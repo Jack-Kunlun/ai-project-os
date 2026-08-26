@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_SOURCE_CONTENT_LENGTH, isSafeExternalRef } from "@/lib/source";
 
 const projectNameSchema = z.string().trim().min(1, "name is required").max(120, "name is too long");
 const projectSlugSchema = z
@@ -23,10 +24,46 @@ export const updateProjectSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, "at least one field is required");
 
+const emptyValueToNull = (value: unknown): unknown => {
+  if (typeof value !== "string") return value;
+
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+};
+
+const sourceContentSchema = z
+  .string()
+  .max(MAX_SOURCE_CONTENT_LENGTH, `contentText must be ${MAX_SOURCE_CONTENT_LENGTH} characters or fewer`)
+  .refine((value) => value.trim().length > 0, "contentText is required");
+
+const sourceExternalRefSchema = z.preprocess(
+  emptyValueToNull,
+  z
+    .string()
+    .max(2048, "externalRef is too long")
+    .refine(isSafeExternalRef, "externalRef must be a credential-free http(s) URL")
+    .nullable()
+    .optional(),
+);
+
+const sourceCapturedAtSchema = z.preprocess(
+  emptyValueToNull,
+  z.iso.datetime({ offset: true }).nullable().optional(),
+);
+
+export const createProjectSourceSchema = z
+  .object({
+    contentText: sourceContentSchema,
+    externalRef: sourceExternalRefSchema,
+    capturedAt: sourceCapturedAtSchema,
+  })
+  .strict();
+
 export const projectIdSchema = z.string().uuid("projectId must be a valid UUID");
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+export type CreateProjectSourceInput = z.infer<typeof createProjectSourceSchema>;
 
 export function slugifyProjectName(name: string): string {
   const slug = name

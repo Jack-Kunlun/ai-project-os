@@ -18,7 +18,7 @@
              Project Snapshot
 ```
 
-Day 1 只交付项目容器、数据库 schema、健康检查、项目 CRUD 和基础页面。Sources、Items、Snapshot 在项目详情页保留占位区域，后续按 5 天计划接入。
+Day 1 交付项目容器、数据库 schema、健康检查、项目 CRUD 和基础页面。Day 2 在详情页接入手工 `ProjectSource` 候选资料：保存原始内容、精确 SHA-256、可选无凭据 HTTP(S) 链接和资料时间，并支持项目内列表与未引用来源删除。Source 仍是候选输入，不等同于可信事实；Items 与 Snapshot 继续保留占位区域。
 
 Day 1 的最终验收记录（包括真实 HTTP smoke、catalog 断言和事务完整性 smoke）见 [docs/acceptance/day-1.md](acceptance/day-1.md)。
 
@@ -29,7 +29,8 @@ V0 不接入 LLM、GitHub 实时连接、文件上传、认证、多用户/RBAC�
 ## 数据原则
 
 - 原始输入先作为候选资料，不能直接等同于可信记忆。
-- `ProjectSource` 保存来源类型、引用和内容摘要；`ProjectItem.sourceId/sourceExcerpt` 保留可追溯入口。
+- `ProjectSource` 保存来源类型、可选外部引用、原始内容和精确 SHA-256；`ProjectItem.sourceId/sourceExcerpt` 保留可追溯入口。V0 Source 列表暂不分页；商业化或大规模数据场景必须先引入 cursor pagination，不承诺无限规模可扩展。
+- Day 2 只接受手工原始资料，服务端固定 `kind=manual`；精确 hash 用于同项目完全重复检测，不做近似或语义去重。
 - `ProjectItem.sourceId` 在数据库层为必填，并且 Item→Source、Item→supersedes、Snapshot→Scan 都通过 `[projectId, foreignId] -> [projectId, id]` 复合外键限制为同项目关系。
 - 上述三条跨子表关系在 PostgreSQL 中是 `NoAction`、`DEFERRABLE INITIALLY DEFERRED`：默认在事务结束检查，或用 `SET CONSTRAINTS ... IMMEDIATE` 提前检查；项目根关系仍为 Cascade。Prisma 7 PSL 不表达 deferrable，因此该属性由增量迁移中的 PostgreSQL-only SQL 保留。
 - Event/history 与 current state 的完整治理不在 Day 1 实现；schema 预留 scan、snapshot 和 supersession 关系。
@@ -40,7 +41,7 @@ V0 不接入 LLM、GitHub 实时连接、文件上传、认证、多用户/RBAC�
 | 天数 | 交付 | 验收焦点 |
 | --- | --- | --- |
 | Day 1 | Next.js 单体骨架、PostgreSQL、Prisma schema、Project CRUD、基础页面 | 真实 DB ready，CRUD 与项目级检查全绿 |
-| Day 2 | Source 手动录入与基础资料展示 | 来源可保存，内容与 hash 可追溯 |
+| Day 2 | Source 手动录入、项目内列表与未引用删除 | 候选来源可保存，内容与 hash 可追溯 |
 | Day 3 | ProjectItem 候选列表、确认/编辑状态 | decision/progress/issue/risk 可被用户确认 |
 | Day 4 | Snapshot 组装与详情视图 | 快照能回答当前状态并展示来源 |
 | Day 5 | 真实项目样本、修正体验、演示与回归 | 用户能判断 AI 是否理解项目 |
@@ -53,3 +54,9 @@ V0 不接入 LLM、GitHub 实时连接、文件上传、认证、多用户/RBAC�
 - 项目可创建、列出、读取、更新；首页提供最小创建/列表体验，详情页展示 Sources、Items、Snapshot 占位区域。
 - `pnpm test`、`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm db:validate`、`pnpm db:generate` 均成功。
 - 使用启动后的应用完成 health + create/list/get/patch curl smoke，并记录准确命令与结果。
+
+## Day 2 边界
+
+- 已实现 `GET`、`POST`、`DELETE` Source API 与详情页手工录入/列表/删除交互；删除前需要确认，数据库引用中的 Source 会被拒绝删除。Source 不存在或不属于当前项目时统一返回资源级 404 `SOURCE_NOT_FOUND`，不用于泄漏其他项目归属。
+- 不包含上传、OCR、网页或 GitHub 抓取、LLM 摘要、Item 自动生成、Source PATCH、版本链、审计日志或认证授权。
+- 项目 ID 隔离用于数据边界，不代表用户权限控制。

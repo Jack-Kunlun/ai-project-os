@@ -1,9 +1,40 @@
 \set ON_ERROR_STOP on
 
+DROP TABLE IF EXISTS pg_temp.integrity_smoke_baseline;
+
+CREATE TEMP TABLE integrity_smoke_baseline (
+  table_name text PRIMARY KEY,
+  row_count bigint NOT NULL
+) ON COMMIT PRESERVE ROWS;
+
+INSERT INTO integrity_smoke_baseline (table_name, row_count)
+SELECT 'Project', count(*)::bigint FROM "Project"
+UNION ALL
+SELECT 'ProjectSource', count(*)::bigint FROM "ProjectSource"
+UNION ALL
+SELECT 'ProjectItem', count(*)::bigint FROM "ProjectItem"
+UNION ALL
+SELECT 'ProjectScan', count(*)::bigint FROM "ProjectScan"
+UNION ALL
+SELECT 'ProjectSnapshot', count(*)::bigint FROM "ProjectSnapshot";
+
 BEGIN;
 
 -- These fixed IDs are used only inside this transaction. The final ROLLBACK
 -- ensures that this smoke test never changes the local database.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "Project" WHERE "id" IN ('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM "ProjectSource" WHERE "id" IN ('11111111-1111-4111-8111-111111111112', '22222222-2222-4222-8222-222222222223'))
+     OR EXISTS (SELECT 1 FROM "ProjectItem" WHERE "id" IN ('11111111-1111-4111-8111-111111111114', '11111111-1111-4111-8111-111111111115', '22222222-2222-4222-8222-222222222225'))
+     OR EXISTS (SELECT 1 FROM "ProjectScan" WHERE "id" IN ('11111111-1111-4111-8111-111111111113', '22222222-2222-4222-8222-222222222224'))
+     OR EXISTS (SELECT 1 FROM "ProjectSnapshot" WHERE "id" = '11111111-1111-4111-8111-111111111116') THEN
+    RAISE EXCEPTION 'fixed integrity smoke IDs already exist';
+  END IF;
+  RAISE NOTICE 'fixed integrity smoke IDs absent before writes: PASS';
+END
+$$;
+
 INSERT INTO "Project" ("id", "name", "slug", "updatedAt")
 VALUES
   ('11111111-1111-4111-8111-111111111111', 'Integrity Smoke A', 'integrity-smoke-a', CURRENT_TIMESTAMP),
@@ -185,14 +216,42 @@ $$;
 ROLLBACK;
 
 DO $$
+DECLARE
+  mismatch_details text;
 BEGIN
-  IF EXISTS (SELECT 1 FROM "Project" WHERE "id" IN ('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'))
-     OR (SELECT count(*) FROM "ProjectSource") <> 0
-     OR (SELECT count(*) FROM "ProjectItem") <> 0
-     OR (SELECT count(*) FROM "ProjectScan") <> 0
-     OR (SELECT count(*) FROM "ProjectSnapshot") <> 0 THEN
-    RAISE EXCEPTION 'integrity smoke changed persistent data';
+  SELECT string_agg(
+           format('%s before=%s after=%s', baseline.table_name, baseline.row_count, current_counts.row_count),
+           ', '
+           ORDER BY baseline.table_name
+         )
+    INTO mismatch_details
+  FROM integrity_smoke_baseline AS baseline
+  JOIN (
+    SELECT 'Project'::text AS table_name, count(*)::bigint AS row_count FROM "Project"
+    UNION ALL
+    SELECT 'ProjectSource', count(*)::bigint FROM "ProjectSource"
+    UNION ALL
+    SELECT 'ProjectItem', count(*)::bigint FROM "ProjectItem"
+    UNION ALL
+    SELECT 'ProjectScan', count(*)::bigint FROM "ProjectScan"
+    UNION ALL
+    SELECT 'ProjectSnapshot', count(*)::bigint FROM "ProjectSnapshot"
+  ) AS current_counts USING (table_name)
+  WHERE baseline.row_count <> current_counts.row_count;
+
+  IF mismatch_details IS NOT NULL THEN
+    RAISE EXCEPTION 'integrity smoke changed persistent row counts: %', mismatch_details;
   END IF;
-  RAISE NOTICE 'post-ROLLBACK persistent data: PASS (smoke projects absent, child tables=0)';
+
+  IF EXISTS (SELECT 1 FROM "Project" WHERE "id" IN ('11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'))
+     OR EXISTS (SELECT 1 FROM "ProjectSource" WHERE "id" IN ('11111111-1111-4111-8111-111111111112', '22222222-2222-4222-8222-222222222223'))
+     OR EXISTS (SELECT 1 FROM "ProjectItem" WHERE "id" IN ('11111111-1111-4111-8111-111111111114', '11111111-1111-4111-8111-111111111115', '22222222-2222-4222-8222-222222222225'))
+     OR EXISTS (SELECT 1 FROM "ProjectScan" WHERE "id" IN ('11111111-1111-4111-8111-111111111113', '22222222-2222-4222-8222-222222222224'))
+     OR EXISTS (SELECT 1 FROM "ProjectSnapshot" WHERE "id" = '11111111-1111-4111-8111-111111111116') THEN
+    RAISE EXCEPTION 'integrity smoke fixed IDs survived ROLLBACK';
+  END IF;
+  RAISE NOTICE 'post-ROLLBACK persistent data: PASS (five table counts unchanged; fixed IDs absent)';
 END
 $$;
+
+DROP TABLE integrity_smoke_baseline;

@@ -68,6 +68,64 @@ BEGIN
 END
 $$;
 
+DO $$
+DECLARE
+  actual_count bigint;
+BEGIN
+  WITH expected (constraint_name, local_table, foreign_table, local_columns, foreign_columns) AS (
+    VALUES
+      (
+        'ProjectItem_projectId_sourceId_fkey',
+        '"ProjectItem"'::regclass,
+        '"ProjectSource"'::regclass,
+        ARRAY['projectId', 'sourceId']::text[],
+        ARRAY['projectId', 'id']::text[]
+      ),
+      (
+        'ProjectItem_projectId_supersedesItemId_fkey',
+        '"ProjectItem"'::regclass,
+        '"ProjectItem"'::regclass,
+        ARRAY['projectId', 'supersedesItemId']::text[],
+        ARRAY['projectId', 'id']::text[]
+      ),
+      (
+        'ProjectSnapshot_projectId_scanId_fkey',
+        '"ProjectSnapshot"'::regclass,
+        '"ProjectScan"'::regclass,
+        ARRAY['projectId', 'scanId']::text[],
+        ARRAY['projectId', 'id']::text[]
+      )
+  ), actual AS (
+    SELECT
+      c.conname AS constraint_name,
+      c.conrelid AS local_table,
+      c.confrelid AS foreign_table,
+      ARRAY(
+        SELECT a.attname::text
+        FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ordinal)
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+        ORDER BY key.ordinal
+      ) AS local_columns,
+      ARRAY(
+        SELECT a.attname::text
+        FROM unnest(c.confkey) WITH ORDINALITY AS key(attnum, ordinal)
+        JOIN pg_attribute a ON a.attrelid = c.confrelid AND a.attnum = key.attnum
+        ORDER BY key.ordinal
+      ) AS foreign_columns
+    FROM pg_constraint c
+    WHERE c.contype = 'f'
+  )
+  SELECT count(*) INTO actual_count
+  FROM expected
+  JOIN actual USING (constraint_name, local_table, foreign_table, local_columns, foreign_columns);
+
+  IF actual_count <> 3 THEN
+    RAISE EXCEPTION 'expected three composite FK column mappings, found %', actual_count;
+  END IF;
+  RAISE NOTICE 'composite FK column mappings: PASS (3)';
+END
+$$;
+
 WITH relationship_violations AS (
   SELECT count(*)::bigint AS count
   FROM "ProjectItem" i

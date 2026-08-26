@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { isProjectSnapshotStale } from "@/lib/project-snapshot-stale";
+import type { SnapshotRecord } from "@/lib/project-snapshot";
 
 type ProjectItem = {
   id: string;
@@ -130,6 +132,15 @@ async function getItems(projectId: string): Promise<ProjectItem[]> {
   return payload.items;
 }
 
+async function getSnapshot(projectId: string): Promise<SnapshotRecord | null> {
+  const response = await fetch(`/api/projects/${projectId}/snapshots`, { cache: "no-store" });
+  const payload = (await response.json()) as { snapshot?: SnapshotRecord | null; error?: { message?: string } };
+  if (!response.ok || !("snapshot" in payload)) {
+    throw new Error(payload.error?.message ?? "项目快照加载失败");
+  }
+  return payload.snapshot ?? null;
+}
+
 function formatSourceDate(value: string | null): string {
   if (!value) return "未填写";
 
@@ -213,6 +224,11 @@ export default function ProjectDetailPage() {
   const [itemSuccess, setItemSuccess] = useState<string | null>(null);
   const [isSourcesLoading, setIsSourcesLoading] = useState(true);
   const [isItemsLoading, setIsItemsLoading] = useState(true);
+  const [snapshot, setSnapshot] = useState<SnapshotRecord | null>(null);
+  const [isSnapshotLoading, setIsSnapshotLoading] = useState(true);
+  const [isGeneratingSnapshot, setIsGeneratingSnapshot] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  const [snapshotSuccess, setSnapshotSuccess] = useState<string | null>(null);
   const [isCreatingSource, setIsCreatingSource] = useState(false);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [isSavingItem, setIsSavingItem] = useState(false);
@@ -274,6 +290,17 @@ export default function ProjectDetailPage() {
         if (!cancelled) setIsItemsLoading(false);
       });
 
+    void getSnapshot(projectId)
+      .then((loadedSnapshot) => {
+        if (!cancelled) setSnapshot(loadedSnapshot);
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setSnapshotError(loadError instanceof Error ? loadError.message : "项目快照加载失败");
+      })
+      .finally(() => {
+        if (!cancelled) setIsSnapshotLoading(false);
+      });
+
     return () => {
       cancelled = true;
     };
@@ -284,10 +311,12 @@ export default function ProjectDetailPage() {
 
     setIsSourcesLoading(true);
     setIsItemsLoading(true);
-    const [projectResult, sourcesResult, itemsResult] = await Promise.allSettled([
+    setIsSnapshotLoading(true);
+    const [projectResult, sourcesResult, itemsResult, snapshotResult] = await Promise.allSettled([
       getProject(projectId),
       getSources(projectId),
       getItems(projectId),
+      getSnapshot(projectId),
     ]);
 
     if (projectResult.status === "fulfilled") {
@@ -317,8 +346,16 @@ export default function ProjectDetailPage() {
       setItemError(itemsResult.reason instanceof Error ? itemsResult.reason.message : "项目条目加载失败");
     }
 
+    if (snapshotResult.status === "fulfilled") {
+      setSnapshot(snapshotResult.value);
+      setSnapshotError(null);
+    } else {
+      setSnapshotError(snapshotResult.reason instanceof Error ? snapshotResult.reason.message : "项目快照加载失败");
+    }
+
     setIsSourcesLoading(false);
     setIsItemsLoading(false);
+    setIsSnapshotLoading(false);
   }
 
   async function handleSourceSubmit(event: FormEvent<HTMLFormElement>) {
@@ -559,8 +596,42 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function handleGenerateSnapshot() {
+    if (!projectId || isGeneratingSnapshot || isSnapshotLoading || confirmedItems.length === 0) return;
+
+    setIsGeneratingSnapshot(true);
+    setSnapshotError(null);
+    setSnapshotSuccess(null);
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/snapshots`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readError(response, "快照生成失败"));
+      }
+
+      const payload = (await response.json()) as { snapshot?: SnapshotRecord };
+      if (!payload.snapshot) {
+        throw new Error("快照生成响应无效");
+      }
+
+      setSnapshot(payload.snapshot);
+      setSnapshotSuccess("最新快照已生成，内容按本次确认状态固定保存。");
+      await reloadProjectAndSources();
+    } catch (generationError) {
+      setSnapshotError(generationError instanceof Error ? generationError.message : "快照生成失败");
+    } finally {
+      setIsGeneratingSnapshot(false);
+    }
+  }
+
   const selectedSource = sources.find((source) => source.id === itemForm.sourceId) ?? null;
   const isEditingItem = editingItemId !== null;
+  const confirmedItems = items.filter((item) => item.reviewStatus === "confirmed");
 
   if (error) {
     return <ProjectShell><div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</div></ProjectShell>;
@@ -579,14 +650,25 @@ export default function ProjectDetailPage() {
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name}</h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">{project.description || "项目描述尚未补充。先接入来源，AI 才能开始建立可追溯的项目理解。"}</p>
         </div>
-        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700">V0 · Day 3</span>
+        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700">V0 · Day 4</span>
       </div>
 
       <section className="mt-8 grid gap-4 md:grid-cols-3">
         <PlaceholderCard {...labels.sources} count={project._count.sources} detail="已接入人工候选资料；内容仍需后续确认，不等同于可信事实。" />
         <PlaceholderCard {...labels.items} count={project._count.items} detail="可人工创建、编辑并确认条目；每条 Item 都保留 Source 追溯。" />
-        <PlaceholderCard {...labels.snapshots} count={project._count.snapshots} detail="快照生成将在 Day 4–5 开始" />
+        <PlaceholderCard {...labels.snapshots} count={project._count.snapshots} detail="历史快照保留在数据库；页面只展示最新一份，并标注是否需要手动重新生成。" />
       </section>
+
+      <SnapshotPanel
+        snapshot={snapshot}
+        snapshotCount={project._count.snapshots}
+        currentConfirmedItems={confirmedItems}
+        isLoading={isSnapshotLoading}
+        isGenerating={isGeneratingSnapshot}
+        error={snapshotError}
+        success={snapshotSuccess}
+        onGenerate={() => void handleGenerateSnapshot()}
+      />
 
       <section aria-labelledby="sources-heading" className="mt-10 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
@@ -1012,6 +1094,171 @@ function ItemCard({
         <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">更新时间</dt><dd className="mt-1">{formatSourceDate(item.updatedAt)}</dd></div>
       </dl>
     </li>
+  );
+}
+
+function SnapshotPanel({
+  snapshot,
+  snapshotCount,
+  currentConfirmedItems,
+  isLoading,
+  isGenerating,
+  error,
+  success,
+  onGenerate,
+}: {
+  snapshot: SnapshotRecord | null;
+  snapshotCount: number;
+  currentConfirmedItems: ProjectItem[];
+  isLoading: boolean;
+  isGenerating: boolean;
+  error: string | null;
+  success: string | null;
+  onGenerate: () => void;
+}) {
+  const hasConfirmedItems = currentConfirmedItems.length > 0;
+  const isStale = snapshot ? isProjectSnapshotStale(snapshot.payload, currentConfirmedItems) : false;
+  const sectionDefinitions = [
+    { key: "decisions" as const, label: "决策", english: "Decisions" },
+    { key: "progress" as const, label: "进展", english: "Progress" },
+    { key: "issues" as const, label: "问题", english: "Issues" },
+    { key: "risks" as const, label: "风险", english: "Risks" },
+  ];
+
+  return (
+    <section aria-labelledby="snapshot-heading" className="mt-10 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+      <div className="flex flex-col gap-5 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Project snapshot</p>
+          <h2 id="snapshot-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">最新项目快照</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">快照只组装已确认 Item，并保存为本次读取点的不可变历史状态；不会自动生成或做优先级判断。</p>
+        </div>
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={isLoading || isGenerating || !hasConfirmedItems}
+          className="shrink-0 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          {isGenerating ? "生成中…" : "生成最新快照"}
+        </button>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/70 px-5 py-4 text-sm leading-6 text-indigo-900" role="note">
+        {!hasConfirmedItems
+          ? "当前没有已确认 Item。请先在项目条目中确认至少一条内容，之后才能生成快照。"
+          : snapshot
+            ? "生成快照不会覆盖历史记录；页面只展示最新一份，更新确认内容后需要手动重新生成。"
+            : "当前已有已确认 Item，但还没有快照。点击右上角按钮生成第一份项目状态。"}
+      </div>
+
+      {error ? <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert">{error}</div> : null}
+      {success ? <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite">{success}</div> : null}
+
+      {isLoading ? (
+        <div className="mt-6 space-y-4" aria-label="正在加载项目快照">
+          <div className="h-28 animate-pulse rounded-2xl bg-slate-100" />
+          <div className="h-48 animate-pulse rounded-2xl bg-slate-100" />
+        </div>
+      ) : snapshot ? (
+        <div className="mt-7">
+          {isStale ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900" role="status">
+              当前已确认 Item 与这份快照不一致（可能新增、移除或重新确认了 Item）。请手动生成最新快照；系统不会自动生成。
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex flex-col gap-3 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h3 className="text-xl font-semibold tracking-tight text-slate-950">截至 {formatSourceDate(snapshot.payload.readAt)} 的已确认项目状态</h3>
+              <p className="mt-2 text-sm text-slate-500">生成于 {formatSourceDate(snapshot.generatedAt)} · 已保留 {snapshotCount} 份历史快照 · 本份确认 Item {snapshot.payload.counts.confirmed} 条</p>
+            </div>
+            <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">读取点：{formatSourceDate(snapshot.payload.readAt)}</span>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/80 p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Focus</p>
+                <h4 className="mt-2 text-lg font-semibold text-slate-950">已确认问题与风险</h4>
+              </div>
+              <span className="rounded-full bg-white/80 px-3 py-1.5 text-xs font-medium text-amber-800">{snapshot.payload.counts.focus} 条</span>
+            </div>
+            <p className="mt-3 text-sm leading-6 text-amber-900">按 Issues 后 Risks 的确定性顺序展示，不表示优先级，也不是 AI 判断。</p>
+            {snapshot.payload.focus.itemIds.length === 0 ? (
+              <p className="mt-4 rounded-xl border border-dashed border-amber-300 bg-white/60 px-4 py-5 text-sm text-amber-800">本次快照没有已确认的问题或风险。</p>
+            ) : (
+              <div className="mt-4 space-y-4">
+                {[...snapshot.payload.sections.issues, ...snapshot.payload.sections.risks].map((item) => <SnapshotItemCard key={item.id} item={item} />)}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-6 grid gap-5 xl:grid-cols-2">
+            {sectionDefinitions.map((section) => {
+              const sectionItems = snapshot.payload.sections[section.key];
+              return (
+                <section key={section.key} aria-labelledby={`snapshot-${section.key}-heading`} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{section.english}</p>
+                      <h4 id={`snapshot-${section.key}-heading`} className="mt-1 text-lg font-semibold text-slate-950">{section.label}</h4>
+                    </div>
+                    <span className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600">{sectionItems.length} 条</span>
+                  </div>
+                  {sectionItems.length === 0 ? (
+                    <p className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">本次没有已确认的{section.label}。</p>
+                  ) : (
+                    <div className="mt-4 space-y-4">{sectionItems.map((item) => <SnapshotItemCard key={item.id} item={item} />)}</div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
+          {hasConfirmedItems ? (
+            <>
+              <p className="text-sm font-medium text-slate-700">已有 {currentConfirmedItems.length} 条已确认 Item，但还没有快照</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">生成快照后，这些已确认状态会按照当前读取点固定保存，并继续保留 Source 追溯。</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-slate-700">还没有可生成的项目状态</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">先创建并确认至少一条 Item，再回来生成 Snapshot。</p>
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SnapshotItemCard({ item }: { item: SnapshotRecord["payload"]["sections"]["decisions"][number] }) {
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">{item.type}</span>
+        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">已确认</span>
+      </div>
+      <h5 className="mt-3 text-base font-semibold tracking-tight text-slate-950">{item.title}</h5>
+      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>
+
+      <div className="mt-4 border-t border-slate-100 pt-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">精确原文摘录</p>
+        <blockquote className="mt-2 whitespace-pre-wrap break-words border-l-2 border-indigo-200 pl-3 text-sm leading-6 text-slate-600">{item.provenance.sourceExcerpt}</blockquote>
+      </div>
+
+      <dl className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500 sm:grid-cols-2">
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">发生时间</dt><dd className="mt-1">{formatSourceDate(item.occurredAt)}</dd></div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">确认时间</dt><dd className="mt-1">{formatSourceDate(item.confirmedAt)}</dd></div>
+        <div>
+          <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Source 链接</dt>
+          <dd className="mt-1 min-w-0">{item.provenance.externalRef ? <a href={item.provenance.externalRef} target="_blank" rel="noopener noreferrer" className="block truncate text-indigo-600 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-700" title={item.provenance.externalRef}>{item.provenance.externalRef}</a> : "未提供外部链接"}</dd>
+        </div>
+        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Source SHA-256</dt><dd className="mt-1 break-all font-mono text-xs leading-5 text-slate-600">{item.provenance.contentHash}</dd></div>
+      </dl>
+    </article>
   );
 }
 

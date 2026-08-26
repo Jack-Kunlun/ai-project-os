@@ -106,6 +106,8 @@ export const updateProjectItemSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reopen"), expectedUpdatedAt: expectedItemUpdatedAtSchema }).strict(),
 ]);
 
+export const createProjectSnapshotSchema = z.object({}).strict();
+
 export const projectIdSchema = z.string().uuid("projectId must be a valid UUID");
 export const projectItemIdSchema = z.string().uuid("itemId must be a valid UUID");
 

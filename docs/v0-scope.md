@@ -18,7 +18,7 @@
              Project Snapshot
 ```
 
-Day 1 交付项目容器、数据库 schema、健康检查、项目 CRUD 和基础页面。Day 2 在详情页接入手工 `ProjectSource` 候选资料：保存原始内容、精确 SHA-256、可选无凭据 HTTP(S) 链接和资料时间，并支持项目内列表与未引用来源删除。Day 3 在详情页接入手工 `ProjectItem`：支持四类条目、精确 Source 摘录、候选/确认/驳回/重新打开状态和受保护的编辑流程。Source 与 Item 都是可追溯的候选输入，不等同于可信事实；Snapshot 继续保留占位区域。
+Day 1 交付项目容器、数据库 schema、健康检查、项目 CRUD 和基础页面。Day 2 在详情页接入手工 `ProjectSource` 候选资料：保存原始内容、精确 SHA-256、可选无凭据 HTTP(S) 链接和资料时间，并支持项目内列表与未引用来源删除。Day 3 在详情页接入手工 `ProjectItem`：支持四类条目、精确 Source 摘录、候选/确认/驳回/重新打开状态和受保护的编辑流程。Day 4 在同项目 Repeatable Read 读取点内，将全部已确认 Item 确定性组装成一份带 Scan 追溯的不可变 Snapshot，并在详情页展示最新状态与来源。Source 与 Item 都是可追溯的候选输入，只有人工确认的 Item 才能进入 Snapshot。
 
 Day 1 的最终验收记录（包括真实 HTTP smoke、catalog 断言和事务完整性 smoke）见 [docs/acceptance/day-1.md](acceptance/day-1.md)。
 
@@ -33,6 +33,7 @@ V0 不接入 LLM、GitHub 实时连接、文件上传、认证、多用户/RBAC�
 - Day 2 只接受手工原始资料，服务端固定 `kind=manual`；精确 hash 用于同项目完全重复检测，不做近似或语义去重。
 - `ProjectItem.sourceId` 在数据库层为必填，并且 Item→Source、Item→supersedes、Snapshot→Scan 都通过 `[projectId, foreignId] -> [projectId, id]` 复合外键限制为同项目关系。
 - `sourceExcerpt` 的精确非空校验，以及 `reviewStatus`/`confirmedAt` 的一致性，是当前受支持 HTTP API 写入路径的不变量；不支持直接 DB/Prisma 写入，schema 尚未完全强制这些语义。未来引入其他 writer 前，需补充数据库约束和迁移。
+- Snapshot 的 payload、非空 `scanId`、Snapshot 与 Scan 共用 `generatedAt`、以及 Scan 的终态时间，是当前 Snapshot HTTP writer 的保证，不是数据库已完全约束的语义；不支持直接 DB/Prisma writer。生成过程使用项目范围的事务 advisory lock，但该锁只保护遵循本 API 协议的并发生成。Snapshot 是“截至 `readAt`”的历史状态，不承诺永远代表当前项目。
 - 上述三条跨子表关系在 PostgreSQL 中是 `NoAction`、`DEFERRABLE INITIALLY DEFERRED`：默认在事务结束检查，或用 `SET CONSTRAINTS ... IMMEDIATE` 提前检查；项目根关系仍为 Cascade。Prisma 7 PSL 不表达 deferrable，因此该属性由增量迁移中的 PostgreSQL-only SQL 保留。
 - Event/history 与 current state 的完整治理不在 Day 1 实现；schema 预留 scan、snapshot 和 supersession 关系。
 - 不把当前“不做付费会员”等产品范围限制硬编码进基础模型。
@@ -52,7 +53,7 @@ V0 不接入 LLM、GitHub 实时连接、文件上传、认证、多用户/RBAC�
 - 目标目录是独立 Git repo，依赖锁文件存在，`.env` 未被 Git 跟踪。
 - PostgreSQL 18.6 容器通过 healthcheck，初始 Prisma migration 已应用。
 - `/api/health` 对真实数据库执行查询并在成功时返回 200。
-- 项目可创建、列出、读取、更新；首页提供最小创建/列表体验，详情页通过独立 API 展示 Sources、Items，Snapshot 仍为占位区域。
+- 项目可创建、列出、读取、更新；首页提供最小创建/列表体验，详情页通过独立 API 展示 Sources、Items 与 Day 4 最新 Snapshot。
 - `pnpm test`、`pnpm lint`、`pnpm typecheck`、`pnpm build`、`pnpm db:validate`、`pnpm db:generate` 均成功。
 - 使用启动后的应用完成 health + create/list/get/patch curl smoke，并记录准确命令与结果。
 
@@ -71,3 +72,11 @@ V0 不接入 LLM、GitHub 实时连接、文件上传、认证、多用户/RBAC�
 - `superseded` Item 会继续被 Item 列表读取且在 UI 中只读；Day 3 不提供创建或转换为 `superseded` 的动作。
 - 所有 PATCH action 都要求 `expectedUpdatedAt`；版本过期返回 `ITEM_VERSION_CONFLICT`，与非法状态转换的 `ITEM_INVALID_TRANSITION` 区分。
 - 不包含 Item 自动生成、LLM、Source 编辑、删除 Item、supersession 操作、审计日志或认证授权。项目 ID 隔离用于数据边界，不代表用户权限控制。
+
+## Day 4 边界
+
+- 已实现 `GET`、`POST` `/api/projects/:projectId/snapshots`。POST 在 Repeatable Read 与项目范围事务 advisory lock 内读取全部同项目 Item，只组装 `confirmed` 条目，并以 `manual` Scan 原子记录 Snapshot；同项目重叠生成返回 `SNAPSHOT_GENERATION_IN_PROGRESS`，数据库事务冲突返回可重试的 `SNAPSHOT_GENERATION_CONFLICT`。
+- Snapshot payload 只保留项目字段、读取/生成时间、四类已确认条目及安全 provenance（Source ID、类型、链接、hash、时间、精确摘录）；不复制 Source 原文、内部 metadata、storageKey 或 supersession 字段。条目按发生时间、确认时间、ID 确定性排序，Focus 固定为 Issues 后 Risks，不表示优先级或 AI 判断。
+- 详情页读取并展示最新已完成 Snapshot；当前确认集合发生新增、移除或重新确认时仅提示手动重生成，不自动生成。历史 Snapshot 可保留在数据库，但 V0 不提供历史列表、切换、详情、编辑或删除。
+- 没有已确认 Item 或确认 Item provenance 无效时，API 分别记录稳定错误的失败 Scan，且不创建 Snapshot。Snapshot payload、`scanId`、Scan 终态时间和共用 `generatedAt` 是受支持 HTTP writer 的保证，数据库尚未完全约束；不支持直接 DB/Prisma writer，advisory lock 也只保护遵循该 API 协议的调用。
+- Day 5 继续聚焦真实项目样本、修正体验、演示与回归；历史治理、数据库约束、分页与 current-state 冲突/修正能力属于后续范围。

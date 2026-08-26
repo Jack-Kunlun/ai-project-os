@@ -51,6 +51,23 @@ const sourceCapturedAtSchema = z.preprocess(
   z.iso.datetime({ offset: true }).nullable().optional(),
 );
 
+const projectItemTypeSchema = z.enum(["decision", "progress", "issue", "risk"]);
+const itemTitleSchema = z.string().trim().min(1, "title is required").max(160, "title is too long");
+const itemContentSchema = z.string().trim().min(1, "content is required").max(20_000, "content is too long");
+const itemSourceExcerptSchema = z
+  .string()
+  .max(10_000, "sourceExcerpt is too long")
+  .refine((value) => value.trim().length > 0, "sourceExcerpt is required");
+const itemOccurredAtSchema = z.preprocess(
+  emptyValueToNull,
+  z.iso.datetime({ offset: true }).nullable().optional(),
+);
+const requiredItemOccurredAtSchema = z.preprocess(
+  emptyValueToNull,
+  z.iso.datetime({ offset: true }).nullable(),
+);
+const expectedItemUpdatedAtSchema = z.iso.datetime({ offset: true });
+
 export const createProjectSourceSchema = z
   .object({
     contentText: sourceContentSchema,
@@ -59,11 +76,44 @@ export const createProjectSourceSchema = z
   })
   .strict();
 
+export const createProjectItemSchema = z
+  .object({
+    type: projectItemTypeSchema,
+    sourceId: z.string().uuid("sourceId must be a valid UUID"),
+    title: itemTitleSchema,
+    content: itemContentSchema,
+    sourceExcerpt: itemSourceExcerptSchema,
+    occurredAt: itemOccurredAtSchema,
+  })
+  .strict();
+
+const editProjectItemSchema = z
+  .object({
+    action: z.literal("edit"),
+    type: projectItemTypeSchema,
+    title: itemTitleSchema,
+    content: itemContentSchema,
+    sourceExcerpt: itemSourceExcerptSchema,
+    occurredAt: requiredItemOccurredAtSchema,
+    expectedUpdatedAt: expectedItemUpdatedAtSchema,
+  })
+  .strict();
+
+export const updateProjectItemSchema = z.discriminatedUnion("action", [
+  editProjectItemSchema,
+  z.object({ action: z.literal("confirm"), expectedUpdatedAt: expectedItemUpdatedAtSchema }).strict(),
+  z.object({ action: z.literal("dismiss"), expectedUpdatedAt: expectedItemUpdatedAtSchema }).strict(),
+  z.object({ action: z.literal("reopen"), expectedUpdatedAt: expectedItemUpdatedAtSchema }).strict(),
+]);
+
 export const projectIdSchema = z.string().uuid("projectId must be a valid UUID");
+export const projectItemIdSchema = z.string().uuid("itemId must be a valid UUID");
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export type CreateProjectSourceInput = z.infer<typeof createProjectSourceSchema>;
+export type CreateProjectItemInput = z.infer<typeof createProjectItemSchema>;
+export type UpdateProjectItemInput = z.infer<typeof updateProjectItemSchema>;
 
 export function slugifyProjectName(name: string): string {
   const slug = name

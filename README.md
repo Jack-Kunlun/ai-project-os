@@ -1,6 +1,6 @@
 # AI Project OS
 
-AI Project OS 是一个面向单项目的 V0 原型，用最小的 Project Snapshot 验证“AI 是否真的理解一个项目”。Day 1 建立项目容器、可追溯数据模型和最小 CRUD；Day 2 接入手工候选资料，并保留原文与精确 hash 供后续追溯。
+AI Project OS 是一个面向单项目的 V0 原型，用最小的 Project Snapshot 验证“AI 是否真的理解一个项目”。Day 1 建立项目容器、可追溯数据模型和最小 CRUD；Day 2 接入手工候选资料；Day 3 支持手工 ProjectItem 的创建、编辑和审核状态流转，并保留原文与精确 hash 供追溯。
 
 ## 本地启动
 
@@ -35,23 +35,30 @@ pnpm db:generate
 
 Day 1 的最终验收命令、HTTP 状态、数据库 catalog 与事务 smoke 结果见 [docs/acceptance/day-1.md](docs/acceptance/day-1.md)。
 Day 2 的实现边界与验收状态见 [docs/acceptance/day-2.md](docs/acceptance/day-2.md)。
+Day 3 的 Item 实现边界与验收状态见 [docs/acceptance/day-3.md](docs/acceptance/day-3.md)。
 
 ## 数据完整性边界
 
 `ProjectItem.sourceId` 在数据库中是必填字段；创建条目必须先创建同项目的 `ProjectSource`。Item→Source、Item→supersedes 和 Snapshot→Scan 使用同项目复合外键，并在 PostgreSQL 中以 `DEFERRABLE INITIALLY DEFERRED` 的 `NoAction` 关系校验，避免跨项目引用，同时允许项目根 Cascade 在事务内清理完整子图。Prisma schema 表达了 `NoAction`，但不会表达 `DEFERRABLE`，对应迁移中的 PostgreSQL-only 扩展需在后续迁移审阅时保留。Day 2 的 Source 只接受手工原始内容，服务端固定 `kind=manual`，保存 SHA-256 和可选无凭据 HTTP(S) 链接；内容仍是候选输入，不代表可信事实。
+
+`sourceExcerpt` 的精确非空校验，以及 `reviewStatus`/`confirmedAt` 的一致性，是当前受支持 HTTP API 写入路径的不变量；不支持直接 DB/Prisma 写入，schema 尚未完全强制这些语义。未来引入其他 writer 前，需补充数据库约束和迁移。
 
 ## API
 
 - `GET /api/health`：真实执行一次 `SELECT 1`，数据库可用时返回 200。
 - `GET /api/projects`：按更新时间列出项目。
 - `POST /api/projects`：创建项目，必填 `name`，可选 `slug` 与 `description`。
-- `GET /api/projects/:projectId`：读取项目详情与最近条目。
+- `GET /api/projects/:projectId`：读取项目详情与统计；条目通过独立的 Items API 读取。
 - `PATCH /api/projects/:projectId`：更新 `name`、`slug` 或 `description`。
 - `GET /api/projects/:projectId/sources`：按接入时间倒序列出项目内全部候选资料，不返回 `storageKey`；V0 暂不分页。
 - `POST /api/projects/:projectId/sources`：手工保存原始候选资料，服务端计算精确 SHA-256；同项目重复内容返回 409。
 - `DELETE /api/projects/:projectId/sources/:sourceId`：仅删除未被 Item 引用的候选资料；Source 不存在或不属于该项目时统一返回资源级 404 `SOURCE_NOT_FOUND`，不用于泄漏其他项目归属。
+- `GET /api/projects/:projectId/items`：按 `updatedAt desc` 列出项目内全部 Item，返回安全的 Source 元数据，不返回原始 Source 内容或内部字段；V0 当前全量返回、不分页，商业化或大规模数据场景必须先引入 cursor pagination。
+- `POST /api/projects/:projectId/items`：手工创建 `decision`、`progress`、`issue` 或 `risk` 候选条目；必须提供同项目 Source 和精确非空原文摘录。
+- `PATCH /api/projects/:projectId/items/:itemId`：严格支持携带 `expectedUpdatedAt` 版本令牌的 `edit`、`confirm`、`dismiss`、`reopen` 状态操作；编辑不允许更换 Source，状态转移按当前状态和版本条件更新。
 
 所有输入使用 Zod 校验；错误响应返回稳定的 `code` 与面向调用方的消息，不回显连接字符串或内部异常。
 
-Day 2 不包含上传、OCR、网页/GitHub 抓取、LLM 摘要、Item 自动生成、Source 编辑或版本链，也不提供认证授权；项目级隔离不是权限控制。
-V0 Source 列表暂不分页；商业化或大规模数据场景必须在扩展前引入 cursor pagination，当前实现不承诺无限规模可扩展。
+Day 3 仍不包含上传、OCR、网页/GitHub 抓取、LLM 摘要、Item 自动生成、Source 编辑或版本链，也不提供认证授权；项目级隔离不是权限控制。
+V0 Source 与 Item 列表当前均全量返回、不分页；商业化或大规模数据场景必须在扩展前为两类列表引入 cursor pagination，当前实现不承诺无限规模可扩展。
+`superseded` Item 仍会出现在项目 Item 列表中并保持只读；Day 3 不提供创建或转换为 `superseded` 的动作。

@@ -22,25 +22,6 @@ const projectDetailSelect = {
       snapshots: true,
     },
   },
-  items: {
-    orderBy: { updatedAt: "desc" },
-    take: 10,
-    select: {
-      id: true,
-      type: true,
-      reviewStatus: true,
-      title: true,
-      content: true,
-      sourceExcerpt: true,
-      occurredAt: true,
-      confirmedAt: true,
-      sourceId: true,
-      supersedesItemId: true,
-      metadata: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  },
 } as const;
 
 function isKnownError(error: unknown, code: string): boolean {

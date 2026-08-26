@@ -4,21 +4,21 @@ import { getDb } from "../src/lib/db";
 import { projectIdSchema } from "../src/lib/validation";
 import {
   cleanupCommand,
-  Day5DemoError,
-  isDay5DemoProject,
+  ProjectSnapshotDemoError,
+  isProjectSnapshotDemo,
   isExactDemoProjectTarget,
   parseCleanupArgs,
   parseSeedArgs,
   recovery,
   type DemoCleanupResult,
-} from "./day5-demo-contract";
+} from "./project-snapshot-demo-contract";
 import {
-  day5FixtureItems,
-  day5FixtureSources,
-  DAY_5_DEMO_DESCRIPTION,
-  DAY_5_DEMO_PROJECT_NAME,
-  DAY_5_DEMO_SLUG_PREFIX,
-} from "../test/fixtures/day-5-ai-project-os";
+  projectSnapshotFixtureItems,
+  projectSnapshotFixtureSources,
+  PROJECT_SNAPSHOT_DEMO_DESCRIPTION,
+  PROJECT_SNAPSHOT_DEMO_PROJECT_NAME,
+  PROJECT_SNAPSHOT_DEMO_SLUG_PREFIX,
+} from "../test/fixtures/project-snapshot-demo";
 
 type JsonObject = Record<string, unknown>;
 
@@ -31,7 +31,7 @@ async function requestJson(baseUrl: string, path: string, init: RequestInit, ste
   try {
     response = await fetch(`${baseUrl}${path}`, init);
   } catch {
-    throw new Day5DemoError("API_UNREACHABLE", `${step} could not reach the local application`);
+    throw new ProjectSnapshotDemoError("API_UNREACHABLE", `${step} could not reach the local application`);
   }
 
   let payload: unknown = null;
@@ -42,10 +42,10 @@ async function requestJson(baseUrl: string, path: string, init: RequestInit, ste
   }
 
   if (!response.ok) {
-    throw new Day5DemoError("API_REQUEST_FAILED", `${step} failed with HTTP ${response.status}`);
+    throw new ProjectSnapshotDemoError("API_REQUEST_FAILED", `${step} failed with HTTP ${response.status}`);
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Day5DemoError("API_RESPONSE_INVALID", `${step} returned an invalid JSON response`);
+    throw new ProjectSnapshotDemoError("API_RESPONSE_INVALID", `${step} returned an invalid JSON response`);
   }
 
   return payload as JsonObject;
@@ -54,7 +54,7 @@ async function requestJson(baseUrl: string, path: string, init: RequestInit, ste
 function readString(payload: JsonObject, key: string, step: string): string {
   const value = payload[key];
   if (typeof value !== "string" || value.length === 0) {
-    throw new Day5DemoError("API_RESPONSE_INVALID", `${step} did not return ${key}`);
+    throw new ProjectSnapshotDemoError("API_RESPONSE_INVALID", `${step} did not return ${key}`);
   }
   return value;
 }
@@ -62,14 +62,14 @@ function readString(payload: JsonObject, key: string, step: string): string {
 function readObject(payload: JsonObject, key: string, step: string): JsonObject {
   const value = payload[key];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Day5DemoError("API_RESPONSE_INVALID", `${step} did not return ${key}`);
+    throw new ProjectSnapshotDemoError("API_RESPONSE_INVALID", `${step} did not return ${key}`);
   }
   return value as JsonObject;
 }
 
 function makeDemoSlug(): string {
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
-  return `${DAY_5_DEMO_SLUG_PREFIX}-${suffix}`;
+  return `${PROJECT_SNAPSHOT_DEMO_SLUG_PREFIX}-${suffix}`;
 }
 
 async function cleanupDemoProject(projectId: string, slug: string): Promise<DemoCleanupResult> {
@@ -103,7 +103,7 @@ async function cleanupDemoProject(projectId: string, slug: string): Promise<Demo
     }
 
     if (project.slug !== slug) {
-      const actualRecovery = isDay5DemoProject(project) ? recovery(projectId, project.slug) : undefined;
+      const actualRecovery = isProjectSnapshotDemo(project) ? recovery(projectId, project.slug) : undefined;
       return {
         ok: false,
         operation: "cleanup",
@@ -120,7 +120,7 @@ async function cleanupDemoProject(projectId: string, slug: string): Promise<Demo
         operation: "cleanup",
         projectId,
         slug,
-        error: { code: "DEMO_MARKER_MISMATCH", message: "The project is not the exact Day 5 demo fixture" },
+        error: { code: "DEMO_MARKER_MISMATCH", message: "The project is not the exact Project Snapshot demo fixture" },
       };
     }
 
@@ -128,8 +128,8 @@ async function cleanupDemoProject(projectId: string, slug: string): Promise<Demo
       where: {
         id: projectId,
         slug,
-        name: DAY_5_DEMO_PROJECT_NAME,
-        description: DAY_5_DEMO_DESCRIPTION,
+        name: PROJECT_SNAPSHOT_DEMO_PROJECT_NAME,
+        description: PROJECT_SNAPSHOT_DEMO_DESCRIPTION,
       },
     });
 
@@ -175,9 +175,9 @@ async function seedDemo(baseUrl: string): Promise<JsonObject> {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          name: DAY_5_DEMO_PROJECT_NAME,
+          name: PROJECT_SNAPSHOT_DEMO_PROJECT_NAME,
           slug,
-          description: DAY_5_DEMO_DESCRIPTION,
+          description: PROJECT_SNAPSHOT_DEMO_DESCRIPTION,
         }),
       },
       "project creation",
@@ -185,14 +185,14 @@ async function seedDemo(baseUrl: string): Promise<JsonObject> {
     const project = readObject(projectPayload, "project", "project creation");
     projectId = readString(project, "id", "project creation");
     if (!projectIdSchema.safeParse(projectId).success) {
-      throw new Day5DemoError("API_RESPONSE_INVALID", "project creation returned an invalid projectId");
+      throw new ProjectSnapshotDemoError("API_RESPONSE_INVALID", "project creation returned an invalid projectId");
     }
     if (readString(project, "slug", "project creation") !== slug) {
-      throw new Day5DemoError("API_RESPONSE_INVALID", "project creation returned an unexpected slug");
+      throw new ProjectSnapshotDemoError("API_RESPONSE_INVALID", "project creation returned an unexpected slug");
     }
 
     const sourceIds = new Map<string, string>();
-    for (const fixtureSource of day5FixtureSources) {
+    for (const fixtureSource of projectSnapshotFixtureSources) {
       const sourcePayload = await requestJson(
         baseUrl,
         `/api/projects/${projectId}/sources`,
@@ -212,9 +212,9 @@ async function seedDemo(baseUrl: string): Promise<JsonObject> {
     }
 
     const confirmedItems: JsonObject[] = [];
-    for (const fixtureItem of day5FixtureItems) {
+    for (const fixtureItem of projectSnapshotFixtureItems) {
       const sourceId = sourceIds.get(fixtureItem.sourceKey);
-      if (!sourceId) throw new Day5DemoError("FIXTURE_INVALID", `fixture source ${fixtureItem.sourceKey} is missing`);
+      if (!sourceId) throw new ProjectSnapshotDemoError("FIXTURE_INVALID", `fixture source ${fixtureItem.sourceKey} is missing`);
 
       const itemPayload = await requestJson(
         baseUrl,
@@ -268,7 +268,7 @@ async function seedDemo(baseUrl: string): Promise<JsonObject> {
       slug,
       browserUrl: `${baseUrl}/projects/${projectId}`,
       cleanupCommand: cleanupCommand(projectId, slug),
-      sourceCount: day5FixtureSources.length,
+      sourceCount: projectSnapshotFixtureSources.length,
       confirmedItemCount: confirmedItems.length,
       snapshotId: readString(snapshot, "id", "initial snapshot generation"),
     };
@@ -276,10 +276,10 @@ async function seedDemo(baseUrl: string): Promise<JsonObject> {
     if (!projectId) throw error;
 
     const cleanupResult = await cleanupDemoProject(projectId, slug);
-    throw new Day5DemoError(
+    throw new ProjectSnapshotDemoError(
       "SEED_FAILED",
       JSON.stringify({
-        message: error instanceof Day5DemoError ? error.message : "Day 5 demo seed failed",
+        message: error instanceof ProjectSnapshotDemoError ? error.message : "Project Snapshot demo seed failed",
         projectId,
         slug,
         cleanup: cleanupResult,
@@ -305,11 +305,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  throw new Day5DemoError("INVALID_ARGUMENTS", "usage: seed [--base-url <URL>] | cleanup --project-id <UUID> --slug <exact-slug>");
+  throw new ProjectSnapshotDemoError("INVALID_ARGUMENTS", "usage: seed [--base-url <URL>] | cleanup --project-id <UUID> --slug <exact-slug>");
 }
 
 main().catch((error: unknown) => {
-  const message = error instanceof Day5DemoError ? error.message : "Day 5 demo command failed";
-  printJson({ ok: false, operation: "day5-demo", error: { code: error instanceof Day5DemoError ? error.code : "DEMO_COMMAND_FAILED", message } });
+  const message = error instanceof ProjectSnapshotDemoError ? error.message : "Project Snapshot demo command failed";
+  printJson({ ok: false, operation: "project-snapshot-demo", error: { code: error instanceof ProjectSnapshotDemoError ? error.code : "DEMO_COMMAND_FAILED", message } });
   process.exitCode = 1;
 });

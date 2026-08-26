@@ -119,7 +119,7 @@ export default function Home() {
               <span className="mt-0.5 block text-xs text-slate-500">Project Snapshot · V0</span>
             </span>
           </Link>
-          <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-500">Day 1 / Foundation</span>
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-500">V0 / Project Snapshot</span>
         </header>
 
         <section className="grid gap-10 pb-12 pt-14 lg:grid-cols-[1.35fr_0.65fr] lg:items-end">
@@ -129,7 +129,7 @@ export default function Home() {
               让项目状态，<span className="text-indigo-600">一眼可被理解。</span>
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              从原始资料到可追溯的 Project Snapshot。先建立项目的事实入口，再逐步让 AI 读懂它最近发生了什么。
+              从原始资料到可追溯的 Project Snapshot。人工整理来源、确认事实，再生成项目最近状态的固定读取点。
             </p>
           </div>
           <div className="grid grid-cols-3 gap-3 lg:pb-1">
@@ -201,7 +201,7 @@ export default function Home() {
             ) : projects.length === 0 ? (
               <div className="mt-7 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
                 <p className="text-sm font-medium text-slate-700">还没有项目</p>
-                <p className="mt-2 text-sm leading-6 text-slate-500">从左侧创建第一个项目，建立你的 Project World Model 入口。</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">从左侧创建第一个项目，建立项目资料与记忆入口。</p>
               </div>
             ) : (
               <div className="mt-7 space-y-3">

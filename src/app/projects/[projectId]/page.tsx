@@ -648,9 +648,8 @@ export default function ProjectDetailPage() {
           <Link href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">← 返回项目列表</Link>
           <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project workspace</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name}</h1>
-          <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">{project.description || "项目描述尚未补充。先接入来源，AI 才能开始建立可追溯的项目理解。"}</p>
+          <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">{project.description || "项目描述尚未补充。先接入来源，再人工创建并确认条目，最后手动生成可追溯快照。"}</p>
         </div>
-        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700">V0 · Day 5</span>
       </div>
 
       <section className="mt-8 grid gap-4 md:grid-cols-3">
@@ -675,7 +674,7 @@ export default function ProjectDetailPage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Source intake</p>
             <h2 id="sources-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">项目资料</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">手工接入原始候选资料，保留精确内容与 SHA-256，供后续条目提取追溯。</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">手工接入原始候选资料，保留精确内容与 SHA-256，供人工创建条目时引用和追溯。</p>
           </div>
           <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isSourcesLoading ? "读取中…" : `${sources.length} 条候选资料`}</span>
         </div>

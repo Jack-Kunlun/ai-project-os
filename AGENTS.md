@@ -2,7 +2,7 @@
 
 ## 作用域
 
-这是一个独立的 Next.js 单体应用，所有 Day 1 代码、迁移、文档和测试均在本目录内。不要扩展到其他项目目录，不要引入独立 API 服务、worker、MCP server 或 monorepo 结构。
+这是一个独立的 Next.js 单体应用，当前 V0 的代码、迁移、文档和测试均在本目录内。不要扩展到其他项目目录，不要引入独立 API 服务、worker、MCP server 或 monorepo 结构。
 
 ## 常用命令
 
@@ -29,7 +29,7 @@ pnpm db:generate
 
 ## 验收
 
-每次有行为变化都要运行相关的聚焦检查。Day 1 完成前必须运行 README 与 `docs/v0-scope.md` 中列出的项目级命令，以及真实数据库上的 API smoke；不要将只通过静态检查称作完成。
+每次有行为变化都要运行相关的聚焦检查。当前 V0 完成前必须运行 README 与 `docs/v0-scope.md` 中列出的项目级命令，以及真实数据库上的 API smoke；不要将只通过静态检查称作完成。
 
 <!-- BEGIN:nextjs-agent-rules -->
 

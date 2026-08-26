@@ -1,22 +1,22 @@
 import { projectIdSchema } from "../src/lib/validation";
 import {
-  DAY_5_DEMO_DESCRIPTION,
-  DAY_5_DEMO_MARKER,
-  DAY_5_DEMO_PROJECT_NAME,
-  DAY_5_DEMO_SLUG_PREFIX,
-} from "../test/fixtures/day-5-ai-project-os";
+  PROJECT_SNAPSHOT_DEMO_DESCRIPTION,
+  PROJECT_SNAPSHOT_DEMO_MARKER,
+  PROJECT_SNAPSHOT_DEMO_PROJECT_NAME,
+  PROJECT_SNAPSHOT_DEMO_SLUG_PREFIX,
+} from "../test/fixtures/project-snapshot-demo";
 
 export const DEFAULT_BASE_URL = "http://localhost:3000";
-const DEMO_SLUG_PATTERN = new RegExp(`^${DAY_5_DEMO_SLUG_PREFIX}-[a-f0-9]{12}$`);
+const DEMO_SLUG_PATTERN = new RegExp(`^${PROJECT_SNAPSHOT_DEMO_SLUG_PREFIX}-[a-f0-9]{12}$`);
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-export class Day5DemoError extends Error {
+export class ProjectSnapshotDemoError extends Error {
   constructor(
     readonly code: string,
     message: string,
   ) {
     super(message);
-    this.name = "Day5DemoError";
+    this.name = "ProjectSnapshotDemoError";
   }
 }
 
@@ -51,7 +51,7 @@ export type DemoProjectIdentity = {
 };
 
 function failArguments(message: string): never {
-  throw new Day5DemoError("INVALID_ARGUMENTS", message);
+  throw new ProjectSnapshotDemoError("INVALID_ARGUMENTS", message);
 }
 
 function hasOnlyRootPathInRawUrl(value: string): boolean {
@@ -153,28 +153,28 @@ export function parseCleanupArgs(args: string[]): { projectId: string; slug: str
     failArguments("--project-id must be a valid UUID");
   }
   if (!slug || !DEMO_SLUG_PATTERN.test(slug)) {
-    failArguments("--slug must be the exact Day 5 demo slug returned by seed");
+    failArguments("--slug must be the exact Project Snapshot demo slug returned by seed");
   }
 
   return { projectId, slug };
 }
 
 export function cleanupCommand(projectId: string, slug: string): string {
-  return `pnpm day5:demo -- cleanup --project-id ${projectId} --slug ${slug}`;
+  return `pnpm project-snapshot:demo -- cleanup --project-id ${projectId} --slug ${slug}`;
 }
 
 export function recovery(projectId: string, slug: string): DemoRecovery {
   return { projectId, slug, command: cleanupCommand(projectId, slug) };
 }
 
-export function isDay5DemoProject(project: DemoProjectIdentity): boolean {
+export function isProjectSnapshotDemo(project: DemoProjectIdentity): boolean {
   return (
-    project.name === DAY_5_DEMO_PROJECT_NAME &&
-    project.description === DAY_5_DEMO_DESCRIPTION &&
-    project.description.includes(DAY_5_DEMO_MARKER)
+    project.name === PROJECT_SNAPSHOT_DEMO_PROJECT_NAME &&
+    project.description === PROJECT_SNAPSHOT_DEMO_DESCRIPTION &&
+    project.description.includes(PROJECT_SNAPSHOT_DEMO_MARKER)
   );
 }
 
 export function isExactDemoProjectTarget(project: DemoProjectIdentity, projectId: string, slug: string): boolean {
-  return project.id === projectId && project.slug === slug && isDay5DemoProject(project);
+  return project.id === projectId && project.slug === slug && isProjectSnapshotDemo(project);
 }

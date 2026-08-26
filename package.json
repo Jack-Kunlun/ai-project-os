@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
+    "day5:demo": "tsx scripts/day5-demo.ts",
     "db:validate": "prisma validate --config prisma.config.ts",
     "db:generate": "prisma generate --config prisma.config.ts",
     "db:migrate": "prisma migrate dev --config prisma.config.ts",

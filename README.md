@@ -1,6 +1,6 @@
 # AI Project OS
 
-AI Project OS 是一个面向单项目的 V0 原型，用最小的 Project Snapshot 验证“AI 是否真的理解一个项目”。Day 1 建立项目容器、可追溯数据模型和最小 CRUD；Day 2 接入手工候选资料；Day 3 支持手工 ProjectItem 的创建、编辑和审核状态流转；Day 4 将同项目已确认 Item 在一致读取点组装成可追溯、不可变的最新 Snapshot。
+AI Project OS 是一个面向单项目的 V0 原型，用最小的 Project Snapshot 验证“AI 是否真的理解一个项目”。Day 1 建立项目容器、可追溯数据模型和最小 CRUD；Day 2 接入手工候选资料；Day 3 支持手工 ProjectItem 的创建、编辑和审核状态流转；Day 4 将同项目已确认 Item 在一致读取点组装成可追溯、不可变的最新 Snapshot；Day 5 提供无敏感信息的真实项目样本、修正演示和回归清单。
 
 ## 本地启动
 
@@ -37,6 +37,27 @@ Day 1 的最终验收命令、HTTP 状态、数据库 catalog 与事务 smoke �
 Day 2 的实现边界与验收状态见 [docs/acceptance/day-2.md](docs/acceptance/day-2.md)。
 Day 3 的 Item 实现边界与验收状态见 [docs/acceptance/day-3.md](docs/acceptance/day-3.md)。
 Day 4 的 Snapshot 实现边界与验收状态见 [docs/acceptance/day-4.md](docs/acceptance/day-4.md)。
+Day 5 的样本、修正流程、可观察问题和真实验收记录位置见 [docs/acceptance/day-5.md](docs/acceptance/day-5.md)。
+
+## Day 5 演示
+
+Day 5 样本使用 AI Project OS 自身的公开原型内容，不包含用户私密信息、真实凭据或带凭据 URL。脚本只允许访问 loopback 根地址（`localhost`、`127.0.0.1` 或 `[::1]`），默认是 `http://localhost:3000`；它只通过现有 HTTP API 创建 Project、两条 manual Source、四条 candidate Item，逐条确认后生成第一份 Snapshot：
+
+```bash
+pnpm day5:demo -- seed --base-url http://localhost:3000
+```
+
+命令会输出 `projectId`、`slug`、`browserUrl` 和精确的 cleanup 命令。打开 `browserUrl` 后，先核对 Snapshot 的四类条目、Focus（Issues 后 Risks）和每条 provenance。然后同时编辑 progress 条目的标题、content 和精确 excerpt：将“修正前”标题/文本改为 fixture 原文中的“修正后”标题/文本，保存使其回到 candidate；核对 Source 原文中的连续摘录，重新确认，再生成最新 Snapshot。旧 Snapshot 只表示过去的读取点，不能替代当前状态。
+
+演示结束后，必须只使用 seed 输出的精确参数清理该临时 Project（脚本会校验 projectId、完整 slug、Day 5 专属 name/marker，并只删除项目根）：
+
+```bash
+pnpm day5:demo -- cleanup --project-id <seed 输出的 projectId> --slug <seed 输出的完整 slug>
+```
+
+cleanup 参数错误、slug 不匹配或目标不是 Day 5 样本都会安全失败并返回非零状态；目标 Project 根的身份字段发生变化也会拒绝。不要使用名称前缀、模糊匹配或批量删除。完整流程、六个可观察问题和真实数据库/API/browser 验收记录位置见 [docs/acceptance/day-5.md](docs/acceptance/day-5.md)。
+
+V0 没有调用 LLM。“理解”验收的是用户能否根据 Source 原文、精确摘录、人工确认的 Item、Focus 和 Snapshot 读取点判断项目状态；这不是自动 AI 判断，也不是自动摘要或自动纠错。
 
 ## 数据完整性边界
 

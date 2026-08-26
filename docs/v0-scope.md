@@ -18,7 +18,7 @@
              Project Snapshot
 ```
 
-Day 1 交付项目容器、数据库 schema、健康检查、项目 CRUD 和基础页面。Day 2 在详情页接入手工 `ProjectSource` 候选资料：保存原始内容、精确 SHA-256、可选无凭据 HTTP(S) 链接和资料时间，并支持项目内列表与未引用来源删除。Day 3 在详情页接入手工 `ProjectItem`：支持四类条目、精确 Source 摘录、候选/确认/驳回/重新打开状态和受保护的编辑流程。Day 4 在同项目 Repeatable Read 读取点内，将全部已确认 Item 确定性组装成一份带 Scan 追溯的不可变 Snapshot，并在详情页展示最新状态与来源。Source 与 Item 都是可追溯的候选输入，只有人工确认的 Item 才能进入 Snapshot。
+Day 1 交付项目容器、数据库 schema、健康检查、项目 CRUD 和基础页面。Day 2 在详情页接入手工 `ProjectSource` 候选资料：保存原始内容、精确 SHA-256、可选无凭据 HTTP(S) 链接和资料时间，并支持项目内列表与未引用来源删除。Day 3 在详情页接入手工 `ProjectItem`：支持四类条目、精确 Source 摘录、候选/确认/驳回/重新打开状态和受保护的编辑流程。Day 4 在同项目 Repeatable Read 读取点内，将全部已确认 Item 确定性组装成一份带 Scan 追溯的不可变 Snapshot，并在详情页展示最新状态与来源。Day 5 使用 AI Project OS 自身的无敏感信息、版本化 fixture，提供可重复的 HTTP seed、精确 cleanup、浏览器修正演示和回归问题清单。Source 与 Item 都是可追溯的候选输入，只有人工确认的 Item 才能进入 Snapshot；V0 未调用 LLM。
 
 Day 1 的最终验收记录（包括真实 HTTP smoke、catalog 断言和事务完整性 smoke）见 [docs/acceptance/day-1.md](acceptance/day-1.md)。
 
@@ -80,3 +80,18 @@ V0 不接入 LLM、GitHub 实时连接、文件上传、认证、多用户/RBAC�
 - 详情页读取并展示最新已完成 Snapshot；当前确认集合发生新增、移除或重新确认时仅提示手动重生成，不自动生成。历史 Snapshot 可保留在数据库，但 V0 不提供历史列表、切换、详情、编辑或删除。
 - 没有已确认 Item 或确认 Item provenance 无效时，API 分别记录稳定错误的失败 Scan，且不创建 Snapshot。Snapshot payload、`scanId`、Scan 终态时间和共用 `generatedAt` 是受支持 HTTP writer 的保证，数据库尚未完全约束；不支持直接 DB/Prisma writer，advisory lock 也只保护遵循该 API 协议的调用。
 - Day 5 继续聚焦真实项目样本、修正体验、演示与回归；历史治理、数据库约束、分页与 current-state 冲突/修正能力属于后续范围。
+
+## Day 5 边界
+
+- `test/fixtures/day-5-ai-project-os.ts` 是版本化的安全样本：AI Project OS 自身、两条 `manual` Source、四条分别属于 decision/progress/issue/risk 的 confirmed Item；所有 Item 都有对应 Source 的精确非空 `sourceExcerpt`，`externalRef` 固定为 `null`。
+- `pnpm day5:demo -- seed --base-url http://localhost:3000` 只通过既有 Project、Source、Item、Snapshot HTTP API 建立唯一临时样本；`--base-url` 只允许 `localhost`、`127.0.0.1` 或 `[::1]` 的 HTTP(S) 根地址。Project slug 每次使用 UUID suffix；Item 先以 candidate 创建，再逐条 confirm，最后生成初始 Snapshot。seed 输出 `projectId`、完整 `slug`、浏览器地址和精确 cleanup 命令；seed 中途失败拿到 Project ID 时会尝试相同参数清理。
+- 浏览器演示先检查四类条目、Focus 的 Issues → Risks 顺序和每条 provenance；再同时编辑 progress 条目的标题、content 和精确 excerpt，把修正前内容改为 fixture 中的修正后内容。保存后 Item 回到 candidate，用户需核对 Source 原文连续摘录、重新确认并手动生成 Snapshot。stale Snapshot 明确表示旧读取点，不自动覆盖历史，也不代表优先级。
+- `pnpm day5:demo -- cleanup --project-id <UUID> --slug <exact-slug>` 只允许精确 projectId、完整 slug、Day 5 专属项目 name 和 marker 全部匹配时删除一个 Project 根，由现有 Cascade 清理子记录。拒绝名称前缀、模糊匹配、非 demo Project 和错误参数；Project 根身份字段发生变化也会拒绝，失败返回非零及可用的精确恢复参数（仅在仍能确认是 demo 项目时提供）。脚本不新增 Project DELETE API，seed 只支持 loopback 根地址。
+- Day 5 的“理解”不是自动 AI 评分。验收的是用户能否依据可追溯 Source、精确 excerpt、人工确认的 Item、Snapshot 读取点和 stale/修正提示回答：
+  1. 当前项目现在怎么样，四类状态是否都能找到来源？
+  2. 最近的 progress 是什么，修正前后文本是否都能在原文中精确定位？
+  3. 当前有哪些 issue 和 risk，Focus 是否严格按 Issues 后 Risks 展示？
+  4. 关键 decision 的原文摘录和 Source hash 是否可回看？
+  5. 编辑已确认 Item 后，用户是否知道它会回到 candidate 并需要重新确认？
+  6. stale 或没有 confirmed Item 时，用户是否能区分过去读取点与新的当前状态？
+- Day 5 不新增 LLM、外部连接、上传、认证、队列、MCP、Snapshot 历史 UI、Item 删除、supersession、分页、数据库约束补强或完整 correction engine；真实 PostgreSQL/API/browser 验收记录留在 [docs/acceptance/day-5.md](acceptance/day-5.md)。

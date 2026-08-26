@@ -650,7 +650,7 @@ export default function ProjectDetailPage() {
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name}</h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">{project.description || "项目描述尚未补充。先接入来源，AI 才能开始建立可追溯的项目理解。"}</p>
         </div>
-        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700">V0 · Day 4</span>
+        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700">V0 · Day 5</span>
       </div>
 
       <section className="mt-8 grid gap-4 md:grid-cols-3">
@@ -1132,6 +1132,7 @@ function SnapshotPanel({
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Project snapshot</p>
           <h2 id="snapshot-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">最新项目快照</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">快照只组装已确认 Item，并保存为本次读取点的不可变历史状态；不会自动生成或做优先级判断。</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">V0 未调用 LLM；这里展示可追溯、人工确认的项目状态，不是自动 AI 判断。</p>
         </div>
         <button
           type="button"
@@ -1145,7 +1146,9 @@ function SnapshotPanel({
 
       <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/70 px-5 py-4 text-sm leading-6 text-indigo-900" role="note">
         {!hasConfirmedItems
-          ? "当前没有已确认 Item。请先在项目条目中确认至少一条内容，之后才能生成快照。"
+          ? snapshot
+            ? "当前没有已确认 Item，不能生成新的当前状态。页面中的旧 Snapshot 仅表示过去的读取点；请先在 Items 中核对并确认至少一条内容，再生成新的 Snapshot。"
+            : "当前没有已确认 Item，不能生成当前状态。请先在项目条目中确认至少一条内容，之后才能生成快照。"
           : snapshot
             ? "生成快照不会覆盖历史记录；页面只展示最新一份，更新确认内容后需要手动重新生成。"
             : "当前已有已确认 Item，但还没有快照。点击右上角按钮生成第一份项目状态。"}
@@ -1163,7 +1166,13 @@ function SnapshotPanel({
         <div className="mt-7">
           {isStale ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900" role="status">
-              当前已确认 Item 与这份快照不一致（可能新增、移除或重新确认了 Item）。请手动生成最新快照；系统不会自动生成。
+              <p><strong className="font-semibold">这份旧 Snapshot 只是历史读取点。</strong> 当前已确认 Item 与它不一致（可能新增、移除或重新确认了 Item），不能把它当作当前项目状态。</p>
+              <ol className="mt-3 list-decimal space-y-1 pl-5">
+                <li><a href="#items-heading" className="font-semibold text-amber-950 underline decoration-amber-400 underline-offset-4">前往 Items 编辑区域</a>，编辑后的条目会回到待确认状态。</li>
+                <li>核对对应 Source 的原文摘录，确认修正后的内容确实被原文支持。</li>
+                <li>重新确认条目，再点击“生成最新快照”读取新的当前状态。</li>
+              </ol>
+              <p className="mt-3">系统不会自动覆盖历史快照，也不会调用 LLM 判断优先级。</p>
             </div>
           ) : null}
 

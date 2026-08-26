@@ -20,6 +20,22 @@ pnpm dev
 
 应用默认运行在 <http://localhost:3000>。
 
+## 本地 Docker 生产部署
+
+如果要在本机以生产构建运行完整 V0（PostgreSQL、一次性 Prisma 迁移和 Next.js 应用），先确认 `.env` 已设置 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 和用于宿主机命令的 `DATABASE_URL`，然后执行：
+
+```bash
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps --all
+```
+
+Compose 会先等待 `postgres` 健康，再运行一次 `prisma migrate deploy`；迁移成功后启动 `app`。应用通过 <http://127.0.0.1:3000> 提供服务，`APP_PORT` 可在 `.env` 中改为其他本机端口。PostgreSQL 仍只绑定到 `127.0.0.1:5433`，数据保存在名为 `ai-project-os-pgdata` 的本地卷中。
+
+Compose 内的应用和迁移服务使用 `postgres:5432` 作为数据库主机，并从 `POSTGRES_*` 变量构造连接串；宿主机上的 `DATABASE_URL` 仍应使用 `127.0.0.1:5433`。当前写法要求 `POSTGRES_PASSWORD` 为 URL-safe 字符。如果密码包含 `@`、`:`、`/`、`?`、`#`、`%` 等 URL 保留字符，请在连接串中进行 URL 编码，或改为在 Compose 两个服务中提供显式的容器内 `DATABASE_URL`，不要把未编码的密码直接拼进 URL。
+
+更新镜像或代码后再次执行 `docker compose up -d --build`；只重启应用可执行 `docker compose restart app`。不要使用 `docker compose down -v`，因为它会删除本地数据库卷和数据。
+
 ## 验证命令
 
 ```bash

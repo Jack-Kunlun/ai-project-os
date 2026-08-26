@@ -16,6 +16,46 @@ services:
       timeout: 5s
       retries: 12
 
+  migrate:
+    build:
+      context: .
+      target: migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runner
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/api/health').then(async (response) => {
+          const body = await response.json();
+          if (!response.ok || body.status !== 'ok' || body.database !== 'up') process.exit(1);
+          }).catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
 volumes:
   ai_project_os_pgdata:
     name: ai-project-os-pgdata

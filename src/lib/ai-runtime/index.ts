@@ -29,6 +29,30 @@ export type {
   OpenAiResponsesTransportPlan,
 } from "./openai-responses-contract";
 export {
+  OPENAI_GROUNDED_RAG_CONTRACT_VERSION,
+  OPENAI_GROUNDED_RAG_PROMPT_FINGERPRINT,
+  OPENAI_GROUNDED_RAG_PROMPT_VERSION,
+  buildOpenAiGroundedRagTransportPlan,
+} from "./openai-grounded-rag-contract";
+export type {
+  OpenAiGroundedRagBody,
+  OpenAiGroundedRagCitation,
+  OpenAiGroundedRagClaim,
+  OpenAiGroundedRagContext,
+  OpenAiGroundedRagRequest,
+  OpenAiGroundedRagStructuredOutput,
+  OpenAiGroundedRagTransportPlan,
+} from "./openai-grounded-rag-contract";
+export {
+  OPENAI_GROUNDED_RAG_OUTPUT_CONTRACT_VERSION,
+  inspectOpenAiGroundedRagResponse,
+  verifyOpenAiGroundedRagResponse,
+} from "./openai-grounded-rag-output";
+export type {
+  InspectedOpenAiGroundedRagResponse,
+  VerifiedOpenAiGroundedRagResponse,
+} from "./openai-grounded-rag-output";
+export {
   buildOpenAiCandidateExcerptFingerprint,
   buildOpenAiCandidateSetFingerprint,
   buildOpenAiCandidateStatementFingerprint,
@@ -71,15 +95,23 @@ export {
   OPENAI_EMBEDDING_MODEL_FINGERPRINT,
   OPENAI_EMBEDDING_MODEL_ID,
   OPENAI_EMBEDDING_PROFILE_FINGERPRINT,
+  OPENAI_GENERATE_WITH_CONTEXT_MODEL_FINGERPRINT,
+  OPENAI_GENERATE_WITH_CONTEXT_MODEL_ID,
+  OPENAI_GENERATE_WITH_CONTEXT_PROCESSOR_FINGERPRINT,
+  OPENAI_GENERATE_WITH_CONTEXT_PROFILE_FINGERPRINT,
   OPENAI_PROCESSOR_REGION_FINGERPRINT,
   OPENAI_RUNTIME_PROFILE_VERSION,
   getOpenAiAutoExtractProfile,
   getOpenAiEmbeddingProfile,
+  getOpenAiGenerateWithContextProfile,
 } from "./openai-runtime-profile";
 export {
   OPENAI_AUTO_EXTRACT_MAX_BUDGET_MICROS,
   OPENAI_AUTO_EXTRACT_MAX_INPUT_TOKENS,
   OPENAI_AUTO_EXTRACT_PRICING_SNAPSHOT_ID,
+  OPENAI_GENERATE_WITH_CONTEXT_MAX_BUDGET_MICROS,
+  OPENAI_GENERATE_WITH_CONTEXT_MAX_INPUT_TOKENS,
+  OPENAI_GENERATE_WITH_CONTEXT_PRICING_SNAPSHOT_ID,
   assertAiExecutionInputWithinProfile,
   calculateAiExecutionBudgetMicros,
   getSyntheticAiExecutionProfile,

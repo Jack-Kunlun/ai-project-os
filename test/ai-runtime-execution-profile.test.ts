@@ -6,9 +6,12 @@ import {
   OPENAI_AUTO_EXTRACT_MAX_BUDGET_MICROS,
   OPENAI_AUTO_EXTRACT_MAX_INPUT_TOKENS,
   OPENAI_AUTO_EXTRACT_PRICING_SNAPSHOT_ID,
+  OPENAI_GENERATE_WITH_CONTEXT_MAX_BUDGET_MICROS,
+  OPENAI_GENERATE_WITH_CONTEXT_MAX_INPUT_TOKENS,
   calculateAiExecutionBudgetMicros,
   getOpenAiAutoExtractProfile,
   getOpenAiEmbeddingProfile,
+  getOpenAiGenerateWithContextProfile,
   getSyntheticAiExecutionProfile,
   resolveAiExecutionProfile,
   scanLocalSourcesForModelTransfer,
@@ -19,6 +22,19 @@ const sourceBId = "22222222-2222-4222-8222-222222222222";
 
 function openAiAutoExtractBoundary() {
   const profile = getOpenAiAutoExtractProfile();
+  return {
+    profileFingerprint: profile.profileFingerprint,
+    providerFingerprint: profile.providerFingerprint,
+    modelFingerprint: profile.modelFingerprint,
+    modelId: profile.modelId,
+    regionFingerprint: profile.processorRegionFingerprint,
+    retentionFingerprint: profile.processorRetentionFingerprint,
+    endpointFingerprint: profile.processorEndpointFingerprint,
+  };
+}
+
+function openAiGenerateWithContextBoundary() {
+  const profile = getOpenAiGenerateWithContextProfile();
   return {
     profileFingerprint: profile.profileFingerprint,
     providerFingerprint: profile.providerFingerprint,
@@ -131,6 +147,33 @@ test("frozen token pricing rounds upward and enforces every budget ceiling", () 
     }),
     140,
   );
+});
+
+test("generate with context resolves only its fixed Responses boundary", () => {
+  const boundary = openAiGenerateWithContextBoundary();
+  const profile = resolveAiExecutionProfile("generateWithContext", boundary);
+  assert.notEqual(profile, null);
+  assert.equal(profile?.kind, "openaiGenerateWithContext");
+  assert.equal(
+    profile?.maxInputTokens,
+    OPENAI_GENERATE_WITH_CONTEXT_MAX_INPUT_TOKENS,
+  );
+  assert.equal(
+    profile?.maxBudgetMicros,
+    OPENAI_GENERATE_WITH_CONTEXT_MAX_BUDGET_MICROS,
+  );
+  assert.ok(Object.isFrozen(profile));
+
+  for (const changedField of Object.keys(boundary) as Array<keyof typeof boundary>) {
+    assert.equal(
+      resolveAiExecutionProfile("generateWithContext", {
+        ...boundary,
+        [changedField]: changedField === "modelId" ? "different-model" : "b".repeat(64),
+      }),
+      null,
+      changedField,
+    );
+  }
 });
 
 test("local source scanning exposes only a stable passed or blocked result", () => {

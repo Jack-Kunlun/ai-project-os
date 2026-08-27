@@ -21,6 +21,7 @@ Project 是资料、事实条目和状态快照的容器。Source 保存原始�
 | AI 候选 | 模型候选以可见 Item 进入人工队列；可在接受前修订字段，不能更换来源与精确摘录 |
 | AI 治理 | 本机 CLI 配置固定模型、显式 Source 范围和到期授权；网页只读展示安全状态 |
 | 检索基础 | 确定性分块、pgvector 存储、原子 Project RAG Snapshot、CJK/标识符/子串 RRF；本机 CLI 可读取已有合格快照 |
+| 受控 RAG 合同 | 将问题、快照和同项目证据绑定到固定无工具模型请求；只接受精确引用回答、双侧证据冲突或无证据拒答；真实模型执行入口仍关闭 |
 | Snapshot | 只组装已确认 Item，按确定性顺序保存不可变读取点和 provenance |
 | 修正 | 修改内容后提示旧 Snapshot 已过期，人工复核、重新确认并手动生成新 Snapshot |
 
@@ -72,7 +73,7 @@ pnpm project-ai:config -- configure \
 pnpm project-ai:config -- revoke --project-id <projectId>
 ```
 
-`configure` 会重新计算并核对 Source 指纹、执行本地敏感信息扫描，并为固定的自动抽取与 Embedding 操作生成 30 天授权；重复执行相同命令是幂等的，改变 Source 集合会撤销旧授权。CLI 只输出安全状态，不输出 Source 内容或凭据。当前执行状态仍固定返回 `EXTERNAL_TRANSFER_NOT_ENABLED`，所以这些命令不会调用 OpenAI，也不会发送任何项目内容。
+`configure` 会重新计算并核对 Source 指纹、执行本地敏感信息扫描，并为固定的自动抽取、Embedding 与带上下文生成操作生成 30 天授权；重复执行相同命令是幂等的，改变 Source 集合会撤销旧授权。CLI 只输出安全状态，不输出 Source 内容或凭据。当前执行状态仍固定返回 `EXTERNAL_TRANSFER_NOT_ENABLED`，所以这些命令不会调用 OpenAI，也不会发送任何项目内容。
 
 已经存在合格且未撤权的 Project RAG Snapshot 时，可以在本机执行项目内检索：
 

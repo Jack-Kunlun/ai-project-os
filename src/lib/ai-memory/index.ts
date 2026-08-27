@@ -78,3 +78,30 @@ export {
   type ProjectSearchErrorCode,
   type ProjectSearchResponse,
 } from "./project-search";
+export {
+  GROUNDED_RAG_MAX_CLAIMS,
+  GROUNDED_RAG_MAX_CONTEXTS,
+  GROUNDED_RAG_PROMPT_VERSION,
+  GROUNDED_RAG_VERSION,
+  GroundedRagError,
+  buildGroundedRagPlan,
+  buildGroundedRagPlanFromSearch,
+  verifyGroundedRagOutput,
+  type GroundedCitation,
+  type GroundedClaim,
+  type GroundedRagContextEntry,
+  type GroundedRagErrorCode,
+  type GroundedRagPlan,
+  type GroundedRagResult,
+} from "./grounded-rag";
+export {
+  createGroundedRagService,
+  type GroundedRagResolver,
+  type GroundedRagRun,
+} from "./grounded-rag-service";
+export {
+  compileOpenAiGroundedRagPlan,
+  verifyOpenAiGroundedRagPlanResponse,
+  type OpenAiGroundedRagExecutionIdentity,
+  type VerifiedOpenAiGroundedRagRun,
+} from "./openai-grounded-rag";

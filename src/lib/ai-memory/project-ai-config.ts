@@ -12,8 +12,10 @@ import {
   LOCAL_SOURCE_SCANNER_VERSION,
   OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
   OPENAI_EMBEDDING_PROCESSOR_FINGERPRINT,
+  OPENAI_GENERATE_WITH_CONTEXT_PROCESSOR_FINGERPRINT,
   getOpenAiAutoExtractProfile,
   getOpenAiEmbeddingProfile,
+  getOpenAiGenerateWithContextProfile,
   loadAiRuntimeConfig,
   scanLocalSourcesForModelTransfer,
 } from "@/lib/ai-runtime";
@@ -42,6 +44,7 @@ const TRANSACTION_RETRY_LIMIT = 3;
 const CONFIGURED_OPERATIONS = [
   AiOperation.autoExtract,
   AiOperation.embedding,
+  AiOperation.generateWithContext,
 ] as const;
 
 type ConfiguredOperation = (typeof CONFIGURED_OPERATIONS)[number];
@@ -150,6 +153,7 @@ function fingerprint(label: string, value: unknown): string {
 function operationBoundaries(): readonly OperationBoundary[] {
   const autoExtract = getOpenAiAutoExtractProfile();
   const embedding = getOpenAiEmbeddingProfile();
+  const generateWithContext = getOpenAiGenerateWithContextProfile();
   return Object.freeze([
     Object.freeze({
       operation: AiOperation.autoExtract,
@@ -172,6 +176,17 @@ function operationBoundaries(): readonly OperationBoundary[] {
       regionFingerprint: embedding.processorRegionFingerprint,
       retentionFingerprint: embedding.processorRetentionFingerprint,
       endpointFingerprint: embedding.processorEndpointFingerprint,
+    }),
+    Object.freeze({
+      operation: AiOperation.generateWithContext,
+      profileFingerprint: generateWithContext.profileFingerprint,
+      providerFingerprint: generateWithContext.providerFingerprint,
+      modelFingerprint: generateWithContext.modelFingerprint,
+      modelId: generateWithContext.modelId,
+      processorFingerprint: OPENAI_GENERATE_WITH_CONTEXT_PROCESSOR_FINGERPRINT,
+      regionFingerprint: generateWithContext.processorRegionFingerprint,
+      retentionFingerprint: generateWithContext.processorRetentionFingerprint,
+      endpointFingerprint: generateWithContext.processorEndpointFingerprint,
     }),
   ]);
 }
@@ -202,6 +217,9 @@ const POLICY_BUDGET_FINGERPRINT = fingerprint("budget", {
   autoExtractMaxOutputTokens: 2_048,
   autoExtractMaxBudgetMicros: 60_000,
   embeddingMaximumAttempts: 1,
+  generateWithContextMaxInputTokens: 64_000,
+  generateWithContextMaxOutputTokens: 2_048,
+  generateWithContextMaxBudgetMicros: 60_000,
 });
 const POLICY_FINGERPRINT = fingerprint("enabled-policy", {
   consentVersion: MODEL_TRANSFER_CONSENT_VERSION,
@@ -400,7 +418,7 @@ function exactConfiguredRevision(value: Readonly<{
     value.autoExtractEnabled !== true ||
     value.sourceSummaryEnabled !== false ||
     value.projectAnalysisEnabled !== false ||
-    value.generateWithContextEnabled !== false ||
+    value.generateWithContextEnabled !== true ||
     value.profileFingerprint !== POLICY_PROFILE_FINGERPRINT ||
     value.processorFingerprint !== POLICY_PROCESSOR_FINGERPRINT ||
     value.regionFingerprint !== POLICY_REGION_FINGERPRINT ||
@@ -659,7 +677,7 @@ class ProjectAiConfigServiceImpl {
             autoExtractEnabled: true,
             sourceSummaryEnabled: false,
             projectAnalysisEnabled: false,
-            generateWithContextEnabled: false,
+            generateWithContextEnabled: true,
             profileFingerprint: POLICY_PROFILE_FINGERPRINT,
             processorFingerprint: POLICY_PROCESSOR_FINGERPRINT,
             regionFingerprint: POLICY_REGION_FINGERPRINT,

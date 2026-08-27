@@ -350,15 +350,20 @@ test(
               assert.equal(body.model, OPENAI_EMBEDDING_MODEL_ID);
               assert.equal(body.dimensions, 1_536);
               assert.equal(body.input.length, 2);
+              assert.deepEqual(
+                [...body.input].sort(),
+                [sourceAContent, sourceBContent].sort(),
+              );
               return new Response(JSON.stringify({
                 object: "list",
                 model: OPENAI_EMBEDDING_MODEL_ID,
-                data: body.input.map((_, index) => ({
+                data: body.input.map((content, index) => ({
                   object: "embedding",
                   index,
                   embedding: Array.from(
                     { length: 1_536 },
-                    (__, component) => component === index ? 1 : 0,
+                    (__, component) =>
+                      component === (content === sourceAContent ? 0 : 1) ? 1 : 0,
                   ),
                 })),
                 usage: { prompt_tokens: 12, total_tokens: 12 },

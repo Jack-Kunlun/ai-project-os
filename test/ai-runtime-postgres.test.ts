@@ -146,6 +146,8 @@ const aiTables = [
   "AiAuditEvent",
   "AiCandidateBatch",
   "AiCandidateClaim",
+  "ProjectRagSnapshot",
+  "ProjectRagSnapshotPointer",
 ] as const;
 
 const aiEnums = [
@@ -161,6 +163,7 @@ const aiEnums = [
   "AiAuditEventType",
   "AiSafeErrorCode",
   "AiCandidateReviewStatus",
+  "ProjectRagSnapshotStatus",
 ] as const;
 
 const aiRuntimeMigrationPath = join(
@@ -190,6 +193,10 @@ const candidateItemPublicationMigrationPath = join(
 const operationProfileMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260828170000_add_ai_operation_profiles/migration.sql",
+);
+const ragSnapshotMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260828210000_add_project_rag_snapshots/migration.sql",
 );
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
@@ -644,6 +651,7 @@ async function applyAiMigrationInTransaction(client: Client): Promise<void> {
     { sql: await loadSql(indexGenerationMigrationPath) },
     { sql: await loadSql(candidateItemPublicationMigrationPath) },
     { sql: await loadSql(operationProfileMigrationPath) },
+    { sql: await loadSql(ragSnapshotMigrationPath) },
   ]);
 }
 
@@ -674,6 +682,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     "20260828123000_add_index_generations",
     "20260828150000_publish_ai_candidate_items",
     "20260828170000_add_ai_operation_profiles",
+    "20260828210000_add_project_rag_snapshots",
   ];
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===
@@ -3572,7 +3581,7 @@ async function runAtomicRuntimeCandidateCompletion(
     configured.configured &&
       configured.currentRevision === 3 &&
       JSON.stringify(configured.sourceIds) === JSON.stringify([sourceAId]) &&
-      configured.operations.length === 2 &&
+      configured.operations.length === 3 &&
       successGrant !== undefined &&
       configured.externalTransferExecution.enabled === false,
     "AI_RUNTIME_POSTGRES_LOCAL_CONFIG_STATUS_MISMATCH",
@@ -3764,7 +3773,7 @@ async function runAtomicRuntimeCandidateCompletion(
     [projectAId, configured.operations.map((operation) => operation.grantId)],
   );
   requireCondition(
-    replacedGrants.rows.length === 2 &&
+    replacedGrants.rows.length === 3 &&
       replacedGrants.rows.every(
         (grant) =>
           grant.status === "revoked" &&
@@ -3869,7 +3878,7 @@ async function runAtomicRuntimeCandidateCompletion(
     [projectAId, reconfigured.operations.map((operation) => operation.grantId)],
   );
   requireCondition(
-    revokedCurrentGrants.rows.length === 2 &&
+    revokedCurrentGrants.rows.length === 3 &&
       revokedCurrentGrants.rows.every(
         (grant) =>
           grant.status === "revoked" &&

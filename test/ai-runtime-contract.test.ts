@@ -331,6 +331,28 @@ test("runtime configuration is disabled by default and fails closed when enabled
     errorCode: "AI_PROVIDER_DISABLED",
   });
   assert.doesNotMatch(JSON.stringify(providerDisabled), /test-secret-sentinel/);
+
+  const ready = loadAiRuntimeConfig({
+    AI_ENABLED: "true",
+    AI_PROVIDER: "openai",
+    OPENAI_API_KEY: "sk-testcredentialvalue1234567890",
+  });
+  assert.deepEqual(ready, {
+    enabled: true,
+    status: "ready",
+    provider: "openai",
+    responseModelId: "gpt-5.4-mini-2026-03-17",
+    embeddingModelId: "text-embedding-3-small",
+  });
+  assert.deepEqual(checkAiRuntimeAvailability(ready), {
+    enabled: true,
+    available: true,
+    errorCode: null,
+    provider: "openai",
+    responseModelId: "gpt-5.4-mini-2026-03-17",
+    embeddingModelId: "text-embedding-3-small",
+  });
+  assert.doesNotMatch(JSON.stringify(ready), /testcredentialvalue/);
 });
 
 test("safe result serialization does not carry raw provider material", () => {

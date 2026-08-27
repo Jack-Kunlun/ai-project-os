@@ -161,10 +161,35 @@ export interface AiRuntimeConfigProviderDisabled {
   errorCode: "AI_PROVIDER_DISABLED";
 }
 
-export type AiRuntimeConfig = AiRuntimeConfigDisabled | AiRuntimeConfigProviderDisabled;
-
-export interface AiRuntimeAvailability {
-  enabled: boolean;
-  available: false;
-  errorCode: "AI_DISABLED" | "AI_PROVIDER_DISABLED";
+export interface AiRuntimeConfigReady {
+  enabled: true;
+  status: "ready";
+  provider: "openai";
+  responseModelId: string;
+  embeddingModelId: string;
 }
+
+export type AiRuntimeConfig =
+  | AiRuntimeConfigDisabled
+  | AiRuntimeConfigProviderDisabled
+  | AiRuntimeConfigReady;
+
+export type AiRuntimeAvailability =
+  | {
+      enabled: false;
+      available: false;
+      errorCode: "AI_DISABLED";
+    }
+  | {
+      enabled: true;
+      available: false;
+      errorCode: "AI_PROVIDER_DISABLED";
+    }
+  | {
+      enabled: true;
+      available: true;
+      errorCode: null;
+      provider: "openai";
+      responseModelId: string;
+      embeddingModelId: string;
+    };

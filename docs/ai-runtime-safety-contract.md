@@ -12,9 +12,9 @@
 
 ### 当前实现状态
 
-当前已经具备并在专用 disposable PostgreSQL gate 中验证了 additive governance migration、typed fake runtime service、`prepare`、CAS claim、`AiRunAttempt`、审计写入以及 queued Run 的 policy/grant、scanner 和 budget 终态闭合。仓库还提供了仅用于预接线检查的纯 `autoExtract` Responses 请求编译器和响应验证器：编译器只接受受控 profile、运行标识和 source 清单，生成不可变的单次传输计划；验证器只接受同一进程中由该编译器签发的计划，把 completed、无工具的结构化响应绑定回原 model、metadata 和 source 快照，并逐条验证 source ID 与连续原文摘录。两者均不读取凭据、不执行网络请求，也没有接入运行服务。该 migration 尚未应用到用户当前数据库或任何部署数据库。本仓库没有公开 API 或 UI 集成；正常运行时 `AI_ENABLED` 仍默认关闭，启用时在真实 provider 未实现的情况下 fail closed 为 provider-disabled。
+当前已经具备并在专用 disposable PostgreSQL gate 中验证了 additive governance migration、typed fake runtime service、`prepare`、CAS claim、`AiRunAttempt`、审计写入以及 queued Run 的 policy/grant、scanner 和 budget 终态闭合。仓库还提供了受控 `autoExtract` Responses 与 Embeddings request plan、响应验证器和共享 HTTP transport：request plan 只接受服务端固定 profile、运行标识和明确输入；验证器只接受同一进程中由对应编译器签发的 plan，把响应绑定回固定 model、metadata 和输入快照，并校验来源证据或向量维度、索引和 usage。HTTP transport 固定 OpenAI origin，使用不可序列化的内存 credential handle，只执行一次 POST，禁止 redirect，不读取 HTTP error body，并限制成功响应体大小。该 migration 尚未应用到用户当前数据库或任何部署数据库。本仓库没有公开 AI API 或 UI 集成；正常运行时 `AI_ENABLED` 仍默认关闭，只有同时显式配置 `AI_ENABLED=true`、`AI_PROVIDER=openai` 和格式有效的本地 `OPENAI_API_KEY` 时，安全配置检查才报告 provider ready。
 
-当前仍没有真实 provider、LLM、Embedding、RAG、GitHub 连接器、agent 或任何真实外发。纯请求编译器与响应验证器也不是 provider adapter 或 transport，不能读取 API key、创建 HTTP header、调用 SDK/fetch 或取得模型输出；验证器只校验调用方提供的未知 JSON，并丢弃未验证的 provider 原文。fake admissibility gate 只是安全元数据管线的测试替身，不是 secret/PII scanner；fake provider 的一次 dispatch 证据也不等于真实 provider 崩溃、对账或 reconciliation 已经解决。Layer A 整体不在本文中被宣称完成，V0 API、页面和人工工作流本轮也没有新增 smoke 证据。
+当前产品仍没有可用的 LLM 自动抽取、Embedding、RAG、GitHub 连接器、agent 或真实外发入口。HTTP transport 已用 dependency-injected local Response fixture 验证，但尚未接入 `AiRuntimeService`、公开 API、候选持久化、向量索引或 UI，也没有在本仓库测试中使用真实 key 或产生 provider 账单。验证后只返回候选/向量、安全 usage 和 opaque request/response ID；原始成功 JSON、reasoning、annotation、HTTP error body 和 credential 均不进入返回值、日志或数据库。fake admissibility gate 仍只是安全元数据管线的测试替身，不是 secret/PII scanner；local mock 的一次 dispatch 证据也不等于真实 provider 质量、账户权限、超时对账或部署健康已经验收。
 
 ## 分层交付
 
@@ -31,16 +31,16 @@ Layer A 只允许构建可禁用、可审计、默认拒绝的本地运行时基
 
 Layer A 不引入真实外发、不把模型结果写入已确认事实、不改变 V0 的 Source、Item 或 Snapshot 语义。
 
-### Layer B：暂不真实启用的外发能力
+### Layer B：受控外发能力
 
-Layer B 包括 OpenAI Responses 和 Embeddings 的出站调用。即使 Layer A 完成，Layer B 也必须继续保持关闭，直到至少满足以下前置条件：
+Layer B 包括 OpenAI Responses 和 Embeddings 的出站调用。transport 可以先实现并使用本地 fixture 验证，但产品入口和真实外发必须保持关闭，直到至少满足以下前置条件：
 
-1. 针对 `store:false` 请求超时且没有 response ID 的情况，取得足以证明 provider 侧处理状态的 unknown 对账证据和可执行 reconciliation 方案；
+1. 针对 `store:false` 请求超时且没有 response ID 的情况，坚持不可对账的 `unknown` 终态，不自动 retry、不重新 dispatch 同一 Run；界面和审计必须明确显示结果未知，除非未来取得官方可验证 evidence，否则不得人工改写终态；
 2. 固定、可验证的输入 token 上界、输出上界、请求数和成本预算方法已经实现并纳入审计；
 3. 真实 provider profile、模型标识、endpoint、region、retention 和数据分类经过独立安全审查；
 4. 固定评测基线完成技术审阅和产品负责人确认，且真实模型结果单独记录，不能用 fixture 自检替代。
 
-在 Layer B 被明确启用前，`AI_ENABLED=false` 是默认值；它必须使 AI 运行时保持关闭，且不能影响现有 V0 API、页面、迁移和人工工作流。
+`AI_ENABLED=false` 始终是默认值；它必须使 AI 运行时保持关闭，且不能影响现有 V0 API、页面、迁移和人工工作流。环境中存在 API key 本身不能启用外发，缺少显式 feature switch 或 provider 选择仍然 fail closed。
 
 ## 访问与授权模型
 
@@ -189,16 +189,20 @@ OpenAI 官方 Responses API 文档描述了 `store`、最大输出、结构化�
 
 截至 2026-08-27，官方 [Create a model response](https://developers.openai.com/api/reference/cli/resources/responses/methods/create) 文档确认了 `store`、`max_output_tokens`、工具选择和 `text.format` 结构化输出；官方 [Get a model response](https://developers.openai.com/api/reference/cli/resources/responses/methods/retrieve) 文档要求先持有 response ID 才能查询对应响应；官方 [Data controls](https://developers.openai.com/api/docs/guides/your-data) 说明 Responses 的应用状态保留受 `store` 和组织数据控制影响，Zero Data Retention 会强制把 `store` 视为 `false`。
 
+官方 [Create embeddings](https://developers.openai.com/api/reference/ruby/resources/embeddings/methods/create) 文档给出每项 8192 token、单请求最多 2048 项和总计 300000 token 的上限，并定义 `float`/`base64` encoding、可选 dimensions、按 index 返回的向量及 prompt token usage。当前 server-owned profile 选择官方列出的固定 Responses snapshot [`gpt-5.4-mini-2026-03-17`](https://developers.openai.com/api/docs/models/gpt-5.4-mini) 与 [`text-embedding-3-small`](https://developers.openai.com/api/docs/models/text-embedding-3-small)，不接受 caller model 或 `latest` 别名；Embedding 的本地 byte/count 上限比官方 token/count 上限更保守。
+
 上述官方资料没有为本项目记录的 `operationKey` 提供可依赖的 provider 幂等保证，也没有说明客户端在请求已送达但尚未拿到 response ID 时如何恢复 provider 处理状态。因此本项目作出保守推论：`store:false` 前台请求在“超时且没有 response ID”时无法仅凭当前官方接口完成对账。该推论不是对 provider 所有未公开行为的断言；如果后续官方合同、账户能力或实测证据发生变化，必须重新审阅本节。
 
-在该未知边界关闭前，只允许保留纯 `autoExtract` 请求编译器与响应验证器，并满足以下限制：
+由于该 unknown 边界无法从客户端单方面消除，当前实现采用“单次发送、不可对账即终态 unknown、零自动重派”的保守策略。Responses/Embeddings transport 必须满足以下限制：
 
 - endpoint 固定为 `/v1/responses`，不接受 caller URL、header、credential、model 参数、prompt、tool 或 schema 扩展；
 - `store:false`、`tools:[]`、`tool_choice:"none"`、`parallel_tool_calls:false`，不包含 background、conversation、previous response、stream 或 hosted tool 字段；
 - 固定严格 JSON Schema，候选字段必须带 `sourceId` 和 `sourceExcerpt`，source 内容明确按不可信数据处理；响应验证器只接受 completed、无 error、无工具调用、model/metadata 与签发计划一致的响应，允许忽略 reasoning item，但只允许一个 completed assistant `output_text`；每个候选的 source 必须属于签发计划且 excerpt 必须是对应原文的连续子串，重复候选、拒答、歧义消息、越权来源或不匹配摘录均以稳定错误拒绝；
-- 传输计划固定 `redirect:error`、`maximumAttempts=1`、`automaticRetry=false`，但当前没有实际 transport；
+- 传输计划固定 `redirect:error`、`maximumAttempts=1`、`automaticRetry=false`；共享 transport 只允许对应模块在同一进程签发的 plan，固定 `credentials:omit`、`referrerPolicy:no-referrer` 和 JSON content type；
 - 通过验证后只返回安全 usage、opaque response ID、候选字段、证据位置和 fingerprints；不返回或保存原始 response、结构化输出文本、reasoning、annotation 或 provider error body；
-- `AI_ENABLED` 和 provider availability 语义不变，仍为 provider-disabled；不得配置 key、执行真实调用、产生账单或宣称自动抽取可用。
+- HTTP 非成功响应不读取 provider error body；成功响应以字节上界和 fatal UTF-8 解码后才进入结构验证；timeout、Abort、连接中断和无效响应在 dispatch 后均按 unknown 处理；
+- Embeddings 请求固定 `encoding_format:float` 和 1536 维，单项 UTF-8 输入不超过 8192 bytes、单请求总输入不超过 256000 bytes、最多 100 项；返回向量按 float32 规范化后校验完整索引、固定维度和 usage；
+- 当前 transport 尚未接入产品服务；不得仅凭模块存在、配置检查 ready 或 mock 通过就宣称自动抽取、Embedding 或 V1 可用。
 
 ### 数据最小化
 

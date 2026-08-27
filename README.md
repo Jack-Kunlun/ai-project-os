@@ -55,6 +55,8 @@ pnpm dev
 
 `.env.example` 只提供变量名和非敏感的本地默认用户/数据库名，不包含可用密码或完整连接串。宿主机上的 `DATABASE_URL` 应指向 `127.0.0.1:5433`；未设置 `POSTGRES_PASSWORD` 时，Compose 会明确失败。`.env` 已被 Git 忽略。
 
+`AI_ENABLED` 默认且当前应保持为 `false`，`OPENAI_API_KEY` 示例值为空。仓库中的受控 provider transport 尚未接入公开 API、持久化或页面；仅配置 key 不代表自动抽取、Embedding 或 V1 已经可用。
+
 应用默认运行在 <http://localhost:3000>。
 
 ## 本地 Docker 部署

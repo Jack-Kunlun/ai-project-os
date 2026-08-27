@@ -4,7 +4,7 @@ import {
   getIssuedOpenAiAutoExtractPlanSources,
   type OpenAiResponsesTransportPlan,
 } from "./openai-responses-contract";
-import type { SafeUsage } from "./types";
+import type { ProviderResultInput, SafeUsage } from "./types";
 
 export const OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION =
   "openai-responses-output:v1" as const;
@@ -42,6 +42,11 @@ export interface VerifiedOpenAiAutoExtractResponse {
   usage: Readonly<SafeUsage>;
   candidates: readonly Readonly<VerifiedOpenAiAutoExtractCandidate>[];
   candidateSetFingerprint: string;
+}
+
+export interface InspectedOpenAiAutoExtractResponse {
+  providerResult: ProviderResultInput;
+  verifiedResponse: VerifiedOpenAiAutoExtractResponse | null;
 }
 
 function invalidInput(): never {
@@ -236,6 +241,15 @@ function parseUsage(
   return Object.freeze({ inputTokens, outputTokens, requestCount: 1 });
 }
 
+function parseOptionalUsage(
+  rawUsage: unknown,
+  maximumOutputTokens: number,
+): Readonly<SafeUsage> | undefined {
+  return rawUsage === null || rawUsage === undefined
+    ? undefined
+    : parseUsage(rawUsage, maximumOutputTokens);
+}
+
 function extractStructuredOutputText(rawOutput: unknown): string {
   const outputItems = dataArray(rawOutput, 1, MAX_OUTPUT_ITEMS);
   let messageCount = 0;
@@ -372,14 +386,14 @@ function parseCandidateSet(
 }
 
 /**
- * Validates one completed Responses payload against its exact issued request.
- * Raw provider text is discarded after strict parsing; only verified candidate
- * claims, safe usage and opaque provider identifiers are returned.
+ * Inspects one Responses payload against its exact issued request. Only a
+ * completed response can yield verified candidates; all other recognized
+ * statuses return safe metadata without accepting partial model output.
  */
-export function verifyOpenAiAutoExtractResponse(
+export function inspectOpenAiAutoExtractResponse(
   plan: OpenAiResponsesTransportPlan,
   rawResponse: unknown,
-): VerifiedOpenAiAutoExtractResponse {
+): InspectedOpenAiAutoExtractResponse {
   const sources = getIssuedOpenAiAutoExtractPlanSources(plan);
   if (sources === null) {
     invalidInput();
@@ -389,9 +403,6 @@ export function verifyOpenAiAutoExtractResponse(
   }
   if (
     requiredDataField(rawResponse, "object") !== "response" ||
-    requiredDataField(rawResponse, "status") !== "completed" ||
-    requiredDataField(rawResponse, "error") !== null ||
-    requiredDataField(rawResponse, "incomplete_details") !== null ||
     requiredDataField(rawResponse, "model") !== plan.body.model ||
     requiredDataField(rawResponse, "store") !== false ||
     requiredDataField(rawResponse, "tool_choice") !== "none" ||
@@ -422,6 +433,69 @@ export function verifyOpenAiAutoExtractResponse(
   ) {
     invalidResponse();
   }
+
+  const status = requiredDataField(rawResponse, "status");
+  const rawError = requiredDataField(rawResponse, "error");
+  const rawIncompleteDetails = requiredDataField(
+    rawResponse,
+    "incomplete_details",
+  );
+  const rawUsage = requiredDataField(rawResponse, "usage");
+  if (status !== "completed") {
+    const usage = parseOptionalUsage(rawUsage, plan.body.max_output_tokens);
+    let providerResult: ProviderResultInput;
+    switch (status) {
+      case "failed":
+        if (!isPlainRecord(rawError) || rawIncompleteDetails !== null) {
+          invalidResponse();
+        }
+        providerResult = {
+          kind: "failed",
+          providerResponseId,
+          safeCode: "AI_PROVIDER_FAILED",
+          ...(usage === undefined ? {} : { usage }),
+        };
+        break;
+      case "incomplete":
+        if (rawError !== null || !isPlainRecord(rawIncompleteDetails)) {
+          invalidResponse();
+        }
+        providerResult = {
+          kind: "incomplete",
+          providerResponseId,
+          safeCode: "AI_PROVIDER_INCOMPLETE",
+          ...(usage === undefined ? {} : { usage }),
+        };
+        break;
+      case "cancelled":
+        if (rawError !== null || rawIncompleteDetails !== null) {
+          invalidResponse();
+        }
+        providerResult = {
+          kind: "cancelled",
+          providerResponseId,
+          safeCode: "AI_PROVIDER_CANCELLED",
+        };
+        break;
+      case "queued":
+      case "in_progress":
+        if (rawError !== null || rawIncompleteDetails !== null || usage !== undefined) {
+          invalidResponse();
+        }
+        providerResult = { kind: status, providerResponseId };
+        break;
+      default:
+        invalidResponse();
+    }
+    return Object.freeze({
+      providerResult: Object.freeze(providerResult),
+      verifiedResponse: null,
+    });
+  }
+
+  if (rawError !== null || rawIncompleteDetails !== null) {
+    invalidResponse();
+  }
   const outputText = extractStructuredOutputText(
     requiredDataField(rawResponse, "output"),
   );
@@ -432,12 +506,9 @@ export function verifyOpenAiAutoExtractResponse(
   ) {
     invalidResponse();
   }
-  const usage = parseUsage(
-    requiredDataField(rawResponse, "usage"),
-    plan.body.max_output_tokens,
-  );
+  const usage = parseUsage(rawUsage, plan.body.max_output_tokens);
   const candidates = parseCandidateSet(outputText, sources);
-  return Object.freeze({
+  const verifiedResponse = Object.freeze({
     contractVersion: OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION,
     providerResponseId,
     modelId: plan.body.model,
@@ -445,4 +516,26 @@ export function verifyOpenAiAutoExtractResponse(
     candidates,
     candidateSetFingerprint: hashCanonicalCandidateSet(candidates),
   });
+  return Object.freeze({
+    providerResult: Object.freeze({
+      kind: "completed" as const,
+      providerResponseId,
+      usage,
+    }),
+    verifiedResponse,
+  });
+}
+
+export function verifyOpenAiAutoExtractResponse(
+  plan: OpenAiResponsesTransportPlan,
+  rawResponse: unknown,
+): VerifiedOpenAiAutoExtractResponse {
+  const inspected = inspectOpenAiAutoExtractResponse(plan, rawResponse);
+  if (
+    inspected.providerResult.kind !== "completed" ||
+    inspected.verifiedResponse === null
+  ) {
+    invalidResponse();
+  }
+  return inspected.verifiedResponse;
 }

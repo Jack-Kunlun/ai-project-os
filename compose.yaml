@@ -37,6 +37,9 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      AI_ENABLED: ${AI_ENABLED:-false}
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ports:
       - "127.0.0.1:${APP_PORT:-3000}:3000"
     restart: unless-stopped

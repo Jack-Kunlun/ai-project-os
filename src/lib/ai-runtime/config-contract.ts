@@ -2,39 +2,63 @@ import type {
   AiRuntimeAvailability,
   AiRuntimeConfig,
 } from "./types";
+import { isOpenAiCredentialConfigured } from "./openai-http-transport";
+import {
+  OPENAI_AUTO_EXTRACT_MODEL_ID,
+  OPENAI_EMBEDDING_MODEL_ID,
+} from "./openai-runtime-profile";
 
 type RuntimeEnvironment = Readonly<Record<string, string | undefined>>;
 
 /**
- * Reads only the feature switch. Provider credentials are deliberately not
- * part of this contract and are never read here.
+ * Returns only safe runtime availability. A credential is checked through an
+ * in-memory handle but never copied into this serializable result.
  */
 export function loadAiRuntimeConfig(
   environment: RuntimeEnvironment = process.env,
 ): AiRuntimeConfig {
   const enabled = environment.AI_ENABLED?.trim().toLowerCase() === "true";
-  return enabled
-    ? {
-        enabled: true,
-        status: "provider_disabled",
-        errorCode: "AI_PROVIDER_DISABLED",
-      }
-    : {
-        enabled: false,
-        status: "disabled",
-        errorCode: "AI_DISABLED",
-      };
+  if (!enabled) {
+    return {
+      enabled: false,
+      status: "disabled",
+      errorCode: "AI_DISABLED",
+    };
+  }
+  const provider = environment.AI_PROVIDER?.trim().toLowerCase();
+  if (provider !== "openai" || !isOpenAiCredentialConfigured(environment)) {
+    return {
+      enabled: true,
+      status: "provider_disabled",
+      errorCode: "AI_PROVIDER_DISABLED",
+    };
+  }
+  return {
+    enabled: true,
+    status: "ready",
+    provider: "openai",
+    responseModelId: OPENAI_AUTO_EXTRACT_MODEL_ID,
+    embeddingModelId: OPENAI_EMBEDDING_MODEL_ID,
+  };
 }
 
 /**
- * Layer A has no provider implementation. Even an explicit feature switch
- * therefore fails closed with a stable code and cannot make V0 depend on a
- * key, SDK, network call or provider configuration.
+ * Missing switches, provider selection or credentials always fail closed.
  */
 export function checkAiRuntimeAvailability(
   config: AiRuntimeConfig,
 ): AiRuntimeAvailability {
-  return config.enabled
-    ? { enabled: true, available: false, errorCode: "AI_PROVIDER_DISABLED" }
-    : { enabled: false, available: false, errorCode: "AI_DISABLED" };
+  if (!config.enabled) {
+    return { enabled: false, available: false, errorCode: "AI_DISABLED" };
+  }
+  return config.status === "ready"
+    ? {
+        enabled: true,
+        available: true,
+        errorCode: null,
+        provider: config.provider,
+        responseModelId: config.responseModelId,
+        embeddingModelId: config.embeddingModelId,
+      }
+    : { enabled: true, available: false, errorCode: "AI_PROVIDER_DISABLED" };
 }

@@ -1,4 +1,6 @@
-# AI Project OS V0 范围
+# AI Project OS V0 历史范围
+
+> 本文保留 V0 发布时的范围与验收事实，不代表当前产品能力。当前版本与运行方式见 [README](../README.md) 和 [V1 本机运行手册](v1-operations.md)。
 
 ## 定位
 
@@ -54,7 +56,7 @@ Source 是候选输入，不直接等同于可信事实。用户需要在 Item �
 
 ## 历史验收材料
 
-以下文件记录能力建设过程中的历史日期、命令和验收事实；它们不改变当前 V0 范围，文件按已验收能力命名：
+以下文件记录能力建设过程中的历史日期、命令和验收事实；它们不改变当时的 V0 范围，文件按已验收能力命名：
 
 - [项目基础验收记录](acceptance/project-foundation.md)
 - [Source 能力验收记录](acceptance/source-provenance.md)

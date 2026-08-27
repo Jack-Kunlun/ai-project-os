@@ -1,20 +1,20 @@
 # AI 运行时安全合同
 
-状态：长期运行时实施合同，尚未交付任何真实模型处理能力。
+状态：长期运行时安全合同。V1 已开放本机逐次授权的 Embedding 索引与查询向量执行；自动抽取、生成式摘要/分析、RAG 回答和生产智能体执行仍关闭。
 
-本文档定义受控模型处理进入 AI Project OS 的安全边界、数据不变量、运行记录和验收门。它是实现合同，不是当前产品能力说明，也不表示模型、Embedding、自动抽取、总结、语义检索、RAG、GitHub 或代理已经可用。当前产品真相仍以 [README](../README.md) 和 [V0 范围](v0-scope.md) 为准。
+本文档定义受控模型处理进入 AI Project OS 的安全边界、数据不变量、运行记录和验收门。下文的阶段性“当前”陈述保留历史语境，不是产品现状；当前产品真相以 [README](../README.md) 和 [V1 本机运行手册](v1-operations.md) 为准。
 
-## 当前边界
+## 合同冻结时的边界
 
-当前 V0 仍是单体 Next.js 人工工作台：用户手工保存 `ProjectSource`，人工创建和确认 `ProjectItem`，再生成确定性的 Project Snapshot。V0 不调用真实 LLM 或 Embedding，不自动抽取、总结、纠错、排序或判断优先级，没有语义搜索、向量记忆、RAG、GitHub 连接器、代理、上传、队列、认证授权或自动修改代码能力。
+合同冻结时的 V0 是单体 Next.js 人工工作台：用户手工保存 `ProjectSource`，人工创建和确认 `ProjectItem`，再生成确定性的 Project Snapshot；当时尚未交付模型、Embedding、语义搜索、GitHub 连接器或代理能力。
 
 本合同描述的实体、typed service、网关和状态目前只存在于 server-only 实现与专用门禁中，仍不属于 V0 产品文案、UI 或公开 API。即使 fake provider 和专用数据库门禁通过，也不能据此宣称真实 AI 能力已经交付。
 
 ### 当前实现状态
 
-当前已经具备并在专用 disposable PostgreSQL gate 中验证了 additive governance migration、typed fake runtime service、`prepare`、CAS claim、`AiRunAttempt`、审计写入以及 queued Run 的 policy/grant、scanner 和 budget 终态闭合。仓库还提供了受控 `autoExtract` Responses 与 Embeddings request plan、响应验证器和共享 HTTP transport：request plan 只接受服务端固定 profile、运行标识和明确输入；验证器只接受同一进程中由对应编译器签发的 plan，把响应绑定回固定 model、metadata 和输入快照，并校验来源证据或向量维度、索引和 usage。HTTP transport 固定 OpenAI origin，使用不可序列化的内存 credential handle，只执行一次 POST，禁止 redirect，不读取 HTTP error body，并限制成功响应体大小。该 migration 尚未应用到用户当前数据库或任何部署数据库。本仓库没有公开 AI API 或 UI 集成；正常运行时 `AI_ENABLED` 仍默认关闭，只有同时显式配置 `AI_ENABLED=true`、`AI_PROVIDER=openai` 和格式有效的本地 `OPENAI_API_KEY` 时，安全配置检查才报告 provider ready。
+该节点当时已在专用 disposable PostgreSQL gate 中验证 additive governance migration、typed fake runtime service、`prepare`、CAS claim、`AiRunAttempt`、审计写入以及 queued Run 的 policy/grant、scanner 和 budget 终态闭合。仓库还提供受控 `autoExtract` Responses 与 Embeddings request plan、响应验证器和共享 HTTP transport：request plan 只接受服务端固定 profile、运行标识和明确输入；验证器只接受同一进程中由对应编译器签发的 plan，把响应绑定回固定 model、metadata 和输入快照，并校验来源证据或向量维度、索引和 usage。HTTP transport 固定 OpenAI origin，使用不可序列化的内存 credential handle，只执行一次 POST，禁止 redirect，不读取 HTTP error body，并限制成功响应体大小。
 
-当前产品仍没有可用的 LLM 自动抽取、Embedding、RAG、GitHub 连接器、agent 或真实外发入口。HTTP transport 已用 dependency-injected local Response fixture 验证，但尚未接入 `AiRuntimeService`、公开 API、候选持久化、向量索引或 UI，也没有在本仓库测试中使用真实 key 或产生 provider 账单。验证后只返回候选/向量、安全 usage 和 opaque request/response ID；原始成功 JSON、reasoning、annotation、HTTP error body 和 credential 均不进入返回值、日志或数据库。fake admissibility gate 仍只是安全元数据管线的测试替身，不是 secret/PII scanner；local mock 的一次 dispatch 证据也不等于真实 provider 质量、账户权限、超时对账或部署健康已经验收。
+在该历史节点，HTTP transport 只用 dependency-injected local Response fixture 验证，尚未接入后续索引和产品工作流，也没有使用真实 key 或产生 provider 账单。验证后只返回候选/向量、安全 usage 和 opaque request/response ID；原始成功 JSON、reasoning、annotation、HTTP error body 和 credential 均不进入返回值、日志或数据库。fake admissibility gate 只是当时安全元数据管线的测试替身；local mock 的一次 dispatch 证据也不等于真实 provider 质量、账户权限、超时对账或部署健康已经验收。
 
 ## 分层交付
 
@@ -253,7 +253,7 @@ Layer A 的实现只有在以下证据全部具备后，才可进入下一层安
 - `AI_ENABLED=false` 下 V0 API、页面和现有人工工作流 smoke 通过；
 - 测试、日志和错误审计证明不保存 request/response 原文、embedding、provider error body、secret 或敏感 metadata。
 
-专用 disposable PostgreSQL gate 已验证迁移、复合 FK、触发器、生命周期 guard、并发 CAS、revoke/claim race 和 Project 根清理顺序；上述证据只适用于测试数据库，不代表 migration 已写入用户或部署数据库，也不代表真实 provider、公开 API/UI 或生产 exactly-once 已验收。当前没有公开 grant 签发接口，真实 provider reconciliation 和 V0 API/页面 smoke 仍是独立验收事项。
+该历史节点的专用 disposable PostgreSQL gate 已验证迁移、复合 FK、触发器、生命周期 guard、并发 CAS、revoke/claim race 和 Project 根清理顺序；证据只适用于当时测试数据库，不代表真实 provider 或生产 exactly-once 已验收。
 
 Layer A 不要求也不允许真实 API 调用、真实 key、真实模型质量评测、真实 provider 账单或生产外发。真实 OpenAI Responses/Embeddings、模型效果、RAG 召回、GitHub 数据和跨系统 reconciliation 都属于 Layer B 及其独立发布门。
 

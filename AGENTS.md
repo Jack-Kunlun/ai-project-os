@@ -2,9 +2,9 @@
 
 ## 作用域
 
-这是一个独立的 Next.js 单体应用，当前 V0 的代码、迁移、文档和测试均在本目录内。不要扩展到其他项目目录，不要引入独立 API 服务、worker、MCP server 或 monorepo 结构。
+这是一个独立的 Next.js 单体应用，V1 的代码、迁移、文档和测试均在本目录内。不要扩展到其他项目目录，不要引入独立 API 服务、worker、MCP server 或 monorepo 结构。
 
-当前 V0 与受控后续开发必须分开描述。只有完成对应的能力合同、固定评测和人工验收后，才可在本仓库内逐项实现以下已批准的后续能力：受控模型处理、只读 GitHub 连接器、混合检索/RAG，以及只读项目记忆代理。这里的授权是开发边界，不代表这些能力已经交付或当前产品可用；未通过节点验收前不得在 README、产品文案或 UI 中宣称可用。
+产品说明必须区分已可执行能力、仅有合同/持久化边界的能力和仍关闭的执行入口。V1 已交付人工 Project Snapshot、本机受控 Embedding/混合检索和只读 GitHub 多仓库快照；自动抽取、生成式摘要/分析、RAG 回答和生产智能体执行仍关闭。未通过实现与运行验收的能力不得在 README、产品文案或 UI 中宣称可用。
 
 ## 常用命令
 
@@ -23,9 +23,9 @@ pnpm db:generate
 
 ## 边界与安全
 
-- V0 不接入 LLM、GitHub、上传、认证、队列、pgvector、Action Engine 或自动改代码。
-- 受控后续能力只能使用已批准的来源与项目范围：模型处理必须输出可核对的结构化证据并保留 `sourceId`/`sourceExcerpt`；GitHub 连接器只读且必须限制仓库范围；混合检索/RAG 不得在缺少证据或存在未解决冲突时编造结论；只读代理只能调用显式允许的读取工具。
-- 后续能力继续禁止自动改代码、GitHub 写操作、任意网络、Shell、文件系统写入、MCP 写操作、独立服务/worker/monorepo，以及任何未通过对应能力验收的运行时、API 或产品能力声明。
+- 网页不保存 GitHub/OpenAI 凭据，不提供模型授权、仓库同步、索引或搜索写接口；这些动作只允许本机 CLI 在精确项目、仓库、grant 和逐次授权范围内执行。
+- 模型处理必须输出可核对的结构化证据并保留 `sourceId`/`sourceExcerpt`；GitHub 连接器只读且必须限制仓库和 frozen commit；混合检索不得跨项目或在无合格快照时返回结果。
+- 继续禁止自动改代码、GitHub 写操作、任意网络、Shell、文件系统写入、MCP 写操作、独立服务/worker/monorepo，以及任何未通过对应能力验收的运行时、API 或产品能力声明。
 - 事实必须能追溯到 `ProjectSource`；不要移除 `sourceId` 或 `sourceExcerpt`。
 - `.env` 仅用于本地开发且已被 Git 忽略；不要把数据库 URL、密码或其他密钥写入源码、日志或提交。
 - 不要使用破坏性 Git 操作，不要回退其他协作者的修改。
@@ -33,7 +33,7 @@ pnpm db:generate
 
 ## 验收
 
-每次有行为变化都要运行相关的聚焦检查。当前 V0 完成前必须运行 README 与 `docs/v0-scope.md` 中列出的项目级命令，以及真实数据库上的 API smoke；不要将只通过静态检查称作完成。
+每次有行为变化都要运行相关的聚焦检查。V1 发布前必须运行 README 中列出的项目级命令、真实 PostgreSQL 门禁以及 Docker Compose 的迁移、健康、API 和页面 smoke；不要将只通过静态检查称作完成。
 
 <!-- BEGIN:nextjs-agent-rules -->
 

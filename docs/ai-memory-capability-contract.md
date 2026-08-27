@@ -1,14 +1,14 @@
 # AI 记忆能力实施合同
 
-状态：已批准的实施范围合同，尚未交付任何 V1 运行能力。
+状态：历史实施合同。V1 已按分节点交付部分运行能力，当前能力与关闭边界以 [README](../README.md) 和 [V1 本机运行手册](v1-operations.md) 为准。
 
-本文档是后续开发的安全边界和验收入口，不是当前产品说明，也不表示模型、连接器、检索、RAG 或代理已经可用。当前产品真相以 README 和 `docs/v0-scope.md` 为准。
+本文档保留设计时的安全边界和发布门；下文使用“当前版本”或“后续能力”的段落描述的是合同冻结时点，不是 V1 现状。
 
-## 当前产品真相
+## 合同冻结时的产品基线
 
-当前版本是单体 Next.js 人工工作台：用户手工录入 `ProjectSource`，人工创建并确认 `ProjectItem`，再生成确定性的 Project Snapshot。Source、Item 和 Snapshot 之间保留项目范围、`sourceId`、`sourceExcerpt` 和稳定错误语义。
+合同冻结时，产品是单体 Next.js 人工工作台：用户手工录入 `ProjectSource`，人工创建并确认 `ProjectItem`，再生成确定性的 Project Snapshot。Source、Item 和 Snapshot 之间保留项目范围、`sourceId`、`sourceExcerpt` 和稳定错误语义。
 
-当前版本不调用模型，不自动抽取、总结、纠错、排序或判断优先级；也没有语义检索、向量记忆、RAG、GitHub 连接器、代理、上传、队列、pgvector、MCP、认证授权或自动改代码能力。当前 V0 文案不得因本合同而改写成 V1 已交付。
+该历史基线不调用模型，也没有语义检索、向量记忆、RAG、GitHub 连接器或代理。此段仅用于说明实施起点，不能用于判断当前 V1 能力。
 
 ## 已批准的后续能力范围
 

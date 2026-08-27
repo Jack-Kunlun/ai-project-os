@@ -24,11 +24,13 @@ import {
   RepositoryCodeIndexError,
   RepositoryCodeSearchError,
   RepositoryModelGrantError,
+  RepositoryRagSnapshotError,
   createGitHubCodeScanService,
   createGitHubRepositoryLedgerService,
   createRepositoryCodeIndexService,
   createRepositoryCodeSearchService,
   createRepositoryModelGrantService,
+  createRepositoryRagSnapshotService,
   type GitHubReadOnlyClient,
   type VerifiedGitHubRepository,
 } from "@/lib/github";
@@ -139,14 +141,15 @@ function repositoryConfig(
   role: ProjectRepositoryRole,
   requiredForProjectSnapshot: boolean,
   includeRoot: string,
+  materialEnabled = true,
 ) {
   return {
     role,
     requiredForProjectSnapshot,
     trackedRef: "refs/heads/main",
     codeEnabled: true,
-    metadataEnabled: true,
-    readmeEnabled: true,
+    metadataEnabled: materialEnabled,
+    readmeEnabled: materialEnabled,
     markdownEnabled: false,
     markdownPaths: [],
     issuesEnabled: false,
@@ -269,6 +272,17 @@ async function expectIndexError(
   );
 }
 
+async function expectRagSnapshotError(
+  action: () => Promise<unknown>,
+  code: RepositoryRagSnapshotError["code"],
+): Promise<void> {
+  await assert.rejects(
+    action,
+    (error: unknown) =>
+      error instanceof RepositoryRagSnapshotError && error.code === code,
+  );
+}
+
 test(
   "repository memory PostgreSQL gate requires an explicit disposable target",
   { skip: !hasUrl || gate === "1" },
@@ -329,7 +343,12 @@ test(
         const requiredLink = await ledger.connect({
           projectId: projectAId,
           repository: safeRepository,
-          config: repositoryConfig(ProjectRepositoryRole.application, true, "src"),
+          config: repositoryConfig(
+            ProjectRepositoryRole.application,
+            true,
+            "src",
+            false,
+          ),
         });
         const optionalLink = await ledger.connect({
           projectId: projectAId,
@@ -504,6 +523,81 @@ test(
         assert.equal(alreadyPublished.kind, "published");
         assert.equal(embeddingCalls, 1);
 
+        const ragSnapshots = createRepositoryRagSnapshotService({ db: prisma });
+        const publishedRepositorySnapshots = await Promise.all([
+          ragSnapshots.publishRepository({
+            projectId: projectAId,
+            projectRepositoryLinkId: requiredLink.id,
+          }),
+          ragSnapshots.publishRepository({
+            projectId: projectAId,
+            projectRepositoryLinkId: requiredLink.id,
+          }),
+        ]);
+        assert.equal(
+          publishedRepositorySnapshots[0]?.id,
+          publishedRepositorySnapshots[1]?.id,
+        );
+        assert.equal(
+          publishedRepositorySnapshots[0]?.codeIndexGenerationId,
+          preparedIndexes[0]!.id,
+        );
+        assert.equal(
+          publishedRepositorySnapshots[0]?.repositoryCodeGenerationId,
+          safeGeneration.id,
+        );
+        assert.equal(
+          publishedRepositorySnapshots[0]?.materialIndexGenerationId,
+          null,
+        );
+        assert.equal(
+          publishedRepositorySnapshots[0]?.capturedGitHubRepositoryId,
+          safeRepository.repositoryId.toString(),
+        );
+        assert.equal(
+          await prisma.repositoryRagSnapshot.count({
+            where: {
+              projectId: projectAId,
+              projectRepositoryLinkId: requiredLink.id,
+            },
+          }),
+          1,
+        );
+        await expectRagSnapshotError(
+          () => ragSnapshots.publishRepository({
+            projectId: projectAId,
+            projectRepositoryLinkId: optionalLink.id,
+          }),
+          "REPOSITORY_RAG_SNAPSHOT_INDEX_NOT_READY",
+        );
+
+        const publishedProjectSnapshot = await ragSnapshots.publishProject({
+          projectId: projectAId,
+        });
+        assert.equal(publishedProjectSnapshot.requiredRepositoryCount, 1);
+        assert.equal(publishedProjectSnapshot.manualRagSnapshotId, null);
+        assert.deepEqual(
+          publishedProjectSnapshot.repositories.map((entry) =>
+            entry.projectRepositoryLinkId),
+          [requiredLink.id],
+        );
+        assert.equal(
+          publishedProjectSnapshot.repositories[0]?.repositoryRagSnapshotId,
+          publishedRepositorySnapshots[0]?.id,
+        );
+        assert.deepEqual(
+          await ragSnapshots.publishProject({ projectId: projectAId }),
+          publishedProjectSnapshot,
+        );
+        assert.deepEqual(
+          await ragSnapshots.getProjectSnapshot({ projectId: projectAId }),
+          publishedProjectSnapshot,
+        );
+        await expectRagSnapshotError(
+          () => ragSnapshots.getProjectSnapshot({ projectId: projectBId }),
+          "REPOSITORY_RAG_SNAPSHOT_NOT_FOUND",
+        );
+
         await expectGrantError(
           () => grantService.issue({
             projectId: projectAId,
@@ -593,6 +687,10 @@ test(
         })).grants.length, 1);
 
         await ledger.disable({ projectId: projectAId, linkId: requiredLink.id });
+        await expectRagSnapshotError(
+          () => ragSnapshots.getProjectSnapshot({ projectId: projectAId }),
+          "REPOSITORY_RAG_SNAPSHOT_BOUNDARY_CONFLICT",
+        );
         await expectIndexError(
           () => indexService.prepareRepositoryCodeIndex({
             projectId: projectAId,

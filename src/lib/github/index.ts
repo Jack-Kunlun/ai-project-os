@@ -142,3 +142,13 @@ export {
   type RepositoryMaterialIndexExecutionResult,
   type RepositoryMaterialIndexView,
 } from "./repository-material-index";
+export {
+  PROJECT_REPOSITORY_RAG_SNAPSHOT_VERSION,
+  REPOSITORY_RAG_SNAPSHOT_VERSION,
+  RepositoryRagSnapshotError,
+  createRepositoryRagSnapshotService,
+  type ProjectRepositoryRagSnapshotView,
+  type RepositoryRagSnapshotErrorCode,
+  type RepositoryRagSnapshotService,
+  type RepositoryRagSnapshotView,
+} from "./repository-rag-snapshot";

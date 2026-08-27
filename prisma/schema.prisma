@@ -456,6 +456,11 @@ model Project {
   repositoryMaterialEmbeddings       RepositoryMaterialEmbedding[]
   repositoryMaterialIndexPointers    RepositoryMaterialIndexPointer[]
   githubMaterialQuarantines         GitHubMaterialQuarantine[]
+  repositoryRagSnapshots             RepositoryRagSnapshot[]
+  repositoryRagSnapshotPointers      RepositoryRagSnapshotPointer[]
+  projectRepositoryRagSnapshots      ProjectRepositoryRagSnapshot[]
+  projectRepositoryRagSnapshotPointer ProjectRepositoryRagSnapshotPointer?
+  projectRepositoryRagEntries        ProjectRepositoryRagSnapshotEntry[]
   codeSnapshots                    ProjectCodeSnapshot[]
   codeSnapshotEntries              ProjectCodeSnapshotEntry[]
   codeSnapshotPointer              ProjectCodeSnapshotPointer?
@@ -547,6 +552,9 @@ model ProjectRepositoryLink {
   sources                 ProjectSource[]                      @relation("RepositoryLinkSources")
   itemEvidences           ProjectItemEvidence[]                @relation("RepositoryLinkItemEvidences")
   sourceChunks            SourceChunk[]                        @relation("RepositoryLinkChunks")
+  ragSnapshots            RepositoryRagSnapshot[]
+  ragSnapshotPointer      RepositoryRagSnapshotPointer?        @relation("RepositoryRagSnapshotPointerLink")
+  projectRepositoryRagEntries ProjectRepositoryRagSnapshotEntry[]
 
   @@unique([projectId, id])
   @@unique([projectId, githubRepositoryId])
@@ -592,6 +600,7 @@ model ProjectRepositoryLinkConfigVersion {
   materialModelGrants         RepositoryMaterialModelGrant[]
   materialIndexes             RepositoryMaterialIndexGeneration[]
   materialIndexPointers       RepositoryMaterialIndexPointer[]       @relation("RepositoryMaterialIndexPointerConfig")
+  repositoryRagSnapshots      RepositoryRagSnapshot[]
   codeSnapshotEntries        ProjectCodeSnapshotEntry[]
 
   @@unique([projectId, id])
@@ -1130,6 +1139,7 @@ model RepositoryMaterialIndexGeneration {
   attempts                        RepositoryMaterialIndexAttempt[]
   embeddings                      RepositoryMaterialEmbedding[]
   publishedPointer                RepositoryMaterialIndexPointer?
+  ragSnapshots                    RepositoryRagSnapshot[]
 
   @@unique([projectId, id])
   @@unique([projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialIndexGeneration_project_link_id_key")
@@ -1481,6 +1491,7 @@ model EmbeddingProfile {
   chunkEmbeddings    ChunkEmbedding[]
   repositoryMaterialIndexes RepositoryMaterialIndexGeneration[]
   repositoryMaterialEmbeddings RepositoryMaterialEmbedding[]
+  repositoryRagSnapshots RepositoryRagSnapshot[]
 
   @@unique([provider, modelId, dimensions, normalization, profileVersion])
 }
@@ -1698,6 +1709,7 @@ model RepositoryCodeIndexGeneration {
   grant                      ModelProcessingGrant                @relation(fields: [projectId, grantId, projectRepositoryLinkId, repositoryCodeGenerationId], references: [projectId, id, projectRepositoryLinkId, repositoryCodeGenerationId], map: "RepositoryCodeIndexGeneration_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
   inputs                     RepositoryCodeIndexInput[]
   publishedPointer           RepositoryCodeIndexPointer?
+  ragSnapshots               RepositoryRagSnapshot[]
 
   @@id([projectId, projectRepositoryLinkId, indexGenerationId])
   @@unique([projectId, indexGenerationId], map: "RepositoryCodeIndexGeneration_project_index_key")
@@ -1863,6 +1875,121 @@ model ProjectCorpusIndexPointer {
   @@unique([projectId, indexGenerationId, corpusGenerationId], map: "ProjectCorpusIndexPointer_exact_target_key")
 }
 
+model RepositoryRagSnapshot {
+  id                               String                             @id @default(uuid()) @db.Uuid
+  projectId                        String                             @db.Uuid
+  projectRepositoryLinkId          String                             @db.Uuid
+  expectedActiveSnapshotId         String?                            @db.Uuid
+  linkConfigVersion                Int
+  effectivePolicyVersion           Int
+  requiredForProjectSnapshot       Boolean
+  policyRevisionId                 String                             @db.Uuid
+  embeddingProfileId               String                             @db.Uuid
+  codeIndexGenerationId            String?                            @db.Uuid
+  repositoryCodeGenerationId       String?                            @db.Uuid
+  materialIndexGenerationId        String?                            @db.Uuid
+  repositoryMaterialGenerationId   String?                            @db.Uuid
+  capturedGitHubRepositoryId       BigInt
+  capturedFullName                 String                             @db.VarChar(512)
+  frozenCommitSha                  String                             @db.Char(40)
+  status                           ProjectRagSnapshotStatus           @default(staging)
+  manifestFingerprint              String                             @db.VarChar(64)
+  createdAt                        DateTime                           @default(now())
+  completedAt                      DateTime?
+  supersededAt                     DateTime?
+  project                          Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink              @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryRagSnapshot_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                           ProjectRepositoryLinkConfigVersion @relation(fields: [projectId, projectRepositoryLinkId, linkConfigVersion, requiredForProjectSnapshot, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, requiredForProjectSnapshot, effectivePolicyVersion], map: "RepositoryRagSnapshot_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  policyRevision                   ProjectAiPolicyRevision            @relation(fields: [projectId, policyRevisionId], references: [projectId, id], map: "RepositoryRagSnapshot_policy_fkey", onDelete: NoAction, onUpdate: Cascade)
+  embeddingProfile                EmbeddingProfile                   @relation(fields: [embeddingProfileId], references: [id], map: "RepositoryRagSnapshot_profile_fkey", onDelete: NoAction, onUpdate: Cascade)
+  codeIndex                        RepositoryCodeIndexGeneration?     @relation(fields: [projectId, projectRepositoryLinkId, codeIndexGenerationId, repositoryCodeGenerationId, linkConfigVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId, linkConfigVersion, effectivePolicyVersion], map: "RepositoryRagSnapshot_code_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  materialIndex                    RepositoryMaterialIndexGeneration? @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, materialIndexGenerationId], references: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id], map: "RepositoryRagSnapshot_material_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  expectedActiveSnapshot           RepositoryRagSnapshot?             @relation("ExpectedRepositoryRagSnapshot", fields: [projectId, projectRepositoryLinkId, expectedActiveSnapshotId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryRagSnapshot_expected_fkey", onDelete: NoAction, onUpdate: Cascade)
+  expectedBySnapshots              RepositoryRagSnapshot[]            @relation("ExpectedRepositoryRagSnapshot")
+  publishedPointer                RepositoryRagSnapshotPointer?
+  projectEntries                  ProjectRepositoryRagSnapshotEntry[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, id], map: "RepositoryRagSnapshot_project_link_id_key")
+  @@unique([projectId, projectRepositoryLinkId, id, manifestFingerprint], map: "RepositoryRagSnapshot_exact_manifest_key")
+  @@unique([projectId, projectRepositoryLinkId, manifestFingerprint], map: "RepositoryRagSnapshot_link_manifest_key")
+  @@index([projectId, projectRepositoryLinkId, status, createdAt], map: "RepositoryRagSnapshot_status_idx")
+}
+
+model RepositoryRagSnapshotPointer {
+  projectId                        String                @db.Uuid
+  projectRepositoryLinkId          String                @db.Uuid
+  repositoryRagSnapshotId          String                @db.Uuid
+  publishedAt                      DateTime              @default(now())
+  project                          Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink @relation("RepositoryRagSnapshotPointerLink", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryRagSnapshotPointer_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  snapshot                         RepositoryRagSnapshot @relation(fields: [projectId, projectRepositoryLinkId, repositoryRagSnapshotId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryRagSnapshotPointer_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@id([projectId, projectRepositoryLinkId])
+  @@unique([projectId, repositoryRagSnapshotId], map: "RepositoryRagSnapshotPointer_project_snapshot_key")
+  @@unique([projectId, projectRepositoryLinkId, repositoryRagSnapshotId], map: "RepositoryRagSnapshotPointer_exact_target_key")
+}
+
+model ProjectRepositoryRagSnapshot {
+  id                       String                              @id @default(uuid()) @db.Uuid
+  projectId                String                              @db.Uuid
+  expectedActiveSnapshotId String?                             @db.Uuid
+  manualRagSnapshotId      String?                             @db.Uuid
+  manualManifestFingerprint String?                            @db.VarChar(64)
+  policyRevisionId         String                              @db.Uuid
+  effectivePolicyVersion   Int
+  status                   ProjectRagSnapshotStatus            @default(staging)
+  manifestFingerprint      String                              @db.VarChar(64)
+  requiredRepositoryCount  Int
+  createdAt                DateTime                            @default(now())
+  completedAt              DateTime?
+  supersededAt             DateTime?
+  project                  Project                             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  manualSnapshot           ProjectRagSnapshot?                 @relation("RepositoryAggregateManualSnapshot", fields: [projectId, manualRagSnapshotId, manualManifestFingerprint], references: [projectId, id, manifestFingerprint], map: "ProjectRepositoryRagSnapshot_manual_fkey", onDelete: NoAction, onUpdate: Cascade)
+  policyRevision           ProjectAiPolicyRevision             @relation(fields: [projectId, policyRevisionId], references: [projectId, id], map: "ProjectRepositoryRagSnapshot_policy_fkey", onDelete: NoAction, onUpdate: Cascade)
+  expectedActiveSnapshot   ProjectRepositoryRagSnapshot?       @relation("ExpectedProjectRepositoryRagSnapshot", fields: [projectId, expectedActiveSnapshotId], references: [projectId, id], map: "ProjectRepositoryRagSnapshot_expected_fkey", onDelete: NoAction, onUpdate: Cascade)
+  expectedBySnapshots      ProjectRepositoryRagSnapshot[]      @relation("ExpectedProjectRepositoryRagSnapshot")
+  entries                  ProjectRepositoryRagSnapshotEntry[]
+  publishedPointer         ProjectRepositoryRagSnapshotPointer?
+
+  @@unique([projectId, id])
+  @@unique([projectId, id, manifestFingerprint], map: "ProjectRepositoryRagSnapshot_exact_manifest_key")
+  @@unique([projectId, manifestFingerprint], map: "ProjectRepositoryRagSnapshot_project_manifest_key")
+  @@index([projectId, status, createdAt], map: "ProjectRepositoryRagSnapshot_status_idx")
+}
+
+model ProjectRepositoryRagSnapshotEntry {
+  id                             String                       @id @default(uuid()) @db.Uuid
+  projectId                      String                       @db.Uuid
+  projectRepositoryRagSnapshotId String                       @db.Uuid
+  projectRepositoryLinkId        String                       @db.Uuid
+  repositoryRagSnapshotId        String                       @db.Uuid
+  ordinal                        Int
+  repositoryManifestFingerprint String                       @db.VarChar(64)
+  createdAt                      DateTime                     @default(now())
+  project                        Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectSnapshot                ProjectRepositoryRagSnapshot @relation(fields: [projectId, projectRepositoryRagSnapshotId], references: [projectId, id], map: "ProjectRepositoryRagSnapshotEntry_project_fkey", onDelete: NoAction, onUpdate: Cascade)
+  repositoryLink                ProjectRepositoryLink         @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "ProjectRepositoryRagSnapshotEntry_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  repositorySnapshot            RepositoryRagSnapshot         @relation(fields: [projectId, projectRepositoryLinkId, repositoryRagSnapshotId, repositoryManifestFingerprint], references: [projectId, projectRepositoryLinkId, id, manifestFingerprint], map: "ProjectRepositoryRagSnapshotEntry_repository_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryRagSnapshotId, id], map: "ProjectRepositoryRagSnapshotEntry_project_id_key")
+  @@unique([projectId, projectRepositoryRagSnapshotId, ordinal], map: "ProjectRepositoryRagSnapshotEntry_ordinal_key")
+  @@unique([projectId, projectRepositoryRagSnapshotId, projectRepositoryLinkId], map: "ProjectRepositoryRagSnapshotEntry_link_key")
+  @@unique([projectId, projectRepositoryRagSnapshotId, repositoryRagSnapshotId], map: "ProjectRepositoryRagSnapshotEntry_snapshot_key")
+  @@index([projectId, projectRepositoryLinkId, repositoryRagSnapshotId], map: "ProjectRepositoryRagSnapshotEntry_repository_idx")
+}
+
+model ProjectRepositoryRagSnapshotPointer {
+  projectId                       String                       @id @db.Uuid
+  projectRepositoryRagSnapshotId  String                       @db.Uuid
+  publishedAt                     DateTime                     @default(now())
+  project                         Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  snapshot                        ProjectRepositoryRagSnapshot @relation(fields: [projectId, projectRepositoryRagSnapshotId], references: [projectId, id], map: "ProjectRepositoryRagSnapshotPointer_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, projectRepositoryRagSnapshotId], map: "ProjectRepositoryRagSnapshotPointer_project_snapshot_key")
+}
+
 model ProjectRagSnapshot {
   id                       String                       @id @default(uuid()) @db.Uuid
   projectId                String                       @db.Uuid
@@ -1881,10 +2008,12 @@ model ProjectRagSnapshot {
   project                  Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   manualIndex              ProjectCorpusIndexGeneration @relation(fields: [projectId, manualIndexGenerationId, manualCorpusGenerationId, grantId, policyRevisionId], references: [projectId, indexGenerationId, corpusGenerationId, grantId, policyRevisionId], map: "ProjectRagSnapshot_manual_index_fkey", onDelete: NoAction, onUpdate: Cascade)
   publishedPointer         ProjectRagSnapshotPointer?
+  repositoryAggregates     ProjectRepositoryRagSnapshot[] @relation("RepositoryAggregateManualSnapshot")
   derivedArtifacts         AiDerivedArtifact[]
   artifactDependencies     ArtifactDependency[]
 
   @@unique([projectId, id])
+  @@unique([projectId, id, manifestFingerprint], map: "ProjectRagSnapshot_exact_manifest_key")
   @@unique([projectId, manifestFingerprint], map: "ProjectRagSnapshot_project_manifest_key")
   @@index([projectId, status, createdAt])
 }
@@ -2022,6 +2151,8 @@ model ProjectAiPolicyRevision {
   derivedArtifacts           AiDerivedArtifact[]
   repositoryMaterialModelGrants RepositoryMaterialModelGrant[]
   repositoryMaterialIndexes RepositoryMaterialIndexGeneration[]
+  repositoryRagSnapshots RepositoryRagSnapshot[]
+  projectRepositoryRagSnapshots ProjectRepositoryRagSnapshot[]
 
   @@unique([projectId, id])
   @@unique([projectId, revision])

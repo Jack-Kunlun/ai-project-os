@@ -137,9 +137,9 @@ enum ProjectRagSnapshotStatus {
 
 enum AiDerivedArtifactKind {
   sourceSummary @map("source_summary")
-  projectBrief @map("project_brief")
-  ragAnswer @map("rag_answer")
-  agentReport @map("agent_report")
+  projectBrief  @map("project_brief")
+  ragAnswer     @map("rag_answer")
+  agentReport   @map("agent_report")
 }
 
 enum AiDerivedArtifactState {
@@ -149,13 +149,13 @@ enum AiDerivedArtifactState {
 }
 
 enum ArtifactDependencyKind {
-  projectSource @map("project_source")
+  projectSource      @map("project_source")
   projectRagSnapshot @map("project_rag_snapshot")
 }
 
 enum ArtifactRestrictionReasonCode {
-  grantIneligible @map("GRANT_INELIGIBLE")
-  policyIneligible @map("POLICY_INELIGIBLE")
+  grantIneligible    @map("GRANT_INELIGIBLE")
+  policyIneligible   @map("POLICY_INELIGIBLE")
   snapshotIneligible @map("SNAPSHOT_INELIGIBLE")
   dependencyMismatch @map("DEPENDENCY_MISMATCH")
 }
@@ -255,22 +255,22 @@ enum AiAuditEventType {
 }
 
 enum AiSafeErrorCode {
-  aiDisabled               @map("AI_DISABLED")
-  aiProviderDisabled       @map("AI_PROVIDER_DISABLED")
+  aiDisabled                 @map("AI_DISABLED")
+  aiProviderDisabled         @map("AI_PROVIDER_DISABLED")
   aiInvalidOperationKeyInput @map("AI_INVALID_OPERATION_KEY_INPUT")
-  aiInvalidStateTransition @map("AI_INVALID_STATE_TRANSITION")
-  aiRedispatchForbidden    @map("AI_REDISPATCH_FORBIDDEN")
-  aiProviderIncomplete     @map("AI_PROVIDER_INCOMPLETE")
-  aiProviderUnknown        @map("AI_PROVIDER_UNKNOWN")
-  aiProviderFailed         @map("AI_PROVIDER_FAILED")
-  aiProviderCancelled      @map("AI_PROVIDER_CANCELLED")
-  aiDispatchNotSent        @map("AI_DISPATCH_NOT_SENT")
-  aiPolicyDenied           @map("AI_POLICY_DENIED")
-  aiGrantDenied            @map("AI_GRANT_DENIED")
-  aiScannerDenied          @map("AI_SCANNER_DENIED")
-  aiBudgetDenied           @map("AI_BUDGET_DENIED")
-  aiInvalidProviderResponse @map("AI_INVALID_PROVIDER_RESPONSE")
-  sourceInUse              @map("SOURCE_IN_USE")
+  aiInvalidStateTransition   @map("AI_INVALID_STATE_TRANSITION")
+  aiRedispatchForbidden      @map("AI_REDISPATCH_FORBIDDEN")
+  aiProviderIncomplete       @map("AI_PROVIDER_INCOMPLETE")
+  aiProviderUnknown          @map("AI_PROVIDER_UNKNOWN")
+  aiProviderFailed           @map("AI_PROVIDER_FAILED")
+  aiProviderCancelled        @map("AI_PROVIDER_CANCELLED")
+  aiDispatchNotSent          @map("AI_DISPATCH_NOT_SENT")
+  aiPolicyDenied             @map("AI_POLICY_DENIED")
+  aiGrantDenied              @map("AI_GRANT_DENIED")
+  aiScannerDenied            @map("AI_SCANNER_DENIED")
+  aiBudgetDenied             @map("AI_BUDGET_DENIED")
+  aiInvalidProviderResponse  @map("AI_INVALID_PROVIDER_RESPONSE")
+  sourceInUse                @map("SOURCE_IN_USE")
 }
 
 enum AiCandidateReviewStatus {
@@ -279,132 +279,593 @@ enum AiCandidateReviewStatus {
   dismissed
 }
 
+enum GitHubConnectionStatus {
+  configured
+  verified
+  disabled
+  accessUnknown @map("access_unknown")
+}
+
+enum ProjectRepositoryLinkStatus {
+  active
+  disabled
+  unlinked
+  accessUnknown @map("access_unknown")
+}
+
+enum ProjectRepositoryRole {
+  primary
+  application
+  infrastructure
+  library
+  documentation
+  other
+}
+
+enum ProjectScanBatchStatus {
+  queued
+  running
+  succeeded
+  partial
+  partialOptional @map("partial_optional")
+  failed
+  unknown
+  cancelled
+}
+
+enum RepoCodeScanRunStatus {
+  queued
+  running
+  succeeded
+  failed
+  rateLimited @map("rate_limited")
+  unknown
+  cancelled
+}
+
+enum RepoCodeScanStage {
+  queued
+  discovering
+  fetching
+  scanning
+  publishing
+  terminal
+}
+
+enum RepositoryCodeGenerationStatus {
+  staging
+  codeReady  @map("code_ready")
+  failed
+  ineligible
+  superseded
+}
+
+enum ProjectCodeSnapshotStatus {
+  staging
+  complete
+  ineligible
+  superseded
+}
+
 model Project {
-  id          String          @id @default(uuid()) @db.Uuid
-  name        String
-  slug        String          @unique
-  description String?         @db.Text
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  sources     ProjectSource[]
-  items       ProjectItem[]
-  scans       ProjectScan[]
-  snapshots   ProjectSnapshot[]
-  aiPolicy    ProjectAiPolicy?
-  aiPolicyRevisions ProjectAiPolicyRevision[]
-  aiPolicyOperationProfiles ProjectAiPolicyOperationProfile[]
-  aiGrants    ModelProcessingGrant[]
-  aiGrantSources ModelProcessingGrantSource[]
-  aiGrantOperations ModelProcessingGrantOperation[]
-  aiRuns      AiRun[]
-  aiAttempts  AiRunAttempt[]
-  aiInputSources AiRunInputSource[]
-  aiAuditEvents AiAuditEvent[]
-  aiCandidateBatches AiCandidateBatch[]
-  aiCandidateClaims AiCandidateClaim[]
-  itemEvidences ProjectItemEvidence[]
-  itemRevisions ProjectItemRevision[]
-  itemRevisionEvidences ProjectItemRevisionEvidence[]
-  sourceChunks SourceChunk[]
-  corpusGenerations ProjectCorpusGeneration[]
-  indexGenerations IndexGeneration[]
-  indexBuildAttempts IndexBuildAttempt[]
-  indexWorkItems IndexWorkItem[]
-  chunkEmbeddings ChunkEmbedding[]
-  corpusIndexPointer ProjectCorpusIndexPointer?
-  ragSnapshots ProjectRagSnapshot[]
-  ragSnapshotPointer ProjectRagSnapshotPointer?
-  aiDerivedArtifacts AiDerivedArtifact[]
-  artifactDependencies ArtifactDependency[]
+  id                               String                               @id @default(uuid()) @db.Uuid
+  name                             String
+  slug                             String                               @unique
+  description                      String?                              @db.Text
+  createdAt                        DateTime                             @default(now())
+  updatedAt                        DateTime                             @updatedAt
+  sources                          ProjectSource[]
+  items                            ProjectItem[]
+  scans                            ProjectScan[]
+  snapshots                        ProjectSnapshot[]
+  aiPolicy                         ProjectAiPolicy?
+  aiPolicyRevisions                ProjectAiPolicyRevision[]
+  aiPolicyOperationProfiles        ProjectAiPolicyOperationProfile[]
+  aiGrants                         ModelProcessingGrant[]
+  aiGrantSources                   ModelProcessingGrantSource[]
+  aiGrantOperations                ModelProcessingGrantOperation[]
+  aiRuns                           AiRun[]
+  aiAttempts                       AiRunAttempt[]
+  aiInputSources                   AiRunInputSource[]
+  aiAuditEvents                    AiAuditEvent[]
+  aiCandidateBatches               AiCandidateBatch[]
+  aiCandidateClaims                AiCandidateClaim[]
+  itemEvidences                    ProjectItemEvidence[]
+  itemRevisions                    ProjectItemRevision[]
+  itemRevisionEvidences            ProjectItemRevisionEvidence[]
+  sourceChunks                     SourceChunk[]
+  corpusGenerations                ProjectCorpusGeneration[]
+  indexGenerations                 IndexGeneration[]
+  indexBuildAttempts               IndexBuildAttempt[]
+  indexWorkItems                   IndexWorkItem[]
+  chunkEmbeddings                  ChunkEmbedding[]
+  corpusIndexPointer               ProjectCorpusIndexPointer?
+  ragSnapshots                     ProjectRagSnapshot[]
+  ragSnapshotPointer               ProjectRagSnapshotPointer?
+  aiDerivedArtifacts               AiDerivedArtifact[]
+  artifactDependencies             ArtifactDependency[]
+  githubConnections                GitHubConnection[]
+  repositoryLinks                  ProjectRepositoryLink[]
+  repositoryLinkConfigVersions     ProjectRepositoryLinkConfigVersion[]
+  repositoryLinkConfigPointers     ProjectRepositoryLinkConfigPointer[]
+  scanBatches                      ProjectScanBatch[]
+  scanBatchEntries                 ProjectScanBatchEntry[]
+  repoCodeScanRuns                 RepoCodeScanRun[]
+  repositoryFiles                  RepositoryFile[]
+  repositoryFileRevisions          RepositoryFileRevision[]
+  repositoryCodeGenerations        RepositoryCodeGeneration[]
+  repositoryCodeGenerationEntries  RepositoryCodeGenerationEntry[]
+  repositoryCodeGenerationPointers RepositoryCodeGenerationPointer[]
+  codeSnapshots                    ProjectCodeSnapshot[]
+  codeSnapshotEntries              ProjectCodeSnapshotEntry[]
+  codeSnapshotPointer              ProjectCodeSnapshotPointer?
 
   @@index([updatedAt])
 }
 
+model GitHubConnection {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  projectId             String                  @db.Uuid
+  authRef               String                  @db.VarChar(128)
+  status                GitHubConnectionStatus  @default(configured)
+  connectionFingerprint String                  @db.VarChar(64)
+  verifiedAt            DateTime?
+  disabledAt            DateTime?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  project               Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLinks       ProjectRepositoryLink[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, connectionFingerprint])
+  @@index([projectId, status])
+}
+
+model GitHubRepository {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  githubRepositoryId BigInt                  @unique
+  nodeId             String                  @db.VarChar(512)
+  currentOwner       String                  @db.VarChar(256)
+  currentName        String                  @db.VarChar(256)
+  currentFullName    String                  @db.VarChar(512)
+  isPrivate          Boolean
+  isArchived         Boolean                 @default(false)
+  isDisabled         Boolean                 @default(false)
+  defaultBranch      String                  @db.VarChar(1024)
+  lastVerifiedAt     DateTime
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  repositoryLinks    ProjectRepositoryLink[]
+
+  @@unique([id, githubRepositoryId])
+  @@index([currentFullName])
+}
+
+model ProjectRepositoryLink {
+  id                      String                               @id @default(uuid()) @db.Uuid
+  projectId               String                               @db.Uuid
+  githubConnectionId      String                               @db.Uuid
+  githubRepositoryId      String                               @db.Uuid
+  status                  ProjectRepositoryLinkStatus          @default(active)
+  effectivePolicyVersion  Int                                  @default(1)
+  createdAt               DateTime                             @default(now())
+  updatedAt               DateTime                             @updatedAt
+  disabledAt              DateTime?
+  unlinkedAt              DateTime?
+  project                 Project                              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  githubConnection        GitHubConnection                     @relation(fields: [projectId, githubConnectionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  githubRepository        GitHubRepository                     @relation(fields: [githubRepositoryId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  configVersions          ProjectRepositoryLinkConfigVersion[]
+  configPointer           ProjectRepositoryLinkConfigPointer?  @relation("RepositoryLinkConfigPointer")
+  scanBatchEntries        ProjectScanBatchEntry[]
+  codeScanRuns            RepoCodeScanRun[]
+  repositoryFiles         RepositoryFile[]
+  repositoryFileRevisions RepositoryFileRevision[]
+  codeGenerations         RepositoryCodeGeneration[]
+  codeGenerationEntries   RepositoryCodeGenerationEntry[]
+  codeGenerationPointer   RepositoryCodeGenerationPointer?     @relation("RepositoryCodeGenerationPointerLink")
+  codeSnapshotEntries     ProjectCodeSnapshotEntry[]
+  sources                 ProjectSource[]                      @relation("RepositoryLinkSources")
+  itemEvidences           ProjectItemEvidence[]                @relation("RepositoryLinkItemEvidences")
+  sourceChunks            SourceChunk[]                        @relation("RepositoryLinkChunks")
+
+  @@unique([projectId, id])
+  @@unique([projectId, githubRepositoryId])
+  @@index([projectId, status])
+  @@index([githubConnectionId])
+  @@index([githubRepositoryId])
+}
+
+model ProjectRepositoryLinkConfigVersion {
+  id                         String                              @id @default(uuid()) @db.Uuid
+  projectId                  String                              @db.Uuid
+  projectRepositoryLinkId    String                              @db.Uuid
+  version                    Int
+  role                       ProjectRepositoryRole
+  requiredForProjectSnapshot Boolean                             @default(true)
+  trackedRef                 String                              @db.VarChar(255)
+  codeEnabled                Boolean                             @default(true)
+  metadataEnabled            Boolean                             @default(true)
+  readmeEnabled              Boolean                             @default(true)
+  markdownEnabled            Boolean                             @default(false)
+  issuesEnabled              Boolean                             @default(false)
+  pullRequestsEnabled        Boolean                             @default(false)
+  releasesEnabled            Boolean                             @default(false)
+  includeRoots               Json                                @db.JsonB
+  softExcludePatterns        Json                                @db.JsonB
+  scanScopeFingerprint       String                              @db.VarChar(64)
+  policyFingerprint          String                              @db.VarChar(64)
+  effectivePolicyVersion     Int
+  createdAt                  DateTime                            @default(now())
+  project                    Project                             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink             ProjectRepositoryLink               @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepoLinkConfigVersion_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  activePointer              ProjectRepositoryLinkConfigPointer? @relation("ActiveRepositoryLinkConfig")
+  scanBatchEntries           ProjectScanBatchEntry[]
+  codeScanRuns               RepoCodeScanRun[]
+  codeGenerations            RepositoryCodeGeneration[]
+  codeGenerationPointers     RepositoryCodeGenerationPointer[]   @relation("RepositoryCodePointerConfig")
+  codeSnapshotEntries        ProjectCodeSnapshotEntry[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, version])
+  @@unique([projectId, projectRepositoryLinkId, version, requiredForProjectSnapshot], map: "RepositoryLinkConfig_required_candidate_key")
+  @@unique([projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepositoryLinkConfig_policy_candidate_key")
+  @@unique([projectId, projectRepositoryLinkId, version, requiredForProjectSnapshot, effectivePolicyVersion], map: "RepositoryLinkConfig_required_policy_key")
+  @@index([projectId, projectRepositoryLinkId, createdAt])
+}
+
+model ProjectRepositoryLinkConfigPointer {
+  projectId               String                             @db.Uuid
+  projectRepositoryLinkId String                             @db.Uuid
+  configVersion           Int
+  effectivePolicyVersion  Int
+  updatedAt               DateTime                           @updatedAt
+  project                 Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink          ProjectRepositoryLink              @relation("RepositoryLinkConfigPointer", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepoLinkConfigPointer_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                  ProjectRepositoryLinkConfigVersion @relation("ActiveRepositoryLinkConfig", fields: [projectId, projectRepositoryLinkId, configVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepoLinkConfigPointer_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@id([projectId, projectRepositoryLinkId])
+  @@unique([projectId, projectRepositoryLinkId, configVersion], map: "RepoLinkConfigPointer_config_key")
+  @@unique([projectId, projectRepositoryLinkId, configVersion, effectivePolicyVersion], map: "RepoLinkConfigPointer_policy_key")
+  @@index([projectId, configVersion])
+}
+
+model ProjectScanBatch {
+  id                          String                  @id @default(uuid()) @db.Uuid
+  projectId                   String                  @db.Uuid
+  status                      ProjectScanBatchStatus  @default(queued)
+  requiredManifestFingerprint String                  @db.VarChar(64)
+  expectedRequiredLinkCount   Int
+  expectedOptionalLinkCount   Int
+  completedRequiredLinkCount  Int                     @default(0)
+  completedOptionalLinkCount  Int                     @default(0)
+  failureCode                 String?                 @db.VarChar(64)
+  startedAt                   DateTime                @default(now())
+  completedAt                 DateTime?
+  project                     Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  entries                     ProjectScanBatchEntry[]
+  codeScanRuns                RepoCodeScanRun[]
+  codeSnapshot                ProjectCodeSnapshot?
+
+  @@unique([projectId, id])
+  @@unique([projectId, requiredManifestFingerprint, startedAt])
+  @@index([projectId, status, startedAt])
+}
+
+model ProjectScanBatchEntry {
+  id                         String                             @id @default(uuid()) @db.Uuid
+  projectId                  String                             @db.Uuid
+  projectScanBatchId         String                             @db.Uuid
+  projectRepositoryLinkId    String                             @db.Uuid
+  linkConfigVersion          Int
+  requiredForProjectSnapshot Boolean
+  effectivePolicyVersion     Int
+  createdAt                  DateTime                           @default(now())
+  project                    Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  batch                      ProjectScanBatch                   @relation(fields: [projectId, projectScanBatchId], references: [projectId, id], map: "ProjectScanBatchEntry_batch_fkey", onDelete: NoAction, onUpdate: Cascade)
+  repositoryLink             ProjectRepositoryLink              @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "ProjectScanBatchEntry_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                     ProjectRepositoryLinkConfigVersion @relation(fields: [projectId, projectRepositoryLinkId, linkConfigVersion, requiredForProjectSnapshot, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, requiredForProjectSnapshot, effectivePolicyVersion], map: "ProjectScanBatchEntry_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectScanBatchId, projectRepositoryLinkId])
+  @@index([projectId, projectRepositoryLinkId, linkConfigVersion])
+}
+
+model RepoCodeScanRun {
+  id                             String                             @id @default(uuid()) @db.Uuid
+  projectId                      String                             @db.Uuid
+  projectRepositoryLinkId        String                             @db.Uuid
+  projectScanBatchId             String?                            @db.Uuid
+  linkConfigVersion              Int
+  expectedEffectivePolicyVersion Int
+  expectedActiveGenerationId     String?                            @db.Uuid
+  operationKey                   String                             @db.VarChar(64)
+  status                         RepoCodeScanRunStatus              @default(queued)
+  stage                          RepoCodeScanStage                  @default(queued)
+  frozenCommitSha                String?                            @db.Char(40)
+  rootTreeSha                    String?                            @db.Char(40)
+  requestCount                   Int                                @default(0)
+  visitedTreeEntryCount          Int                                @default(0)
+  discoveredFileCount            Int                                @default(0)
+  decodedTextBytes               Int                                @default(0)
+  failureCode                    String?                            @db.VarChar(64)
+  retryAt                        DateTime?
+  startedAt                      DateTime                           @default(now())
+  completedAt                    DateTime?
+  project                        Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                 ProjectRepositoryLink              @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepoCodeScanRun_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                         ProjectRepositoryLinkConfigVersion @relation(fields: [projectId, projectRepositoryLinkId, linkConfigVersion, expectedEffectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepoCodeScanRun_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  batch                          ProjectScanBatch?                  @relation(fields: [projectId, projectScanBatchId], references: [projectId, id], map: "RepoCodeScanRun_batch_fkey", onDelete: NoAction, onUpdate: Cascade)
+  codeGeneration                 RepositoryCodeGeneration?
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, id])
+  @@unique([projectId, operationKey])
+  @@index([projectId, projectRepositoryLinkId, status, startedAt])
+  @@index([projectId, projectScanBatchId])
+}
+
+model RepositoryFile {
+  id                      String                   @id @default(uuid()) @db.Uuid
+  projectId               String                   @db.Uuid
+  projectRepositoryLinkId String                   @db.Uuid
+  normalizedPath          String                   @db.VarChar(1024)
+  createdAt               DateTime                 @default(now())
+  project                 Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink          ProjectRepositoryLink    @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryFile_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  revisions               RepositoryFileRevision[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, id])
+  @@unique([projectId, projectRepositoryLinkId, normalizedPath])
+  @@index([projectId, projectRepositoryLinkId, createdAt])
+}
+
+model RepositoryFileRevision {
+  id                      String                          @id @default(uuid()) @db.Uuid
+  projectId               String                          @db.Uuid
+  projectRepositoryLinkId String                          @db.Uuid
+  repositoryFileId        String                          @db.Uuid
+  blobOid                 String                          @db.Char(40)
+  contentText             String                          @db.Text
+  contentHash             String                          @db.Char(64)
+  contentBytes            Int
+  lineCount               Int
+  scannerVersion          String                          @db.VarChar(128)
+  scannerFingerprint      String                          @db.VarChar(64)
+  createdAt               DateTime                        @default(now())
+  project                 Project                         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink          ProjectRepositoryLink           @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryFileRevision_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  repositoryFile          RepositoryFile                  @relation(fields: [projectId, projectRepositoryLinkId, repositoryFileId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryFileRevision_file_fkey", onDelete: NoAction, onUpdate: Cascade)
+  generationEntries       RepositoryCodeGenerationEntry[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, id])
+  @@unique([projectId, projectRepositoryLinkId, repositoryFileId, blobOid])
+  @@index([projectId, projectRepositoryLinkId, repositoryFileId, createdAt])
+}
+
+model RepositoryCodeGeneration {
+  id                         String                             @id @default(uuid()) @db.Uuid
+  projectId                  String                             @db.Uuid
+  projectRepositoryLinkId    String                             @db.Uuid
+  linkConfigVersion          Int
+  repoCodeScanRunId          String                             @db.Uuid
+  status                     RepositoryCodeGenerationStatus     @default(staging)
+  generationKey              String                             @db.VarChar(64)
+  capturedGitHubRepositoryId BigInt
+  capturedFullName           String                             @db.VarChar(512)
+  frozenCommitSha            String                             @db.Char(40)
+  rootTreeSha                String                             @db.Char(40)
+  scanScopeFingerprint       String                             @db.VarChar(64)
+  scannerVersion             String                             @db.VarChar(128)
+  scannerFingerprint         String                             @db.VarChar(64)
+  effectivePolicyVersion     Int
+  manifestFingerprint        String                             @db.VarChar(64)
+  exclusionManifest          Json                               @db.JsonB
+  fileCount                  Int
+  decodedTextBytes           Int
+  createdAt                  DateTime                           @default(now())
+  completedAt                DateTime?
+  supersededAt               DateTime?
+  project                    Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink             ProjectRepositoryLink              @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryCodeGeneration_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                     ProjectRepositoryLinkConfigVersion @relation(fields: [projectId, projectRepositoryLinkId, linkConfigVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepositoryCodeGeneration_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  scanRun                    RepoCodeScanRun                    @relation(fields: [projectId, projectRepositoryLinkId, repoCodeScanRunId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodeGeneration_run_fkey", onDelete: NoAction, onUpdate: Cascade)
+  entries                    RepositoryCodeGenerationEntry[]
+  activePointer              RepositoryCodeGenerationPointer?   @relation("ActiveRepositoryCodeGeneration")
+  codeSnapshotEntries        ProjectCodeSnapshotEntry[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, id], map: "RepositoryCodeGeneration_link_id_key")
+  @@unique([projectId, projectRepositoryLinkId, repoCodeScanRunId], map: "RepositoryCodeGeneration_run_key")
+  @@unique([projectId, generationKey])
+  @@index([projectId, projectRepositoryLinkId, status, createdAt])
+}
+
+model RepositoryCodeGenerationEntry {
+  id                         String                   @id @default(uuid()) @db.Uuid
+  projectId                  String                   @db.Uuid
+  projectRepositoryLinkId    String                   @db.Uuid
+  repositoryCodeGenerationId String                   @db.Uuid
+  repositoryFileRevisionId   String                   @db.Uuid
+  ordinal                    Int
+  normalizedPath             String                   @db.VarChar(1024)
+  mode                       String                   @db.Char(6)
+  blobOid                    String                   @db.Char(40)
+  contentHash                String                   @db.Char(64)
+  contentBytes               Int
+  lineCount                  Int
+  createdAt                  DateTime                 @default(now())
+  project                    Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink             ProjectRepositoryLink    @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryCodeGenerationEntry_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  generation                 RepositoryCodeGeneration @relation(fields: [projectId, projectRepositoryLinkId, repositoryCodeGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodeGenerationEntry_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  fileRevision               RepositoryFileRevision   @relation(fields: [projectId, projectRepositoryLinkId, repositoryFileRevisionId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodeGenerationEntry_revision_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, repositoryCodeGenerationId, normalizedPath], map: "RepositoryCodeGenerationEntry_generation_path_key")
+  @@unique([projectId, projectRepositoryLinkId, repositoryCodeGenerationId, ordinal], map: "RepositoryCodeGenerationEntry_generation_ordinal_key")
+  @@index([projectId, projectRepositoryLinkId, repositoryFileRevisionId])
+}
+
+model RepositoryCodeGenerationPointer {
+  projectId                  String                             @db.Uuid
+  projectRepositoryLinkId    String                             @db.Uuid
+  repositoryCodeGenerationId String                             @db.Uuid
+  linkConfigVersion          Int
+  effectivePolicyVersion     Int
+  updatedAt                  DateTime                           @updatedAt
+  project                    Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink             ProjectRepositoryLink              @relation("RepositoryCodeGenerationPointerLink", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryCodePointer_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  generation                 RepositoryCodeGeneration           @relation("ActiveRepositoryCodeGeneration", fields: [projectId, projectRepositoryLinkId, repositoryCodeGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodePointer_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                     ProjectRepositoryLinkConfigVersion @relation("RepositoryCodePointerConfig", fields: [projectId, projectRepositoryLinkId, linkConfigVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepositoryCodePointer_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@id([projectId, projectRepositoryLinkId])
+  @@unique([projectId, projectRepositoryLinkId, repositoryCodeGenerationId], map: "RepositoryCodePointer_generation_key")
+  @@index([projectId, repositoryCodeGenerationId])
+}
+
+model ProjectCodeSnapshot {
+  id                  String                      @id @default(uuid()) @db.Uuid
+  projectId           String                      @db.Uuid
+  projectScanBatchId  String                      @db.Uuid
+  status              ProjectCodeSnapshotStatus   @default(staging)
+  manifestFingerprint String                      @db.VarChar(64)
+  requiredLinkCount   Int
+  createdAt           DateTime                    @default(now())
+  completedAt         DateTime?
+  supersededAt        DateTime?
+  project             Project                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  batch               ProjectScanBatch            @relation(fields: [projectId, projectScanBatchId], references: [projectId, id], map: "ProjectCodeSnapshot_batch_fkey", onDelete: NoAction, onUpdate: Cascade)
+  entries             ProjectCodeSnapshotEntry[]
+  activePointer       ProjectCodeSnapshotPointer?
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectScanBatchId])
+  @@unique([projectId, manifestFingerprint])
+  @@index([projectId, status, createdAt])
+}
+
+model ProjectCodeSnapshotEntry {
+  id                            String                             @id @default(uuid()) @db.Uuid
+  projectId                     String                             @db.Uuid
+  projectCodeSnapshotId         String                             @db.Uuid
+  projectRepositoryLinkId       String                             @db.Uuid
+  linkConfigVersion             Int
+  requiredForProjectSnapshot    Boolean                            @default(true)
+  effectivePolicyVersion        Int
+  repositoryCodeGenerationId    String                             @db.Uuid
+  frozenCommitSha               String                             @db.Char(40)
+  generationManifestFingerprint String                             @db.VarChar(64)
+  createdAt                     DateTime                           @default(now())
+  project                       Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  snapshot                      ProjectCodeSnapshot                @relation(fields: [projectId, projectCodeSnapshotId], references: [projectId, id], map: "ProjectCodeSnapshotEntry_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
+  repositoryLink                ProjectRepositoryLink              @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "ProjectCodeSnapshotEntry_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                        ProjectRepositoryLinkConfigVersion @relation(fields: [projectId, projectRepositoryLinkId, linkConfigVersion, requiredForProjectSnapshot, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, requiredForProjectSnapshot, effectivePolicyVersion], map: "ProjectCodeSnapshotEntry_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  generation                    RepositoryCodeGeneration           @relation(fields: [projectId, projectRepositoryLinkId, repositoryCodeGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "ProjectCodeSnapshotEntry_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectCodeSnapshotId, projectRepositoryLinkId])
+  @@index([projectId, projectRepositoryLinkId, repositoryCodeGenerationId])
+}
+
+model ProjectCodeSnapshotPointer {
+  projectId             String              @id @db.Uuid
+  projectCodeSnapshotId String              @db.Uuid
+  updatedAt             DateTime            @updatedAt
+  project               Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  snapshot              ProjectCodeSnapshot @relation(fields: [projectId, projectCodeSnapshotId], references: [projectId, id], map: "ProjectCodeSnapshotPointer_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, projectCodeSnapshotId])
+}
+
 model ProjectSource {
-  id                      String             @id @default(uuid()) @db.Uuid
-  projectId               String             @db.Uuid
+  id                      String                         @id @default(uuid()) @db.Uuid
+  projectId               String                         @db.Uuid
   kind                    ProjectSourceKind
-  originScope             ContentOriginScope @default(project)
-  projectRepositoryLinkId String?            @db.Uuid
-  sourceIdentity          String             @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  revisionKey             String             @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  originScope             ContentOriginScope             @default(project)
+  projectRepositoryLinkId String?                        @db.Uuid
+  sourceIdentity          String                         @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  revisionKey             String                         @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   externalRef             String?
-  contentText             String             @db.Text
+  contentText             String                         @db.Text
   contentHash             String
-  manualContentDedupeKey  String?            @db.VarChar(64)
+  manualContentDedupeKey  String?                        @db.VarChar(64)
   storageKey              String?
   capturedAt              DateTime?
-  ingestedAt              DateTime           @default(now())
-  project                 Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  items                   ProjectItem[]       @relation("SourceItems")
-  itemEvidences           ProjectItemEvidence[] @relation("EvidenceProjectSource")
+  ingestedAt              DateTime                       @default(now())
+  project                 Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectRepositoryLink   ProjectRepositoryLink?         @relation("RepositoryLinkSources", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  items                   ProjectItem[]                  @relation("SourceItems")
+  itemEvidences           ProjectItemEvidence[]          @relation("EvidenceProjectSource")
   grantSources            ModelProcessingGrantSource[]
   aiRunInputs             AiRunInputSource[]
   aiCandidateClaims       AiCandidateClaim[]
-  sourceChunks            SourceChunk[]       @relation("ChunkProjectSource")
+  sourceChunks            SourceChunk[]                  @relation("ChunkProjectSource")
   corpusGenerationEntries ProjectCorpusGenerationEntry[]
   artifactDependencies    ArtifactDependency[]
 
-  @@index([projectId, capturedAt])
   @@unique([projectId, id])
   @@unique([projectId, id, originScope])
   @@unique([projectId, id, originScope, projectRepositoryLinkId])
   @@unique([projectId, sourceIdentity, revisionKey])
   @@unique([projectId, id, originScope, revisionKey, contentHash])
+  @@index([projectId, capturedAt])
 }
 
 model ProjectItem {
-  id               String                   @id @default(uuid()) @db.Uuid
-  projectId        String                   @db.Uuid
+  id               String                  @id @default(uuid()) @db.Uuid
+  projectId        String                  @db.Uuid
   type             ProjectItemType
-  reviewStatus     ProjectItemReviewStatus  @default(candidate)
-  sourceId         String                   @db.Uuid
+  reviewStatus     ProjectItemReviewStatus @default(candidate)
+  sourceId         String                  @db.Uuid
   title            String
-  content          String                   @db.Text
-  sourceExcerpt    String?                  @db.Text
+  content          String                  @db.Text
+  sourceExcerpt    String?                 @db.Text
   occurredAt       DateTime?
   confirmedAt      DateTime?
-  supersedesItemId String?                  @db.Uuid
-  metadata         Json                     @default("{}") @db.JsonB
-  createdAt        DateTime                 @default(now())
-  updatedAt        DateTime                 @updatedAt
-  project          Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  source           ProjectSource            @relation("SourceItems", fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  supersedesItem   ProjectItem?             @relation("ItemSupersession", fields: [projectId, supersedesItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  supersededBy     ProjectItem[]            @relation("ItemSupersession")
-  aiCandidateClaim AiCandidateClaim?        @relation("AiCandidateItem")
+  supersedesItemId String?                 @db.Uuid
+  metadata         Json                    @default("{}") @db.JsonB
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  project          Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source           ProjectSource           @relation("SourceItems", fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  supersedesItem   ProjectItem?            @relation("ItemSupersession", fields: [projectId, supersedesItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  supersededBy     ProjectItem[]           @relation("ItemSupersession")
+  aiCandidateClaim AiCandidateClaim?       @relation("AiCandidateItem")
   evidences        ProjectItemEvidence[]
   revisions        ProjectItemRevision[]
 
+  @@unique([projectId, id])
   @@index([projectId, reviewStatus])
   @@index([projectId, type])
   @@index([sourceId])
   @@index([supersedesItemId])
-  @@unique([projectId, id])
 }
 
 model ProjectItemEvidence {
-  id                       String                   @id @default(uuid()) @db.Uuid
-  projectId                String                   @db.Uuid
-  projectItemId            String                   @db.Uuid
+  id                       String                        @id @default(uuid()) @db.Uuid
+  projectId                String                        @db.Uuid
+  projectItemId            String                        @db.Uuid
   role                     ProjectItemEvidenceRole
-  evidenceState            ProjectItemEvidenceState @default(active)
-  originScope              ContentOriginScope       @default(project)
-  projectRepositoryLinkId  String?                  @db.Uuid
-  projectSourceId          String?                  @db.Uuid
-  sourceExcerpt            String?                  @db.Text
-  sourceExcerptFingerprint String?                  @db.VarChar(64)
+  evidenceState            ProjectItemEvidenceState      @default(active)
+  originScope              ContentOriginScope            @default(project)
+  projectRepositoryLinkId  String?                       @db.Uuid
+  projectSourceId          String?                       @db.Uuid
+  sourceExcerpt            String?                       @db.Text
+  sourceExcerptFingerprint String?                       @db.VarChar(64)
   rangeUnit                ProjectEvidenceRangeUnit?
   rangeStart               Int?
   rangeEnd                 Int?
-  isActive                 Boolean                  @default(true)
-  createdAt                DateTime                 @default(now())
+  isActive                 Boolean                       @default(true)
+  createdAt                DateTime                      @default(now())
   supersededAt             DateTime?
   purgedAt                 DateTime?
-  deletionReceipt          String?                  @db.Uuid
-  project                  Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  item                     ProjectItem              @relation(fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  projectSource            ProjectSource?           @relation("EvidenceProjectSource", fields: [projectId, projectSourceId, originScope], references: [projectId, id, originScope], onDelete: NoAction, onUpdate: Cascade)
+  deletionReceipt          String?                       @db.Uuid
+  project                  Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectRepositoryLink    ProjectRepositoryLink?        @relation("RepositoryLinkItemEvidences", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  item                     ProjectItem                   @relation(fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectSource            ProjectSource?                @relation("EvidenceProjectSource", fields: [projectId, projectSourceId, originScope], references: [projectId, id, originScope], onDelete: NoAction, onUpdate: Cascade)
   revisionLinks            ProjectItemRevisionEvidence[]
 
   @@unique([projectId, id])
@@ -479,27 +940,28 @@ model EmbeddingProfile {
 }
 
 model SourceChunk {
-  id                       String             @id @default(uuid()) @db.Uuid
-  projectId                String             @db.Uuid
-  originScope              ContentOriginScope @default(project)
-  projectRepositoryLinkId  String?            @db.Uuid
-  projectSourceId          String?            @db.Uuid
-  sourceRevisionKey        String?            @db.Uuid
-  sourceContentHash        String?            @db.VarChar(64)
-  ordinal                  Int
-  rangeUnit                ProjectEvidenceRangeUnit
-  rangeStart               Int
-  rangeEnd                 Int
-  chunkerVersion           String             @db.VarChar(128)
-  contentText              String?            @db.Text
-  contentHash              String?            @db.VarChar(64)
-  contentBytes             Int?
-  state                    SourceChunkState   @default(active)
-  createdAt                DateTime           @default(now())
-  purgedAt                 DateTime?
-  deletionReceipt          String?            @db.Uuid
-  project                  Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  projectSource            ProjectSource?     @relation("ChunkProjectSource", fields: [projectId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, revisionKey, contentHash], onDelete: NoAction, onUpdate: Cascade)
+  id                      String                         @id @default(uuid()) @db.Uuid
+  projectId               String                         @db.Uuid
+  originScope             ContentOriginScope             @default(project)
+  projectRepositoryLinkId String?                        @db.Uuid
+  projectSourceId         String?                        @db.Uuid
+  sourceRevisionKey       String?                        @db.Uuid
+  sourceContentHash       String?                        @db.VarChar(64)
+  ordinal                 Int
+  rangeUnit               ProjectEvidenceRangeUnit
+  rangeStart              Int
+  rangeEnd                Int
+  chunkerVersion          String                         @db.VarChar(128)
+  contentText             String?                        @db.Text
+  contentHash             String?                        @db.VarChar(64)
+  contentBytes            Int?
+  state                   SourceChunkState               @default(active)
+  createdAt               DateTime                       @default(now())
+  purgedAt                DateTime?
+  deletionReceipt         String?                        @db.Uuid
+  project                 Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectRepositoryLink   ProjectRepositoryLink?         @relation("RepositoryLinkChunks", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectSource           ProjectSource?                 @relation("ChunkProjectSource", fields: [projectId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, revisionKey, contentHash], onDelete: NoAction, onUpdate: Cascade)
   corpusGenerationEntries ProjectCorpusGenerationEntry[]
   indexInputEntries       IndexGenerationInputEntry[]
   chunkEmbeddings         ChunkEmbedding[]
@@ -514,23 +976,23 @@ model SourceChunk {
 }
 
 model ProjectCorpusGeneration {
-  id                        String                          @id @default(uuid()) @db.Uuid
-  projectId                 String                          @db.Uuid
-  grantId                   String                          @db.Uuid
-  policyRevisionId          String                          @db.Uuid
-  status                    ProjectCorpusGenerationStatus   @default(staging)
-  generationKey             String                          @db.VarChar(64)
-  sourceManifestFingerprint String                          @db.VarChar(64)
-  chunkManifestFingerprint  String                          @db.VarChar(64)
+  id                        String                         @id @default(uuid()) @db.Uuid
+  projectId                 String                         @db.Uuid
+  grantId                   String                         @db.Uuid
+  policyRevisionId          String                         @db.Uuid
+  status                    ProjectCorpusGenerationStatus  @default(staging)
+  generationKey             String                         @db.VarChar(64)
+  sourceManifestFingerprint String                         @db.VarChar(64)
+  chunkManifestFingerprint  String                         @db.VarChar(64)
   sourceCount               Int
   expectedChunkCount        Int
-  chunkerVersion            String                          @db.VarChar(128)
-  failureCode               String?                         @db.VarChar(64)
-  createdAt                 DateTime                        @default(now())
+  chunkerVersion            String                         @db.VarChar(128)
+  failureCode               String?                        @db.VarChar(64)
+  createdAt                 DateTime                       @default(now())
   completedAt               DateTime?
   supersededAt              DateTime?
-  project                   Project                         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  grant                     ModelProcessingGrant            @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "ProjectCorpusGeneration_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
+  project                   Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant                     ModelProcessingGrant           @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "ProjectCorpusGeneration_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
   entries                   ProjectCorpusGenerationEntry[]
   projectIndexes            ProjectCorpusIndexGeneration[]
 
@@ -543,25 +1005,25 @@ model ProjectCorpusGeneration {
 }
 
 model ProjectCorpusGenerationEntry {
-  id                       String                   @id @default(uuid()) @db.Uuid
-  projectId                String                   @db.Uuid
-  corpusGenerationId       String                   @db.Uuid
-  grantId                  String                   @db.Uuid
-  grantSourceId            String                   @db.Uuid
-  projectSourceId          String                   @db.Uuid
-  originScope              ContentOriginScope
-  sourceRevisionKey        String                   @db.Uuid
-  sourceContentHash        String                   @db.VarChar(64)
-  sourceChunkId            String                   @db.Uuid
-  ordinal                  Int
-  chunkContentHash         String                   @db.VarChar(64)
-  chunkContentBytes        Int
-  createdAt                DateTime                 @default(now())
-  generation               ProjectCorpusGeneration @relation(fields: [projectId, corpusGenerationId, grantId], references: [projectId, id, grantId], map: "ProjectCorpusGenerationEntry_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
-  grantSource              ModelProcessingGrantSource @relation(fields: [projectId, grantSourceId, grantId, projectSourceId], references: [projectId, id, grantId, sourceId], map: "ProjectCorpusGenerationEntry_grant_source_fkey", onDelete: NoAction, onUpdate: Cascade)
-  projectSource            ProjectSource            @relation(fields: [projectId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, revisionKey, contentHash], map: "ProjectCorpusGenerationEntry_source_revision_fkey", onDelete: NoAction, onUpdate: Cascade)
-  sourceChunk              SourceChunk              @relation(fields: [projectId, sourceChunkId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash, chunkContentHash], references: [projectId, id, projectSourceId, originScope, sourceRevisionKey, sourceContentHash, contentHash], map: "ProjectCorpusGenerationEntry_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
-  projectCorpusInputs      ProjectCorpusIndexInput[]
+  id                  String                     @id @default(uuid()) @db.Uuid
+  projectId           String                     @db.Uuid
+  corpusGenerationId  String                     @db.Uuid
+  grantId             String                     @db.Uuid
+  grantSourceId       String                     @db.Uuid
+  projectSourceId     String                     @db.Uuid
+  originScope         ContentOriginScope
+  sourceRevisionKey   String                     @db.Uuid
+  sourceContentHash   String                     @db.VarChar(64)
+  sourceChunkId       String                     @db.Uuid
+  ordinal             Int
+  chunkContentHash    String                     @db.VarChar(64)
+  chunkContentBytes   Int
+  createdAt           DateTime                   @default(now())
+  generation          ProjectCorpusGeneration    @relation(fields: [projectId, corpusGenerationId, grantId], references: [projectId, id, grantId], map: "ProjectCorpusGenerationEntry_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  grantSource         ModelProcessingGrantSource @relation(fields: [projectId, grantSourceId, grantId, projectSourceId], references: [projectId, id, grantId, sourceId], map: "ProjectCorpusGenerationEntry_grant_source_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectSource       ProjectSource              @relation(fields: [projectId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, revisionKey, contentHash], map: "ProjectCorpusGenerationEntry_source_revision_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sourceChunk         SourceChunk                @relation(fields: [projectId, sourceChunkId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash, chunkContentHash], references: [projectId, id, projectSourceId, originScope, sourceRevisionKey, sourceContentHash, contentHash], map: "ProjectCorpusGenerationEntry_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectCorpusInputs ProjectCorpusIndexInput[]
 
   @@unique([projectId, id])
   @@unique([projectId, corpusGenerationId, id], map: "CorpusEntry_generation_id_key")
@@ -572,27 +1034,27 @@ model ProjectCorpusGenerationEntry {
 }
 
 model IndexGeneration {
-  id                            String                 @id @default(uuid()) @db.Uuid
-  projectId                     String                 @db.Uuid
+  id                            String                        @id @default(uuid()) @db.Uuid
+  projectId                     String                        @db.Uuid
   kind                          IndexGenerationKind
-  grantId                       String                 @db.Uuid
-  policyRevisionId              String                 @db.Uuid
-  embeddingProfileId            String                 @db.Uuid
-  status                        IndexGenerationStatus   @default(staging)
-  generationKey                 String                 @db.VarChar(64)
-  inputManifestFingerprint      String                 @db.VarChar(64)
-  processingBoundaryFingerprint String                 @db.VarChar(64)
+  grantId                       String                        @db.Uuid
+  policyRevisionId              String                        @db.Uuid
+  embeddingProfileId            String                        @db.Uuid
+  status                        IndexGenerationStatus         @default(staging)
+  generationKey                 String                        @db.VarChar(64)
+  inputManifestFingerprint      String                        @db.VarChar(64)
+  processingBoundaryFingerprint String                        @db.VarChar(64)
   expectedInputCount            Int
-  indexedInputCount             Int                    @default(0)
-  failureCode                   String?                @db.VarChar(64)
-  createdAt                     DateTime               @default(now())
+  indexedInputCount             Int                           @default(0)
+  failureCode                   String?                       @db.VarChar(64)
+  createdAt                     DateTime                      @default(now())
   buildStartedAt                DateTime?
   completedAt                   DateTime?
   publishedAt                   DateTime?
   supersededAt                  DateTime?
-  project                       Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  grant                         ModelProcessingGrant   @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "IndexGeneration_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
-  embeddingProfile              EmbeddingProfile       @relation(fields: [embeddingProfileId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  project                       Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant                         ModelProcessingGrant          @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "IndexGeneration_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
+  embeddingProfile              EmbeddingProfile              @relation(fields: [embeddingProfileId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   projectCorpus                 ProjectCorpusIndexGeneration?
   inputs                        IndexGenerationInputEntry[]
   attempts                      IndexBuildAttempt[]
@@ -609,14 +1071,14 @@ model IndexGeneration {
 }
 
 model ProjectCorpusIndexGeneration {
-  projectId          String                  @db.Uuid
-  indexGenerationId  String                  @db.Uuid
-  corpusGenerationId String                  @db.Uuid
-  grantId            String                  @db.Uuid
-  policyRevisionId   String                  @db.Uuid
-  createdAt          DateTime                @default(now())
-  indexGeneration    IndexGeneration         @relation(fields: [projectId, indexGenerationId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_index_fkey", onDelete: NoAction, onUpdate: Cascade)
-  corpusGeneration   ProjectCorpusGeneration @relation(fields: [projectId, corpusGenerationId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_corpus_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectId          String                     @db.Uuid
+  indexGenerationId  String                     @db.Uuid
+  corpusGenerationId String                     @db.Uuid
+  grantId            String                     @db.Uuid
+  policyRevisionId   String                     @db.Uuid
+  createdAt          DateTime                   @default(now())
+  indexGeneration    IndexGeneration            @relation(fields: [projectId, indexGenerationId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  corpusGeneration   ProjectCorpusGeneration    @relation(fields: [projectId, corpusGenerationId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_corpus_fkey", onDelete: NoAction, onUpdate: Cascade)
   inputs             ProjectCorpusIndexInput[]
   publishedPointer   ProjectCorpusIndexPointer?
   ragSnapshots       ProjectRagSnapshot[]
@@ -629,17 +1091,17 @@ model ProjectCorpusIndexGeneration {
 }
 
 model IndexGenerationInputEntry {
-  id                 String                  @id @default(uuid()) @db.Uuid
-  projectId          String                  @db.Uuid
-  indexGenerationId  String                  @db.Uuid
+  id                 String                   @id @default(uuid()) @db.Uuid
+  projectId          String                   @db.Uuid
+  indexGenerationId  String                   @db.Uuid
   ordinal            Int
   entryKind          IndexInputEntryKind
-  sourceChunkId      String                  @db.Uuid
-  contentHash        String                  @db.VarChar(64)
+  sourceChunkId      String                   @db.Uuid
+  contentHash        String                   @db.VarChar(64)
   contentBytes       Int
-  createdAt          DateTime                @default(now())
-  indexGeneration    IndexGeneration         @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "IndexGenerationInputEntry_index_fkey", onDelete: NoAction, onUpdate: Cascade)
-  sourceChunk        SourceChunk             @relation(fields: [projectId, sourceChunkId], references: [projectId, id], map: "IndexGenerationInputEntry_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
+  createdAt          DateTime                 @default(now())
+  indexGeneration    IndexGeneration          @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "IndexGenerationInputEntry_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sourceChunk        SourceChunk              @relation(fields: [projectId, sourceChunkId], references: [projectId, id], map: "IndexGenerationInputEntry_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
   projectCorpusInput ProjectCorpusIndexInput?
   workItem           IndexWorkItem?
   embedding          ChunkEmbedding?
@@ -700,24 +1162,24 @@ model IndexBuildAttempt {
 }
 
 model IndexWorkItem {
-  id                            String              @id @default(uuid()) @db.Uuid
-  projectId                     String              @db.Uuid
-  indexGenerationId            String              @db.Uuid
-  inputEntryId                  String              @db.Uuid
-  sourceChunkId                 String              @db.Uuid
-  attemptId                     String?             @db.Uuid
-  operationKey                  String              @db.VarChar(64)
-  processingBoundaryFingerprint String              @db.VarChar(64)
-  status                        IndexWorkItemStatus  @default(queued)
-  retryCount                    Int                 @default(0)
-  safeErrorCode                 String?             @db.VarChar(64)
-  createdAt                     DateTime             @default(now())
+  id                            String                    @id @default(uuid()) @db.Uuid
+  projectId                     String                    @db.Uuid
+  indexGenerationId             String                    @db.Uuid
+  inputEntryId                  String                    @db.Uuid
+  sourceChunkId                 String                    @db.Uuid
+  attemptId                     String?                   @db.Uuid
+  operationKey                  String                    @db.VarChar(64)
+  processingBoundaryFingerprint String                    @db.VarChar(64)
+  status                        IndexWorkItemStatus       @default(queued)
+  retryCount                    Int                       @default(0)
+  safeErrorCode                 String?                   @db.VarChar(64)
+  createdAt                     DateTime                  @default(now())
   claimedAt                     DateTime?
   completedAt                   DateTime?
-  project                       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  indexGeneration               IndexGeneration      @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "IndexWorkItem_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  project                       Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  indexGeneration               IndexGeneration           @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "IndexWorkItem_index_fkey", onDelete: NoAction, onUpdate: Cascade)
   inputEntry                    IndexGenerationInputEntry @relation(fields: [projectId, indexGenerationId, inputEntryId, sourceChunkId], references: [projectId, indexGenerationId, id, sourceChunkId], map: "IndexWorkItem_input_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
-  attempt                       IndexBuildAttempt?   @relation(fields: [projectId, indexGenerationId, attemptId], references: [projectId, indexGenerationId, id], map: "IndexWorkItem_attempt_fkey", onDelete: NoAction, onUpdate: Cascade)
+  attempt                       IndexBuildAttempt?        @relation(fields: [projectId, indexGenerationId, attemptId], references: [projectId, indexGenerationId, id], map: "IndexWorkItem_attempt_fkey", onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, indexGenerationId, inputEntryId], map: "IndexWorkItem_project_index_input_key")
   @@unique([projectId, indexGenerationId, inputEntryId, sourceChunkId], map: "IndexWorkItem_exact_input_key")
@@ -726,22 +1188,22 @@ model IndexWorkItem {
 }
 
 model ChunkEmbedding {
-  id                 String                       @id @default(uuid()) @db.Uuid
-  projectId          String                       @db.Uuid
-  indexGenerationId  String                       @db.Uuid
-  inputEntryId       String                       @db.Uuid
-  sourceChunkId      String                       @db.Uuid
-  embeddingProfileId String                       @db.Uuid
-  attemptId          String                       @db.Uuid
+  id                 String                      @id @default(uuid()) @db.Uuid
+  projectId          String                      @db.Uuid
+  indexGenerationId  String                      @db.Uuid
+  inputEntryId       String                      @db.Uuid
+  sourceChunkId      String                      @db.Uuid
+  embeddingProfileId String                      @db.Uuid
+  attemptId          String                      @db.Uuid
   vector             Unsupported("vector(1536)")
-  vectorFingerprint  String                       @db.VarChar(64)
-  createdAt          DateTime                     @default(now())
-  project            Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  indexGeneration    IndexGeneration              @relation(fields: [projectId, indexGenerationId, embeddingProfileId], references: [projectId, id, embeddingProfileId], map: "ChunkEmbedding_index_profile_fkey", onDelete: NoAction, onUpdate: Cascade)
-  embeddingProfile   EmbeddingProfile             @relation(fields: [embeddingProfileId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  inputEntry         IndexGenerationInputEntry    @relation(fields: [projectId, indexGenerationId, inputEntryId, sourceChunkId], references: [projectId, indexGenerationId, id, sourceChunkId], map: "ChunkEmbedding_input_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
-  sourceChunk        SourceChunk                  @relation(fields: [projectId, sourceChunkId], references: [projectId, id], map: "ChunkEmbedding_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
-  attempt            IndexBuildAttempt            @relation(fields: [projectId, indexGenerationId, attemptId], references: [projectId, indexGenerationId, id], map: "ChunkEmbedding_attempt_fkey", onDelete: NoAction, onUpdate: Cascade)
+  vectorFingerprint  String                      @db.VarChar(64)
+  createdAt          DateTime                    @default(now())
+  project            Project                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  indexGeneration    IndexGeneration             @relation(fields: [projectId, indexGenerationId, embeddingProfileId], references: [projectId, id, embeddingProfileId], map: "ChunkEmbedding_index_profile_fkey", onDelete: NoAction, onUpdate: Cascade)
+  embeddingProfile   EmbeddingProfile            @relation(fields: [embeddingProfileId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  inputEntry         IndexGenerationInputEntry   @relation(fields: [projectId, indexGenerationId, inputEntryId, sourceChunkId], references: [projectId, indexGenerationId, id, sourceChunkId], map: "ChunkEmbedding_input_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sourceChunk        SourceChunk                 @relation(fields: [projectId, sourceChunkId], references: [projectId, id], map: "ChunkEmbedding_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
+  attempt            IndexBuildAttempt           @relation(fields: [projectId, indexGenerationId, attemptId], references: [projectId, indexGenerationId, id], map: "ChunkEmbedding_attempt_fkey", onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, id])
   @@unique([projectId, indexGenerationId, inputEntryId], map: "ChunkEmbedding_project_index_input_key")
@@ -763,25 +1225,25 @@ model ProjectCorpusIndexPointer {
 }
 
 model ProjectRagSnapshot {
-  id                      String                   @id @default(uuid()) @db.Uuid
-  projectId               String                   @db.Uuid
-  manualIndexGenerationId String                   @db.Uuid
-  manualCorpusGenerationId String                  @db.Uuid
-  grantId                 String                   @db.Uuid
-  policyRevisionId        String                   @db.Uuid
-  effectivePolicyVersion  Int
-  status                  ProjectRagSnapshotStatus @default(staging)
-  manifestFingerprint     String                   @db.VarChar(64)
-  requiredRepositoryCount Int                      @default(0)
-  failureCode             String?                  @db.VarChar(64)
-  createdAt               DateTime                 @default(now())
-  completedAt             DateTime?
-  supersededAt            DateTime?
-  project                 Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  manualIndex             ProjectCorpusIndexGeneration @relation(fields: [projectId, manualIndexGenerationId, manualCorpusGenerationId, grantId, policyRevisionId], references: [projectId, indexGenerationId, corpusGenerationId, grantId, policyRevisionId], map: "ProjectRagSnapshot_manual_index_fkey", onDelete: NoAction, onUpdate: Cascade)
-  publishedPointer        ProjectRagSnapshotPointer?
-  derivedArtifacts        AiDerivedArtifact[]
-  artifactDependencies    ArtifactDependency[]
+  id                       String                       @id @default(uuid()) @db.Uuid
+  projectId                String                       @db.Uuid
+  manualIndexGenerationId  String                       @db.Uuid
+  manualCorpusGenerationId String                       @db.Uuid
+  grantId                  String                       @db.Uuid
+  policyRevisionId         String                       @db.Uuid
+  effectivePolicyVersion   Int
+  status                   ProjectRagSnapshotStatus     @default(staging)
+  manifestFingerprint      String                       @db.VarChar(64)
+  requiredRepositoryCount  Int                          @default(0)
+  failureCode              String?                      @db.VarChar(64)
+  createdAt                DateTime                     @default(now())
+  completedAt              DateTime?
+  supersededAt             DateTime?
+  project                  Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  manualIndex              ProjectCorpusIndexGeneration @relation(fields: [projectId, manualIndexGenerationId, manualCorpusGenerationId, grantId, policyRevisionId], references: [projectId, indexGenerationId, corpusGenerationId, grantId, policyRevisionId], map: "ProjectRagSnapshot_manual_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  publishedPointer         ProjectRagSnapshotPointer?
+  derivedArtifacts         AiDerivedArtifact[]
+  artifactDependencies     ArtifactDependency[]
 
   @@unique([projectId, id])
   @@unique([projectId, manifestFingerprint], map: "ProjectRagSnapshot_project_manifest_key")
@@ -799,34 +1261,34 @@ model ProjectRagSnapshotPointer {
 }
 
 model AiDerivedArtifact {
-  id                          String                        @id @default(uuid()) @db.Uuid
-  projectId                   String                        @db.Uuid
+  id                          String                         @id @default(uuid()) @db.Uuid
+  projectId                   String                         @db.Uuid
   kind                        AiDerivedArtifactKind
-  state                       AiDerivedArtifactState        @default(active)
+  state                       AiDerivedArtifactState         @default(active)
   operation                   AiOperation
-  artifactFingerprint         String                        @db.VarChar(64)
-  inputFingerprint            String                        @db.VarChar(64)
-  outputFingerprint           String                        @db.VarChar(64)
-  payload                     Json                          @db.JsonB
-  projectRagSnapshotId        String                        @db.Uuid
-  snapshotManifestFingerprint String                        @db.VarChar(64)
-  grantId                     String                        @db.Uuid
-  policyRevisionId            String                        @db.Uuid
+  artifactFingerprint         String                         @db.VarChar(64)
+  inputFingerprint            String                         @db.VarChar(64)
+  outputFingerprint           String                         @db.VarChar(64)
+  payload                     Json                           @db.JsonB
+  projectRagSnapshotId        String                         @db.Uuid
+  snapshotManifestFingerprint String                         @db.VarChar(64)
+  grantId                     String                         @db.Uuid
+  policyRevisionId            String                         @db.Uuid
   effectivePolicyVersion      Int
-  profileFingerprint          String                        @db.VarChar(64)
-  providerFingerprint         String                        @db.VarChar(64)
-  modelFingerprint            String                        @db.VarChar(64)
-  modelId                     String                        @db.VarChar(128)
-  promptFingerprint           String                        @db.VarChar(64)
-  promptVersion               String                        @db.VarChar(128)
-  createdAt                   DateTime                      @default(now())
+  profileFingerprint          String                         @db.VarChar(64)
+  providerFingerprint         String                         @db.VarChar(64)
+  modelFingerprint            String                         @db.VarChar(64)
+  modelId                     String                         @db.VarChar(128)
+  promptFingerprint           String                         @db.VarChar(64)
+  promptVersion               String                         @db.VarChar(128)
+  createdAt                   DateTime                       @default(now())
   staleAt                     DateTime?
   restrictedAt                DateTime?
   restrictionReasonCode       ArtifactRestrictionReasonCode?
-  project                     Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  grant                       ModelProcessingGrant          @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "AiDerivedArtifact_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
-  policyRevision              ProjectAiPolicyRevision       @relation(fields: [projectId, policyRevisionId], references: [projectId, id], map: "AiDerivedArtifact_policy_fkey", onDelete: NoAction, onUpdate: Cascade)
-  projectRagSnapshot          ProjectRagSnapshot            @relation(fields: [projectId, projectRagSnapshotId], references: [projectId, id], map: "AiDerivedArtifact_rag_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
+  project                     Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant                       ModelProcessingGrant           @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "AiDerivedArtifact_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
+  policyRevision              ProjectAiPolicyRevision        @relation(fields: [projectId, policyRevisionId], references: [projectId, id], map: "AiDerivedArtifact_policy_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectRagSnapshot          ProjectRagSnapshot             @relation(fields: [projectId, projectRagSnapshotId], references: [projectId, id], map: "AiDerivedArtifact_rag_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
   dependencies                ArtifactDependency[]
 
   @@unique([projectId, id])
@@ -838,25 +1300,25 @@ model AiDerivedArtifact {
 }
 
 model ArtifactDependency {
-  id                          String                        @id @default(uuid()) @db.Uuid
-  projectId                   String                        @db.Uuid
-  artifactId                  String                        @db.Uuid
+  id                          String                 @id @default(uuid()) @db.Uuid
+  projectId                   String                 @db.Uuid
+  artifactId                  String                 @db.Uuid
   dependencyKind              ArtifactDependencyKind
   originScope                 ContentOriginScope?
-  projectSourceId             String?                       @db.Uuid
-  sourceRevisionKey           String?                       @db.Uuid
-  sourceContentHash           String?                       @db.VarChar(64)
-  projectRagSnapshotId        String?                       @db.Uuid
-  snapshotManifestFingerprint String?                       @db.VarChar(64)
-  grantId                     String                        @db.Uuid
-  policyRevisionId            String                        @db.Uuid
+  projectSourceId             String?                @db.Uuid
+  sourceRevisionKey           String?                @db.Uuid
+  sourceContentHash           String?                @db.VarChar(64)
+  projectRagSnapshotId        String?                @db.Uuid
+  snapshotManifestFingerprint String?                @db.VarChar(64)
+  grantId                     String                 @db.Uuid
+  policyRevisionId            String                 @db.Uuid
   effectivePolicyVersion      Int
-  dependencyFingerprint       String                        @db.VarChar(64)
-  createdAt                   DateTime                      @default(now())
-  project                     Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  artifact                    AiDerivedArtifact             @relation(fields: [projectId, artifactId], references: [projectId, id], map: "ArtifactDependency_artifact_fkey", onDelete: Cascade, onUpdate: Cascade)
-  projectSource               ProjectSource?                @relation(fields: [projectId, projectSourceId], references: [projectId, id], map: "ArtifactDependency_project_source_fkey", onDelete: NoAction, onUpdate: Cascade)
-  projectRagSnapshot          ProjectRagSnapshot?           @relation(fields: [projectId, projectRagSnapshotId], references: [projectId, id], map: "ArtifactDependency_rag_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
+  dependencyFingerprint       String                 @db.VarChar(64)
+  createdAt                   DateTime               @default(now())
+  project                     Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  artifact                    AiDerivedArtifact      @relation(fields: [projectId, artifactId], references: [projectId, id], map: "ArtifactDependency_artifact_fkey", onDelete: Cascade, onUpdate: Cascade)
+  projectSource               ProjectSource?         @relation(fields: [projectId, projectSourceId], references: [projectId, id], map: "ArtifactDependency_project_source_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectRagSnapshot          ProjectRagSnapshot?    @relation(fields: [projectId, projectRagSnapshotId], references: [projectId, id], map: "ArtifactDependency_rag_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, id])
   @@unique([projectId, artifactId, dependencyFingerprint], map: "ArtifactDependency_artifact_fingerprint_key")
@@ -865,19 +1327,19 @@ model ArtifactDependency {
 }
 
 model ProjectScan {
-  id          String            @id @default(uuid()) @db.Uuid
-  projectId   String            @db.Uuid
+  id          String             @id @default(uuid()) @db.Uuid
+  projectId   String             @db.Uuid
   trigger     ProjectScanTrigger
-  status      ProjectScanStatus @default(running)
-  startedAt   DateTime          @default(now())
+  status      ProjectScanStatus  @default(running)
+  startedAt   DateTime           @default(now())
   completedAt DateTime?
-  error       String?           @db.Text
-  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  snapshots   ProjectSnapshot[] @relation("ScanSnapshots")
+  error       String?            @db.Text
+  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  snapshots   ProjectSnapshot[]  @relation("ScanSnapshots")
 
+  @@unique([projectId, id])
   @@index([projectId, startedAt])
   @@index([projectId, status])
-  @@unique([projectId, id])
 }
 
 model ProjectSnapshot {
@@ -894,31 +1356,31 @@ model ProjectSnapshot {
 }
 
 model ProjectAiPolicyRevision {
-  id                   String   @id @default(uuid()) @db.Uuid
-  projectId            String   @db.Uuid
-  revision             Int
-  policyFingerprint    String   @db.VarChar(64)
-  outboundEnabled      Boolean  @default(false)
-  embeddingEnabled     Boolean  @default(false)
-  autoExtractEnabled   Boolean  @default(false)
-  sourceSummaryEnabled Boolean  @default(false)
-  projectAnalysisEnabled Boolean @default(false)
-  generateWithContextEnabled Boolean @default(false)
-  profileFingerprint   String   @db.VarChar(64)
-  processorFingerprint String   @db.VarChar(64)
-  regionFingerprint    String   @db.VarChar(64)
-  retentionFingerprint String   @db.VarChar(64)
-  endpointFingerprint  String   @db.VarChar(64)
-  budgetFingerprint    String   @db.VarChar(64)
-  scannerFingerprint   String   @db.VarChar(64)
-  createdAt            DateTime @default(now())
-  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  currentPolicy        ProjectAiPolicy?
-  operationProfiles    ProjectAiPolicyOperationProfile[]
-  grants               ModelProcessingGrant[]
-  runs                 AiRun[]
-  auditEvents          AiAuditEvent[]
-  derivedArtifacts     AiDerivedArtifact[]
+  id                         String                            @id @default(uuid()) @db.Uuid
+  projectId                  String                            @db.Uuid
+  revision                   Int
+  policyFingerprint          String                            @db.VarChar(64)
+  outboundEnabled            Boolean                           @default(false)
+  embeddingEnabled           Boolean                           @default(false)
+  autoExtractEnabled         Boolean                           @default(false)
+  sourceSummaryEnabled       Boolean                           @default(false)
+  projectAnalysisEnabled     Boolean                           @default(false)
+  generateWithContextEnabled Boolean                           @default(false)
+  profileFingerprint         String                            @db.VarChar(64)
+  processorFingerprint       String                            @db.VarChar(64)
+  regionFingerprint          String                            @db.VarChar(64)
+  retentionFingerprint       String                            @db.VarChar(64)
+  endpointFingerprint        String                            @db.VarChar(64)
+  budgetFingerprint          String                            @db.VarChar(64)
+  scannerFingerprint         String                            @db.VarChar(64)
+  createdAt                  DateTime                          @default(now())
+  project                    Project                           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  currentPolicy              ProjectAiPolicy?
+  operationProfiles          ProjectAiPolicyOperationProfile[]
+  grants                     ModelProcessingGrant[]
+  runs                       AiRun[]
+  auditEvents                AiAuditEvent[]
+  derivedArtifacts           AiDerivedArtifact[]
 
   @@unique([projectId, id])
   @@unique([projectId, revision])
@@ -926,20 +1388,20 @@ model ProjectAiPolicyRevision {
 }
 
 model ProjectAiPolicyOperationProfile {
-  id                   String        @id @default(uuid()) @db.Uuid
-  projectId            String        @db.Uuid
-  policyRevisionId     String        @db.Uuid
+  id                   String                  @id @default(uuid()) @db.Uuid
+  projectId            String                  @db.Uuid
+  policyRevisionId     String                  @db.Uuid
   operation            AiOperation
-  profileFingerprint   String        @db.VarChar(64)
-  providerFingerprint  String        @db.VarChar(64)
-  modelFingerprint     String        @db.VarChar(64)
-  modelId              String        @db.VarChar(128)
-  processorFingerprint String        @db.VarChar(64)
-  regionFingerprint    String        @db.VarChar(64)
-  retentionFingerprint String        @db.VarChar(64)
-  endpointFingerprint  String        @db.VarChar(64)
-  createdAt            DateTime      @default(now())
-  project              Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  profileFingerprint   String                  @db.VarChar(64)
+  providerFingerprint  String                  @db.VarChar(64)
+  modelFingerprint     String                  @db.VarChar(64)
+  modelId              String                  @db.VarChar(128)
+  processorFingerprint String                  @db.VarChar(64)
+  regionFingerprint    String                  @db.VarChar(64)
+  retentionFingerprint String                  @db.VarChar(64)
+  endpointFingerprint  String                  @db.VarChar(64)
+  createdAt            DateTime                @default(now())
+  project              Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
   policyRevision       ProjectAiPolicyRevision @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, id])
@@ -948,53 +1410,53 @@ model ProjectAiPolicyOperationProfile {
 }
 
 model ProjectAiPolicy {
-  projectId        String                     @id @db.Uuid
-  currentRevisionId String                    @db.Uuid
-  createdAt        DateTime                   @default(now())
-  updatedAt        DateTime                   @updatedAt
-  project          Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  currentRevision  ProjectAiPolicyRevision    @relation(fields: [projectId, currentRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectId         String                  @id @db.Uuid
+  currentRevisionId String                  @db.Uuid
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  project           Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  currentRevision   ProjectAiPolicyRevision @relation(fields: [projectId, currentRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, currentRevisionId])
 }
 
 model ModelProcessingGrant {
-  id                         String                         @id @default(uuid()) @db.Uuid
-  projectId                  String                         @db.Uuid
-  sourceKind                 ModelProcessingGrantSourceKind @default(manual_text)
-  status                     ModelProcessingGrantStatus     @default(draft)
-  policyRevisionId           String                         @db.Uuid
-  profileFingerprint         String                         @db.VarChar(64)
-  providerFingerprint        String                         @db.VarChar(64)
-  modelFingerprint           String                         @db.VarChar(64)
-  modelId                    String                         @db.VarChar(128)
-  processorFingerprint       String                         @db.VarChar(64)
-  regionFingerprint          String                         @db.VarChar(64)
-  retentionFingerprint       String                         @db.VarChar(64)
-  endpointFingerprint        String                         @db.VarChar(64)
-  grantFingerprint           String                         @db.VarChar(64)
-  effectivePolicyVersion     Int
-  budgetFingerprint           String                         @db.VarChar(64)
-  scannerFingerprint         String                         @db.VarChar(64)
-  scannerVersion             String                         @db.VarChar(64)
-  budgetProfile              AiBudgetProfile
-  issuedBy                   String                         @db.VarChar(128)
-  purposeCode                String                         @db.VarChar(64)
-  issuedAt                   DateTime?
-  expiresAt                  DateTime?
-  revokedAt                  DateTime?
-  revocationReasonCode       ModelProcessingGrantRevocationReasonCode?
-  createdAt                  DateTime                       @default(now())
-  updatedAt                  DateTime                       @updatedAt
-  project                    Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  policyRevision             ProjectAiPolicyRevision        @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  sources                    ModelProcessingGrantSource[]
-  operations                 ModelProcessingGrantOperation[]
-  runs                       AiRun[]
-  auditEvents                AiAuditEvent[]
-  corpusGenerations          ProjectCorpusGeneration[]
-  indexGenerations           IndexGeneration[]
-  derivedArtifacts           AiDerivedArtifact[]
+  id                     String                                    @id @default(uuid()) @db.Uuid
+  projectId              String                                    @db.Uuid
+  sourceKind             ModelProcessingGrantSourceKind            @default(manual_text)
+  status                 ModelProcessingGrantStatus                @default(draft)
+  policyRevisionId       String                                    @db.Uuid
+  profileFingerprint     String                                    @db.VarChar(64)
+  providerFingerprint    String                                    @db.VarChar(64)
+  modelFingerprint       String                                    @db.VarChar(64)
+  modelId                String                                    @db.VarChar(128)
+  processorFingerprint   String                                    @db.VarChar(64)
+  regionFingerprint      String                                    @db.VarChar(64)
+  retentionFingerprint   String                                    @db.VarChar(64)
+  endpointFingerprint    String                                    @db.VarChar(64)
+  grantFingerprint       String                                    @db.VarChar(64)
+  effectivePolicyVersion Int
+  budgetFingerprint      String                                    @db.VarChar(64)
+  scannerFingerprint     String                                    @db.VarChar(64)
+  scannerVersion         String                                    @db.VarChar(64)
+  budgetProfile          AiBudgetProfile
+  issuedBy               String                                    @db.VarChar(128)
+  purposeCode            String                                    @db.VarChar(64)
+  issuedAt               DateTime?
+  expiresAt              DateTime?
+  revokedAt              DateTime?
+  revocationReasonCode   ModelProcessingGrantRevocationReasonCode?
+  createdAt              DateTime                                  @default(now())
+  updatedAt              DateTime                                  @updatedAt
+  project                Project                                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  policyRevision         ProjectAiPolicyRevision                   @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  sources                ModelProcessingGrantSource[]
+  operations             ModelProcessingGrantOperation[]
+  runs                   AiRun[]
+  auditEvents            AiAuditEvent[]
+  corpusGenerations      ProjectCorpusGeneration[]
+  indexGenerations       IndexGeneration[]
+  derivedArtifacts       AiDerivedArtifact[]
 
   @@unique([projectId, id])
   @@unique([projectId, id, policyRevisionId])
@@ -1004,17 +1466,17 @@ model ModelProcessingGrant {
 }
 
 model ModelProcessingGrantSource {
-  id                String                @id @default(uuid()) @db.Uuid
-  projectId         String                @db.Uuid
-  grantId           String                @db.Uuid
-  sourceId          String                @db.Uuid
-  contentFingerprint String                @db.VarChar(64)
-  contentBytes      Int
-  createdAt         DateTime              @default(now())
-  project           Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  grant             ModelProcessingGrant  @relation(fields: [projectId, grantId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  inputSources      AiRunInputSource[]
-  source            ProjectSource         @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  id                      String                         @id @default(uuid()) @db.Uuid
+  projectId               String                         @db.Uuid
+  grantId                 String                         @db.Uuid
+  sourceId                String                         @db.Uuid
+  contentFingerprint      String                         @db.VarChar(64)
+  contentBytes            Int
+  createdAt               DateTime                       @default(now())
+  project                 Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant                   ModelProcessingGrant           @relation(fields: [projectId, grantId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  inputSources            AiRunInputSource[]
+  source                  ProjectSource                  @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   corpusGenerationEntries ProjectCorpusGenerationEntry[]
 
   @@unique([projectId, id])
@@ -1024,14 +1486,14 @@ model ModelProcessingGrantSource {
 }
 
 model ModelProcessingGrantOperation {
-  id         String                 @id @default(uuid()) @db.Uuid
-  projectId  String                 @db.Uuid
-  grantId    String                 @db.Uuid
-  operation  AiOperation
-  createdAt  DateTime               @default(now())
-  project    Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  grant      ModelProcessingGrant  @relation(fields: [projectId, grantId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  runs       AiRun[]
+  id        String               @id @default(uuid()) @db.Uuid
+  projectId String               @db.Uuid
+  grantId   String               @db.Uuid
+  operation AiOperation
+  createdAt DateTime             @default(now())
+  project   Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant     ModelProcessingGrant @relation(fields: [projectId, grantId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  runs      AiRun[]
 
   @@unique([projectId, id])
   @@unique([projectId, grantId])
@@ -1040,50 +1502,50 @@ model ModelProcessingGrantOperation {
 }
 
 model AiRun {
-  id                            String                       @id @default(uuid()) @db.Uuid
-  projectId                     String                       @db.Uuid
-  grantId                       String                       @db.Uuid
-  policyRevisionId              String                       @db.Uuid
+  id                            String                        @id @default(uuid()) @db.Uuid
+  projectId                     String                        @db.Uuid
+  grantId                       String                        @db.Uuid
+  policyRevisionId              String                        @db.Uuid
   operation                     AiOperation
-  operationKey                  String                       @db.VarChar(64)
-  operationKeySchemaVersion     String                       @db.VarChar(32)
-  inputManifestFingerprint     String                       @db.VarChar(64)
-  promptFingerprint             String                       @db.VarChar(64)
-  promptVersion                String                       @db.VarChar(128)
-  providerFingerprint          String                       @db.VarChar(64)
-  modelId                      String                       @db.VarChar(128)
-  modelFingerprint              String                       @db.VarChar(64)
-  profileFingerprint            String                       @db.VarChar(64)
-  grantFingerprint              String                       @db.VarChar(64)
+  operationKey                  String                        @db.VarChar(64)
+  operationKeySchemaVersion     String                        @db.VarChar(32)
+  inputManifestFingerprint      String                        @db.VarChar(64)
+  promptFingerprint             String                        @db.VarChar(64)
+  promptVersion                 String                        @db.VarChar(128)
+  providerFingerprint           String                        @db.VarChar(64)
+  modelId                       String                        @db.VarChar(128)
+  modelFingerprint              String                        @db.VarChar(64)
+  profileFingerprint            String                        @db.VarChar(64)
+  grantFingerprint              String                        @db.VarChar(64)
   effectivePolicyVersion        Int
-  processorFingerprint          String                       @db.VarChar(64)
-  processorEndpointFingerprint String                       @db.VarChar(64)
-  processorRegionFingerprint    String                       @db.VarChar(64)
-  processorRetentionFingerprint String                       @db.VarChar(64)
-  noRagSnapshotMarker           String                       @db.VarChar(32)
-  status                        AiRunStatus                  @default(queued)
-  inputBytes                    Int                          @default(0)
-  outputBytes                   Int                          @default(0)
-  maxInputTokens                Int                          @default(0)
-  maxOutputTokens               Int                          @default(0)
-  maxRequests                   Int                          @default(1)
-  maxBudgetMicros               Int                          @default(0)
-  inputTokens                   Int                          @default(0)
-  outputTokens                  Int                          @default(0)
-  requestCount                  Int                          @default(0)
-  budgetUsedMicros              Int                          @default(0)
-  pricingSnapshotId             String?                      @db.VarChar(128)
+  processorFingerprint          String                        @db.VarChar(64)
+  processorEndpointFingerprint  String                        @db.VarChar(64)
+  processorRegionFingerprint    String                        @db.VarChar(64)
+  processorRetentionFingerprint String                        @db.VarChar(64)
+  noRagSnapshotMarker           String                        @db.VarChar(32)
+  status                        AiRunStatus                   @default(queued)
+  inputBytes                    Int                           @default(0)
+  outputBytes                   Int                           @default(0)
+  maxInputTokens                Int                           @default(0)
+  maxOutputTokens               Int                           @default(0)
+  maxRequests                   Int                           @default(1)
+  maxBudgetMicros               Int                           @default(0)
+  inputTokens                   Int                           @default(0)
+  outputTokens                  Int                           @default(0)
+  requestCount                  Int                           @default(0)
+  budgetUsedMicros              Int                           @default(0)
+  pricingSnapshotId             String?                       @db.VarChar(128)
   budgetStatus                  AiBudgetStatus
   safeErrorCode                 AiSafeErrorCode?
   httpStatus                    Int?
-  providerRequestId             String?                      @db.VarChar(512)
-  providerResponseId            String?                      @db.VarChar(512)
-  createdAt                     DateTime                     @default(now())
-  claimedAt                    DateTime?
-  sentAt                       DateTime?
-  completedAt                  DateTime?
-  project                       Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  grant                         ModelProcessingGrant         @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], onDelete: NoAction, onUpdate: Cascade)
+  providerRequestId             String?                       @db.VarChar(512)
+  providerResponseId            String?                       @db.VarChar(512)
+  createdAt                     DateTime                      @default(now())
+  claimedAt                     DateTime?
+  sentAt                        DateTime?
+  completedAt                   DateTime?
+  project                       Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant                         ModelProcessingGrant          @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], onDelete: NoAction, onUpdate: Cascade)
   policyRevision                ProjectAiPolicyRevision       @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   operationGrant                ModelProcessingGrantOperation @relation(fields: [projectId, grantId, operation], references: [projectId, grantId, operation], onDelete: NoAction, onUpdate: Cascade)
   attempts                      AiRunAttempt[]
@@ -1100,25 +1562,25 @@ model AiRun {
 }
 
 model AiRunAttempt {
-  id                  String             @id @default(uuid()) @db.Uuid
-  projectId           String             @db.Uuid
-  aiRunId             String             @db.Uuid
-  attemptNumber       Int
-  dispatchToken       String             @unique @db.VarChar(128)
-  status              AiRunAttemptStatus @default(sent)
-  providerRequestId   String?            @db.VarChar(512)
-  providerResponseId  String?            @db.VarChar(512)
-  httpStatus          Int?
-  inputTokens         Int                @default(0)
-  outputTokens        Int                @default(0)
-  requestCount        Int                @default(1)
-  safeErrorCode       AiSafeErrorCode?
-  createdAt           DateTime           @default(now())
-  sentAt              DateTime           @default(now())
-  completedAt         DateTime?
-  project             Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  aiRun               AiRun              @relation(fields: [projectId, aiRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  auditEvents         AiAuditEvent[]
+  id                 String             @id @default(uuid()) @db.Uuid
+  projectId          String             @db.Uuid
+  aiRunId            String             @db.Uuid
+  attemptNumber      Int
+  dispatchToken      String             @unique @db.VarChar(128)
+  status             AiRunAttemptStatus @default(sent)
+  providerRequestId  String?            @db.VarChar(512)
+  providerResponseId String?            @db.VarChar(512)
+  httpStatus         Int?
+  inputTokens        Int                @default(0)
+  outputTokens       Int                @default(0)
+  requestCount       Int                @default(1)
+  safeErrorCode      AiSafeErrorCode?
+  createdAt          DateTime           @default(now())
+  sentAt             DateTime           @default(now())
+  completedAt        DateTime?
+  project            Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  aiRun              AiRun              @relation(fields: [projectId, aiRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  auditEvents        AiAuditEvent[]
 
   @@unique([projectId, id])
   @@unique([projectId, id, aiRunId])
@@ -1127,21 +1589,21 @@ model AiRunAttempt {
 }
 
 model AiRunInputSource {
-  id                          String                       @id @default(uuid()) @db.Uuid
-  projectId                   String                       @db.Uuid
-  aiRunId                     String                       @db.Uuid
-  grantId                     String                       @db.Uuid
-  sourceId                    String                       @db.Uuid
-  contentFingerprint          String                       @db.VarChar(64)
+  id                          String                     @id @default(uuid()) @db.Uuid
+  projectId                   String                     @db.Uuid
+  aiRunId                     String                     @db.Uuid
+  grantId                     String                     @db.Uuid
+  sourceId                    String                     @db.Uuid
+  contentFingerprint          String                     @db.VarChar(64)
   contentBytes                Int
-  scannerVersion              String                       @db.VarChar(64)
+  scannerVersion              String                     @db.VarChar(64)
   safeScanResult              AiSafeScanResult
-  evidenceManifestFingerprint String                       @db.VarChar(64)
-  createdAt                   DateTime                     @default(now())
-  project                     Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  aiRun                       AiRun                        @relation(fields: [projectId, aiRunId, grantId], references: [projectId, id, grantId], onDelete: NoAction, onUpdate: Cascade)
-  grantSource                 ModelProcessingGrantSource   @relation(fields: [projectId, grantId, sourceId], references: [projectId, grantId, sourceId], onDelete: NoAction, onUpdate: Cascade)
-  source                      ProjectSource                @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  evidenceManifestFingerprint String                     @db.VarChar(64)
+  createdAt                   DateTime                   @default(now())
+  project                     Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  aiRun                       AiRun                      @relation(fields: [projectId, aiRunId, grantId], references: [projectId, id, grantId], onDelete: NoAction, onUpdate: Cascade)
+  grantSource                 ModelProcessingGrantSource @relation(fields: [projectId, grantId, sourceId], references: [projectId, grantId, sourceId], onDelete: NoAction, onUpdate: Cascade)
+  source                      ProjectSource              @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   candidateClaims             AiCandidateClaim[]
 
   @@unique([projectId, id])
@@ -1150,26 +1612,26 @@ model AiRunInputSource {
 }
 
 model AiAuditEvent {
-  id                  String             @id @default(uuid()) @db.Uuid
-  projectId           String             @db.Uuid
-  policyRevisionId    String             @db.Uuid
-  eventType           AiAuditEventType
-  safeCode            AiSafeErrorCode?
-  eventFingerprint    String?            @db.VarChar(64)
-  fingerprintCount    Int?
-  byteCount           Int?
-  tokenCount          Int?
-  requestCount        Int?
-  httpStatus          Int?
-  grantId             String?            @db.Uuid
-  aiRunId             String?            @db.Uuid
-  attemptId           String?            @db.Uuid
-  createdAt           DateTime           @default(now())
-  project             Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  grant               ModelProcessingGrant? @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], onDelete: NoAction, onUpdate: Cascade)
-  policyRevision      ProjectAiPolicyRevision @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  aiRun               AiRun?             @relation(fields: [projectId, aiRunId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], onDelete: NoAction, onUpdate: Cascade)
-  attempt             AiRunAttempt?      @relation(fields: [projectId, attemptId, aiRunId], references: [projectId, id, aiRunId], onDelete: NoAction, onUpdate: Cascade)
+  id               String                  @id @default(uuid()) @db.Uuid
+  projectId        String                  @db.Uuid
+  policyRevisionId String                  @db.Uuid
+  eventType        AiAuditEventType
+  safeCode         AiSafeErrorCode?
+  eventFingerprint String?                 @db.VarChar(64)
+  fingerprintCount Int?
+  byteCount        Int?
+  tokenCount       Int?
+  requestCount     Int?
+  httpStatus       Int?
+  grantId          String?                 @db.Uuid
+  aiRunId          String?                 @db.Uuid
+  attemptId        String?                 @db.Uuid
+  createdAt        DateTime                @default(now())
+  project          Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant            ModelProcessingGrant?   @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], onDelete: NoAction, onUpdate: Cascade)
+  policyRevision   ProjectAiPolicyRevision @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  aiRun            AiRun?                  @relation(fields: [projectId, aiRunId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], onDelete: NoAction, onUpdate: Cascade)
+  attempt          AiRunAttempt?           @relation(fields: [projectId, attemptId, aiRunId], references: [projectId, id, aiRunId], onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, id])
   @@index([projectId, policyRevisionId])
@@ -1180,15 +1642,15 @@ model AiAuditEvent {
 }
 
 model AiCandidateBatch {
-  id                       String             @id @default(uuid()) @db.Uuid
-  projectId                String             @db.Uuid
-  aiRunId                  String             @db.Uuid
-  candidateSetFingerprint  String             @db.VarChar(64)
-  candidateCount           Int
-  createdAt                DateTime           @default(now())
-  project                  Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  aiRun                    AiRun              @relation(fields: [projectId, aiRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  claims                   AiCandidateClaim[]
+  id                      String             @id @default(uuid()) @db.Uuid
+  projectId               String             @db.Uuid
+  aiRunId                 String             @db.Uuid
+  candidateSetFingerprint String             @db.VarChar(64)
+  candidateCount          Int
+  createdAt               DateTime           @default(now())
+  project                 Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  aiRun                   AiRun              @relation(fields: [projectId, aiRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  claims                  AiCandidateClaim[]
 
   @@unique([projectId, id])
   @@unique([projectId, id, aiRunId])
@@ -1197,28 +1659,28 @@ model AiCandidateBatch {
 }
 
 model AiCandidateClaim {
-  id                        String                    @id @default(uuid()) @db.Uuid
-  projectId                 String                    @db.Uuid
-  batchId                   String                    @db.Uuid
-  aiRunId                   String                    @db.Uuid
-  sourceId                  String                    @db.Uuid
-  itemType                  ProjectItemType
-  statement                 String                    @db.Text
-  statementFingerprint      String                    @db.VarChar(64)
-  sourceExcerpt             String                    @db.Text
-  sourceExcerptFingerprint  String                    @db.VarChar(64)
-  sourceStart               Int
-  sourceEnd                 Int
-  reviewStatus              AiCandidateReviewStatus   @default(candidate)
-  reviewedAt                DateTime?
-  reviewedBy                String?                   @db.VarChar(128)
-  projectItemId             String                    @db.Uuid
-  createdAt                 DateTime                  @default(now())
-  project                   Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  batch                     AiCandidateBatch          @relation(fields: [projectId, batchId, aiRunId], references: [projectId, id, aiRunId], onDelete: NoAction, onUpdate: Cascade)
-  runInput                   AiRunInputSource          @relation(fields: [projectId, aiRunId, sourceId], references: [projectId, aiRunId, sourceId], onDelete: NoAction, onUpdate: Cascade)
-  source                     ProjectSource             @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  projectItem                ProjectItem               @relation("AiCandidateItem", fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  id                       String                  @id @default(uuid()) @db.Uuid
+  projectId                String                  @db.Uuid
+  batchId                  String                  @db.Uuid
+  aiRunId                  String                  @db.Uuid
+  sourceId                 String                  @db.Uuid
+  itemType                 ProjectItemType
+  statement                String                  @db.Text
+  statementFingerprint     String                  @db.VarChar(64)
+  sourceExcerpt            String                  @db.Text
+  sourceExcerptFingerprint String                  @db.VarChar(64)
+  sourceStart              Int
+  sourceEnd                Int
+  reviewStatus             AiCandidateReviewStatus @default(candidate)
+  reviewedAt               DateTime?
+  reviewedBy               String?                 @db.VarChar(128)
+  projectItemId            String                  @db.Uuid
+  createdAt                DateTime                @default(now())
+  project                  Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  batch                    AiCandidateBatch        @relation(fields: [projectId, batchId, aiRunId], references: [projectId, id, aiRunId], onDelete: NoAction, onUpdate: Cascade)
+  runInput                 AiRunInputSource        @relation(fields: [projectId, aiRunId, sourceId], references: [projectId, aiRunId, sourceId], onDelete: NoAction, onUpdate: Cascade)
+  source                   ProjectSource           @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectItem              ProjectItem             @relation("AiCandidateItem", fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, id])
   @@unique([projectId, batchId, sourceId, statementFingerprint, sourceExcerptFingerprint], map: "AiCandidateClaim_batch_source_statement_excerpt_key")

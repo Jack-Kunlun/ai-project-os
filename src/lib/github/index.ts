@@ -21,3 +21,15 @@ export {
   type VerifiedGitHubTree,
   type VerifiedGitHubTreeEntry,
 } from "./read-only-client";
+export {
+  GITHUB_AUTH_REF,
+  GITHUB_REPOSITORY_LEDGER_VERSION,
+  GITHUB_SOFT_EXCLUDE_CLASSES,
+  GitHubLedgerError,
+  createGitHubRepositoryLedgerService,
+  type ConnectRepositoryInput,
+  type GitHubLedgerErrorCode,
+  type GitHubRepositoryLedgerService,
+  type RepositoryLinkConfigInput,
+  type RepositoryLinkStatus,
+} from "./repository-ledger";

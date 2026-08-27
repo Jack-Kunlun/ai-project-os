@@ -11,6 +11,24 @@ export {
 export { classifyProviderResult } from "./provider-result";
 export { checkAiRuntimeAvailability, loadAiRuntimeConfig } from "./config-contract";
 export {
+  OPENAI_RESPONSES_AUTO_EXTRACT_PROMPT_FINGERPRINT,
+  OPENAI_RESPONSES_AUTO_EXTRACT_PROMPT_VERSION,
+  OPENAI_RESPONSES_CONTRACT_VERSION,
+  OPENAI_RESPONSES_ENDPOINT,
+  OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
+  OPENAI_RESPONSES_PROFILE_VERSION,
+  OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+  OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+  buildOpenAiAutoExtractTransportPlan,
+} from "./openai-responses-contract";
+export type {
+  OpenAiAutoExtractRequest,
+  OpenAiAutoExtractSource,
+  OpenAiResponsesAutoExtractBody,
+  OpenAiResponsesProfile,
+  OpenAiResponsesTransportPlan,
+} from "./openai-responses-contract";
+export {
   AiRuntimeServiceError,
   isAiRuntimeServiceError,
   throwAiRuntimeServiceError,

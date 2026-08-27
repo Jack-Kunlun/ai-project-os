@@ -52,6 +52,7 @@ function completedResponse(): Record<string, unknown> {
   const outputText = JSON.stringify({
     candidates: [
       {
+        itemType: "decision",
         statement: "The owner is Cedar.",
         sourceId,
         sourceExcerpt: "Owner is Cedar.",
@@ -152,6 +153,7 @@ test("transport performs one fixed-origin no-redirect POST and returns verified 
     usage: { inputTokens: 20, outputTokens: 10, requestCount: 1 },
   });
   assert.equal(result.verifiedResponse?.candidates.length, 1);
+  assert.equal(result.verifiedResponse?.candidates[0]?.itemType, "decision");
   assert.equal(
     result.verifiedResponse?.candidates[0]?.sourceExcerpt,
     "Owner is Cedar.",

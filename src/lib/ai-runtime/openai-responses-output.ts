@@ -7,10 +7,15 @@ import {
 import type { ProviderResultInput, SafeUsage } from "./types";
 
 export const OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION =
-  "openai-responses-output:v1" as const;
+  "openai-responses-output:v2" as const;
 
 const ROOT_OUTPUT_FIELDS = ["candidates"] as const;
-const CANDIDATE_FIELDS = ["statement", "sourceId", "sourceExcerpt"] as const;
+const CANDIDATE_FIELDS = [
+  "itemType",
+  "statement",
+  "sourceId",
+  "sourceExcerpt",
+] as const;
 const METADATA_FIELDS = ["operation_key", "run_id"] as const;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -26,6 +31,7 @@ const MAX_STATEMENT_LENGTH = 20_000;
 const MAX_SOURCE_EXCERPT_LENGTH = 10_000;
 
 export interface VerifiedOpenAiAutoExtractCandidate {
+  itemType: "decision" | "progress" | "issue" | "risk";
   statement: string;
   statementFingerprint: string;
   sourceId: string;
@@ -217,6 +223,7 @@ export function buildOpenAiCandidateSetFingerprint(
       JSON.stringify({
         contractVersion: OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION,
         candidates: candidates.map((candidate) => ({
+          itemType: candidate.itemType,
           statement: candidate.statement,
           sourceId: candidate.sourceId,
           sourceExcerpt: candidate.sourceExcerpt,
@@ -367,7 +374,17 @@ function parseCandidateSet(
       source.slice(0, sourceStartCodeUnits),
       "utf8",
     );
+    const itemType = requiredDataField(rawCandidate, "itemType");
+    if (
+      itemType !== "decision" &&
+      itemType !== "progress" &&
+      itemType !== "issue" &&
+      itemType !== "risk"
+    ) {
+      invalidResponse();
+    }
     return Object.freeze({
+      itemType,
       statement,
       statementFingerprint: buildOpenAiCandidateStatementFingerprint(statement),
       sourceId,

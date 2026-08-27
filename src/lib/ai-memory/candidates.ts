@@ -40,6 +40,7 @@ const candidateClaimSelect = {
   batchId: true,
   aiRunId: true,
   sourceId: true,
+  itemType: true,
   statement: true,
   statementFingerprint: true,
   sourceExcerpt: true,
@@ -49,7 +50,7 @@ const candidateClaimSelect = {
   reviewStatus: true,
   reviewedAt: true,
   reviewedBy: true,
-  acceptedItemId: true,
+  projectItemId: true,
   createdAt: true,
   batch: {
     select: {
@@ -57,7 +58,7 @@ const candidateClaimSelect = {
       candidateCount: true,
     },
   },
-  acceptedItem: {
+  projectItem: {
     select: {
       id: true,
       type: true,
@@ -292,6 +293,7 @@ function normalizeVerifiedResponse(value: unknown): NormalizedVerifiedResponse {
   const normalizedCandidates = denseDataArray(dataField(value, "candidates")).map(
     (rawCandidate): Readonly<VerifiedOpenAiAutoExtractCandidate> => {
       const fields = [
+        "itemType",
         "statement",
         "statementFingerprint",
         "sourceId",
@@ -304,6 +306,15 @@ function normalizeVerifiedResponse(value: unknown): NormalizedVerifiedResponse {
         return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
       }
       const statement = safeText(dataField(rawCandidate, "statement"), 20_000);
+      const itemType = dataField(rawCandidate, "itemType");
+      if (
+        itemType !== ProjectItemType.decision &&
+        itemType !== ProjectItemType.progress &&
+        itemType !== ProjectItemType.issue &&
+        itemType !== ProjectItemType.risk
+      ) {
+        return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
+      }
       const sourceExcerpt = safeText(dataField(rawCandidate, "sourceExcerpt"), 10_000);
       const sourceId = validateUuid(dataField(rawCandidate, "sourceId"));
       const statementFingerprint = validateFingerprint(
@@ -322,6 +333,7 @@ function normalizeVerifiedResponse(value: unknown): NormalizedVerifiedResponse {
         return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
       }
       return Object.freeze({
+        itemType,
         statement,
         statementFingerprint,
         sourceId,
@@ -380,6 +392,7 @@ function candidateIdentityFingerprint(
   candidate: Pick<
     VerifiedOpenAiAutoExtractCandidate,
     | "sourceId"
+    | "itemType"
     | "statement"
     | "statementFingerprint"
     | "sourceExcerpt"
@@ -392,6 +405,7 @@ function candidateIdentityFingerprint(
     .update(
       JSON.stringify({
         sourceId: candidate.sourceId,
+        itemType: candidate.itemType,
         statement: candidate.statement,
         statementFingerprint: candidate.statementFingerprint,
         sourceExcerpt: candidate.sourceExcerpt,
@@ -476,6 +490,12 @@ function normalizeItemInput(value: AcceptAiCandidateRequest["item"]): {
     return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
   }
   return { type: value.type, title, content, occurredAt };
+}
+
+function candidateTitle(statement: string): string {
+  const characters = Array.from(statement.trim());
+  if (characters.length <= 160) return characters.join("");
+  return `${characters.slice(0, 157).join("")}...`;
 }
 
 class AiCandidateServiceImpl {
@@ -616,6 +636,10 @@ class AiCandidateServiceImpl {
       }
 
       const batchId = randomUUID();
+      const publishedAt = this.now();
+      if (!Number.isFinite(publishedAt.getTime())) {
+        return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
+      }
       await tx.aiCandidateBatch.create({
         data: {
           id: batchId,
@@ -623,23 +647,71 @@ class AiCandidateServiceImpl {
           aiRunId,
           candidateSetFingerprint: response.candidateSetFingerprint,
           candidateCount: response.candidates.length,
+          createdAt: publishedAt,
         },
       });
-      if (response.candidates.length > 0) {
-        await tx.aiCandidateClaim.createMany({
-          data: response.candidates.map((candidate) => ({
-            id: randomUUID(),
+      for (const candidate of response.candidates) {
+        const candidateId = randomUUID();
+        const projectItemId = randomUUID();
+        const source = sourceById.get(candidate.sourceId);
+        if (source === undefined) {
+          return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
+        }
+        const createdItem = await tx.projectItem.create({
+          data: {
+            id: projectItemId,
+            projectId,
+            type: candidate.itemType,
+            reviewStatus: ProjectItemReviewStatus.candidate,
+            sourceId: candidate.sourceId,
+            title: candidateTitle(candidate.statement),
+            content: candidate.statement,
+            sourceExcerpt: candidate.sourceExcerpt,
+            occurredAt: null,
+            confirmedAt: null,
+            metadata: {
+              origin: "ai_candidate",
+              aiRunId,
+              candidateClaimId: candidateId,
+              statementFingerprint: candidate.statementFingerprint,
+              candidateSetFingerprint: response.candidateSetFingerprint,
+            },
+            createdAt: publishedAt,
+            updatedAt: publishedAt,
+          },
+        });
+        const evidence = await createPrimaryProjectItemEvidence(tx, {
+          projectId,
+          projectItemId,
+          projectSourceId: candidate.sourceId,
+          sourceText: source.source.contentText,
+          sourceExcerpt: candidate.sourceExcerpt,
+          createdAt: publishedAt,
+        });
+        await appendProjectItemRevision(tx, {
+          item: createdItem,
+          action: ProjectItemRevisionAction.aiCreated,
+          actorId: "ai:model",
+          evidences: [evidence],
+          createdAt: publishedAt,
+        });
+        await tx.aiCandidateClaim.create({
+          data: {
+            id: candidateId,
             projectId,
             batchId,
             aiRunId,
             sourceId: candidate.sourceId,
+            itemType: candidate.itemType,
             statement: candidate.statement,
             statementFingerprint: candidate.statementFingerprint,
             sourceExcerpt: candidate.sourceExcerpt,
             sourceExcerptFingerprint: candidate.sourceExcerptFingerprint,
             sourceStart: candidate.sourceStart,
             sourceEnd: candidate.sourceEnd,
-          })),
+            projectItemId,
+            createdAt: publishedAt,
+          },
         });
       }
       const created = await tx.aiCandidateBatch.findUnique({
@@ -707,11 +779,8 @@ class AiCandidateServiceImpl {
           id: true,
           aiRunId: true,
           sourceId: true,
-          sourceExcerpt: true,
-          statementFingerprint: true,
+          projectItemId: true,
           reviewStatus: true,
-          batch: { select: { candidateSetFingerprint: true } },
-          source: { select: { contentText: true } },
         },
       });
       if (claim === null) return throwAiCandidateError("AI_CANDIDATE_NOT_FOUND");
@@ -723,48 +792,34 @@ class AiCandidateServiceImpl {
       if (!Number.isFinite(reviewedAt.getTime())) {
         return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
       }
-      const acceptedItemId = randomUUID();
-      const createdItem = await tx.projectItem.create({
-        data: {
-          id: acceptedItemId,
+      const evidence = await tx.projectItemEvidence.findFirst({
+        where: {
           projectId,
-          type: itemInput.type,
-          reviewStatus: ProjectItemReviewStatus.candidate,
-          sourceId: claim.sourceId,
-          title: itemInput.title,
-          content: itemInput.content,
-          sourceExcerpt: claim.sourceExcerpt,
-          occurredAt: itemInput.occurredAt,
-          confirmedAt: null,
-          metadata: {
-            origin: "ai_candidate",
-            aiRunId: claim.aiRunId,
-            candidateClaimId: claim.id,
-            statementFingerprint: claim.statementFingerprint,
-            candidateSetFingerprint: claim.batch.candidateSetFingerprint,
-          },
-          createdAt: reviewedAt,
-          updatedAt: reviewedAt,
+          projectItemId: claim.projectItemId,
+          role: "primary",
+          evidenceState: "active",
+          isActive: true,
+        },
+        select: {
+          id: true,
+          role: true,
+          projectSourceId: true,
+          sourceExcerpt: true,
+          sourceExcerptFingerprint: true,
+          rangeStart: true,
+          rangeEnd: true,
         },
       });
-      const evidence = await createPrimaryProjectItemEvidence(tx, {
-        projectId,
-        projectItemId: acceptedItemId,
-        projectSourceId: claim.sourceId,
-        sourceText: claim.source.contentText,
-        sourceExcerpt: claim.sourceExcerpt,
-        createdAt: reviewedAt,
-      });
-      await appendProjectItemRevision(tx, {
-        item: createdItem,
-        action: ProjectItemRevisionAction.aiCreated,
-        actorId: "ai:model",
-        evidences: [evidence],
-        createdAt: reviewedAt,
-      });
+      if (evidence === null) {
+        return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
+      }
       const confirmedItem = await tx.projectItem.update({
-        where: { projectId_id: { projectId, id: acceptedItemId } },
+        where: { projectId_id: { projectId, id: claim.projectItemId } },
         data: {
+          type: itemInput.type,
+          title: itemInput.title,
+          content: itemInput.content,
+          occurredAt: itemInput.occurredAt,
           reviewStatus: ProjectItemReviewStatus.confirmed,
           confirmedAt: reviewedAt,
           updatedAt: reviewedAt,
@@ -787,7 +842,6 @@ class AiCandidateServiceImpl {
           reviewStatus: AiCandidateReviewStatus.accepted,
           reviewedAt,
           reviewedBy,
-          acceptedItemId,
         },
       });
       if (updated.count !== 1) {
@@ -812,7 +866,7 @@ class AiCandidateServiceImpl {
     return this.serializable(async (tx) => {
       const existing = await tx.aiCandidateClaim.findUnique({
         where: { projectId_id: { projectId, id: candidateId } },
-        select: { reviewStatus: true },
+        select: { reviewStatus: true, projectItemId: true },
       });
       if (existing === null) return throwAiCandidateError("AI_CANDIDATE_NOT_FOUND");
       if (existing.reviewStatus !== AiCandidateReviewStatus.candidate) {
@@ -822,6 +876,42 @@ class AiCandidateServiceImpl {
       if (!Number.isFinite(reviewedAt.getTime())) {
         return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
       }
+      const evidence = await tx.projectItemEvidence.findFirst({
+        where: {
+          projectId,
+          projectItemId: existing.projectItemId,
+          role: "primary",
+          evidenceState: "active",
+          isActive: true,
+        },
+        select: {
+          id: true,
+          role: true,
+          projectSourceId: true,
+          sourceExcerpt: true,
+          sourceExcerptFingerprint: true,
+          rangeStart: true,
+          rangeEnd: true,
+        },
+      });
+      if (evidence === null) {
+        return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
+      }
+      const dismissedItem = await tx.projectItem.update({
+        where: { projectId_id: { projectId, id: existing.projectItemId } },
+        data: {
+          reviewStatus: ProjectItemReviewStatus.dismissed,
+          confirmedAt: null,
+          updatedAt: reviewedAt,
+        },
+      });
+      await appendProjectItemRevision(tx, {
+        item: dismissedItem,
+        action: ProjectItemRevisionAction.dismissed,
+        actorId: reviewedBy,
+        evidences: [evidence],
+        createdAt: reviewedAt,
+      });
       const updated = await tx.aiCandidateClaim.updateMany({
         where: {
           projectId,
@@ -832,7 +922,6 @@ class AiCandidateServiceImpl {
           reviewStatus: AiCandidateReviewStatus.dismissed,
           reviewedAt,
           reviewedBy,
-          acceptedItemId: null,
         },
       });
       if (updated.count !== 1) {

@@ -45,6 +45,7 @@ function verifiedResponse(): unknown {
   const outputText = JSON.stringify({
     candidates: [
       {
+        itemType: "decision",
         statement: "The owner is Cedar.",
         sourceId,
         sourceExcerpt: "Owner is Cedar.",

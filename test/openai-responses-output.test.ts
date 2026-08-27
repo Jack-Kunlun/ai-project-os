@@ -56,6 +56,7 @@ function plan(): OpenAiResponsesTransportPlan {
 function candidateOutput(
   candidates: readonly Record<string, unknown>[] = [
     {
+      itemType: "decision",
       statement: "The project owner is Cedar.",
       sourceId: sourceBId,
       sourceExcerpt: "Owner is Cedar.",
@@ -110,11 +111,13 @@ function assertInvalidResponse(callback: () => unknown): void {
 test("verifier accepts one completed structured response and returns only verified evidence", () => {
   const output = candidateOutput([
     {
+      itemType: "decision",
       statement: "The project owner is Cedar.",
       sourceId: sourceBId,
       sourceExcerpt: "Owner is Cedar.",
     },
     {
+      itemType: "progress",
       statement: "The milestone is evidence review.",
       sourceId: sourceAId,
       sourceExcerpt: "Milestone is evidence review.",
@@ -139,6 +142,10 @@ test("verifier accepts one completed structured response and returns only verifi
   assert.deepEqual(
     verified.candidates.map((candidate) => candidate.sourceId),
     [sourceAId, sourceBId],
+  );
+  assert.deepEqual(
+    verified.candidates.map((candidate) => candidate.itemType),
+    ["progress", "decision"],
   );
   assert.equal(verified.candidates[0]?.sourceStart, 0);
   assert.equal(verified.candidates[0]?.sourceEnd, 29);
@@ -179,6 +186,7 @@ test("verifier records UTF-8 byte offsets for non-ASCII source evidence", () => 
   );
   const output = candidateOutput([
     {
+      itemType: "progress",
       statement: "里程碑已经完成。",
       sourceId: sourceAId,
       sourceExcerpt: "里程碑已完成",
@@ -285,6 +293,7 @@ test("verifier rejects malformed candidate JSON and unsupported fields", () => {
     JSON.stringify({ candidates: "not-an-array" }),
     candidateOutput([
       {
+        itemType: "decision",
         statement: "The project owner is Cedar.",
         sourceId: sourceBId,
         sourceExcerpt: "Owner is Cedar.",
@@ -293,6 +302,15 @@ test("verifier rejects malformed candidate JSON and unsupported fields", () => {
     ]),
     candidateOutput([
       {
+        itemType: "note",
+        statement: "The project owner is Cedar.",
+        sourceId: sourceBId,
+        sourceExcerpt: "Owner is Cedar.",
+      },
+    ]),
+    candidateOutput([
+      {
+        itemType: "decision",
         statement: "",
         sourceId: sourceBId,
         sourceExcerpt: "Owner is Cedar.",
@@ -300,6 +318,7 @@ test("verifier rejects malformed candidate JSON and unsupported fields", () => {
     ]),
     candidateOutput([
       {
+        itemType: "decision",
         statement: "unsafe\u0001control",
         sourceId: sourceBId,
         sourceExcerpt: "Owner is Cedar.",
@@ -307,6 +326,7 @@ test("verifier rejects malformed candidate JSON and unsupported fields", () => {
     ]),
     candidateOutput([
       {
+        itemType: "decision",
         statement: "unpaired\ud800",
         sourceId: sourceBId,
         sourceExcerpt: "Owner is Cedar.",
@@ -324,6 +344,7 @@ test("verifier rejects malformed candidate JSON and unsupported fields", () => {
 
 test("verifier requires authorized exact evidence and rejects duplicate candidates", () => {
   const valid = {
+    itemType: "decision",
     statement: "The project owner is Cedar.",
     sourceId: sourceBId,
     sourceExcerpt: "Owner is Cedar.",

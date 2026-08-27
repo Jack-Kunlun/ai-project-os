@@ -113,7 +113,7 @@ test("auto-extract compiler produces a fixed no-tools single-attempt Responses p
 
   assert.deepEqual(plan.body.text.format, {
     type: "json_schema",
-    name: "ai_project_os_candidate_claims_v1",
+    name: "ai_project_os_candidate_claims_v2",
     strict: true,
     schema: {
       type: "object",
@@ -123,11 +123,15 @@ test("auto-extract compiler produces a fixed no-tools single-attempt Responses p
           items: {
             type: "object",
             properties: {
+              itemType: {
+                type: "string",
+                enum: ["decision", "progress", "issue", "risk"],
+              },
               statement: { type: "string" },
               sourceId: { type: "string" },
               sourceExcerpt: { type: "string" },
             },
-            required: ["statement", "sourceId", "sourceExcerpt"],
+            required: ["itemType", "statement", "sourceId", "sourceExcerpt"],
             additionalProperties: false,
           },
         },

@@ -177,6 +177,10 @@ const indexGenerationMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260828123000_add_index_generations/migration.sql",
 );
+const candidateItemPublicationMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260828150000_publish_ai_candidate_items/migration.sql",
+);
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
   join(repositoryRoot, "prisma/migrations/20260826030732_integrity_boundaries/migration.sql"),
@@ -628,6 +632,19 @@ async function applyAiMigrationInTransaction(client: Client): Promise<void> {
     { sql: await loadSql(itemEvidenceHistoryMigrationPath) },
     { sql: await loadSql(sourceChunkMigrationPath) },
     { sql: await loadSql(indexGenerationMigrationPath) },
+    { sql: await loadSql(candidateItemPublicationMigrationPath) },
+  ]);
+}
+
+async function applyAiMigrationsBeforeCandidatePublication(
+  client: Client,
+): Promise<void> {
+  await transaction(client, [
+    { sql: await loadSql(aiRuntimeMigrationPath) },
+    { sql: await loadSql(aiCandidateMigrationPath) },
+    { sql: await loadSql(itemEvidenceHistoryMigrationPath) },
+    { sql: await loadSql(sourceChunkMigrationPath) },
+    { sql: await loadSql(indexGenerationMigrationPath) },
   ]);
 }
 
@@ -644,6 +661,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     "20260827140000_add_item_evidence_history",
     "20260828100000_add_source_chunks",
     "20260828123000_add_index_generations",
+    "20260828150000_publish_ai_candidate_items",
   ];
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===
@@ -709,6 +727,8 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     { name: "ProjectItem_ai_candidate_provenance_trigger", table: "ProjectItem", timing: "BEFORE", events: ["UPDATE", "DELETE"] },
     { name: "AiCandidateBatch_count_consistency_constraint_trigger", table: "AiCandidateBatch", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
     { name: "AiCandidateClaim_count_consistency_constraint_trigger", table: "AiCandidateClaim", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
+    { name: "AiCandidateClaim_item_consistency_constraint_trigger", table: "AiCandidateClaim", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
+    { name: "ProjectItem_ai_candidate_consistency_constraint_trigger", table: "ProjectItem", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
   ];
   for (const expectation of triggerExpectations) {
     const result = await safeQuery<{
@@ -3545,6 +3565,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
 
   const candidates = [
     {
+      itemType: "decision",
       statement: "Candidate decision.",
       statementFingerprint: buildOpenAiCandidateStatementFingerprint(
         "Candidate decision.",
@@ -3558,6 +3579,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
       sourceEnd: Buffer.byteLength(sourceAContent, "utf8"),
     },
     {
+      itemType: "risk",
       statement: "Candidate risk.",
       statementFingerprint: buildOpenAiCandidateStatementFingerprint(
         "Candidate risk.",
@@ -3596,7 +3618,12 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
       first.id === replay.id &&
         first.candidateCount === 2 &&
         first.claims.length === 2 &&
-        first.claims.every((claim) => claim.reviewStatus === "candidate"),
+        first.claims.every(
+          (claim) =>
+            claim.reviewStatus === "candidate" &&
+            claim.projectItem.reviewStatus === "candidate" &&
+            claim.projectItem.content === claim.statement,
+        ),
       "AI_CANDIDATE_POSTGRES_ATOMIC_IDEMPOTENCY_FAILED",
     );
 
@@ -3609,6 +3636,39 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
     requireCondition(
       decision !== undefined && risk !== undefined,
       "AI_CANDIDATE_POSTGRES_CLAIMS_MISSING",
+    );
+    const publishedCandidates = await safeQuery<{
+      project_item_id: string;
+      revisions: string;
+      initial_action: string;
+      evidences: string;
+    }>(
+      client,
+      `SELECT c."projectItemId"::text AS project_item_id,
+              count(r."id")::text AS revisions,
+              min(r."action"::text) AS initial_action,
+              (SELECT count(*)::text FROM "ProjectItemEvidence" AS e
+                WHERE e."projectId" = c."projectId"
+                  AND e."projectItemId" = c."projectItemId") AS evidences
+         FROM "AiCandidateClaim" AS c
+         JOIN "ProjectItemRevision" AS r
+           ON r."projectId" = c."projectId"
+          AND r."projectItemId" = c."projectItemId"
+        WHERE c."projectId" = $1 AND c."batchId" = $2
+        GROUP BY c."projectId", c."projectItemId"
+        ORDER BY c."projectItemId"`,
+      [projectAId, first.id],
+    );
+    requireCondition(
+      publishedCandidates.rows.length === 2 &&
+        publishedCandidates.rows.every(
+          (row) =>
+            row.project_item_id.length > 0 &&
+            row.revisions === "1" &&
+            row.initial_action === "ai_created" &&
+            row.evidences === "1",
+        ),
+      "AI_CANDIDATE_POSTGRES_VISIBLE_PUBLICATION_MISMATCH",
     );
     const accepted = await service.acceptCandidate({
       projectId: projectAId,
@@ -3628,11 +3688,12 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
     });
     requireCondition(
       accepted.reviewStatus === "accepted" &&
-        accepted.acceptedItem?.reviewStatus === "confirmed" &&
-        accepted.acceptedItem.sourceId === sourceAId &&
-        accepted.acceptedItem.sourceExcerpt === sourceAContent &&
+        accepted.projectItem.reviewStatus === "confirmed" &&
+        accepted.projectItem.sourceId === sourceAId &&
+        accepted.projectItem.sourceExcerpt === sourceAContent &&
         dismissed.reviewStatus === "dismissed" &&
-        dismissed.acceptedItemId === null,
+        dismissed.projectItem.reviewStatus === "dismissed" &&
+        dismissed.projectItemId === risk.projectItemId,
       "AI_CANDIDATE_POSTGRES_REVIEW_STATE_MISMATCH",
     );
 
@@ -3650,7 +3711,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
            WHERE re."projectId" = $1 AND re."projectItemId" = $2) AS revision_links
        FROM "ProjectItemRevision" r
        WHERE r."projectId" = $1 AND r."projectItemId" = $2`,
-      [projectAId, accepted.acceptedItemId],
+      [projectAId, accepted.projectItemId],
     );
     requireCondition(
       JSON.stringify(acceptedHistory.rows[0]?.actions) ===
@@ -3743,7 +3804,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
             sql: `UPDATE "ProjectItem"
                     SET "sourceExcerpt" = 'runtime'
                   WHERE "projectId" = $1 AND "id" = $2`,
-            values: [projectAId, accepted.acceptedItemId],
+            values: [projectAId, accepted.projectItemId],
           },
         ]),
       "accepted candidate provenance mutation",
@@ -3754,7 +3815,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
           {
             sql: `DELETE FROM "ProjectItem"
                   WHERE "projectId" = $1 AND "id" = $2`,
-            values: [projectAId, accepted.acceptedItemId],
+            values: [projectAId, accepted.projectItemId],
           },
         ]),
       "accepted candidate item delete",
@@ -3786,6 +3847,299 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
       cascade.rows[0].claims === "0" &&
       cascade.rows[0].items === "0",
     "AI_CANDIDATE_POSTGRES_PROJECT_CASCADE_MISMATCH",
+  );
+}
+
+async function runCandidatePublicationUpgradePath(client: Client): Promise<void> {
+  await resetPublic(client);
+  for (const path of v0MigrationPaths) {
+    await applySqlMigration(client, path);
+  }
+  await seedV0Rows(client);
+  await applyAiMigrationsBeforeCandidatePublication(client);
+
+  await insertPolicyRevision(
+    client,
+    revisionAId,
+    projectAId,
+    1,
+    true,
+    false,
+    true,
+  );
+  await insertPolicyPointer(client, projectAId, revisionAId);
+  await insertDraftGrant(client, grantAId);
+  await insertGrantSource(client, grantSourceAId, grantAId);
+  await insertGrantOperation(client, grantOperationAId, grantAId, "autoExtract");
+  await issueGrant(client, grantAId);
+
+  const runId = "21212121-2121-4121-8121-212121212121";
+  const inputId = "22222221-2222-4222-8222-222222222221";
+  const attemptId = "23232323-2323-4323-8323-232323232323";
+  const batchId = "24242424-2424-4424-8424-242424242424";
+  const pendingClaimId = "25252525-2525-4525-8525-252525252525";
+  const dismissedClaimId = "26262626-2626-4626-8626-262626262626";
+  const acceptedClaimId = "27272727-2727-4727-8727-272727272727";
+  const acceptedItemId = "28282828-2828-4828-8828-282828282828";
+  const acceptedEvidenceId = "29292929-2929-4929-8929-292929292929";
+  const acceptedRevisionId = "30303030-3030-4030-8030-303030303030";
+  const providerResponseId = "resp_candidate_upgrade_1";
+
+  await safeQuery(
+    client,
+    `INSERT INTO "AiRun"
+       ("id", "projectId", "grantId", "policyRevisionId", "operation",
+        "operationKey", "operationKeySchemaVersion", "inputManifestFingerprint",
+        "promptFingerprint", "promptVersion", "providerFingerprint", "modelId",
+        "modelFingerprint", "profileFingerprint", "grantFingerprint",
+        "effectivePolicyVersion", "processorFingerprint", "processorEndpointFingerprint",
+        "processorRegionFingerprint", "processorRetentionFingerprint", "noRagSnapshotMarker",
+        "inputBytes", "outputBytes", "maxInputTokens", "maxOutputTokens", "maxRequests",
+        "maxBudgetMicros", "inputTokens", "outputTokens", "requestCount", "budgetUsedMicros",
+        "pricingSnapshotId", "budgetStatus", "status")
+     VALUES ($1, $2, $3, $4, 'autoExtract', $5, 'ai-operation-key:v1', $6,
+             $7, 'candidate-upgrade-prompt-v1', $7, 'synthetic-provider/model-v1',
+             $7, $7, $7, 1, $7, $7, $7, $7, 'no-rag-snapshot:v1',
+             $8, 0, 100, 100, 1, 100000, 0, 0, 0, 0,
+             'candidate-upgrade-pricing-v1', 'pending', 'queued')`,
+    [
+      runId,
+      projectAId,
+      grantAId,
+      revisionAId,
+      "d".repeat(64),
+      sourceAContentHash,
+      fingerprintA,
+      Buffer.byteLength(sourceAContent, "utf8"),
+    ],
+  );
+  await insertRunInputSource(client, inputId, runId);
+  await claimRun(client, runId, attemptId);
+  await transaction(client, [
+    {
+      sql: `UPDATE "AiRunAttempt"
+               SET "status" = 'succeeded', "inputTokens" = 10,
+                   "outputTokens" = 5, "providerResponseId" = $3,
+                   "httpStatus" = 200, "completedAt" = CURRENT_TIMESTAMP
+             WHERE "projectId" = $1 AND "id" = $2`,
+      values: [projectAId, attemptId, providerResponseId],
+    },
+    {
+      sql: `UPDATE "AiRun"
+               SET "status" = 'succeeded', "outputBytes" = 256,
+                   "inputTokens" = 10, "outputTokens" = 5,
+                   "budgetUsedMicros" = 1, "budgetStatus" = 'allowed',
+                   "providerResponseId" = $3, "httpStatus" = 200,
+                   "completedAt" = CURRENT_TIMESTAMP
+             WHERE "projectId" = $1 AND "id" = $2`,
+      values: [projectAId, runId, providerResponseId],
+    },
+  ]);
+
+  await transaction(client, [
+    {
+      sql: `INSERT INTO "ProjectItem"
+              ("id", "projectId", "type", "reviewStatus", "sourceId", "title",
+               "content", "sourceExcerpt", "confirmedAt", "metadata",
+               "createdAt", "updatedAt")
+            VALUES ($1, $2, 'decision', 'confirmed', $3,
+                    'Accepted legacy candidate', 'Accepted legacy candidate', $4,
+                    CURRENT_TIMESTAMP,
+                    jsonb_build_object('origin', 'ai_candidate'),
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      values: [acceptedItemId, projectAId, sourceAId, sourceAContent],
+    },
+    {
+      sql: `INSERT INTO "ProjectItemEvidence"
+              ("id", "projectId", "projectItemId", "role", "evidenceState",
+               "originScope", "projectSourceId", "sourceExcerpt",
+               "sourceExcerptFingerprint", "rangeUnit", "rangeStart", "rangeEnd",
+               "isActive")
+            VALUES ($1, $2, $3, 'primary', 'active', 'project', $4, $5,
+                    encode(sha256(convert_to($5, 'UTF8')), 'hex'),
+                    'utf8_byte', 0, $6, true)`,
+      values: [
+        acceptedEvidenceId,
+        projectAId,
+        acceptedItemId,
+        sourceAId,
+        sourceAContent,
+        Buffer.byteLength(sourceAContent, "utf8"),
+      ],
+    },
+    {
+      sql: `INSERT INTO "ProjectItemRevision"
+              ("id", "projectId", "projectItemId", "revisionNumber", "action",
+               "actorId", "itemType", "reviewStatus", "title", "content",
+               "sourceId", "sourceExcerpt", "confirmedAt", "metadata",
+               "evidenceManifestFingerprint", "integrityState")
+            VALUES ($1, $2, $3, 1, 'legacy_import', 'system:migration',
+                    'decision', 'confirmed', 'Accepted legacy candidate',
+                    'Accepted legacy candidate', $4::uuid, $5, CURRENT_TIMESTAMP,
+                    jsonb_build_object('origin', 'ai_candidate'),
+                    encode(sha256(convert_to(
+                      $4::uuid::text || ':' || encode(sha256(convert_to($5, 'UTF8')), 'hex')
+                      || ':0:' || $6::text,
+                      'UTF8'
+                    )), 'hex'), 'active')`,
+      values: [
+        acceptedRevisionId,
+        projectAId,
+        acceptedItemId,
+        sourceAId,
+        sourceAContent,
+        Buffer.byteLength(sourceAContent, "utf8"),
+      ],
+    },
+    {
+      sql: `INSERT INTO "ProjectItemRevisionEvidence"
+              ("id", "projectId", "projectItemId", "revisionId", "evidenceId", "role")
+            VALUES (gen_random_uuid(), $1, $2, $3, $4, 'primary')`,
+      values: [
+        projectAId,
+        acceptedItemId,
+        acceptedRevisionId,
+        acceptedEvidenceId,
+      ],
+    },
+    {
+      sql: `INSERT INTO "AiCandidateBatch"
+              ("id", "projectId", "aiRunId", "candidateSetFingerprint", "candidateCount")
+            VALUES ($1, $2, $3, $4, 3)`,
+      values: [batchId, projectAId, runId, fingerprintA],
+    },
+    {
+      sql: `INSERT INTO "AiCandidateClaim"
+              ("id", "projectId", "batchId", "aiRunId", "sourceId",
+               "statement", "statementFingerprint", "sourceExcerpt",
+               "sourceExcerptFingerprint", "sourceStart", "sourceEnd")
+            VALUES ($1, $2, $3, $4, $5, 'Pending legacy candidate', $6,
+                    $7, $8, 0, $9)`,
+      values: [
+        pendingClaimId,
+        projectAId,
+        batchId,
+        runId,
+        sourceAId,
+        fingerprintA,
+        sourceAContent,
+        fingerprintA,
+        Buffer.byteLength(sourceAContent, "utf8"),
+      ],
+    },
+    {
+      sql: `INSERT INTO "AiCandidateClaim"
+              ("id", "projectId", "batchId", "aiRunId", "sourceId",
+               "statement", "statementFingerprint", "sourceExcerpt",
+               "sourceExcerptFingerprint", "sourceStart", "sourceEnd")
+            VALUES ($1, $2, $3, $4, $5, 'Accepted legacy candidate', $6,
+                    $7, $8, 0, $9)`,
+      values: [
+        acceptedClaimId,
+        projectAId,
+        batchId,
+        runId,
+        sourceAId,
+        "c".repeat(64),
+        sourceAContent,
+        "c".repeat(64),
+        Buffer.byteLength(sourceAContent, "utf8"),
+      ],
+    },
+    {
+      sql: `INSERT INTO "AiCandidateClaim"
+              ("id", "projectId", "batchId", "aiRunId", "sourceId",
+               "statement", "statementFingerprint", "sourceExcerpt",
+               "sourceExcerptFingerprint", "sourceStart", "sourceEnd")
+            VALUES ($1, $2, $3, $4, $5, 'Dismissed legacy candidate', $6,
+                    'runtime', $7, 0, $8)`,
+      values: [
+        dismissedClaimId,
+        projectAId,
+        batchId,
+        runId,
+        sourceAId,
+        fingerprintB,
+        fingerprintB,
+        Buffer.byteLength("runtime", "utf8"),
+      ],
+    },
+    {
+      sql: `UPDATE "AiCandidateClaim"
+               SET "reviewStatus" = 'dismissed',
+                   "reviewedAt" = CURRENT_TIMESTAMP,
+                   "reviewedBy" = 'upgrade-reviewer'
+             WHERE "projectId" = $1 AND "id" = $2`,
+      values: [projectAId, dismissedClaimId],
+    },
+    {
+      sql: `UPDATE "AiCandidateClaim"
+               SET "reviewStatus" = 'accepted',
+                   "reviewedAt" = CURRENT_TIMESTAMP,
+                   "reviewedBy" = 'upgrade-reviewer',
+                   "acceptedItemId" = $3
+             WHERE "projectId" = $1 AND "id" = $2`,
+      values: [projectAId, acceptedClaimId, acceptedItemId],
+    },
+  ]);
+
+  await applySqlMigration(client, candidateItemPublicationMigrationPath);
+  const rows = await safeQuery<{
+    id: string;
+    claim_status: string;
+    item_type: string;
+    item_status: string;
+    project_item_id: string;
+    actions: string[];
+    evidence_count: string;
+  }>(
+    client,
+    `SELECT c."id"::text AS id,
+            c."reviewStatus"::text AS claim_status,
+            c."itemType"::text AS item_type,
+            i."reviewStatus"::text AS item_status,
+            c."projectItemId"::text AS project_item_id,
+            array_agg(r."action"::text ORDER BY r."revisionNumber") AS actions,
+            (SELECT count(*)::text FROM "ProjectItemEvidence" AS e
+              WHERE e."projectId" = c."projectId"
+                AND e."projectItemId" = c."projectItemId") AS evidence_count
+       FROM "AiCandidateClaim" AS c
+       JOIN "ProjectItem" AS i
+         ON i."projectId" = c."projectId" AND i."id" = c."projectItemId"
+       JOIN "ProjectItemRevision" AS r
+         ON r."projectId" = c."projectId"
+        AND r."projectItemId" = c."projectItemId"
+      WHERE c."projectId" = $1 AND c."id" = ANY($2::uuid[])
+      GROUP BY c."id", c."reviewStatus", c."itemType", i."reviewStatus",
+               c."projectItemId", c."projectId"
+      ORDER BY c."id"`,
+    [projectAId, [pendingClaimId, dismissedClaimId, acceptedClaimId]],
+  );
+  const pending = rows.rows.find((row) => row.id === pendingClaimId);
+  const dismissed = rows.rows.find((row) => row.id === dismissedClaimId);
+  const accepted = rows.rows.find((row) => row.id === acceptedClaimId);
+  requireCondition(
+    pending?.claim_status === "candidate" &&
+      pending.item_type === "progress" &&
+      pending.item_status === "candidate" &&
+      pending.project_item_id.length > 0 &&
+      pending.evidence_count === "1" &&
+      JSON.stringify(pending.actions) === JSON.stringify(["ai_created"]) &&
+      dismissed?.claim_status === "dismissed" &&
+      dismissed.item_type === "progress" &&
+      dismissed.item_status === "dismissed" &&
+      dismissed.project_item_id.length > 0 &&
+      dismissed.evidence_count === "1" &&
+      JSON.stringify(dismissed.actions) ===
+        JSON.stringify(["ai_created", "dismissed"]) &&
+      accepted?.claim_status === "accepted" &&
+      accepted.item_type === "decision" &&
+      accepted.item_status === "confirmed" &&
+      accepted.project_item_id === acceptedItemId &&
+      accepted.evidence_count === "1" &&
+      JSON.stringify(accepted.actions) ===
+        JSON.stringify(["ai_created", "confirmed"]),
+    "AI_CANDIDATE_POSTGRES_PUBLICATION_UPGRADE_MISMATCH",
   );
 }
 
@@ -4167,6 +4521,7 @@ test(
       await runRunAttemptInputMatrix(client);
       await runCandidateMemoryMatrix(client, testDatabaseUrl as string);
       await runCrossProjectAuditDeleteCascadeMatrix(client);
+      await runCandidatePublicationUpgradePath(client);
     } finally {
       try {
         await resetPublic(client);

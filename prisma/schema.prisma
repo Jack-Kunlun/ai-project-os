@@ -334,7 +334,7 @@ model ProjectItem {
   source           ProjectSource            @relation("SourceItems", fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   supersedesItem   ProjectItem?             @relation("ItemSupersession", fields: [projectId, supersedesItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   supersededBy     ProjectItem[]            @relation("ItemSupersession")
-  aiCandidateClaim AiCandidateClaim?        @relation("AcceptedCandidateItem")
+  aiCandidateClaim AiCandidateClaim?        @relation("AiCandidateItem")
   evidences        ProjectItemEvidence[]
   revisions        ProjectItemRevision[]
 
@@ -1034,6 +1034,7 @@ model AiCandidateClaim {
   batchId                   String                    @db.Uuid
   aiRunId                   String                    @db.Uuid
   sourceId                  String                    @db.Uuid
+  itemType                  ProjectItemType
   statement                 String                    @db.Text
   statementFingerprint      String                    @db.VarChar(64)
   sourceExcerpt             String                    @db.Text
@@ -1043,17 +1044,17 @@ model AiCandidateClaim {
   reviewStatus              AiCandidateReviewStatus   @default(candidate)
   reviewedAt                DateTime?
   reviewedBy                String?                   @db.VarChar(128)
-  acceptedItemId            String?                   @db.Uuid
+  projectItemId             String                    @db.Uuid
   createdAt                 DateTime                  @default(now())
   project                   Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   batch                     AiCandidateBatch          @relation(fields: [projectId, batchId, aiRunId], references: [projectId, id, aiRunId], onDelete: NoAction, onUpdate: Cascade)
   runInput                   AiRunInputSource          @relation(fields: [projectId, aiRunId, sourceId], references: [projectId, aiRunId, sourceId], onDelete: NoAction, onUpdate: Cascade)
   source                     ProjectSource             @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  acceptedItem               ProjectItem?              @relation("AcceptedCandidateItem", fields: [projectId, acceptedItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectItem                ProjectItem               @relation("AiCandidateItem", fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, id])
-  @@unique([projectId, batchId, sourceId, statementFingerprint, sourceExcerptFingerprint])
-  @@unique([projectId, acceptedItemId])
+  @@unique([projectId, batchId, sourceId, statementFingerprint, sourceExcerptFingerprint], map: "AiCandidateClaim_batch_source_statement_excerpt_key")
+  @@unique([projectId, projectItemId])
   @@index([projectId, reviewStatus, createdAt])
   @@index([projectId, sourceId])
 }

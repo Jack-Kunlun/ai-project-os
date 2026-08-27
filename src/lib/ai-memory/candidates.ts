@@ -115,6 +115,7 @@ export interface AcceptAiCandidateRequest {
   projectId: string;
   candidateId: string;
   reviewedBy: string;
+  expectedItemUpdatedAt: Date;
   item: {
     type: ProjectItemType;
     title: string;
@@ -127,6 +128,7 @@ export interface DismissAiCandidateRequest {
   projectId: string;
   candidateId: string;
   reviewedBy: string;
+  expectedItemUpdatedAt: Date;
 }
 
 export interface CreateAiCandidateServiceOptions {
@@ -470,6 +472,13 @@ function validateReviewer(value: unknown): string {
   return value;
 }
 
+function validateDate(value: unknown): Date {
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
+    return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
+  }
+  return new Date(value.getTime());
+}
+
 function normalizeItemInput(value: AcceptAiCandidateRequest["item"]): {
   type: ProjectItemType;
   title: string;
@@ -801,6 +810,7 @@ class AiCandidateServiceImpl {
     const projectId = validateUuid(request.projectId);
     const candidateId = validateUuid(request.candidateId);
     const reviewedBy = validateReviewer(request.reviewedBy);
+    const expectedItemUpdatedAt = validateDate(request.expectedItemUpdatedAt);
     const itemInput = normalizeItemInput(request.item);
 
     return this.serializable(async (tx) => {
@@ -812,17 +822,30 @@ class AiCandidateServiceImpl {
           sourceId: true,
           projectItemId: true,
           reviewStatus: true,
+          projectItem: {
+            select: { reviewStatus: true, updatedAt: true },
+          },
         },
       });
       if (claim === null) return throwAiCandidateError("AI_CANDIDATE_NOT_FOUND");
       if (claim.reviewStatus !== AiCandidateReviewStatus.candidate) {
         return throwAiCandidateError("AI_CANDIDATE_ALREADY_REVIEWED");
       }
+      if (
+        claim.projectItem.reviewStatus !== ProjectItemReviewStatus.candidate ||
+        claim.projectItem.updatedAt.getTime() !== expectedItemUpdatedAt.getTime()
+      ) {
+        return throwAiCandidateError("AI_CANDIDATE_VERSION_CONFLICT");
+      }
 
-      const reviewedAt = this.now();
-      if (!Number.isFinite(reviewedAt.getTime())) {
+      const currentTime = this.now();
+      if (!Number.isFinite(currentTime.getTime())) {
         return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
       }
+      const reviewedAt = new Date(Math.max(
+        currentTime.getTime(),
+        claim.projectItem.updatedAt.getTime() + 1,
+      ));
       const evidence = await tx.projectItemEvidence.findFirst({
         where: {
           projectId,
@@ -844,8 +867,13 @@ class AiCandidateServiceImpl {
       if (evidence === null) {
         return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
       }
-      const confirmedItem = await tx.projectItem.update({
-        where: { projectId_id: { projectId, id: claim.projectItemId } },
+      const confirmed = await tx.projectItem.updateMany({
+        where: {
+          projectId,
+          id: claim.projectItemId,
+          reviewStatus: ProjectItemReviewStatus.candidate,
+          updatedAt: expectedItemUpdatedAt,
+        },
         data: {
           type: itemInput.type,
           title: itemInput.title,
@@ -856,6 +884,15 @@ class AiCandidateServiceImpl {
           updatedAt: reviewedAt,
         },
       });
+      if (confirmed.count !== 1) {
+        return throwAiCandidateError("AI_CANDIDATE_VERSION_CONFLICT");
+      }
+      const confirmedItem = await tx.projectItem.findUnique({
+        where: { projectId_id: { projectId, id: claim.projectItemId } },
+      });
+      if (confirmedItem === null) {
+        return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
+      }
       await appendProjectItemRevision(tx, {
         item: confirmedItem,
         action: ProjectItemRevisionAction.confirmed,
@@ -893,20 +930,37 @@ class AiCandidateServiceImpl {
     const projectId = validateUuid(request.projectId);
     const candidateId = validateUuid(request.candidateId);
     const reviewedBy = validateReviewer(request.reviewedBy);
+    const expectedItemUpdatedAt = validateDate(request.expectedItemUpdatedAt);
 
     return this.serializable(async (tx) => {
       const existing = await tx.aiCandidateClaim.findUnique({
         where: { projectId_id: { projectId, id: candidateId } },
-        select: { reviewStatus: true, projectItemId: true },
+        select: {
+          reviewStatus: true,
+          projectItemId: true,
+          projectItem: {
+            select: { reviewStatus: true, updatedAt: true },
+          },
+        },
       });
       if (existing === null) return throwAiCandidateError("AI_CANDIDATE_NOT_FOUND");
       if (existing.reviewStatus !== AiCandidateReviewStatus.candidate) {
         return throwAiCandidateError("AI_CANDIDATE_ALREADY_REVIEWED");
       }
-      const reviewedAt = this.now();
-      if (!Number.isFinite(reviewedAt.getTime())) {
+      if (
+        existing.projectItem.reviewStatus !== ProjectItemReviewStatus.candidate ||
+        existing.projectItem.updatedAt.getTime() !== expectedItemUpdatedAt.getTime()
+      ) {
+        return throwAiCandidateError("AI_CANDIDATE_VERSION_CONFLICT");
+      }
+      const currentTime = this.now();
+      if (!Number.isFinite(currentTime.getTime())) {
         return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
       }
+      const reviewedAt = new Date(Math.max(
+        currentTime.getTime(),
+        existing.projectItem.updatedAt.getTime() + 1,
+      ));
       const evidence = await tx.projectItemEvidence.findFirst({
         where: {
           projectId,
@@ -928,14 +982,28 @@ class AiCandidateServiceImpl {
       if (evidence === null) {
         return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
       }
-      const dismissedItem = await tx.projectItem.update({
-        where: { projectId_id: { projectId, id: existing.projectItemId } },
+      const dismissed = await tx.projectItem.updateMany({
+        where: {
+          projectId,
+          id: existing.projectItemId,
+          reviewStatus: ProjectItemReviewStatus.candidate,
+          updatedAt: expectedItemUpdatedAt,
+        },
         data: {
           reviewStatus: ProjectItemReviewStatus.dismissed,
           confirmedAt: null,
           updatedAt: reviewedAt,
         },
       });
+      if (dismissed.count !== 1) {
+        return throwAiCandidateError("AI_CANDIDATE_VERSION_CONFLICT");
+      }
+      const dismissedItem = await tx.projectItem.findUnique({
+        where: { projectId_id: { projectId, id: existing.projectItemId } },
+      });
+      if (dismissedItem === null) {
+        return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
+      }
       await appendProjectItemRevision(tx, {
         item: dismissedItem,
         action: ProjectItemRevisionAction.dismissed,

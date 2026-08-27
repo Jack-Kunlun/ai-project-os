@@ -4095,6 +4095,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
       projectId: projectAId,
       candidateId: decision.id,
       reviewedBy: "local-user",
+      expectedItemUpdatedAt: decision.projectItem.updatedAt,
       item: {
         type: ProjectItemType.decision,
         title: "Accepted model candidate",
@@ -4106,6 +4107,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
       projectId: projectAId,
       candidateId: risk.id,
       reviewedBy: "local-user",
+      expectedItemUpdatedAt: risk.projectItem.updatedAt,
     });
     requireCondition(
       accepted.reviewStatus === "accepted" &&
@@ -4159,6 +4161,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
           projectId: projectAId,
           candidateId: decision.id,
           reviewedBy: "local-user",
+          expectedItemUpdatedAt: accepted.projectItem.updatedAt,
           item: {
             type: ProjectItemType.decision,
             title: "Duplicate review",
@@ -4173,6 +4176,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
         projectId: projectAId,
         candidateId: decision.id,
         reviewedBy: "local-user",
+        expectedItemUpdatedAt: accepted.projectItem.updatedAt,
       });
       throw new Error("AI_CANDIDATE_POSTGRES_TERMINAL_REVIEW_ACCEPTED");
     } catch (error) {

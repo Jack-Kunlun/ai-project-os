@@ -162,10 +162,75 @@ test("candidate review rejects unsafe reviewer identity before opening a transac
       projectId,
       candidateId: sourceId,
       reviewedBy: "Bearer secret",
+      expectedItemUpdatedAt: new Date(0),
     }),
     (error: unknown) =>
       error instanceof AiCandidateError &&
       error.code === "AI_CANDIDATE_INVALID_INPUT",
   );
   assert.equal(transactionCalls(), 0);
+});
+
+test("candidate review rejects a missing item version before opening a transaction", async () => {
+  const { service, transactionCalls } = serviceWithTransactionTrap();
+  await assert.rejects(
+    service.acceptCandidate({
+      projectId,
+      candidateId: sourceId,
+      reviewedBy: "local:user",
+      expectedItemUpdatedAt: null as unknown as Date,
+      item: {
+        type: "decision",
+        title: "Candidate title",
+        content: "Candidate content",
+        occurredAt: null,
+      },
+    }),
+    (error: unknown) =>
+      error instanceof AiCandidateError &&
+      error.code === "AI_CANDIDATE_INVALID_INPUT",
+  );
+  assert.equal(transactionCalls(), 0);
+});
+
+test("candidate review reports stale visible item state before any mutation", async () => {
+  let itemWrites = 0;
+  const tx = {
+    aiCandidateClaim: {
+      findUnique: async () => ({
+        id: sourceId,
+        aiRunId: runId,
+        sourceId,
+        projectItemId: runId,
+        reviewStatus: "candidate",
+        projectItem: {
+          reviewStatus: "candidate",
+          updatedAt: new Date("2026-08-28T10:00:01.000Z"),
+        },
+      }),
+    },
+    projectItem: {
+      updateMany: async () => {
+        itemWrites += 1;
+        return { count: 1 };
+      },
+    },
+  };
+  const db = {
+    $transaction: async (callback: (value: typeof tx) => Promise<unknown>) =>
+      callback(tx),
+  } as unknown as PrismaClient;
+  const service = createAiCandidateService({ db });
+  await assert.rejects(
+    service.dismissCandidate({
+      projectId,
+      candidateId: sourceId,
+      reviewedBy: "local:user",
+      expectedItemUpdatedAt: new Date("2026-08-28T10:00:00.000Z"),
+    }),
+    (error: unknown) =>
+      error instanceof AiCandidateError &&
+      error.code === "AI_CANDIDATE_VERSION_CONFLICT",
+  );
+  assert.equal(itemWrites, 0);
 });

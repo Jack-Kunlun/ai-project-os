@@ -106,16 +106,52 @@ export const updateProjectItemSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reopen"), expectedUpdatedAt: expectedItemUpdatedAtSchema }).strict(),
 ]);
 
+const aiCandidateReviewStatusSchema = z.enum(["candidate", "accepted", "dismissed"]);
+const aiCandidateTakeSchema = z
+  .string()
+  .regex(/^(?:[1-9]|[1-9][0-9]|100)$/, "take must be an integer from 1 to 100")
+  .transform(Number);
+
+export const listAiCandidatesQuerySchema = z
+  .object({
+    reviewStatus: aiCandidateReviewStatusSchema.optional(),
+    take: aiCandidateTakeSchema.optional(),
+  })
+  .strict();
+
+const acceptAiCandidateSchema = z
+  .object({
+    action: z.literal("accept"),
+    expectedItemUpdatedAt: expectedItemUpdatedAtSchema,
+    type: projectItemTypeSchema,
+    title: itemTitleSchema,
+    content: itemContentSchema,
+    occurredAt: requiredItemOccurredAtSchema,
+  })
+  .strict();
+
+export const reviewAiCandidateSchema = z.discriminatedUnion("action", [
+  acceptAiCandidateSchema,
+  z
+    .object({
+      action: z.literal("dismiss"),
+      expectedItemUpdatedAt: expectedItemUpdatedAtSchema,
+    })
+    .strict(),
+]);
+
 export const createProjectSnapshotSchema = z.object({}).strict();
 
 export const projectIdSchema = z.string().uuid("projectId must be a valid UUID");
 export const projectItemIdSchema = z.string().uuid("itemId must be a valid UUID");
+export const aiCandidateIdSchema = z.string().uuid("candidateId must be a valid UUID");
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 export type CreateProjectSourceInput = z.infer<typeof createProjectSourceSchema>;
 export type CreateProjectItemInput = z.infer<typeof createProjectItemSchema>;
 export type UpdateProjectItemInput = z.infer<typeof updateProjectItemSchema>;
+export type ReviewAiCandidateInput = z.infer<typeof reviewAiCandidateSchema>;
 
 export function slugifyProjectName(name: string): string {
   const slug = name

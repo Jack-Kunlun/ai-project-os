@@ -6,6 +6,7 @@ export type AiCandidateErrorCode =
   | "AI_CANDIDATE_BATCH_CONFLICT"
   | "AI_CANDIDATE_NOT_FOUND"
   | "AI_CANDIDATE_ALREADY_REVIEWED"
+  | "AI_CANDIDATE_VERSION_CONFLICT"
   | "AI_CANDIDATE_WRITE_CONFLICT";
 
 export class AiCandidateError extends Error {

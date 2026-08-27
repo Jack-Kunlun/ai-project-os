@@ -18,6 +18,12 @@ export const projectItemSelect = {
   sourceId: true,
   createdAt: true,
   updatedAt: true,
+  aiCandidateClaim: {
+    select: {
+      id: true,
+      reviewStatus: true,
+    },
+  },
   source: {
     select: {
       id: true,

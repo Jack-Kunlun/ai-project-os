@@ -1,8 +1,8 @@
 # AI Project OS
 
-AI Project OS 是一个面向单项目的 V0 原型：把人工录入的项目资料整理成可追溯的 Project Snapshot，帮助用户回看项目当前状态、最近进展、问题、风险和关键决策。
+AI Project OS 是一个可本地部署的项目记忆工作台：把项目资料整理成可追溯的 Project Snapshot，帮助用户回看项目当前状态、最近进展、问题、风险和关键决策。
 
-当前版本是确定性的人工工作台，不调用 LLM，不自动抽取、总结、纠错或判断优先级。每条进入 Snapshot 的内容都必须由用户确认，并保留对应的 Source 和精确摘录。
+当前网页同时提供确定性的人工工作流和受治理的 AI 候选审阅工作台。仓库已经具备固定模型策略、显式 Source 授权、模型传输适配器、确定性分块、pgvector 索引和候选原子发布能力；真实外部传输执行入口仍保持关闭，因此当前部署不会自动调用 LLM 或发送项目内容。每条进入 Snapshot 的内容都必须由用户确认，并保留对应的 Source 和精确摘录。
 
 项目记忆持久化在 PostgreSQL 中：原始 Source、人工确认和纠错后的 Item，以及不可变的 Snapshot 共同组成可追溯的项目状态记录。
 
@@ -18,6 +18,9 @@ Project 是资料、事实条目和状态快照的容器。Source 保存原始�
 | Source | 手工保存原始内容、来源链接、资料时间和 SHA-256；同项目重复内容会被拒绝 |
 | Item | 手工创建四类候选条目，要求同项目 Source 与精确非空摘录 |
 | 审核 | 人工编辑、确认、驳回、重新打开；编辑已确认条目会回到候选状态 |
+| AI 候选 | 模型候选以可见 Item 进入人工队列；可在接受前修订字段，不能更换来源与精确摘录 |
+| AI 治理 | 本机 CLI 配置固定模型、显式 Source 范围和到期授权；网页只读展示安全状态 |
+| 语义索引基础 | 确定性分块、pgvector 存储、可恢复构建和项目级原子发布；尚未开放产品检索入口 |
 | Snapshot | 只组装已确认 Item，按确定性顺序保存不可变读取点和 provenance |
 | 修正 | 修改内容后提示旧 Snapshot 已过期，人工复核、重新确认并手动生成新 Snapshot |
 
@@ -32,8 +35,8 @@ Project 是资料、事实条目和状态快照的容器。Source 保存原始�
 
 ## 当前限制与非目标
 
-- 不调用 LLM，不提供自动抽取、自动摘要、自动纠错或语义优先级判断。
-- 暂不接入 GitHub 或飞书实时连接、文件上传、OCR、队列、pgvector、MCP 或 Action Engine。
+- 外部模型传输执行入口尚未开放，因此不提供真实自动抽取、自动摘要、语义搜索或 RAG 查询。
+- 暂不接入 GitHub 或飞书实时连接、文件上传、OCR、队列、MCP 或 Action Engine。
 - 暂无认证、授权、多用户和 RBAC；项目 ID 隔离是数据边界，不是访问控制。
 - Source 与 Item 列表当前全量返回、不分页，不承诺无限规模扩展。
 - 页面和 API 只提供最新 Snapshot 的读取；历史 Snapshot 可保留在数据库，但暂无历史列表、切换、编辑或删除界面。
@@ -74,7 +77,7 @@ pnpm project-ai:config -- revoke --project-id <projectId>
 
 ## 本地 Docker 部署
 
-如果要在本机以生产构建运行完整 V0（PostgreSQL、一次性 Prisma 迁移和 Next.js 应用），确认 `.env` 已设置 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 和宿主机使用的 `DATABASE_URL`，然后执行：
+如果要在本机以生产构建运行当前应用（PostgreSQL、一次性 Prisma 迁移和 Next.js 应用），确认 `.env` 已设置 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_DB` 和宿主机使用的 `DATABASE_URL`，然后执行：
 
 ```bash
 docker compose config --quiet
@@ -116,6 +119,8 @@ git diff --check
 - `GET /api/projects/:projectId/snapshots`：读取最新一份已完成 Snapshot；没有 Snapshot 时返回 `null`。
 - `POST /api/projects/:projectId/snapshots`：在一致读取点内，将已确认 Item 组装成手工 Snapshot 并记录 Scan。
 - `GET /api/projects/:projectId/ai-memory`：只读返回受控 AI 策略、授权范围、候选数和运行时配置状态；不返回 Source 内容或凭据。
+- `GET /api/projects/:projectId/ai-memory/candidates`：按审阅状态读取模型候选及其可见 Item；支持严格的 `reviewStatus` 与 `take` 查询参数。
+- `PATCH /api/projects/:projectId/ai-memory/candidates/:candidateId`：携带 Item 的 `expectedItemUpdatedAt` 接受或驳回候选；接受时允许人工修订类型、标题、内容和发生时间。
 
 所有输入使用 Zod 校验；错误响应返回稳定的 `code` 与面向调用方的消息，不回显连接字符串或内部异常。
 
@@ -123,7 +128,7 @@ git diff --check
 
 `ProjectItem.sourceId` 在数据库中是必填字段；Item→Source、Item→supersedes 和 Snapshot→Scan 使用同项目复合外键，避免跨项目引用。项目根关系仍可级联清理子记录。PostgreSQL 迁移保留 `DEFERRABLE INITIALLY DEFERRED` 约束，而 Prisma schema 本身不表达该扩展。
 
-`sourceExcerpt` 的精确非空校验，以及 `reviewStatus`/`confirmedAt` 的一致性，是当前 HTTP 写入路径的不变量；Snapshot payload、`scanId`、Scan 终态时间和共用 `generatedAt` 也由当前 Snapshot writer 保证。生成过程使用项目范围的事务 advisory lock，但只保护遵循本 API 协议的调用。
+`sourceExcerpt` 的精确非空校验，以及 `reviewStatus`/`confirmedAt` 的一致性，是当前 HTTP 写入路径的不变量；AI 候选只能通过专用审阅接口推进，通用 Item 编辑或状态接口会拒绝关联候选，避免绕过候选状态机。Snapshot payload、`scanId`、Scan 终态时间和共用 `generatedAt` 也由当前 Snapshot writer 保证。生成过程使用项目范围的事务 advisory lock，但只保护遵循本 API 协议的调用。
 
 数据库迁移文件在 `prisma/migrations`。如需重建本地数据库，`docker compose down -v` 会删除本地开发数据，必须明确确认后再执行。
 

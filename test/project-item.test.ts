@@ -15,7 +15,10 @@ import {
 import { buildEvidenceManifestFingerprint } from "@/lib/project-item-history";
 import {
   createProjectItemSchema,
+  aiCandidateIdSchema,
+  listAiCandidatesQuerySchema,
   projectItemIdSchema,
+  reviewAiCandidateSchema,
   updateProjectItemSchema,
 } from "@/lib/validation";
 
@@ -85,6 +88,38 @@ test("project item edit is strict and protects sourceId", () => {
   assert.equal(updateProjectItemSchema.safeParse({ action: "confirm", expectedUpdatedAt: "not-a-date" }).success, false);
   assert.equal(updateProjectItemSchema.safeParse({ action: "confirm", expectedUpdatedAt, title: "unexpected" }).success, false);
   assert.equal(updateProjectItemSchema.safeParse({ action: "replace" }).success, false);
+});
+
+test("AI candidate list and review validation is strict and versioned", () => {
+  const list = listAiCandidatesQuerySchema.safeParse({
+    reviewStatus: "candidate",
+    take: "100",
+  });
+  assert.equal(list.success, true);
+  if (list.success) assert.equal(list.data.take, 100);
+  assert.equal(listAiCandidatesQuerySchema.safeParse({ take: "0" }).success, false);
+  assert.equal(listAiCandidatesQuerySchema.safeParse({ take: "01" }).success, false);
+  assert.equal(listAiCandidatesQuerySchema.safeParse({ reviewStatus: "confirmed" }).success, false);
+  assert.equal(listAiCandidatesQuerySchema.safeParse({ unknown: "value" }).success, false);
+
+  const accept = {
+    action: "accept" as const,
+    expectedItemUpdatedAt: expectedUpdatedAt,
+    type: "decision" as const,
+    title: "Human-reviewed title",
+    content: "Human-reviewed content",
+    occurredAt: null,
+  };
+  assert.equal(reviewAiCandidateSchema.safeParse(accept).success, true);
+  assert.equal(reviewAiCandidateSchema.safeParse({
+    action: "dismiss",
+    expectedItemUpdatedAt: expectedUpdatedAt,
+  }).success, true);
+  assert.equal(reviewAiCandidateSchema.safeParse({ ...accept, sourceId }).success, false);
+  assert.equal(reviewAiCandidateSchema.safeParse({ ...accept, occurredAt: undefined }).success, false);
+  assert.equal(reviewAiCandidateSchema.safeParse({ action: "dismiss" }).success, false);
+  assert.equal(aiCandidateIdSchema.safeParse(sourceId).success, true);
+  assert.equal(aiCandidateIdSchema.safeParse("not-a-uuid").success, false);
 });
 
 test("source excerpts require an exact non-empty substring", () => {
@@ -161,6 +196,10 @@ test("public item selection excludes internal metadata and raw source content", 
   assert.equal("storageKey" in projectItemSelect.source.select, false);
   assert.equal("contentText" in projectItemSelect.source.select, false);
   assert.equal("metadata" in projectItemSelect.source.select, false);
+  assert.deepEqual(projectItemSelect.aiCandidateClaim.select, {
+    id: true,
+    reviewStatus: true,
+  });
 });
 
 test("item API errors remain stable and do not expose Prisma internals", () => {

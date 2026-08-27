@@ -63,6 +63,14 @@ function versionConflictError(): ApiError {
   return new ApiError(409, "ITEM_VERSION_CONFLICT", "Item was updated by another request; refresh and retry");
 }
 
+function aiCandidateReviewRequiredError(): ApiError {
+  return new ApiError(
+    409,
+    "AI_CANDIDATE_REVIEW_REQUIRED",
+    "AI-generated items must be reviewed in the AI memory workbench",
+  );
+}
+
 function itemMutationError(code: ReturnType<typeof classifyItemMutationMiss>): ApiError {
   switch (code) {
     case "PROJECT_NOT_FOUND":
@@ -129,6 +137,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
 
       if (existing.updatedAt.getTime() !== expectedVersion.getTime()) {
         throw versionConflictError();
+      }
+
+      if (existing.aiCandidateClaim !== null) {
+        throw aiCandidateReviewRequiredError();
       }
 
       const currentStatus = existing.reviewStatus as ProjectItemReviewStatus;

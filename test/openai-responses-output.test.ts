@@ -156,6 +156,43 @@ test("verifier accepts one completed structured response and returns only verifi
   assert.equal("outputText" in verified, false);
 });
 
+test("verifier records UTF-8 byte offsets for non-ASCII source evidence", () => {
+  const unicodePlan = buildOpenAiAutoExtractTransportPlan(
+    {
+      profileVersion: OPENAI_RESPONSES_PROFILE_VERSION,
+      providerFingerprint: OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+      profileFingerprint: operationKey,
+      modelId,
+      modelFingerprint,
+      processorEndpointFingerprint: OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
+      processorRegionFingerprint: operationKey,
+      processorRetentionFingerprint: OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+      maxInputBytes: 8_192,
+      maxOutputTokens: 1_024,
+      timeoutMs: 30_000,
+    },
+    {
+      runId,
+      operationKey,
+      sources: [{ sourceId: sourceAId, content: "前缀：里程碑已完成。" }],
+    },
+  );
+  const output = candidateOutput([
+    {
+      statement: "里程碑已经完成。",
+      sourceId: sourceAId,
+      sourceExcerpt: "里程碑已完成",
+    },
+  ]);
+  const verified = verifyOpenAiAutoExtractResponse(
+    unicodePlan,
+    providerResponse(output),
+  );
+
+  assert.equal(verified.candidates[0]?.sourceStart, 9);
+  assert.equal(verified.candidates[0]?.sourceEnd, 27);
+});
+
 test("verifier binds the response to the issued model, metadata and no-tools request", () => {
   for (const invalid of [
     providerResponse(candidateOutput(), { object: "chat.completion" }),

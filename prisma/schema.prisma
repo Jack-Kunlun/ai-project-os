@@ -140,6 +140,12 @@ enum AiSafeErrorCode {
   sourceInUse              @map("SOURCE_IN_USE")
 }
 
+enum AiCandidateReviewStatus {
+  candidate
+  accepted
+  dismissed
+}
+
 model Project {
   id          String          @id @default(uuid()) @db.Uuid
   name        String
@@ -160,6 +166,8 @@ model Project {
   aiAttempts  AiRunAttempt[]
   aiInputSources AiRunInputSource[]
   aiAuditEvents AiAuditEvent[]
+  aiCandidateBatches AiCandidateBatch[]
+  aiCandidateClaims AiCandidateClaim[]
 
   @@index([updatedAt])
 }
@@ -178,6 +186,7 @@ model ProjectSource {
   items        ProjectItem[]      @relation("SourceItems")
   grantSources ModelProcessingGrantSource[]
   aiRunInputs  AiRunInputSource[]
+  aiCandidateClaims AiCandidateClaim[]
 
   @@index([projectId, capturedAt])
   @@unique([projectId, contentHash])
@@ -203,6 +212,7 @@ model ProjectItem {
   source           ProjectSource            @relation("SourceItems", fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   supersedesItem   ProjectItem?             @relation("ItemSupersession", fields: [projectId, supersedesItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   supersededBy     ProjectItem[]            @relation("ItemSupersession")
+  aiCandidateClaim AiCandidateClaim?        @relation("AcceptedCandidateItem")
 
   @@index([projectId, reviewStatus])
   @@index([projectId, type])
@@ -406,6 +416,7 @@ model AiRun {
   attempts                      AiRunAttempt[]
   inputSources                  AiRunInputSource[]
   auditEvents                   AiAuditEvent[]
+  candidateBatch                AiCandidateBatch?
 
   @@unique([projectId, id])
   @@unique([projectId, id, grantId])
@@ -458,6 +469,7 @@ model AiRunInputSource {
   aiRun                       AiRun                        @relation(fields: [projectId, aiRunId, grantId], references: [projectId, id, grantId], onDelete: NoAction, onUpdate: Cascade)
   grantSource                 ModelProcessingGrantSource   @relation(fields: [projectId, grantId, sourceId], references: [projectId, grantId, sourceId], onDelete: NoAction, onUpdate: Cascade)
   source                      ProjectSource                @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  candidateClaims             AiCandidateClaim[]
 
   @@unique([projectId, id])
   @@unique([projectId, aiRunId, sourceId])
@@ -492,4 +504,51 @@ model AiAuditEvent {
   @@index([projectId, grantId])
   @@index([projectId, aiRunId])
   @@index([projectId, attemptId])
+}
+
+model AiCandidateBatch {
+  id                       String             @id @default(uuid()) @db.Uuid
+  projectId                String             @db.Uuid
+  aiRunId                  String             @db.Uuid
+  candidateSetFingerprint  String             @db.VarChar(64)
+  candidateCount           Int
+  createdAt                DateTime           @default(now())
+  project                  Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  aiRun                    AiRun              @relation(fields: [projectId, aiRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  claims                   AiCandidateClaim[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, id, aiRunId])
+  @@unique([projectId, aiRunId])
+  @@index([projectId, createdAt])
+}
+
+model AiCandidateClaim {
+  id                        String                    @id @default(uuid()) @db.Uuid
+  projectId                 String                    @db.Uuid
+  batchId                   String                    @db.Uuid
+  aiRunId                   String                    @db.Uuid
+  sourceId                  String                    @db.Uuid
+  statement                 String                    @db.Text
+  statementFingerprint      String                    @db.VarChar(64)
+  sourceExcerpt             String                    @db.Text
+  sourceExcerptFingerprint  String                    @db.VarChar(64)
+  sourceStart               Int
+  sourceEnd                 Int
+  reviewStatus              AiCandidateReviewStatus   @default(candidate)
+  reviewedAt                DateTime?
+  reviewedBy                String?                   @db.VarChar(128)
+  acceptedItemId            String?                   @db.Uuid
+  createdAt                 DateTime                  @default(now())
+  project                   Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  batch                     AiCandidateBatch          @relation(fields: [projectId, batchId, aiRunId], references: [projectId, id, aiRunId], onDelete: NoAction, onUpdate: Cascade)
+  runInput                   AiRunInputSource          @relation(fields: [projectId, aiRunId, sourceId], references: [projectId, aiRunId, sourceId], onDelete: NoAction, onUpdate: Cascade)
+  source                     ProjectSource             @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  acceptedItem               ProjectItem?              @relation("AcceptedCandidateItem", fields: [projectId, acceptedItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, batchId, sourceId, statementFingerprint, sourceExcerptFingerprint])
+  @@unique([projectId, acceptedItemId])
+  @@index([projectId, reviewStatus, createdAt])
+  @@index([projectId, sourceId])
 }

@@ -197,7 +197,19 @@ function hashText(label: string, value: string): string {
     .digest("hex");
 }
 
-function hashCanonicalCandidateSet(
+export function buildOpenAiCandidateStatementFingerprint(
+  statement: string,
+): string {
+  return hashText("statement", statement);
+}
+
+export function buildOpenAiCandidateExcerptFingerprint(
+  sourceExcerpt: string,
+): string {
+  return hashText("source-excerpt", sourceExcerpt);
+}
+
+export function buildOpenAiCandidateSetFingerprint(
   candidates: readonly Readonly<VerifiedOpenAiAutoExtractCandidate>[],
 ): string {
   return createHash("sha256")
@@ -347,18 +359,22 @@ function parseCandidateSet(
       MAX_SOURCE_EXCERPT_LENGTH,
       true,
     );
-    const sourceStart = source.indexOf(sourceExcerpt);
-    if (sourceStart < 0) {
+    const sourceStartCodeUnits = source.indexOf(sourceExcerpt);
+    if (sourceStartCodeUnits < 0) {
       invalidResponse();
     }
+    const sourceStart = Buffer.byteLength(
+      source.slice(0, sourceStartCodeUnits),
+      "utf8",
+    );
     return Object.freeze({
       statement,
-      statementFingerprint: hashText("statement", statement),
+      statementFingerprint: buildOpenAiCandidateStatementFingerprint(statement),
       sourceId,
       sourceExcerpt,
-      sourceExcerptFingerprint: hashText("source-excerpt", sourceExcerpt),
+      sourceExcerptFingerprint: buildOpenAiCandidateExcerptFingerprint(sourceExcerpt),
       sourceStart,
-      sourceEnd: sourceStart + sourceExcerpt.length,
+      sourceEnd: sourceStart + Buffer.byteLength(sourceExcerpt, "utf8"),
     });
   });
 
@@ -514,7 +530,7 @@ export function inspectOpenAiAutoExtractResponse(
     modelId: plan.body.model,
     usage,
     candidates,
-    candidateSetFingerprint: hashCanonicalCandidateSet(candidates),
+    candidateSetFingerprint: buildOpenAiCandidateSetFingerprint(candidates),
   });
   return Object.freeze({
     providerResult: Object.freeze({

@@ -29,6 +29,9 @@ export type {
   OpenAiResponsesTransportPlan,
 } from "./openai-responses-contract";
 export {
+  buildOpenAiCandidateExcerptFingerprint,
+  buildOpenAiCandidateSetFingerprint,
+  buildOpenAiCandidateStatementFingerprint,
   inspectOpenAiAutoExtractResponse,
   OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION,
   verifyOpenAiAutoExtractResponse,

@@ -6,10 +6,13 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient, ProjectItemType } from "@prisma/client";
 import { Client, type QueryResult, type QueryResultRow } from "pg";
 import {
   buildOperationKey,
+  buildOpenAiCandidateExcerptFingerprint,
+  buildOpenAiCandidateSetFingerprint,
+  buildOpenAiCandidateStatementFingerprint,
   buildInputManifest,
   buildInputManifestFingerprint,
   calculateFakeBudgetMicros,
@@ -19,7 +22,12 @@ import {
   FakeAdmissibilityRecorder,
   FakeProviderRecorder,
   type ClaimAndDispatchRunResult,
+  OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION,
 } from "@/lib/ai-runtime";
+import {
+  AiCandidateError,
+  createAiCandidateService,
+} from "@/lib/ai-memory";
 import { hashSourceContent } from "@/lib/source";
 
 const execFile = promisify(execFileCallback);
@@ -130,6 +138,8 @@ const aiTables = [
   "AiRunAttempt",
   "AiRunInputSource",
   "AiAuditEvent",
+  "AiCandidateBatch",
+  "AiCandidateClaim",
 ] as const;
 
 const aiEnums = [
@@ -144,11 +154,16 @@ const aiEnums = [
   "AiSafeScanResult",
   "AiAuditEventType",
   "AiSafeErrorCode",
+  "AiCandidateReviewStatus",
 ] as const;
 
-const aiMigrationPath = join(
+const aiRuntimeMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260827090000_add_ai_runtime_governance/migration.sql",
+);
+const aiCandidateMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260827120000_add_ai_memory_candidates/migration.sql",
 );
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
@@ -595,7 +610,10 @@ async function applySqlMigration(client: Client, path: string): Promise<void> {
 }
 
 async function applyAiMigrationInTransaction(client: Client): Promise<void> {
-  await transaction(client, [{ sql: await loadSql(aiMigrationPath) }]);
+  await transaction(client, [
+    { sql: await loadSql(aiRuntimeMigrationPath) },
+    { sql: await loadSql(aiCandidateMigrationPath) },
+  ]);
 }
 
 async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
@@ -607,6 +625,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     "20260826021100_init",
     "20260826030732_integrity_boundaries",
     "20260827090000_add_ai_runtime_governance",
+    "20260827120000_add_ai_memory_candidates",
   ];
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===
@@ -667,6 +686,11 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     { name: "AiAuditEvent_append_only_trigger", table: "AiAuditEvent", timing: "BEFORE", events: ["INSERT", "UPDATE", "DELETE"] },
     { name: "AiRun_attempt_consistency_constraint_trigger", table: "AiRun", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
     { name: "AiRunAttempt_run_consistency_constraint_trigger", table: "AiRunAttempt", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
+    { name: "AiCandidateBatch_lifecycle_trigger", table: "AiCandidateBatch", timing: "BEFORE", events: ["INSERT", "UPDATE", "DELETE"] },
+    { name: "AiCandidateClaim_lifecycle_trigger", table: "AiCandidateClaim", timing: "BEFORE", events: ["INSERT", "UPDATE", "DELETE"] },
+    { name: "ProjectItem_ai_candidate_provenance_trigger", table: "ProjectItem", timing: "BEFORE", events: ["UPDATE", "DELETE"] },
+    { name: "AiCandidateBatch_count_consistency_constraint_trigger", table: "AiCandidateBatch", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
+    { name: "AiCandidateClaim_count_consistency_constraint_trigger", table: "AiCandidateClaim", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
   ];
   for (const expectation of triggerExpectations) {
     const result = await safeQuery<{
@@ -815,6 +839,7 @@ async function insertPolicyRevision(
   revision: number,
   outboundEnabled: boolean,
   projectAnalysisEnabled: boolean,
+  autoExtractEnabled = false,
 ): Promise<void> {
   await safeQuery(
     client,
@@ -824,9 +849,17 @@ async function insertPolicyRevision(
         "projectAnalysisEnabled", "generateWithContextEnabled",
         "profileFingerprint", "processorFingerprint", "regionFingerprint",
         "retentionFingerprint", "endpointFingerprint", "budgetFingerprint", "scannerFingerprint")
-     VALUES ($1, $2, $3, $4, $5, false, false, false, $6, false,
+     VALUES ($1, $2, $3, $4, $5, false, $7, false, $6, false,
              $4, $4, $4, $4, $4, $4, $4)`,
-    [revisionId, projectId, revision, fingerprintA, outboundEnabled, projectAnalysisEnabled],
+    [
+      revisionId,
+      projectId,
+      revision,
+      fingerprintA,
+      outboundEnabled,
+      projectAnalysisEnabled,
+      autoExtractEnabled,
+    ],
   );
 }
 
@@ -847,6 +880,7 @@ async function insertDraftGrant(
   client: Client,
   grantId: string,
   policyRevisionId = revisionAId,
+  effectivePolicyVersion = 1,
 ): Promise<void> {
   await safeQuery(
     client,
@@ -860,9 +894,15 @@ async function insertDraftGrant(
         "updatedAt")
      VALUES ($1, $2, 'manual_text', 'draft', $3,
              $4, $4, $4, 'synthetic-provider/model-v1',
-             $4, $4, $4, $4, $4, 1, $4, $4, 'scanner-v1', 'standard',
+             $4, $4, $4, $4, $4, $5, $4, $4, 'scanner-v1', 'standard',
              'runtime-gate-test', 'runtime-gate', NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP)`,
-    [grantId, projectAId, policyRevisionId, fingerprintA],
+    [
+      grantId,
+      projectAId,
+      policyRevisionId,
+      fingerprintA,
+      effectivePolicyVersion,
+    ],
   );
 }
 
@@ -3309,6 +3349,333 @@ async function runRunAttemptInputMatrix(client: Client): Promise<void> {
   );
 }
 
+async function runCandidateMemoryMatrix(client: Client, url: string): Promise<void> {
+  await setupFreshLiveGrant(client);
+  await insertPolicyRevision(
+    client,
+    revisionA2Id,
+    projectAId,
+    2,
+    true,
+    true,
+    true,
+  );
+  await safeQuery(
+    client,
+    `UPDATE "ProjectAiPolicy"
+        SET "currentRevisionId" = $2, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "projectId" = $1`,
+    [projectAId, revisionA2Id],
+  );
+
+  const candidateGrantId = "12121212-1212-4212-8212-121212121212";
+  const candidateGrantSourceId = "13131313-1313-4313-8313-131313131313";
+  const candidateGrantOperationId = "14141414-1414-4414-8414-141414141414";
+  const candidateRunId = "15151515-1515-4515-8515-151515151515";
+  const candidateInputId = "16161616-1616-4616-8616-161616161616";
+  const candidateAttemptId = "17171717-1717-4717-8717-171717171717";
+  const providerResponseId = "resp_candidate_postgres_1";
+
+  await insertDraftGrant(client, candidateGrantId, revisionA2Id, 2);
+  await insertGrantSource(
+    client,
+    candidateGrantSourceId,
+    candidateGrantId,
+  );
+  await insertGrantOperation(
+    client,
+    candidateGrantOperationId,
+    candidateGrantId,
+    "autoExtract",
+  );
+  await issueGrant(client, candidateGrantId);
+
+  await safeQuery(
+    client,
+    `INSERT INTO "AiRun"
+       ("id", "projectId", "grantId", "policyRevisionId", "operation",
+        "operationKey", "operationKeySchemaVersion", "inputManifestFingerprint",
+        "promptFingerprint", "promptVersion", "providerFingerprint", "modelId",
+        "modelFingerprint", "profileFingerprint", "grantFingerprint",
+        "effectivePolicyVersion", "processorFingerprint", "processorEndpointFingerprint",
+        "processorRegionFingerprint", "processorRetentionFingerprint", "noRagSnapshotMarker",
+        "inputBytes", "outputBytes", "maxInputTokens", "maxOutputTokens", "maxRequests",
+        "maxBudgetMicros", "inputTokens", "outputTokens", "requestCount", "budgetUsedMicros",
+        "pricingSnapshotId", "budgetStatus", "status")
+     VALUES ($1, $2, $3, $4, 'autoExtract', $5, 'ai-operation-key:v1', $6,
+             $7, 'candidate-prompt-v1', $7, 'synthetic-provider/model-v1',
+             $7, $7, $7, 2, $7, $7, $7, $7, 'no-rag-snapshot:v1',
+             $8, 0, 100, 100, 1, 100000, 0, 0, 0, 0,
+             'candidate-pricing-v1', 'pending', 'queued')`,
+    [
+      candidateRunId,
+      projectAId,
+      candidateGrantId,
+      revisionA2Id,
+      "f".repeat(64),
+      sourceAContentHash,
+      fingerprintA,
+      Buffer.byteLength(sourceAContent, "utf8"),
+    ],
+  );
+  await insertRunInputSource(
+    client,
+    candidateInputId,
+    candidateRunId,
+    projectAId,
+    candidateGrantId,
+  );
+  await claimRun(client, candidateRunId, candidateAttemptId);
+  await transaction(client, [
+    {
+      sql: `UPDATE "AiRunAttempt"
+               SET "status" = 'succeeded',
+                   "inputTokens" = 10,
+                   "outputTokens" = 5,
+                   "providerResponseId" = $3,
+                   "httpStatus" = 200,
+                   "completedAt" = CURRENT_TIMESTAMP
+             WHERE "projectId" = $1 AND "id" = $2`,
+      values: [projectAId, candidateAttemptId, providerResponseId],
+    },
+    {
+      sql: `UPDATE "AiRun"
+               SET "status" = 'succeeded',
+                   "outputBytes" = 256,
+                   "inputTokens" = 10,
+                   "outputTokens" = 5,
+                   "budgetUsedMicros" = 1,
+                   "budgetStatus" = 'allowed',
+                   "providerResponseId" = $3,
+                   "httpStatus" = 200,
+                   "completedAt" = CURRENT_TIMESTAMP
+             WHERE "projectId" = $1 AND "id" = $2`,
+      values: [projectAId, candidateRunId, providerResponseId],
+    },
+  ]);
+
+  const candidates = [
+    {
+      statement: "Candidate decision.",
+      statementFingerprint: buildOpenAiCandidateStatementFingerprint(
+        "Candidate decision.",
+      ),
+      sourceId: sourceAId,
+      sourceExcerpt: sourceAContent,
+      sourceExcerptFingerprint: buildOpenAiCandidateExcerptFingerprint(
+        sourceAContent,
+      ),
+      sourceStart: 0,
+      sourceEnd: Buffer.byteLength(sourceAContent, "utf8"),
+    },
+    {
+      statement: "Candidate risk.",
+      statementFingerprint: buildOpenAiCandidateStatementFingerprint(
+        "Candidate risk.",
+      ),
+      sourceId: sourceAId,
+      sourceExcerpt: "runtime",
+      sourceExcerptFingerprint: buildOpenAiCandidateExcerptFingerprint("runtime"),
+      sourceStart: 0,
+      sourceEnd: Buffer.byteLength("runtime", "utf8"),
+    },
+  ] as const;
+  const verifiedResponse = {
+    contractVersion: OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION,
+    providerResponseId,
+    modelId: "synthetic-provider/model-v1",
+    usage: { inputTokens: 10, outputTokens: 5, requestCount: 1 },
+    candidates,
+    candidateSetFingerprint: buildOpenAiCandidateSetFingerprint(candidates),
+  };
+
+  const adapter = new PrismaPg({ connectionString: url });
+  const prisma = new PrismaClient({ adapter });
+  const service = createAiCandidateService({ db: prisma });
+  try {
+    const first = await service.persistVerifiedCandidates({
+      projectId: projectAId,
+      aiRunId: candidateRunId,
+      verifiedResponse,
+    });
+    const replay = await service.persistVerifiedCandidates({
+      projectId: projectAId,
+      aiRunId: candidateRunId,
+      verifiedResponse,
+    });
+    requireCondition(
+      first.id === replay.id &&
+        first.candidateCount === 2 &&
+        first.claims.length === 2 &&
+        first.claims.every((claim) => claim.reviewStatus === "candidate"),
+      "AI_CANDIDATE_POSTGRES_ATOMIC_IDEMPOTENCY_FAILED",
+    );
+
+    const decision = first.claims.find(
+      (claim) => claim.statement === "Candidate decision.",
+    );
+    const risk = first.claims.find(
+      (claim) => claim.statement === "Candidate risk.",
+    );
+    requireCondition(
+      decision !== undefined && risk !== undefined,
+      "AI_CANDIDATE_POSTGRES_CLAIMS_MISSING",
+    );
+    const accepted = await service.acceptCandidate({
+      projectId: projectAId,
+      candidateId: decision.id,
+      reviewedBy: "local-user",
+      item: {
+        type: ProjectItemType.decision,
+        title: "Accepted model candidate",
+        content: decision.statement,
+        occurredAt: null,
+      },
+    });
+    const dismissed = await service.dismissCandidate({
+      projectId: projectAId,
+      candidateId: risk.id,
+      reviewedBy: "local-user",
+    });
+    requireCondition(
+      accepted.reviewStatus === "accepted" &&
+        accepted.acceptedItem?.reviewStatus === "confirmed" &&
+        accepted.acceptedItem.sourceId === sourceAId &&
+        accepted.acceptedItem.sourceExcerpt === sourceAContent &&
+        dismissed.reviewStatus === "dismissed" &&
+        dismissed.acceptedItemId === null,
+      "AI_CANDIDATE_POSTGRES_REVIEW_STATE_MISMATCH",
+    );
+
+    const replayAfterReview = await service.persistVerifiedCandidates({
+      projectId: projectAId,
+      aiRunId: candidateRunId,
+      verifiedResponse,
+    });
+    requireCondition(
+      replayAfterReview.id === first.id &&
+        replayAfterReview.claims.some((claim) => claim.reviewStatus === "accepted") &&
+        replayAfterReview.claims.some((claim) => claim.reviewStatus === "dismissed"),
+      "AI_CANDIDATE_POSTGRES_REPLAY_AFTER_REVIEW_FAILED",
+    );
+    await expectActionRejected(
+      async () => {
+        await service.acceptCandidate({
+          projectId: projectAId,
+          candidateId: decision.id,
+          reviewedBy: "local-user",
+          item: {
+            type: ProjectItemType.decision,
+            title: "Duplicate review",
+            content: decision.statement,
+          },
+        });
+      },
+      "candidate duplicate review",
+    );
+    try {
+      await service.dismissCandidate({
+        projectId: projectAId,
+        candidateId: decision.id,
+        reviewedBy: "local-user",
+      });
+      throw new Error("AI_CANDIDATE_POSTGRES_TERMINAL_REVIEW_ACCEPTED");
+    } catch (error) {
+      requireCondition(
+        error instanceof AiCandidateError &&
+          error.code === "AI_CANDIDATE_ALREADY_REVIEWED",
+        "AI_CANDIDATE_POSTGRES_TERMINAL_REVIEW_ERROR_MISMATCH",
+      );
+    }
+
+    await expectActionRejected(
+      () =>
+        transaction(client, [
+          {
+            sql: `UPDATE "AiCandidateClaim"
+                    SET "statement" = 'forged'
+                  WHERE "projectId" = $1 AND "id" = $2`,
+            values: [projectAId, decision.id],
+          },
+        ]),
+      "candidate evidence update",
+    );
+    await expectActionRejected(
+      () =>
+        transaction(client, [
+          {
+            sql: `DELETE FROM "AiCandidateClaim"
+                  WHERE "projectId" = $1 AND "id" = $2`,
+            values: [projectAId, risk.id],
+          },
+        ]),
+      "candidate direct delete",
+    );
+    await expectActionRejected(
+      () =>
+        transaction(client, [
+          {
+            sql: `UPDATE "AiCandidateBatch"
+                    SET "candidateCount" = 1
+                  WHERE "projectId" = $1 AND "id" = $2`,
+            values: [projectAId, first.id],
+          },
+        ]),
+      "candidate batch mutation",
+    );
+    await expectActionRejected(
+      () =>
+        transaction(client, [
+          {
+            sql: `UPDATE "ProjectItem"
+                    SET "sourceExcerpt" = 'runtime'
+                  WHERE "projectId" = $1 AND "id" = $2`,
+            values: [projectAId, accepted.acceptedItemId],
+          },
+        ]),
+      "accepted candidate provenance mutation",
+    );
+    await expectActionRejected(
+      () =>
+        transaction(client, [
+          {
+            sql: `DELETE FROM "ProjectItem"
+                  WHERE "projectId" = $1 AND "id" = $2`,
+            values: [projectAId, accepted.acceptedItemId],
+          },
+        ]),
+      "accepted candidate item delete",
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
+
+  await transaction(client, [
+    {
+      sql: `DELETE FROM "Project" WHERE "id" = $1`,
+      values: [projectAId],
+    },
+  ]);
+  const cascade = await safeQuery<{
+    batches: string;
+    claims: string;
+    items: string;
+  }>(
+    client,
+    `SELECT
+       (SELECT COUNT(*)::text FROM "AiCandidateBatch" WHERE "projectId" = $1) AS batches,
+       (SELECT COUNT(*)::text FROM "AiCandidateClaim" WHERE "projectId" = $1) AS claims,
+       (SELECT COUNT(*)::text FROM "ProjectItem" WHERE "projectId" = $1) AS items`,
+    [projectAId],
+  );
+  requireCondition(
+    cascade.rows[0]?.batches === "0" &&
+      cascade.rows[0].claims === "0" &&
+      cascade.rows[0].items === "0",
+    "AI_CANDIDATE_POSTGRES_PROJECT_CASCADE_MISMATCH",
+  );
+}
+
 async function assertProjectRootCascade(client: Client): Promise<void> {
   const result = await safeQuery<{
     project_a: string;
@@ -3323,6 +3690,8 @@ async function assertProjectRootCascade(client: Client): Promise<void> {
     attempts_a: string;
     inputs_a: string;
     audits_a: string;
+    candidate_batches_a: string;
+    candidate_claims_a: string;
     project_b: string;
     source_b: string;
   }>(
@@ -3340,6 +3709,8 @@ async function assertProjectRootCascade(client: Client): Promise<void> {
        (SELECT COUNT(*)::text FROM "AiRunAttempt" WHERE "projectId" = $1) AS attempts_a,
        (SELECT COUNT(*)::text FROM "AiRunInputSource" WHERE "projectId" = $1) AS inputs_a,
        (SELECT COUNT(*)::text FROM "AiAuditEvent" WHERE "projectId" = $1) AS audits_a,
+       (SELECT COUNT(*)::text FROM "AiCandidateBatch" WHERE "projectId" = $1) AS candidate_batches_a,
+       (SELECT COUNT(*)::text FROM "AiCandidateClaim" WHERE "projectId" = $1) AS candidate_claims_a,
        (SELECT COUNT(*)::text FROM "Project" WHERE "id" = $2) AS project_b,
        (SELECT COUNT(*)::text FROM "ProjectSource" WHERE "projectId" = $2) AS source_b`,
     [projectAId, projectBId],
@@ -3359,6 +3730,8 @@ async function assertProjectRootCascade(client: Client): Promise<void> {
       counts.attempts_a === "0" &&
       counts.inputs_a === "0" &&
       counts.audits_a === "0" &&
+      counts.candidate_batches_a === "0" &&
+      counts.candidate_claims_a === "0" &&
       counts.project_b === "1" &&
       counts.source_b === "1",
     "AI_RUNTIME_POSTGRES_PROJECT_ROOT_CASCADE_MISMATCH",
@@ -3679,6 +4052,7 @@ test(
       await runTwoConnectionOrderingEvidence(client, testDatabaseUrl as string);
       await setupFreshLiveGrant(client);
       await runRunAttemptInputMatrix(client);
+      await runCandidateMemoryMatrix(client, testDatabaseUrl as string);
       await runCrossProjectAuditDeleteCascadeMatrix(client);
     } finally {
       try {

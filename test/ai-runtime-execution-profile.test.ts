@@ -8,10 +8,14 @@ import {
   OPENAI_AUTO_EXTRACT_PRICING_SNAPSHOT_ID,
   OPENAI_GENERATE_WITH_CONTEXT_MAX_BUDGET_MICROS,
   OPENAI_GENERATE_WITH_CONTEXT_MAX_INPUT_TOKENS,
+  OPENAI_PROJECT_ANALYSIS_MAX_BUDGET_MICROS,
+  OPENAI_SOURCE_SUMMARY_MAX_BUDGET_MICROS,
   calculateAiExecutionBudgetMicros,
   getOpenAiAutoExtractProfile,
   getOpenAiEmbeddingProfile,
   getOpenAiGenerateWithContextProfile,
+  getOpenAiProjectAnalysisProfile,
+  getOpenAiSourceSummaryProfile,
   getSyntheticAiExecutionProfile,
   resolveAiExecutionProfile,
   scanLocalSourcesForModelTransfer,
@@ -35,6 +39,21 @@ function openAiAutoExtractBoundary() {
 
 function openAiGenerateWithContextBoundary() {
   const profile = getOpenAiGenerateWithContextProfile();
+  return {
+    profileFingerprint: profile.profileFingerprint,
+    providerFingerprint: profile.providerFingerprint,
+    modelFingerprint: profile.modelFingerprint,
+    modelId: profile.modelId,
+    regionFingerprint: profile.processorRegionFingerprint,
+    retentionFingerprint: profile.processorRetentionFingerprint,
+    endpointFingerprint: profile.processorEndpointFingerprint,
+  };
+}
+
+function openAiAnalysisBoundary(operation: "sourceSummary" | "projectAnalysis") {
+  const profile = operation === "sourceSummary"
+    ? getOpenAiSourceSummaryProfile()
+    : getOpenAiProjectAnalysisProfile();
   return {
     profileFingerprint: profile.profileFingerprint,
     providerFingerprint: profile.providerFingerprint,
@@ -174,6 +193,26 @@ test("generate with context resolves only its fixed Responses boundary", () => {
       changedField,
     );
   }
+});
+
+test("source summary and project analysis have separate fixed execution boundaries", () => {
+  const summaryBoundary = openAiAnalysisBoundary("sourceSummary");
+  const analysisBoundary = openAiAnalysisBoundary("projectAnalysis");
+  const summary = resolveAiExecutionProfile("sourceSummary", summaryBoundary);
+  const analysis = resolveAiExecutionProfile("projectAnalysis", analysisBoundary);
+  assert.equal(summary?.kind, "openaiSourceSummary");
+  assert.equal(analysis?.kind, "openaiProjectAnalysis");
+  assert.equal(summary?.maxBudgetMicros, OPENAI_SOURCE_SUMMARY_MAX_BUDGET_MICROS);
+  assert.equal(analysis?.maxBudgetMicros, OPENAI_PROJECT_ANALYSIS_MAX_BUDGET_MICROS);
+  assert.notEqual(summary?.promptFingerprint, analysis?.promptFingerprint);
+  assert.equal(
+    resolveAiExecutionProfile("sourceSummary", analysisBoundary),
+    null,
+  );
+  assert.equal(
+    resolveAiExecutionProfile("projectAnalysis", summaryBoundary),
+    null,
+  );
 });
 
 test("local source scanning exposes only a stable passed or blocked result", () => {

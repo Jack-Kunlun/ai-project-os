@@ -68,6 +68,12 @@ export type GroundedClaim = Readonly<{
   citations: readonly GroundedCitation[];
 }>;
 
+export type GroundedConflict = Readonly<{
+  factKey: string;
+  left: GroundedClaim;
+  right: GroundedClaim;
+}>;
+
 export type GroundedRagResult =
   | Readonly<{
       kind: "answer";
@@ -79,11 +85,7 @@ export type GroundedRagResult =
   | Readonly<{
       kind: "conflict";
       answer: string;
-      conflicts: readonly Readonly<{
-        factKey: string;
-        left: GroundedClaim;
-        right: GroundedClaim;
-      }>[];
+      conflicts: readonly GroundedConflict[];
       snapshotId: string;
       contextFingerprint: string;
     }>
@@ -430,33 +432,55 @@ function groundedClaim(
   return Object.freeze({ text: raw.text, citations: Object.freeze(citations) });
 }
 
-function verifyAnswer(plan: GroundedRagPlan, value: Record<string, unknown>): GroundedRagResult {
-  exactKeys(value, ["kind", "claims"]);
-  if (!Array.isArray(value.claims) || value.claims.length < 1 || value.claims.length > GROUNDED_RAG_MAX_CLAIMS) {
+export function verifyGroundedClaimSet(
+  plan: GroundedRagPlan,
+  value: unknown,
+  bounds: Readonly<{ minimum: number; maximum: number }>,
+): readonly GroundedClaim[] {
+  if (
+    !issuedPlans.has(plan) ||
+    !Number.isSafeInteger(bounds.minimum) ||
+    !Number.isSafeInteger(bounds.maximum) ||
+    bounds.minimum < 0 ||
+    bounds.maximum < bounds.minimum ||
+    bounds.maximum > 40 ||
+    !Array.isArray(value) ||
+    value.length < bounds.minimum ||
+    value.length > bounds.maximum
+  ) {
+    return fail(!issuedPlans.has(plan)
+      ? "GROUNDED_RAG_INVALID_INPUT"
+      : "GROUNDED_RAG_INVALID_OUTPUT");
+  }
+  const rawClaims = value.map(canonicalRawClaim);
+  const claimTexts = new Set(rawClaims.map((claim) => claim.text));
+  if (claimTexts.size !== rawClaims.length) {
     return fail("GROUNDED_RAG_INVALID_OUTPUT");
   }
-  const rawClaims = value.claims.map(canonicalRawClaim);
-  const claimTexts = new Set(rawClaims.map((claim) => claim.text));
-  if (claimTexts.size !== rawClaims.length) return fail("GROUNDED_RAG_INVALID_OUTPUT");
-  const claims = Object.freeze(rawClaims.map((claim) => groundedClaim(plan, claim)));
-  const answer = claims.length === 1
-    ? `仅依据 ${claims[0]!.citations[0]!.sourceId} 回答：${claims[0]!.text}。`
-    : `仅依据已检索项目资料回答：${claims.map((claim) => claim.text).join("；")}。`;
-  return Object.freeze({
-    kind: "answer" as const,
-    answer,
-    claims,
-    snapshotId: plan.snapshotId,
-    contextFingerprint: plan.contextFingerprint,
-  });
+  return Object.freeze(rawClaims.map((claim) => groundedClaim(plan, claim)));
 }
 
-function verifyConflict(plan: GroundedRagPlan, value: Record<string, unknown>): GroundedRagResult {
-  exactKeys(value, ["kind", "conflicts"]);
-  if (!Array.isArray(value.conflicts) || value.conflicts.length < 1 || value.conflicts.length > 10) {
-    return fail("GROUNDED_RAG_INVALID_OUTPUT");
+export function verifyGroundedConflictSet(
+  plan: GroundedRagPlan,
+  value: unknown,
+  bounds: Readonly<{ minimum: number; maximum: number }>,
+): readonly GroundedConflict[] {
+  if (
+    !issuedPlans.has(plan) ||
+    !Number.isSafeInteger(bounds.minimum) ||
+    !Number.isSafeInteger(bounds.maximum) ||
+    bounds.minimum < 0 ||
+    bounds.maximum < bounds.minimum ||
+    bounds.maximum > 20 ||
+    !Array.isArray(value) ||
+    value.length < bounds.minimum ||
+    value.length > bounds.maximum
+  ) {
+    return fail(!issuedPlans.has(plan)
+      ? "GROUNDED_RAG_INVALID_INPUT"
+      : "GROUNDED_RAG_INVALID_OUTPUT");
   }
-  const conflicts = Object.freeze(value.conflicts.map((conflict) => {
+  return Object.freeze(value.map((conflict) => {
     if (!isPlainRecord(conflict)) return fail("GROUNDED_RAG_INVALID_OUTPUT");
     exactKeys(conflict, ["factKey", "left", "right"]);
     if (typeof conflict.factKey !== "string" || !FACT_KEY_PATTERN.test(conflict.factKey)) {
@@ -474,6 +498,32 @@ function verifyConflict(plan: GroundedRagPlan, value: Record<string, unknown>): 
     }
     return Object.freeze({ factKey: conflict.factKey, left, right });
   }));
+}
+
+function verifyAnswer(plan: GroundedRagPlan, value: Record<string, unknown>): GroundedRagResult {
+  exactKeys(value, ["kind", "claims"]);
+  const claims = verifyGroundedClaimSet(plan, value.claims, {
+    minimum: 1,
+    maximum: GROUNDED_RAG_MAX_CLAIMS,
+  });
+  const answer = claims.length === 1
+    ? `仅依据 ${claims[0]!.citations[0]!.sourceId} 回答：${claims[0]!.text}。`
+    : `仅依据已检索项目资料回答：${claims.map((claim) => claim.text).join("；")}。`;
+  return Object.freeze({
+    kind: "answer" as const,
+    answer,
+    claims,
+    snapshotId: plan.snapshotId,
+    contextFingerprint: plan.contextFingerprint,
+  });
+}
+
+function verifyConflict(plan: GroundedRagPlan, value: Record<string, unknown>): GroundedRagResult {
+  exactKeys(value, ["kind", "conflicts"]);
+  const conflicts = verifyGroundedConflictSet(plan, value.conflicts, {
+    minimum: 1,
+    maximum: 10,
+  });
   const answer = `项目资料存在冲突：${conflicts.map((conflict) =>
     `${conflict.factKey} 分别记录为“${conflict.left.text}”和“${conflict.right.text}”`,
   ).join("；")}。请人工复核。`;

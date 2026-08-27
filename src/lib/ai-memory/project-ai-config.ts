@@ -13,9 +13,13 @@ import {
   OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
   OPENAI_EMBEDDING_PROCESSOR_FINGERPRINT,
   OPENAI_GENERATE_WITH_CONTEXT_PROCESSOR_FINGERPRINT,
+  OPENAI_PROJECT_ANALYSIS_PROCESSOR_FINGERPRINT,
+  OPENAI_SOURCE_SUMMARY_PROCESSOR_FINGERPRINT,
   getOpenAiAutoExtractProfile,
   getOpenAiEmbeddingProfile,
   getOpenAiGenerateWithContextProfile,
+  getOpenAiProjectAnalysisProfile,
+  getOpenAiSourceSummaryProfile,
   loadAiRuntimeConfig,
   scanLocalSourcesForModelTransfer,
 } from "@/lib/ai-runtime";
@@ -44,6 +48,8 @@ const TRANSACTION_RETRY_LIMIT = 3;
 const CONFIGURED_OPERATIONS = [
   AiOperation.autoExtract,
   AiOperation.embedding,
+  AiOperation.sourceSummary,
+  AiOperation.projectAnalysis,
   AiOperation.generateWithContext,
 ] as const;
 
@@ -154,6 +160,8 @@ function operationBoundaries(): readonly OperationBoundary[] {
   const autoExtract = getOpenAiAutoExtractProfile();
   const embedding = getOpenAiEmbeddingProfile();
   const generateWithContext = getOpenAiGenerateWithContextProfile();
+  const sourceSummary = getOpenAiSourceSummaryProfile();
+  const projectAnalysis = getOpenAiProjectAnalysisProfile();
   return Object.freeze([
     Object.freeze({
       operation: AiOperation.autoExtract,
@@ -188,6 +196,28 @@ function operationBoundaries(): readonly OperationBoundary[] {
       retentionFingerprint: generateWithContext.processorRetentionFingerprint,
       endpointFingerprint: generateWithContext.processorEndpointFingerprint,
     }),
+    Object.freeze({
+      operation: AiOperation.sourceSummary,
+      profileFingerprint: sourceSummary.profileFingerprint,
+      providerFingerprint: sourceSummary.providerFingerprint,
+      modelFingerprint: sourceSummary.modelFingerprint,
+      modelId: sourceSummary.modelId,
+      processorFingerprint: OPENAI_SOURCE_SUMMARY_PROCESSOR_FINGERPRINT,
+      regionFingerprint: sourceSummary.processorRegionFingerprint,
+      retentionFingerprint: sourceSummary.processorRetentionFingerprint,
+      endpointFingerprint: sourceSummary.processorEndpointFingerprint,
+    }),
+    Object.freeze({
+      operation: AiOperation.projectAnalysis,
+      profileFingerprint: projectAnalysis.profileFingerprint,
+      providerFingerprint: projectAnalysis.providerFingerprint,
+      modelFingerprint: projectAnalysis.modelFingerprint,
+      modelId: projectAnalysis.modelId,
+      processorFingerprint: OPENAI_PROJECT_ANALYSIS_PROCESSOR_FINGERPRINT,
+      regionFingerprint: projectAnalysis.processorRegionFingerprint,
+      retentionFingerprint: projectAnalysis.processorRetentionFingerprint,
+      endpointFingerprint: projectAnalysis.processorEndpointFingerprint,
+    }),
   ]);
 }
 
@@ -220,6 +250,12 @@ const POLICY_BUDGET_FINGERPRINT = fingerprint("budget", {
   generateWithContextMaxInputTokens: 64_000,
   generateWithContextMaxOutputTokens: 2_048,
   generateWithContextMaxBudgetMicros: 60_000,
+  sourceSummaryMaxInputTokens: 64_000,
+  sourceSummaryMaxOutputTokens: 2_048,
+  sourceSummaryMaxBudgetMicros: 60_000,
+  projectAnalysisMaxInputTokens: 64_000,
+  projectAnalysisMaxOutputTokens: 4_096,
+  projectAnalysisMaxBudgetMicros: 90_000,
 });
 const POLICY_FINGERPRINT = fingerprint("enabled-policy", {
   consentVersion: MODEL_TRANSFER_CONSENT_VERSION,
@@ -416,8 +452,8 @@ function exactConfiguredRevision(value: Readonly<{
     value.outboundEnabled !== true ||
     value.embeddingEnabled !== true ||
     value.autoExtractEnabled !== true ||
-    value.sourceSummaryEnabled !== false ||
-    value.projectAnalysisEnabled !== false ||
+    value.sourceSummaryEnabled !== true ||
+    value.projectAnalysisEnabled !== true ||
     value.generateWithContextEnabled !== true ||
     value.profileFingerprint !== POLICY_PROFILE_FINGERPRINT ||
     value.processorFingerprint !== POLICY_PROCESSOR_FINGERPRINT ||
@@ -675,8 +711,8 @@ class ProjectAiConfigServiceImpl {
             outboundEnabled: true,
             embeddingEnabled: true,
             autoExtractEnabled: true,
-            sourceSummaryEnabled: false,
-            projectAnalysisEnabled: false,
+            sourceSummaryEnabled: true,
+            projectAnalysisEnabled: true,
             generateWithContextEnabled: true,
             profileFingerprint: POLICY_PROFILE_FINGERPRINT,
             processorFingerprint: POLICY_PROCESSOR_FINGERPRINT,

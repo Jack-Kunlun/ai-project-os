@@ -7,7 +7,12 @@ type AiMemoryStatus = {
   currentRevision: number | null;
   sourceIds: string[];
   operations: Array<{
-    operation: "autoExtract" | "embedding" | "generateWithContext";
+    operation:
+      | "autoExtract"
+      | "embedding"
+      | "sourceSummary"
+      | "projectAnalysis"
+      | "generateWithContext";
     modelId: string;
     grantId: string;
     sourceCount: number;

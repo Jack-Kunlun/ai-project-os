@@ -1,4 +1,15 @@
 export {
+  AI_DERIVED_ARTIFACT_VERSION,
+  AiDerivedArtifactError,
+  createAiDerivedArtifactService,
+  type AiDerivedArtifactAvailability,
+  type AiDerivedArtifactErrorCode,
+  type AiDerivedArtifactRestrictionReason,
+  type AiDerivedArtifactView,
+  type CreateAiDerivedArtifactServiceOptions,
+  type PublishGroundedAnalysisRequest,
+} from "./artifacts";
+export {
   AiCandidateError,
   throwAiCandidateError,
   type AiCandidateErrorCode,
@@ -105,3 +116,21 @@ export {
   type OpenAiGroundedRagExecutionIdentity,
   type VerifiedOpenAiGroundedRagRun,
 } from "./openai-grounded-rag";
+export {
+  GROUNDED_ANALYSIS_VERSION,
+  GROUNDED_PROJECT_BRIEF_PROMPT_VERSION,
+  GROUNDED_SOURCE_SUMMARY_PROMPT_VERSION,
+  verifyGroundedAnalysisOutput,
+  type GroundedAnalysisOperation,
+  type GroundedAnalysisRefusal,
+  type GroundedAnalysisResult,
+  type GroundedProjectBrief,
+  type GroundedSourceSummary,
+} from "./grounded-analysis";
+export {
+  OPENAI_GROUNDED_ANALYSIS_PLAN_VERSION,
+  compileOpenAiGroundedAnalysisPlan,
+  verifyOpenAiGroundedAnalysisPlanOutput,
+  type OpenAiGroundedAnalysisExecutionIdentity,
+  type OpenAiGroundedAnalysisPlan,
+} from "./openai-grounded-analysis";

@@ -148,6 +148,8 @@ const aiTables = [
   "AiCandidateClaim",
   "ProjectRagSnapshot",
   "ProjectRagSnapshotPointer",
+  "AiDerivedArtifact",
+  "ArtifactDependency",
 ] as const;
 
 const aiEnums = [
@@ -164,6 +166,10 @@ const aiEnums = [
   "AiSafeErrorCode",
   "AiCandidateReviewStatus",
   "ProjectRagSnapshotStatus",
+  "AiDerivedArtifactKind",
+  "AiDerivedArtifactState",
+  "ArtifactDependencyKind",
+  "ArtifactRestrictionReasonCode",
 ] as const;
 
 const aiRuntimeMigrationPath = join(
@@ -197,6 +203,10 @@ const operationProfileMigrationPath = join(
 const ragSnapshotMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260828210000_add_project_rag_snapshots/migration.sql",
+);
+const derivedArtifactMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260828233000_add_ai_derived_artifacts/migration.sql",
 );
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
@@ -652,6 +662,7 @@ async function applyAiMigrationInTransaction(client: Client): Promise<void> {
     { sql: await loadSql(candidateItemPublicationMigrationPath) },
     { sql: await loadSql(operationProfileMigrationPath) },
     { sql: await loadSql(ragSnapshotMigrationPath) },
+    { sql: await loadSql(derivedArtifactMigrationPath) },
   ]);
 }
 
@@ -683,6 +694,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     "20260828150000_publish_ai_candidate_items",
     "20260828170000_add_ai_operation_profiles",
     "20260828210000_add_project_rag_snapshots",
+    "20260828233000_add_ai_derived_artifacts",
   ];
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===
@@ -751,6 +763,10 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     { name: "AiCandidateClaim_count_consistency_constraint_trigger", table: "AiCandidateClaim", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
     { name: "AiCandidateClaim_item_consistency_constraint_trigger", table: "AiCandidateClaim", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
     { name: "ProjectItem_ai_candidate_consistency_constraint_trigger", table: "ProjectItem", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
+    { name: "AiDerivedArtifact_guard_trigger", table: "AiDerivedArtifact", timing: "BEFORE", events: ["INSERT", "UPDATE"] },
+    { name: "ArtifactDependency_guard_trigger", table: "ArtifactDependency", timing: "BEFORE", events: ["INSERT", "UPDATE"] },
+    { name: "AiDerivedArtifact_dependency_manifest_constraint", table: "AiDerivedArtifact", timing: "AFTER", events: ["INSERT", "UPDATE"], constraint: true, deferred: true },
+    { name: "ArtifactDependency_manifest_constraint", table: "ArtifactDependency", timing: "AFTER", events: ["INSERT", "UPDATE", "DELETE"], constraint: true, deferred: true },
   ];
   for (const expectation of triggerExpectations) {
     const result = await safeQuery<{
@@ -3581,7 +3597,7 @@ async function runAtomicRuntimeCandidateCompletion(
     configured.configured &&
       configured.currentRevision === 3 &&
       JSON.stringify(configured.sourceIds) === JSON.stringify([sourceAId]) &&
-      configured.operations.length === 3 &&
+      configured.operations.length === 5 &&
       successGrant !== undefined &&
       configured.externalTransferExecution.enabled === false,
     "AI_RUNTIME_POSTGRES_LOCAL_CONFIG_STATUS_MISMATCH",
@@ -3773,7 +3789,7 @@ async function runAtomicRuntimeCandidateCompletion(
     [projectAId, configured.operations.map((operation) => operation.grantId)],
   );
   requireCondition(
-    replacedGrants.rows.length === 3 &&
+    replacedGrants.rows.length === 5 &&
       replacedGrants.rows.every(
         (grant) =>
           grant.status === "revoked" &&
@@ -3878,7 +3894,7 @@ async function runAtomicRuntimeCandidateCompletion(
     [projectAId, reconfigured.operations.map((operation) => operation.grantId)],
   );
   requireCondition(
-    revokedCurrentGrants.rows.length === 3 &&
+    revokedCurrentGrants.rows.length === 5 &&
       revokedCurrentGrants.rows.every(
         (grant) =>
           grant.status === "revoked" &&

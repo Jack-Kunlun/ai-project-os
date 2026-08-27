@@ -13,12 +13,26 @@ import {
   OPENAI_EMBEDDING_MODEL_ID,
   OPENAI_EMBEDDING_PROFILE_FINGERPRINT,
   OPENAI_PROCESSOR_REGION_FINGERPRINT,
+  OPENAI_PROJECT_ANALYSIS_MODEL_FINGERPRINT,
+  OPENAI_PROJECT_ANALYSIS_MODEL_ID,
+  OPENAI_PROJECT_ANALYSIS_PROCESSOR_FINGERPRINT,
+  OPENAI_PROJECT_ANALYSIS_PROFILE_FINGERPRINT,
+  OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
+  OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+  OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+  OPENAI_SOURCE_SUMMARY_MODEL_FINGERPRINT,
+  OPENAI_SOURCE_SUMMARY_MODEL_ID,
+  OPENAI_SOURCE_SUMMARY_PROCESSOR_FINGERPRINT,
+  OPENAI_SOURCE_SUMMARY_PROFILE_FINGERPRINT,
   loadOpenAiCredential,
 } from "@/lib/ai-runtime";
 import {
+  AiDerivedArtifactError,
   EMBEDDING_STORAGE_PROFILE_FINGERPRINT,
   CorpusIndexError,
   ProjectSearchError,
+  buildGroundedRagPlanFromSearch,
+  createAiDerivedArtifactService,
   createCorpusIndexService,
   createProjectSearchService,
 } from "@/lib/ai-memory";
@@ -46,6 +60,14 @@ const secondGrantId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
 const secondGrantSourceAId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
 const secondGrantSourceBId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
 const secondGrantOperationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4";
+const summaryGrantId = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+const summaryGrantSourceAId = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
+const summaryGrantSourceBId = "cccccccc-cccc-4ccc-8ccc-ccccccccccc3";
+const summaryGrantOperationId = "cccccccc-cccc-4ccc-8ccc-ccccccccccc4";
+const analysisGrantId = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1";
+const analysisGrantSourceAId = "dddddddd-dddd-4ddd-8ddd-ddddddddddd2";
+const analysisGrantSourceBId = "dddddddd-dddd-4ddd-8ddd-ddddddddddd3";
+const analysisGrantOperationId = "dddddddd-dddd-4ddd-8ddd-ddddddddddd4";
 const sourceAContent = "项目负责人是岚。\n\n当前目标是建立可追溯的长期记忆。";
 const sourceBContent = "Repository Alpha owns the API. Repository Beta owns the UI.";
 
@@ -147,6 +169,8 @@ test(
             policyFingerprint: "4".repeat(64),
             outboundEnabled: true,
             embeddingEnabled: true,
+            sourceSummaryEnabled: true,
+            projectAnalysisEnabled: true,
             profileFingerprint: OPENAI_EMBEDDING_PROFILE_FINGERPRINT,
             processorFingerprint,
             regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
@@ -169,6 +193,36 @@ test(
             regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
             retentionFingerprint: OPENAI_EMBEDDINGS_RETENTION_FINGERPRINT,
             endpointFingerprint: OPENAI_EMBEDDINGS_ENDPOINT_FINGERPRINT,
+          },
+        });
+        await prisma.projectAiPolicyOperationProfile.create({
+          data: {
+            projectId,
+            policyRevisionId,
+            operation: "projectAnalysis",
+            profileFingerprint: OPENAI_PROJECT_ANALYSIS_PROFILE_FINGERPRINT,
+            providerFingerprint: OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+            modelFingerprint: OPENAI_PROJECT_ANALYSIS_MODEL_FINGERPRINT,
+            modelId: OPENAI_PROJECT_ANALYSIS_MODEL_ID,
+            processorFingerprint: OPENAI_PROJECT_ANALYSIS_PROCESSOR_FINGERPRINT,
+            regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
+            retentionFingerprint: OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+            endpointFingerprint: OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
+          },
+        });
+        await prisma.projectAiPolicyOperationProfile.create({
+          data: {
+            projectId,
+            policyRevisionId,
+            operation: "sourceSummary",
+            profileFingerprint: OPENAI_SOURCE_SUMMARY_PROFILE_FINGERPRINT,
+            providerFingerprint: OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+            modelFingerprint: OPENAI_SOURCE_SUMMARY_MODEL_FINGERPRINT,
+            modelId: OPENAI_SOURCE_SUMMARY_MODEL_ID,
+            processorFingerprint: OPENAI_SOURCE_SUMMARY_PROCESSOR_FINGERPRINT,
+            regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
+            retentionFingerprint: OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+            endpointFingerprint: OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
           },
         });
         await prisma.projectAiPolicy.create({
@@ -228,6 +282,126 @@ test(
         });
         await prisma.modelProcessingGrant.update({
           where: { id: grantId },
+          data: {
+            status: "issued",
+            issuedAt: new Date(Date.now() - 60_000),
+            expiresAt: new Date(Date.now() + 3_600_000),
+          },
+        });
+        await prisma.modelProcessingGrant.create({
+          data: {
+            id: summaryGrantId,
+            projectId,
+            sourceKind: "manual_text",
+            policyRevisionId,
+            profileFingerprint: OPENAI_SOURCE_SUMMARY_PROFILE_FINGERPRINT,
+            providerFingerprint: OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+            modelFingerprint: OPENAI_SOURCE_SUMMARY_MODEL_FINGERPRINT,
+            modelId: OPENAI_SOURCE_SUMMARY_MODEL_ID,
+            processorFingerprint: OPENAI_SOURCE_SUMMARY_PROCESSOR_FINGERPRINT,
+            regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
+            retentionFingerprint: OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+            endpointFingerprint: OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
+            grantFingerprint: "c".repeat(64),
+            effectivePolicyVersion: 1,
+            budgetFingerprint,
+            scannerFingerprint,
+            scannerVersion: "scanner-v1",
+            budgetProfile: "standard",
+            issuedBy: "test-owner",
+            purposeCode: "source-summary",
+          },
+        });
+        await prisma.modelProcessingGrantSource.createMany({
+          data: [
+            {
+              id: summaryGrantSourceAId,
+              projectId,
+              grantId: summaryGrantId,
+              sourceId: sourceAId,
+              contentFingerprint: hashSourceContent(sourceAContent),
+              contentBytes: Buffer.byteLength(sourceAContent, "utf8"),
+            },
+            {
+              id: summaryGrantSourceBId,
+              projectId,
+              grantId: summaryGrantId,
+              sourceId: sourceBId,
+              contentFingerprint: hashSourceContent(sourceBContent),
+              contentBytes: Buffer.byteLength(sourceBContent, "utf8"),
+            },
+          ],
+        });
+        await prisma.modelProcessingGrantOperation.create({
+          data: {
+            id: summaryGrantOperationId,
+            projectId,
+            grantId: summaryGrantId,
+            operation: "sourceSummary",
+          },
+        });
+        await prisma.modelProcessingGrant.update({
+          where: { id: summaryGrantId },
+          data: {
+            status: "issued",
+            issuedAt: new Date(Date.now() - 60_000),
+            expiresAt: new Date(Date.now() + 3_600_000),
+          },
+        });
+        await prisma.modelProcessingGrant.create({
+          data: {
+            id: analysisGrantId,
+            projectId,
+            sourceKind: "manual_text",
+            policyRevisionId,
+            profileFingerprint: OPENAI_PROJECT_ANALYSIS_PROFILE_FINGERPRINT,
+            providerFingerprint: OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+            modelFingerprint: OPENAI_PROJECT_ANALYSIS_MODEL_FINGERPRINT,
+            modelId: OPENAI_PROJECT_ANALYSIS_MODEL_ID,
+            processorFingerprint: OPENAI_PROJECT_ANALYSIS_PROCESSOR_FINGERPRINT,
+            regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
+            retentionFingerprint: OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+            endpointFingerprint: OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
+            grantFingerprint: "d".repeat(64),
+            effectivePolicyVersion: 1,
+            budgetFingerprint,
+            scannerFingerprint,
+            scannerVersion: "scanner-v1",
+            budgetProfile: "standard",
+            issuedBy: "test-owner",
+            purposeCode: "project-analysis",
+          },
+        });
+        await prisma.modelProcessingGrantSource.createMany({
+          data: [
+            {
+              id: analysisGrantSourceAId,
+              projectId,
+              grantId: analysisGrantId,
+              sourceId: sourceAId,
+              contentFingerprint: hashSourceContent(sourceAContent),
+              contentBytes: Buffer.byteLength(sourceAContent, "utf8"),
+            },
+            {
+              id: analysisGrantSourceBId,
+              projectId,
+              grantId: analysisGrantId,
+              sourceId: sourceBId,
+              contentFingerprint: hashSourceContent(sourceBContent),
+              contentBytes: Buffer.byteLength(sourceBContent, "utf8"),
+            },
+          ],
+        });
+        await prisma.modelProcessingGrantOperation.create({
+          data: {
+            id: analysisGrantOperationId,
+            projectId,
+            grantId: analysisGrantId,
+            operation: "projectAnalysis",
+          },
+        });
+        await prisma.modelProcessingGrant.update({
+          where: { id: analysisGrantId },
           data: {
             status: "issued",
             issuedAt: new Date(Date.now() - 60_000),
@@ -425,6 +599,112 @@ test(
         assert.equal(lexicalSearch.results[0]?.citation.sourceId, sourceAId);
         assert.equal(lexicalSearch.results[0]?.citation.excerpt, sourceAContent);
         assert.equal(lexicalSearch.snapshot.manualIndexGenerationId, indexResults[0]!.id);
+
+        const summaryPlan = buildGroundedRagPlanFromSearch({
+          projectId,
+          question: "请按资料原文摘要项目负责人和目标。",
+          search: lexicalSearch,
+        });
+        const summaryOutput = {
+          kind: "source_summary" as const,
+          paragraphs: [{
+            text: sourceAContent,
+            citations: [{ citationKey: "c1", excerpt: sourceAContent }],
+          }],
+        };
+        const artifactService = createAiDerivedArtifactService({ db: prisma });
+        const artifacts = await Promise.all([
+          artifactService.publishAnalysis({
+            projectId,
+            operation: "sourceSummary",
+            plan: summaryPlan,
+            output: summaryOutput,
+          }),
+          artifactService.publishAnalysis({
+            projectId,
+            operation: "sourceSummary",
+            plan: summaryPlan,
+            output: summaryOutput,
+          }),
+        ]);
+        assert.equal(artifacts[0]?.id, artifacts[1]?.id);
+        assert.equal(artifacts[0]?.availability, "active");
+        assert.equal(artifacts[0]?.kind, "source_summary");
+        const summarySourceCount = new Set(
+          summaryPlan.contexts.map((context) => context.sourceId),
+        ).size;
+        assert.equal(artifacts[0]?.dependencyCount, summarySourceCount + 1);
+        assert.equal(artifacts[0]?.payload?.kind, "source_summary");
+        const projectBrief = await artifactService.publishAnalysis({
+          projectId,
+          operation: "projectAnalysis",
+          plan: summaryPlan,
+          output: {
+            kind: "project_brief",
+            progress: [{
+              text: "当前目标是建立可追溯的长期记忆",
+              citations: [{
+                citationKey: "c1",
+                excerpt: "当前目标是建立可追溯的长期记忆",
+              }],
+            }],
+            risks: [],
+            unknowns: [],
+            conflicts: [],
+            questions: [],
+          },
+        });
+        assert.equal(projectBrief.kind, "project_brief");
+        assert.equal(projectBrief.availability, "active");
+        assert.equal(projectBrief.payload?.kind, "project_brief");
+        assert.equal(await prisma.aiDerivedArtifact.count({ where: { projectId } }), 2);
+        assert.equal(
+          await prisma.artifactDependency.count({ where: { projectId } }),
+          (summarySourceCount + 1) * 2,
+        );
+        await assert.rejects(
+          () => artifactService.publishAnalysis({
+            projectId,
+            operation: "sourceSummary",
+            plan: summaryPlan,
+            output: {
+              kind: "source_summary",
+              paragraphs: [{
+                text: "不存在于证据中的结论",
+                citations: [{ citationKey: "c1", excerpt: sourceAContent }],
+              }],
+            },
+          }),
+        );
+        await prisma.modelProcessingGrant.update({
+          where: { id: summaryGrantId },
+          data: {
+            status: "revoked",
+            revokedAt: new Date(),
+            revocationReasonCode: "userRequested",
+          },
+        });
+        const restrictedArtifact = await artifactService.getArtifact({
+          projectId,
+          artifactId: artifacts[0]!.id,
+        });
+        assert.equal(restrictedArtifact.availability, "restricted");
+        assert.equal(restrictedArtifact.restrictionReasonCode, "GRANT_INELIGIBLE");
+        assert.equal(restrictedArtifact.payload, null);
+        const stillActiveBrief = await artifactService.getArtifact({
+          projectId,
+          artifactId: projectBrief.id,
+        });
+        assert.equal(stillActiveBrief.availability, "active");
+        await assert.rejects(
+          () => artifactService.getArtifact({
+            projectId: otherProjectId,
+            artifactId: artifacts[0]!.id,
+          }),
+          (error: unknown) =>
+            error instanceof AiDerivedArtifactError &&
+            error.code === "AI_ARTIFACT_NOT_FOUND",
+        );
 
         const hybridSearch = await searchService.search({
           projectId,

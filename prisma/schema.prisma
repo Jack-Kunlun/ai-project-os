@@ -135,6 +135,31 @@ enum ProjectRagSnapshotStatus {
   superseded
 }
 
+enum AiDerivedArtifactKind {
+  sourceSummary @map("source_summary")
+  projectBrief @map("project_brief")
+  ragAnswer @map("rag_answer")
+  agentReport @map("agent_report")
+}
+
+enum AiDerivedArtifactState {
+  active
+  stale
+  restricted
+}
+
+enum ArtifactDependencyKind {
+  projectSource @map("project_source")
+  projectRagSnapshot @map("project_rag_snapshot")
+}
+
+enum ArtifactRestrictionReasonCode {
+  grantIneligible @map("GRANT_INELIGIBLE")
+  policyIneligible @map("POLICY_INELIGIBLE")
+  snapshotIneligible @map("SNAPSHOT_INELIGIBLE")
+  dependencyMismatch @map("DEPENDENCY_MISMATCH")
+}
+
 enum ProjectScanTrigger {
   manual
   system
@@ -289,6 +314,8 @@ model Project {
   corpusIndexPointer ProjectCorpusIndexPointer?
   ragSnapshots ProjectRagSnapshot[]
   ragSnapshotPointer ProjectRagSnapshotPointer?
+  aiDerivedArtifacts AiDerivedArtifact[]
+  artifactDependencies ArtifactDependency[]
 
   @@index([updatedAt])
 }
@@ -316,6 +343,7 @@ model ProjectSource {
   aiCandidateClaims       AiCandidateClaim[]
   sourceChunks            SourceChunk[]       @relation("ChunkProjectSource")
   corpusGenerationEntries ProjectCorpusGenerationEntry[]
+  artifactDependencies    ArtifactDependency[]
 
   @@index([projectId, capturedAt])
   @@unique([projectId, id])
@@ -752,6 +780,8 @@ model ProjectRagSnapshot {
   project                 Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   manualIndex             ProjectCorpusIndexGeneration @relation(fields: [projectId, manualIndexGenerationId, manualCorpusGenerationId, grantId, policyRevisionId], references: [projectId, indexGenerationId, corpusGenerationId, grantId, policyRevisionId], map: "ProjectRagSnapshot_manual_index_fkey", onDelete: NoAction, onUpdate: Cascade)
   publishedPointer        ProjectRagSnapshotPointer?
+  derivedArtifacts        AiDerivedArtifact[]
+  artifactDependencies    ArtifactDependency[]
 
   @@unique([projectId, id])
   @@unique([projectId, manifestFingerprint], map: "ProjectRagSnapshot_project_manifest_key")
@@ -766,6 +796,72 @@ model ProjectRagSnapshotPointer {
   ragSnapshot   ProjectRagSnapshot @relation(fields: [projectId, ragSnapshotId], references: [projectId, id], map: "ProjectRagSnapshotPointer_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, ragSnapshotId], map: "ProjectRagSnapshotPointer_project_snapshot_key")
+}
+
+model AiDerivedArtifact {
+  id                          String                        @id @default(uuid()) @db.Uuid
+  projectId                   String                        @db.Uuid
+  kind                        AiDerivedArtifactKind
+  state                       AiDerivedArtifactState        @default(active)
+  operation                   AiOperation
+  artifactFingerprint         String                        @db.VarChar(64)
+  inputFingerprint            String                        @db.VarChar(64)
+  outputFingerprint           String                        @db.VarChar(64)
+  payload                     Json                          @db.JsonB
+  projectRagSnapshotId        String                        @db.Uuid
+  snapshotManifestFingerprint String                        @db.VarChar(64)
+  grantId                     String                        @db.Uuid
+  policyRevisionId            String                        @db.Uuid
+  effectivePolicyVersion      Int
+  profileFingerprint          String                        @db.VarChar(64)
+  providerFingerprint         String                        @db.VarChar(64)
+  modelFingerprint            String                        @db.VarChar(64)
+  modelId                     String                        @db.VarChar(128)
+  promptFingerprint           String                        @db.VarChar(64)
+  promptVersion               String                        @db.VarChar(128)
+  createdAt                   DateTime                      @default(now())
+  staleAt                     DateTime?
+  restrictedAt                DateTime?
+  restrictionReasonCode       ArtifactRestrictionReasonCode?
+  project                     Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant                       ModelProcessingGrant          @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "AiDerivedArtifact_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
+  policyRevision              ProjectAiPolicyRevision       @relation(fields: [projectId, policyRevisionId], references: [projectId, id], map: "AiDerivedArtifact_policy_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectRagSnapshot          ProjectRagSnapshot            @relation(fields: [projectId, projectRagSnapshotId], references: [projectId, id], map: "AiDerivedArtifact_rag_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
+  dependencies                ArtifactDependency[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, artifactFingerprint], map: "AiDerivedArtifact_project_fingerprint_key")
+  @@index([projectId, kind, createdAt])
+  @@index([projectId, state, createdAt])
+  @@index([projectId, projectRagSnapshotId])
+  @@index([projectId, grantId])
+}
+
+model ArtifactDependency {
+  id                          String                        @id @default(uuid()) @db.Uuid
+  projectId                   String                        @db.Uuid
+  artifactId                  String                        @db.Uuid
+  dependencyKind              ArtifactDependencyKind
+  originScope                 ContentOriginScope?
+  projectSourceId             String?                       @db.Uuid
+  sourceRevisionKey           String?                       @db.Uuid
+  sourceContentHash           String?                       @db.VarChar(64)
+  projectRagSnapshotId        String?                       @db.Uuid
+  snapshotManifestFingerprint String?                       @db.VarChar(64)
+  grantId                     String                        @db.Uuid
+  policyRevisionId            String                        @db.Uuid
+  effectivePolicyVersion      Int
+  dependencyFingerprint       String                        @db.VarChar(64)
+  createdAt                   DateTime                      @default(now())
+  project                     Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  artifact                    AiDerivedArtifact             @relation(fields: [projectId, artifactId], references: [projectId, id], map: "ArtifactDependency_artifact_fkey", onDelete: Cascade, onUpdate: Cascade)
+  projectSource               ProjectSource?                @relation(fields: [projectId, projectSourceId], references: [projectId, id], map: "ArtifactDependency_project_source_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectRagSnapshot          ProjectRagSnapshot?           @relation(fields: [projectId, projectRagSnapshotId], references: [projectId, id], map: "ArtifactDependency_rag_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, artifactId, dependencyFingerprint], map: "ArtifactDependency_artifact_fingerprint_key")
+  @@index([projectId, projectSourceId])
+  @@index([projectId, projectRagSnapshotId])
 }
 
 model ProjectScan {
@@ -822,6 +918,7 @@ model ProjectAiPolicyRevision {
   grants               ModelProcessingGrant[]
   runs                 AiRun[]
   auditEvents          AiAuditEvent[]
+  derivedArtifacts     AiDerivedArtifact[]
 
   @@unique([projectId, id])
   @@unique([projectId, revision])
@@ -897,6 +994,7 @@ model ModelProcessingGrant {
   auditEvents                AiAuditEvent[]
   corpusGenerations          ProjectCorpusGeneration[]
   indexGenerations           IndexGeneration[]
+  derivedArtifacts           AiDerivedArtifact[]
 
   @@unique([projectId, id])
   @@unique([projectId, id, policyRevisionId])

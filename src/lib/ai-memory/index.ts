@@ -27,3 +27,15 @@ export {
   type SourceChunkErrorCode,
   type SourceChunkView,
 } from "./source-chunks";
+export {
+  CorpusIndexError,
+  EMBEDDING_STORAGE_PROFILE_FINGERPRINT,
+  EMBEDDING_STORAGE_PROFILE_ID,
+  PROJECT_CORPUS_GENERATION_VERSION,
+  PROJECT_CORPUS_INDEX_VERSION,
+  createCorpusIndexService,
+  type CorpusIndexErrorCode,
+  type ProjectCorpusGenerationView,
+  type ProjectCorpusIndexExecutionResult,
+  type ProjectCorpusIndexView,
+} from "./corpus-index";

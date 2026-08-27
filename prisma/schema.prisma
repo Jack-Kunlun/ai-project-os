@@ -77,6 +77,57 @@ enum SourceChunkState {
   purged
 }
 
+enum ProjectCorpusGenerationStatus {
+  staging
+  complete
+  failed
+  ineligible
+  superseded
+}
+
+enum IndexGenerationKind {
+  projectCorpus      @map("project_corpus")
+  repositoryMaterial @map("repository_material")
+  repositoryCode     @map("repository_code")
+}
+
+enum IndexGenerationStatus {
+  staging
+  building
+  ragReady                 @map("rag_ready")
+  ragReadyEmpty            @map("rag_ready_empty")
+  semanticDisabledByPolicy @map("semantic_disabled_by_policy")
+  failed
+  unknown
+  cancelled
+  ineligible
+  superseded
+}
+
+enum IndexInputEntryKind {
+  projectCorpus      @map("project_corpus")
+  repositoryMaterial @map("repository_material")
+  repositoryCode     @map("repository_code")
+}
+
+enum IndexBuildAttemptStatus {
+  queued
+  running
+  succeeded
+  failed
+  unknown
+  cancelled
+}
+
+enum IndexWorkItemStatus {
+  queued
+  running
+  succeeded
+  failed
+  unknown
+  cancelled
+}
+
 enum ProjectScanTrigger {
   manual
   system
@@ -222,6 +273,12 @@ model Project {
   itemRevisions ProjectItemRevision[]
   itemRevisionEvidences ProjectItemRevisionEvidence[]
   sourceChunks SourceChunk[]
+  corpusGenerations ProjectCorpusGeneration[]
+  indexGenerations IndexGeneration[]
+  indexBuildAttempts IndexBuildAttempt[]
+  indexWorkItems IndexWorkItem[]
+  chunkEmbeddings ChunkEmbedding[]
+  corpusIndexPointer ProjectCorpusIndexPointer?
 
   @@index([updatedAt])
 }
@@ -248,6 +305,7 @@ model ProjectSource {
   aiRunInputs             AiRunInputSource[]
   aiCandidateClaims       AiCandidateClaim[]
   sourceChunks            SourceChunk[]       @relation("ChunkProjectSource")
+  corpusGenerationEntries ProjectCorpusGenerationEntry[]
 
   @@index([projectId, capturedAt])
   @@unique([projectId, id])
@@ -376,6 +434,8 @@ model EmbeddingProfile {
   profileVersion     String                 @db.VarChar(128)
   profileFingerprint String                 @unique @db.VarChar(64)
   createdAt          DateTime               @default(now())
+  indexGenerations   IndexGeneration[]
+  chunkEmbeddings    ChunkEmbedding[]
 
   @@unique([provider, modelId, dimensions, normalization, profileVersion])
 }
@@ -402,13 +462,264 @@ model SourceChunk {
   deletionReceipt          String?            @db.Uuid
   project                  Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   projectSource            ProjectSource?     @relation("ChunkProjectSource", fields: [projectId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, revisionKey, contentHash], onDelete: NoAction, onUpdate: Cascade)
+  corpusGenerationEntries ProjectCorpusGenerationEntry[]
+  indexInputEntries       IndexGenerationInputEntry[]
+  chunkEmbeddings         ChunkEmbedding[]
 
   @@unique([projectId, id])
   @@unique([projectId, id, originScope])
   @@unique([projectId, id, originScope, projectRepositoryLinkId])
   @@unique([projectId, id, projectSourceId, originScope])
+  @@unique([projectId, id, projectSourceId, originScope, sourceRevisionKey, sourceContentHash, contentHash], map: "SourceChunk_exact_revision_content_key")
   @@index([projectId, projectSourceId, ordinal])
   @@index([projectId, state, createdAt])
+}
+
+model ProjectCorpusGeneration {
+  id                        String                          @id @default(uuid()) @db.Uuid
+  projectId                 String                          @db.Uuid
+  grantId                   String                          @db.Uuid
+  policyRevisionId          String                          @db.Uuid
+  status                    ProjectCorpusGenerationStatus   @default(staging)
+  generationKey             String                          @db.VarChar(64)
+  sourceManifestFingerprint String                          @db.VarChar(64)
+  chunkManifestFingerprint  String                          @db.VarChar(64)
+  sourceCount               Int
+  expectedChunkCount        Int
+  chunkerVersion            String                          @db.VarChar(128)
+  failureCode               String?                         @db.VarChar(64)
+  createdAt                 DateTime                        @default(now())
+  completedAt               DateTime?
+  supersededAt              DateTime?
+  project                   Project                         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant                     ModelProcessingGrant            @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "ProjectCorpusGeneration_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
+  entries                   ProjectCorpusGenerationEntry[]
+  projectIndexes            ProjectCorpusIndexGeneration[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, id, grantId])
+  @@unique([projectId, id, grantId, policyRevisionId], map: "ProjectCorpusGeneration_index_grant_policy_key")
+  @@unique([projectId, generationKey])
+  @@index([projectId, status, createdAt])
+  @@index([projectId, grantId])
+}
+
+model ProjectCorpusGenerationEntry {
+  id                       String                   @id @default(uuid()) @db.Uuid
+  projectId                String                   @db.Uuid
+  corpusGenerationId       String                   @db.Uuid
+  grantId                  String                   @db.Uuid
+  grantSourceId            String                   @db.Uuid
+  projectSourceId          String                   @db.Uuid
+  originScope              ContentOriginScope
+  sourceRevisionKey        String                   @db.Uuid
+  sourceContentHash        String                   @db.VarChar(64)
+  sourceChunkId            String                   @db.Uuid
+  ordinal                  Int
+  chunkContentHash         String                   @db.VarChar(64)
+  chunkContentBytes        Int
+  createdAt                DateTime                 @default(now())
+  generation               ProjectCorpusGeneration @relation(fields: [projectId, corpusGenerationId, grantId], references: [projectId, id, grantId], map: "ProjectCorpusGenerationEntry_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  grantSource              ModelProcessingGrantSource @relation(fields: [projectId, grantSourceId, grantId, projectSourceId], references: [projectId, id, grantId, sourceId], map: "ProjectCorpusGenerationEntry_grant_source_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectSource            ProjectSource            @relation(fields: [projectId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, revisionKey, contentHash], map: "ProjectCorpusGenerationEntry_source_revision_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sourceChunk              SourceChunk              @relation(fields: [projectId, sourceChunkId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash, chunkContentHash], references: [projectId, id, projectSourceId, originScope, sourceRevisionKey, sourceContentHash, contentHash], map: "ProjectCorpusGenerationEntry_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectCorpusInputs      ProjectCorpusIndexInput[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, corpusGenerationId, id], map: "CorpusEntry_generation_id_key")
+  @@unique([projectId, corpusGenerationId, id, sourceChunkId], map: "CorpusEntry_generation_chunk_key")
+  @@unique([projectId, corpusGenerationId, sourceChunkId], map: "ProjectCorpusGenerationEntry_generation_sourceChunk_key")
+  @@unique([projectId, corpusGenerationId, ordinal], map: "ProjectCorpusGenerationEntry_generation_ordinal_key")
+  @@index([projectId, projectSourceId, ordinal], map: "ProjectCorpusGenerationEntry_project_source_ordinal_idx")
+}
+
+model IndexGeneration {
+  id                            String                 @id @default(uuid()) @db.Uuid
+  projectId                     String                 @db.Uuid
+  kind                          IndexGenerationKind
+  grantId                       String                 @db.Uuid
+  policyRevisionId              String                 @db.Uuid
+  embeddingProfileId            String                 @db.Uuid
+  status                        IndexGenerationStatus   @default(staging)
+  generationKey                 String                 @db.VarChar(64)
+  inputManifestFingerprint      String                 @db.VarChar(64)
+  processingBoundaryFingerprint String                 @db.VarChar(64)
+  expectedInputCount            Int
+  indexedInputCount             Int                    @default(0)
+  failureCode                   String?                @db.VarChar(64)
+  createdAt                     DateTime               @default(now())
+  buildStartedAt                DateTime?
+  completedAt                   DateTime?
+  publishedAt                   DateTime?
+  supersededAt                  DateTime?
+  project                       Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant                         ModelProcessingGrant   @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "IndexGeneration_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
+  embeddingProfile              EmbeddingProfile       @relation(fields: [embeddingProfileId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  projectCorpus                 ProjectCorpusIndexGeneration?
+  inputs                        IndexGenerationInputEntry[]
+  attempts                      IndexBuildAttempt[]
+  workItems                     IndexWorkItem[]
+  embeddings                    ChunkEmbedding[]
+  publishedPointer              ProjectCorpusIndexPointer?
+
+  @@unique([projectId, id])
+  @@unique([projectId, id, embeddingProfileId])
+  @@unique([projectId, id, grantId, policyRevisionId])
+  @@unique([projectId, generationKey])
+  @@index([projectId, status, createdAt])
+  @@index([projectId, kind, createdAt])
+}
+
+model ProjectCorpusIndexGeneration {
+  projectId          String                  @db.Uuid
+  indexGenerationId  String                  @db.Uuid
+  corpusGenerationId String                  @db.Uuid
+  grantId            String                  @db.Uuid
+  policyRevisionId   String                  @db.Uuid
+  createdAt          DateTime                @default(now())
+  indexGeneration    IndexGeneration         @relation(fields: [projectId, indexGenerationId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  corpusGeneration   ProjectCorpusGeneration @relation(fields: [projectId, corpusGenerationId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_corpus_fkey", onDelete: NoAction, onUpdate: Cascade)
+  inputs             ProjectCorpusIndexInput[]
+  publishedPointer   ProjectCorpusIndexPointer?
+
+  @@id([projectId, indexGenerationId])
+  @@unique([projectId, indexGenerationId, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_index_grant_policy_key")
+  @@unique([projectId, indexGenerationId, corpusGenerationId], map: "ProjectCorpusIndexGeneration_index_corpus_key")
+  @@index([projectId, corpusGenerationId], map: "ProjectCorpusIndexGeneration_project_corpus_idx")
+}
+
+model IndexGenerationInputEntry {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  projectId          String                  @db.Uuid
+  indexGenerationId  String                  @db.Uuid
+  ordinal            Int
+  entryKind          IndexInputEntryKind
+  sourceChunkId      String                  @db.Uuid
+  contentHash        String                  @db.VarChar(64)
+  contentBytes       Int
+  createdAt          DateTime                @default(now())
+  indexGeneration    IndexGeneration         @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "IndexGenerationInputEntry_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sourceChunk        SourceChunk             @relation(fields: [projectId, sourceChunkId], references: [projectId, id], map: "IndexGenerationInputEntry_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectCorpusInput ProjectCorpusIndexInput?
+  workItem           IndexWorkItem?
+  embedding          ChunkEmbedding?
+
+  @@unique([projectId, indexGenerationId, id], map: "IndexGenerationInputEntry_project_index_id_key")
+  @@unique([projectId, indexGenerationId, id, sourceChunkId], map: "IndexGenerationInputEntry_project_index_id_chunk_key")
+  @@unique([projectId, indexGenerationId, ordinal], map: "IndexGenerationInputEntry_project_index_ordinal_key")
+  @@unique([projectId, indexGenerationId, sourceChunkId], map: "IndexGenerationInputEntry_project_index_chunk_key")
+  @@index([projectId, sourceChunkId], map: "IndexGenerationInputEntry_project_chunk_idx")
+}
+
+model ProjectCorpusIndexInput {
+  projectId          String                       @db.Uuid
+  indexGenerationId  String                       @db.Uuid
+  inputEntryId       String                       @db.Uuid
+  corpusGenerationId String                       @db.Uuid
+  corpusEntryId      String                       @db.Uuid
+  sourceChunkId      String                       @db.Uuid
+  createdAt          DateTime                     @default(now())
+  indexGeneration    ProjectCorpusIndexGeneration @relation(fields: [projectId, indexGenerationId, corpusGenerationId], references: [projectId, indexGenerationId, corpusGenerationId], map: "ProjectCorpusIndexInput_index_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  inputEntry         IndexGenerationInputEntry    @relation(fields: [projectId, indexGenerationId, inputEntryId, sourceChunkId], references: [projectId, indexGenerationId, id, sourceChunkId], map: "ProjectCorpusIndexInput_input_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+  corpusEntry        ProjectCorpusGenerationEntry @relation(fields: [projectId, corpusGenerationId, corpusEntryId, sourceChunkId], references: [projectId, corpusGenerationId, id, sourceChunkId], map: "ProjectCorpusIndexInput_corpus_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@id([projectId, indexGenerationId, inputEntryId])
+  @@unique([projectId, indexGenerationId, inputEntryId, sourceChunkId], map: "ProjectCorpusIndexInput_exact_input_key")
+  @@unique([projectId, indexGenerationId, corpusEntryId], map: "ProjectCorpusIndexInput_corpus_entry_key")
+  @@index([projectId, corpusGenerationId, corpusEntryId], map: "ProjectCorpusIndexInput_corpus_entry_idx")
+}
+
+model IndexBuildAttempt {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  projectId          String                  @db.Uuid
+  indexGenerationId  String                  @db.Uuid
+  grantId            String                  @db.Uuid
+  policyRevisionId   String                  @db.Uuid
+  attemptNumber      Int
+  operationKey       String                  @db.VarChar(64)
+  status             IndexBuildAttemptStatus @default(queued)
+  expectedInputCount Int
+  requestCount       Int                     @default(0)
+  inputTokens        Int                     @default(0)
+  safeErrorCode      String?                 @db.VarChar(64)
+  providerRequestId  String?                 @db.VarChar(512)
+  createdAt          DateTime                @default(now())
+  startedAt          DateTime?
+  sentAt             DateTime?
+  completedAt        DateTime?
+  project            Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  indexGeneration    IndexGeneration         @relation(fields: [projectId, indexGenerationId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], map: "IndexBuildAttempt_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  workItems          IndexWorkItem[]
+  embeddings         ChunkEmbedding[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, indexGenerationId, id], map: "IndexBuildAttempt_project_index_id_key")
+  @@unique([projectId, indexGenerationId, attemptNumber], map: "IndexBuildAttempt_project_index_attempt_key")
+  @@unique([projectId, operationKey], map: "IndexBuildAttempt_project_operation_key")
+  @@index([projectId, indexGenerationId, status], map: "IndexBuildAttempt_project_index_status_idx")
+}
+
+model IndexWorkItem {
+  id                            String              @id @default(uuid()) @db.Uuid
+  projectId                     String              @db.Uuid
+  indexGenerationId            String              @db.Uuid
+  inputEntryId                  String              @db.Uuid
+  sourceChunkId                 String              @db.Uuid
+  attemptId                     String?             @db.Uuid
+  operationKey                  String              @db.VarChar(64)
+  processingBoundaryFingerprint String              @db.VarChar(64)
+  status                        IndexWorkItemStatus  @default(queued)
+  retryCount                    Int                 @default(0)
+  safeErrorCode                 String?             @db.VarChar(64)
+  createdAt                     DateTime             @default(now())
+  claimedAt                     DateTime?
+  completedAt                   DateTime?
+  project                       Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  indexGeneration               IndexGeneration      @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "IndexWorkItem_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  inputEntry                    IndexGenerationInputEntry @relation(fields: [projectId, indexGenerationId, inputEntryId, sourceChunkId], references: [projectId, indexGenerationId, id, sourceChunkId], map: "IndexWorkItem_input_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+  attempt                       IndexBuildAttempt?   @relation(fields: [projectId, indexGenerationId, attemptId], references: [projectId, indexGenerationId, id], map: "IndexWorkItem_attempt_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, indexGenerationId, inputEntryId], map: "IndexWorkItem_project_index_input_key")
+  @@unique([projectId, indexGenerationId, inputEntryId, sourceChunkId], map: "IndexWorkItem_exact_input_key")
+  @@unique([projectId, operationKey], map: "IndexWorkItem_project_operation_key")
+  @@index([projectId, indexGenerationId, status], map: "IndexWorkItem_project_index_status_idx")
+}
+
+model ChunkEmbedding {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  projectId          String                       @db.Uuid
+  indexGenerationId  String                       @db.Uuid
+  inputEntryId       String                       @db.Uuid
+  sourceChunkId      String                       @db.Uuid
+  embeddingProfileId String                       @db.Uuid
+  attemptId          String                       @db.Uuid
+  vector             Unsupported("vector(1536)")
+  vectorFingerprint  String                       @db.VarChar(64)
+  createdAt          DateTime                     @default(now())
+  project            Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  indexGeneration    IndexGeneration              @relation(fields: [projectId, indexGenerationId, embeddingProfileId], references: [projectId, id, embeddingProfileId], map: "ChunkEmbedding_index_profile_fkey", onDelete: NoAction, onUpdate: Cascade)
+  embeddingProfile   EmbeddingProfile             @relation(fields: [embeddingProfileId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  inputEntry         IndexGenerationInputEntry    @relation(fields: [projectId, indexGenerationId, inputEntryId, sourceChunkId], references: [projectId, indexGenerationId, id, sourceChunkId], map: "ChunkEmbedding_input_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sourceChunk        SourceChunk                  @relation(fields: [projectId, sourceChunkId], references: [projectId, id], map: "ChunkEmbedding_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
+  attempt            IndexBuildAttempt            @relation(fields: [projectId, indexGenerationId, attemptId], references: [projectId, indexGenerationId, id], map: "ChunkEmbedding_attempt_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, indexGenerationId, inputEntryId], map: "ChunkEmbedding_project_index_input_key")
+  @@unique([projectId, indexGenerationId, inputEntryId, sourceChunkId], map: "ChunkEmbedding_exact_input_key")
+  @@index([projectId, sourceChunkId, embeddingProfileId], map: "ChunkEmbedding_project_chunk_profile_idx")
+}
+
+model ProjectCorpusIndexPointer {
+  projectId          String                       @id @db.Uuid
+  indexGenerationId  String                       @db.Uuid
+  corpusGenerationId String                       @db.Uuid
+  publishedAt        DateTime                     @default(now())
+  project            Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  indexGeneration    IndexGeneration              @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "ProjectCorpusIndexPointer_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectCorpus      ProjectCorpusIndexGeneration @relation(fields: [projectId, indexGenerationId, corpusGenerationId], references: [projectId, indexGenerationId, corpusGenerationId], map: "ProjectCorpusIndexPointer_project_corpus_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, indexGenerationId], map: "ProjectCorpusIndexPointer_project_index_key")
+  @@unique([projectId, indexGenerationId, corpusGenerationId], map: "ProjectCorpusIndexPointer_exact_target_key")
 }
 
 model ProjectScan {
@@ -515,6 +826,8 @@ model ModelProcessingGrant {
   operations                 ModelProcessingGrantOperation[]
   runs                       AiRun[]
   auditEvents                AiAuditEvent[]
+  corpusGenerations          ProjectCorpusGeneration[]
+  indexGenerations           IndexGeneration[]
 
   @@unique([projectId, id])
   @@unique([projectId, id, policyRevisionId])
@@ -535,8 +848,10 @@ model ModelProcessingGrantSource {
   grant             ModelProcessingGrant  @relation(fields: [projectId, grantId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   inputSources      AiRunInputSource[]
   source            ProjectSource         @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  corpusGenerationEntries ProjectCorpusGenerationEntry[]
 
   @@unique([projectId, id])
+  @@unique([projectId, id, grantId, sourceId])
   @@unique([projectId, grantId, sourceId])
   @@index([projectId, sourceId])
 }

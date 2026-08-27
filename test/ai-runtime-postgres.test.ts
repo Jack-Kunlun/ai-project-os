@@ -173,6 +173,10 @@ const sourceChunkMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260828100000_add_source_chunks/migration.sql",
 );
+const indexGenerationMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260828123000_add_index_generations/migration.sql",
+);
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
   join(repositoryRoot, "prisma/migrations/20260826030732_integrity_boundaries/migration.sql"),
@@ -623,6 +627,7 @@ async function applyAiMigrationInTransaction(client: Client): Promise<void> {
     { sql: await loadSql(aiCandidateMigrationPath) },
     { sql: await loadSql(itemEvidenceHistoryMigrationPath) },
     { sql: await loadSql(sourceChunkMigrationPath) },
+    { sql: await loadSql(indexGenerationMigrationPath) },
   ]);
 }
 
@@ -638,6 +643,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     "20260827120000_add_ai_memory_candidates",
     "20260827140000_add_item_evidence_history",
     "20260828100000_add_source_chunks",
+    "20260828123000_add_index_generations",
   ];
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===

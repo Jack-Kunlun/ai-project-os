@@ -34,6 +34,7 @@ const migrationPaths = [
   "20260827120000_add_ai_memory_candidates",
   "20260827140000_add_item_evidence_history",
   "20260828100000_add_source_chunks",
+  "20260828123000_add_index_generations",
 ].map((name) => join(repositoryRoot, "prisma/migrations", name, "migration.sql"));
 
 function validateDisposableUrl(value: unknown): string {
@@ -100,6 +101,7 @@ async function applyUpgradePath(client: Client): Promise<void> {
     await applyMigration(client, 3);
     await applyMigration(client, 4);
     await applyMigration(client, 5);
+    await applyMigration(client, 6);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

@@ -109,6 +109,12 @@ export {
   type ProjectSearchResponse,
 } from "./project-search";
 export {
+  PROJECT_QUERY_TRANSFER_CONSENT_VERSION,
+  ProjectQueryEmbeddingError,
+  createOpenAiProjectQueryEmbedding,
+  type ProjectQueryEmbeddingErrorCode,
+} from "./query-embedding";
+export {
   GROUNDED_RAG_MAX_CLAIMS,
   GROUNDED_RAG_MAX_CONTEXTS,
   GROUNDED_RAG_PROMPT_VERSION,

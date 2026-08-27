@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PROJECT_QUERY_TRANSFER_CONSENT_VERSION } from "@/lib/ai-memory";
 import {
   ProjectMemorySearchCliError,
   parseProjectMemorySearchArgs,
@@ -20,12 +21,35 @@ test("local project search CLI accepts only explicit bounded arguments", () => {
       query: "当前里程碑",
       take: 5,
       queryVectorFile: "/tmp/query-vector.json",
+      scope: "auto",
+      generateQueryEmbedding: false,
     },
   );
-  assert.equal(parseProjectMemorySearchArgs([
+  assert.deepEqual(parseProjectMemorySearchArgs([
     "--project-id", projectId,
     "--query", "status",
-  ]).take, 10);
+  ]), {
+    projectId,
+    query: "status",
+    take: 10,
+    queryVectorFile: null,
+    scope: "auto",
+    generateQueryEmbedding: false,
+  });
+  assert.deepEqual(parseProjectMemorySearchArgs([
+    "--project-id", projectId,
+    "--query", "跨仓库风险",
+    "--scope", "repositories",
+    "--acknowledge-external-query-transfer",
+    PROJECT_QUERY_TRANSFER_CONSENT_VERSION,
+  ]), {
+    projectId,
+    query: "跨仓库风险",
+    take: 10,
+    queryVectorFile: null,
+    scope: "repositories",
+    generateQueryEmbedding: true,
+  });
 });
 
 test("local project search CLI rejects duplicates, remote paths and overreach", () => {
@@ -36,6 +60,14 @@ test("local project search CLI rejects duplicates, remote paths and overreach", 
     ["--project-id", projectId, "--query", "x", "--query-vector-file", "relative.json"],
     ["--project-id", projectId, "--query", "x", "--query-vector-file", "https://example.com/vector.json"],
     ["--project-id", projectId, "--query", "x", "--unknown", "value"],
+    ["--project-id", projectId, "--query", "x", "--scope", "all"],
+    [
+      "--project-id", projectId,
+      "--query", "x",
+      "--query-vector-file", "/tmp/query.json",
+      "--acknowledge-external-query-transfer",
+      PROJECT_QUERY_TRANSFER_CONSENT_VERSION,
+    ],
   ];
   for (const args of invalid) {
     assert.throws(

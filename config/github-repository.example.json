@@ -1,0 +1,25 @@
+{
+  "role": "primary",
+  "requiredForProjectSnapshot": true,
+  "trackedRef": "refs/heads/main",
+  "codeEnabled": true,
+  "metadataEnabled": true,
+  "readmeEnabled": true,
+  "markdownEnabled": false,
+  "markdownPaths": [],
+  "issuesEnabled": false,
+  "pullRequestsEnabled": false,
+  "releasesEnabled": false,
+  "includeRoots": ["prisma", "scripts", "src"],
+  "softExcludePatterns": [
+    "build",
+    "coverage",
+    "dist",
+    "generated",
+    "lockfile",
+    "minified",
+    "node_modules",
+    "source_map",
+    "vendor"
+  ]
+}

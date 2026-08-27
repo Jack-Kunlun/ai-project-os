@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { PROJECT_QUERY_TRANSFER_CONSENT_VERSION } from "../src/lib/ai-memory";
 
 export class ProjectMemorySearchCliError extends Error {
   readonly code = "PROJECT_MEMORY_SEARCH_CLI_INVALID" as const;
@@ -14,6 +15,8 @@ export type ProjectMemorySearchCommand = Readonly<{
   query: string;
   take: number;
   queryVectorFile: string | null;
+  scope: "auto" | "project" | "repositories";
+  generateQueryEmbedding: boolean;
 }>;
 
 function fail(): never {
@@ -29,6 +32,8 @@ export function parseProjectMemorySearchArgs(
     "--query",
     "--take",
     "--query-vector-file",
+    "--scope",
+    "--acknowledge-external-query-transfer",
   ]);
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index];
@@ -73,10 +78,27 @@ export function parseProjectMemorySearchArgs(
   ) {
     return fail();
   }
+  const scope = values.get("--scope") ?? "auto";
+  if (scope !== "auto" && scope !== "project" && scope !== "repositories") {
+    return fail();
+  }
+  const queryTransferConsent = values.get(
+    "--acknowledge-external-query-transfer",
+  );
+  const generateQueryEmbedding = queryTransferConsent !== undefined;
+  if (
+    (generateQueryEmbedding &&
+      queryTransferConsent !== PROJECT_QUERY_TRANSFER_CONSENT_VERSION) ||
+    (generateQueryEmbedding && queryVectorFile !== null)
+  ) {
+    return fail();
+  }
   return Object.freeze({
     projectId,
     query: query.trim(),
     take,
     queryVectorFile,
+    scope,
+    generateQueryEmbedding,
   });
 }

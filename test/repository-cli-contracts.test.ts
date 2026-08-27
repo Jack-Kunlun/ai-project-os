@@ -3,6 +3,7 @@ import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
 import {
   REPOSITORY_MODEL_TRANSFER_CONSENT_VERSION,
+  REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
   RepositoryCodeSearchError,
   createRepositoryCodeSearchService,
 } from "@/lib/github";
@@ -14,6 +15,10 @@ import {
   RepositoryModelGrantCliError,
   parseRepositoryModelGrantArgs,
 } from "../scripts/repository-model-grant-contract";
+import {
+  RepositoryMaterialModelGrantCliError,
+  parseRepositoryMaterialModelGrantArgs,
+} from "../scripts/repository-material-model-grant-contract";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const linkId = "22222222-2222-4222-8222-222222222222";
@@ -60,6 +65,39 @@ test("repository grant CLI requires explicit destination and rights acknowledgem
       "--acknowledge-processing-rights",
     ]),
     RepositoryModelGrantCliError,
+  );
+});
+
+test("repository material grant CLI supports extraction but requires explicit consent", () => {
+  assert.deepEqual(parseRepositoryMaterialModelGrantArgs([
+    "issue",
+    "--project", projectId,
+    "--link", linkId,
+    "--operations", "embedding,autoExtract,sourceSummary",
+    "--consent", REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
+    "--acknowledge-external-transfer",
+    "--acknowledge-processing-rights",
+  ]), {
+    operation: "issue",
+    request: {
+      projectId,
+      projectRepositoryLinkId: linkId,
+      operations: ["embedding", "autoExtract", "sourceSummary"],
+      consentVersion: REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
+      acknowledgeExternalModelTransfer: true,
+      acknowledgeProcessingRights: true,
+    },
+  });
+  assert.throws(
+    () => parseRepositoryMaterialModelGrantArgs([
+      "issue",
+      "--project", projectId,
+      "--link", linkId,
+      "--operations", "embedding",
+      "--consent", REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
+      "--acknowledge-processing-rights",
+    ]),
+    RepositoryMaterialModelGrantCliError,
   );
 });
 

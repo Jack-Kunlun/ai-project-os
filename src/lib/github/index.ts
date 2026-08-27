@@ -107,6 +107,17 @@ export {
   type RepositoryModelGrantView,
 } from "./repository-model-grant";
 export {
+  REPOSITORY_MATERIAL_MODEL_GRANT_LIFETIME_DAYS,
+  REPOSITORY_MATERIAL_MODEL_GRANT_VERSION,
+  REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
+  RepositoryMaterialModelGrantError,
+  createRepositoryMaterialModelGrantService,
+  type IssueRepositoryMaterialModelGrantsRequest,
+  type RepositoryMaterialModelGrantErrorCode,
+  type RepositoryMaterialModelGrantStatus,
+  type RepositoryMaterialModelGrantView,
+} from "./repository-material-model-grant";
+export {
   REPOSITORY_CODE_SEARCH_VERSION,
   RepositoryCodeSearchError,
   createRepositoryCodeSearchService,

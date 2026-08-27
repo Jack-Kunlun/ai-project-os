@@ -447,6 +447,14 @@ model Project {
   repositoryMaterialGenerations     RepositoryMaterialGeneration[]
   repositoryMaterialGenerationEntries RepositoryMaterialGenerationEntry[]
   repositoryMaterialGenerationPointers RepositoryMaterialGenerationPointer[]
+  repositoryMaterialModelGrants      RepositoryMaterialModelGrant[]
+  repositoryMaterialGrantSources     RepositoryMaterialModelGrantSource[]
+  repositoryMaterialChunks           RepositoryMaterialChunk[]
+  repositoryMaterialIndexes          RepositoryMaterialIndexGeneration[]
+  repositoryMaterialIndexInputs      RepositoryMaterialIndexInput[]
+  repositoryMaterialIndexAttempts    RepositoryMaterialIndexAttempt[]
+  repositoryMaterialEmbeddings       RepositoryMaterialEmbedding[]
+  repositoryMaterialIndexPointers    RepositoryMaterialIndexPointer[]
   githubMaterialQuarantines         GitHubMaterialQuarantine[]
   codeSnapshots                    ProjectCodeSnapshot[]
   codeSnapshotEntries              ProjectCodeSnapshotEntry[]
@@ -524,6 +532,14 @@ model ProjectRepositoryLink {
   materialGenerations    RepositoryMaterialGeneration[]
   materialGenerationEntries RepositoryMaterialGenerationEntry[]
   materialGenerationPointer RepositoryMaterialGenerationPointer? @relation("RepositoryMaterialGenerationPointerLink")
+  materialModelGrants      RepositoryMaterialModelGrant[]
+  materialGrantSources     RepositoryMaterialModelGrantSource[]
+  materialChunks           RepositoryMaterialChunk[]
+  materialIndexes          RepositoryMaterialIndexGeneration[]
+  materialIndexInputs      RepositoryMaterialIndexInput[]
+  materialIndexAttempts    RepositoryMaterialIndexAttempt[]
+  materialEmbeddings       RepositoryMaterialEmbedding[]
+  materialIndexPointer     RepositoryMaterialIndexPointer?       @relation("RepositoryMaterialIndexPointerLink")
   materialQuarantines    GitHubMaterialQuarantine[]
   indexGenerations        IndexGeneration[]
   modelProcessingGrants   ModelProcessingGrant[]                @relation("RepositoryGrantSubject")
@@ -573,6 +589,9 @@ model ProjectRepositoryLinkConfigVersion {
   materialSyncRuns           GitHubMaterialSyncRun[]
   materialGenerations        RepositoryMaterialGeneration[]
   materialGenerationPointers RepositoryMaterialGenerationPointer[] @relation("RepositoryMaterialGenerationPointerConfig")
+  materialModelGrants         RepositoryMaterialModelGrant[]
+  materialIndexes             RepositoryMaterialIndexGeneration[]
+  materialIndexPointers       RepositoryMaterialIndexPointer[]       @relation("RepositoryMaterialIndexPointerConfig")
   codeSnapshotEntries        ProjectCodeSnapshotEntry[]
 
   @@unique([projectId, id])
@@ -902,6 +921,11 @@ model RepositoryMaterialGeneration {
   expectedByRuns            GitHubMaterialSyncRun[]            @relation("ExpectedRepositoryMaterialGeneration")
   entries                   RepositoryMaterialGenerationEntry[]
   activePointer             RepositoryMaterialGenerationPointer? @relation("ActiveRepositoryMaterialGeneration")
+  modelGrants               RepositoryMaterialModelGrant[]
+  grantSources              RepositoryMaterialModelGrantSource[]
+  chunks                    RepositoryMaterialChunk[]
+  indexes                   RepositoryMaterialIndexGeneration[]
+  indexInputs               RepositoryMaterialIndexInput[]
 
   @@unique([projectId, id])
   @@unique([projectId, projectRepositoryLinkId, id])
@@ -926,9 +950,14 @@ model RepositoryMaterialGenerationEntry {
   repositoryLink                ProjectRepositoryLink        @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryMaterialGenerationEntry_link_fkey", onDelete: NoAction, onUpdate: Cascade)
   generation                    RepositoryMaterialGeneration @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialGenerationEntry_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
   sourceVersion                 GitHubSourceVersion          @relation(fields: [projectId, projectRepositoryLinkId, githubSourceVersionId, projectSourceId], references: [projectId, projectRepositoryLinkId, id, projectSourceId], map: "RepositoryMaterialGenerationEntry_source_version_fkey", onDelete: NoAction, onUpdate: Cascade)
+  grantSources                  RepositoryMaterialModelGrantSource[]
+  chunks                        RepositoryMaterialChunk[]
+  indexInputs                   RepositoryMaterialIndexInput[]
 
   @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id], map: "RepositoryMaterialGenerationEntry_generation_id_key")
   @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id, githubSourceVersionId], map: "RepositoryMaterialGenerationEntry_exact_member_key")
+  @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id, githubSourceVersionId, projectSourceId], map: "RepositoryMaterialGenerationEntry_model_member_key")
   @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, githubSourceVersionId], map: "RepositoryMaterialGenerationEntry_generation_source_key")
   @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, ordinal], map: "RepositoryMaterialGenerationEntry_generation_ordinal_key")
   @@index([projectId, projectRepositoryLinkId, projectSourceId])
@@ -949,6 +978,272 @@ model RepositoryMaterialGenerationPointer {
   @@id([projectId, projectRepositoryLinkId])
   @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId], map: "RepositoryMaterialPointer_generation_key")
   @@index([projectId, repositoryMaterialGenerationId])
+}
+
+model RepositoryMaterialModelGrant {
+  id                               String                         @id @default(uuid()) @db.Uuid
+  projectId                        String                         @db.Uuid
+  projectRepositoryLinkId          String                         @db.Uuid
+  repositoryMaterialGenerationId   String                         @db.Uuid
+  linkConfigVersion                Int
+  linkEffectivePolicyVersion       Int
+  policyRevisionId                 String                         @db.Uuid
+  effectivePolicyVersion           Int
+  operation                        AiOperation
+  status                           ModelProcessingGrantStatus     @default(draft)
+  profileFingerprint               String                         @db.VarChar(64)
+  providerFingerprint              String                         @db.VarChar(64)
+  modelFingerprint                 String                         @db.VarChar(64)
+  modelId                          String                         @db.VarChar(128)
+  processorFingerprint             String                         @db.VarChar(64)
+  regionFingerprint                String                         @db.VarChar(64)
+  retentionFingerprint             String                         @db.VarChar(64)
+  endpointFingerprint              String                         @db.VarChar(64)
+  grantFingerprint                 String                         @db.VarChar(64)
+  materialPolicyFingerprint        String                         @db.VarChar(64)
+  sourceManifestFingerprint        String                         @db.VarChar(64)
+  scannerFingerprint               String                         @db.VarChar(64)
+  scannerVersion                   String                         @db.VarChar(128)
+  consentVersion                   String                         @db.VarChar(64)
+  sourceCount                      Int
+  sourceBytes                      Int
+  issuedBy                         String                         @db.VarChar(128)
+  purposeCode                      String                         @db.VarChar(64)
+  issuedAt                         DateTime?
+  expiresAt                        DateTime?
+  revokedAt                        DateTime?
+  revocationReasonCode             ModelProcessingGrantRevocationReasonCode?
+  createdAt                        DateTime                       @default(now())
+  updatedAt                        DateTime                       @updatedAt
+  project                          Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink          @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryMaterialModelGrant_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                           ProjectRepositoryLinkConfigVersion @relation(fields: [projectId, projectRepositoryLinkId, linkConfigVersion, linkEffectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepositoryMaterialModelGrant_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  materialGeneration               RepositoryMaterialGeneration   @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialModelGrant_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  policyRevision                   ProjectAiPolicyRevision         @relation(fields: [projectId, policyRevisionId], references: [projectId, id], map: "RepositoryMaterialModelGrant_policy_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sources                          RepositoryMaterialModelGrantSource[]
+  indexes                          RepositoryMaterialIndexGeneration[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialModelGrant_project_link_id_key")
+  @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id], map: "RepositoryMaterialModelGrant_subject_key")
+  @@unique([projectId, grantFingerprint], map: "RepositoryMaterialModelGrant_fingerprint_key")
+  @@index([projectId, projectRepositoryLinkId, status, expiresAt], map: "RepositoryMaterialModelGrant_status_idx")
+}
+
+model RepositoryMaterialModelGrantSource {
+  id                               String                         @id @default(uuid()) @db.Uuid
+  projectId                        String                         @db.Uuid
+  projectRepositoryLinkId          String                         @db.Uuid
+  grantId                          String                         @db.Uuid
+  repositoryMaterialGenerationId   String                         @db.Uuid
+  materialGenerationEntryId        String                         @db.Uuid
+  githubSourceVersionId            String                         @db.Uuid
+  projectSourceId                  String                         @db.Uuid
+  originScope                      ContentOriginScope             @default(repository_link)
+  sourceRevisionKey                String                         @db.Uuid
+  sourceContentHash                String                         @db.VarChar(64)
+  contentBytes                     Int
+  createdAt                        DateTime                       @default(now())
+  project                          Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink          @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryMaterialGrantSource_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  grant                            RepositoryMaterialModelGrant   @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, grantId], references: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id], map: "RepositoryMaterialGrantSource_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
+  generation                       RepositoryMaterialGeneration   @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialGrantSource_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  generationEntry                  RepositoryMaterialGenerationEntry @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, materialGenerationEntryId, githubSourceVersionId, projectSourceId], references: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id, githubSourceVersionId, projectSourceId], map: "RepositoryMaterialGrantSource_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectSource                    ProjectSource                  @relation(fields: [projectId, projectSourceId, originScope, projectRepositoryLinkId, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, projectRepositoryLinkId, revisionKey, contentHash], map: "RepositoryMaterialGrantSource_source_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexInputs                      RepositoryMaterialIndexInput[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, grantId, id], map: "RepositoryMaterialGrantSource_grant_id_key")
+  @@unique([projectId, projectRepositoryLinkId, grantId, projectSourceId], map: "RepositoryMaterialGrantSource_grant_source_key")
+  @@unique([projectId, projectRepositoryLinkId, grantId, id, repositoryMaterialGenerationId, materialGenerationEntryId, projectSourceId], map: "RepositoryMaterialGrantSource_index_key")
+  @@index([projectId, projectRepositoryLinkId, projectSourceId], map: "RepositoryMaterialGrantSource_source_idx")
+}
+
+model RepositoryMaterialChunk {
+  id                               String                         @id @default(uuid()) @db.Uuid
+  projectId                        String                         @db.Uuid
+  projectRepositoryLinkId          String                         @db.Uuid
+  repositoryMaterialGenerationId   String                         @db.Uuid
+  materialGenerationEntryId        String                         @db.Uuid
+  githubSourceVersionId            String                         @db.Uuid
+  projectSourceId                  String                         @db.Uuid
+  originScope                      ContentOriginScope             @default(repository_link)
+  sourceRevisionKey                String                         @db.Uuid
+  sourceContentHash                String                         @db.VarChar(64)
+  ordinal                          Int
+  rangeStart                       Int
+  rangeEnd                         Int
+  chunkerVersion                   String                         @db.VarChar(128)
+  contentText                      String                         @db.Text
+  contentHash                      String                         @db.VarChar(64)
+  contentBytes                     Int
+  createdAt                        DateTime                       @default(now())
+  project                          Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink          @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryMaterialChunk_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  generation                       RepositoryMaterialGeneration   @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialChunk_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  generationEntry                  RepositoryMaterialGenerationEntry @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, materialGenerationEntryId, githubSourceVersionId, projectSourceId], references: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id, githubSourceVersionId, projectSourceId], map: "RepositoryMaterialChunk_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+  projectSource                    ProjectSource                  @relation(fields: [projectId, projectSourceId, originScope, projectRepositoryLinkId, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, projectRepositoryLinkId, revisionKey, contentHash], map: "RepositoryMaterialChunk_source_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexInputs                      RepositoryMaterialIndexInput[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialChunk_project_link_id_key")
+  @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, materialGenerationEntryId, id], map: "RepositoryMaterialChunk_entry_id_key")
+  @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, materialGenerationEntryId, chunkerVersion, ordinal], map: "RepositoryMaterialChunk_ordinal_key")
+  @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, materialGenerationEntryId, chunkerVersion, rangeStart, rangeEnd, contentHash], map: "RepositoryMaterialChunk_range_key")
+  @@index([projectId, projectRepositoryLinkId, projectSourceId, ordinal], map: "RepositoryMaterialChunk_source_idx")
+}
+
+model RepositoryMaterialIndexGeneration {
+  id                               String                         @id @default(uuid()) @db.Uuid
+  projectId                        String                         @db.Uuid
+  projectRepositoryLinkId          String                         @db.Uuid
+  repositoryMaterialGenerationId   String                         @db.Uuid
+  expectedActiveIndexGenerationId  String?                        @db.Uuid
+  linkConfigVersion                Int
+  grantId                          String                         @db.Uuid
+  policyRevisionId                 String                         @db.Uuid
+  effectivePolicyVersion           Int
+  embeddingProfileId               String                         @db.Uuid
+  status                           IndexGenerationStatus          @default(staging)
+  generationKey                    String                         @db.VarChar(64)
+  inputManifestFingerprint         String                         @db.VarChar(64)
+  processingBoundaryFingerprint    String                         @db.VarChar(64)
+  chunkerVersion                   String                         @db.VarChar(128)
+  expectedInputCount               Int
+  indexedInputCount                Int                            @default(0)
+  failureCode                      String?                        @db.VarChar(64)
+  createdAt                        DateTime                       @default(now())
+  buildStartedAt                   DateTime?
+  completedAt                      DateTime?
+  publishedAt                      DateTime?
+  supersededAt                     DateTime?
+  project                          Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink          @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryMaterialIndex_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                           ProjectRepositoryLinkConfigVersion @relation(fields: [projectId, projectRepositoryLinkId, linkConfigVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepositoryMaterialIndex_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  materialGeneration               RepositoryMaterialGeneration   @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialIndex_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  expectedActiveIndex              RepositoryMaterialIndexGeneration? @relation("ExpectedRepositoryMaterialIndex", fields: [projectId, projectRepositoryLinkId, expectedActiveIndexGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialIndex_expected_fkey", onDelete: NoAction, onUpdate: Cascade)
+  expectedByIndexes                RepositoryMaterialIndexGeneration[] @relation("ExpectedRepositoryMaterialIndex")
+  grant                            RepositoryMaterialModelGrant    @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, grantId], references: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id], map: "RepositoryMaterialIndex_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
+  policyRevision                   ProjectAiPolicyRevision         @relation(fields: [projectId, policyRevisionId], references: [projectId, id], map: "RepositoryMaterialIndex_policy_fkey", onDelete: NoAction, onUpdate: Cascade)
+  embeddingProfile                EmbeddingProfile                @relation(fields: [embeddingProfileId], references: [id], map: "RepositoryMaterialIndex_profile_fkey", onDelete: NoAction, onUpdate: Cascade)
+  inputs                          RepositoryMaterialIndexInput[]
+  attempts                        RepositoryMaterialIndexAttempt[]
+  embeddings                      RepositoryMaterialEmbedding[]
+  publishedPointer                RepositoryMaterialIndexPointer?
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialIndexGeneration_project_link_id_key")
+  @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id], map: "RepositoryMaterialIndex_generation_id_key")
+  @@unique([projectId, projectRepositoryLinkId, id, grantId], map: "RepositoryMaterialIndex_grant_key")
+  @@unique([projectId, projectRepositoryLinkId, id, embeddingProfileId], map: "RepositoryMaterialIndex_profile_key")
+  @@unique([projectId, generationKey], map: "RepositoryMaterialIndex_generation_key")
+  @@index([projectId, projectRepositoryLinkId, status, createdAt], map: "RepositoryMaterialIndex_status_idx")
+}
+
+model RepositoryMaterialIndexInput {
+  id                               String                         @id @default(uuid()) @db.Uuid
+  projectId                        String                         @db.Uuid
+  projectRepositoryLinkId          String                         @db.Uuid
+  indexGenerationId                String                         @db.Uuid
+  grantId                          String                         @db.Uuid
+  grantSourceId                    String                         @db.Uuid
+  repositoryMaterialGenerationId   String                         @db.Uuid
+  materialGenerationEntryId        String                         @db.Uuid
+  projectSourceId                  String                         @db.Uuid
+  sourceChunkId                    String                         @db.Uuid
+  ordinal                          Int
+  contentHash                      String                         @db.VarChar(64)
+  contentBytes                     Int
+  createdAt                        DateTime                       @default(now())
+  project                          Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink          @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryMaterialIndexInput_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration                  RepositoryMaterialIndexGeneration @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, indexGenerationId], references: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id], map: "RepositoryMaterialIndexInput_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  grantSource                      RepositoryMaterialModelGrantSource @relation(fields: [projectId, projectRepositoryLinkId, grantId, grantSourceId, repositoryMaterialGenerationId, materialGenerationEntryId, projectSourceId], references: [projectId, projectRepositoryLinkId, grantId, id, repositoryMaterialGenerationId, materialGenerationEntryId, projectSourceId], map: "RepositoryMaterialIndexInput_grant_source_fkey", onDelete: NoAction, onUpdate: Cascade)
+  materialGeneration               RepositoryMaterialGeneration   @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryMaterialIndexInput_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  generationEntry                  RepositoryMaterialGenerationEntry @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, materialGenerationEntryId], references: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id], map: "RepositoryMaterialIndexInput_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sourceChunk                      RepositoryMaterialChunk         @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, materialGenerationEntryId, sourceChunkId], references: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, materialGenerationEntryId, id], map: "RepositoryMaterialIndexInput_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
+  embedding                        RepositoryMaterialEmbedding?
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, id], map: "RepositoryMaterialIndexInput_index_id_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, id, sourceChunkId], map: "RepositoryMaterialIndexInput_exact_id_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, ordinal], map: "RepositoryMaterialIndexInput_ordinal_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, sourceChunkId], map: "RepositoryMaterialIndexInput_chunk_key")
+  @@index([projectId, projectRepositoryLinkId, projectSourceId], map: "RepositoryMaterialIndexInput_source_idx")
+}
+
+model RepositoryMaterialIndexAttempt {
+  id                               String                         @id @default(uuid()) @db.Uuid
+  projectId                        String                         @db.Uuid
+  projectRepositoryLinkId          String                         @db.Uuid
+  indexGenerationId                String                         @db.Uuid
+  grantId                          String                         @db.Uuid
+  attemptNumber                    Int
+  operationKey                     String                         @db.VarChar(64)
+  status                           IndexBuildAttemptStatus        @default(queued)
+  expectedInputCount               Int
+  requestCount                     Int                            @default(0)
+  inputTokens                      Int                            @default(0)
+  safeErrorCode                    String?                        @db.VarChar(64)
+  providerRequestId                String?                        @db.VarChar(512)
+  createdAt                        DateTime                       @default(now())
+  startedAt                        DateTime?
+  sentAt                           DateTime?
+  completedAt                      DateTime?
+  project                          Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink          @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryMaterialIndexAttempt_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration                  RepositoryMaterialIndexGeneration @relation(fields: [projectId, projectRepositoryLinkId, indexGenerationId, grantId], references: [projectId, projectRepositoryLinkId, id, grantId], map: "RepositoryMaterialIndexAttempt_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  embeddings                      RepositoryMaterialEmbedding[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, id], map: "RepositoryMaterialIndexAttempt_index_id_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, attemptNumber], map: "RepositoryMaterialIndexAttempt_number_key")
+  @@unique([projectId, operationKey], map: "RepositoryMaterialIndexAttempt_operation_key")
+  @@index([projectId, projectRepositoryLinkId, indexGenerationId, status], map: "RepositoryMaterialIndexAttempt_status_idx")
+}
+
+model RepositoryMaterialEmbedding {
+  id                               String                         @id @default(uuid()) @db.Uuid
+  projectId                        String                         @db.Uuid
+  projectRepositoryLinkId          String                         @db.Uuid
+  indexGenerationId                String                         @db.Uuid
+  inputEntryId                     String                         @db.Uuid
+  sourceChunkId                    String                         @db.Uuid
+  embeddingProfileId               String                         @db.Uuid
+  attemptId                        String                         @db.Uuid
+  vector                           Unsupported("vector(1536)")
+  vectorFingerprint                String                         @db.VarChar(64)
+  createdAt                        DateTime                       @default(now())
+  project                          Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink          @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryMaterialEmbedding_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration                  RepositoryMaterialIndexGeneration @relation(fields: [projectId, projectRepositoryLinkId, indexGenerationId, embeddingProfileId], references: [projectId, projectRepositoryLinkId, id, embeddingProfileId], map: "RepositoryMaterialEmbedding_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  inputEntry                       RepositoryMaterialIndexInput   @relation(fields: [projectId, projectRepositoryLinkId, indexGenerationId, inputEntryId, sourceChunkId], references: [projectId, projectRepositoryLinkId, indexGenerationId, id, sourceChunkId], map: "RepositoryMaterialEmbedding_input_fkey", onDelete: NoAction, onUpdate: Cascade)
+  embeddingProfile                EmbeddingProfile                @relation(fields: [embeddingProfileId], references: [id], map: "RepositoryMaterialEmbedding_profile_fkey", onDelete: NoAction, onUpdate: Cascade)
+  attempt                         RepositoryMaterialIndexAttempt  @relation(fields: [projectId, projectRepositoryLinkId, indexGenerationId, attemptId], references: [projectId, projectRepositoryLinkId, indexGenerationId, id], map: "RepositoryMaterialEmbedding_attempt_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, inputEntryId], map: "RepositoryMaterialEmbedding_input_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, inputEntryId, sourceChunkId], map: "RepositoryMaterialEmbedding_exact_input_key")
+  @@index([projectId, projectRepositoryLinkId, sourceChunkId, embeddingProfileId], map: "RepositoryMaterialEmbedding_chunk_idx")
+}
+
+model RepositoryMaterialIndexPointer {
+  projectId                        String                         @db.Uuid
+  projectRepositoryLinkId          String                         @db.Uuid
+  indexGenerationId                String                         @db.Uuid
+  repositoryMaterialGenerationId   String                         @db.Uuid
+  linkConfigVersion                Int
+  effectivePolicyVersion           Int
+  publishedAt                      DateTime                       @default(now())
+  project                          Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink                   ProjectRepositoryLink          @relation("RepositoryMaterialIndexPointerLink", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryMaterialIndexPointer_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                           ProjectRepositoryLinkConfigVersion @relation("RepositoryMaterialIndexPointerConfig", fields: [projectId, projectRepositoryLinkId, linkConfigVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepositoryMaterialIndexPointer_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration                  RepositoryMaterialIndexGeneration @relation(fields: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, indexGenerationId], references: [projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, id], map: "RepositoryMaterialIndexPointer_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@id([projectId, projectRepositoryLinkId])
+  @@unique([projectId, indexGenerationId], map: "RepositoryMaterialIndexPointer_project_index_key")
+  @@unique([projectId, projectRepositoryLinkId, repositoryMaterialGenerationId, indexGenerationId], map: "RepositoryMaterialIndexPointer_index_target_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, repositoryMaterialGenerationId, linkConfigVersion, effectivePolicyVersion], map: "RepositoryMaterialIndexPointer_exact_target_key")
 }
 
 model GitHubMaterialQuarantine {
@@ -1050,6 +1345,8 @@ model ProjectSource {
   corpusGenerationEntries ProjectCorpusGenerationEntry[]
   artifactDependencies    ArtifactDependency[]
   githubSourceVersion     GitHubSourceVersion?
+  repositoryMaterialGrantSources RepositoryMaterialModelGrantSource[]
+  repositoryMaterialChunks       RepositoryMaterialChunk[]
 
   @@unique([projectId, id])
   @@unique([projectId, id, originScope])
@@ -1182,6 +1479,8 @@ model EmbeddingProfile {
   createdAt          DateTime               @default(now())
   indexGenerations   IndexGeneration[]
   chunkEmbeddings    ChunkEmbedding[]
+  repositoryMaterialIndexes RepositoryMaterialIndexGeneration[]
+  repositoryMaterialEmbeddings RepositoryMaterialEmbedding[]
 
   @@unique([provider, modelId, dimensions, normalization, profileVersion])
 }
@@ -1721,6 +2020,8 @@ model ProjectAiPolicyRevision {
   runs                       AiRun[]
   auditEvents                AiAuditEvent[]
   derivedArtifacts           AiDerivedArtifact[]
+  repositoryMaterialModelGrants RepositoryMaterialModelGrant[]
+  repositoryMaterialIndexes RepositoryMaterialIndexGeneration[]
 
   @@unique([projectId, id])
   @@unique([projectId, revision])

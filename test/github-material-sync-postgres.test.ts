@@ -3,15 +3,21 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, ProjectRepositoryRole } from "@prisma/client";
+import { AiOperation, PrismaClient, ProjectRepositoryRole } from "@prisma/client";
 import { Client } from "pg";
 import {
   GITHUB_READ_ONLY_CLIENT_VERSION,
   GITHUB_SOFT_EXCLUDE_CLASSES,
+  REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
   createGitHubMaterialSyncService,
   createGitHubRepositoryLedgerService,
+  createRepositoryMaterialModelGrantService,
   type GitHubMaterialReadOnlyClient,
 } from "@/lib/github";
+import {
+  OPENAI_EMBEDDING_PROCESSOR_FINGERPRINT,
+  getOpenAiEmbeddingProfile,
+} from "@/lib/ai-runtime";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -335,6 +341,80 @@ test(
         })) {
           assert.equal(version.projectSource.sourceIdentity, firstIdentities.get(version.remoteIdentity));
         }
+
+        const embedding = getOpenAiEmbeddingProfile();
+        const policyFingerprint = "1".repeat(64);
+        const policyRevisionId = "22222222-2222-4222-8222-222222222222";
+        await prisma.projectAiPolicyRevision.create({
+          data: {
+            id: policyRevisionId,
+            projectId,
+            revision: 1,
+            policyFingerprint,
+            outboundEnabled: true,
+            embeddingEnabled: true,
+            autoExtractEnabled: false,
+            sourceSummaryEnabled: false,
+            projectAnalysisEnabled: false,
+            generateWithContextEnabled: false,
+            profileFingerprint: "2".repeat(64),
+            processorFingerprint: "3".repeat(64),
+            regionFingerprint: embedding.processorRegionFingerprint,
+            retentionFingerprint: embedding.processorRetentionFingerprint,
+            endpointFingerprint: embedding.processorEndpointFingerprint,
+            budgetFingerprint: "4".repeat(64),
+            scannerFingerprint: "5".repeat(64),
+            operationProfiles: {
+              create: {
+                id: "33333333-3333-4333-8333-333333333333",
+                operation: AiOperation.embedding,
+                profileFingerprint: embedding.profileFingerprint,
+                providerFingerprint: embedding.providerFingerprint,
+                modelFingerprint: embedding.modelFingerprint,
+                modelId: embedding.modelId,
+                processorFingerprint: OPENAI_EMBEDDING_PROCESSOR_FINGERPRINT,
+                regionFingerprint: embedding.processorRegionFingerprint,
+                retentionFingerprint: embedding.processorRetentionFingerprint,
+                endpointFingerprint: embedding.processorEndpointFingerprint,
+              },
+            },
+          },
+        });
+        await prisma.projectAiPolicy.create({
+          data: { projectId, currentRevisionId: policyRevisionId },
+        });
+        const materialGrants = createRepositoryMaterialModelGrantService({ db: prisma });
+        const issued = await materialGrants.issue({
+          projectId,
+          projectRepositoryLinkId: linkA.id,
+          operations: [AiOperation.embedding],
+          consentVersion: REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
+          acknowledgeExternalModelTransfer: true,
+          acknowledgeProcessingRights: true,
+        });
+        assert.equal(issued.grants.length, 1);
+        assert.equal(issued.grants[0]?.operation, AiOperation.embedding);
+        assert.equal(issued.eligibleMaterialGeneration?.id, second.repositoryMaterialGenerationId);
+        assert.equal(
+          await prisma.repositoryMaterialModelGrantSource.count({
+            where: { projectId, grantId: issued.grants[0]!.id },
+          }),
+          6,
+        );
+        const replayedGrant = await materialGrants.issue({
+          projectId,
+          projectRepositoryLinkId: linkA.id,
+          operations: [AiOperation.embedding],
+          consentVersion: REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
+          acknowledgeExternalModelTransfer: true,
+          acknowledgeProcessingRights: true,
+        });
+        assert.equal(replayedGrant.grants[0]?.id, issued.grants[0]?.id);
+        await materialGrants.revoke({ projectId, projectRepositoryLinkId: linkA.id });
+        assert.equal(
+          (await materialGrants.getStatus({ projectId, projectRepositoryLinkId: linkA.id })).grants.length,
+          0,
+        );
 
         const queuedB = await service.prepareRepositorySync({ projectId, linkId: linkB.id });
         await ledger.disable({ projectId, linkId: linkB.id });

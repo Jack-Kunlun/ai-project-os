@@ -28,6 +28,8 @@ export const PROJECT_CORPUS_GENERATION_VERSION =
   "project-corpus-generation:v1" as const;
 export const PROJECT_CORPUS_INDEX_VERSION =
   "project-corpus-index:v1" as const;
+export const PROJECT_RAG_SNAPSHOT_VERSION =
+  "project-rag-snapshot:v1" as const;
 export const EMBEDDING_STORAGE_PROFILE_ID =
   "00000000-0000-4000-8000-000000001536" as const;
 export const EMBEDDING_STORAGE_PROFILE_FINGERPRINT =
@@ -172,6 +174,9 @@ type ClaimedIndexBuild = Readonly<{
   projectId: string;
   indexGenerationId: string;
   corpusGenerationId: string;
+  grantId: string;
+  policyRevisionId: string;
+  effectivePolicyVersion: number;
   attemptId: string;
   attemptOperationKey: string;
   expectedInputCount: number;
@@ -692,6 +697,9 @@ export function createCorpusIndexService(options: {
         projectId,
         indexGenerationId,
         corpusGenerationId: initial.projectCorpus.corpusGenerationId,
+        grantId: initial.grantId,
+        policyRevisionId: initial.policyRevisionId,
+        effectivePolicyVersion: snapshot.grant.policyRevision,
         attemptId: attempt.id,
         attemptOperationKey: attempt.operationKey,
         expectedInputCount: initial.expectedInputCount,
@@ -918,6 +926,76 @@ export function createCorpusIndexService(options: {
           update: {
             indexGenerationId: claim.indexGenerationId,
             corpusGenerationId: claim.corpusGenerationId,
+            publishedAt: completedAt,
+          },
+        });
+        const ragSnapshotManifestFingerprint = stableFingerprint(
+          PROJECT_RAG_SNAPSHOT_VERSION,
+          [
+            claim.projectId,
+            claim.indexGenerationId,
+            claim.corpusGenerationId,
+            claim.grantId,
+            claim.policyRevisionId,
+            claim.effectivePolicyVersion,
+            "required-repositories:0",
+          ],
+        );
+        const previousSnapshots = await tx.projectRagSnapshot.findMany({
+          where: {
+            projectId: claim.projectId,
+            status: "complete",
+            manifestFingerprint: { not: ragSnapshotManifestFingerprint },
+          },
+          select: { id: true },
+        });
+        if (previousSnapshots.length > 0) {
+          await tx.projectRagSnapshot.updateMany({
+            where: {
+              projectId: claim.projectId,
+              id: { in: previousSnapshots.map((snapshot) => snapshot.id) },
+              status: "complete",
+            },
+            data: { status: "superseded", supersededAt: completedAt },
+          });
+        }
+        const ragSnapshot = await tx.projectRagSnapshot.upsert({
+          where: {
+            projectId_manifestFingerprint: {
+              projectId: claim.projectId,
+              manifestFingerprint: ragSnapshotManifestFingerprint,
+            },
+          },
+          create: {
+            id: safeUuid(idFactory()),
+            projectId: claim.projectId,
+            manualIndexGenerationId: claim.indexGenerationId,
+            manualCorpusGenerationId: claim.corpusGenerationId,
+            grantId: claim.grantId,
+            policyRevisionId: claim.policyRevisionId,
+            effectivePolicyVersion: claim.effectivePolicyVersion,
+            status: "complete",
+            manifestFingerprint: ragSnapshotManifestFingerprint,
+            requiredRepositoryCount: 0,
+            completedAt,
+          },
+          update: {
+            status: "complete",
+            failureCode: null,
+            supersededAt: null,
+            completedAt,
+          },
+          select: { id: true },
+        });
+        await tx.projectRagSnapshotPointer.upsert({
+          where: { projectId: claim.projectId },
+          create: {
+            projectId: claim.projectId,
+            ragSnapshotId: ragSnapshot.id,
+            publishedAt: completedAt,
+          },
+          update: {
+            ragSnapshotId: ragSnapshot.id,
             publishedAt: completedAt,
           },
         });

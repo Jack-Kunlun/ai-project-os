@@ -15,7 +15,13 @@ import {
   OPENAI_PROCESSOR_REGION_FINGERPRINT,
   loadOpenAiCredential,
 } from "@/lib/ai-runtime";
-import { CorpusIndexError, createCorpusIndexService } from "@/lib/ai-memory";
+import {
+  EMBEDDING_STORAGE_PROFILE_FINGERPRINT,
+  CorpusIndexError,
+  ProjectSearchError,
+  createCorpusIndexService,
+  createProjectSearchService,
+} from "@/lib/ai-memory";
 import { hashSourceContent } from "@/lib/source";
 
 const execFile = promisify(execFileCallback);
@@ -370,6 +376,8 @@ test(
         assert.equal(fetchCalls, 1);
         assert.equal(await prisma.chunkEmbedding.count({ where: { projectId } }), 2);
         assert.equal(await prisma.projectCorpusIndexPointer.count({ where: { projectId } }), 1);
+        assert.equal(await prisma.projectRagSnapshot.count({ where: { projectId, status: "complete" } }), 1);
+        assert.equal(await prisma.projectRagSnapshotPointer.count({ where: { projectId } }), 1);
         assert.equal(await prisma.indexWorkItem.count({
           where: { projectId, status: "succeeded" },
         }), 2);
@@ -402,6 +410,49 @@ test(
           minimum_norm: 1,
           maximum_norm: 1,
         });
+        const searchService = createProjectSearchService({ db: prisma });
+        const lexicalSearch = await searchService.search({
+          projectId,
+          query: "可追溯的长期记忆",
+          take: 2,
+        });
+        assert.equal(lexicalSearch.mode, "lexical");
+        assert.equal(lexicalSearch.results[0]?.citation.sourceId, sourceAId);
+        assert.equal(lexicalSearch.results[0]?.citation.excerpt, sourceAContent);
+        assert.equal(lexicalSearch.snapshot.manualIndexGenerationId, indexResults[0]!.id);
+
+        const hybridSearch = await searchService.search({
+          projectId,
+          query: "向量专用查询",
+          take: 2,
+          queryEmbedding: {
+            profileFingerprint: EMBEDDING_STORAGE_PROFILE_FINGERPRINT,
+            vector: Array.from({ length: 1_536 }, (_, index) => index === 0 ? 1 : 0),
+          },
+        });
+        assert.equal(hybridSearch.mode, "hybrid");
+        assert.equal(hybridSearch.results[0]?.citation.sourceId, sourceAId);
+        assert.equal(hybridSearch.results[0]?.componentRanks.vector, 1);
+        assert.equal(hybridSearch.results.every((result) => result.citation.projectId === projectId), true);
+        await assert.rejects(
+          () => searchService.search({
+            projectId: otherProjectId,
+            query: "长期记忆",
+          }),
+          (error: unknown) =>
+            error instanceof ProjectSearchError &&
+            error.code === "PROJECT_SEARCH_SNAPSHOT_NOT_READY",
+        );
+        const ragSnapshot = await prisma.projectRagSnapshot.findFirstOrThrow({
+          where: { projectId, status: "complete" },
+          select: { id: true },
+        });
+        await expectRejected(() => raw.query(
+          `INSERT INTO "ProjectRagSnapshotPointer"
+             ("projectId", "ragSnapshotId")
+           VALUES ($1, $2)`,
+          [otherProjectId, ragSnapshot.id],
+        ));
         const replayed = await service.executeProjectCorpusIndex(
           { projectId, indexGenerationId: indexResults[0]!.id },
           credential!,
@@ -535,6 +586,15 @@ test(
             revocationReasonCode: "userRequested",
           },
         });
+        await assert.rejects(
+          () => searchService.search({
+            projectId,
+            query: "长期记忆",
+          }),
+          (error: unknown) =>
+            error instanceof ProjectSearchError &&
+            error.code === "PROJECT_SEARCH_SNAPSHOT_INELIGIBLE",
+        );
         await assert.rejects(
           () => service.ensureProjectCorpusGeneration({ projectId, grantId }),
           (error: unknown) =>

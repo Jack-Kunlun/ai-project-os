@@ -33,6 +33,7 @@ export {
   EMBEDDING_STORAGE_PROFILE_ID,
   PROJECT_CORPUS_GENERATION_VERSION,
   PROJECT_CORPUS_INDEX_VERSION,
+  PROJECT_RAG_SNAPSHOT_VERSION,
   createCorpusIndexService,
   type CorpusIndexErrorCode,
   type ProjectCorpusGenerationView,
@@ -54,3 +55,26 @@ export {
   type ProjectAiMemoryStatus,
   type ProjectAiOperationStatus,
 } from "./project-ai-config";
+export {
+  HYBRID_SEARCH_MAX_DOCUMENTS,
+  HYBRID_SEARCH_MAX_QUERY_BYTES,
+  HYBRID_SEARCH_MAX_RESULTS,
+  HYBRID_SEARCH_RRF_K,
+  HYBRID_SEARCH_VERSION,
+  HybridSearchError,
+  rankHybridSearch,
+  type HybridSearchDocument,
+  type HybridSearchErrorCode,
+  type HybridSearchResult,
+  type HybridSearchVectorRank,
+} from "./hybrid-search";
+export {
+  PROJECT_SEARCH_VECTOR_DIMENSIONS,
+  PROJECT_SEARCH_VERSION,
+  ProjectSearchError,
+  createProjectSearchService,
+  type ProjectQueryEmbedding,
+  type ProjectSearchCitation,
+  type ProjectSearchErrorCode,
+  type ProjectSearchResponse,
+} from "./project-search";

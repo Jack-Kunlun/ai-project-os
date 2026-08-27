@@ -128,6 +128,13 @@ enum IndexWorkItemStatus {
   cancelled
 }
 
+enum ProjectRagSnapshotStatus {
+  staging
+  complete
+  ineligible
+  superseded
+}
+
 enum ProjectScanTrigger {
   manual
   system
@@ -280,6 +287,8 @@ model Project {
   indexWorkItems IndexWorkItem[]
   chunkEmbeddings ChunkEmbedding[]
   corpusIndexPointer ProjectCorpusIndexPointer?
+  ragSnapshots ProjectRagSnapshot[]
+  ragSnapshotPointer ProjectRagSnapshotPointer?
 
   @@index([updatedAt])
 }
@@ -582,10 +591,12 @@ model ProjectCorpusIndexGeneration {
   corpusGeneration   ProjectCorpusGeneration @relation(fields: [projectId, corpusGenerationId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_corpus_fkey", onDelete: NoAction, onUpdate: Cascade)
   inputs             ProjectCorpusIndexInput[]
   publishedPointer   ProjectCorpusIndexPointer?
+  ragSnapshots       ProjectRagSnapshot[]
 
   @@id([projectId, indexGenerationId])
   @@unique([projectId, indexGenerationId, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_index_grant_policy_key")
   @@unique([projectId, indexGenerationId, corpusGenerationId], map: "ProjectCorpusIndexGeneration_index_corpus_key")
+  @@unique([projectId, indexGenerationId, corpusGenerationId, grantId, policyRevisionId], map: "ProjectCorpusIndexGeneration_exact_boundary_key")
   @@index([projectId, corpusGenerationId], map: "ProjectCorpusIndexGeneration_project_corpus_idx")
 }
 
@@ -721,6 +732,40 @@ model ProjectCorpusIndexPointer {
 
   @@unique([projectId, indexGenerationId], map: "ProjectCorpusIndexPointer_project_index_key")
   @@unique([projectId, indexGenerationId, corpusGenerationId], map: "ProjectCorpusIndexPointer_exact_target_key")
+}
+
+model ProjectRagSnapshot {
+  id                      String                   @id @default(uuid()) @db.Uuid
+  projectId               String                   @db.Uuid
+  manualIndexGenerationId String                   @db.Uuid
+  manualCorpusGenerationId String                  @db.Uuid
+  grantId                 String                   @db.Uuid
+  policyRevisionId        String                   @db.Uuid
+  effectivePolicyVersion  Int
+  status                  ProjectRagSnapshotStatus @default(staging)
+  manifestFingerprint     String                   @db.VarChar(64)
+  requiredRepositoryCount Int                      @default(0)
+  failureCode             String?                  @db.VarChar(64)
+  createdAt               DateTime                 @default(now())
+  completedAt             DateTime?
+  supersededAt            DateTime?
+  project                 Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  manualIndex             ProjectCorpusIndexGeneration @relation(fields: [projectId, manualIndexGenerationId, manualCorpusGenerationId, grantId, policyRevisionId], references: [projectId, indexGenerationId, corpusGenerationId, grantId, policyRevisionId], map: "ProjectRagSnapshot_manual_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  publishedPointer        ProjectRagSnapshotPointer?
+
+  @@unique([projectId, id])
+  @@unique([projectId, manifestFingerprint], map: "ProjectRagSnapshot_project_manifest_key")
+  @@index([projectId, status, createdAt])
+}
+
+model ProjectRagSnapshotPointer {
+  projectId     String             @id @db.Uuid
+  ragSnapshotId String             @db.Uuid
+  publishedAt   DateTime           @default(now())
+  project       Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  ragSnapshot   ProjectRagSnapshot @relation(fields: [projectId, ragSnapshotId], references: [projectId, id], map: "ProjectRagSnapshotPointer_snapshot_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, ragSnapshotId], map: "ProjectRagSnapshotPointer_project_snapshot_key")
 }
 
 model ProjectScan {

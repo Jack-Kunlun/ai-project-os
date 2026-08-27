@@ -790,7 +790,7 @@ model ProjectCodeSnapshotEntry {
 
   @@unique([projectId, id])
   @@unique([projectId, projectCodeSnapshotId, projectRepositoryLinkId])
-  @@index([projectId, projectRepositoryLinkId, repositoryCodeGenerationId], map: "RepositoryCodeIndexGeneration_code_generation_idx")
+  @@index([projectId, projectRepositoryLinkId, repositoryCodeGenerationId])
 }
 
 model ProjectCodeSnapshotPointer {
@@ -1182,7 +1182,7 @@ model RepositoryCodeIndexGeneration {
   @@unique([projectId, projectRepositoryLinkId, indexGenerationId, grantId, policyRevisionId], map: "RepositoryCodeIndexGeneration_index_grant_policy_key")
   @@unique([projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId], map: "RepositoryCodeIndexGeneration_exact_input_key")
   @@unique([projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId, linkConfigVersion, effectivePolicyVersion], map: "RepositoryCodeIndexGeneration_exact_boundary_key")
-  @@index([projectId, projectRepositoryLinkId, repositoryCodeGenerationId])
+  @@index([projectId, projectRepositoryLinkId, repositoryCodeGenerationId], map: "RepositoryCodeIndexGeneration_code_generation_idx")
 }
 
 model RepositoryCodeIndexInput {

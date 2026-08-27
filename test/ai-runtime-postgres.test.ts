@@ -165,6 +165,10 @@ const aiCandidateMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260827120000_add_ai_memory_candidates/migration.sql",
 );
+const itemEvidenceHistoryMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260827140000_add_item_evidence_history/migration.sql",
+);
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
   join(repositoryRoot, "prisma/migrations/20260826030732_integrity_boundaries/migration.sql"),
@@ -613,6 +617,7 @@ async function applyAiMigrationInTransaction(client: Client): Promise<void> {
   await transaction(client, [
     { sql: await loadSql(aiRuntimeMigrationPath) },
     { sql: await loadSql(aiCandidateMigrationPath) },
+    { sql: await loadSql(itemEvidenceHistoryMigrationPath) },
   ]);
 }
 
@@ -626,6 +631,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     "20260826030732_integrity_boundaries",
     "20260827090000_add_ai_runtime_governance",
     "20260827120000_add_ai_memory_candidates",
+    "20260827140000_add_item_evidence_history",
   ];
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===
@@ -829,6 +835,76 @@ async function assertV0RowsSurviveAiMigration(client: Client): Promise<void> {
       result.rows[0]?.sources === "1" &&
       result.rows[0]?.items === "1",
     "AI_RUNTIME_POSTGRES_V0_ROWS_NOT_PRESERVED",
+  );
+}
+
+async function assertV0ItemHistoryBackfill(client: Client): Promise<void> {
+  const result = await safeQuery<{
+    origin_scope: string;
+    source_identity_present: boolean;
+    revision_key_present: boolean;
+    dedupe_matches: boolean;
+    evidences: string;
+    revisions: string;
+    revision_links: string;
+    action: string;
+    range_start: number;
+    range_end: number;
+  }>(
+    client,
+    `SELECT
+       s."originScope"::text AS origin_scope,
+       s."sourceIdentity" IS NOT NULL AS source_identity_present,
+       s."revisionKey" IS NOT NULL AS revision_key_present,
+       s."manualContentDedupeKey" = s."contentHash" AS dedupe_matches,
+       (SELECT COUNT(*)::text FROM "ProjectItemEvidence" e
+         WHERE e."projectId" = i."projectId" AND e."projectItemId" = i."id") AS evidences,
+       (SELECT COUNT(*)::text FROM "ProjectItemRevision" r
+         WHERE r."projectId" = i."projectId" AND r."projectItemId" = i."id") AS revisions,
+       (SELECT COUNT(*)::text FROM "ProjectItemRevisionEvidence" re
+         WHERE re."projectId" = i."projectId" AND re."projectItemId" = i."id") AS revision_links,
+       r."action"::text AS action,
+       e."rangeStart" AS range_start,
+       e."rangeEnd" AS range_end
+     FROM "ProjectItem" i
+     JOIN "ProjectSource" s
+       ON s."projectId" = i."projectId" AND s."id" = i."sourceId"
+     JOIN "ProjectItemEvidence" e
+       ON e."projectId" = i."projectId" AND e."projectItemId" = i."id"
+      AND e."role" = 'primary' AND e."isActive" = true
+     JOIN "ProjectItemRevision" r
+       ON r."projectId" = i."projectId" AND r."projectItemId" = i."id"
+      AND r."revisionNumber" = 1
+     WHERE i."projectId" = $1`,
+    [projectAId],
+  );
+  const row = result.rows[0];
+  requireCondition(
+    row !== undefined &&
+      row.origin_scope === "project" &&
+      row.source_identity_present &&
+      row.revision_key_present &&
+      row.dedupe_matches &&
+      row.evidences === "1" &&
+      row.revisions === "1" &&
+      row.revision_links === "1" &&
+      row.action === "legacy_import" &&
+      row.range_start === 0 &&
+      row.range_end === Buffer.byteLength(sourceAContent, "utf8"),
+    "AI_RUNTIME_POSTGRES_V0_HISTORY_BACKFILL_MISMATCH",
+  );
+
+  await expectActionRejected(
+    () => transaction(client, [{
+      sql: `INSERT INTO "ProjectItem"
+              ("id", "projectId", "type", "reviewStatus", "sourceId",
+               "title", "content", "sourceExcerpt", "updatedAt")
+            VALUES ('aaaaaaa0-aaaa-4aaa-8aaa-aaaaaaaaaaa9', $1, 'decision',
+                    'candidate', $2, 'Untracked item', 'No history', $3,
+                    CURRENT_TIMESTAMP)`,
+      values: [projectAId, sourceAId, sourceAContent],
+    }]),
+    "project item without evidence history",
   );
 }
 
@@ -1318,6 +1394,7 @@ async function runV0UpgradePath(client: Client): Promise<void> {
   await assertV0RowsSurviveAiMigration(client);
   await applyAiMigrationInTransaction(client);
   await assertV0RowsSurviveAiMigration(client);
+  await assertV0ItemHistoryBackfill(client);
 }
 
 async function runPolicyAndGrantMatrix(client: Client): Promise<void> {
@@ -3545,6 +3622,30 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
         dismissed.reviewStatus === "dismissed" &&
         dismissed.acceptedItemId === null,
       "AI_CANDIDATE_POSTGRES_REVIEW_STATE_MISMATCH",
+    );
+
+    const acceptedHistory = await safeQuery<{
+      actions: string[];
+      evidences: string;
+      revision_links: string;
+    }>(
+      client,
+      `SELECT
+         array_agg(r."action"::text ORDER BY r."revisionNumber") AS actions,
+         (SELECT COUNT(*)::text FROM "ProjectItemEvidence" e
+           WHERE e."projectId" = $1 AND e."projectItemId" = $2) AS evidences,
+         (SELECT COUNT(*)::text FROM "ProjectItemRevisionEvidence" re
+           WHERE re."projectId" = $1 AND re."projectItemId" = $2) AS revision_links
+       FROM "ProjectItemRevision" r
+       WHERE r."projectId" = $1 AND r."projectItemId" = $2`,
+      [projectAId, accepted.acceptedItemId],
+    );
+    requireCondition(
+      JSON.stringify(acceptedHistory.rows[0]?.actions) ===
+        JSON.stringify(["ai_created", "confirmed"]) &&
+        acceptedHistory.rows[0]?.evidences === "1" &&
+        acceptedHistory.rows[0]?.revision_links === "2",
+      "AI_CANDIDATE_POSTGRES_ITEM_HISTORY_MISMATCH",
     );
 
     const replayAfterReview = await service.persistVerifiedCandidates({

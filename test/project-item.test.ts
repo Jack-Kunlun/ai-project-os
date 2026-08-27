@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
-import { Prisma } from "@prisma/client";
+import { Prisma, ProjectItemEvidenceRole } from "@prisma/client";
 import { ApiError, mapApiError } from "@/lib/api-errors";
 import {
   canApplyItemAction,
   classifyItemMutationMiss,
   isExactSourceExcerpt,
+  locateExactSourceExcerpt,
   projectItemSelect,
   type ProjectItemAction,
   type ProjectItemReviewStatus,
 } from "@/lib/project-item";
+import { buildEvidenceManifestFingerprint } from "@/lib/project-item-history";
 import {
   createProjectItemSchema,
   projectItemIdSchema,
@@ -92,6 +95,29 @@ test("source excerpts require an exact non-empty substring", () => {
   assert.equal(isExactSourceExcerpt(source, "original source excerpt"), false);
   assert.equal(isExactSourceExcerpt(source, "Original source excerpt "), false);
   assert.equal(isExactSourceExcerpt(source, "   "), false);
+});
+
+test("source evidence records deterministic UTF-8 byte ranges and manifests", () => {
+  assert.deepEqual(locateExactSourceExcerpt("前缀：里程碑已完成", "里程碑"), {
+    rangeStart: 9,
+    rangeEnd: 18,
+  });
+  assert.equal(locateExactSourceExcerpt("same same", "missing"), null);
+
+  const sourceFingerprint = "a".repeat(64);
+  const identity = `${sourceId}:${sourceFingerprint}:9:18`;
+  assert.equal(
+    buildEvidenceManifestFingerprint([{
+      id: "33333333-3333-4333-8333-333333333333",
+      role: ProjectItemEvidenceRole.primary,
+      projectSourceId: sourceId,
+      sourceExcerpt: "里程碑",
+      sourceExcerptFingerprint: sourceFingerprint,
+      rangeStart: 9,
+      rangeEnd: 18,
+    }]),
+    createHash("sha256").update(identity, "utf8").digest("hex"),
+  );
 });
 
 test("item action transitions match the review state machine", () => {

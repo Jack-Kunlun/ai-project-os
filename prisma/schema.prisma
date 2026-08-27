@@ -27,6 +27,43 @@ enum ProjectItemReviewStatus {
   superseded
 }
 
+enum ContentOriginScope {
+  project
+  repository_link
+}
+
+enum ProjectItemEvidenceRole {
+  primary
+  supporting
+}
+
+enum ProjectItemEvidenceState {
+  active
+  purged
+}
+
+enum ProjectEvidenceRangeUnit {
+  utf8_byte
+  line
+}
+
+enum ProjectItemRevisionAction {
+  legacyImport   @map("legacy_import")
+  manualCreated  @map("manual_created")
+  aiCreated      @map("ai_created")
+  edited
+  confirmed
+  dismissed
+  reopened
+  rebindSource   @map("rebind_source")
+  repairEvidence @map("repair_evidence")
+}
+
+enum ProjectItemRevisionIntegrityState {
+  active
+  purged_redacted
+}
+
 enum ProjectScanTrigger {
   manual
   system
@@ -168,29 +205,40 @@ model Project {
   aiAuditEvents AiAuditEvent[]
   aiCandidateBatches AiCandidateBatch[]
   aiCandidateClaims AiCandidateClaim[]
+  itemEvidences ProjectItemEvidence[]
+  itemRevisions ProjectItemRevision[]
+  itemRevisionEvidences ProjectItemRevisionEvidence[]
 
   @@index([updatedAt])
 }
 
 model ProjectSource {
-  id           String            @id @default(uuid()) @db.Uuid
-  projectId    String            @db.Uuid
-  kind         ProjectSourceKind
-  externalRef  String?
-  contentText  String            @db.Text
-  contentHash  String
-  storageKey   String?
-  capturedAt   DateTime?
-  ingestedAt   DateTime          @default(now())
-  project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  items        ProjectItem[]      @relation("SourceItems")
-  grantSources ModelProcessingGrantSource[]
-  aiRunInputs  AiRunInputSource[]
-  aiCandidateClaims AiCandidateClaim[]
+  id                      String             @id @default(uuid()) @db.Uuid
+  projectId               String             @db.Uuid
+  kind                    ProjectSourceKind
+  originScope             ContentOriginScope @default(project)
+  projectRepositoryLinkId String?            @db.Uuid
+  sourceIdentity          String             @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  revisionKey             String             @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  externalRef             String?
+  contentText             String             @db.Text
+  contentHash             String
+  manualContentDedupeKey  String?            @db.VarChar(64)
+  storageKey              String?
+  capturedAt              DateTime?
+  ingestedAt              DateTime           @default(now())
+  project                 Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items                   ProjectItem[]       @relation("SourceItems")
+  itemEvidences           ProjectItemEvidence[] @relation("EvidenceProjectSource")
+  grantSources            ModelProcessingGrantSource[]
+  aiRunInputs             AiRunInputSource[]
+  aiCandidateClaims       AiCandidateClaim[]
 
   @@index([projectId, capturedAt])
-  @@unique([projectId, contentHash])
   @@unique([projectId, id])
+  @@unique([projectId, id, originScope])
+  @@unique([projectId, id, originScope, projectRepositoryLinkId])
+  @@unique([projectId, sourceIdentity, revisionKey])
 }
 
 model ProjectItem {
@@ -213,12 +261,94 @@ model ProjectItem {
   supersedesItem   ProjectItem?             @relation("ItemSupersession", fields: [projectId, supersedesItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   supersededBy     ProjectItem[]            @relation("ItemSupersession")
   aiCandidateClaim AiCandidateClaim?        @relation("AcceptedCandidateItem")
+  evidences        ProjectItemEvidence[]
+  revisions        ProjectItemRevision[]
 
   @@index([projectId, reviewStatus])
   @@index([projectId, type])
   @@index([sourceId])
   @@index([supersedesItemId])
   @@unique([projectId, id])
+}
+
+model ProjectItemEvidence {
+  id                       String                   @id @default(uuid()) @db.Uuid
+  projectId                String                   @db.Uuid
+  projectItemId            String                   @db.Uuid
+  role                     ProjectItemEvidenceRole
+  evidenceState            ProjectItemEvidenceState @default(active)
+  originScope              ContentOriginScope       @default(project)
+  projectRepositoryLinkId  String?                  @db.Uuid
+  projectSourceId          String?                  @db.Uuid
+  sourceExcerpt            String?                  @db.Text
+  sourceExcerptFingerprint String?                  @db.VarChar(64)
+  rangeUnit                ProjectEvidenceRangeUnit?
+  rangeStart               Int?
+  rangeEnd                 Int?
+  isActive                 Boolean                  @default(true)
+  createdAt                DateTime                 @default(now())
+  supersededAt             DateTime?
+  purgedAt                 DateTime?
+  deletionReceipt          String?                  @db.Uuid
+  project                  Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  item                     ProjectItem              @relation(fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectSource            ProjectSource?           @relation("EvidenceProjectSource", fields: [projectId, projectSourceId, originScope], references: [projectId, id, originScope], onDelete: NoAction, onUpdate: Cascade)
+  revisionLinks            ProjectItemRevisionEvidence[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectItemId, id])
+  @@index([projectId, projectItemId, isActive])
+  @@index([projectId, projectSourceId])
+}
+
+model ProjectItemRevision {
+  id                          String                            @id @default(uuid()) @db.Uuid
+  projectId                   String                            @db.Uuid
+  projectItemId               String                            @db.Uuid
+  revisionNumber              Int
+  action                      ProjectItemRevisionAction
+  actorId                     String                            @db.VarChar(128)
+  reason                      String?                           @db.Text
+  itemType                    ProjectItemType
+  reviewStatus                ProjectItemReviewStatus
+  title                       String
+  content                     String                            @db.Text
+  sourceId                    String?                           @db.Uuid
+  sourceExcerpt               String?                           @db.Text
+  occurredAt                  DateTime?
+  confirmedAt                 DateTime?
+  supersedesItemId            String?                           @db.Uuid
+  metadata                    Json                              @db.JsonB
+  evidenceManifestFingerprint String?                           @db.VarChar(64)
+  integrityState              ProjectItemRevisionIntegrityState @default(active)
+  deletionReceipt             String?                           @db.Uuid
+  createdAt                   DateTime                          @default(now())
+  project                     Project                           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  item                        ProjectItem                       @relation(fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  evidenceLinks               ProjectItemRevisionEvidence[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, projectItemId, id])
+  @@unique([projectId, projectItemId, revisionNumber])
+  @@index([projectId, projectItemId, createdAt])
+}
+
+model ProjectItemRevisionEvidence {
+  id            String                  @id @default(uuid()) @db.Uuid
+  projectId     String                  @db.Uuid
+  projectItemId String                  @db.Uuid
+  revisionId    String                  @db.Uuid
+  evidenceId    String                  @db.Uuid
+  role          ProjectItemEvidenceRole
+  createdAt     DateTime                @default(now())
+  project       Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revision      ProjectItemRevision     @relation(fields: [projectId, projectItemId, revisionId], references: [projectId, projectItemId, id], onDelete: NoAction, onUpdate: Cascade)
+  evidence      ProjectItemEvidence     @relation(fields: [projectId, projectItemId, evidenceId], references: [projectId, projectItemId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, revisionId, evidenceId])
+  @@index([projectId, projectItemId, revisionId])
+  @@index([projectId, projectItemId, evidenceId])
 }
 
 model ProjectScan {

@@ -1,8 +1,14 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
+import {
+  appendProjectItemRevision,
+  createPrimaryProjectItemEvidence,
+  supersedeProjectItemEvidence,
+  type ProjectItemEvidenceReference,
+} from "@/lib/project-item-history";
 import {
   canApplyItemAction,
   classifyItemMutationMiss,
@@ -99,94 +105,154 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
   let expectedUpdatedAt: Date | undefined;
 
   try {
-    parsed = await parseParams(context.params);
+    const routeParams = await parseParams(context.params);
+    parsed = routeParams;
     const input = updateProjectItemSchema.parse(await readJsonBody(request));
-    expectedUpdatedAt = new Date(input.expectedUpdatedAt);
+    const expectedVersion = new Date(input.expectedUpdatedAt);
+    expectedUpdatedAt = expectedVersion;
     const db = getDb();
-    const project = await db.project.findUnique({ where: { id: parsed.projectId }, select: { id: true } });
+    const item = await db.$transaction(async (tx) => {
+      const project = await tx.project.findUnique({ where: { id: routeParams.projectId }, select: { id: true } });
 
-    if (!project) {
-      throw projectNotFoundError();
-    }
+      if (!project) {
+        throw projectNotFoundError();
+      }
 
-    const existing = await db.projectItem.findUnique({
-      where: { projectId_id: { projectId: parsed.projectId, id: parsed.itemId } },
-      select: itemMutationSelect,
-    });
+      const existing = await tx.projectItem.findUnique({
+        where: { projectId_id: { projectId: routeParams.projectId, id: routeParams.itemId } },
+        select: itemMutationSelect,
+      });
 
-    if (!existing) {
-      throw await getMutationMissError(db, parsed.projectId, parsed.itemId, expectedUpdatedAt);
-    }
+      if (!existing) {
+        throw itemNotFoundError();
+      }
 
-    if (existing.updatedAt.getTime() !== expectedUpdatedAt.getTime()) {
-      throw versionConflictError();
-    }
+      if (existing.updatedAt.getTime() !== expectedVersion.getTime()) {
+        throw versionConflictError();
+      }
 
-    const currentStatus = existing.reviewStatus as ProjectItemReviewStatus;
-    if (!canApplyItemAction(currentStatus, input.action)) {
-      throw invalidTransitionError();
-    }
+      const currentStatus = existing.reviewStatus as ProjectItemReviewStatus;
+      if (!canApplyItemAction(currentStatus, input.action)) {
+        throw invalidTransitionError();
+      }
 
-    if (input.action === "edit" && !isExactSourceExcerpt(existing.source.contentText, input.sourceExcerpt)) {
-      throw new ApiError(422, "SOURCE_EXCERPT_MISMATCH", "sourceExcerpt must be an exact non-empty part of the source content");
-    }
+      if (input.action === "edit" && !isExactSourceExcerpt(existing.source.contentText, input.sourceExcerpt)) {
+        throw new ApiError(422, "SOURCE_EXCERPT_MISMATCH", "sourceExcerpt must be an exact non-empty part of the source content");
+      }
 
-    const nextUpdatedAt = new Date(Math.max(Date.now(), existing.updatedAt.getTime() + 1));
-    const mutationWhere = {
-      projectId: parsed.projectId,
-      id: parsed.itemId,
-      reviewStatus: currentStatus,
-      updatedAt: existing.updatedAt,
-    };
-    let updatedCount: number;
-
-    if (input.action === "edit") {
-      const result = await db.projectItem.updateMany({
-        where: mutationWhere,
-        data: {
-          type: input.type,
-          title: input.title,
-          content: input.content,
-          sourceExcerpt: input.sourceExcerpt,
-          occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
-          reviewStatus: "candidate",
-          confirmedAt: null,
-          updatedAt: nextUpdatedAt,
+      const activeEvidence = await tx.projectItemEvidence.findMany({
+        where: {
+          projectId: routeParams.projectId,
+          projectItemId: routeParams.itemId,
+          evidenceState: "active",
+          isActive: true,
+        },
+        select: {
+          id: true,
+          role: true,
+          projectSourceId: true,
+          sourceExcerpt: true,
+          sourceExcerptFingerprint: true,
+          rangeStart: true,
+          rangeEnd: true,
         },
       });
-      updatedCount = result.count;
-    } else if (input.action === "confirm") {
-      const result = await db.projectItem.updateMany({
-        where: mutationWhere,
-        data: { reviewStatus: "confirmed", confirmedAt: new Date(), updatedAt: nextUpdatedAt },
-      });
-      updatedCount = result.count;
-    } else if (input.action === "dismiss") {
-      const result = await db.projectItem.updateMany({
-        where: mutationWhere,
-        data: { reviewStatus: "dismissed", confirmedAt: null, updatedAt: nextUpdatedAt },
-      });
-      updatedCount = result.count;
-    } else {
-      const result = await db.projectItem.updateMany({
-        where: mutationWhere,
-        data: { reviewStatus: "candidate", confirmedAt: null, updatedAt: nextUpdatedAt },
-      });
-      updatedCount = result.count;
-    }
+      const currentPrimary = activeEvidence.filter((evidence) => evidence.role === "primary");
+      if (currentPrimary.length !== 1 || currentPrimary[0]?.projectSourceId !== existing.sourceId) {
+        throw new ApiError(409, "ITEM_EVIDENCE_INVALID", "Item does not have one valid primary evidence record");
+      }
 
-    if (updatedCount !== 1) {
-      throw await getMutationMissError(db, parsed.projectId, parsed.itemId, expectedUpdatedAt);
-    }
+      const nextUpdatedAt = new Date(Math.max(Date.now(), existing.updatedAt.getTime() + 1));
+      const mutationWhere = {
+        projectId: routeParams.projectId,
+        id: routeParams.itemId,
+        reviewStatus: currentStatus,
+        updatedAt: existing.updatedAt,
+      };
+      let updatedCount: number;
+      let revisionAction: ProjectItemRevisionAction;
+      let revisionEvidence: readonly ProjectItemEvidenceReference[] = activeEvidence;
 
-    const item = await db.projectItem.findUnique({
-      where: { projectId_id: { projectId: parsed.projectId, id: parsed.itemId } },
-      select: projectItemSelect,
+      if (input.action === "edit") {
+        const result = await tx.projectItem.updateMany({
+          where: mutationWhere,
+          data: {
+            type: input.type,
+            title: input.title,
+            content: input.content,
+            sourceExcerpt: input.sourceExcerpt,
+            occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
+            reviewStatus: "candidate",
+            confirmedAt: null,
+            updatedAt: nextUpdatedAt,
+          },
+        });
+        updatedCount = result.count;
+        revisionAction = ProjectItemRevisionAction.edited;
+      } else if (input.action === "confirm") {
+        const result = await tx.projectItem.updateMany({
+          where: mutationWhere,
+          data: { reviewStatus: "confirmed", confirmedAt: nextUpdatedAt, updatedAt: nextUpdatedAt },
+        });
+        updatedCount = result.count;
+        revisionAction = ProjectItemRevisionAction.confirmed;
+      } else if (input.action === "dismiss") {
+        const result = await tx.projectItem.updateMany({
+          where: mutationWhere,
+          data: { reviewStatus: "dismissed", confirmedAt: null, updatedAt: nextUpdatedAt },
+        });
+        updatedCount = result.count;
+        revisionAction = ProjectItemRevisionAction.dismissed;
+      } else {
+        const result = await tx.projectItem.updateMany({
+          where: mutationWhere,
+          data: { reviewStatus: "candidate", confirmedAt: null, updatedAt: nextUpdatedAt },
+        });
+        updatedCount = result.count;
+        revisionAction = ProjectItemRevisionAction.reopened;
+      }
+
+      if (updatedCount !== 1) {
+        throw versionConflictError();
+      }
+
+      if (input.action === "edit") {
+        await supersedeProjectItemEvidence(tx, {
+          projectId: routeParams.projectId,
+          projectItemId: routeParams.itemId,
+          evidenceId: currentPrimary[0]!.id,
+          supersededAt: nextUpdatedAt,
+        });
+        const replacement = await createPrimaryProjectItemEvidence(tx, {
+          projectId: routeParams.projectId,
+          projectItemId: routeParams.itemId,
+          projectSourceId: existing.sourceId,
+          sourceText: existing.source.contentText,
+          sourceExcerpt: input.sourceExcerpt,
+          createdAt: nextUpdatedAt,
+        });
+        revisionEvidence = [
+          replacement,
+          ...activeEvidence.filter((evidence) => evidence.role === "supporting"),
+        ];
+      }
+
+      const updated = await tx.projectItem.findUniqueOrThrow({
+        where: { projectId_id: { projectId: routeParams.projectId, id: routeParams.itemId } },
+      });
+      await appendProjectItemRevision(tx, {
+        item: updated,
+        action: revisionAction,
+        actorId: "local:user",
+        evidences: revisionEvidence,
+        createdAt: nextUpdatedAt,
+      });
+
+      return tx.projectItem.findUniqueOrThrow({
+        where: { projectId_id: { projectId: routeParams.projectId, id: routeParams.itemId } },
+        select: projectItemSelect,
+      });
     });
-
-    if (!item) {
-      throw await getMutationMissError(db, parsed.projectId, parsed.itemId, expectedUpdatedAt);
-    }
 
     return NextResponse.json({ item });
   } catch (error) {

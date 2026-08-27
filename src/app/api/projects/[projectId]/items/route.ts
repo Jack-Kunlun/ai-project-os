@@ -1,8 +1,12 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
+import {
+  appendProjectItemRevision,
+  createPrimaryProjectItemEvidence,
+} from "@/lib/project-item-history";
 import { isExactSourceExcerpt, projectItemSelect } from "@/lib/project-item";
 import { createProjectItemSchema, projectIdSchema } from "@/lib/validation";
 
@@ -52,37 +56,62 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const db = getDb();
     await assertProjectExists(db, projectId);
     const input = createProjectItemSchema.parse(await readJsonBody(request));
-    const source = await db.projectSource.findUnique({
-      where: { projectId_id: { projectId, id: input.sourceId } },
-      select: { id: true, contentText: true },
-    });
+    const item = await db.$transaction(async (tx) => {
+      const source = await tx.projectSource.findUnique({
+        where: { projectId_id: { projectId, id: input.sourceId } },
+        select: { id: true, contentText: true },
+      });
 
-    if (!source) {
-      // Re-check the parent after a miss so a concurrent project deletion is
-      // reported as PROJECT_NOT_FOUND rather than SOURCE_NOT_FOUND.
-      await assertProjectExists(db, projectId);
-      throw new ApiError(404, "SOURCE_NOT_FOUND", "Source not found");
-    }
+      if (!source) {
+        const project = await tx.project.findUnique({
+          where: { id: projectId },
+          select: { id: true },
+        });
+        if (!project) {
+          throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found");
+        }
+        throw new ApiError(404, "SOURCE_NOT_FOUND", "Source not found");
+      }
 
-    if (!isExactSourceExcerpt(source.contentText, input.sourceExcerpt)) {
-      throw new ApiError(422, "SOURCE_EXCERPT_MISMATCH", "sourceExcerpt must be an exact non-empty part of the source content");
-    }
+      if (!isExactSourceExcerpt(source.contentText, input.sourceExcerpt)) {
+        throw new ApiError(422, "SOURCE_EXCERPT_MISMATCH", "sourceExcerpt must be an exact non-empty part of the source content");
+      }
 
-    const item = await db.projectItem.create({
-      data: {
+      const created = await tx.projectItem.create({
+        data: {
+          projectId,
+          type: input.type,
+          reviewStatus: "candidate",
+          sourceId: input.sourceId,
+          title: input.title,
+          content: input.content,
+          sourceExcerpt: input.sourceExcerpt,
+          occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
+          confirmedAt: null,
+          supersedesItemId: null,
+          metadata: {},
+        },
+      });
+      const evidence = await createPrimaryProjectItemEvidence(tx, {
         projectId,
-        type: input.type,
-        reviewStatus: "candidate",
-        sourceId: input.sourceId,
-        title: input.title,
-        content: input.content,
+        projectItemId: created.id,
+        projectSourceId: source.id,
+        sourceText: source.contentText,
         sourceExcerpt: input.sourceExcerpt,
-        occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
-        confirmedAt: null,
-        supersedesItemId: null,
-        metadata: {},
-      },
-      select: projectItemSelect,
+        createdAt: created.createdAt,
+      });
+      await appendProjectItemRevision(tx, {
+        item: created,
+        action: ProjectItemRevisionAction.manualCreated,
+        actorId: "local:user",
+        evidences: [evidence],
+        createdAt: created.createdAt,
+      });
+
+      return tx.projectItem.findUniqueOrThrow({
+        where: { projectId_id: { projectId, id: created.id } },
+        select: projectItemSelect,
+      });
     });
 
     return NextResponse.json({ item }, { status: 201 });

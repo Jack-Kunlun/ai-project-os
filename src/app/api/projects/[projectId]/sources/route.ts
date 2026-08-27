@@ -60,14 +60,18 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const input = createProjectSourceSchema.parse(await readJsonBody(request));
     const db = getDb();
     await assertProjectExists(projectId);
+    const contentHash = hashSourceContent(input.contentText);
 
     const source = await db.projectSource.create({
       data: {
         projectId,
         kind: "manual",
+        originScope: "project",
+        projectRepositoryLinkId: null,
         externalRef: input.externalRef ?? null,
         contentText: input.contentText,
-        contentHash: hashSourceContent(input.contentText),
+        contentHash,
+        manualContentDedupeKey: contentHash,
         capturedAt: input.capturedAt ? new Date(input.capturedAt) : null,
       },
       select: sourceSelect,

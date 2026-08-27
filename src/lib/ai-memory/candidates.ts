@@ -4,6 +4,7 @@ import {
   Prisma,
   type PrismaClient,
   ProjectItemReviewStatus,
+  ProjectItemRevisionAction,
   ProjectItemType,
 } from "@prisma/client";
 import {
@@ -14,6 +15,10 @@ import {
   type VerifiedOpenAiAutoExtractCandidate,
 } from "@/lib/ai-runtime";
 import { hashSourceContent } from "@/lib/source";
+import {
+  appendProjectItemRevision,
+  createPrimaryProjectItemEvidence,
+} from "@/lib/project-item-history";
 import { AiCandidateError, throwAiCandidateError } from "./candidate-errors";
 
 const UUID_PATTERN =
@@ -706,6 +711,7 @@ class AiCandidateServiceImpl {
           statementFingerprint: true,
           reviewStatus: true,
           batch: { select: { candidateSetFingerprint: true } },
+          source: { select: { contentText: true } },
         },
       });
       if (claim === null) return throwAiCandidateError("AI_CANDIDATE_NOT_FOUND");
@@ -718,18 +724,18 @@ class AiCandidateServiceImpl {
         return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
       }
       const acceptedItemId = randomUUID();
-      await tx.projectItem.create({
+      const createdItem = await tx.projectItem.create({
         data: {
           id: acceptedItemId,
           projectId,
           type: itemInput.type,
-          reviewStatus: ProjectItemReviewStatus.confirmed,
+          reviewStatus: ProjectItemReviewStatus.candidate,
           sourceId: claim.sourceId,
           title: itemInput.title,
           content: itemInput.content,
           sourceExcerpt: claim.sourceExcerpt,
           occurredAt: itemInput.occurredAt,
-          confirmedAt: reviewedAt,
+          confirmedAt: null,
           metadata: {
             origin: "ai_candidate",
             aiRunId: claim.aiRunId,
@@ -737,7 +743,39 @@ class AiCandidateServiceImpl {
             statementFingerprint: claim.statementFingerprint,
             candidateSetFingerprint: claim.batch.candidateSetFingerprint,
           },
+          createdAt: reviewedAt,
+          updatedAt: reviewedAt,
         },
+      });
+      const evidence = await createPrimaryProjectItemEvidence(tx, {
+        projectId,
+        projectItemId: acceptedItemId,
+        projectSourceId: claim.sourceId,
+        sourceText: claim.source.contentText,
+        sourceExcerpt: claim.sourceExcerpt,
+        createdAt: reviewedAt,
+      });
+      await appendProjectItemRevision(tx, {
+        item: createdItem,
+        action: ProjectItemRevisionAction.aiCreated,
+        actorId: "ai:model",
+        evidences: [evidence],
+        createdAt: reviewedAt,
+      });
+      const confirmedItem = await tx.projectItem.update({
+        where: { projectId_id: { projectId, id: acceptedItemId } },
+        data: {
+          reviewStatus: ProjectItemReviewStatus.confirmed,
+          confirmedAt: reviewedAt,
+          updatedAt: reviewedAt,
+        },
+      });
+      await appendProjectItemRevision(tx, {
+        item: confirmedItem,
+        action: ProjectItemRevisionAction.confirmed,
+        actorId: reviewedBy,
+        evidences: [evidence],
+        createdAt: reviewedAt,
       });
       const updated = await tx.aiCandidateClaim.updateMany({
         where: {

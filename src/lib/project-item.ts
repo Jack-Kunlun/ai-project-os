@@ -42,7 +42,23 @@ export function canApplyItemAction(status: ProjectItemReviewStatus, action: Proj
 }
 
 export function isExactSourceExcerpt(sourceText: string, sourceExcerpt: string): boolean {
-  return sourceExcerpt.trim().length > 0 && sourceText.includes(sourceExcerpt);
+  return locateExactSourceExcerpt(sourceText, sourceExcerpt) !== null;
+}
+
+export function locateExactSourceExcerpt(
+  sourceText: string,
+  sourceExcerpt: string,
+): { rangeStart: number; rangeEnd: number } | null {
+  if (sourceExcerpt.trim().length === 0) return null;
+
+  const codeUnitStart = sourceText.indexOf(sourceExcerpt);
+  if (codeUnitStart < 0) return null;
+
+  const rangeStart = Buffer.byteLength(sourceText.slice(0, codeUnitStart), "utf8");
+  return {
+    rangeStart,
+    rangeEnd: rangeStart + Buffer.byteLength(sourceExcerpt, "utf8"),
+  };
 }
 
 export function classifyItemMutationMiss(input: {

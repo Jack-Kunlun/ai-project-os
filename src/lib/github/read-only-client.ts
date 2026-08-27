@@ -15,6 +15,8 @@ const MAX_TOKEN_FILE_BYTES = 512;
 const MAX_STANDARD_RESPONSE_BYTES = 1_048_576;
 const MAX_TREE_RESPONSE_BYTES = 8_388_608;
 const MAX_BLOB_RESPONSE_BYTES = 393_216;
+const MAX_MATERIAL_PAGE_RESPONSE_BYTES = 8_388_608;
+const MATERIAL_PAGE_SIZE = 100;
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const TOKEN_PATTERN = /^github_pat_[A-Za-z0-9_]{32,240}$/;
 const JSON_CONTENT_TYPE_PATTERN = /^application\/json(?:\s*;|$)/i;
@@ -27,6 +29,11 @@ type FetchImplementation = (
   input: string | URL | Request,
   init?: RequestInit,
 ) => Promise<Response>;
+
+type GitHubReadResponse = Readonly<{
+  body: unknown;
+  nextPage: number | null;
+}>;
 
 export type GitHubReadErrorCode =
   | "GITHUB_DISABLED"
@@ -62,7 +69,12 @@ export type GitHubReadEndpoint =
   | Readonly<{ kind: "reference"; owner: string; repository: string; trackedRef: string }>
   | Readonly<{ kind: "commit"; owner: string; repository: string; commitSha: string }>
   | Readonly<{ kind: "tree"; owner: string; repository: string; treeSha: string }>
-  | Readonly<{ kind: "blob"; owner: string; repository: string; blobSha: string }>;
+  | Readonly<{ kind: "blob"; owner: string; repository: string; blobSha: string }>
+  | Readonly<{ kind: "issues"; owner: string; repository: string; page: number }>
+  | Readonly<{ kind: "pulls"; owner: string; repository: string; page: number }>
+  | Readonly<{ kind: "pull"; owner: string; repository: string; pullNumber: number }>
+  | Readonly<{ kind: "pullFiles"; owner: string; repository: string; pullNumber: number; page: number }>
+  | Readonly<{ kind: "releases"; owner: string; repository: string; page: number }>;
 
 export type GitHubReadPlan = Readonly<{
   clientVersion: typeof GITHUB_READ_ONLY_CLIENT_VERSION;
@@ -118,6 +130,74 @@ export type VerifiedGitHubBlob = Readonly<{
   content: string;
 }>;
 
+export type VerifiedGitHubPage<T> = Readonly<{
+  items: readonly Readonly<T>[];
+  nextPage: number | null;
+}>;
+
+export type VerifiedGitHubIssue = Readonly<{
+  nodeId: string;
+  number: number;
+  title: string;
+  body: string | null;
+  state: "open" | "closed";
+  labels: readonly string[];
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  htmlUrl: string;
+}>;
+
+export type VerifiedGitHubPullRequestSummary = Readonly<{
+  nodeId: string;
+  number: number;
+  updatedAt: string;
+}>;
+
+export type VerifiedGitHubPullRequest = Readonly<{
+  nodeId: string;
+  number: number;
+  title: string;
+  body: string | null;
+  state: "open" | "closed";
+  draft: boolean;
+  baseRef: string;
+  baseSha: string;
+  headRef: string;
+  headSha: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  mergedAt: string | null;
+  htmlUrl: string;
+}>;
+
+export type VerifiedGitHubPullRequestFile = Readonly<{
+  blobSha: string;
+  filename: string;
+  previousFilename: string | null;
+  status: "added" | "removed" | "modified" | "renamed" | "copied" | "changed" | "unchanged";
+  additions: number;
+  deletions: number;
+  changes: number;
+}>;
+
+export type VerifiedGitHubRelease = Readonly<{
+  releaseId: number;
+  nodeId: string;
+  tagName: string;
+  name: string | null;
+  body: string | null;
+  draft: boolean;
+  prerelease: boolean;
+  createdAt: string;
+  publishedAt: string | null;
+  htmlUrl: string;
+}>;
+
 export interface GitHubReadOnlyClient {
   readonly version: typeof GITHUB_READ_ONLY_CLIENT_VERSION;
   getRepository(input: Readonly<{ owner: string; repository: string }>): Promise<VerifiedGitHubRepository>;
@@ -125,6 +205,14 @@ export interface GitHubReadOnlyClient {
   getCommit(input: Readonly<{ owner: string; repository: string; commitSha: string }>): Promise<VerifiedGitHubCommit>;
   getTree(input: Readonly<{ owner: string; repository: string; treeSha: string }>): Promise<VerifiedGitHubTree>;
   getBlob(input: Readonly<{ owner: string; repository: string; blobSha: string }>): Promise<VerifiedGitHubBlob>;
+}
+
+export interface GitHubMaterialReadOnlyClient extends GitHubReadOnlyClient {
+  getIssuesPage(input: Readonly<{ owner: string; repository: string; page: number }>): Promise<VerifiedGitHubPage<VerifiedGitHubIssue>>;
+  getPullRequestsPage(input: Readonly<{ owner: string; repository: string; page: number }>): Promise<VerifiedGitHubPage<VerifiedGitHubPullRequestSummary>>;
+  getPullRequest(input: Readonly<{ owner: string; repository: string; pullNumber: number }>): Promise<VerifiedGitHubPullRequest>;
+  getPullRequestFilesPage(input: Readonly<{ owner: string; repository: string; pullNumber: number; page: number }>): Promise<VerifiedGitHubPage<VerifiedGitHubPullRequestFile>>;
+  getReleasesPage(input: Readonly<{ owner: string; repository: string; page: number }>): Promise<VerifiedGitHubPage<VerifiedGitHubRelease>>;
 }
 
 const credentialValues = new WeakMap<object, string>();
@@ -233,6 +321,20 @@ function canonicalSha(value: unknown): string {
   return value;
 }
 
+function canonicalPage(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 10_000) {
+    return fail("GITHUB_INVALID_REQUEST");
+  }
+  return value as number;
+}
+
+function canonicalRemoteNumber(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 2_147_483_647) {
+    return fail("GITHUB_INVALID_REQUEST");
+  }
+  return value as number;
+}
+
 function canonicalTrackedRef(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -284,6 +386,25 @@ export function createGitHubReadPlan(endpoint: GitHubReadEndpoint): GitHubReadPl
   } else if (endpoint.kind === "blob") {
     path = `${repositoryPath}/git/blobs/${canonicalSha(endpoint.blobSha)}`;
     maximumResponseBytes = MAX_BLOB_RESPONSE_BYTES;
+  } else if (endpoint.kind === "issues") {
+    const page = canonicalPage(endpoint.page);
+    path = `${repositoryPath}/issues?state=all&sort=updated&direction=asc&per_page=${MATERIAL_PAGE_SIZE}&page=${page}`;
+    maximumResponseBytes = MAX_MATERIAL_PAGE_RESPONSE_BYTES;
+  } else if (endpoint.kind === "pulls") {
+    const page = canonicalPage(endpoint.page);
+    path = `${repositoryPath}/pulls?state=all&sort=updated&direction=asc&per_page=${MATERIAL_PAGE_SIZE}&page=${page}`;
+    maximumResponseBytes = MAX_MATERIAL_PAGE_RESPONSE_BYTES;
+  } else if (endpoint.kind === "pull") {
+    path = `${repositoryPath}/pulls/${canonicalRemoteNumber(endpoint.pullNumber)}`;
+  } else if (endpoint.kind === "pullFiles") {
+    const pullNumber = canonicalRemoteNumber(endpoint.pullNumber);
+    const page = canonicalPage(endpoint.page);
+    path = `${repositoryPath}/pulls/${pullNumber}/files?per_page=${MATERIAL_PAGE_SIZE}&page=${page}`;
+    maximumResponseBytes = MAX_MATERIAL_PAGE_RESPONSE_BYTES;
+  } else if (endpoint.kind === "releases") {
+    const page = canonicalPage(endpoint.page);
+    path = `${repositoryPath}/releases?per_page=${MATERIAL_PAGE_SIZE}&page=${page}`;
+    maximumResponseBytes = MAX_MATERIAL_PAGE_RESPONSE_BYTES;
   } else {
     return fail("GITHUB_INVALID_REQUEST");
   }
@@ -369,7 +490,7 @@ async function executeReadPlan(
   plan: GitHubReadPlan,
   token: string,
   fetchImplementation: FetchImplementation,
-): Promise<unknown> {
+): Promise<GitHubReadResponse> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), plan.timeoutMs);
   try {
@@ -419,10 +540,87 @@ async function executeReadPlan(
       await discardBody(response);
       return fail("GITHUB_REQUEST_FAILED", null, requestId);
     }
-    return readJsonWithinLimit(response, plan.maximumResponseBytes);
+    const nextPage = nextPageFromLink(response, plan);
+    return Object.freeze({
+      body: await readJsonWithinLimit(response, plan.maximumResponseBytes),
+      nextPage,
+    });
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function isPagedEndpoint(kind: GitHubReadEndpoint["kind"]): boolean {
+  return kind === "issues" || kind === "pulls" ||
+    kind === "pullFiles" || kind === "releases";
+}
+
+function sortedQuery(url: URL): string {
+  return [...url.searchParams.entries()]
+    .sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+      leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue))
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+}
+
+function nextPageFromLink(response: Response, plan: GitHubReadPlan): number | null {
+  const header = response.headers.get("link");
+  if (header === null) return null;
+  if (
+    Buffer.byteLength(header, "utf8") > 4_096 ||
+    CONTROL_CHARACTER_PATTERN.test(header)
+  ) {
+    return fail("GITHUB_INVALID_RESPONSE", null, safeRequestId(response));
+  }
+  const nextTargets: string[] = [];
+  for (const rawPart of header.split(",")) {
+    const part = rawPart.trim();
+    const match = /^<([^<>]+)>;\s*rel="([A-Za-z ]+)"$/.exec(part);
+    if (match === null) {
+      return fail("GITHUB_INVALID_RESPONSE", null, safeRequestId(response));
+    }
+    if (match[2]!.split(" ").includes("next")) nextTargets.push(match[1]!);
+  }
+  if (nextTargets.length === 0) return null;
+  if (nextTargets.length !== 1 || !isPagedEndpoint(plan.endpointKind)) {
+    return fail("GITHUB_INVALID_RESPONSE", null, safeRequestId(response));
+  }
+  let current: URL;
+  let candidate: URL;
+  try {
+    current = new URL(plan.url);
+    candidate = new URL(nextTargets[0]!);
+  } catch {
+    return fail("GITHUB_INVALID_RESPONSE", null, safeRequestId(response));
+  }
+  const currentPageText = current.searchParams.get("page");
+  const candidatePageText = candidate.searchParams.get("page");
+  if (
+    currentPageText === null || candidatePageText === null ||
+    !/^[1-9][0-9]{0,4}$/.test(currentPageText) ||
+    !/^[1-9][0-9]{0,4}$/.test(candidatePageText)
+  ) {
+    return fail("GITHUB_INVALID_RESPONSE", null, safeRequestId(response));
+  }
+  const currentPage = Number(currentPageText);
+  const candidatePage = Number(candidatePageText);
+  if (currentPage > 10_000 || candidatePage > 10_000) {
+    return fail("GITHUB_INVALID_RESPONSE", null, safeRequestId(response));
+  }
+  const expected = new URL(current);
+  expected.searchParams.set("page", String(currentPage + 1));
+  if (
+    candidatePage !== currentPage + 1 ||
+    candidate.origin !== GITHUB_API_ORIGIN ||
+    candidate.username !== "" ||
+    candidate.password !== "" ||
+    candidate.hash !== "" ||
+    candidate.pathname !== expected.pathname ||
+    sortedQuery(candidate) !== sortedQuery(expected)
+  ) {
+    return fail("GITHUB_INVALID_RESPONSE", null, safeRequestId(response));
+  }
+  return candidatePage;
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -564,62 +762,359 @@ function parseBlob(value: unknown, expectedSha: string): VerifiedGitHubBlob {
   });
 }
 
+function safeMaterialText(value: unknown, maximumBytes: number): string {
+  if (
+    typeof value !== "string" ||
+    Buffer.byteLength(value, "utf8") > maximumBytes ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(value)
+  ) {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  return value;
+}
+
+function nullableMaterialText(value: unknown, maximumBytes: number): string | null {
+  if (value === null) return null;
+  return safeMaterialText(value, maximumBytes);
+}
+
+function responseRemoteNumber(value: unknown): number {
+  const result = safeInteger(value, 2_147_483_647);
+  return result > 0 ? result : fail("GITHUB_INVALID_RESPONSE");
+}
+
+function safeTimestamp(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) ||
+    !Number.isFinite(Date.parse(value))
+  ) {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  return value;
+}
+
+function nullableTimestamp(value: unknown): string | null {
+  return value === null ? null : safeTimestamp(value);
+}
+
+function safeGitHubHtmlUrl(
+  value: unknown,
+  owner: string,
+  repository: string,
+  expectedPrefix: string,
+): string {
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > 4_096) {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  const repositoryPrefix = `/${owner}/${repository}/${expectedPrefix}`.toLowerCase();
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== "github.com" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    !parsed.pathname.toLowerCase().startsWith(repositoryPrefix)
+  ) {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  return value;
+}
+
+function responseArray(value: unknown): readonly unknown[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > MATERIAL_PAGE_SIZE ||
+    Object.keys(value).length !== value.length
+  ) {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  return value;
+}
+
+function parseIssue(
+  value: unknown,
+  owner: string,
+  repository: string,
+): VerifiedGitHubIssue {
+  const issue = record(value);
+  const state = issue.state;
+  if (state !== "open" && state !== "closed") {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  const rawLabels = responseArray(issue.labels);
+  const labels = rawLabels.map((rawLabel) => {
+    const label = record(rawLabel);
+    return safeString(label.name, 256);
+  });
+  if (new Set(labels).size !== labels.length) {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  return Object.freeze({
+    nodeId: safeString(issue.node_id, 512),
+    number: responseRemoteNumber(issue.number),
+    title: safeString(issue.title, 16_384),
+    body: nullableMaterialText(issue.body, 1_048_576),
+    state,
+    labels: Object.freeze([...labels].sort()),
+    createdAt: safeTimestamp(issue.created_at),
+    updatedAt: safeTimestamp(issue.updated_at),
+    closedAt: nullableTimestamp(issue.closed_at),
+    htmlUrl: safeGitHubHtmlUrl(issue.html_url, owner, repository, "issues/"),
+  });
+}
+
+function parseIssuesPage(
+  value: unknown,
+  nextPage: number | null,
+  owner: string,
+  repository: string,
+): VerifiedGitHubPage<VerifiedGitHubIssue> {
+  const items = responseArray(value)
+    .filter((raw) => !("pull_request" in record(raw)))
+    .map((raw) => parseIssue(raw, owner, repository));
+  return Object.freeze({ items: Object.freeze(items), nextPage });
+}
+
+function parsePullRequestSummary(value: unknown): VerifiedGitHubPullRequestSummary {
+  const pull = record(value);
+  return Object.freeze({
+    nodeId: safeString(pull.node_id, 512),
+    number: responseRemoteNumber(pull.number),
+    updatedAt: safeTimestamp(pull.updated_at),
+  });
+}
+
+function parsePullRequestsPage(
+  value: unknown,
+  nextPage: number | null,
+): VerifiedGitHubPage<VerifiedGitHubPullRequestSummary> {
+  const items = responseArray(value).map(parsePullRequestSummary);
+  return Object.freeze({ items: Object.freeze(items), nextPage });
+}
+
+function parsePullRequest(
+  value: unknown,
+  owner: string,
+  repository: string,
+  expectedNumber: number,
+): VerifiedGitHubPullRequest {
+  const pull = record(value);
+  const base = record(pull.base);
+  const head = record(pull.head);
+  const baseRepository = record(base.repo);
+  const state = pull.state;
+  if (
+    pull.number !== expectedNumber ||
+    (state !== "open" && state !== "closed") ||
+    typeof pull.draft !== "boolean" ||
+    String(baseRepository.full_name).toLowerCase() !==
+      `${owner}/${repository}`.toLowerCase()
+  ) {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  return Object.freeze({
+    nodeId: safeString(pull.node_id, 512),
+    number: expectedNumber,
+    title: safeString(pull.title, 16_384),
+    body: nullableMaterialText(pull.body, 1_048_576),
+    state,
+    draft: pull.draft,
+    baseRef: safeString(base.ref, 1_024),
+    baseSha: responseSha(base.sha),
+    headRef: safeString(head.ref, 1_024),
+    headSha: responseSha(head.sha),
+    additions: safeInteger(pull.additions, 100_000_000),
+    deletions: safeInteger(pull.deletions, 100_000_000),
+    changedFiles: safeInteger(pull.changed_files, 100_000),
+    createdAt: safeTimestamp(pull.created_at),
+    updatedAt: safeTimestamp(pull.updated_at),
+    closedAt: nullableTimestamp(pull.closed_at),
+    mergedAt: nullableTimestamp(pull.merged_at),
+    htmlUrl: safeGitHubHtmlUrl(pull.html_url, owner, repository, "pull/"),
+  });
+}
+
+const PULL_FILE_STATUSES = Object.freeze([
+  "added",
+  "removed",
+  "modified",
+  "renamed",
+  "copied",
+  "changed",
+  "unchanged",
+] as const);
+
+function parsePullRequestFile(value: unknown): VerifiedGitHubPullRequestFile {
+  const file = record(value);
+  if (!PULL_FILE_STATUSES.includes(file.status as (typeof PULL_FILE_STATUSES)[number])) {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  const previousFilename = file.previous_filename === undefined
+    ? null
+    : safeString(file.previous_filename, 4_096);
+  return Object.freeze({
+    blobSha: responseSha(file.sha),
+    filename: safeString(file.filename, 4_096),
+    previousFilename,
+    status: file.status as VerifiedGitHubPullRequestFile["status"],
+    additions: safeInteger(file.additions, 100_000_000),
+    deletions: safeInteger(file.deletions, 100_000_000),
+    changes: safeInteger(file.changes, 100_000_000),
+  });
+}
+
+function parsePullRequestFilesPage(
+  value: unknown,
+  nextPage: number | null,
+): VerifiedGitHubPage<VerifiedGitHubPullRequestFile> {
+  const items = responseArray(value).map(parsePullRequestFile);
+  return Object.freeze({ items: Object.freeze(items), nextPage });
+}
+
+function parseRelease(
+  value: unknown,
+  owner: string,
+  repository: string,
+): VerifiedGitHubRelease {
+  const release = record(value);
+  if (typeof release.draft !== "boolean" || typeof release.prerelease !== "boolean") {
+    return fail("GITHUB_INVALID_RESPONSE");
+  }
+  return Object.freeze({
+    releaseId: responseRemoteNumber(release.id),
+    nodeId: safeString(release.node_id, 512),
+    tagName: safeString(release.tag_name, 1_024),
+    name: nullableMaterialText(release.name, 16_384),
+    body: nullableMaterialText(release.body, 1_048_576),
+    draft: release.draft,
+    prerelease: release.prerelease,
+    createdAt: safeTimestamp(release.created_at),
+    publishedAt: nullableTimestamp(release.published_at),
+    htmlUrl: safeGitHubHtmlUrl(release.html_url, owner, repository, "releases/"),
+  });
+}
+
+function parseReleasesPage(
+  value: unknown,
+  nextPage: number | null,
+  owner: string,
+  repository: string,
+): VerifiedGitHubPage<VerifiedGitHubRelease> {
+  const items = responseArray(value).map((raw) => parseRelease(raw, owner, repository));
+  return Object.freeze({ items: Object.freeze(items), nextPage });
+}
+
 export function createGitHubReadOnlyClient(options: Readonly<{
   credential: GitHubCredentialHandle;
   fetchImplementation?: FetchImplementation;
-}>): GitHubReadOnlyClient {
+}>): GitHubMaterialReadOnlyClient {
   const token = resolveCredential(options.credential);
   const fetchImplementation = options.fetchImplementation ?? fetch;
-  const request = async (endpoint: GitHubReadEndpoint): Promise<unknown> => {
+  const request = async (endpoint: GitHubReadEndpoint): Promise<GitHubReadResponse> => {
     const plan = createGitHubReadPlan(endpoint);
     return executeReadPlan(plan, token, fetchImplementation);
   };
-  const client: GitHubReadOnlyClient = {
+  const client: GitHubMaterialReadOnlyClient = {
     version: GITHUB_READ_ONLY_CLIENT_VERSION,
     async getRepository(input) {
       const owner = canonicalOwner(input.owner);
       const repository = canonicalRepository(input.repository);
       return parseRepository(
-        await request({ kind: "repository", owner, repository }),
+        (await request({ kind: "repository", owner, repository })).body,
         owner,
         repository,
       );
     },
     async getReference(input) {
       const trackedRef = canonicalTrackedRef(input.trackedRef);
-      return parseReference(await request({
+      return parseReference((await request({
         kind: "reference",
         owner: input.owner,
         repository: input.repository,
         trackedRef,
-      }), trackedRef);
+      })).body, trackedRef);
     },
     async getCommit(input) {
       const commitSha = canonicalSha(input.commitSha);
-      return parseCommit(await request({
+      return parseCommit((await request({
         kind: "commit",
         owner: input.owner,
         repository: input.repository,
         commitSha,
-      }), commitSha);
+      })).body, commitSha);
     },
     async getTree(input) {
       const treeSha = canonicalSha(input.treeSha);
-      return parseTree(await request({
+      return parseTree((await request({
         kind: "tree",
         owner: input.owner,
         repository: input.repository,
         treeSha,
-      }), treeSha);
+      })).body, treeSha);
     },
     async getBlob(input) {
       const blobSha = canonicalSha(input.blobSha);
-      return parseBlob(await request({
+      return parseBlob((await request({
         kind: "blob",
         owner: input.owner,
         repository: input.repository,
         blobSha,
-      }), blobSha);
+      })).body, blobSha);
+    },
+    async getIssuesPage(input) {
+      const owner = canonicalOwner(input.owner);
+      const repository = canonicalRepository(input.repository);
+      const page = canonicalPage(input.page);
+      const response = await request({ kind: "issues", owner, repository, page });
+      return parseIssuesPage(response.body, response.nextPage, owner, repository);
+    },
+    async getPullRequestsPage(input) {
+      const owner = canonicalOwner(input.owner);
+      const repository = canonicalRepository(input.repository);
+      const page = canonicalPage(input.page);
+      const response = await request({ kind: "pulls", owner, repository, page });
+      return parsePullRequestsPage(response.body, response.nextPage);
+    },
+    async getPullRequest(input) {
+      const owner = canonicalOwner(input.owner);
+      const repository = canonicalRepository(input.repository);
+      const pullNumber = canonicalRemoteNumber(input.pullNumber);
+      const response = await request({
+        kind: "pull",
+        owner,
+        repository,
+        pullNumber,
+      });
+      return parsePullRequest(response.body, owner, repository, pullNumber);
+    },
+    async getPullRequestFilesPage(input) {
+      const owner = canonicalOwner(input.owner);
+      const repository = canonicalRepository(input.repository);
+      const pullNumber = canonicalRemoteNumber(input.pullNumber);
+      const page = canonicalPage(input.page);
+      const response = await request({
+        kind: "pullFiles",
+        owner,
+        repository,
+        pullNumber,
+        page,
+      });
+      return parsePullRequestFilesPage(response.body, response.nextPage);
+    },
+    async getReleasesPage(input) {
+      const owner = canonicalOwner(input.owner);
+      const repository = canonicalRepository(input.repository);
+      const page = canonicalPage(input.page);
+      const response = await request({ kind: "releases", owner, repository, page });
+      return parseReleasesPage(response.body, response.nextPage, owner, repository);
     },
   };
   return Object.freeze(client);

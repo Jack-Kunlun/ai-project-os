@@ -93,6 +93,26 @@ test("request plans expose only pinned GET endpoints at api.github.com", () => {
   assert.equal(createGitHubReadPlan({ kind: "commit", owner, repository, commitSha }).method, "GET");
   assert.equal(createGitHubReadPlan({ kind: "tree", owner, repository, treeSha }).maximumResponseBytes, 8_388_608);
   assert.equal(createGitHubReadPlan({ kind: "blob", owner, repository, blobSha }).maximumResponseBytes, 393_216);
+  assert.equal(
+    createGitHubReadPlan({ kind: "issues", owner, repository, page: 2 }).url,
+    `${GITHUB_API_ORIGIN}/repos/${owner}/${repository}/issues?state=all&sort=updated&direction=asc&per_page=100&page=2`,
+  );
+  assert.equal(
+    createGitHubReadPlan({ kind: "pulls", owner, repository, page: 3 }).url,
+    `${GITHUB_API_ORIGIN}/repos/${owner}/${repository}/pulls?state=all&sort=updated&direction=asc&per_page=100&page=3`,
+  );
+  assert.equal(
+    createGitHubReadPlan({ kind: "pull", owner, repository, pullNumber: 42 }).url,
+    `${GITHUB_API_ORIGIN}/repos/${owner}/${repository}/pulls/42`,
+  );
+  assert.equal(
+    createGitHubReadPlan({ kind: "pullFiles", owner, repository, pullNumber: 42, page: 1 }).url,
+    `${GITHUB_API_ORIGIN}/repos/${owner}/${repository}/pulls/42/files?per_page=100&page=1`,
+  );
+  assert.equal(
+    createGitHubReadPlan({ kind: "releases", owner, repository, page: 1 }).url,
+    `${GITHUB_API_ORIGIN}/repos/${owner}/${repository}/releases?per_page=100&page=1`,
+  );
 });
 
 test("request plans reject arbitrary origins, malformed repository names, refs and SHA values", () => {
@@ -105,11 +125,146 @@ test("request plans reject arbitrary origins, malformed repository names, refs a
     { kind: "commit", owner, repository, commitSha: `${commitSha}0` },
     { kind: "tree", owner, repository, treeSha: "main" },
     { kind: "blob", owner, repository, blobSha: blobSha.toUpperCase() },
+    { kind: "issues", owner, repository, page: 0 },
+    { kind: "pulls", owner, repository, page: 10_001 },
+    { kind: "pull", owner, repository, pullNumber: 0 },
+    { kind: "pullFiles", owner, repository, pullNumber: 1, page: -1 },
   ] as const;
   for (const input of invalid) {
     assert.throws(
       () => createGitHubReadPlan(input),
       assertCode("GITHUB_INVALID_REQUEST"),
+    );
+  }
+});
+
+test("client validates paged Issues, pull request metadata/files, and Releases", async () => {
+  const issueNext = `${GITHUB_API_ORIGIN}/repos/${owner}/${repository}/issues?state=all&sort=updated&direction=asc&per_page=100&page=2`;
+  const responses = [
+    jsonResponse([
+      {
+        node_id: "I_SAFE_1",
+        number: 7,
+        title: "Preserve repository provenance",
+        body: "Keep the frozen commit.\nDo not follow links.",
+        state: "open",
+        labels: [{ name: "memory" }, { name: "security" }],
+        created_at: "2026-08-01T00:00:00Z",
+        updated_at: "2026-08-02T00:00:00Z",
+        closed_at: null,
+        html_url: `https://github.com/${owner}/${repository}/issues/7`,
+      },
+      {
+        node_id: "PR_IN_ISSUES",
+        number: 8,
+        pull_request: { url: "ignored" },
+      },
+    ], {
+      headers: { link: `<${issueNext}>; rel="next"` },
+    }),
+    jsonResponse([{
+      node_id: "PR_SAFE_1",
+      number: 12,
+      updated_at: "2026-08-03T00:00:00Z",
+    }]),
+    jsonResponse({
+      node_id: "PR_SAFE_1",
+      number: 12,
+      title: "Add immutable citations",
+      body: "Includes line-scoped citations.",
+      state: "closed",
+      draft: false,
+      base: {
+        ref: "main",
+        sha: "d".repeat(40),
+        repo: { full_name: `${owner}/${repository}` },
+      },
+      head: { ref: "feature/citations", sha: "e".repeat(40) },
+      additions: 20,
+      deletions: 3,
+      changed_files: 2,
+      created_at: "2026-08-01T00:00:00Z",
+      updated_at: "2026-08-03T00:00:00Z",
+      closed_at: "2026-08-03T00:00:00Z",
+      merged_at: "2026-08-03T00:00:00Z",
+      html_url: `https://github.com/${owner}/${repository}/pull/12`,
+    }),
+    jsonResponse([{
+      sha: "f".repeat(40),
+      filename: "src/citations.ts",
+      status: "modified",
+      additions: 20,
+      deletions: 3,
+      changes: 23,
+      patch: "SECRET_PATCH_MUST_NOT_BE_RETURNED",
+    }]),
+    jsonResponse([{
+      id: 99,
+      node_id: "RE_SAFE_1",
+      tag_name: "v1.0.0",
+      name: "V1",
+      body: "First governed memory release.",
+      draft: false,
+      prerelease: false,
+      created_at: "2026-08-04T00:00:00Z",
+      published_at: "2026-08-04T01:00:00Z",
+      html_url: `https://github.com/${owner}/${repository}/releases/tag/v1.0.0`,
+    }]),
+  ];
+  const client = createGitHubReadOnlyClient({
+    credential: await credential(),
+    fetchImplementation: async () => responses.shift()!,
+  });
+
+  const issues = await client.getIssuesPage({ owner, repository, page: 1 });
+  assert.equal(issues.nextPage, 2);
+  assert.equal(issues.items.length, 1);
+  assert.deepEqual(issues.items[0]?.labels, ["memory", "security"]);
+  const pulls = await client.getPullRequestsPage({ owner, repository, page: 1 });
+  assert.deepEqual(pulls.items, [{
+    nodeId: "PR_SAFE_1",
+    number: 12,
+    updatedAt: "2026-08-03T00:00:00Z",
+  }]);
+  const pull = await client.getPullRequest({ owner, repository, pullNumber: 12 });
+  assert.equal(pull.changedFiles, 2);
+  assert.equal(pull.headRef, "feature/citations");
+  const files = await client.getPullRequestFilesPage({
+    owner,
+    repository,
+    pullNumber: 12,
+    page: 1,
+  });
+  assert.deepEqual(Object.keys(files.items[0]!).sort(), [
+    "additions",
+    "blobSha",
+    "changes",
+    "deletions",
+    "filename",
+    "previousFilename",
+    "status",
+  ]);
+  assert.equal(JSON.stringify(files).includes("SECRET_PATCH"), false);
+  const releases = await client.getReleasesPage({ owner, repository, page: 1 });
+  assert.equal(releases.items[0]?.tagName, "v1.0.0");
+  assert.equal(responses.length, 0);
+});
+
+test("paged client rejects foreign or non-sequential Link targets", async () => {
+  const invalidTargets = [
+    `https://evil.example/repos/${owner}/${repository}/issues?page=2`,
+    `${GITHUB_API_ORIGIN}/repos/${owner}/${repository}/issues?state=all&sort=updated&direction=asc&per_page=100&page=3`,
+  ];
+  for (const target of invalidTargets) {
+    const client = createGitHubReadOnlyClient({
+      credential: await credential(),
+      fetchImplementation: async () => jsonResponse([], {
+        headers: { link: `<${target}>; rel="next"` },
+      }),
+    });
+    await assert.rejects(
+      () => client.getIssuesPage({ owner, repository, page: 1 }),
+      assertCode("GITHUB_INVALID_RESPONSE"),
     );
   }
 });

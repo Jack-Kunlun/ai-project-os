@@ -375,6 +375,10 @@ test("schema and migration statically declare the governance contract", () => {
     join(repositoryRoot, "prisma/migrations/20260827090000_add_ai_runtime_governance/migration.sql"),
     "utf8",
   );
+  const operationProfileMigration = readFileSync(
+    join(repositoryRoot, "prisma/migrations/20260828170000_add_ai_operation_profiles/migration.sql"),
+    "utf8",
+  );
   const sourceRoute = readFileSync(
     join(repositoryRoot, "src/app/api/projects/[projectId]/sources/[sourceId]/route.ts"),
     "utf8",
@@ -394,6 +398,22 @@ test("schema and migration statically declare the governance contract", () => {
     assert.match(schema, new RegExp(`model ${model} \\{`));
     assert.match(migration, new RegExp(`CREATE TABLE "${model}"`));
   }
+  assert.match(schema, /model ProjectAiPolicyOperationProfile \{/);
+  assert.match(operationProfileMigration, /CREATE TABLE "ProjectAiPolicyOperationProfile"/);
+  assert.match(
+    operationProfileMigration,
+    /CREATE UNIQUE INDEX "ModelProcessingGrantOperation_projectId_grantId_key"/,
+  );
+  assert.match(
+    operationProfileMigration,
+    /CREATE TRIGGER "ProjectAiPolicyOperationProfile_immutable_trigger"\s+BEFORE INSERT OR UPDATE OR DELETE/,
+  );
+  assert.match(operationProfileMigration, /policy operation profiles are incomplete/);
+  assert.match(operationProfileMigration, /grant operation profile mismatch/);
+  assert.match(
+    operationProfileMigration,
+    /JOIN "ProjectAiPolicyOperationProfile" AS p[\s\S]*p\."operation" = NEW\."operation"/,
+  );
   for (const operation of AI_OPERATIONS) {
     assert.match(schema, new RegExp(`\\s${operation}\\s`));
     assert.match(migration, new RegExp(`'${operation}'`));

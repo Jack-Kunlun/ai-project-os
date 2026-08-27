@@ -150,6 +150,21 @@ test(
             scannerFingerprint,
           },
         });
+        await prisma.projectAiPolicyOperationProfile.create({
+          data: {
+            projectId,
+            policyRevisionId,
+            operation: "embedding",
+            profileFingerprint: OPENAI_EMBEDDING_PROFILE_FINGERPRINT,
+            providerFingerprint: OPENAI_EMBEDDINGS_PROVIDER_FINGERPRINT,
+            modelFingerprint: OPENAI_EMBEDDING_MODEL_FINGERPRINT,
+            modelId: OPENAI_EMBEDDING_MODEL_ID,
+            processorFingerprint,
+            regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
+            retentionFingerprint: OPENAI_EMBEDDINGS_RETENTION_FINGERPRINT,
+            endpointFingerprint: OPENAI_EMBEDDINGS_ENDPOINT_FINGERPRINT,
+          },
+        });
         await prisma.projectAiPolicy.create({
           data: { projectId, currentRevisionId: policyRevisionId },
         });

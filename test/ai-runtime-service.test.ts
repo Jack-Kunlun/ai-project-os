@@ -71,6 +71,20 @@ function preparedQueryResponses(contentText = "safe-source"): unknown[][] {
       scannerFingerprint: fingerprintA,
     }],
     [{
+      id: "f7777777-7777-4777-8777-777777777777",
+      projectId,
+      policyRevisionId: revisionId,
+      operation: "projectAnalysis",
+      profileFingerprint: fingerprintA,
+      providerFingerprint: fingerprintA,
+      modelFingerprint: fingerprintA,
+      modelId: "synthetic-provider/model-v1",
+      processorFingerprint: fingerprintA,
+      regionFingerprint: fingerprintA,
+      retentionFingerprint: fingerprintA,
+      endpointFingerprint: fingerprintA,
+    }],
+    [{
       id: runId,
       projectId,
       status: "issued",
@@ -450,23 +464,21 @@ function queuedClosureResponses(
   liveFailure: "policy" | "grant",
 ): unknown[][] {
   const prepared = preparedQueryResponses(reconciliationContentText);
-  const currentRevision = {
-    ...(prepared[2]?.[0] as Record<string, unknown>),
-    ...(liveFailure === "policy"
-      ? { projectAnalysisEnabled: false }
-      : {}),
-  };
+  const currentRevision = prepared[2]?.[0];
+  const currentOperationProfile = prepared[3]?.[0];
   const currentGrant = {
-    ...(prepared[3]?.[0] as Record<string, unknown>),
+    ...(prepared[4]?.[0] as Record<string, unknown>),
     ...(liveFailure === "grant" ? { status: "revoked" } : {}),
   };
   const frozenRevision = prepared[2]?.[0];
-  const frozenGrant = prepared[3]?.[0];
+  const frozenGrant = prepared[4]?.[0];
   return [
     [{ id: projectId }],
     [{ currentRevisionId: revisionId }],
     [currentRevision],
-    ...(liveFailure === "grant" ? [[currentGrant]] : []),
+    ...(liveFailure === "policy"
+      ? [[]]
+      : [[currentOperationProfile], [currentGrant]]),
     [{
       id: runId,
       projectId,
@@ -1192,7 +1204,7 @@ test("claim conflicts use one read-committed observer without dispatch or writes
       Prisma.TransactionIsolationLevel.Serializable,
       Prisma.TransactionIsolationLevel.ReadCommitted,
     ]);
-    assert.equal(fake.state.queryCount, 10);
+    assert.equal(fake.state.queryCount, 11);
     assert.equal(fake.state.writeCount, 0);
     assert.equal(assessCalls, 0);
     assert.equal(dispatchCalls, 0);
@@ -1215,15 +1227,24 @@ test("claim conflict reconciliation preserves safe authorization failures and pa
   });
 
   const grantMismatch = reconciliationResponses("running");
-  (grantMismatch[3]?.[0] as Record<string, unknown>).status = "revoked";
+  (grantMismatch[4]?.[0] as Record<string, unknown>).status = "revoked";
   cases.push({
     name: "grant mismatch",
     responses: grantMismatch,
     safeCode: "AI_GRANT_DENIED",
   });
 
+  const operationProfileMismatch = reconciliationResponses("running");
+  (operationProfileMismatch[3]?.[0] as Record<string, unknown>).profileFingerprint =
+    fingerprintB;
+  cases.push({
+    name: "operation profile mismatch",
+    responses: operationProfileMismatch,
+    safeCode: "AI_GRANT_DENIED",
+  });
+
   const sourceMismatch = reconciliationResponses("running");
-  (sourceMismatch[6]?.[0] as Record<string, unknown>).contentHash = fingerprintB;
+  (sourceMismatch[7]?.[0] as Record<string, unknown>).contentHash = fingerprintB;
   cases.push({
     name: "source mismatch",
     responses: sourceMismatch,
@@ -1231,7 +1252,7 @@ test("claim conflict reconciliation preserves safe authorization failures and pa
   });
 
   const operationMismatch = reconciliationResponses("running");
-  operationMismatch[4] = [];
+  operationMismatch[5] = [];
   cases.push({
     name: "operation mismatch",
     responses: operationMismatch,
@@ -1679,12 +1700,13 @@ test("queued policy and grant failures close one frozen Run without dispatch", a
       assert.match(fake.state.queries[0] ?? "", /FROM "Project"[\s\S]*FOR UPDATE/);
       assert.match(fake.state.queries[1] ?? "", /FROM "ProjectAiPolicy"[\s\S]*FOR UPDATE/);
       assert.match(fake.state.queries[2] ?? "", /FROM "ProjectAiPolicyRevision"[\s\S]*FOR KEY SHARE/);
-      assert.match(fake.state.queries[3] ?? "", /FROM "AiRun"[\s\S]*operationKey/);
-      assert.match(fake.state.queries[4] ?? "", /FROM "Project"[\s\S]*FOR UPDATE/);
-      assert.match(fake.state.queries[5] ?? "", /FROM "ProjectAiPolicyRevision"[\s\S]*FOR KEY SHARE/);
-      assert.match(fake.state.queries[6] ?? "", /FROM "ModelProcessingGrant"[\s\S]*FOR KEY SHARE/);
-      assert.match(fake.state.queries[7] ?? "", /FROM "AiRun"[\s\S]*FOR UPDATE/);
-      assert.match(fake.state.queries[9] ?? "", /FROM "AiRunAttempt"[\s\S]*FOR UPDATE/);
+      assert.match(fake.state.queries[3] ?? "", /FROM "ProjectAiPolicyOperationProfile"[\s\S]*FOR KEY SHARE/);
+      assert.match(fake.state.queries[4] ?? "", /FROM "AiRun"[\s\S]*operationKey/);
+      assert.match(fake.state.queries[5] ?? "", /FROM "Project"[\s\S]*FOR UPDATE/);
+      assert.match(fake.state.queries[6] ?? "", /FROM "ProjectAiPolicyRevision"[\s\S]*FOR KEY SHARE/);
+      assert.match(fake.state.queries[7] ?? "", /FROM "ModelProcessingGrant"[\s\S]*FOR KEY SHARE/);
+      assert.match(fake.state.queries[8] ?? "", /FROM "AiRun"[\s\S]*FOR UPDATE/);
+      assert.match(fake.state.queries[10] ?? "", /FROM "AiRunAttempt"[\s\S]*FOR UPDATE/);
     }
   }
 });

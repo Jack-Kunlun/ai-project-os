@@ -130,6 +130,7 @@ function batch3OperationKey(sequence: number): string {
 
 const aiTables = [
   "ProjectAiPolicyRevision",
+  "ProjectAiPolicyOperationProfile",
   "ProjectAiPolicy",
   "ModelProcessingGrant",
   "ModelProcessingGrantSource",
@@ -180,6 +181,10 @@ const indexGenerationMigrationPath = join(
 const candidateItemPublicationMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260828150000_publish_ai_candidate_items/migration.sql",
+);
+const operationProfileMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260828170000_add_ai_operation_profiles/migration.sql",
 );
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
@@ -633,6 +638,7 @@ async function applyAiMigrationInTransaction(client: Client): Promise<void> {
     { sql: await loadSql(sourceChunkMigrationPath) },
     { sql: await loadSql(indexGenerationMigrationPath) },
     { sql: await loadSql(candidateItemPublicationMigrationPath) },
+    { sql: await loadSql(operationProfileMigrationPath) },
   ]);
 }
 
@@ -662,6 +668,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     "20260828100000_add_source_chunks",
     "20260828123000_add_index_generations",
     "20260828150000_publish_ai_candidate_items",
+    "20260828170000_add_ai_operation_profiles",
   ];
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===
@@ -711,6 +718,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
   };
   const triggerExpectations: readonly TriggerExpectation[] = [
     { name: "ProjectAiPolicyRevision_immutable_trigger", table: "ProjectAiPolicyRevision", timing: "BEFORE", events: ["INSERT", "UPDATE", "DELETE"] },
+    { name: "ProjectAiPolicyOperationProfile_immutable_trigger", table: "ProjectAiPolicyOperationProfile", timing: "BEFORE", events: ["INSERT", "UPDATE", "DELETE"] },
     { name: "ProjectAiPolicy_delete_guard_trigger", table: "ProjectAiPolicy", timing: "BEFORE", events: ["DELETE"] },
     { name: "ModelProcessingGrant_lifecycle_trigger", table: "ModelProcessingGrant", timing: "BEFORE", events: ["INSERT", "UPDATE"] },
     { name: "ModelProcessingGrant_issuance_trigger", table: "ModelProcessingGrant", timing: "BEFORE", events: ["UPDATE"], updateColumns: ["status"] },
@@ -808,6 +816,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
         AND indexname = ANY($1::text[])`,
     [[
       "ModelProcessingGrant_projectId_status_idx",
+      "ModelProcessingGrantOperation_projectId_grantId_key",
       "AiAuditEvent_projectId_policyRevisionId_idx",
     ]],
   );
@@ -821,6 +830,10 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
         {
           indexname: "ModelProcessingGrant_projectId_status_idx",
           tablename: "ModelProcessingGrant",
+        },
+        {
+          indexname: "ModelProcessingGrantOperation_projectId_grantId_key",
+          tablename: "ModelProcessingGrantOperation",
         },
       ]),
     "AI_RUNTIME_POSTGRES_INDEX_MISMATCH",
@@ -948,6 +961,7 @@ async function insertPolicyRevision(
   outboundEnabled: boolean,
   projectAnalysisEnabled: boolean,
   autoExtractEnabled = false,
+  createOperationProfiles = true,
 ): Promise<void> {
   await safeQuery(
     client,
@@ -969,6 +983,25 @@ async function insertPolicyRevision(
       autoExtractEnabled,
     ],
   );
+
+  if (!createOperationProfiles) return;
+  const operations = [
+    ...(projectAnalysisEnabled ? ["projectAnalysis"] : []),
+    ...(autoExtractEnabled ? ["autoExtract"] : []),
+  ];
+  for (const operation of operations) {
+    await safeQuery(
+      client,
+      `INSERT INTO "ProjectAiPolicyOperationProfile"
+         ("id", "projectId", "policyRevisionId", "operation",
+          "profileFingerprint", "providerFingerprint", "modelFingerprint", "modelId",
+          "processorFingerprint", "regionFingerprint", "retentionFingerprint",
+          "endpointFingerprint")
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $4, $4,
+               'synthetic-provider/model-v1', $4, $4, $4, $4)`,
+      [projectId, revisionId, operation, fingerprintA],
+    );
+  }
 }
 
 async function insertPolicyPointer(
@@ -1430,8 +1463,41 @@ async function runV0UpgradePath(client: Client): Promise<void> {
 }
 
 async function runPolicyAndGrantMatrix(client: Client): Promise<void> {
-  await insertPolicyRevision(client, revisionAId, projectAId, 1, true, true);
+  await insertPolicyRevision(client, revisionAId, projectAId, 1, true, true, true);
   await insertPolicyPointer(client, projectAId, revisionAId);
+
+  await expectRejected(
+    client,
+    `INSERT INTO "ProjectAiPolicyOperationProfile"
+       ("id", "projectId", "policyRevisionId", "operation",
+        "profileFingerprint", "providerFingerprint", "modelFingerprint", "modelId",
+        "processorFingerprint", "regionFingerprint", "retentionFingerprint",
+        "endpointFingerprint")
+     VALUES (gen_random_uuid(), $1, $2, 'projectAnalysis', $3, $3, $3,
+             'synthetic-provider/model-v1', $3, $3, $3, $3)`,
+    [projectAId, revisionAId, fingerprintA],
+    "current operation profile append",
+  );
+
+  await safeQuery(
+    client,
+    `INSERT INTO "ProjectAiPolicyRevision"
+       ("id", "projectId", "revision", "policyFingerprint", "outboundEnabled",
+        "embeddingEnabled", "autoExtractEnabled", "sourceSummaryEnabled",
+        "projectAnalysisEnabled", "generateWithContextEnabled",
+        "profileFingerprint", "processorFingerprint", "regionFingerprint",
+        "retentionFingerprint", "endpointFingerprint", "budgetFingerprint", "scannerFingerprint")
+     VALUES ('bbbbbbb4-bbbb-4bbb-8bbb-bbbbbbbbbbb4', $1, 1, $2, true,
+             false, false, false, true, false, $2, $2, $2, $2, $2, $2, $2)`,
+    [projectBId, fingerprintA],
+  );
+  await expectRejected(
+    client,
+    `INSERT INTO "ProjectAiPolicy" ("projectId", "currentRevisionId", "updatedAt")
+     VALUES ($1, 'bbbbbbb4-bbbb-4bbb-8bbb-bbbbbbbbbbb4', CURRENT_TIMESTAMP)`,
+    [projectBId],
+    "policy pointer without complete operation profiles",
+  );
 
   await expectRejected(
     client,
@@ -1470,10 +1536,35 @@ async function runPolicyAndGrantMatrix(client: Client): Promise<void> {
     [grantOperationBadId, projectAId, grantBadOperationId],
     "policy-disallowed operation scope",
   );
+  await safeQuery(
+    client,
+    `UPDATE "ModelProcessingGrant"
+        SET "modelFingerprint" = $3, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "projectId" = $1 AND "id" = $2`,
+    [projectAId, grantBadOperationId, fingerprintB],
+  );
+  await expectActionRejected(
+    () => insertGrantOperation(
+      client,
+      grantOperationBadId,
+      grantBadOperationId,
+      "projectAnalysis",
+    ),
+    "grant operation model profile mismatch",
+  );
 
   await insertDraftGrant(client, grantAId);
   await insertGrantSource(client, grantSourceAId, grantAId);
   await insertGrantOperation(client, grantOperationAId, grantAId);
+  await expectActionRejected(
+    () => insertGrantOperation(
+      client,
+      grantOperationBadId,
+      grantAId,
+      "autoExtract",
+    ),
+    "grant second operation",
+  );
   await issueGrant(client, grantAId);
 
   await expectActionRejected(
@@ -3866,6 +3957,7 @@ async function runCandidatePublicationUpgradePath(client: Client): Promise<void>
     true,
     false,
     true,
+    false,
   );
   await insertPolicyPointer(client, projectAId, revisionAId);
   await insertDraftGrant(client, grantAId);
@@ -4141,6 +4233,31 @@ async function runCandidatePublicationUpgradePath(client: Client): Promise<void>
         JSON.stringify(["ai_created", "confirmed"]),
     "AI_CANDIDATE_POSTGRES_PUBLICATION_UPGRADE_MISMATCH",
   );
+
+  await applySqlMigration(client, operationProfileMigrationPath);
+  const profile = await safeQuery<{
+    operation: string;
+    profile_fingerprint: string;
+    provider_fingerprint: string;
+    model_id: string;
+  }>(
+    client,
+    `SELECT "operation"::text AS operation,
+            "profileFingerprint" AS profile_fingerprint,
+            "providerFingerprint" AS provider_fingerprint,
+            "modelId" AS model_id
+       FROM "ProjectAiPolicyOperationProfile"
+      WHERE "projectId" = $1 AND "policyRevisionId" = $2`,
+    [projectAId, revisionAId],
+  );
+  requireCondition(
+    profile.rows.length === 1 &&
+      profile.rows[0]?.operation === "autoExtract" &&
+      profile.rows[0].profile_fingerprint === fingerprintA &&
+      profile.rows[0].provider_fingerprint === fingerprintA &&
+      profile.rows[0].model_id === "synthetic-provider/model-v1",
+    "AI_RUNTIME_POSTGRES_OPERATION_PROFILE_BACKFILL_MISMATCH",
+  );
 }
 
 async function assertProjectRootCascade(client: Client): Promise<void> {
@@ -4149,6 +4266,7 @@ async function assertProjectRootCascade(client: Client): Promise<void> {
     source_a: string;
     item_a: string;
     policy_revisions_a: string;
+    operation_profiles_a: string;
     policy_a: string;
     grants_a: string;
     grant_sources_a: string;
@@ -4168,6 +4286,7 @@ async function assertProjectRootCascade(client: Client): Promise<void> {
        (SELECT COUNT(*)::text FROM "ProjectSource" WHERE "projectId" = $1) AS source_a,
        (SELECT COUNT(*)::text FROM "ProjectItem" WHERE "projectId" = $1) AS item_a,
        (SELECT COUNT(*)::text FROM "ProjectAiPolicyRevision" WHERE "projectId" = $1) AS policy_revisions_a,
+       (SELECT COUNT(*)::text FROM "ProjectAiPolicyOperationProfile" WHERE "projectId" = $1) AS operation_profiles_a,
        (SELECT COUNT(*)::text FROM "ProjectAiPolicy" WHERE "projectId" = $1) AS policy_a,
        (SELECT COUNT(*)::text FROM "ModelProcessingGrant" WHERE "projectId" = $1) AS grants_a,
        (SELECT COUNT(*)::text FROM "ModelProcessingGrantSource" WHERE "projectId" = $1) AS grant_sources_a,
@@ -4189,6 +4308,7 @@ async function assertProjectRootCascade(client: Client): Promise<void> {
       counts.source_a === "0" &&
       counts.item_a === "0" &&
       counts.policy_revisions_a === "0" &&
+      counts.operation_profiles_a === "0" &&
       counts.policy_a === "0" &&
       counts.grants_a === "0" &&
       counts.grant_sources_a === "0" &&

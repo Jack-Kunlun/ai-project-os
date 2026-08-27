@@ -326,9 +326,12 @@ async function readEligibleEmbeddingGrant(
       ON op."projectId" = g."projectId"
      AND op."grantId" = g."id"
      AND op."operation" = 'embedding'
+    JOIN "ProjectAiPolicyOperationProfile" AS opp
+      ON opp."projectId" = r."projectId"
+     AND opp."policyRevisionId" = r."id"
+     AND opp."operation" = op."operation"
     WHERE p."id" = ${projectId}::uuid
       AND r."outboundEnabled" = TRUE
-      AND r."embeddingEnabled" = TRUE
       AND g."status" = 'issued'
       AND g."sourceKind" = 'manual_text'
       AND g."issuedAt" IS NOT NULL
@@ -336,14 +339,17 @@ async function readEligibleEmbeddingGrant(
       AND g."expiresAt" IS NOT NULL
       AND g."expiresAt" > CURRENT_TIMESTAMP
       AND g."effectivePolicyVersion" = r."revision"
-      AND g."profileFingerprint" = r."profileFingerprint"
-      AND g."processorFingerprint" = r."processorFingerprint"
-      AND g."regionFingerprint" = r."regionFingerprint"
-      AND g."retentionFingerprint" = r."retentionFingerprint"
-      AND g."endpointFingerprint" = r."endpointFingerprint"
+      AND g."profileFingerprint" = opp."profileFingerprint"
+      AND g."providerFingerprint" = opp."providerFingerprint"
+      AND g."modelFingerprint" = opp."modelFingerprint"
+      AND g."modelId" = opp."modelId"
+      AND g."processorFingerprint" = opp."processorFingerprint"
+      AND g."regionFingerprint" = opp."regionFingerprint"
+      AND g."retentionFingerprint" = opp."retentionFingerprint"
+      AND g."endpointFingerprint" = opp."endpointFingerprint"
       AND g."budgetFingerprint" = r."budgetFingerprint"
       AND g."scannerFingerprint" = r."scannerFingerprint"
-    FOR SHARE OF p, ap, r, g, op
+    FOR SHARE OF p, ap, r, g, op, opp
   `);
   if (grantRows.length !== 1) return fail("CORPUS_INDEX_GRANT_INELIGIBLE");
   const grant = grantRows[0]!;

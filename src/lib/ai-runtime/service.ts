@@ -197,6 +197,21 @@ type PolicyRevisionRow = {
   scannerFingerprint: string;
 };
 
+type OperationProfileRow = {
+  id: string;
+  projectId: string;
+  policyRevisionId: string;
+  operation: string;
+  profileFingerprint: string;
+  providerFingerprint: string;
+  modelFingerprint: string;
+  modelId: string;
+  processorFingerprint: string;
+  regionFingerprint: string;
+  retentionFingerprint: string;
+  endpointFingerprint: string;
+};
+
 type GrantRow = {
   id: string;
   projectId: string;
@@ -442,30 +457,24 @@ function safeGeneratedId(idFactory: () => string): string {
   }
 }
 
-function allowlistedOperation(revision: PolicyRevisionRow, operation: AiOperation): boolean {
-  switch (operation) {
-    case "embedding":
-      return revision.embeddingEnabled;
-    case "autoExtract":
-      return revision.autoExtractEnabled;
-    case "sourceSummary":
-      return revision.sourceSummaryEnabled;
-    case "projectAnalysis":
-      return revision.projectAnalysisEnabled;
-    case "generateWithContext":
-      return revision.generateWithContextEnabled;
-  }
-}
-
-function samePolicySnapshot(revision: PolicyRevisionRow, grant: GrantRow): boolean {
+function samePolicySnapshot(
+  revision: PolicyRevisionRow,
+  operationProfile: OperationProfileRow,
+  grant: GrantRow,
+): boolean {
   return (
+    operationProfile.projectId === revision.projectId &&
+    operationProfile.policyRevisionId === revision.id &&
     grant.policyRevisionId === revision.id &&
     grant.effectivePolicyVersion === revision.revision &&
-    grant.profileFingerprint === revision.profileFingerprint &&
-    grant.processorFingerprint === revision.processorFingerprint &&
-    grant.regionFingerprint === revision.regionFingerprint &&
-    grant.retentionFingerprint === revision.retentionFingerprint &&
-    grant.endpointFingerprint === revision.endpointFingerprint &&
+    grant.profileFingerprint === operationProfile.profileFingerprint &&
+    grant.providerFingerprint === operationProfile.providerFingerprint &&
+    grant.modelFingerprint === operationProfile.modelFingerprint &&
+    grant.modelId === operationProfile.modelId &&
+    grant.processorFingerprint === operationProfile.processorFingerprint &&
+    grant.regionFingerprint === operationProfile.regionFingerprint &&
+    grant.retentionFingerprint === operationProfile.retentionFingerprint &&
+    grant.endpointFingerprint === operationProfile.endpointFingerprint &&
     grant.budgetFingerprint === revision.budgetFingerprint &&
     grant.scannerFingerprint === revision.scannerFingerprint
   );
@@ -1282,6 +1291,35 @@ async function lockPolicyRevision(
     FROM "ProjectAiPolicyRevision"
     WHERE "projectId" = ${projectId}::uuid
       AND "id" = ${revisionId}::uuid
+    FOR KEY SHARE
+  `);
+  return rows[0] ?? null;
+}
+
+async function lockOperationProfile(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+  revisionId: string,
+  operation: AiOperation,
+): Promise<OperationProfileRow | null> {
+  const rows = await tx.$queryRaw<OperationProfileRow[]>(Prisma.sql`
+    SELECT
+      "id"::text AS "id",
+      "projectId"::text AS "projectId",
+      "policyRevisionId"::text AS "policyRevisionId",
+      "operation"::text AS "operation",
+      "profileFingerprint",
+      "providerFingerprint",
+      "modelFingerprint",
+      "modelId",
+      "processorFingerprint",
+      "regionFingerprint",
+      "retentionFingerprint",
+      "endpointFingerprint"
+    FROM "ProjectAiPolicyOperationProfile"
+    WHERE "projectId" = ${projectId}::uuid
+      AND "policyRevisionId" = ${revisionId}::uuid
+      AND "operation" = ${operation}::"AiOperation"
     FOR KEY SHARE
   `);
   return rows[0] ?? null;
@@ -2769,8 +2807,22 @@ class AiRuntimeServiceImpl {
     if (
       revision === null ||
       revision.projectId !== request.projectId ||
-      revision.outboundEnabled !== true ||
-      !allowlistedOperation(revision, request.operation)
+      revision.outboundEnabled !== true
+    ) {
+      return rejected("AI_POLICY_DENIED");
+    }
+
+    const operationProfile = await lockOperationProfile(
+      tx,
+      request.projectId,
+      revision.id,
+      request.operation,
+    );
+    if (
+      operationProfile === null ||
+      operationProfile.projectId !== request.projectId ||
+      operationProfile.policyRevisionId !== revision.id ||
+      operationProfile.operation !== request.operation
     ) {
       return rejected("AI_POLICY_DENIED");
     }
@@ -2784,7 +2836,7 @@ class AiRuntimeServiceImpl {
       grant.revokedAt !== null ||
       grant.expiresAt === null ||
       grant.expiresAtIsLive !== true ||
-      !samePolicySnapshot(revision, grant) ||
+      !samePolicySnapshot(revision, operationProfile, grant) ||
       !MODEL_ID_PATTERN.test(grant.modelId) ||
       SECRET_OR_URL_PATTERN.test(grant.modelId) ||
       /(^|[/:@_-])latest($|[/:@_-])/i.test(grant.modelId) ||

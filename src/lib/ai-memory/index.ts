@@ -39,3 +39,18 @@ export {
   type ProjectCorpusIndexExecutionResult,
   type ProjectCorpusIndexView,
 } from "./corpus-index";
+export {
+  ProjectAiConfigError,
+  throwProjectAiConfigError,
+  type ProjectAiConfigErrorCode,
+} from "./project-ai-config-errors";
+export {
+  MODEL_TRANSFER_CONSENT_VERSION,
+  PROJECT_AI_CONFIG_VERSION,
+  PROJECT_AI_GRANT_LIFETIME_DAYS,
+  createProjectAiConfigService,
+  type ConfigureProjectAiMemoryRequest,
+  type CreateProjectAiConfigServiceOptions,
+  type ProjectAiMemoryStatus,
+  type ProjectAiOperationStatus,
+} from "./project-ai-config";

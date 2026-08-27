@@ -21,23 +21,17 @@ import {
   FakeAdmissibilityGate,
   FakeAdmissibilityRecorder,
   FakeProviderRecorder,
-  LOCAL_SOURCE_SCANNER_FINGERPRINT,
   LOCAL_SOURCE_SCANNER_VERSION,
-  OPENAI_AUTO_EXTRACT_MODEL_FINGERPRINT,
   OPENAI_AUTO_EXTRACT_MODEL_ID,
-  OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
-  OPENAI_AUTO_EXTRACT_PROFILE_FINGERPRINT,
-  OPENAI_PROCESSOR_REGION_FINGERPRINT,
-  OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
   type ClaimAndDispatchRunResult,
   OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION,
-  OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
-  OPENAI_RESPONSES_RETENTION_FINGERPRINT,
   sumInputBytes,
 } from "@/lib/ai-runtime";
 import {
   AiCandidateError,
+  MODEL_TRANSFER_CONSENT_VERSION,
   createAiCandidateService,
+  createProjectAiConfigService,
 } from "@/lib/ai-memory";
 import { hashSourceContent } from "@/lib/source";
 
@@ -3564,109 +3558,36 @@ async function runAtomicRuntimeCandidateCompletion(
   client: Client,
   prisma: PrismaClient,
 ): Promise<void> {
-  const revisionId = "18181818-1818-4818-8818-181818181818";
-  const operationProfileId = "19191919-1919-4919-8919-191919191919";
-  const policyFingerprint = "c".repeat(64);
-  const budgetFingerprint = "d".repeat(64);
-  await safeQuery(
-    client,
-    `INSERT INTO "ProjectAiPolicyRevision"
-       ("id", "projectId", "revision", "policyFingerprint", "outboundEnabled",
-        "embeddingEnabled", "autoExtractEnabled", "sourceSummaryEnabled",
-        "projectAnalysisEnabled", "generateWithContextEnabled",
-        "profileFingerprint", "processorFingerprint", "regionFingerprint",
-        "retentionFingerprint", "endpointFingerprint", "budgetFingerprint",
-        "scannerFingerprint")
-     VALUES ($1, $2, 3, $3, true, false, true, false, false, false,
-             $4, $5, $6, $7, $8, $9, $10)`,
-    [
-      revisionId,
-      projectAId,
-      policyFingerprint,
-      OPENAI_AUTO_EXTRACT_PROFILE_FINGERPRINT,
-      OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
-      OPENAI_PROCESSOR_REGION_FINGERPRINT,
-      OPENAI_RESPONSES_RETENTION_FINGERPRINT,
-      OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
-      budgetFingerprint,
-      LOCAL_SOURCE_SCANNER_FINGERPRINT,
-    ],
+  const configService = createProjectAiConfigService({ db: prisma, environment: {} });
+  const configured = await configService.configure({
+    projectId: projectAId,
+    sourceIds: [sourceAId],
+    consentVersion: MODEL_TRANSFER_CONSENT_VERSION,
+    acknowledgeExternalModelTransfer: true,
+  });
+  const successGrant = configured.operations.find(
+    (operation) => operation.operation === "autoExtract",
   );
-  await safeQuery(
-    client,
-    `INSERT INTO "ProjectAiPolicyOperationProfile"
-       ("id", "projectId", "policyRevisionId", "operation",
-        "profileFingerprint", "providerFingerprint", "modelFingerprint", "modelId",
-        "processorFingerprint", "regionFingerprint", "retentionFingerprint",
-        "endpointFingerprint")
-     VALUES ($1, $2, $3, 'autoExtract', $4, $5, $6, $7, $8, $9, $10, $11)`,
-    [
-      operationProfileId,
-      projectAId,
-      revisionId,
-      OPENAI_AUTO_EXTRACT_PROFILE_FINGERPRINT,
-      OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
-      OPENAI_AUTO_EXTRACT_MODEL_FINGERPRINT,
-      OPENAI_AUTO_EXTRACT_MODEL_ID,
-      OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
-      OPENAI_PROCESSOR_REGION_FINGERPRINT,
-      OPENAI_RESPONSES_RETENTION_FINGERPRINT,
-      OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
-    ],
+  requireCondition(
+    configured.configured &&
+      configured.currentRevision === 3 &&
+      JSON.stringify(configured.sourceIds) === JSON.stringify([sourceAId]) &&
+      configured.operations.length === 2 &&
+      successGrant !== undefined &&
+      configured.externalTransferExecution.enabled === false,
+    "AI_RUNTIME_POSTGRES_LOCAL_CONFIG_STATUS_MISMATCH",
   );
-  await safeQuery(
-    client,
-    `UPDATE "ProjectAiPolicy"
-        SET "currentRevisionId" = $2, "updatedAt" = CURRENT_TIMESTAMP
-      WHERE "projectId" = $1`,
-    [projectAId, revisionId],
+  const idempotent = await configService.configure({
+    projectId: projectAId,
+    sourceIds: [sourceAId],
+    consentVersion: MODEL_TRANSFER_CONSENT_VERSION,
+    acknowledgeExternalModelTransfer: true,
+  });
+  requireCondition(
+    idempotent.currentRevision === configured.currentRevision &&
+      JSON.stringify(idempotent.operations) === JSON.stringify(configured.operations),
+    "AI_RUNTIME_POSTGRES_LOCAL_CONFIG_NOT_IDEMPOTENT",
   );
-
-  const insertExactGrant = async (
-    grantId: string,
-    grantSourceId: string,
-    grantOperationId: string,
-    grantFingerprint: string,
-  ): Promise<void> => {
-    await safeQuery(
-      client,
-      `INSERT INTO "ModelProcessingGrant"
-         ("id", "projectId", "sourceKind", "status", "policyRevisionId",
-          "profileFingerprint", "providerFingerprint", "modelFingerprint", "modelId",
-          "processorFingerprint", "regionFingerprint", "retentionFingerprint",
-          "endpointFingerprint", "grantFingerprint", "effectivePolicyVersion",
-          "budgetFingerprint", "scannerFingerprint", "scannerVersion", "budgetProfile",
-          "issuedBy", "purposeCode", "updatedAt")
-       VALUES ($1, $2, 'manual_text', 'draft', $3, $4, $5, $6, $7, $8, $9,
-               $10, $11, $12, 3, $13, $14, $15, 'standard',
-               'runtime-gate-test', 'atomic-candidate-completion', CURRENT_TIMESTAMP)`,
-      [
-        grantId,
-        projectAId,
-        revisionId,
-        OPENAI_AUTO_EXTRACT_PROFILE_FINGERPRINT,
-        OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
-        OPENAI_AUTO_EXTRACT_MODEL_FINGERPRINT,
-        OPENAI_AUTO_EXTRACT_MODEL_ID,
-        OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
-        OPENAI_PROCESSOR_REGION_FINGERPRINT,
-        OPENAI_RESPONSES_RETENTION_FINGERPRINT,
-        OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
-        grantFingerprint,
-        budgetFingerprint,
-        LOCAL_SOURCE_SCANNER_FINGERPRINT,
-        LOCAL_SOURCE_SCANNER_VERSION,
-      ],
-    );
-    await insertGrantSource(client, grantSourceId, grantId);
-    await insertGrantOperation(
-      client,
-      grantOperationId,
-      grantId,
-      "autoExtract",
-    );
-    await issueGrant(client, grantId);
-  };
 
   const candidateService = createAiCandidateService({ db: prisma });
   const admissibilityGate = {
@@ -3693,13 +3614,6 @@ async function runAtomicRuntimeCandidateCompletion(
     },
   };
 
-  const successGrantId = "20202020-2020-4020-8020-202020202020";
-  await insertExactGrant(
-    successGrantId,
-    "21212120-2121-4121-8121-212121212120",
-    "22222220-2222-4222-8222-222222222220",
-    "e".repeat(64),
-  );
   const providerResponseId = "resp_atomic_candidate_completion_1";
   const candidates = [{
     itemType: "progress" as const,
@@ -3757,7 +3671,7 @@ async function runAtomicRuntimeCandidateCompletion(
   });
   const success = await successService.execute({
     projectId: projectAId,
-    grantId: successGrantId,
+    grantId: successGrant.grantId,
     operation: "autoExtract",
     sourceIds: [sourceAId],
   });
@@ -3809,12 +3723,54 @@ async function runAtomicRuntimeCandidateCompletion(
     "AI_RUNTIME_POSTGRES_ATOMIC_COMPLETION_STATE_MISMATCH",
   );
 
-  const rollbackGrantId = "23232320-2323-4323-8323-232323232320";
-  await insertExactGrant(
-    rollbackGrantId,
-    "24242420-2424-4424-8424-242424242420",
-    "25252520-2525-4525-8525-252525252520",
-    "f".repeat(64),
+  await prisma.projectSource.create({
+    data: {
+      id: sourceA2Id,
+      projectId: projectAId,
+      kind: "manual",
+      contentText: sourceA2Content,
+      contentHash: sourceA2ContentHash,
+      manualContentDedupeKey: sourceA2ContentHash,
+    },
+  });
+  const reconfigured = await configService.configure({
+    projectId: projectAId,
+    sourceIds: [sourceA2Id, sourceAId],
+    consentVersion: MODEL_TRANSFER_CONSENT_VERSION,
+    acknowledgeExternalModelTransfer: true,
+  });
+  const rollbackGrant = reconfigured.operations.find(
+    (operation) => operation.operation === "autoExtract",
+  );
+  requireCondition(
+    reconfigured.configured &&
+      reconfigured.currentRevision === configured.currentRevision &&
+      JSON.stringify(reconfigured.sourceIds) ===
+        JSON.stringify([sourceAId, sourceA2Id]) &&
+      rollbackGrant !== undefined &&
+      rollbackGrant.grantId !== successGrant.grantId,
+    "AI_RUNTIME_POSTGRES_LOCAL_CONFIG_REPLACEMENT_MISMATCH",
+  );
+  const replacedGrants = await safeQuery<{
+    status: string;
+    revocation_reason: string | null;
+  }>(
+    client,
+    `SELECT "status"::text AS status,
+            "revocationReasonCode"::text AS revocation_reason
+       FROM "ModelProcessingGrant"
+      WHERE "projectId" = $1 AND "id" = ANY($2::uuid[])
+      ORDER BY "id"`,
+    [projectAId, configured.operations.map((operation) => operation.grantId)],
+  );
+  requireCondition(
+    replacedGrants.rows.length === 2 &&
+      replacedGrants.rows.every(
+        (grant) =>
+          grant.status === "revoked" &&
+          grant.revocation_reason === "policyChanged",
+      ),
+    "AI_RUNTIME_POSTGRES_LOCAL_CONFIG_OLD_GRANTS_NOT_REVOKED",
   );
   const rollbackService = createAiRuntimeService({
     db: prisma,
@@ -3844,9 +3800,9 @@ async function runAtomicRuntimeCandidateCompletion(
   });
   const rolledBack = await rollbackService.execute({
     projectId: projectAId,
-    grantId: rollbackGrantId,
+    grantId: rollbackGrant.grantId,
     operation: "autoExtract",
-    sourceIds: [sourceAId],
+    sourceIds: [sourceAId, sourceA2Id],
   });
   requireCondition(
     rolledBack.kind === "claimed" &&
@@ -3889,6 +3845,37 @@ async function runAtomicRuntimeCandidateCompletion(
       rollbackRow.batches === "0" &&
       rollbackRow.terminal_audits === "0",
     "AI_RUNTIME_POSTGRES_ATOMIC_ROLLBACK_STATE_MISMATCH",
+  );
+
+  const revoked = await configService.revoke(projectAId);
+  requireCondition(
+    !revoked.configured &&
+      revoked.currentRevision === 4 &&
+      revoked.sourceIds.length === 0 &&
+      revoked.operations.length === 0 &&
+      revoked.externalTransferExecution.enabled === false,
+    "AI_RUNTIME_POSTGRES_LOCAL_CONFIG_REVOKE_STATUS_MISMATCH",
+  );
+  const revokedCurrentGrants = await safeQuery<{
+    status: string;
+    revocation_reason: string | null;
+  }>(
+    client,
+    `SELECT "status"::text AS status,
+            "revocationReasonCode"::text AS revocation_reason
+       FROM "ModelProcessingGrant"
+      WHERE "projectId" = $1 AND "id" = ANY($2::uuid[])
+      ORDER BY "id"`,
+    [projectAId, reconfigured.operations.map((operation) => operation.grantId)],
+  );
+  requireCondition(
+    revokedCurrentGrants.rows.length === 2 &&
+      revokedCurrentGrants.rows.every(
+        (grant) =>
+          grant.status === "revoked" &&
+          grant.revocation_reason === "userRequested",
+      ),
+    "AI_RUNTIME_POSTGRES_LOCAL_CONFIG_CURRENT_GRANTS_NOT_REVOKED",
   );
 }
 

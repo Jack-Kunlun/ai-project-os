@@ -55,7 +55,20 @@ pnpm dev
 
 `.env.example` 只提供变量名和非敏感的本地默认用户/数据库名，不包含可用密码或完整连接串。宿主机上的 `DATABASE_URL` 应指向 `127.0.0.1:5433`；未设置 `POSTGRES_PASSWORD` 时，Compose 会明确失败。`.env` 已被 Git 忽略。
 
-`AI_ENABLED` 默认且当前应保持为 `false`，`OPENAI_API_KEY` 示例值为空。仓库中的受控 provider transport 尚未接入公开 API、持久化或页面；仅配置 key 不代表自动抽取、Embedding 或 V1 已经可用。
+`AI_ENABLED` 默认且当前应保持为 `false`，`OPENAI_API_KEY` 示例值为空。仓库已具备受控 provider transport、运行时审计和候选原子发布能力，但没有开放真实外部传输的执行入口；仅配置 key 不代表自动抽取、Embedding 或 V1 已经可用。
+
+受控 AI 策略和模型处理授权只能通过本机 CLI 写入；应用没有身份认证，因此不提供对应的 HTTP 写接口。配置前先从项目 Source 列表取得明确的 `projectId` 和 `sourceId`，然后显式确认所选内容未来可能发送给 OpenAI：
+
+```bash
+pnpm project-ai:config -- status --project-id <projectId>
+pnpm project-ai:config -- configure \
+  --project-id <projectId> \
+  --source-id <sourceId> \
+  --acknowledge-external-model-transfer selected-project-sources-to-openai:v1
+pnpm project-ai:config -- revoke --project-id <projectId>
+```
+
+`configure` 会重新计算并核对 Source 指纹、执行本地敏感信息扫描，并为固定的自动抽取与 Embedding 操作生成 30 天授权；重复执行相同命令是幂等的，改变 Source 集合会撤销旧授权。CLI 只输出安全状态，不输出 Source 内容或凭据。当前执行状态仍固定返回 `EXTERNAL_TRANSFER_NOT_ENABLED`，所以这些命令不会调用 OpenAI，也不会发送任何项目内容。
 
 应用默认运行在 <http://localhost:3000>。
 
@@ -102,6 +115,7 @@ git diff --check
 - `PATCH /api/projects/:projectId/items/:itemId`：携带 `expectedUpdatedAt` 执行编辑、确认、驳回或重新打开。
 - `GET /api/projects/:projectId/snapshots`：读取最新一份已完成 Snapshot；没有 Snapshot 时返回 `null`。
 - `POST /api/projects/:projectId/snapshots`：在一致读取点内，将已确认 Item 组装成手工 Snapshot 并记录 Scan。
+- `GET /api/projects/:projectId/ai-memory`：只读返回受控 AI 策略、授权范围、候选数和运行时配置状态；不返回 Source 内容或凭据。
 
 所有输入使用 Zod 校验；错误响应返回稳定的 `code` 与面向调用方的消息，不回显连接字符串或内部异常。
 

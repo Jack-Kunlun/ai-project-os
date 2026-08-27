@@ -13,6 +13,7 @@
     "test:v1-storage-postgres": "tsx --test test/project-item-history-postgres.test.ts",
     "test:corpus-index-postgres": "tsx --test test/corpus-index-postgres.test.ts",
     "project-snapshot:demo": "tsx scripts/project-snapshot-demo.ts",
+    "project-ai:config": "tsx scripts/project-ai-config.ts",
     "db:validate": "prisma validate --config prisma.config.ts",
     "db:generate": "prisma generate --config prisma.config.ts",
     "db:migrate": "prisma migrate dev --config prisma.config.ts",

@@ -62,6 +62,7 @@ function repositoryConfig(
     metadataEnabled: true,
     readmeEnabled: true,
     markdownEnabled: false,
+    markdownPaths: [],
     issuesEnabled: false,
     pullRequestsEnabled: false,
     releasesEnabled: false,

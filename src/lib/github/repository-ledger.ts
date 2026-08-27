@@ -9,7 +9,7 @@ import {
 import type { VerifiedGitHubRepository } from "./read-only-client";
 
 export const GITHUB_REPOSITORY_LEDGER_VERSION =
-  "github-repository-ledger:v1" as const;
+  "github-repository-ledger:v2" as const;
 export const GITHUB_AUTH_REF = "github-token-file:v1" as const;
 export const GITHUB_SOFT_EXCLUDE_CLASSES = Object.freeze([
   "vendor",
@@ -33,6 +33,7 @@ const LINK_CONFIG_FIELDS = Object.freeze([
   "includeRoots",
   "issuesEnabled",
   "markdownEnabled",
+  "markdownPaths",
   "metadataEnabled",
   "pullRequestsEnabled",
   "readmeEnabled",
@@ -85,6 +86,7 @@ export type RepositoryLinkConfigInput = Readonly<{
   metadataEnabled: boolean;
   readmeEnabled: boolean;
   markdownEnabled: boolean;
+  markdownPaths: readonly string[];
   issuesEnabled: boolean;
   pullRequestsEnabled: boolean;
   releasesEnabled: boolean;
@@ -123,6 +125,7 @@ export type RepositoryLinkStatus = Readonly<{
     metadataEnabled: boolean;
     readmeEnabled: boolean;
     markdownEnabled: boolean;
+    markdownPaths: readonly string[];
     issuesEnabled: boolean;
     pullRequestsEnabled: boolean;
     releasesEnabled: boolean;
@@ -260,6 +263,26 @@ function canonicalSoftExcludes(value: unknown): readonly GitHubSoftExcludeClass[
   return values as readonly GitHubSoftExcludeClass[];
 }
 
+function canonicalMarkdownPaths(value: unknown, enabled: boolean): readonly string[] {
+  if (!Array.isArray(value) || value.length > 100 || Object.keys(value).length !== value.length) {
+    return fail("GITHUB_LEDGER_INVALID_INPUT");
+  }
+  const paths = value.map((entry) => {
+    const path = canonicalIncludeRoot(entry);
+    if (
+      !/\.(?:md|markdown)$/iu.test(path) ||
+      ["*", "?", "[", "]"].some((character) => path.includes(character))
+    ) {
+      return fail("GITHUB_LEDGER_INVALID_INPUT");
+    }
+    return path;
+  }).sort();
+  if (enabled !== (paths.length > 0) || new Set(paths).size !== paths.length) {
+    return fail("GITHUB_LEDGER_INVALID_INPUT");
+  }
+  return Object.freeze(paths);
+}
+
 function canonicalRole(value: unknown): ProjectRepositoryRole {
   if (!Object.values(ProjectRepositoryRole).includes(value as ProjectRepositoryRole)) {
     return fail("GITHUB_LEDGER_INVALID_INPUT");
@@ -302,6 +325,10 @@ function parseConfig(value: unknown): RepositoryLinkConfigInput {
     metadataEnabled: value.metadataEnabled as boolean,
     readmeEnabled: value.readmeEnabled as boolean,
     markdownEnabled: value.markdownEnabled as boolean,
+    markdownPaths: canonicalMarkdownPaths(
+      value.markdownPaths,
+      value.markdownEnabled as boolean,
+    ),
     issuesEnabled: value.issuesEnabled as boolean,
     pullRequestsEnabled: value.pullRequestsEnabled as boolean,
     releasesEnabled: value.releasesEnabled as boolean,
@@ -386,6 +413,7 @@ function configFingerprints(config: RepositoryLinkConfigInput): Readonly<{
       metadataEnabled: config.metadataEnabled,
       readmeEnabled: config.readmeEnabled,
       markdownEnabled: config.markdownEnabled,
+      markdownPaths: config.markdownPaths,
       issuesEnabled: config.issuesEnabled,
       pullRequestsEnabled: config.pullRequestsEnabled,
       releasesEnabled: config.releasesEnabled,
@@ -429,6 +457,7 @@ type LinkQueryRow = Readonly<{
       metadataEnabled: boolean;
       readmeEnabled: boolean;
       markdownEnabled: boolean;
+      markdownPaths: unknown;
       issuesEnabled: boolean;
       pullRequestsEnabled: boolean;
       releasesEnabled: boolean;
@@ -446,6 +475,10 @@ function projectStatus(row: LinkQueryRow): RepositoryLinkStatus {
   if (pointer === null) return fail("GITHUB_LEDGER_INTEGRITY_ERROR");
   const includeRoots = canonicalStringArray(pointer.config.includeRoots, 32, canonicalIncludeRoot);
   const softExcludePatterns = canonicalSoftExcludes(pointer.config.softExcludePatterns);
+  const markdownPaths = canonicalMarkdownPaths(
+    pointer.config.markdownPaths,
+    pointer.config.markdownEnabled,
+  );
   const eligible =
     row.status === ProjectRepositoryLinkStatus.active &&
     row.effectivePolicyVersion === pointer.effectivePolicyVersion &&
@@ -475,6 +508,7 @@ function projectStatus(row: LinkQueryRow): RepositoryLinkStatus {
       metadataEnabled: pointer.config.metadataEnabled,
       readmeEnabled: pointer.config.readmeEnabled,
       markdownEnabled: pointer.config.markdownEnabled,
+      markdownPaths,
       issuesEnabled: pointer.config.issuesEnabled,
       pullRequestsEnabled: pointer.config.pullRequestsEnabled,
       releasesEnabled: pointer.config.releasesEnabled,

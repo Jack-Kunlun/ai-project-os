@@ -43,6 +43,7 @@ const config = Object.freeze({
   metadataEnabled: true,
   readmeEnabled: true,
   markdownEnabled: false,
+  markdownPaths: [],
   issuesEnabled: false,
   pullRequestsEnabled: false,
   releasesEnabled: false,
@@ -56,7 +57,7 @@ function assertInvalid(error: unknown): boolean {
 
 test("repository ledger uses a fixed auth reference and a versioned contract", () => {
   assert.equal(GITHUB_AUTH_REF, "github-token-file:v1");
-  assert.equal(GITHUB_REPOSITORY_LEDGER_VERSION, "github-repository-ledger:v1");
+  assert.equal(GITHUB_REPOSITORY_LEDGER_VERSION, "github-repository-ledger:v2");
   assert.equal(new Set(GITHUB_SOFT_EXCLUDE_CLASSES).size, GITHUB_SOFT_EXCLUDE_CLASSES.length);
   assert.equal(Object.isFrozen(GITHUB_SOFT_EXCLUDE_CLASSES), true);
 });
@@ -77,6 +78,8 @@ test("repository ledger rejects ambiguous scope before opening a transaction", a
     { projectId, repository, config: { ...config, trackedRef: "refs/tags/v1" } },
     { projectId, repository, config: { ...config, includeRoots: ["../secret"] } },
     { projectId, repository, config: { ...config, includeRoots: ["src\\server"] } },
+    { projectId, repository, config: { ...config, markdownEnabled: true } },
+    { projectId, repository, config: { ...config, markdownPaths: ["docs/*.md"] } },
     { projectId, repository, config: { ...config, softExcludePatterns: ["secrets"] } },
     {
       projectId,

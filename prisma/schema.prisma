@@ -173,6 +173,7 @@ enum ProjectScanStatus {
 
 enum ModelProcessingGrantSourceKind {
   manual_text
+  repository_code
 }
 
 enum ModelProcessingGrantStatus {
@@ -396,6 +397,9 @@ model Project {
   repositoryCodeGenerations        RepositoryCodeGeneration[]
   repositoryCodeGenerationEntries  RepositoryCodeGenerationEntry[]
   repositoryCodeGenerationPointers RepositoryCodeGenerationPointer[]
+  repositoryCodeIndexGenerations    RepositoryCodeIndexGeneration[]
+  repositoryCodeIndexInputs         RepositoryCodeIndexInput[]
+  repositoryCodeIndexPointers       RepositoryCodeIndexPointer[]
   codeSnapshots                    ProjectCodeSnapshot[]
   codeSnapshotEntries              ProjectCodeSnapshotEntry[]
   codeSnapshotPointer              ProjectCodeSnapshotPointer?
@@ -464,6 +468,11 @@ model ProjectRepositoryLink {
   codeGenerations         RepositoryCodeGeneration[]
   codeGenerationEntries   RepositoryCodeGenerationEntry[]
   codeGenerationPointer   RepositoryCodeGenerationPointer?     @relation("RepositoryCodeGenerationPointerLink")
+  codeIndexGenerations    RepositoryCodeIndexGeneration[]
+  codeIndexInputs         RepositoryCodeIndexInput[]
+  codeIndexPointer        RepositoryCodeIndexPointer?           @relation("RepositoryCodeIndexPointerLink")
+  indexGenerations        IndexGeneration[]
+  modelProcessingGrants   ModelProcessingGrant[]                @relation("RepositoryGrantSubject")
   codeSnapshotEntries     ProjectCodeSnapshotEntry[]
   sources                 ProjectSource[]                      @relation("RepositoryLinkSources")
   itemEvidences           ProjectItemEvidence[]                @relation("RepositoryLinkItemEvidences")
@@ -504,6 +513,8 @@ model ProjectRepositoryLinkConfigVersion {
   codeScanRuns               RepoCodeScanRun[]
   codeGenerations            RepositoryCodeGeneration[]
   codeGenerationPointers     RepositoryCodeGenerationPointer[]   @relation("RepositoryCodePointerConfig")
+  codeIndexGenerations       RepositoryCodeIndexGeneration[]
+  codeIndexPointers          RepositoryCodeIndexPointer[]         @relation("RepositoryCodeIndexPointerConfig")
   codeSnapshotEntries        ProjectCodeSnapshotEntry[]
 
   @@unique([projectId, id])
@@ -641,6 +652,8 @@ model RepositoryFileRevision {
   repositoryLink          ProjectRepositoryLink           @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryFileRevision_link_fkey", onDelete: NoAction, onUpdate: Cascade)
   repositoryFile          RepositoryFile                  @relation(fields: [projectId, projectRepositoryLinkId, repositoryFileId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryFileRevision_file_fkey", onDelete: NoAction, onUpdate: Cascade)
   generationEntries       RepositoryCodeGenerationEntry[]
+  sourceChunks            SourceChunk[]
+  codeIndexInputs         RepositoryCodeIndexInput[]
 
   @@unique([projectId, id])
   @@unique([projectId, projectRepositoryLinkId, id])
@@ -680,6 +693,8 @@ model RepositoryCodeGeneration {
   scanRun                    RepoCodeScanRun                    @relation(fields: [projectId, projectRepositoryLinkId, repoCodeScanRunId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodeGeneration_run_fkey", onDelete: NoAction, onUpdate: Cascade)
   entries                    RepositoryCodeGenerationEntry[]
   activePointer              RepositoryCodeGenerationPointer?   @relation("ActiveRepositoryCodeGeneration")
+  codeIndexes                RepositoryCodeIndexGeneration[]
+  modelProcessingGrants      ModelProcessingGrant[]              @relation("RepositoryGrantCodeGeneration")
   codeSnapshotEntries        ProjectCodeSnapshotEntry[]
 
   @@unique([projectId, id])
@@ -707,8 +722,10 @@ model RepositoryCodeGenerationEntry {
   repositoryLink             ProjectRepositoryLink    @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryCodeGenerationEntry_link_fkey", onDelete: NoAction, onUpdate: Cascade)
   generation                 RepositoryCodeGeneration @relation(fields: [projectId, projectRepositoryLinkId, repositoryCodeGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodeGenerationEntry_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
   fileRevision               RepositoryFileRevision   @relation(fields: [projectId, projectRepositoryLinkId, repositoryFileRevisionId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodeGenerationEntry_revision_fkey", onDelete: NoAction, onUpdate: Cascade)
+  codeIndexInputs            RepositoryCodeIndexInput[]
 
   @@unique([projectId, id])
+  @@unique([projectId, projectRepositoryLinkId, repositoryCodeGenerationId, id, repositoryFileRevisionId], map: "RepositoryCodeGenerationEntry_exact_member_key")
   @@unique([projectId, projectRepositoryLinkId, repositoryCodeGenerationId, normalizedPath], map: "RepositoryCodeGenerationEntry_generation_path_key")
   @@unique([projectId, projectRepositoryLinkId, repositoryCodeGenerationId, ordinal], map: "RepositoryCodeGenerationEntry_generation_ordinal_key")
   @@index([projectId, projectRepositoryLinkId, repositoryFileRevisionId])
@@ -773,7 +790,7 @@ model ProjectCodeSnapshotEntry {
 
   @@unique([projectId, id])
   @@unique([projectId, projectCodeSnapshotId, projectRepositoryLinkId])
-  @@index([projectId, projectRepositoryLinkId, repositoryCodeGenerationId])
+  @@index([projectId, projectRepositoryLinkId, repositoryCodeGenerationId], map: "RepositoryCodeIndexGeneration_code_generation_idx")
 }
 
 model ProjectCodeSnapshotPointer {
@@ -954,6 +971,7 @@ model SourceChunk {
   projectSourceId         String?                        @db.Uuid
   sourceRevisionKey       String?                        @db.Uuid
   sourceContentHash       String?                        @db.VarChar(64)
+  repositoryFileRevisionId String?                       @db.Uuid
   ordinal                 Int
   rangeUnit               ProjectEvidenceRangeUnit
   rangeStart              Int
@@ -969,13 +987,16 @@ model SourceChunk {
   project                 Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   projectRepositoryLink   ProjectRepositoryLink?         @relation("RepositoryLinkChunks", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   projectSource           ProjectSource?                 @relation("ChunkProjectSource", fields: [projectId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, revisionKey, contentHash], onDelete: NoAction, onUpdate: Cascade)
+  repositoryFileRevision  RepositoryFileRevision?        @relation(fields: [projectId, projectRepositoryLinkId, repositoryFileRevisionId], references: [projectId, projectRepositoryLinkId, id], map: "SourceChunk_repository_revision_fkey", onDelete: NoAction, onUpdate: Cascade)
   corpusGenerationEntries ProjectCorpusGenerationEntry[]
   indexInputEntries       IndexGenerationInputEntry[]
+  repositoryCodeInputs    RepositoryCodeIndexInput[]
   chunkEmbeddings         ChunkEmbedding[]
 
   @@unique([projectId, id])
   @@unique([projectId, id, originScope])
   @@unique([projectId, id, originScope, projectRepositoryLinkId])
+  @@unique([projectId, projectRepositoryLinkId, repositoryFileRevisionId, id], map: "SourceChunk_repository_revision_id_key")
   @@unique([projectId, id, projectSourceId, originScope])
   @@unique([projectId, id, projectSourceId, originScope, sourceRevisionKey, sourceContentHash, contentHash], map: "SourceChunk_exact_revision_content_key")
   @@index([projectId, projectSourceId, ordinal])
@@ -1044,6 +1065,8 @@ model IndexGeneration {
   id                            String                        @id @default(uuid()) @db.Uuid
   projectId                     String                        @db.Uuid
   kind                          IndexGenerationKind
+  originScope                   ContentOriginScope              @default(project)
+  projectRepositoryLinkId       String?                         @db.Uuid
   grantId                       String                        @db.Uuid
   policyRevisionId              String                        @db.Uuid
   embeddingProfileId            String                        @db.Uuid
@@ -1060,16 +1083,24 @@ model IndexGeneration {
   publishedAt                   DateTime?
   supersededAt                  DateTime?
   project                       Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectRepositoryLink         ProjectRepositoryLink?        @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "IndexGeneration_repository_link_fkey", onDelete: NoAction, onUpdate: Cascade)
   grant                         ModelProcessingGrant          @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], map: "IndexGeneration_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
   embeddingProfile              EmbeddingProfile              @relation(fields: [embeddingProfileId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   projectCorpus                 ProjectCorpusIndexGeneration?
+  repositoryCode               RepositoryCodeIndexGeneration?
+  expectedByRepositoryCodeIndexes RepositoryCodeIndexGeneration[] @relation("ExpectedRepositoryCodeIndex")
   inputs                        IndexGenerationInputEntry[]
   attempts                      IndexBuildAttempt[]
   workItems                     IndexWorkItem[]
   embeddings                    ChunkEmbedding[]
   publishedPointer              ProjectCorpusIndexPointer?
+  repositoryCodePointer         RepositoryCodeIndexPointer?
 
   @@unique([projectId, id])
+  @@unique([projectId, id, originScope])
+  @@unique([projectId, id, originScope, projectRepositoryLinkId], map: "IndexGeneration_scope_link_key")
+  @@unique([projectId, projectRepositoryLinkId, id], map: "IndexGeneration_repository_link_id_key")
+  @@unique([projectId, projectRepositoryLinkId, id, grantId, policyRevisionId], map: "IndexGeneration_repository_grant_policy_key")
   @@unique([projectId, id, embeddingProfileId])
   @@unique([projectId, id, grantId, policyRevisionId])
   @@unique([projectId, generationKey])
@@ -1103,21 +1134,100 @@ model IndexGenerationInputEntry {
   indexGenerationId  String                   @db.Uuid
   ordinal            Int
   entryKind          IndexInputEntryKind
+  originScope        ContentOriginScope
+  projectRepositoryLinkId String?               @db.Uuid
   sourceChunkId      String                   @db.Uuid
   contentHash        String                   @db.VarChar(64)
   contentBytes       Int
   createdAt          DateTime                 @default(now())
-  indexGeneration    IndexGeneration          @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "IndexGenerationInputEntry_index_fkey", onDelete: NoAction, onUpdate: Cascade)
-  sourceChunk        SourceChunk              @relation(fields: [projectId, sourceChunkId], references: [projectId, id], map: "IndexGenerationInputEntry_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration    IndexGeneration          @relation(fields: [projectId, indexGenerationId, originScope], references: [projectId, id, originScope], map: "IndexGenerationInputEntry_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sourceChunk        SourceChunk              @relation(fields: [projectId, sourceChunkId, originScope], references: [projectId, id, originScope], map: "IndexGenerationInputEntry_source_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
   projectCorpusInput ProjectCorpusIndexInput?
+  repositoryCodeInput RepositoryCodeIndexInput?
   workItem           IndexWorkItem?
   embedding          ChunkEmbedding?
 
   @@unique([projectId, indexGenerationId, id], map: "IndexGenerationInputEntry_project_index_id_key")
   @@unique([projectId, indexGenerationId, id, sourceChunkId], map: "IndexGenerationInputEntry_project_index_id_chunk_key")
+  @@unique([projectId, indexGenerationId, id, sourceChunkId, originScope, projectRepositoryLinkId], map: "IndexGenerationInputEntry_scope_link_key")
   @@unique([projectId, indexGenerationId, ordinal], map: "IndexGenerationInputEntry_project_index_ordinal_key")
   @@unique([projectId, indexGenerationId, sourceChunkId], map: "IndexGenerationInputEntry_project_index_chunk_key")
   @@index([projectId, sourceChunkId], map: "IndexGenerationInputEntry_project_chunk_idx")
+}
+
+model RepositoryCodeIndexGeneration {
+  projectId                  String                             @db.Uuid
+  projectRepositoryLinkId    String                             @db.Uuid
+  indexGenerationId          String                             @db.Uuid
+  repositoryCodeGenerationId String                             @db.Uuid
+  expectedActiveIndexGenerationId String?                       @db.Uuid
+  linkConfigVersion          Int
+  grantId                    String                             @db.Uuid
+  policyRevisionId           String                             @db.Uuid
+  effectivePolicyVersion     Int
+  chunkerVersion             String                             @db.VarChar(128)
+  createdAt                  DateTime                           @default(now())
+  project                    Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink             ProjectRepositoryLink              @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryCodeIndexGeneration_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                     ProjectRepositoryLinkConfigVersion @relation(fields: [projectId, projectRepositoryLinkId, linkConfigVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepositoryCodeIndexGeneration_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration            IndexGeneration                    @relation(fields: [projectId, projectRepositoryLinkId, indexGenerationId, grantId, policyRevisionId], references: [projectId, projectRepositoryLinkId, id, grantId, policyRevisionId], map: "RepositoryCodeIndexGeneration_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  codeGeneration             RepositoryCodeGeneration           @relation(fields: [projectId, projectRepositoryLinkId, repositoryCodeGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodeIndexGeneration_code_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+  expectedActiveIndexGeneration IndexGeneration?                @relation("ExpectedRepositoryCodeIndex", fields: [projectId, projectRepositoryLinkId, expectedActiveIndexGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodeIndexGeneration_expected_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  grant                      ModelProcessingGrant                @relation(fields: [projectId, grantId, projectRepositoryLinkId, repositoryCodeGenerationId], references: [projectId, id, projectRepositoryLinkId, repositoryCodeGenerationId], map: "RepositoryCodeIndexGeneration_grant_fkey", onDelete: NoAction, onUpdate: Cascade)
+  inputs                     RepositoryCodeIndexInput[]
+  publishedPointer           RepositoryCodeIndexPointer?
+
+  @@id([projectId, projectRepositoryLinkId, indexGenerationId])
+  @@unique([projectId, indexGenerationId], map: "RepositoryCodeIndexGeneration_project_index_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, grantId, policyRevisionId], map: "RepositoryCodeIndexGeneration_index_grant_policy_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId], map: "RepositoryCodeIndexGeneration_exact_input_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId, linkConfigVersion, effectivePolicyVersion], map: "RepositoryCodeIndexGeneration_exact_boundary_key")
+  @@index([projectId, projectRepositoryLinkId, repositoryCodeGenerationId])
+}
+
+model RepositoryCodeIndexInput {
+  projectId                  String                             @db.Uuid
+  projectRepositoryLinkId    String                             @db.Uuid
+  indexGenerationId          String                             @db.Uuid
+  inputEntryId               String                             @db.Uuid
+  repositoryCodeGenerationId String                             @db.Uuid
+  codeGenerationEntryId      String                             @db.Uuid
+  repositoryFileRevisionId   String                             @db.Uuid
+  sourceChunkId              String                             @db.Uuid
+  createdAt                  DateTime                           @default(now())
+  project                    Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink             ProjectRepositoryLink              @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryCodeIndexInput_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration            RepositoryCodeIndexGeneration      @relation(fields: [projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId], references: [projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId], map: "RepositoryCodeIndexInput_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  inputEntry                 IndexGenerationInputEntry          @relation(fields: [projectId, indexGenerationId, inputEntryId, sourceChunkId, originScope, projectRepositoryLinkId], references: [projectId, indexGenerationId, id, sourceChunkId, originScope, projectRepositoryLinkId], map: "RepositoryCodeIndexInput_input_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+  codeGenerationEntry       RepositoryCodeGenerationEntry      @relation(fields: [projectId, projectRepositoryLinkId, repositoryCodeGenerationId, codeGenerationEntryId, repositoryFileRevisionId], references: [projectId, projectRepositoryLinkId, repositoryCodeGenerationId, id, repositoryFileRevisionId], map: "RepositoryCodeIndexInput_code_entry_fkey", onDelete: NoAction, onUpdate: Cascade)
+  repositoryFileRevision    RepositoryFileRevision             @relation(fields: [projectId, projectRepositoryLinkId, repositoryFileRevisionId], references: [projectId, projectRepositoryLinkId, id], map: "RepositoryCodeIndexInput_revision_fkey", onDelete: NoAction, onUpdate: Cascade)
+  sourceChunk               SourceChunk                       @relation(fields: [projectId, projectRepositoryLinkId, repositoryFileRevisionId, sourceChunkId], references: [projectId, projectRepositoryLinkId, repositoryFileRevisionId, id], map: "RepositoryCodeIndexInput_chunk_fkey", onDelete: NoAction, onUpdate: Cascade)
+  originScope               ContentOriginScope                 @default(repository_link)
+
+  @@id([projectId, projectRepositoryLinkId, indexGenerationId, inputEntryId])
+  @@unique([projectId, indexGenerationId, inputEntryId], map: "RepositoryCodeIndexInput_project_input_key")
+  @@unique([projectId, indexGenerationId, inputEntryId, sourceChunkId, originScope, projectRepositoryLinkId], map: "RepositoryCodeIndexInput_input_scope_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, codeGenerationEntryId, sourceChunkId], map: "RepositoryCodeIndexInput_exact_member_key")
+  @@index([projectId, projectRepositoryLinkId, repositoryFileRevisionId], map: "RepositoryCodeIndexInput_revision_idx")
+}
+
+model RepositoryCodeIndexPointer {
+  projectId                  String                             @db.Uuid
+  projectRepositoryLinkId    String                             @db.Uuid
+  indexGenerationId          String                             @db.Uuid
+  repositoryCodeGenerationId String                             @db.Uuid
+  linkConfigVersion          Int
+  effectivePolicyVersion     Int
+  publishedAt                DateTime                           @default(now())
+  project                    Project                            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink             ProjectRepositoryLink              @relation("RepositoryCodeIndexPointerLink", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "RepositoryCodeIndexPointer_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                     ProjectRepositoryLinkConfigVersion @relation("RepositoryCodeIndexPointerConfig", fields: [projectId, projectRepositoryLinkId, linkConfigVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "RepositoryCodeIndexPointer_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration            IndexGeneration                    @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "RepositoryCodeIndexPointer_index_fkey", onDelete: NoAction, onUpdate: Cascade)
+  repositoryCodeIndex       RepositoryCodeIndexGeneration      @relation(fields: [projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId, linkConfigVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId, linkConfigVersion, effectivePolicyVersion], map: "RepositoryCodeIndexPointer_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
+
+  @@id([projectId, projectRepositoryLinkId])
+  @@unique([projectId, indexGenerationId], map: "RepositoryCodeIndexPointer_project_index_key")
+  @@unique([projectId, projectRepositoryLinkId, indexGenerationId, repositoryCodeGenerationId, linkConfigVersion, effectivePolicyVersion], map: "RepositoryCodeIndexPointer_exact_generation_key")
 }
 
 model ProjectCorpusIndexInput {
@@ -1431,6 +1541,12 @@ model ModelProcessingGrant {
   id                     String                                    @id @default(uuid()) @db.Uuid
   projectId              String                                    @db.Uuid
   sourceKind             ModelProcessingGrantSourceKind            @default(manual_text)
+  projectRepositoryLinkId String?                                   @db.Uuid
+  repositoryCodeGenerationId String?                                @db.Uuid
+  linkConfigVersion      Int?
+  linkEffectivePolicyVersion Int?
+  scanScopeFingerprint   String?                                    @db.VarChar(64)
+  sourceManifestFingerprint String?                                 @db.VarChar(64)
   status                 ModelProcessingGrantStatus                @default(draft)
   policyRevisionId       String                                    @db.Uuid
   profileFingerprint     String                                    @db.VarChar(64)
@@ -1456,6 +1572,8 @@ model ModelProcessingGrant {
   createdAt              DateTime                                  @default(now())
   updatedAt              DateTime                                  @updatedAt
   project                Project                                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryLink         ProjectRepositoryLink?                    @relation("RepositoryGrantSubject", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "ModelProcessingGrant_repository_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  repositoryCodeGeneration RepositoryCodeGeneration?               @relation("RepositoryGrantCodeGeneration", fields: [projectId, projectRepositoryLinkId, repositoryCodeGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "ModelProcessingGrant_repository_code_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
   policyRevision         ProjectAiPolicyRevision                   @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   sources                ModelProcessingGrantSource[]
   operations             ModelProcessingGrantOperation[]
@@ -1463,9 +1581,11 @@ model ModelProcessingGrant {
   auditEvents            AiAuditEvent[]
   corpusGenerations      ProjectCorpusGeneration[]
   indexGenerations       IndexGeneration[]
+  repositoryCodeIndexes  RepositoryCodeIndexGeneration[]
   derivedArtifacts       AiDerivedArtifact[]
 
   @@unique([projectId, id])
+  @@unique([projectId, id, projectRepositoryLinkId, repositoryCodeGenerationId], map: "ModelProcessingGrant_repository_subject_key")
   @@unique([projectId, id, policyRevisionId])
   @@index([projectId, expiresAt])
   @@index([projectId, revokedAt])

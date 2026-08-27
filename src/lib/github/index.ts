@@ -1,4 +1,14 @@
 export {
+  REPOSITORY_CODE_CHUNKER_VERSION,
+  REPOSITORY_CODE_CHUNK_MAX_BYTES,
+  REPOSITORY_CODE_CHUNK_MAX_INPUT_BYTES,
+  REPOSITORY_CODE_CHUNK_MAX_LINES,
+  REPOSITORY_CODE_CHUNK_OVERLAP_LINES,
+  REPOSITORY_CODE_CHUNK_TARGET_BYTES,
+  chunkRepositoryCode,
+  type DeterministicRepositoryCodeChunk,
+} from "./code-chunking";
+export {
   GITHUB_CODE_SCAN_SERVICE_VERSION,
   GitHubCodeScanServiceError,
   createGitHubCodeScanService,
@@ -56,3 +66,23 @@ export {
   type RepositoryLinkConfigInput,
   type RepositoryLinkStatus,
 } from "./repository-ledger";
+export {
+  REPOSITORY_MODEL_GRANT_LIFETIME_DAYS,
+  REPOSITORY_MODEL_GRANT_VERSION,
+  REPOSITORY_MODEL_TRANSFER_CONSENT_VERSION,
+  RepositoryModelGrantError,
+  createRepositoryModelGrantService,
+  type IssueRepositoryModelGrantsRequest,
+  type RepositoryModelGrantErrorCode,
+  type RepositoryModelGrantStatus,
+  type RepositoryModelGrantView,
+} from "./repository-model-grant";
+export {
+  REPOSITORY_CODE_SEARCH_VERSION,
+  RepositoryCodeSearchError,
+  createRepositoryCodeSearchService,
+  type RepositoryCodeCitation,
+  type RepositoryCodeSearchErrorCode,
+  type RepositoryCodeSearchResponse,
+  type RepositoryCodeSearchScope,
+} from "./repository-code-search";

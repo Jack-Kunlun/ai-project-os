@@ -557,7 +557,10 @@ class ProjectAiConfigServiceImpl {
                 scannerFingerprint: true,
                 operationProfiles: true,
                 grants: {
-                  where: { status: ModelProcessingGrantStatus.issued },
+                  where: {
+                    status: ModelProcessingGrantStatus.issued,
+                    sourceKind: "manual_text",
+                  },
                   include: { operations: true, sources: true },
                 },
               },
@@ -773,18 +776,27 @@ class ProjectAiConfigServiceImpl {
         },
         include: { operations: true, sources: true },
       });
+      const manualGrants = issuedGrants.filter(
+        (grant) => grant.sourceKind === "manual_text",
+      );
+      const staleRepositoryGrants = issuedGrants.filter(
+        (grant) =>
+          grant.sourceKind === "repository_code" &&
+          grant.policyRevisionId !== revision.id,
+      );
       const matchingGrants = OPERATION_BOUNDARIES.map((boundary) =>
-        issuedGrants.find((grant) =>
+        manualGrants.find((grant) =>
           grantMatches(grant, revision.id, boundary, selectedSources, now)),
       );
       if (
-        issuedGrants.length === OPERATION_BOUNDARIES.length &&
+        manualGrants.length === OPERATION_BOUNDARIES.length &&
+        staleRepositoryGrants.length === 0 &&
         matchingGrants.every((grant) => grant !== undefined)
       ) {
         return;
       }
 
-      for (const grant of issuedGrants) {
+      for (const grant of [...manualGrants, ...staleRepositoryGrants]) {
         const updated = await tx.modelProcessingGrant.updateMany({
           where: {
             projectId: request.projectId,

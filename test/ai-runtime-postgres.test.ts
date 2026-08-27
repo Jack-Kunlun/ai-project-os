@@ -21,8 +21,19 @@ import {
   FakeAdmissibilityGate,
   FakeAdmissibilityRecorder,
   FakeProviderRecorder,
+  LOCAL_SOURCE_SCANNER_FINGERPRINT,
+  LOCAL_SOURCE_SCANNER_VERSION,
+  OPENAI_AUTO_EXTRACT_MODEL_FINGERPRINT,
+  OPENAI_AUTO_EXTRACT_MODEL_ID,
+  OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
+  OPENAI_AUTO_EXTRACT_PROFILE_FINGERPRINT,
+  OPENAI_PROCESSOR_REGION_FINGERPRINT,
+  OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
   type ClaimAndDispatchRunResult,
   OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION,
+  OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+  OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+  sumInputBytes,
 } from "@/lib/ai-runtime";
 import {
   AiCandidateError,
@@ -3549,6 +3560,338 @@ async function runRunAttemptInputMatrix(client: Client): Promise<void> {
   );
 }
 
+async function runAtomicRuntimeCandidateCompletion(
+  client: Client,
+  prisma: PrismaClient,
+): Promise<void> {
+  const revisionId = "18181818-1818-4818-8818-181818181818";
+  const operationProfileId = "19191919-1919-4919-8919-191919191919";
+  const policyFingerprint = "c".repeat(64);
+  const budgetFingerprint = "d".repeat(64);
+  await safeQuery(
+    client,
+    `INSERT INTO "ProjectAiPolicyRevision"
+       ("id", "projectId", "revision", "policyFingerprint", "outboundEnabled",
+        "embeddingEnabled", "autoExtractEnabled", "sourceSummaryEnabled",
+        "projectAnalysisEnabled", "generateWithContextEnabled",
+        "profileFingerprint", "processorFingerprint", "regionFingerprint",
+        "retentionFingerprint", "endpointFingerprint", "budgetFingerprint",
+        "scannerFingerprint")
+     VALUES ($1, $2, 3, $3, true, false, true, false, false, false,
+             $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      revisionId,
+      projectAId,
+      policyFingerprint,
+      OPENAI_AUTO_EXTRACT_PROFILE_FINGERPRINT,
+      OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
+      OPENAI_PROCESSOR_REGION_FINGERPRINT,
+      OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+      OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
+      budgetFingerprint,
+      LOCAL_SOURCE_SCANNER_FINGERPRINT,
+    ],
+  );
+  await safeQuery(
+    client,
+    `INSERT INTO "ProjectAiPolicyOperationProfile"
+       ("id", "projectId", "policyRevisionId", "operation",
+        "profileFingerprint", "providerFingerprint", "modelFingerprint", "modelId",
+        "processorFingerprint", "regionFingerprint", "retentionFingerprint",
+        "endpointFingerprint")
+     VALUES ($1, $2, $3, 'autoExtract', $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      operationProfileId,
+      projectAId,
+      revisionId,
+      OPENAI_AUTO_EXTRACT_PROFILE_FINGERPRINT,
+      OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+      OPENAI_AUTO_EXTRACT_MODEL_FINGERPRINT,
+      OPENAI_AUTO_EXTRACT_MODEL_ID,
+      OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
+      OPENAI_PROCESSOR_REGION_FINGERPRINT,
+      OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+      OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
+    ],
+  );
+  await safeQuery(
+    client,
+    `UPDATE "ProjectAiPolicy"
+        SET "currentRevisionId" = $2, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "projectId" = $1`,
+    [projectAId, revisionId],
+  );
+
+  const insertExactGrant = async (
+    grantId: string,
+    grantSourceId: string,
+    grantOperationId: string,
+    grantFingerprint: string,
+  ): Promise<void> => {
+    await safeQuery(
+      client,
+      `INSERT INTO "ModelProcessingGrant"
+         ("id", "projectId", "sourceKind", "status", "policyRevisionId",
+          "profileFingerprint", "providerFingerprint", "modelFingerprint", "modelId",
+          "processorFingerprint", "regionFingerprint", "retentionFingerprint",
+          "endpointFingerprint", "grantFingerprint", "effectivePolicyVersion",
+          "budgetFingerprint", "scannerFingerprint", "scannerVersion", "budgetProfile",
+          "issuedBy", "purposeCode", "updatedAt")
+       VALUES ($1, $2, 'manual_text', 'draft', $3, $4, $5, $6, $7, $8, $9,
+               $10, $11, $12, 3, $13, $14, $15, 'standard',
+               'runtime-gate-test', 'atomic-candidate-completion', CURRENT_TIMESTAMP)`,
+      [
+        grantId,
+        projectAId,
+        revisionId,
+        OPENAI_AUTO_EXTRACT_PROFILE_FINGERPRINT,
+        OPENAI_RESPONSES_PROVIDER_FINGERPRINT,
+        OPENAI_AUTO_EXTRACT_MODEL_FINGERPRINT,
+        OPENAI_AUTO_EXTRACT_MODEL_ID,
+        OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
+        OPENAI_PROCESSOR_REGION_FINGERPRINT,
+        OPENAI_RESPONSES_RETENTION_FINGERPRINT,
+        OPENAI_RESPONSES_ENDPOINT_FINGERPRINT,
+        grantFingerprint,
+        budgetFingerprint,
+        LOCAL_SOURCE_SCANNER_FINGERPRINT,
+        LOCAL_SOURCE_SCANNER_VERSION,
+      ],
+    );
+    await insertGrantSource(client, grantSourceId, grantId);
+    await insertGrantOperation(
+      client,
+      grantOperationId,
+      grantId,
+      "autoExtract",
+    );
+    await issueGrant(client, grantId);
+  };
+
+  const candidateService = createAiCandidateService({ db: prisma });
+  const admissibilityGate = {
+    assess: (value: unknown) => {
+      const input = value as {
+        projectId: string;
+        runId: string;
+        operationKey: string;
+        inputManifest: ReturnType<typeof buildInputManifest>;
+        inputManifestFingerprint: string;
+      };
+      return {
+        admissible: true as const,
+        projectId: input.projectId,
+        runId: input.runId,
+        operationKey: input.operationKey,
+        inputManifestFingerprint: input.inputManifestFingerprint,
+        inputBytes: sumInputBytes(input.inputManifest),
+        sourceCount: input.inputManifest.length,
+        scannerVersion: LOCAL_SOURCE_SCANNER_VERSION,
+        safeScanResult: "passed" as const,
+        safeCode: null,
+      };
+    },
+  };
+
+  const successGrantId = "20202020-2020-4020-8020-202020202020";
+  await insertExactGrant(
+    successGrantId,
+    "21212120-2121-4121-8121-212121212120",
+    "22222220-2222-4222-8222-222222222220",
+    "e".repeat(64),
+  );
+  const providerResponseId = "resp_atomic_candidate_completion_1";
+  const candidates = [{
+    itemType: "progress" as const,
+    statement: "Atomic candidate publication succeeded.",
+    statementFingerprint: buildOpenAiCandidateStatementFingerprint(
+      "Atomic candidate publication succeeded.",
+    ),
+    sourceId: sourceAId,
+    sourceExcerpt: sourceAContent,
+    sourceExcerptFingerprint: buildOpenAiCandidateExcerptFingerprint(sourceAContent),
+    sourceStart: 0,
+    sourceEnd: Buffer.byteLength(sourceAContent, "utf8"),
+  }];
+  const verifiedResponse = Object.freeze({
+    contractVersion: OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION,
+    providerResponseId,
+    modelId: OPENAI_AUTO_EXTRACT_MODEL_ID,
+    usage: Object.freeze({ inputTokens: 10, outputTokens: 5, requestCount: 1 }),
+    candidates: Object.freeze(candidates),
+    candidateSetFingerprint: buildOpenAiCandidateSetFingerprint(candidates),
+  });
+  const outputBytes = Buffer.byteLength(JSON.stringify(verifiedResponse), "utf8");
+  const successService = createAiRuntimeService({
+    db: prisma,
+    admissibilityGate,
+    provider: {
+      dispatch: async () => ({
+        classification: {
+          runStatus: "succeeded" as const,
+          attemptStatus: "succeeded" as const,
+          safeCode: null,
+          httpStatus: 200,
+          automaticRetry: false as const,
+          providerRequestId: "req_atomic_candidate_completion_1",
+          providerResponseId,
+          usage: { inputTokens: 10, outputTokens: 5, requestCount: 1 as const },
+        },
+        completionPayload: verifiedResponse,
+        outputBytes,
+      }),
+    },
+    completionHandler: {
+      complete: async (tx, value) => {
+        requireCondition(
+          value.operation === "autoExtract",
+          "AI_RUNTIME_POSTGRES_COMPLETION_OPERATION_MISMATCH",
+        );
+        await candidateService.persistVerifiedCandidatesInTransaction(tx, {
+          projectId: value.projectId,
+          aiRunId: value.runId,
+          verifiedResponse: value.completionPayload,
+        });
+      },
+    },
+  });
+  const success = await successService.execute({
+    projectId: projectAId,
+    grantId: successGrantId,
+    operation: "autoExtract",
+    sourceIds: [sourceAId],
+  });
+  if (!(success.kind === "claimed" && success.status === "succeeded")) {
+    throw new Error(
+      `AI_RUNTIME_POSTGRES_ATOMIC_COMPLETION_FAILED:${JSON.stringify(success)}`,
+    );
+  }
+  if (success.kind !== "claimed" || success.runId === undefined) {
+    throw new Error("AI_RUNTIME_POSTGRES_ATOMIC_COMPLETION_RUN_MISSING");
+  }
+  const committed = await safeQuery<{
+    run_status: string;
+    output_bytes: number;
+    attempt_status: string;
+    batches: string;
+    claims: string;
+    items: string;
+    terminal_audits: string;
+  }>(
+    client,
+    `SELECT r."status"::text AS run_status,
+            r."outputBytes" AS output_bytes,
+            (SELECT a."status"::text FROM "AiRunAttempt" a
+              WHERE a."projectId" = r."projectId" AND a."aiRunId" = r."id") AS attempt_status,
+            (SELECT count(*)::text FROM "AiCandidateBatch" b
+              WHERE b."projectId" = r."projectId" AND b."aiRunId" = r."id") AS batches,
+            (SELECT count(*)::text FROM "AiCandidateClaim" c
+              WHERE c."projectId" = r."projectId" AND c."aiRunId" = r."id") AS claims,
+            (SELECT count(*)::text FROM "ProjectItem" i
+              WHERE i."projectId" = r."projectId"
+                AND i."metadata"->>'aiRunId' = r."id"::text) AS items,
+            (SELECT count(*)::text FROM "AiAuditEvent" e
+              WHERE e."projectId" = r."projectId" AND e."aiRunId" = r."id"
+                AND e."eventType" IN ('runSucceeded', 'attemptSucceeded')) AS terminal_audits
+       FROM "AiRun" r
+      WHERE r."projectId" = $1 AND r."id" = $2`,
+    [projectAId, success.runId],
+  );
+  const committedRow = committed.rows[0];
+  requireCondition(
+    committedRow?.run_status === "succeeded" &&
+      committedRow.output_bytes === outputBytes &&
+      committedRow.attempt_status === "succeeded" &&
+      committedRow.batches === "1" &&
+      committedRow.claims === "1" &&
+      committedRow.items === "1" &&
+      committedRow.terminal_audits === "2",
+    "AI_RUNTIME_POSTGRES_ATOMIC_COMPLETION_STATE_MISMATCH",
+  );
+
+  const rollbackGrantId = "23232320-2323-4323-8323-232323232320";
+  await insertExactGrant(
+    rollbackGrantId,
+    "24242420-2424-4424-8424-242424242420",
+    "25252520-2525-4525-8525-252525252520",
+    "f".repeat(64),
+  );
+  const rollbackService = createAiRuntimeService({
+    db: prisma,
+    admissibilityGate,
+    provider: {
+      dispatch: async () => ({
+        classification: {
+          runStatus: "succeeded" as const,
+          attemptStatus: "succeeded" as const,
+          safeCode: null,
+          httpStatus: 200,
+          automaticRetry: false as const,
+          providerRequestId: "req_atomic_candidate_rollback_1",
+          providerResponseId: "resp_atomic_candidate_rollback_1",
+          usage: { inputTokens: 10, outputTokens: 5, requestCount: 1 as const },
+        },
+        completionPayload: verifiedResponse,
+        outputBytes,
+      }),
+    },
+    completionHandler: {
+      complete: async () => {
+        throw new Error("EXPECTED_ATOMIC_COMPLETION_ROLLBACK");
+      },
+    },
+    transactionRetryLimit: 1,
+  });
+  const rolledBack = await rollbackService.execute({
+    projectId: projectAId,
+    grantId: rollbackGrantId,
+    operation: "autoExtract",
+    sourceIds: [sourceAId],
+  });
+  requireCondition(
+    rolledBack.kind === "claimed" &&
+      rolledBack.status === "running" &&
+      rolledBack.safeCode === "AI_PROVIDER_UNKNOWN",
+    "AI_RUNTIME_POSTGRES_ATOMIC_ROLLBACK_RESULT_MISMATCH",
+  );
+  if (rolledBack.kind !== "claimed" || rolledBack.runId === undefined) {
+    throw new Error("AI_RUNTIME_POSTGRES_ATOMIC_ROLLBACK_RUN_MISSING");
+  }
+  const rollback = await safeQuery<{
+    run_status: string;
+    output_bytes: number;
+    provider_response_id: string | null;
+    attempt_status: string;
+    batches: string;
+    terminal_audits: string;
+  }>(
+    client,
+    `SELECT r."status"::text AS run_status,
+            r."outputBytes" AS output_bytes,
+            r."providerResponseId" AS provider_response_id,
+            (SELECT a."status"::text FROM "AiRunAttempt" a
+              WHERE a."projectId" = r."projectId" AND a."aiRunId" = r."id") AS attempt_status,
+            (SELECT count(*)::text FROM "AiCandidateBatch" b
+              WHERE b."projectId" = r."projectId" AND b."aiRunId" = r."id") AS batches,
+            (SELECT count(*)::text FROM "AiAuditEvent" e
+              WHERE e."projectId" = r."projectId" AND e."aiRunId" = r."id"
+                AND e."eventType" IN ('runSucceeded', 'attemptSucceeded')) AS terminal_audits
+       FROM "AiRun" r
+      WHERE r."projectId" = $1 AND r."id" = $2`,
+    [projectAId, rolledBack.runId],
+  );
+  const rollbackRow = rollback.rows[0];
+  requireCondition(
+    rollbackRow?.run_status === "running" &&
+      rollbackRow.output_bytes === 0 &&
+      rollbackRow.provider_response_id === null &&
+      rollbackRow.attempt_status === "sent" &&
+      rollbackRow.batches === "0" &&
+      rollbackRow.terminal_audits === "0",
+    "AI_RUNTIME_POSTGRES_ATOMIC_ROLLBACK_STATE_MISMATCH",
+  );
+}
+
 async function runCandidateMemoryMatrix(client: Client, url: string): Promise<void> {
   await setupFreshLiveGrant(client);
   await insertPolicyRevision(
@@ -3911,6 +4254,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
         ]),
       "accepted candidate item delete",
     );
+    await runAtomicRuntimeCandidateCompletion(client, prisma);
   } finally {
     await prisma.$disconnect();
   }

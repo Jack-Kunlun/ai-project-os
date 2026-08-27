@@ -65,7 +65,9 @@ export {
 export {
   OPENAI_AUTO_EXTRACT_MODEL_FINGERPRINT,
   OPENAI_AUTO_EXTRACT_MODEL_ID,
+  OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT,
   OPENAI_AUTO_EXTRACT_PROFILE_FINGERPRINT,
+  OPENAI_EMBEDDING_PROCESSOR_FINGERPRINT,
   OPENAI_EMBEDDING_MODEL_FINGERPRINT,
   OPENAI_EMBEDDING_MODEL_ID,
   OPENAI_EMBEDDING_PROFILE_FINGERPRINT,
@@ -74,6 +76,25 @@ export {
   getOpenAiAutoExtractProfile,
   getOpenAiEmbeddingProfile,
 } from "./openai-runtime-profile";
+export {
+  OPENAI_AUTO_EXTRACT_MAX_BUDGET_MICROS,
+  OPENAI_AUTO_EXTRACT_MAX_INPUT_TOKENS,
+  OPENAI_AUTO_EXTRACT_PRICING_SNAPSHOT_ID,
+  assertAiExecutionInputWithinProfile,
+  calculateAiExecutionBudgetMicros,
+  getSyntheticAiExecutionProfile,
+  resolveAiExecutionProfile,
+} from "./execution-profile";
+export type {
+  AiExecutionBoundary,
+  AiExecutionProfile,
+} from "./execution-profile";
+export {
+  LOCAL_SOURCE_SCANNER_FINGERPRINT,
+  LOCAL_SOURCE_SCANNER_VERSION,
+  scanLocalSourcesForModelTransfer,
+} from "./local-source-scanner";
+export type { LocalSourceScanResult } from "./local-source-scanner";
 export type {
   OpenAiEmbeddingInput,
   OpenAiEmbeddingsBody,
@@ -125,7 +146,9 @@ export {
 } from "./service";
 export type {
   AiAdmissibilityGate,
+  AiRuntimeCompletionHandler,
   AiRuntimeProvider,
+  AiRuntimeProviderDispatchResult,
   ClaimAndDispatchRunRequest,
   ClaimAndDispatchRunResult,
   CreateAiRuntimeServiceOptions,

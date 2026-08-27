@@ -551,189 +551,220 @@ class AiCandidateServiceImpl {
     const aiRunId = validateUuid(request.aiRunId);
     const response = normalizeVerifiedResponse(request.verifiedResponse);
 
-    return this.serializable(async (tx) => {
-      const run = await tx.aiRun.findUnique({
-        where: { projectId_id: { projectId, id: aiRunId } },
-        select: {
-          operation: true,
-          status: true,
-          modelId: true,
-          providerResponseId: true,
-          inputTokens: true,
-          outputTokens: true,
-          requestCount: true,
-          inputSources: {
-            select: {
-              sourceId: true,
-              contentFingerprint: true,
-              contentBytes: true,
-              source: { select: { contentText: true } },
-            },
+    return this.serializable(
+      (tx) => this.persistNormalizedCandidates(tx, projectId, aiRunId, response),
+      true,
+    );
+  }
+
+  async persistVerifiedCandidatesInTransaction(
+    tx: Prisma.TransactionClient,
+    request: PersistVerifiedAiCandidatesRequest,
+  ): Promise<PersistedAiCandidateBatch> {
+    if (
+      typeof tx !== "object" ||
+      tx === null ||
+      typeof tx.aiRun?.findUnique !== "function" ||
+      typeof request !== "object" ||
+      request === null
+    ) {
+      return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
+    }
+    return this.persistNormalizedCandidates(
+      tx,
+      validateUuid(request.projectId),
+      validateUuid(request.aiRunId),
+      normalizeVerifiedResponse(request.verifiedResponse),
+    );
+  }
+
+  private async persistNormalizedCandidates(
+    tx: Prisma.TransactionClient,
+    projectId: string,
+    aiRunId: string,
+    response: NormalizedVerifiedResponse,
+  ): Promise<PersistedAiCandidateBatch> {
+    const run = await tx.aiRun.findUnique({
+      where: { projectId_id: { projectId, id: aiRunId } },
+      select: {
+        operation: true,
+        status: true,
+        modelId: true,
+        providerResponseId: true,
+        inputTokens: true,
+        outputTokens: true,
+        requestCount: true,
+        inputSources: {
+          select: {
+            sourceId: true,
+            contentFingerprint: true,
+            contentBytes: true,
+            source: { select: { contentText: true } },
           },
-          candidateBatch: {
-            select: {
-              id: true,
-              projectId: true,
-              aiRunId: true,
-              candidateSetFingerprint: true,
-              candidateCount: true,
-              createdAt: true,
-              claims: {
-                select: candidateClaimSelect,
-                orderBy: { createdAt: "asc" },
-              },
+        },
+        candidateBatch: {
+          select: {
+            id: true,
+            projectId: true,
+            aiRunId: true,
+            candidateSetFingerprint: true,
+            candidateCount: true,
+            createdAt: true,
+            claims: {
+              select: candidateClaimSelect,
+              orderBy: { createdAt: "asc" },
             },
           },
         },
-      });
-      if (run === null) return throwAiCandidateError("AI_CANDIDATE_RUN_NOT_FOUND");
-      if (run.operation !== "autoExtract" || run.status !== "succeeded") {
-        return throwAiCandidateError("AI_CANDIDATE_RUN_NOT_ELIGIBLE");
-      }
+      },
+    });
+    if (run === null) return throwAiCandidateError("AI_CANDIDATE_RUN_NOT_FOUND");
+    if (run.operation !== "autoExtract" || run.status !== "succeeded") {
+      return throwAiCandidateError("AI_CANDIDATE_RUN_NOT_ELIGIBLE");
+    }
+    if (
+      run.modelId !== response.modelId ||
+      run.providerResponseId !== response.providerResponseId ||
+      run.inputTokens !== response.inputTokens ||
+      run.outputTokens !== response.outputTokens ||
+      run.requestCount !== response.requestCount
+    ) {
+      return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
+    }
+    if (run.candidateBatch !== null) {
+      return verifyExistingBatch(run.candidateBatch, response);
+    }
+
+    const sourceById = new Map(
+      run.inputSources.map((input) => [input.sourceId, input]),
+    );
+    for (const input of run.inputSources) {
       if (
-        run.modelId !== response.modelId ||
-        run.providerResponseId !== response.providerResponseId ||
-        run.inputTokens !== response.inputTokens ||
-        run.outputTokens !== response.outputTokens ||
-        run.requestCount !== response.requestCount
+        hashSourceContent(input.source.contentText) !== input.contentFingerprint ||
+        Buffer.byteLength(input.source.contentText, "utf8") !== input.contentBytes
       ) {
         return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
       }
-      if (run.candidateBatch !== null) {
-        return verifyExistingBatch(run.candidateBatch, response);
+    }
+    for (const candidate of response.candidates) {
+      const input = sourceById.get(candidate.sourceId);
+      if (input === undefined) {
+        return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
       }
+      const codeUnitStart = input.source.contentText.indexOf(candidate.sourceExcerpt);
+      const sourceStart = codeUnitStart < 0
+        ? -1
+        : Buffer.byteLength(
+            input.source.contentText.slice(0, codeUnitStart),
+            "utf8",
+          );
+      if (
+        sourceStart !== candidate.sourceStart ||
+        candidate.sourceEnd !==
+          sourceStart + Buffer.byteLength(candidate.sourceExcerpt, "utf8")
+      ) {
+        return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
+      }
+    }
 
-      const sourceById = new Map(
-        run.inputSources.map((input) => [input.sourceId, input]),
-      );
-      for (const input of run.inputSources) {
-        if (
-          hashSourceContent(input.source.contentText) !== input.contentFingerprint ||
-          Buffer.byteLength(input.source.contentText, "utf8") !== input.contentBytes
-        ) {
-          return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
-        }
+    const batchId = randomUUID();
+    const publishedAt = this.now();
+    if (!Number.isFinite(publishedAt.getTime())) {
+      return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
+    }
+    await tx.aiCandidateBatch.create({
+      data: {
+        id: batchId,
+        projectId,
+        aiRunId,
+        candidateSetFingerprint: response.candidateSetFingerprint,
+        candidateCount: response.candidates.length,
+        createdAt: publishedAt,
+      },
+    });
+    for (const candidate of response.candidates) {
+      const candidateId = randomUUID();
+      const projectItemId = randomUUID();
+      const source = sourceById.get(candidate.sourceId);
+      if (source === undefined) {
+        return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
       }
-      for (const candidate of response.candidates) {
-        const input = sourceById.get(candidate.sourceId);
-        if (input === undefined) {
-          return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
-        }
-        const codeUnitStart = input.source.contentText.indexOf(candidate.sourceExcerpt);
-        const sourceStart = codeUnitStart < 0
-          ? -1
-          : Buffer.byteLength(
-              input.source.contentText.slice(0, codeUnitStart),
-              "utf8",
-            );
-        if (
-          sourceStart !== candidate.sourceStart ||
-          candidate.sourceEnd !==
-            sourceStart + Buffer.byteLength(candidate.sourceExcerpt, "utf8")
-        ) {
-          return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
-        }
-      }
-
-      const batchId = randomUUID();
-      const publishedAt = this.now();
-      if (!Number.isFinite(publishedAt.getTime())) {
-        return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
-      }
-      await tx.aiCandidateBatch.create({
+      const createdItem = await tx.projectItem.create({
         data: {
-          id: batchId,
+          id: projectItemId,
           projectId,
-          aiRunId,
-          candidateSetFingerprint: response.candidateSetFingerprint,
-          candidateCount: response.candidates.length,
-          createdAt: publishedAt,
-        },
-      });
-      for (const candidate of response.candidates) {
-        const candidateId = randomUUID();
-        const projectItemId = randomUUID();
-        const source = sourceById.get(candidate.sourceId);
-        if (source === undefined) {
-          return throwAiCandidateError("AI_CANDIDATE_RESPONSE_MISMATCH");
-        }
-        const createdItem = await tx.projectItem.create({
-          data: {
-            id: projectItemId,
-            projectId,
-            type: candidate.itemType,
-            reviewStatus: ProjectItemReviewStatus.candidate,
-            sourceId: candidate.sourceId,
-            title: candidateTitle(candidate.statement),
-            content: candidate.statement,
-            sourceExcerpt: candidate.sourceExcerpt,
-            occurredAt: null,
-            confirmedAt: null,
-            metadata: {
-              origin: "ai_candidate",
-              aiRunId,
-              candidateClaimId: candidateId,
-              statementFingerprint: candidate.statementFingerprint,
-              candidateSetFingerprint: response.candidateSetFingerprint,
-            },
-            createdAt: publishedAt,
-            updatedAt: publishedAt,
-          },
-        });
-        const evidence = await createPrimaryProjectItemEvidence(tx, {
-          projectId,
-          projectItemId,
-          projectSourceId: candidate.sourceId,
-          sourceText: source.source.contentText,
+          type: candidate.itemType,
+          reviewStatus: ProjectItemReviewStatus.candidate,
+          sourceId: candidate.sourceId,
+          title: candidateTitle(candidate.statement),
+          content: candidate.statement,
           sourceExcerpt: candidate.sourceExcerpt,
-          createdAt: publishedAt,
-        });
-        await appendProjectItemRevision(tx, {
-          item: createdItem,
-          action: ProjectItemRevisionAction.aiCreated,
-          actorId: "ai:model",
-          evidences: [evidence],
-          createdAt: publishedAt,
-        });
-        await tx.aiCandidateClaim.create({
-          data: {
-            id: candidateId,
-            projectId,
-            batchId,
+          occurredAt: null,
+          confirmedAt: null,
+          metadata: {
+            origin: "ai_candidate",
             aiRunId,
-            sourceId: candidate.sourceId,
-            itemType: candidate.itemType,
-            statement: candidate.statement,
+            candidateClaimId: candidateId,
             statementFingerprint: candidate.statementFingerprint,
-            sourceExcerpt: candidate.sourceExcerpt,
-            sourceExcerptFingerprint: candidate.sourceExcerptFingerprint,
-            sourceStart: candidate.sourceStart,
-            sourceEnd: candidate.sourceEnd,
-            projectItemId,
-            createdAt: publishedAt,
+            candidateSetFingerprint: response.candidateSetFingerprint,
           },
-        });
-      }
-      const created = await tx.aiCandidateBatch.findUnique({
-        where: { projectId_id: { projectId, id: batchId } },
-        select: {
-          id: true,
-          projectId: true,
-          aiRunId: true,
-          candidateSetFingerprint: true,
-          candidateCount: true,
-          createdAt: true,
-          claims: {
-            select: candidateClaimSelect,
-            orderBy: { createdAt: "asc" },
-          },
+          createdAt: publishedAt,
+          updatedAt: publishedAt,
         },
       });
-      if (created === null) {
-        return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
-      }
-      return verifyExistingBatch(created, response);
-    }, true);
+      const evidence = await createPrimaryProjectItemEvidence(tx, {
+        projectId,
+        projectItemId,
+        projectSourceId: candidate.sourceId,
+        sourceText: source.source.contentText,
+        sourceExcerpt: candidate.sourceExcerpt,
+        createdAt: publishedAt,
+      });
+      await appendProjectItemRevision(tx, {
+        item: createdItem,
+        action: ProjectItemRevisionAction.aiCreated,
+        actorId: "ai:model",
+        evidences: [evidence],
+        createdAt: publishedAt,
+      });
+      await tx.aiCandidateClaim.create({
+        data: {
+          id: candidateId,
+          projectId,
+          batchId,
+          aiRunId,
+          sourceId: candidate.sourceId,
+          itemType: candidate.itemType,
+          statement: candidate.statement,
+          statementFingerprint: candidate.statementFingerprint,
+          sourceExcerpt: candidate.sourceExcerpt,
+          sourceExcerptFingerprint: candidate.sourceExcerptFingerprint,
+          sourceStart: candidate.sourceStart,
+          sourceEnd: candidate.sourceEnd,
+          projectItemId,
+          createdAt: publishedAt,
+        },
+      });
+    }
+    const created = await tx.aiCandidateBatch.findUnique({
+      where: { projectId_id: { projectId, id: batchId } },
+      select: {
+        id: true,
+        projectId: true,
+        aiRunId: true,
+        candidateSetFingerprint: true,
+        candidateCount: true,
+        createdAt: true,
+        claims: {
+          select: candidateClaimSelect,
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+    if (created === null) {
+      return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
+    }
+    return verifyExistingBatch(created, response);
   }
 
   async listCandidates(
@@ -941,7 +972,11 @@ export function createAiCandidateService(
   options: CreateAiCandidateServiceOptions,
 ): Pick<
   AiCandidateServiceImpl,
-  "persistVerifiedCandidates" | "listCandidates" | "acceptCandidate" | "dismissCandidate"
+  | "persistVerifiedCandidates"
+  | "persistVerifiedCandidatesInTransaction"
+  | "listCandidates"
+  | "acceptCandidate"
+  | "dismissCandidate"
 > {
   return new AiCandidateServiceImpl(options);
 }

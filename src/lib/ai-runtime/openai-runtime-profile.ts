@@ -30,6 +30,12 @@ function fingerprint(label: string): string {
 export const OPENAI_PROCESSOR_REGION_FINGERPRINT = fingerprint(
   "processor-region:global",
 );
+export const OPENAI_AUTO_EXTRACT_PROCESSOR_FINGERPRINT = fingerprint(
+  "processor:auto-extract:http-transport:v1",
+);
+export const OPENAI_EMBEDDING_PROCESSOR_FINGERPRINT = fingerprint(
+  "processor:embedding-index:http-transport:v1",
+);
 export const OPENAI_AUTO_EXTRACT_MODEL_FINGERPRINT = fingerprint(
   `model:${OPENAI_AUTO_EXTRACT_MODEL_ID}`,
 );

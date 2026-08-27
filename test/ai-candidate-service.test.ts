@@ -130,6 +130,31 @@ test("candidate persistence rejects internally inconsistent evidence offsets", a
   await assertInvalidWithoutTransaction(forged);
 });
 
+test("candidate completion can reuse the caller transaction without nesting one", async () => {
+  const { service, transactionCalls } = serviceWithTransactionTrap();
+  let runReads = 0;
+  const tx = {
+    aiRun: {
+      findUnique: async () => {
+        runReads += 1;
+        return null;
+      },
+    },
+  };
+  await assert.rejects(
+    service.persistVerifiedCandidatesInTransaction(tx as never, {
+      projectId,
+      aiRunId: runId,
+      verifiedResponse: verifiedResponse(),
+    }),
+    (error: unknown) =>
+      error instanceof AiCandidateError &&
+      error.code === "AI_CANDIDATE_RUN_NOT_FOUND",
+  );
+  assert.equal(runReads, 1);
+  assert.equal(transactionCalls(), 0);
+});
+
 test("candidate review rejects unsafe reviewer identity before opening a transaction", async () => {
   const { service, transactionCalls } = serviceWithTransactionTrap();
   await assert.rejects(

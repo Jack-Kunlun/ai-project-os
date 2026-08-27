@@ -24,10 +24,12 @@ import {
   type InputManifest,
 } from "./manifest";
 import {
-  assertFakeInputWithinProfile,
-  calculateFakeBudgetMicros,
-  FAKE_PROFILE,
-} from "./fake-profile";
+  assertAiExecutionInputWithinProfile,
+  calculateAiExecutionBudgetMicros,
+  getSyntheticAiExecutionProfile,
+  resolveAiExecutionProfile,
+  type AiExecutionProfile,
+} from "./execution-profile";
 import {
   AI_OPERATIONS,
   AI_RUN_STATUSES,
@@ -57,6 +59,7 @@ const SERVICE_OPTION_FIELDS = [
   "idFactory",
   "transactionRetryLimit",
   "provider",
+  "completionHandler",
 ] as const;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -102,6 +105,12 @@ const PROVIDER_CLASSIFICATION_FIELDS = [
   "usage",
 ] as const;
 const USAGE_FIELDS = ["inputTokens", "outputTokens", "requestCount"] as const;
+const PROVIDER_DISPATCH_ENVELOPE_FIELDS = [
+  "classification",
+  "completionPayload",
+  "outputBytes",
+] as const;
+const MAX_PROVIDER_OUTPUT_BYTES = 1_048_576;
 
 function dbSafeErrorCode(
   value: AiSafeErrorCode | null,
@@ -119,7 +128,29 @@ export interface AiAdmissibilityGate {
 }
 
 export interface AiRuntimeProvider {
-  dispatch(value: unknown): ProviderClassification;
+  dispatch(
+    value: unknown,
+  ): AiRuntimeProviderDispatchResult | Promise<AiRuntimeProviderDispatchResult>;
+}
+
+export type AiRuntimeProviderDispatchResult =
+  | ProviderClassification
+  | Readonly<{
+      classification: ProviderClassification;
+      completionPayload: unknown;
+      outputBytes: number;
+    }>;
+
+export interface AiRuntimeCompletionHandler {
+  complete(
+    tx: Prisma.TransactionClient,
+    value: Readonly<{
+      projectId: string;
+      runId: string;
+      operation: AiOperation;
+      completionPayload: unknown;
+    }>,
+  ): Promise<void>;
 }
 
 export interface CreateAiRuntimeServiceOptions {
@@ -128,6 +159,7 @@ export interface CreateAiRuntimeServiceOptions {
   idFactory?: () => string;
   transactionRetryLimit?: number;
   provider?: AiRuntimeProvider;
+  completionHandler?: AiRuntimeCompletionHandler;
 }
 
 export interface PrepareOrGetRunRequest {
@@ -318,6 +350,7 @@ type PreparedContext = {
   request: PrepareOrGetRunRequest;
   revision: PolicyRevisionRow;
   grant: GrantRow;
+  executionProfile: AiExecutionProfile;
   manifest: InputManifest;
   inputManifestFingerprint: string;
   inputBytes: number;
@@ -484,6 +517,7 @@ function operationKeyForContext(
   request: PrepareOrGetRunRequest,
   revision: PolicyRevisionRow,
   grant: GrantRow,
+  executionProfile: AiExecutionProfile,
   manifest: InputManifest,
 ): string {
   return buildOperationKey({
@@ -496,8 +530,8 @@ function operationKeyForContext(
       contentBytes: entry.contentBytes,
       evidenceManifestFingerprint: entry.evidenceManifestFingerprint,
     })),
-    promptFingerprint: FAKE_PROFILE.promptFingerprint,
-    promptVersion: FAKE_PROFILE.promptVersion,
+    promptFingerprint: executionProfile.promptFingerprint,
+    promptVersion: executionProfile.promptVersion,
     profileFingerprint: grant.profileFingerprint,
     providerFingerprint: grant.providerFingerprint,
     modelId: grant.modelId,
@@ -811,6 +845,33 @@ export function isAiRuntimeRunAttemptParityValid(
 ): boolean {
   try {
     const status = safeRunStatus(run.status);
+    if (!(AI_OPERATIONS as readonly string[]).includes(run.operation)) {
+      return false;
+    }
+    const executionProfile = resolveAiExecutionProfile(
+      run.operation as AiOperation,
+      {
+        profileFingerprint: run.profileFingerprint,
+        providerFingerprint: run.providerFingerprint,
+        modelFingerprint: run.modelFingerprint,
+        modelId: run.modelId,
+        regionFingerprint: run.processorRegionFingerprint,
+        retentionFingerprint: run.processorRetentionFingerprint,
+        endpointFingerprint: run.processorEndpointFingerprint,
+      },
+    );
+    if (
+      executionProfile === null ||
+      run.promptFingerprint !== executionProfile.promptFingerprint ||
+      run.promptVersion !== executionProfile.promptVersion ||
+      run.pricingSnapshotId !== executionProfile.pricingSnapshotId ||
+      run.maxInputTokens !== executionProfile.maxInputTokens ||
+      run.maxOutputTokens !== executionProfile.maxOutputTokens ||
+      run.maxRequests !== executionProfile.maxRequests ||
+      run.maxBudgetMicros !== executionProfile.maxBudgetMicros
+    ) {
+      return false;
+    }
     if (!safeTerminalCodeMatches(status, run.safeErrorCode, attempts.length === 1)) {
       return false;
     }
@@ -863,8 +924,9 @@ export function isAiRuntimeRunAttemptParityValid(
       | "failed"
       | "unknown"
       | "cancelled";
-    const expectedBudget = calculateFakeBudgetMicros({
+    const expectedBudget = calculateAiExecutionBudgetMicros(executionProfile, {
       inputBytes: run.inputBytes,
+      inputTokens: run.inputTokens,
       outputTokens: run.outputTokens,
     });
     return (
@@ -885,7 +947,9 @@ export function isAiRuntimeRunAttemptParityValid(
       run.providerRequestId === attempt.providerRequestId &&
       run.providerResponseId === attempt.providerResponseId &&
       run.safeErrorCode === attempt.safeErrorCode &&
-      run.outputBytes === 0
+      Number.isSafeInteger(run.outputBytes) &&
+      run.outputBytes >= 0 &&
+      (status === "succeeded" || run.outputBytes === 0)
     );
   } catch {
     return false;
@@ -934,6 +998,7 @@ function safeProviderUsage(value: unknown): SafeUsage | null {
 export function normalizeAiRuntimeProviderClassification(
   value: unknown,
   inputBytes: number,
+  executionProfile: AiExecutionProfile = getSyntheticAiExecutionProfile(),
 ): ProviderClassification {
   try {
     if (!isPlainRecord(value) || !exactKeys(value, PROVIDER_CLASSIFICATION_FIELDS)) {
@@ -970,15 +1035,16 @@ export function normalizeAiRuntimeProviderClassification(
     const usage = safeProviderUsage(value.usage);
     if (
       usage !== null &&
-      (usage.inputTokens > FAKE_PROFILE.maxInputTokens ||
-        usage.outputTokens > FAKE_PROFILE.maxOutputTokens ||
+      (usage.inputTokens > executionProfile.maxInputTokens ||
+        usage.outputTokens > executionProfile.maxOutputTokens ||
         usage.requestCount !== 1)
     ) {
       return unknownProviderClassification();
     }
-    assertFakeInputWithinProfile(inputBytes);
-    calculateFakeBudgetMicros({
+    assertAiExecutionInputWithinProfile(executionProfile, inputBytes);
+    calculateAiExecutionBudgetMicros(executionProfile, {
       inputBytes,
+      inputTokens: usage?.inputTokens ?? 0,
       outputTokens: usage?.outputTokens ?? 0,
     });
     const validStatusCode =
@@ -1005,6 +1071,89 @@ export function normalizeAiRuntimeProviderClassification(
   }
 }
 
+type NormalizedProviderDispatch = Readonly<{
+  classification: ProviderClassification;
+  completionPayload: unknown;
+  hasCompletionPayload: boolean;
+  outputBytes: number;
+}>;
+
+function normalizeProviderDispatch(
+  value: unknown,
+  inputBytes: number,
+  executionProfile: AiExecutionProfile,
+): NormalizedProviderDispatch {
+  if (
+    !isPlainRecord(value) ||
+    !exactKeys(value, PROVIDER_DISPATCH_ENVELOPE_FIELDS)
+  ) {
+    return Object.freeze({
+      classification: normalizeAiRuntimeProviderClassification(
+        value,
+        inputBytes,
+        executionProfile,
+      ),
+      completionPayload: null,
+      hasCompletionPayload: false,
+      outputBytes: 0,
+    });
+  }
+
+  try {
+    const classificationDescriptor = Object.getOwnPropertyDescriptor(
+      value,
+      "classification",
+    );
+    const payloadDescriptor = Object.getOwnPropertyDescriptor(
+      value,
+      "completionPayload",
+    );
+    const outputBytesDescriptor = Object.getOwnPropertyDescriptor(
+      value,
+      "outputBytes",
+    );
+    if (
+      classificationDescriptor === undefined ||
+      !("value" in classificationDescriptor) ||
+      payloadDescriptor === undefined ||
+      !("value" in payloadDescriptor) ||
+      outputBytesDescriptor === undefined ||
+      !("value" in outputBytesDescriptor)
+    ) {
+      throw new Error("invalid provider dispatch envelope");
+    }
+    const classification = normalizeAiRuntimeProviderClassification(
+      classificationDescriptor.value,
+      inputBytes,
+      executionProfile,
+    );
+    const outputBytes = outputBytesDescriptor.value;
+    if (
+      !Number.isSafeInteger(outputBytes) ||
+      outputBytes < 0 ||
+      outputBytes > MAX_PROVIDER_OUTPUT_BYTES ||
+      (classification.runStatus === "succeeded" && outputBytes === 0) ||
+      (classification.runStatus !== "succeeded" &&
+        (outputBytes !== 0 || payloadDescriptor.value !== null))
+    ) {
+      throw new Error("invalid provider dispatch output");
+    }
+    return Object.freeze({
+      classification,
+      completionPayload: payloadDescriptor.value,
+      hasCompletionPayload: classification.runStatus === "succeeded",
+      outputBytes,
+    });
+  } catch {
+    return Object.freeze({
+      classification: unknownProviderClassification(),
+      completionPayload: null,
+      hasCompletionPayload: false,
+      outputBytes: 0,
+    });
+  }
+}
+
 function expectedRunFields(context: PreparedContext): Record<string, unknown> {
   return {
     projectId: context.request.projectId,
@@ -1014,8 +1163,8 @@ function expectedRunFields(context: PreparedContext): Record<string, unknown> {
     operationKey: context.operationKey,
     operationKeySchemaVersion: OPERATION_KEY_SCHEMA_VERSION,
     inputManifestFingerprint: context.inputManifestFingerprint,
-    promptFingerprint: FAKE_PROFILE.promptFingerprint,
-    promptVersion: FAKE_PROFILE.promptVersion,
+    promptFingerprint: context.executionProfile.promptFingerprint,
+    promptVersion: context.executionProfile.promptVersion,
     providerFingerprint: context.grant.providerFingerprint,
     modelId: context.grant.modelId,
     modelFingerprint: context.grant.modelFingerprint,
@@ -1029,15 +1178,15 @@ function expectedRunFields(context: PreparedContext): Record<string, unknown> {
     noRagSnapshotMarker: NO_RAG_SNAPSHOT_MARKER,
     inputBytes: context.inputBytes,
     outputBytes: 0,
-    maxInputTokens: FAKE_PROFILE.maxInputTokens,
-    maxOutputTokens: FAKE_PROFILE.maxOutputTokens,
-    maxRequests: FAKE_PROFILE.maxRequests,
-    maxBudgetMicros: FAKE_PROFILE.maxBudgetMicros,
+    maxInputTokens: context.executionProfile.maxInputTokens,
+    maxOutputTokens: context.executionProfile.maxOutputTokens,
+    maxRequests: context.executionProfile.maxRequests,
+    maxBudgetMicros: context.executionProfile.maxBudgetMicros,
     inputTokens: 0,
     outputTokens: 0,
     requestCount: 0,
     budgetUsedMicros: 0,
-    pricingSnapshotId: FAKE_PROFILE.pricingSnapshotId,
+    pricingSnapshotId: context.executionProfile.pricingSnapshotId,
     budgetStatus: "pending",
     safeErrorCode: null,
     httpStatus: null,
@@ -1142,11 +1291,22 @@ function buildClosureContext(
     );
     const inputManifestFingerprint = buildInputManifestFingerprint(manifest);
     const inputBytes = sumInputBytes(manifest);
-    const operationKey = operationKeyForContext(request, revision, grant, manifest);
+    const executionProfile = resolveAiExecutionProfile(request.operation, grant);
+    if (executionProfile === null) {
+      return null;
+    }
+    const operationKey = operationKeyForContext(
+      request,
+      revision,
+      grant,
+      executionProfile,
+      manifest,
+    );
     const context: PreparedContext = {
       request,
       revision,
       grant,
+      executionProfile,
       manifest,
       inputManifestFingerprint,
       inputBytes,
@@ -1711,6 +1871,7 @@ class AiRuntimeServiceImpl {
   private readonly transaction: TransactionRunner;
   private readonly admissibilityGate: AiAdmissibilityGate;
   private readonly provider: AiRuntimeProvider | null;
+  private readonly completionHandler: AiRuntimeCompletionHandler | null;
   private readonly idFactory: () => string;
   private readonly transactionRetryLimit: number;
 
@@ -1751,6 +1912,16 @@ class AiRuntimeServiceImpl {
     ) {
       invalidInput();
     }
+    const candidateCompletionHandler = rawOptions.completionHandler;
+    if (
+      candidateCompletionHandler !== undefined &&
+      (candidateCompletionHandler === null ||
+        typeof candidateCompletionHandler !== "object" ||
+        typeof (candidateCompletionHandler as { complete?: unknown }).complete !==
+          "function")
+    ) {
+      invalidInput();
+    }
     if (rawOptions.idFactory !== undefined && typeof rawOptions.idFactory !== "function") {
       invalidInput();
     }
@@ -1769,6 +1940,9 @@ class AiRuntimeServiceImpl {
     this.admissibilityGate = candidateGate as AiAdmissibilityGate;
     this.provider =
       candidateProvider === undefined ? null : (candidateProvider as AiRuntimeProvider);
+    this.completionHandler = candidateCompletionHandler === undefined
+      ? null
+      : (candidateCompletionHandler as AiRuntimeCompletionHandler);
     this.idFactory = (rawOptions.idFactory as (() => string) | undefined) ?? randomUUID;
     this.transactionRetryLimit = retryLimit ?? DEFAULT_TRANSACTION_RETRY_LIMIT;
   }
@@ -1833,10 +2007,10 @@ class AiRuntimeServiceImpl {
       return claim ?? claimRejected("AI_INVALID_PROVIDER_RESPONSE", request);
     }
 
-    let classification: ProviderClassification;
+    let dispatched: NormalizedProviderDispatch;
     try {
-      classification = normalizeAiRuntimeProviderClassification(
-        provider.dispatch({
+      dispatched = normalizeProviderDispatch(
+        await provider.dispatch({
           projectId: claim.request.projectId,
           runId: claim.runId,
           attemptId: claim.attemptId,
@@ -1845,11 +2019,17 @@ class AiRuntimeServiceImpl {
           operationKey: claim.operationKey,
         }),
         claim.context.inputBytes,
+        claim.context.executionProfile,
       );
     } catch {
-      classification = unknownProviderClassification();
+      dispatched = Object.freeze({
+        classification: unknownProviderClassification(),
+        completionPayload: null,
+        hasCompletionPayload: false,
+        outputBytes: 0,
+      });
     }
-    return this.completeClaim(claim, classification);
+    return this.completeClaim(claim, dispatched);
   }
 
   async execute(value: unknown): Promise<ClaimAndDispatchRunResult> {
@@ -2168,8 +2348,15 @@ class AiRuntimeServiceImpl {
     }
 
     try {
-      assertFakeInputWithinProfile(context.inputBytes);
-      calculateFakeBudgetMicros({ inputBytes: context.inputBytes, outputTokens: 0 });
+      assertAiExecutionInputWithinProfile(
+        context.executionProfile,
+        context.inputBytes,
+      );
+      calculateAiExecutionBudgetMicros(context.executionProfile, {
+        inputBytes: context.inputBytes,
+        inputTokens: 0,
+        outputTokens: 0,
+      });
     } catch (error: unknown) {
       if (
         !(error instanceof AiRuntimeServiceError) ||
@@ -2339,8 +2526,15 @@ class AiRuntimeServiceImpl {
     }
 
     try {
-      assertFakeInputWithinProfile(context.inputBytes);
-      calculateFakeBudgetMicros({ inputBytes: context.inputBytes, outputTokens: 0 });
+      assertAiExecutionInputWithinProfile(
+        context.executionProfile,
+        context.inputBytes,
+      );
+      calculateAiExecutionBudgetMicros(context.executionProfile, {
+        inputBytes: context.inputBytes,
+        inputTokens: 0,
+        outputTokens: 0,
+      });
     } catch (error: unknown) {
       if (
         !(error instanceof AiRuntimeServiceError) ||
@@ -2570,12 +2764,12 @@ class AiRuntimeServiceImpl {
 
   private async completeClaim(
     claim: ClaimedDispatch,
-    classification: ProviderClassification,
+    dispatched: NormalizedProviderDispatch,
   ): Promise<ClaimAndDispatchRunResult> {
     for (let attempt = 0; attempt < this.transactionRetryLimit; attempt += 1) {
       try {
         return await this.transaction(
-          (tx) => this.completeInTransaction(tx, claim, classification),
+          (tx) => this.completeInTransaction(tx, claim, dispatched),
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
       } catch (error: unknown) {
@@ -2602,8 +2796,9 @@ class AiRuntimeServiceImpl {
   private async completeInTransaction(
     tx: Prisma.TransactionClient,
     claim: ClaimedDispatch,
-    classification: ProviderClassification,
+    dispatched: NormalizedProviderDispatch,
   ): Promise<ClaimAndDispatchRunResult> {
+    const classification = dispatched.classification;
     // The claim is already committed.  Lock the frozen audit-FK parents first
     // and do not re-read the mutable policy pointer or grant lifecycle here.
     if (
@@ -2651,7 +2846,10 @@ class AiRuntimeServiceImpl {
     };
     let budgetUsedMicros: number;
     try {
-      assertFakeInputWithinProfile(current.run.inputBytes);
+      assertAiExecutionInputWithinProfile(
+        claim.context.executionProfile,
+        current.run.inputBytes,
+      );
       if (
         usage.inputTokens > current.run.maxInputTokens ||
         usage.outputTokens > current.run.maxOutputTokens ||
@@ -2659,10 +2857,14 @@ class AiRuntimeServiceImpl {
       ) {
         throwAiRuntimeServiceError("AI_BUDGET_DENIED");
       }
-      budgetUsedMicros = calculateFakeBudgetMicros({
+      budgetUsedMicros = calculateAiExecutionBudgetMicros(
+        claim.context.executionProfile,
+        {
         inputBytes: current.run.inputBytes,
+        inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
-      });
+        },
+      );
       if (budgetUsedMicros > current.run.maxBudgetMicros) {
         throwAiRuntimeServiceError("AI_BUDGET_DENIED");
       }
@@ -2709,7 +2911,7 @@ class AiRuntimeServiceImpl {
     const runUpdated = await tx.$executeRaw<number>(Prisma.sql`
       UPDATE "AiRun"
          SET "status" = ${runStatus}::"AiRunStatus",
-             "outputBytes" = 0,
+             "outputBytes" = ${dispatched.outputBytes},
              "inputTokens" = ${usage.inputTokens},
              "outputTokens" = ${usage.outputTokens},
              "requestCount" = 1,
@@ -2729,6 +2931,20 @@ class AiRuntimeServiceImpl {
     `);
     if (Number(runUpdated) !== 1) {
       throwAiRuntimeServiceError("AI_INVALID_PROVIDER_RESPONSE");
+    }
+
+    if (classification.runStatus === "succeeded") {
+      if (dispatched.hasCompletionPayload !== (this.completionHandler !== null)) {
+        throwAiRuntimeServiceError("AI_INVALID_PROVIDER_RESPONSE");
+      }
+      if (this.completionHandler !== null) {
+        await this.completionHandler.complete(tx, Object.freeze({
+          projectId: claim.request.projectId,
+          runId: claim.runId,
+          operation: claim.request.operation,
+          completionPayload: dispatched.completionPayload,
+        }));
+      }
     }
 
     await this.writeTerminalAudit(
@@ -2847,6 +3063,10 @@ class AiRuntimeServiceImpl {
     if (!(await lockGrantOperation(tx, request.projectId, request.grantId, request.operation))) {
       return rejected("AI_GRANT_DENIED");
     }
+    const executionProfile = resolveAiExecutionProfile(request.operation, grant);
+    if (executionProfile === null) {
+      return rejected("AI_GRANT_DENIED");
+    }
 
     const sourceEntries: Array<{
       sourceId: string;
@@ -2889,12 +3109,14 @@ class AiRuntimeServiceImpl {
       request,
       revision,
       grant,
+      executionProfile,
       manifest,
     );
     return {
       request,
       revision,
       grant,
+      executionProfile,
       manifest,
       inputManifestFingerprint,
       inputBytes,

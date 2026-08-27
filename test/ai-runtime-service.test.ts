@@ -295,6 +295,7 @@ function conflictObserverDatabase(responses: unknown[][]): {
 
 function completionLockOrderDatabase(): {
   db: unknown;
+  completionTransaction: unknown;
   state: {
     isolationLevels: Prisma.TransactionIsolationLevel[];
     completionQueries: string[];
@@ -389,6 +390,7 @@ function completionLockOrderDatabase(): {
         );
       },
     },
+    completionTransaction,
     state,
   };
 }
@@ -810,7 +812,7 @@ test("existing run reads require service-owned Run/Attempt parity", () => {
     operationKey: fingerprintA,
     operationKeySchemaVersion: "ai-operation-key:v1",
     inputManifestFingerprint: fingerprintA,
-    promptFingerprint: fingerprintA,
+    promptFingerprint: FAKE_PROFILE.promptFingerprint,
     promptVersion: "fake-prompt-v1",
     providerFingerprint: fingerprintA,
     modelId: "synthetic-provider/model-v1",
@@ -1451,6 +1453,124 @@ test("completion locks frozen audit parents before Run and Attempt and ignores l
     ),
     [null, null],
   );
+});
+
+test("async provider output is completed by the handler in the same transaction", async () => {
+  const fake = completionLockOrderDatabase();
+  const completionPayload = Object.freeze({ verified: "candidate-set" });
+  let dispatchResolved = false;
+  let completionValue: unknown;
+  let completionCalls = 0;
+  const service = createAiRuntimeService({
+    db: fake.db as never,
+    admissibilityGate: new FakeAdmissibilityGate(),
+    provider: {
+      dispatch: async () => {
+        await Promise.resolve();
+        dispatchResolved = true;
+        return {
+          classification: {
+            runStatus: "succeeded" as const,
+            attemptStatus: "succeeded" as const,
+            safeCode: null,
+            httpStatus: 200,
+            automaticRetry: false as const,
+            providerRequestId: "req-async-1",
+            providerResponseId: "resp-async-1",
+            usage: { inputTokens: 3, outputTokens: 4, requestCount: 1 as const },
+          },
+          completionPayload,
+          outputBytes: 128,
+        };
+      },
+    },
+    completionHandler: {
+      complete: async (tx, value) => {
+        assert.equal(dispatchResolved, true);
+        assert.equal(tx, fake.completionTransaction);
+        completionCalls += 1;
+        completionValue = value;
+        fake.state.completionEvents.push("completion");
+      },
+    },
+    transactionRetryLimit: 1,
+    idFactory: () => attemptId,
+  });
+
+  const result = await service.claimAndDispatchRun({
+    projectId,
+    grantId: runId,
+    operation: "projectAnalysis",
+    sourceIds: [sourceAId],
+    runId,
+    operationKey: reconciliationOperationKey,
+  });
+
+  assert.deepEqual(result, {
+    kind: "claimed",
+    status: "succeeded",
+    runId,
+    operationKey: reconciliationOperationKey,
+    attemptId,
+    safeCode: null,
+  });
+  assert.equal(completionCalls, 1);
+  assert.deepEqual(completionValue, {
+    projectId,
+    runId,
+    operation: "projectAnalysis",
+    completionPayload,
+  });
+  const completionIndex = fake.state.completionEvents.indexOf("completion");
+  const firstAuditIndex = fake.state.completionEvents.indexOf("audit");
+  assert.ok(completionIndex > 0);
+  assert.ok(firstAuditIndex > completionIndex);
+});
+
+test("provider payload is never discarded when no completion handler is configured", async () => {
+  const fake = completionLockOrderDatabase();
+  const service = createAiRuntimeService({
+    db: fake.db as never,
+    admissibilityGate: new FakeAdmissibilityGate(),
+    provider: {
+      dispatch: async () => ({
+        classification: {
+          runStatus: "succeeded" as const,
+          attemptStatus: "succeeded" as const,
+          safeCode: null,
+          httpStatus: 200,
+          automaticRetry: false as const,
+          providerRequestId: "req-no-handler-1",
+          providerResponseId: "resp-no-handler-1",
+          usage: { inputTokens: 3, outputTokens: 4, requestCount: 1 as const },
+        },
+        completionPayload: Object.freeze({ verified: "candidate-set" }),
+        outputBytes: 128,
+      }),
+    },
+    transactionRetryLimit: 1,
+    idFactory: () => attemptId,
+  });
+
+  assert.deepEqual(
+    await service.claimAndDispatchRun({
+      projectId,
+      grantId: runId,
+      operation: "projectAnalysis",
+      sourceIds: [sourceAId],
+      runId,
+      operationKey: reconciliationOperationKey,
+    }),
+    {
+      kind: "claimed",
+      status: "running",
+      runId,
+      operationKey: reconciliationOperationKey,
+      attemptId,
+      safeCode: "AI_PROVIDER_UNKNOWN",
+    },
+  );
+  assert.equal(fake.state.auditWrites, 0);
 });
 
 test("terminal unknown audits use the generated Prisma safe-code enum value", async () => {

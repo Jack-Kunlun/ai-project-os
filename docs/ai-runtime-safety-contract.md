@@ -12,9 +12,9 @@
 
 ### 当前实现状态
 
-当前已经具备并在专用 disposable PostgreSQL gate 中验证了 additive governance migration、typed fake runtime service、`prepare`、CAS claim、`AiRunAttempt`、审计写入以及 queued Run 的 policy/grant、scanner 和 budget 终态闭合。仓库还提供了一个仅用于预接线检查的纯 `autoExtract` Responses 请求编译器：它只接受受控 profile、运行标识和 source 清单，生成不可变的单次传输计划，不读取凭据、不执行网络请求，也没有接入运行服务。该 migration 尚未应用到用户当前数据库或任何部署数据库。本仓库没有公开 API 或 UI 集成；正常运行时 `AI_ENABLED` 仍默认关闭，启用时在真实 provider 未实现的情况下 fail closed 为 provider-disabled。
+当前已经具备并在专用 disposable PostgreSQL gate 中验证了 additive governance migration、typed fake runtime service、`prepare`、CAS claim、`AiRunAttempt`、审计写入以及 queued Run 的 policy/grant、scanner 和 budget 终态闭合。仓库还提供了仅用于预接线检查的纯 `autoExtract` Responses 请求编译器和响应验证器：编译器只接受受控 profile、运行标识和 source 清单，生成不可变的单次传输计划；验证器只接受同一进程中由该编译器签发的计划，把 completed、无工具的结构化响应绑定回原 model、metadata 和 source 快照，并逐条验证 source ID 与连续原文摘录。两者均不读取凭据、不执行网络请求，也没有接入运行服务。该 migration 尚未应用到用户当前数据库或任何部署数据库。本仓库没有公开 API 或 UI 集成；正常运行时 `AI_ENABLED` 仍默认关闭，启用时在真实 provider 未实现的情况下 fail closed 为 provider-disabled。
 
-当前仍没有真实 provider、LLM、Embedding、RAG、GitHub 连接器、agent 或任何真实外发。纯请求编译器也不是 provider adapter 或 transport，不能读取 API key、创建 HTTP header、调用 SDK/fetch 或解析模型输出。fake admissibility gate 只是安全元数据管线的测试替身，不是 secret/PII scanner；fake provider 的一次 dispatch 证据也不等于真实 provider 崩溃、对账或 reconciliation 已经解决。Layer A 整体不在本文中被宣称完成，V0 API、页面和人工工作流本轮也没有新增 smoke 证据。
+当前仍没有真实 provider、LLM、Embedding、RAG、GitHub 连接器、agent 或任何真实外发。纯请求编译器与响应验证器也不是 provider adapter 或 transport，不能读取 API key、创建 HTTP header、调用 SDK/fetch 或取得模型输出；验证器只校验调用方提供的未知 JSON，并丢弃未验证的 provider 原文。fake admissibility gate 只是安全元数据管线的测试替身，不是 secret/PII scanner；fake provider 的一次 dispatch 证据也不等于真实 provider 崩溃、对账或 reconciliation 已经解决。Layer A 整体不在本文中被宣称完成，V0 API、页面和人工工作流本轮也没有新增 smoke 证据。
 
 ## 分层交付
 
@@ -191,12 +191,13 @@ OpenAI 官方 Responses API 文档描述了 `store`、最大输出、结构化�
 
 上述官方资料没有为本项目记录的 `operationKey` 提供可依赖的 provider 幂等保证，也没有说明客户端在请求已送达但尚未拿到 response ID 时如何恢复 provider 处理状态。因此本项目作出保守推论：`store:false` 前台请求在“超时且没有 response ID”时无法仅凭当前官方接口完成对账。该推论不是对 provider 所有未公开行为的断言；如果后续官方合同、账户能力或实测证据发生变化，必须重新审阅本节。
 
-在该未知边界关闭前，只允许保留纯 `autoExtract` 请求编译器，并满足以下限制：
+在该未知边界关闭前，只允许保留纯 `autoExtract` 请求编译器与响应验证器，并满足以下限制：
 
 - endpoint 固定为 `/v1/responses`，不接受 caller URL、header、credential、model 参数、prompt、tool 或 schema 扩展；
 - `store:false`、`tools:[]`、`tool_choice:"none"`、`parallel_tool_calls:false`，不包含 background、conversation、previous response、stream 或 hosted tool 字段；
-- 固定严格 JSON Schema，候选字段必须带 `sourceId` 和 `sourceExcerpt`，source 内容明确按不可信数据处理；未来输出门还必须验证 source 属于授权 manifest 且 excerpt 是对应原文的连续子串，当前编译器不解析或接受模型输出；
+- 固定严格 JSON Schema，候选字段必须带 `sourceId` 和 `sourceExcerpt`，source 内容明确按不可信数据处理；响应验证器只接受 completed、无 error、无工具调用、model/metadata 与签发计划一致的响应，允许忽略 reasoning item，但只允许一个 completed assistant `output_text`；每个候选的 source 必须属于签发计划且 excerpt 必须是对应原文的连续子串，重复候选、拒答、歧义消息、越权来源或不匹配摘录均以稳定错误拒绝；
 - 传输计划固定 `redirect:error`、`maximumAttempts=1`、`automaticRetry=false`，但当前没有实际 transport；
+- 通过验证后只返回安全 usage、opaque response ID、候选字段、证据位置和 fingerprints；不返回或保存原始 response、结构化输出文本、reasoning、annotation 或 provider error body；
 - `AI_ENABLED` 和 provider availability 语义不变，仍为 provider-disabled；不得配置 key、执行真实调用、产生账单或宣称自动抽取可用。
 
 ### 数据最小化

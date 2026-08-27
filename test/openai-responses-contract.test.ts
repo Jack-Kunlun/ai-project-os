@@ -193,6 +193,7 @@ test("compiler rejects request expansion, invalid sources and oversized canonica
     request({ sources: [validSource, validSource] }),
     request({ sources: [{ sourceId: sourceAId, content: "" }] }),
     request({ sources: [{ sourceId: sourceAId, content: "unsafe\u0000content" }] }),
+    request({ sources: [{ sourceId: sourceAId, content: "unsafe\u0001content" }] }),
     request({ sources: [{ sourceId: sourceAId, content: "unpaired\ud800" }] }),
     request({ sources: [{ ...validSource, prompt: "caller prompt" }] }),
   ]) {

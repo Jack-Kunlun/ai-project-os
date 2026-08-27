@@ -33,13 +33,18 @@ const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const SECRET_LIKE_IDENTIFIER_PATTERN =
   /(api[-_]?key|bearer|password|secret|token|sk-)/i;
 const UNSAFE_SOURCE_CONTROL_PATTERN =
-  /[\u0000\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
 
 const MAX_SOURCE_COUNT = 100;
 const MAX_PROFILE_INPUT_BYTES = 256_000;
 const MAX_PROFILE_OUTPUT_TOKENS = 4_096;
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 120_000;
+
+const issuedAutoExtractPlans = new WeakMap<
+  object,
+  readonly Readonly<OpenAiAutoExtractSource>[]
+>();
 
 const AUTO_EXTRACT_INSTRUCTIONS = [
   "Extract only candidate project facts that are explicitly supported by the supplied sources.",
@@ -406,7 +411,7 @@ export function buildOpenAiAutoExtractTransportPlan(
 ): OpenAiResponsesTransportPlan {
   const profile = normalizeProfile(rawProfile);
   const request = normalizeRequest(rawRequest, profile.maxInputBytes);
-  return deepFreeze({
+  const plan: OpenAiResponsesTransportPlan = deepFreeze({
     contractVersion: OPENAI_RESPONSES_CONTRACT_VERSION,
     operation: "autoExtract" as const,
     profileFingerprint: profile.profileFingerprint,
@@ -451,4 +456,19 @@ export function buildOpenAiAutoExtractTransportPlan(
       },
     },
   });
+  issuedAutoExtractPlans.set(plan, request.sources);
+  return plan;
+}
+
+/**
+ * Resolves the exact source snapshot attached to a plan created by this module.
+ * Deserialized or caller-forged plans are deliberately not accepted.
+ */
+export function getIssuedOpenAiAutoExtractPlanSources(
+  value: unknown,
+): readonly Readonly<OpenAiAutoExtractSource>[] | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  return issuedAutoExtractPlans.get(value) ?? null;
 }

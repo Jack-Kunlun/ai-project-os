@@ -29,6 +29,14 @@ export type {
   OpenAiResponsesTransportPlan,
 } from "./openai-responses-contract";
 export {
+  OPENAI_RESPONSES_OUTPUT_CONTRACT_VERSION,
+  verifyOpenAiAutoExtractResponse,
+} from "./openai-responses-output";
+export type {
+  VerifiedOpenAiAutoExtractCandidate,
+  VerifiedOpenAiAutoExtractResponse,
+} from "./openai-responses-output";
+export {
   AiRuntimeServiceError,
   isAiRuntimeServiceError,
   throwAiRuntimeServiceError,

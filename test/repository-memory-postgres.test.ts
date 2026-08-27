@@ -10,6 +10,10 @@ import {
 } from "@prisma/client";
 import { Client } from "pg";
 import {
+  OPENAI_EMBEDDING_MODEL_ID,
+  loadOpenAiCredential,
+} from "@/lib/ai-runtime";
+import {
   MODEL_TRANSFER_CONSENT_VERSION,
   createProjectAiConfigService,
 } from "@/lib/ai-memory";
@@ -17,10 +21,12 @@ import {
   GITHUB_READ_ONLY_CLIENT_VERSION,
   GITHUB_SOFT_EXCLUDE_CLASSES,
   REPOSITORY_MODEL_TRANSFER_CONSENT_VERSION,
+  RepositoryCodeIndexError,
   RepositoryCodeSearchError,
   RepositoryModelGrantError,
   createGitHubCodeScanService,
   createGitHubRepositoryLedgerService,
+  createRepositoryCodeIndexService,
   createRepositoryCodeSearchService,
   createRepositoryModelGrantService,
   type GitHubReadOnlyClient,
@@ -251,6 +257,17 @@ async function expectSearchError(
   );
 }
 
+async function expectIndexError(
+  action: () => Promise<unknown>,
+  code: RepositoryCodeIndexError["code"],
+): Promise<void> {
+  await assert.rejects(
+    action,
+    (error: unknown) =>
+      error instanceof RepositoryCodeIndexError && error.code === code,
+  );
+}
+
 test(
   "repository memory PostgreSQL gate requires an explicit disposable target",
   { skip: !hasUrl || gate === "1" },
@@ -365,6 +382,127 @@ test(
           acknowledgeProcessingRights: true,
         });
         assert.equal(idempotent.grants[0]?.id, issued.grants[0]?.id);
+
+        const indexService = createRepositoryCodeIndexService({ db: prisma });
+        const preparedIndexes = await Promise.all([
+          indexService.prepareRepositoryCodeIndex({
+            projectId: projectAId,
+            projectRepositoryLinkId: requiredLink.id,
+            grantId: issued.grants[0]!.id,
+          }),
+          indexService.prepareRepositoryCodeIndex({
+            projectId: projectAId,
+            projectRepositoryLinkId: requiredLink.id,
+            grantId: issued.grants[0]!.id,
+          }),
+        ]);
+        assert.equal(preparedIndexes[0]?.id, preparedIndexes[1]?.id);
+        assert.equal(preparedIndexes[0]?.status, "building");
+        assert.equal(preparedIndexes[0]?.expectedInputCount, 1);
+        assert.equal(preparedIndexes[0]?.capturedFullName, safeRepository.fullName);
+        assert.equal(preparedIndexes[0]?.frozenCommitSha, fixtures[0]!.commitSha);
+        assert.equal(await prisma.repositoryCodeIndexGeneration.count({
+          where: { projectId: projectAId },
+        }), 1);
+        assert.equal(await prisma.repositoryCodeIndexInput.count({
+          where: { projectId: projectAId },
+        }), 1);
+
+        const credential = loadOpenAiCredential({
+          OPENAI_API_KEY: `sk-${"a".repeat(32)}`,
+        });
+        assert.notEqual(credential, null);
+        let embeddingCalls = 0;
+        const publishedIndex = await indexService.executeRepositoryCodeIndex(
+          {
+            projectId: projectAId,
+            projectRepositoryLinkId: requiredLink.id,
+            indexGenerationId: preparedIndexes[0]!.id,
+          },
+          credential!,
+          {
+            fetchImplementation: async (_request, init) => {
+              embeddingCalls += 1;
+              const body = JSON.parse(String(init?.body)) as {
+                model: string;
+                input: string[];
+                dimensions: number;
+              };
+              assert.equal(body.model, OPENAI_EMBEDDING_MODEL_ID);
+              assert.equal(body.dimensions, 1_536);
+              assert.deepEqual(body.input, [fixtures[0]!.content]);
+              return new Response(JSON.stringify({
+                object: "list",
+                model: OPENAI_EMBEDDING_MODEL_ID,
+                data: [{
+                  object: "embedding",
+                  index: 0,
+                  embedding: Array.from(
+                    { length: 1_536 },
+                    (_, component) => component === 0 ? 1 : 0,
+                  ),
+                }],
+                usage: { prompt_tokens: 8, total_tokens: 8 },
+              }), {
+                status: 200,
+                headers: {
+                  "content-type": "application/json",
+                  "x-request-id": "req_repository_index_success",
+                },
+              });
+            },
+          },
+        );
+        assert.equal(publishedIndex.kind, "published");
+        assert.equal(embeddingCalls, 1);
+        assert.equal(await prisma.repositoryCodeIndexPointer.count({
+          where: { projectId: projectAId },
+        }), 1);
+        assert.equal(await prisma.chunkEmbedding.count({
+          where: { projectId: projectAId },
+        }), 1);
+        const repositoryVector = await raw.query<{
+          dimensions: number;
+          magnitude: number;
+        }>(
+          `SELECT vector_dims("vector") AS dimensions,
+                  vector_norm("vector") AS magnitude
+             FROM "ChunkEmbedding"
+            WHERE "projectId" = $1 AND "indexGenerationId" = $2`,
+          [projectAId, preparedIndexes[0]!.id],
+        );
+        assert.deepEqual(repositoryVector.rows, [{ dimensions: 1536, magnitude: 1 }]);
+        assert.equal(await prisma.indexWorkItem.count({
+          where: { projectId: projectAId, status: "succeeded" },
+        }), 1);
+        const repositoryChunk = await prisma.sourceChunk.findFirstOrThrow({
+          where: {
+            projectId: projectAId,
+            projectRepositoryLinkId: requiredLink.id,
+            originScope: "repository_link",
+          },
+        });
+        assert.equal(repositoryChunk.rangeUnit, "line");
+        assert.equal(repositoryChunk.rangeStart, 1);
+        assert.equal(repositoryChunk.rangeEnd, 4);
+        assert.equal(repositoryChunk.contentText, fixtures[0]!.content);
+
+        const alreadyPublished = await indexService.executeRepositoryCodeIndex(
+          {
+            projectId: projectAId,
+            projectRepositoryLinkId: requiredLink.id,
+            indexGenerationId: preparedIndexes[0]!.id,
+          },
+          credential!,
+          {
+            fetchImplementation: async () => {
+              throw new Error("published index must not dispatch again");
+            },
+          },
+        );
+        assert.equal(alreadyPublished.kind, "published");
+        assert.equal(embeddingCalls, 1);
+
         await expectGrantError(
           () => grantService.issue({
             projectId: projectAId,
@@ -454,6 +592,14 @@ test(
         })).grants.length, 1);
 
         await ledger.disable({ projectId: projectAId, linkId: requiredLink.id });
+        await expectIndexError(
+          () => indexService.prepareRepositoryCodeIndex({
+            projectId: projectAId,
+            projectRepositoryLinkId: requiredLink.id,
+            grantId: issued.grants[0]!.id,
+          }),
+          "REPOSITORY_CODE_INDEX_LINK_INELIGIBLE",
+        );
         await expectSearchError(
           () => search.search({
             projectId: projectAId,

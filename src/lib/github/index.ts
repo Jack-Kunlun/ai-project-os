@@ -86,3 +86,11 @@ export {
   type RepositoryCodeSearchResponse,
   type RepositoryCodeSearchScope,
 } from "./repository-code-search";
+export {
+  REPOSITORY_CODE_INDEX_VERSION,
+  RepositoryCodeIndexError,
+  createRepositoryCodeIndexService,
+  type RepositoryCodeIndexErrorCode,
+  type RepositoryCodeIndexExecutionResult,
+  type RepositoryCodeIndexView,
+} from "./repository-code-index";

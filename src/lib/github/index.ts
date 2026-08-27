@@ -134,3 +134,11 @@ export {
   type RepositoryCodeIndexExecutionResult,
   type RepositoryCodeIndexView,
 } from "./repository-code-index";
+export {
+  REPOSITORY_MATERIAL_INDEX_VERSION,
+  RepositoryMaterialIndexError,
+  createRepositoryMaterialIndexService,
+  type RepositoryMaterialIndexErrorCode,
+  type RepositoryMaterialIndexExecutionResult,
+  type RepositoryMaterialIndexView,
+} from "./repository-material-index";

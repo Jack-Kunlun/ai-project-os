@@ -9,14 +9,18 @@ import {
   GITHUB_READ_ONLY_CLIENT_VERSION,
   GITHUB_SOFT_EXCLUDE_CLASSES,
   REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
+  RepositoryMaterialIndexError,
   createGitHubMaterialSyncService,
   createGitHubRepositoryLedgerService,
+  createRepositoryMaterialIndexService,
   createRepositoryMaterialModelGrantService,
   type GitHubMaterialReadOnlyClient,
 } from "@/lib/github";
 import {
   OPENAI_EMBEDDING_PROCESSOR_FINGERPRINT,
+  OPENAI_EMBEDDING_MODEL_ID,
   getOpenAiEmbeddingProfile,
+  loadOpenAiCredential,
 } from "@/lib/ai-runtime";
 
 const execFile = promisify(execFileCallback);
@@ -410,10 +414,156 @@ test(
           acknowledgeProcessingRights: true,
         });
         assert.equal(replayedGrant.grants[0]?.id, issued.grants[0]?.id);
+
+        const materialIndex = createRepositoryMaterialIndexService({ db: prisma });
+        const preparedIndexes = await Promise.all([
+          materialIndex.prepareRepositoryMaterialIndex({
+            projectId,
+            projectRepositoryLinkId: linkA.id,
+            grantId: issued.grants[0]!.id,
+          }),
+          materialIndex.prepareRepositoryMaterialIndex({
+            projectId,
+            projectRepositoryLinkId: linkA.id,
+            grantId: issued.grants[0]!.id,
+          }),
+        ]);
+        assert.equal(preparedIndexes[0]?.id, preparedIndexes[1]?.id);
+        assert.equal(preparedIndexes[0]?.status, "building");
+        assert.ok(preparedIndexes[0]!.expectedInputCount >= 6);
+        assert.equal(preparedIndexes[0]?.capturedFullName, repositoryA.fullName);
+        assert.equal(preparedIndexes[0]?.observedHeadCommitSha, commitSha);
+        assert.equal(
+          await prisma.repositoryMaterialIndexGeneration.count({
+            where: { projectId, projectRepositoryLinkId: linkA.id },
+          }),
+          1,
+        );
+        assert.equal(
+          await prisma.repositoryMaterialIndexInput.count({
+            where: {
+              projectId,
+              projectRepositoryLinkId: linkA.id,
+              indexGenerationId: preparedIndexes[0]!.id,
+            },
+          }),
+          preparedIndexes[0]!.expectedInputCount,
+        );
+
+        const credential = loadOpenAiCredential({
+          OPENAI_API_KEY: "sk-" + "a".repeat(32),
+        });
+        assert.notEqual(credential, null);
+        let embeddingCalls = 0;
+        const publishedIndex = await materialIndex.executeRepositoryMaterialIndex(
+          {
+            projectId,
+            projectRepositoryLinkId: linkA.id,
+            indexGenerationId: preparedIndexes[0]!.id,
+          },
+          credential!,
+          {
+            fetchImplementation: async (_request, init) => {
+              embeddingCalls += 1;
+              const body = JSON.parse(String(init?.body)) as {
+                model: string;
+                input: string[];
+                dimensions: number;
+              };
+              assert.equal(body.model, OPENAI_EMBEDDING_MODEL_ID);
+              assert.equal(body.dimensions, 1_536);
+              assert.ok(body.input.length >= 6);
+              return new Response(JSON.stringify({
+                object: "list",
+                model: OPENAI_EMBEDDING_MODEL_ID,
+                data: body.input.map((_content, index) => ({
+                  object: "embedding",
+                  index,
+                  embedding: Array.from(
+                    { length: 1_536 },
+                    (_, component) => component === 0 ? 1 : 0,
+                  ),
+                })),
+                usage: {
+                  prompt_tokens: body.input.length * 8,
+                  total_tokens: body.input.length * 8,
+                },
+              }), {
+                status: 200,
+                headers: {
+                  "content-type": "application/json",
+                  "x-request-id": "req_repository_material_index_success",
+                },
+              });
+            },
+          },
+        );
+        assert.equal(publishedIndex.kind, "published");
+        assert.equal(embeddingCalls, 1);
+        assert.equal(
+          await prisma.repositoryMaterialIndexPointer.count({
+            where: { projectId, projectRepositoryLinkId: linkA.id },
+          }),
+          1,
+        );
+        assert.equal(
+          await prisma.repositoryMaterialEmbedding.count({
+            where: {
+              projectId,
+              projectRepositoryLinkId: linkA.id,
+              indexGenerationId: preparedIndexes[0]!.id,
+            },
+          }),
+          preparedIndexes[0]!.expectedInputCount,
+        );
+        const materialVectors = await raw.query<{
+          dimensions: number;
+          magnitude: number;
+        }>(
+          `SELECT vector_dims("vector") AS dimensions,
+                  vector_norm("vector") AS magnitude
+             FROM "RepositoryMaterialEmbedding"
+            WHERE "projectId" = $1 AND "indexGenerationId" = $2`,
+          [projectId, preparedIndexes[0]!.id],
+        );
+        assert.equal(
+          materialVectors.rows.length,
+          preparedIndexes[0]!.expectedInputCount,
+        );
+        assert.ok(materialVectors.rows.every((row) =>
+          row.dimensions === 1_536 && row.magnitude === 1));
+
+        const alreadyPublished =
+          await materialIndex.executeRepositoryMaterialIndex(
+            {
+              projectId,
+              projectRepositoryLinkId: linkA.id,
+              indexGenerationId: preparedIndexes[0]!.id,
+            },
+            credential!,
+            {
+              fetchImplementation: async () => {
+                throw new Error("published material index must not dispatch again");
+              },
+            },
+          );
+        assert.equal(alreadyPublished.kind, "published");
+        assert.equal(embeddingCalls, 1);
+
         await materialGrants.revoke({ projectId, projectRepositoryLinkId: linkA.id });
         assert.equal(
           (await materialGrants.getStatus({ projectId, projectRepositoryLinkId: linkA.id })).grants.length,
           0,
+        );
+        await assert.rejects(
+          () => materialIndex.prepareRepositoryMaterialIndex({
+            projectId,
+            projectRepositoryLinkId: linkA.id,
+            grantId: issued.grants[0]!.id,
+          }),
+          (error: unknown) =>
+            error instanceof RepositoryMaterialIndexError &&
+            error.code === "REPOSITORY_MATERIAL_INDEX_GRANT_INELIGIBLE",
         );
 
         const queuedB = await service.prepareRepositorySync({ projectId, linkId: linkB.id });

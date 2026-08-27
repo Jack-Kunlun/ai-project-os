@@ -194,6 +194,7 @@ export type VerifiedGitHubRelease = Readonly<{
   draft: boolean;
   prerelease: boolean;
   createdAt: string;
+  updatedAt: string;
   publishedAt: string | null;
   htmlUrl: string;
 }>;
@@ -997,6 +998,7 @@ function parseRelease(
     draft: release.draft,
     prerelease: release.prerelease,
     createdAt: safeTimestamp(release.created_at),
+    updatedAt: safeTimestamp(release.updated_at),
     publishedAt: nullableTimestamp(release.published_at),
     htmlUrl: safeGitHubHtmlUrl(release.html_url, owner, repository, "releases/"),
   });

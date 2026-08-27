@@ -62,6 +62,28 @@ export {
   type VerifiedGitHubTreeEntry,
 } from "./read-only-client";
 export {
+  GITHUB_MATERIAL_SYNC_SERVICE_VERSION,
+  GitHubMaterialSyncServiceError,
+  createGitHubMaterialSyncService,
+  type GitHubMaterialSyncService,
+  type GitHubMaterialSyncServiceErrorCode,
+  type RepositoryMaterialSyncView,
+} from "./material-sync-service";
+export {
+  GITHUB_MATERIAL_SCANNER_FINGERPRINT,
+  GITHUB_MATERIAL_SCANNER_VERSION,
+  GITHUB_MATERIAL_SCAN_BUDGETS,
+  GitHubMaterialScanError,
+  scanGitHubRepositoryMaterials,
+  type GitHubMaterialKindValue,
+  type GitHubMaterialQuarantineFinding,
+  type GitHubMaterialScanErrorCode,
+  type GitHubMaterialScanPolicy,
+  type GitHubMaterialScanResult,
+  type ScanGitHubRepositoryMaterialsOptions,
+  type ScannedGitHubMaterialSource,
+} from "./material-scanner";
+export {
   GITHUB_AUTH_REF,
   GITHUB_REPOSITORY_LEDGER_VERSION,
   GITHUB_SOFT_EXCLUDE_CLASSES,

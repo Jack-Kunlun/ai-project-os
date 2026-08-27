@@ -80,6 +80,7 @@ test("repository ledger rejects ambiguous scope before opening a transaction", a
     { projectId, repository, config: { ...config, includeRoots: ["src\\server"] } },
     { projectId, repository, config: { ...config, markdownEnabled: true } },
     { projectId, repository, config: { ...config, markdownPaths: ["docs/*.md"] } },
+    { projectId, repository, config: { ...config, markdownEnabled: true, markdownPaths: [`${"a".repeat(480)}.md`] } },
     { projectId, repository, config: { ...config, softExcludePatterns: ["secrets"] } },
     {
       projectId,

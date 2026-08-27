@@ -387,6 +387,18 @@ test(
           },
         });
         await expectRejected(() =>
+          prisma.gitHubMaterialSyncRun.update({
+            where: { id: runA.id },
+            data: { requestCount: 4 },
+          }),
+        );
+        await expectRejected(() =>
+          prisma.repositoryMaterialGeneration.update({
+            where: { id: generationA.id },
+            data: { completedAt: new Date("2030-01-01T00:00:00.000Z") },
+          }),
+        );
+        await expectRejected(() =>
           prisma.gitHubSourceVersion.update({
             where: { id: sourceVersion.id },
             data: { remoteIdentity: "repository:mutated" },
@@ -426,8 +438,18 @@ test(
           });
           await prisma.gitHubMaterialSyncRun.update({
             where: { id: run.id },
-            data: { status: "running", stage: "publishing", startedAt: new Date() },
+            data: { status: "running", stage: "freezing", startedAt: new Date() },
           });
+          await prisma.gitHubMaterialSyncRun.update({
+            where: { id: run.id },
+            data: { stage: "publishing" },
+          });
+          await expectRejected(() =>
+            prisma.gitHubMaterialSyncRun.update({
+              where: { id: run.id },
+              data: { stage: "fetching" },
+            }),
+          );
           const generation = await prisma.repositoryMaterialGeneration.create({
             data: {
               projectId,
@@ -516,7 +538,11 @@ test(
         });
         await prisma.gitHubMaterialSyncRun.update({
           where: { id: failedRun.id },
-          data: { status: "running", stage: "scanning", startedAt: new Date() },
+          data: { status: "running", stage: "freezing", startedAt: new Date() },
+        });
+        await prisma.gitHubMaterialSyncRun.update({
+          where: { id: failedRun.id },
+          data: { stage: "scanning" },
         });
         const failedGeneration = await prisma.repositoryMaterialGeneration.create({
           data: {

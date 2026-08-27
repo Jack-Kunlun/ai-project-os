@@ -207,6 +207,7 @@ test("client validates paged Issues, pull request metadata/files, and Releases",
       draft: false,
       prerelease: false,
       created_at: "2026-08-04T00:00:00Z",
+      updated_at: "2026-08-04T02:00:00Z",
       published_at: "2026-08-04T01:00:00Z",
       html_url: `https://github.com/${owner}/${repository}/releases/tag/v1.0.0`,
     }]),
@@ -247,6 +248,7 @@ test("client validates paged Issues, pull request metadata/files, and Releases",
   assert.equal(JSON.stringify(files).includes("SECRET_PATCH"), false);
   const releases = await client.getReleasesPage({ owner, repository, page: 1 });
   assert.equal(releases.items[0]?.tagName, "v1.0.0");
+  assert.equal(releases.items[0]?.updatedAt, "2026-08-04T02:00:00Z");
   assert.equal(responses.length, 0);
 });
 

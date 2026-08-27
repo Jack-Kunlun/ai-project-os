@@ -270,6 +270,7 @@ function canonicalMarkdownPaths(value: unknown, enabled: boolean): readonly stri
   const paths = value.map((entry) => {
     const path = canonicalIncludeRoot(entry);
     if (
+      Buffer.byteLength(path, "utf8") > 480 ||
       !/\.(?:md|markdown)$/iu.test(path) ||
       ["*", "?", "[", "]"].some((character) => path.includes(character))
     ) {

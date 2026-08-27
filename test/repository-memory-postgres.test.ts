@@ -15,6 +15,7 @@ import {
 } from "@/lib/ai-runtime";
 import {
   MODEL_TRANSFER_CONSENT_VERSION,
+  createCorpusIndexService,
   createProjectAiConfigService,
 } from "@/lib/ai-memory";
 import {
@@ -25,6 +26,7 @@ import {
   RepositoryCodeSearchError,
   RepositoryModelGrantError,
   RepositoryRagSnapshotError,
+  createProjectRepositorySearchService,
   createGitHubCodeScanService,
   createGitHubRepositoryLedgerService,
   createRepositoryCodeIndexService,
@@ -54,6 +56,17 @@ const safeRepository: VerifiedGitHubRepository = Object.freeze({
   owner: "acme",
   name: "memory-core",
   fullName: "acme/memory-core",
+  private: true,
+  archived: false,
+  disabled: false,
+  defaultBranch: "main",
+});
+const secondSafeRepository: VerifiedGitHubRepository = Object.freeze({
+  repositoryId: 3_000_003,
+  nodeId: "R_MEMORY_SAFE_SECOND",
+  owner: "acme",
+  name: "memory-api",
+  fullName: "acme/memory-api",
   private: true,
   archived: false,
   disabled: false,
@@ -109,6 +122,21 @@ const fixtures: readonly RepositoryFixture[] = Object.freeze([
     content: [
       'export const OptionalInfraBeacon = "nebula_guardrail";',
       'export const supportContact = "release.owner@example.com";',
+      "",
+    ].join("\n"),
+  }),
+  Object.freeze({
+    repository: secondSafeRepository,
+    commitSha: "5".repeat(40),
+    rootTreeSha: "6".repeat(40),
+    directoryTreeSha: "7".repeat(40),
+    blobSha: "8".repeat(40),
+    includeRoot: "api",
+    fileName: "repository.ts",
+    content: [
+      "export function SecondRepositoryBeacon(): string {",
+      '  return "orion_cross_repository";',
+      "}",
       "",
     ].join("\n"),
   }),
@@ -338,6 +366,10 @@ test(
         });
         assert.equal(configured.configured, true);
         assert.equal(configured.operations.length, 5);
+        const manualEmbeddingGrantId = configured.operations.find(
+          (operation) => operation.operation === AiOperation.embedding,
+        )?.grantId;
+        assert.notEqual(manualEmbeddingGrantId, undefined);
 
         const ledger = createGitHubRepositoryLedgerService({ db: prisma });
         const requiredLink = await ledger.connect({
@@ -355,10 +387,20 @@ test(
           repository: piiRepository,
           config: repositoryConfig(ProjectRepositoryRole.infrastructure, false, "infra"),
         });
+        const secondRequiredLink = await ledger.connect({
+          projectId: projectAId,
+          repository: secondSafeRepository,
+          config: repositoryConfig(
+            ProjectRepositoryRole.library,
+            true,
+            "api",
+            false,
+          ),
+        });
         const scanner = createGitHubCodeScanService({ db: prisma, client: fixtureClient() });
         const scanned = await scanner.scanProject(projectAId);
         assert.equal(scanned.status, "succeeded");
-        assert.equal(scanned.completedRequiredLinkCount, 1);
+        assert.equal(scanned.completedRequiredLinkCount, 2);
         assert.equal(scanned.completedOptionalLinkCount, 1);
 
         const safeGeneration = await prisma.repositoryCodeGeneration.findFirstOrThrow({
@@ -367,7 +409,15 @@ test(
         const piiGeneration = await prisma.repositoryCodeGeneration.findFirstOrThrow({
           where: { projectId: projectAId, projectRepositoryLinkId: optionalLink.id },
         });
+        const secondSafeGeneration =
+          await prisma.repositoryCodeGeneration.findFirstOrThrow({
+            where: {
+              projectId: projectAId,
+              projectRepositoryLinkId: secondRequiredLink.id,
+            },
+          });
         assert.equal(safeGeneration.modelTransferScanResult, "passed");
+        assert.equal(secondSafeGeneration.modelTransferScanResult, "passed");
         assert.equal(piiGeneration.modelTransferScanResult, "blocked");
         assert.deepEqual(piiGeneration.securityFindingManifest, [
           { normalizedPath: "infra/alerts.ts", categories: ["EMAIL_ADDRESS"] },
@@ -377,8 +427,10 @@ test(
           include: { snapshot: { include: { entries: true } } },
         });
         assert.deepEqual(
-          projectSnapshot.snapshot.entries.map((entry) => entry.projectRepositoryLinkId),
-          [requiredLink.id],
+          projectSnapshot.snapshot.entries
+            .map((entry) => entry.projectRepositoryLinkId)
+            .sort(),
+          [requiredLink.id, secondRequiredLink.id].sort(),
         );
 
         const grantService = createRepositoryModelGrantService({ db: prisma });
@@ -402,6 +454,18 @@ test(
           acknowledgeProcessingRights: true,
         });
         assert.equal(idempotent.grants[0]?.id, issued.grants[0]?.id);
+        const secondIssued = await grantService.issue({
+          projectId: projectAId,
+          projectRepositoryLinkId: secondRequiredLink.id,
+          operations: [AiOperation.embedding],
+          consentVersion: REPOSITORY_MODEL_TRANSFER_CONSENT_VERSION,
+          acknowledgeExternalModelTransfer: true,
+          acknowledgeProcessingRights: true,
+        });
+        assert.equal(
+          secondIssued.eligibleCodeGeneration?.id,
+          secondSafeGeneration.id,
+        );
 
         const indexService = createRepositoryCodeIndexService({ db: prisma });
         const preparedIndexes = await Promise.all([
@@ -523,6 +587,93 @@ test(
         assert.equal(alreadyPublished.kind, "published");
         assert.equal(embeddingCalls, 1);
 
+        const secondPreparedIndex =
+          await indexService.prepareRepositoryCodeIndex({
+            projectId: projectAId,
+            projectRepositoryLinkId: secondRequiredLink.id,
+            grantId: secondIssued.grants[0]!.id,
+          });
+        const secondPublishedIndex = await indexService.executeRepositoryCodeIndex(
+          {
+            projectId: projectAId,
+            projectRepositoryLinkId: secondRequiredLink.id,
+            indexGenerationId: secondPreparedIndex.id,
+          },
+          credential!,
+          {
+            fetchImplementation: async (_request, init) => {
+              const body = JSON.parse(String(init?.body)) as {
+                model: string;
+                input: string[];
+                dimensions: number;
+              };
+              assert.deepEqual(body.input, [fixtures[2]!.content]);
+              return new Response(JSON.stringify({
+                object: "list",
+                model: OPENAI_EMBEDDING_MODEL_ID,
+                data: [{
+                  object: "embedding",
+                  index: 0,
+                  embedding: Array.from(
+                    { length: 1_536 },
+                    (_, component) => component === 1 ? 1 : 0,
+                  ),
+                }],
+                usage: { prompt_tokens: 8, total_tokens: 8 },
+              }), {
+                status: 200,
+                headers: {
+                  "content-type": "application/json",
+                  "x-request-id": "req_repository_index_second_success",
+                },
+              });
+            },
+          },
+        );
+        assert.equal(secondPublishedIndex.kind, "published");
+
+        const corpusIndex = createCorpusIndexService({ db: prisma });
+        const manualCorpus = await corpusIndex.ensureProjectCorpusGeneration({
+          projectId: projectAId,
+          grantId: manualEmbeddingGrantId!,
+        });
+        const manualIndex = await corpusIndex.prepareProjectCorpusIndex({
+          projectId: projectAId,
+          corpusGenerationId: manualCorpus.id,
+        });
+        const publishedManualIndex = await corpusIndex.executeProjectCorpusIndex(
+          { projectId: projectAId, indexGenerationId: manualIndex.id },
+          credential!,
+          {
+            fetchImplementation: async (_request, init) => {
+              const body = JSON.parse(String(init?.body)) as {
+                input: string[];
+              };
+              assert.deepEqual(body.input, [sourceContent]);
+              return new Response(JSON.stringify({
+                object: "list",
+                model: OPENAI_EMBEDDING_MODEL_ID,
+                data: [{
+                  object: "embedding",
+                  index: 0,
+                  embedding: Array.from(
+                    { length: 1_536 },
+                    (_, component) => component === 2 ? 1 : 0,
+                  ),
+                }],
+                usage: { prompt_tokens: 8, total_tokens: 8 },
+              }), {
+                status: 200,
+                headers: {
+                  "content-type": "application/json",
+                  "x-request-id": "req_manual_index_success",
+                },
+              });
+            },
+          },
+        );
+        assert.equal(publishedManualIndex.kind, "published");
+
         const ragSnapshots = createRepositoryRagSnapshotService({ db: prisma });
         const publishedRepositorySnapshots = await Promise.all([
           ragSnapshots.publishRepository({
@@ -574,17 +725,16 @@ test(
         const publishedProjectSnapshot = await ragSnapshots.publishProject({
           projectId: projectAId,
         });
-        assert.equal(publishedProjectSnapshot.requiredRepositoryCount, 1);
-        assert.equal(publishedProjectSnapshot.manualRagSnapshotId, null);
+        assert.equal(publishedProjectSnapshot.requiredRepositoryCount, 2);
+        assert.notEqual(publishedProjectSnapshot.manualRagSnapshotId, null);
         assert.deepEqual(
           publishedProjectSnapshot.repositories.map((entry) =>
             entry.projectRepositoryLinkId),
-          [requiredLink.id],
+          [requiredLink.id, secondRequiredLink.id].sort(),
         );
-        assert.equal(
-          publishedProjectSnapshot.repositories[0]?.repositoryRagSnapshotId,
-          publishedRepositorySnapshots[0]?.id,
-        );
+        assert.ok(publishedProjectSnapshot.repositories.some((entry) =>
+          entry.projectRepositoryLinkId === requiredLink.id &&
+          entry.repositoryRagSnapshotId === publishedRepositorySnapshots[0]?.id));
         assert.deepEqual(
           await ragSnapshots.publishProject({ projectId: projectAId }),
           publishedProjectSnapshot,
@@ -593,6 +743,83 @@ test(
           await ragSnapshots.getProjectSnapshot({ projectId: projectAId }),
           publishedProjectSnapshot,
         );
+        const projectRepositorySearch = createProjectRepositorySearchService({
+          db: prisma,
+        });
+        const repositoryLexicalResults = await projectRepositorySearch.search({
+          projectId: projectAId,
+          query: "calculateMemoryChecksum",
+        });
+        assert.equal(repositoryLexicalResults.mode, "lexical");
+        assert.equal(repositoryLexicalResults.snapshot.requiredRepositoryCount, 2);
+        assert.equal(repositoryLexicalResults.results.length, 1);
+        assert.equal(
+          repositoryLexicalResults.results[0]?.citation.origin,
+          "repositoryCode",
+        );
+        assert.equal(
+          repositoryLexicalResults.results[0]?.citation.projectRepositoryLinkId,
+          requiredLink.id,
+        );
+        assert.equal(
+          repositoryLexicalResults.results[0]?.citation.immutableRef,
+          `acme/memory-core@${"a".repeat(40)}:src/checksum.ts#L1-L3`,
+        );
+        const repositoryHybridResults = await projectRepositorySearch.search({
+          projectId: projectAId,
+          query: "checksum implementation",
+          queryEmbedding: {
+            profileFingerprint:
+              "b6ea9b216ae969788bdf629f9cb31be5fd4d4e221fc87d433303bc3c363ee8d6",
+            vector: Object.freeze(Array.from(
+              { length: 1_536 },
+              (_, component) => component === 0 ? 1 : 0,
+            )),
+          },
+        });
+        assert.equal(repositoryHybridResults.mode, "hybrid");
+        assert.equal(repositoryHybridResults.results.length, 3);
+        assert.equal(
+          repositoryHybridResults.results[0]?.componentRanks.vector,
+          1,
+        );
+        assert.equal(
+          repositoryHybridResults.results[0]?.citation.projectRepositoryLinkId,
+          requiredLink.id,
+        );
+        const crossRepositoryResults = await projectRepositorySearch.search({
+          projectId: projectAId,
+          query: "SecondRepositoryBeacon",
+        });
+        assert.equal(crossRepositoryResults.results.length, 1);
+        assert.equal(
+          crossRepositoryResults.results[0]?.citation.projectRepositoryLinkId,
+          secondRequiredLink.id,
+        );
+        const crossRepositoryVectorResults = await projectRepositorySearch.search({
+          projectId: projectAId,
+          query: "unrelated vector query",
+          queryEmbedding: {
+            profileFingerprint:
+              "b6ea9b216ae969788bdf629f9cb31be5fd4d4e221fc87d433303bc3c363ee8d6",
+            vector: Object.freeze(Array.from(
+              { length: 1_536 },
+              (_, component) => component === 1 ? 1 : 0,
+            )),
+          },
+        });
+        assert.equal(
+          crossRepositoryVectorResults.results[0]?.citation
+            .projectRepositoryLinkId,
+          secondRequiredLink.id,
+        );
+        const combinedManualResults = await projectRepositorySearch.search({
+          projectId: projectAId,
+          query: "Approved local project charter",
+        });
+        assert.equal(combinedManualResults.results.length, 1);
+        assert.equal(combinedManualResults.results[0]?.citation.origin, "project");
+        assert.equal(combinedManualResults.results[0]?.citation.sourceId, sourceId);
         await expectRagSnapshotError(
           () => ragSnapshots.getProjectSnapshot({ projectId: projectBId }),
           "REPOSITORY_RAG_SNAPSHOT_NOT_FOUND",
@@ -617,7 +844,7 @@ test(
           scope: { kind: "project" },
         });
         assert.equal(requiredResults.mode, "lexical");
-        assert.equal(requiredResults.scope.repositoryCount, 1);
+        assert.equal(requiredResults.scope.repositoryCount, 2);
         assert.equal(requiredResults.results.length, 1);
         assert.equal(
           requiredResults.results[0]?.citation.projectRepositoryLinkId,

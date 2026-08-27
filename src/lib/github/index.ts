@@ -152,3 +152,12 @@ export {
   type RepositoryRagSnapshotService,
   type RepositoryRagSnapshotView,
 } from "./repository-rag-snapshot";
+export {
+  PROJECT_REPOSITORY_SEARCH_VECTOR_DIMENSIONS,
+  PROJECT_REPOSITORY_SEARCH_VERSION,
+  ProjectRepositorySearchError,
+  createProjectRepositorySearchService,
+  type ProjectRepositorySearchCitation,
+  type ProjectRepositorySearchErrorCode,
+  type ProjectRepositorySearchResponse,
+} from "./project-repository-search";

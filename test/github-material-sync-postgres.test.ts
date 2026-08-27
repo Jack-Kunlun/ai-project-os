@@ -10,10 +10,12 @@ import {
   GITHUB_SOFT_EXCLUDE_CLASSES,
   REPOSITORY_MATERIAL_MODEL_TRANSFER_CONSENT_VERSION,
   RepositoryMaterialIndexError,
+  createProjectRepositorySearchService,
   createGitHubMaterialSyncService,
   createGitHubRepositoryLedgerService,
   createRepositoryMaterialIndexService,
   createRepositoryMaterialModelGrantService,
+  createRepositoryRagSnapshotService,
   type GitHubMaterialReadOnlyClient,
 } from "@/lib/github";
 import {
@@ -92,7 +94,7 @@ function repositoryConfig(role: ProjectRepositoryRole) {
     role,
     requiredForProjectSnapshot: role === ProjectRepositoryRole.application,
     trackedRef: "refs/heads/main",
-    codeEnabled: true,
+    codeEnabled: false,
     metadataEnabled: true,
     readmeEnabled: true,
     markdownEnabled: true,
@@ -549,6 +551,51 @@ test(
           );
         assert.equal(alreadyPublished.kind, "published");
         assert.equal(embeddingCalls, 1);
+
+        const ragSnapshots = createRepositoryRagSnapshotService({ db: prisma });
+        const repositorySnapshot = await ragSnapshots.publishRepository({
+          projectId,
+          projectRepositoryLinkId: linkA.id,
+        });
+        assert.equal(repositorySnapshot.codeIndexGenerationId, null);
+        assert.equal(
+          repositorySnapshot.materialIndexGenerationId,
+          preparedIndexes[0]!.id,
+        );
+        const projectRagSnapshot = await ragSnapshots.publishProject({ projectId });
+        assert.equal(projectRagSnapshot.requiredRepositoryCount, 1);
+        assert.equal(projectRagSnapshot.repositories[0]?.projectRepositoryLinkId, linkA.id);
+
+        const repositorySearch = createProjectRepositorySearchService({ db: prisma });
+        const lexicalResults = await repositorySearch.search({
+          projectId,
+          query: "immutable citations",
+          take: 10,
+        });
+        assert.equal(lexicalResults.mode, "lexical");
+        assert.ok(lexicalResults.results.length > 0);
+        assert.ok(lexicalResults.results.every((result) =>
+          result.citation.origin === "repositoryMaterial" &&
+          result.citation.projectRepositoryLinkId === linkA.id &&
+          result.citation.capturedFullName === repositoryA.fullName &&
+          result.citation.frozenCommitSha === commitSha));
+        assert.ok(lexicalResults.results.some((result) =>
+          result.citation.excerpt.includes("citation")));
+        const hybridResults = await repositorySearch.search({
+          projectId,
+          query: "governed memory",
+          queryEmbedding: {
+            profileFingerprint:
+              "b6ea9b216ae969788bdf629f9cb31be5fd4d4e221fc87d433303bc3c363ee8d6",
+            vector: Object.freeze(Array.from(
+              { length: 1_536 },
+              (_, component) => component === 0 ? 1 : 0,
+            )),
+          },
+        });
+        assert.equal(hybridResults.mode, "hybrid");
+        assert.ok(hybridResults.results.length > 0);
+        assert.equal(hybridResults.results[0]?.componentRanks.vector, 1);
 
         await materialGrants.revoke({ projectId, projectRepositoryLinkId: linkA.id });
         assert.equal(

@@ -1,4 +1,4 @@
-# Day 5 验收记录
+# Project Snapshot 演示验收记录
 
 日期：2026-08-26
 
@@ -6,7 +6,7 @@
 
 ## 实现范围
 
-Day 5 用一个可重复、安全的 AI Project OS 自身样本收口 V0 的演示闭环：
+本次用一个可重复、安全的 AI Project OS 自身样本收口 V0 的演示闭环：
 
 - `test/fixtures/project-snapshot-demo.ts` 提供版本化 fixture，包含两条 `manual` Source 和四条分别属于 decision、progress、issue、risk 的 Item。每个 Item 都有精确 Source excerpt，`externalRef` 为 `null`；progress 同时保留修正前、修正后文本及两段可精确定位的原文摘录。
 - `pnpm project-snapshot:demo -- seed --base-url http://localhost:3000` 只允许 loopback 根地址（`localhost`、`127.0.0.1`、`[::1]`），并只通过已有 HTTP API 创建唯一临时 Project、Sources、candidate Items，逐条 confirm 并生成初始 Snapshot。slug 使用 UUID suffix，输出 `projectId`、`slug`、`browserUrl`、`cleanupCommand` 和 Snapshot 标识。
@@ -61,7 +61,7 @@ cleanup 失败时保留输出中的精确恢复参数，先修复参数或数据
 
 ## 自动化检查记录
 
-以下命令与真实流程是 Day 5 的项目级验证范围；初轮自动化与修复后自动化分开记录，真实验收结果见后文。
+以下命令与真实流程是本次演示的项目级验证范围；初轮自动化与修复后自动化分开记录，真实验收结果见后文。
 
 ### 初轮自动化（修复前）
 
@@ -82,7 +82,7 @@ cleanup 失败时保留输出中的精确恢复参数，先修复参数或数据
 | --- | --- | --- |
 | `pnpm exec tsx --test test/project-snapshot-demo-contract.test.ts` | PASS，5/5 | loopback URL、参数、精确 target 和 recovery contract |
 | `pnpm exec tsx --test test/project-snapshot-demo-fixture.test.ts` | PASS，5/5 | fixture 结构、excerpt、Focus 和安全模式 |
-| 两项 Day 5 聚焦测试合计 | PASS，10/10 | CLI contract + fixture |
+| 两项演示聚焦测试合计 | PASS，10/10 | CLI contract + fixture |
 | `pnpm test` | PASS，43/43 | 项目测试全集 |
 | `pnpm lint` | PASS | ESLint |
 | `pnpm typecheck` | PASS | TypeScript |
@@ -112,4 +112,4 @@ cleanup 失败时保留输出中的精确恢复参数，先修复参数或数据
 
 本阶段不新增 LLM、外部连接、上传、认证、队列、MCP、Project DELETE API、Snapshot 历史 UI、Item 删除、supersession、分页、数据库约束补强或完整 correction engine。seed/cleanup 只服务开发演示，不是持久的“加载演示数据”产品按钮。
 
-当前没有未清理的 Day 5 demo 数据。fresh Terra XHigh 独立复审已检查 loopback/raw-path 限制、精确 cleanup、recovery、测试覆盖、UI 纠错语义、文档和范围边界，结论为 `APPROVED`，P1/P2/P3 = `0/0/0`。
+当前没有未清理的演示数据。fresh Terra XHigh 独立复审已检查 loopback/raw-path 限制、精确 cleanup、recovery、测试覆盖、UI 纠错语义、文档和范围边界，结论为 `APPROVED`，P1/P2/P3 = `0/0/0`。

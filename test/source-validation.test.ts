@@ -63,7 +63,7 @@ test("source API errors map to stable client-safe codes", () => {
     [409, "SOURCE_CONTENT_DUPLICATE", "This source content already exists in the project"],
     [404, "PROJECT_NOT_FOUND", "Project not found"],
     [404, "SOURCE_NOT_FOUND", "Source not found"],
-    [409, "SOURCE_IN_USE", "Source is referenced by a project item"],
+    [409, "SOURCE_IN_USE", "Source is referenced by project records"],
   ] as const) {
     assert.deepEqual(mapApiError(new ApiError(status, code, message)), {
       status,

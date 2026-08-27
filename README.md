@@ -127,14 +127,14 @@ pnpm project-snapshot:demo -- seed --base-url http://localhost:3000
 pnpm project-snapshot:demo -- cleanup --project-id <seed 输出的 projectId> --slug <seed 输出的完整 slug>
 ```
 
-cleanup 会核验精确 projectId、完整 slug、稳定 demo name/marker，并且只删除该 Project 根；不要使用名称前缀、模糊匹配或批量删除。完整历史流程和真实验收结果见 [Project Snapshot 演示验收记录](docs/acceptance/day-5.md)。
+cleanup 会核验精确 projectId、完整 slug、稳定 demo name/marker，并且只删除该 Project 根；不要使用名称前缀、模糊匹配或批量删除。完整历史流程和真实验收结果见 [Project Snapshot 演示验收记录](docs/acceptance/correction-demo.md)。
 
 ## 历史验收材料
 
-历史记录保留当时的阶段名称和验收事实，不代表当前产品范围：
+历史记录保留当时的日期、命令和验收事实，不代表当前产品范围；文件按已验收能力命名：
 
-- [基础项目验收记录](docs/acceptance/day-1.md)
-- [Source 能力验收记录](docs/acceptance/day-2.md)
-- [Item 能力验收记录](docs/acceptance/day-3.md)
-- [Snapshot 能力验收记录](docs/acceptance/day-4.md)
-- [Project Snapshot 演示验收记录](docs/acceptance/day-5.md)
+- [项目基础验收记录](docs/acceptance/project-foundation.md)
+- [Source 能力验收记录](docs/acceptance/source-provenance.md)
+- [Item 能力验收记录](docs/acceptance/item-review.md)
+- [Snapshot 能力验收记录](docs/acceptance/snapshot-consistency.md)
+- [Project Snapshot 演示验收记录](docs/acceptance/correction-demo.md)

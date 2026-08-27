@@ -54,10 +54,10 @@ Source 是候选输入，不直接等同于可信事实。用户需要在 Item �
 
 ## 历史验收材料
 
-以下文件记录能力建设过程中的历史验收事实；其中的阶段名称和当时的命令上下文不改变当前 V0 范围：
+以下文件记录能力建设过程中的历史日期、命令和验收事实；它们不改变当前 V0 范围，文件按已验收能力命名：
 
-- [项目基础验收记录](acceptance/day-1.md)
-- [Source 能力验收记录](acceptance/day-2.md)
-- [Item 能力验收记录](acceptance/day-3.md)
-- [Snapshot 能力验收记录](acceptance/day-4.md)
-- [Project Snapshot 演示验收记录](acceptance/day-5.md)
+- [项目基础验收记录](acceptance/project-foundation.md)
+- [Source 能力验收记录](acceptance/source-provenance.md)
+- [Item 能力验收记录](acceptance/item-review.md)
+- [Snapshot 能力验收记录](acceptance/snapshot-consistency.md)
+- [Project Snapshot 演示验收记录](acceptance/correction-demo.md)

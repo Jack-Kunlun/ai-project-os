@@ -1,10 +1,10 @@
-# Day 4 验收记录
+# Snapshot 能力验收记录
 
 日期：2026-08-26
 
 ## 实现范围
 
-Day 4 将同项目已确认 Item 组装为可追溯的 Project Snapshot：
+本次将同项目已确认 Item 组装为可追溯的 Project Snapshot：
 
 - 新增 `GET /api/projects/:projectId/snapshots`，只读取 `generatedAt desc, id desc` 的最新已完成 Snapshot；没有快照时返回 `snapshot: null`，不提供历史列表或详情 API。
 - 新增 `POST /api/projects/:projectId/snapshots`，严格接受 `{}`。事务第一条语句读取项目、`statement_timestamp()` 和项目 advisory lock，并使用 `RepeatableRead` 固定本次读取点；随后读取全部项目 Item，成功时原子创建 `manual/running` Scan、Snapshot 并完成 Scan。
@@ -21,7 +21,7 @@ Day 4 将同项目已确认 Item 组装为可追溯的 Project Snapshot：
 
 ## 初轮自动化检查（冲突修复前）
 
-初轮 Day 4 实现完成后，先执行本地自动化与数据库基础检查；当时 PostgreSQL 18.6 容器健康。
+初轮 Snapshot 能力实现完成后，先执行本地自动化与数据库基础检查；当时 PostgreSQL 18.6 容器健康。
 
 | 命令/检查 | 状态 |
 | --- | --- |
@@ -114,7 +114,7 @@ P2 修复后由 Sol 新鲜执行的最终自动化检查：
 - 所有临时 Project/Item/Snapshot IDs 查询结果为 0；最终恢复 baseline：`4|1|0|0|0`。
 - P2 修复复验使用的额外临时 Project/Source/Item/Snapshot 也已精确删除，ID 查询结果为 0，五表再次恢复 `4|1|0|0|0`。
 - server 已停止，临时脚本已删除。
-- 未修改 schema、migration、依赖、lockfile、Compose 或 env；Day 4 尚未 commit/push。
+- 未修改 schema、migration、依赖、lockfile、Compose 或 env；本次能力尚未 commit/push。
 
 ## 独立审计状态
 
@@ -122,4 +122,4 @@ P2 修复后由 Sol 新鲜执行的最终自动化检查：
 
 Fresh Terra Max 独立新鲜执行并通过：`pnpm test` 33/33、lint、typecheck、production build、`git diff --check`；client chunks 无 Zod、Snapshot assembly 或 `node:crypto` markers；只读 PostgreSQL 五表基线为 `4|1|0|0|0`。
 
-复审未重复执行会写入临时数据的 HTTP 攻击流程，而是核对最终代码、测试、构建与文档；HTTP 攻击流程及其 cleanup 结果由 Sol 的真实复验证据提供。Day 4 独立审计现已收口为 approved。
+复审未重复执行会写入临时数据的 HTTP 攻击流程，而是核对最终代码、测试、构建与文档；HTTP 攻击流程及其 cleanup 结果由 Sol 的真实复验证据提供。Snapshot 能力独立审计现已收口为 approved。

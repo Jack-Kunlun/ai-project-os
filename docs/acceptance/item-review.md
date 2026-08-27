@@ -1,17 +1,17 @@
-# Day 3 验收记录
+# Item 能力验收记录
 
 日期：2026-08-26
 
 ## 实现范围
 
-Day 3 在详情页接入可追溯的手工 `ProjectItem`：
+本次在详情页接入可追溯的手工 `ProjectItem`：
 
 - `GET /api/projects/:projectId/items` 按 `updatedAt desc` 返回项目内全部条目，并仅返回安全的 Source 元数据；V0 当前全量返回、不分页。
 - `POST /api/projects/:projectId/items` 创建 `decision`、`progress`、`issue`、`risk` 候选条目；必须引用同项目 Source，并提供精确非空原文摘录。
 - `PATCH /api/projects/:projectId/items/:itemId` 支持严格的 `edit`、`confirm`、`dismiss`、`reopen` 状态操作；所有操作必须携带 `expectedUpdatedAt` 版本令牌，编辑保持 Source 不变并回到候选状态。
 - 详情页保留 Source 列表与原文，支持 Item 创建、编辑、确认、驳回、重新打开，并展示状态、摘录、Source 链接/hash、发生时间、确认时间和更新时间。
 
-不包含 Item 自动生成、LLM、删除 Item、Source 编辑、supersession 操作、审计日志或认证授权。商业化或大规模数据场景必须在扩展前为 Source 与 Item 列表引入 cursor pagination。`superseded` Item 仍会被 Item 列表读取且在 UI 中只读；Day 3 不提供创建或转换为 `superseded` 的动作。
+不包含 Item 自动生成、LLM、删除 Item、Source 编辑、supersession 操作、审计日志或认证授权。商业化或大规模数据场景必须在扩展前为 Source 与 Item 列表引入 cursor pagination。`superseded` Item 仍会被 Item 列表读取且在 UI 中只读；本次不提供创建或转换为 `superseded` 的动作。
 
 ## 初轮自动化检查（pre-repair，已被审计取代）
 
@@ -66,9 +66,9 @@ Day 3 在详情页接入可追溯的手工 `ProjectItem`：
 
 - 本轮创建的 2 条 Item 与 1 条 Source 已准确删除；跨项目 Source 已通过 API 删除。
 - 清理后计数恢复为 `Project=4 | ProjectSource=1 | ProjectItem=0 | ProjectScan=0 | ProjectSnapshot=0`；smoke IDs 均为 0。
-- 4 个既有 Project 与既有 Day 2 Source 未修改。
+- 4 个既有 Project 与既有 Source 未修改。
 - 临时 production server 已停止。
-- Day 3 尚未 commit/push。
+- 本次能力尚未 commit/push。
 
 ## 独立审计与修复
 
@@ -132,9 +132,9 @@ Day 3 在详情页接入可追溯的手工 `ProjectItem`：
 
 - HTTP/browser smoke 使用 Project A `12d1fcce-0056-4baa-b620-93ff4beced36` 与 Project B `769766e5-8c64-4e9a-97d7-180ab1be5c89`。
 - 精确删除 smoke Item `fb2654cf-6ee9-4885-a23a-47abdb4f8f89` 与 Source `0071fb3b-f136-44cb-9dac-b1707fdb71bc`；跨项目 Source `71d90eb6-eba6-4cc6-99a6-200643997fa6` 已由 API 删除。
-- 清理后五表计数恢复为 `4|1|0|0|0`，上述 smoke Item/Source ID 计数均为 0；4 个既有 Project 与既有 Day 2 Source 未修改。
+- 清理后五表计数恢复为 `4|1|0|0|0`，上述 smoke Item/Source ID 计数均为 0；4 个既有 Project 与既有 Source 未修改。
 - 临时 production server 与浏览器标签已关闭。Source 引用保护测试在服务端产生一条预期 Prisma FK 日志，客户端仅收到稳定的 409 `SOURCE_IN_USE`。
-- Day 3 仍未 commit/push。
+- 本次能力仍未 commit/push。
 
 ## 数据与安全边界
 

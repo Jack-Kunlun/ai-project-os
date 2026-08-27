@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
+    "test:ai-runtime-postgres": "tsx --test test/ai-runtime-postgres.test.ts",
     "project-snapshot:demo": "tsx scripts/project-snapshot-demo.ts",
     "db:validate": "prisma validate --config prisma.config.ts",
     "db:generate": "prisma generate --config prisma.config.ts",

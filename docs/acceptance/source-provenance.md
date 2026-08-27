@@ -1,10 +1,10 @@
-# Day 2 验收记录
+# Source 能力验收记录
 
 日期：2026-08-26
 
 ## 实现范围
 
-Day 2 只接入手工 `ProjectSource` 候选资料：
+本次只接入手工 `ProjectSource` 候选资料：
 
 - `GET /api/projects/:projectId/sources`：项目内按 `ingestedAt desc` 列出全部 Source，不返回 `storageKey`；V0 暂不分页。
 - `POST /api/projects/:projectId/sources`：只接受原始内容、可选无凭据 HTTP(S) 链接和资料时间；服务端固定 `kind=manual`，按实际 UTF-8 原文计算 SHA-256。
@@ -99,7 +99,7 @@ ProjectSnapshot=0
 - 删除按钮触发永久删除确认；删除后计数恢复，完成态提示为“候选资料已删除。”。
 - 页面控制台 warning/error 为 0；桌面完整页面布局检查通过。
 
-最终数据库保留 1 条明确标识的 Day 2 HTTP smoke Source，其他子表为 0；它用于证明后续 integrity smoke 可在非空 Source 基线上运行。
+最终数据库保留 1 条明确标识的 HTTP smoke Source，其他子表为 0；它用于证明后续 integrity smoke 可在非空 Source 基线上运行。
 
 ## 数据与安全边界
 

@@ -39,7 +39,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ pro
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     if (isKnownError(error, "P2003")) {
-      return handleApiError(new ApiError(409, "SOURCE_IN_USE", "Source is referenced by a project item"));
+      return handleApiError(new ApiError(409, "SOURCE_IN_USE", "Source is referenced by project records"));
     }
 
     if (isKnownError(error, "P2025")) {

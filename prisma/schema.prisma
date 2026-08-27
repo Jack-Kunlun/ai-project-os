@@ -38,6 +38,108 @@ enum ProjectScanStatus {
   failed
 }
 
+enum ModelProcessingGrantSourceKind {
+  manual_text
+}
+
+enum ModelProcessingGrantStatus {
+  draft
+  issued
+  revoked
+}
+
+enum ModelProcessingGrantRevocationReasonCode {
+  userRequested
+  policyChanged
+  expired
+  scannerFinding
+  budgetExceeded
+  securityReview
+}
+
+enum AiOperation {
+  embedding
+  autoExtract
+  sourceSummary
+  projectAnalysis
+  generateWithContext
+}
+
+enum AiRunStatus {
+  queued
+  running
+  succeeded
+  failed
+  unknown
+  cancelled
+}
+
+enum AiRunAttemptStatus {
+  sent
+  succeeded
+  failed
+  unknown
+  cancelled
+}
+
+enum AiBudgetProfile {
+  standard
+}
+
+enum AiBudgetStatus {
+  pending
+  allowed
+  exhausted
+  exceeded
+  rejected
+}
+
+enum AiSafeScanResult {
+  passed
+  blocked
+  unavailable
+}
+
+enum AiAuditEventType {
+  policyCreated
+  policyAdvanced
+  grantIssued
+  grantRevoked
+  preflightRejected
+  scannerRejected
+  budgetRejected
+  runCreated
+  runClaimed
+  dispatchSent
+  runSucceeded
+  runFailed
+  runUnknown
+  runCancelled
+  attemptSucceeded
+  attemptFailed
+  attemptUnknown
+  attemptCancelled
+}
+
+enum AiSafeErrorCode {
+  aiDisabled               @map("AI_DISABLED")
+  aiProviderDisabled       @map("AI_PROVIDER_DISABLED")
+  aiInvalidOperationKeyInput @map("AI_INVALID_OPERATION_KEY_INPUT")
+  aiInvalidStateTransition @map("AI_INVALID_STATE_TRANSITION")
+  aiRedispatchForbidden    @map("AI_REDISPATCH_FORBIDDEN")
+  aiProviderIncomplete     @map("AI_PROVIDER_INCOMPLETE")
+  aiProviderUnknown        @map("AI_PROVIDER_UNKNOWN")
+  aiProviderFailed         @map("AI_PROVIDER_FAILED")
+  aiProviderCancelled      @map("AI_PROVIDER_CANCELLED")
+  aiDispatchNotSent        @map("AI_DISPATCH_NOT_SENT")
+  aiPolicyDenied           @map("AI_POLICY_DENIED")
+  aiGrantDenied            @map("AI_GRANT_DENIED")
+  aiScannerDenied          @map("AI_SCANNER_DENIED")
+  aiBudgetDenied           @map("AI_BUDGET_DENIED")
+  aiInvalidProviderResponse @map("AI_INVALID_PROVIDER_RESPONSE")
+  sourceInUse              @map("SOURCE_IN_USE")
+}
+
 model Project {
   id          String          @id @default(uuid()) @db.Uuid
   name        String
@@ -49,6 +151,15 @@ model Project {
   items       ProjectItem[]
   scans       ProjectScan[]
   snapshots   ProjectSnapshot[]
+  aiPolicy    ProjectAiPolicy?
+  aiPolicyRevisions ProjectAiPolicyRevision[]
+  aiGrants    ModelProcessingGrant[]
+  aiGrantSources ModelProcessingGrantSource[]
+  aiGrantOperations ModelProcessingGrantOperation[]
+  aiRuns      AiRun[]
+  aiAttempts  AiRunAttempt[]
+  aiInputSources AiRunInputSource[]
+  aiAuditEvents AiAuditEvent[]
 
   @@index([updatedAt])
 }
@@ -65,6 +176,8 @@ model ProjectSource {
   ingestedAt   DateTime          @default(now())
   project      Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   items        ProjectItem[]      @relation("SourceItems")
+  grantSources ModelProcessingGrantSource[]
+  aiRunInputs  AiRunInputSource[]
 
   @@index([projectId, capturedAt])
   @@unique([projectId, contentHash])
@@ -125,4 +238,258 @@ model ProjectSnapshot {
 
   @@index([projectId, generatedAt])
   @@index([scanId])
+}
+
+model ProjectAiPolicyRevision {
+  id                   String   @id @default(uuid()) @db.Uuid
+  projectId            String   @db.Uuid
+  revision             Int
+  policyFingerprint    String   @db.VarChar(64)
+  outboundEnabled      Boolean  @default(false)
+  embeddingEnabled     Boolean  @default(false)
+  autoExtractEnabled   Boolean  @default(false)
+  sourceSummaryEnabled Boolean  @default(false)
+  projectAnalysisEnabled Boolean @default(false)
+  generateWithContextEnabled Boolean @default(false)
+  profileFingerprint   String   @db.VarChar(64)
+  processorFingerprint String   @db.VarChar(64)
+  regionFingerprint    String   @db.VarChar(64)
+  retentionFingerprint String   @db.VarChar(64)
+  endpointFingerprint  String   @db.VarChar(64)
+  budgetFingerprint    String   @db.VarChar(64)
+  scannerFingerprint   String   @db.VarChar(64)
+  createdAt            DateTime @default(now())
+  project              Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  currentPolicy        ProjectAiPolicy?
+  grants               ModelProcessingGrant[]
+  runs                 AiRun[]
+  auditEvents          AiAuditEvent[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, revision])
+  @@index([projectId, revision])
+}
+
+model ProjectAiPolicy {
+  projectId        String                     @id @db.Uuid
+  currentRevisionId String                    @db.Uuid
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  project          Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  currentRevision  ProjectAiPolicyRevision    @relation(fields: [projectId, currentRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, currentRevisionId])
+}
+
+model ModelProcessingGrant {
+  id                         String                         @id @default(uuid()) @db.Uuid
+  projectId                  String                         @db.Uuid
+  sourceKind                 ModelProcessingGrantSourceKind @default(manual_text)
+  status                     ModelProcessingGrantStatus     @default(draft)
+  policyRevisionId           String                         @db.Uuid
+  profileFingerprint         String                         @db.VarChar(64)
+  providerFingerprint        String                         @db.VarChar(64)
+  modelFingerprint           String                         @db.VarChar(64)
+  modelId                    String                         @db.VarChar(128)
+  processorFingerprint       String                         @db.VarChar(64)
+  regionFingerprint          String                         @db.VarChar(64)
+  retentionFingerprint       String                         @db.VarChar(64)
+  endpointFingerprint        String                         @db.VarChar(64)
+  grantFingerprint           String                         @db.VarChar(64)
+  effectivePolicyVersion     Int
+  budgetFingerprint           String                         @db.VarChar(64)
+  scannerFingerprint         String                         @db.VarChar(64)
+  scannerVersion             String                         @db.VarChar(64)
+  budgetProfile              AiBudgetProfile
+  issuedBy                   String                         @db.VarChar(128)
+  purposeCode                String                         @db.VarChar(64)
+  issuedAt                   DateTime?
+  expiresAt                  DateTime?
+  revokedAt                  DateTime?
+  revocationReasonCode       ModelProcessingGrantRevocationReasonCode?
+  createdAt                  DateTime                       @default(now())
+  updatedAt                  DateTime                       @updatedAt
+  project                    Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  policyRevision             ProjectAiPolicyRevision        @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  sources                    ModelProcessingGrantSource[]
+  operations                 ModelProcessingGrantOperation[]
+  runs                       AiRun[]
+  auditEvents                AiAuditEvent[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, id, policyRevisionId])
+  @@index([projectId, expiresAt])
+  @@index([projectId, revokedAt])
+  @@index([projectId, status])
+}
+
+model ModelProcessingGrantSource {
+  id                String                @id @default(uuid()) @db.Uuid
+  projectId         String                @db.Uuid
+  grantId           String                @db.Uuid
+  sourceId          String                @db.Uuid
+  contentFingerprint String                @db.VarChar(64)
+  contentBytes      Int
+  createdAt         DateTime              @default(now())
+  project           Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant             ModelProcessingGrant  @relation(fields: [projectId, grantId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  inputSources      AiRunInputSource[]
+  source            ProjectSource         @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, grantId, sourceId])
+  @@index([projectId, sourceId])
+}
+
+model ModelProcessingGrantOperation {
+  id         String                 @id @default(uuid()) @db.Uuid
+  projectId  String                 @db.Uuid
+  grantId    String                 @db.Uuid
+  operation  AiOperation
+  createdAt  DateTime               @default(now())
+  project    Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant      ModelProcessingGrant  @relation(fields: [projectId, grantId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  runs       AiRun[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, grantId, operation])
+  @@index([projectId, operation])
+}
+
+model AiRun {
+  id                            String                       @id @default(uuid()) @db.Uuid
+  projectId                     String                       @db.Uuid
+  grantId                       String                       @db.Uuid
+  policyRevisionId              String                       @db.Uuid
+  operation                     AiOperation
+  operationKey                  String                       @db.VarChar(64)
+  operationKeySchemaVersion     String                       @db.VarChar(32)
+  inputManifestFingerprint     String                       @db.VarChar(64)
+  promptFingerprint             String                       @db.VarChar(64)
+  promptVersion                String                       @db.VarChar(128)
+  providerFingerprint          String                       @db.VarChar(64)
+  modelId                      String                       @db.VarChar(128)
+  modelFingerprint              String                       @db.VarChar(64)
+  profileFingerprint            String                       @db.VarChar(64)
+  grantFingerprint              String                       @db.VarChar(64)
+  effectivePolicyVersion        Int
+  processorFingerprint          String                       @db.VarChar(64)
+  processorEndpointFingerprint String                       @db.VarChar(64)
+  processorRegionFingerprint    String                       @db.VarChar(64)
+  processorRetentionFingerprint String                       @db.VarChar(64)
+  noRagSnapshotMarker           String                       @db.VarChar(32)
+  status                        AiRunStatus                  @default(queued)
+  inputBytes                    Int                          @default(0)
+  outputBytes                   Int                          @default(0)
+  maxInputTokens                Int                          @default(0)
+  maxOutputTokens               Int                          @default(0)
+  maxRequests                   Int                          @default(1)
+  maxBudgetMicros               Int                          @default(0)
+  inputTokens                   Int                          @default(0)
+  outputTokens                  Int                          @default(0)
+  requestCount                  Int                          @default(0)
+  budgetUsedMicros              Int                          @default(0)
+  pricingSnapshotId             String?                      @db.VarChar(128)
+  budgetStatus                  AiBudgetStatus
+  safeErrorCode                 AiSafeErrorCode?
+  httpStatus                    Int?
+  providerRequestId             String?                      @db.VarChar(512)
+  providerResponseId            String?                      @db.VarChar(512)
+  createdAt                     DateTime                     @default(now())
+  claimedAt                    DateTime?
+  sentAt                       DateTime?
+  completedAt                  DateTime?
+  project                       Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant                         ModelProcessingGrant         @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], onDelete: NoAction, onUpdate: Cascade)
+  policyRevision                ProjectAiPolicyRevision       @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  operationGrant                ModelProcessingGrantOperation @relation(fields: [projectId, grantId, operation], references: [projectId, grantId, operation], onDelete: NoAction, onUpdate: Cascade)
+  attempts                      AiRunAttempt[]
+  inputSources                  AiRunInputSource[]
+  auditEvents                   AiAuditEvent[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, id, grantId])
+  @@unique([projectId, id, grantId, policyRevisionId])
+  @@unique([projectId, operationKey])
+  @@index([projectId, status])
+  @@index([projectId, createdAt])
+}
+
+model AiRunAttempt {
+  id                  String             @id @default(uuid()) @db.Uuid
+  projectId           String             @db.Uuid
+  aiRunId             String             @db.Uuid
+  attemptNumber       Int
+  dispatchToken       String             @unique @db.VarChar(128)
+  status              AiRunAttemptStatus @default(sent)
+  providerRequestId   String?            @db.VarChar(512)
+  providerResponseId  String?            @db.VarChar(512)
+  httpStatus          Int?
+  inputTokens         Int                @default(0)
+  outputTokens        Int                @default(0)
+  requestCount        Int                @default(1)
+  safeErrorCode       AiSafeErrorCode?
+  createdAt           DateTime           @default(now())
+  sentAt              DateTime           @default(now())
+  completedAt         DateTime?
+  project             Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  aiRun               AiRun              @relation(fields: [projectId, aiRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  auditEvents         AiAuditEvent[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, id, aiRunId])
+  @@unique([projectId, aiRunId, attemptNumber])
+  @@index([projectId, aiRunId, status])
+}
+
+model AiRunInputSource {
+  id                          String                       @id @default(uuid()) @db.Uuid
+  projectId                   String                       @db.Uuid
+  aiRunId                     String                       @db.Uuid
+  grantId                     String                       @db.Uuid
+  sourceId                    String                       @db.Uuid
+  contentFingerprint          String                       @db.VarChar(64)
+  contentBytes                Int
+  scannerVersion              String                       @db.VarChar(64)
+  safeScanResult              AiSafeScanResult
+  evidenceManifestFingerprint String                       @db.VarChar(64)
+  createdAt                   DateTime                     @default(now())
+  project                     Project                      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  aiRun                       AiRun                        @relation(fields: [projectId, aiRunId, grantId], references: [projectId, id, grantId], onDelete: NoAction, onUpdate: Cascade)
+  grantSource                 ModelProcessingGrantSource   @relation(fields: [projectId, grantId, sourceId], references: [projectId, grantId, sourceId], onDelete: NoAction, onUpdate: Cascade)
+  source                      ProjectSource                @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, aiRunId, sourceId])
+  @@index([projectId, sourceId])
+}
+
+model AiAuditEvent {
+  id                  String             @id @default(uuid()) @db.Uuid
+  projectId           String             @db.Uuid
+  policyRevisionId    String             @db.Uuid
+  eventType           AiAuditEventType
+  safeCode            AiSafeErrorCode?
+  eventFingerprint    String?            @db.VarChar(64)
+  fingerprintCount    Int?
+  byteCount           Int?
+  tokenCount          Int?
+  requestCount        Int?
+  httpStatus          Int?
+  grantId             String?            @db.Uuid
+  aiRunId             String?            @db.Uuid
+  attemptId           String?            @db.Uuid
+  createdAt           DateTime           @default(now())
+  project             Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  grant               ModelProcessingGrant? @relation(fields: [projectId, grantId, policyRevisionId], references: [projectId, id, policyRevisionId], onDelete: NoAction, onUpdate: Cascade)
+  policyRevision      ProjectAiPolicyRevision @relation(fields: [projectId, policyRevisionId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  aiRun               AiRun?             @relation(fields: [projectId, aiRunId, grantId, policyRevisionId], references: [projectId, id, grantId, policyRevisionId], onDelete: NoAction, onUpdate: Cascade)
+  attempt             AiRunAttempt?      @relation(fields: [projectId, attemptId, aiRunId], references: [projectId, id, aiRunId], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@index([projectId, policyRevisionId])
+  @@index([projectId, eventType, createdAt])
+  @@index([projectId, grantId])
+  @@index([projectId, aiRunId])
+  @@index([projectId, attemptId])
 }

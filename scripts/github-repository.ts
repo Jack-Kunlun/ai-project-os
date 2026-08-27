@@ -6,16 +6,19 @@ import {
   GitHubLedgerError,
   GitHubMaterialSyncServiceError,
   GitHubReadError,
+  ProjectRepositoryStatusError,
   createGitHubCodeScanService,
   createGitHubMaterialSyncService,
   createGitHubReadOnlyClient,
   createGitHubRepositoryLedgerService,
+  createProjectRepositoryStatusService,
   loadGitHubCredential,
 } from "../src/lib/github";
 import {
   GitHubRepositoryCliError,
   parseGitHubRepositoryArgs,
 } from "./github-repository-contract";
+import { readCliArguments } from "./cli-arguments";
 
 const MAX_CONFIG_FILE_BYTES = 64_000;
 const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
@@ -37,6 +40,9 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   GITHUB_LINK_UNLINKED: "仓库连接已解除",
   GITHUB_LEDGER_WRITE_CONFLICT: "仓库连接发生并发冲突，请重试",
   GITHUB_LEDGER_INTEGRITY_ERROR: "仓库连接账本不一致",
+  PROJECT_REPOSITORY_STATUS_INVALID_INPUT: "仓库记忆状态输入无效",
+  PROJECT_REPOSITORY_STATUS_PROJECT_NOT_FOUND: "项目不存在",
+  PROJECT_REPOSITORY_STATUS_CONFLICT: "仓库记忆状态不一致",
 });
 
 function printJson(value: unknown): void {
@@ -74,13 +80,17 @@ async function requireClient() {
 async function main(): Promise<void> {
   let db: ReturnType<typeof getDb> | undefined;
   try {
-    const command = parseGitHubRepositoryArgs(process.argv.slice(2));
+    const command = parseGitHubRepositoryArgs(readCliArguments());
     db = getDb();
     const ledger = createGitHubRepositoryLedgerService({ db });
     let result: unknown;
     switch (command.operation) {
       case "list":
         result = await ledger.list(command.projectId);
+        break;
+      case "status":
+        result = await createProjectRepositoryStatusService({ db })
+          .getStatus(command.projectId);
         break;
       case "disable":
         result = await ledger.disable({
@@ -132,7 +142,8 @@ async function main(): Promise<void> {
       error instanceof GitHubReadError ||
       error instanceof GitHubLedgerError ||
       error instanceof GitHubCodeScanServiceError ||
-      error instanceof GitHubMaterialSyncServiceError
+      error instanceof GitHubMaterialSyncServiceError ||
+      error instanceof ProjectRepositoryStatusError
       ? error.code
       : "GITHUB_REPOSITORY_FAILED";
     printJson({
@@ -148,4 +159,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void main();

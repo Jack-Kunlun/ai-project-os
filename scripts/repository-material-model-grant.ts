@@ -8,6 +8,7 @@ import {
   RepositoryMaterialModelGrantCliError,
   parseRepositoryMaterialModelGrantArgs,
 } from "./repository-material-model-grant-contract";
+import { readCliArguments } from "./cli-arguments";
 
 const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   REPOSITORY_MATERIAL_MODEL_GRANT_INVALID_INPUT: "授权输入无效",
@@ -22,7 +23,7 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
 async function main(): Promise<void> {
   let db: ReturnType<typeof getDb> | undefined;
   try {
-    const command = parseRepositoryMaterialModelGrantArgs(process.argv.slice(2));
+    const command = parseRepositoryMaterialModelGrantArgs(readCliArguments());
     db = getDb();
     const service = createRepositoryMaterialModelGrantService({ db });
     const status = command.operation === "issue"
@@ -52,4 +53,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void main();

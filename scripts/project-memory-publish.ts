@@ -8,6 +8,7 @@ import {
   ProjectMemoryPublishCliError,
   parseProjectMemoryPublishArgs,
 } from "./project-memory-publish-contract";
+import { readCliArguments } from "./cli-arguments";
 
 const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   PROJECT_MEMORY_PUBLISH_CLI_INVALID_ARGUMENTS: "项目记忆快照命令参数无效",
@@ -27,7 +28,7 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
 async function main(): Promise<void> {
   let db: ReturnType<typeof getDb> | undefined;
   try {
-    const command = parseProjectMemoryPublishArgs(process.argv.slice(2));
+    const command = parseProjectMemoryPublishArgs(readCliArguments());
     db = getDb();
     const service = createRepositoryRagSnapshotService({ db });
     const snapshot = command.scope === "repository"
@@ -59,4 +60,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void main();

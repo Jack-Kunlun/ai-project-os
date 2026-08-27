@@ -9,6 +9,7 @@ import {
   ProjectAiConfigCliError,
   parseProjectAiConfigArgs,
 } from "./project-ai-config-contract";
+import { readCliArguments } from "./cli-arguments";
 
 const CONFIG_ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   PROJECT_AI_CONFIG_INVALID_INPUT: "配置输入无效",
@@ -27,7 +28,7 @@ function printJson(value: unknown): void {
 async function main(): Promise<void> {
   let db: ReturnType<typeof getDb> | undefined;
   try {
-    const command = parseProjectAiConfigArgs(process.argv.slice(2));
+    const command = parseProjectAiConfigArgs(readCliArguments());
     db = getDb();
     const service = createProjectAiConfigService({ db });
     const aiMemory = command.operation === "status"
@@ -76,4 +77,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void main();

@@ -12,6 +12,7 @@ import {
   recovery,
   type DemoCleanupResult,
 } from "./project-snapshot-demo-contract";
+import { readCliArguments } from "./cli-arguments";
 import {
   projectSnapshotFixtureItems,
   projectSnapshotFixtureSources,
@@ -290,7 +291,7 @@ async function seedDemo(baseUrl: string): Promise<JsonObject> {
 }
 
 async function main(): Promise<void> {
-  const rawArgs = process.argv.slice(2);
+  const rawArgs = readCliArguments();
   const [command, ...args] = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
   if (command === "seed") {
     const { baseUrl } = parseSeedArgs(args);

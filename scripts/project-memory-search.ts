@@ -22,6 +22,7 @@ import {
   ProjectMemorySearchCliError,
   parseProjectMemorySearchArgs,
 } from "./project-memory-search-contract";
+import { readCliArguments } from "./cli-arguments";
 
 const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   PROJECT_SEARCH_INVALID_INPUT: "搜索输入无效",
@@ -67,7 +68,7 @@ async function readQueryEmbedding(path: string | null): Promise<ProjectQueryEmbe
 async function main(): Promise<void> {
   let db: ReturnType<typeof getDb> | undefined;
   try {
-    const command = parseProjectMemorySearchArgs(process.argv.slice(2));
+    const command = parseProjectMemorySearchArgs(readCliArguments());
     let queryEmbedding = await readQueryEmbedding(command.queryVectorFile);
     db = getDb();
     const repositoryPointer = command.scope === "project"
@@ -167,4 +168,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void main();

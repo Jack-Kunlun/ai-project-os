@@ -161,3 +161,10 @@ export {
   type ProjectRepositorySearchErrorCode,
   type ProjectRepositorySearchResponse,
 } from "./project-repository-search";
+export {
+  PROJECT_REPOSITORY_STATUS_VERSION,
+  ProjectRepositoryStatusError,
+  createProjectRepositoryStatusService,
+  type ProjectRepositoryMemoryStatus,
+  type ProjectRepositoryStatusErrorCode,
+} from "./project-repository-status";

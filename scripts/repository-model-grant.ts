@@ -8,6 +8,7 @@ import {
   RepositoryModelGrantCliError,
   parseRepositoryModelGrantArgs,
 } from "./repository-model-grant-contract";
+import { readCliArguments } from "./cli-arguments";
 
 const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   REPOSITORY_MODEL_GRANT_INVALID_INPUT: "授权输入无效",
@@ -23,7 +24,7 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
 async function main(): Promise<void> {
   let db: ReturnType<typeof getDb> | undefined;
   try {
-    const command = parseRepositoryModelGrantArgs(process.argv.slice(2));
+    const command = parseRepositoryModelGrantArgs(readCliArguments());
     db = getDb();
     const service = createRepositoryModelGrantService({ db });
     const status = command.operation === "issue"
@@ -53,4 +54,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void main();

@@ -27,6 +27,7 @@ import {
   RepositoryModelGrantError,
   RepositoryRagSnapshotError,
   createProjectRepositorySearchService,
+  createProjectRepositoryStatusService,
   createGitHubCodeScanService,
   createGitHubRepositoryLedgerService,
   createRepositoryCodeIndexService,
@@ -742,6 +743,29 @@ test(
         assert.deepEqual(
           await ragSnapshots.getProjectSnapshot({ projectId: projectAId }),
           publishedProjectSnapshot,
+        );
+        const repositoryStatus = await createProjectRepositoryStatusService({
+          db: prisma,
+        }).getStatus(projectAId);
+        assert.equal(repositoryStatus.configuredRepositoryCount, 3);
+        assert.equal(repositoryStatus.activeRepositoryCount, 3);
+        assert.equal(repositoryStatus.requiredRepositoryCount, 2);
+        assert.equal(repositoryStatus.readyRepositoryCount, 2);
+        assert.notEqual(repositoryStatus.projectCodeSnapshotId, null);
+        assert.equal(repositoryStatus.projectRagSnapshot?.ready, true);
+        assert.equal(
+          repositoryStatus.projectRagSnapshot?.requiredRepositoryCount,
+          2,
+        );
+        assert.equal(
+          repositoryStatus.repositories.find((repository) =>
+            repository.id === requiredLink.id)?.ragReady,
+          true,
+        );
+        assert.equal(
+          repositoryStatus.repositories.find((repository) =>
+            repository.id === optionalLink.id)?.ragReady,
+          false,
         );
         const projectRepositorySearch = createProjectRepositorySearchService({
           db: prisma,

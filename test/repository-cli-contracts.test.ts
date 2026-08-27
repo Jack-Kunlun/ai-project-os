@@ -183,6 +183,10 @@ test("GitHub repository CLI keeps remote reads behind explicit local commands", 
     "--project-id", projectId,
   ]), { operation: "scan-code", projectId });
   assert.deepEqual(parseGitHubRepositoryArgs([
+    "status",
+    "--project-id", projectId,
+  ]), { operation: "status", projectId });
+  assert.deepEqual(parseGitHubRepositoryArgs([
     "sync-material",
     "--project-id", projectId,
     "--link-id", linkId,

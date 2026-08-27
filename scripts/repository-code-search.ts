@@ -8,6 +8,7 @@ import {
   RepositoryCodeSearchCliError,
   parseRepositoryCodeSearchArgs,
 } from "./repository-code-search-contract";
+import { readCliArguments } from "./cli-arguments";
 
 const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   REPOSITORY_CODE_SEARCH_INVALID_INPUT: "搜索输入无效",
@@ -22,7 +23,7 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
 async function main(): Promise<void> {
   let db: ReturnType<typeof getDb> | undefined;
   try {
-    const command = parseRepositoryCodeSearchArgs(process.argv.slice(2));
+    const command = parseRepositoryCodeSearchArgs(readCliArguments());
     db = getDb();
     const result = await createRepositoryCodeSearchService({ db }).search({
       projectId: command.projectId,
@@ -48,4 +49,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void main();

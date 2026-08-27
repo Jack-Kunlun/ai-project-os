@@ -5,8 +5,20 @@ import {
   ProjectMemorySearchCliError,
   parseProjectMemorySearchArgs,
 } from "../scripts/project-memory-search-contract";
+import { readCliArguments } from "../scripts/cli-arguments";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
+
+test("CLI arguments accept pnpm separator and direct execution equally", () => {
+  assert.deepEqual(
+    readCliArguments(["node", "script.ts", "--", "status", "--project-id", projectId]),
+    ["status", "--project-id", projectId],
+  );
+  assert.deepEqual(
+    readCliArguments(["node", "script.ts", "status", "--project-id", projectId]),
+    ["status", "--project-id", projectId],
+  );
+});
 
 test("local project search CLI accepts only explicit bounded arguments", () => {
   assert.deepEqual(

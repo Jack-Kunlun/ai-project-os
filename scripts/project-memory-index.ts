@@ -20,6 +20,7 @@ import {
   ProjectMemoryIndexCliError,
   parseProjectMemoryIndexArgs,
 } from "./project-memory-index-contract";
+import { readCliArguments } from "./cli-arguments";
 
 const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   PROJECT_MEMORY_INDEX_CLI_INVALID_ARGUMENTS: "项目记忆索引命令参数无效",
@@ -63,7 +64,7 @@ function safeErrorCode(error: unknown): string {
 async function main(): Promise<void> {
   let db: ReturnType<typeof getDb> | undefined;
   try {
-    const command = parseProjectMemoryIndexArgs(process.argv.slice(2));
+    const command = parseProjectMemoryIndexArgs(readCliArguments());
     const availability = checkAiRuntimeAvailability(loadAiRuntimeConfig());
     if (!availability.available) {
       throw new ProjectMemoryIndexRuntimeError(availability.errorCode);
@@ -158,4 +159,4 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void main();

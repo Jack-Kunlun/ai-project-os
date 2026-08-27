@@ -15,7 +15,7 @@ export class GitHubRepositoryCliError extends Error {
 }
 
 export type GitHubRepositoryCommand =
-  | Readonly<{ operation: "list"; projectId: string }>
+  | Readonly<{ operation: "list" | "status"; projectId: string }>
   | Readonly<{
       operation: "connect";
       projectId: string;
@@ -74,6 +74,7 @@ export function parseGitHubRepositoryArgs(
   const operation = args[0];
   if (
     operation !== "list" &&
+    operation !== "status" &&
     operation !== "connect" &&
     operation !== "disable" &&
     operation !== "unlink" &&
@@ -85,7 +86,7 @@ export function parseGitHubRepositoryArgs(
   const values = parsePairs(args.slice(1));
   const projectId = uuid(values.get("--project-id"));
 
-  if (operation === "list" || operation === "scan-code") {
+  if (operation === "list" || operation === "status" || operation === "scan-code") {
     exactFlags(values, ["--project-id"]);
     return Object.freeze({ operation, projectId });
   }

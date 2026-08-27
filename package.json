@@ -13,6 +13,7 @@
     "test:v1-storage-postgres": "tsx --test test/project-item-history-postgres.test.ts",
     "test:corpus-index-postgres": "tsx --test test/corpus-index-postgres.test.ts",
     "test:github-ledger-postgres": "tsx --test test/github-ledger-postgres.test.ts",
+    "test:github-scan-postgres": "tsx --test test/github-code-scan-postgres.test.ts",
     "project-snapshot:demo": "tsx scripts/project-snapshot-demo.ts",
     "project-ai:config": "tsx scripts/project-ai-config.ts",
     "project-memory:search": "tsx scripts/project-memory-search.ts",

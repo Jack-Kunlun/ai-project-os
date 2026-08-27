@@ -531,21 +531,23 @@ model ProjectRepositoryLinkConfigPointer {
 }
 
 model ProjectScanBatch {
-  id                          String                  @id @default(uuid()) @db.Uuid
-  projectId                   String                  @db.Uuid
-  status                      ProjectScanBatchStatus  @default(queued)
-  requiredManifestFingerprint String                  @db.VarChar(64)
-  expectedRequiredLinkCount   Int
-  expectedOptionalLinkCount   Int
-  completedRequiredLinkCount  Int                     @default(0)
-  completedOptionalLinkCount  Int                     @default(0)
-  failureCode                 String?                 @db.VarChar(64)
-  startedAt                   DateTime                @default(now())
-  completedAt                 DateTime?
-  project                     Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  entries                     ProjectScanBatchEntry[]
-  codeScanRuns                RepoCodeScanRun[]
-  codeSnapshot                ProjectCodeSnapshot?
+  id                           String                  @id @default(uuid()) @db.Uuid
+  projectId                    String                  @db.Uuid
+  expectedActiveCodeSnapshotId String?                 @db.Uuid
+  status                       ProjectScanBatchStatus  @default(queued)
+  requiredManifestFingerprint  String                  @db.VarChar(64)
+  expectedRequiredLinkCount    Int
+  expectedOptionalLinkCount    Int
+  completedRequiredLinkCount   Int                     @default(0)
+  completedOptionalLinkCount   Int                     @default(0)
+  failureCode                  String?                 @db.VarChar(64)
+  startedAt                    DateTime                @default(now())
+  completedAt                  DateTime?
+  project                      Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  expectedActiveCodeSnapshot   ProjectCodeSnapshot?    @relation("ExpectedProjectCodeSnapshot", fields: [projectId, expectedActiveCodeSnapshotId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  entries                      ProjectScanBatchEntry[]
+  codeScanRuns                 RepoCodeScanRun[]
+  codeSnapshot                 ProjectCodeSnapshot?    @relation("BatchProducedCodeSnapshot")
 
   @@unique([projectId, id])
   @@unique([projectId, requiredManifestFingerprint, startedAt])
@@ -601,6 +603,7 @@ model RepoCodeScanRun {
   @@unique([projectId, id])
   @@unique([projectId, projectRepositoryLinkId, id])
   @@unique([projectId, operationKey])
+  @@unique([projectId, projectScanBatchId, projectRepositoryLinkId], map: "RepoCodeScanRun_batch_link_key")
   @@index([projectId, projectRepositoryLinkId, status, startedAt])
   @@index([projectId, projectScanBatchId])
 }
@@ -641,7 +644,7 @@ model RepositoryFileRevision {
 
   @@unique([projectId, id])
   @@unique([projectId, projectRepositoryLinkId, id])
-  @@unique([projectId, projectRepositoryLinkId, repositoryFileId, blobOid])
+  @@unique([projectId, projectRepositoryLinkId, repositoryFileId, blobOid, scannerFingerprint], map: "RepositoryFileRevision_blob_scanner_key")
   @@index([projectId, projectRepositoryLinkId, repositoryFileId, createdAt])
 }
 
@@ -663,6 +666,9 @@ model RepositoryCodeGeneration {
   effectivePolicyVersion     Int
   manifestFingerprint        String                             @db.VarChar(64)
   exclusionManifest          Json                               @db.JsonB
+  modelTransferScanResult    AiSafeScanResult                   @default(unavailable)
+  securityFindingManifest    Json                               @default("[]") @db.JsonB
+  securityFindingCount       Int                                @default(0)
   fileCount                  Int
   decodedTextBytes           Int
   createdAt                  DateTime                           @default(now())
@@ -736,7 +742,8 @@ model ProjectCodeSnapshot {
   completedAt         DateTime?
   supersededAt        DateTime?
   project             Project                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  batch               ProjectScanBatch            @relation(fields: [projectId, projectScanBatchId], references: [projectId, id], map: "ProjectCodeSnapshot_batch_fkey", onDelete: NoAction, onUpdate: Cascade)
+  batch               ProjectScanBatch            @relation("BatchProducedCodeSnapshot", fields: [projectId, projectScanBatchId], references: [projectId, id], map: "ProjectCodeSnapshot_batch_fkey", onDelete: NoAction, onUpdate: Cascade)
+  expectedByBatches   ProjectScanBatch[]          @relation("ExpectedProjectCodeSnapshot")
   entries             ProjectCodeSnapshotEntry[]
   activePointer       ProjectCodeSnapshotPointer?
 

@@ -1,4 +1,27 @@
 export {
+  GITHUB_CODE_SCAN_SERVICE_VERSION,
+  GitHubCodeScanServiceError,
+  createGitHubCodeScanService,
+  type GitHubCodeScanService,
+  type GitHubCodeScanServiceErrorCode,
+  type ProjectCodeScanBatchView,
+  type RepositoryScanRunView,
+} from "./code-scan-service";
+export {
+  GITHUB_CODE_SCANNER_FINGERPRINT,
+  GITHUB_CODE_SCANNER_VERSION,
+  GITHUB_CODE_SCAN_BUDGETS,
+  GitHubCodeScanError,
+  scanGitHubRepositoryCode,
+  type GitHubCodeExclusionReason,
+  type GitHubCodeScanErrorCode,
+  type GitHubCodeScanExclusion,
+  type GitHubCodeScanResult,
+  type GitHubCodeSecurityFinding,
+  type ScanGitHubRepositoryCodeOptions,
+  type ScannedGitHubCodeFile,
+} from "./code-scanner";
+export {
   GITHUB_ACCEPT,
   GITHUB_API_ORIGIN,
   GITHUB_API_VERSION,

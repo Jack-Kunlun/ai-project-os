@@ -64,6 +64,19 @@ enum ProjectItemRevisionIntegrityState {
   purged_redacted
 }
 
+enum EmbeddingProvider {
+  openai
+}
+
+enum EmbeddingNormalization {
+  unit_length
+}
+
+enum SourceChunkState {
+  active
+  purged
+}
+
 enum ProjectScanTrigger {
   manual
   system
@@ -208,6 +221,7 @@ model Project {
   itemEvidences ProjectItemEvidence[]
   itemRevisions ProjectItemRevision[]
   itemRevisionEvidences ProjectItemRevisionEvidence[]
+  sourceChunks SourceChunk[]
 
   @@index([updatedAt])
 }
@@ -233,12 +247,14 @@ model ProjectSource {
   grantSources            ModelProcessingGrantSource[]
   aiRunInputs             AiRunInputSource[]
   aiCandidateClaims       AiCandidateClaim[]
+  sourceChunks            SourceChunk[]       @relation("ChunkProjectSource")
 
   @@index([projectId, capturedAt])
   @@unique([projectId, id])
   @@unique([projectId, id, originScope])
   @@unique([projectId, id, originScope, projectRepositoryLinkId])
   @@unique([projectId, sourceIdentity, revisionKey])
+  @@unique([projectId, id, originScope, revisionKey, contentHash])
 }
 
 model ProjectItem {
@@ -349,6 +365,50 @@ model ProjectItemRevisionEvidence {
   @@unique([projectId, revisionId, evidenceId])
   @@index([projectId, projectItemId, revisionId])
   @@index([projectId, projectItemId, evidenceId])
+}
+
+model EmbeddingProfile {
+  id                 String                 @id @default(uuid()) @db.Uuid
+  provider           EmbeddingProvider
+  modelId            String                 @db.VarChar(128)
+  dimensions         Int
+  normalization      EmbeddingNormalization
+  profileVersion     String                 @db.VarChar(128)
+  profileFingerprint String                 @unique @db.VarChar(64)
+  createdAt          DateTime               @default(now())
+
+  @@unique([provider, modelId, dimensions, normalization, profileVersion])
+}
+
+model SourceChunk {
+  id                       String             @id @default(uuid()) @db.Uuid
+  projectId                String             @db.Uuid
+  originScope              ContentOriginScope @default(project)
+  projectRepositoryLinkId  String?            @db.Uuid
+  projectSourceId          String?            @db.Uuid
+  sourceRevisionKey        String?            @db.Uuid
+  sourceContentHash        String?            @db.VarChar(64)
+  ordinal                  Int
+  rangeUnit                ProjectEvidenceRangeUnit
+  rangeStart               Int
+  rangeEnd                 Int
+  chunkerVersion           String             @db.VarChar(128)
+  contentText              String?            @db.Text
+  contentHash              String?            @db.VarChar(64)
+  contentBytes             Int?
+  state                    SourceChunkState   @default(active)
+  createdAt                DateTime           @default(now())
+  purgedAt                 DateTime?
+  deletionReceipt          String?            @db.Uuid
+  project                  Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectSource            ProjectSource?     @relation("ChunkProjectSource", fields: [projectId, projectSourceId, originScope, sourceRevisionKey, sourceContentHash], references: [projectId, id, originScope, revisionKey, contentHash], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, id, originScope])
+  @@unique([projectId, id, originScope, projectRepositoryLinkId])
+  @@unique([projectId, id, projectSourceId, originScope])
+  @@index([projectId, projectSourceId, ordinal])
+  @@index([projectId, state, createdAt])
 }
 
 model ProjectScan {

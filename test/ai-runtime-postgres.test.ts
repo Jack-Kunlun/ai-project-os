@@ -169,6 +169,10 @@ const itemEvidenceHistoryMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260827140000_add_item_evidence_history/migration.sql",
 );
+const sourceChunkMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260828100000_add_source_chunks/migration.sql",
+);
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
   join(repositoryRoot, "prisma/migrations/20260826030732_integrity_boundaries/migration.sql"),
@@ -618,6 +622,7 @@ async function applyAiMigrationInTransaction(client: Client): Promise<void> {
     { sql: await loadSql(aiRuntimeMigrationPath) },
     { sql: await loadSql(aiCandidateMigrationPath) },
     { sql: await loadSql(itemEvidenceHistoryMigrationPath) },
+    { sql: await loadSql(sourceChunkMigrationPath) },
   ]);
 }
 
@@ -632,6 +637,7 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     "20260827090000_add_ai_runtime_governance",
     "20260827120000_add_ai_memory_candidates",
     "20260827140000_add_item_evidence_history",
+    "20260828100000_add_source_chunks",
   ];
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===

@@ -7,6 +7,7 @@ import test from "node:test";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
+import { createSourceChunkService } from "@/lib/ai-memory";
 import { hashSourceContent } from "@/lib/source";
 
 const execFile = promisify(execFileCallback);
@@ -32,6 +33,7 @@ const migrationPaths = [
   "20260827090000_add_ai_runtime_governance",
   "20260827120000_add_ai_memory_candidates",
   "20260827140000_add_item_evidence_history",
+  "20260828100000_add_source_chunks",
 ].map((name) => join(repositoryRoot, "prisma/migrations", name, "migration.sql"));
 
 function validateDisposableUrl(value: unknown): string {
@@ -97,6 +99,7 @@ async function applyUpgradePath(client: Client): Promise<void> {
     await applyMigration(client, 2);
     await applyMigration(client, 3);
     await applyMigration(client, 4);
+    await applyMigration(client, 5);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -182,6 +185,30 @@ test(
       const adapter = new PrismaPg({ connectionString: url });
       const prisma = new PrismaClient({ adapter });
       try {
+        const extensions = await raw.query<{ extname: string; extversion: string }>(
+          `SELECT extname, extversion
+             FROM pg_extension
+            WHERE extname = ANY($1::text[])
+            ORDER BY extname`,
+          [["pg_trgm", "vector"]],
+        );
+        assert.deepEqual(extensions.rows, [
+          { extname: "pg_trgm", extversion: "1.6" },
+          { extname: "vector", extversion: "0.8.6" },
+        ]);
+        const profile = await prisma.embeddingProfile.findUnique({
+          where: {
+            profileFingerprint: "b6ea9b216ae969788bdf629f9cb31be5fd4d4e221fc87d433303bc3c363ee8d6",
+          },
+          select: { provider: true, modelId: true, dimensions: true, normalization: true },
+        });
+        assert.deepEqual(profile, {
+          provider: "openai",
+          modelId: "text-embedding-3-small",
+          dimensions: 1536,
+          normalization: "unit_length",
+        });
+
         await prisma.project.createMany({
           data: [
             { id: projectId, name: "History project", slug: "history-project" },
@@ -208,6 +235,28 @@ test(
             },
           ],
         });
+
+        const chunkService = createSourceChunkService({ db: prisma });
+        const [firstChunks, replayedChunks] = await Promise.all([
+          chunkService.ensureProjectSourceChunks({ projectId, sourceId }),
+          chunkService.ensureProjectSourceChunks({ projectId, sourceId }),
+        ]);
+        assert.deepEqual(
+          firstChunks.map((chunk) => chunk.id),
+          replayedChunks.map((chunk) => chunk.id),
+        );
+        assert.equal(firstChunks.length, 1);
+        assert.equal(firstChunks[0]?.contentText, sourceText);
+        assert.equal(await prisma.sourceChunk.count({ where: { projectId } }), 1);
+
+        await expectRejected(() => prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { contentText: "forged source revision" },
+        }));
+        await expectRejected(() => prisma.sourceChunk.update({
+          where: { id: firstChunks[0]!.id },
+          data: { contentText: "forged chunk" },
+        }));
 
         const itemRoute = await import("@/app/api/projects/[projectId]/items/route");
         const itemDetailRoute = await import("@/app/api/projects/[projectId]/items/[itemId]/route");
@@ -330,6 +379,7 @@ test(
         });
 
         await prisma.project.delete({ where: { id: projectId } });
+        assert.equal(await prisma.sourceChunk.count({ where: { projectId } }), 0);
         assert.equal(await prisma.projectItemEvidence.count({ where: { projectId } }), 0);
         assert.equal(await prisma.projectItemRevision.count({ where: { projectId } }), 0);
       } finally {

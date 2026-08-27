@@ -1,4 +1,23 @@
 export {
+  READ_ONLY_AGENT_MAX_EVIDENCE_CONTEXTS,
+  READ_ONLY_AGENT_MAX_TOOL_CALLS,
+  READ_ONLY_AGENT_PROHIBITED_CAPABILITIES,
+  READ_ONLY_AGENT_PLANNING_RULES,
+  READ_ONLY_AGENT_TOOLS,
+  READ_ONLY_AGENT_VERSION,
+  ReadOnlyAgentError,
+  createReadOnlyProjectAgent,
+  verifyReadOnlyAgentPlan,
+  type ReadOnlyAgentErrorCode,
+  type ReadOnlyAgentFinalResolver,
+  type ReadOnlyAgentPlan,
+  type ReadOnlyAgentPlanResolver,
+  type ReadOnlyAgentPlanningInput,
+  type ReadOnlyAgentRun,
+  type ReadOnlyAgentToolCall,
+  type ReadOnlyAgentTraceEntry,
+} from "./read-only-agent";
+export {
   AI_DERIVED_ARTIFACT_VERSION,
   AiDerivedArtifactError,
   createAiDerivedArtifactService,

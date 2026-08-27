@@ -28,6 +28,7 @@ import {
 } from "@/lib/ai-runtime";
 import {
   AiDerivedArtifactError,
+  ReadOnlyAgentError,
   EMBEDDING_STORAGE_PROFILE_FINGERPRINT,
   CorpusIndexError,
   ProjectSearchError,
@@ -35,6 +36,7 @@ import {
   createAiDerivedArtifactService,
   createCorpusIndexService,
   createProjectSearchService,
+  createReadOnlyProjectAgent,
 } from "@/lib/ai-memory";
 import { hashSourceContent } from "@/lib/source";
 
@@ -661,6 +663,100 @@ test(
         assert.equal(
           await prisma.artifactDependency.count({ where: { projectId } }),
           (summarySourceCount + 1) * 2,
+        );
+        const writeCountsBeforeAgent = await Promise.all([
+          prisma.project.count(),
+          prisma.projectSource.count(),
+          prisma.projectItem.count(),
+          prisma.projectSnapshot.count(),
+          prisma.projectScan.count(),
+          prisma.aiRun.count(),
+          prisma.aiAuditEvent.count(),
+          prisma.aiDerivedArtifact.count(),
+          prisma.artifactDependency.count(),
+        ]);
+        const readOnlyAgent = createReadOnlyProjectAgent({
+          db: prisma,
+          searchService,
+          resolvePlan: async (input) => {
+            assert.equal(input.project.id, projectId);
+            assert.deepEqual(input.tools, [
+              "read_project",
+              "search_memory",
+              "get_source",
+              "get_snapshot",
+            ]);
+            return {
+              calls: [
+                { callId: "a1", tool: "read_project", arguments: {} },
+                {
+                  callId: "a2",
+                  tool: "search_memory",
+                  arguments: { query: "可追溯的长期记忆", take: 2 },
+                },
+                { callId: "a3", tool: "get_source", arguments: { sourceId: sourceAId } },
+              ],
+            };
+          },
+          resolveFinal: async (plan) => {
+            assert.equal(plan.snapshotId, lexicalSearch.snapshot.id);
+            assert.equal(plan.contexts.every((context) => context.projectId === projectId), true);
+            return {
+              kind: "answer",
+              claims: [{
+                text: "当前目标是建立可追溯的长期记忆",
+                citations: [{
+                  citationKey: "c1",
+                  excerpt: "当前目标是建立可追溯的长期记忆",
+                }],
+              }],
+            };
+          },
+        });
+        const agentRun = await readOnlyAgent.run({
+          projectId,
+          question: "项目当前目标是什么？",
+        });
+        assert.equal(agentRun.result.kind, "answer");
+        assert.equal(agentRun.capabilities.writeCount, 0);
+        assert.deepEqual(agentRun.trace.map((entry) => entry.tool), [
+          "read_project",
+          "search_memory",
+          "get_source",
+        ]);
+        const writeCountsAfterAgent = await Promise.all([
+          prisma.project.count(),
+          prisma.projectSource.count(),
+          prisma.projectItem.count(),
+          prisma.projectSnapshot.count(),
+          prisma.projectScan.count(),
+          prisma.aiRun.count(),
+          prisma.aiAuditEvent.count(),
+          prisma.aiDerivedArtifact.count(),
+          prisma.artifactDependency.count(),
+        ]);
+        assert.deepEqual(writeCountsAfterAgent, writeCountsBeforeAgent);
+
+        const crossProjectAgent = createReadOnlyProjectAgent({
+          db: prisma,
+          searchService,
+          resolvePlan: async () => ({
+            calls: [{
+              callId: "a1",
+              tool: "get_source",
+              arguments: { sourceId: sourceAId },
+            }],
+          }),
+          resolveFinal: async () => { throw new Error("must not resolve final"); },
+        });
+        await assert.rejects(
+          () => crossProjectAgent.run({
+            projectId: otherProjectId,
+            question: "读取另一个项目的来源",
+          }),
+          (error: unknown) =>
+            error instanceof ReadOnlyAgentError &&
+            error.code === "READ_ONLY_AGENT_SOURCE_NOT_FOUND",
         );
         await assert.rejects(
           () => artifactService.publishAnalysis({

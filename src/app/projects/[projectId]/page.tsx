@@ -1150,7 +1150,7 @@ function SnapshotPanel({
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Project snapshot</p>
           <h2 id="snapshot-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">最新项目快照</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">快照只组装已确认 Item，并保存为本次读取点的不可变历史状态；不会自动生成或做优先级判断。</p>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">V0 未调用 LLM；这里展示可追溯、人工确认的项目状态，不是自动 AI 判断。</p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">该快照始终只展示人工确认状态；AI 候选在人工接受前不会进入项目事实。</p>
         </div>
         <button
           type="button"
@@ -1298,7 +1298,7 @@ function ProjectShell({ children }: { children: ReactNode }) {
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold tracking-tight text-white">OS</span>
             <span className="block text-sm font-semibold tracking-[0.16em] text-slate-950">AI PROJECT OS</span>
           </Link>
-          <span className="text-xs text-slate-400">Project Snapshot · V0</span>
+          <span className="text-xs text-slate-400">Project Memory · V1</span>
         </header>
         <div className="py-10">{children}</div>
       </div>

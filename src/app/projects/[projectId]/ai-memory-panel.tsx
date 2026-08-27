@@ -268,12 +268,12 @@ export function AiMemoryPanel({
           <span className={`rounded-full border px-3 py-1.5 ${status?.runtime.configured ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
             {status?.runtime.configured ? "运行时已配置" : "运行时未启用"}
           </span>
-          <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600">外部传输未开放</span>
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-slate-600">网页外发关闭</span>
         </div>
       </div>
 
       <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900" role="note">
-        当前网页只有状态读取和人工候选审阅，不提供模型传输授权写入，也没有真实外部调用入口。授权创建或撤销必须在本机执行受控 CLI。
+        网页只读取治理状态并审阅候选，不发送项目内容。模型授权、GitHub 同步、Embedding 索引、快照发布与检索必须在本机受控 CLI 中执行，并逐次显式确认外部传输。
       </div>
 
       {error ? <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert">{error}</div> : null}

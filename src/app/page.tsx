@@ -116,10 +116,10 @@ export default function Home() {
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold tracking-tight text-white">OS</span>
             <span>
               <span className="block text-sm font-semibold tracking-[0.16em] text-slate-950">AI PROJECT OS</span>
-              <span className="mt-0.5 block text-xs text-slate-500">Project Snapshot · V0</span>
+              <span className="mt-0.5 block text-xs text-slate-500">Project Memory · V1</span>
             </span>
           </Link>
-          <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-500">V0 / Project Snapshot</span>
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-500">V1 / Governed Memory</span>
         </header>
 
         <section className="grid gap-10 pb-12 pt-14 lg:grid-cols-[1.35fr_0.65fr] lg:items-end">
@@ -129,7 +129,7 @@ export default function Home() {
               让项目状态，<span className="text-indigo-600">一眼可被理解。</span>
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              从原始资料到可追溯的 Project Snapshot。人工整理来源、确认事实，再生成项目最近状态的固定读取点。
+              从人工资料和 GitHub 多仓库到可追溯的证据快照。网页负责人工确认；模型传输、仓库同步和语义索引通过本机受控 CLI 执行。
             </p>
           </div>
           <div className="grid grid-cols-3 gap-3 lg:pb-1">
@@ -153,7 +153,7 @@ export default function Home() {
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Start here</p>
                 <h2 className="mt-3 text-2xl font-semibold tracking-tight">创建一个项目</h2>
               </div>
-              <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-slate-300">最小入口</span>
+              <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs text-slate-300">项目入口</span>
             </div>
             <p className="mt-4 text-sm leading-6 text-slate-400">项目是所有来源、事实条目和快照的容器。名称确定后，后续可以继续补充资料。</p>
             <label className="mt-7 block text-sm font-medium text-slate-200" htmlFor="project-name">项目名称</label>
@@ -161,7 +161,7 @@ export default function Home() {
               id="project-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="例如：私域商城 V0"
+              placeholder="例如：私域商城"
               maxLength={120}
               required
               className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30"
@@ -227,7 +227,7 @@ export default function Home() {
 
         <footer className="mt-12 flex flex-col gap-2 border-t border-slate-200/80 pt-5 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
           <span>Facts first · Every future insight should be traceable to a source.</span>
-          <span>AI Project OS V0</span>
+          <span>AI Project OS V1</span>
         </footer>
       </div>
     </main>

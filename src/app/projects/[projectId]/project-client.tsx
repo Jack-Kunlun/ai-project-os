@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { AppHeader } from "@/components/app-header";
 import { isProjectSnapshotStale } from "@/lib/project-snapshot-stale";
 import type { SnapshotRecord } from "@/lib/project-snapshot";
 
@@ -220,7 +221,7 @@ function itemActionText(action: ItemAction): string {
   }
 }
 
-export function ProjectDetailClient() {
+export function ProjectDetailClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [sources, setSources] = useState<ProjectSource[]>([]);
@@ -642,18 +643,18 @@ export function ProjectDetailClient() {
   const confirmedItems = items.filter((item) => item.reviewStatus === "confirmed");
 
   if (error) {
-    return <ProjectShell><div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</div></ProjectShell>;
+    return <ProjectShell username={username} projectId={projectId}><div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</div></ProjectShell>;
   }
 
   if (!project) {
-    return <ProjectShell><div className="h-40 animate-pulse rounded-3xl bg-slate-100" aria-label="正在加载项目" /></ProjectShell>;
+    return <ProjectShell username={username} projectId={projectId}><div className="h-40 animate-pulse rounded-3xl bg-slate-100" aria-label="正在加载项目" /></ProjectShell>;
   }
 
   return (
-    <ProjectShell>
+    <ProjectShell username={username} projectId={projectId}>
       <div className="flex flex-col gap-6 border-b border-slate-200/80 pb-8 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <Link href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">← 返回项目列表</Link>
+          <Link href="/dashboard#projects" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">← 返回项目列表</Link>
           <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project workspace</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name}</h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">{project.description || "项目描述尚未补充。先接入来源，再人工创建并确认条目，最后手动生成可追溯快照。"}</p>
@@ -1293,17 +1294,11 @@ function SnapshotItemCard({ item }: { item: SnapshotRecord["payload"]["sections"
   );
 }
 
-function ProjectShell({ children }: { children: ReactNode }) {
+function ProjectShell({ children, username, projectId }: { children: ReactNode; username: string; projectId: string }) {
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="overview" />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-7">
-          <Link href="/" className="flex items-center gap-3" aria-label="AI Project OS 首页">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold tracking-tight text-white">OS</span>
-            <span className="block text-sm font-semibold tracking-[0.16em] text-slate-950">AI PROJECT OS</span>
-          </Link>
-          <div className="flex flex-wrap items-center justify-end gap-3"><Link href="/guide#project-data" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">使用指南</Link><span className="text-xs text-slate-400">Project Intelligence · V2.1</span></div>
-        </header>
         <div className="py-10">{children}</div>
       </div>
     </main>

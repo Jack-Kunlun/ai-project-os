@@ -40,9 +40,11 @@ export class ApiError extends Error {
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
   if (error instanceof AuthError) {
     const mapping = {
-      AUTH_INVALID_INPUT: [400, "初始化或登录信息无效"],
+      AUTH_INVALID_INPUT: [400, "账户或登录信息格式无效"],
       AUTH_ALREADY_INITIALIZED: [409, "应用已经完成初始化"],
       AUTH_INVALID_CREDENTIALS: [401, "用户名或密码错误"],
+      AUTH_CURRENT_PASSWORD_INVALID: [401, "当前密码不正确"],
+      AUTH_PASSWORD_UNCHANGED: [400, "新密码不能与当前密码相同"],
       AUTH_REQUIRED: [401, "请先登录"],
       AUTH_CSRF_REJECTED: [403, "请求来源校验失败"],
     } as const;

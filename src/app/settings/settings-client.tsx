@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { LogoutButton } from "@/app/logout-button";
+import { AppHeader } from "@/components/app-header";
 
 type ProviderKind = "openai" | "deepseek" | "qwen" | "glm";
 type ProviderCatalogEntry = {
@@ -81,22 +80,8 @@ export function SettingsClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+      <AppHeader username={username} active="settings" />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-7">
-          <Link href="/" className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span>
-            <span>
-              <span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span>
-              <span className="block text-xs text-slate-500">系统设置 · V2.1</span>
-            </span>
-          </Link>
-          <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-slate-500">
-            <Link href="/guide#providers" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">使用指南</Link>
-            <span>{username}</span>
-            <LogoutButton />
-          </div>
-        </header>
-
         <section className="pb-10 pt-12">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI connections</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">模型供应商</h1>

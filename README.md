@@ -1,6 +1,6 @@
 # AI Project OS
 
-AI Project OS V2.1 是一套可在本机部署的项目长期记忆与只读项目智能工作台。它把人工资料和多个 GitHub 仓库整理成可追溯记忆，并提供页面化的模型配置、自动抽取、向量索引、语义检索、带引用 RAG、项目状态简报和受约束的只读智能体。
+AI Project OS V2.2 是一套可在本机部署的项目长期记忆与只读项目智能工作台。它把人工资料和多个 GitHub 仓库整理成可追溯记忆，并通过 Dashboard 汇总配置进度、项目状态、最近任务和下一步操作，提供页面化的模型配置、自动抽取、向量索引、语义检索、带引用 RAG、项目状态简报和受约束的只读智能体。
 
 所有模型与 GitHub 凭据都在网页录入，由服务端使用 AES-256-GCM 加密后保存；主密钥位于数据库之外。每次向模型供应商发送项目内容前，用户仍需在页面明确确认本次传输范围。模型抽取结果只会进入候选队列，必须人工确认后才成为已确认项目事实。
 
@@ -12,9 +12,11 @@ AI Project OS V2.1 是一套可在本机部署的项目长期记忆与只读项�
 
 ## 当前能力
 
-| 能力 | V2.1 行为 |
+| 能力 | V2.2 行为 |
 | --- | --- |
 | 本地管理员 | 首次启动创建唯一管理员；数据库会话、HttpOnly Cookie、同源写请求校验和退出登录 |
+| Dashboard | 汇总项目、已确认事实、仓库和智能记忆状态；显示配置进度、下一步建议、最近任务，并提供项目搜索、创建和四个工作区快捷入口 |
+| 个人中心 | 查看账户、会话和活动时间；修改登录名；验证当前密码后轮换密码并撤销全部会话 |
 | 模型供应商 | 页面配置和测试 OpenAI、DeepSeek、Qwen、GLM；API Key 加密保存且永不回显 |
 | 能力路由 | 每个项目分别选择自动抽取、向量索引和引用式生成所使用的供应商与模型 |
 | 项目资料 | 保存人工原文、来源、时间和 SHA-256；条目必须引用同项目资料中的精确摘录 |
@@ -33,9 +35,9 @@ DeepSeek 可用于生成；它不提供向量路由。语义索引可选择 Open
 
 ## 从页面开始使用
 
-1. 首次打开应用，创建本地管理员账号。
-2. 在“模型与系统设置”添加供应商，填写 API Key、生成模型和可选向量模型，然后执行连接测试。
-3. 创建或进入项目，在“智能控制台”为自动抽取、语义向量和引用式问答选择已验证的供应商。
+1. 首次打开应用，创建本地管理员账号；登录后进入 Dashboard。
+2. 按 Dashboard 的“推荐下一步”进入模型设置，填写 API Key、生成模型和可选向量模型，然后执行连接测试。
+3. 在 Dashboard 创建或搜索项目，并从项目卡直接进入“智能控制台”，为自动抽取、语义向量和引用式问答选择已验证的供应商。
 4. 在同一控制台连接一个或多个 GitHub 仓库；也可以继续手工录入项目资料。
 5. 运行代码扫描和仓库资料同步。扫描结果冻结到明确 commit，并按仓库级原子发布。
 6. 进入“智能记忆”，明确确认本次外部模型传输后执行自动抽取或建立统一语义索引。
@@ -45,6 +47,7 @@ DeepSeek 可用于生成；它不提供向量路由。语义索引可选择 Open
 ## 安全与数据边界
 
 - 管理员密码使用 scrypt 与随机盐保存；会话 Token 只保存 SHA-256，浏览器 Cookie 为 HttpOnly、SameSite=Lax。
+- 修改密码必须验证当前密码；成功后撤销该账户全部会话并要求重新登录。登录名和密码更新均要求有效会话与同源写请求。
 - API Key 和 GitHub PAT 使用 AES-256-GCM、随机 nonce、认证标签和绑定用途的 AAD 加密。网页/API 只返回尾号，不返回密文或明文。
 - 主密钥不进入 PostgreSQL。Compose 使用独立命名卷 `ai-project-os-secrets` 持久化 `/var/lib/ai-project-os-secrets/master.key`。
 - GitHub 客户端只允许固定 `api.github.com` GET 端点，拒绝重定向、超大响应、身份不一致和不受控分页。
@@ -54,7 +57,7 @@ DeepSeek 可用于生成；它不提供向量路由。语义索引可选择 Open
 - RAG 上下文被视为不可信内容；模型只能引用本次检索返回的 MemoryRecord UUID。
 - 项目智能体的计划使用严格结构校验，只允许项目概览、已确认条目、语义记忆和仓库状态四个只读工具；未知工具、重复单例工具、额外字段和越界引用都会整次拒绝。
 - 当前向量路由的供应商、模型和维度必须与活动索引一致；配置变化后必须重建索引，旧索引不会被静默复用。
-- 项目删除会级联清理本项目的任务、授权、候选、索引和回答；供应商凭据与全局连接独立保存。
+- 当前版本不提供项目删除 API 或页面入口；候选 Source 只有在未被 Item 引用时才允许删除。供应商凭据与全局连接独立保存。
 
 ## 当前限制
 
@@ -64,7 +67,7 @@ DeepSeek 可用于生成；它不提供向量路由。语义索引可选择 Open
 - 模型调用会使用用户自己的供应商额度并可能产生费用；项目不自动代替用户发送真实私有资料做验收。
 - 不支持自定义 OpenAI-compatible Base URL、Ollama、Azure OpenAI、文件上传、OCR、飞书、MCP、自动改代码、Shell、文件系统操作或任何 GitHub 写操作。
 - 项目智能体没有定时自主运行和行动审批能力；它只能在页面当次确认后执行一次只读调查。
-- 已有 V1 CLI 和历史运行合同继续保留用于兼容与审计，但 V2.1 的常规配置和操作入口是网页。
+- 已有 V1 CLI 和历史运行合同继续保留用于兼容与审计，但 V2.2 的常规配置和操作入口是网页。
 
 ## 本地 Docker 部署
 
@@ -114,7 +117,7 @@ git diff --check
 # 真实 PostgreSQL V2 AI 闭环；创建的隔离数据会自动清理
 WEB_AI_POSTGRES_GATE=1 pnpm exec tsx --test test/web-ai-workflow-postgres.test.ts
 
-# 真实 PostgreSQL V2.1 项目智能体闭环；使用模拟供应商响应并自动清理
+# 真实 PostgreSQL 项目智能体闭环；使用模拟供应商响应并自动清理
 PROJECT_INTELLIGENCE_POSTGRES_GATE=1 pnpm run test:project-intelligence-postgres
 
 pnpm exec prisma migrate status --config prisma.config.ts
@@ -122,14 +125,18 @@ pnpm exec prisma migrate status --config prisma.config.ts
 
 `pnpm build` 使用 Next.js 官方 Webpack 构建后端，以避免部分受限 macOS 环境中 Turbopack 的本地端口限制。
 
-## V2.1 页面与 API
+## V2.2 页面与 API
 
 - `/setup`、`/login`：首次管理员初始化与登录。
+- `/dashboard`：全局项目状态、配置进度、下一步建议、最近任务、项目搜索/创建和快捷入口；`/` 会在登录后跳转到这里。
+- `/profile`：账户信息、登录名修改、密码轮换和退出登录。
 - `/settings`：模型供应商、API Key、模型和连接测试。
 - `/projects/:projectId/control`：项目模型路由、GitHub 多仓库连接、扫描、同步和任务状态。
 - `/projects/:projectId/memory`：自动抽取、候选审核、统一向量索引、语义检索和引用式问答。
 - `/projects/:projectId/intelligence`：项目当前状态简报、受约束的只读调查、计划轨迹和证据快照。
 - `/api/settings/providers/*`：受认证保护的供应商配置、密钥轮换与连接测试。
+- `/api/dashboard`：Dashboard 聚合指标、项目状态和最近任务。
+- `/api/profile`：账户信息读取、登录名更新与密码轮换。
 - `/api/projects/:projectId/ai-routes`：项目级能力路由。
 - `/api/projects/:projectId/repositories/*`：多仓库连接、代码扫描和资料同步。
 - `/api/projects/:projectId/memory/*`：索引、抽取、候选审核、搜索与 RAG。
@@ -140,4 +147,4 @@ pnpm exec prisma migrate status --config prisma.config.ts
 
 ## 历史材料
 
-V1 CLI 手册和历史合同保留在 `docs/`，仅用于兼容、审计和理解旧数据结构。它们不覆盖本 README 描述的当前 V2.1 页面能力。
+V1 CLI 手册和历史合同保留在 `docs/`，仅用于兼容、审计和理解旧数据结构。它们不覆盖本 README 描述的当前 V2.2 页面能力。

@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SetupPage() {
   if (await isApplicationInitialized()) {
-    redirect((await getPageSession()) === null ? "/login" : "/");
+    redirect((await getPageSession()) === null ? "/login" : "/dashboard");
   }
   return <SetupForm />;
 }

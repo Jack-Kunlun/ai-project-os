@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { AppHeader } from "@/components/app-header";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 
 type Citation = {
@@ -116,7 +116,7 @@ function shortHash(value: string): string {
   return value.length > 12 ? value.slice(0, 12) : value;
 }
 
-export function ProjectIntelligenceClient() {
+export function ProjectIntelligenceClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
   const [projectName, setProjectName] = useState("项目");
   const [status, setStatus] = useState<StatusPayload | null>(null);
@@ -153,23 +153,8 @@ export function ProjectIntelligenceClient() {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="intelligence" />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-7">
-          <Link href="/" className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span>
-            <span>
-              <span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span>
-              <span className="block text-xs text-slate-500">只读项目智能体 · V2.1</span>
-            </span>
-          </Link>
-          <nav className="flex flex-wrap gap-2">
-            <Link href="/guide#agent" className="nav-pill">使用指南</Link>
-            <Link href={`/projects/${projectId}`} className="nav-pill">资料与条目</Link>
-            <Link href={`/projects/${projectId}/memory`} className="nav-pill">智能记忆</Link>
-            <Link href={`/projects/${projectId}/control`} className="nav-pill">智能控制台</Link>
-          </nav>
-        </header>
-
         <section className="pb-10 pt-12">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project intelligence agent</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1>
@@ -185,7 +170,6 @@ export function ProjectIntelligenceClient() {
           </>
         )}
       </div>
-      <style jsx global>{`.nav-pill{border:1px solid rgb(226 232 240);border-radius:9999px;background:white;padding:.5rem 1rem;font-size:.75rem;line-height:1rem;font-weight:600;color:rgb(71 85 105)}.nav-pill:hover{border-color:rgb(165 180 252);color:rgb(67 56 202)}`}</style>
     </main>
   );
 }

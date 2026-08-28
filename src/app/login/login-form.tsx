@@ -4,9 +4,9 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-export function LoginForm() {
+export function LoginForm({ notice }: { notice?: string }) {
   const router = useRouter();
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +25,7 @@ export function LoginForm() {
         const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
         throw new Error(payload?.error?.message ?? "登录失败");
       }
-      router.replace("/");
+      router.replace("/dashboard");
       router.refresh();
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "登录失败");
@@ -41,9 +41,10 @@ export function LoginForm() {
         <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Secure workspace</p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">登录 AI Project OS</h1>
         <label className="mt-8 block text-sm font-medium" htmlFor="login-username">用户名</label>
-        <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+        <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required placeholder="输入登录名" className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
         <label className="mt-5 block text-sm font-medium" htmlFor="login-password">密码</label>
         <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+        {notice ? <p role="status" className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</p> : null}
         {error ? <p role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
         <button type="submit" disabled={pending} className="mt-7 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50">{pending ? "登录中…" : "登录"}</button>
         <p className="mt-5 text-center text-xs text-slate-500"><Link href="/guide" className="font-semibold text-indigo-600 hover:text-indigo-700">打开使用指南</Link></p>

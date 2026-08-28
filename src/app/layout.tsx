@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Project OS · Project Intelligence V2.1",
+  title: "AI Project OS · Project Intelligence V2.2",
   description: "通过自动抽取、语义记忆、引用式问答与只读项目智能体，建立可追溯、可审阅的项目长期记忆。",
 };
 

@@ -22,6 +22,8 @@ export type AuthErrorCode =
   | "AUTH_INVALID_INPUT"
   | "AUTH_ALREADY_INITIALIZED"
   | "AUTH_INVALID_CREDENTIALS"
+  | "AUTH_CURRENT_PASSWORD_INVALID"
+  | "AUTH_PASSWORD_UNCHANGED"
   | "AUTH_REQUIRED"
   | "AUTH_CSRF_REJECTED";
 
@@ -189,6 +191,63 @@ export async function loginAdmin(
     data: { revokedAt: new Date() },
   });
   return createSession(db, user);
+}
+
+export async function updateAccountUsername(
+  userId: string,
+  usernameInput: unknown,
+  db: PrismaClient = getDb(),
+): Promise<SafeSessionUser> {
+  const username = canonicalUsername(usernameInput);
+  const user = await db.appUser.update({
+    where: { id: userId },
+    data: { username },
+    select: { id: true, username: true, role: true },
+  });
+  return safeUser(user);
+}
+
+export async function changeAccountPassword(
+  userId: string,
+  currentPasswordInput: unknown,
+  newPasswordInput: unknown,
+  db: PrismaClient = getDb(),
+): Promise<void> {
+  const user = await db.appUser.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      passwordHash: true,
+      passwordSalt: true,
+      passwordVersion: true,
+    },
+  });
+  if (user === null) return fail("AUTH_REQUIRED");
+  if (!(await verifyPasswordRecord(currentPasswordInput, user))) {
+    return fail("AUTH_CURRENT_PASSWORD_INVALID");
+  }
+  if (await verifyPasswordRecord(newPasswordInput, user)) {
+    return fail("AUTH_PASSWORD_UNCHANGED");
+  }
+
+  const nextPassword = await createPasswordRecord(newPasswordInput);
+  const revokedAt = new Date();
+  await db.$transaction(async (tx) => {
+    const update = await tx.appUser.updateMany({
+      where: {
+        id: userId,
+        passwordHash: user.passwordHash,
+        passwordSalt: user.passwordSalt,
+        passwordVersion: user.passwordVersion,
+      },
+      data: nextPassword,
+    });
+    if (update.count !== 1) return fail("AUTH_CURRENT_PASSWORD_INVALID");
+    await tx.appSession.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt },
+    });
+  });
 }
 
 function cookieToken(cookieHeader: string | null): string | null {

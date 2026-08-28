@@ -3,8 +3,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "使用指南 · AI Project OS V2.1",
-  description: "AI Project OS V2.1 从首次配置到项目智能体的页面操作指南。",
+  title: "使用指南 · AI Project OS V2.2",
+  description: "AI Project OS V2.2 从 Dashboard、首次配置到项目智能体的页面操作指南。",
 };
 
 const workflow = [
@@ -26,15 +26,16 @@ export default function GuidePage() {
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-7">
-          <Link href="/" className="flex items-center gap-3" aria-label="AI Project OS 首页">
+          <Link href="/dashboard" className="flex items-center gap-3" aria-label="AI Project OS Dashboard">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span>
             <span>
               <span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span>
-              <span className="block text-xs text-slate-500">使用指南 · V2.1</span>
+              <span className="block text-xs text-slate-500">使用指南 · V2.2</span>
             </span>
           </Link>
           <nav className="flex flex-wrap gap-2 text-xs font-semibold">
-            <Link href="/" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-slate-600 hover:border-indigo-200 hover:text-indigo-700">项目首页</Link>
+            <Link href="/dashboard" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-slate-600 hover:border-indigo-200 hover:text-indigo-700">Dashboard</Link>
+            <Link href="/profile" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-slate-600 hover:border-indigo-200 hover:text-indigo-700">个人中心</Link>
             <Link href="/settings" className="rounded-full bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500">模型与系统设置</Link>
           </nav>
         </header>
@@ -70,7 +71,25 @@ export default function GuidePage() {
           <GuideSection id="first-run" eyebrow="First run" title="首次启动与登录">
             <Step number="1" title="初始化本地管理员">首次打开应用会进入初始化页。用户名至少 3 位；密码至少 12 位并同时包含字母和数字。当前版本为本地单管理员模式。</Step>
             <Step number="2" title="理解凭据保存方式">模型 API Key 和 GitHub PAT 由服务端加密保存，页面不会回显明文。数据库之外的本地主密钥同样必须保留；不要删除 Compose 的 secrets 卷。</Step>
-            <Step number="3" title="登录后的第一站">先进入“模型与系统设置”，完成至少一个生成模型和一个向量模型的连接测试，再创建正式项目。</Step>
+            <Step number="3" title="登录后的第一站">登录后会进入 Dashboard。先按“推荐下一步”完成至少一个生成模型和一个向量模型的连接测试，再创建正式项目。</Step>
+          </GuideSection>
+
+          <GuideSection id="dashboard" eyebrow="Command center" title="从 Dashboard 开始工作">
+            <p className="text-sm leading-7 text-slate-600">Dashboard 不是静态欢迎页，而是每次打开系统后的工作入口。它会把跨项目状态压缩成当前最值得处理的一步，减少在不同页面之间来回查找。</p>
+            <div className="mt-6 grid gap-4 md:grid-cols-2">
+              <InfoCard title="先看推荐下一步">系统按模型连接、项目、三条 AI 路由和智能记忆索引依次判断缺口，并直接链接到需要处理的页面。</InfoCard>
+              <InfoCard title="检查工作空间就绪度">四步进度用于判断基础能力是否真的可用；容器健康但模型或索引缺失时，不会显示为完整就绪。</InfoCard>
+              <InfoCard title="继续最近任务">仓库扫描、同步、抽取、索引、问答、简报和智能体运行会显示持久化状态，可直接回到所属项目。</InfoCard>
+              <InfoCard title="直接操作项目">搜索项目后，从项目卡直接进入资料、控制台、记忆或智能体。配置进度条显示资料、路由和索引三个关键阶段。</InfoCard>
+            </div>
+            <div className="mt-5"><Link href="/dashboard" className="inline-flex rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">打开 Dashboard</Link></div>
+          </GuideSection>
+
+          <GuideSection id="profile" eyebrow="Personal center" title="管理个人信息与登录安全">
+            <Step number="1" title="查看账户状态">点击右上角头像，查看本地管理员角色、账户创建时间、最近活动、活动会话和当前会话到期时间。</Step>
+            <Step number="2" title="修改登录名">登录名为 3–64 位，只允许字母、数字、点、下划线和连字符；保存后下次登录使用新登录名。</Step>
+            <Step number="3" title="安全轮换密码">输入当前密码和新密码。新密码至少 12 位并包含字母和数字；成功后全部会话会被撤销，需要重新登录。</Step>
+            <Callout tone="slate" title="凭据分开管理">模型 API Key 位于“模型设置”；GitHub PAT 位于具体项目的“智能控制台”。个人中心不会展示或导出这些凭据。</Callout>
           </GuideSection>
 
           <GuideSection id="providers" eyebrow="AI connections" title="配置模型供应商">
@@ -89,7 +108,7 @@ export default function GuidePage() {
             <div className="grid gap-5 lg:grid-cols-2">
               <InfoCard title="手工资料与条目">
                 <ol className="space-y-2">
-                  <li>1. 在首页创建项目并进入“资料与条目”。</li>
+                  <li>1. 在 Dashboard 创建项目并进入“资料与条目”。</li>
                   <li>2. 先录入原始资料和可选来源链接。</li>
                   <li>3. 创建条目时选择资料，并引用资料中的精确连续原文。</li>
                   <li>4. 将候选条目确认后，它才会成为项目事实。</li>
@@ -166,8 +185,8 @@ export default function GuidePage() {
         </div>
 
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 py-7 text-xs text-slate-400">
-          <span>AI Project OS V2.1 · 页面操作指南</span>
-          <Link href="/" className="font-semibold text-indigo-600 hover:text-indigo-700">返回项目首页</Link>
+          <span>AI Project OS V2.2 · 页面操作指南</span>
+          <Link href="/dashboard" className="font-semibold text-indigo-600 hover:text-indigo-700">返回 Dashboard</Link>
         </footer>
       </div>
     </main>

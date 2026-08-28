@@ -4,7 +4,6 @@ import { ProjectControlClient } from "./project-control-client";
 export const dynamic = "force-dynamic";
 
 export default async function ProjectControlPage() {
-  await requirePageSession();
-  return <ProjectControlClient />;
+  const user = await requirePageSession();
+  return <ProjectControlClient username={user.username} />;
 }
-

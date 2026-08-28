@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { AppHeader } from "@/components/app-header";
 
 type Provider = {
   id: string;
@@ -73,7 +74,7 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-export function ProjectControlClient() {
+export function ProjectControlClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
   const [projectName, setProjectName] = useState("项目");
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -122,12 +123,8 @@ export function ProjectControlClient() {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="control" />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-7">
-          <Link href="/" className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span><span><span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span><span className="block text-xs text-slate-500">项目智能控制台 · V2.1</span></span></Link>
-          <div className="flex flex-wrap gap-2"><Link href="/guide#routes" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600">使用指南</Link><Link href={`/projects/${projectId}`} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600">资料与条目</Link><Link href={`/projects/${projectId}/memory`} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600">智能记忆</Link><Link href={`/projects/${projectId}/intelligence`} className="rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white">项目智能体</Link></div>
-        </header>
-
         <section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Control plane</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">选择每项 AI 能力使用的供应商，并在页面连接多个 GitHub 仓库。仓库读取始终冻结到明确 commit，扫描结果按仓库级原子发布。</p></section>
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {loading ? <div className="h-40 animate-pulse rounded-3xl bg-slate-200" /> : (

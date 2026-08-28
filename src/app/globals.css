@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f5f7fb;
+  --background: #f4f6fb;
   --foreground: #0f172a;
 }
 
@@ -16,16 +16,32 @@
 
 html {
   background: var(--background);
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-rendering: optimizeLegibility;
 }
 
 button,
 input,
 textarea {
   font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+::selection {
+  background: #c7d2fe;
+  color: #1e1b4b;
 }

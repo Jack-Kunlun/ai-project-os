@@ -36,7 +36,7 @@ export function SetupForm() {
         body: JSON.stringify({ username, password }),
       });
       if (!response.ok) throw new Error(await errorMessage(response));
-      router.replace("/");
+      router.replace("/dashboard");
       router.refresh();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "初始化失败");

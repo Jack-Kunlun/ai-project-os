@@ -402,7 +402,7 @@ test(
         where: { id: interruptedWorkflowClaim.attemptId },
         data: { leaseExpiresAt: new Date(Date.now() - 1) },
       });
-      const reconciledWorkflowJob = await reconcileProjectJob(projectId, interruptedWorkflowJob.id, db);
+      const reconciledWorkflowJob = await reconcileProjectJob(projectId, interruptedWorkflowJob.id, user.id, db);
       assert.equal(reconciledWorkflowJob.status, "unknown");
       const reconciledAudit = await db.providerCallAudit.findUniqueOrThrow({ where: { id: runningAudit.id } });
       assert.equal(reconciledAudit.status, "unknown");

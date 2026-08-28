@@ -140,6 +140,10 @@ enum BackgroundJobAttemptDispatchState {
   acknowledged
 }
 
+enum BackgroundJobReconciliationResolution {
+  explicitAbandon @map("explicit_abandon")
+}
+
 enum MemoryIndexStatus {
   staging
   building
@@ -585,6 +589,7 @@ model Project {
   githubSyncEntries                ProjectGitHubSyncEntry[]
   githubSyncChanges                ProjectGitHubSyncChange[]
   githubSyncReconciliations        ProjectGitHubSyncReconciliation[]
+  backgroundJobReconciliations     BackgroundJobReconciliation[]
   repositoryLinkConfigVersions     ProjectRepositoryLinkConfigVersion[]
   repositoryLinkConfigPointers     ProjectRepositoryLinkConfigPointer[]
   scanBatches                      ProjectScanBatch[]
@@ -2667,6 +2672,7 @@ model AppUser {
   aiRouteRevisions ProjectAiRouteRevision[]
   githubSyncReconciliations ProjectGitHubSyncReconciliation[]
   memoryIndexReconciliations MemoryIndexReconciliation[]
+  backgroundJobReconciliations BackgroundJobReconciliation[]
 }
 
 model AppSession {
@@ -2829,6 +2835,7 @@ model BackgroundJob {
   intelligenceReport ProjectIntelligenceReport?
   projectAgentRun  ProjectAgentRun?
   githubSyncRun    ProjectGitHubSyncRun?
+  reconciliation   BackgroundJobReconciliation?
   memoryIndexGenerations MemoryIndexGeneration[]
   providerCalls    ProviderCallAudit[]
   attempts         BackgroundJobAttempt[]
@@ -2856,6 +2863,23 @@ model BackgroundJobAttempt {
   @@unique([jobId, attemptNumber])
   @@index([jobId, status, leaseExpiresAt])
   @@index([leaseExpiresAt, status])
+}
+
+model BackgroundJobReconciliation {
+  id                  String                                  @id @default(uuid()) @db.Uuid
+  projectId           String                                  @db.Uuid
+  jobId               String                                  @db.Uuid
+  requestedById       String                                  @db.Uuid
+  resolution          BackgroundJobReconciliationResolution
+  evidenceFingerprint String                                  @db.Char(64)
+  createdAt           DateTime                                @default(now())
+  project             Project                                 @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  job                 BackgroundJob                            @relation(fields: [projectId, jobId], references: [projectId, id], map: "BackgroundJobReconciliation_job_fkey", onDelete: Cascade, onUpdate: Cascade)
+  requestedBy         AppUser                                 @relation(fields: [requestedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id], map: "BackgroundJobReconciliation_project_id_key")
+  @@unique([projectId, jobId], map: "BackgroundJobReconciliation_project_job_key")
+  @@index([projectId, createdAt])
 }
 
 model ProjectGitHubSyncRun {

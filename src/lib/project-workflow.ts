@@ -332,6 +332,24 @@ export function classifyProviderDispatchFailure(error: unknown): "unknown" | "fa
   return isUncertainProviderDispatch(error) ? "unknown" : "failed";
 }
 
+export function isSpecializedProjectJobKind(kind: BackgroundJobKind): boolean {
+  return kind === "memoryIndex" || kind === "githubProjectSync";
+}
+
+export function isSpecializedProjectJobReconciliationKind(kind: BackgroundJobKind): boolean {
+  return isSpecializedProjectJobKind(kind) || kind === "githubScan" || kind === "githubMaterialSync";
+}
+
+/**
+ * Generic reconciliation evidence is deliberately deterministic and contains
+ * only project/job identity.  It is not a provider response or a retry token.
+ */
+export function genericReconciliationEvidenceFingerprint(projectId: string, jobId: string): string {
+  return createHash("sha256")
+    .update(`background-job-reconciliation:v1:${projectId}:${jobId}`, "utf8")
+    .digest("hex");
+}
+
 async function withJobLock<T>(db: WorkflowDb, jobId: string, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   if (!("$transaction" in db)) {
     return operation(db);
@@ -791,45 +809,92 @@ export async function getProjectJob(
 export async function reconcileProjectJob(
   projectId: string,
   jobId: string,
+  requestedById: string,
   db: WorkflowDb = getDb(),
 ) {
+  const uuid = z.string().uuid();
+  if (!uuid.safeParse(projectId).success || !uuid.safeParse(jobId).success || !uuid.safeParse(requestedById).success) {
+    return fail("PROJECT_WORKFLOW_INVALID_INPUT");
+  }
   return withJobLock(db, jobId, async (tx) => {
     const job = await tx.backgroundJob.findUnique({
       where: { id: jobId },
-      select: { id: true, projectId: true, kind: true, status: true },
+      select: { id: true, projectId: true, kind: true, status: true, reconciliationRequired: true, failureCode: true },
     });
     if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
     if (job.projectId !== projectId) return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
-    if (job.kind === "githubProjectSync") return fail("PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED");
-    if (job.status === "unknown") {
+    if (isSpecializedProjectJobReconciliationKind(job.kind)) return fail("PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED");
+
+    let currentStatus = job.status;
+    let currentReconciliationRequired = job.reconciliationRequired;
+    let currentFailureCode = job.failureCode;
+    if (job.status === "running") {
+      const attempt = await tx.backgroundJobAttempt.findFirst({
+        where: { jobId },
+        orderBy: { attemptNumber: "desc" },
+        select: { id: true, status: true, leaseExpiresAt: true },
+      });
+      if (attempt === null) return fail("PROJECT_WORKFLOW_ATTEMPT_NOT_FOUND");
+      if (attempt.status !== "running") return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
+      if (!isLeaseExpired(attempt.leaseExpiresAt)) return fail("PROJECT_WORKFLOW_RECONCILIATION_NOT_DUE");
+      const completedAt = new Date();
+      const attemptUpdated = await tx.backgroundJobAttempt.updateMany({
+        where: { id: attempt.id, jobId, status: "running" },
+        data: { status: "unknown", safeFailureCode: "RECONCILIATION_REQUIRED", completedAt, heartbeatAt: completedAt },
+      });
+      if (attemptUpdated.count !== 1) return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
       await tx.providerCallAudit.updateMany({
         where: { jobId, status: "running" },
-        data: { status: "unknown", safeErrorCode: "RECONCILIATION_REQUIRED", completedAt: new Date() },
+        data: { status: "unknown", safeErrorCode: "RECONCILIATION_REQUIRED", completedAt },
       });
-      return getProjectJob(projectId, jobId, tx);
+      const jobUpdated = await tx.backgroundJob.updateMany({
+        where: { id: jobId, projectId, status: "running" },
+        data: { status: "unknown", stage: "reconciliation_required", failureCode: "RECONCILIATION_REQUIRED", completedAt, reconciliationRequired: true },
+      });
+      if (jobUpdated.count !== 1) return fail("PROJECT_WORKFLOW_CLAIM_CONFLICT");
+      currentStatus = "unknown";
+      currentReconciliationRequired = true;
+      currentFailureCode = "RECONCILIATION_REQUIRED";
     }
-    if (job.status !== "running") return fail("PROJECT_WORKFLOW_INVALID_STATE");
-    const attempt = await tx.backgroundJobAttempt.findFirst({
-      where: { jobId },
-      orderBy: { attemptNumber: "desc" },
-      select: { id: true, status: true, leaseExpiresAt: true },
+
+    if (currentStatus !== "unknown") return fail("PROJECT_WORKFLOW_INVALID_STATE");
+
+    const existingReconciliation = await tx.backgroundJobReconciliation.findUnique({
+      where: { projectId_jobId: { projectId, jobId } },
+      select: { id: true },
     });
-    if (attempt === null) return fail("PROJECT_WORKFLOW_ATTEMPT_NOT_FOUND");
-    if (attempt.status !== "running") return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
-    if (!isLeaseExpired(attempt.leaseExpiresAt)) return fail("PROJECT_WORKFLOW_RECONCILIATION_NOT_DUE");
+    const actor = await tx.appUser.findUnique({ where: { id: requestedById }, select: { id: true } });
+    if (actor === null) return fail("PROJECT_WORKFLOW_INVALID_INPUT");
+    if (existingReconciliation !== null && !currentReconciliationRequired) return getProjectJob(projectId, jobId, tx);
+    if (!currentReconciliationRequired) return fail("PROJECT_WORKFLOW_INVALID_STATE");
+
     const completedAt = new Date();
-    await tx.backgroundJobAttempt.update({
-      where: { id: attempt.id },
-      data: { status: "unknown", safeFailureCode: "RECONCILIATION_REQUIRED", completedAt, heartbeatAt: completedAt },
-    });
     await tx.providerCallAudit.updateMany({
       where: { jobId, status: "running" },
       data: { status: "unknown", safeErrorCode: "RECONCILIATION_REQUIRED", completedAt },
     });
-    await tx.backgroundJob.update({
-      where: { id: jobId },
-      data: { status: "unknown", stage: "reconciliation_required", failureCode: "RECONCILIATION_REQUIRED", completedAt, reconciliationRequired: true },
+    if (existingReconciliation === null) {
+      await tx.backgroundJobReconciliation.create({
+        data: {
+          projectId,
+          jobId,
+          requestedById: actor.id,
+          resolution: "explicitAbandon",
+          evidenceFingerprint: genericReconciliationEvidenceFingerprint(projectId, jobId),
+        },
+        select: { id: true },
+      });
+    }
+    const updated = await tx.backgroundJob.updateMany({
+      where: { id: jobId, projectId, status: "unknown", reconciliationRequired: true },
+      data: {
+        status: "unknown",
+        stage: "reconciled_unknown",
+        failureCode: currentFailureCode ?? "RECONCILIATION_REQUIRED",
+        reconciliationRequired: false,
+      },
     });
+    if (updated.count !== 1) return fail("PROJECT_WORKFLOW_CLAIM_CONFLICT");
     return getProjectJob(projectId, jobId, tx);
   });
 }
@@ -846,7 +911,7 @@ export async function cancelProjectJob(
     });
     if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
     if (job.projectId !== projectId) return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
-    if (job.kind === "githubProjectSync") return fail("PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED");
+    if (isSpecializedProjectJobKind(job.kind)) return fail("PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED");
     if (job.status !== "queued" && job.status !== "waitingConsent") return fail("PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED");
     const completedAt = new Date();
     await tx.backgroundJob.update({

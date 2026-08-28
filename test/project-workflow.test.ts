@@ -32,7 +32,7 @@ type JobStatus = "queued" | "waitingConsent" | "running" | "succeeded" | "failed
 type FakeJob = {
   id: string;
   projectId: string;
-  kind: "memoryIndex";
+  kind: "projectBrief" | "memoryIndex" | "githubProjectSync" | "githubScan" | "githubMaterialSync";
   status: JobStatus;
   stage: string;
   result: unknown;
@@ -67,10 +67,21 @@ type FakeProviderCallAudit = {
   completedAt: Date | null;
 };
 
+type FakeJobReconciliation = {
+  id: string;
+  projectId: string;
+  jobId: string;
+  requestedById: string;
+  resolution: string;
+  evidenceFingerprint: string;
+};
+
 class FakeWorkflowDb {
   readonly jobs = new Map<string, FakeJob>();
   readonly attempts = new Map<string, FakeAttempt>();
   readonly audits = new Map<string, FakeProviderCallAudit>();
+  readonly reconciliations = new Map<string, FakeJobReconciliation>();
+  readonly users = new Set<string>();
 
   readonly backgroundJob = {
     findUnique: async ({ where }: { where: { id: string } }) => this.jobs.get(where.id) ?? null,
@@ -142,6 +153,20 @@ class FakeWorkflowDb {
     },
   };
 
+  readonly backgroundJobReconciliation = {
+    findUnique: async ({ where }: { where: { projectId_jobId: { projectId: string; jobId: string } } }) =>
+      this.reconciliations.get(`${where.projectId_jobId.projectId}:${where.projectId_jobId.jobId}`) ?? null,
+    create: async ({ data }: { data: Omit<FakeJobReconciliation, "id"> }) => {
+      const reconciliation: FakeJobReconciliation = { ...data, id: randomUUID() };
+      this.reconciliations.set(`${data.projectId}:${data.jobId}`, reconciliation);
+      return reconciliation;
+    },
+  };
+
+  readonly appUser = {
+    findUnique: async ({ where }: { where: { id: string } }) => this.users.has(where.id) ? { id: where.id } : null,
+  };
+
   async $executeRaw(query: unknown): Promise<number> {
     void query;
     return 0;
@@ -156,7 +181,7 @@ class FakeWorkflowDb {
     const job: FakeJob = {
       id: randomUUID(),
       projectId,
-      kind: "memoryIndex",
+      kind: "projectBrief",
       status,
       stage: status,
       result: null,
@@ -247,20 +272,64 @@ test("expired running lease reconciles to unknown without provider retry", async
   const attempt = fake.attempts.get(claim.attemptId)!;
   attempt.leaseExpiresAt = new Date(Date.now() - 1);
   const audit = fake.addAudit(job.id);
+  const requestedById = randomUUID();
+  fake.users.add(requestedById);
   assert.equal(isLeaseExpired(attempt.leaseExpiresAt), true);
-  const reconciled = await reconcileProjectJob(projectId, job.id, fake as never);
+  const reconciled = await reconcileProjectJob(projectId, job.id, requestedById, fake as never);
   assert.equal(reconciled.status, "unknown");
-  assert.equal(reconciled.reconciliationRequired, true);
+  assert.equal(reconciled.reconciliationRequired, false);
+  assert.equal(reconciled.stage, "reconciled_unknown");
+  assert.equal(fake.reconciliations.size, 1);
   assert.equal(fake.attempts.get(claim.attemptId)?.status, "unknown");
   assert.equal(fake.audits.get(audit.id)?.status, "unknown");
   assert.equal(fake.audits.get(audit.id)?.safeErrorCode, "RECONCILIATION_REQUIRED");
   assert.notEqual(fake.audits.get(audit.id)?.completedAt, null);
-  const again = await reconcileProjectJob(projectId, job.id, fake as never);
+  const again = await reconcileProjectJob(projectId, job.id, requestedById, fake as never);
   assert.equal(again.status, "unknown");
+  assert.equal(fake.reconciliations.size, 1);
   await assert.rejects(
     () => finishProjectJob({ jobId: job.id, ...claim, result: { stale: true } }, fake as never),
     (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_STALE_ATTEMPT",
   );
+});
+
+test("generic reconciliation rejects specialized, non-unknown, and unknown actors", async () => {
+  const fake = db();
+  const projectId = randomUUID();
+  const actorId = randomUUID();
+  fake.users.add(actorId);
+
+  const queued = fake.addJob("queued", projectId);
+  await assert.rejects(
+    () => reconcileProjectJob(projectId, queued.id, actorId, fake as never),
+    (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_STATE",
+  );
+
+  const specialized = fake.addJob("unknown", projectId);
+  specialized.kind = "memoryIndex";
+  specialized.reconciliationRequired = true;
+  await assert.rejects(
+    () => reconcileProjectJob(projectId, specialized.id, actorId, fake as never),
+    (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED",
+  );
+
+  for (const kind of ["githubScan", "githubMaterialSync"] as const) {
+    const childRun = fake.addJob("unknown", projectId);
+    childRun.kind = kind;
+    childRun.reconciliationRequired = true;
+    await assert.rejects(
+      () => reconcileProjectJob(projectId, childRun.id, actorId, fake as never),
+      (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED",
+    );
+  }
+
+  const unknown = fake.addJob("unknown", projectId);
+  unknown.reconciliationRequired = true;
+  await assert.rejects(
+    () => reconcileProjectJob(projectId, unknown.id, randomUUID(), fake as never),
+    (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_INPUT",
+  );
+  assert.equal(fake.reconciliations.size, 0);
 });
 
 test("cancel is limited to queued or waiting-consent jobs and details omit lease secrets", async () => {

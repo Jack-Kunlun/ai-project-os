@@ -49,7 +49,7 @@ export async function POST(request: Request, context: Context) {
       : body.action === "reconcile" && existing?.kind === "memoryIndex"
         ? await reconcileMemoryIndexJob({ projectId, jobId, requestedById: user.id })
       : body.action === "reconcile"
-        ? await reconcileProjectJob(projectId, jobId)
+        ? await reconcileProjectJob(projectId, jobId, user.id)
       : body.action === "cancel"
         ? existing?.kind === "githubProjectSync"
           ? await cancelGitHubProjectSync({ projectId, jobId, requestedById: user.id })

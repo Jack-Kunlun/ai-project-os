@@ -485,12 +485,17 @@ export default defineConfig({
         },
       });
       await reconcileProjectJob(cascadeProjectId, cascadeJob.id, userId, db);
-      await db.project.delete({ where: { id: cascadeProjectId } });
+      // This gate intentionally stops before the later project-lifecycle
+      // migrations. Use SQL that does not ask the current Prisma Client to
+      // select fields (such as Project.archivedAt) that do not exist yet.
+      await raw.query('DELETE FROM "Project" WHERE "id" = $1', [cascadeProjectId]);
       assert.equal(await db.backgroundJob.findUnique({ where: { id: cascadeJob.id } }), null);
       assert.equal(await db.backgroundJobReconciliation.count({ where: { projectId: cascadeProjectId } }), 0);
     } finally {
       if (db !== null) {
-        await db.project.deleteMany({ where: { id: { in: [projectId, otherProjectId] } } });
+        if (rawConnected) {
+          await raw.query('DELETE FROM "Project" WHERE "id" IN ($1, $2)', [projectId, otherProjectId]);
+        }
         await db.aiProviderConnection.deleteMany({ where: { id: memoryProviderId } });
         await db.externalCredential.deleteMany({ where: { id: memoryCredentialId } });
         await db.$disconnect();

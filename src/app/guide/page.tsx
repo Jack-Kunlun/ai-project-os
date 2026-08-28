@@ -3,8 +3,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "使用指南 · AI Project OS V2.2",
-  description: "AI Project OS V2.2 从 Dashboard、首次配置到项目智能体的页面操作指南。",
+  title: "使用指南 · AI Project OS V2.2.1",
+  description: "AI Project OS V2.2.1 从 Dashboard、首次配置到项目智能体的页面操作指南。",
 };
 
 const workflow = [
@@ -30,7 +30,7 @@ export default function GuidePage() {
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span>
             <span>
               <span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span>
-              <span className="block text-xs text-slate-500">使用指南 · V2.2</span>
+              <span className="block text-xs text-slate-500">使用指南 · V2.2.1</span>
             </span>
           </Link>
           <nav className="flex flex-wrap gap-2 text-xs font-semibold">
@@ -135,6 +135,7 @@ export default function GuidePage() {
               <InfoCard title="自动抽取">从所选原始资料中抽取 decision、progress、issue 和 risk 候选。</InfoCard>
               <InfoCard title="引用式问答">生成 RAG 回答、项目状态简报和智能体最终回答。</InfoCard>
             </div>
+            <Callout tone="amber" title="切换模型前先看影响预览">切换自动抽取或引用式问答模型只影响后续任务，历史结果保留原供应商与模型来源。切换向量供应商、模型或维度会暂停语义搜索、RAG 和项目智能体；页面要求明确确认，保存后必须前往智能记忆重建索引。</Callout>
           </GuideSection>
 
           <GuideSection id="memory" eyebrow="AI memory" title="建立并使用智能记忆">
@@ -185,7 +186,7 @@ export default function GuidePage() {
         </div>
 
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 py-7 text-xs text-slate-400">
-          <span>AI Project OS V2.2 · 页面操作指南</span>
+          <span>AI Project OS V2.2.1 · 页面操作指南</span>
           <Link href="/dashboard" className="font-semibold text-indigo-600 hover:text-indigo-700">返回 Dashboard</Link>
         </footer>
       </div>

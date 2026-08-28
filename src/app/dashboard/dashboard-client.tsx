@@ -211,7 +211,7 @@ export function DashboardClient({ username }: { username: string }) {
           <MetricCard label="项目" value={payload.summary.projects} detail="统一工作空间" icon="folder" tone="indigo" loading={loading} />
           <MetricCard label="已确认事实" value={payload.summary.confirmedItems} detail="经过人工审核" icon="check" tone="emerald" loading={loading} />
           <MetricCard label="连接仓库" value={payload.summary.repositories} detail="多仓库只读来源" icon="branch" tone="cyan" loading={loading} />
-          <MetricCard label="智能记忆" value={`${payload.summary.indexedProjects}/${payload.summary.projects}`} detail={payload.summary.activeJobs > 0 ? `${payload.summary.activeJobs} 个任务进行中` : "已建立活动索引"} icon="spark" tone="violet" loading={loading} />
+          <MetricCard label="智能记忆" value={`${payload.summary.indexedProjects}/${payload.summary.projects}`} detail={payload.summary.activeJobs > 0 ? `${payload.summary.activeJobs} 个任务进行中` : payload.summary.indexedProjects > 0 ? `${payload.summary.indexedProjects} 个项目已建立索引` : "尚未建立活动索引"} icon="spark" tone="violet" loading={loading} />
         </section>
 
         <section className="mt-6 grid gap-6 lg:grid-cols-[0.82fr_1.18fr]">

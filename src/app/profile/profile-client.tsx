@@ -90,7 +90,7 @@ export function ProfileClient({ username: initialUsername }: { username: string 
 
             <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm">
               <h2 className="text-sm font-semibold text-slate-800">账户状态</h2>
-              {loading || !profile ? <div className="mt-5 space-y-3">{[1, 2, 3].map((item) => <div key={item} className="h-10 animate-pulse rounded-xl bg-slate-100" />)}</div> : <dl className="mt-5 space-y-4 text-sm"><InfoRow label="账户类型" value="本地管理员" /><InfoRow label="创建时间" value={formatDate(profile.createdAt)} /><InfoRow label="最近活动" value={formatDate(profile.lastSeenAt)} /><InfoRow label="活动会话" value={`${profile.activeSessionCount} 个`} /><InfoRow label="当前会话到期" value={formatDate(profile.sessionExpiresAt)} /></dl>}
+              {loading || !profile ? <div className="mt-5 space-y-3">{[1, 2, 3].map((item) => <div key={item} className="h-10 animate-pulse rounded-xl bg-slate-100" />)}</div> : <dl className="mt-5 space-y-4 text-sm"><InfoRow label="账户类型" value="本地管理员" /><InfoRow label="创建时间" value={formatDate(profile.createdAt)} /><InfoRow label="最近活动" value={formatDate(profile.lastSeenAt)} /><InfoRow label="活动会话" value={`${profile.activeSessionCount} 个`} /><InfoRow label="最近会话到期" value={formatDate(profile.sessionExpiresAt)} /></dl>}
             </section>
 
             <LogoutButton className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50" />

@@ -20,6 +20,20 @@ type AiRoute = {
   modelId: string;
   embeddingDimensions: number | null;
   maxOutputTokens: number;
+  updatedAt: string;
+};
+type RouteImpact = {
+  changed: boolean;
+  onlyFutureRuns: boolean;
+  indexInvalidated: boolean;
+  requiresIndexRebuildAcknowledgement: boolean;
+  activeIndexGenerationId: string | null;
+  activeIndex: { indexGenerationId: string; providerConnectionId: string; providerName: string; providerKind: string; modelId: string; dimensions: number } | null;
+};
+type RoutePreview = {
+  current: AiRoute | null;
+  next: Omit<AiRoute, "updatedAt">;
+  impact: RouteImpact;
 };
 type RepositoryLink = {
   id: string;
@@ -158,23 +172,111 @@ function RouteCard({ operation, projectId, providers, current, onSaved }: { oper
   const eligible = useMemo(() => providers.filter((provider) => provider.status === "verified" && (operation !== "embedding" || provider.defaultEmbeddingModelId !== null)), [providers, operation]);
   const [providerId, setProviderId] = useState(current?.providerConnectionId ?? eligible[0]?.id ?? "");
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [previewPending, setPreviewPending] = useState(false);
+  const [preview, setPreview] = useState<RoutePreview | null>(null);
+  const [previewForKey, setPreviewForKey] = useState("");
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [acknowledgeIndexRebuild, setAcknowledgeIndexRebuild] = useState(false);
+  const [message, setMessage] = useState<ReactNode>(null);
   const provider = eligible.find((entry) => entry.id === providerId);
 
+  const target = useMemo(() => {
+    if (!provider) return null;
+    const isEmbedding = operation === "embedding";
+    return {
+      operation,
+      providerConnectionId: provider.id,
+      modelId: isEmbedding ? provider.defaultEmbeddingModelId : provider.defaultGenerationModelId,
+      embeddingDimensions: isEmbedding ? provider.embeddingDimensions : null,
+      maxOutputTokens: isEmbedding ? 128 : 2048,
+      ...(current ? { expectedUpdatedAt: current.updatedAt } : { expectedUpdatedAt: null }),
+    };
+  }, [current, operation, provider]);
+
+  const targetKey = JSON.stringify(target);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      await Promise.resolve();
+      if (!active) return;
+      setPreviewPending(Boolean(target));
+      setPreviewError(null);
+      setPreview(null);
+      setPreviewForKey("");
+      setAcknowledgeIndexRebuild(false);
+      if (!target) return;
+      try {
+        const response = await fetch(`/api/projects/${projectId}/ai-routes`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(target),
+        });
+        if (!response.ok) throw new Error(await readError(response, "无法检查路由切换影响"));
+        const nextPreview = await response.json() as RoutePreview;
+        if (active) {
+          setPreview(nextPreview);
+          setPreviewForKey(targetKey);
+        }
+      } catch (previewLoadError: unknown) {
+        if (active) setPreviewError(previewLoadError instanceof Error ? previewLoadError.message : "无法检查路由切换影响");
+      } finally {
+        if (active) setPreviewPending(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [projectId, target, targetKey]);
+
+  async function refreshPreviewAfterConflict(): Promise<void> {
+    if (!target) return;
+    setPreviewPending(true);
+    setPreviewError(null);
+    setPreview(null);
+    setPreviewForKey("");
+    setAcknowledgeIndexRebuild(false);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/ai-routes`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(target),
+      });
+      if (!response.ok) throw new Error(await readError(response, "无法重新检查路由切换影响"));
+      const refreshed = await response.json() as RoutePreview;
+      if (refreshed.current) onSaved(refreshed.current);
+      setPreview(refreshed);
+      setPreviewForKey(targetKey);
+      setMessage("路由状态已变化，影响预览已刷新；请重新确认后再次保存。");
+    } catch (refreshError: unknown) {
+      setPreviewError(refreshError instanceof Error ? refreshError.message : "无法重新检查路由切换影响");
+      setMessage("路由状态已变化，重新获取影响预览失败，请刷新页面后重试。");
+    } finally {
+      setPreviewPending(false);
+    }
+  }
+
   async function save() {
-    if (!provider) return;
+    if (!provider || !target || previewPending || previewError || previewForKey !== targetKey) return;
     setPending(true); setMessage(null);
     try {
-      const isEmbedding = operation === "embedding";
-      const response = await fetch(`/api/projects/${projectId}/ai-routes`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ operation, providerConnectionId: provider.id, modelId: isEmbedding ? provider.defaultEmbeddingModelId : provider.defaultGenerationModelId, embeddingDimensions: isEmbedding ? provider.embeddingDimensions : null, maxOutputTokens: isEmbedding ? 128 : 2048 }) });
-      if (!response.ok) throw new Error(await readError(response, "路由保存失败"));
-      onSaved((await response.json() as { route: AiRoute }).route);
-      setMessage("已保存");
+      const response = await fetch(`/api/projects/${projectId}/ai-routes`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...target, acknowledgeIndexRebuild }) });
+      if (!response.ok) {
+        if (response.status === 409) {
+          await refreshPreviewAfterConflict();
+          return;
+        }
+        throw new Error(await readError(response, "路由保存失败"));
+      }
+      const result = await response.json() as { route: AiRoute; impact: RouteImpact };
+      onSaved(result.route);
+      setMessage(result.impact.indexInvalidated
+        ? <span>已保存；语义搜索、RAG 和项目智能体已暂停。请前往 <Link href={`/projects/${projectId}/memory`} className="font-semibold underline">智能记忆重建索引</Link>。</span>
+        : "已保存；本次切换只影响后续任务，历史结果和向量索引保留。");
     } catch (saveError) { setMessage(saveError instanceof Error ? saveError.message : "路由保存失败"); }
     finally { setPending(false); }
   }
 
-  return <article className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><h3 className="font-semibold">{operationInfo[operation].title}</h3><p className="mt-2 min-h-12 text-xs leading-5 text-slate-500">{operationInfo[operation].description}</p><select value={providerId} onChange={(event) => setProviderId(event.target.value)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"><option value="">选择已验证供应商</option>{eligible.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {operation === "embedding" ? entry.defaultEmbeddingModelId : entry.defaultGenerationModelId}</option>)}</select><button type="button" onClick={() => void save()} disabled={pending || !provider} className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : current ? "更新路由" : "保存路由"}</button>{message ? <p className="mt-2 text-xs text-slate-500">{message}</p> : null}</article>;
+  const activePreview = previewForKey === targetKey ? preview : null;
+  return <article className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><h3 className="font-semibold">{operationInfo[operation].title}</h3><p className="mt-2 min-h-12 text-xs leading-5 text-slate-500">{operationInfo[operation].description}</p><select value={providerId} onChange={(event) => setProviderId(event.target.value)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"><option value="">选择已验证供应商</option>{eligible.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {operation === "embedding" ? entry.defaultEmbeddingModelId : entry.defaultGenerationModelId}</option>)}</select>{previewPending ? <p className="mt-3 text-xs text-slate-400">正在检查切换影响…</p> : null}{previewError ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{previewError}</p> : null}{activePreview?.impact.onlyFutureRuns ? <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">只影响后续任务；历史结果和向量索引保留。</p> : null}{activePreview?.impact.indexInvalidated ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900"><p>当前索引将变为不兼容，语义搜索、RAG 和项目智能体会暂停。</p>{activePreview.impact.activeIndex ? <p className="mt-1 text-amber-800">旧索引：{activePreview.impact.activeIndex.providerName} · {activePreview.impact.activeIndex.modelId} · {activePreview.impact.activeIndex.dimensions} 维</p> : null}<p className="mt-1 text-amber-800">新配置：{provider?.name ?? "所选供应商"} · {target?.modelId ?? "所选模型"} · {target?.embeddingDimensions ?? "未知"} 维</p><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={acknowledgeIndexRebuild} onChange={(event) => setAcknowledgeIndexRebuild(event.target.checked)} className="mt-1" /><span>我确认保存后前往智能记忆重建索引</span></label></div> : null}<button type="button" onClick={() => void save()} disabled={pending || previewPending || !activePreview || Boolean(previewError) || Boolean(activePreview?.impact.requiresIndexRebuildAcknowledgement && !acknowledgeIndexRebuild)} className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : current ? "更新路由" : "保存路由"}</button>{message ? <p role="status" className="mt-2 text-xs text-slate-500">{message}</p> : null}</article>;
 }
 
 function RepositorySection({ projectId, repositories, credentialSuffix, onReload }: { projectId: string; repositories: RepositoryLink[]; credentialSuffix: string | null; onReload: () => Promise<void> }) {

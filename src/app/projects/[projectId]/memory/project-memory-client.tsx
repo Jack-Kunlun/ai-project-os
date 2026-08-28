@@ -66,11 +66,13 @@ type IndexStatus = {
       recordCount: number;
       inputManifestFingerprint: string;
       completedAt: string;
+      providerConnection: { id: string; name: string; kind: string; status: string };
     };
   };
   compatible: boolean;
-  inputs: { projectSourceCount: number; hasCodeSnapshot: boolean; repositoryMaterialGenerationCount: number };
-  route: null | { providerConnectionId: string; modelId: string; embeddingDimensions: number };
+  readiness: "routeMissing" | "providerUnavailable" | "indexMissing" | "routeIncompatible" | "inputsChanged" | "ready";
+  inputs: { projectSourceCount: number; hasCodeSnapshot: boolean; repositoryMaterialGenerationCount: number; manifestFingerprint: string | null };
+  route: null | { providerConnectionId: string; modelId: string; embeddingDimensions: number | null; providerConnection: { id: string; name: string; kind: string; status: string } };
 };
 
 async function readError(response: Response, fallback: string): Promise<string> {
@@ -121,9 +123,41 @@ function ConsentCheck({ checked, setChecked }: { checked: boolean; setChecked: (
 }
 
 function IndexPanel({ projectId, index, onReload }: { projectId: string; index: IndexStatus; onReload: () => Promise<void> }) {
-  const [acknowledged, setAcknowledged] = useState(false); const [pending, setPending] = useState(false); const [message, setMessage] = useState<string | null>(null);
-  async function build() { setPending(true); setMessage(null); try { const response = await fetch(`/api/projects/${projectId}/memory/index`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientKey: crypto.randomUUID(), consent }) }); if (!response.ok) throw new Error(await readError(response, "索引构建失败")); setMessage("新索引已完成并原子切换"); setAcknowledged(false); await onReload(); } catch (buildError) { setMessage(buildError instanceof Error ? buildError.message : "索引构建失败"); } finally { setPending(false); } }
-  return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Unified vector memory</p><h2 className="mt-2 text-2xl font-semibold">项目语义索引</h2><p className="mt-2 text-sm leading-6 text-slate-500">使用当前冻结的人工资料、仓库资料生成和项目代码快照。失败不会替换上一个可用索引。</p></div><div className="grid grid-cols-3 gap-2"><Metric label="资料" value={index.inputs.projectSourceCount} /><Metric label="代码" value={index.inputs.hasCodeSnapshot ? "已冻结" : "无"} /><Metric label="仓库资料" value={index.inputs.repositoryMaterialGenerationCount} /></div></div>{index.activeIndex ? <div className={`mt-6 rounded-2xl border p-5 ${index.compatible ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className={`text-sm font-semibold ${index.compatible ? "text-emerald-900" : "text-amber-900"}`}>{index.compatible ? "索引可用" : "索引需要重建"} · {index.activeIndex.generation.recordCount} 条记忆</p><p className={`mt-1 text-xs ${index.compatible ? "text-emerald-700" : "text-amber-700"}`}>{index.activeIndex.generation.modelId} · {index.activeIndex.generation.dimensions} 维 · {dateLabel(index.activeIndex.publishedAt)}</p></div><code className={`text-[10px] ${index.compatible ? "text-emerald-700" : "text-amber-700"}`}>{index.activeIndex.generation.inputManifestFingerprint.slice(0, 16)}…</code></div>{!index.compatible ? <p className="mt-3 text-xs leading-5 text-amber-800">当前向量供应商、模型或维度与该索引不一致。重建前已停用语义查询和项目智能体。</p> : null}</div> : <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">尚未建立统一语义索引。</div>}{!index.route ? <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置语义向量路由。</p> : <><ConsentCheck checked={acknowledged} setChecked={setAcknowledged} /><button type="button" onClick={() => void build()} disabled={!acknowledged || pending} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "分批嵌入并发布中…" : index.activeIndex ? "重建并切换索引" : "建立语义索引"}</button></>}{message ? <p role="status" className="mt-3 text-sm text-slate-600">{message}</p> : null}</section>;
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function build() {
+    setPending(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/memory/index`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ clientKey: crypto.randomUUID(), consent }),
+      });
+      if (!response.ok) throw new Error(await readError(response, "索引构建失败"));
+      setMessage("新索引已完成并原子切换");
+      setAcknowledged(false);
+      await onReload();
+    } catch (buildError) {
+      setMessage(buildError instanceof Error ? buildError.message : "索引构建失败");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const readinessLabels: Record<IndexStatus["readiness"], string> = {
+    routeMissing: "未配置向量路由",
+    providerUnavailable: "向量供应商不可用",
+    indexMissing: "尚未建立索引",
+    routeIncompatible: "向量路由已变化，需要重建",
+    inputsChanged: "资料输入已变化，需要重建",
+    ready: "索引可用",
+  };
+  const ready = index.readiness === "ready";
+
+  return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Unified vector memory</p><h2 className="mt-2 text-2xl font-semibold">项目语义索引</h2><p className="mt-2 text-sm leading-6 text-slate-500">使用当前冻结的人工资料、仓库资料生成和项目代码快照。失败不会替换上一个可用索引。</p></div><div className="grid grid-cols-3 gap-2"><Metric label="资料" value={index.inputs.projectSourceCount} /><Metric label="代码" value={index.inputs.hasCodeSnapshot ? "已冻结" : "无"} /><Metric label="仓库资料" value={index.inputs.repositoryMaterialGenerationCount} /></div></div>{index.activeIndex ? <div className={`mt-6 rounded-2xl border p-5 ${ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className={`text-sm font-semibold ${ready ? "text-emerald-900" : "text-amber-900"}`}>{readinessLabels[index.readiness]} · {index.activeIndex.generation.recordCount} 条记忆</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>索引：{index.activeIndex.generation.providerConnection.name} · {index.activeIndex.generation.modelId} · {index.activeIndex.generation.dimensions} 维 · {dateLabel(index.activeIndex.publishedAt)}</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>当前路由：{index.route ? `${index.route.providerConnection.name} · ${index.route.modelId} · ${index.route.embeddingDimensions ?? "未知"} 维` : "未配置"}</p></div><code className={`text-[10px] ${ready ? "text-emerald-700" : "text-amber-700"}`}>{index.activeIndex.generation.inputManifestFingerprint.slice(0, 16)}…</code></div>{!ready ? <p className="mt-3 text-xs leading-5 text-amber-800">{index.readiness === "providerUnavailable" ? "当前向量供应商未通过连接测试或已停用，语义查询和项目智能体已暂停。" : index.readiness === "inputsChanged" ? "资料或仓库快照已变化，旧索引不会混用新输入；请重建后恢复语义能力。" : "当前向量供应商、模型或维度与该索引不一致，重建前已停用语义查询和项目智能体。"}</p> : null}</div> : <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">{readinessLabels[index.readiness]}</div>}{!index.route ? <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置语义向量路由。</p> : <><ConsentCheck checked={acknowledged} setChecked={setAcknowledged} /><button type="button" onClick={() => void build()} disabled={!acknowledged || pending} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "分批嵌入并发布中…" : index.activeIndex ? "重建并切换索引" : "建立语义索引"}</button></>}{message ? <p role="status" className="mt-3 text-sm text-slate-600">{message}</p> : null}</section>;
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) { return <div className="min-w-20 rounded-xl bg-slate-50 px-3 py-3 text-center"><p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div>; }

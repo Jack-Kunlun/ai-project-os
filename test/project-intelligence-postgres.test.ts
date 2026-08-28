@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import test from "node:test";
-import { ProjectItemRevisionAction } from "@prisma/client";
+import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
 import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
 import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
@@ -40,6 +40,8 @@ test(
     let credentialId: string | null = null;
     let alternateProviderId: string | null = null;
     let alternateCredentialId: string | null = null;
+    let crossProjectId: string | null = null;
+    let sameProjectGenerationId: string | null = null;
     let chatCalls = 0;
 
     await unlink(masterKeyPath).catch(() => undefined);
@@ -220,6 +222,45 @@ test(
       }, db);
       assert.equal(indexJob.status, "succeeded");
 
+      const indexedPointer = await db.memoryIndexPointer.findUnique({
+        where: { projectId },
+        include: { generation: true },
+      });
+      assert.notEqual(indexedPointer, null);
+      crossProjectId = randomUUID();
+      await db.project.create({
+        data: {
+          id: crossProjectId,
+          name: `Intelligence cross project ${suffix}`,
+          slug: `intelligence-cross-${suffix}`,
+        },
+      });
+      await assert.rejects(
+        () => db.memoryIndexGeneration.create({
+          data: {
+            projectId: crossProjectId!,
+            providerConnectionId: provider.id,
+            modelId: "embedding-test",
+            dimensions: 8,
+            inputManifestFingerprint: "e".repeat(64),
+            expectedActiveIndexGenerationId: indexedPointer!.generation.id,
+          },
+        }),
+        (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003",
+      );
+      const sameProjectGeneration = await db.memoryIndexGeneration.create({
+        data: {
+          projectId,
+          providerConnectionId: provider.id,
+          modelId: "embedding-test",
+          dimensions: 8,
+          inputManifestFingerprint: "f".repeat(64),
+          expectedActiveIndexGenerationId: indexedPointer!.generation.id,
+        },
+      });
+      sameProjectGenerationId = sameProjectGeneration.id;
+      assert.equal(sameProjectGeneration.expectedActiveIndexGenerationId, indexedPointer!.generation.id);
+
       const briefJob = await runProjectBriefJob({
         projectId,
         requestedBy: user,
@@ -266,6 +307,15 @@ test(
       assert.equal(audits.length, 6);
       assert.equal(await db.webAiGrant.count({ where: { projectId } }), 5);
       assert.equal(chatCalls, 3);
+      const projectAgentJobCountBeforeRouteChange = await db.backgroundJob.count({
+        where: { projectId, kind: "projectAgent" },
+      });
+      const providerCallCountBeforeRouteChange = audits.length;
+      const chatCallsBeforeRouteChange = chatCalls;
+      const previousAgentJob = await db.backgroundJob.findUniqueOrThrow({
+        where: { id: agentJob.id },
+        select: { id: true, status: true, stage: true, failureCode: true, result: true, completedAt: true },
+      });
 
       const alternateProvider = await createProviderConnection({
         name: `V2.1 alternate ${suffix}`,
@@ -281,13 +331,25 @@ test(
         data: { status: "verified", lastTestedAt: new Date() },
       });
       alternateCredentialId = alternateProviderRow.credentialId;
+      const pointerBeforeRouteChange = await db.memoryIndexPointer.findUnique({
+        where: { projectId },
+        include: { generation: true },
+      });
+      assert.notEqual(pointerBeforeRouteChange, null);
       await upsertProjectAiRoute(projectId, {
         operation: "embedding",
         providerConnectionId: alternateProvider.id,
         modelId: "embedding-test",
         embeddingDimensions: 8,
         maxOutputTokens: 128,
+        acknowledgeIndexRebuild: true,
       }, db);
+      const pointerAfterRouteChange = await db.memoryIndexPointer.findUnique({
+        where: { projectId },
+        include: { generation: true },
+      });
+      assert.equal(pointerAfterRouteChange?.indexGenerationId, pointerBeforeRouteChange?.indexGenerationId);
+      assert.equal(pointerAfterRouteChange?.generation.status, "complete");
       const incompatible = await listProjectIntelligence(projectId, db);
       assert.equal(incompatible.readiness.activeIndex, true);
       assert.equal(incompatible.readiness.indexCompatible, false);
@@ -302,15 +364,21 @@ test(
         }, db),
         (error: unknown) => error instanceof Error && error.message === "SEMANTIC_INDEX_NOT_READY",
       );
-      const failedJob = await db.backgroundJob.findFirstOrThrow({
+      assert.equal(await db.backgroundJob.count({
         where: { projectId, kind: "projectAgent" },
-        orderBy: { createdAt: "desc" },
+      }), projectAgentJobCountBeforeRouteChange);
+      const agentJobAfterRejectedPreflight = await db.backgroundJob.findUniqueOrThrow({
+        where: { id: agentJob.id },
+        select: { id: true, status: true, stage: true, failureCode: true, result: true, completedAt: true },
       });
-      assert.equal(failedJob.status, "failed");
-      assert.equal(failedJob.failureCode, "SEMANTIC_INDEX_NOT_READY");
+      assert.deepEqual(agentJobAfterRejectedPreflight, previousAgentJob);
+      assert.equal(await db.providerCallAudit.count({ where: { job: { projectId } } }), providerCallCountBeforeRouteChange);
+      assert.equal(chatCalls, chatCallsBeforeRouteChange);
     } finally {
       globalThis.fetch = previousFetch;
+      if (sameProjectGenerationId !== null) await db.memoryIndexGeneration.deleteMany({ where: { id: sameProjectGenerationId } });
       await db.project.deleteMany({ where: { id: projectId } });
+      if (crossProjectId !== null) await db.project.deleteMany({ where: { id: crossProjectId } });
       if (alternateProviderId !== null) await db.aiProviderConnection.deleteMany({ where: { id: alternateProviderId } });
       if (alternateCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: alternateCredentialId } });
       if (providerId !== null) await db.aiProviderConnection.deleteMany({ where: { id: providerId } });

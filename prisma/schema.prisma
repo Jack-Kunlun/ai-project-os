@@ -539,6 +539,7 @@ model Project {
   codeSnapshotEntries              ProjectCodeSnapshotEntry[]
   codeSnapshotPointer              ProjectCodeSnapshotPointer?
   webAiRoutes                      ProjectAiRoute[]
+  aiRouteRevisions                 ProjectAiRouteRevision[]
   webAiGrants                      WebAiGrant[]
   backgroundJobs                   BackgroundJob[]
   memoryIndexGenerations           MemoryIndexGeneration[]
@@ -2573,6 +2574,7 @@ model AppUser {
   sessions        AppSession[]
   webAiGrants     WebAiGrant[]
   backgroundJobs  BackgroundJob[]
+  aiRouteRevisions ProjectAiRouteRevision[]
 }
 
 model AppSession {
@@ -2625,6 +2627,8 @@ model AiProviderConnection {
   updatedAt                DateTime                   @updatedAt
   credential               ExternalCredential         @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   projectRoutes            ProjectAiRoute[]
+  aiRouteRevisionsOld      ProjectAiRouteRevision[] @relation("ProjectAiRouteRevisionOldProvider")
+  aiRouteRevisionsNew      ProjectAiRouteRevision[] @relation("ProjectAiRouteRevisionNewProvider")
   webAiGrants              WebAiGrant[]
   memoryIndexGenerations   MemoryIndexGeneration[]
   ragAnswers               RagAnswer[]
@@ -2650,6 +2654,37 @@ model ProjectAiRoute {
 
   @@id([projectId, operation])
   @@index([providerConnectionId])
+}
+
+model ProjectAiRouteRevision {
+  id                       String               @id @default(uuid()) @db.Uuid
+  projectId                String               @db.Uuid
+  operation                AiOperation
+  oldProviderConnectionId  String?              @db.Uuid
+  oldModelId               String?              @db.VarChar(128)
+  oldEmbeddingDimensions   Int?
+  oldMaxOutputTokens       Int?
+  newProviderConnectionId  String               @db.Uuid
+  newModelId               String               @db.VarChar(128)
+  newEmbeddingDimensions   Int?
+  newMaxOutputTokens       Int
+  onlyFutureRuns           Boolean              @default(false)
+  indexInvalidated         Boolean              @default(false)
+  activeIndexGenerationId  String?              @db.Uuid
+  actorId                  String?              @db.Uuid
+  createdAt                DateTime             @default(now())
+  project                  Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  oldProviderConnection    AiProviderConnection? @relation("ProjectAiRouteRevisionOldProvider", fields: [oldProviderConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  newProviderConnection    AiProviderConnection  @relation("ProjectAiRouteRevisionNewProvider", fields: [newProviderConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  activeIndexGeneration    MemoryIndexGeneration? @relation(fields: [projectId, activeIndexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  actor                    AppUser?             @relation(fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([projectId, operation, createdAt])
+  @@index([projectId, createdAt])
+  @@index([newProviderConnectionId])
+  @@index([oldProviderConnectionId])
+  @@index([activeIndexGenerationId])
+  @@index([projectId, activeIndexGenerationId])
 }
 
 model WebAiGrant {
@@ -2714,6 +2749,8 @@ model MemoryIndexGeneration {
   dimensions               Int
   status                   MemoryIndexStatus    @default(staging)
   inputManifestFingerprint String               @db.Char(64)
+  expectedActiveIndexGenerationId String?       @db.Uuid
+  expectedActiveIndexGeneration MemoryIndexGeneration? @relation("MemoryIndexGenerationExpectedActive", fields: [projectId, expectedActiveIndexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   recordCount              Int                  @default(0)
   createdAt                DateTime             @default(now())
   completedAt              DateTime?
@@ -2725,9 +2762,12 @@ model MemoryIndexGeneration {
   ragAnswers               RagAnswer[]
   intelligenceReports      ProjectIntelligenceReport[]
   projectAgentRuns         ProjectAgentRun[]
+  aiRouteRevisions         ProjectAiRouteRevision[]
+  expectedByIndexGenerations MemoryIndexGeneration[] @relation("MemoryIndexGenerationExpectedActive")
 
   @@unique([projectId, id])
   @@index([projectId, status, createdAt])
+  @@index([projectId, expectedActiveIndexGenerationId])
 }
 
 model MemoryIndexPointer {

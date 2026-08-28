@@ -4,6 +4,7 @@ import { z } from "zod";
 import { invokeChatCompletion, invokeEmbeddings } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 import { requireProjectAiRoute } from "@/lib/project-ai-routes";
+import { getProjectMemoryInputManifest } from "@/lib/web-memory-index";
 import {
   assertWebAiConsent,
   auditedProviderCall,
@@ -129,39 +130,61 @@ function rankRecords(
 }
 
 export async function getActiveMemoryIndex(projectId: string, db: PrismaClient = getDb()) {
-  const pointer = await db.memoryIndexPointer.findUnique({
-    where: { projectId },
-    select: {
-      indexGenerationId: true,
-      generation: {
-        select: {
-          id: true,
-          providerConnectionId: true,
-          modelId: true,
-          dimensions: true,
-          inputManifestFingerprint: true,
-          records: {
-            orderBy: { id: "asc" },
-            select: {
-              id: true,
-              scope: true,
-              projectSourceId: true,
-              projectRepositoryLinkId: true,
-              frozenCommitSha: true,
-              path: true,
-              externalRef: true,
-              rangeStart: true,
-              rangeEnd: true,
-              contentText: true,
-              contentHash: true,
-              embedding: true,
+  const [pointer, route, currentManifest] = await Promise.all([
+    db.memoryIndexPointer.findUnique({
+      where: { projectId },
+      select: {
+        indexGenerationId: true,
+        generation: {
+          select: {
+            id: true,
+            providerConnectionId: true,
+            modelId: true,
+            dimensions: true,
+            inputManifestFingerprint: true,
+            records: {
+              orderBy: { id: "asc" },
+              select: {
+                id: true,
+                scope: true,
+                projectSourceId: true,
+                projectRepositoryLinkId: true,
+                frozenCommitSha: true,
+                path: true,
+                externalRef: true,
+                rangeStart: true,
+                rangeEnd: true,
+                contentText: true,
+                contentHash: true,
+                embedding: true,
+              },
             },
           },
         },
       },
-    },
-  });
-  if (pointer === null || pointer.generation.records.length === 0) return fail("SEMANTIC_INDEX_NOT_READY");
+    }),
+    db.projectAiRoute.findUnique({
+      where: { projectId_operation: { projectId, operation: "embedding" } },
+      select: {
+        providerConnectionId: true,
+        modelId: true,
+        embeddingDimensions: true,
+        providerConnection: { select: { status: true } },
+      },
+    }),
+    getProjectMemoryInputManifest(projectId, db),
+  ]);
+  if (
+    pointer === null ||
+    pointer.generation.records.length === 0 ||
+    route === null ||
+    route.providerConnection.status !== "verified" ||
+    route.providerConnectionId !== pointer.generation.providerConnectionId ||
+    route.modelId !== pointer.generation.modelId ||
+    route.embeddingDimensions !== pointer.generation.dimensions ||
+    currentManifest === null ||
+    currentManifest !== pointer.generation.inputManifestFingerprint
+  ) return fail("SEMANTIC_INDEX_NOT_READY");
   return pointer.generation;
 }
 
@@ -174,6 +197,7 @@ export async function searchActiveMemoryForJob(input: Readonly<{
   take?: number;
 }>, db: PrismaClient): Promise<readonly WebSearchResult[]> {
   if (
+    input.route.providerConnection.status !== "verified" ||
     input.route.providerConnectionId !== input.index.providerConnectionId ||
     input.route.embeddingDimensions !== input.index.dimensions ||
     input.route.modelId !== input.index.modelId

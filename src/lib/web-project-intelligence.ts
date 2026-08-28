@@ -21,6 +21,10 @@ import {
   searchActiveMemoryForJob,
   type WebSearchResult,
 } from "@/lib/web-rag";
+import {
+  getProjectMemoryInputManifest,
+  resolveMemoryIndexReadiness,
+} from "@/lib/web-memory-index";
 import { jsonValue } from "@/lib/web-github";
 
 const projectIdSchema = z.string().uuid();
@@ -753,7 +757,7 @@ export async function listProjectIntelligence(projectIdValue: unknown, db: Prism
   const projectId = projectIdSchema.parse(projectIdValue);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (project === null) return fail("PROJECT_INTELLIGENCE_INVALID_INPUT");
-  const [reports, agentRuns, activeIndex, routes] = await Promise.all([
+  const [reports, agentRuns, activeIndex, routes, currentManifest] = await Promise.all([
     db.projectIntelligenceReport.findMany({
       where: { projectId },
       orderBy: { createdAt: "desc" },
@@ -796,7 +800,14 @@ export async function listProjectIntelligence(projectIdValue: unknown, db: Prism
       select: {
         indexGenerationId: true,
         publishedAt: true,
-        generation: { select: { providerConnectionId: true, modelId: true, dimensions: true } },
+        generation: {
+          select: {
+            providerConnectionId: true,
+            modelId: true,
+            dimensions: true,
+            inputManifestFingerprint: true,
+          },
+        },
       },
     }),
     db.projectAiRoute.findMany({
@@ -808,24 +819,33 @@ export async function listProjectIntelligence(projectIdValue: unknown, db: Prism
         providerConnection: { select: { id: true, name: true, kind: true, status: true } },
       },
     }),
+    getProjectMemoryInputManifest(projectId, db),
   ]);
   const embeddingRoute = routes.find((route) => route.operation === "embedding") ?? null;
   const generationRoute = routes.find((route) => route.operation === "generateWithContext") ?? null;
-  const indexCompatible =
-    activeIndex !== null &&
-    embeddingRoute !== null &&
-    activeIndex.generation.providerConnectionId === embeddingRoute.providerConnection.id &&
-    activeIndex.generation.modelId === embeddingRoute.modelId &&
-    activeIndex.generation.dimensions === embeddingRoute.embeddingDimensions;
+  const readinessState = resolveMemoryIndexReadiness({
+    embeddingRoute: embeddingRoute === null ? null : {
+      providerConnectionId: embeddingRoute.providerConnection.id,
+      modelId: embeddingRoute.modelId,
+      embeddingDimensions: embeddingRoute.embeddingDimensions,
+      providerVerified: embeddingRoute.providerConnection.status === "verified",
+    },
+    activeIndex: activeIndex === null ? null : {
+      providerConnectionId: activeIndex.generation.providerConnectionId,
+      modelId: activeIndex.generation.modelId,
+      dimensions: activeIndex.generation.dimensions,
+      inputManifestFingerprint: activeIndex.generation.inputManifestFingerprint,
+    },
+    currentInputManifestFingerprint: currentManifest,
+    generationProviderVerified: generationRoute?.providerConnection.status === "verified",
+  });
   const readiness = Object.freeze({
     activeIndex: activeIndex !== null,
-    indexCompatible,
+    indexCompatible: readinessState.indexCompatible,
+    state: readinessState.state,
     embeddingRoute: embeddingRoute?.providerConnection.status === "verified",
     generationRoute: generationRoute?.providerConnection.status === "verified",
-    ready:
-      indexCompatible &&
-      embeddingRoute?.providerConnection.status === "verified" &&
-      generationRoute?.providerConnection.status === "verified",
+    ready: readinessState.ready,
     indexGenerationId: activeIndex?.indexGenerationId ?? null,
     routes: Object.freeze({ embedding: embeddingRoute, generation: generationRoute }),
   });

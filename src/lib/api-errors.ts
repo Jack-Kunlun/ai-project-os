@@ -98,6 +98,8 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
   if (error instanceof ProjectAiRouteError) {
     const mapping = {
       PROJECT_AI_ROUTE_INVALID_INPUT: [400, "项目模型路由配置无效"],
+      PROJECT_AI_ROUTE_CONFLICT: [409, "项目模型路由已被其他操作更新，请刷新后重试"],
+      PROJECT_AI_ROUTE_CONFIRMATION_REQUIRED: [409, "切换向量模型前请确认并在完成后重建索引"],
       PROJECT_NOT_FOUND: [404, "项目不存在"],
       AI_PROVIDER_NOT_FOUND: [404, "模型供应商不存在"],
       AI_PROVIDER_NOT_VERIFIED: [409, "请先通过供应商连接测试"],
@@ -168,7 +170,8 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MEMORY_INDEX_INPUT_INVALID: "索引输入或向量配置无效",
       MEMORY_INDEX_PUBLICATION_CONFLICT: "索引发布发生并发冲突，请重试",
     } as const;
-    return { status: 422, body: { error: { code: error.code, message: messages[error.code] } } };
+    const status = error.code === "MEMORY_INDEX_PUBLICATION_CONFLICT" ? 409 : 422;
+    return { status, body: { error: { code: error.code, message: messages[error.code] } } };
   }
 
   if (error instanceof WebAutoExtractError) {

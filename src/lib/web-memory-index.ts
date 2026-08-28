@@ -16,6 +16,8 @@ import {
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
 
+type MemoryIndexDb = PrismaClient | Prisma.TransactionClient;
+
 const MAX_INDEX_RECORDS = 5_000;
 const MAX_INDEX_TEXT_BYTES = 24 * 1024 * 1024;
 const EMBEDDING_BATCH_SIZE = 16;
@@ -31,6 +33,98 @@ export class WebMemoryIndexError extends Error {
     super(code);
     this.name = "WebMemoryIndexError";
   }
+}
+
+export type MemoryIndexReadinessState =
+  | "routeMissing"
+  | "providerUnavailable"
+  | "indexMissing"
+  | "routeIncompatible"
+  | "inputsChanged"
+  | "ready";
+
+export type MemoryIntelligenceReadinessState = MemoryIndexReadinessState | "generationProviderUnavailable";
+
+export type MemoryIndexReadiness = Readonly<{
+  state: MemoryIntelligenceReadinessState;
+  indexCompatible: boolean;
+  inputManifestCurrent: boolean;
+  ready: boolean;
+}>;
+
+export function resolveMemoryIndexReadiness(input: Readonly<{
+  embeddingRoute: Readonly<{
+    providerConnectionId: string;
+    modelId: string;
+    embeddingDimensions: number | null;
+    providerVerified: boolean;
+  }> | null;
+  activeIndex: Readonly<{
+    providerConnectionId: string;
+    modelId: string;
+    dimensions: number;
+    inputManifestFingerprint: string;
+  }> | null;
+  currentInputManifestFingerprint: string | null;
+  generationProviderVerified?: boolean;
+}>): MemoryIndexReadiness {
+  const routeAvailable = input.embeddingRoute !== null;
+  const providerAvailable = routeAvailable && input.embeddingRoute.providerVerified;
+  const indexAvailable = input.activeIndex !== null;
+  const routeCompatible = routeAvailable && indexAvailable && providerAvailable &&
+    input.embeddingRoute.providerConnectionId === input.activeIndex.providerConnectionId &&
+    input.embeddingRoute.modelId === input.activeIndex.modelId &&
+    input.embeddingRoute.embeddingDimensions === input.activeIndex.dimensions;
+  const inputManifestCurrent = indexAvailable && input.currentInputManifestFingerprint !== null &&
+    input.currentInputManifestFingerprint === input.activeIndex.inputManifestFingerprint;
+  const baseState: MemoryIndexReadinessState = !routeAvailable
+    ? "routeMissing"
+    : !providerAvailable
+      ? "providerUnavailable"
+      : !indexAvailable
+        ? "indexMissing"
+        : !routeCompatible
+          ? "routeIncompatible"
+          : !inputManifestCurrent
+            ? "inputsChanged"
+            : "ready";
+  const state: MemoryIntelligenceReadinessState = baseState === "ready" && input.generationProviderVerified === false
+    ? "generationProviderUnavailable"
+    : baseState;
+  return Object.freeze({
+    state,
+    indexCompatible: baseState === "ready",
+    inputManifestCurrent,
+    ready: state === "ready",
+  });
+}
+
+export type MemoryIndexPublicationSnapshot = Readonly<{
+  expectedActiveIndexGenerationId: string | null;
+  currentActiveIndexGenerationId: string | null;
+  expectedRoute: Readonly<{
+    providerConnectionId: string;
+    modelId: string;
+    embeddingDimensions: number | null;
+  }>;
+  currentRoute: Readonly<{
+    providerConnectionId: string;
+    modelId: string;
+    embeddingDimensions: number | null;
+    providerVerified: boolean;
+  }> | null;
+  expectedInputManifestFingerprint: string;
+  currentInputManifestFingerprint: string | null;
+}>;
+
+export function isMemoryIndexPublicationCurrent(input: MemoryIndexPublicationSnapshot): boolean {
+  return input.currentActiveIndexGenerationId === input.expectedActiveIndexGenerationId &&
+    input.currentRoute !== null &&
+    input.currentRoute.providerVerified &&
+    input.currentRoute.providerConnectionId === input.expectedRoute.providerConnectionId &&
+    input.currentRoute.modelId === input.expectedRoute.modelId &&
+    input.currentRoute.embeddingDimensions === input.expectedRoute.embeddingDimensions &&
+    input.currentInputManifestFingerprint === input.expectedInputManifestFingerprint;
 }
 
 type IndexInput = Readonly<{
@@ -59,9 +153,22 @@ function ensureBudget(records: readonly IndexInput[]): void {
   }
 }
 
+function inputManifest(records: readonly IndexInput[]): string {
+  return manifestFingerprint(records.map((record) => ({
+    scope: record.scope,
+    projectSourceId: record.projectSourceId,
+    projectRepositoryLinkId: record.projectRepositoryLinkId,
+    frozenCommitSha: record.frozenCommitSha,
+    path: record.path,
+    rangeStart: record.rangeStart,
+    rangeEnd: record.rangeEnd,
+    contentHash: record.contentHash,
+  })));
+}
+
 export async function collectProjectMemoryInputs(
   projectId: string,
-  db: PrismaClient = getDb(),
+  db: MemoryIndexDb = getDb(),
 ): Promise<readonly IndexInput[]> {
   const [manualSources, materialPointers, codePointer] = await Promise.all([
     db.projectSource.findMany({
@@ -193,8 +300,25 @@ export async function collectProjectMemoryInputs(
   return Object.freeze(records);
 }
 
+export async function getProjectMemoryInputManifest(
+  projectId: string,
+  db: MemoryIndexDb = getDb(),
+): Promise<string | null> {
+  try {
+    return inputManifest(await collectProjectMemoryInputs(projectId, db));
+  } catch (error) {
+    if (
+      error instanceof WebMemoryIndexError &&
+      (error.code === "MEMORY_INDEX_EMPTY" || error.code === "MEMORY_INDEX_TOO_LARGE")
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function getProjectMemoryIndexStatus(projectId: string, db: PrismaClient = getDb()) {
-  const [pointer, sourceCount, codePointer, materialPointerCount, route] = await Promise.all([
+  const [pointer, sourceCount, codePointer, materialPointerCount, route, currentManifest] = await Promise.all([
     db.memoryIndexPointer.findUnique({
       where: { projectId },
       select: {
@@ -208,6 +332,7 @@ export async function getProjectMemoryIndexStatus(projectId: string, db: PrismaC
             recordCount: true,
             inputManifestFingerprint: true,
             completedAt: true,
+            providerConnection: { select: { id: true, name: true, kind: true, status: true } },
           },
         },
       },
@@ -217,22 +342,40 @@ export async function getProjectMemoryIndexStatus(projectId: string, db: PrismaC
     db.repositoryMaterialGenerationPointer.count({ where: { projectId } }),
     db.projectAiRoute.findUnique({
       where: { projectId_operation: { projectId, operation: "embedding" } },
-      select: { providerConnectionId: true, modelId: true, embeddingDimensions: true },
+      select: {
+        providerConnectionId: true,
+        modelId: true,
+        embeddingDimensions: true,
+        providerConnection: { select: { id: true, name: true, kind: true, status: true } },
+      },
     }),
+    getProjectMemoryInputManifest(projectId, db),
   ]);
-  const compatible =
-    pointer !== null &&
-    route !== null &&
-    pointer.generation.providerConnectionId === route.providerConnectionId &&
-    pointer.generation.modelId === route.modelId &&
-    pointer.generation.dimensions === route.embeddingDimensions;
+  const readiness = resolveMemoryIndexReadiness({
+    embeddingRoute: route === null ? null : {
+      providerConnectionId: route.providerConnectionId,
+      modelId: route.modelId,
+      embeddingDimensions: route.embeddingDimensions,
+      providerVerified: route.providerConnection.status === "verified",
+    },
+    activeIndex: pointer === null ? null : {
+      providerConnectionId: pointer.generation.providerConnectionId,
+      modelId: pointer.generation.modelId,
+      dimensions: pointer.generation.dimensions,
+      inputManifestFingerprint: pointer.generation.inputManifestFingerprint,
+    },
+    currentInputManifestFingerprint: currentManifest,
+  });
+  const compatible = readiness.indexCompatible;
   return Object.freeze({
     activeIndex: pointer,
     compatible,
+    readiness: readiness.state,
     inputs: {
       projectSourceCount: sourceCount,
       hasCodeSnapshot: codePointer !== null,
       repositoryMaterialGenerationCount: materialPointerCount,
+      manifestFingerprint: currentManifest,
     },
     route,
   });
@@ -245,21 +388,19 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
   consent: unknown;
 }>, db: PrismaClient = getDb()) {
   assertWebAiConsent(input.consent);
-  const [route, records] = await Promise.all([
-    requireProjectAiRoute(input.projectId, "embedding", db),
-    collectProjectMemoryInputs(input.projectId, db),
-  ]);
+  const snapshot = await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, 29082026))`;
+    const route = await requireProjectAiRoute(input.projectId, "embedding", tx);
+    const records = await collectProjectMemoryInputs(input.projectId, tx);
+    const pointer = await tx.memoryIndexPointer.findUnique({
+      where: { projectId: input.projectId },
+      select: { indexGenerationId: true },
+    });
+    return Object.freeze({ route, records, expectedActiveIndexGenerationId: pointer?.indexGenerationId ?? null });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  const { route, records, expectedActiveIndexGenerationId } = snapshot;
   if (route.embeddingDimensions === null) return fail("MEMORY_INDEX_INPUT_INVALID");
-  const manifest = manifestFingerprint(records.map((record) => ({
-    scope: record.scope,
-    projectSourceId: record.projectSourceId,
-    projectRepositoryLinkId: record.projectRepositoryLinkId,
-    frozenCommitSha: record.frozenCommitSha,
-    path: record.path,
-    rangeStart: record.rangeStart,
-    rangeEnd: record.rangeEnd,
-    contentHash: record.contentHash,
-  })));
+  const manifest = inputManifest(records);
   const granted = await createGrantedWebAiJob({
     projectId: input.projectId,
     kind: "memoryIndex",
@@ -287,6 +428,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
         modelId: route.modelId,
         dimensions: route.embeddingDimensions,
         inputManifestFingerprint: manifest,
+        expectedActiveIndexGenerationId,
       },
     });
     generationId = generation.id;
@@ -328,6 +470,47 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
     await db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, 29082026))`;
       const previous = await tx.memoryIndexPointer.findUnique({ where: { projectId: input.projectId } });
+      const currentRoute = await tx.projectAiRoute.findUnique({
+        where: { projectId_operation: { projectId: input.projectId, operation: "embedding" } },
+        select: {
+          providerConnectionId: true,
+          modelId: true,
+          embeddingDimensions: true,
+          providerConnection: { select: { status: true } },
+        },
+      });
+      let currentManifest: string | null;
+      try {
+        currentManifest = inputManifest(await collectProjectMemoryInputs(input.projectId, tx));
+      } catch (error) {
+        if (
+          error instanceof WebMemoryIndexError &&
+          (error.code === "MEMORY_INDEX_EMPTY" || error.code === "MEMORY_INDEX_TOO_LARGE")
+        ) {
+          currentManifest = null;
+        } else {
+          throw error;
+        }
+      }
+      if (!isMemoryIndexPublicationCurrent({
+        expectedActiveIndexGenerationId,
+        currentActiveIndexGenerationId: previous?.indexGenerationId ?? null,
+        expectedRoute: {
+          providerConnectionId: route.providerConnectionId,
+          modelId: route.modelId,
+          embeddingDimensions: route.embeddingDimensions,
+        },
+        currentRoute: currentRoute === null ? null : {
+          providerConnectionId: currentRoute.providerConnectionId,
+          modelId: currentRoute.modelId,
+          embeddingDimensions: currentRoute.embeddingDimensions,
+          providerVerified: currentRoute.providerConnection.status === "verified",
+        },
+        expectedInputManifestFingerprint: manifest,
+        currentInputManifestFingerprint: currentManifest,
+      })) {
+        return fail("MEMORY_INDEX_PUBLICATION_CONFLICT");
+      }
       await tx.memoryIndexGeneration.update({
         where: { projectId_id: { projectId: input.projectId, id: generation.id } },
         data: { status: "complete", recordCount: records.length, completedAt: new Date() },
@@ -354,7 +537,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
   } catch (error) {
     if (generationId !== null) {
       await db.memoryIndexGeneration.updateMany({
-        where: { id: generationId, status: "staging" },
+        where: { id: generationId, status: { in: ["staging"] } },
         data: { status: "failed", completedAt: new Date() },
       }).catch(() => undefined);
     }

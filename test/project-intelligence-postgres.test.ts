@@ -10,6 +10,7 @@ import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
 import { appendProjectItemRevision, createPrimaryProjectItemEvidence } from "../src/lib/project-item-history";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
+import { claimProjectJob, reconcileProjectJob } from "../src/lib/project-workflow";
 import {
   listProjectIntelligence,
   PROJECT_AGENT_TOOLS,
@@ -374,6 +375,39 @@ test(
       assert.deepEqual(agentJobAfterRejectedPreflight, previousAgentJob);
       assert.equal(await db.providerCallAudit.count({ where: { job: { projectId } } }), providerCallCountBeforeRouteChange);
       assert.equal(chatCalls, chatCallsBeforeRouteChange);
+
+      const interruptedWorkflowJob = await db.backgroundJob.create({
+        data: {
+          id: randomUUID(),
+          projectId,
+          kind: "projectAgent",
+          requestedById: user.id,
+          idempotencyKey: (`audit-${suffix}`).padEnd(64, "a"),
+          payload: {},
+        },
+      });
+      const interruptedWorkflowClaim = await claimProjectJob(interruptedWorkflowJob.id, db);
+      assert.notEqual(interruptedWorkflowClaim, false);
+      if (interruptedWorkflowClaim === false) return;
+      const runningAudit = await db.providerCallAudit.create({
+        data: {
+          jobId: interruptedWorkflowJob.id,
+          providerConnectionId: provider.id,
+          operation: "projectAnalysis",
+          modelId: "generation-test",
+          status: "running",
+        },
+      });
+      await db.backgroundJobAttempt.update({
+        where: { id: interruptedWorkflowClaim.attemptId },
+        data: { leaseExpiresAt: new Date(Date.now() - 1) },
+      });
+      const reconciledWorkflowJob = await reconcileProjectJob(projectId, interruptedWorkflowJob.id, db);
+      assert.equal(reconciledWorkflowJob.status, "unknown");
+      const reconciledAudit = await db.providerCallAudit.findUniqueOrThrow({ where: { id: runningAudit.id } });
+      assert.equal(reconciledAudit.status, "unknown");
+      assert.equal(reconciledAudit.safeErrorCode, "RECONCILIATION_REQUIRED");
+      assert.notEqual(reconciledAudit.completedAt, null);
     } finally {
       globalThis.fetch = previousFetch;
       if (sameProjectGenerationId !== null) await db.memoryIndexGeneration.deleteMany({ where: { id: sameProjectGenerationId } });

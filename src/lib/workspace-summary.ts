@@ -1,5 +1,28 @@
 export type JobKind = "githubScan" | "githubMaterialSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
-export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type JobStatus = "queued" | "waitingConsent" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
+export type JobAttemptStatus = "running" | "succeeded" | "failed" | "unknown" | "cancelled";
+export type JobAttemptDispatchState = "pending" | "dispatched" | "acknowledged";
+export type JobAttemptSummary = {
+  id: string;
+  attemptNumber: number;
+  status: JobAttemptStatus;
+  leasedAt: string;
+  leaseExpiresAt: string;
+  heartbeatAt: string;
+  dispatchState: JobAttemptDispatchState;
+  safeFailureCode: string | null;
+  completedAt: string | null;
+};
+
+export const jobStatusLabels: Record<JobStatus, string> = {
+  queued: "等待中",
+  waitingConsent: "等待确认",
+  running: "进行中",
+  succeeded: "已完成",
+  failed: "失败",
+  unknown: "未知结果",
+  cancelled: "已取消",
+};
 
 export type WorkspaceProject = {
   id: string;
@@ -22,8 +45,10 @@ export type WorkspaceProject = {
     kind: JobKind;
     status: JobStatus;
     stage: string;
+    reconciliationRequired: boolean;
     createdAt: string;
     completedAt: string | null;
+    attempts: JobAttemptSummary[];
   }>;
 };
 
@@ -33,8 +58,10 @@ export type RecentJob = {
   status: JobStatus;
   stage: string;
   failureCode: string | null;
+  reconciliationRequired: boolean;
   createdAt: string;
   completedAt: string | null;
+  attempts: JobAttemptSummary[];
   project: { id: string; name: string } | null;
 };
 

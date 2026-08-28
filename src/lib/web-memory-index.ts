@@ -5,6 +5,7 @@ import { chunkSourceText } from "@/lib/ai-memory/chunking";
 import { getDb } from "@/lib/db";
 import { chunkRepositoryCode } from "@/lib/github";
 import { requireProjectAiRoute } from "@/lib/project-ai-routes";
+import { getProjectJob } from "@/lib/project-workflow";
 import {
   assertWebAiConsent,
   auditedProviderCall,
@@ -413,10 +414,11 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
     payload: { recordCount: records.length, manifest },
   }, db);
   if (!granted.created) {
-    return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
+    return getProjectJob(input.projectId, granted.jobId, db);
   }
-  if (!(await claimWebAiJob(granted.jobId, db))) {
-    return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
+  const claim = await claimWebAiJob(granted.jobId, db);
+  if (!claim) {
+    return getProjectJob(input.projectId, granted.jobId, db);
   }
 
   let generationId: string | null = null;
@@ -435,9 +437,10 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
 
     for (let offset = 0; offset < records.length; offset += EMBEDDING_BATCH_SIZE) {
       const batch = records.slice(offset, offset + EMBEDDING_BATCH_SIZE);
-      await updateWebAiJobProgress(granted.jobId, "embedding", offset, records.length, db);
+      await updateWebAiJobProgress(granted.jobId, claim, "embedding", offset, records.length, db);
       const embeddingResult = await auditedProviderCall({
         jobId: granted.jobId,
+        attempt: claim,
         route,
         call: () => invokeEmbeddings({
           connection: route.providerConnection,
@@ -466,7 +469,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
       });
     }
 
-    await updateWebAiJobProgress(granted.jobId, "publishing", records.length, records.length, db);
+    await updateWebAiJobProgress(granted.jobId, claim, "publishing", records.length, records.length, db);
     await db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, 29082026))`;
       const previous = await tx.memoryIndexPointer.findUnique({ where: { projectId: input.projectId } });
@@ -528,7 +531,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
       }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
-    return finishWebAiJob(granted.jobId, {
+    return finishWebAiJob(granted.jobId, claim, {
       indexGenerationId: generation.id,
       recordCount: records.length,
       dimensions: route.embeddingDimensions,
@@ -541,7 +544,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
         data: { status: "failed", completedAt: new Date() },
       }).catch(() => undefined);
     }
-    await failWebAiJob(granted.jobId, error, db);
+    await failWebAiJob(granted.jobId, claim, error, db);
     throw error;
   }
 }

@@ -8,6 +8,7 @@ import {
   createPrimaryProjectItemEvidence,
 } from "@/lib/project-item-history";
 import { requireProjectAiRoute } from "@/lib/project-ai-routes";
+import { getProjectJob } from "@/lib/project-workflow";
 import {
   assertWebAiConsent,
   auditedProviderCall,
@@ -135,17 +136,19 @@ export async function runAutoExtractJob(input: Readonly<{
     manifestFingerprint: manifest,
     payload: { sourceIds: sources.map((source) => source.id), manifest },
   }, db);
-  if (!granted.created) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
-  if (!(await claimWebAiJob(granted.jobId, db))) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
+  if (!granted.created) return getProjectJob(input.projectId, granted.jobId, db);
+  const claim = await claimWebAiJob(granted.jobId, db);
+  if (!claim) return getProjectJob(input.projectId, granted.jobId, db);
 
   let createdCount = 0;
   let duplicateCount = 0;
   try {
     for (let index = 0; index < sources.length; index += 1) {
       const source = sources[index]!;
-      await updateWebAiJobProgress(granted.jobId, "extracting", index, sources.length, db);
+      await updateWebAiJobProgress(granted.jobId, claim, "extracting", index, sources.length, db);
       const response = await auditedProviderCall({
         jobId: granted.jobId,
+        attempt: claim,
         route,
         call: () => invokeChatCompletion({
           connection: route.providerConnection,
@@ -233,14 +236,14 @@ export async function runAutoExtractJob(input: Readonly<{
         }
       }
     }
-    return finishWebAiJob(granted.jobId, {
+    return finishWebAiJob(granted.jobId, claim, {
       sourceCount: sources.length,
       candidateCount: createdCount,
       duplicateCount,
       manifest,
     }, db);
   } catch (error) {
-    await failWebAiJob(granted.jobId, error, db);
+    await failWebAiJob(granted.jobId, claim, error, db);
     throw error;
   }
 }

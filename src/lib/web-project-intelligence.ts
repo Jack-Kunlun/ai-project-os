@@ -5,6 +5,7 @@ import { invokeChatCompletion } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 import { createProjectRepositoryStatusService } from "@/lib/github/project-repository-status";
 import { requireProjectAiRoute } from "@/lib/project-ai-routes";
+import { getProjectJob } from "@/lib/project-workflow";
 import {
   auditedProviderCall,
   assertWebAiConsent,
@@ -26,6 +27,7 @@ import {
   resolveMemoryIndexReadiness,
 } from "@/lib/web-memory-index";
 import { jsonValue } from "@/lib/web-github";
+import type { JobAttemptClaim } from "@/lib/project-workflow";
 
 const projectIdSchema = z.string().uuid();
 const questionSchema = z.string().trim().min(2).max(2_000);
@@ -454,9 +456,10 @@ export async function runProjectBriefJob(input: Readonly<{
     manifestFingerprint: manifest,
     payload: { reportVersion: "project-intelligence-report:v1", indexGenerationId: runtime.index.id },
   }, db);
-  if (!granted.created) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
-  if (!(await claimWebAiJob(granted.jobId, db))) {
-    return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
+  if (!granted.created) return getProjectJob(projectId, granted.jobId, db);
+  const claim = await claimWebAiJob(granted.jobId, db);
+  if (!claim) {
+    return getProjectJob(projectId, granted.jobId, db);
   }
 
   try {
@@ -469,12 +472,13 @@ export async function runProjectBriefJob(input: Readonly<{
       scopeIds: { indexGenerationId: runtime.index.id, queryHash: sha256(REPORT_SEARCH_QUERY) },
       manifestFingerprint: manifest,
     }, db);
-    await updateWebAiJobProgress(granted.jobId, "collecting_evidence", 0, 2, db);
+    await updateWebAiJobProgress(granted.jobId, claim, "collecting_evidence", 0, 2, db);
     const [items, searchResults] = await Promise.all([
       confirmedItemEvidence(projectId, ["progress", "decision", "issue", "risk"], 20, db),
       searchActiveMemoryForJob({
         projectId,
         jobId: granted.jobId,
+        attempt: claim,
         question: REPORT_SEARCH_QUERY,
         route: runtime.embeddingRoute,
         index: runtime.index,
@@ -487,9 +491,10 @@ export async function runProjectBriefJob(input: Readonly<{
       ...repositoryEvidence(runtime.state),
       ...memoryEvidence(searchResults),
     ]);
-    await updateWebAiJobProgress(granted.jobId, "generating_brief", 1, 2, db);
+    await updateWebAiJobProgress(granted.jobId, claim, "generating_brief", 1, 2, db);
     const generated = await auditedProviderCall({
       jobId: granted.jobId,
+      attempt: claim,
       route: runtime.generationRoute,
       operation: "projectAnalysis",
       call: () => invokeChatCompletion({
@@ -542,9 +547,9 @@ export async function runProjectBriefJob(input: Readonly<{
         outputTokens: generated.outputTokens,
       },
     });
-    return finishWebAiJob(granted.jobId, { reportId: stored.id }, db);
+    return finishWebAiJob(granted.jobId, claim, { reportId: stored.id }, db);
   } catch (error) {
-    await failWebAiJob(granted.jobId, error, db);
+    await failWebAiJob(granted.jobId, claim, error, db);
     throw error;
   }
 }
@@ -552,6 +557,7 @@ export async function runProjectBriefJob(input: Readonly<{
 async function executeAgentPlan(input: Readonly<{
   projectId: string;
   jobId: string;
+  attempt: JobAttemptClaim;
   plan: ProjectAgentPlan;
   state: ProjectState;
   embeddingRoute: Awaited<ReturnType<typeof requireProjectAiRoute>>;
@@ -582,6 +588,7 @@ async function executeAgentPlan(input: Readonly<{
       const results = await searchActiveMemoryForJob({
         projectId: input.projectId,
         jobId: input.jobId,
+        attempt: input.attempt,
         question: call.arguments.query,
         route: input.embeddingRoute,
         index: input.index,
@@ -630,9 +637,10 @@ export async function runProjectAgentJob(input: Readonly<{
     manifestFingerprint: manifest,
     payload: { agentVersion: "read-only-project-intelligence-agent:v1", question },
   }, db);
-  if (!granted.created) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
-  if (!(await claimWebAiJob(granted.jobId, db))) {
-    return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
+  if (!granted.created) return getProjectJob(projectId, granted.jobId, db);
+  const claim = await claimWebAiJob(granted.jobId, db);
+  if (!claim) {
+    return getProjectJob(projectId, granted.jobId, db);
   }
 
   try {
@@ -645,9 +653,10 @@ export async function runProjectAgentJob(input: Readonly<{
       scopeIds: { indexGenerationId: runtime.index.id, questionHash: sha256(question) },
       manifestFingerprint: manifest,
     }, db);
-    await updateWebAiJobProgress(granted.jobId, "planning", 0, 3, db);
+    await updateWebAiJobProgress(granted.jobId, claim, "planning", 0, 3, db);
     const planned = await auditedProviderCall({
       jobId: granted.jobId,
+      attempt: claim,
       route: runtime.generationRoute,
       operation: "projectAnalysis",
       call: () => invokeChatCompletion({
@@ -677,18 +686,20 @@ export async function runProjectAgentJob(input: Readonly<{
       }),
     }, db);
     const plan = parseProjectAgentPlan(planned.content);
-    await updateWebAiJobProgress(granted.jobId, "executing_read_only_tools", 1, 3, db);
+    await updateWebAiJobProgress(granted.jobId, claim, "executing_read_only_tools", 1, 3, db);
     const execution = await executeAgentPlan({
       projectId,
       jobId: granted.jobId,
+      attempt: claim,
       plan,
       state: runtime.state,
       embeddingRoute: runtime.embeddingRoute,
       index: runtime.index,
     }, db);
-    await updateWebAiJobProgress(granted.jobId, "grounded_response", 2, 3, db);
+    await updateWebAiJobProgress(granted.jobId, claim, "grounded_response", 2, 3, db);
     const generated = await auditedProviderCall({
       jobId: granted.jobId,
+      attempt: claim,
       route: runtime.generationRoute,
       operation: "projectAnalysis",
       call: () => invokeChatCompletion({
@@ -746,9 +757,9 @@ export async function runProjectAgentJob(input: Readonly<{
         outputTokens: planned.outputTokens + generated.outputTokens,
       },
     });
-    return finishWebAiJob(granted.jobId, { agentRunId: stored.id }, db);
+    return finishWebAiJob(granted.jobId, claim, { agentRunId: stored.id }, db);
   } catch (error) {
-    await failWebAiJob(granted.jobId, error, db);
+    await failWebAiJob(granted.jobId, claim, error, db);
     throw error;
   }
 }

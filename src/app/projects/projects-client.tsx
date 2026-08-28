@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
-import type { JobKind, JobStatus, WorkspaceProject } from "@/lib/workspace-summary";
+import { jobStatusLabels, type JobKind, type WorkspaceProject } from "@/lib/workspace-summary";
 
 type ProjectsPayload = { projects: WorkspaceProject[] };
 
@@ -16,14 +16,6 @@ const jobLabels: Record<JobKind, string> = {
   ragAnswer: "引用式问答",
   projectBrief: "项目简报",
   projectAgent: "智能体调查",
-};
-
-const jobStatusLabels: Record<JobStatus, string> = {
-  queued: "等待中",
-  running: "进行中",
-  succeeded: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
 };
 
 async function readError(response: Response, fallback: string): Promise<string> {

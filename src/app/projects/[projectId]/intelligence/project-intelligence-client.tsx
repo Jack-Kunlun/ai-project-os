@@ -201,10 +201,11 @@ function BriefPanel({ projectId, report, ready, onReload }: { projectId: string;
         body: JSON.stringify({ clientKey: crypto.randomUUID(), consent }),
       });
       if (!response.ok) throw new Error(await readError(response, "项目简报生成失败"));
-      setAcknowledged(false); setMessage("当前状态简报已生成并保存"); await onReload();
+      setMessage("当前状态简报已生成并保存"); await onReload();
     } catch (generateError) {
       setMessage(generateError instanceof Error ? generateError.message : "项目简报生成失败");
     } finally {
+      setAcknowledged(false);
       setPending(false);
     }
   }
@@ -236,10 +237,11 @@ function AgentPanel({ projectId, runs, tools, ready, onReload }: { projectId: st
         body: JSON.stringify({ clientKey: crypto.randomUUID(), question, consent }),
       });
       if (!response.ok) throw new Error(await readError(response, "项目调查失败"));
-      setQuestion(""); setAcknowledged(false); setSelectedRunId(null); setMessage("只读调查已完成"); await onReload();
+      setQuestion(""); setSelectedRunId(null); setMessage("只读调查已完成"); await onReload();
     } catch (askError) {
       setMessage(askError instanceof Error ? askError.message : "项目调查失败");
     } finally {
+      setAcknowledged(false);
       setPending(false);
     }
   }

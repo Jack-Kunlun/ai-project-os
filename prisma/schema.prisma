@@ -117,10 +117,26 @@ enum BackgroundJobKind {
 
 enum BackgroundJobStatus {
   queued
+  waitingConsent
   running
   succeeded
   failed
+  unknown
   cancelled
+}
+
+enum BackgroundJobAttemptStatus {
+  running
+  succeeded
+  failed
+  unknown
+  cancelled
+}
+
+enum BackgroundJobAttemptDispatchState {
+  pending
+  dispatched
+  acknowledged
 }
 
 enum MemoryIndexStatus {
@@ -2724,6 +2740,7 @@ model BackgroundJob {
   idempotencyKey   String              @db.Char(64)
   requestedById    String              @db.Uuid
   webAiGrantId     String?             @db.Uuid
+  reconciliationRequired Boolean         @default(false)
   createdAt        DateTime            @default(now())
   startedAt        DateTime?
   completedAt      DateTime?
@@ -2735,10 +2752,30 @@ model BackgroundJob {
   intelligenceReport ProjectIntelligenceReport?
   projectAgentRun  ProjectAgentRun?
   providerCalls    ProviderCallAudit[]
+  attempts         BackgroundJobAttempt[]
 
   @@unique([requestedById, idempotencyKey])
   @@index([projectId, status, createdAt])
   @@index([status, createdAt])
+}
+
+model BackgroundJobAttempt {
+  id              String                               @id @default(uuid()) @db.Uuid
+  jobId           String                               @db.Uuid
+  attemptNumber   Int
+  status          BackgroundJobAttemptStatus          @default(running)
+  leaseTokenHash  String                               @db.Char(64)
+  leasedAt        DateTime                             @default(now())
+  leaseExpiresAt  DateTime
+  heartbeatAt     DateTime                             @default(now())
+  dispatchState   BackgroundJobAttemptDispatchState   @default(pending)
+  safeFailureCode String?                              @db.VarChar(64)
+  completedAt     DateTime?
+  job             BackgroundJob                         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, attemptNumber])
+  @@index([jobId, status, leaseExpiresAt])
+  @@index([leaseExpiresAt, status])
 }
 
 model MemoryIndexGeneration {

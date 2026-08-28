@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth";
 import { handleApiError } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
+import { toPublicProjectJob } from "@/lib/project-workflow";
 
 export const dynamic = "force-dynamic";
 
@@ -39,8 +40,24 @@ export async function GET(request: Request) {
               kind: true,
               status: true,
               stage: true,
+              reconciliationRequired: true,
               createdAt: true,
               completedAt: true,
+              attempts: {
+                orderBy: { attemptNumber: "desc" },
+                take: 1,
+                select: {
+                  id: true,
+                  attemptNumber: true,
+                  status: true,
+                  leasedAt: true,
+                  leaseExpiresAt: true,
+                  heartbeatAt: true,
+                  dispatchState: true,
+                  safeFailureCode: true,
+                  completedAt: true,
+                },
+              },
             },
           },
         },
@@ -53,7 +70,7 @@ export async function GET(request: Request) {
           embeddingDimensions: true,
         },
       }),
-      db.backgroundJob.count({ where: { status: { in: ["queued", "running"] } } }),
+      db.backgroundJob.count({ where: { status: { in: ["queued", "waitingConsent", "running"] } } }),
       db.backgroundJob.findMany({
         where: { projectId: { not: null } },
         orderBy: { createdAt: "desc" },
@@ -64,8 +81,24 @@ export async function GET(request: Request) {
           status: true,
           stage: true,
           failureCode: true,
+          reconciliationRequired: true,
           createdAt: true,
           completedAt: true,
+          attempts: {
+            orderBy: { attemptNumber: "desc" },
+            take: 1,
+            select: {
+              id: true,
+              attemptNumber: true,
+              status: true,
+              leasedAt: true,
+              leaseExpiresAt: true,
+              heartbeatAt: true,
+              dispatchState: true,
+              safeFailureCode: true,
+              completedAt: true,
+            },
+          },
           project: { select: { id: true, name: true } },
         },
       }),
@@ -82,6 +115,15 @@ export async function GET(request: Request) {
       { confirmedItems: 0, repositories: 0, indexedProjects: 0, routedProjects: 0 },
     );
 
+    const publicProjects = projects.map((project) => ({
+      ...project,
+      backgroundJobs: project.backgroundJobs.map(toPublicProjectJob),
+    }));
+    const publicRecentJobs = recentJobs.map((job) => ({
+      ...toPublicProjectJob(job),
+      project: job.project,
+    }));
+
     return NextResponse.json(
       {
         summary: {
@@ -93,8 +135,8 @@ export async function GET(request: Request) {
             (provider) => provider.defaultEmbeddingModelId !== null && provider.embeddingDimensions !== null,
           ).length,
         },
-        projects,
-        recentJobs,
+        projects: publicProjects,
+        recentJobs: publicRecentJobs,
       },
       { headers: { "cache-control": "no-store" } },
     );

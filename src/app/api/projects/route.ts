@@ -5,6 +5,7 @@ import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { createWithAvailableSlug, isUniqueConstraintError } from "@/lib/project-slug";
 import { createProjectSchema, slugifyProjectName } from "@/lib/validation";
+import { toPublicProjectJob } from "@/lib/project-workflow";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,12 @@ export async function GET(request: Request) {
       select: projectSummarySelect,
     });
 
-    return NextResponse.json({ projects });
+    return NextResponse.json({
+      projects: projects.map((project) => ({
+        ...project,
+        backgroundJobs: project.backgroundJobs.map(toPublicProjectJob),
+      })),
+    });
   } catch (error) {
     return handleApiError(error);
   }
@@ -76,7 +82,12 @@ export async function POST(request: Request) {
         }),
     });
 
-    return NextResponse.json({ project }, { status: 201 });
+    return NextResponse.json({
+      project: {
+        ...project,
+        backgroundJobs: project.backgroundJobs.map(toPublicProjectJob),
+      },
+    }, { status: 201 });
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       return handleApiError(new ApiError(400, "PROJECT_SLUG_CONFLICT", "A project with this slug already exists"));

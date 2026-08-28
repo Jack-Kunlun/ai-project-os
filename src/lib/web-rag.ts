@@ -4,6 +4,7 @@ import { z } from "zod";
 import { invokeChatCompletion, invokeEmbeddings } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 import { requireProjectAiRoute } from "@/lib/project-ai-routes";
+import { getProjectJob } from "@/lib/project-workflow";
 import { getProjectMemoryInputManifest } from "@/lib/web-memory-index";
 import {
   assertWebAiConsent,
@@ -20,6 +21,9 @@ import {
 
 const questionSchema = z.string().trim().min(2).max(2_000);
 const MAX_CONTEXT_CHARACTERS = 30_000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const HASH_PATTERN = /^[0-9a-f]{64}$/iu;
+const COMMIT_PATTERN = /^[0-9a-f]{40}$/iu;
 const ragResponseSchema = z.object({
   answer: z.string().trim().min(1).max(50_000),
   citations: z.array(z.string().uuid()).min(1).max(12),
@@ -60,8 +64,101 @@ export type WebSearchResult = Readonly<Omit<SearchRecord, "embedding"> & {
   score: number;
 }>;
 
+type PublicRagCitation = Readonly<{
+  id: string;
+  scope: SearchRecord["scope"];
+  path: string | null;
+  externalRef: string | null;
+  frozenCommitSha: string | null;
+  rangeStart: number;
+  rangeEnd: number;
+  contentHash: string;
+  excerpt: string;
+}>;
+
+type PublicRagAnswer = Readonly<{
+  id: string;
+  question: string;
+  answer: string;
+  citations: readonly PublicRagCitation[];
+  modelId: string;
+  inputTokens: number;
+  outputTokens: number;
+  createdAt: Date;
+  providerConnection: { name: string; kind: string };
+}>;
+
 function fail(code: WebRagErrorCode): never {
   throw new WebRagError(code);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function safeText(value: unknown, maximumLength: number): string | null {
+  return typeof value === "string" && value.length <= maximumLength ? value : null;
+}
+
+function safeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function safeUuid(value: unknown): string | null {
+  return typeof value === "string" && UUID_PATTERN.test(value) ? value : null;
+}
+
+function safeCitation(value: unknown): PublicRagCitation | null {
+  if (!isRecord(value)) return null;
+  const id = safeUuid(value.id);
+  const scope = value.scope === "projectSource" || value.scope === "repositoryCode" || value.scope === "repositoryMaterial"
+    ? value.scope
+    : null;
+  const rangeStart = safeInteger(value.rangeStart);
+  const rangeEnd = safeInteger(value.rangeEnd);
+  const contentHash = typeof value.contentHash === "string" && HASH_PATTERN.test(value.contentHash) ? value.contentHash : null;
+  const excerpt = safeText(value.excerpt, 50_000);
+  if (id === null || scope === null || rangeStart === null || rangeEnd === null || contentHash === null || excerpt === null) return null;
+  return Object.freeze({
+    id,
+    scope,
+    path: safeText(value.path, 2_048),
+    externalRef: safeText(value.externalRef, 4_096),
+    frozenCommitSha: typeof value.frozenCommitSha === "string" && COMMIT_PATTERN.test(value.frozenCommitSha) ? value.frozenCommitSha : null,
+    rangeStart,
+    rangeEnd,
+    contentHash,
+    excerpt,
+  });
+}
+
+/** Serialize persisted RAG history without forwarding arbitrary JSON citations. */
+export function serializeRagAnswer(value: unknown): PublicRagAnswer | null {
+  if (!isRecord(value) || !isRecord(value.providerConnection)) return null;
+  const id = safeUuid(value.id);
+  const question = safeText(value.question, 2_000);
+  const answer = safeText(value.answer, 50_000);
+  const modelId = safeText(value.modelId, 128);
+  const inputTokens = safeInteger(value.inputTokens);
+  const outputTokens = safeInteger(value.outputTokens);
+  const providerName = safeText(value.providerConnection.name, 80);
+  const providerKind = safeText(value.providerConnection.kind, 32);
+  const createdAt = value.createdAt instanceof Date && Number.isFinite(value.createdAt.getTime()) ? value.createdAt : null;
+  if (!Array.isArray(value.citations) || value.citations.length < 1 || value.citations.length > 12) return null;
+  const citations = value.citations.map(safeCitation);
+  if (!citations.every((citation): citation is PublicRagCitation => citation !== null)) return null;
+  if (id === null || question === null || answer === null || modelId === null || inputTokens === null || outputTokens === null || providerName === null || providerKind === null || createdAt === null) return null;
+  return Object.freeze({
+    id,
+    question,
+    answer,
+    citations: Object.freeze(citations),
+    modelId,
+    inputTokens,
+    outputTokens,
+    createdAt,
+    providerConnection: Object.freeze({ name: providerName, kind: providerKind }),
+  });
 }
 
 function sha256(value: string): string {
@@ -191,6 +288,7 @@ export async function getActiveMemoryIndex(projectId: string, db: PrismaClient =
 export async function searchActiveMemoryForJob(input: Readonly<{
   projectId: string;
   jobId: string;
+  attempt: import("@/lib/project-workflow").JobAttemptClaim;
   question: string;
   route: RuntimeRoute;
   index: Awaited<ReturnType<typeof getActiveMemoryIndex>>;
@@ -204,9 +302,10 @@ export async function searchActiveMemoryForJob(input: Readonly<{
   ) {
     return fail("SEMANTIC_INDEX_NOT_READY");
   }
-  await updateWebAiJobProgress(input.jobId, "query_embedding", 0, 2, db);
+  await updateWebAiJobProgress(input.jobId, input.attempt, "query_embedding", 0, 2, db);
   const embedded = await auditedProviderCall({
     jobId: input.jobId,
+    attempt: input.attempt,
     route: input.route,
     call: () => invokeEmbeddings({
       connection: input.route.providerConnection,
@@ -249,13 +348,14 @@ export async function runSemanticSearchJob(input: Readonly<{
     manifestFingerprint: manifest,
     payload: { question, indexGenerationId: index.id },
   }, db);
-  if (!granted.created) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
-  if (!(await claimWebAiJob(granted.jobId, db))) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
+  if (!granted.created) return getProjectJob(input.projectId, granted.jobId, db);
+  const claim = await claimWebAiJob(granted.jobId, db);
+  if (!claim) return getProjectJob(input.projectId, granted.jobId, db);
   try {
-    const results = await searchActiveMemoryForJob({ projectId: input.projectId, jobId: granted.jobId, question, route, index }, db);
-    return finishWebAiJob(granted.jobId, { question, indexGenerationId: index.id, results }, db);
+    const results = await searchActiveMemoryForJob({ projectId: input.projectId, jobId: granted.jobId, attempt: claim, question, route, index }, db);
+    return finishWebAiJob(granted.jobId, claim, { question, indexGenerationId: index.id, results }, db);
   } catch (error) {
-    await failWebAiJob(granted.jobId, error, db);
+    await failWebAiJob(granted.jobId, claim, error, db);
     throw error;
   }
 }
@@ -318,8 +418,9 @@ export async function runRagAnswerJob(input: Readonly<{
     manifestFingerprint: manifest,
     payload: { question, indexGenerationId: index.id },
   }, db);
-  if (!granted.created) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
-  if (!(await claimWebAiJob(granted.jobId, db))) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
+  if (!granted.created) return getProjectJob(input.projectId, granted.jobId, db);
+  const claim = await claimWebAiJob(granted.jobId, db);
+  if (!claim) return getProjectJob(input.projectId, granted.jobId, db);
   try {
     await createSupplementalWebAiGrant({
       projectId: input.projectId,
@@ -333,15 +434,17 @@ export async function runRagAnswerJob(input: Readonly<{
     const ranked = await searchActiveMemoryForJob({
       projectId: input.projectId,
       jobId: granted.jobId,
+      attempt: claim,
       question,
       route: embeddingRoute,
       index,
     }, db);
     const contexts = boundedContexts(ranked);
     if (contexts.length === 0) return fail("SEMANTIC_INDEX_NOT_READY");
-    await updateWebAiJobProgress(granted.jobId, "grounded_generation", 1, 2, db);
+    await updateWebAiJobProgress(granted.jobId, claim, "grounded_generation", 1, 2, db);
     const generated = await auditedProviderCall({
       jobId: granted.jobId,
+      attempt: claim,
       route: generationRoute,
       call: () => invokeChatCompletion({
         connection: generationRoute.providerConnection,
@@ -407,15 +510,15 @@ export async function runRagAnswerJob(input: Readonly<{
         outputTokens: generated.outputTokens ?? 0,
       },
     });
-    return finishWebAiJob(granted.jobId, { answerId: answer.id }, db);
+    return finishWebAiJob(granted.jobId, claim, { answerId: answer.id }, db);
   } catch (error) {
-    await failWebAiJob(granted.jobId, error, db);
+    await failWebAiJob(granted.jobId, claim, error, db);
     throw error;
   }
 }
 
 export async function listRagAnswers(projectId: string, db: PrismaClient = getDb()) {
-  return db.ragAnswer.findMany({
+  const answers = await db.ragAnswer.findMany({
     where: { projectId },
     orderBy: { createdAt: "desc" },
     take: 30,
@@ -431,4 +534,5 @@ export async function listRagAnswers(projectId: string, db: PrismaClient = getDb
       providerConnection: { select: { name: true, kind: true } },
     },
   });
+  return answers.map(serializeRagAnswer).filter((answer) => answer !== null);
 }

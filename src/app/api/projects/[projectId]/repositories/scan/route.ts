@@ -3,6 +3,7 @@ import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { runGitHubCodeScanJob } from "@/lib/background-jobs";
+import { toPublicProjectJob } from "@/lib/project-workflow";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -16,9 +17,8 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const projectId = idSchema.parse((await context.params).projectId);
     const input = inputSchema.parse(await readJsonBody(request));
     const job = await runGitHubCodeScanJob({ projectId, requestedBy: user, clientKey: input.clientKey });
-    return NextResponse.json({ job });
+    return NextResponse.json({ job: toPublicProjectJob(job) });
   } catch (error) {
     return handleApiError(error);
   }
 }
-

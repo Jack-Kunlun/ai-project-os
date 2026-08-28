@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import type { DashboardPayload, JobKind, JobStatus, RecentJob } from "@/lib/workspace-summary";
+import { jobStatusLabels, type DashboardPayload, type JobKind, type JobStatus, type RecentJob } from "@/lib/workspace-summary";
 
 const emptyPayload: DashboardPayload = {
   summary: {
@@ -29,14 +29,6 @@ const jobLabels: Record<JobKind, string> = {
   ragAnswer: "引用式问答",
   projectBrief: "项目简报",
   projectAgent: "智能体调查",
-};
-
-const jobStatusLabels: Record<JobStatus, string> = {
-  queued: "等待中",
-  running: "进行中",
-  succeeded: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
 };
 
 async function readError(response: Response, fallback: string): Promise<string> {
@@ -181,7 +173,7 @@ function RecentJobs({ jobs, loading }: { jobs: RecentJob[]; loading: boolean }) 
 }
 
 function StatusDot({ status }: { status: JobStatus }) {
-  const styles: Record<JobStatus, string> = { queued: "bg-amber-400", running: "animate-pulse bg-indigo-500", succeeded: "bg-emerald-500", failed: "bg-rose-500", cancelled: "bg-slate-400" };
+  const styles: Record<JobStatus, string> = { queued: "bg-amber-400", waitingConsent: "bg-amber-400", running: "animate-pulse bg-indigo-500", succeeded: "bg-emerald-500", failed: "bg-rose-500", unknown: "bg-orange-500", cancelled: "bg-slate-400" };
   return <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${styles[status]}`} />;
 }
 

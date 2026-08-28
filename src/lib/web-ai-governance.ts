@@ -14,6 +14,18 @@ import { ProviderTransportError } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 import { jsonValue } from "@/lib/web-github";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
+import {
+  claimProjectJob,
+  failProjectJob,
+  finishProjectJob,
+  toPublicProjectJob,
+  isUncertainProviderDispatch,
+  markProjectJobUnknown,
+  markProviderAcknowledged,
+  markProviderDispatched,
+  type JobAttemptClaim,
+  updateProjectJobProgress,
+} from "@/lib/project-workflow";
 
 export { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 const GRANT_LIFETIME_MS = 24 * 60 * 60 * 1_000;
@@ -137,16 +149,8 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
   });
 }
 
-export async function claimWebAiJob(jobId: string, db: PrismaClient = getDb()): Promise<boolean> {
-  const result = await db.backgroundJob.updateMany({
-    where: { id: jobId, status: "queued" },
-    data: { status: "running", stage: "preparing", startedAt: new Date() },
-  });
-  if (result.count === 1) return true;
-  const job = await db.backgroundJob.findUnique({ where: { id: jobId }, select: { status: true } });
-  if (job === null) return fail("WEB_AI_JOB_NOT_FOUND");
-  if (job.status === "succeeded" || job.status === "failed") return false;
-  return fail("WEB_AI_JOB_INVALID_STATE");
+export async function claimWebAiJob(jobId: string, db: PrismaClient = getDb()): Promise<JobAttemptClaim | false> {
+  return claimProjectJob(jobId, db);
 }
 
 function safeFailureCode(error: unknown): string {
@@ -161,54 +165,36 @@ function safeFailureCode(error: unknown): string {
 
 export async function finishWebAiJob(
   jobId: string,
+  claim: JobAttemptClaim,
   result: unknown,
   db: PrismaClient = getDb(),
 ) {
-  return db.backgroundJob.update({
-    where: { id: jobId },
-    data: {
-      status: "succeeded",
-      stage: "complete",
-      result: jsonValue(result),
-      progressCurrent: 1,
-      progressTotal: 1,
-      failureCode: null,
-      completedAt: new Date(),
-    },
-  });
+  return toPublicProjectJob(await finishProjectJob({ jobId, ...claim, result: jsonValue(result) }, db));
 }
 
 export async function failWebAiJob(
   jobId: string,
+  claim: JobAttemptClaim,
   error: unknown,
   db: PrismaClient = getDb(),
 ) {
-  await db.backgroundJob.updateMany({
-    where: { id: jobId, status: "running" },
-    data: {
-      status: "failed",
-      stage: "failed",
-      failureCode: safeFailureCode(error),
-      completedAt: new Date(),
-    },
-  });
+  await failProjectJob({ jobId, ...claim, error }, db);
 }
 
 export async function updateWebAiJobProgress(
   jobId: string,
+  claim: JobAttemptClaim,
   stage: string,
   current: number,
   total: number,
   db: PrismaClient = getDb(),
 ) {
-  await db.backgroundJob.updateMany({
-    where: { id: jobId, status: "running" },
-    data: { stage, progressCurrent: current, progressTotal: total },
-  });
+  await updateProjectJobProgress({ jobId, ...claim, stage, current, total }, db);
 }
 
 export async function auditedProviderCall<T>(input: Readonly<{
   jobId: string;
+  attempt: JobAttemptClaim;
   route: RuntimeRoute;
   operation?: AiOperation;
   call: () => Promise<Readonly<T & {
@@ -221,6 +207,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
   providerRequestId: string | null;
   outputTokens?: number;
 }> {
+  await markProviderDispatched({ jobId: input.jobId, ...input.attempt }, db);
   const audit = await db.providerCallAudit.create({
     data: {
       jobId: input.jobId,
@@ -232,6 +219,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
   });
   try {
     const result = await input.call();
+    await markProviderAcknowledged({ jobId: input.jobId, ...input.attempt }, db);
     await db.providerCallAudit.update({
       where: { id: audit.id },
       data: {
@@ -244,14 +232,18 @@ export async function auditedProviderCall<T>(input: Readonly<{
     });
     return result;
   } catch (error) {
+    const uncertain = isUncertainProviderDispatch(error);
     await db.providerCallAudit.updateMany({
       where: { id: audit.id, status: "running" },
       data: {
-        status: "failed",
+        status: uncertain ? "unknown" : "failed",
         safeErrorCode: safeFailureCode(error),
         completedAt: new Date(),
       },
     });
+    if (uncertain) {
+      await markProjectJobUnknown({ jobId: input.jobId, ...input.attempt, error }, db);
+    }
     throw error;
   }
 }

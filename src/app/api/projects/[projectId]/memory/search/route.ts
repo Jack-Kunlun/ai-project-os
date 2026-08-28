@@ -3,6 +3,7 @@ import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { runSemanticSearchJob } from "@/lib/web-rag";
+import { toPublicProjectJob } from "@/lib/project-workflow";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -26,9 +27,8 @@ export async function POST(request: Request, context: { params: Promise<{ projec
       consent: body.consent,
       question: body.question,
     });
-    return NextResponse.json({ job });
+    return NextResponse.json({ job: toPublicProjectJob(job) });
   } catch (error) {
     return handleApiError(error);
   }
 }
-

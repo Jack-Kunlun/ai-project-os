@@ -16,6 +16,7 @@ import { WebAutoExtractError } from "@/lib/web-auto-extract";
 import { WebMemoryIndexError } from "@/lib/web-memory-index";
 import { ProjectIntelligenceError } from "@/lib/web-project-intelligence";
 import { WebRagError } from "@/lib/web-rag";
+import { ProjectWorkflowError } from "@/lib/project-workflow";
 
 export type ApiErrorBody = {
   error: {
@@ -123,6 +124,24 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
   if (error instanceof BackgroundJobError) {
     const status = error.code === "BACKGROUND_JOB_NOT_FOUND" ? 404 : 409;
     return { status, body: { error: { code: error.code, message: "任务状态无效，请刷新后重试" } } };
+  }
+
+  if (error instanceof ProjectWorkflowError) {
+    const mapping = {
+      PROJECT_WORKFLOW_INVALID_INPUT: [400, "任务请求无效"],
+      PROJECT_WORKFLOW_JOB_NOT_FOUND: [404, "任务不存在"],
+      PROJECT_WORKFLOW_PROJECT_MISMATCH: [404, "任务不存在"],
+      PROJECT_WORKFLOW_INVALID_STATE: [409, "任务状态已变化，请刷新后重试"],
+      PROJECT_WORKFLOW_CLAIM_CONFLICT: [409, "任务已被其他执行尝试领取"],
+      PROJECT_WORKFLOW_ATTEMPT_NOT_FOUND: [409, "任务执行尝试不存在或已失效"],
+      PROJECT_WORKFLOW_STALE_ATTEMPT: [409, "任务执行尝试已失效，请刷新任务状态"],
+      PROJECT_WORKFLOW_LEASE_EXPIRED: [409, "任务租约已过期，请执行协调确认"],
+      PROJECT_WORKFLOW_RECONCILIATION_NOT_DUE: [409, "任务仍在租约内，暂不能协调确认"],
+      PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED: [409, "当前任务状态不允许取消"],
+      PROJECT_WORKFLOW_RETRY_NOT_SUPPORTED: [409, "未知结果任务不支持自动重试，请重新发起并重新确认"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
   }
 
   if (error instanceof GitHubReadError) {

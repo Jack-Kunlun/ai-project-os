@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
+import { jobStatusLabels, type JobAttemptSummary } from "@/lib/workspace-summary";
 
 type Provider = {
   id: string;
@@ -63,12 +64,19 @@ type RepositoryLink = {
 type Job = {
   id: string;
   kind: "githubScan" | "githubMaterialSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  status: "queued" | "waitingConsent" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
   stage: string;
   failureCode: string | null;
+  reconciliationRequired: boolean;
   createdAt: string;
   completedAt: string | null;
   result: unknown;
+  attempts: JobAttemptSummary[];
+};
+
+type GitHubJobResult = {
+  status?: string;
+  warning?: string;
 };
 
 async function readError(response: Response, fallback: string): Promise<string> {
@@ -145,7 +153,7 @@ export function ProjectControlClient({ username }: { username: string }) {
           <>
             <AiRouteSection projectId={projectId} providers={providers} routes={routes} onChanged={setRoutes} />
             <RepositorySection projectId={projectId} repositories={repositories} credentialSuffix={credentialSuffix} onReload={reload} />
-            <JobSection jobs={jobs} />
+            <JobSection projectId={projectId} jobs={jobs} onReload={reload} />
           </>
         )}
       </div>
@@ -284,11 +292,37 @@ function RepositorySection({ projectId, repositories, credentialSuffix, onReload
   const [codeEnabled, setCodeEnabled] = useState(true); const [readmeEnabled, setReadmeEnabled] = useState(true); const [issuesEnabled, setIssuesEnabled] = useState(false); const [pullRequestsEnabled, setPullRequestsEnabled] = useState(false); const [releasesEnabled, setReleasesEnabled] = useState(true); const [required, setRequired] = useState(true);
   const [pending, setPending] = useState(false); const [activeTask, setActiveTask] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null);
   async function connect(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setPending(true); setMessage(null); try { const response = await fetch(`/api/projects/${projectId}/repositories`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ owner, repository, ...(token ? { token } : {}), role, requiredForProjectSnapshot: required, trackedBranch, codeEnabled, metadataEnabled: true, readmeEnabled, markdownPaths: splitList(markdownPaths), issuesEnabled, pullRequestsEnabled, releasesEnabled, includeRoots: splitList(includeRoots), softExcludePatterns: ["vendor", "node_modules", "build", "dist", "coverage", "generated", "minified", "source_map", "lockfile"] }) }); if (!response.ok) throw new Error(await readError(response, "仓库连接失败")); setToken(""); setOwner(""); setRepository(""); setMessage("仓库已验证并连接"); await onReload(); } catch (connectError) { setMessage(connectError instanceof Error ? connectError.message : "仓库连接失败"); } finally { setPending(false); } }
-  async function runTask(path: string, body: object, key: string) { setActiveTask(key); setMessage(null); try { const response = await fetch(`/api/projects/${projectId}/repositories/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, clientKey: crypto.randomUUID() }) }); if (!response.ok) throw new Error(await readError(response, "仓库任务失败")); setMessage("任务已完成，结果已原子发布"); await onReload(); } catch (taskError) { setMessage(taskError instanceof Error ? taskError.message : "仓库任务失败"); } finally { setActiveTask(null); } }
+  async function runTask(path: string, body: object, key: string) { setActiveTask(key); setMessage(null); try { const response = await fetch(`/api/projects/${projectId}/repositories/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, clientKey: crypto.randomUUID() }) }); if (!response.ok) throw new Error(await readError(response, "仓库任务失败")); const payload = await response.json() as { job?: Job }; const result = payload.job?.result as GitHubJobResult | null | undefined; if (payload.job?.status === "unknown") setMessage("任务结果未知，未确认是否发布；请在任务详情中协调确认，系统不会自动重试。 "); else if (payload.job?.status === "failed") setMessage(`任务未完成：${payload.job.failureCode ?? "仓库任务失败"}`); else if (payload.job?.status === "succeeded" && result?.warning) setMessage("任务已完成，但可选仓库未完成；必需内容已按原子规则发布。 "); else if (payload.job?.status === "succeeded") setMessage("任务已完成，结果已原子发布"); else setMessage("任务仍在处理中，请查看任务状态"); await onReload(); } catch (taskError) { setMessage(taskError instanceof Error ? taskError.message : "仓库任务失败"); } finally { setActiveTask(null); } }
   return <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-100 pb-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">GitHub connector</p><h2 className="mt-2 text-2xl font-semibold">多仓库项目来源</h2><p className="mt-2 text-sm leading-6 text-slate-500">使用只读 fine-grained PAT。凭据{credentialSuffix ? `已保存（尾号 ${credentialSuffix}）` : "尚未配置"}；扫描过程中不会写入 GitHub。</p></div>{repositories.some((entry) => entry.status === "active" && entry.config.codeEnabled) ? <button type="button" onClick={() => void runTask("scan", {}, "scan")} disabled={activeTask !== null} className="rounded-xl bg-indigo-600 px-5 py-3 text-xs font-semibold text-white disabled:opacity-50">{activeTask === "scan" ? "扫描与发布中…" : "扫描全部代码仓库"}</button> : null}</div><div className="mt-7 grid gap-7 lg:grid-cols-[0.75fr_1.25fr]"><form onSubmit={connect} className="rounded-2xl bg-slate-950 p-6 text-white"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">Connect repository</p><h3 className="mt-2 text-xl font-semibold">连接一个仓库</h3><div className="mt-5 grid grid-cols-2 gap-3"><DarkField label="Owner"><input value={owner} onChange={(event) => setOwner(event.target.value)} required className="control-dark" /></DarkField><DarkField label="Repository"><input value={repository} onChange={(event) => setRepository(event.target.value)} required className="control-dark" /></DarkField></div><DarkField label={credentialSuffix ? "替换 PAT（可选）" : "Fine-grained PAT"}><input type="password" value={token} onChange={(event) => setToken(event.target.value)} required={!credentialSuffix} autoComplete="new-password" className="control-dark" /></DarkField><div className="grid grid-cols-2 gap-3"><DarkField label="跟踪分支"><input value={trackedBranch} onChange={(event) => setTrackedBranch(event.target.value)} required className="control-dark" /></DarkField><DarkField label="仓库角色"><select value={role} onChange={(event) => setRole(event.target.value)} className="control-dark"><option value="primary">主仓库</option><option value="application">应用</option><option value="infrastructure">基础设施</option><option value="library">库</option><option value="documentation">文档</option><option value="other">其他</option></select></DarkField></div><DarkField label="代码扫描根目录（逗号或换行）"><textarea value={includeRoots} onChange={(event) => setIncludeRoots(event.target.value)} rows={2} required className="control-dark" /></DarkField><DarkField label="额外 Markdown 路径（可选）"><textarea value={markdownPaths} onChange={(event) => setMarkdownPaths(event.target.value)} rows={2} className="control-dark" /></DarkField><div className="mt-5 grid grid-cols-2 gap-2 text-xs text-slate-300"><Check label="代码" value={codeEnabled} set={setCodeEnabled} /><Check label="README" value={readmeEnabled} set={setReadmeEnabled} /><Check label="Issues" value={issuesEnabled} set={setIssuesEnabled} /><Check label="Pull Requests" value={pullRequestsEnabled} set={setPullRequestsEnabled} /><Check label="Releases" value={releasesEnabled} set={setReleasesEnabled} /><Check label="项目快照必需" value={required} set={setRequired} /></div><button disabled={pending} className="mt-6 w-full rounded-xl bg-indigo-400 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50">{pending ? "验证并连接中…" : "验证并连接仓库"}</button><style jsx>{`.control-dark{margin-top:.4rem;width:100%;border-radius:.75rem;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.1);padding:.7rem .8rem;font-size:.8rem;color:white;outline:none}.control-dark option{color:#0f172a}`}</style></form><div>{repositories.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center text-sm text-slate-500">尚未连接仓库。一个项目可以持续添加多个仓库。</div> : <div className="space-y-4">{repositories.map((link) => <article key={link.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{link.repository.currentFullName}</h3><p className="mt-1 text-xs text-slate-500">{link.config.role} · {link.config.trackedRef} · {link.repository.private ? "私有" : "公开"}</p></div><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${link.eligible ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{link.eligible ? "可扫描" : link.status}</span></div><p className="mt-3 text-xs leading-5 text-slate-500">范围：{link.config.includeRoots.join("、")} · 最近验证 {formatDate(link.repository.lastVerifiedAt)}</p><div className="mt-4 flex gap-2">{link.config.metadataEnabled || link.config.readmeEnabled || link.config.issuesEnabled || link.config.pullRequestsEnabled || link.config.releasesEnabled ? <button type="button" onClick={() => void runTask("materials", { linkId: link.id }, link.id)} disabled={activeTask !== null || !link.eligible} className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 disabled:opacity-40">{activeTask === link.id ? "同步中…" : "同步仓库资料"}</button> : null}</div></article>)}</div>}</div></div>{message ? <p role="status" className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}</section>;
 }
 
 function DarkField({ label, children }: { label: string; children: ReactNode }) { return <label className="mt-4 block text-xs font-medium text-slate-300">{label}{children}</label>; }
 function Check({ label, value, set }: { label: string; value: boolean; set: (value: boolean) => void }) { return <label className="flex items-center gap-2"><input type="checkbox" checked={value} onChange={(event) => set(event.target.checked)} /> {label}</label>; }
 
-function JobSection({ jobs }: { jobs: Job[] }) { return <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-5"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Durable jobs</p><h2 className="mt-2 text-2xl font-semibold">最近任务</h2></div>{jobs.length === 0 ? <p className="mt-6 text-sm text-slate-500">还没有页面任务。</p> : <div className="mt-5 divide-y divide-slate-100">{jobs.map((job) => <div key={job.id} className="flex flex-wrap items-center justify-between gap-3 py-4"><div><p className="text-sm font-semibold text-slate-700">{job.kind}</p><p className="mt-1 text-xs text-slate-400">{formatDate(job.createdAt)} · {job.stage}</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${job.status === "succeeded" ? "bg-emerald-50 text-emerald-700" : job.status === "failed" ? "bg-rose-50 text-rose-700" : "bg-indigo-50 text-indigo-700"}`}>{job.status}{job.failureCode ? ` · ${job.failureCode}` : ""}</span></div>)}</div>}</section>; }
+function JobSection({ projectId, jobs, onReload }: { projectId: string; jobs: Job[]; onReload: () => Promise<void> }) {
+  const [pending, setPending] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setNow(Date.now()), 0);
+    return () => window.clearTimeout(timer);
+  }, [jobs]);
+  async function act(job: Job, action: "reconcile" | "cancel") {
+    setPending(`${job.id}:${action}`); setMessage(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/jobs/${job.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!response.ok) throw new Error(await readError(response, "任务操作失败"));
+      await onReload();
+      setMessage(action === "cancel" ? "任务已取消。" : "任务已协调为未知结果，系统不会自动重试。重新运行需重新确认。");
+    } catch (actionError) {
+      setMessage(actionError instanceof Error ? actionError.message : "任务操作失败");
+    } finally {
+      setPending(null);
+    }
+  }
+  return <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-5"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Recoverable jobs</p><h2 className="mt-2 text-2xl font-semibold">最近任务</h2><p className="mt-2 text-sm leading-6 text-slate-500">每次执行都有独立租约与 attempt。未知结果不会自动重试，避免重复调用模型。</p></div>{jobs.length === 0 ? <p className="mt-6 text-sm text-slate-500">还没有页面任务。</p> : <div className="mt-5 divide-y divide-slate-100">{jobs.map((job) => { const attempt = job.attempts[0]; const expired = now !== null && job.status === "running" && attempt !== undefined && new Date(attempt.leaseExpiresAt).getTime() <= now; const canCancel = job.status === "queued" || job.status === "waitingConsent"; return <div key={job.id} className="flex flex-wrap items-start justify-between gap-4 py-4"><div className="min-w-0"><p className="text-sm font-semibold text-slate-700">{job.kind}</p><p className="mt-1 text-xs text-slate-400">{formatDate(job.createdAt)} · {job.stage}{attempt ? ` · attempt #${attempt.attemptNumber}` : ""}</p>{job.status === "unknown" ? <p className="mt-2 text-xs leading-5 text-orange-700">外部调用结果未知，禁止自动重试；请重新发起并重新确认。</p> : null}{expired ? <p className="mt-2 text-xs leading-5 text-amber-700">执行租约已过期，可手动协调确认。</p> : null}</div><div className="flex flex-wrap items-center justify-end gap-2"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${job.status === "succeeded" ? "bg-emerald-50 text-emerald-700" : job.status === "failed" ? "bg-rose-50 text-rose-700" : job.status === "unknown" ? "bg-orange-50 text-orange-700" : job.status === "cancelled" ? "bg-slate-100 text-slate-600" : "bg-indigo-50 text-indigo-700"}`}>{jobStatusLabels[job.status]}{job.failureCode ? ` · ${job.failureCode}` : ""}</span>{canCancel ? <button type="button" onClick={() => void act(job, "cancel")} disabled={pending !== null} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 disabled:opacity-40">{pending === `${job.id}:cancel` ? "取消中…" : "取消"}</button> : null}{expired ? <button type="button" onClick={() => void act(job, "reconcile")} disabled={pending !== null} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 disabled:opacity-40">{pending === `${job.id}:reconcile` ? "协调中…" : "协调确认"}</button> : null}</div></div>; })}</div>}{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-600">{message}</p> : null}</section>;
+}

@@ -7,6 +7,20 @@ import {
   createGitHubMaterialSyncService,
 } from "@/lib/github";
 import { jsonValue, loadProjectGitHubClient } from "@/lib/web-github";
+import {
+  claimProjectJob,
+  failProjectJob,
+  finishProjectJob,
+  getProjectJob,
+  isUncertainProviderDispatch,
+  markProjectJobUnknown,
+  markProviderAcknowledged,
+  markProviderDispatched,
+  startProjectJobHeartbeat,
+  toPublicProjectJob,
+  type ProjectJobHeartbeat,
+  type JobAttemptClaim,
+} from "@/lib/project-workflow";
 
 export type BackgroundJobErrorCode =
   | "BACKGROUND_JOB_INVALID_INPUT"
@@ -23,20 +37,8 @@ export class BackgroundJobError extends Error {
 const clientKeySchema = z.string().min(8).max(200).regex(/^[A-Za-z0-9._:-]+$/);
 const linkIdSchema = z.string().uuid();
 
-function fail(code: BackgroundJobErrorCode): never {
-  throw new BackgroundJobError(code);
-}
-
 function idempotencyHash(kind: BackgroundJobKind, projectId: string, clientKey: string): string {
   return createHash("sha256").update(`${kind}:${projectId}:${clientKey}`, "utf8").digest("hex");
-}
-
-function safeFailureCode(error: unknown): string {
-  if (typeof error === "object" && error !== null && "code" in error) {
-    const code = (error as { code?: unknown }).code;
-    if (typeof code === "string" && /^[A-Z0-9_]{3,64}$/.test(code)) return code;
-  }
-  return "BACKGROUND_JOB_FAILED";
 }
 
 async function createQueuedJob(input: Readonly<{
@@ -64,43 +66,121 @@ async function createQueuedJob(input: Readonly<{
   });
 }
 
-async function claimJob(jobId: string, kind: BackgroundJobKind, db: PrismaClient) {
-  const claimed = await db.backgroundJob.updateMany({
-    where: { id: jobId, kind, status: "queued" },
-    data: { status: "running", stage: "executing", startedAt: new Date() },
-  });
-  if (claimed.count === 1) return;
-  const job = await db.backgroundJob.findUnique({ where: { id: jobId } });
-  if (job === null) return fail("BACKGROUND_JOB_NOT_FOUND");
-  if (job.status === "succeeded" || job.status === "failed") return;
-  return fail("BACKGROUND_JOB_INVALID_STATE");
+async function claimJob(jobId: string, kind: BackgroundJobKind, db: PrismaClient): Promise<JobAttemptClaim | false> {
+  return claimProjectJob(jobId, db, kind);
 }
 
-async function finishJob(jobId: string, result: unknown, db: PrismaClient) {
-  return db.backgroundJob.update({
-    where: { id: jobId },
-    data: {
-      status: "succeeded",
-      stage: "complete",
-      result: jsonValue(result),
-      progressCurrent: 1,
-      progressTotal: 1,
-      completedAt: new Date(),
-      failureCode: null,
-    },
+async function finishJob(jobId: string, claim: JobAttemptClaim, result: unknown, db: PrismaClient) {
+  return toPublicProjectJob(await finishProjectJob({ jobId, ...claim, result: jsonValue(result) }, db));
+}
+
+async function failJob(jobId: string, claim: JobAttemptClaim, error: unknown, db: PrismaClient, result?: unknown) {
+  await failProjectJob({ jobId, ...claim, error, ...(result === undefined ? {} : { result: jsonValue(result) }) }, db);
+}
+
+function nestedStatus(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const status = (value as { status?: unknown }).status;
+  return typeof status === "string" ? status : null;
+}
+
+function nestedFailureCode(value: unknown, fallback: string): string {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const record = value as { failureCode?: unknown; code?: unknown };
+    const code = record.failureCode ?? record.code;
+    if (typeof code === "string" && /^[A-Z0-9_]{3,64}$/.test(code)) return code;
+  }
+  return fallback;
+}
+
+export type GitHubJobOutcome = Readonly<{
+  status: "succeeded" | "failed" | "unknown";
+  failureCode: string | null;
+  warning: string | null;
+}>;
+
+export function classifyGitHubJobResult(
+  result: unknown,
+  kind: "githubScan" | "githubMaterialSync",
+): GitHubJobOutcome {
+  const status = nestedStatus(result);
+  if (status === "succeeded") return Object.freeze({ status: "succeeded", failureCode: null, warning: null });
+  if (kind === "githubScan" && status === "partialOptional") {
+    return Object.freeze({ status: "succeeded", failureCode: null, warning: "OPTIONAL_REPOSITORY_INCOMPLETE" });
+  }
+  if (status === "unknown") {
+    return Object.freeze({
+      status: "unknown",
+      failureCode: nestedFailureCode(result, "RECONCILIATION_REQUIRED"),
+      warning: null,
+    });
+  }
+  if (status !== "failed" && status !== "partial" && status !== "rateLimited" && status !== "cancelled") {
+    return Object.freeze({
+      status: "unknown",
+      failureCode: nestedFailureCode(result, "GITHUB_JOB_RESULT_UNKNOWN"),
+      warning: null,
+    });
+  }
+  const fallback = status === "rateLimited"
+    ? "GITHUB_RATE_LIMITED"
+    : kind === "githubScan"
+      ? status === "partial" ? "GITHUB_CODE_SCAN_PARTIAL" : "GITHUB_CODE_SCAN_FAILED"
+      : status === "partial" ? "GITHUB_MATERIAL_SYNC_PARTIAL" : "GITHUB_MATERIAL_SYNC_FAILED";
+  return Object.freeze({
+    status: "failed",
+    failureCode: nestedFailureCode(result, fallback),
+    warning: null,
   });
 }
 
-async function failJob(jobId: string, error: unknown, db: PrismaClient) {
-  await db.backgroundJob.updateMany({
-    where: { id: jobId, status: "running" },
-    data: {
-      status: "failed",
-      stage: "failed",
-      failureCode: safeFailureCode(error),
-      completedAt: new Date(),
-    },
-  });
+export function classifyGitHubJobError(error: unknown): GitHubJobOutcome {
+  const code = nestedFailureCode(error, "");
+  return isUncertainProviderDispatch(error) || code.endsWith("_RECONCILIATION_REQUIRED")
+    ? Object.freeze({ status: "unknown", failureCode: nestedFailureCode(error, "RECONCILIATION_REQUIRED"), warning: null })
+    : Object.freeze({ status: "failed", failureCode: nestedFailureCode(error, "GITHUB_JOB_FAILED"), warning: null });
+}
+
+async function stopRequestHeartbeat(
+  heartbeat: ProjectJobHeartbeat,
+  jobId: string,
+  claim: JobAttemptClaim,
+  db: PrismaClient,
+): Promise<void> {
+  await heartbeat.stop();
+  if (heartbeat.failure !== null) {
+    await markProjectJobUnknown({
+      jobId,
+      ...claim,
+      error: { code: "PROJECT_WORKFLOW_HEARTBEAT_FAILED" },
+    }, db).catch(() => undefined);
+    throw heartbeat.failure;
+  }
+}
+
+async function settleGitHubResult(
+  projectId: string,
+  jobId: string,
+  claim: JobAttemptClaim,
+  result: unknown,
+  db: PrismaClient,
+  outcome: GitHubJobOutcome,
+) {
+  if (outcome.status === "succeeded") {
+    return finishJob(jobId, claim, result, db);
+  }
+  if (outcome.status === "unknown") {
+    await markProjectJobUnknown({
+      jobId,
+      ...claim,
+      error: { code: outcome.failureCode ?? "RECONCILIATION_REQUIRED" },
+      result,
+    }, db);
+    return getProjectJob(projectId, jobId, db);
+  }
+  const error = { code: outcome.failureCode ?? "GITHUB_JOB_FAILED" };
+  await failJob(jobId, claim, error, db, result);
+  return getProjectJob(projectId, jobId, db);
 }
 
 export async function runGitHubCodeScanJob(input: Readonly<{
@@ -114,14 +194,28 @@ export async function runGitHubCodeScanJob(input: Readonly<{
     kind: "githubScan",
     clientKey: input.clientKey,
   }, db);
-  if (job.status !== "queued") return job;
-  await claimJob(job.id, "githubScan", db);
+  if (job.status !== "queued") return toPublicProjectJob(job);
+  const claim = await claimJob(job.id, "githubScan", db);
+  if (!claim) return toPublicProjectJob(await db.backgroundJob.findUniqueOrThrow({ where: { id: job.id } }));
+  let heartbeat: ProjectJobHeartbeat | null = null;
   try {
+    await markProviderDispatched({ jobId: job.id, ...claim }, db);
+    heartbeat = startProjectJobHeartbeat({ jobId: job.id, ...claim }, db);
     const client = await loadProjectGitHubClient(input.projectId, db);
     const result = await createGitHubCodeScanService({ db, client }).scanProject(input.projectId);
-    return finishJob(job.id, result, db);
+    const outcome = classifyGitHubJobResult(result, "githubScan");
+    await stopRequestHeartbeat(heartbeat, job.id, claim, db);
+    if (outcome.status !== "unknown") {
+      await markProviderAcknowledged({ jobId: job.id, ...claim }, db);
+    }
+    return settleGitHubResult(input.projectId, job.id, claim, result, db, outcome);
   } catch (error) {
-    await failJob(job.id, error, db);
+    if (heartbeat !== null) await heartbeat.stop();
+    if (classifyGitHubJobError(error).status === "unknown") {
+      await markProjectJobUnknown({ jobId: job.id, ...claim, error }, db);
+    } else {
+      await failJob(job.id, claim, error, db);
+    }
     throw error;
   }
 }
@@ -140,23 +234,37 @@ export async function runGitHubMaterialSyncJob(input: Readonly<{
     clientKey: input.clientKey,
     payload: { linkId },
   }, db);
-  if (job.status !== "queued") return job;
-  await claimJob(job.id, "githubMaterialSync", db);
+  if (job.status !== "queued") return toPublicProjectJob(job);
+  const claim = await claimJob(job.id, "githubMaterialSync", db);
+  if (!claim) return toPublicProjectJob(await db.backgroundJob.findUniqueOrThrow({ where: { id: job.id } }));
+  let heartbeat: ProjectJobHeartbeat | null = null;
   try {
+    await markProviderDispatched({ jobId: job.id, ...claim }, db);
+    heartbeat = startProjectJobHeartbeat({ jobId: job.id, ...claim }, db);
     const client = await loadProjectGitHubClient(input.projectId, db);
     const result = await createGitHubMaterialSyncService({ db, client }).syncRepository({
       projectId: input.projectId,
       linkId,
     });
-    return finishJob(job.id, result, db);
+    const outcome = classifyGitHubJobResult(result, "githubMaterialSync");
+    await stopRequestHeartbeat(heartbeat, job.id, claim, db);
+    if (outcome.status !== "unknown") {
+      await markProviderAcknowledged({ jobId: job.id, ...claim }, db);
+    }
+    return settleGitHubResult(input.projectId, job.id, claim, result, db, outcome);
   } catch (error) {
-    await failJob(job.id, error, db);
+    if (heartbeat !== null) await heartbeat.stop();
+    if (classifyGitHubJobError(error).status === "unknown") {
+      await markProjectJobUnknown({ jobId: job.id, ...claim, error }, db);
+    } else {
+      await failJob(job.id, claim, error, db);
+    }
     throw error;
   }
 }
 
 export async function listProjectJobs(projectId: string, db: PrismaClient = getDb()) {
-  return db.backgroundJob.findMany({
+  const jobs = await db.backgroundJob.findMany({
     where: { projectId },
     orderBy: { createdAt: "desc" },
     take: 30,
@@ -172,7 +280,23 @@ export async function listProjectJobs(projectId: string, db: PrismaClient = getD
       createdAt: true,
       startedAt: true,
       completedAt: true,
+      reconciliationRequired: true,
+      attempts: {
+        orderBy: { attemptNumber: "desc" },
+        take: 1,
+        select: {
+          id: true,
+          attemptNumber: true,
+          status: true,
+          leasedAt: true,
+          leaseExpiresAt: true,
+          heartbeatAt: true,
+          dispatchState: true,
+          safeFailureCode: true,
+          completedAt: true,
+        },
+      },
     },
   });
+  return jobs.map(toPublicProjectJob);
 }
-

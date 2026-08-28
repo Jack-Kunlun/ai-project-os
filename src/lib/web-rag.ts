@@ -128,7 +128,7 @@ function rankRecords(
   }).sort((left, right) => right.score - left.score || left.id.localeCompare(right.id)).slice(0, take));
 }
 
-async function activeIndex(projectId: string, db: PrismaClient) {
+export async function getActiveMemoryIndex(projectId: string, db: PrismaClient = getDb()) {
   const pointer = await db.memoryIndexPointer.findUnique({
     where: { projectId },
     select: {
@@ -136,6 +136,7 @@ async function activeIndex(projectId: string, db: PrismaClient) {
       generation: {
         select: {
           id: true,
+          providerConnectionId: true,
           modelId: true,
           dimensions: true,
           inputManifestFingerprint: true,
@@ -164,14 +165,16 @@ async function activeIndex(projectId: string, db: PrismaClient) {
   return pointer.generation;
 }
 
-async function embedAndRank(input: Readonly<{
+export async function searchActiveMemoryForJob(input: Readonly<{
   projectId: string;
   jobId: string;
   question: string;
   route: RuntimeRoute;
-  index: Awaited<ReturnType<typeof activeIndex>>;
+  index: Awaited<ReturnType<typeof getActiveMemoryIndex>>;
+  take?: number;
 }>, db: PrismaClient): Promise<readonly WebSearchResult[]> {
   if (
+    input.route.providerConnectionId !== input.index.providerConnectionId ||
     input.route.embeddingDimensions !== input.index.dimensions ||
     input.route.modelId !== input.index.modelId
   ) {
@@ -190,7 +193,7 @@ async function embedAndRank(input: Readonly<{
   }, db);
   const vector = embedded.vectors[0];
   if (vector === undefined) return fail("SEMANTIC_QUERY_VECTOR_INVALID");
-  return rankRecords(input.question, vector, input.index.records as SearchRecord[]);
+  return rankRecords(input.question, vector, input.index.records as SearchRecord[], input.take ?? 10);
 }
 
 export async function runSemanticSearchJob(input: Readonly<{
@@ -204,7 +207,7 @@ export async function runSemanticSearchJob(input: Readonly<{
   const question = questionSchema.parse(input.question);
   const [route, index] = await Promise.all([
     requireProjectAiRoute(input.projectId, "embedding", db),
-    activeIndex(input.projectId, db),
+    getActiveMemoryIndex(input.projectId, db),
   ]);
   const manifest = manifestFingerprint({
     questionHash: sha256(question),
@@ -225,7 +228,7 @@ export async function runSemanticSearchJob(input: Readonly<{
   if (!granted.created) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
   if (!(await claimWebAiJob(granted.jobId, db))) return db.backgroundJob.findUniqueOrThrow({ where: { id: granted.jobId } });
   try {
-    const results = await embedAndRank({ projectId: input.projectId, jobId: granted.jobId, question, route, index }, db);
+    const results = await searchActiveMemoryForJob({ projectId: input.projectId, jobId: granted.jobId, question, route, index }, db);
     return finishWebAiJob(granted.jobId, { question, indexGenerationId: index.id, results }, db);
   } catch (error) {
     await failWebAiJob(granted.jobId, error, db);
@@ -273,7 +276,7 @@ export async function runRagAnswerJob(input: Readonly<{
   const [embeddingRoute, generationRoute, index] = await Promise.all([
     requireProjectAiRoute(input.projectId, "embedding", db),
     requireProjectAiRoute(input.projectId, "generateWithContext", db),
-    activeIndex(input.projectId, db),
+    getActiveMemoryIndex(input.projectId, db),
   ]);
   const manifest = manifestFingerprint({
     questionHash: sha256(question),
@@ -303,7 +306,7 @@ export async function runRagAnswerJob(input: Readonly<{
       scopeIds: { indexGenerationId: index.id, questionHash: sha256(question) },
       manifestFingerprint: manifest,
     }, db);
-    const ranked = await embedAndRank({
+    const ranked = await searchActiveMemoryForJob({
       projectId: input.projectId,
       jobId: granted.jobId,
       question,

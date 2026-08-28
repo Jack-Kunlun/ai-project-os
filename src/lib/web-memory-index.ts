@@ -202,6 +202,7 @@ export async function getProjectMemoryIndexStatus(projectId: string, db: PrismaC
         generation: {
           select: {
             id: true,
+            providerConnectionId: true,
             modelId: true,
             dimensions: true,
             recordCount: true,
@@ -219,8 +220,15 @@ export async function getProjectMemoryIndexStatus(projectId: string, db: PrismaC
       select: { providerConnectionId: true, modelId: true, embeddingDimensions: true },
     }),
   ]);
+  const compatible =
+    pointer !== null &&
+    route !== null &&
+    pointer.generation.providerConnectionId === route.providerConnectionId &&
+    pointer.generation.modelId === route.modelId &&
+    pointer.generation.dimensions === route.embeddingDimensions;
   return Object.freeze({
     activeIndex: pointer,
+    compatible,
     inputs: {
       projectSourceCount: sourceCount,
       hasCodeSnapshot: codePointer !== null,
@@ -354,4 +362,3 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
     throw error;
   }
 }
-

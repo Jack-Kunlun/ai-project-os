@@ -100,6 +100,7 @@ enum WebAiScopeKind {
   repositoryCode     @map("repository_code")
   repositoryMaterial @map("repository_material")
   projectMemory      @map("project_memory")
+  projectIntelligence @map("project_intelligence")
   query
 }
 
@@ -110,6 +111,8 @@ enum BackgroundJobKind {
   autoExtract        @map("auto_extract")
   semanticSearch     @map("semantic_search")
   ragAnswer          @map("rag_answer")
+  projectBrief       @map("project_brief")
+  projectAgent       @map("project_agent")
 }
 
 enum BackgroundJobStatus {
@@ -543,6 +546,8 @@ model Project {
   memoryRecords                    MemoryRecord[]
   ragAnswers                       RagAnswer[]
   webAiCandidates                  WebAiCandidate[]
+  intelligenceReports              ProjectIntelligenceReport[]
+  projectAgentRuns                 ProjectAgentRun[]
 
   @@index([updatedAt])
 }
@@ -2625,6 +2630,8 @@ model AiProviderConnection {
   ragAnswers               RagAnswer[]
   webAiCandidates          WebAiCandidate[]
   providerCalls            ProviderCallAudit[]
+  intelligenceReports      ProjectIntelligenceReport[]
+  projectAgentRuns         ProjectAgentRun[]
 
   @@index([kind, status])
 }
@@ -2690,6 +2697,8 @@ model BackgroundJob {
   webAiGrant       WebAiGrant?          @relation(fields: [webAiGrantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   webAiCandidates  WebAiCandidate[]
   ragAnswer        RagAnswer?
+  intelligenceReport ProjectIntelligenceReport?
+  projectAgentRun  ProjectAgentRun?
   providerCalls    ProviderCallAudit[]
 
   @@unique([requestedById, idempotencyKey])
@@ -2714,6 +2723,8 @@ model MemoryIndexGeneration {
   records                  MemoryRecord[]
   pointer                  MemoryIndexPointer?
   ragAnswers               RagAnswer[]
+  intelligenceReports      ProjectIntelligenceReport[]
+  projectAgentRuns         ProjectAgentRun[]
 
   @@unique([projectId, id])
   @@index([projectId, status, createdAt])
@@ -2773,6 +2784,53 @@ model RagAnswer {
   job                  BackgroundJob         @relation(fields: [jobId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   indexGeneration      MemoryIndexGeneration @relation(fields: [projectId, indexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   providerConnection   AiProviderConnection  @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([projectId, createdAt])
+}
+
+model ProjectIntelligenceReport {
+  id                       String                @id @default(uuid()) @db.Uuid
+  projectId                String                @db.Uuid
+  jobId                    String                @unique @db.Uuid
+  indexGenerationId        String                @db.Uuid
+  providerConnectionId     String                @db.Uuid
+  modelId                  String                @db.VarChar(128)
+  report                   Json                  @db.JsonB
+  citations                Json                  @db.JsonB
+  inputManifestFingerprint String                @db.Char(64)
+  inputTokens              Int                   @default(0)
+  outputTokens             Int                   @default(0)
+  createdAt                DateTime              @default(now())
+  project                  Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  job                      BackgroundJob         @relation(fields: [jobId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration          MemoryIndexGeneration @relation(fields: [projectId, indexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection       AiProviderConnection  @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([projectId, createdAt])
+}
+
+model ProjectAgentRun {
+  id                       String                @id @default(uuid()) @db.Uuid
+  projectId                String                @db.Uuid
+  jobId                    String                @unique @db.Uuid
+  indexGenerationId        String                @db.Uuid
+  providerConnectionId     String                @db.Uuid
+  modelId                  String                @db.VarChar(128)
+  question                 String                @db.Text
+  plan                     Json                  @db.JsonB
+  trace                    Json                  @db.JsonB
+  answer                   String                @db.Text
+  recommendations          Json                  @db.JsonB
+  uncertainties            Json                  @db.JsonB
+  citations                Json                  @db.JsonB
+  inputManifestFingerprint String                @db.Char(64)
+  inputTokens              Int                   @default(0)
+  outputTokens             Int                   @default(0)
+  createdAt                DateTime              @default(now())
+  project                  Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  job                      BackgroundJob         @relation(fields: [jobId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration          MemoryIndexGeneration @relation(fields: [projectId, indexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection       AiProviderConnection  @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
 
   @@index([projectId, createdAt])
 }

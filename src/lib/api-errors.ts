@@ -14,6 +14,7 @@ import { WebGitHubError } from "@/lib/web-github";
 import { WebAiGovernanceError } from "@/lib/web-ai-governance";
 import { WebAutoExtractError } from "@/lib/web-auto-extract";
 import { WebMemoryIndexError } from "@/lib/web-memory-index";
+import { ProjectIntelligenceError } from "@/lib/web-project-intelligence";
 import { WebRagError } from "@/lib/web-rag";
 
 export type ApiErrorBody = {
@@ -161,7 +162,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
   if (error instanceof WebMemoryIndexError) {
     const messages = {
       MEMORY_INDEX_EMPTY: "当前没有可建立索引的项目资料或仓库内容",
-      MEMORY_INDEX_TOO_LARGE: "当前索引输入超过 V2.0 单次安全上限",
+      MEMORY_INDEX_TOO_LARGE: "当前索引输入超过单次安全上限",
       MEMORY_INDEX_INPUT_INVALID: "索引输入或向量配置无效",
       MEMORY_INDEX_PUBLICATION_CONFLICT: "索引发布发生并发冲突，请重试",
     } as const;
@@ -190,6 +191,18 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       RAG_INVALID_CITATION: "模型引用了检索范围之外的证据",
     } as const;
     return { status: 422, body: { error: { code: error.code, message: messages[error.code] } } };
+  }
+
+  if (error instanceof ProjectIntelligenceError) {
+    const mapping = {
+      PROJECT_INTELLIGENCE_INVALID_INPUT: [400, "项目智能分析输入无效"],
+      PROJECT_INTELLIGENCE_INVALID_PLAN: [422, "模型未返回可执行的只读调查计划"],
+      PROJECT_INTELLIGENCE_INVALID_MODEL_OUTPUT: [422, "模型未返回可验证的项目分析"],
+      PROJECT_INTELLIGENCE_INVALID_CITATION: [422, "模型引用了本次调查范围之外的证据"],
+      PROJECT_INTELLIGENCE_EVIDENCE_EMPTY: [422, "当前没有足够的项目证据"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
   }
 
   if (error instanceof ApiError) {

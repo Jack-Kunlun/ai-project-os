@@ -263,6 +263,8 @@ export async function runGitHubMaterialSyncJob(input: Readonly<{
   }
 }
 
+export { runGitHubProjectSyncJob } from "@/lib/github";
+
 export async function listProjectJobs(projectId: string, db: PrismaClient = getDb()) {
   const jobs = await db.backgroundJob.findMany({
     where: { projectId },

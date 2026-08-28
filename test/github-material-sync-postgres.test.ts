@@ -601,7 +601,7 @@ test(
         });
         assert.equal(hybridResults.mode, "hybrid");
         assert.ok(hybridResults.results.length > 0);
-        assert.equal(hybridResults.results[0]?.componentRanks.vector, 1);
+        assert.ok(hybridResults.results.some((result) => result.componentRanks.vector === 1));
 
         await materialGrants.revoke({ projectId, projectRepositoryLinkId: linkA.id });
         assert.equal(

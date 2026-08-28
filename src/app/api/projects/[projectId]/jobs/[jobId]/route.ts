@@ -9,6 +9,7 @@ import {
   rejectProjectJobRetry,
   toPublicProjectJob,
 } from "@/lib/project-workflow";
+import { cancelGitHubProjectSync, reconcileGitHubProjectSync } from "@/lib/github/project-sync-service";
 
 export const dynamic = "force-dynamic";
 
@@ -36,15 +37,20 @@ export async function GET(request: Request, context: Context) {
 export async function POST(request: Request, context: Context) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const params = await context.params;
     const projectId = idSchema.parse(params.projectId);
     const jobId = idSchema.parse(params.jobId);
     const body = actionSchema.parse(await readJsonBody(request));
-    const job = body.action === "reconcile"
-      ? await reconcileProjectJob(projectId, jobId)
+    const existing = body.action === "reconcile" || body.action === "cancel" ? await getProjectJob(projectId, jobId) : null;
+    const job = body.action === "reconcile" && existing?.kind === "githubProjectSync"
+      ? await reconcileGitHubProjectSync({ projectId, jobId, requestedById: user.id })
+      : body.action === "reconcile"
+        ? await reconcileProjectJob(projectId, jobId)
       : body.action === "cancel"
-        ? await cancelProjectJob(projectId, jobId)
+        ? existing?.kind === "githubProjectSync"
+          ? await cancelGitHubProjectSync({ projectId, jobId, requestedById: user.id })
+          : await cancelProjectJob(projectId, jobId)
         : rejectProjectJobRetry();
     return NextResponse.json({ job: toPublicProjectJob(job) });
   } catch (error) {

@@ -467,6 +467,53 @@ test("network failures execute once and forged credential handles cannot dispatc
   );
 });
 
+test("absolute deadline prevents a GitHub request after the sync budget", async () => {
+  let calls = 0;
+  const client = createGitHubReadOnlyClient({
+    credential: await credential(),
+    absoluteDeadlineAt: Date.now() - 1,
+    fetchImplementation: async () => {
+      calls += 1;
+      return jsonResponse({});
+    },
+  });
+  await assert.rejects(
+    () => client.getRepository({ owner, repository }),
+    assertCode("GITHUB_REQUEST_TIMEOUT"),
+  );
+  assert.equal(calls, 0);
+});
+
+test("absolute deadline distinguishes zero-dispatch budget exhaustion from an uncertain fetch timeout", async () => {
+  let calls = 0;
+  const beforeFetch = createGitHubReadOnlyClient({
+    credential: await credential(),
+    absoluteDeadlineAt: Date.now() - 1,
+    fetchImplementation: async () => {
+      calls += 1;
+      return jsonResponse({});
+    },
+  });
+  await assert.rejects(
+    () => beforeFetch.getRepository({ owner, repository }),
+    (error: unknown) => error instanceof GitHubReadError && error.code === "GITHUB_REQUEST_TIMEOUT" && error.requestDispatched === false,
+  );
+  assert.equal(calls, 0);
+
+  const afterDispatch = createGitHubReadOnlyClient({
+    credential: await credential(),
+    fetchImplementation: async () => {
+      calls += 1;
+      throw new Error("network unavailable");
+    },
+  });
+  await assert.rejects(
+    () => afterDispatch.getRepository({ owner, repository }),
+    (error: unknown) => error instanceof GitHubReadError && error.code === "GITHUB_REQUEST_FAILED" && error.requestDispatched === true,
+  );
+  assert.equal(calls, 1);
+});
+
 test("client source contains no write method, arbitrary origin, logging or retry loop", () => {
   const source = readFileSync(
     join(process.cwd(), "src/lib/github/read-only-client.ts"),

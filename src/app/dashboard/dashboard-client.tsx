@@ -23,6 +23,7 @@ const emptyPayload: DashboardPayload = {
 const jobLabels: Record<JobKind, string> = {
   githubScan: "代码扫描",
   githubMaterialSync: "仓库资料同步",
+  githubProjectSync: "GitHub 全量同步",
   memoryIndex: "记忆索引",
   autoExtract: "自动抽取",
   semanticSearch: "语义检索",
@@ -51,7 +52,7 @@ function formatDate(value: string): string {
 
 function jobHref(job: Pick<RecentJob, "kind" | "project">): string {
   if (!job.project) return "/dashboard";
-  if (job.kind === "githubScan" || job.kind === "githubMaterialSync") return `/projects/${job.project.id}/control`;
+  if (job.kind === "githubScan" || job.kind === "githubMaterialSync" || job.kind === "githubProjectSync") return `/projects/${job.project.id}/control`;
   if (job.kind === "projectBrief" || job.kind === "projectAgent") return `/projects/${job.project.id}/intelligence`;
   return `/projects/${job.project.id}/memory`;
 }

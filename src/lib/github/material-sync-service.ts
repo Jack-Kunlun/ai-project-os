@@ -18,6 +18,11 @@ import {
   GitHubReadError,
   type GitHubMaterialReadOnlyClient,
 } from "./read-only-client";
+import {
+  hasBlockingUnknownProjectMaterialRun,
+  hasBlockingUnknownProjectSyncRun,
+  lockGitHubProject,
+} from "./project-sync-lock";
 
 export const GITHUB_MATERIAL_SYNC_SERVICE_VERSION =
   "github-material-sync-service:v1" as const;
@@ -72,10 +77,30 @@ export type RepositoryMaterialSyncView = Readonly<{
 
 export interface GitHubMaterialSyncService {
   prepareRepositorySync(input: unknown): Promise<RepositoryMaterialSyncView>;
+  prepareRepositorySyncFrozen(input: unknown): Promise<RepositoryMaterialSyncView>;
   executeRepositorySync(input: unknown): Promise<RepositoryMaterialSyncView>;
+  skipRepositorySync(input: unknown): Promise<RepositoryMaterialSyncView>;
   syncRepository(input: unknown): Promise<RepositoryMaterialSyncView>;
   getRepositorySync(input: unknown): Promise<RepositoryMaterialSyncView>;
 }
+
+/** A server-frozen material target. No credential or source payload is kept. */
+export type FrozenRepositoryMaterialSyncTarget = Readonly<{
+  projectRepositoryLinkId: string;
+  githubConnectionId: string;
+  credentialId: string;
+  credentialSecretFingerprint: string;
+  githubRepositoryId: string;
+  repositoryNodeId: string;
+  repositoryOwner: string;
+  repositoryName: string;
+  repositoryFullName: string;
+  linkConfigVersion: number;
+  effectivePolicyVersion: number;
+  expectedActiveGenerationId: string | null;
+  trackedRef: string;
+  policyFingerprint: string;
+}>;
 
 type TransactionRunner = <T>(
   callback: (tx: Prisma.TransactionClient) => Promise<T>,
@@ -85,8 +110,15 @@ type TransactionRunner = <T>(
 type EligibleLink = Readonly<{
   id: string;
   projectId: string;
+  githubConnectionId: string;
   status: string;
   effectivePolicyVersion: number;
+  githubConnection?: Readonly<{
+    id: string;
+    status: string;
+    credentialId: string | null;
+    credential?: Readonly<{ id: string; kind: string; secretFingerprint: string }> | null;
+  }> | null;
   githubRepository: Readonly<{
     githubRepositoryId: bigint;
     nodeId: string;
@@ -132,8 +164,8 @@ type RunClaim = Readonly<{
 }>;
 
 type FailureDisposition = Readonly<{
-  status: "failed" | "rateLimited";
-  failureCode: string;
+  status: "failed" | "rateLimited" | "unknown" | "cancelled";
+  failureCode: string | null;
   retryAt: Date | null;
   invalidateLink: boolean;
 }>;
@@ -179,13 +211,86 @@ function parseLinkInput(value: unknown): Readonly<{ projectId: string; linkId: s
   });
 }
 
-function parseRunInput(value: unknown): Readonly<{ projectId: string; runId: string }> {
-  if (!isPlainRecord(value) || !exactKeys(value, ["projectId", "runId"])) {
+function parseRunInput(value: unknown): Readonly<{ projectId: string; runId: string; frozenTarget?: FrozenRepositoryMaterialSyncTarget }> {
+  if (!isPlainRecord(value)) {
+    return fail("GITHUB_MATERIAL_SYNC_INVALID_INPUT");
+  }
+  const keys = Object.keys(value).sort();
+  const base = ["projectId", "runId"].sort();
+  const withFrozenTarget = [...base, "frozenTarget"].sort();
+  if (keys.join("\u0000") !== base.join("\u0000") && keys.join("\u0000") !== withFrozenTarget.join("\u0000")) {
     return fail("GITHUB_MATERIAL_SYNC_INVALID_INPUT");
   }
   return Object.freeze({
     projectId: canonicalUuid(value.projectId),
     runId: canonicalUuid(value.runId),
+    ...(value.frozenTarget === undefined ? {} : { frozenTarget: parseFrozenTarget(value.frozenTarget) }),
+  });
+}
+
+function parseFrozenTarget(value: unknown): FrozenRepositoryMaterialSyncTarget {
+  if (!isPlainRecord(value)) return fail("GITHUB_MATERIAL_SYNC_INVALID_INPUT");
+  const expectedKeys = [
+    "credentialId", "effectivePolicyVersion", "expectedActiveGenerationId", "githubConnectionId",
+    "credentialSecretFingerprint",
+    "githubRepositoryId", "linkConfigVersion", "policyFingerprint", "projectRepositoryLinkId",
+    "repositoryFullName", "repositoryName", "repositoryNodeId", "repositoryOwner", "trackedRef",
+  ] as const;
+  if (!exactKeys(value, expectedKeys)) return fail("GITHUB_MATERIAL_SYNC_INVALID_INPUT");
+  if (
+    typeof value.projectRepositoryLinkId !== "string" ||
+    typeof value.policyFingerprint !== "string" ||
+    !FINGERPRINT_PATTERN.test(value.policyFingerprint) ||
+    !Number.isSafeInteger(value.linkConfigVersion) ||
+    (value.linkConfigVersion as number) < 1 ||
+    !Number.isSafeInteger(value.effectivePolicyVersion) ||
+    (value.effectivePolicyVersion as number) < 1
+  ) return fail("GITHUB_MATERIAL_SYNC_INVALID_INPUT");
+  const projectRepositoryLinkId = canonicalUuid(value.projectRepositoryLinkId);
+  const githubConnectionId = canonicalUuid(value.githubConnectionId);
+  const credentialId = canonicalUuid(value.credentialId);
+  if (typeof value.credentialSecretFingerprint !== "string" || !FINGERPRINT_PATTERN.test(value.credentialSecretFingerprint)) {
+    return fail("GITHUB_MATERIAL_SYNC_INVALID_INPUT");
+  }
+  const expectedActiveGenerationId = value.expectedActiveGenerationId === null
+    ? null
+    : canonicalUuid(value.expectedActiveGenerationId);
+  if (
+    typeof value.githubRepositoryId !== "string" || !/^[1-9][0-9]{0,20}$/.test(value.githubRepositoryId) ||
+    typeof value.repositoryNodeId !== "string" || value.repositoryNodeId.length < 1 || value.repositoryNodeId.length > 512 ||
+    typeof value.repositoryOwner !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(value.repositoryOwner) ||
+    typeof value.repositoryName !== "string" || !/^[A-Za-z0-9_.-]{1,100}$/.test(value.repositoryName) ||
+    typeof value.repositoryFullName !== "string" || value.repositoryFullName !== `${value.repositoryOwner}/${value.repositoryName}` ||
+    typeof value.trackedRef !== "string" || !/^refs\/heads\/[A-Za-z0-9._/-]+$/.test(value.trackedRef) || value.trackedRef.includes("..") || value.trackedRef.includes("//")
+  ) return fail("GITHUB_MATERIAL_SYNC_INVALID_INPUT");
+  return Object.freeze({
+    projectRepositoryLinkId,
+    githubConnectionId,
+    credentialId,
+    credentialSecretFingerprint: value.credentialSecretFingerprint,
+    githubRepositoryId: value.githubRepositoryId,
+    repositoryNodeId: value.repositoryNodeId,
+    repositoryOwner: value.repositoryOwner,
+    repositoryName: value.repositoryName,
+    repositoryFullName: value.repositoryFullName,
+    linkConfigVersion: value.linkConfigVersion as number,
+    effectivePolicyVersion: value.effectivePolicyVersion as number,
+    expectedActiveGenerationId,
+    trackedRef: value.trackedRef,
+    policyFingerprint: value.policyFingerprint,
+  });
+}
+
+function parseFrozenInput(value: unknown): Readonly<{
+  projectId: string;
+  target: FrozenRepositoryMaterialSyncTarget;
+}> {
+  if (!isPlainRecord(value) || !exactKeys(value, ["projectId", "target"])) {
+    return fail("GITHUB_MATERIAL_SYNC_INVALID_INPUT");
+  }
+  return Object.freeze({
+    projectId: canonicalUuid(value.projectId),
+    target: parseFrozenTarget(value.target),
   });
 }
 
@@ -278,6 +383,28 @@ function failureDisposition(error: unknown, now: Date): FailureDisposition {
         status: "rateLimited",
         failureCode: "GITHUB_RATE_LIMITED",
         retryAt: new Date(Math.max(headerTime, now.getTime() + 1_000)),
+        invalidateLink: false,
+      });
+    }
+    if (
+      (error.code === "GITHUB_REQUEST_TIMEOUT" || error.code === "GITHUB_REQUEST_FAILED") &&
+      error.requestDispatched === false
+    ) {
+      // The scanner never issued a provider request.  Keep the child in the
+      // known, cancelled lifecycle so a root sync can record a skipped target
+      // without inventing an external result or reconciliation requirement.
+      return Object.freeze({
+        status: "cancelled",
+        failureCode: null,
+        retryAt: null,
+        invalidateLink: false,
+      });
+    }
+    if ((error.code === "GITHUB_REQUEST_TIMEOUT" || error.code === "GITHUB_REQUEST_FAILED") && error.requestDispatched !== false) {
+      return Object.freeze({
+        status: "unknown",
+        failureCode: error.code,
+        retryAt: null,
         invalidateLink: false,
       });
     }
@@ -464,6 +591,7 @@ export function createGitHubMaterialSyncService(options: Readonly<{
           status: "failed",
           stage: "terminal",
           failureCode: "GITHUB_MATERIAL_SYNC_LINK_INELIGIBLE",
+          retryAt: null,
           completedAt: now,
         },
       });
@@ -527,7 +655,11 @@ export function createGitHubMaterialSyncService(options: Readonly<{
     });
   };
 
-  const claimRun = async (projectId: string, runId: string): Promise<RunClaim> => {
+  const claimRun = async (
+    projectId: string,
+    runId: string,
+    frozenTarget?: FrozenRepositoryMaterialSyncTarget,
+  ): Promise<RunClaim> => {
     return serializable(async (tx) => {
       const run = await tx.gitHubMaterialSyncRun.findUnique({
         where: { projectId_id: { projectId, id: runId } },
@@ -535,6 +667,7 @@ export function createGitHubMaterialSyncService(options: Readonly<{
           repositoryLink: {
             include: {
               githubRepository: true,
+              githubConnection: { include: { credential: true } },
               configPointer: { include: { config: true } },
               materialGenerationPointer: true,
             },
@@ -549,6 +682,20 @@ export function createGitHubMaterialSyncService(options: Readonly<{
       if (run.status !== "queued") return fail("GITHUB_MATERIAL_SYNC_PUBLISH_CONFLICT");
       const link = run.repositoryLink as EligibleLink;
       const pointer = link.configPointer;
+      const frozenIdentityMatches = frozenTarget === undefined || (
+        link.githubConnectionId === frozenTarget.githubConnectionId &&
+        link.githubConnection?.id === frozenTarget.githubConnectionId &&
+        link.githubConnection.status === "verified" &&
+        link.githubConnection.credentialId === frozenTarget.credentialId &&
+        link.githubConnection.credential?.kind === "github" &&
+        link.githubConnection.credential?.secretFingerprint === frozenTarget.credentialSecretFingerprint &&
+        link.githubRepository.githubRepositoryId.toString() === frozenTarget.githubRepositoryId &&
+        link.githubRepository.nodeId === frozenTarget.repositoryNodeId &&
+        link.githubRepository.currentOwner === frozenTarget.repositoryOwner &&
+        link.githubRepository.currentName === frozenTarget.repositoryName &&
+        link.githubRepository.currentFullName === frozenTarget.repositoryFullName &&
+        pointer?.config.trackedRef === frozenTarget.trackedRef
+      );
       if (
         link.status !== "active" ||
         pointer === null ||
@@ -557,7 +704,8 @@ export function createGitHubMaterialSyncService(options: Readonly<{
         pointer.effectivePolicyVersion !== run.expectedEffectivePolicyVersion ||
         pointer.config.effectivePolicyVersion !== run.expectedEffectivePolicyVersion ||
         (link.materialGenerationPointer?.repositoryMaterialGenerationId ?? null) !==
-          run.expectedActiveMaterialGenerationId
+          run.expectedActiveMaterialGenerationId ||
+        !frozenIdentityMatches
       ) {
         return fail("GITHUB_MATERIAL_SYNC_LINK_INELIGIBLE");
       }
@@ -568,11 +716,13 @@ export function createGitHubMaterialSyncService(options: Readonly<{
         linkConfigVersion: run.linkConfigVersion,
         expectedEffectivePolicyVersion: run.expectedEffectivePolicyVersion,
         expectedActiveGenerationId: run.expectedActiveMaterialGenerationId,
-        owner: link.githubRepository.currentOwner,
-        repository: link.githubRepository.currentName,
-        expectedRepositoryId: safeRepositoryId(link.githubRepository.githubRepositoryId),
-        expectedNodeId: link.githubRepository.nodeId,
-        trackedRef: pointer.config.trackedRef,
+        owner: frozenTarget?.repositoryOwner ?? link.githubRepository.currentOwner,
+        repository: frozenTarget?.repositoryName ?? link.githubRepository.currentName,
+        expectedRepositoryId: frozenTarget === undefined
+          ? safeRepositoryId(link.githubRepository.githubRepositoryId)
+          : safeRepositoryId(BigInt(frozenTarget.githubRepositoryId)),
+        expectedNodeId: frozenTarget?.repositoryNodeId ?? link.githubRepository.nodeId,
+        trackedRef: frozenTarget?.trackedRef ?? pointer.config.trackedRef,
         policy: materialPolicy(pointer.config),
       });
       await tx.gitHubMaterialSyncRun.update({
@@ -861,10 +1011,14 @@ export function createGitHubMaterialSyncService(options: Readonly<{
     });
   };
 
-  const executeRun = async (projectId: string, runId: string): Promise<void> => {
+  const executeRun = async (
+    projectId: string,
+    runId: string,
+    frozenTarget?: FrozenRepositoryMaterialSyncTarget,
+  ): Promise<void> => {
     let claim: RunClaim;
     try {
-      claim = await claimRun(projectId, runId);
+      claim = await claimRun(projectId, runId, frozenTarget);
     } catch (error) {
       if (
         error instanceof GitHubMaterialSyncServiceError &&
@@ -915,6 +1069,110 @@ export function createGitHubMaterialSyncService(options: Readonly<{
     }
   };
 
+  const prepareFrozen = async (
+    input: Readonly<{ projectId: string; target: FrozenRepositoryMaterialSyncTarget }>,
+    allowProjectSync: boolean,
+  ): Promise<RepositoryMaterialSyncView> => {
+    const runId = generatedUuid(idFactory);
+    const operationKey = fingerprint("repository-material-sync-run", {
+      runId,
+      projectId: input.projectId,
+      projectRepositoryLinkId: input.target.projectRepositoryLinkId,
+    });
+    return serializable(async (tx) => {
+      await lockGitHubProject(tx, input.projectId);
+      const project = await tx.project.findUnique({
+        where: { id: input.projectId },
+        select: { id: true },
+      });
+      if (project === null) return fail("GITHUB_MATERIAL_SYNC_PROJECT_NOT_FOUND");
+      if (await hasBlockingUnknownProjectMaterialRun(tx, input.projectId)) {
+        return fail("GITHUB_MATERIAL_SYNC_RECONCILIATION_REQUIRED");
+      }
+      const pending = await tx.gitHubMaterialSyncRun.findFirst({
+        where: {
+          projectId: input.projectId,
+          projectRepositoryLinkId: input.target.projectRepositoryLinkId,
+          status: { in: ["queued", "running"] },
+        },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      });
+      if (pending?.status === "running") return fail("GITHUB_MATERIAL_SYNC_ALREADY_RUNNING");
+      if (pending !== null) return readRun(tx, input.projectId, pending.id);
+      if (!allowProjectSync) {
+        const projectSyncDelegate = (tx as unknown as {
+          projectGitHubSyncRun?: { findFirst: (args: unknown) => Promise<{ status: string } | null> };
+        }).projectGitHubSyncRun;
+        if (projectSyncDelegate !== undefined) {
+          const active = await projectSyncDelegate.findFirst({
+            where: { projectId: input.projectId, status: { in: ["queued", "running"] } },
+            select: { status: true },
+          });
+          if (active !== null) {
+            return fail("GITHUB_MATERIAL_SYNC_ALREADY_RUNNING");
+          }
+        }
+        if (await hasBlockingUnknownProjectSyncRun(tx, input.projectId)) {
+          return fail("GITHUB_MATERIAL_SYNC_RECONCILIATION_REQUIRED");
+        }
+      }
+      const row = await tx.projectRepositoryLink.findUnique({
+        where: {
+          projectId_id: {
+            projectId: input.projectId,
+            id: input.target.projectRepositoryLinkId,
+          },
+        },
+        include: {
+          githubRepository: true,
+          githubConnection: { include: { credential: true } },
+          configPointer: { include: { config: true } },
+          materialGenerationPointer: true,
+        },
+      });
+      if (row === null) return fail("GITHUB_MATERIAL_SYNC_LINK_NOT_FOUND");
+      const pointer = row.configPointer;
+      if (
+        row.status !== "active" ||
+        row.githubConnectionId !== input.target.githubConnectionId ||
+        row.githubConnection?.id !== input.target.githubConnectionId ||
+        row.githubConnection.status !== "verified" ||
+        row.githubConnection.credentialId !== input.target.credentialId ||
+        row.githubConnection.credential?.kind !== "github" ||
+        row.githubConnection.credential?.secretFingerprint !== input.target.credentialSecretFingerprint ||
+        row.githubRepository.githubRepositoryId.toString() !== input.target.githubRepositoryId ||
+        row.githubRepository.nodeId !== input.target.repositoryNodeId ||
+        row.githubRepository.currentOwner !== input.target.repositoryOwner ||
+        row.githubRepository.currentName !== input.target.repositoryName ||
+        row.githubRepository.currentFullName !== input.target.repositoryFullName ||
+        pointer === null ||
+        pointer.configVersion !== input.target.linkConfigVersion ||
+        pointer.effectivePolicyVersion !== input.target.effectivePolicyVersion ||
+        row.effectivePolicyVersion !== input.target.effectivePolicyVersion ||
+        pointer.config.effectivePolicyVersion !== input.target.effectivePolicyVersion ||
+        pointer.config.trackedRef !== input.target.trackedRef ||
+        pointer.config.policyFingerprint !== input.target.policyFingerprint ||
+        (row.materialGenerationPointer?.repositoryMaterialGenerationId ?? null) !==
+          input.target.expectedActiveGenerationId
+      ) return fail("GITHUB_MATERIAL_SYNC_LINK_INELIGIBLE");
+      materialPolicy(pointer.config);
+      await tx.gitHubMaterialSyncRun.create({
+        data: {
+          id: runId,
+          projectId: input.projectId,
+          projectRepositoryLinkId: input.target.projectRepositoryLinkId,
+          linkConfigVersion: input.target.linkConfigVersion,
+          expectedEffectivePolicyVersion: input.target.effectivePolicyVersion,
+          expectedActiveMaterialGenerationId: input.target.expectedActiveGenerationId,
+          operationKey,
+          status: "queued",
+          stage: "queued",
+        },
+      });
+      return readRun(tx, input.projectId, runId);
+    });
+  };
+
   const service: GitHubMaterialSyncService = {
     async prepareRepositorySync(value): Promise<RepositoryMaterialSyncView> {
       const input = parseLinkInput(value);
@@ -926,26 +1184,42 @@ export function createGitHubMaterialSyncService(options: Readonly<{
       });
       try {
         return await serializable(async (tx) => {
+          await lockGitHubProject(tx, input.projectId);
           const project = await tx.project.findUnique({
             where: { id: input.projectId },
             select: { id: true },
           });
           if (project === null) return fail("GITHUB_MATERIAL_SYNC_PROJECT_NOT_FOUND");
+          if (await hasBlockingUnknownProjectMaterialRun(tx, input.projectId)) {
+            return fail("GITHUB_MATERIAL_SYNC_RECONCILIATION_REQUIRED");
+          }
           const pending = await tx.gitHubMaterialSyncRun.findFirst({
             where: {
               projectId: input.projectId,
               projectRepositoryLinkId: input.linkId,
-              status: { in: ["queued", "running", "unknown"] },
+              status: { in: ["queued", "running"] },
             },
             orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           });
-          if (pending?.status === "unknown") {
-            return fail("GITHUB_MATERIAL_SYNC_RECONCILIATION_REQUIRED");
-          }
           if (pending?.status === "running") {
             return fail("GITHUB_MATERIAL_SYNC_ALREADY_RUNNING");
           }
           if (pending !== null) return readRun(tx, input.projectId, pending.id);
+          const projectSyncDelegate = (tx as unknown as {
+            projectGitHubSyncRun?: { findFirst: (args: unknown) => Promise<{ status: string } | null> };
+          }).projectGitHubSyncRun;
+          if (projectSyncDelegate !== undefined) {
+            const active = await projectSyncDelegate.findFirst({
+              where: { projectId: input.projectId, status: { in: ["queued", "running"] } },
+              select: { status: true },
+            });
+            if (active !== null) {
+              return fail("GITHUB_MATERIAL_SYNC_ALREADY_RUNNING");
+            }
+          }
+          if (await hasBlockingUnknownProjectSyncRun(tx, input.projectId)) {
+            return fail("GITHUB_MATERIAL_SYNC_RECONCILIATION_REQUIRED");
+          }
           const row = await tx.projectRepositoryLink.findUnique({
             where: { projectId_id: { projectId: input.projectId, id: input.linkId } },
             include: {
@@ -991,20 +1265,24 @@ export function createGitHubMaterialSyncService(options: Readonly<{
             where: {
               projectId: input.projectId,
               projectRepositoryLinkId: input.linkId,
-              status: { in: ["queued", "running", "unknown"] },
+              status: { in: ["queued", "running"] },
             },
             select: { id: true, status: true },
           });
-          if (pending?.status === "unknown") {
-            return fail("GITHUB_MATERIAL_SYNC_RECONCILIATION_REQUIRED");
-          }
           if (pending?.status === "running") {
             return fail("GITHUB_MATERIAL_SYNC_ALREADY_RUNNING");
           }
           if (pending !== null) return readRun(options.db, input.projectId, pending.id);
+          if (await hasBlockingUnknownProjectMaterialRun(options.db, input.projectId) || await hasBlockingUnknownProjectSyncRun(options.db, input.projectId)) {
+            return fail("GITHUB_MATERIAL_SYNC_RECONCILIATION_REQUIRED");
+          }
         }
         throw error;
       }
+    },
+
+    async prepareRepositorySyncFrozen(value): Promise<RepositoryMaterialSyncView> {
+      return prepareFrozen(parseFrozenInput(value), true);
     },
 
     async executeRepositorySync(value): Promise<RepositoryMaterialSyncView> {
@@ -1017,7 +1295,25 @@ export function createGitHubMaterialSyncService(options: Readonly<{
         return fail("GITHUB_MATERIAL_SYNC_ALREADY_RUNNING");
       }
       if (current.status !== "queued") return current;
-      await executeRun(input.projectId, input.runId);
+      await executeRun(input.projectId, input.runId, input.frozenTarget);
+      return readRun(options.db, input.projectId, input.runId);
+    },
+
+    async skipRepositorySync(value): Promise<RepositoryMaterialSyncView> {
+      const input = parseRunInput(value);
+      await serializable(async (tx) => {
+        const updated = await tx.gitHubMaterialSyncRun.updateMany({
+          where: { projectId: input.projectId, id: input.runId, status: "queued" },
+          data: {
+            status: "cancelled",
+            stage: "terminal",
+            failureCode: null,
+            retryAt: null,
+            completedAt: safeDate(nowFactory),
+          },
+        });
+        if (updated.count > 1) return fail("GITHUB_MATERIAL_SYNC_WRITE_CONFLICT");
+      });
       return readRun(options.db, input.projectId, input.runId);
     },
 

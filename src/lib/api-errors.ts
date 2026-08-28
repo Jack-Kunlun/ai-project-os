@@ -8,6 +8,7 @@ import {
   GitHubLedgerError,
   GitHubMaterialSyncServiceError,
   GitHubReadError,
+  ProjectGitHubSyncError,
 } from "@/lib/github";
 import { ProjectAiRouteError } from "@/lib/project-ai-routes";
 import { WebGitHubError } from "@/lib/web-github";
@@ -138,6 +139,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_WORKFLOW_LEASE_EXPIRED: [409, "任务租约已过期，请执行协调确认"],
       PROJECT_WORKFLOW_RECONCILIATION_NOT_DUE: [409, "任务仍在租约内，暂不能协调确认"],
       PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED: [409, "当前任务状态不允许取消"],
+      PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED: [409, "该任务必须使用专用协调或取消入口"],
       PROJECT_WORKFLOW_RETRY_NOT_SUPPORTED: [409, "未知结果任务不支持自动重试，请重新发起并重新确认"],
     } as const;
     const [status, message] = mapping[error.code];
@@ -164,13 +166,25 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
   if (
     error instanceof GitHubLedgerError ||
     error instanceof GitHubCodeScanServiceError ||
-    error instanceof GitHubMaterialSyncServiceError
+    error instanceof GitHubMaterialSyncServiceError ||
+    error instanceof ProjectGitHubSyncError
   ) {
     const notFound = error.code.includes("NOT_FOUND") || error.code.includes("PROJECT_NOT_FOUND");
-    const conflict = error.code.includes("CONFLICT") || error.code.includes("ALREADY_RUNNING");
+    const conflict = error.code.includes("CONFLICT") || error.code.includes("ALREADY_RUNNING") ||
+      error.code.includes("DIRECT_OPERATION_ACTIVE") || error.code.includes("RECONCILIATION_REQUIRED") ||
+      error.code.includes("RECONCILIATION_NOT_DUE") || error.code.includes("CANCEL_NOT_ALLOWED");
     return {
       status: notFound ? 404 : conflict ? 409 : 422,
-      body: { error: { code: error.code, message: "GitHub 仓库任务未能完成，请检查配置与任务状态" } },
+      body: {
+        error: {
+          code: error.code,
+          message: error instanceof ProjectGitHubSyncError
+            ? error.code === "PROJECT_GITHUB_SYNC_NO_ENABLED_TARGETS"
+              ? "当前项目没有可同步的已启用 GitHub 内容"
+              : "GitHub 项目同步未能完成，请检查配置与任务状态"
+            : "GitHub 仓库任务未能完成，请检查配置与任务状态",
+        },
+      },
     };
   }
 

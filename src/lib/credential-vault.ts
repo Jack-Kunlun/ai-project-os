@@ -228,9 +228,16 @@ export async function readCredentialSecret(
   credentialId: string,
   expectedKind: ExternalCredentialKind,
   db: CredentialDb = getDb(),
+  options: Readonly<{ expectedSecretFingerprint?: string }> = {},
 ): Promise<string> {
   const credential = await db.externalCredential.findUnique({ where: { id: credentialId } });
   if (credential === null || credential.kind !== expectedKind) {
+    return fail("CREDENTIAL_NOT_FOUND");
+  }
+  if (options.expectedSecretFingerprint !== undefined &&
+    (typeof options.expectedSecretFingerprint !== "string" ||
+      !/^[0-9a-f]{64}$/.test(options.expectedSecretFingerprint) ||
+      credential.secretFingerprint !== options.expectedSecretFingerprint)) {
     return fail("CREDENTIAL_NOT_FOUND");
   }
   return openSealedSecret(credential, await loadOrCreateMasterKey());

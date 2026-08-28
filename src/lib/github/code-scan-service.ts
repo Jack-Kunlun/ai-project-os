@@ -15,6 +15,11 @@ import {
   GitHubReadError,
   type GitHubReadOnlyClient,
 } from "./read-only-client";
+import {
+  hasBlockingUnknownProjectCodeBatch,
+  hasBlockingUnknownProjectSyncRun,
+  lockGitHubProject,
+} from "./project-sync-lock";
 
 export const GITHUB_CODE_SCAN_SERVICE_VERSION =
   "github-code-scan-service:v1" as const;
@@ -78,10 +83,33 @@ export type ProjectCodeScanBatchView = Readonly<{
 
 export interface GitHubCodeScanService {
   prepareProjectScan(projectId: unknown): Promise<ProjectCodeScanBatchView>;
+  prepareProjectScanFrozen(input: unknown): Promise<ProjectCodeScanBatchView>;
   executeProjectScan(input: unknown): Promise<ProjectCodeScanBatchView>;
+  executeProjectScanRun(input: unknown): Promise<ProjectCodeScanBatchView>;
+  finalizeProjectScan(input: unknown): Promise<ProjectCodeScanBatchView>;
   scanProject(projectId: unknown): Promise<ProjectCodeScanBatchView>;
   getProjectScan(input: unknown): Promise<ProjectCodeScanBatchView>;
 }
+
+/** A server-frozen target. It deliberately contains identities and versions,
+ * never credentials or source content. */
+export type FrozenProjectCodeScanTarget = Readonly<{
+  projectRepositoryLinkId: string;
+  githubConnectionId: string;
+  credentialId: string;
+  credentialSecretFingerprint: string;
+  githubRepositoryId: string;
+  repositoryNodeId: string;
+  repositoryOwner: string;
+  repositoryName: string;
+  repositoryFullName: string;
+  linkConfigVersion: number;
+  effectivePolicyVersion: number;
+  expectedActiveGenerationId: string | null;
+  requiredForProjectSnapshot: boolean;
+  trackedRef: string;
+  scanScopeFingerprint: string;
+}>;
 
 type TransactionRunner = <T>(
   callback: (tx: Prisma.TransactionClient) => Promise<T>,
@@ -91,7 +119,15 @@ type TransactionRunner = <T>(
 type EligibleLink = Readonly<{
   id: string;
   projectId: string;
+  githubConnectionId: string;
+  status: string;
   effectivePolicyVersion: number;
+  githubConnection?: Readonly<{
+    id: string;
+    status: string;
+    credentialId: string | null;
+    credential?: Readonly<{ id: string; kind: string; secretFingerprint: string }> | null;
+  }> | null;
   githubRepository: Readonly<{
     githubRepositoryId: bigint;
     nodeId: string;
@@ -147,7 +183,7 @@ type RunClaim = Readonly<{
 }>;
 
 type FailureDisposition = Readonly<{
-  status: "failed" | "rateLimited";
+  status: "failed" | "rateLimited" | "unknown";
   failureCode: string;
   retryAt: Date | null;
   invalidateLink: boolean;
@@ -184,6 +220,114 @@ function parseBatchInput(value: unknown): Readonly<{ projectId: string; batchId:
   return Object.freeze({
     projectId: canonicalUuid(value.projectId),
     batchId: canonicalUuid(value.batchId),
+  });
+}
+
+function parseFrozenTarget(value: unknown): FrozenProjectCodeScanTarget {
+  if (!isPlainRecord(value)) return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  const expectedKeys = [
+    "credentialId", "effectivePolicyVersion", "expectedActiveGenerationId", "githubConnectionId",
+    "credentialSecretFingerprint",
+    "githubRepositoryId", "linkConfigVersion", "projectRepositoryLinkId", "repositoryFullName",
+    "repositoryName", "repositoryNodeId", "repositoryOwner", "requiredForProjectSnapshot", "scanScopeFingerprint", "trackedRef",
+  ] as const;
+  if (!exactKeys(value, expectedKeys)) return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  const projectRepositoryLinkId = canonicalUuid(value.projectRepositoryLinkId);
+  const githubConnectionId = canonicalUuid(value.githubConnectionId);
+  const credentialId = canonicalUuid(value.credentialId);
+  if (typeof value.credentialSecretFingerprint !== "string" || !FINGERPRINT_PATTERN.test(value.credentialSecretFingerprint)) {
+    return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  }
+  const expectedActiveGenerationId = value.expectedActiveGenerationId === null
+    ? null
+    : canonicalUuid(value.expectedActiveGenerationId);
+  if (
+    typeof value.githubRepositoryId !== "string" || !/^[1-9][0-9]{0,20}$/.test(value.githubRepositoryId) ||
+    typeof value.repositoryNodeId !== "string" || value.repositoryNodeId.length < 1 || value.repositoryNodeId.length > 512 ||
+    typeof value.repositoryOwner !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(value.repositoryOwner) ||
+    typeof value.repositoryName !== "string" || !/^[A-Za-z0-9_.-]{1,100}$/.test(value.repositoryName) ||
+    typeof value.repositoryFullName !== "string" || value.repositoryFullName !== `${value.repositoryOwner}/${value.repositoryName}` ||
+    typeof value.trackedRef !== "string" || !/^refs\/heads\/[A-Za-z0-9._/-]+$/.test(value.trackedRef) || value.trackedRef.includes("..") || value.trackedRef.includes("//")
+  ) return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  if (
+    !Number.isSafeInteger(value.linkConfigVersion) ||
+    (value.linkConfigVersion as number) < 1 ||
+    !Number.isSafeInteger(value.effectivePolicyVersion) ||
+    (value.effectivePolicyVersion as number) < 1 ||
+    typeof value.requiredForProjectSnapshot !== "boolean" ||
+    typeof value.scanScopeFingerprint !== "string" ||
+    !FINGERPRINT_PATTERN.test(value.scanScopeFingerprint)
+  ) {
+    return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  }
+  return Object.freeze({
+    projectRepositoryLinkId,
+    githubConnectionId,
+    credentialId,
+    credentialSecretFingerprint: value.credentialSecretFingerprint,
+    githubRepositoryId: value.githubRepositoryId,
+    repositoryNodeId: value.repositoryNodeId,
+    repositoryOwner: value.repositoryOwner,
+    repositoryName: value.repositoryName,
+    repositoryFullName: value.repositoryFullName,
+    linkConfigVersion: value.linkConfigVersion as number,
+    effectivePolicyVersion: value.effectivePolicyVersion as number,
+    expectedActiveGenerationId,
+    requiredForProjectSnapshot: value.requiredForProjectSnapshot as boolean,
+    trackedRef: value.trackedRef,
+    scanScopeFingerprint: value.scanScopeFingerprint,
+  });
+}
+
+function parseFrozenInput(value: unknown): Readonly<{
+  projectId: string;
+  targets: readonly FrozenProjectCodeScanTarget[];
+}> {
+  if (!isPlainRecord(value) || !exactKeys(value, ["projectId", "targets"]) || !Array.isArray(value.targets)) {
+    return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  }
+  if (value.targets.length === 0 || value.targets.length > 2_000) {
+    return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  }
+  const targets = value.targets.map(parseFrozenTarget);
+  if (new Set(targets.map((target) => target.projectRepositoryLinkId)).size !== targets.length) {
+    return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  }
+  return Object.freeze({
+    projectId: canonicalUuid(value.projectId),
+    targets: Object.freeze(targets),
+  });
+}
+
+function parseBatchRunInput(value: unknown): Readonly<{ projectId: string; batchId: string; runId: string; frozenTarget?: FrozenProjectCodeScanTarget }> {
+  if (!isPlainRecord(value)) {
+    return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  }
+  const keys = Object.keys(value).sort();
+  const base = ["batchId", "projectId", "runId"].sort();
+  const withFrozenTarget = [...base, "frozenTarget"].sort();
+  if (keys.length !== base.length && keys.join("\u0000") !== withFrozenTarget.join("\u0000")) return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  if (keys.length === base.length && keys.join("\u0000") !== base.join("\u0000")) return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  return Object.freeze({
+    projectId: canonicalUuid(value.projectId),
+    batchId: canonicalUuid(value.batchId),
+    runId: canonicalUuid(value.runId),
+    ...(value.frozenTarget === undefined ? {} : { frozenTarget: parseFrozenTarget(value.frozenTarget) }),
+  });
+}
+
+function parseFinalizeInput(value: unknown): Readonly<{ projectId: string; batchId: string; allowQueued: boolean }> {
+  if (!isPlainRecord(value)) return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  const keys = Object.keys(value).sort();
+  const base = ["batchId", "projectId"];
+  if (keys.join("\u0000") !== base.join("\u0000") && keys.join("\u0000") !== [...base, "allowQueued"].sort().join("\u0000")) {
+    return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  }
+  if ("allowQueued" in value && typeof value.allowQueued !== "boolean") return fail("GITHUB_CODE_SCAN_INVALID_INPUT");
+  return Object.freeze({
+    projectId: canonicalUuid(value.projectId),
+    batchId: canonicalUuid(value.batchId),
+    allowQueued: value.allowQueued === true,
   });
 }
 
@@ -261,6 +405,14 @@ function failureDisposition(error: unknown, now: Date): FailureDisposition {
         status: "rateLimited",
         failureCode: "GITHUB_RATE_LIMITED",
         retryAt,
+        invalidateLink: false,
+      });
+    }
+    if ((error.code === "GITHUB_REQUEST_TIMEOUT" || error.code === "GITHUB_REQUEST_FAILED") && error.requestDispatched !== false) {
+      return Object.freeze({
+        status: "unknown",
+        failureCode: error.code,
+        retryAt: null,
         invalidateLink: false,
       });
     }
@@ -451,16 +603,31 @@ export function createGitHubCodeScanService(options: Readonly<{
           },
         });
       }
-      await tx.repoCodeScanRun.update({
-        where: { projectId_id: { projectId: claim.projectId, id: claim.runId } },
-        data: {
-          status: disposition.status,
-          stage: "terminal",
-          failureCode: disposition.failureCode,
-          retryAt: disposition.retryAt,
-          completedAt: now,
-        },
-      });
+      if (disposition.status === "unknown") {
+        // Unknown means the request may have reached GitHub. The legacy
+        // lifecycle contract requires an unknown run to be in the terminal
+        // stage while retaining a null completedAt for reconciliation.
+        await tx.repoCodeScanRun.update({
+          where: { projectId_id: { projectId: claim.projectId, id: claim.runId } },
+          data: {
+            status: "unknown",
+            stage: "terminal",
+            failureCode: disposition.failureCode,
+            retryAt: disposition.retryAt,
+          },
+        });
+      } else {
+        await tx.repoCodeScanRun.update({
+          where: { projectId_id: { projectId: claim.projectId, id: claim.runId } },
+          data: {
+            status: disposition.status,
+            stage: "terminal",
+            failureCode: disposition.failureCode,
+            retryAt: disposition.retryAt,
+            completedAt: now,
+          },
+        });
+      }
     });
   };
 
@@ -487,7 +654,11 @@ export function createGitHubCodeScanService(options: Readonly<{
     });
   };
 
-  const claimRun = async (projectId: string, runId: string): Promise<RunClaim> => {
+  const claimRun = async (
+    projectId: string,
+    runId: string,
+    frozenTarget?: FrozenProjectCodeScanTarget,
+  ): Promise<RunClaim> => {
     return serializable(async (tx) => {
       const run = await tx.repoCodeScanRun.findUnique({
         where: { projectId_id: { projectId, id: runId } },
@@ -496,6 +667,7 @@ export function createGitHubCodeScanService(options: Readonly<{
           repositoryLink: {
             include: {
               githubRepository: true,
+              githubConnection: { include: { credential: true } },
               configPointer: { include: { config: true } },
               codeGenerationPointer: true,
             },
@@ -513,6 +685,20 @@ export function createGitHubCodeScanService(options: Readonly<{
       }
       const link = run.repositoryLink as EligibleLink;
       const pointer = link.configPointer;
+      const frozenIdentityMatches = frozenTarget === undefined || (
+        link.githubConnectionId === frozenTarget.githubConnectionId &&
+        link.githubConnection?.id === frozenTarget.githubConnectionId &&
+        link.githubConnection.status === "verified" &&
+        link.githubConnection.credentialId === frozenTarget.credentialId &&
+        link.githubConnection.credential?.kind === "github" &&
+        link.githubConnection.credential?.secretFingerprint === frozenTarget.credentialSecretFingerprint &&
+        link.githubRepository.githubRepositoryId.toString() === frozenTarget.githubRepositoryId &&
+        link.githubRepository.nodeId === frozenTarget.repositoryNodeId &&
+        link.githubRepository.currentOwner === frozenTarget.repositoryOwner &&
+        link.githubRepository.currentName === frozenTarget.repositoryName &&
+        link.githubRepository.currentFullName === frozenTarget.repositoryFullName &&
+        pointer?.config.trackedRef === frozenTarget.trackedRef
+      );
       if (
         link.projectId !== projectId ||
         pointer === null ||
@@ -523,7 +709,8 @@ export function createGitHubCodeScanService(options: Readonly<{
         pointer.config.codeEnabled !== true ||
         !FINGERPRINT_PATTERN.test(pointer.config.scanScopeFingerprint) ||
         (link.codeGenerationPointer?.repositoryCodeGenerationId ?? null) !==
-          run.expectedActiveGenerationId
+          run.expectedActiveGenerationId ||
+        !frozenIdentityMatches
       ) {
         return fail("GITHUB_CODE_SCAN_LINK_INELIGIBLE");
       }
@@ -545,11 +732,13 @@ export function createGitHubCodeScanService(options: Readonly<{
         linkConfigVersion: run.linkConfigVersion,
         expectedEffectivePolicyVersion: run.expectedEffectivePolicyVersion,
         expectedActiveGenerationId: run.expectedActiveGenerationId,
-        owner: link.githubRepository.currentOwner,
-        repository: link.githubRepository.currentName,
-        expectedRepositoryId: safeRepositoryId(link.githubRepository.githubRepositoryId),
-        expectedNodeId: link.githubRepository.nodeId,
-        trackedRef: pointer.config.trackedRef,
+        owner: frozenTarget?.repositoryOwner ?? link.githubRepository.currentOwner,
+        repository: frozenTarget?.repositoryName ?? link.githubRepository.currentName,
+        expectedRepositoryId: frozenTarget === undefined
+          ? safeRepositoryId(link.githubRepository.githubRepositoryId)
+          : safeRepositoryId(BigInt(frozenTarget.githubRepositoryId)),
+        expectedNodeId: frozenTarget?.repositoryNodeId ?? link.githubRepository.nodeId,
+        trackedRef: frozenTarget?.trackedRef ?? pointer.config.trackedRef,
         includeRoots: safeStringArray(pointer.config.includeRoots),
         softExcludePatterns: safeSoftExcludes(pointer.config.softExcludePatterns),
         scanScopeFingerprint: pointer.config.scanScopeFingerprint,
@@ -808,10 +997,14 @@ export function createGitHubCodeScanService(options: Readonly<{
     });
   };
 
-  const executeRun = async (projectId: string, runId: string): Promise<void> => {
+  const executeRun = async (
+    projectId: string,
+    runId: string,
+    frozenTarget?: FrozenProjectCodeScanTarget,
+  ): Promise<void> => {
     let claim: RunClaim;
     try {
-      claim = await claimRun(projectId, runId);
+      claim = await claimRun(projectId, runId, frozenTarget);
     } catch (error) {
       if (
         error instanceof GitHubCodeScanServiceError &&
@@ -1033,6 +1226,160 @@ export function createGitHubCodeScanService(options: Readonly<{
     });
   };
 
+  const prepareFrozen = async (
+    input: Readonly<{ projectId: string; targets: readonly FrozenProjectCodeScanTarget[] }>,
+    allowProjectSync: boolean,
+  ): Promise<ProjectCodeScanBatchView> => {
+    const batchId = generatedUuid(idFactory);
+    const startedAt = safeDate(nowFactory);
+    return serializable(async (tx) => {
+      await lockGitHubProject(tx, input.projectId);
+      const project = await tx.project.findUnique({
+        where: { id: input.projectId },
+        select: { id: true },
+      });
+      if (project === null) return fail("GITHUB_CODE_SCAN_PROJECT_NOT_FOUND");
+      if (await hasBlockingUnknownProjectCodeBatch(tx, input.projectId)) {
+        return fail("GITHUB_CODE_SCAN_RECONCILIATION_REQUIRED");
+      }
+      const pending = await tx.projectScanBatch.findFirst({
+        where: { projectId: input.projectId, status: { in: ["queued", "running"] } },
+        select: { status: true },
+      });
+      if (pending !== null) return fail("GITHUB_CODE_SCAN_ALREADY_RUNNING");
+      if (!allowProjectSync) {
+        const projectSyncDelegate = (tx as unknown as {
+          projectGitHubSyncRun?: { findFirst: (args: unknown) => Promise<{ status: string } | null> };
+        }).projectGitHubSyncRun;
+        if (projectSyncDelegate !== undefined) {
+          const active = await projectSyncDelegate.findFirst({
+            where: { projectId: input.projectId, status: { in: ["queued", "running"] } },
+            select: { status: true },
+          });
+          if (active !== null) {
+            return fail("GITHUB_CODE_SCAN_ALREADY_RUNNING");
+          }
+        }
+        if (await hasBlockingUnknownProjectSyncRun(tx, input.projectId)) {
+          return fail("GITHUB_CODE_SCAN_RECONCILIATION_REQUIRED");
+        }
+      }
+      const rows = await tx.projectRepositoryLink.findMany({
+        where: {
+          projectId: input.projectId,
+          id: { in: input.targets.map((target) => target.projectRepositoryLinkId) },
+        },
+        include: {
+          githubRepository: true,
+          githubConnection: { include: { credential: true } },
+          configPointer: { include: { config: true } },
+          codeGenerationPointer: true,
+        },
+      });
+      const byId = new Map(rows.map((row) => [row.id, row as EligibleLink]));
+      if (byId.size !== input.targets.length) return fail("GITHUB_CODE_SCAN_LINK_INELIGIBLE");
+      for (const target of input.targets) {
+        const link = byId.get(target.projectRepositoryLinkId);
+        const pointer = link?.configPointer;
+        if (
+          link === undefined ||
+          link.status !== "active" ||
+          link.githubConnectionId !== target.githubConnectionId ||
+          link.githubConnection?.id !== target.githubConnectionId ||
+          link.githubConnection.status !== "verified" ||
+          link.githubConnection.credentialId !== target.credentialId ||
+          link.githubConnection.credential?.kind !== "github" ||
+          link.githubConnection.credential?.secretFingerprint !== target.credentialSecretFingerprint ||
+          link.githubRepository.githubRepositoryId.toString() !== target.githubRepositoryId ||
+          link.githubRepository.nodeId !== target.repositoryNodeId ||
+          link.githubRepository.currentOwner !== target.repositoryOwner ||
+          link.githubRepository.currentName !== target.repositoryName ||
+          link.githubRepository.currentFullName !== target.repositoryFullName ||
+          pointer === null ||
+          pointer === undefined ||
+          pointer.configVersion !== target.linkConfigVersion ||
+          pointer.effectivePolicyVersion !== target.effectivePolicyVersion ||
+          link.effectivePolicyVersion !== target.effectivePolicyVersion ||
+          pointer.config.effectivePolicyVersion !== target.effectivePolicyVersion ||
+          pointer.config.codeEnabled !== true ||
+          pointer.config.trackedRef !== target.trackedRef ||
+          pointer.config.scanScopeFingerprint !== target.scanScopeFingerprint ||
+          (link.codeGenerationPointer?.repositoryCodeGenerationId ?? null) !== target.expectedActiveGenerationId
+        ) {
+          return fail("GITHUB_CODE_SCAN_LINK_INELIGIBLE");
+        }
+      }
+      const currentSnapshot = await tx.projectCodeSnapshotPointer.findUnique({
+        where: { projectId: input.projectId },
+        select: { projectCodeSnapshotId: true },
+      });
+      const requiredEntries = input.targets
+        .filter((target) => target.requiredForProjectSnapshot)
+        .map((target) => {
+          const link = byId.get(target.projectRepositoryLinkId)!;
+          return {
+            linkId: target.projectRepositoryLinkId,
+            configVersion: target.linkConfigVersion,
+            effectivePolicyVersion: target.effectivePolicyVersion,
+            trackedRef: link.configPointer!.config.trackedRef,
+            scanScopeFingerprint: target.scanScopeFingerprint,
+            githubRepositoryId: link.githubRepository.githubRepositoryId.toString(),
+          };
+        });
+      const requiredManifestFingerprint = fingerprint(
+        "required-repository-manifest",
+        requiredEntries,
+      );
+      await tx.projectScanBatch.create({
+        data: {
+          id: batchId,
+          projectId: input.projectId,
+          expectedActiveCodeSnapshotId: currentSnapshot?.projectCodeSnapshotId ?? null,
+          status: "queued",
+          requiredManifestFingerprint,
+          expectedRequiredLinkCount: requiredEntries.length,
+          expectedOptionalLinkCount: input.targets.length - requiredEntries.length,
+          startedAt,
+        },
+      });
+      await tx.projectScanBatchEntry.createMany({
+        data: input.targets.map((target) => ({
+          id: generatedUuid(idFactory),
+          projectId: input.projectId,
+          projectScanBatchId: batchId,
+          projectRepositoryLinkId: target.projectRepositoryLinkId,
+          linkConfigVersion: target.linkConfigVersion,
+          requiredForProjectSnapshot: target.requiredForProjectSnapshot,
+          effectivePolicyVersion: target.effectivePolicyVersion,
+        })),
+      });
+      await tx.repoCodeScanRun.createMany({
+        data: input.targets.map((target) => ({
+          id: generatedUuid(idFactory),
+          projectId: input.projectId,
+          projectRepositoryLinkId: target.projectRepositoryLinkId,
+          projectScanBatchId: batchId,
+          linkConfigVersion: target.linkConfigVersion,
+          expectedEffectivePolicyVersion: target.effectivePolicyVersion,
+          expectedActiveGenerationId: target.expectedActiveGenerationId,
+          operationKey: fingerprint("repository-code-scan-run", {
+            projectId: input.projectId,
+            batchId,
+            projectRepositoryLinkId: target.projectRepositoryLinkId,
+            configVersion: target.linkConfigVersion,
+            effectivePolicyVersion: target.effectivePolicyVersion,
+            expectedActiveGenerationId: target.expectedActiveGenerationId,
+            scanScopeFingerprint: target.scanScopeFingerprint,
+          }),
+          status: "queued",
+          stage: "queued",
+          startedAt,
+        })),
+      });
+      return readBatch(tx, input.projectId, batchId);
+    });
+  };
+
   const service: GitHubCodeScanService = {
     async prepareProjectScan(projectIdValue): Promise<ProjectCodeScanBatchView> {
       const projectId = canonicalUuid(projectIdValue);
@@ -1040,19 +1387,30 @@ export function createGitHubCodeScanService(options: Readonly<{
       const startedAt = safeDate(nowFactory);
       try {
         return await serializable(async (tx) => {
+          await lockGitHubProject(tx, projectId);
           const project = await tx.project.findUnique({
             where: { id: projectId },
             select: { id: true },
           });
           if (project === null) return fail("GITHUB_CODE_SCAN_PROJECT_NOT_FOUND");
-          const pending = await tx.projectScanBatch.findFirst({
-            where: { projectId, status: { in: ["queued", "running", "unknown"] } },
-            select: { status: true },
-          });
-          if (pending?.status === "unknown") {
+          if (await hasBlockingUnknownProjectCodeBatch(tx, projectId)) {
             return fail("GITHUB_CODE_SCAN_RECONCILIATION_REQUIRED");
           }
+          const pending = await tx.projectScanBatch.findFirst({
+            where: { projectId, status: { in: ["queued", "running"] } },
+            select: { status: true },
+          });
+          const activeProjectSync = await tx.projectGitHubSyncRun?.findFirst?.({
+            where: { projectId, status: { in: ["queued", "running"] } },
+            select: { status: true },
+          });
+          if (activeProjectSync !== null && activeProjectSync !== undefined) {
+            return fail("GITHUB_CODE_SCAN_ALREADY_RUNNING");
+          }
           if (pending !== null) return fail("GITHUB_CODE_SCAN_ALREADY_RUNNING");
+          if (await hasBlockingUnknownProjectSyncRun(tx, projectId)) {
+            return fail("GITHUB_CODE_SCAN_RECONCILIATION_REQUIRED");
+          }
           const rows = await tx.projectRepositoryLink.findMany({
             where: { projectId, status: "active" },
             orderBy: [{ id: "asc" }],
@@ -1149,16 +1507,20 @@ export function createGitHubCodeScanService(options: Readonly<{
           error.code === "GITHUB_CODE_SCAN_WRITE_CONFLICT"
         ) {
           const pending = await options.db.projectScanBatch.findFirst({
-            where: { projectId, status: { in: ["queued", "running", "unknown"] } },
+            where: { projectId, status: { in: ["queued", "running"] } },
             select: { status: true },
           });
-          if (pending?.status === "unknown") {
+          if (pending !== null) return fail("GITHUB_CODE_SCAN_ALREADY_RUNNING");
+          if (await hasBlockingUnknownProjectCodeBatch(options.db, projectId) || await hasBlockingUnknownProjectSyncRun(options.db, projectId)) {
             return fail("GITHUB_CODE_SCAN_RECONCILIATION_REQUIRED");
           }
-          if (pending !== null) return fail("GITHUB_CODE_SCAN_ALREADY_RUNNING");
         }
         throw error;
       }
+    },
+
+    async prepareProjectScanFrozen(value): Promise<ProjectCodeScanBatchView> {
+      return prepareFrozen(parseFrozenInput(value), true);
     },
 
     async executeProjectScan(value): Promise<ProjectCodeScanBatchView> {
@@ -1172,6 +1534,41 @@ export function createGitHubCodeScanService(options: Readonly<{
       }
       for (const run of current.runs) {
         if (run.status === "queued") await executeRun(input.projectId, run.id);
+      }
+      return finalizeBatch(input.projectId, input.batchId);
+    },
+
+    async executeProjectScanRun(value): Promise<ProjectCodeScanBatchView> {
+      const input = parseBatchRunInput(value);
+      const run = await options.db.repoCodeScanRun.findUnique({
+        where: { projectId_id: { projectId: input.projectId, id: input.runId } },
+        select: { projectScanBatchId: true },
+      });
+      if (run === null || run.projectScanBatchId !== input.batchId) {
+        return fail("GITHUB_CODE_SCAN_RUN_NOT_FOUND");
+      }
+      const current = await readBatch(options.db, input.projectId, input.batchId);
+      if (current.status === "unknown") return fail("GITHUB_CODE_SCAN_RECONCILIATION_REQUIRED");
+      const target = current.runs.find((candidate) => candidate.id === input.runId);
+      if (target === undefined) return fail("GITHUB_CODE_SCAN_RUN_NOT_FOUND");
+      if (target.status === "queued") await executeRun(input.projectId, input.runId, input.frozenTarget);
+      return readBatch(options.db, input.projectId, input.batchId);
+    },
+
+    async finalizeProjectScan(value): Promise<ProjectCodeScanBatchView> {
+      const input = parseFinalizeInput(value);
+      if (input.allowQueued) {
+        await serializable(async (tx) => {
+          await tx.repoCodeScanRun.updateMany({
+            where: { projectId: input.projectId, projectScanBatchId: input.batchId, status: "queued" },
+            data: {
+              status: "failed",
+              stage: "terminal",
+              failureCode: "GITHUB_PROJECT_SYNC_NOT_RUN",
+              completedAt: safeDate(nowFactory),
+            },
+          });
+        });
       }
       return finalizeBatch(input.projectId, input.batchId);
     },

@@ -26,6 +26,7 @@ export type ProjectWorkflowErrorCode =
   | "PROJECT_WORKFLOW_LEASE_EXPIRED"
   | "PROJECT_WORKFLOW_RECONCILIATION_NOT_DUE"
   | "PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED"
+  | "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED"
   | "PROJECT_WORKFLOW_RETRY_NOT_SUPPORTED";
 
 export class ProjectWorkflowError extends Error {
@@ -238,10 +239,34 @@ function serializeMaterialSyncResult(value: Record<string, unknown>): Record<str
   };
 }
 
+function serializeGitHubProjectSyncResult(value: Record<string, unknown>): Record<string, unknown> {
+  const counts = isRecord(value.counts) ? value.counts : {};
+  const warnings = Array.isArray(value.warnings)
+    ? value.warnings.filter((entry): entry is string => typeof entry === "string" && /^[A-Z0-9_]{3,64}$/.test(entry)).slice(0, 100)
+    : [];
+  return {
+    syncRunId: safeResultString(value.syncRunId ?? value.id, 128),
+    status: safeResultEnum(value.status, ["queued", "running", "succeeded", "partial", "failed", "rateLimited", "unknown", "cancelled"] as const),
+    scopeFingerprint: safeResultHash(value.scopeFingerprint, 64),
+    manifestFingerprint: safeResultHash(value.manifestFingerprint, 64),
+    counts: {
+      added: safeResultInteger(counts.added) ?? 0,
+      updated: safeResultInteger(counts.updated) ?? 0,
+      deleted: safeResultInteger(counts.deleted) ?? 0,
+      unchanged: safeResultInteger(counts.unchanged) ?? 0,
+      withheld: safeResultInteger(counts.withheld) ?? 0,
+    },
+    warnings,
+    failureCode: safeNullableFailureCode(value.failureCode),
+    reconciliationRequired: value.reconciliationRequired === true,
+  };
+}
+
 export function serializeProjectJobResult(kind: BackgroundJobKind, value: unknown): unknown {
   if (value === null || value === undefined || !isRecord(value)) return null;
   if (kind === "githubScan") return Object.freeze(serializeCodeScanResult(value));
   if (kind === "githubMaterialSync") return Object.freeze(serializeMaterialSyncResult(value));
+  if (kind === "githubProjectSync") return Object.freeze(serializeGitHubProjectSyncResult(value));
   if (kind === "semanticSearch") {
     const results = Array.isArray(value.results)
       ? value.results.map(serializeSearchResult).filter((result): result is Record<string, unknown> => result !== null).slice(0, 10)
@@ -280,6 +305,11 @@ export function isLeaseExpired(leaseExpiresAt: Date | string, now = new Date()):
 
 export function isUncertainProviderDispatch(error: unknown): boolean {
   const code = safeFailureCode(error);
+  if ((code === "GITHUB_REQUEST_TIMEOUT" || code === "GITHUB_REQUEST_FAILED") &&
+    typeof error === "object" && error !== null &&
+    "requestDispatched" in error && (error as { requestDispatched?: unknown }).requestDispatched === false) {
+    return false;
+  }
   return code === "AI_PROVIDER_TIMEOUT" || code === "AI_PROVIDER_UNAVAILABLE" ||
     code === "GITHUB_REQUEST_TIMEOUT" || code === "GITHUB_REQUEST_FAILED";
 }
@@ -299,6 +329,19 @@ async function withJobLock<T>(db: WorkflowDb, jobId: string, operation: (tx: Pri
   // Committed lets the waiter observe the lock holder's committed status
   // instead of retaining a stale Serializable snapshot after the wait.
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
+/**
+ * Expose the same per-job advisory lock to job-kind specific reconciliation
+ * code.  The callback remains transaction-scoped so callers cannot observe a
+ * partially reconciled job.
+ */
+export async function withProjectJobLock<T>(
+  db: WorkflowDb,
+  jobId: string,
+  operation: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return withJobLock(db, jobId, operation);
 }
 
 async function findJobForAttempt(tx: Prisma.TransactionClient, jobId: string) {
@@ -503,11 +546,11 @@ export async function markProviderDispatched(
 }
 
 export async function markProviderAcknowledged(
-  input: Readonly<{ jobId: string; attemptId: string; claimToken: string }>,
+  input: Readonly<{ jobId: string; attemptId: string; claimToken: string; allowExpired?: boolean }>,
   db: WorkflowDb = getDb(),
 ): Promise<boolean> {
   return withJobLock(db, input.jobId, async (tx) => {
-    await verifyAttempt(tx, input);
+    await verifyAttempt(tx, input, { allowExpired: input.allowExpired === true });
     const now = new Date();
     const updated = await tx.backgroundJobAttempt.updateMany({
       where: { id: input.attemptId, jobId: input.jobId, status: "running", dispatchState: "dispatched" },
@@ -519,11 +562,11 @@ export async function markProviderAcknowledged(
 }
 
 export async function finishProjectJob(
-  input: Readonly<{ jobId: string; attemptId: string; claimToken: string; result: unknown }>,
+  input: Readonly<{ jobId: string; attemptId: string; claimToken: string; result: unknown; allowExpired?: boolean }>,
   db: WorkflowDb = getDb(),
 ) {
   return withJobLock(db, input.jobId, async (tx) => {
-    const { job } = await verifyAttempt(tx, input);
+    const { job } = await verifyAttempt(tx, input, { allowExpired: input.allowExpired === true });
     const completedAt = new Date();
     const updated = await tx.backgroundJobAttempt.updateMany({
       where: { id: input.attemptId, jobId: input.jobId, status: "running" },
@@ -547,14 +590,14 @@ export async function finishProjectJob(
 }
 
 export async function failProjectJob(
-  input: Readonly<{ jobId: string; attemptId: string; claimToken: string; error: unknown; result?: unknown }>,
+  input: Readonly<{ jobId: string; attemptId: string; claimToken: string; error: unknown; result?: unknown; allowExpired?: boolean }>,
   db: WorkflowDb = getDb(),
 ): Promise<boolean> {
   return withJobLock(db, input.jobId, async (tx) => {
     const job = await findJobForAttempt(tx, input.jobId);
     if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
     if (job.status === "unknown" || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled") return false;
-    await verifyAttempt(tx, input);
+    await verifyAttempt(tx, input, { allowExpired: input.allowExpired === true });
     const completedAt = new Date();
     const code = safeFailureCode(input.error);
     const updated = await tx.backgroundJobAttempt.updateMany({
@@ -723,10 +766,11 @@ export async function reconcileProjectJob(
   return withJobLock(db, jobId, async (tx) => {
     const job = await tx.backgroundJob.findUnique({
       where: { id: jobId },
-      select: { id: true, projectId: true, status: true },
+      select: { id: true, projectId: true, kind: true, status: true },
     });
     if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
     if (job.projectId !== projectId) return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
+    if (job.kind === "githubProjectSync") return fail("PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED");
     if (job.status === "unknown") {
       await tx.providerCallAudit.updateMany({
         where: { jobId, status: "running" },
@@ -768,10 +812,11 @@ export async function cancelProjectJob(
   return withJobLock(db, jobId, async (tx) => {
     const job = await tx.backgroundJob.findUnique({
       where: { id: jobId },
-      select: { id: true, projectId: true, status: true },
+      select: { id: true, projectId: true, kind: true, status: true },
     });
     if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
     if (job.projectId !== projectId) return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
+    if (job.kind === "githubProjectSync") return fail("PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED");
     if (job.status !== "queued" && job.status !== "waitingConsent") return fail("PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED");
     const completedAt = new Date();
     await tx.backgroundJob.update({

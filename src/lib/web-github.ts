@@ -5,11 +5,15 @@ import { getDb } from "@/lib/db";
 import {
   GITHUB_SOFT_EXCLUDE_CLASSES,
   GITHUB_VAULT_AUTH_REF,
+  createGitHubRepositoryLedgerService,
+} from "@/lib/github/repository-ledger";
+import {
   createGitHubCredentialFromToken,
   createGitHubReadOnlyClient,
-  createGitHubRepositoryLedgerService,
   type GitHubMaterialReadOnlyClient,
-} from "@/lib/github";
+} from "@/lib/github/read-only-client";
+
+export type WebGitHubCredentialClient = GitHubMaterialReadOnlyClient;
 
 export type WebGitHubErrorCode =
   | "GITHUB_WEB_INVALID_INPUT"
@@ -172,6 +176,35 @@ export async function loadProjectGitHubClient(
   return createGitHubReadOnlyClient({ credential: createGitHubCredentialFromToken(token) });
 }
 
+/** Resolve one frozen credential identity without reselecting project scope. */
+export async function loadGitHubClientForCredential(
+  credentialId: string,
+  db: PrismaClient = getDb(),
+  options: Readonly<{ absoluteDeadlineAt?: Date | number | null; expectedSecretFingerprint?: string }> = {},
+): Promise<WebGitHubCredentialClient> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(credentialId)) {
+    return fail("GITHUB_WEB_INVALID_INPUT");
+  }
+  const credential = await db.externalCredential.findUnique({
+    where: { id: credentialId },
+    select: { id: true, kind: true, secretFingerprint: true },
+  });
+  if (credential === null || credential.kind !== "github") return fail("GITHUB_WEB_CREDENTIAL_REQUIRED");
+  if (options.expectedSecretFingerprint !== undefined &&
+    (typeof options.expectedSecretFingerprint !== "string" ||
+      !/^[0-9a-f]{64}$/.test(options.expectedSecretFingerprint) ||
+      credential.secretFingerprint !== options.expectedSecretFingerprint)) {
+    return fail("GITHUB_WEB_CREDENTIAL_REQUIRED");
+  }
+  const token = await readCredentialSecret(credential.id, "github", db, {
+    expectedSecretFingerprint: options.expectedSecretFingerprint,
+  });
+  return createGitHubReadOnlyClient({
+    credential: createGitHubCredentialFromToken(token),
+    absoluteDeadlineAt: options.absoluteDeadlineAt,
+  });
+}
+
 export async function disableWebGitHubRepository(
   projectId: string,
   linkId: string,
@@ -183,4 +216,3 @@ export async function disableWebGitHubRepository(
 export function jsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
-

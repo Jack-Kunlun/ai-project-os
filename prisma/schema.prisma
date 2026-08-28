@@ -107,6 +107,7 @@ enum WebAiScopeKind {
 enum BackgroundJobKind {
   githubScan         @map("github_scan")
   githubMaterialSync @map("github_material_sync")
+  githubProjectSync  @map("github_project_sync")
   memoryIndex        @map("memory_index")
   autoExtract        @map("auto_extract")
   semanticSearch     @map("semantic_search")
@@ -452,6 +453,55 @@ enum GitHubMaterialSyncStage {
   terminal
 }
 
+enum ProjectGitHubSyncRunStatus {
+  queued
+  running
+  succeeded
+  partial
+  failed
+  rateLimited @map("rate_limited")
+  unknown
+  cancelled
+}
+
+enum ProjectGitHubSyncStage {
+  queued
+  freezing
+  code
+  material
+  finalizing
+  terminal
+}
+
+enum ProjectGitHubSyncEntryKind {
+  code
+  material
+}
+
+enum ProjectGitHubSyncEntryStatus {
+  pending
+  running
+  succeeded
+  partial
+  failed
+  rateLimited @map("rate_limited")
+  unknown
+  skipped
+}
+
+enum ProjectGitHubSyncChangeType {
+  added
+  updated
+  deleted
+  unchanged
+  withheld
+}
+
+enum ProjectGitHubSyncReconciliationResolution {
+  observedTerminal @map("observed_terminal")
+  explicitAbandon  @map("explicit_abandon")
+}
+
 enum RepositoryMaterialGenerationStatus {
   staging
   complete
@@ -519,6 +569,10 @@ model Project {
   artifactDependencies             ArtifactDependency[]
   githubConnections                GitHubConnection[]
   repositoryLinks                  ProjectRepositoryLink[]
+  githubSyncRuns                   ProjectGitHubSyncRun[]
+  githubSyncEntries                ProjectGitHubSyncEntry[]
+  githubSyncChanges                ProjectGitHubSyncChange[]
+  githubSyncReconciliations        ProjectGitHubSyncReconciliation[]
   repositoryLinkConfigVersions     ProjectRepositoryLinkConfigVersion[]
   repositoryLinkConfigPointers     ProjectRepositoryLinkConfigPointer[]
   scanBatches                      ProjectScanBatch[]
@@ -583,6 +637,7 @@ model GitHubConnection {
   project               Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
   credential            ExternalCredential?     @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   repositoryLinks       ProjectRepositoryLink[]
+  githubSyncEntries     ProjectGitHubSyncEntry[]
 
   @@unique([projectId, id])
   @@unique([projectId, connectionFingerprint])
@@ -649,6 +704,7 @@ model ProjectRepositoryLink {
   materialEmbeddings       RepositoryMaterialEmbedding[]
   materialIndexPointer     RepositoryMaterialIndexPointer?       @relation("RepositoryMaterialIndexPointerLink")
   materialQuarantines    GitHubMaterialQuarantine[]
+  githubSyncEntries      ProjectGitHubSyncEntry[]
   indexGenerations        IndexGeneration[]
   modelProcessingGrants   ModelProcessingGrant[]                @relation("RepositoryGrantSubject")
   codeSnapshotEntries     ProjectCodeSnapshotEntry[]
@@ -694,6 +750,7 @@ model ProjectRepositoryLinkConfigVersion {
   activePointer              ProjectRepositoryLinkConfigPointer? @relation("ActiveRepositoryLinkConfig")
   scanBatchEntries           ProjectScanBatchEntry[]
   codeScanRuns               RepoCodeScanRun[]
+  githubSyncEntries          ProjectGitHubSyncEntry[]
   codeGenerations            RepositoryCodeGeneration[]
   codeGenerationPointers     RepositoryCodeGenerationPointer[]   @relation("RepositoryCodePointerConfig")
   codeIndexGenerations       RepositoryCodeIndexGeneration[]
@@ -748,6 +805,7 @@ model ProjectScanBatch {
   expectedActiveCodeSnapshot   ProjectCodeSnapshot?    @relation("ExpectedProjectCodeSnapshot", fields: [projectId, expectedActiveCodeSnapshotId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   entries                      ProjectScanBatchEntry[]
   codeScanRuns                 RepoCodeScanRun[]
+  githubSyncEntries            ProjectGitHubSyncEntry[] @relation("GitHubSyncCodeBatch")
   codeSnapshot                 ProjectCodeSnapshot?    @relation("BatchProducedCodeSnapshot")
 
   @@unique([projectId, id])
@@ -886,6 +944,7 @@ model RepositoryCodeGeneration {
   codeIndexes                RepositoryCodeIndexGeneration[]
   modelProcessingGrants      ModelProcessingGrant[]              @relation("RepositoryGrantCodeGeneration")
   codeSnapshotEntries        ProjectCodeSnapshotEntry[]
+  githubSyncEntriesBefore    ProjectGitHubSyncEntry[]         @relation("SyncEntryBeforeCodeGeneration")
 
   @@unique([projectId, id])
   @@unique([projectId, projectRepositoryLinkId, id], map: "RepositoryCodeGeneration_link_id_key")
@@ -964,6 +1023,7 @@ model GitHubMaterialSyncRun {
   expectedActiveMaterialGeneration    RepositoryMaterialGeneration? @relation("ExpectedRepositoryMaterialGeneration", fields: [projectId, projectRepositoryLinkId, expectedActiveMaterialGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "GitHubMaterialSyncRun_expected_generation_fkey", onDelete: NoAction, onUpdate: Cascade)
   producedGeneration                  RepositoryMaterialGeneration? @relation("MaterialSyncProducedGeneration")
   quarantines                         GitHubMaterialQuarantine[]
+  githubSyncEntries                   ProjectGitHubSyncEntry[] @relation("GitHubSyncMaterialRun")
 
   @@unique([projectId, id])
   @@unique([projectId, projectRepositoryLinkId, id])
@@ -1039,6 +1099,7 @@ model RepositoryMaterialGeneration {
   chunks                    RepositoryMaterialChunk[]
   indexes                   RepositoryMaterialIndexGeneration[]
   indexInputs               RepositoryMaterialIndexInput[]
+  githubSyncEntriesBefore    ProjectGitHubSyncEntry[]         @relation("SyncEntryBeforeMaterialGeneration")
 
   @@unique([projectId, id])
   @@unique([projectId, projectRepositoryLinkId, id])
@@ -2591,6 +2652,7 @@ model AppUser {
   webAiGrants     WebAiGrant[]
   backgroundJobs  BackgroundJob[]
   aiRouteRevisions ProjectAiRouteRevision[]
+  githubSyncReconciliations ProjectGitHubSyncReconciliation[]
 }
 
 model AppSession {
@@ -2621,6 +2683,7 @@ model ExternalCredential {
   rotatedAt         DateTime?
   aiProvider        AiProviderConnection?
   githubConnections GitHubConnection[]
+  githubSyncEntries ProjectGitHubSyncEntry[]
 
   @@index([kind, updatedAt])
 }
@@ -2751,12 +2814,14 @@ model BackgroundJob {
   ragAnswer        RagAnswer?
   intelligenceReport ProjectIntelligenceReport?
   projectAgentRun  ProjectAgentRun?
+  githubSyncRun    ProjectGitHubSyncRun?
   providerCalls    ProviderCallAudit[]
   attempts         BackgroundJobAttempt[]
 
   @@unique([requestedById, idempotencyKey])
   @@index([projectId, status, createdAt])
   @@index([status, createdAt])
+  @@unique([projectId, id], map: "BackgroundJob_project_id_key")
 }
 
 model BackgroundJobAttempt {
@@ -2776,6 +2841,139 @@ model BackgroundJobAttempt {
   @@unique([jobId, attemptNumber])
   @@index([jobId, status, leaseExpiresAt])
   @@index([leaseExpiresAt, status])
+}
+
+model ProjectGitHubSyncRun {
+  id                         String                    @id @default(uuid()) @db.Uuid
+  projectId                  String                    @db.Uuid
+  parentJobId                String                    @unique @db.Uuid
+  status                     ProjectGitHubSyncRunStatus @default(queued)
+  stage                      ProjectGitHubSyncStage    @default(queued)
+  scopeFingerprint           String                    @db.Char(64)
+  manifestFingerprint        String?                   @db.Char(64)
+  deadlineAt                 DateTime
+  codeTargetCount            Int                       @default(0)
+  materialTargetCount        Int                       @default(0)
+  completedCodeTargetCount   Int                       @default(0)
+  completedMaterialTargetCount Int                     @default(0)
+  addedCount                 Int                       @default(0)
+  updatedCount               Int                       @default(0)
+  deletedCount               Int                       @default(0)
+  unchangedCount             Int                       @default(0)
+  withheldCount              Int                       @default(0)
+  warnings                   Json                      @default("[]") @db.JsonB
+  failureCode                String?                   @db.VarChar(64)
+  reconciliationRequired    Boolean                   @default(false)
+  createdAt                  DateTime                  @default(now())
+  startedAt                  DateTime?
+  completedAt                DateTime?
+  project                    Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentJob                  BackgroundJob              @relation(fields: [projectId, parentJobId], references: [projectId, id], map: "ProjectGitHubSyncRun_parent_job_fkey", onDelete: NoAction, onUpdate: Cascade)
+  entries                    ProjectGitHubSyncEntry[]
+  changes                    ProjectGitHubSyncChange[]
+  reconciliation             ProjectGitHubSyncReconciliation?
+
+  @@unique([projectId, id])
+  @@unique([projectId, parentJobId], map: "ProjectGitHubSyncRun_project_job_key")
+  @@index([projectId, status, createdAt])
+  @@index([projectId, deadlineAt, status])
+}
+
+model ProjectGitHubSyncEntry {
+  id                         String                      @id @default(uuid()) @db.Uuid
+  projectId                  String                      @db.Uuid
+  syncRunId                  String                      @db.Uuid
+  projectRepositoryLinkId    String                      @db.Uuid
+  githubConnectionId         String                      @db.Uuid
+  credentialId               String                      @db.Uuid
+  credentialSecretFingerprint String                     @db.Char(64)
+  ordinal                    Int
+  targetKind                 ProjectGitHubSyncEntryKind
+  targetKey                  String                      @db.VarChar(1024)
+  status                     ProjectGitHubSyncEntryStatus @default(pending)
+  githubRepositoryId         BigInt
+  repositoryNodeId           String                      @db.VarChar(512)
+  repositoryOwner            String                      @db.VarChar(256)
+  repositoryName             String                      @db.VarChar(256)
+  repositoryFullName        String                      @db.VarChar(512)
+  configVersion              Int
+  effectivePolicyVersion     Int
+  requiredForProjectSnapshot Boolean
+  trackedRef                 String                      @db.VarChar(255)
+  scanScopeFingerprint       String                      @db.Char(64)
+  policyFingerprint          String                      @db.Char(64)
+  configSnapshot             Json                        @db.JsonB
+  beforeCodeGenerationId     String?                     @db.Uuid
+  beforeMaterialGenerationId String?                    @db.Uuid
+  childCodeBatchId           String?                     @db.Uuid
+  childMaterialSyncRunId     String?                     @db.Uuid
+  warning                    String?                     @db.VarChar(128)
+  failureCode                String?                     @db.VarChar(64)
+  createdAt                  DateTime                    @default(now())
+  startedAt                  DateTime?
+  completedAt                DateTime?
+  project                    Project                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  syncRun                   ProjectGitHubSyncRun         @relation(fields: [projectId, syncRunId], references: [projectId, id], map: "ProjectGitHubSyncEntry_run_fkey", onDelete: Cascade, onUpdate: Cascade)
+  repositoryLink             ProjectRepositoryLink       @relation(fields: [projectId, projectRepositoryLinkId], references: [projectId, id], map: "ProjectGitHubSyncEntry_link_fkey", onDelete: NoAction, onUpdate: Cascade)
+  githubConnection           GitHubConnection             @relation(fields: [projectId, githubConnectionId], references: [projectId, id], map: "ProjectGitHubSyncEntry_connection_fkey", onDelete: NoAction, onUpdate: Cascade)
+  credential                 ExternalCredential           @relation(fields: [credentialId], references: [id], map: "ProjectGitHubSyncEntry_credential_fkey", onDelete: NoAction, onUpdate: Cascade)
+  config                     ProjectRepositoryLinkConfigVersion @relation(fields: [projectId, projectRepositoryLinkId, configVersion, effectivePolicyVersion], references: [projectId, projectRepositoryLinkId, version, effectivePolicyVersion], map: "ProjectGitHubSyncEntry_config_fkey", onDelete: NoAction, onUpdate: Cascade)
+  beforeCodeGeneration       RepositoryCodeGeneration?    @relation("SyncEntryBeforeCodeGeneration", fields: [projectId, projectRepositoryLinkId, beforeCodeGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "ProjectGitHubSyncEntry_before_code_fkey", onDelete: NoAction, onUpdate: Cascade)
+  beforeMaterialGeneration   RepositoryMaterialGeneration? @relation("SyncEntryBeforeMaterialGeneration", fields: [projectId, projectRepositoryLinkId, beforeMaterialGenerationId], references: [projectId, projectRepositoryLinkId, id], map: "ProjectGitHubSyncEntry_before_material_fkey", onDelete: NoAction, onUpdate: Cascade)
+  codeBatch                  ProjectScanBatch?            @relation("GitHubSyncCodeBatch", fields: [projectId, childCodeBatchId], references: [projectId, id], map: "ProjectGitHubSyncEntry_code_batch_fkey", onDelete: NoAction, onUpdate: Cascade)
+  materialSyncRun            GitHubMaterialSyncRun?       @relation("GitHubSyncMaterialRun", fields: [projectId, childMaterialSyncRunId], references: [projectId, id], map: "ProjectGitHubSyncEntry_material_run_fkey", onDelete: NoAction, onUpdate: Cascade)
+  changes                   ProjectGitHubSyncChange[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, syncRunId, targetKind, projectRepositoryLinkId], map: "ProjectGitHubSyncEntry_run_target_key")
+  @@unique([projectId, syncRunId, ordinal], map: "ProjectGitHubSyncEntry_run_ordinal_key")
+  @@index([projectId, syncRunId, status, ordinal])
+  @@index([projectId, projectRepositoryLinkId, targetKind, createdAt])
+}
+
+model ProjectGitHubSyncChange {
+  id                         String                      @id @default(uuid()) @db.Uuid
+  projectId                  String                      @db.Uuid
+  syncRunId                  String                      @db.Uuid
+  entryId                   String                      @db.Uuid
+  targetKind                 ProjectGitHubSyncEntryKind
+  targetKey                  String                      @db.VarChar(1024)
+  identity                   String                      @db.VarChar(2048)
+  changeType                 ProjectGitHubSyncChangeType
+  normalizedPath             String?                     @db.VarChar(1024)
+  materialKind               GitHubMaterialKind?
+  remoteIdentity             String?                     @db.VarChar(512)
+  beforeContentHash          String?                     @db.Char(64)
+  afterContentHash           String?                     @db.Char(64)
+  beforeRevisionFingerprint  String?                     @db.Char(64)
+  afterRevisionFingerprint   String?                     @db.Char(64)
+  createdAt                  DateTime                    @default(now())
+  project                    Project                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  syncRun                   ProjectGitHubSyncRun         @relation(fields: [projectId, syncRunId], references: [projectId, id], map: "ProjectGitHubSyncChange_run_fkey", onDelete: Cascade, onUpdate: Cascade)
+  entry                     ProjectGitHubSyncEntry       @relation(fields: [projectId, entryId], references: [projectId, id], map: "ProjectGitHubSyncChange_entry_fkey", onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, syncRunId, entryId, identity], map: "ProjectGitHubSyncChange_run_identity_key")
+  @@index([projectId, syncRunId, changeType, targetKind])
+  @@index([projectId, entryId, identity])
+}
+
+model ProjectGitHubSyncReconciliation {
+  id                  String                                      @id @default(uuid()) @db.Uuid
+  projectId           String                                      @db.Uuid
+  syncRunId            String                                      @unique @db.Uuid
+  requestedById        String                                      @db.Uuid
+  resolution           ProjectGitHubSyncReconciliationResolution
+  childClassifications Json                                        @db.JsonB
+  evidenceFingerprint  String                                      @db.Char(64)
+  createdAt            DateTime                                    @default(now())
+  project              Project                                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  syncRun              ProjectGitHubSyncRun                        @relation(fields: [projectId, syncRunId], references: [projectId, id], map: "ProjectGitHubSyncReconciliation_run_fkey", onDelete: Cascade, onUpdate: Cascade)
+  requestedBy          AppUser                                     @relation(fields: [requestedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, syncRunId], map: "ProjectGitHubSyncReconciliation_project_run_key")
+  @@index([projectId, createdAt])
 }
 
 model MemoryIndexGeneration {

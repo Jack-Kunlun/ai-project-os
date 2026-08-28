@@ -297,6 +297,10 @@ test("provider dispatch classification keeps uncertain calls unknown and rejects
   for (const code of ["AI_PROVIDER_TIMEOUT", "AI_PROVIDER_UNAVAILABLE"] as const) {
     assert.equal(classifyProviderDispatchFailure(new ProviderTransportError(code)), "unknown");
   }
+  assert.equal(classifyProviderDispatchFailure(new GitHubReadError("GITHUB_REQUEST_TIMEOUT", null, null, true)), "unknown");
+  assert.equal(classifyProviderDispatchFailure(new GitHubReadError("GITHUB_REQUEST_FAILED", null, null, true)), "unknown");
+  assert.equal(classifyProviderDispatchFailure(new GitHubReadError("GITHUB_REQUEST_TIMEOUT", null, null, false)), "failed");
+  assert.equal(classifyProviderDispatchFailure(new GitHubReadError("GITHUB_REQUEST_FAILED", null, null, false)), "failed");
   for (const code of ["AI_PROVIDER_AUTH_FAILED", "AI_PROVIDER_REJECTED"] as const) {
     assert.equal(classifyProviderDispatchFailure(new ProviderTransportError(code, 422)), "failed");
   }

@@ -13,6 +13,7 @@ export const GITHUB_READ_ONLY_CLIENT_VERSION =
   "github-read-only-client:v1" as const;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+export const GITHUB_REQUEST_DEADLINE_SAFETY_MS = 250 as const;
 const MAX_TOKEN_FILE_BYTES = 512;
 const MAX_STANDARD_RESPONSE_BYTES = 1_048_576;
 const MAX_TREE_RESPONSE_BYTES = 8_388_608;
@@ -54,6 +55,8 @@ export class GitHubReadError extends Error {
     readonly code: GitHubReadErrorCode,
     readonly retryAtEpochSeconds: number | null = null,
     readonly requestId: string | null = null,
+    /** Whether the transport call was started and may have reached GitHub. */
+    readonly requestDispatched = true,
   ) {
     super(code);
     this.name = "GitHubReadError";
@@ -87,7 +90,7 @@ export type GitHubReadPlan = Readonly<{
   method: "GET";
   url: string;
   redirect: "error";
-  timeoutMs: typeof DEFAULT_TIMEOUT_MS;
+  timeoutMs: number;
   maximumResponseBytes: number;
 }>;
 
@@ -226,8 +229,9 @@ function fail(
   code: GitHubReadErrorCode,
   retryAtEpochSeconds: number | null = null,
   requestId: string | null = null,
+  requestDispatched = true,
 ): never {
-  throw new GitHubReadError(code, retryAtEpochSeconds, requestId);
+  throw new GitHubReadError(code, retryAtEpochSeconds, requestId, requestDispatched);
 }
 
 function enabled(environment: RuntimeEnvironment): boolean {
@@ -506,9 +510,23 @@ async function executeReadPlan(
   plan: GitHubReadPlan,
   token: string,
   fetchImplementation: FetchImplementation,
+  timeoutMs = plan.timeoutMs,
+  absoluteDeadlineAtEpochMs: number | null = null,
 ): Promise<GitHubReadResponse> {
+  // Check the absolute budget before invoking fetch.  This is deliberately a
+  // separate branch from an AbortController timeout so callers can safely
+  // classify it as a deterministic, zero-dispatch outcome.
+  if (
+    absoluteDeadlineAtEpochMs !== null &&
+    Date.now() >= absoluteDeadlineAtEpochMs - GITHUB_REQUEST_DEADLINE_SAFETY_MS
+  ) {
+    return fail("GITHUB_REQUEST_TIMEOUT", null, null, false);
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return fail("GITHUB_REQUEST_TIMEOUT", null, null, false);
+  }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), plan.timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     let response: Response;
     try {
@@ -529,6 +547,9 @@ async function executeReadPlan(
     } catch {
       return fail(
         controller.signal.aborted ? "GITHUB_REQUEST_TIMEOUT" : "GITHUB_REQUEST_FAILED",
+        null,
+        null,
+        true,
       );
     }
     const requestId = safeRequestId(response);
@@ -561,6 +582,14 @@ async function executeReadPlan(
       body: await readJsonWithinLimit(response, plan.maximumResponseBytes),
       nextPage,
     });
+  } catch (error) {
+    if (error instanceof GitHubReadError) throw error;
+    return fail(
+      controller.signal.aborted ? "GITHUB_REQUEST_TIMEOUT" : "GITHUB_REQUEST_FAILED",
+      null,
+      null,
+      true,
+    );
   } finally {
     clearTimeout(timeout);
   }
@@ -1032,12 +1061,27 @@ function parseReleasesPage(
 export function createGitHubReadOnlyClient(options: Readonly<{
   credential: GitHubCredentialHandle;
   fetchImplementation?: FetchImplementation;
+  absoluteDeadlineAt?: Date | number | null;
 }>): GitHubMaterialReadOnlyClient {
   const token = resolveCredential(options.credential);
   const fetchImplementation = options.fetchImplementation ?? fetch;
+  const absoluteDeadlineAtEpochMs = options.absoluteDeadlineAt === undefined || options.absoluteDeadlineAt === null
+    ? null
+    : options.absoluteDeadlineAt instanceof Date
+      ? options.absoluteDeadlineAt.getTime()
+      : options.absoluteDeadlineAt;
+  if (absoluteDeadlineAtEpochMs !== null && !Number.isFinite(absoluteDeadlineAtEpochMs)) {
+    return fail("GITHUB_INVALID_REQUEST");
+  }
   const request = async (endpoint: GitHubReadEndpoint): Promise<GitHubReadResponse> => {
     const plan = createGitHubReadPlan(endpoint);
-    return executeReadPlan(plan, token, fetchImplementation);
+    const timeoutMs = absoluteDeadlineAtEpochMs === null
+      ? plan.timeoutMs
+      : Math.min(
+        plan.timeoutMs,
+        absoluteDeadlineAtEpochMs - Date.now() - GITHUB_REQUEST_DEADLINE_SAFETY_MS,
+      );
+    return executeReadPlan(plan, token, fetchImplementation, timeoutMs, absoluteDeadlineAtEpochMs);
   };
   const client: GitHubMaterialReadOnlyClient = {
     version: GITHUB_READ_ONLY_CLIENT_VERSION,

@@ -475,6 +475,9 @@ test(
               assert.equal(body.model, OPENAI_EMBEDDING_MODEL_ID);
               assert.equal(body.dimensions, 1_536);
               assert.ok(body.input.length >= 6);
+              const semanticTargetIndex = body.input.findIndex((content) =>
+                content.includes("Governed memory"));
+              assert.notEqual(semanticTargetIndex, -1);
               return new Response(JSON.stringify({
                 object: "list",
                 model: OPENAI_EMBEDDING_MODEL_ID,
@@ -483,7 +486,10 @@ test(
                   index,
                   embedding: Array.from(
                     { length: 1_536 },
-                    (_, component) => component === 0 ? 1 : 0,
+                    (_, component) =>
+                      component === (index === semanticTargetIndex ? 0 : 1)
+                        ? 1
+                        : 0,
                   ),
                 })),
                 usage: {

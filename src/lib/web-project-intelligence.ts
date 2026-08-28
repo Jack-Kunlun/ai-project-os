@@ -813,6 +813,8 @@ export async function listProjectIntelligence(projectIdValue: unknown, db: Prism
         publishedAt: true,
         generation: {
           select: {
+            jobId: true,
+            status: true,
             providerConnectionId: true,
             modelId: true,
             dimensions: true,
@@ -846,6 +848,8 @@ export async function listProjectIntelligence(projectIdValue: unknown, db: Prism
       modelId: activeIndex.generation.modelId,
       dimensions: activeIndex.generation.dimensions,
       inputManifestFingerprint: activeIndex.generation.inputManifestFingerprint,
+      legacy: activeIndex.generation.jobId === null,
+      status: activeIndex.generation.status,
     },
     currentInputManifestFingerprint: currentManifest,
     generationProviderVerified: generationRoute?.providerConnection.status === "verified",

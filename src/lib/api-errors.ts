@@ -201,9 +201,21 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MEMORY_INDEX_EMPTY: "当前没有可建立索引的项目资料或仓库内容",
       MEMORY_INDEX_TOO_LARGE: "当前索引输入超过单次安全上限",
       MEMORY_INDEX_INPUT_INVALID: "索引输入或向量配置无效",
+      MEMORY_INDEX_ROUTE_MISSING: "请先配置项目向量路由",
+      MEMORY_INDEX_PROVIDER_UNAVAILABLE: "当前向量供应商未验证或已停用",
+      MEMORY_INDEX_INCREMENTAL_BASELINE_REQUIRED: "增量构建需要一代兼容且带完整指纹的活动索引，请先执行全量构建",
+      MEMORY_INDEX_PLAN_STALE: "索引计划已变化，请重新读取计划并确认后再构建",
+      MEMORY_INDEX_DEADLINE_EXCEEDED: "当前索引规模无法在单次请求期限内安全完成",
+      MEMORY_INDEX_ALREADY_RUNNING: "项目已有索引构建正在进行或等待人工收口",
+      MEMORY_INDEX_RECONCILIATION_REQUIRED: "该索引结果尚未完成协调确认",
       MEMORY_INDEX_PUBLICATION_CONFLICT: "索引发布发生并发冲突，请重试",
     } as const;
-    const status = error.code === "MEMORY_INDEX_PUBLICATION_CONFLICT" ? 409 : 422;
+    const status = [
+      "MEMORY_INDEX_PLAN_STALE",
+      "MEMORY_INDEX_ALREADY_RUNNING",
+      "MEMORY_INDEX_RECONCILIATION_REQUIRED",
+      "MEMORY_INDEX_PUBLICATION_CONFLICT",
+    ].includes(error.code) ? 409 : 422;
     return { status, body: { error: { code: error.code, message: messages[error.code] } } };
   }
 

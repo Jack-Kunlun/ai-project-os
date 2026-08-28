@@ -1,7 +1,8 @@
 import type { AiOperation, AiProviderConnection } from "@prisma/client";
 import { readCredentialSecret } from "@/lib/credential-vault";
 
-const REQUEST_TIMEOUT_MS = 45_000;
+/** Upper bound used for one provider HTTP request when no earlier deadline applies. */
+export const PROVIDER_REQUEST_TIMEOUT_MS = 45_000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_EMBEDDING_BATCH = 32;
 const MAX_EMBEDDING_INPUT_CHARS = 24_000;
@@ -20,6 +21,8 @@ export class ProviderTransportError extends Error {
   constructor(
     readonly code: ProviderTransportErrorCode,
     readonly status: number = 502,
+    /** Whether the provider request may already have reached the network. */
+    readonly requestDispatched = true,
   ) {
     super(code);
     this.name = "ProviderTransportError";
@@ -87,11 +90,22 @@ async function providerPost(
   connection: RuntimeConnection,
   path: "/chat/completions" | "/embeddings",
   body: Readonly<Record<string, unknown>>,
+  absoluteDeadlineAt?: Date,
 ): Promise<Readonly<{ payload: unknown; requestId: string | null }>> {
-  if (connection.status === "disabled") return fail("AI_PROVIDER_UNAVAILABLE", 409);
+  if (connection.status === "disabled") throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+  const remaining = absoluteDeadlineAt === undefined
+    ? PROVIDER_REQUEST_TIMEOUT_MS
+    : absoluteDeadlineAt.getTime() - Date.now();
+  if (remaining <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
   const apiKey = await readCredentialSecret(connection.credentialId, "aiProvider");
+  const remainingAfterCredential = absoluteDeadlineAt === undefined
+    ? PROVIDER_REQUEST_TIMEOUT_MS
+    : absoluteDeadlineAt.getTime() - Date.now();
+  if (remainingAfterCredential <= 0) {
+    throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
+  }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), Math.min(PROVIDER_REQUEST_TIMEOUT_MS, remainingAfterCredential));
   try {
     const response = await fetch(`${connection.baseUrl}${path}`, {
       method: "POST",
@@ -171,6 +185,7 @@ export async function invokeEmbeddings(input: Readonly<{
   modelId: string;
   texts: readonly string[];
   expectedDimensions?: number | null;
+  absoluteDeadlineAt?: Date;
 }>): Promise<EmbeddingResult> {
   if (input.connection.kind === "deepseek") return fail("AI_PROVIDER_EMBEDDING_UNSUPPORTED", 422);
   if (
@@ -186,7 +201,7 @@ export async function invokeEmbeddings(input: Readonly<{
     ...(input.connection.kind === "openai" && input.expectedDimensions
       ? { dimensions: input.expectedDimensions }
       : {}),
-  });
+  }, input.absoluteDeadlineAt);
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
   const record = payload as Record<string, unknown>;
   const data = record.data;
@@ -223,4 +238,3 @@ export async function invokeEmbeddings(input: Readonly<{
     providerRequestId: requestId,
   });
 }
-

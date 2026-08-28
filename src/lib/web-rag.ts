@@ -235,6 +235,8 @@ export async function getActiveMemoryIndex(projectId: string, db: PrismaClient =
         generation: {
           select: {
             id: true,
+            jobId: true,
+            status: true,
             providerConnectionId: true,
             modelId: true,
             dimensions: true,
@@ -273,6 +275,8 @@ export async function getActiveMemoryIndex(projectId: string, db: PrismaClient =
   ]);
   if (
     pointer === null ||
+    pointer.generation.jobId === null ||
+    pointer.generation.status !== "complete" ||
     pointer.generation.records.length === 0 ||
     route === null ||
     route.providerConnection.status !== "verified" ||

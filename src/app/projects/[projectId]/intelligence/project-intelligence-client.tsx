@@ -71,6 +71,7 @@ type ProviderRoute = null | {
 type Readiness = {
   activeIndex: boolean;
   indexCompatible: boolean;
+  state: "routeMissing" | "providerUnavailable" | "indexMissing" | "legacyIndex" | "routeIncompatible" | "inputsChanged" | "ready" | "generationProviderUnavailable";
   embeddingRoute: boolean;
   generationRoute: boolean;
   ready: boolean;
@@ -178,7 +179,7 @@ function ReadinessPanel({ readiness }: { readiness: Readiness }) {
   const checks = [
     { label: "生成模型路由", ready: readiness.generationRoute, detail: readiness.routes.generation ? `${readiness.routes.generation.providerConnection.name} · ${readiness.routes.generation.modelId}` : "尚未配置" },
     { label: "向量模型路由", ready: readiness.embeddingRoute, detail: readiness.routes.embedding ? `${readiness.routes.embedding.providerConnection.name} · ${readiness.routes.embedding.modelId}` : "尚未配置" },
-    { label: "兼容的记忆索引", ready: readiness.indexCompatible, detail: readiness.indexCompatible ? `索引 ${shortHash(readiness.indexGenerationId ?? "")}` : readiness.activeIndex ? "当前向量路由已变化，请重建索引" : "尚未建立" },
+    { label: "兼容的记忆索引", ready: readiness.indexCompatible, detail: readiness.indexCompatible ? `索引 ${shortHash(readiness.indexGenerationId ?? "")}` : readiness.state === "legacyIndex" ? "旧版索引，升级后需首次全量重建" : readiness.activeIndex ? "当前向量路由已变化，请重建索引" : "尚未建立" },
   ];
   return <section className={`rounded-3xl border p-6 shadow-sm ${readiness.ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Runtime readiness</p><h2 className="mt-2 text-xl font-semibold">{readiness.ready ? "项目智能体已就绪" : "完成配置后即可运行"}</h2></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${readiness.ready ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{readiness.ready ? "READY" : "SETUP REQUIRED"}</span></div><div className="mt-5 grid gap-3 md:grid-cols-3">{checks.map((check) => <div key={check.label} className="rounded-2xl border border-white/80 bg-white/80 p-4"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${check.ready ? "bg-emerald-500" : "bg-amber-400"}`} /><p className="text-sm font-semibold">{check.label}</p></div><p className="mt-2 truncate text-xs text-slate-500" title={check.detail}>{check.detail}</p></div>)}</div>{!readiness.ready ? <p className="mt-4 text-xs leading-5 text-amber-900">请在“智能控制台”配置并验证生成、向量路由，再到“智能记忆”建立当前索引。项目内容只有在你勾选本次确认并主动运行后才会发送给供应商。</p> : null}</section>;
 }

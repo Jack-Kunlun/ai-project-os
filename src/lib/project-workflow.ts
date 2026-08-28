@@ -262,6 +262,25 @@ function serializeGitHubProjectSyncResult(value: Record<string, unknown>): Recor
   };
 }
 
+function serializeMemoryIndexResult(value: Record<string, unknown>): Record<string, unknown> {
+  const output: Record<string, unknown> = {};
+  const indexGenerationId = safeResultString(value.indexGenerationId, 128);
+  const mode = safeResultEnum(value.mode, ["full", "incremental"] as const);
+  const planFingerprint = safeResultHash(value.planFingerprint, 64);
+  const manifest = safeResultHash(value.manifest, 64);
+  const reconciliation = safeResultEnum(value.reconciliation, ["publishedLocally", "explicitAbandon"] as const);
+  if (indexGenerationId !== null) output.indexGenerationId = indexGenerationId;
+  if (mode !== null) output.mode = mode;
+  if (planFingerprint !== null) output.planFingerprint = planFingerprint;
+  if (manifest !== null) output.manifest = manifest;
+  if (reconciliation !== null) output.reconciliation = reconciliation;
+  for (const key of ["expectedInputCount", "generatedRecordCount", "reusedRecordCount", "recordCount", "dimensions"] as const) {
+    const number = safeResultInteger(value[key]);
+    if (number !== null) output[key] = number;
+  }
+  return output;
+}
+
 export function serializeProjectJobResult(kind: BackgroundJobKind, value: unknown): unknown {
   if (value === null || value === undefined || !isRecord(value)) return null;
   if (kind === "githubScan") return Object.freeze(serializeCodeScanResult(value));
@@ -278,12 +297,7 @@ export function serializeProjectJobResult(kind: BackgroundJobKind, value: unknow
     });
   }
   if (kind === "memoryIndex") {
-    return Object.freeze(serializeSimpleResult(value, {
-      indexGenerationId: "uuid",
-      recordCount: "integer",
-      dimensions: "integer",
-      manifest: "hash",
-    }));
+    return Object.freeze(serializeMemoryIndexResult(value));
   }
   if (kind === "autoExtract") {
     return Object.freeze(serializeSimpleResult(value, {
@@ -305,7 +319,7 @@ export function isLeaseExpired(leaseExpiresAt: Date | string, now = new Date()):
 
 export function isUncertainProviderDispatch(error: unknown): boolean {
   const code = safeFailureCode(error);
-  if ((code === "GITHUB_REQUEST_TIMEOUT" || code === "GITHUB_REQUEST_FAILED") &&
+  if ((code === "AI_PROVIDER_TIMEOUT" || code === "AI_PROVIDER_UNAVAILABLE" || code === "GITHUB_REQUEST_TIMEOUT" || code === "GITHUB_REQUEST_FAILED") &&
     typeof error === "object" && error !== null &&
     "requestDispatched" in error && (error as { requestDispatched?: unknown }).requestDispatched === false) {
     return false;
@@ -555,6 +569,22 @@ export async function markProviderAcknowledged(
     const updated = await tx.backgroundJobAttempt.updateMany({
       where: { id: input.attemptId, jobId: input.jobId, status: "running", dispatchState: "dispatched" },
       data: { dispatchState: "acknowledged", heartbeatAt: now, leaseExpiresAt: new Date(now.getTime() + DEFAULT_JOB_LEASE_MS) },
+    });
+    if (updated.count !== 1) return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
+    return true;
+  });
+}
+
+/** Undo the optimistic dispatch marker when transport failed before fetch. */
+export async function markProviderNotDispatched(
+  input: Readonly<{ jobId: string; attemptId: string; claimToken: string }>,
+  db: WorkflowDb = getDb(),
+): Promise<boolean> {
+  return withJobLock(db, input.jobId, async (tx) => {
+    await verifyAttempt(tx, input);
+    const updated = await tx.backgroundJobAttempt.updateMany({
+      where: { id: input.attemptId, jobId: input.jobId, status: "running", dispatchState: "dispatched" },
+      data: { dispatchState: "pending" },
     });
     if (updated.count !== 1) return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
     return true;

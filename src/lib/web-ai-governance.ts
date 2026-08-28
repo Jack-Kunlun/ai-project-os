@@ -23,6 +23,7 @@ import {
   markProjectJobUnknown,
   markProviderAcknowledged,
   markProviderDispatched,
+  markProviderNotDispatched,
   type JobAttemptClaim,
   updateProjectJobProgress,
 } from "@/lib/project-workflow";
@@ -86,6 +87,12 @@ export async function createGrantedWebAiJob(input: Readonly<{
   scopeIds: unknown;
   manifestFingerprint: string;
   payload: Record<string, unknown>;
+  /**
+   * A kind-specific resource can be created while the grant/job transaction
+   * is still open. Memory index candidates use this seam to hold the project
+   * admission lock and create their generation atomically with the job.
+   */
+  afterCreate?: (tx: Prisma.TransactionClient, jobId: string) => Promise<void>;
 }>, db: PrismaClient = getDb()): Promise<Readonly<{ jobId: string; created: boolean }>> {
   const key = idempotencyKey(input.kind, input.projectId, input.requestedBy.id, input.clientKey);
   const existing = await db.backgroundJob.findUnique({
@@ -120,6 +127,7 @@ export async function createGrantedWebAiJob(input: Readonly<{
         payload: jsonValue(input.payload),
       },
     });
+    if (input.afterCreate !== undefined) await input.afterCreate(tx, job.id);
     return Object.freeze({ jobId: job.id, created: true });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
@@ -233,6 +241,14 @@ export async function auditedProviderCall<T>(input: Readonly<{
     return result;
   } catch (error) {
     const uncertain = isUncertainProviderDispatch(error);
+    // Transport errors that do not carry the optional marker are conservative:
+    // the request may already have reached the provider. Only an explicit
+    // `false` is safe to classify as pre-dispatch.
+    const requestDispatched = !(
+      typeof error === "object" && error !== null &&
+      "requestDispatched" in error &&
+      (error as { requestDispatched?: unknown }).requestDispatched === false
+    );
     await db.providerCallAudit.updateMany({
       where: { id: audit.id, status: "running" },
       data: {
@@ -241,6 +257,9 @@ export async function auditedProviderCall<T>(input: Readonly<{
         completedAt: new Date(),
       },
     });
+    if (!uncertain && !requestDispatched) {
+      await markProviderNotDispatched({ jobId: input.jobId, ...input.attempt }, db).catch(() => undefined);
+    }
     if (uncertain) {
       await markProjectJobUnknown({ jobId: input.jobId, ...input.attempt, error }, db);
     }

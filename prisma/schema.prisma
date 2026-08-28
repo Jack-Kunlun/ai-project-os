@@ -142,9 +142,21 @@ enum BackgroundJobAttemptDispatchState {
 
 enum MemoryIndexStatus {
   staging
+  building
   complete
   failed
+  unknown
   superseded
+}
+
+enum MemoryIndexBuildMode {
+  full
+  incremental
+}
+
+enum MemoryIndexReconciliationResolution {
+  explicitAbandon  @map("explicit_abandon")
+  publishedLocally @map("published_locally")
 }
 
 enum MemoryRecordScope {
@@ -615,6 +627,7 @@ model Project {
   memoryIndexGenerations           MemoryIndexGeneration[]
   memoryIndexPointer               MemoryIndexPointer?
   memoryRecords                    MemoryRecord[]
+  memoryIndexReconciliations       MemoryIndexReconciliation[]
   ragAnswers                       RagAnswer[]
   webAiCandidates                  WebAiCandidate[]
   intelligenceReports              ProjectIntelligenceReport[]
@@ -2653,6 +2666,7 @@ model AppUser {
   backgroundJobs  BackgroundJob[]
   aiRouteRevisions ProjectAiRouteRevision[]
   githubSyncReconciliations ProjectGitHubSyncReconciliation[]
+  memoryIndexReconciliations MemoryIndexReconciliation[]
 }
 
 model AppSession {
@@ -2815,6 +2829,7 @@ model BackgroundJob {
   intelligenceReport ProjectIntelligenceReport?
   projectAgentRun  ProjectAgentRun?
   githubSyncRun    ProjectGitHubSyncRun?
+  memoryIndexGenerations MemoryIndexGeneration[]
   providerCalls    ProviderCallAudit[]
   attempts         BackgroundJobAttempt[]
 
@@ -2979,13 +2994,23 @@ model ProjectGitHubSyncReconciliation {
 model MemoryIndexGeneration {
   id                       String               @id @default(uuid()) @db.Uuid
   projectId                String               @db.Uuid
+  jobId                    String?              @db.Uuid
   providerConnectionId     String               @db.Uuid
   modelId                  String               @db.VarChar(128)
   dimensions               Int
   status                   MemoryIndexStatus    @default(staging)
+  buildMode                MemoryIndexBuildMode @default(full)
   inputManifestFingerprint String               @db.Char(64)
   expectedActiveIndexGenerationId String?       @db.Uuid
+  expectedEmbeddingRouteUpdatedAt DateTime?
+  expectedInputCount      Int                  @default(0)
+  generatedRecordCount    Int                  @default(0)
+  reusedRecordCount       Int                  @default(0)
+  deadlineAt              DateTime?
+  failureCode             String?              @db.VarChar(64)
+  reconciliationRequired  Boolean              @default(false)
   expectedActiveIndexGeneration MemoryIndexGeneration? @relation("MemoryIndexGenerationExpectedActive", fields: [projectId, expectedActiveIndexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  job                      BackgroundJob?       @relation(fields: [projectId, jobId], references: [projectId, id], map: "MemoryIndexGeneration_job_fkey", onDelete: NoAction, onUpdate: Cascade)
   recordCount              Int                  @default(0)
   createdAt                DateTime             @default(now())
   completedAt              DateTime?
@@ -2998,11 +3023,14 @@ model MemoryIndexGeneration {
   intelligenceReports      ProjectIntelligenceReport[]
   projectAgentRuns         ProjectAgentRun[]
   aiRouteRevisions         ProjectAiRouteRevision[]
+  reconciliations           MemoryIndexReconciliation[]
   expectedByIndexGenerations MemoryIndexGeneration[] @relation("MemoryIndexGenerationExpectedActive")
 
   @@unique([projectId, id])
+  @@unique([projectId, jobId], map: "MemoryIndexGeneration_projectId_jobId_key")
   @@index([projectId, status, createdAt])
   @@index([projectId, expectedActiveIndexGenerationId])
+  @@index([projectId, jobId])
 }
 
 model MemoryIndexPointer {
@@ -3030,16 +3058,41 @@ model MemoryRecord {
   contentText             String                @db.Text
   contentHash             String                @db.Char(64)
   embedding               Float[]
+  inputFingerprint         String?               @db.Char(64)
+  embeddingFingerprint     String?               @db.Char(64)
+  reusedFromMemoryRecordId String?              @db.Uuid
   createdAt               DateTime              @default(now())
   project                 Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
   generation              MemoryIndexGeneration @relation(fields: [projectId, indexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   projectSource           ProjectSource?        @relation("MemoryRecordProjectSource", fields: [projectId, projectSourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   projectRepositoryLink   ProjectRepositoryLink? @relation("MemoryRecordRepositoryLink", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  reusedFromMemoryRecord  MemoryRecord?         @relation("MemoryRecordReuse", fields: [projectId, reusedFromMemoryRecordId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  reusedByMemoryRecords   MemoryRecord[]        @relation("MemoryRecordReuse")
 
+  @@unique([projectId, id], map: "MemoryRecord_project_id_key")
   @@unique([projectId, indexGenerationId, id])
   @@index([projectId, indexGenerationId, scope])
+  @@index([projectId, indexGenerationId, inputFingerprint], map: "MemoryRecord_project_generation_input_fingerprint_idx")
+  @@index([projectId, embeddingFingerprint], map: "MemoryRecord_project_embedding_fingerprint_idx")
   @@index([projectId, projectSourceId])
   @@index([projectId, projectRepositoryLinkId])
+}
+
+model MemoryIndexReconciliation {
+  id                  String                                  @id @default(uuid()) @db.Uuid
+  projectId           String                                  @db.Uuid
+  indexGenerationId   String                                  @db.Uuid
+  requestedById       String                                  @db.Uuid
+  resolution          MemoryIndexReconciliationResolution
+  evidenceFingerprint String                                  @db.Char(64)
+  createdAt           DateTime                                @default(now())
+  project             Project                                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generation          MemoryIndexGeneration                   @relation(fields: [projectId, indexGenerationId], references: [projectId, id], map: "MemoryIndexReconciliation_generation_fkey", onDelete: Cascade, onUpdate: Cascade)
+  requestedBy         AppUser                                 @relation(fields: [requestedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id], map: "MemoryIndexReconciliation_project_id_key")
+  @@unique([projectId, indexGenerationId], map: "MemoryIndexReconciliation_project_generation_key")
+  @@index([projectId, createdAt])
 }
 
 model RagAnswer {

@@ -304,6 +304,12 @@ test("provider dispatch classification keeps uncertain calls unknown and rejects
   for (const code of ["AI_PROVIDER_AUTH_FAILED", "AI_PROVIDER_REJECTED"] as const) {
     assert.equal(classifyProviderDispatchFailure(new ProviderTransportError(code, 422)), "failed");
   }
+  for (const code of ["AI_PROVIDER_TIMEOUT", "AI_PROVIDER_UNAVAILABLE"] as const) {
+    assert.equal(
+      classifyProviderDispatchFailure(new ProviderTransportError(code, 504, false)),
+      "failed",
+    );
+  }
   assert.throws(
     () => rejectProjectJobRetry(),
     (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_RETRY_NOT_SUPPORTED",
@@ -546,6 +552,21 @@ test("job result serializers keep search and answer payloads explicit", () => {
       { ...validPersistedAnswerInput.citations[0], contentHash: "not-a-sha256" },
     ],
   }), null);
+
+  const published = serializeProjectJobResult("memoryIndex", {
+    indexGenerationId: randomUUID(),
+    mode: "incremental",
+    recordCount: 2,
+    reconciliation: "publishedLocally",
+    credentialId: "do-not-return",
+  }) as Record<string, unknown>;
+  assert.equal(published.reconciliation, "publishedLocally");
+  assert.equal("credentialId" in published, false);
+  const abandoned = serializeProjectJobResult("memoryIndex", {
+    reconciliation: "explicitAbandon",
+    payload: "do-not-return",
+  }) as Record<string, unknown>;
+  assert.deepEqual(abandoned, { reconciliation: "explicitAbandon" });
 });
 
 test("job action routes consistently use the public mapper", () => {

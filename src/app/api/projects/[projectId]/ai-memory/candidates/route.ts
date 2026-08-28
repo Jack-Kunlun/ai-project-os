@@ -5,6 +5,7 @@ import {
 } from "@/lib/ai-memory";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError } from "@/lib/api-response";
+import { requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import {
   listAiCandidatesQuerySchema,
@@ -37,6 +38,7 @@ export async function GET(
   context: { params: Promise<{ projectId: string }> },
 ) {
   try {
+    await requireApiSession(request);
     const { projectId: rawProjectId } = await context.params;
     const projectId = projectIdSchema.parse(rawProjectId);
     const query = parseQuery(request);

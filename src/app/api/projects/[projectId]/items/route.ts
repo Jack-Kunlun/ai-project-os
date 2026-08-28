@@ -2,6 +2,7 @@ import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
+import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import {
   appendProjectItemRevision,
@@ -29,8 +30,9 @@ async function assertProjectExists(db: ReturnType<typeof getDb>, projectId: stri
   }
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ projectId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
+    await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
     const db = getDb();
     await assertProjectExists(db, projectId);
@@ -51,6 +53,8 @@ export async function POST(request: Request, context: { params: Promise<{ projec
   let parsedProjectId: string | undefined;
 
   try {
+    assertSameOrigin(request);
+    await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
     parsedProjectId = projectId;
     const db = getDb();

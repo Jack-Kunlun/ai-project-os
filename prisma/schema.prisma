@@ -68,6 +68,75 @@ enum EmbeddingProvider {
   openai
 }
 
+enum AppUserRole {
+  admin
+}
+
+enum ExternalCredentialKind {
+  aiProvider @map("ai_provider")
+  github
+}
+
+enum AiProviderKind {
+  openai
+  deepseek
+  qwen
+  glm
+}
+
+enum AiProviderProtocol {
+  chatCompletions @map("chat_completions")
+}
+
+enum AiProviderConnectionStatus {
+  configured
+  verified
+  error
+  disabled
+}
+
+enum WebAiScopeKind {
+  projectSources      @map("project_sources")
+  repositoryCode     @map("repository_code")
+  repositoryMaterial @map("repository_material")
+  query
+}
+
+enum BackgroundJobKind {
+  githubScan         @map("github_scan")
+  githubMaterialSync @map("github_material_sync")
+  memoryIndex        @map("memory_index")
+  autoExtract        @map("auto_extract")
+  ragAnswer          @map("rag_answer")
+}
+
+enum BackgroundJobStatus {
+  queued
+  running
+  succeeded
+  failed
+  cancelled
+}
+
+enum MemoryIndexStatus {
+  staging
+  complete
+  failed
+  superseded
+}
+
+enum MemoryRecordScope {
+  projectSource       @map("project_source")
+  repositoryCode     @map("repository_code")
+  repositoryMaterial @map("repository_material")
+}
+
+enum WebAiCandidateStatus {
+  candidate
+  accepted
+  dismissed
+}
+
 enum EmbeddingNormalization {
   unit_length
 }
@@ -464,6 +533,14 @@ model Project {
   codeSnapshots                    ProjectCodeSnapshot[]
   codeSnapshotEntries              ProjectCodeSnapshotEntry[]
   codeSnapshotPointer              ProjectCodeSnapshotPointer?
+  webAiRoutes                      ProjectAiRoute[]
+  webAiGrants                      WebAiGrant[]
+  backgroundJobs                   BackgroundJob[]
+  memoryIndexGenerations           MemoryIndexGeneration[]
+  memoryIndexPointer               MemoryIndexPointer?
+  memoryRecords                    MemoryRecord[]
+  ragAnswers                       RagAnswer[]
+  webAiCandidates                  WebAiCandidate[]
 
   @@index([updatedAt])
 }
@@ -478,7 +555,9 @@ model GitHubConnection {
   disabledAt            DateTime?
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
+  credentialId          String?                 @db.Uuid
   project               Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  credential            ExternalCredential?     @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   repositoryLinks       ProjectRepositoryLink[]
 
   @@unique([projectId, id])
@@ -555,6 +634,7 @@ model ProjectRepositoryLink {
   ragSnapshots            RepositoryRagSnapshot[]
   ragSnapshotPointer      RepositoryRagSnapshotPointer?        @relation("RepositoryRagSnapshotPointerLink")
   projectRepositoryRagEntries ProjectRepositoryRagSnapshotEntry[]
+  memoryRecords          MemoryRecord[]                        @relation("MemoryRecordRepositoryLink")
 
   @@unique([projectId, id])
   @@unique([projectId, githubRepositoryId])
@@ -1357,6 +1437,8 @@ model ProjectSource {
   githubSourceVersion     GitHubSourceVersion?
   repositoryMaterialGrantSources RepositoryMaterialModelGrantSource[]
   repositoryMaterialChunks       RepositoryMaterialChunk[]
+  memoryRecords                  MemoryRecord[]                 @relation("MemoryRecordProjectSource")
+  webAiCandidates                WebAiCandidate[]
 
   @@unique([projectId, id])
   @@unique([projectId, id, originScope])
@@ -1387,6 +1469,7 @@ model ProjectItem {
   supersedesItem   ProjectItem?            @relation("ItemSupersession", fields: [projectId, supersedesItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   supersededBy     ProjectItem[]           @relation("ItemSupersession")
   aiCandidateClaim AiCandidateClaim?       @relation("AiCandidateItem")
+  webAiCandidate   WebAiCandidate?         @relation("WebAiCandidateItem")
   evidences        ProjectItemEvidence[]
   revisions        ProjectItemRevision[]
 
@@ -2469,4 +2552,269 @@ model AiCandidateClaim {
   @@unique([projectId, projectItemId])
   @@index([projectId, reviewStatus, createdAt])
   @@index([projectId, sourceId])
+}
+
+model AppUser {
+  id              String          @id @default(uuid()) @db.Uuid
+  username        String          @unique @db.VarChar(64)
+  passwordHash    String          @db.VarChar(128)
+  passwordSalt    String          @db.VarChar(128)
+  passwordVersion Int             @default(1)
+  role            AppUserRole     @unique @default(admin)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  sessions        AppSession[]
+  webAiGrants     WebAiGrant[]
+  backgroundJobs  BackgroundJob[]
+}
+
+model AppSession {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  tokenHash  String    @unique @db.Char(64)
+  expiresAt  DateTime
+  lastSeenAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+  user       AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt, revokedAt])
+}
+
+model ExternalCredential {
+  id                String                 @id @default(uuid()) @db.Uuid
+  kind              ExternalCredentialKind
+  ciphertext        Bytes
+  nonce             Bytes
+  authTag           Bytes
+  keyVersion        Int                    @default(1)
+  maskedSuffix      String                 @db.VarChar(12)
+  secretFingerprint String                 @db.Char(64)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  rotatedAt         DateTime?
+  aiProvider        AiProviderConnection?
+  githubConnections GitHubConnection[]
+
+  @@index([kind, updatedAt])
+}
+
+model AiProviderConnection {
+  id                       String                     @id @default(uuid()) @db.Uuid
+  name                     String                     @unique @db.VarChar(80)
+  kind                     AiProviderKind
+  protocol                 AiProviderProtocol         @default(chatCompletions)
+  baseUrl                  String                     @db.VarChar(512)
+  credentialId             String                     @unique @db.Uuid
+  defaultGenerationModelId String                     @db.VarChar(128)
+  defaultEmbeddingModelId  String?                    @db.VarChar(128)
+  embeddingDimensions      Int?
+  status                   AiProviderConnectionStatus @default(configured)
+  lastTestedAt             DateTime?
+  lastErrorCode            String?                    @db.VarChar(64)
+  disabledAt               DateTime?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  credential               ExternalCredential         @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  projectRoutes            ProjectAiRoute[]
+  webAiGrants              WebAiGrant[]
+  memoryIndexGenerations   MemoryIndexGeneration[]
+  ragAnswers               RagAnswer[]
+  webAiCandidates          WebAiCandidate[]
+  providerCalls            ProviderCallAudit[]
+
+  @@index([kind, status])
+}
+
+model ProjectAiRoute {
+  projectId           String               @db.Uuid
+  operation           AiOperation
+  providerConnectionId String              @db.Uuid
+  modelId             String               @db.VarChar(128)
+  embeddingDimensions Int?
+  maxOutputTokens     Int                  @default(2048)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  providerConnection  AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@id([projectId, operation])
+  @@index([providerConnectionId])
+}
+
+model WebAiGrant {
+  id                   String               @id @default(uuid()) @db.Uuid
+  projectId            String               @db.Uuid
+  operation            AiOperation
+  scopeKind            WebAiScopeKind
+  scopeIds             Json                 @db.JsonB
+  manifestFingerprint  String               @db.Char(64)
+  providerConnectionId String               @db.Uuid
+  modelId              String               @db.VarChar(128)
+  consentVersion       String               @db.VarChar(128)
+  issuedById           String               @db.Uuid
+  issuedAt             DateTime             @default(now())
+  expiresAt            DateTime
+  revokedAt            DateTime?
+  project              Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  providerConnection   AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  issuedBy             AppUser              @relation(fields: [issuedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  jobs                 BackgroundJob[]
+
+  @@index([projectId, operation, expiresAt])
+  @@index([providerConnectionId])
+}
+
+model BackgroundJob {
+  id               String              @id @default(uuid()) @db.Uuid
+  projectId        String?             @db.Uuid
+  kind             BackgroundJobKind
+  status           BackgroundJobStatus @default(queued)
+  stage            String              @default("queued") @db.VarChar(64)
+  payload          Json                @default("{}") @db.JsonB
+  result           Json?               @db.JsonB
+  progressCurrent  Int                 @default(0)
+  progressTotal    Int                 @default(0)
+  failureCode      String?             @db.VarChar(64)
+  idempotencyKey   String              @db.Char(64)
+  requestedById    String              @db.Uuid
+  webAiGrantId     String?             @db.Uuid
+  createdAt        DateTime            @default(now())
+  startedAt        DateTime?
+  completedAt      DateTime?
+  project          Project?            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  requestedBy      AppUser             @relation(fields: [requestedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  webAiGrant       WebAiGrant?          @relation(fields: [webAiGrantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  webAiCandidates  WebAiCandidate[]
+  ragAnswer        RagAnswer?
+  providerCalls    ProviderCallAudit[]
+
+  @@unique([requestedById, idempotencyKey])
+  @@index([projectId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model MemoryIndexGeneration {
+  id                       String               @id @default(uuid()) @db.Uuid
+  projectId                String               @db.Uuid
+  providerConnectionId     String               @db.Uuid
+  modelId                  String               @db.VarChar(128)
+  dimensions               Int
+  status                   MemoryIndexStatus    @default(staging)
+  inputManifestFingerprint String               @db.Char(64)
+  recordCount              Int                  @default(0)
+  createdAt                DateTime             @default(now())
+  completedAt              DateTime?
+  supersededAt             DateTime?
+  project                  Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  providerConnection       AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  records                  MemoryRecord[]
+  pointer                  MemoryIndexPointer?
+  ragAnswers               RagAnswer[]
+
+  @@unique([projectId, id])
+  @@index([projectId, status, createdAt])
+}
+
+model MemoryIndexPointer {
+  projectId         String                @id @db.Uuid
+  indexGenerationId String                @unique @db.Uuid
+  publishedAt       DateTime              @default(now())
+  project           Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generation        MemoryIndexGeneration @relation(fields: [projectId, indexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, indexGenerationId])
+}
+
+model MemoryRecord {
+  id                      String                @id @default(uuid()) @db.Uuid
+  projectId               String                @db.Uuid
+  indexGenerationId       String                @db.Uuid
+  scope                   MemoryRecordScope
+  projectSourceId         String?               @db.Uuid
+  projectRepositoryLinkId String?               @db.Uuid
+  frozenCommitSha         String?               @db.Char(40)
+  path                    String?               @db.VarChar(1024)
+  externalRef             String?               @db.Text
+  rangeStart              Int
+  rangeEnd                Int
+  contentText             String                @db.Text
+  contentHash             String                @db.Char(64)
+  embedding               Float[]
+  createdAt               DateTime              @default(now())
+  project                 Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  generation              MemoryIndexGeneration @relation(fields: [projectId, indexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectSource           ProjectSource?        @relation("MemoryRecordProjectSource", fields: [projectId, projectSourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectRepositoryLink   ProjectRepositoryLink? @relation("MemoryRecordRepositoryLink", fields: [projectId, projectRepositoryLinkId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, indexGenerationId, id])
+  @@index([projectId, indexGenerationId, scope])
+  @@index([projectId, projectSourceId])
+  @@index([projectId, projectRepositoryLinkId])
+}
+
+model RagAnswer {
+  id                   String                @id @default(uuid()) @db.Uuid
+  projectId            String                @db.Uuid
+  jobId                String                @unique @db.Uuid
+  indexGenerationId    String                @db.Uuid
+  providerConnectionId String                @db.Uuid
+  modelId              String                @db.VarChar(128)
+  question             String                @db.Text
+  answer               String                @db.Text
+  citations            Json                  @db.JsonB
+  inputTokens          Int                   @default(0)
+  outputTokens         Int                   @default(0)
+  createdAt            DateTime              @default(now())
+  project              Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  job                  BackgroundJob         @relation(fields: [jobId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  indexGeneration      MemoryIndexGeneration @relation(fields: [projectId, indexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection   AiProviderConnection  @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([projectId, createdAt])
+}
+
+model WebAiCandidate {
+  id                   String               @id @default(uuid()) @db.Uuid
+  projectId            String               @db.Uuid
+  jobId                String               @db.Uuid
+  sourceId             String               @db.Uuid
+  projectItemId        String               @unique @db.Uuid
+  providerConnectionId String               @db.Uuid
+  modelId              String               @db.VarChar(128)
+  candidateFingerprint String               @db.Char(64)
+  reviewStatus         WebAiCandidateStatus @default(candidate)
+  reviewedAt           DateTime?
+  reviewedBy           String?              @db.VarChar(128)
+  createdAt            DateTime             @default(now())
+  project              Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  job                  BackgroundJob        @relation(fields: [jobId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  source               ProjectSource        @relation(fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectItem          ProjectItem          @relation("WebAiCandidateItem", fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection   AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, sourceId, candidateFingerprint])
+  @@unique([projectId, projectItemId])
+  @@index([projectId, reviewStatus, createdAt])
+}
+
+model ProviderCallAudit {
+  id                   String               @id @default(uuid()) @db.Uuid
+  jobId                String               @db.Uuid
+  providerConnectionId String               @db.Uuid
+  operation            AiOperation
+  modelId              String               @db.VarChar(128)
+  status               String               @db.VarChar(32)
+  safeErrorCode        String?              @db.VarChar(64)
+  providerRequestId    String?              @db.VarChar(256)
+  inputTokens          Int                  @default(0)
+  outputTokens         Int                  @default(0)
+  createdAt            DateTime             @default(now())
+  completedAt          DateTime?
+  job                  BackgroundJob        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  providerConnection   AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([jobId, createdAt])
+  @@index([providerConnectionId, createdAt])
 }

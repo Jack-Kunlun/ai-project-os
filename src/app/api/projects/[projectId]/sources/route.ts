@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
+import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { hashSourceContent } from "@/lib/source";
 import { createProjectSourceSchema, projectIdSchema } from "@/lib/validation";
@@ -36,8 +37,9 @@ async function assertProjectExists(projectId: string): Promise<void> {
   }
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ projectId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
+    await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
     const db = getDb();
     await assertProjectExists(projectId);
@@ -56,6 +58,8 @@ export async function GET(_request: Request, context: { params: Promise<{ projec
 
 export async function POST(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
+    assertSameOrigin(request);
+    await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
     const input = createProjectSourceSchema.parse(await readJsonBody(request));
     const db = getDb();

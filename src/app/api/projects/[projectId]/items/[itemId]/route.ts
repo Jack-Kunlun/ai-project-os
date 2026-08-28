@@ -2,6 +2,7 @@ import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
+import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import {
   appendProjectItemRevision,
@@ -113,6 +114,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
   let expectedUpdatedAt: Date | undefined;
 
   try {
+    assertSameOrigin(request);
+    await requireApiSession(request);
     const routeParams = await parseParams(context.params);
     parsed = routeParams;
     const input = updateProjectItemSchema.parse(await readJsonBody(request));

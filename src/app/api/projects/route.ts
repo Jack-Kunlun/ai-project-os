@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
+import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { createWithAvailableSlug, isUniqueConstraintError } from "@/lib/project-slug";
 import { createProjectSchema, slugifyProjectName } from "@/lib/validation";
@@ -24,8 +25,9 @@ const projectSummarySelect = {
   },
 } as const;
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    await requireApiSession(request);
     const db = getDb();
     const projects = await db.project.findMany({
       orderBy: { updatedAt: "desc" },
@@ -40,6 +42,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    assertSameOrigin(request);
+    await requireApiSession(request);
     const db = getDb();
     const input = createProjectSchema.parse(await readJsonBody(request));
     const project = await createWithAvailableSlug({

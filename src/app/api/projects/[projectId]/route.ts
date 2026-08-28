@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
+import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { projectIdSchema, updateProjectSchema } from "@/lib/validation";
 
@@ -33,8 +34,9 @@ async function parseProjectId(params: Promise<{ projectId: string }>): Promise<s
   return projectIdSchema.parse(projectId);
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ projectId: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
+    await requireApiSession(request);
     const db = getDb();
     const projectId = await parseProjectId(context.params);
     const project = await db.project.findUnique({ where: { id: projectId }, select: projectDetailSelect });
@@ -51,6 +53,8 @@ export async function GET(_request: Request, context: { params: Promise<{ projec
 
 export async function PATCH(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
+    assertSameOrigin(request);
+    await requireApiSession(request);
     const db = getDb();
     const projectId = await parseProjectId(context.params);
     const input = updateProjectSchema.parse(await readJsonBody(request));

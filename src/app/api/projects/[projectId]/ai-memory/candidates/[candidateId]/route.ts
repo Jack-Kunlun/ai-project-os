@@ -4,6 +4,7 @@ import {
   createAiCandidateService,
 } from "@/lib/ai-memory";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
+import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import {
   aiCandidateIdSchema,
@@ -19,6 +20,8 @@ export async function PATCH(
   context: { params: Promise<{ projectId: string; candidateId: string }> },
 ) {
   try {
+    assertSameOrigin(request);
+    const user = await requireApiSession(request);
     const params = await context.params;
     const projectId = projectIdSchema.parse(params.projectId);
     const candidateId = aiCandidateIdSchema.parse(params.candidateId);
@@ -28,7 +31,7 @@ export async function PATCH(
       ? await service.acceptCandidate({
           projectId,
           candidateId,
-          reviewedBy: "local:user",
+          reviewedBy: `local:${user.username}`,
           expectedItemUpdatedAt: new Date(input.expectedItemUpdatedAt),
           item: {
             type: input.type,
@@ -40,7 +43,7 @@ export async function PATCH(
       : await service.dismissCandidate({
           projectId,
           candidateId,
-          reviewedBy: "local:user",
+          reviewedBy: `local:${user.username}`,
           expectedItemUpdatedAt: new Date(input.expectedItemUpdatedAt),
         });
     return NextResponse.json({ candidate });

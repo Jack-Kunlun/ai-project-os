@@ -5,6 +5,7 @@ import {
 } from "@/lib/ai-memory";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError } from "@/lib/api-response";
+import { requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { projectIdSchema } from "@/lib/validation";
 
@@ -30,10 +31,11 @@ function mapProjectAiConfigError(error: ProjectAiConfigError): ApiError {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ projectId: string }> },
 ) {
   try {
+    await requireApiSession(request);
     const { projectId: rawProjectId } = await context.params;
     const projectId = projectIdSchema.parse(rawProjectId);
     const status = await createProjectAiConfigService({ db: getDb() })

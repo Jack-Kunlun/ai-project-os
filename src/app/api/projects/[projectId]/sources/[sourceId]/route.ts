@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError } from "@/lib/api-response";
+import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { projectIdSchema } from "@/lib/validation";
 import { z } from "zod";
@@ -22,8 +23,10 @@ async function parseParams(params: Promise<{ projectId: string; sourceId: string
   };
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ projectId: string; sourceId: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ projectId: string; sourceId: string }> }) {
   try {
+    assertSameOrigin(request);
+    await requireApiSession(request);
     const { projectId, sourceId } = await parseParams(context.params);
     const db = getDb();
     const source = await db.projectSource.findUnique({

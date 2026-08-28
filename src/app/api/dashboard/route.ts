@@ -13,12 +13,14 @@ export async function GET(request: Request) {
 
     const [projects, providers, activeJobCount, recentJobs] = await Promise.all([
       db.project.findMany({
+        where: { archivedAt: null },
         orderBy: { updatedAt: "desc" },
         select: {
           id: true,
           name: true,
           slug: true,
           description: true,
+          archivedAt: true,
           createdAt: true,
           updatedAt: true,
           _count: {
@@ -70,9 +72,11 @@ export async function GET(request: Request) {
           embeddingDimensions: true,
         },
       }),
-      db.backgroundJob.count({ where: { status: { in: ["queued", "waitingConsent", "running"] } } }),
+      db.backgroundJob.count({
+        where: { status: { in: ["queued", "waitingConsent", "running"] }, project: { archivedAt: null } },
+      }),
       db.backgroundJob.findMany({
-        where: { projectId: { not: null } },
+        where: { projectId: { not: null }, project: { archivedAt: null } },
         orderBy: { createdAt: "desc" },
         take: 8,
         select: {

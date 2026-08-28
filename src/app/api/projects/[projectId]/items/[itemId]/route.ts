@@ -18,6 +18,7 @@ import {
   type ProjectItemReviewStatus,
 } from "@/lib/project-item";
 import { projectIdSchema, projectItemIdSchema, updateProjectItemSchema } from "@/lib/validation";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -118,6 +119,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
     const user = await requireApiSession(request);
     const routeParams = await parseParams(context.params);
     parsed = routeParams;
+    await assertProjectActive(routeParams.projectId);
     const input = updateProjectItemSchema.parse(await readJsonBody(request));
     const expectedVersion = new Date(input.expectedUpdatedAt);
     expectedUpdatedAt = expectedVersion;

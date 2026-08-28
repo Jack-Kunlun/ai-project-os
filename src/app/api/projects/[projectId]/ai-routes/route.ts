@@ -7,6 +7,7 @@ import {
   previewProjectAiRouteChange,
   upsertProjectAiRoute,
 } from "@/lib/project-ai-routes";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
@@ -28,8 +29,10 @@ export async function POST(request: Request, context: { params: Promise<{ projec
   try {
     assertSameOrigin(request);
     await requireApiSession(request);
+    const resolvedProjectId = await projectId(context.params);
+    await assertProjectActive(resolvedProjectId);
     return NextResponse.json(await previewProjectAiRouteChange(
-      await projectId(context.params),
+      resolvedProjectId,
       await readJsonBody(request),
     ));
   } catch (error) {
@@ -41,8 +44,10 @@ export async function PUT(request: Request, context: { params: Promise<{ project
   try {
     assertSameOrigin(request);
     const user = await requireApiSession(request);
+    const resolvedProjectId = await projectId(context.params);
+    await assertProjectActive(resolvedProjectId);
     const result = await upsertProjectAiRoute(
-      await projectId(context.params),
+      resolvedProjectId,
       await readJsonBody(request),
       undefined,
       user.id,

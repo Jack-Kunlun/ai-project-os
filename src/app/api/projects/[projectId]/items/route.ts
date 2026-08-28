@@ -10,6 +10,7 @@ import {
 } from "@/lib/project-item-history";
 import { isExactSourceExcerpt, projectItemSelect } from "@/lib/project-item";
 import { createProjectItemSchema, projectIdSchema } from "@/lib/validation";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const projectId = await parseProjectId(context.params);
     parsedProjectId = projectId;
     const db = getDb();
-    await assertProjectExists(db, projectId);
+    await assertProjectActive(projectId, db);
     const input = createProjectItemSchema.parse(await readJsonBody(request));
     const item = await db.$transaction(async (tx) => {
       const source = await tx.projectSource.findUnique({

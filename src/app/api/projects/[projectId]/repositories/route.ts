@@ -3,6 +3,7 @@ import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { connectWebGitHubRepository, getWebGitHubStatus } from "@/lib/web-github";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
@@ -24,8 +25,10 @@ export async function POST(request: Request, context: { params: Promise<{ projec
   try {
     assertSameOrigin(request);
     await requireApiSession(request);
+    const resolvedProjectId = await projectId(context.params);
+    await assertProjectActive(resolvedProjectId);
     const result = await connectWebGitHubRepository(
-      await projectId(context.params),
+      resolvedProjectId,
       await readJsonBody(request),
     );
     return NextResponse.json(result, { status: 201 });
@@ -33,4 +36,3 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     return handleApiError(error);
   }
 }
-

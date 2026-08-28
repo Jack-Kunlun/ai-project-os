@@ -5,6 +5,7 @@ import { handleApiError } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { projectIdSchema } from "@/lib/validation";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ proj
     await requireApiSession(request);
     const { projectId, sourceId } = await parseParams(context.params);
     const db = getDb();
+    await assertProjectActive(projectId, db);
     const source = await db.projectSource.findUnique({
       where: { projectId_id: { projectId, id: sourceId } },
       select: { id: true },

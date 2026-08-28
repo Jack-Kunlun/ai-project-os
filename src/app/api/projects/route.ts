@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
@@ -14,6 +15,7 @@ const projectSummarySelect = {
   name: true,
   slug: true,
   description: true,
+  archivedAt: true,
   createdAt: true,
   updatedAt: true,
   _count: {
@@ -42,16 +44,33 @@ const projectSummarySelect = {
   },
 } as const;
 
+const listProjectsQuerySchema = z.object({
+  view: z.enum(["active", "archived"]).default("active"),
+}).strict();
+
 export async function GET(request: Request) {
   try {
     await requireApiSession(request);
     const db = getDb();
-    const projects = await db.project.findMany({
-      orderBy: { updatedAt: "desc" },
-      select: projectSummarySelect,
-    });
+    const searchParams = new URL(request.url).searchParams;
+    for (const key of new Set(searchParams.keys())) {
+      if (searchParams.getAll(key).length !== 1) throw new ApiError(400, "INVALID_QUERY", `Query parameter ${key} must be unique`);
+    }
+    const query = listProjectsQuerySchema.parse(Object.fromEntries(searchParams));
+    const archived = query.view === "archived";
+    const [projects, activeCount, archivedCount] = await Promise.all([
+      db.project.findMany({
+        where: { archivedAt: archived ? { not: null } : null },
+        orderBy: { updatedAt: "desc" },
+        select: projectSummarySelect,
+      }),
+      db.project.count({ where: { archivedAt: null } }),
+      db.project.count({ where: { archivedAt: { not: null } } }),
+    ]);
 
     return NextResponse.json({
+      view: query.view,
+      counts: { active: activeCount, archived: archivedCount },
       projects: projects.map((project) => ({
         ...project,
         backgroundJobs: project.backgroundJobs.map(toPublicProjectJob),

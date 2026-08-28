@@ -24,6 +24,15 @@ export const updateProjectSchema = z
   })
   .refine((value) => Object.keys(value).length > 0, "at least one field is required");
 
+export const updateProjectLifecycleSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("archive"), expectedUpdatedAt: z.iso.datetime({ offset: true }) }).strict(),
+  z.object({ action: z.literal("restore"), expectedUpdatedAt: z.iso.datetime({ offset: true }) }).strict(),
+]);
+
+export const createProjectExportSchema = z.object({
+  expectedUpdatedAt: z.iso.datetime({ offset: true }),
+}).strict();
+
 const emptyValueToNull = (value: unknown): unknown => {
   if (typeof value !== "string") return value;
 
@@ -148,6 +157,8 @@ export const aiCandidateIdSchema = z.string().uuid("candidateId must be a valid 
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+export type UpdateProjectLifecycleInput = z.infer<typeof updateProjectLifecycleSchema>;
+export type CreateProjectExportInput = z.infer<typeof createProjectExportSchema>;
 export type CreateProjectSourceInput = z.infer<typeof createProjectSourceSchema>;
 export type CreateProjectItemInput = z.infer<typeof createProjectItemSchema>;
 export type UpdateProjectItemInput = z.infer<typeof updateProjectItemSchema>;

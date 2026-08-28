@@ -11,6 +11,7 @@ import {
 } from "@/lib/project-workflow";
 import { cancelGitHubProjectSync, reconcileGitHubProjectSync } from "@/lib/github/project-sync-service";
 import { cancelMemoryIndexJob, reconcileMemoryIndexJob } from "@/lib/web-memory-index";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,7 @@ export async function POST(request: Request, context: Context) {
     const params = await context.params;
     const projectId = idSchema.parse(params.projectId);
     const jobId = idSchema.parse(params.jobId);
+    await assertProjectActive(projectId);
     const body = actionSchema.parse(await readJsonBody(request));
     const existing = body.action === "reconcile" || body.action === "cancel" ? await getProjectJob(projectId, jobId) : null;
     const job = body.action === "reconcile" && existing?.kind === "githubProjectSync"

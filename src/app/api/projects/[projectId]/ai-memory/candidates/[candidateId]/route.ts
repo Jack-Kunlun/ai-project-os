@@ -12,6 +12,7 @@ import {
   reviewAiCandidateSchema,
 } from "@/lib/validation";
 import { mapAiCandidateError } from "../../candidate-api-errors";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export async function PATCH(
     const user = await requireApiSession(request);
     const params = await context.params;
     const projectId = projectIdSchema.parse(params.projectId);
+    await assertProjectActive(projectId);
     const candidateId = aiCandidateIdSchema.parse(params.candidateId);
     const input = reviewAiCandidateSchema.parse(await readJsonBody(request));
     const service = createAiCandidateService({ db: getDb() });

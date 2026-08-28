@@ -19,6 +19,8 @@ import { ProjectIntelligenceError } from "@/lib/web-project-intelligence";
 import { WebRagError } from "@/lib/web-rag";
 import { ProjectWorkflowError } from "@/lib/project-workflow";
 import { ProjectGovernanceError } from "@/lib/project-governance";
+import { ProjectLifecycleError } from "@/lib/project-lifecycle";
+import { ProjectExportError } from "@/lib/project-export";
 
 export type ApiErrorBody = {
   error: {
@@ -157,6 +159,30 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
         },
       },
     };
+  }
+
+  if (error instanceof ProjectLifecycleError) {
+    const errors = {
+      PROJECT_NOT_FOUND: { status: 404, message: "项目不存在" },
+      PROJECT_ARCHIVED: { status: 409, message: "项目已归档，请先恢复后再操作" },
+      PROJECT_ALREADY_ACTIVE: { status: 409, message: "项目当前未归档" },
+      PROJECT_LIFECYCLE_STALE: { status: 409, message: "项目状态已变化，请刷新后重试" },
+      PROJECT_HAS_UNRESOLVED_JOBS: { status: 409, message: "项目仍有运行中或待人工收口的任务，暂不能归档" },
+      PROJECT_LIFECYCLE_CONFLICT: { status: 409, message: "项目状态正在变化，请稍后重试" },
+    } as const;
+    const mapped = errors[error.code];
+    return { status: mapped.status, body: { error: { code: error.code, message: mapped.message } } };
+  }
+
+  if (error instanceof ProjectExportError) {
+    const errors = {
+      PROJECT_EXPORT_NOT_FOUND: { status: 404, message: "项目不存在" },
+      PROJECT_EXPORT_STALE: { status: 409, message: "项目已发生变化，请刷新后重新导出" },
+      PROJECT_EXPORT_TOO_LARGE: { status: 413, message: "安全导出超过 20 MiB 限制，请缩小项目资料后重试" },
+      PROJECT_EXPORT_CONFLICT: { status: 409, message: "项目正在变化，请稍后重新导出" },
+    } as const;
+    const mapped = errors[error.code];
+    return { status: mapped.status, body: { error: { code: error.code, message: mapped.message } } };
   }
 
   if (error instanceof GitHubReadError) {

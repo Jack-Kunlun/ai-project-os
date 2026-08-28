@@ -29,6 +29,7 @@ export type WorkspaceProject = {
   name: string;
   slug: string;
   description: string | null;
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
   _count: {

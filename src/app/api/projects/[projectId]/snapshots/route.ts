@@ -13,6 +13,7 @@ import {
   type SnapshotRecord,
 } from "@/lib/project-snapshot";
 import { createProjectSnapshotSchema, projectIdSchema } from "@/lib/validation";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -249,6 +250,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     assertSameOrigin(request);
     await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
+    await assertProjectActive(projectId);
     createProjectSnapshotSchema.parse(await readJsonBody(request));
     const outcome = await generateSnapshot(projectId);
 

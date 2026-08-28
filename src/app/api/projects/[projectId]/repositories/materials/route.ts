@@ -4,6 +4,7 @@ import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { runGitHubMaterialSyncJob } from "@/lib/background-jobs";
 import { toPublicProjectJob } from "@/lib/project-workflow";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -18,6 +19,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const projectId = idSchema.parse((await context.params).projectId);
+    await assertProjectActive(projectId);
     const input = inputSchema.parse(await readJsonBody(request));
     const job = await runGitHubMaterialSyncJob({
       projectId,

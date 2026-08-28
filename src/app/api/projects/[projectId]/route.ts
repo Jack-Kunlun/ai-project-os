@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 import { projectIdSchema, updateProjectSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ const projectDetailSelect = {
   name: true,
   slug: true,
   description: true,
+  archivedAt: true,
   createdAt: true,
   updatedAt: true,
   _count: {
@@ -57,6 +59,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
     await requireApiSession(request);
     const db = getDb();
     const projectId = await parseProjectId(context.params);
+    await assertProjectActive(projectId, db);
     const input = updateProjectSchema.parse(await readJsonBody(request));
     const project = await db.project.update({
       where: { id: projectId },

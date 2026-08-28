@@ -68,6 +68,27 @@ type RouteRevision = {
 
 type Page<T> = { items: T[]; nextCursor: string | null };
 
+type UsageBreakdown = {
+  recordCount: number;
+  requestCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  succeededRequests: number;
+  failedRequests: number;
+  unknownRequests: number;
+  runningRequests: number;
+};
+
+type Usage = {
+  period: { days: 7 | 30 | 90; start: string; end: string };
+  totals: UsageBreakdown;
+  byProvider: Array<UsageBreakdown & { providerName: string; providerKind: string; modelId: string; source: "current" | "legacy" }>;
+  byOperation: Array<UsageBreakdown & { operation: string }>;
+  pricing: { available: false; reason: string };
+  sources: { current: string; legacy: string };
+};
+
 const itemLabels = { decision: "决策", progress: "进展", issue: "问题", risk: "风险" } as const;
 const jobLabels: Record<string, string> = {
   githubScan: "仓库代码扫描",
@@ -100,6 +121,13 @@ const readinessLabels: Record<string, string> = {
   routeIncompatible: "索引与当前路由不兼容",
   inputsChanged: "资料已变化，索引待重建",
 };
+const operationLabels: Record<string, string> = {
+  embedding: "语义向量",
+  autoExtract: "自动抽取",
+  sourceSummary: "资料总结",
+  projectAnalysis: "项目分析",
+  generateWithContext: "引用式生成",
+};
 
 async function readJson<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
@@ -110,6 +138,10 @@ async function readJson<T>(response: Response): Promise<T> {
 function formatDate(value: string | null): string {
   if (value === null) return "—";
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("zh-CN").format(value);
 }
 
 function statusTone(status: string): string {
@@ -129,6 +161,8 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
   const [operationCursor, setOperationCursor] = useState<string | null>(null);
   const [routes, setRoutes] = useState<RouteRevision[]>([]);
   const [routeCursor, setRouteCursor] = useState<string | null>(null);
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [usageDays, setUsageDays] = useState<7 | 30 | 90>(30);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -164,17 +198,22 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
     setRouteCursor(page.nextCursor);
   }, [projectId]);
 
+  const fetchUsage = useCallback(async (days: 7 | 30 | 90) => {
+    const payload = await readJson<{ usage: Usage }>(await fetch(`/api/projects/${projectId}/governance/usage?days=${days}`, { cache: "no-store" }));
+    setUsage(payload.usage);
+  }, [projectId]);
+
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      await Promise.all([fetchSummary(), fetchReviews(), fetchOperations(), fetchRoutes()]);
+      await Promise.all([fetchSummary(), fetchReviews(), fetchOperations(), fetchRoutes(), fetchUsage(usageDays)]);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "治理数据加载失败");
     } finally {
       setLoading(false);
     }
-  }, [fetchOperations, fetchReviews, fetchRoutes, fetchSummary]);
+  }, [fetchOperations, fetchReviews, fetchRoutes, fetchSummary, fetchUsage, usageDays]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload(), 0);
@@ -274,6 +313,28 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
             </section>
 
             <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
+                <SectionHeader eyebrow="Model usage" title="模型用量" description="现行调用审计按每次供应商请求计数；旧运行台账按 requestCount 汇总，两者来源独立，不重复计数。" border={false} />
+                <div className="flex rounded-xl bg-slate-100 p-1" aria-label="用量统计周期">{([7, 30, 90] as const).map((days) => <button key={days} type="button" onClick={() => setUsageDays(days)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${usageDays === days ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{days} 天</button>)}</div>
+              </div>
+              {usage === null ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : (
+                <>
+                  <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <UsageMetric label="供应商请求" value={formatNumber(usage.totals.requestCount)} detail={`${formatNumber(usage.totals.recordCount)} 条审计/运行记录`} />
+                    <UsageMetric label="输入 Token" value={formatNumber(usage.totals.inputTokens)} detail={`周期始于 ${formatDate(usage.period.start)}`} />
+                    <UsageMetric label="输出 Token" value={formatNumber(usage.totals.outputTokens)} detail={`合计 ${formatNumber(usage.totals.totalTokens)} Token`} />
+                    <UsageMetric label="异常请求" value={formatNumber(usage.totals.failedRequests + usage.totals.unknownRequests)} detail={`失败 ${formatNumber(usage.totals.failedRequests)} · 未知 ${formatNumber(usage.totals.unknownRequests)}`} />
+                  </div>
+                  <div className="mt-6 grid gap-5 lg:grid-cols-2">
+                    <UsageList title="按供应商与模型" empty="当前周期没有模型调用。" items={usage.byProvider.map((entry) => ({ key: `${entry.source}:${entry.providerKind}:${entry.modelId}`, label: `${entry.providerName} · ${entry.modelId}`, detail: `${entry.source === "legacy" ? "旧运行台账" : entry.providerKind} · ${formatNumber(entry.requestCount)} 次`, value: `${formatNumber(entry.totalTokens)} Token` }))} />
+                    <UsageList title="按能力" empty="当前周期没有能力用量。" items={usage.byOperation.map((entry) => ({ key: entry.operation, label: operationLabels[entry.operation] ?? entry.operation, detail: `${formatNumber(entry.requestCount)} 次请求`, value: `${formatNumber(entry.totalTokens)} Token` }))} />
+                  </div>
+                  <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">{usage.pricing.reason}。这里展示可核对的请求与 Token，不把 Token 直接换算为金额。</p>
+                </>
+              )}
+            </section>
+
+            <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               <SectionHeader eyebrow="Human review" title="待审核候选" description="逐条核对内容与原文摘录。接受后才成为项目事实；页面不提供批量接受。" />
               {reviews.length === 0 ? <Empty text="当前没有待审核候选。" /> : <div className="mt-6 grid gap-4 lg:grid-cols-2">{reviews.map((review) => (
                 <article key={`${review.source}:${review.id}`} className="flex flex-col rounded-2xl border border-slate-200 p-5">
@@ -338,8 +399,16 @@ function Metric({ label, value, detail, tone }: { label: string; value: string |
   return <article className={`rounded-2xl border p-5 shadow-sm ${tones[tone]}`}><p className="text-xs font-semibold text-slate-500">{label}</p><p className="mt-2 text-2xl font-semibold tracking-tight">{value}</p><p className="mt-2 text-[11px] leading-5 text-slate-500">{detail}</p></article>;
 }
 
-function SectionHeader({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
-  return <div className="border-b border-slate-100 pb-5"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{eyebrow}</p><h2 className="mt-2 text-2xl font-semibold">{title}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{description}</p></div>;
+function SectionHeader({ eyebrow, title, description, border = true }: { eyebrow: string; title: string; description: string; border?: boolean }) {
+  return <div className={border ? "border-b border-slate-100 pb-5" : ""}><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{eyebrow}</p><h2 className="mt-2 text-2xl font-semibold">{title}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">{description}</p></div>;
+}
+
+function UsageMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <article className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-500">{label}</p><p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{value}</p><p className="mt-2 text-[11px] leading-5 text-slate-400">{detail}</p></article>;
+}
+
+function UsageList({ title, empty, items }: { title: string; empty: string; items: Array<{ key: string; label: string; detail: string; value: string }> }) {
+  return <div className="rounded-2xl border border-slate-200 p-5"><h3 className="text-sm font-semibold text-slate-700">{title}</h3>{items.length === 0 ? <p className="mt-4 text-xs text-slate-400">{empty}</p> : <div className="mt-3 divide-y divide-slate-100">{items.slice(0, 8).map((item) => <div key={item.key} className="flex items-center justify-between gap-4 py-3"><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-700">{item.label}</p><p className="mt-1 text-[11px] text-slate-400">{item.detail}</p></div><span className="shrink-0 text-xs font-semibold text-slate-600">{item.value}</span></div>)}</div>}</div>;
 }
 
 function Empty({ text }: { text: string }) {

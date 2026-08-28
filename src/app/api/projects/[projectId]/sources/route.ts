@@ -6,6 +6,7 @@ import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { hashSourceContent } from "@/lib/source";
 import { createProjectSourceSchema, projectIdSchema } from "@/lib/validation";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -63,7 +64,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const projectId = await parseProjectId(context.params);
     const input = createProjectSourceSchema.parse(await readJsonBody(request));
     const db = getDb();
-    await assertProjectExists(projectId);
+    await assertProjectActive(projectId, db);
     const contentHash = hashSourceContent(input.contentText);
 
     const source = await db.projectSource.create({

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { runAutoExtractJob } from "@/lib/web-auto-extract";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const projectId = idSchema.parse((await context.params).projectId);
+    await assertProjectActive(projectId);
     const body = bodySchema.parse(await readJsonBody(request));
     const job = await runAutoExtractJob({
       projectId,

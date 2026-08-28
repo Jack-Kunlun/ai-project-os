@@ -6,7 +6,6 @@ type ProjectSection = "overview" | "control" | "memory" | "intelligence";
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid" },
   { key: "projects", label: "项目", href: "/dashboard#projects", icon: "folder" },
-  { key: "guide", label: "使用指南", href: "/guide", icon: "book" },
   { key: "settings", label: "模型设置", href: "/settings", icon: "sliders" },
 ] as const;
 
@@ -61,15 +60,26 @@ export function AppHeader({
           })}
         </nav>
 
-        <Link
-          href="/profile"
-          aria-label={`个人中心：${username}`}
-          aria-current={active === "profile" ? "page" : undefined}
-          className={`order-2 flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3 transition md:order-3 ${active === "profile" ? "border-indigo-200 bg-indigo-50" : "border-slate-200 bg-white hover:border-indigo-200"}`}
-        >
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-bold text-white shadow-sm">{initial}</span>
-          <span className="hidden max-w-28 truncate text-xs font-semibold text-slate-700 sm:block">{username}</span>
-        </Link>
+        <div className="order-2 flex items-center gap-2 md:order-3">
+          <Link
+            href="/guide"
+            aria-label="打开帮助与使用指南"
+            title="帮助与使用指南"
+            className="flex h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+          >
+            <NavIcon name="help" />
+            <span className="hidden text-xs font-semibold lg:block">帮助</span>
+          </Link>
+          <Link
+            href="/profile"
+            aria-label={`个人中心：${username}`}
+            aria-current={active === "profile" ? "page" : undefined}
+            className={`flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3 transition ${active === "profile" ? "border-indigo-200 bg-indigo-50" : "border-slate-200 bg-white hover:border-indigo-200"}`}
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-bold text-white shadow-sm">{initial}</span>
+            <span className="hidden max-w-28 truncate text-xs font-semibold text-slate-700 sm:block">{username}</span>
+          </Link>
+        </div>
       </div>
 
       {projectId ? (
@@ -101,7 +111,7 @@ function NavIcon({ name }: { name: string }) {
   const paths: Record<string, React.ReactNode> = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></>,
     folder: <path d="M3 7.5h7l2-2h9v12.75A2.75 2.75 0 0 1 18.25 21H5.75A2.75 2.75 0 0 1 3 18.25V7.5Z" />,
-    book: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21V5.5Z" /><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v16h4.5A2.5 2.5 0 0 1 20 21V5.5Z" /></>,
+    help: <><circle cx="12" cy="12" r="9" /><path d="M9.8 9.2a2.4 2.4 0 1 1 3.5 2.15c-.8.4-1.3.9-1.3 1.9" /><path d="M12 17h.01" /></>,
     sliders: <><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></>,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;

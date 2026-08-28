@@ -36,9 +36,11 @@ export {
   GITHUB_API_ORIGIN,
   GITHUB_API_VERSION,
   GITHUB_CREDENTIAL_CONTRACT_VERSION,
+  GITHUB_VAULT_CREDENTIAL_CONTRACT_VERSION,
   GITHUB_READ_ONLY_CLIENT_VERSION,
   GITHUB_USER_AGENT,
   GitHubReadError,
+  createGitHubCredentialFromToken,
   createGitHubReadOnlyClient,
   createGitHubReadPlan,
   loadGitHubCredential,
@@ -85,6 +87,7 @@ export {
 } from "./material-scanner";
 export {
   GITHUB_AUTH_REF,
+  GITHUB_VAULT_AUTH_REF,
   GITHUB_REPOSITORY_LEDGER_VERSION,
   GITHUB_SOFT_EXCLUDE_CLASSES,
   GitHubLedgerError,

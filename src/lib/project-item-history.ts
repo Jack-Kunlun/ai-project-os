@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  ContentOriginScope,
   Prisma,
   ProjectItemEvidenceRole,
   ProjectItemRevisionAction,
@@ -75,6 +76,8 @@ export async function createPrimaryProjectItemEvidence(
     projectSourceId: string;
     sourceText: string;
     sourceExcerpt: string;
+    originScope?: ContentOriginScope;
+    projectRepositoryLinkId?: string | null;
     createdAt?: Date;
   },
 ): Promise<ProjectItemEvidenceReference> {
@@ -90,8 +93,8 @@ export async function createPrimaryProjectItemEvidence(
       projectItemId: input.projectItemId,
       role: ProjectItemEvidenceRole.primary,
       evidenceState: "active",
-      originScope: "project",
-      projectRepositoryLinkId: null,
+      originScope: input.originScope ?? "project",
+      projectRepositoryLinkId: input.projectRepositoryLinkId ?? null,
       projectSourceId: input.projectSourceId,
       sourceExcerpt: input.sourceExcerpt,
       sourceExcerptFingerprint: sha256(input.sourceExcerpt),

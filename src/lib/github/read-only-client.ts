@@ -7,6 +7,8 @@ export const GITHUB_ACCEPT = "application/vnd.github+json" as const;
 export const GITHUB_USER_AGENT = "AI-Project-OS-GitHub-Connector/1.0" as const;
 export const GITHUB_CREDENTIAL_CONTRACT_VERSION =
   "github-fine-grained-pat-file:v1" as const;
+export const GITHUB_VAULT_CREDENTIAL_CONTRACT_VERSION =
+  "github-fine-grained-pat-vault:v1" as const;
 export const GITHUB_READ_ONLY_CLIENT_VERSION =
   "github-read-only-client:v1" as const;
 
@@ -59,9 +61,11 @@ export class GitHubReadError extends Error {
 }
 
 export interface GitHubCredentialHandle {
-  readonly contractVersion: typeof GITHUB_CREDENTIAL_CONTRACT_VERSION;
+  readonly contractVersion:
+    | typeof GITHUB_CREDENTIAL_CONTRACT_VERSION
+    | typeof GITHUB_VAULT_CREDENTIAL_CONTRACT_VERSION;
   readonly provider: "github";
-  readonly authRef: "github-token-file:v1";
+  readonly authRef: "github-token-file:v1" | "github-vault:v1";
 }
 
 export type GitHubReadEndpoint =
@@ -278,6 +282,17 @@ export async function loadGitHubCredential(options: Readonly<{
     contractVersion: GITHUB_CREDENTIAL_CONTRACT_VERSION,
     provider: "github" as const,
     authRef: "github-token-file:v1" as const,
+  });
+  credentialValues.set(handle, token);
+  return handle;
+}
+
+export function createGitHubCredentialFromToken(tokenInput: unknown): GitHubCredentialHandle {
+  const token = tokenFromFileContent(tokenInput);
+  const handle = Object.freeze({
+    contractVersion: GITHUB_VAULT_CREDENTIAL_CONTRACT_VERSION,
+    provider: "github" as const,
+    authRef: "github-vault:v1" as const,
   });
   credentialValues.set(handle, token);
   return handle;

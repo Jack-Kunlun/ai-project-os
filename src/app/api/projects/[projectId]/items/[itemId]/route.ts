@@ -115,7 +115,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
 
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const routeParams = await parseParams(context.params);
     parsed = routeParams;
     const input = updateProjectItemSchema.parse(await readJsonBody(request));
@@ -142,7 +142,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
         throw versionConflictError();
       }
 
-      if (existing.aiCandidateClaim !== null) {
+      if (existing.aiCandidateClaim !== null || existing.webAiCandidate !== null) {
         throw aiCandidateReviewRequiredError();
       }
 
@@ -244,6 +244,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
           projectSourceId: existing.sourceId,
           sourceText: existing.source.contentText,
           sourceExcerpt: input.sourceExcerpt,
+          originScope: existing.source.originScope,
+          projectRepositoryLinkId: existing.source.projectRepositoryLinkId,
           createdAt: nextUpdatedAt,
         });
         revisionEvidence = [
@@ -258,7 +260,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
       await appendProjectItemRevision(tx, {
         item: updated,
         action: revisionAction,
-        actorId: "local:user",
+        actorId: `local:${user.username}`,
         evidences: revisionEvidence,
         createdAt: nextUpdatedAt,
       });

@@ -99,6 +99,7 @@ enum WebAiScopeKind {
   projectSources      @map("project_sources")
   repositoryCode     @map("repository_code")
   repositoryMaterial @map("repository_material")
+  projectMemory      @map("project_memory")
   query
 }
 
@@ -107,6 +108,7 @@ enum BackgroundJobKind {
   githubMaterialSync @map("github_material_sync")
   memoryIndex        @map("memory_index")
   autoExtract        @map("auto_extract")
+  semanticSearch     @map("semantic_search")
   ragAnswer          @map("rag_answer")
 }
 

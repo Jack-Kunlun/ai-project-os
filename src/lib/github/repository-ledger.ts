@@ -11,6 +11,7 @@ import type { VerifiedGitHubRepository } from "./read-only-client";
 export const GITHUB_REPOSITORY_LEDGER_VERSION =
   "github-repository-ledger:v2" as const;
 export const GITHUB_AUTH_REF = "github-token-file:v1" as const;
+export const GITHUB_VAULT_AUTH_REF = "github-vault:v1" as const;
 export const GITHUB_SOFT_EXCLUDE_CLASSES = Object.freeze([
   "vendor",
   "node_modules",
@@ -531,19 +532,27 @@ export function createGitHubRepositoryLedgerService(options: Readonly<{
   db: PrismaClient;
   idFactory?: () => string;
   now?: () => Date;
+  authRef?: typeof GITHUB_AUTH_REF | typeof GITHUB_VAULT_AUTH_REF;
+  credentialId?: string;
 }>): GitHubRepositoryLedgerService {
   if (
     typeof options !== "object" ||
     options === null ||
     typeof options.db?.$transaction !== "function" ||
     (options.idFactory !== undefined && typeof options.idFactory !== "function") ||
-    (options.now !== undefined && typeof options.now !== "function")
+    (options.now !== undefined && typeof options.now !== "function") ||
+    (options.authRef !== undefined &&
+      options.authRef !== GITHUB_AUTH_REF &&
+      options.authRef !== GITHUB_VAULT_AUTH_REF) ||
+    (options.credentialId !== undefined && !UUID_PATTERN.test(options.credentialId))
   ) {
     return fail("GITHUB_LEDGER_INVALID_INPUT");
   }
   const transaction = options.db.$transaction.bind(options.db) as TransactionRunner;
   const idFactory = options.idFactory ?? randomUUID;
   const nowFactory = options.now ?? (() => new Date());
+  const authRef = options.authRef ?? GITHUB_AUTH_REF;
+  const credentialId = options.credentialId;
   const generatedId = (): string => canonicalUuid(idFactory());
   const currentTime = (): Date => {
     const value = nowFactory();
@@ -598,7 +607,7 @@ export function createGitHubRepositoryLedgerService(options: Readonly<{
       const fingerprints = configFingerprints(input.config);
       const connectionFingerprint = fingerprint("connection", {
         projectId: input.projectId,
-        authRef: GITHUB_AUTH_REF,
+        authRef,
       });
       const linkId = generatedId();
       const connectionId = generatedId();
@@ -666,9 +675,10 @@ export function createGitHubRepositoryLedgerService(options: Readonly<{
               data: {
                 id: connectionId,
                 projectId: input.projectId,
-                authRef: GITHUB_AUTH_REF,
+                authRef,
                 status: GitHubConnectionStatus.verified,
                 connectionFingerprint,
+                credentialId,
                 verifiedAt: now,
                 updatedAt: now,
               },
@@ -680,6 +690,7 @@ export function createGitHubRepositoryLedgerService(options: Readonly<{
                 verifiedAt: now,
                 disabledAt: null,
                 updatedAt: now,
+                ...(credentialId !== undefined ? { credentialId } : {}),
               },
             });
 

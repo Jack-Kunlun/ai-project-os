@@ -24,12 +24,20 @@ export const projectItemSelect = {
       reviewStatus: true,
     },
   },
+  webAiCandidate: {
+    select: {
+      id: true,
+      reviewStatus: true,
+    },
+  },
   source: {
     select: {
       id: true,
       kind: true,
       externalRef: true,
       contentHash: true,
+      originScope: true,
+      projectRepositoryLinkId: true,
       capturedAt: true,
       ingestedAt: true,
     },

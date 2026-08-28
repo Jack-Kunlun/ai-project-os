@@ -86,7 +86,7 @@ export default function GuidePage() {
           </GuideSection>
 
           <GuideSection id="profile" eyebrow="Personal center" title="管理个人信息与登录安全">
-            <Step number="1" title="查看账户状态">点击右上角头像，查看本地管理员角色、账户创建时间、最近活动、活动会话和当前会话到期时间。</Step>
+            <Step number="1" title="查看账户状态">点击右上角头像，查看本地管理员角色、账户创建时间、最近活动、活动会话和最近活动会话的到期时间。</Step>
             <Step number="2" title="修改登录名">登录名为 3–64 位，只允许字母、数字、点、下划线和连字符；保存后下次登录使用新登录名。</Step>
             <Step number="3" title="安全轮换密码">输入当前密码和新密码。新密码至少 12 位并包含字母和数字；成功后全部会话会被撤销，需要重新登录。</Step>
             <Callout tone="slate" title="凭据分开管理">模型 API Key 位于“模型设置”；GitHub PAT 位于具体项目的“智能控制台”。个人中心不会展示或导出这些凭据。</Callout>

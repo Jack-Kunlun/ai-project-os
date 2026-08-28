@@ -18,9 +18,25 @@ const projectSummarySelect = {
   _count: {
     select: {
       sources: true,
-      items: true,
+      items: { where: { reviewStatus: "confirmed" } },
       scans: true,
       snapshots: true,
+      repositoryLinks: { where: { status: "active" } },
+      webAiRoutes: true,
+      projectAgentRuns: true,
+    },
+  },
+  memoryIndexPointer: { select: { publishedAt: true } },
+  backgroundJobs: {
+    orderBy: { createdAt: "desc" },
+    take: 1,
+    select: {
+      id: true,
+      kind: true,
+      status: true,
+      stage: true,
+      createdAt: true,
+      completedAt: true,
     },
   },
 } as const;

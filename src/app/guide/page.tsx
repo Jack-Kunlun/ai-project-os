@@ -80,9 +80,9 @@ export default function GuidePage() {
               <InfoCard title="先看推荐下一步">系统按模型连接、项目、三条 AI 路由和智能记忆索引依次判断缺口，并直接链接到需要处理的页面。</InfoCard>
               <InfoCard title="检查工作空间就绪度">四步进度用于判断基础能力是否真的可用；容器健康但模型或索引缺失时，不会显示为完整就绪。</InfoCard>
               <InfoCard title="继续最近任务">仓库扫描、同步、抽取、索引、问答、简报和智能体运行会显示持久化状态，可直接回到所属项目。</InfoCard>
-              <InfoCard title="直接操作项目">搜索项目后，从项目卡直接进入资料、控制台、记忆或智能体。配置进度条显示资料、路由和索引三个关键阶段。</InfoCard>
+              <InfoCard title="进入项目管理">项目搜索、创建和工作区入口位于独立“项目”页；Dashboard 只保留跨项目概览和任务状态。</InfoCard>
             </div>
-            <div className="mt-5"><Link href="/dashboard" className="inline-flex rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">打开 Dashboard</Link></div>
+            <div className="mt-5 flex flex-wrap gap-3"><Link href="/dashboard" className="inline-flex rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">打开 Dashboard</Link><Link href="/projects" className="inline-flex rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">打开项目</Link></div>
           </GuideSection>
 
           <GuideSection id="profile" eyebrow="Personal center" title="管理个人信息与登录安全">
@@ -108,7 +108,7 @@ export default function GuidePage() {
             <div className="grid gap-5 lg:grid-cols-2">
               <InfoCard title="手工资料与条目">
                 <ol className="space-y-2">
-                  <li>1. 在 Dashboard 创建项目并进入“资料与条目”。</li>
+                  <li>1. 在顶部“项目”页面创建项目并进入“资料与条目”。</li>
                   <li>2. 先录入原始资料和可选来源链接。</li>
                   <li>3. 创建条目时选择资料，并引用资料中的精确连续原文。</li>
                   <li>4. 将候选条目确认后，它才会成为项目事实。</li>

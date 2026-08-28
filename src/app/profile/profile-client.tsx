@@ -128,7 +128,7 @@ export function ProfileClient({ username: initialUsername }: { username: string 
           </div>
           <div className="flex flex-wrap gap-2">
             <CredentialLink href="/settings">模型 API Key</CredentialLink>
-            <CredentialLink href="/dashboard#projects">GitHub PAT</CredentialLink>
+            <CredentialLink href="/projects">GitHub PAT</CredentialLink>
           </div>
         </section>
       </div>

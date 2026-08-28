@@ -5,7 +5,7 @@ type ProjectSection = "overview" | "control" | "memory" | "intelligence";
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid" },
-  { key: "projects", label: "项目", href: "/dashboard#projects", icon: "folder" },
+  { key: "projects", label: "项目", href: "/projects", icon: "folder" },
   { key: "settings", label: "模型设置", href: "/settings", icon: "sliders" },
 ] as const;
 

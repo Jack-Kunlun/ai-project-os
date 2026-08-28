@@ -1,63 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-
-type JobKind = "githubScan" | "githubMaterialSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
-type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
-
-type DashboardProject = {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  createdAt: string;
-  updatedAt: string;
-  _count: {
-    sources: number;
-    items: number;
-    snapshots: number;
-    repositoryLinks: number;
-    webAiRoutes: number;
-    projectAgentRuns: number;
-  };
-  memoryIndexPointer: { publishedAt: string } | null;
-  backgroundJobs: Array<{
-    id: string;
-    kind: JobKind;
-    status: JobStatus;
-    stage: string;
-    createdAt: string;
-    completedAt: string | null;
-  }>;
-};
-
-type RecentJob = {
-  id: string;
-  kind: JobKind;
-  status: JobStatus;
-  stage: string;
-  failureCode: string | null;
-  createdAt: string;
-  completedAt: string | null;
-  project: { id: string; name: string } | null;
-};
-
-type DashboardPayload = {
-  summary: {
-    projects: number;
-    confirmedItems: number;
-    repositories: number;
-    indexedProjects: number;
-    routedProjects: number;
-    activeJobs: number;
-    generationProviders: number;
-    embeddingProviders: number;
-  };
-  projects: DashboardProject[];
-  recentJobs: RecentJob[];
-};
+import type { DashboardPayload, JobKind, JobStatus, RecentJob } from "@/lib/workspace-summary";
 
 const emptyPayload: DashboardPayload = {
   summary: {
@@ -122,8 +68,6 @@ export function DashboardClient({ username }: { username: string }) {
   const [payload, setPayload] = useState<DashboardPayload>(emptyPayload);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,21 +88,13 @@ export function DashboardClient({ username }: { username: string }) {
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  const filteredProjects = useMemo(() => {
-    const keyword = search.trim().toLocaleLowerCase("zh-CN");
-    if (!keyword) return payload.projects;
-    return payload.projects.filter((project) =>
-      `${project.name} ${project.description ?? ""} ${project.slug}`.toLocaleLowerCase("zh-CN").includes(keyword),
-    );
-  }, [payload.projects, search]);
-
   const nextStep = useMemo(() => {
     const { summary, projects } = payload;
     if (summary.generationProviders === 0 || summary.embeddingProviders === 0) {
       return { label: "先配置可用的生成与向量模型", detail: "完成连接测试后，项目才能建立记忆并运行智能体。", href: "/settings", action: "配置模型" };
     }
     if (summary.projects === 0) {
-      return { label: "创建第一个项目", detail: "项目会隔离资料、仓库、记忆和智能分析记录。", href: "#projects", action: "新建项目", create: true };
+      return { label: "创建第一个项目", detail: "项目会隔离资料、仓库、记忆和智能分析记录。", href: "/projects", action: "前往项目" };
     }
     const unrouted = projects.find((project) => project._count.webAiRoutes < 3);
     if (unrouted) {
@@ -183,9 +119,9 @@ export function DashboardClient({ username }: { username: string }) {
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Your project command center</p>
               <h1 className="mt-4 text-3xl font-semibold tracking-[-0.035em] sm:text-5xl">欢迎回来，{username}</h1>
-              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">从这里判断项目是否就绪、继续最近工作，并直接进入资料、仓库、记忆或智能体，不再逐层寻找入口。</p>
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">从这里查看跨项目状态、判断工作空间是否就绪，并继续最近的同步、记忆或智能分析任务。</p>
               <div className="mt-7 flex flex-wrap gap-3">
-                <button type="button" onClick={() => setCreateOpen(true)} className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">＋ 新建项目</button>
+                <Link href="/projects" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">进入项目</Link>
                 <Link href="/guide#dashboard" className="rounded-xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15">查看使用指南</Link>
               </div>
             </div>
@@ -196,11 +132,7 @@ export function DashboardClient({ username }: { username: string }) {
               </div>
               <h2 className="mt-4 text-xl font-semibold">{nextStep.label}</h2>
               <p className="mt-2 text-sm leading-6 text-slate-300">{nextStep.detail}</p>
-              {nextStep.create ? (
-                <button type="button" onClick={() => setCreateOpen(true)} className="mt-5 text-sm font-semibold text-indigo-200 hover:text-white">{nextStep.action} →</button>
-              ) : (
-                <Link href={nextStep.href} className="mt-5 inline-flex text-sm font-semibold text-indigo-200 hover:text-white">{nextStep.action} →</Link>
-              )}
+              <Link href={nextStep.href} className="mt-5 inline-flex text-sm font-semibold text-indigo-200 hover:text-white">{nextStep.action} →</Link>
             </div>
           </div>
         </section>
@@ -218,41 +150,7 @@ export function DashboardClient({ username }: { username: string }) {
           <ReadinessPanel payload={payload} loading={loading} />
           <RecentJobs jobs={payload.recentJobs} loading={loading} />
         </section>
-
-        <section id="projects" className="scroll-mt-36 pt-12">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Projects</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-[-0.03em]">你的项目</h2>
-              <p className="mt-2 text-sm text-slate-500">搜索项目，或直接进入下一项工作。</p>
-            </div>
-            <div className="flex gap-3">
-              <label className="relative block min-w-0 sm:w-64">
-                <span className="sr-only">搜索项目</span>
-                <svg aria-hidden="true" viewBox="0 0 24 24" className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索项目" className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
-              </label>
-              <button type="button" onClick={() => setCreateOpen(true)} className="shrink-0 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500">新建项目</button>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="mt-6 grid gap-5 lg:grid-cols-2">{[1, 2].map((item) => <div key={item} className="h-64 animate-pulse rounded-3xl bg-slate-200" />)}</div>
-          ) : filteredProjects.length === 0 ? (
-            <div className="mt-6 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
-              <p className="text-base font-semibold text-slate-800">{payload.projects.length === 0 ? "还没有项目" : "没有匹配的项目"}</p>
-              <p className="mt-2 text-sm text-slate-500">{payload.projects.length === 0 ? "创建项目后，Dashboard 会在这里汇总资料、仓库和智能状态。" : "换一个项目名称或描述关键词试试。"}</p>
-              {payload.projects.length === 0 ? <button type="button" onClick={() => setCreateOpen(true)} className="mt-5 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white">创建第一个项目</button> : null}
-            </div>
-          ) : (
-            <div className="mt-6 grid gap-5 lg:grid-cols-2">
-              {filteredProjects.map((project) => <ProjectCard key={project.id} project={project} />)}
-            </div>
-          )}
-        </section>
       </div>
-
-      {createOpen ? <CreateProjectDialog onClose={() => setCreateOpen(false)} onCreated={load} /> : null}
     </main>
   );
 }
@@ -270,9 +168,9 @@ function MetricCard({ label, value, detail, icon, tone, loading }: { label: stri
 function ReadinessPanel({ payload, loading }: { payload: DashboardPayload; loading: boolean }) {
   const steps = [
     { label: "模型连接", detail: "生成与向量能力", done: payload.summary.generationProviders > 0 && payload.summary.embeddingProviders > 0, href: "/settings" },
-    { label: "项目空间", detail: "至少创建一个项目", done: payload.summary.projects > 0, href: "#projects" },
-    { label: "能力路由", detail: `${payload.summary.routedProjects}/${payload.summary.projects} 个项目完成`, done: payload.summary.projects > 0 && payload.summary.routedProjects === payload.summary.projects, href: payload.projects[0] ? `/projects/${payload.projects[0].id}/control` : "#projects" },
-    { label: "智能记忆", detail: `${payload.summary.indexedProjects}/${payload.summary.projects} 个项目有索引`, done: payload.summary.projects > 0 && payload.summary.indexedProjects === payload.summary.projects, href: payload.projects[0] ? `/projects/${payload.projects[0].id}/memory` : "#projects" },
+    { label: "项目空间", detail: "至少创建一个项目", done: payload.summary.projects > 0, href: "/projects" },
+    { label: "能力路由", detail: `${payload.summary.routedProjects}/${payload.summary.projects} 个项目完成`, done: payload.summary.projects > 0 && payload.summary.routedProjects === payload.summary.projects, href: payload.projects[0] ? `/projects/${payload.projects[0].id}/control` : "/projects" },
+    { label: "智能记忆", detail: `${payload.summary.indexedProjects}/${payload.summary.projects} 个项目有索引`, done: payload.summary.projects > 0 && payload.summary.indexedProjects === payload.summary.projects, href: payload.projects[0] ? `/projects/${payload.projects[0].id}/memory` : "/projects" },
   ];
   const completed = steps.filter((step) => step.done).length;
   return <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Setup progress</p><h2 className="mt-2 text-xl font-semibold">工作空间就绪度</h2></div><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600">{loading ? "…" : `${completed}/4`}</span></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all" style={{ width: `${completed * 25}%` }} /></div><div className="mt-5 space-y-2">{steps.map((step, index) => <Link key={step.label} href={step.href} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition hover:bg-slate-50"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-700">{step.label}</span><span className="block truncate text-xs text-slate-400">{step.detail}</span></span><span className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500">→</span></Link>)}</div></section>;
@@ -282,55 +180,9 @@ function RecentJobs({ jobs, loading }: { jobs: RecentJob[]; loading: boolean }) 
   return <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Recent activity</p><h2 className="mt-2 text-xl font-semibold">最近任务</h2></div><span className="text-xs text-slate-400">自动保留执行状态</span></div>{loading ? <div className="mt-5 space-y-3">{[1, 2, 3].map((item) => <div key={item} className="h-12 animate-pulse rounded-xl bg-slate-100" />)}</div> : jobs.length === 0 ? <div className="mt-5 rounded-2xl bg-slate-50 px-5 py-9 text-center text-sm text-slate-500">运行仓库同步、索引或智能分析后，任务会显示在这里。</div> : <div className="mt-5 divide-y divide-slate-100">{jobs.slice(0, 5).map((job) => <Link key={job.id} href={jobHref(job)} className="flex items-center gap-3 py-3.5 first:pt-0 last:pb-0"><StatusDot status={job.status} /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-slate-700">{jobLabels[job.kind]}</span><span className="block truncate text-xs text-slate-400">{job.project?.name ?? "系统任务"} · {formatDate(job.createdAt)}</span></span><span className="shrink-0 text-xs font-medium text-slate-500">{jobStatusLabels[job.status]}</span></Link>)}</div>}</section>;
 }
 
-function ProjectCard({ project }: { project: DashboardProject }) {
-  const checks = [project._count.sources > 0, project._count.webAiRoutes === 3, project.memoryIndexPointer !== null];
-  const progress = Math.round((checks.filter(Boolean).length / checks.length) * 100);
-  const latestJob = project.backgroundJobs[0];
-  return <article className="group rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-xl hover:shadow-indigo-950/5"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><Link href={`/projects/${project.id}`} className="block truncate text-xl font-semibold tracking-tight text-slate-900 transition group-hover:text-indigo-700">{project.name}</Link><p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{project.description || "还没有项目描述。进入资料与条目补充背景，让后续记忆更容易理解。"}</p></div><span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${project.memoryIndexPointer ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{project.memoryIndexPointer ? "记忆就绪" : "待建立记忆"}</span></div><div className="mt-5 grid grid-cols-3 gap-2"><SmallStat label="事实" value={project._count.items} /><SmallStat label="仓库" value={project._count.repositoryLinks} /><SmallStat label="智能体运行" value={project._count.projectAgentRuns} /></div><div className="mt-5"><div className="flex items-center justify-between text-[11px] text-slate-400"><span>配置进度</span><span>{progress}%</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${progress}%` }} /></div></div><div className="mt-5 flex flex-wrap gap-2"><QuickLink href={`/projects/${project.id}`} label="资料" /><QuickLink href={`/projects/${project.id}/control`} label="控制台" /><QuickLink href={`/projects/${project.id}/memory`} label="记忆" /><QuickLink href={`/projects/${project.id}/intelligence`} label="智能体" primary /></div><div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-[11px] text-slate-400"><span>更新于 {formatDate(project.updatedAt)}</span><span>{latestJob ? `${jobLabels[latestJob.kind]} · ${jobStatusLabels[latestJob.status]}` : "暂无任务"}</span></div></article>;
-}
-
-function SmallStat({ label, value }: { label: string; value: number }) {
-  return <div className="rounded-xl bg-slate-50 px-3 py-3"><p className="text-lg font-semibold text-slate-800">{value}</p><p className="mt-0.5 text-[10px] text-slate-400">{label}</p></div>;
-}
-
-function QuickLink({ href, label, primary = false }: { href: string; label: string; primary?: boolean }) {
-  return <Link href={href} className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${primary ? "bg-slate-950 text-white hover:bg-indigo-600" : "border border-slate-200 text-slate-600 hover:border-indigo-200 hover:text-indigo-700"}`}>{label}</Link>;
-}
-
 function StatusDot({ status }: { status: JobStatus }) {
   const styles: Record<JobStatus, string> = { queued: "bg-amber-400", running: "animate-pulse bg-indigo-500", succeeded: "bg-emerald-500", failed: "bg-rose-500", cancelled: "bg-slate-400" };
   return <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${styles[status]}`} />;
-}
-
-function CreateProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => Promise<void> }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) { if (event.key === "Escape" && !pending) onClose(); }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, pending]);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!name.trim()) return;
-    setPending(true); setError(null);
-    try {
-      const response = await fetch("/api/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, description }) });
-      if (!response.ok) throw new Error(await readError(response, "项目创建失败"));
-      await onCreated();
-      onClose();
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "项目创建失败");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="create-project-title" className="w-full max-w-lg rounded-t-[2rem] bg-white p-7 shadow-2xl sm:rounded-[2rem] sm:p-8"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">New project</p><h2 id="create-project-title" className="mt-2 text-2xl font-semibold">创建项目空间</h2><p className="mt-2 text-sm leading-6 text-slate-500">项目会隔离自己的资料、仓库、模型路由和智能记忆。</p></div><button type="button" onClick={onClose} disabled={pending} className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200" aria-label="关闭">×</button></div><form onSubmit={submit} className="mt-7"><label htmlFor="dashboard-project-name" className="text-sm font-semibold text-slate-700">项目名称</label><input id="dashboard-project-name" autoFocus value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required placeholder="例如：AI Project OS" className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /><label htmlFor="dashboard-project-description" className="mt-5 block text-sm font-semibold text-slate-700">项目描述 <span className="font-normal text-slate-400">（可选）</span></label><textarea id="dashboard-project-description" value={description} onChange={(event) => setDescription(event.target.value)} maxLength={2000} rows={4} placeholder="这个项目在解决什么问题？当前最重要的目标是什么？" className="mt-2 w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />{error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}<div className="mt-7 flex justify-end gap-3"><button type="button" onClick={onClose} disabled={pending} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">取消</button><button disabled={pending || !name.trim()} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? "创建中…" : "创建项目"}</button></div></form></section></div>;
 }
 
 function DashboardIcon({ name }: { name: string }) {

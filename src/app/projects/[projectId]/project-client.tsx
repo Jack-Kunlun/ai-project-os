@@ -1297,12 +1297,12 @@ function ProjectShell({ children }: { children: ReactNode }) {
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <header className="flex items-center justify-between border-b border-slate-200/80 pb-7">
+        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-7">
           <Link href="/" className="flex items-center gap-3" aria-label="AI Project OS 首页">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold tracking-tight text-white">OS</span>
             <span className="block text-sm font-semibold tracking-[0.16em] text-slate-950">AI PROJECT OS</span>
           </Link>
-          <span className="text-xs text-slate-400">Project Intelligence · V2.1</span>
+          <div className="flex flex-wrap items-center justify-end gap-3"><Link href="/guide#project-data" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">使用指南</Link><span className="text-xs text-slate-400">Project Intelligence · V2.1</span></div>
         </header>
         <div className="py-10">{children}</div>
       </div>

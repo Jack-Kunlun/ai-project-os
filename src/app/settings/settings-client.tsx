@@ -90,7 +90,8 @@ export function SettingsClient({ username }: { username: string }) {
               <span className="block text-xs text-slate-500">系统设置 · V2.1</span>
             </span>
           </Link>
-          <div className="flex items-center gap-4 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-slate-500">
+            <Link href="/guide#providers" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">使用指南</Link>
             <span>{username}</span>
             <LogoutButton />
           </div>

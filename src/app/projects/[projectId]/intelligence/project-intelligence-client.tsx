@@ -163,6 +163,7 @@ export function ProjectIntelligenceClient() {
             </span>
           </Link>
           <nav className="flex flex-wrap gap-2">
+            <Link href="/guide#agent" className="nav-pill">使用指南</Link>
             <Link href={`/projects/${projectId}`} className="nav-pill">资料与条目</Link>
             <Link href={`/projects/${projectId}/memory`} className="nav-pill">智能记忆</Link>
             <Link href={`/projects/${projectId}/control`} className="nav-pill">智能控制台</Link>

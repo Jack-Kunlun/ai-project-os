@@ -112,7 +112,7 @@ export function HomeClient() {
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <header className="flex items-center justify-between border-b border-slate-200/80 pb-7">
+        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200/80 pb-7">
           <Link href="/" className="flex items-center gap-3" aria-label="AI Project OS 首页">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold tracking-tight text-white">OS</span>
             <span>
@@ -120,7 +120,8 @@ export function HomeClient() {
               <span className="mt-0.5 block text-xs text-slate-500">Project Intelligence · V2.1</span>
             </span>
           </Link>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <Link href="/guide" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700">使用指南</Link>
             <Link href="/settings" className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700">模型与系统设置</Link>
             <LogoutButton />
           </div>
@@ -142,6 +143,8 @@ export function HomeClient() {
             <Metric label="Snapshots" value={totals.snapshots} />
           </div>
         </section>
+
+        <QuickStartGuide />
 
         {error ? (
           <div className="mb-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert">
@@ -245,4 +248,14 @@ function Metric({ label, value }: { label: string; value: number }) {
       <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{value}</p>
     </div>
   );
+}
+
+function QuickStartGuide() {
+  const steps = [
+    ["01", "配置模型", "添加并测试生成与向量供应商", "/guide#providers"],
+    ["02", "准备项目", "录入资料或连接 GitHub 仓库", "/guide#project-data"],
+    ["03", "建立记忆", "审核候选并构建语义索引", "/guide#memory"],
+    ["04", "运行智能体", "生成简报或开展只读调查", "/guide#agent"],
+  ] as const;
+  return <section className="mb-6 rounded-3xl border border-indigo-100 bg-indigo-50/70 p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Recommended workflow</p><h2 className="mt-2 text-xl font-semibold">第一次使用，按这个顺序完成</h2></div><Link href="/guide" className="rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-500">打开完整使用指南</Link></div><ol className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{steps.map(([number, title, detail, href]) => <li key={number}><Link href={href} className="block h-full rounded-2xl border border-white bg-white/80 p-4 transition hover:border-indigo-200 hover:bg-white"><span className="text-xs font-bold text-indigo-600">{number}</span><p className="mt-3 text-sm font-semibold">{title}</p><p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p></Link></li>)}</ol></section>;
 }

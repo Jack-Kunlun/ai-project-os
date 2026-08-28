@@ -208,6 +208,42 @@ const derivedArtifactMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260828233000_add_ai_derived_artifacts/migration.sql",
 );
+const githubRepositoryLedgerMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829010000_add_github_repository_ledger/migration.sql",
+);
+const githubScanSecurityMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829020000_bind_github_scan_security/migration.sql",
+);
+const repositoryCodeIndexMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829033000_add_repository_code_indexes/migration.sql",
+);
+const repositoryMaterialLedgerMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829050000_add_repository_material_ledger/migration.sql",
+);
+const repositoryMaterialPolicyMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829051000_harden_repository_material_policy/migration.sql",
+);
+const repositoryMaterialTerminalMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829052000_seal_repository_material_terminal_rows/migration.sql",
+);
+const repositoryMaterialIndexMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829053000_add_repository_material_indexes/migration.sql",
+);
+const repositoryRagSnapshotMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829060000_add_repository_rag_snapshots/migration.sql",
+);
+const grantOperationProfileGuardMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829070000_restore_grant_operation_profile_guard/migration.sql",
+);
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
   join(repositoryRoot, "prisma/migrations/20260826030732_integrity_boundaries/migration.sql"),
@@ -663,6 +699,15 @@ async function applyAiMigrationInTransaction(client: Client): Promise<void> {
     { sql: await loadSql(operationProfileMigrationPath) },
     { sql: await loadSql(ragSnapshotMigrationPath) },
     { sql: await loadSql(derivedArtifactMigrationPath) },
+    { sql: await loadSql(githubRepositoryLedgerMigrationPath) },
+    { sql: await loadSql(githubScanSecurityMigrationPath) },
+    { sql: await loadSql(repositoryCodeIndexMigrationPath) },
+    { sql: await loadSql(repositoryMaterialLedgerMigrationPath) },
+    { sql: await loadSql(repositoryMaterialPolicyMigrationPath) },
+    { sql: await loadSql(repositoryMaterialTerminalMigrationPath) },
+    { sql: await loadSql(repositoryMaterialIndexMigrationPath) },
+    { sql: await loadSql(repositoryRagSnapshotMigrationPath) },
+    { sql: await loadSql(grantOperationProfileGuardMigrationPath) },
   ]);
 }
 
@@ -695,6 +740,15 @@ async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
     "20260828170000_add_ai_operation_profiles",
     "20260828210000_add_project_rag_snapshots",
     "20260828233000_add_ai_derived_artifacts",
+    "20260829010000_add_github_repository_ledger",
+    "20260829020000_bind_github_scan_security",
+    "20260829033000_add_repository_code_indexes",
+    "20260829050000_add_repository_material_ledger",
+    "20260829051000_harden_repository_material_policy",
+    "20260829052000_seal_repository_material_terminal_rows",
+    "20260829053000_add_repository_material_indexes",
+    "20260829060000_add_repository_rag_snapshots",
+    "20260829070000_restore_grant_operation_profile_guard",
   ];
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===

@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 type PrimarySection = "dashboard" | "projects" | "settings" | "profile";
-type ProjectSection = "overview" | "control" | "memory" | "intelligence";
+type ProjectSection = "overview" | "control" | "memory" | "intelligence" | "governance";
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid" },
@@ -14,6 +14,7 @@ const projectItems = [
   { key: "control", label: "智能控制台", suffix: "/control" },
   { key: "memory", label: "智能记忆", suffix: "/memory" },
   { key: "intelligence", label: "项目智能体", suffix: "/intelligence" },
+  { key: "governance", label: "治理与审核", suffix: "/governance" },
 ] as const;
 
 export function AppHeader({

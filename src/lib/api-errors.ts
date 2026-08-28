@@ -18,6 +18,7 @@ import { WebMemoryIndexError } from "@/lib/web-memory-index";
 import { ProjectIntelligenceError } from "@/lib/web-project-intelligence";
 import { WebRagError } from "@/lib/web-rag";
 import { ProjectWorkflowError } from "@/lib/project-workflow";
+import { ProjectGovernanceError } from "@/lib/project-governance";
 
 export type ApiErrorBody = {
   error: {
@@ -144,6 +145,18 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof ProjectGovernanceError) {
+    return {
+      status: 400,
+      body: {
+        error: {
+          code: error.code,
+          message: error.code === "GOVERNANCE_CURSOR_INVALID" ? "分页游标无效" : "分页数量无效",
+        },
+      },
+    };
   }
 
   if (error instanceof GitHubReadError) {

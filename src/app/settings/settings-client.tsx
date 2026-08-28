@@ -87,7 +87,7 @@ export function SettingsClient({ username }: { username: string }) {
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span>
             <span>
               <span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span>
-              <span className="block text-xs text-slate-500">系统设置 · V2.0</span>
+              <span className="block text-xs text-slate-500">系统设置 · V2.1</span>
             </span>
           </Link>
           <div className="flex items-center gap-4 text-xs text-slate-500">
@@ -323,4 +323,3 @@ function ProviderCard({ provider, catalog, onChanged }: { provider: Provider; ca
 function EditField({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block text-xs font-medium text-slate-600">{label}{children}</label>;
 }
-

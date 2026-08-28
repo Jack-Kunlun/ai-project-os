@@ -117,7 +117,7 @@ export function HomeClient() {
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold tracking-tight text-white">OS</span>
             <span>
               <span className="block text-sm font-semibold tracking-[0.16em] text-slate-950">AI PROJECT OS</span>
-              <span className="mt-0.5 block text-xs text-slate-500">AI Memory · V2.0</span>
+              <span className="mt-0.5 block text-xs text-slate-500">Project Intelligence · V2.1</span>
             </span>
           </Link>
           <div className="flex items-center gap-4">
@@ -133,7 +133,7 @@ export function HomeClient() {
               让项目状态，<span className="text-indigo-600">一眼可被理解。</span>
             </h1>
             <p className="mt-6 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-              从人工资料和 GitHub 多仓库到自动抽取、统一向量索引与引用式问答。配置、同步、审核和检索都可以在页面完成。
+              从人工资料和 GitHub 多仓库到自动抽取、统一向量记忆、引用式问答与只读项目智能体。配置、同步、审核、检索和调查都可以在页面完成。
             </p>
           </div>
           <div className="grid grid-cols-3 gap-3 lg:pb-1">
@@ -231,7 +231,7 @@ export function HomeClient() {
 
         <footer className="mt-12 flex flex-col gap-2 border-t border-slate-200/80 pt-5 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
           <span>Facts first · Every future insight should be traceable to a source.</span>
-          <span>AI Project OS V2.0</span>
+          <span>AI Project OS V2.1</span>
         </footer>
       </div>
     </main>

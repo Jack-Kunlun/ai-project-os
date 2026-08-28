@@ -47,7 +47,7 @@ type RepositoryLink = {
 };
 type Job = {
   id: string;
-  kind: "githubScan" | "githubMaterialSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer";
+  kind: "githubScan" | "githubMaterialSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   stage: string;
   failureCode: string | null;
@@ -124,8 +124,8 @@ export function ProjectControlClient() {
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-7">
-          <Link href="/" className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span><span><span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span><span className="block text-xs text-slate-500">项目智能控制台 · V2.0</span></span></Link>
-          <div className="flex gap-2"><Link href={`/projects/${projectId}`} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600">资料与条目</Link><Link href={`/projects/${projectId}/memory`} className="rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white">智能记忆</Link></div>
+          <Link href="/" className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span><span><span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span><span className="block text-xs text-slate-500">项目智能控制台 · V2.1</span></span></Link>
+          <div className="flex flex-wrap gap-2"><Link href={`/projects/${projectId}`} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600">资料与条目</Link><Link href={`/projects/${projectId}/memory`} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600">智能记忆</Link><Link href={`/projects/${projectId}/intelligence`} className="rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white">项目智能体</Link></div>
         </header>
 
         <section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Control plane</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">选择每项 AI 能力使用的供应商，并在页面连接多个 GitHub 仓库。仓库读取始终冻结到明确 commit，扫描结果按仓库级原子发布。</p></section>

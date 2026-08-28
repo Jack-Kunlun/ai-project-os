@@ -658,7 +658,7 @@ export function ProjectDetailClient() {
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name}</h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">{project.description || "项目描述尚未补充。先接入来源，再人工创建并确认条目，最后手动生成可追溯快照。"}</p>
         </div>
-        <Link href={`/projects/${projectId}/control`} className="shrink-0 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">智能控制台</Link>
+        <div className="flex shrink-0 flex-wrap gap-2"><Link href={`/projects/${projectId}/control`} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">智能控制台</Link><Link href={`/projects/${projectId}/memory`} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">智能记忆</Link><Link href={`/projects/${projectId}/intelligence`} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">项目智能体</Link></div>
       </div>
 
       <section className="mt-8 grid gap-4 md:grid-cols-3">
@@ -1302,7 +1302,7 @@ function ProjectShell({ children }: { children: ReactNode }) {
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold tracking-tight text-white">OS</span>
             <span className="block text-sm font-semibold tracking-[0.16em] text-slate-950">AI PROJECT OS</span>
           </Link>
-          <span className="text-xs text-slate-400">AI Memory · V2.0</span>
+          <span className="text-xs text-slate-400">Project Intelligence · V2.1</span>
         </header>
         <div className="py-10">{children}</div>
       </div>

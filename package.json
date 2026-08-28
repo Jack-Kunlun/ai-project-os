@@ -1,6 +1,6 @@
 {
   "name": "ai-project-os",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17,6 +17,7 @@
     "test:github-material-sync-postgres": "tsx --test test/github-material-sync-postgres.test.ts",
     "test:github-scan-postgres": "tsx --test test/github-code-scan-postgres.test.ts",
     "test:repository-memory-postgres": "tsx --test test/repository-memory-postgres.test.ts",
+    "test:project-intelligence-postgres": "tsx --test test/project-intelligence-postgres.test.ts",
     "project-snapshot:demo": "tsx scripts/project-snapshot-demo.ts",
     "project-ai:config": "tsx scripts/project-ai-config.ts",
     "github-repository": "tsx scripts/github-repository.ts",

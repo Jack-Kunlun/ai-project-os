@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { isProjectSnapshotStale } from "@/lib/project-snapshot-stale";
 import type { SnapshotRecord } from "@/lib/project-snapshot";
-import { AiMemoryPanel } from "./ai-memory-panel";
 
 type ProjectItem = {
   id: string;
@@ -20,6 +19,10 @@ type ProjectItem = {
   createdAt: string;
   updatedAt: string;
   aiCandidateClaim: {
+    id: string;
+    reviewStatus: "candidate" | "accepted" | "dismissed";
+  } | null;
+  webAiCandidate: {
     id: string;
     reviewStatus: "candidate" | "accepted" | "dismissed";
   } | null;
@@ -664,12 +667,6 @@ export function ProjectDetailClient() {
         <PlaceholderCard {...labels.snapshots} count={project._count.snapshots} detail="历史快照保留在数据库；页面只展示最新一份，并标注是否需要手动重新生成。" />
       </section>
 
-      <AiMemoryPanel
-        projectId={projectId}
-        sourceSetKey={sources.map((source) => source.id).sort().join(":")}
-        onReviewComplete={reloadProjectAndSources}
-      />
-
       <SnapshotPanel
         snapshot={snapshot}
         snapshotCount={project._count.snapshots}
@@ -1013,7 +1010,8 @@ function ItemCard({
 }) {
   const isActionPending = itemActionId === item.id;
   const actionsDisabled = Boolean(itemActionId) || isSavingItem || editingItemId !== null;
-  const isAiCandidateItem = item.aiCandidateClaim !== null;
+  const requiresAiWorkbench =
+    item.aiCandidateClaim !== null || item.webAiCandidate?.reviewStatus === "candidate";
 
   return (
     <li className={`rounded-2xl border p-5 ${item.reviewStatus === "superseded" ? "border-slate-200 bg-slate-50/70" : "border-slate-200 bg-white"}`}>
@@ -1031,12 +1029,17 @@ function ItemCard({
                 AI 候选 · {item.aiCandidateClaim.reviewStatus === "candidate" ? "待审阅" : item.aiCandidateClaim.reviewStatus === "accepted" ? "已接受" : "已驳回"}
               </span>
             ) : null}
+            {item.webAiCandidate ? (
+              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+                AI 候选 · {item.webAiCandidate.reviewStatus === "candidate" ? "待审阅" : item.webAiCandidate.reviewStatus === "accepted" ? "已接受" : "已驳回"}
+              </span>
+            ) : null}
           </div>
           <h4 className="mt-3 text-lg font-semibold tracking-tight text-slate-950">{item.title}</h4>
           <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>
         </div>
 
-        {item.reviewStatus !== "superseded" && !isAiCandidateItem ? (
+        {item.reviewStatus !== "superseded" && !requiresAiWorkbench ? (
           <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
             <button
               type="button"
@@ -1078,7 +1081,7 @@ function ItemCard({
           </div>
         ) : (
           <span className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-400">
-            {isAiCandidateItem && item.reviewStatus === "candidate" ? "请在 AI 工作台审阅" : "只读"}
+            {requiresAiWorkbench && item.reviewStatus === "candidate" ? "请在 AI 工作台审阅" : "只读"}
           </span>
         )}
       </div>

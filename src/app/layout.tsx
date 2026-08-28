@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Project OS · Governed Project Memory",
-  description: "建立可追溯、可审阅、受治理的项目长期记忆。",
+  title: "AI Project OS · AI Memory V2.0",
+  description: "通过自动抽取、语义检索与引用式问答，建立可追溯、可审阅的项目长期记忆。",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

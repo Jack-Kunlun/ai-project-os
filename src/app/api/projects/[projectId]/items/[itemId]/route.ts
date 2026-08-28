@@ -142,7 +142,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
         throw versionConflictError();
       }
 
-      if (existing.aiCandidateClaim !== null || existing.webAiCandidate !== null) {
+      if (
+        existing.aiCandidateClaim !== null ||
+        existing.webAiCandidate?.reviewStatus === "candidate"
+      ) {
         throw aiCandidateReviewRequiredError();
       }
 

@@ -47,7 +47,7 @@ type RepositoryLink = {
 };
 type Job = {
   id: string;
-  kind: "githubScan" | "githubMaterialSync" | "memoryIndex" | "autoExtract" | "ragAnswer";
+  kind: "githubScan" | "githubMaterialSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer";
   status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
   stage: string;
   failureCode: string | null;

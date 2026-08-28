@@ -163,7 +163,7 @@ export async function getProjectUsageSummary(
     byOperation: Object.freeze(byOperation),
     pricing: Object.freeze({ available: false, reason: "未维护供应商价格快照，因此不估算费用" }),
     sources: Object.freeze({
-      current: "ProviderCallAudit，每次页面运行时模型请求计一次",
+      current: "ProviderCallAudit，每条受审计模型调用尝试计一次",
       legacy: "AiRun 汇总台账，按 requestCount 计数且不与现行审计重复",
     }),
   });

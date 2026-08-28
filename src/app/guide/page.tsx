@@ -3,15 +3,16 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "使用指南 · AI Project OS V2.2.1",
-  description: "AI Project OS V2.2.1 从 Dashboard、首次配置到项目智能体的页面操作指南。",
+  title: "使用指南 · AI Project OS V2.3.0",
+  description: "AI Project OS V2.3.0 从 Dashboard、首次配置到项目治理与智能体的页面操作指南。",
 };
 
 const workflow = [
   { number: "01", title: "配置模型", detail: "添加并测试生成与向量供应商。", href: "#providers" },
   { number: "02", title: "准备项目", detail: "录入资料，或连接并扫描 GitHub 仓库。", href: "#project-data" },
   { number: "03", title: "建立记忆", detail: "审核 AI 候选，构建兼容的语义索引。", href: "#memory" },
-  { number: "04", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
+  { number: "04", title: "治理项目", detail: "处理异常，查看用量，归档或安全导出。", href: "#governance" },
+  { number: "05", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
 ] as const;
 
 const providerRows = [
@@ -30,7 +31,7 @@ export default function GuidePage() {
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span>
             <span>
               <span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span>
-              <span className="block text-xs text-slate-500">使用指南 · V2.2.1</span>
+              <span className="block text-xs text-slate-500">使用指南 · V2.3.0</span>
             </span>
           </Link>
           <nav className="flex flex-wrap gap-2 text-xs font-semibold">
@@ -57,7 +58,7 @@ export default function GuidePage() {
           </div>
         </section>
 
-        <nav aria-label="推荐使用顺序" className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <nav aria-label="推荐使用顺序" className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
           {workflow.map((step) => (
             <a key={step.number} href={step.href} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200">
               <span className="text-xs font-bold text-indigo-600">{step.number}</span>
@@ -126,6 +127,7 @@ export default function GuidePage() {
               </InfoCard>
             </div>
             <Callout tone="slate" title="资料不是事实">新接入的 Source、GitHub 内容和模型抽取结果都只是候选证据。只有经过人工确认的 ProjectItem 才应当被视为项目事实。</Callout>
+            <p className="mt-5 text-sm leading-7 text-slate-600">项目卡还提供受限 JSON 导出与软归档。归档前必须没有运行中或待人工收口任务；归档不删除数据，并可从“已归档”列表恢复。</p>
           </GuideSection>
 
           <GuideSection id="routes" eyebrow="Project routing" title="为项目分配 AI 能力">
@@ -144,6 +146,14 @@ export default function GuidePage() {
             <Step number="3" title="建立统一向量索引">确认当前路由后构建索引。索引覆盖人工资料、已发布仓库资料和代码快照；构建失败不会替换上一代完整索引。</Step>
             <Step number="4" title="检索和引用式问答">语义搜索返回原文片段、路径、冻结 commit 和分数。引用式问答只允许引用本次检索命中的证据。</Step>
             <Callout tone="amber" title="什么时候需要重建索引">新增或更新资料、重新扫描仓库、同步新仓库内容，或更换向量供应商/模型/维度后，都应重新建立索引。</Callout>
+          </GuideSection>
+
+          <GuideSection id="governance" eyebrow="Governance & review" title="审核事实、收口异常并管理项目数据">
+            <Step number="1" title="逐条审核候选">进入项目“治理与审核”，同时检查网页抽取候选和已验证运行候选。页面不提供批量接受，确认或驳回后会重新读取服务器状态。</Step>
+            <Step number="2" title="区分失败和未知结果">失败表示已有明确终态；未知表示外部结果无法确认。只有具备对应不可变证据的任务才显示“人工收口”，该动作不会自动重试或改写为成功。</Step>
+            <Step number="3" title="查看模型用量">在 7、30、90 天之间切换，按供应商、模型和能力核对调用尝试与 Token。系统没有供应商价格快照，因此不会显示猜测费用。</Step>
+            <Step number="4" title="归档、恢复或导出">从“项目”页归档没有活动任务的项目；归档后项目变为只读，恢复后可继续操作。进行中和已归档项目都可导出受限 JSON。</Step>
+            <Callout tone="amber" title="JSON 导出不是备份">导出不读取系统凭据库中的 API Key 或 GitHub PAT，也不包含向量、原始任务载荷、供应商请求 ID、仓库代码正文或完整数据库状态。文件会原样包含项目正文；若曾把密码或 Token 错误录入资料，它们也会出现。请按敏感业务数据保管，灾难恢复仍应使用 PostgreSQL 与主密钥备份。</Callout>
           </GuideSection>
 
           <GuideSection id="agent" eyebrow="Project intelligence" title="生成简报并运行只读智能体">
@@ -169,6 +179,8 @@ export default function GuidePage() {
               <InfoCard title="GitHub 无法读取">检查 PAT 是否覆盖目标仓库、所需读取权限是否开启、仓库身份和跟踪分支是否正确。</InfoCard>
               <InfoCard title="按钮保持禁用">确认前置配置是否就绪、必填内容是否完成，并勾选当前操作的传输确认复选框。</InfoCard>
               <InfoCard title="任务失败或状态变化">刷新页面查看持久化任务状态。失败不会替换上一代已发布仓库数据或索引。</InfoCard>
+              <InfoCard title="项目无法归档">先到“治理与审核”确认没有排队中、等待确认、运行中或待人工收口任务；归档不会强制中断任务。</InfoCard>
+              <InfoCard title="用量与账单不一致">页面统计受审计的调用尝试和 Token，不维护价格、折扣或缓存计费规则。最终金额以供应商账单为准。</InfoCard>
             </div>
           </GuideSection>
 
@@ -186,7 +198,7 @@ export default function GuidePage() {
         </div>
 
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 py-7 text-xs text-slate-400">
-          <span>AI Project OS V2.2.1 · 页面操作指南</span>
+          <span>AI Project OS V2.3.0 · 页面操作指南</span>
           <Link href="/dashboard" className="font-semibold text-indigo-600 hover:text-indigo-700">返回 Dashboard</Link>
         </footer>
       </div>

@@ -314,13 +314,13 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
 
             <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
-                <SectionHeader eyebrow="Model usage" title="模型用量" description="现行调用审计按每次供应商请求计数；旧运行台账按 requestCount 汇总，两者来源独立，不重复计数。" border={false} />
+                <SectionHeader eyebrow="Model usage" title="模型用量" description="现行调用审计按每次受审计模型调用尝试计数；旧运行台账按 requestCount 汇总，两者来源独立，不重复计数。" border={false} />
                 <div className="flex rounded-xl bg-slate-100 p-1" aria-label="用量统计周期">{([7, 30, 90] as const).map((days) => <button key={days} type="button" onClick={() => setUsageDays(days)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${usageDays === days ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{days} 天</button>)}</div>
               </div>
               {usage === null ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : (
                 <>
                   <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <UsageMetric label="供应商请求" value={formatNumber(usage.totals.requestCount)} detail={`${formatNumber(usage.totals.recordCount)} 条审计/运行记录`} />
+                    <UsageMetric label="模型调用尝试" value={formatNumber(usage.totals.requestCount)} detail={`${formatNumber(usage.totals.recordCount)} 条审计/运行记录`} />
                     <UsageMetric label="输入 Token" value={formatNumber(usage.totals.inputTokens)} detail={`周期始于 ${formatDate(usage.period.start)}`} />
                     <UsageMetric label="输出 Token" value={formatNumber(usage.totals.outputTokens)} detail={`合计 ${formatNumber(usage.totals.totalTokens)} Token`} />
                     <UsageMetric label="异常请求" value={formatNumber(usage.totals.failedRequests + usage.totals.unknownRequests)} detail={`失败 ${formatNumber(usage.totals.failedRequests)} · 未知 ${formatNumber(usage.totals.unknownRequests)}`} />

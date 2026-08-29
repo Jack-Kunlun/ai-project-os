@@ -124,7 +124,7 @@ export async function loadOrCreateMasterKey(): Promise<Buffer> {
 }
 
 function canonicalSecret(kind: ExternalCredentialKind, value: unknown): string {
-  const maximumLength = kind === "git" ? 32_768 : kind === "oidcClient" || kind === "oidcFlow" ? 4_096 : 512;
+  const maximumLength = kind === "git" ? 32_768 : kind === "mcp" || kind === "oidcClient" || kind === "oidcFlow" ? 4_096 : 512;
   if (
     typeof value !== "string" ||
     value.length < 8 ||

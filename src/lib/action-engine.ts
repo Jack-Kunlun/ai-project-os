@@ -8,6 +8,11 @@ import { z } from "zod";
 import { assertProjectAccess, getProjectPermission, type AccessUser } from "@/lib/access-control";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
+import {
+  buildMcpActionSnapshot,
+  canonicalMcpActionSnapshot,
+  executeMcpActionSnapshot,
+} from "@/lib/mcp";
 
 const ACTION_LEASE_MS = 10 * 60_000;
 const ACTION_HEARTBEAT_MS = 60_000;
@@ -22,6 +27,7 @@ export const PROJECT_ACTION_CAPABILITIES = [
   "project.repository.sync",
   "project.web-source.sync",
   "project.memory-quality.scan",
+  "project.mcp.read-tool.invoke",
 ] as const;
 
 export type ProjectActionCapability = (typeof PROJECT_ACTION_CAPABILITIES)[number];
@@ -59,6 +65,14 @@ const CAPABILITY_CATALOG: Readonly<Record<ProjectActionCapability, CapabilityDef
     riskLevel: "low",
     defaultPolicy: "automatic",
     effect: "local",
+  }),
+  "project.mcp.read-tool.invoke": Object.freeze({
+    id: "project.mcp.read-tool.invoke",
+    label: "调用 MCP 只读工具",
+    description: "调用管理员已验证、项目 Owner 已逐项授权的远程只读工具。每次调用都必须单独审批，结果只写入动作审计。",
+    riskLevel: "high",
+    defaultPolicy: "approvalRequired",
+    effect: "external-read",
   }),
 });
 
@@ -167,8 +181,9 @@ export function projectActionCapabilityCatalog(): readonly CapabilityDefinition[
   return Object.freeze(PROJECT_ACTION_CAPABILITIES.map((id) => CAPABILITY_CATALOG[id]));
 }
 
-export function canonicalProjectActionInput(capabilityInput: unknown, input: unknown): Readonly<Record<string, never>> {
-  parseCapability(capabilityInput);
+export function canonicalProjectActionInput(capabilityInput: unknown, input: unknown): Readonly<Record<string, unknown>> {
+  const capability = parseCapability(capabilityInput);
+  if (capability === "project.mcp.read-tool.invoke") return canonicalMcpActionSnapshot(input);
   const parsed = emptyInputSchema.safeParse(input ?? {});
   if (!parsed.success) return fail("ACTION_INVALID_INPUT");
   return Object.freeze({});
@@ -313,7 +328,9 @@ export async function requestProjectAction(projectIdInput: unknown, input: unkno
   if (!parsed.success) return fail("ACTION_INVALID_INPUT");
   await assertActiveProject(actor, projectId, "edit", db);
   const capability = CAPABILITY_CATALOG[parsed.data.capability];
-  const canonicalInput = canonicalProjectActionInput(capability.id, parsed.data.input);
+  const canonicalInput = capability.id === "project.mcp.read-tool.invoke"
+    ? await buildMcpActionSnapshot(projectId, parsed.data.input, db)
+    : canonicalProjectActionInput(capability.id, parsed.data.input);
   const inputFingerprint = projectActionInputFingerprint(projectId, capability.id, canonicalInput);
   const idempotencyKey = hash(`project-action-request:v1:${projectId}:${actor.id}:${parsed.data.clientRequestId}`);
   const existing = await db.projectAction.findUnique({
@@ -338,7 +355,10 @@ export async function requestProjectAction(projectIdInput: unknown, input: unkno
       if (project === null) return fail("ACTION_PROJECT_NOT_FOUND");
       if (project.archivedAt !== null) return fail("ACTION_PROJECT_ARCHIVED");
       const override = await tx.projectActionPolicy.findUnique({ where: { projectId_capability: { projectId, capability: capability.id } }, select: { mode: true } });
-      const policyMode: ProjectActionPolicyMode = override?.mode ?? capability.defaultPolicy;
+      const configuredMode: ProjectActionPolicyMode = override?.mode ?? capability.defaultPolicy;
+      const policyMode: ProjectActionPolicyMode = capability.id === "project.mcp.read-tool.invoke" && configuredMode !== "denied"
+        ? "approvalRequired"
+        : configuredMode;
       if (policyMode === "denied") return fail("ACTION_POLICY_DENIED");
       const now = new Date();
       const status = policyMode === "automatic" ? "queued" as const : "waitingApproval" as const;
@@ -350,7 +370,7 @@ export async function requestProjectAction(projectIdInput: unknown, input: unkno
           capability: capability.id,
           riskLevel: capability.riskLevel,
           status,
-          input: canonicalInput,
+          input: canonicalInput as Prisma.InputJsonObject,
           inputFingerprint,
           policyModeSnapshot: policyMode,
           idempotencyKey,
@@ -383,6 +403,7 @@ export async function updateProjectActionPolicy(projectIdInput: unknown, capabil
   const capability = parseCapability(capabilityInput);
   const parsed = policyUpdateSchema.safeParse(input);
   if (!parsed.success) return fail("ACTION_INVALID_INPUT");
+  if (capability === "project.mcp.read-tool.invoke" && parsed.data.mode === "automatic") return fail("ACTION_INVALID_INPUT");
   await assertActiveProject(actor, projectId, "owner", db);
   return db.$transaction(async (tx) => {
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:${capability}`}::text, 31010001))`);
@@ -566,6 +587,19 @@ async function executeAction(action: ClaimedAction, db: PrismaClient): Promise<P
     const failedCount = results.filter((entry) => entry.status === "failed").length;
     if (failedCount > 0) throw new ActionExecutionError("ACTION_WEB_SOURCE_SYNC_PARTIAL_FAILURE", { sourceCount: results.length, failedCount });
     return { sourceCount: results.length, failedCount: 0 };
+  }
+  if (capability === "project.mcp.read-tool.invoke") {
+    const result = await executeMcpActionSnapshot(action.projectId, action.input, db);
+    return {
+      connectionId: result.connectionId,
+      toolName: result.toolName,
+      definitionFingerprint: result.definitionFingerprint,
+      text: result.text ?? "",
+      structuredContent: (result.structuredContent ?? {}) as Prisma.InputJsonValue,
+      hasStructuredContent: result.structuredContent !== null,
+      omittedContentCount: result.omittedContentCount,
+      resultFingerprint: result.resultFingerprint,
+    };
   }
   const { analyzeProjectMemoryQuality } = await import("@/lib/memory-quality");
   const result = await analyzeProjectMemoryQuality(action.projectId, db);

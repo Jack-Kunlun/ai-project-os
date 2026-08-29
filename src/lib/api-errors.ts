@@ -33,6 +33,7 @@ import { AccessControlError } from "@/lib/access-control";
 import { WorkspaceError } from "@/lib/workspaces";
 import { OidcError } from "@/lib/oidc";
 import { ActionEngineError } from "@/lib/action-engine";
+import { McpCapabilityError } from "@/lib/mcp";
 
 export type ApiErrorBody = {
   error: {
@@ -55,6 +56,35 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof McpCapabilityError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      MCP_INVALID_INPUT: [400, "MCP 配置或请求无效"],
+      MCP_CONNECTION_NOT_FOUND: [404, "MCP 连接不存在"],
+      MCP_CONNECTION_NAME_CONFLICT: [409, "MCP 连接名称已存在"],
+      MCP_CONNECTION_CONFLICT: [409, "MCP 连接已被其他管理员更新，请刷新后重试"],
+      MCP_CONNECTION_DISABLED: [409, "MCP 连接已停用"],
+      MCP_CONNECTION_NOT_VERIFIED: [409, "MCP 连接尚未成功发现工具"],
+      MCP_NETWORK_BLOCKED: [403, "MCP 地址位于未授权的内网或保留网络"],
+      MCP_NETWORK_CHANGED: [409, "MCP 域名解析地址已变化，请管理员重新确认网络"],
+      MCP_TRANSPORT_FAILED: [502, "MCP 远程连接失败"],
+      MCP_PROTOCOL_UNSUPPORTED: [422, "该服务不支持当前 Streamable HTTP MCP 协议"],
+      MCP_RESPONSE_INVALID: [502, "MCP 服务返回了无效响应"],
+      MCP_RESPONSE_TOO_LARGE: [413, "MCP 响应超过安全上限"],
+      MCP_TOOL_CATALOG_INVALID: [422, "MCP 工具目录不符合受控接入要求"],
+      MCP_TOOL_NOT_FOUND: [404, "MCP 工具定义不存在或已更新"],
+      MCP_TOOL_NOT_READ_ONLY: [403, "该工具未明确声明只读和非破坏性，不能授权"],
+      MCP_TOOL_DEFINITION_STALE: [409, "MCP 工具、凭据或授权快照已变化，请重新授权并创建动作"],
+      MCP_GRANT_NOT_FOUND: [404, "项目 MCP 工具授权不存在"],
+      MCP_GRANT_REVOKED: [403, "项目 MCP 工具授权已撤销"],
+      MCP_GRANT_CONFLICT: [409, "MCP 工具授权已被其他用户更新，请刷新后重试"],
+      MCP_TOOL_INPUT_INVALID: [400, "工具参数不符合已固化的输入 Schema"],
+      MCP_TOOL_INPUT_REQUIRED_UNSUPPORTED: [422, "当前版本不允许 MCP 工具在执行中继续索取输入"],
+      MCP_TOOL_CALL_FAILED: [502, "MCP 工具调用失败"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "MCP 能力处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof ActionEngineError) {
     const mapping: Record<string, readonly [number, string]> = {
       ACTION_INVALID_INPUT: [400, "动作请求无效"],

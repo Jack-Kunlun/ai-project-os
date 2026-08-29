@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ConnectionTabs } from "@/components/connection-tabs";
 
 type ProviderKind = "github" | "gitee" | "gitlab" | "gitea" | "forgejo" | "generic";
 type Transport = "https" | "ssh";
@@ -83,6 +84,8 @@ export function ConnectionsClient({ username }: { username: string }) {
             {["HTTPS Token / Basic", "SSH Deploy Key", "自定义 CA", "内网服务显式授权"].map((item) => <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-slate-200">{item}</div>)}
           </div>
         </section>
+
+        <ConnectionTabs active="git" />
 
         {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
 

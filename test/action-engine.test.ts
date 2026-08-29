@@ -14,16 +14,17 @@ function actionError(operation: () => unknown): string | null {
   catch (error) { return error instanceof ActionEngineError ? error.code : "unexpected"; }
 }
 
-test("动作能力注册表仅开放三项现有安全能力", () => {
+test("动作能力注册表仅开放内置能力与受控 MCP 只读调用", () => {
   const catalog = projectActionCapabilityCatalog();
   assert.deepEqual(catalog.map((entry) => entry.id), [
     "project.repository.sync",
     "project.web-source.sync",
     "project.memory-quality.scan",
+    "project.mcp.read-tool.invoke",
   ]);
-  assert.deepEqual(catalog.map((entry) => entry.defaultPolicy), ["approvalRequired", "approvalRequired", "automatic"]);
+  assert.deepEqual(catalog.map((entry) => entry.defaultPolicy), ["approvalRequired", "approvalRequired", "automatic", "approvalRequired"]);
   assert.ok(catalog.every((entry) => entry.effect === "local" || entry.effect === "external-read"));
-  assert.ok(catalog.every((entry) => entry.riskLevel !== "high"));
+  assert.equal(catalog.find((entry) => entry.id === "project.mcp.read-tool.invoke")?.riskLevel, "high");
   assert.equal(new Set(catalog.map((entry) => entry.id)).size, catalog.length);
 });
 
@@ -38,6 +39,18 @@ test("动作输入严格、规范且指纹绑定项目与能力", () => {
   assert.equal(first, projectActionInputFingerprint(projectA, "project.memory-quality.scan", {}));
   assert.notEqual(first, projectActionInputFingerprint(projectB, "project.memory-quality.scan", {}));
   assert.notEqual(first, projectActionInputFingerprint(projectA, "project.repository.sync", {}));
+  const mcpSnapshot = {
+    grantId: "00000000-0000-4000-8000-000000000201",
+    connectionId: "00000000-0000-4000-8000-000000000202",
+    toolName: "project.search",
+    toolDefinitionId: "00000000-0000-4000-8000-000000000203",
+    toolDefinitionFingerprint: "a".repeat(64),
+    networkFingerprint: "b".repeat(64),
+    credentialFingerprint: "c".repeat(64),
+    arguments: { query: "release" },
+  };
+  assert.deepEqual(canonicalProjectActionInput("project.mcp.read-tool.invoke", mcpSnapshot), mcpSnapshot);
+  assert.notEqual(projectActionInputFingerprint(projectA, "project.mcp.read-tool.invoke", mcpSnapshot), first);
 });
 
 test("动作状态机只允许审批、队列和一次执行收口", () => {

@@ -159,7 +159,12 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
   method?: "GET" | "POST";
   headers?: Readonly<Record<string, string>>;
   body?: string;
+  maximumResponseBytes?: number;
 }> = {}): Promise<RawResponse> {
+  const maximumResponseBytes = options.maximumResponseBytes ?? MAX_RESPONSE_BYTES;
+  if (!Number.isInteger(maximumResponseBytes) || maximumResponseBytes < 1 || maximumResponseBytes > MAX_RESPONSE_BYTES) {
+    return fail("WEB_SOURCE_INVALID_INPUT");
+  }
   return new Promise<RawResponse>((resolve, reject) => {
     const lookupPinned: LookupFunction = (_hostname, options, callback) => {
       callback(null, options.all ? [{ address: endpoint.address, family: endpoint.family }] : endpoint.address, endpoint.family);
@@ -174,7 +179,7 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
       let size = 0;
       response.on("data", (chunk: Buffer) => {
         size += chunk.length;
-        if (size > MAX_RESPONSE_BYTES) {
+        if (size > maximumResponseBytes) {
           response.destroy(new WebSourceError("WEB_SOURCE_TOO_LARGE"));
           return;
         }
@@ -195,6 +200,36 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
   });
 }
 
+export async function securePinnedHttpRequest(input: Readonly<{
+  url: string;
+  allowPrivateNetwork: boolean;
+  expectedFingerprint?: string | null;
+  method?: "GET" | "POST";
+  headers?: Readonly<Record<string, string>>;
+  body?: string;
+  maximumResponseBytes?: number;
+}>): Promise<Readonly<{
+  status: number;
+  headers: Readonly<Record<string, string>>;
+  body: Buffer;
+  finalUrl: string;
+  fingerprint: string;
+}>> {
+  const canonical = canonicalWebSourceUrl(input.url, input.allowPrivateNetwork);
+  const url = new URL(canonical);
+  const endpoint = await resolveEndpoint(url, input.allowPrivateNetwork);
+  if (input.expectedFingerprint !== undefined && input.expectedFingerprint !== null && endpoint.fingerprint !== input.expectedFingerprint) {
+    return fail("WEB_SOURCE_NETWORK_CHANGED");
+  }
+  const response = await requestPinned(url, endpoint, {
+    method: input.method,
+    headers: input.headers,
+    body: input.body,
+    maximumResponseBytes: input.maximumResponseBytes,
+  });
+  return Object.freeze({ ...response, finalUrl: canonical, fingerprint: endpoint.fingerprint });
+}
+
 export async function securePinnedJsonRequest(input: Readonly<{
   url: string;
   allowPrivateNetwork: boolean;
@@ -203,19 +238,13 @@ export async function securePinnedJsonRequest(input: Readonly<{
   headers?: Readonly<Record<string, string>>;
   body?: string;
 }>): Promise<Readonly<{ value: unknown; finalUrl: string; fingerprint: string; status: number }>> {
-  const canonical = canonicalWebSourceUrl(input.url, input.allowPrivateNetwork);
-  const url = new URL(canonical);
-  const endpoint = await resolveEndpoint(url, input.allowPrivateNetwork);
-  if (input.expectedFingerprint !== undefined && input.expectedFingerprint !== null && endpoint.fingerprint !== input.expectedFingerprint) {
-    return fail("WEB_SOURCE_NETWORK_CHANGED");
-  }
-  const response = await requestPinned(url, endpoint, { method: input.method, headers: input.headers, body: input.body });
+  const response = await securePinnedHttpRequest(input);
   if (response.status < 200 || response.status >= 300) return fail("WEB_SOURCE_HTTP_STATUS");
   const contentType = response.headers["content-type"] ?? "";
   if (!/^application\/(?:[A-Za-z0-9.+-]*\+)?json(?:\s*;|$)/iu.test(contentType)) return fail("WEB_SOURCE_TYPE_UNSUPPORTED");
   let value: unknown;
   try { value = JSON.parse(response.body.toString("utf8")); } catch { return fail("WEB_SOURCE_CONTENT_EMPTY"); }
-  return Object.freeze({ value, finalUrl: canonical, fingerprint: endpoint.fingerprint, status: response.status });
+  return Object.freeze({ value, finalUrl: response.finalUrl, fingerprint: response.fingerprint, status: response.status });
 }
 
 async function fetchWebSource(input: Readonly<{ url: string; allowPrivateNetwork: boolean; expectedFingerprint: string | null }>) {

@@ -117,7 +117,7 @@ export async function authorizeApiRequest(user: AccessUser, request: Request, db
   if (projectId === undefined) return;
   const write = !["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase());
   const ownerOnly = write && (
-    /\/(?:lifecycle|export|action-policies)(?:\/|$)/u.test(path)
+    /\/(?:lifecycle|export|action-policies|mcp-tool-grants)(?:\/|$)/u.test(path)
     || /\/actions\/[0-9a-f-]+\/decision(?:\/|$)/u.test(path)
   );
   await assertProjectAccess(user, projectId, ownerOnly ? "owner" : write ? "edit" : "view", db);

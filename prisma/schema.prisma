@@ -182,8 +182,32 @@ enum ExternalCredentialKind {
   aiProvider @map("ai_provider")
   github
   git
+  mcp
   oidcClient @map("oidc_client")
   oidcFlow   @map("oidc_flow")
+}
+
+enum McpAuthKind {
+  none
+  bearer
+}
+
+enum McpConnectionStatus {
+  configured
+  verified
+  error
+  disabled
+}
+
+enum ProjectMcpToolGrantStatus {
+  active
+  revoked
+}
+
+enum ProjectMcpToolGrantAuditEvent {
+  granted
+  refreshed
+  revoked
 }
 
 enum GitProviderKind {
@@ -888,6 +912,7 @@ model Project {
   actionPolicies                       ProjectActionPolicy[]
   actionPolicyRevisions                ProjectActionPolicyRevision[]
   actions                              ProjectAction[]
+  mcpToolGrants                        ProjectMcpToolGrant[]
   memoryIndexGenerations               MemoryIndexGeneration[]
   memoryIndexPointer                   MemoryIndexPointer?
   memoryRecords                        MemoryRecord[]
@@ -3261,6 +3286,9 @@ model AppUser {
   reviewedProjectAssetSegments ProjectAssetSegment[]             @relation("ProjectAssetSegmentReviewedBy")
   createdGitConnections        GitConnection[]
   createdGitRepositoryLinks    ProjectGitRepositoryLink[]
+  createdMcpConnections        McpConnection[]
+  managedMcpToolGrants         ProjectMcpToolGrant[]             @relation("ProjectMcpToolGrantManagedBy")
+  mcpToolGrantAuditEvents      ProjectMcpToolGrantAudit[]
   automationRules              AutomationRule[]
   notifications                Notification[]
   updatedActionPolicies        ProjectActionPolicy[]             @relation("ProjectActionPolicyUpdatedBy")
@@ -3451,11 +3479,99 @@ model ExternalCredential {
   aiProvider        AiProviderConnection?
   githubConnections GitHubConnection[]
   gitConnections    GitConnection[]
+  mcpConnection     McpConnection?
   oidcProviders     OidcProvider[]
   oidcLoginAttempts OidcLoginAttempt[]
   githubSyncEntries ProjectGitHubSyncEntry[]
 
   @@index([kind, updatedAt])
+}
+
+model McpConnection {
+  id                         String              @id @default(uuid()) @db.Uuid
+  name                       String              @unique @db.VarChar(80)
+  endpointUrl                String              @db.VarChar(1024)
+  authKind                   McpAuthKind
+  credentialId               String?             @unique @db.Uuid
+  allowPrivateNetwork        Boolean             @default(false)
+  resolvedAddressFingerprint String?             @db.Char(64)
+  protocolVersion            String?             @db.VarChar(16)
+  catalogFingerprint         String?             @db.Char(64)
+  status                     McpConnectionStatus @default(configured)
+  lastDiscoveredAt           DateTime?
+  lastErrorCode              String?             @db.VarChar(64)
+  disabledAt                 DateTime?
+  createdById                String              @db.Uuid
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+  credential                 ExternalCredential? @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  createdBy                  AppUser             @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  toolDefinitions            McpToolDefinition[]
+
+  @@index([status, updatedAt])
+  @@index([createdById, createdAt])
+}
+
+model McpToolDefinition {
+  id                    String                @id @default(uuid()) @db.Uuid
+  connectionId          String                @db.Uuid
+  name                  String                @db.VarChar(128)
+  title                 String?               @db.VarChar(200)
+  description           String?               @db.Text
+  inputSchema           Json                  @db.JsonB
+  outputSchema          Json?                 @db.JsonB
+  annotations           Json                  @default("{}") @db.JsonB
+  readOnlyEligible      Boolean
+  definitionFingerprint String                @db.Char(64)
+  current               Boolean               @default(true)
+  discoveredAt          DateTime              @default(now())
+  supersededAt          DateTime?
+  connection            McpConnection         @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  projectGrants         ProjectMcpToolGrant[]
+
+  @@unique([connectionId, name, definitionFingerprint])
+  @@unique([id, connectionId, name])
+  @@index([connectionId, current, name])
+}
+
+model ProjectMcpToolGrant {
+  id                String                    @id @default(uuid()) @db.Uuid
+  projectId         String                    @db.Uuid
+  connectionId      String                    @db.Uuid
+  toolName          String                    @db.VarChar(128)
+  toolDefinitionId  String                    @db.Uuid
+  status            ProjectMcpToolGrantStatus @default(active)
+  managedById       String                    @db.Uuid
+  acknowledgedAt    DateTime
+  revokedAt         DateTime?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  project           Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  toolDefinition    McpToolDefinition         @relation(fields: [toolDefinitionId, connectionId, toolName], references: [id, connectionId, name], onDelete: NoAction, onUpdate: Cascade)
+  managedBy         AppUser                   @relation("ProjectMcpToolGrantManagedBy", fields: [managedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audits            ProjectMcpToolGrantAudit[]
+
+  @@unique([projectId, connectionId, toolName])
+  @@unique([projectId, id])
+  @@index([projectId, status, updatedAt])
+  @@index([toolDefinitionId])
+  @@index([managedById, updatedAt])
+}
+
+model ProjectMcpToolGrantAudit {
+  id                    String                            @id @default(uuid()) @db.Uuid
+  projectId             String                            @db.Uuid
+  grantId               String                            @db.Uuid
+  event                 ProjectMcpToolGrantAuditEvent
+  actorId               String                            @db.Uuid
+  definitionFingerprint String                            @db.Char(64)
+  details               Json                              @default("{}") @db.JsonB
+  createdAt             DateTime                          @default(now())
+  grant                 ProjectMcpToolGrant               @relation(fields: [projectId, grantId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
+  actor                 AppUser                           @relation(fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([projectId, grantId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model AiProviderConnection {

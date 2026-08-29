@@ -20,6 +20,14 @@ type Action = {
   approvalExpiresAt: string | null;
   attemptCount: number;
   result: unknown;
+  resultImport: null | {
+    id: string;
+    resultFingerprint: string;
+    contentFingerprint: string;
+    createdAt: string;
+    projectSource: { id: string; kind: "mcp"; ingestedAt: string };
+    importedBy: { id: string; username: string; displayName: string | null };
+  };
   failureCode: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -30,7 +38,7 @@ type Action = {
   audits: Audit[];
   canCancel: boolean;
 };
-type Center = { catalog: Capability[]; policies: Policy[]; actions: Action[]; canManagePolicies: boolean; canApprove: boolean; archived: boolean };
+type Center = { catalog: Capability[]; policies: Policy[]; actions: Action[]; canManagePolicies: boolean; canApprove: boolean; canImportResults: boolean; archived: boolean };
 
 const modeLabels: Record<PolicyMode, string> = { automatic: "自动执行", approvalRequired: "每次审批", denied: "禁止执行" };
 const statusLabels: Record<Action["status"], string> = {
@@ -61,6 +69,12 @@ function mcpInput(value: unknown): { toolName: string; arguments: unknown } | nu
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
   return typeof input.toolName === "string" ? { toolName: input.toolName, arguments: input.arguments } : null;
+}
+
+function mcpResultFingerprint(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const fingerprint = (value as Record<string, unknown>).resultFingerprint;
+  return typeof fingerprint === "string" && /^[0-9a-f]{64}$/u.test(fingerprint) ? fingerprint : null;
 }
 
 export function ProjectActionsClient({ username, projectId }: { username: string; projectId: string }) {
@@ -126,6 +140,31 @@ export function ProjectActionsClient({ username, projectId }: { username: string
     finally { setPendingKey(null); }
   }
 
+  async function importResult(action: Action) {
+    const resultFingerprint = mcpResultFingerprint(action.result);
+    if (resultFingerprint === null) {
+      setError("动作结果缺少有效指纹，不能纳入项目资料。");
+      return;
+    }
+    if (!window.confirm("把这次 MCP 结果固化为项目资料？导入后仍是未确认来源，不会自动进入事实或语义索引。")) return;
+    setPendingKey(`import:${action.id}`); setMessage(null); setError(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/actions/${action.id}/result-import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          expectedUpdatedAt: action.updatedAt,
+          expectedInputFingerprint: action.inputFingerprint,
+          expectedResultFingerprint: resultFingerprint,
+        }),
+      });
+      if (!response.ok) throw new Error(await responseError(response, "动作结果导入失败"));
+      setMessage("MCP 结果已固化为项目资料。需要先审核并重建索引，才会参与后续语义检索与智能体调查。");
+      await reload();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "动作结果导入失败"); }
+    finally { setPendingKey(null); }
+  }
+
   const policyByCapability = new Map(center?.policies.map((policy) => [policy.capability, policy]) ?? []);
   const catalogById = new Map(center?.catalog.map((capability) => [capability.id, capability]) ?? []);
 
@@ -145,6 +184,32 @@ export function ProjectActionsClient({ username, projectId }: { username: string
       </section>
 
       <section className="mt-10"><div className="mb-5 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Action ledger</p><h2 className="mt-2 text-2xl font-semibold">动作记录</h2></div><span className="text-xs text-slate-400">最近 {center?.actions.length ?? 0} 条</span></div><div className="space-y-4">{center && center.actions.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">还没有动作。可以先运行一次“检查记忆质量”验证完整闭环。</div> : center?.actions.map((action) => { const capability = catalogById.get(action.capability); const busy = pendingKey?.endsWith(action.id) ?? false; const toolCall = action.capability === "project.mcp.read-tool.invoke" ? mcpInput(action.input) : null; return <article key={action.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold">{toolCall ? `${capability?.label ?? action.capability} · ${toolCall.toolName}` : capability?.label ?? action.capability}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${badgeTone(action.status)}`}>{statusLabels[action.status]}</span></div><p className="mt-2 text-xs text-slate-500">申请人：{displayUser(action.requestedBy)} · {new Date(action.createdAt).toLocaleString("zh-CN")}</p></div><div className="text-right"><p className="font-mono text-[11px] text-slate-400" title={action.inputFingerprint}>指纹 {action.inputFingerprint.slice(0, 12)}…</p><p className="mt-1 text-[11px] text-slate-400">策略快照：{modeLabels[action.policyModeSnapshot]}</p></div></div>{toolCall ? <details open={action.status === "waitingApproval"} className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"><summary className="cursor-pointer text-xs font-semibold text-amber-900">核对 MCP 调用参数</summary><pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-5 text-amber-900">{JSON.stringify(toolCall.arguments, null, 2)}</pre></details> : null}{action.failureCode ? <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 font-mono text-xs text-rose-700">{action.failureCode}</p> : null}{action.result && action.status === "succeeded" ? <details className="mt-4 rounded-2xl bg-emerald-50 p-4"><summary className="cursor-pointer text-xs font-semibold text-emerald-800">查看执行结果</summary><pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-all text-[11px] leading-5 text-emerald-950">{JSON.stringify(action.result, null, 2)}</pre></details> : null}{action.approval ? <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-600">{action.approval.decision === "approved" ? "已批准" : "已拒绝"} · {displayUser(action.approval.decidedBy)} · {new Date(action.approval.decidedAt).toLocaleString("zh-CN")}{action.approval.note ? ` · ${action.approval.note}` : ""}</p> : action.status === "waitingApproval" && action.approvalExpiresAt ? <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-700">审批有效期至 {new Date(action.approvalExpiresAt).toLocaleString("zh-CN")}。审批会同时核对当前版本和输入指纹。</p> : null}<div className="mt-5 grid gap-4 lg:grid-cols-[1fr_auto]"><div className="flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-slate-500">{action.audits.slice(0, 6).map((audit) => <span key={audit.id}><strong className="font-semibold text-slate-700">{auditLabels[audit.event] ?? audit.event}</strong> · {displayUser(audit.actor)} · {new Date(audit.createdAt).toLocaleString("zh-CN")}</span>)}</div><div className="flex flex-wrap justify-end gap-2">{center.canApprove && action.status === "waitingApproval" ? <><button type="button" onClick={() => void decide(action, "rejected")} disabled={busy} className="flex min-h-10 items-center justify-center rounded-xl border border-rose-200 px-4 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50">拒绝</button><button type="button" onClick={() => void decide(action, "approved")} disabled={busy} className="flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">批准并排队</button></> : null}{action.canCancel ? <button type="button" onClick={() => void cancel(action)} disabled={busy} className="flex min-h-10 items-center justify-center rounded-xl px-4 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 disabled:opacity-50">取消动作</button> : null}</div></div></article>; })}</div></section>
+      <section className="mt-10 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Reviewed intake</p>
+            <h2 className="mt-2 text-2xl font-semibold">MCP 结果纳入项目资料</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">只有成功结果可以由 Editor 或 Owner 手动固化。导入会锁定动作、输入与结果指纹，但不会自动生成事实、重建索引或触发智能体。</p>
+          </div>
+          <Link href={`/projects/${projectId}`} className="flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:border-indigo-300 hover:text-indigo-700">查看项目资料</Link>
+        </div>
+        <div className="mt-5 space-y-3">
+          {(center?.actions.filter((action) => action.capability === "project.mcp.read-tool.invoke" && action.status === "succeeded") ?? []).map((action) => {
+            const input = mcpInput(action.input);
+            const fingerprint = mcpResultFingerprint(action.result);
+            const busy = pendingKey === `import:${action.id}`;
+            return <div key={action.id} className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">{input?.toolName ?? "MCP 只读工具"}</p>
+                <p className="mt-1 font-mono text-[11px] text-slate-400">结果 {fingerprint?.slice(0, 12) ?? "无有效指纹"}…</p>
+                {action.resultImport ? <p className="mt-2 text-xs text-emerald-700">已由 {displayUser(action.resultImport.importedBy)} 导入 · {new Date(action.resultImport.createdAt).toLocaleString("zh-CN")}</p> : <p className="mt-2 text-xs text-amber-700">等待人工确认是否作为未审核项目资料保留</p>}
+              </div>
+              {action.resultImport ? <span className="flex min-h-10 items-center justify-center rounded-xl bg-emerald-100 px-4 py-2 text-xs font-semibold text-emerald-700">已固化</span> : <button type="button" onClick={() => void importResult(action)} disabled={!center?.canImportResults || center.archived || fingerprint === null || busy} className="flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40">{busy ? "导入中…" : "导入为项目资料"}</button>}
+            </div>;
+          })}
+          {center && center.actions.every((action) => action.capability !== "project.mcp.read-tool.invoke" || action.status !== "succeeded") ? <div className="rounded-2xl border border-dashed border-slate-300 px-5 py-10 text-center text-sm text-slate-500">还没有可导入的 MCP 成功结果。</div> : null}
+        </div>
+      </section>
     </div>
   </main>;
 }

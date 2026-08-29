@@ -42,7 +42,7 @@ export type ProjectQueryEmbedding = Readonly<{
 export type ProjectSearchCitation = Readonly<{
   projectId: string;
   sourceId: string;
-  sourceKind: "document" | "screenshot" | "github" | "git" | "web" | "manual";
+  sourceKind: "document" | "screenshot" | "github" | "git" | "web" | "manual" | "mcp";
   externalRef: string | null;
   chunkId: string;
   rangeUnit: "utf8_byte" | "line";
@@ -172,7 +172,7 @@ function vectorLiteral(vector: readonly number[]): string {
 }
 
 function sourceKind(value: string): ProjectSearchCitation["sourceKind"] {
-  if (!["document", "screenshot", "github", "git", "web", "manual"].includes(value)) {
+  if (!["document", "screenshot", "github", "git", "web", "manual", "mcp"].includes(value)) {
     return fail("PROJECT_SEARCH_SNAPSHOT_CONFLICT");
   }
   return value as ProjectSearchCitation["sourceKind"];

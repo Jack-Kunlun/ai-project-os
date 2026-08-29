@@ -13,6 +13,7 @@ enum ProjectSourceKind {
   git
   web
   manual
+  mcp
 }
 
 enum WebSourceStatus {
@@ -912,6 +913,7 @@ model Project {
   actionPolicies                       ProjectActionPolicy[]
   actionPolicyRevisions                ProjectActionPolicyRevision[]
   actions                              ProjectAction[]
+  actionResultImports                  ProjectActionResultImport[]
   mcpToolGrants                        ProjectMcpToolGrant[]
   memoryIndexGenerations               MemoryIndexGeneration[]
   memoryIndexPointer                   MemoryIndexPointer?
@@ -2131,6 +2133,7 @@ model ProjectSource {
   assetSegment                   ProjectAssetSegment?                 @relation("ProjectAssetSegmentSource")
   gitRepositorySnapshotEntries   GitRepositorySnapshotEntry[]         @relation("GitRepositorySnapshotSource")
   webSourceRevisions             WebSourceRevision[]                  @relation("WebSourceRevisionProjectSource")
+  actionResultImport             ProjectActionResultImport?
 
   @@unique([projectId, id])
   @@unique([projectId, id, originScope])
@@ -3296,6 +3299,7 @@ model AppUser {
   requestedActions             ProjectAction[]                   @relation("ProjectActionRequestedBy")
   decidedActionApprovals       ProjectActionApproval[]           @relation("ProjectActionApprovalDecidedBy")
   actionAuditEvents            ProjectActionAudit[]              @relation("ProjectActionAuditActor")
+  importedActionResults        ProjectActionResultImport[]       @relation("ProjectActionResultImportedBy")
   resolvedMemoryQualityIssues  MemoryQualityIssue[]
   createdWebSources            WebSource[]
   createdWorkspaces            Workspace[]                       @relation("WorkspaceCreatedBy")
@@ -3876,12 +3880,35 @@ model ProjectAction {
   requestedBy           AppUser                        @relation("ProjectActionRequestedBy", fields: [requestedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   approval              ProjectActionApproval?
   audits                ProjectActionAudit[]
+  resultImport          ProjectActionResultImport?
 
   @@unique([projectId, id])
   @@unique([projectId, requestedById, idempotencyKey])
   @@index([projectId, status, createdAt])
   @@index([status, leaseExpiresAt, createdAt])
   @@index([requestedById, createdAt])
+}
+
+model ProjectActionResultImport {
+  id                     String        @id @default(uuid()) @db.Uuid
+  projectId              String        @db.Uuid
+  actionId               String        @unique @db.Uuid
+  projectSourceId        String        @unique @db.Uuid
+  actionInputFingerprint String        @db.Char(64)
+  resultFingerprint      String        @db.Char(64)
+  contentFingerprint     String        @db.Char(64)
+  importedById           String        @db.Uuid
+  createdAt              DateTime      @default(now())
+  project                Project       @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  action                 ProjectAction @relation(fields: [projectId, actionId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
+  projectSource          ProjectSource @relation(fields: [projectId, projectSourceId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
+  importedBy             AppUser       @relation("ProjectActionResultImportedBy", fields: [importedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, actionId])
+  @@unique([projectId, projectSourceId])
+  @@index([projectId, createdAt])
+  @@index([importedById, createdAt])
 }
 
 model ProjectActionApproval {

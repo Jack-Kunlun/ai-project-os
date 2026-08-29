@@ -69,7 +69,7 @@ const CAPABILITY_CATALOG: Readonly<Record<ProjectActionCapability, CapabilityDef
   "project.mcp.read-tool.invoke": Object.freeze({
     id: "project.mcp.read-tool.invoke",
     label: "调用 MCP 只读工具",
-    description: "调用管理员已验证、项目 Owner 已逐项授权的远程只读工具。每次调用都必须单独审批，结果只写入动作审计。",
+    description: "调用管理员已验证、项目 Owner 已逐项授权的远程只读工具。每次调用都必须单独审批，结果默认只保存在动作记录中，可再由成员人工固化为未审核项目资料。",
     riskLevel: "high",
     defaultPolicy: "approvalRequired",
     effect: "external-read",
@@ -144,6 +144,16 @@ const actionSelect = {
   createdAt: true,
   updatedAt: true,
   requestedBy: { select: { id: true, username: true, displayName: true } },
+  resultImport: {
+    select: {
+      id: true,
+      resultFingerprint: true,
+      contentFingerprint: true,
+      createdAt: true,
+      projectSource: { select: { id: true, kind: true, ingestedAt: true } },
+      importedBy: { select: { id: true, username: true, displayName: true } },
+    },
+  },
   approval: { select: { decision: true, note: true, decidedAt: true, decidedBy: { select: { id: true, username: true, displayName: true } } } },
   audits: { orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 12, select: { id: true, event: true, details: true, createdAt: true, actor: { select: { id: true, username: true, displayName: true } } } },
 } satisfies Prisma.ProjectActionSelect;
@@ -318,6 +328,7 @@ export async function getProjectActionCenter(projectIdInput: unknown, actor: Acc
     })),
     canManagePolicies: permission === "owner",
     canApprove: permission === "owner",
+    canImportResults: permission === "owner" || permission === "edit",
     archived: project.archivedAt !== null,
   });
 }

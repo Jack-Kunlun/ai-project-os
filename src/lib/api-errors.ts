@@ -33,6 +33,7 @@ import { AccessControlError } from "@/lib/access-control";
 import { WorkspaceError } from "@/lib/workspaces";
 import { OidcError } from "@/lib/oidc";
 import { ActionEngineError } from "@/lib/action-engine";
+import { ActionResultIntakeError } from "@/lib/action-result-intake";
 import { McpCapabilityError } from "@/lib/mcp";
 
 export type ApiErrorBody = {
@@ -56,6 +57,19 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof ActionResultIntakeError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      ACTION_RESULT_INTAKE_INVALID_INPUT: [400, "动作结果导入请求无效"],
+      ACTION_RESULT_INTAKE_ACTION_NOT_FOUND: [404, "动作不存在"],
+      ACTION_RESULT_INTAKE_NOT_IMPORTABLE: [409, "只有已成功的 MCP 只读调用结果可以导入"],
+      ACTION_RESULT_INTAKE_VERSION_CONFLICT: [409, "动作记录已变化，请刷新后重新确认"],
+      ACTION_RESULT_INTAKE_RESULT_CHANGED: [409, "动作输入或结果指纹已变化，请刷新后重新确认"],
+      ACTION_RESULT_INTAKE_TOO_LARGE: [413, "动作结果超过单条项目资料的安全上限"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "动作结果导入失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof McpCapabilityError) {
     const mapping: Record<string, readonly [number, string]> = {
       MCP_INVALID_INPUT: [400, "MCP 配置或请求无效"],

@@ -28,7 +28,7 @@ export type GroundedRagContextEntry = Readonly<{
   projectId: string;
   sourceId: string;
   chunkId: string;
-  sourceKind: "document" | "screenshot" | "github" | "git" | "web" | "manual";
+  sourceKind: "document" | "screenshot" | "github" | "git" | "web" | "manual" | "mcp";
   externalRef: string | null;
   contentHash: string;
   contentText: string;
@@ -220,7 +220,7 @@ function canonicalContext(
   const contextProjectId = canonicalId(value.projectId);
   if (contextProjectId !== projectId) return fail("GROUNDED_RAG_CONTEXT_CONFLICT");
   const sourceKind = value.sourceKind;
-  if (!["document", "screenshot", "github", "git", "web", "manual"].includes(sourceKind)) {
+  if (!["document", "screenshot", "github", "git", "web", "manual", "mcp"].includes(sourceKind)) {
     return fail("GROUNDED_RAG_INVALID_INPUT");
   }
   const externalRef = value.externalRef === null

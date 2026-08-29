@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { ActionEngineError, decideProjectAction, requestProjectAction, runProjectActionWorkerCycle, updateProjectActionPolicy } from "../src/lib/action-engine";
+import { ActionResultIntakeError, importProjectActionResult } from "../src/lib/action-result-intake";
 import { getDb } from "../src/lib/db";
 import {
   McpCapabilityError,
@@ -102,6 +103,25 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
     const succeeded = await db.projectAction.findUniqueOrThrow({ where: { id: waiting.id } });
     assert.equal(succeeded.status, "succeeded");
     assert.equal((succeeded.result as { toolName?: string }).toolName, "project.lookup");
+    const succeededFingerprint = (succeeded.result as { resultFingerprint?: string }).resultFingerprint;
+    assert.match(succeededFingerprint ?? "", /^[0-9a-f]{64}$/u);
+    const resultImport = await importProjectActionResult(projectId, succeeded.id, {
+      expectedUpdatedAt: succeeded.updatedAt.toISOString(),
+      expectedInputFingerprint: succeeded.inputFingerprint,
+      expectedResultFingerprint: succeededFingerprint,
+    }, editor, db);
+    assert.equal(resultImport.projectSource.kind, "mcp");
+    assert.equal(resultImport.contentFingerprint, resultImport.projectSource.contentHash);
+    const importedSource = await db.projectSource.findUniqueOrThrow({ where: { id: resultImport.projectSource.id } });
+    assert.equal(importedSource.sourceIdentity, succeeded.id);
+    assert.equal(importedSource.revisionKey, succeeded.id);
+    assert.equal((JSON.parse(importedSource.contentText) as { result: { text: string } }).result.text, "found");
+    assert.equal((await importProjectActionResult(projectId, succeeded.id, {
+      expectedUpdatedAt: succeeded.updatedAt.toISOString(),
+      expectedInputFingerprint: succeeded.inputFingerprint,
+      expectedResultFingerprint: succeededFingerprint,
+    }, editor, db)).id, resultImport.id);
+    await assert.rejects(() => db.projectActionResultImport.update({ where: { id: resultImport.id }, data: { contentFingerprint: "d".repeat(64) } }));
 
     const staleWaiting = await requestProjectAction(projectId, { capability: "project.mcp.read-tool.invoke", input: { grantId: grant.id, arguments: { query: "release", revision: 1 } }, clientRequestId: randomUUID() }, editor, db);
     await decideProjectAction(projectId, staleWaiting.id, { decision: "approved", expectedUpdatedAt: staleWaiting.updatedAt.toISOString(), expectedFingerprint: staleWaiting.inputFingerprint, note: null }, admin, db);
@@ -112,6 +132,14 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
     const failed = await db.projectAction.findUniqueOrThrow({ where: { id: staleWaiting.id } });
     assert.equal(failed.status, "failed");
     assert.equal(failed.failureCode, "MCP_TOOL_DEFINITION_STALE");
+    await assert.rejects(
+      () => importProjectActionResult(projectId, failed.id, {
+        expectedUpdatedAt: failed.updatedAt.toISOString(),
+        expectedInputFingerprint: failed.inputFingerprint,
+        expectedResultFingerprint: "e".repeat(64),
+      }, editor, db),
+      (error: unknown) => error instanceof ActionResultIntakeError && error.code === "ACTION_RESULT_INTAKE_NOT_IMPORTABLE",
+    );
 
     await assert.rejects(
       () => requestProjectAction(projectId, { capability: "project.mcp.read-tool.invoke", input: { grantId: grant.id, arguments: { query: "release", revision: 1 } }, clientRequestId: randomUUID() }, editor, db),

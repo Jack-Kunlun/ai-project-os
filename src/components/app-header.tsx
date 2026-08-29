@@ -2,7 +2,7 @@ import Link from "next/link";
 import { APP_VERSION } from "@/lib/version";
 
 type PrimarySection = "dashboard" | "projects" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide";
-type ProjectSection = "overview" | "assets" | "externalSources" | "repositories" | "automations" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance";
+type ProjectSection = "overview" | "assets" | "externalSources" | "repositories" | "automations" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance";
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid" },
@@ -18,6 +18,7 @@ const projectItems = [
   { key: "externalSources", label: "外部资料", suffix: "/external-sources" },
   { key: "repositories", label: "代码仓库", suffix: "/repositories" },
   { key: "automations", label: "自动化", suffix: "/automations" },
+  { key: "actions", label: "动作与审批", suffix: "/actions" },
   { key: "control", label: "智能控制台", suffix: "/control" },
   { key: "memory", label: "智能记忆", suffix: "/memory" },
   { key: "memoryQuality", label: "记忆质量", suffix: "/memory-quality" },

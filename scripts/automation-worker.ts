@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { runProjectActionWorkerCycle } from "@/lib/action-engine";
 import { runAutomationWorkerCycle } from "@/lib/automation";
 
 const workerId = `worker:${randomUUID()}`;
@@ -13,13 +14,20 @@ async function wait(milliseconds: number) {
 
 async function main() {
   while (!stopping) {
+    let claimed = 0;
+    try {
+      const result = await runProjectActionWorkerCycle({ workerId, maximumActions: 5 });
+      claimed += result.claimed;
+    } catch {
+      console.error("Action worker cycle failed");
+    }
     try {
       const result = await runAutomationWorkerCycle({ workerId, maximumRuns: 5 });
-      if (result.claimed === 0) await wait(10_000);
+      claimed += result.claimed;
     } catch {
       console.error("Automation worker cycle failed");
-      await wait(10_000);
     }
+    if (claimed === 0) await wait(10_000);
   }
 }
 

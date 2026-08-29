@@ -318,6 +318,9 @@ enum NotificationKind {
   automationFailed    @map("automation_failed")
   consentRequired     @map("consent_required")
   memoryQuality       @map("memory_quality")
+  actionApprovalRequired @map("action_approval_required")
+  actionCompleted        @map("action_completed")
+  actionFailed           @map("action_failed")
   system
 }
 
@@ -326,6 +329,47 @@ enum NotificationSeverity {
   success
   warning
   error
+}
+
+enum ProjectActionPolicyMode {
+  automatic
+  approvalRequired @map("approval_required")
+  denied
+}
+
+enum ProjectActionRiskLevel {
+  low
+  medium
+  high
+}
+
+enum ProjectActionStatus {
+  waitingApproval @map("waiting_approval")
+  queued
+  running
+  succeeded
+  failed
+  rejected
+  cancelled
+  expired
+}
+
+enum ProjectActionApprovalDecision {
+  approved
+  rejected
+}
+
+enum ProjectActionAuditEvent {
+  requested
+  queued
+  approvalRequested @map("approval_requested")
+  approved
+  rejected
+  cancelled
+  claimed
+  succeeded
+  failed
+  expired
 }
 
 enum MemoryQualityIssueKind {
@@ -841,6 +885,9 @@ model Project {
   automationRules                      AutomationRule[]
   automationRuns                       AutomationRun[]
   notifications                        Notification[]
+  actionPolicies                       ProjectActionPolicy[]
+  actionPolicyRevisions                ProjectActionPolicyRevision[]
+  actions                              ProjectAction[]
   memoryIndexGenerations               MemoryIndexGeneration[]
   memoryIndexPointer                   MemoryIndexPointer?
   memoryRecords                        MemoryRecord[]
@@ -3216,6 +3263,11 @@ model AppUser {
   createdGitRepositoryLinks    ProjectGitRepositoryLink[]
   automationRules              AutomationRule[]
   notifications                Notification[]
+  updatedActionPolicies        ProjectActionPolicy[]             @relation("ProjectActionPolicyUpdatedBy")
+  actionPolicyRevisions        ProjectActionPolicyRevision[]     @relation("ProjectActionPolicyRevisionChangedBy")
+  requestedActions             ProjectAction[]                   @relation("ProjectActionRequestedBy")
+  decidedActionApprovals       ProjectActionApproval[]           @relation("ProjectActionApprovalDecidedBy")
+  actionAuditEvents            ProjectActionAudit[]              @relation("ProjectActionAuditActor")
   resolvedMemoryQualityIssues  MemoryQualityIssue[]
   createdWebSources            WebSource[]
   createdWorkspaces            Workspace[]                       @relation("WorkspaceCreatedBy")
@@ -3649,6 +3701,102 @@ model Notification {
   @@unique([userId, dedupeKey])
   @@index([userId, readAt, createdAt])
   @@index([projectId, createdAt])
+}
+
+model ProjectActionPolicy {
+  id          String                  @id @default(uuid()) @db.Uuid
+  projectId   String                  @db.Uuid
+  capability  String                  @db.VarChar(96)
+  mode        ProjectActionPolicyMode
+  updatedById String                  @db.Uuid
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  project     Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  updatedBy   AppUser                 @relation("ProjectActionPolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, capability])
+  @@index([projectId, mode])
+  @@index([updatedById, updatedAt])
+}
+
+model ProjectActionPolicyRevision {
+  id              String                   @id @default(uuid()) @db.Uuid
+  projectId       String                   @db.Uuid
+  capability      String                   @db.VarChar(96)
+  previousMode    ProjectActionPolicyMode?
+  currentMode     ProjectActionPolicyMode
+  changedById     String                   @db.Uuid
+  policyUpdatedAt DateTime
+  createdAt       DateTime                 @default(now())
+  project         Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  changedBy       AppUser                  @relation("ProjectActionPolicyRevisionChangedBy", fields: [changedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([projectId, capability, createdAt])
+  @@index([changedById, createdAt])
+}
+
+model ProjectAction {
+  id                    String                         @id @default(uuid()) @db.Uuid
+  projectId             String                         @db.Uuid
+  capability            String                         @db.VarChar(96)
+  riskLevel             ProjectActionRiskLevel
+  status                ProjectActionStatus
+  input                 Json                           @default("{}") @db.JsonB
+  inputFingerprint      String                         @db.Char(64)
+  policyModeSnapshot    ProjectActionPolicyMode
+  idempotencyKey        String                         @db.Char(64)
+  requestedById         String                         @db.Uuid
+  approvalExpiresAt     DateTime?
+  workerId              String?                        @db.VarChar(128)
+  leaseExpiresAt        DateTime?
+  attemptCount          Int                            @default(0)
+  result                Json?                          @db.JsonB
+  failureCode           String?                        @db.VarChar(64)
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+  project               Project                        @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  requestedBy           AppUser                        @relation("ProjectActionRequestedBy", fields: [requestedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  approval              ProjectActionApproval?
+  audits                ProjectActionAudit[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, requestedById, idempotencyKey])
+  @@index([projectId, status, createdAt])
+  @@index([status, leaseExpiresAt, createdAt])
+  @@index([requestedById, createdAt])
+}
+
+model ProjectActionApproval {
+  id                String                        @id @default(uuid()) @db.Uuid
+  projectId         String                        @db.Uuid
+  actionId          String                        @unique @db.Uuid
+  decision          ProjectActionApprovalDecision
+  actionFingerprint String                        @db.Char(64)
+  decidedById       String                        @db.Uuid
+  note              String?                       @db.VarChar(500)
+  decidedAt         DateTime                      @default(now())
+  action            ProjectAction                 @relation(fields: [projectId, actionId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
+  decidedBy         AppUser                       @relation("ProjectActionApprovalDecidedBy", fields: [decidedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, actionId])
+  @@index([decidedById, decidedAt])
+}
+
+model ProjectActionAudit {
+  id        String                  @id @default(uuid()) @db.Uuid
+  projectId String                  @db.Uuid
+  actionId  String                  @db.Uuid
+  event     ProjectActionAuditEvent
+  actorId   String?                 @db.Uuid
+  details   Json                    @default("{}") @db.JsonB
+  createdAt DateTime                @default(now())
+  action    ProjectAction           @relation(fields: [projectId, actionId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
+  actor     AppUser?                @relation("ProjectActionAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([projectId, actionId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model MemoryQualityIssue {

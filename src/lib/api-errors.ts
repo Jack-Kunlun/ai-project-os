@@ -32,6 +32,7 @@ import { WebSourceError } from "@/lib/web-sources";
 import { AccessControlError } from "@/lib/access-control";
 import { WorkspaceError } from "@/lib/workspaces";
 import { OidcError } from "@/lib/oidc";
+import { ActionEngineError } from "@/lib/action-engine";
 
 export type ApiErrorBody = {
   error: {
@@ -54,6 +55,26 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof ActionEngineError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      ACTION_INVALID_INPUT: [400, "动作请求无效"],
+      ACTION_PROJECT_NOT_FOUND: [404, "项目不存在"],
+      ACTION_PROJECT_ARCHIVED: [409, "已归档项目不能创建或审批动作"],
+      ACTION_NOT_FOUND: [404, "动作不存在"],
+      ACTION_POLICY_DENIED: [403, "项目策略禁止执行该能力"],
+      ACTION_POLICY_CONFLICT: [409, "动作策略已被其他用户更新，请刷新后重试"],
+      ACTION_IDEMPOTENCY_CONFLICT: [409, "同一请求标识已经用于另一项动作"],
+      ACTION_APPROVAL_REQUIRED: [409, "该动作需要项目 Owner 审批"],
+      ACTION_APPROVAL_EXPIRED: [410, "动作审批已经过期，请重新创建"],
+      ACTION_DECISION_CONFLICT: [409, "动作内容或状态已变化，请刷新后重试"],
+      ACTION_CANCEL_FORBIDDEN: [403, "只有动作申请人或项目 Owner 可以取消"],
+      ACTION_STATE_CONFLICT: [409, "动作状态已变化，当前操作不能继续"],
+      ACTION_EXECUTION_FAILED: [500, "动作执行失败"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "动作处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof WorkspaceError) {
     const mapping: Record<string, readonly [number, string]> = {
       WORKSPACE_INVALID_INPUT: [400, "工作区请求无效"],

@@ -72,7 +72,8 @@ export async function updateProjectLifecycle(
             },
           });
           const runningAutomations = await tx.automationRun.count({ where: { projectId: input.projectId, status: "running" } });
-          if (unresolvedJobs > 0 || runningAutomations > 0) throw new ProjectLifecycleError("PROJECT_HAS_UNRESOLVED_JOBS");
+          const runningActions = await tx.projectAction.count({ where: { projectId: input.projectId, status: "running" } });
+          if (unresolvedJobs > 0 || runningAutomations > 0 || runningActions > 0) throw new ProjectLifecycleError("PROJECT_HAS_UNRESOLVED_JOBS");
         } else if (current.archivedAt === null) {
           throw new ProjectLifecycleError("PROJECT_ALREADY_ACTIVE");
         }
@@ -86,6 +87,20 @@ export async function updateProjectLifecycle(
         });
         if (input.action === "archive") {
           await tx.automationRule.updateMany({ where: { projectId: input.projectId, status: "active" }, data: { status: "paused" } });
+          const pendingActions = await tx.projectAction.findMany({ where: { projectId: input.projectId, status: { in: ["waitingApproval", "queued"] } }, select: { id: true, status: true } });
+          for (const action of pendingActions) {
+            const cancelled = await tx.projectAction.updateMany({
+              where: { id: action.id, status: action.status },
+              data: { status: "cancelled", completedAt: changedAt, updatedAt: changedAt },
+            });
+            if (cancelled.count === 1) await tx.projectActionAudit.create({ data: {
+              projectId: input.projectId,
+              actionId: action.id,
+              event: "cancelled",
+              actorId: input.actorId,
+              details: { previousStatus: action.status, reason: "PROJECT_ARCHIVED" },
+            } });
+          }
         }
         const revision = await tx.projectLifecycleRevision.create({
           data: {

@@ -7,7 +7,7 @@ import { APP_VERSION } from "@/lib/version";
 
 export const metadata: Metadata = {
   title: `使用指南 · AI Project OS V${APP_VERSION}`,
-  description: `AI Project OS V${APP_VERSION} 从连接配置、资料接入到自动化、团队治理与智能体的页面操作指南。`,
+  description: `AI Project OS V${APP_VERSION} 从连接配置、资料接入到自动化、受控动作、团队治理与智能体的页面操作指南。`,
 };
 
 export const dynamic = "force-dynamic";
@@ -19,8 +19,9 @@ const workflow = [
   { number: "04", title: "建立记忆", detail: "审核 AI 候选，构建兼容的语义索引。", href: "#memory" },
   { number: "05", title: "维护质量", detail: "检查冲突、过期与低置信度记忆。", href: "#quality" },
   { number: "06", title: "设置自动化", detail: "定时同步来源并接收待确认通知。", href: "#automation" },
-  { number: "07", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
-  { number: "08", title: "团队协作", detail: "管理角色、邀请和企业 OIDC 登录。", href: "#team" },
+  { number: "07", title: "管理动作", detail: "设置项目策略，完成 Owner 审批并核对审计。", href: "#actions" },
+  { number: "08", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
+  { number: "09", title: "团队协作", detail: "管理角色、邀请和企业 OIDC 登录。", href: "#team" },
 ] as const;
 
 const providerRows = [
@@ -41,7 +42,7 @@ export default async function GuidePage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-600">Start to finish</p>
             <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight tracking-[-0.04em] sm:text-6xl">从第一次配置，到可信的项目回答。</h1>
-            <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600">按推荐顺序完成连接、资料、智能记忆、自动化和团队权限。每一步都保留来源、审核状态和证据引用；只有你在页面明确确认后，相关内容才会发送给模型供应商。</p>
+            <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600">按推荐顺序完成连接、资料、智能记忆、自动化、受控动作和团队权限。每一步都保留来源、审核状态和证据引用；只有你在页面明确确认后，相关内容才会发送给模型供应商。</p>
           </div>
           <div className="rounded-3xl bg-slate-950 p-6 text-white">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Before you start</p>
@@ -54,7 +55,7 @@ export default async function GuidePage() {
           </div>
         </section>
 
-        <nav aria-label="推荐使用顺序" className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <nav aria-label="推荐使用顺序" className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {workflow.map((step) => (
             <a key={step.number} href={step.href} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200">
               <span className="text-xs font-bold text-indigo-600">{step.number}</span>
@@ -191,6 +192,14 @@ export default async function GuidePage() {
             <div className="mt-5"><Link href="/notifications" className="inline-flex rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700">打开通知中心</Link></div>
           </GuideSection>
 
+          <GuideSection id="actions" eyebrow="Controlled action engine" title="用策略和审批控制项目动作">
+            <Step number="1" title="为每项能力选择策略">项目 Owner 在“动作与审批”中把仓库同步、网页刷新或记忆质量检查设为“自动执行”“每次审批”或“禁止执行”。策略只影响之后创建的动作。</Step>
+            <Step number="2" title="由 Editor 或 Owner 创建动作">系统会固定能力、规范化输入、输入指纹、风险级别和策略快照。仓库同步与网页刷新默认等待审批；本地记忆质量检查默认直接排队。</Step>
+            <Step number="3" title="由 Owner 核对并决策">待审批动作会通知项目 Owner。批准或拒绝时，服务端会重新核对动作版本和输入指纹；24 小时内没有决策会自动过期。</Step>
+            <Step number="4" title="查看执行和不可变审计">Worker 领取后显示运行状态、结果或安全错误码。申请、排队、审批、领取和终态均保留审计；租约过期会失败关闭，不会自动重复外部读取。</Step>
+            <Callout tone="amber" title="动作中心不是任意工具平台">当前只开放三个内置动作，并且输入为空对象。模型不能生成或批准动作；系统不提供 MCP、Shell、代码写入、分支/PR、合并、部署或其他外部写操作。</Callout>
+          </GuideSection>
+
           <GuideSection id="governance" eyebrow="Governance & review" title="审核事实、收口异常并管理项目数据">
             <Step number="1" title="逐条审核候选">进入项目“治理与审核”，同时检查网页抽取候选和已验证运行候选。页面不提供批量接受，确认或驳回后会重新读取服务器状态。</Step>
             <Step number="2" title="区分失败和未知结果">失败表示已有明确终态；未知表示外部结果无法确认。只有具备对应不可变证据的任务才显示“人工收口”，该动作不会自动重试或改写为成功。</Step>
@@ -204,7 +213,7 @@ export default async function GuidePage() {
             <Step number="2" title="生成项目当前状态">勾选当次传输确认后生成简报。结果按进展、决策、问题、风险、关注事项和待确认问题组织，并保存证据快照。</Step>
             <Step number="3" title="提出一个可调查的问题">适合询问“当前最大风险是什么”“哪些决策仍缺少证据”“最近完成了什么”。问题越具体，检索计划越有效。</Step>
             <Step number="4" title="核对引用和轨迹">查看回答引用的证据、只读工具执行顺序、建议和不确定性。证据不足时应补资料，而不是把推测直接当作事实。</Step>
-            <Callout tone="slate" title="智能体不会做什么">当前智能体没有 Shell、任意文件系统、代码修改、Git 写入或部署权限。自动化可以提醒你生成简报，但每次模型外发仍需由你在页面确认。</Callout>
+            <Callout tone="slate" title="智能体不会做什么">当前智能体没有 Shell、任意文件系统、代码修改、Git 写入或部署权限。它也不能自行创建或批准“动作与审批”中的动作。自动化可以提醒你生成简报，但每次模型外发仍需由你在页面确认。</Callout>
           </GuideSection>
 
           <GuideSection id="team" eyebrow="Team & identity" title="管理成员、邀请和企业登录">
@@ -214,7 +223,7 @@ export default async function GuidePage() {
               <InfoCard title="邀请链接">建议限定邮箱。链接只在创建后显示一次，请立即复制并通过安全渠道发送；接受者邮箱必须匹配。</InfoCard>
               <InfoCard title="OIDC 登录">配置 Issuer、Client、Secret、Scopes 和 Token 认证方式。系统使用 Authorization Code + PKCE，并校验 issuer、audience、nonce、过期时间和 JWKS 签名。</InfoCard>
             </div>
-            <Callout tone="amber" title="相同邮箱不会自动绑定">OIDC 未知身份若使用已有本地账户邮箱，登录会被拒绝。V3.0.0 尚未提供显式身份绑定页面，这一限制用于防止邮箱劫持。</Callout>
+            <Callout tone="amber" title="相同邮箱不会自动绑定">OIDC 未知身份若使用已有本地账户邮箱，登录会被拒绝。V3.1.0 尚未提供显式身份绑定页面，这一限制用于防止邮箱劫持。</Callout>
             <div className="mt-5"><Link href="/team" className="inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往团队</Link></div>
           </GuideSection>
 
@@ -236,6 +245,7 @@ export default async function GuidePage() {
               <InfoCard title="网页来源无法刷新">确认页面无需登录或 JavaScript 渲染。公司内网页面需要明确授权；云元数据地址始终无法放行。</InfoCard>
               <InfoCard title="OIDC 登录被拒绝">检查回调地址、Issuer、Client、Secret、Scopes 和 Token 认证方式；相同邮箱的本地账号不会自动合并。</InfoCard>
               <InfoCard title="自动化没有运行">确认 Worker 正在运行、规则已启用、项目未归档且执行时间已到。连续失败三次的规则会自动暂停。</InfoCard>
+              <InfoCard title="动作一直等待或失败">等待审批时联系项目 Owner；超过 24 小时需要重新创建。排队后检查 Worker，失败后先查看安全错误码和审计；系统不会自动重试外部读取。</InfoCard>
               <InfoCard title="按钮保持禁用">确认前置配置是否就绪、必填内容是否完成，并勾选当前操作的传输确认复选框。</InfoCard>
               <InfoCard title="任务失败或状态变化">刷新页面查看持久化任务状态。失败不会替换上一代已发布仓库数据或索引。</InfoCard>
               <InfoCard title="项目无法归档">先到“治理与审核”确认没有排队中、等待确认、运行中或待人工收口任务；归档不会强制中断任务。</InfoCard>

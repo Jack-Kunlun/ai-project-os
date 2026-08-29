@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-type PrimarySection = "dashboard" | "projects" | "settings" | "profile";
+type PrimarySection = "dashboard" | "projects" | "settings" | "profile" | "guide";
 type ProjectSection = "overview" | "control" | "memory" | "intelligence" | "governance";
 
 const primaryItems = [
@@ -29,6 +29,7 @@ export function AppHeader({
   projectSection?: ProjectSection;
 }) {
   const initial = username.slice(0, 1).toUpperCase();
+  const guideActive = active === "guide";
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
@@ -65,8 +66,9 @@ export function AppHeader({
           <Link
             href="/guide"
             aria-label="打开帮助与使用指南"
+            aria-current={guideActive ? "page" : undefined}
             title="帮助与使用指南"
-            className="flex h-11 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"
+            className={`flex h-11 items-center gap-2 rounded-full border px-3 transition ${guideActive ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-500 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"}`}
           >
             <NavIcon name="help" />
             <span className="hidden text-xs font-semibold lg:block">帮助</span>

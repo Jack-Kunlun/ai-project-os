@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { AppHeader } from "@/components/app-header";
+import { requirePageSession } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "使用指南 · AI Project OS V2.3.0",
   description: "AI Project OS V2.3.0 从 Dashboard、首次配置到项目治理与智能体的页面操作指南。",
 };
+
+export const dynamic = "force-dynamic";
 
 const workflow = [
   { number: "01", title: "配置模型", detail: "添加并测试生成与向量供应商。", href: "#providers" },
@@ -22,25 +26,13 @@ const providerRows = [
   ["GLM（智谱开放平台）", "生成 + 向量", "适合国内 API 接入的一体化配置"],
 ] as const;
 
-export default function GuidePage() {
+export default async function GuidePage() {
+  const user = await requirePageSession();
+
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+      <AppHeader username={user.username} active="guide" />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-7">
-          <Link href="/dashboard" className="flex items-center gap-3" aria-label="AI Project OS Dashboard">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white">OS</span>
-            <span>
-              <span className="block text-sm font-semibold tracking-[0.16em]">AI PROJECT OS</span>
-              <span className="block text-xs text-slate-500">使用指南 · V2.3.0</span>
-            </span>
-          </Link>
-          <nav className="flex flex-wrap gap-2 text-xs font-semibold">
-            <Link href="/dashboard" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-slate-600 hover:border-indigo-200 hover:text-indigo-700">Dashboard</Link>
-            <Link href="/profile" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-slate-600 hover:border-indigo-200 hover:text-indigo-700">个人中心</Link>
-            <Link href="/settings" className="rounded-full bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500">模型与系统设置</Link>
-          </nav>
-        </header>
-
         <section className="grid gap-8 pb-12 pt-14 lg:grid-cols-[1.35fr_0.65fr] lg:items-end">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-600">Start to finish</p>

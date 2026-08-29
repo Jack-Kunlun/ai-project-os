@@ -35,6 +35,8 @@ test("source schema rejects blank and oversized content", () => {
 test("source schema accepts credential-free http(s) URLs only", () => {
   assert.equal(createProjectSourceSchema.safeParse({ contentText: "usable", externalRef: "https://example.com/a" }).success, true);
   assert.equal(createProjectSourceSchema.safeParse({ contentText: "usable", externalRef: "http://localhost:3000" }).success, true);
+  assert.equal(createProjectSourceSchema.safeParse({ contentText: "usable", externalRef: "/api/projects/11111111-1111-4111-8111-111111111111/assets/22222222-2222-4222-8222-222222222222/download#page=1" }).success, true);
+  assert.equal(createProjectSourceSchema.safeParse({ contentText: "usable", externalRef: "/api/projects/11111111-1111-4111-8111-111111111111/assets/../../secrets/download#page=1" }).success, false);
   assert.equal(createProjectSourceSchema.safeParse({ contentText: "usable", externalRef: "ftp://example.com/a" }).success, false);
   assert.equal(createProjectSourceSchema.safeParse({ contentText: "usable", externalRef: "https://user:password@example.com/a" }).success, false);
   assert.equal(createProjectSourceSchema.safeParse({ contentText: "usable", externalRef: "https://user@example.com/a" }).success, false);

@@ -53,8 +53,8 @@ test("all project mutation routes reject archived projects except bounded lifecy
 test("active workspace reads exclude archived projects while the project list exposes an explicit view", async () => {
   const dashboard = await readFile("src/app/api/dashboard/route.ts", "utf8");
   const projects = await readFile("src/app/api/projects/route.ts", "utf8");
-  assert.match(dashboard, /where: \{ archivedAt: null \}/u);
-  assert.match(dashboard, /project: \{ archivedAt: null \}/u);
+  assert.match(dashboard, /const projectWhere = \{ AND: \[accessibleProjectWhere\(user\), \{ archivedAt: null \}\] \}/u);
+  assert.ok((dashboard.match(/project: \{ is: projectWhere \}/gu) ?? []).length >= 2);
   assert.match(projects, /z\.enum\(\["active", "archived"\]\)/u);
   assert.match(projects, /counts: \{ active: activeCount, archived: archivedCount \}/u);
 });

@@ -223,7 +223,7 @@ test("agent executes project reads only and returns an exactly cited result", as
   assert.equal(sourceLookups.length, 1);
   assert.deepEqual(
     (sourceLookups[0] as { where: unknown }).where,
-    { projectId, id: sourceId },
+    { projectId, id: sourceId, retiredAt: null },
   );
 
   await assert.rejects(

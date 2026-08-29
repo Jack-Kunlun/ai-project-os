@@ -23,7 +23,7 @@ const qwenConnectionId = "44444444-4444-4444-8444-444444444444";
 const generationId = "55555555-5555-4555-8555-555555555555";
 
 type FakeRoute = {
-  operation: "embedding" | "autoExtract" | "generateWithContext";
+  operation: "embedding" | "visionExtract" | "autoExtract" | "generateWithContext";
   providerConnectionId: string;
   modelId: string;
   embeddingDimensions: number | null;
@@ -36,6 +36,7 @@ type FakeProvider = {
   kind: "openai" | "qwen";
   status: "verified" | "error";
   defaultEmbeddingModelId: string | null;
+  defaultVisionModelId: string | null;
   embeddingDimensions: number | null;
 };
 
@@ -47,6 +48,7 @@ class FakeRouteDb {
       kind: "openai",
       status: "verified",
       defaultEmbeddingModelId: "text-embedding-3-small",
+      defaultVisionModelId: "gpt-4.1-mini",
       embeddingDimensions: 1536,
     }],
     [qwenConnectionId, {
@@ -54,6 +56,7 @@ class FakeRouteDb {
       kind: "qwen",
       status: "verified",
       defaultEmbeddingModelId: "text-embedding-v4",
+      defaultVisionModelId: "qwen3-vl-plus",
       embeddingDimensions: 1024,
     }],
   ]);
@@ -181,6 +184,27 @@ test("route preview marks generation changes as future-only and preserves the in
   assert.equal(preview.impact.requiresIndexRebuildAcknowledgement, false);
   assert.equal(preview.current?.modelId, "gpt-4.1-mini");
   assert.equal(preview.next.modelId, "qwen-plus");
+});
+
+test("vision route accepts only the provider's configured vision model and stays future-only", async () => {
+  const db = new FakeRouteDb();
+  const preview = await previewProjectAiRouteChange(projectId, {
+    operation: "visionExtract",
+    providerConnectionId: qwenConnectionId,
+    modelId: "qwen3-vl-plus",
+    maxOutputTokens: 2048,
+  }, db as unknown as PrismaClient);
+  assert.equal(preview.impact.onlyFutureRuns, true);
+  assert.equal(preview.impact.indexInvalidated, false);
+  await assert.rejects(
+    () => previewProjectAiRouteChange(projectId, {
+      operation: "visionExtract",
+      providerConnectionId: qwenConnectionId,
+      modelId: "qwen-vl-unconfigured",
+      maxOutputTokens: 2048,
+    }, db as unknown as PrismaClient),
+    (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_CAPABILITY_MISMATCH",
+  );
 });
 
 test("embedding changes require acknowledgement, record provenance, and reject stale CAS writes", async () => {

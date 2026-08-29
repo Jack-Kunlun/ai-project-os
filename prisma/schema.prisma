@@ -397,6 +397,49 @@ enum ProjectActionAuditEvent {
   expired
 }
 
+enum ProjectObjectiveStatus {
+  draft
+  active
+  completed
+  cancelled
+}
+
+enum ProjectWorkItemStatus {
+  proposed
+  planned
+  inProgress @map("in_progress")
+  blocked
+  completed
+  cancelled
+}
+
+enum ProjectWorkItemPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+enum ProjectWorkItemOrigin {
+  manual
+  agentRecommendation @map("agent_recommendation")
+}
+
+enum ProjectPlanEntityType {
+  objective
+  workItem   @map("work_item")
+  dependency
+}
+
+enum ProjectPlanAuditEvent {
+  created
+  updated
+  statusChanged     @map("status_changed")
+  recommendationPromoted @map("recommendation_promoted")
+  dependencyAdded  @map("dependency_added")
+  dependencyRemoved @map("dependency_removed")
+}
+
 enum MemoryQualityIssueKind {
   duplicate
   conflict
@@ -923,6 +966,10 @@ model Project {
   webAiCandidates                      WebAiCandidate[]
   intelligenceReports                  ProjectIntelligenceReport[]
   projectAgentRuns                     ProjectAgentRun[]
+  projectObjectives                    ProjectObjective[]
+  projectWorkItems                     ProjectWorkItem[]
+  projectWorkItemDependencies          ProjectWorkItemDependency[]
+  projectPlanAudits                    ProjectPlanAudit[]
   lifecycleRevisions                   ProjectLifecycleRevision[]
   dataExportAudits                     ProjectDataExportAudit[]
   memoryQualityIssues                  MemoryQualityIssue[]
@@ -3300,6 +3347,11 @@ model AppUser {
   decidedActionApprovals       ProjectActionApproval[]           @relation("ProjectActionApprovalDecidedBy")
   actionAuditEvents            ProjectActionAudit[]              @relation("ProjectActionAuditActor")
   importedActionResults        ProjectActionResultImport[]       @relation("ProjectActionResultImportedBy")
+  createdProjectObjectives     ProjectObjective[]                @relation("ProjectObjectiveCreatedBy")
+  createdProjectWorkItems      ProjectWorkItem[]                 @relation("ProjectWorkItemCreatedBy")
+  createdWorkItemDependencies  ProjectWorkItemDependency[]       @relation("ProjectWorkItemDependencyCreatedBy")
+  removedWorkItemDependencies  ProjectWorkItemDependency[]       @relation("ProjectWorkItemDependencyRemovedBy")
+  projectPlanAuditEvents       ProjectPlanAudit[]                @relation("ProjectPlanAuditActor")
   resolvedMemoryQualityIssues  MemoryQualityIssue[]
   createdWebSources            WebSource[]
   createdWorkspaces            Workspace[]                       @relation("WorkspaceCreatedBy")
@@ -4335,8 +4387,101 @@ model ProjectAgentRun {
   job                      BackgroundJob         @relation(fields: [jobId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   indexGeneration          MemoryIndexGeneration @relation(fields: [projectId, indexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   providerConnection       AiProviderConnection  @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  promotedWorkItems        ProjectWorkItem[]
 
+  @@unique([projectId, id])
   @@index([projectId, createdAt])
+}
+
+model ProjectObjective {
+  id          String                 @id @default(uuid()) @db.Uuid
+  projectId   String                 @db.Uuid
+  title       String                 @db.VarChar(160)
+  description String?                @db.Text
+  status      ProjectObjectiveStatus @default(draft)
+  targetDate  DateTime?              @db.Date
+  createdById String                 @db.Uuid
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  completedAt DateTime?
+  project     Project                @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  createdBy   AppUser                @relation("ProjectObjectiveCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  workItems   ProjectWorkItem[]
+
+  @@unique([projectId, id])
+  @@index([projectId, status, updatedAt])
+  @@index([createdById, createdAt])
+}
+
+model ProjectWorkItem {
+  id                  String                  @id @default(uuid()) @db.Uuid
+  projectId           String                  @db.Uuid
+  objectiveId         String?                 @db.Uuid
+  title               String                  @db.VarChar(160)
+  description         String?                 @db.Text
+  status              ProjectWorkItemStatus   @default(planned)
+  priority            ProjectWorkItemPriority @default(medium)
+  targetDate          DateTime?               @db.Date
+  origin              ProjectWorkItemOrigin   @default(manual)
+  agentRunId          String?                 @db.Uuid
+  recommendationIndex Int?
+  evidenceSnapshot    Json?                   @db.JsonB
+  evidenceFingerprint String?                 @db.Char(64)
+  createdById         String                  @db.Uuid
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  completedAt         DateTime?
+  project             Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  objective           ProjectObjective?       @relation(fields: [projectId, objectiveId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  agentRun            ProjectAgentRun?        @relation(fields: [projectId, agentRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  createdBy           AppUser                 @relation("ProjectWorkItemCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  dependencies        ProjectWorkItemDependency[] @relation("ProjectWorkItemDependencies")
+  dependents          ProjectWorkItemDependency[] @relation("ProjectWorkItemDependents")
+
+  @@unique([projectId, id])
+  @@unique([projectId, agentRunId, recommendationIndex])
+  @@index([projectId, status, priority, updatedAt])
+  @@index([projectId, objectiveId, status])
+  @@index([createdById, createdAt])
+}
+
+model ProjectWorkItemDependency {
+  id          String          @id @default(uuid()) @db.Uuid
+  projectId   String          @db.Uuid
+  workItemId  String          @db.Uuid
+  dependsOnId String          @db.Uuid
+  createdById String          @db.Uuid
+  createdAt   DateTime        @default(now())
+  removedAt   DateTime?
+  removedById String?         @db.Uuid
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  workItem    ProjectWorkItem @relation("ProjectWorkItemDependencies", fields: [projectId, workItemId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
+  dependsOn   ProjectWorkItem @relation("ProjectWorkItemDependents", fields: [projectId, dependsOnId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
+  createdBy   AppUser         @relation("ProjectWorkItemDependencyCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  removedBy   AppUser?        @relation("ProjectWorkItemDependencyRemovedBy", fields: [removedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@index([projectId, workItemId, removedAt])
+  @@index([projectId, dependsOnId, removedAt])
+  @@index([createdById, createdAt])
+  @@index([removedById, removedAt])
+}
+
+model ProjectPlanAudit {
+  id         String                @id @default(uuid()) @db.Uuid
+  projectId  String                @db.Uuid
+  entityType ProjectPlanEntityType
+  entityId   String                @db.Uuid
+  event      ProjectPlanAuditEvent
+  details    Json                  @default("{}") @db.JsonB
+  actorId    String                @db.Uuid
+  createdAt  DateTime              @default(now())
+  project    Project               @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  actor      AppUser               @relation("ProjectPlanAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([projectId, entityType, entityId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model WebAiCandidate {

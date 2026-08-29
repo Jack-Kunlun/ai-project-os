@@ -35,6 +35,7 @@ import { OidcError } from "@/lib/oidc";
 import { ActionEngineError } from "@/lib/action-engine";
 import { ActionResultIntakeError } from "@/lib/action-result-intake";
 import { McpCapabilityError } from "@/lib/mcp";
+import { ProjectPlanError } from "@/lib/project-plan";
 
 export type ApiErrorBody = {
   error: {
@@ -57,6 +58,24 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof ProjectPlanError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PROJECT_PLAN_INVALID_INPUT: [400, "项目计划请求无效"],
+      PROJECT_PLAN_PROJECT_NOT_FOUND: [404, "项目不存在"],
+      PROJECT_PLAN_OBJECTIVE_NOT_FOUND: [404, "项目目标不存在"],
+      PROJECT_PLAN_WORK_ITEM_NOT_FOUND: [404, "工作项不存在"],
+      PROJECT_PLAN_DEPENDENCY_NOT_FOUND: [404, "工作项依赖不存在"],
+      PROJECT_PLAN_RECOMMENDATION_NOT_FOUND: [404, "智能体建议不存在或已变化"],
+      PROJECT_PLAN_EVIDENCE_INVALID: [422, "智能体建议缺少完整、可验证的证据快照"],
+      PROJECT_PLAN_VERSION_CONFLICT: [409, "项目计划已被其他成员更新，请刷新后重试"],
+      PROJECT_PLAN_STATUS_CONFLICT: [409, "当前状态不能执行该计划变更"],
+      PROJECT_PLAN_DEPENDENCY_CONFLICT: [409, "该工作项依赖已经存在"],
+      PROJECT_PLAN_DEPENDENCY_CYCLE: [409, "该依赖会形成循环，不能保存"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "项目计划处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof ActionResultIntakeError) {
     const mapping: Record<string, readonly [number, string]> = {
       ACTION_RESULT_INTAKE_INVALID_INPUT: [400, "动作结果导入请求无效"],

@@ -21,6 +21,7 @@
     "test:project-intelligence-postgres": "tsx --test test/project-intelligence-postgres.test.ts",
     "test:action-engine-postgres": "tsx --test test/action-engine-postgres.test.ts",
     "test:mcp-capabilities-postgres": "tsx --test test/mcp-capabilities-postgres.test.ts",
+    "test:project-plan-postgres": "tsx --test test/project-plan-postgres.test.ts",
     "project-snapshot:demo": "tsx scripts/project-snapshot-demo.ts",
     "project-ai:config": "tsx scripts/project-ai-config.ts",
     "github-repository": "tsx scripts/github-repository.ts",

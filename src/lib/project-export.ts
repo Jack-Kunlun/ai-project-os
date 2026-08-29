@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { getDb } from "@/lib/db";
 import { isSafeExternalRef } from "@/lib/source";
 
-export const PROJECT_EXPORT_SCHEMA_VERSION = "ai-project-os.project-export.v2";
+export const PROJECT_EXPORT_SCHEMA_VERSION = "ai-project-os.project-export.v3";
 export const PROJECT_EXPORT_MAX_BYTES = 20 * 1024 * 1024;
 
 export type ProjectExportErrorCode =
@@ -42,7 +42,7 @@ export async function exportProjectData(
         throw new ProjectExportError("PROJECT_EXPORT_STALE");
       }
 
-      const [sources, assets, items, repositories, routes, routeRevisions, lifecycle, jobs, answers, reports, agentRuns] = await Promise.all([
+      const [sources, assets, items, repositories, routes, routeRevisions, lifecycle, jobs, answers, reports, agentRuns, actionResultImports, objectives, workItems, dependencies, planAudits] = await Promise.all([
         tx.projectSource.findMany({
           where: { projectId: input.projectId },
           orderBy: [{ ingestedAt: "asc" }, { id: "asc" }],
@@ -296,6 +296,31 @@ export async function exportProjectData(
             createdAt: true,
           },
         }),
+        tx.projectActionResultImport.findMany({
+          where: { projectId: input.projectId },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { id: true, actionId: true, projectSourceId: true, actionInputFingerprint: true, resultFingerprint: true, contentFingerprint: true, createdAt: true, importedBy: { select: { username: true } } },
+        }),
+        tx.projectObjective.findMany({
+          where: { projectId: input.projectId },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { id: true, title: true, description: true, status: true, targetDate: true, createdAt: true, updatedAt: true, completedAt: true, createdBy: { select: { username: true } } },
+        }),
+        tx.projectWorkItem.findMany({
+          where: { projectId: input.projectId },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { id: true, objectiveId: true, title: true, description: true, status: true, priority: true, targetDate: true, origin: true, agentRunId: true, recommendationIndex: true, evidenceSnapshot: true, evidenceFingerprint: true, createdAt: true, updatedAt: true, completedAt: true, createdBy: { select: { username: true } } },
+        }),
+        tx.projectWorkItemDependency.findMany({
+          where: { projectId: input.projectId },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { id: true, workItemId: true, dependsOnId: true, createdAt: true, removedAt: true, createdBy: { select: { username: true } }, removedBy: { select: { username: true } } },
+        }),
+        tx.projectPlanAudit.findMany({
+          where: { projectId: input.projectId },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { id: true, entityType: true, entityId: true, event: true, details: true, createdAt: true, actor: { select: { username: true } } },
+        }),
       ]);
 
       const exportedAt = new Date();
@@ -381,6 +406,13 @@ export async function exportProjectData(
         ragAnswers: answers.map((answer) => ({ ...answer, createdAt: answer.createdAt.toISOString() })),
         intelligenceReports: reports.map((report) => ({ ...report, createdAt: report.createdAt.toISOString() })),
         agentRuns: agentRuns.map((run) => ({ ...run, createdAt: run.createdAt.toISOString() })),
+        actionResultImports: actionResultImports.map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
+        projectPlan: {
+          objectives: objectives.map((objective) => ({ ...objective, targetDate: iso(objective.targetDate), createdAt: objective.createdAt.toISOString(), updatedAt: objective.updatedAt.toISOString(), completedAt: iso(objective.completedAt) })),
+          workItems: workItems.map((workItem) => ({ ...workItem, targetDate: iso(workItem.targetDate), createdAt: workItem.createdAt.toISOString(), updatedAt: workItem.updatedAt.toISOString(), completedAt: iso(workItem.completedAt) })),
+          dependencies: dependencies.map((dependency) => ({ ...dependency, createdAt: dependency.createdAt.toISOString(), removedAt: iso(dependency.removedAt) })),
+          audits: planAudits.map((audit) => ({ ...audit, createdAt: audit.createdAt.toISOString() })),
+        },
         exclusions: [
           "系统凭据库中的 API Key、GitHub PAT 及加密密钥材料",
           "向量与索引内部记录",

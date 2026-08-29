@@ -8,6 +8,7 @@ import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
 import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
 import { appendProjectItemRevision, createPrimaryProjectItemEvidence } from "../src/lib/project-item-history";
+import { createProjectPlanEntry, getProjectPlan } from "../src/lib/project-plan";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
 import { claimProjectJob, reconcileProjectJob } from "../src/lib/project-workflow";
@@ -296,6 +297,17 @@ test(
       assert.equal(trace.some((entry) => entry.tool === "memory_search" && entry.resultCount > 0), true);
       assert.equal(trace.every((entry) => entry.evidenceIds.every((id) => /^[0-9a-f-]{36}$/u.test(id))), true);
       assert.match(run.answer, /统一记忆索引/u);
+      const promoted = await createProjectPlanEntry(projectId, { operation: "promoteRecommendation", agentRunId: run.id, recommendationIndex: 0 }, user, db);
+      assert.ok("workItem" in promoted && promoted.workItem !== undefined);
+      const promotedWorkItem = promoted.workItem;
+      assert.equal(promotedWorkItem.status, "proposed");
+      assert.equal(promotedWorkItem.origin, "agentRecommendation");
+      assert.match(promotedWorkItem.evidenceFingerprint ?? "", /^[0-9a-f]{64}$/u);
+      const samePromotion = await createProjectPlanEntry(projectId, { operation: "promoteRecommendation", agentRunId: run.id, recommendationIndex: 0 }, user, db);
+      assert.ok("workItem" in samePromotion && samePromotion.workItem !== undefined);
+      assert.equal(samePromotion.workItem.id, promotedWorkItem.id);
+      assert.equal((await getProjectPlan(projectId, user, db)).availableRecommendations.length, 0);
+      await assert.rejects(() => db.projectWorkItem.update({ where: { id: promotedWorkItem.id }, data: { evidenceFingerprint: "e".repeat(64) } }));
 
       const status = await listProjectIntelligence(projectId, db);
       assert.equal(status.readiness.ready, true);

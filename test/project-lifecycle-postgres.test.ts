@@ -108,7 +108,7 @@ test(
         sources: Array<{ contentText: string }>;
         exclusions: string[];
       };
-      assert.equal(document.schemaVersion, "ai-project-os.project-export.v2");
+      assert.equal(document.schemaVersion, "ai-project-os.project-export.v3");
       assert.notEqual(document.project.archivedAt, null);
       assert.equal(document.sources[0]?.contentText, "exported project evidence");
       assert.equal(exported.audit.byteCount, Buffer.byteLength(exported.json, "utf8"));

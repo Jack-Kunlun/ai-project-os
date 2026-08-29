@@ -185,7 +185,7 @@ test(
         assets: Array<{ id: string; versions: Array<{ sizeBytes: string; segments: Array<{ locatorLabel: string }> }> }>;
         exclusions: string[];
       };
-      assert.equal(exportDocument.schemaVersion, "ai-project-os.project-export.v2");
+      assert.equal(exportDocument.schemaVersion, "ai-project-os.project-export.v3");
       assert.equal(exportDocument.assets.length, 2);
       assert.equal(exportDocument.assets.some((entry) => entry.id === image!.id), true);
       assert.equal(exportDocument.sources.some((entry) => entry.externalRef?.includes(`/assets/${image!.id}/download#`) === true), true);

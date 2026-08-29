@@ -4,7 +4,7 @@ ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 
 RUN apt-get update \
-  && apt-get install --no-install-recommends -y openssl \
+  && apt-get install --no-install-recommends -y ca-certificates git openssh-client openssl \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable \
   && corepack install --global pnpm@10.14.0
@@ -39,6 +39,24 @@ USER node
 
 CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy", "--config", "prisma.config.ts"]
 
+FROM deps AS worker
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV AI_PROJECT_OS_MASTER_KEY_FILE=/var/lib/ai-project-os-secrets/master.key
+# Prisma evaluates its config during generation; Compose replaces this
+# non-secret build-only URL with the real runtime connection.
+ENV DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build"
+
+COPY . .
+RUN pnpm db:generate
+RUN mkdir -p /var/lib/ai-project-os-secrets /var/lib/ai-project-os/uploads \
+  && chown -R node:node /var/lib/ai-project-os-secrets /var/lib/ai-project-os/uploads /app
+
+USER node
+
+CMD ["node", "node_modules/tsx/dist/cli.mjs", "scripts/automation-worker.ts"]
+
 FROM base AS runner
 
 ENV NODE_ENV=production
@@ -50,8 +68,8 @@ COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 
-RUN mkdir -p /var/lib/ai-project-os-secrets \
-  && chown node:node /var/lib/ai-project-os-secrets
+RUN mkdir -p /var/lib/ai-project-os-secrets /var/lib/ai-project-os/uploads \
+  && chown node:node /var/lib/ai-project-os-secrets /var/lib/ai-project-os/uploads
 
 USER node
 

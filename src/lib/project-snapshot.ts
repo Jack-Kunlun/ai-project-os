@@ -2,7 +2,7 @@ import { z } from "zod";
 import { isSafeExternalRef } from "@/lib/source";
 
 const snapshotItemTypeSchema = z.enum(["decision", "progress", "issue", "risk"]);
-const snapshotSourceKindSchema = z.enum(["document", "screenshot", "github", "manual"]);
+const snapshotSourceKindSchema = z.enum(["document", "screenshot", "github", "git", "web", "manual"]);
 const isoDateTimeSchema = z.iso.datetime({ offset: true });
 const snapshotExternalRefSchema = z
   .string()

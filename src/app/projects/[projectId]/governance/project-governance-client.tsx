@@ -91,6 +91,7 @@ type Usage = {
 
 const itemLabels = { decision: "决策", progress: "进展", issue: "问题", risk: "风险" } as const;
 const jobLabels: Record<string, string> = {
+  assetExtract: "文件图片识别",
   githubScan: "仓库代码扫描",
   githubMaterialSync: "仓库资料同步",
   githubProjectSync: "项目 GitHub 同步",
@@ -123,6 +124,7 @@ const readinessLabels: Record<string, string> = {
 };
 const operationLabels: Record<string, string> = {
   embedding: "语义向量",
+  visionExtract: "图片与扫描件识别",
   autoExtract: "自动抽取",
   sourceSummary: "资料总结",
   projectAnalysis: "项目分析",

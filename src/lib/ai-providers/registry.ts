@@ -7,7 +7,9 @@ export type ProviderDefinition = Readonly<{
   apiKeyLabel: string;
   generationModelSuggestions: readonly string[];
   embeddingModelSuggestions: readonly Readonly<{ id: string; dimensions: number }>[];
+  visionModelSuggestions: readonly string[];
   supportsEmbeddings: boolean;
+  supportsVision: boolean;
 }>;
 
 export const PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = Object.freeze([
@@ -21,7 +23,9 @@ export const PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = Object.freeze
       Object.freeze({ id: "text-embedding-3-small", dimensions: 1536 }),
       Object.freeze({ id: "text-embedding-3-large", dimensions: 3072 }),
     ]),
+    visionModelSuggestions: Object.freeze(["gpt-4.1-mini", "gpt-4o-mini"]),
     supportsEmbeddings: true,
+    supportsVision: true,
   }),
   Object.freeze({
     kind: "deepseek",
@@ -30,7 +34,9 @@ export const PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = Object.freeze
     apiKeyLabel: "DeepSeek API Key",
     generationModelSuggestions: Object.freeze(["deepseek-chat", "deepseek-reasoner"]),
     embeddingModelSuggestions: Object.freeze([]),
+    visionModelSuggestions: Object.freeze(["deepseek-v4-flash-vision-exp"]),
     supportsEmbeddings: false,
+    supportsVision: true,
   }),
   Object.freeze({
     kind: "qwen",
@@ -42,7 +48,9 @@ export const PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = Object.freeze
       Object.freeze({ id: "text-embedding-v4", dimensions: 1024 }),
       Object.freeze({ id: "text-embedding-v3", dimensions: 1024 }),
     ]),
+    visionModelSuggestions: Object.freeze(["qwen3-vl-plus", "qwen-vl-max"]),
     supportsEmbeddings: true,
+    supportsVision: true,
   }),
   Object.freeze({
     kind: "glm",
@@ -54,7 +62,9 @@ export const PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = Object.freeze
       Object.freeze({ id: "embedding-3", dimensions: 2048 }),
       Object.freeze({ id: "embedding-2", dimensions: 1024 }),
     ]),
+    visionModelSuggestions: Object.freeze(["glm-5v-turbo", "glm-4.5v"]),
     supportsEmbeddings: true,
+    supportsVision: true,
   }),
 ]);
 

@@ -283,6 +283,14 @@ function serializeMemoryIndexResult(value: Record<string, unknown>): Record<stri
 
 export function serializeProjectJobResult(kind: BackgroundJobKind, value: unknown): unknown {
   if (value === null || value === undefined || !isRecord(value)) return null;
+  if (kind === "assetExtract") {
+    return Object.freeze(serializeSimpleResult(value, {
+      assetId: "uuid",
+      versionId: "uuid",
+      visionSegmentCount: "integer",
+      manifest: "hash",
+    }));
+  }
   if (kind === "githubScan") return Object.freeze(serializeCodeScanResult(value));
   if (kind === "githubMaterialSync") return Object.freeze(serializeMaterialSyncResult(value));
   if (kind === "githubProjectSync") return Object.freeze(serializeGitHubProjectSyncResult(value));

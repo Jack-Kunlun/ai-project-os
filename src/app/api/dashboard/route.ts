@@ -3,17 +3,19 @@ import { requireApiSession } from "@/lib/auth";
 import { handleApiError } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
 import { toPublicProjectJob } from "@/lib/project-workflow";
+import { accessibleProjectWhere } from "@/lib/access-control";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const db = getDb();
+    const projectWhere = { AND: [accessibleProjectWhere(user), { archivedAt: null }] };
 
-    const [projects, providers, activeJobCount, recentJobs] = await Promise.all([
+    const [projects, providers, activeJobCount, pendingAssetReviews, recentJobs] = await Promise.all([
       db.project.findMany({
-        where: { archivedAt: null },
+        where: projectWhere,
         orderBy: { updatedAt: "desc" },
         select: {
           id: true,
@@ -25,7 +27,8 @@ export async function GET(request: Request) {
           updatedAt: true,
           _count: {
             select: {
-              sources: true,
+              sources: { where: { retiredAt: null } },
+              assets: { where: { status: { not: "deleted" } } },
               items: { where: { reviewStatus: "confirmed" } },
               snapshots: true,
               repositoryLinks: { where: { status: "active" } },
@@ -73,10 +76,13 @@ export async function GET(request: Request) {
         },
       }),
       db.backgroundJob.count({
-        where: { status: { in: ["queued", "waitingConsent", "running"] }, project: { archivedAt: null } },
+        where: { status: { in: ["queued", "waitingConsent", "running"] }, project: { is: projectWhere } },
+      }),
+      db.projectAsset.count({
+        where: { status: "awaitingReview", project: projectWhere },
       }),
       db.backgroundJob.findMany({
-        where: { projectId: { not: null }, project: { archivedAt: null } },
+        where: { projectId: { not: null }, project: { is: projectWhere } },
         orderBy: { createdAt: "desc" },
         take: 8,
         select: {
@@ -114,9 +120,10 @@ export async function GET(request: Request) {
         confirmedItems: current.confirmedItems + project._count.items,
         repositories: current.repositories + project._count.repositoryLinks,
         indexedProjects: current.indexedProjects + (project.memoryIndexPointer ? 1 : 0),
-        routedProjects: current.routedProjects + (project._count.webAiRoutes === 3 ? 1 : 0),
+        routedProjects: current.routedProjects + (project._count.webAiRoutes === 4 ? 1 : 0),
+        assets: current.assets + project._count.assets,
       }),
-      { confirmedItems: 0, repositories: 0, indexedProjects: 0, routedProjects: 0 },
+      { confirmedItems: 0, repositories: 0, indexedProjects: 0, routedProjects: 0, assets: 0 },
     );
 
     const publicProjects = projects.map((project) => ({
@@ -134,6 +141,7 @@ export async function GET(request: Request) {
           projects: projects.length,
           ...summary,
           activeJobs: activeJobCount,
+          pendingAssetReviews,
           generationProviders: verifiedProviders.length,
           embeddingProviders: verifiedProviders.filter(
             (provider) => provider.defaultEmbeddingModelId !== null && provider.embeddingDimensions !== null,

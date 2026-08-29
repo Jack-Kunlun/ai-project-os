@@ -534,7 +534,7 @@ class ProjectAiConfigServiceImpl {
       where: { id: projectId },
       select: {
         id: true,
-        _count: { select: { sources: true } },
+        _count: { select: { sources: { where: { retiredAt: null } } } },
         aiPolicy: {
           select: {
             currentRevision: {
@@ -657,7 +657,7 @@ class ProjectAiConfigServiceImpl {
         return throwProjectAiConfigError("PROJECT_NOT_FOUND");
       }
       const rows = await tx.projectSource.findMany({
-        where: { projectId: request.projectId, id: { in: [...request.sourceIds] } },
+        where: { projectId: request.projectId, id: { in: [...request.sourceIds] }, retiredAt: null },
         select: { id: true, contentText: true, contentHash: true },
       });
       if (rows.length !== request.sourceIds.length) {

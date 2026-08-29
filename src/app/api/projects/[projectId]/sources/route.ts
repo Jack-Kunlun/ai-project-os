@@ -46,7 +46,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
     await assertProjectExists(projectId);
 
     const sources = await db.projectSource.findMany({
-      where: { projectId },
+      where: { projectId, retiredAt: null },
       orderBy: { ingestedAt: "desc" },
       select: sourceSelect,
     });

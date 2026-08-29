@@ -1,11 +1,13 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
-import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
+import { Prisma, type AppUser, type AppUserRole, type PrismaClient } from "@prisma/client";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
+import { authorizeApiRequest } from "@/lib/access-control";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
 export const SESSION_LIFETIME_DAYS = 14 as const;
+export const DEFAULT_WORKSPACE_ID = "00000000-0000-4000-8000-000000000001" as const;
 
 const PASSWORD_VERSION = 1;
 const SCRYPT_KEY_BYTES = 32;
@@ -24,7 +26,10 @@ export type AuthErrorCode =
   | "AUTH_INVALID_CREDENTIALS"
   | "AUTH_CURRENT_PASSWORD_INVALID"
   | "AUTH_PASSWORD_UNCHANGED"
+  | "AUTH_LOCAL_PASSWORD_EXISTS"
   | "AUTH_REQUIRED"
+  | "AUTH_FORBIDDEN"
+  | "AUTH_ACCOUNT_DISABLED"
   | "AUTH_CSRF_REJECTED";
 
 export class AuthError extends Error {
@@ -37,7 +42,7 @@ export class AuthError extends Error {
 export type SafeSessionUser = Readonly<{
   id: string;
   username: string;
-  role: "admin";
+  role: AppUserRole;
 }>;
 
 export type CreatedSession = Readonly<{
@@ -73,6 +78,18 @@ function canonicalPassword(value: unknown): string {
   return value;
 }
 
+function canonicalOptionalProfileText(value: unknown, maximum: number): string | null {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string" || value.trim() !== value || value.length < 1 || value.length > maximum || CONTROL_PATTERN.test(value)) return fail("AUTH_INVALID_INPUT");
+  return value;
+}
+
+function canonicalEmail(value: unknown): string | null {
+  const email = canonicalOptionalProfileText(value, 320)?.toLowerCase() ?? null;
+  if (email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) return fail("AUTH_INVALID_INPUT");
+  return email;
+}
+
 function tokenHash(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
@@ -103,8 +120,9 @@ export async function createPasswordRecord(passwordInput: unknown): Promise<Read
 
 export async function verifyPasswordRecord(
   passwordInput: unknown,
-  record: Readonly<{ passwordHash: string; passwordSalt: string; passwordVersion: number }>,
+  record: Readonly<{ passwordHash: string | null; passwordSalt: string | null; passwordVersion: number }>,
 ): Promise<boolean> {
+  if (record.passwordHash === null || record.passwordSalt === null) return false;
   let password: string;
   try {
     password = canonicalPassword(passwordInput);
@@ -129,7 +147,7 @@ function safeUser(user: Pick<AppUser, "id" | "username" | "role">): SafeSessionU
   return Object.freeze({ id: user.id, username: user.username, role: user.role });
 }
 
-async function createSession(
+export async function createSession(
   db: PrismaClient | Prisma.TransactionClient,
   user: Pick<AppUser, "id" | "username" | "role">,
   now = new Date(),
@@ -165,6 +183,8 @@ export async function initializeAdmin(
     const user = await tx.appUser.create({
       data: { username, role: "admin", ...password },
     });
+    await tx.workspace.update({ where: { id: DEFAULT_WORKSPACE_ID }, data: { createdById: user.id } });
+    await tx.workspaceMembership.create({ data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "owner" } });
     return createSession(tx, user);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
@@ -182,6 +202,7 @@ export async function loginAdmin(
   const user = await db.appUser.findUnique({ where: { username } });
   if (
     user === null ||
+    user.disabledAt !== null ||
     !(await verifyPasswordRecord(input.password, user))
   ) {
     return fail("AUTH_INVALID_CREDENTIALS");
@@ -207,6 +228,27 @@ export async function updateAccountUsername(
   return safeUser(user);
 }
 
+export async function updateAccountProfile(
+  userId: string,
+  input: Readonly<{ displayName: unknown; email: unknown }>,
+  db: PrismaClient = getDb(),
+): Promise<Readonly<{ id: string; displayName: string | null; email: string | null }>> {
+  return db.appUser.update({
+    where: { id: userId },
+    data: { displayName: canonicalOptionalProfileText(input.displayName, 160), email: canonicalEmail(input.email) },
+    select: { id: true, displayName: true, email: true },
+  });
+}
+
+export async function setLocalAccountPassword(userId: string, newPasswordInput: unknown, db: PrismaClient = getDb()): Promise<void> {
+  const nextPassword = await createPasswordRecord(newPasswordInput);
+  await db.$transaction(async (tx) => {
+    const updated = await tx.appUser.updateMany({ where: { id: userId, passwordHash: null, passwordSalt: null }, data: nextPassword });
+    if (updated.count !== 1) return fail("AUTH_LOCAL_PASSWORD_EXISTS");
+    await tx.appSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+  });
+}
+
 export async function changeAccountPassword(
   userId: string,
   currentPasswordInput: unknown,
@@ -223,6 +265,7 @@ export async function changeAccountPassword(
     },
   });
   if (user === null) return fail("AUTH_REQUIRED");
+  if (user.passwordHash === null || user.passwordSalt === null) return fail("AUTH_CURRENT_PASSWORD_INVALID");
   if (!(await verifyPasswordRecord(currentPasswordInput, user))) {
     return fail("AUTH_CURRENT_PASSWORD_INVALID");
   }
@@ -272,7 +315,7 @@ export async function readSessionToken(
     where: { tokenHash: tokenHash(token) },
     include: { user: true },
   });
-  if (session === null || session.revokedAt !== null || session.expiresAt <= now) return null;
+  if (session === null || session.revokedAt !== null || session.expiresAt <= now || session.user.disabledAt !== null) return null;
   if (now.getTime() - session.lastSeenAt.getTime() > 5 * 60 * 1_000) {
     await db.appSession.updateMany({
       where: { id: session.id, revokedAt: null, expiresAt: { gt: now } },
@@ -287,7 +330,9 @@ export async function requireApiSession(
   db: PrismaClient = getDb(),
 ): Promise<SafeSessionUser> {
   const user = await readSessionToken(cookieToken(request.headers.get("cookie")), db);
-  return user ?? fail("AUTH_REQUIRED");
+  if (user === null) return fail("AUTH_REQUIRED");
+  await authorizeApiRequest(user, request, db);
+  return user;
 }
 
 export async function requirePageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {

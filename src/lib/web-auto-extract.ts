@@ -78,7 +78,7 @@ function fingerprint(sourceId: string, sourceHash: string, candidate: z.infer<ty
 
 export async function listAutoExtractSources(projectId: string, db: PrismaClient = getDb()) {
   return db.projectSource.findMany({
-    where: { projectId },
+    where: { projectId, retiredAt: null },
     orderBy: { ingestedAt: "desc" },
     select: {
       id: true,
@@ -104,7 +104,7 @@ export async function runAutoExtractJob(input: Readonly<{
   const [route, sources] = await Promise.all([
     requireProjectAiRoute(input.projectId, "autoExtract", db),
     db.projectSource.findMany({
-      where: { projectId: input.projectId, id: { in: parsed.sourceIds } },
+      where: { projectId: input.projectId, id: { in: parsed.sourceIds }, retiredAt: null },
       orderBy: { id: "asc" },
       select: {
         id: true,

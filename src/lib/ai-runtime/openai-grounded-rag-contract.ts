@@ -153,7 +153,7 @@ export type OpenAiGroundedRagContext = Readonly<{
   citationKey: string;
   sourceId: string;
   chunkId: string;
-  sourceKind: "document" | "screenshot" | "github" | "manual";
+  sourceKind: "document" | "screenshot" | "github" | "git" | "web" | "manual";
   externalRef: string | null;
   contentHash: string;
   contentText: string;
@@ -408,6 +408,8 @@ function normalizeContext(
     "document",
     "screenshot",
     "github",
+    "git",
+    "web",
     "manual",
   ].includes(sourceKind as string)) {
     return invalidInput();

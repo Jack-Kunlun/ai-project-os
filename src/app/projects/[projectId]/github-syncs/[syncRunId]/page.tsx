@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { z } from "zod";
+import { assertProjectAccess } from "@/lib/access-control";
 import { requirePageSession } from "@/lib/auth";
 import {
   getProjectGitHubSync,
@@ -57,10 +58,11 @@ export default async function ProjectGitHubSyncPage({
   params: Promise<{ projectId: string; syncRunId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requirePageSession();
+  const user = await requirePageSession();
   const route = await params;
   const projectId = idSchema.parse(route.projectId);
   const syncRunId = idSchema.parse(route.syncRunId);
+  await assertProjectAccess(user, projectId, "view");
   const query = await searchParams;
   const page = pageSchema.parse({
     offset: queryValue(query.offset),

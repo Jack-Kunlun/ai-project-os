@@ -15,7 +15,8 @@ export type ProviderTransportErrorCode =
   | "AI_PROVIDER_TIMEOUT"
   | "AI_PROVIDER_RESPONSE_TOO_LARGE"
   | "AI_PROVIDER_INVALID_RESPONSE"
-  | "AI_PROVIDER_EMBEDDING_UNSUPPORTED";
+  | "AI_PROVIDER_EMBEDDING_UNSUPPORTED"
+  | "AI_PROVIDER_VISION_UNSUPPORTED";
 
 export class ProviderTransportError extends Error {
   constructor(
@@ -88,7 +89,7 @@ function mapHttpError(status: number): never {
 
 async function providerPost(
   connection: RuntimeConnection,
-  path: "/chat/completions" | "/embeddings",
+  path: "/chat/completions" | "/embeddings" | "/responses",
   body: Readonly<Record<string, unknown>>,
   absoluteDeadlineAt?: Date,
 ): Promise<Readonly<{ payload: unknown; requestId: string | null }>> {
@@ -136,8 +137,8 @@ function usageCounts(payload: Record<string, unknown>): Readonly<{ input: number
   const usage = payload.usage;
   if (typeof usage !== "object" || usage === null) return Object.freeze({ input: 0, output: 0 });
   const record = usage as Record<string, unknown>;
-  const input = record.prompt_tokens;
-  const output = record.completion_tokens;
+  const input = record.prompt_tokens ?? record.input_tokens;
+  const output = record.completion_tokens ?? record.output_tokens;
   return Object.freeze({
     input: typeof input === "number" && Number.isSafeInteger(input) && input >= 0 ? input : 0,
     output: typeof output === "number" && Number.isSafeInteger(output) && output >= 0 ? output : 0,
@@ -157,6 +158,97 @@ export async function invokeChatCompletion(input: Readonly<{
     messages: input.messages,
     max_tokens: input.maxOutputTokens,
     temperature: input.temperature ?? 0,
+    stream: false,
+  });
+  if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  const record = payload as Record<string, unknown>;
+  const choices = record.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  const first = choices[0];
+  if (typeof first !== "object" || first === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  const message = (first as Record<string, unknown>).message;
+  if (typeof message !== "object" || message === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  const content = (message as Record<string, unknown>).content;
+  if (typeof content !== "string" || content.trim().length === 0 || content.length > 1_000_000) {
+    return fail("AI_PROVIDER_INVALID_RESPONSE");
+  }
+  const usage = usageCounts(record);
+  return Object.freeze({
+    content,
+    inputTokens: usage.input,
+    outputTokens: usage.output,
+    providerRequestId: requestId,
+  });
+}
+
+function responseText(payload: Record<string, unknown>): string | null {
+  if (typeof payload.output_text === "string" && payload.output_text.trim().length > 0) return payload.output_text;
+  if (!Array.isArray(payload.output)) return null;
+  for (const item of payload.output) {
+    if (typeof item !== "object" || item === null) continue;
+    const content = (item as Record<string, unknown>).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (typeof part !== "object" || part === null) continue;
+      const record = part as Record<string, unknown>;
+      if ((record.type === "output_text" || record.type === "text") && typeof record.text === "string" && record.text.trim().length > 0) {
+        return record.text;
+      }
+    }
+  }
+  return null;
+}
+
+export async function invokeVisionCompletion(input: Readonly<{
+  connection: RuntimeConnection;
+  modelId: string;
+  image: Buffer;
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+  prompt: string;
+  maxOutputTokens: number;
+}>): Promise<ChatResult> {
+  if (input.image.length === 0 || input.image.length > 10 * 1024 * 1024 || input.prompt.length < 1 || input.prompt.length > 8_000) {
+    return fail("AI_PROVIDER_REJECTED", 400);
+  }
+  const dataUrl = `data:${input.mimeType};base64,${input.image.toString("base64")}`;
+  if (input.connection.kind === "deepseek") {
+    if (input.modelId !== "deepseek-v4-flash-vision-exp") return fail("AI_PROVIDER_VISION_UNSUPPORTED", 422);
+    const { payload, requestId } = await providerPost(input.connection, "/responses", {
+      model: input.modelId,
+      instructions: "Extract only evidence visible in the image. Never infer hidden facts. Return the requested JSON object only.",
+      input: [{
+        role: "user",
+        content: [
+          { type: "input_text", text: input.prompt },
+          { type: "input_image", image_url: dataUrl, detail: "high" },
+        ],
+      }],
+      max_output_tokens: input.maxOutputTokens,
+      store: false,
+    });
+    if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+    const record = payload as Record<string, unknown>;
+    const content = responseText(record);
+    if (content === null || content.length > 1_000_000) return fail("AI_PROVIDER_INVALID_RESPONSE");
+    const usage = usageCounts(record);
+    return Object.freeze({
+      content,
+      inputTokens: usage.input,
+      outputTokens: usage.output,
+      providerRequestId: requestId,
+    });
+  }
+  const { payload, requestId } = await providerPost(input.connection, "/chat/completions", {
+    model: input.modelId,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image_url", image_url: { url: dataUrl } },
+        { type: "text", text: input.prompt },
+      ],
+    }],
+    max_tokens: input.maxOutputTokens,
+    temperature: 0,
     stream: false,
   });
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");

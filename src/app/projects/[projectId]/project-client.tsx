@@ -29,7 +29,7 @@ type ProjectItem = {
   } | null;
   source: {
     id: string;
-    kind: "document" | "screenshot" | "github" | "manual";
+    kind: "document" | "screenshot" | "github" | "git" | "web" | "manual";
     externalRef: string | null;
     contentHash: string;
     capturedAt: string | null;
@@ -39,7 +39,7 @@ type ProjectItem = {
 
 type ProjectSource = {
   id: string;
-  kind: "document" | "screenshot" | "github" | "manual";
+  kind: "document" | "screenshot" | "github" | "git" | "web" | "manual";
   externalRef: string | null;
   contentText: string;
   contentHash: string;
@@ -56,6 +56,7 @@ type Project = {
   updatedAt: string;
   _count: {
     sources: number;
+    assets: number;
     items: number;
     scans: number;
     snapshots: number;

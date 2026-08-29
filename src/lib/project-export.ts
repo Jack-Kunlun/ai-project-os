@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { getDb } from "@/lib/db";
 import { isSafeExternalRef } from "@/lib/source";
 
-export const PROJECT_EXPORT_SCHEMA_VERSION = "ai-project-os.project-export.v1";
+export const PROJECT_EXPORT_SCHEMA_VERSION = "ai-project-os.project-export.v2";
 export const PROJECT_EXPORT_MAX_BYTES = 20 * 1024 * 1024;
 
 export type ProjectExportErrorCode =
@@ -42,7 +42,7 @@ export async function exportProjectData(
         throw new ProjectExportError("PROJECT_EXPORT_STALE");
       }
 
-      const [sources, items, repositories, routes, routeRevisions, lifecycle, jobs, answers, reports, agentRuns] = await Promise.all([
+      const [sources, assets, items, repositories, routes, routeRevisions, lifecycle, jobs, answers, reports, agentRuns] = await Promise.all([
         tx.projectSource.findMany({
           where: { projectId: input.projectId },
           orderBy: [{ ingestedAt: "asc" }, { id: "asc" }],
@@ -58,6 +58,61 @@ export async function exportProjectData(
             contentHash: true,
             capturedAt: true,
             ingestedAt: true,
+            retiredAt: true,
+          },
+        }),
+        tx.projectAsset.findMany({
+          where: { projectId: input.projectId },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: {
+            id: true,
+            displayName: true,
+            kind: true,
+            status: true,
+            deletedAt: true,
+            createdAt: true,
+            updatedAt: true,
+            uploadedBy: { select: { username: true } },
+            versions: {
+              orderBy: { version: "asc" },
+              select: {
+                id: true,
+                version: true,
+                originalFileName: true,
+                mimeType: true,
+                sizeBytes: true,
+                contentHash: true,
+                status: true,
+                parserVersion: true,
+                failureCode: true,
+                processingStartedAt: true,
+                completedAt: true,
+                createdAt: true,
+                segments: {
+                  orderBy: { ordinal: "asc" },
+                  select: {
+                    id: true,
+                    ordinal: true,
+                    locatorKind: true,
+                    locatorLabel: true,
+                    pageNumber: true,
+                    slideNumber: true,
+                    sheetName: true,
+                    cellRange: true,
+                    extractionMethod: true,
+                    contentText: true,
+                    contentHash: true,
+                    reviewedText: true,
+                    reviewStatus: true,
+                    reviewedAt: true,
+                    modelId: true,
+                    projectSourceId: true,
+                    providerConnection: { select: { name: true, kind: true } },
+                    reviewedBy: { select: { username: true } },
+                  },
+                },
+              },
+            },
           },
         }),
         tx.projectItem.findMany({
@@ -258,6 +313,24 @@ export async function exportProjectData(
           externalRef: source.externalRef === null || isSafeExternalRef(source.externalRef) ? source.externalRef : null,
           capturedAt: iso(source.capturedAt),
           ingestedAt: source.ingestedAt.toISOString(),
+          retiredAt: iso(source.retiredAt),
+        })),
+        assets: assets.map((asset) => ({
+          ...asset,
+          deletedAt: iso(asset.deletedAt),
+          createdAt: asset.createdAt.toISOString(),
+          updatedAt: asset.updatedAt.toISOString(),
+          versions: asset.versions.map((version) => ({
+            ...version,
+            sizeBytes: version.sizeBytes.toString(),
+            processingStartedAt: iso(version.processingStartedAt),
+            completedAt: iso(version.completedAt),
+            createdAt: version.createdAt.toISOString(),
+            segments: version.segments.map((segment) => ({
+              ...segment,
+              reviewedAt: iso(segment.reviewedAt),
+            })),
+          })),
         })),
         items: items.map((item) => ({
           ...item,
@@ -313,6 +386,7 @@ export async function exportProjectData(
           "向量与索引内部记录",
           "原始任务 payload/result、幂等键、租约令牌和供应商请求 ID",
           "仓库代码文件正文、扫描中间账本和完整数据库备份数据",
+          "上传文件的原始二进制内容与服务端存储路径；请同时备份 ai-project-os-uploads 卷",
         ],
       } as const;
       const json = `${JSON.stringify(document, null, 2)}\n`;

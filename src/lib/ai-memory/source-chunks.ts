@@ -148,6 +148,7 @@ export function createSourceChunkService(options: {
                 revisionKey: true,
                 contentHash: true,
                 contentText: true,
+                retiredAt: true,
               },
             });
             if (source === null) {
@@ -161,6 +162,7 @@ export function createSourceChunkService(options: {
             }
             if (
               source.originScope !== "project" ||
+              source.retiredAt !== null ||
               !FINGERPRINT_PATTERN.test(source.contentHash) ||
               hashSourceContent(source.contentText) !== source.contentHash
             ) {

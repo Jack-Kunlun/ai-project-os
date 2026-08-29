@@ -13,10 +13,11 @@ type Provider = {
   status: "configured" | "verified" | "error";
   defaultGenerationModelId: string;
   defaultEmbeddingModelId: string | null;
+  defaultVisionModelId: string | null;
   embeddingDimensions: number | null;
 };
 type AiRoute = {
-  operation: "embedding" | "autoExtract" | "generateWithContext";
+  operation: "embedding" | "visionExtract" | "autoExtract" | "generateWithContext";
   providerConnectionId: string;
   modelId: string;
   embeddingDimensions: number | null;
@@ -63,7 +64,7 @@ type RepositoryLink = {
 };
 type Job = {
   id: string;
-  kind: "githubScan" | "githubMaterialSync" | "githubProjectSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
+  kind: "assetExtract" | "githubScan" | "githubMaterialSync" | "githubProjectSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
   status: "queued" | "waitingConsent" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
   stage: string;
   failureCode: string | null;
@@ -167,6 +168,7 @@ export function ProjectControlClient({ username }: { username: string }) {
 
 const operationInfo = {
   embedding: { title: "语义向量", description: "为项目资料和仓库内容建立语义索引。" },
+  visionExtract: { title: "图片识别", description: "识别图片和扫描 PDF，并生成待人工核对的文字与视觉描述。" },
   autoExtract: { title: "自动抽取", description: "从原始资料抽取待人工审核的决策、进展、问题和风险。" },
   generateWithContext: { title: "引用式问答", description: "只基于检索到的项目证据生成带引用回答。" },
 } as const;
@@ -174,14 +176,14 @@ const operationInfo = {
 function AiRouteSection({ projectId, providers, routes, onChanged }: { projectId: string; providers: Provider[]; routes: AiRoute[]; onChanged: (routes: AiRoute[]) => void }) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
-      <div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Capability routing</p><h2 className="mt-2 text-2xl font-semibold">项目模型路由</h2><p className="mt-2 text-sm leading-6 text-slate-500">仅能选择已通过连接测试的供应商。生成与向量可以分别使用不同国内外服务。</p></div>
-      {providers.length === 0 ? <p className="mt-6 rounded-2xl bg-amber-50 px-5 py-4 text-sm text-amber-800">还没有可用供应商。请先到 <Link href="/settings" className="font-semibold underline">模型与系统设置</Link> 添加并测试连接。</p> : <div className="mt-6 grid gap-4 lg:grid-cols-3">{(["embedding", "autoExtract", "generateWithContext"] as const).map((operation) => <RouteCard key={operation} operation={operation} projectId={projectId} providers={providers} current={routes.find((route) => route.operation === operation)} onSaved={(route) => onChanged([...routes.filter((item) => item.operation !== operation), route])} />)}</div>}
+      <div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Capability routing</p><h2 className="mt-2 text-2xl font-semibold">项目模型路由</h2><p className="mt-2 text-sm leading-6 text-slate-500">仅能选择已通过连接测试且已配置对应模型的供应商。图片识别、自动抽取、向量索引与引用式生成可分别使用不同的国内外服务。</p></div>
+      {providers.length === 0 ? <p className="mt-6 rounded-2xl bg-amber-50 px-5 py-4 text-sm text-amber-800">还没有可用供应商。请先到 <Link href="/settings" className="font-semibold underline">模型与系统设置</Link> 添加并测试连接。</p> : <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">{(["embedding", "visionExtract", "autoExtract", "generateWithContext"] as const).map((operation) => <RouteCard key={operation} operation={operation} projectId={projectId} providers={providers} current={routes.find((route) => route.operation === operation)} onSaved={(route) => onChanged([...routes.filter((item) => item.operation !== operation), route])} />)}</div>}
     </section>
   );
 }
 
 function RouteCard({ operation, projectId, providers, current, onSaved }: { operation: keyof typeof operationInfo; projectId: string; providers: Provider[]; current?: AiRoute; onSaved: (route: AiRoute) => void }) {
-  const eligible = useMemo(() => providers.filter((provider) => provider.status === "verified" && (operation !== "embedding" || provider.defaultEmbeddingModelId !== null)), [providers, operation]);
+  const eligible = useMemo(() => providers.filter((provider) => provider.status === "verified" && (operation !== "embedding" || provider.defaultEmbeddingModelId !== null) && (operation !== "visionExtract" || provider.defaultVisionModelId !== null)), [providers, operation]);
   const [providerId, setProviderId] = useState(current?.providerConnectionId ?? eligible[0]?.id ?? "");
   const [pending, setPending] = useState(false);
   const [previewPending, setPreviewPending] = useState(false);
@@ -198,7 +200,7 @@ function RouteCard({ operation, projectId, providers, current, onSaved }: { oper
     return {
       operation,
       providerConnectionId: provider.id,
-      modelId: isEmbedding ? provider.defaultEmbeddingModelId : provider.defaultGenerationModelId,
+      modelId: isEmbedding ? provider.defaultEmbeddingModelId : operation === "visionExtract" ? provider.defaultVisionModelId : provider.defaultGenerationModelId,
       embeddingDimensions: isEmbedding ? provider.embeddingDimensions : null,
       maxOutputTokens: isEmbedding ? 128 : 2048,
       ...(current ? { expectedUpdatedAt: current.updatedAt } : { expectedUpdatedAt: null }),
@@ -288,7 +290,7 @@ function RouteCard({ operation, projectId, providers, current, onSaved }: { oper
   }
 
   const activePreview = previewForKey === targetKey ? preview : null;
-  return <article className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><h3 className="font-semibold">{operationInfo[operation].title}</h3><p className="mt-2 min-h-12 text-xs leading-5 text-slate-500">{operationInfo[operation].description}</p><select value={providerId} onChange={(event) => setProviderId(event.target.value)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"><option value="">选择已验证供应商</option>{eligible.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {operation === "embedding" ? entry.defaultEmbeddingModelId : entry.defaultGenerationModelId}</option>)}</select>{previewPending ? <p className="mt-3 text-xs text-slate-400">正在检查切换影响…</p> : null}{previewError ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{previewError}</p> : null}{activePreview?.impact.onlyFutureRuns ? <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">只影响后续任务；历史结果和向量索引保留。</p> : null}{activePreview?.impact.indexInvalidated ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900"><p>当前索引将变为不兼容，语义搜索、RAG 和项目智能体会暂停。</p>{activePreview.impact.activeIndex ? <p className="mt-1 text-amber-800">旧索引：{activePreview.impact.activeIndex.providerName} · {activePreview.impact.activeIndex.modelId} · {activePreview.impact.activeIndex.dimensions} 维</p> : null}<p className="mt-1 text-amber-800">新配置：{provider?.name ?? "所选供应商"} · {target?.modelId ?? "所选模型"} · {target?.embeddingDimensions ?? "未知"} 维</p><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={acknowledgeIndexRebuild} onChange={(event) => setAcknowledgeIndexRebuild(event.target.checked)} className="mt-1" /><span>我确认保存后前往智能记忆重建索引</span></label></div> : null}<button type="button" onClick={() => void save()} disabled={pending || previewPending || !activePreview || Boolean(previewError) || Boolean(activePreview?.impact.requiresIndexRebuildAcknowledgement && !acknowledgeIndexRebuild)} className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : current ? "更新路由" : "保存路由"}</button>{message ? <p role="status" className="mt-2 text-xs text-slate-500">{message}</p> : null}</article>;
+  return <article className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><h3 className="font-semibold">{operationInfo[operation].title}</h3><p className="mt-2 min-h-12 text-xs leading-5 text-slate-500">{operationInfo[operation].description}</p><select value={providerId} onChange={(event) => setProviderId(event.target.value)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"><option value="">选择已验证供应商</option>{eligible.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {operation === "embedding" ? entry.defaultEmbeddingModelId : operation === "visionExtract" ? entry.defaultVisionModelId : entry.defaultGenerationModelId}</option>)}</select>{previewPending ? <p className="mt-3 text-xs text-slate-400">正在检查切换影响…</p> : null}{previewError ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{previewError}</p> : null}{activePreview?.impact.onlyFutureRuns ? <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">只影响后续任务；历史结果和向量索引保留。</p> : null}{activePreview?.impact.indexInvalidated ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900"><p>当前索引将变为不兼容，语义搜索、RAG 和项目智能体会暂停。</p>{activePreview.impact.activeIndex ? <p className="mt-1 text-amber-800">旧索引：{activePreview.impact.activeIndex.providerName} · {activePreview.impact.activeIndex.modelId} · {activePreview.impact.activeIndex.dimensions} 维</p> : null}<p className="mt-1 text-amber-800">新配置：{provider?.name ?? "所选供应商"} · {target?.modelId ?? "所选模型"} · {target?.embeddingDimensions ?? "未知"} 维</p><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={acknowledgeIndexRebuild} onChange={(event) => setAcknowledgeIndexRebuild(event.target.checked)} className="mt-1" /><span>我确认保存后前往智能记忆重建索引</span></label></div> : null}<button type="button" onClick={() => void save()} disabled={pending || previewPending || !activePreview || Boolean(previewError) || Boolean(activePreview?.impact.requiresIndexRebuildAcknowledgement && !acknowledgeIndexRebuild)} className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : current ? "更新路由" : "保存路由"}</button>{message ? <p role="status" className="mt-2 text-xs text-slate-500">{message}</p> : null}</article>;
 }
 
 function RepositorySection({ projectId, repositories, credentialSuffix, onReload }: { projectId: string; repositories: RepositoryLink[]; credentialSuffix: string | null; onReload: () => Promise<void> }) {

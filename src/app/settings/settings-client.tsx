@@ -11,7 +11,9 @@ type ProviderCatalogEntry = {
   apiKeyLabel: string;
   generationModelSuggestions: string[];
   embeddingModelSuggestions: Array<{ id: string; dimensions: number }>;
+  visionModelSuggestions: string[];
   supportsEmbeddings: boolean;
+  supportsVision: boolean;
 };
 type Provider = {
   id: string;
@@ -20,6 +22,7 @@ type Provider = {
   baseUrl: string;
   defaultGenerationModelId: string;
   defaultEmbeddingModelId: string | null;
+  defaultVisionModelId: string | null;
   embeddingDimensions: number | null;
   status: "configured" | "verified" | "error" | "disabled";
   lastTestedAt: string | null;
@@ -131,6 +134,7 @@ function ProviderCreateForm({
   const [name, setName] = useState("OpenAI");
   const [apiKey, setApiKey] = useState("");
   const [generationModelId, setGenerationModelId] = useState("gpt-4.1-mini");
+  const [visionModelId, setVisionModelId] = useState("gpt-4.1-mini");
   const [embeddingEnabled, setEmbeddingEnabled] = useState(true);
   const [embeddingModelId, setEmbeddingModelId] = useState("text-embedding-3-small");
   const [embeddingDimensions, setEmbeddingDimensions] = useState("1536");
@@ -143,6 +147,7 @@ function ProviderCreateForm({
     if (!next) return;
     setName(next.displayName);
     setGenerationModelId(next.generationModelSuggestions[0] ?? "");
+    setVisionModelId(next.visionModelSuggestions[0] ?? "");
     const embedding = next.embeddingModelSuggestions[0];
     setEmbeddingEnabled(next.supportsEmbeddings && embedding !== undefined);
     setEmbeddingModelId(embedding?.id ?? "");
@@ -168,6 +173,7 @@ function ProviderCreateForm({
           kind,
           apiKey,
           generationModelId,
+          visionModelId: definition?.supportsVision && visionModelId ? visionModelId : null,
           embeddingModelId: embeddingEnabled ? embeddingModelId : null,
           embeddingDimensions: embeddingEnabled ? Number(embeddingDimensions) : null,
         }),
@@ -197,6 +203,7 @@ function ProviderCreateForm({
       <Field label={definition?.apiKeyLabel ?? "API Key"}><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" maxLength={512} required className="dark-field" /></Field>
       <Field label="生成模型"><input list={`generation-${kind}`} value={generationModelId} onChange={(event) => setGenerationModelId(event.target.value)} required className="dark-field" /></Field>
       <datalist id={`generation-${kind}`}>{definition?.generationModelSuggestions.map((id) => <option key={id} value={id} />)}</datalist>
+      {definition?.supportsVision ? <><Field label="图片识别模型"><input list={`vision-${kind}`} value={visionModelId} onChange={(event) => setVisionModelId(event.target.value)} required className="dark-field" /></Field><datalist id={`vision-${kind}`}>{definition.visionModelSuggestions.map((id) => <option key={id} value={id} />)}</datalist></> : null}
       {definition?.supportsEmbeddings ? (
         <>
           <label className="mt-5 flex items-center gap-3 text-sm text-slate-200"><input type="checkbox" checked={embeddingEnabled} onChange={(event) => setEmbeddingEnabled(event.target.checked)} /> 同时配置向量模型</label>
@@ -222,6 +229,7 @@ function ProviderCard({ provider, catalog, onChanged }: { provider: Provider; ca
   const [message, setMessage] = useState<string | null>(null);
   const [name, setName] = useState(provider.name);
   const [generationModelId, setGenerationModelId] = useState(provider.defaultGenerationModelId);
+  const [visionModelId, setVisionModelId] = useState(provider.defaultVisionModelId ?? "");
   const [embeddingModelId, setEmbeddingModelId] = useState(provider.defaultEmbeddingModelId ?? "");
   const [embeddingDimensions, setEmbeddingDimensions] = useState(provider.embeddingDimensions ? String(provider.embeddingDimensions) : "");
   const [apiKey, setApiKey] = useState("");
@@ -253,6 +261,7 @@ function ProviderCard({ provider, catalog, onChanged }: { provider: Provider; ca
         body: JSON.stringify({
           name,
           generationModelId,
+          visionModelId: catalog?.supportsVision && visionModelId ? visionModelId : null,
           embeddingModelId: catalog?.supportsEmbeddings && embeddingModelId ? embeddingModelId : null,
           embeddingDimensions: catalog?.supportsEmbeddings && embeddingModelId ? Number(embeddingDimensions) : null,
           ...(apiKey ? { apiKey } : {}),
@@ -298,8 +307,8 @@ function ProviderCard({ provider, catalog, onChanged }: { provider: Provider; ca
         </div>
         <div className="flex gap-2"><button type="button" onClick={() => setEditing((value) => !value)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">{editing ? "收起" : "编辑"}</button><button type="button" onClick={() => void testConnection()} disabled={testing || provider.status === "disabled"} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{testing ? "测试中…" : "测试连接"}</button></div>
       </div>
-      <dl className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-2"><div><dt className="text-slate-400">生成模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultGenerationModelId}</dd></div><div><dt className="text-slate-400">向量模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} 维` : "未配置"}</dd></div></dl>
-      {editing ? <form onSubmit={save} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2"><EditField label="连接名称"><input value={name} onChange={(event) => setName(event.target.value)} required className="edit-field" /></EditField><EditField label="生成模型"><input value={generationModelId} onChange={(event) => setGenerationModelId(event.target.value)} required className="edit-field" /></EditField>{catalog?.supportsEmbeddings ? <><EditField label="向量模型（留空即关闭）"><input value={embeddingModelId} onChange={(event) => setEmbeddingModelId(event.target.value)} className="edit-field" /></EditField><EditField label="向量维度"><input type="number" value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} disabled={!embeddingModelId} className="edit-field" /></EditField></> : null}<EditField label="替换 API Key（可选）"><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" className="edit-field" /></EditField><div className="flex items-end gap-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">保存变更</button><button type="button" onClick={() => void toggleEnabled()} disabled={pending || (provider.status !== "disabled" && provider._count.projectRoutes > 0)} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-600 disabled:opacity-40">{provider.status === "disabled" ? "重新启用" : "停用连接"}</button></div><style jsx>{`.edit-field{margin-top:.4rem;width:100%;border-radius:.75rem;border:1px solid #e2e8f0;padding:.7rem .85rem;font-size:.8rem;outline:none}.edit-field:focus{border-color:#818cf8;box-shadow:0 0 0 2px #e0e7ff}`}</style></form> : null}
+      <dl className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">生成模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultGenerationModelId}</dd></div><div><dt className="text-slate-400">图片识别</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultVisionModelId ?? "未配置"}</dd></div><div><dt className="text-slate-400">向量模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} 维` : "未配置"}</dd></div></dl>
+      {editing ? <form onSubmit={save} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2"><EditField label="连接名称"><input value={name} onChange={(event) => setName(event.target.value)} required className="edit-field" /></EditField><EditField label="生成模型"><input value={generationModelId} onChange={(event) => setGenerationModelId(event.target.value)} required className="edit-field" /></EditField>{catalog?.supportsVision ? <EditField label="图片识别模型"><input value={visionModelId} onChange={(event) => setVisionModelId(event.target.value)} className="edit-field" /></EditField> : null}{catalog?.supportsEmbeddings ? <><EditField label="向量模型（留空即关闭）"><input value={embeddingModelId} onChange={(event) => setEmbeddingModelId(event.target.value)} className="edit-field" /></EditField><EditField label="向量维度"><input type="number" value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} disabled={!embeddingModelId} className="edit-field" /></EditField></> : null}<EditField label="替换 API Key（可选）"><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" className="edit-field" /></EditField><div className="flex items-end gap-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">保存变更</button><button type="button" onClick={() => void toggleEnabled()} disabled={pending || (provider.status !== "disabled" && provider._count.projectRoutes > 0)} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-600 disabled:opacity-40">{provider.status === "disabled" ? "重新启用" : "停用连接"}</button></div><style jsx>{`.edit-field{margin-top:.4rem;width:100%;border-radius:.75rem;border:1px solid #e2e8f0;padding:.7rem .85rem;font-size:.8rem;outline:none}.edit-field:focus{border-color:#818cf8;box-shadow:0 0 0 2px #e0e7ff}`}</style></form> : null}
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}
       {provider.lastErrorCode ? <p className="mt-2 text-xs text-rose-600">安全错误码：{provider.lastErrorCode}</p> : null}
     </article>

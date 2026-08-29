@@ -397,9 +397,14 @@ export async function collectProjectMemoryInputs(
 ): Promise<readonly IndexInput[]> {
   const [manualSources, materialPointers, codePointer] = await Promise.all([
     db.projectSource.findMany({
-      where: { projectId, originScope: "project" },
+      where: { projectId, originScope: "project", retiredAt: null },
       orderBy: { id: "asc" },
-      select: { id: true, externalRef: true, contentText: true },
+      select: {
+        id: true,
+        externalRef: true,
+        contentText: true,
+        assetSegment: { select: { locatorLabel: true } },
+      },
     }),
     db.repositoryMaterialGenerationPointer.findMany({
       where: { projectId },
@@ -463,7 +468,7 @@ export async function collectProjectMemoryInputs(
         projectSourceId: source.id,
         projectRepositoryLinkId: null,
         frozenCommitSha: null,
-        path: null,
+        path: source.assetSegment?.locatorLabel ?? null,
         externalRef: source.externalRef,
         rangeStart: chunk.rangeStart,
         rangeEnd: chunk.rangeEnd,
@@ -718,7 +723,7 @@ export async function getProjectMemoryIndexStatus(projectId: string, db: PrismaC
         },
       },
     }),
-    db.projectSource.count({ where: { projectId, originScope: "project" } }),
+    db.projectSource.count({ where: { projectId, originScope: "project", retiredAt: null } }),
     db.projectCodeSnapshotPointer.findUnique({ where: { projectId }, select: { projectCodeSnapshotId: true } }),
     db.repositoryMaterialGenerationPointer.count({ where: { projectId } }),
     db.projectAiRoute.findUnique({

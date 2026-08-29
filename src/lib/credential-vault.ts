@@ -124,10 +124,11 @@ export async function loadOrCreateMasterKey(): Promise<Buffer> {
 }
 
 function canonicalSecret(kind: ExternalCredentialKind, value: unknown): string {
+  const maximumLength = kind === "git" ? 32_768 : kind === "oidcClient" || kind === "oidcFlow" ? 4_096 : 512;
   if (
     typeof value !== "string" ||
     value.length < 8 ||
-    value.length > 512 ||
+    value.length > maximumLength ||
     value.trim() !== value ||
     /\s/u.test(value) ||
     CONTROL_PATTERN.test(value)
@@ -138,6 +139,12 @@ function canonicalSecret(kind: ExternalCredentialKind, value: unknown): string {
     kind === "github" &&
     !/^github_pat_[A-Za-z0-9_]{32,240}$/.test(value)
   ) {
+    return fail("CREDENTIAL_INVALID_INPUT");
+  }
+  if (kind === "git" && !/^[A-Za-z0-9_-]+$/.test(value)) {
+    return fail("CREDENTIAL_INVALID_INPUT");
+  }
+  if (kind === "oidcFlow" && !/^[A-Za-z0-9_-]+$/.test(value)) {
     return fail("CREDENTIAL_INVALID_INPUT");
   }
   return value;

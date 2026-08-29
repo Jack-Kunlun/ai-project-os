@@ -40,6 +40,7 @@ services:
       AI_PROJECT_OS_MASTER_KEY_FILE: /var/lib/ai-project-os-secrets/master.key
     volumes:
       - ai_project_os_secrets:/var/lib/ai-project-os-secrets
+      - ai_project_os_uploads:/var/lib/ai-project-os/uploads
     ports:
       - "127.0.0.1:${APP_PORT:-3000}:3000"
     restart: unless-stopped
@@ -59,8 +60,27 @@ services:
       retries: 12
       start_period: 10s
 
+  worker:
+    build:
+      context: .
+      target: worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      AI_PROJECT_OS_MASTER_KEY_FILE: /var/lib/ai-project-os-secrets/master.key
+    volumes:
+      - ai_project_os_secrets:/var/lib/ai-project-os-secrets
+      - ai_project_os_uploads:/var/lib/ai-project-os/uploads
+    restart: unless-stopped
+    init: true
+
 volumes:
   ai_project_os_pgdata:
     name: ai-project-os-pgdata
   ai_project_os_secrets:
     name: ai-project-os-secrets
+  ai_project_os_uploads:
+    name: ai-project-os-uploads

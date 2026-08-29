@@ -407,7 +407,7 @@ export function createReadOnlyProjectAgent(options: Readonly<{
           });
         } else if (call.tool === "get_source") {
           const source = await options.db.projectSource.findFirst({
-            where: { projectId, id: call.arguments.sourceId },
+            where: { projectId, id: call.arguments.sourceId, retiredAt: null },
             select: {
               id: true,
               kind: true,
@@ -478,7 +478,7 @@ export function createReadOnlyProjectAgent(options: Readonly<{
           const items = Object.values(snapshot.payload.sections).flat();
           const sourceIds = [...new Set(items.map((item) => item.provenance.sourceId))];
           const sources = await options.db.projectSource.findMany({
-            where: { projectId, id: { in: sourceIds } },
+            where: { projectId, id: { in: sourceIds }, retiredAt: null },
             select: { id: true, contentText: true, contentHash: true },
           });
           const sourcesById = new Map(sources.map((source) => [source.id, source]));

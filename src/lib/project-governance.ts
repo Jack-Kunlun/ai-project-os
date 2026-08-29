@@ -368,6 +368,7 @@ function sanitizeWarnings(value: Prisma.JsonValue): readonly string[] {
 
 function operationDestination(projectId: string, kind: BackgroundJobKind, syncRunId: string | null): string {
   if (kind === "githubProjectSync" && syncRunId !== null) return `/projects/${projectId}/github-syncs/${syncRunId}`;
+  if (kind === "assetExtract") return `/projects/${projectId}/assets`;
   if (kind === "memoryIndex" || kind === "autoExtract" || kind === "semanticSearch" || kind === "ragAnswer") return `/projects/${projectId}/memory`;
   if (kind === "projectBrief" || kind === "projectAgent") return `/projects/${projectId}/intelligence`;
   return `/projects/${projectId}/control`;

@@ -6,6 +6,8 @@ import {
   changeAccountPassword,
   expiredSessionCookie,
   requireApiSession,
+  setLocalAccountPassword,
+  updateAccountProfile,
   updateAccountUsername,
 } from "@/lib/auth";
 import { ApiError } from "@/lib/api-errors";
@@ -16,6 +18,8 @@ export const dynamic = "force-dynamic";
 
 const profileUpdateSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("updateUsername"), username: z.string() }).strict(),
+  z.object({ action: z.literal("updateProfile"), displayName: z.string().nullable(), email: z.string().nullable() }).strict(),
+  z.object({ action: z.literal("setLocalPassword"), newPassword: z.string() }).strict(),
   z.object({
     action: z.literal("changePassword"),
     currentPassword: z.string(),
@@ -30,7 +34,11 @@ export async function GET(request: Request) {
     const [user, activeSessionCount, latestSession] = await Promise.all([
       db.appUser.findUnique({
         where: { id: sessionUser.id },
-        select: { id: true, username: true, role: true, createdAt: true, updatedAt: true },
+        select: {
+          id: true, username: true, displayName: true, email: true, role: true, passwordHash: true, createdAt: true, updatedAt: true,
+          workspaceMemberships: { select: { role: true, workspace: { select: { id: true, name: true } } } },
+          oidcIdentities: { select: { email: true, lastLoginAt: true, provider: { select: { id: true, name: true } } } },
+        },
       }),
       db.appSession.count({
         where: { userId: sessionUser.id, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -43,7 +51,7 @@ export async function GET(request: Request) {
     ]);
     if (user === null) throw new ApiError(401, "AUTH_REQUIRED", "请先登录");
     return NextResponse.json(
-      { profile: { ...user, activeSessionCount, lastSeenAt: latestSession?.lastSeenAt ?? null, sessionExpiresAt: latestSession?.expiresAt ?? null } },
+      { profile: { ...user, passwordHash: undefined, hasLocalPassword: user.passwordHash !== null, activeSessionCount, lastSeenAt: latestSession?.lastSeenAt ?? null, sessionExpiresAt: latestSession?.expiresAt ?? null } },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
@@ -59,6 +67,14 @@ export async function PATCH(request: Request) {
     if (input.action === "updateUsername") {
       const user = await updateAccountUsername(sessionUser.id, input.username);
       return NextResponse.json({ user }, { headers: { "cache-control": "no-store" } });
+    }
+    if (input.action === "updateProfile") {
+      const user = await updateAccountProfile(sessionUser.id, input);
+      return NextResponse.json({ user }, { headers: { "cache-control": "no-store" } });
+    }
+    if (input.action === "setLocalPassword") {
+      await setLocalAccountPassword(sessionUser.id, input.newPassword);
+      return NextResponse.json({ passwordChanged: true }, { headers: { "cache-control": "no-store", "set-cookie": expiredSessionCookie() } });
     }
 
     await changeAccountPassword(sessionUser.id, input.currentPassword, input.newPassword);

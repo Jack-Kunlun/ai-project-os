@@ -22,6 +22,12 @@ export type ProjectItemHistorySnapshot = {
   sourceExcerpt: string | null;
   occurredAt: Date | null;
   confirmedAt: Date | null;
+  confidence: number | null;
+  importance: number;
+  validFrom: Date | null;
+  validUntil: Date | null;
+  pinned: boolean;
+  lastVerifiedAt: Date | null;
   supersedesItemId: string | null;
   metadata: Prisma.JsonValue;
 };
@@ -198,6 +204,12 @@ export async function appendProjectItemRevision(
       sourceExcerpt: input.item.sourceExcerpt,
       occurredAt: input.item.occurredAt,
       confirmedAt: input.item.confirmedAt,
+      confidence: input.item.confidence,
+      importance: input.item.importance,
+      validFrom: input.item.validFrom,
+      validUntil: input.item.validUntil,
+      pinned: input.item.pinned,
+      lastVerifiedAt: input.item.lastVerifiedAt,
       supersedesItemId: input.item.supersedesItemId,
       metadata: input.item.metadata as Prisma.InputJsonValue,
       evidenceManifestFingerprint: buildEvidenceManifestFingerprint(input.evidences),

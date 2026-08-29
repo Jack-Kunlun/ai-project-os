@@ -64,10 +64,10 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const item = await db.$transaction(async (tx) => {
       const source = await tx.projectSource.findUnique({
         where: { projectId_id: { projectId, id: input.sourceId } },
-        select: { id: true, contentText: true },
+        select: { id: true, contentText: true, retiredAt: true },
       });
 
-      if (!source) {
+      if (!source || source.retiredAt !== null) {
         const project = await tx.project.findUnique({
           where: { id: projectId },
           select: { id: true },

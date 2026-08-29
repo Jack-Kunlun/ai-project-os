@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
@@ -7,6 +8,7 @@ import { getDb } from "@/lib/db";
 import { createWithAvailableSlug, isUniqueConstraintError } from "@/lib/project-slug";
 import { createProjectSchema, slugifyProjectName } from "@/lib/validation";
 import { toPublicProjectJob } from "@/lib/project-workflow";
+import { accessibleProjectWhere, resolveProjectCreationWorkspace } from "@/lib/access-control";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +22,8 @@ const projectSummarySelect = {
   updatedAt: true,
   _count: {
     select: {
-      sources: true,
+      sources: { where: { retiredAt: null } },
+      assets: { where: { status: { not: "deleted" } } },
       items: { where: { reviewStatus: "confirmed" } },
       scans: true,
       snapshots: true,
@@ -50,7 +53,7 @@ const listProjectsQuerySchema = z.object({
 
 export async function GET(request: Request) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const db = getDb();
     const searchParams = new URL(request.url).searchParams;
     for (const key of new Set(searchParams.keys())) {
@@ -58,14 +61,16 @@ export async function GET(request: Request) {
     }
     const query = listProjectsQuerySchema.parse(Object.fromEntries(searchParams));
     const archived = query.view === "archived";
+    const accessWhere = accessibleProjectWhere(user);
+    const where: Prisma.ProjectWhereInput = { AND: [accessWhere, { archivedAt: archived ? { not: null } : null }] };
     const [projects, activeCount, archivedCount] = await Promise.all([
       db.project.findMany({
-        where: { archivedAt: archived ? { not: null } : null },
+        where,
         orderBy: { updatedAt: "desc" },
         select: projectSummarySelect,
       }),
-      db.project.count({ where: { archivedAt: null } }),
-      db.project.count({ where: { archivedAt: { not: null } } }),
+      db.project.count({ where: { AND: [accessWhere, { archivedAt: null }] } }),
+      db.project.count({ where: { AND: [accessWhere, { archivedAt: { not: null } }] } }),
     ]);
 
     return NextResponse.json({
@@ -84,8 +89,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const db = getDb();
+    const workspaceId = await resolveProjectCreationWorkspace(user, db);
     const input = createProjectSchema.parse(await readJsonBody(request));
     const project = await createWithAvailableSlug({
       requestedSlug: input.slug,
@@ -96,6 +102,8 @@ export async function POST(request: Request) {
             name: input.name,
             slug,
             description: input.description || null,
+            workspaceId,
+            memberships: { create: { userId: user.id, role: "owner" } },
           },
           select: projectSummarySelect,
         }),

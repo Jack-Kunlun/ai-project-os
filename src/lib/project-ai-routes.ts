@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getProviderDefinition, isSafeModelId } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 
-export const SUPPORTED_OPERATIONS = ["embedding", "autoExtract", "generateWithContext"] as const;
+export const SUPPORTED_OPERATIONS = ["embedding", "visionExtract", "autoExtract", "generateWithContext"] as const;
 type SupportedOperation = typeof SUPPORTED_OPERATIONS[number];
 
 const routeSchema = z.object({
@@ -101,6 +101,7 @@ function validateTarget(
     kind: Parameters<typeof getProviderDefinition>[0];
     status: string;
     defaultEmbeddingModelId: string | null;
+    defaultVisionModelId: string | null;
     embeddingDimensions: number | null;
   }> | null,
 ): void {
@@ -115,6 +116,14 @@ function validateTarget(
       provider.embeddingDimensions === null ||
       input.modelId !== provider.defaultEmbeddingModelId ||
       input.embeddingDimensions !== provider.embeddingDimensions
+    ) {
+      return fail("AI_PROVIDER_CAPABILITY_MISMATCH");
+    }
+  } else if (input.operation === "visionExtract") {
+    if (
+      !getProviderDefinition(provider.kind).supportsVision ||
+      provider.defaultVisionModelId === null ||
+      input.modelId !== provider.defaultVisionModelId
     ) {
       return fail("AI_PROVIDER_CAPABILITY_MISMATCH");
     }
@@ -210,6 +219,7 @@ async function readOperationState(
       kind: true,
       status: true,
       defaultEmbeddingModelId: true,
+      defaultVisionModelId: true,
       embeddingDimensions: true,
     },
   });
@@ -286,6 +296,7 @@ export async function getProjectAiRoutes(projectId: string, db: PrismaClient = g
         status: true,
         defaultGenerationModelId: true,
         defaultEmbeddingModelId: true,
+        defaultVisionModelId: true,
         embeddingDimensions: true,
       },
     }),

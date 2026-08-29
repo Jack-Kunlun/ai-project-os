@@ -214,7 +214,9 @@ function artifactKind(
   return fail("AI_ARTIFACT_REFUSAL_NOT_PERSISTED");
 }
 
-function prismaOperation(operation: GroundedAnalysisOperation): AiOperation {
+function prismaOperation(
+  operation: GroundedAnalysisOperation,
+): typeof AiOperation.sourceSummary | typeof AiOperation.projectAnalysis {
   return operation === "sourceSummary"
     ? AiOperation.sourceSummary
     : AiOperation.projectAnalysis;

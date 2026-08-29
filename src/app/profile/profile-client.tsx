@@ -9,7 +9,12 @@ import { AppHeader } from "@/components/app-header";
 type Profile = {
   id: string;
   username: string;
-  role: "admin";
+  displayName: string | null;
+  email: string | null;
+  role: "admin" | "member";
+  hasLocalPassword: boolean;
+  workspaceMemberships: Array<{ role: "owner" | "admin" | "member" | "viewer"; workspace: { id: string; name: string } }>;
+  oidcIdentities: Array<{ email: string | null; lastLoginAt: string; provider: { id: string; name: string } }>;
   createdAt: string;
   updatedAt: string;
   activeSessionCount: number;
@@ -66,7 +71,7 @@ export function ProfileClient({ username: initialUsername }: { username: string 
         <section>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Account</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">个人中心</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500">查看账户状态，管理登录名和密码。</p>
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500">查看身份来源、工作区角色和会话状态，维护个人资料与本地恢复凭据。</p>
         </section>
 
         {error ? <div role="alert" className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline">重试</button></div> : null}
@@ -76,10 +81,10 @@ export function ProfileClient({ username: initialUsername }: { username: string 
             <div className="flex min-w-0 items-center gap-4">
               <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-xl font-bold text-white shadow-lg shadow-indigo-500/20">{headerUsername.slice(0, 1).toUpperCase()}</span>
               <div className="min-w-0">
-                <h2 className="truncate text-xl font-semibold tracking-[-0.02em]">{headerUsername}</h2>
+                <h2 className="truncate text-xl font-semibold tracking-[-0.02em]">{profile?.displayName || headerUsername}</h2>
                 <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="rounded-full bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-700">本地管理员</span>
-                  <span className="text-slate-400">账户数据仅保存在当前部署</span>
+                  <span className="rounded-full bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-700">{profile?.role === "admin" ? "系统管理员" : "工作区成员"}</span>
+                  <span className="text-slate-400">@{headerUsername}</span>
                 </div>
               </div>
             </div>
@@ -112,13 +117,16 @@ export function ProfileClient({ username: initialUsername }: { username: string 
           </details>
         </section>
 
+        {profile ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace roles</p><h2 className="mt-2 text-lg font-semibold">工作区身份</h2><div className="mt-4 space-y-2">{profile.workspaceMemberships.map((membership) => <div key={membership.workspace.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{membership.workspace.name}</span><span className="text-xs font-semibold text-indigo-700">{membership.role}</span></div>)}</div></div><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Sign-in methods</p><h2 className="mt-2 text-lg font-semibold">登录方式</h2><div className="mt-4 space-y-2"><div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">本地密码：{profile.hasLocalPassword ? "已配置" : "未配置"}</div>{profile.oidcIdentities.map((identity) => <div key={identity.provider.id} className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-700">{identity.provider.name}{identity.email ? ` · ${identity.email}` : ""}</div>)}</div></div></section> : null}
+
         <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm">
           <div className="px-6 py-6 sm:px-7">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Account settings</p>
             <h2 className="mt-2 text-xl font-semibold">登录与安全</h2>
           </div>
+          <ProfileDetailsForm key={`${profile?.displayName ?? ""}:${profile?.email ?? ""}`} profile={profile} onUpdated={(details) => setProfile((current) => current ? { ...current, ...details } : current)} />
           <UsernameForm key={profile?.username ?? "loading"} profile={profile} loading={loading} onUpdated={(username) => { setHeaderUsername(username); setProfile((current) => current ? { ...current, username } : current); router.refresh(); }} />
-          <PasswordForm />
+          <PasswordForm hasLocalPassword={profile?.hasLocalPassword ?? true} />
         </section>
 
         <section className="mt-5 flex flex-col gap-4 rounded-2xl border border-slate-200/80 bg-white/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -128,12 +136,30 @@ export function ProfileClient({ username: initialUsername }: { username: string 
           </div>
           <div className="flex flex-wrap gap-2">
             <CredentialLink href="/settings">模型 API Key</CredentialLink>
-            <CredentialLink href="/projects">GitHub PAT</CredentialLink>
+            <CredentialLink href="/connections">Git 服务凭据</CredentialLink>
           </div>
         </section>
       </div>
     </main>
   );
+}
+
+function ProfileDetailsForm({ profile, onUpdated }: { profile: Profile | null; onUpdated: (value: { displayName: string | null; email: string | null }) => void }) {
+  const [displayName, setDisplayName] = useState(profile?.displayName ?? "");
+  const [email, setEmail] = useState(profile?.email ?? "");
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setPending(true); setMessage(null);
+    try {
+      const response = await fetch("/api/profile", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "updateProfile", displayName: displayName || null, email: email || null }) });
+      if (!response.ok) throw new Error(await readError(response, "个人资料更新失败"));
+      const next = (await response.json() as { user: { displayName: string | null; email: string | null } }).user;
+      onUpdated(next); setMessage({ tone: "success", text: "个人资料已更新。" });
+    } catch (cause) { setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "个人资料更新失败" }); }
+    finally { setPending(false); }
+  }
+  return <section className="grid gap-5 border-t border-slate-100 px-6 py-6 sm:grid-cols-[0.72fr_1.28fr] sm:px-7"><div><h3 className="text-sm font-semibold text-slate-800">个人资料</h3><p className="mt-1.5 text-xs leading-5 text-slate-400">显示名称用于页面展示；邮箱用于邀请匹配与企业身份关联。</p></div><form onSubmit={submit} className="grid gap-3 sm:grid-cols-2"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="显示名称" maxLength={160} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="邮箱" maxLength={320} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><div className="sm:col-span-2"><button disabled={pending || !profile} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : "保存个人资料"}</button>{message ? <Message {...message} /> : null}</div></form></section>;
 }
 
 function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null; loading: boolean; onUpdated: (username: string) => void }) {
@@ -176,7 +202,7 @@ function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null
   );
 }
 
-function PasswordForm() {
+function PasswordForm({ hasLocalPassword }: { hasLocalPassword: boolean }) {
   const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -192,7 +218,7 @@ function PasswordForm() {
     }
     setPending(true); setMessage(null);
     try {
-      const response = await fetch("/api/profile", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "changePassword", currentPassword, newPassword }) });
+      const response = await fetch("/api/profile", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(hasLocalPassword ? { action: "changePassword", currentPassword, newPassword } : { action: "setLocalPassword", newPassword }) });
       if (!response.ok) throw new Error(await readError(response, "密码更新失败"));
       router.replace("/login?password=updated");
       router.refresh();
@@ -207,22 +233,22 @@ function PasswordForm() {
       <summary className="grid cursor-pointer list-none gap-4 px-6 py-6 transition hover:bg-slate-50 sm:grid-cols-[0.72fr_1.28fr] sm:px-7">
         <span>
           <span className="block text-sm font-semibold text-slate-800">修改密码</span>
-          <span className="mt-1.5 block text-xs leading-5 text-slate-400">仅在需要轮换密码时展开。</span>
+          <span className="mt-1.5 block text-xs leading-5 text-slate-400">{hasLocalPassword ? "仅在需要轮换密码时展开。" : "为企业身份账号设置本地恢复密码。"}</span>
         </span>
         <span className="flex items-center justify-between gap-4">
-          <span className="text-xs leading-5 text-slate-500">更新后会撤销全部登录会话，并要求重新登录。</span>
+          <span className="text-xs leading-5 text-slate-500">设置后会撤销全部登录会话，并要求重新登录。</span>
           <span aria-hidden="true" className="shrink-0 text-lg text-slate-400 transition group-open:rotate-180">⌄</span>
         </span>
       </summary>
       <form onSubmit={submit} className="grid gap-4 border-t border-slate-100 bg-slate-50/70 px-6 py-6 sm:px-7">
-        <PasswordField id="profile-current-password" label="当前密码" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" />
+        {hasLocalPassword ? <PasswordField id="profile-current-password" label="当前密码" value={currentPassword} onChange={setCurrentPassword} autoComplete="current-password" /> : null}
         <div className="grid gap-4 sm:grid-cols-2">
           <PasswordField id="profile-new-password" label="新密码" value={newPassword} onChange={setNewPassword} autoComplete="new-password" />
           <PasswordField id="profile-confirm-password" label="再次输入新密码" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" />
         </div>
         <p className="text-xs text-slate-400">新密码至少 12 位，并同时包含字母和数字。</p>
         {message ? <Message {...message} /> : null}
-        <div><button disabled={pending || !currentPassword || !newPassword || !confirmPassword} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500 disabled:opacity-40">{pending ? "正在更新…" : "更新密码并重新登录"}</button></div>
+        <div><button disabled={pending || (hasLocalPassword && !currentPassword) || !newPassword || !confirmPassword} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500 disabled:opacity-40">{pending ? "正在更新…" : hasLocalPassword ? "更新密码并重新登录" : "设置本地密码并重新登录"}</button></div>
       </form>
     </details>
   );

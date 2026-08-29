@@ -34,6 +34,7 @@ const createSchema = z.object({
   kind: providerKindSchema,
   apiKey: z.string().min(8).max(512),
   generationModelId: modelIdSchema,
+  visionModelId: modelIdSchema.nullable().optional(),
   embeddingModelId: modelIdSchema.nullable().optional(),
   embeddingDimensions: z.number().int().min(8).max(8192).nullable().optional(),
 }).strict();
@@ -42,6 +43,7 @@ const updateSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   apiKey: z.string().min(8).max(512).optional(),
   generationModelId: modelIdSchema.optional(),
+  visionModelId: modelIdSchema.nullable().optional(),
   embeddingModelId: modelIdSchema.nullable().optional(),
   embeddingDimensions: z.number().int().min(8).max(8192).nullable().optional(),
   enabled: z.boolean().optional(),
@@ -55,6 +57,7 @@ const providerSelect = {
   baseUrl: true,
   defaultGenerationModelId: true,
   defaultEmbeddingModelId: true,
+  defaultVisionModelId: true,
   embeddingDimensions: true,
   status: true,
   lastTestedAt: true,
@@ -84,6 +87,13 @@ function assertEmbeddingConfiguration(
   if ((modelId == null) !== (dimensions == null)) return fail("AI_PROVIDER_INVALID_INPUT");
 }
 
+function assertVisionConfiguration(kind: AiProviderKind, modelId: string | null | undefined): void {
+  if (!getProviderDefinition(kind).supportsVision && modelId != null) return fail("AI_PROVIDER_INVALID_INPUT");
+  if (kind === "deepseek" && modelId != null && modelId !== "deepseek-v4-flash-vision-exp") {
+    return fail("AI_PROVIDER_INVALID_INPUT");
+  }
+}
+
 export function providerCatalog() {
   return PROVIDER_DEFINITIONS.map((definition) => ({
     kind: definition.kind,
@@ -92,7 +102,9 @@ export function providerCatalog() {
     apiKeyLabel: definition.apiKeyLabel,
     generationModelSuggestions: definition.generationModelSuggestions,
     embeddingModelSuggestions: definition.embeddingModelSuggestions,
+    visionModelSuggestions: definition.visionModelSuggestions,
     supportsEmbeddings: definition.supportsEmbeddings,
+    supportsVision: definition.supportsVision,
   }));
 }
 
@@ -103,6 +115,7 @@ export async function listProviderConnections(db: PrismaClient = getDb()) {
 export async function createProviderConnection(input: unknown, db: PrismaClient = getDb()) {
   const parsed = createSchema.parse(input);
   assertEmbeddingConfiguration(parsed.kind, parsed.embeddingModelId, parsed.embeddingDimensions);
+  assertVisionConfiguration(parsed.kind, parsed.visionModelId);
   try {
     return await db.$transaction(async (tx) => {
       const credential = await createCredential("aiProvider", parsed.apiKey, tx);
@@ -113,6 +126,7 @@ export async function createProviderConnection(input: unknown, db: PrismaClient 
           baseUrl: canonicalProviderBaseUrl(parsed.kind),
           credentialId: credential.id,
           defaultGenerationModelId: parsed.generationModelId,
+          defaultVisionModelId: parsed.visionModelId ?? null,
           defaultEmbeddingModelId: parsed.embeddingModelId ?? null,
           embeddingDimensions: parsed.embeddingDimensions ?? null,
         },
@@ -140,6 +154,10 @@ export async function updateProviderConnection(
     ? existing.embeddingDimensions
     : parsed.embeddingDimensions;
   assertEmbeddingConfiguration(existing.kind, nextModel, nextDimensions);
+  assertVisionConfiguration(
+    existing.kind,
+    parsed.visionModelId === undefined ? existing.defaultVisionModelId : parsed.visionModelId,
+  );
   try {
     return await db.$transaction(async (tx) => {
       if (parsed.apiKey !== undefined) {
@@ -151,6 +169,9 @@ export async function updateProviderConnection(
           ...(parsed.name !== undefined ? { name: parsed.name } : {}),
           ...(parsed.generationModelId !== undefined
             ? { defaultGenerationModelId: parsed.generationModelId }
+            : {}),
+          ...(parsed.visionModelId !== undefined
+            ? { defaultVisionModelId: parsed.visionModelId }
             : {}),
           ...(parsed.embeddingModelId !== undefined
             ? { defaultEmbeddingModelId: parsed.embeddingModelId }
@@ -235,4 +256,3 @@ export async function testProviderConnection(providerId: string, db: PrismaClien
     throw error;
   }
 }
-

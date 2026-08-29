@@ -21,6 +21,17 @@ import { ProjectWorkflowError } from "@/lib/project-workflow";
 import { ProjectGovernanceError } from "@/lib/project-governance";
 import { ProjectLifecycleError } from "@/lib/project-lifecycle";
 import { ProjectExportError } from "@/lib/project-export";
+import { ProjectAssetError } from "@/lib/project-assets/service";
+import { ProjectAssetStorageError } from "@/lib/project-assets/storage";
+import { ProjectAssetParserError } from "@/lib/project-assets/parser";
+import { ProjectAssetArchiveError } from "@/lib/project-assets/archive";
+import { GitRunnerError, GitSafetyError, GitServiceError } from "@/lib/git";
+import { AutomationError } from "@/lib/automation";
+import { MemoryQualityError } from "@/lib/memory-quality";
+import { WebSourceError } from "@/lib/web-sources";
+import { AccessControlError } from "@/lib/access-control";
+import { WorkspaceError } from "@/lib/workspaces";
+import { OidcError } from "@/lib/oidc";
 
 export type ApiErrorBody = {
   error: {
@@ -43,6 +54,191 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof WorkspaceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      WORKSPACE_INVALID_INPUT: [400, "工作区请求无效"],
+      WORKSPACE_NOT_FOUND: [404, "工作区不存在"],
+      WORKSPACE_MEMBER_NOT_FOUND: [404, "成员不存在"],
+      WORKSPACE_MEMBER_CONFLICT: [409, "用户名或邮箱已经存在"],
+      WORKSPACE_INVITATION_NOT_FOUND: [404, "邀请不存在或已使用"],
+      WORKSPACE_INVITATION_EXPIRED: [410, "邀请已经过期"],
+      WORKSPACE_INVITATION_EMAIL_MISMATCH: [403, "当前账户邮箱与邀请对象不一致"],
+      WORKSPACE_LAST_OWNER_REQUIRED: [409, "工作区必须至少保留一位所有者"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "工作区操作失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof OidcError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      OIDC_INVALID_INPUT: [400, "OIDC 配置或登录请求无效"],
+      OIDC_PROVIDER_NOT_FOUND: [404, "OIDC 身份源不存在"],
+      OIDC_PROVIDER_CONFLICT: [409, "OIDC 身份源名称或客户端配置已存在"],
+      OIDC_PROVIDER_NOT_VERIFIED: [409, "OIDC 身份源尚未验证或已停用"],
+      OIDC_DISCOVERY_FAILED: [422, "OIDC Discovery 文档不符合安全要求"],
+      OIDC_NETWORK_BLOCKED: [403, "OIDC 地址位于未授权的内网或保留网络"],
+      OIDC_NETWORK_CHANGED: [409, "OIDC 域名解析地址已变化，请管理员重新验证"],
+      OIDC_FLOW_INVALID: [400, "OIDC 登录状态无效或已经使用"],
+      OIDC_FLOW_EXPIRED: [410, "OIDC 登录已过期，请重新开始"],
+      OIDC_TOKEN_EXCHANGE_FAILED: [502, "OIDC 授权码交换失败"],
+      OIDC_ID_TOKEN_INVALID: [401, "OIDC ID Token 验证失败"],
+      OIDC_ACCOUNT_NOT_ALLOWED: [403, "该身份尚未被邀请，且不满足自动加入规则"],
+      OIDC_ACCOUNT_DISABLED: [403, "账户已停用"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "OIDC 操作失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof AccessControlError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      ACCESS_FORBIDDEN: [403, "你没有执行此操作所需的权限"],
+      ACCESS_PROJECT_NOT_FOUND: [404, "项目不存在"],
+      ACCESS_WORKSPACE_NOT_FOUND: [404, "工作区不存在"],
+      ACCESS_LAST_OWNER_REQUIRED: [409, "工作区必须至少保留一位所有者"],
+    };
+    const [status, message] = mapping[error.code] ?? [403, "访问被拒绝"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof AutomationError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      AUTOMATION_INVALID_INPUT: [400, "自动化规则输入无效"],
+      AUTOMATION_PROJECT_NOT_FOUND: [404, "项目不存在"],
+      AUTOMATION_RULE_NOT_FOUND: [404, "自动化规则不存在"],
+      AUTOMATION_RULE_CONFLICT: [409, "自动化规则名称已存在"],
+      AUTOMATION_RULE_PAUSED: [409, "已暂停的自动化规则不能立即运行"],
+      AUTOMATION_RUN_CONFLICT: [409, "自动化运行状态已变化"],
+      NOTIFICATION_NOT_FOUND: [404, "通知不存在"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "自动化操作失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof MemoryQualityError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      MEMORY_QUALITY_INVALID_INPUT: [400, "记忆质量参数无效"],
+      MEMORY_QUALITY_PROJECT_NOT_FOUND: [404, "项目不存在"],
+      MEMORY_QUALITY_ITEM_NOT_FOUND: [404, "记忆条目不存在"],
+      MEMORY_QUALITY_ISSUE_NOT_FOUND: [404, "质量问题不存在或已处理"],
+      MEMORY_QUALITY_VERSION_CONFLICT: [409, "记忆条目已被更新，请刷新后重试"],
+      MEMORY_QUALITY_TOO_MANY_ITEMS: [413, "待分析记忆超过单次质量检查上限"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "记忆质量操作失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof WebSourceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      WEB_SOURCE_INVALID_INPUT: [400, "网页来源配置无效；公网地址必须使用 HTTPS"],
+      WEB_SOURCE_PROJECT_NOT_FOUND: [404, "项目不存在"],
+      WEB_SOURCE_NOT_FOUND: [404, "网页来源不存在"],
+      WEB_SOURCE_CONFLICT: [409, "该网页已经添加到项目"],
+      WEB_SOURCE_DISABLED: [409, "网页来源已停用"],
+      WEB_SOURCE_NETWORK_BLOCKED: [403, "网页地址位于未授权的内网或保留网络"],
+      WEB_SOURCE_NETWORK_CHANGED: [409, "网页域名解析地址已变化，请在页面重新确认网络"],
+      WEB_SOURCE_HOST_UNRESOLVED: [422, "网页域名无法解析"],
+      WEB_SOURCE_REDIRECT_REJECTED: [422, "网页发生了不允许的跨域或不安全重定向"],
+      WEB_SOURCE_FETCH_FAILED: [502, "网页抓取失败"],
+      WEB_SOURCE_HTTP_STATUS: [502, "网页返回了非成功状态"],
+      WEB_SOURCE_TOO_LARGE: [413, "网页响应超过 5 MiB 安全上限"],
+      WEB_SOURCE_TYPE_UNSUPPORTED: [422, "网页内容类型不受支持"],
+      WEB_SOURCE_CONTENT_EMPTY: [422, "网页中没有可识别文本"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "网页来源操作失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof GitServiceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      GIT_CONNECTION_INVALID_INPUT: [400, "Git 服务配置无效"],
+      GIT_CONNECTION_NOT_FOUND: [404, "Git 服务连接不存在"],
+      GIT_CONNECTION_NAME_CONFLICT: [409, "Git 服务连接名称已存在"],
+      GIT_CONNECTION_IN_USE: [409, "Git 服务仍有关联仓库，无法停用"],
+      GIT_CONNECTION_DISABLED: [409, "Git 服务连接已停用"],
+      GIT_REPOSITORY_NOT_FOUND: [404, "Git 仓库或分支不存在"],
+      GIT_REPOSITORY_CONFLICT: [409, "该项目已经关联此仓库"],
+      GIT_REPOSITORY_EMPTY: [422, "仓库或所选分支没有可扫描内容"],
+      GIT_REPOSITORY_TOO_LARGE: [413, "仓库扫描范围超过安全上限，请缩小目录范围"],
+      GIT_REPOSITORY_BINARY_ONLY: [422, "扫描范围内没有可识别的文本代码文件"],
+      GIT_REPOSITORY_LINK_NOT_FOUND: [404, "项目仓库关联不存在"],
+      GIT_REPOSITORY_LINK_DISABLED: [409, "项目仓库关联已停用"],
+      GIT_REPOSITORY_SYNC_FAILED: [502, "Git 仓库同步失败"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "Git 仓库操作失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof GitSafetyError) {
+    const messages: Record<string, string> = {
+      GIT_BASE_URL_INVALID: "Git 服务地址无效",
+      GIT_REPOSITORY_PATH_INVALID: "仓库路径无效",
+      GIT_REF_INVALID: "分支名称无效",
+      GIT_SCAN_SCOPE_INVALID: "仓库扫描范围无效",
+      GIT_HOST_UNRESOLVED: "Git 服务域名无法解析",
+      GIT_NETWORK_BLOCKED: "Git 服务地址位于未授权的内网或保留网络",
+      GIT_NETWORK_CHANGED: "Git 服务解析地址已变化，请重新执行连接测试",
+      GIT_TLS_CA_INVALID: "自定义 CA 证书格式无效",
+      GIT_SSH_KNOWN_HOST_INVALID: "SSH 主机公钥记录格式无效",
+    };
+    const status = error.code === "GIT_NETWORK_CHANGED" ? 409 : error.code.includes("NETWORK") ? 403 : 400;
+    return { status, body: { error: { code: error.code, message: messages[error.code] ?? "Git 安全校验失败" } } };
+  }
+
+  if (error instanceof GitRunnerError) {
+    const messages: Record<string, string> = {
+      GIT_EXECUTABLE_UNAVAILABLE: "运行环境缺少 Git 客户端",
+      GIT_REMOTE_UNAVAILABLE: "Git 仓库不可访问",
+      GIT_AUTHENTICATION_FAILED: "Git 凭据无效或没有只读权限",
+      GIT_HOST_KEY_REJECTED: "SSH 主机公钥校验失败",
+      GIT_OPERATION_TIMEOUT: "Git 仓库操作超时",
+      GIT_OUTPUT_TOO_LARGE: "Git 仓库响应超过安全上限",
+      GIT_OPERATION_FAILED: "Git 仓库操作失败",
+    };
+    const status = error.code === "GIT_AUTHENTICATION_FAILED" ? 401 : error.code === "GIT_OUTPUT_TOO_LARGE" ? 413 : 502;
+    return { status, body: { error: { code: error.code, message: messages[error.code] ?? "Git 仓库操作失败" } } };
+  }
+
+  if (error instanceof ProjectAssetError) {
+    const mapping = {
+      PROJECT_ASSET_INVALID_INPUT: [400, "文件资料请求无效"],
+      PROJECT_ASSET_NOT_FOUND: [404, "文件资料不存在"],
+      PROJECT_ASSET_DUPLICATE: [409, "相同内容的文件已经上传"],
+      PROJECT_ASSET_INVALID_STATE: [409, "文件资料状态已变化，请刷新后重试"],
+      PROJECT_ASSET_SEGMENT_NOT_FOUND: [404, "待审核识别片段不存在"],
+      PROJECT_ASSET_SEGMENT_ALREADY_REVIEWED: [409, "该识别片段已经审核"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof ProjectAssetStorageError) {
+    const messages = {
+      ASSET_FILE_EMPTY: "文件内容为空",
+      ASSET_FILE_TOO_LARGE: "文件超过允许大小",
+      ASSET_FILE_TYPE_UNSUPPORTED: "暂不支持该文件类型",
+      ASSET_FILE_SIGNATURE_INVALID: "文件扩展名与真实内容不一致或文件已损坏",
+      ASSET_IMAGE_TOO_LARGE: "图片像素尺寸超过安全限制",
+      ASSET_STORAGE_INVALID_KEY: "文件存储标识无效",
+      ASSET_STORAGE_UNAVAILABLE: "本地文件存储不可用",
+    } as const;
+    const status = error.code === "ASSET_STORAGE_UNAVAILABLE" ? 503 : 422;
+    return { status, body: { error: { code: error.code, message: messages[error.code] } } };
+  }
+
+  if (error instanceof ProjectAssetParserError || error instanceof ProjectAssetArchiveError) {
+    const messages: Record<string, string> = {
+      ASSET_DOCUMENT_INVALID: "文件内容已损坏或无法解析",
+      ASSET_DOCUMENT_TOO_LARGE: "文件页数、单元格或解析内容超过安全限制",
+      ASSET_DOCUMENT_EMPTY: "文件中没有可识别内容",
+      ASSET_DOCUMENT_TYPE_UNSUPPORTED: "暂不支持解析该文件类型",
+      ASSET_ARCHIVE_INVALID: "Office 文件结构无效",
+      ASSET_ARCHIVE_ENCRYPTED: "不支持加密或带密码的 Office 文件",
+      ASSET_ARCHIVE_TOO_LARGE: "Office 文件解压后超过安全限制",
+      ASSET_ARCHIVE_UNSAFE_PATH: "Office 文件包含不安全的内部路径",
+    };
+    return { status: 422, body: { error: { code: error.code, message: messages[error.code] ?? "文件解析失败" } } };
+  }
+
   if (error instanceof AuthError) {
     const mapping = {
       AUTH_INVALID_INPUT: [400, "账户或登录信息格式无效"],
@@ -50,7 +246,10 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AUTH_INVALID_CREDENTIALS: [401, "用户名或密码错误"],
       AUTH_CURRENT_PASSWORD_INVALID: [401, "当前密码不正确"],
       AUTH_PASSWORD_UNCHANGED: [400, "新密码不能与当前密码相同"],
+      AUTH_LOCAL_PASSWORD_EXISTS: [409, "该账户已经设置本地密码"],
       AUTH_REQUIRED: [401, "请先登录"],
+      AUTH_FORBIDDEN: [403, "你没有执行此操作所需的权限"],
+      AUTH_ACCOUNT_DISABLED: [403, "账户已停用"],
       AUTH_CSRF_REJECTED: [403, "请求来源校验失败"],
     } as const;
     const [status, message] = mapping[error.code];
@@ -93,6 +292,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_PROVIDER_RESPONSE_TOO_LARGE: "供应商响应超过安全上限",
       AI_PROVIDER_INVALID_RESPONSE: "供应商返回了无法验证的响应",
       AI_PROVIDER_EMBEDDING_UNSUPPORTED: "该供应商不支持向量模型",
+      AI_PROVIDER_VISION_UNSUPPORTED: "所选供应商或模型不支持图片识别",
     } as const;
     return {
       status: error.status,

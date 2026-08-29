@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-export function LoginForm({ notice }: { notice?: string }) {
+export function LoginForm({ notice, oidcProviders = [], returnTo = "/dashboard" }: { notice?: string; oidcProviders?: Array<{ id: string; name: string }>; returnTo?: string }) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -25,7 +25,7 @@ export function LoginForm({ notice }: { notice?: string }) {
         const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
         throw new Error(payload?.error?.message ?? "登录失败");
       }
-      router.replace("/dashboard");
+      router.replace(returnTo);
       router.refresh();
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "登录失败");
@@ -47,6 +47,7 @@ export function LoginForm({ notice }: { notice?: string }) {
         {notice ? <p role="status" className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</p> : null}
         {error ? <p role="alert" className="mt-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
         <button type="submit" disabled={pending} className="mt-7 w-full rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50">{pending ? "登录中…" : "登录"}</button>
+        {oidcProviders.length > 0 ? <div className="mt-7 border-t border-slate-100 pt-6"><p className="text-center text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">或使用企业身份</p><div className="mt-4 space-y-2">{oidcProviders.map((provider) => <a key={provider.id} href={`/api/auth/oidc/start/${provider.id}?returnTo=${encodeURIComponent(returnTo)}`} className="flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50">使用 {provider.name} 登录</a>)}</div></div> : null}
         <p className="mt-5 text-center text-xs text-slate-500"><Link href="/guide" className="font-semibold text-indigo-600 hover:text-indigo-700">打开使用指南</Link></p>
       </form>
     </main>

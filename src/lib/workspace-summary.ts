@@ -1,4 +1,4 @@
-export type JobKind = "githubScan" | "githubMaterialSync" | "githubProjectSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
+export type JobKind = "assetExtract" | "githubScan" | "githubMaterialSync" | "githubProjectSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
 export type JobStatus = "queued" | "waitingConsent" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
 export type JobAttemptStatus = "running" | "succeeded" | "failed" | "unknown" | "cancelled";
 export type JobAttemptDispatchState = "pending" | "dispatched" | "acknowledged";
@@ -34,6 +34,7 @@ export type WorkspaceProject = {
   updatedAt: string;
   _count: {
     sources: number;
+    assets: number;
     items: number;
     snapshots: number;
     repositoryLinks: number;
@@ -74,6 +75,8 @@ export type DashboardPayload = {
     indexedProjects: number;
     routedProjects: number;
     activeJobs: number;
+    assets: number;
+    pendingAssetReviews: number;
     generationProviders: number;
     embeddingProviders: number;
   };

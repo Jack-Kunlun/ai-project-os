@@ -71,7 +71,8 @@ export async function updateProjectLifecycle(
               ],
             },
           });
-          if (unresolvedJobs > 0) throw new ProjectLifecycleError("PROJECT_HAS_UNRESOLVED_JOBS");
+          const runningAutomations = await tx.automationRun.count({ where: { projectId: input.projectId, status: "running" } });
+          if (unresolvedJobs > 0 || runningAutomations > 0) throw new ProjectLifecycleError("PROJECT_HAS_UNRESOLVED_JOBS");
         } else if (current.archivedAt === null) {
           throw new ProjectLifecycleError("PROJECT_ALREADY_ACTIVE");
         }
@@ -83,6 +84,9 @@ export async function updateProjectLifecycle(
           data: { archivedAt, updatedAt: changedAt },
           select: lifecycleProjectSelect,
         });
+        if (input.action === "archive") {
+          await tx.automationRule.updateMany({ where: { projectId: input.projectId, status: "active" }, data: { status: "paused" } });
+        }
         const revision = await tx.projectLifecycleRevision.create({
           data: {
             projectId: input.projectId,

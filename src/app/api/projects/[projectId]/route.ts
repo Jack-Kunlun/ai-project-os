@@ -19,7 +19,8 @@ const projectDetailSelect = {
   updatedAt: true,
   _count: {
     select: {
-      sources: true,
+      sources: { where: { retiredAt: null } },
+      assets: { where: { status: { not: "deleted" } } },
       items: true,
       scans: true,
       snapshots: true,

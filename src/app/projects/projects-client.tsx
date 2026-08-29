@@ -15,6 +15,7 @@ type ProjectsPayload = {
 const emptyPayload: ProjectsPayload = { view: "active", counts: { active: 0, archived: 0 }, projects: [] };
 
 const jobLabels: Record<JobKind, string> = {
+  assetExtract: "文件图片识别",
   githubScan: "代码扫描",
   githubMaterialSync: "仓库资料同步",
   githubProjectSync: "GitHub 全量同步",
@@ -137,7 +138,7 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
   const archived = project.archivedAt !== null;
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
-  const checks = [project._count.sources > 0, project._count.webAiRoutes === 3, project.memoryIndexPointer !== null];
+  const checks = [project._count.sources > 0, project._count.webAiRoutes === 4, project.memoryIndexPointer !== null];
   const progress = Math.round((checks.filter(Boolean).length / checks.length) * 100);
   const latestJob = project.backgroundJobs[0];
 
@@ -176,7 +177,7 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
         </div>
         <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${archived ? "bg-slate-100 text-slate-600" : project.memoryIndexPointer ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{archived ? "已归档" : project.memoryIndexPointer ? "记忆就绪" : "待建立记忆"}</span>
       </div>
-      <div className="mt-5 grid grid-cols-3 gap-2"><SmallStat label="事实" value={project._count.items} /><SmallStat label="仓库" value={project._count.repositoryLinks} /><SmallStat label="智能体运行" value={project._count.projectAgentRuns} /></div>
+      <div className="mt-5 grid grid-cols-4 gap-2"><SmallStat label="文件" value={project._count.assets} /><SmallStat label="事实" value={project._count.items} /><SmallStat label="仓库" value={project._count.repositoryLinks} /><SmallStat label="智能体" value={project._count.projectAgentRuns} /></div>
       {archived ? (
         <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">归档于 {formatDate(project.archivedAt!)}。项目数据未删除；恢复后才能继续修改或运行任务。</div>
       ) : (
@@ -189,7 +190,7 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
         {archived ? (
           <><button type="button" onClick={() => onLifecycle("restore")} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">恢复项目</button><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button></>
         ) : (
-          <><QuickLink href={`/projects/${project.id}`} label="资料" /><QuickLink href={`/projects/${project.id}/control`} label="控制台" /><QuickLink href={`/projects/${project.id}/memory`} label="记忆" /><QuickLink href={`/projects/${project.id}/intelligence`} label="智能体" primary /><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("archive")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:border-amber-200 hover:text-amber-700">归档</button></>
+          <><QuickLink href={`/projects/${project.id}`} label="资料" /><QuickLink href={`/projects/${project.id}/assets`} label="文件" /><QuickLink href={`/projects/${project.id}/control`} label="控制台" /><QuickLink href={`/projects/${project.id}/memory`} label="记忆" /><QuickLink href={`/projects/${project.id}/intelligence`} label="智能体" primary /><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("archive")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:border-amber-200 hover:text-amber-700">归档</button></>
         )}
       </div>
       {exportMessage ? <p role="status" className="mt-3 text-[11px] leading-5 text-slate-500">{exportMessage}</p> : null}

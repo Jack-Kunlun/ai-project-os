@@ -13,6 +13,8 @@ const emptyPayload: DashboardPayload = {
     indexedProjects: 0,
     routedProjects: 0,
     activeJobs: 0,
+    assets: 0,
+    pendingAssetReviews: 0,
     generationProviders: 0,
     embeddingProviders: 0,
   },
@@ -21,6 +23,7 @@ const emptyPayload: DashboardPayload = {
 };
 
 const jobLabels: Record<JobKind, string> = {
+  assetExtract: "文件图片识别",
   githubScan: "代码扫描",
   githubMaterialSync: "仓库资料同步",
   githubProjectSync: "GitHub 全量同步",
@@ -52,6 +55,7 @@ function formatDate(value: string): string {
 
 function jobHref(job: Pick<RecentJob, "kind" | "project">): string {
   if (!job.project) return "/dashboard";
+  if (job.kind === "assetExtract") return `/projects/${job.project.id}/assets`;
   if (job.kind === "githubScan" || job.kind === "githubMaterialSync" || job.kind === "githubProjectSync") return `/projects/${job.project.id}/control`;
   if (job.kind === "projectBrief" || job.kind === "projectAgent") return `/projects/${job.project.id}/intelligence`;
   return `/projects/${job.project.id}/memory`;
@@ -89,9 +93,13 @@ export function DashboardClient({ username }: { username: string }) {
     if (summary.projects === 0) {
       return { label: "创建第一个项目", detail: "项目会隔离资料、仓库、记忆和智能分析记录。", href: "/projects", action: "前往项目" };
     }
-    const unrouted = projects.find((project) => project._count.webAiRoutes < 3);
+    const unrouted = projects.find((project) => project._count.webAiRoutes < 4);
     if (unrouted) {
-      return { label: `完成「${unrouted.name}」的 AI 路由`, detail: "分别选择语义向量、自动抽取和引用式问答供应商。", href: `/projects/${unrouted.id}/control`, action: "继续配置" };
+      return { label: `完成「${unrouted.name}」的 AI 路由`, detail: "分别选择图片识别、语义向量、自动抽取和引用式问答供应商。", href: `/projects/${unrouted.id}/control`, action: "继续配置" };
+    }
+    if (summary.pendingAssetReviews > 0) {
+      const current = projects.find((project) => project._count.assets > 0) ?? projects[0]!;
+      return { label: "核对文件识别结果", detail: `${summary.pendingAssetReviews} 个文件正在等待人工确认，确认前不会进入项目记忆。`, href: `/projects/${current.id}/assets`, action: "进入文件资料" };
     }
     const unindexed = projects.find((project) => project.memoryIndexPointer === null);
     if (unindexed) {
@@ -132,8 +140,9 @@ export function DashboardClient({ username }: { username: string }) {
 
         {error ? <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline underline-offset-4">重试</button></div> : null}
 
-        <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="项目概览指标">
+        <section className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5" aria-label="项目概览指标">
           <MetricCard label="项目" value={payload.summary.projects} detail="统一工作空间" icon="folder" tone="indigo" loading={loading} />
+          <MetricCard label="文件资料" value={payload.summary.assets} detail={payload.summary.pendingAssetReviews > 0 ? `${payload.summary.pendingAssetReviews} 个待确认` : "原件与定位片段"} icon="file" tone="cyan" loading={loading} />
           <MetricCard label="已确认事实" value={payload.summary.confirmedItems} detail="经过人工审核" icon="check" tone="emerald" loading={loading} />
           <MetricCard label="连接仓库" value={payload.summary.repositories} detail="多仓库只读来源" icon="branch" tone="cyan" loading={loading} />
           <MetricCard label="智能记忆" value={`${payload.summary.indexedProjects}/${payload.summary.projects}`} detail={payload.summary.activeJobs > 0 ? `${payload.summary.activeJobs} 个任务进行中` : payload.summary.indexedProjects > 0 ? `${payload.summary.indexedProjects} 个项目已建立索引` : "尚未建立活动索引"} icon="spark" tone="violet" loading={loading} />
@@ -184,6 +193,7 @@ function DashboardIcon({ name }: { name: string }) {
     check: <><circle cx="12" cy="12" r="9" /><path d="m8 12 2.5 2.5L16.5 9" /></>,
     branch: <><circle cx="6" cy="5" r="2" /><circle cx="18" cy="7" r="2" /><circle cx="6" cy="19" r="2" /><path d="M6 7v10M8 9c5 0 4-2 8-2" /></>,
     spark: <path d="m12 3 1.6 5.4L19 10l-5.4 1.6L12 17l-1.6-5.4L5 10l5.4-1.6L12 3Zm6 12 .7 2.3L21 18l-2.3.7L18 21l-.7-2.3L15 18l2.3-.7L18 15Z" />,
+    file: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5M9 13h6M9 17h6" /></>,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }

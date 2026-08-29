@@ -15,13 +15,14 @@ export const dynamic = "force-dynamic";
 const workflow = [
   { number: "01", title: "配置模型", detail: "添加并测试生成、视觉与向量供应商。", href: "#providers" },
   { number: "02", title: "连接 Git", detail: "配置 GitHub、Gitee、自建 Git 等只读连接。", href: "#connections" },
-  { number: "03", title: "接入资料", detail: "上传文件，添加网页和多个代码仓库。", href: "#project-data" },
-  { number: "04", title: "建立记忆", detail: "审核 AI 候选，构建兼容的语义索引。", href: "#memory" },
-  { number: "05", title: "维护质量", detail: "检查冲突、过期与低置信度记忆。", href: "#quality" },
-  { number: "06", title: "设置自动化", detail: "定时同步来源并接收待确认通知。", href: "#automation" },
-  { number: "07", title: "管理动作", detail: "设置项目策略，完成 Owner 审批并核对审计。", href: "#actions" },
-  { number: "08", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
-  { number: "09", title: "团队协作", detail: "管理角色、邀请和企业 OIDC 登录。", href: "#team" },
+  { number: "03", title: "连接 MCP", detail: "发现远程只读工具并为项目逐项授权。", href: "#mcp" },
+  { number: "04", title: "接入资料", detail: "上传文件，添加网页和多个代码仓库。", href: "#project-data" },
+  { number: "05", title: "建立记忆", detail: "审核 AI 候选，构建兼容的语义索引。", href: "#memory" },
+  { number: "06", title: "维护质量", detail: "检查冲突、过期与低置信度记忆。", href: "#quality" },
+  { number: "07", title: "设置自动化", detail: "定时同步来源并接收待确认通知。", href: "#automation" },
+  { number: "08", title: "管理动作", detail: "设置项目策略，完成 Owner 审批并核对审计。", href: "#actions" },
+  { number: "09", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
+  { number: "10", title: "团队协作", detail: "管理角色、邀请和企业 OIDC 登录。", href: "#team" },
 ] as const;
 
 const providerRows = [
@@ -50,6 +51,7 @@ export default async function GuidePage() {
               <li>Docker 服务处于健康状态</li>
               <li>已准备至少一个模型 API Key</li>
               <li>仓库接入时准备只读 Token 或专用 SSH Key</li>
+              <li>MCP 接入时使用受信服务和只读 Bearer Token</li>
               <li>不要在项目资料中录入密码或 Token</li>
             </ul>
           </div>
@@ -87,7 +89,18 @@ export default async function GuidePage() {
             <Step number="1" title="查看账户状态">点击右上角头像，查看账户角色、工作区/项目授权、账户创建时间、最近活动和活动会话。</Step>
             <Step number="2" title="修改登录名">登录名为 3–64 位，只允许字母、数字、点、下划线和连字符；保存后下次登录使用新登录名。</Step>
             <Step number="3" title="安全轮换密码">在“登录与安全”中展开“修改密码”，再输入当前密码和新密码。新密码至少 12 位并包含字母和数字；成功后全部会话会被撤销，需要重新登录。</Step>
-            <Callout tone="slate" title="凭据分开管理">模型 API Key 位于“模型设置”；Git 凭据位于“连接器”；OIDC Client Secret 位于“团队”。个人中心不会展示或导出这些凭据。</Callout>
+            <Callout tone="slate" title="凭据分开管理">模型 API Key 位于“模型设置”；Git 与 MCP 凭据位于“连接器”；OIDC Client Secret 位于“团队”。个人中心不会展示或导出这些凭据。</Callout>
+          </GuideSection>
+
+          <GuideSection id="mcp" eyebrow="Controlled MCP" title="连接并授权远程只读工具">
+            <Step number="1" title="由管理员添加远程服务">进入“连接器 → MCP 只读工具”，填写 Streamable HTTP 端点和可选 Bearer Token。公网必须使用 HTTPS；公司内网需要明确开启内网访问。当前不运行 stdio、本地子进程或旧式 HTTP+SSE。</Step>
+            <Step number="2" title="发现并固化工具定义">执行“发现并固化工具”。系统固定 DNS 地址，分页读取工具目录，并把名称、说明、输入/输出 Schema、annotations 和定义指纹保存为追加式快照。不兼容或过大的 Schema 会被拒绝。</Step>
+            <Step number="3" title="由项目 Owner 逐项授权">进入项目“工具权限”。只有同时声明 <code>readOnlyHint=true</code> 和 <code>destructiveHint=false</code> 的当前定义可供授权；Owner 仍需确认远端服务和凭据本身可信且只读。</Step>
+            <Step number="4" title="填写参数并创建动作">Editor 或 Owner 按固化的输入 Schema 填写 JSON 参数。系统把项目、授权、工具定义、参数、网络和凭据指纹一起固化为动作；不会立即访问远端。</Step>
+            <Step number="5" title="逐次审批并核对结果">Owner 到“动作与审批”展开完整参数后批准。MCP 调用不允许“自动执行”；执行前再次核对全部快照，任何授权撤销、工具更新、DNS 变化或凭据轮换都会失败关闭。</Step>
+            <Callout tone="amber" title="远端声明不是安全保证">MCP annotations 按协议属于未受信提示。系统的门禁可以阻止未授权、未审批或发生漂移的调用，但不能证明第三方服务实际只读。应使用你控制或充分信任的服务、最小权限 Token 和独立审计。</Callout>
+            <Callout tone="slate" title="结果不会自动进入 AI">工具结果只保存在对应动作记录中，响应体有超时和大小限制；图片、音频与资源链接不会自动展开。结果不会自动写入记忆、RAG 索引或交给项目智能体。</Callout>
+            <div className="mt-5"><Link href="/connections/mcp" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往 MCP 连接</Link></div>
           </GuideSection>
 
           <GuideSection id="providers" eyebrow="AI connections" title="配置模型供应商">
@@ -193,11 +206,11 @@ export default async function GuidePage() {
           </GuideSection>
 
           <GuideSection id="actions" eyebrow="Controlled action engine" title="用策略和审批控制项目动作">
-            <Step number="1" title="为每项能力选择策略">项目 Owner 在“动作与审批”中把仓库同步、网页刷新或记忆质量检查设为“自动执行”“每次审批”或“禁止执行”。策略只影响之后创建的动作。</Step>
-            <Step number="2" title="由 Editor 或 Owner 创建动作">系统会固定能力、规范化输入、输入指纹、风险级别和策略快照。仓库同步与网页刷新默认等待审批；本地记忆质量检查默认直接排队。</Step>
+            <Step number="1" title="为每项能力选择策略">项目 Owner 在“动作与审批”中管理仓库同步、网页刷新、记忆质量检查和 MCP 只读调用。前三项可选择“自动执行”“每次审批”或“禁止执行”；MCP 只允许“每次审批”或“禁止执行”。</Step>
+            <Step number="2" title="由 Editor 或 Owner 创建动作">系统会固定能力、规范化输入、输入指纹、风险级别和策略快照。仓库同步与网页刷新默认等待审批；本地记忆质量检查默认直接排队；MCP 调用还固定授权、工具、网络和凭据指纹。</Step>
             <Step number="3" title="由 Owner 核对并决策">待审批动作会通知项目 Owner。批准或拒绝时，服务端会重新核对动作版本和输入指纹；24 小时内没有决策会自动过期。</Step>
             <Step number="4" title="查看执行和不可变审计">Worker 领取后显示运行状态、结果或安全错误码。申请、排队、审批、领取和终态均保留审计；租约过期会失败关闭，不会自动重复外部读取。</Step>
-            <Callout tone="amber" title="动作中心不是任意工具平台">当前只开放三个内置动作，并且输入为空对象。模型不能生成或批准动作；系统不提供 MCP、Shell、代码写入、分支/PR、合并、部署或其他外部写操作。</Callout>
+            <Callout tone="amber" title="动作中心不是任意执行平台">当前只开放三个内置动作和一个受控 MCP 只读调用能力。模型不能生成或批准动作；系统不提供 stdio MCP、MCP 写操作、Shell、代码写入、分支/PR、合并、部署或其他外部写操作。</Callout>
           </GuideSection>
 
           <GuideSection id="governance" eyebrow="Governance & review" title="审核事实、收口异常并管理项目数据">
@@ -213,7 +226,7 @@ export default async function GuidePage() {
             <Step number="2" title="生成项目当前状态">勾选当次传输确认后生成简报。结果按进展、决策、问题、风险、关注事项和待确认问题组织，并保存证据快照。</Step>
             <Step number="3" title="提出一个可调查的问题">适合询问“当前最大风险是什么”“哪些决策仍缺少证据”“最近完成了什么”。问题越具体，检索计划越有效。</Step>
             <Step number="4" title="核对引用和轨迹">查看回答引用的证据、只读工具执行顺序、建议和不确定性。证据不足时应补资料，而不是把推测直接当作事实。</Step>
-            <Callout tone="slate" title="智能体不会做什么">当前智能体没有 Shell、任意文件系统、代码修改、Git 写入或部署权限。它也不能自行创建或批准“动作与审批”中的动作。自动化可以提醒你生成简报，但每次模型外发仍需由你在页面确认。</Callout>
+            <Callout tone="slate" title="智能体不会做什么">当前智能体没有 Shell、任意文件系统、代码修改、Git 写入、MCP 工具调用或部署权限。它也不能自行创建或批准“动作与审批”中的动作。自动化可以提醒你生成简报，但每次模型外发仍需由你在页面确认。</Callout>
           </GuideSection>
 
           <GuideSection id="team" eyebrow="Team & identity" title="管理成员、邀请和企业登录">
@@ -223,7 +236,7 @@ export default async function GuidePage() {
               <InfoCard title="邀请链接">建议限定邮箱。链接只在创建后显示一次，请立即复制并通过安全渠道发送；接受者邮箱必须匹配。</InfoCard>
               <InfoCard title="OIDC 登录">配置 Issuer、Client、Secret、Scopes 和 Token 认证方式。系统使用 Authorization Code + PKCE，并校验 issuer、audience、nonce、过期时间和 JWKS 签名。</InfoCard>
             </div>
-            <Callout tone="amber" title="相同邮箱不会自动绑定">OIDC 未知身份若使用已有本地账户邮箱，登录会被拒绝。V3.1.0 尚未提供显式身份绑定页面，这一限制用于防止邮箱劫持。</Callout>
+            <Callout tone="amber" title="相同邮箱不会自动绑定">OIDC 未知身份若使用已有本地账户邮箱，登录会被拒绝。V3.2.0 尚未提供显式身份绑定页面，这一限制用于防止邮箱劫持。</Callout>
             <div className="mt-5"><Link href="/team" className="inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往团队</Link></div>
           </GuideSection>
 
@@ -242,6 +255,7 @@ export default async function GuidePage() {
               <InfoCard title="索引需要重建">当前向量供应商、模型或维度与活动索引不一致。使用当前路由重新建立索引。</InfoCard>
               <InfoCard title="模型输出被拒绝">输出结构、证据摘录或引用 ID 未通过校验。原结果不会保存为可信内容；可重试或更换模型。</InfoCard>
               <InfoCard title="Git 仓库无法读取">检查连接状态、凭据权限、仓库路径、分支、CA 或 known_hosts。DNS 地址变化后需要管理员重新验证连接。</InfoCard>
+              <InfoCard title="MCP 工具无法授权或调用">先确认连接已成功发现工具，定义明确声明只读且非破坏性。工具、DNS、凭据或授权发生变化后，先由管理员重新发现，再由项目 Owner 重新确认授权并创建新动作。</InfoCard>
               <InfoCard title="网页来源无法刷新">确认页面无需登录或 JavaScript 渲染。公司内网页面需要明确授权；云元数据地址始终无法放行。</InfoCard>
               <InfoCard title="OIDC 登录被拒绝">检查回调地址、Issuer、Client、Secret、Scopes 和 Token 认证方式；相同邮箱的本地账号不会自动合并。</InfoCard>
               <InfoCard title="自动化没有运行">确认 Worker 正在运行、规则已启用、项目未归档且执行时间已到。连续失败三次的规则会自动暂停。</InfoCard>

@@ -8,6 +8,8 @@ AI Project OS V3.0.0 是一套可本地部署的项目长期记忆与只读项�
 
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
+- V3.0.0 发布说明：[docs/releases/v3.0.0.md](docs/releases/v3.0.0.md)。
+- 版本记录：[CHANGELOG.md](CHANGELOG.md)。
 - 历史 CLI 手册：[docs/v1-operations.md](docs/v1-operations.md)，仅用于兼容旧流程。
 
 推荐首次使用顺序：

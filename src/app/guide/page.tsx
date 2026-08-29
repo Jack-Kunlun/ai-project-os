@@ -22,7 +22,8 @@ const workflow = [
   { number: "07", title: "设置自动化", detail: "定时同步来源并接收待确认通知。", href: "#automation" },
   { number: "08", title: "管理动作", detail: "设置项目策略，完成 Owner 审批并核对审计。", href: "#actions" },
   { number: "09", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
-  { number: "10", title: "团队协作", detail: "管理角色、邀请和企业 OIDC 登录。", href: "#team" },
+  { number: "10", title: "维护项目计划", detail: "把建议转为有证据、由人推进的目标和工作项。", href: "#plan" },
+  { number: "11", title: "团队协作", detail: "管理角色、邀请和企业 OIDC 登录。", href: "#team" },
 ] as const;
 
 const providerRows = [
@@ -43,7 +44,7 @@ export default async function GuidePage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-600">Start to finish</p>
             <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight tracking-[-0.04em] sm:text-6xl">从第一次配置，到可信的项目回答。</h1>
-            <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600">按推荐顺序完成连接、资料、智能记忆、自动化、受控动作和团队权限。每一步都保留来源、审核状态和证据引用；只有你在页面明确确认后，相关内容才会发送给模型供应商。</p>
+            <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600">按推荐顺序完成连接、资料、智能记忆、自动化、受控动作、项目计划和团队权限。每一步都保留来源、审核状态和证据引用；只有你在页面明确确认后，相关内容才会发送给模型供应商。</p>
           </div>
           <div className="rounded-3xl bg-slate-950 p-6 text-white">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Before you start</p>
@@ -99,7 +100,7 @@ export default async function GuidePage() {
             <Step number="4" title="填写参数并创建动作">Editor 或 Owner 按固化的输入 Schema 填写 JSON 参数。系统把项目、授权、工具定义、参数、网络和凭据指纹一起固化为动作；不会立即访问远端。</Step>
             <Step number="5" title="逐次审批并核对结果">Owner 到“动作与审批”展开完整参数后批准。MCP 调用不允许“自动执行”；执行前再次核对全部快照，任何授权撤销、工具更新、DNS 变化或凭据轮换都会失败关闭。</Step>
             <Callout tone="amber" title="远端声明不是安全保证">MCP annotations 按协议属于未受信提示。系统的门禁可以阻止未授权、未审批或发生漂移的调用，但不能证明第三方服务实际只读。应使用你控制或充分信任的服务、最小权限 Token 和独立审计。</Callout>
-            <Callout tone="slate" title="结果不会自动进入 AI">工具结果只保存在对应动作记录中，响应体有超时和大小限制；图片、音频与资源链接不会自动展开。结果不会自动写入记忆、RAG 索引或交给项目智能体。</Callout>
+            <Callout tone="slate" title="结果不会自动进入 AI">工具结果默认只保存在对应动作记录中，响应体有超时和大小限制；图片、音频与资源链接不会自动展开。成功结果可以在“动作与审批”中由 Editor 或 Owner 人工固化为未审核项目资料；仍需后续审核与索引重建，才会参与记忆、RAG 或项目智能体。</Callout>
             <div className="mt-5"><Link href="/connections/mcp" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往 MCP 连接</Link></div>
           </GuideSection>
 
@@ -229,6 +230,15 @@ export default async function GuidePage() {
             <Callout tone="slate" title="智能体不会做什么">当前智能体没有 Shell、任意文件系统、代码修改、Git 写入、MCP 工具调用或部署权限。它也不能自行创建或批准“动作与审批”中的动作。自动化可以提醒你生成简报，但每次模型外发仍需由你在页面确认。</Callout>
           </GuideSection>
 
+          <GuideSection id="plan" eyebrow="Evidence-driven plan" title="把证据转成由人推进的项目计划">
+            <Step number="1" title="先建立目标与工作项">进入项目“项目计划”。手工目标从草稿开始，手工工作项从已计划开始；Editor 或 Owner 可以补充标题、说明、优先级和目标归属。</Step>
+            <Step number="2" title="核对智能体建议的证据">只读智能体产生建议后，页面会同时显示引用来源和输入清单指纹。选择“纳入计划”只会固化一条 <code>proposed</code> 工作项，不会自动接受或执行。</Step>
+            <Step number="3" title="由人决定是否接受和推进">Editor 或 Owner 查看证据快照后，手工把建议接受为已计划，再按实际进度标记进行中、已阻塞、已完成或已取消。完成目标同样需要人工操作。</Step>
+            <Step number="4" title="维护依赖与审计">工作项依赖会在服务端检查重复和循环；移除依赖只会标记失效，不删除历史。创建、状态变化、证据纳入和依赖调整都会进入追加式审计。</Step>
+            <Callout tone="amber" title="项目计划不是自动执行器">计划项只表达经用户核对的目标、工作和依赖。系统不会根据建议自动修改代码、调用 MCP、创建 Git 分支或 PR、合并、运行 Shell 或部署；动作中心的审批边界也不会被项目计划绕过。</Callout>
+            <div className="mt-5"><Link href="/projects" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">选择项目并打开项目计划</Link></div>
+          </GuideSection>
+
           <GuideSection id="team" eyebrow="Team & identity" title="管理成员、邀请和企业登录">
             <div className="grid gap-4 md:grid-cols-2">
               <InfoCard title="工作区角色">Owner/Admin 可管理成员、邀请、OIDC 和全部项目；Member/Viewer 只访问单独授权项目。系统阻止删除或降级最后一位启用的 Owner。</InfoCard>
@@ -236,7 +246,7 @@ export default async function GuidePage() {
               <InfoCard title="邀请链接">建议限定邮箱。链接只在创建后显示一次，请立即复制并通过安全渠道发送；接受者邮箱必须匹配。</InfoCard>
               <InfoCard title="OIDC 登录">配置 Issuer、Client、Secret、Scopes 和 Token 认证方式。系统使用 Authorization Code + PKCE，并校验 issuer、audience、nonce、过期时间和 JWKS 签名。</InfoCard>
             </div>
-            <Callout tone="amber" title="相同邮箱不会自动绑定">OIDC 未知身份若使用已有本地账户邮箱，登录会被拒绝。V3.2.0 尚未提供显式身份绑定页面，这一限制用于防止邮箱劫持。</Callout>
+            <Callout tone="amber" title="相同邮箱不会自动绑定">OIDC 未知身份若使用已有本地账户邮箱，登录会被拒绝。V{APP_VERSION} 尚未提供显式身份绑定页面，这一限制用于防止邮箱劫持。</Callout>
             <div className="mt-5"><Link href="/team" className="inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往团队</Link></div>
           </GuideSection>
 

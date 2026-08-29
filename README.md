@@ -1,6 +1,6 @@
 # AI Project OS
 
-AI Project OS V3.2.0 是一套可本地部署的项目长期记忆、只读项目智能与受控动作工作台。它把人工资料、文件、网页和多个 Git 服务中的代码仓库整理为有来源、有版本、有审核状态的项目记忆，并提供语义检索、引用式 RAG、项目状态简报、受约束的只读智能体、持久化自动化、动作审批、远程只读 MCP 工具授权、不可变审计、记忆质量治理和团队权限。
+AI Project OS V4.0.0 是一套可本地部署的项目长期记忆、只读项目智能、受控动作与证据驱动计划工作台。它把人工资料、文件、网页、多个 Git 服务中的代码仓库和经人工纳入的 MCP 只读结果整理为有来源、有版本、有审核状态的项目证据，并提供语义检索、引用式 RAG、项目状态简报、受约束的只读智能体、持久化自动化、动作审批、人工治理的项目计划、不可变审计、记忆质量治理和团队权限。
 
 模型、Git、MCP 与 OIDC 凭据全部从页面配置，由服务端使用 AES-256-GCM 加密保存；主密钥位于数据库之外。涉及向第三方模型发送项目内容的操作仍要求用户在页面核对供应商、模型和输入范围。AI 抽取结果只进入候选队列，人工确认后才成为项目事实。
 
@@ -8,6 +8,7 @@ AI Project OS V3.2.0 是一套可本地部署的项目长期记忆、只读项�
 
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
+- V4.0.0 发布说明：[docs/releases/v4.0.0.md](docs/releases/v4.0.0.md)。
 - V3.2.0 发布说明：[docs/releases/v3.2.0.md](docs/releases/v3.2.0.md)。
 - V3.1.0 发布说明：[docs/releases/v3.1.0.md](docs/releases/v3.1.0.md)。
 - V3.0.0 发布说明：[docs/releases/v3.0.0.md](docs/releases/v3.0.0.md)。
@@ -26,11 +27,13 @@ AI Project OS V3.2.0 是一套可本地部署的项目长期记忆、只读项�
 8. 使用语义搜索、引用式问答和只读项目智能体。
 9. 在“自动化”“记忆质量”和“通知”中维护长期运行状态。
 10. 在项目“动作与审批”中选择动作策略，核对待审批动作和执行审计。
-11. 需要协作时，在“团队”中创建成员、邀请链接或 OIDC 身份源。
+11. 如需复用成功的 MCP 文本结果，在动作详情中人工纳入为未审核项目资料，再按资料流程审核和重建索引。
+12. 在“项目计划”中维护目标与工作项；把智能体建议纳入为 proposed 后，由人接受并推进。
+13. 需要协作时，在“团队”中创建成员、邀请链接或 OIDC 身份源。
 
 ## 当前能力
 
-| 能力 | V3.2.0 行为 |
+| 能力 | V4.0.0 行为 |
 | --- | --- |
 | Dashboard | 汇总跨项目指标、配置就绪度、推荐下一步、待处理状态和最近任务；项目管理保持为独立顶部入口 |
 | 项目与个人中心 | 项目搜索、创建、软归档、恢复和受限 JSON 导出；个人资料、登录名、密码和活动会话管理 |
@@ -41,7 +44,7 @@ AI Project OS V3.2.0 是一套可本地部署的项目长期记忆、只读项�
 | 文件与图片识别 | TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP；本地解析文本，图片和扫描 PDF 经当次授权后调用视觉模型并逐片段审核 |
 | 外部资料 | 抓取公开网页或经明确授权的内网页面；浏览器选择本地文件夹后按文件批量导入；来源版本原子发布 |
 | 多 Git 连接 | GitHub、Gitee、GitLab、自建 GitLab、Gitea、Forgejo 和通用 Git；HTTPS Token/Basic 或 SSH Key；支持自定义 CA、known_hosts 与显式内网授权 |
-| 受控 MCP 连接 | 页面配置远程 Streamable HTTP 服务与加密 Bearer Token；固定 DNS，固化工具定义快照，只允许明确声明只读且非破坏性的定义进入项目授权 |
+| 受控 MCP 连接与结果纳入 | 页面配置远程 Streamable HTTP 服务与加密 Bearer Token；固定 DNS，固化工具定义快照，只允许明确声明只读且非破坏性的定义进入项目授权；成功结果可由 Editor 或 Owner 人工固化为未审核项目资料 |
 | 多仓库记忆 | 一个项目可关联多个 Git 服务上的多个仓库；按分支与目录冻结 commit，完整校验后原子发布代码快照 |
 | GitHub 扩展资料 | 既有 GitHub 专用连接继续支持 README、Markdown、Issue、PR 和 Release 的只读同步 |
 | 自动抽取与审核 | 从明确选择的资料抽取 decision、progress、issue、risk；结构与连续原文验证通过后进入人工审核 |
@@ -50,6 +53,7 @@ AI Project OS V3.2.0 是一套可本地部署的项目长期记忆、只读项�
 | 项目简报与只读智能体 | 聚合项目概览、已确认条目、语义记忆和仓库状态；模型计划只能调用固定的项目内只读工具 |
 | 自动化 Worker | Compose 独立 Worker 持久化领取规则、租约与运行结果；支持仓库同步、网页刷新、记忆质量检查，以及需要人工确认的模型任务提醒 |
 | 动作与审批 | 项目级策略控制自动执行、每次审批或禁止执行；开放仓库同步、网页刷新、记忆质量检查和受控 MCP 只读调用，MCP 必须逐次审批并绑定授权、工具、网络和凭据指纹 |
+| 证据驱动项目计划 | 手工维护目标、工作项、优先级、状态和依赖；智能体建议只能经用户纳入为带引用快照与输入指纹的 proposed 工作项，后续接受和推进均由人完成 |
 | 记忆质量 | 确定性识别重复、冲突、过期、证据不足和低置信度记忆；可维护置信度、重要性、有效期、置顶和人工复核时间 |
 | 通知中心 | 汇总自动化成功、失败、记忆质量与模型外发待确认通知，支持已读状态 |
 | 治理与审核 | 候选审核、异常任务收口、模型路由历史和 7/30/90 天用量核对 |
@@ -68,6 +72,7 @@ AI Project OS V3.2.0 是一套可本地部署的项目长期记忆、只读项�
 - `/projects/:projectId/automations`：自动化规则与运行记录。
 - `/projects/:projectId/actions`：动作策略、审批与执行审计。
 - `/projects/:projectId/tools`：项目 MCP 工具逐项授权与调用动作创建。
+- `/projects/:projectId/plan`：证据驱动的目标、工作项、依赖和审计。
 
 `.env` 只承载部署基础设施参数，例如数据库连接、端口和安全 Cookie 开关；模型 API Key、Git Token、SSH Key、MCP Bearer Token 与 OIDC Client Secret 不写入环境变量。
 
@@ -86,10 +91,12 @@ AI Project OS V3.2.0 是一套可本地部署的项目长期记忆、只读项�
 - 动作创建会固定能力、规范化输入、输入指纹和当时的项目策略。需要审批的动作仅由项目 Owner 决策，24 小时后自动过期。
 - 动作 Worker 使用持久化租约和心跳。租约过期会失败关闭，不自动重复外部读取；项目归档会取消尚未执行的动作并阻止新动作领取。
 - MCP 工具定义采用追加式快照。项目 Owner 逐项授权，每次调用单独审批；执行前重新核对授权、工具定义、DNS 和凭据指纹，任何漂移都失败关闭。
+- 成功 MCP 动作结果只能由 Editor 或 Owner 手工纳入；导入记录绑定动作、输入、结果和内容指纹，数据库阻止改写，且不会自动触发事实确认、索引或模型调用。
+- 智能体建议纳入计划时固定建议索引、引用快照、运行输入清单指纹和证据指纹。建议只进入 `proposed`，状态推进与依赖调整必须由用户完成并留下追加式审计。
 
 ## 当前限制
 
-- V3.2.0 当前提供一个由旧数据迁移得到的默认工作区；数据模型支持多个工作区，但页面尚未提供工作区创建和切换。
+- V4.0.0 当前提供一个由旧数据迁移得到的默认工作区；数据模型支持多个工作区，但页面尚未提供工作区创建和切换。
 - OIDC 不提供“按邮箱自动合并已有本地账户”。已有账户需要未来的显式身份绑定流程；当前遇到相同邮箱会拒绝登录，避免账户劫持。
 - Git 通用连接器读取代码与文本快照；Issue、PR、Release 等扩展资料目前仍是 GitHub 专用能力。
 - 网页来源只抓取服务端可读取的静态文本，不执行 JavaScript，也不提供页面登录或自定义请求头。
@@ -98,7 +105,8 @@ AI Project OS V3.2.0 是一套可本地部署的项目长期记忆、只读项�
 - 自动化可以自动同步仓库、刷新网页和运行确定性质量检查；涉及向模型发送内容的索引与简报任务只创建待确认通知，不会绕过当次授权。
 - 动作中心不是通用 Agent 工具平台。三个内置能力仍使用固定输入；MCP 只支持管理员验证、Owner 授权和逐次审批的远程只读调用，不接受模型生成或批准的工具调用。
 - MCP 不支持 stdio、本地子进程、旧式 HTTP+SSE、执行中继续索取输入、自动执行或任何写操作。服务端 annotations 是未受信提示，接入方仍需使用可信服务和最小权限只读凭据。
-- MCP 结果只保存到动作记录，不会自动进入项目记忆、RAG 索引或模型上下文；图片、音频和资源链接不会自动展开。
+- MCP 成功结果可以人工纳入为未审核项目资料，但不会自动成为事实、建立索引或进入模型上下文；图片、音频和资源链接不会自动展开。
+- 项目计划不会自动生成执行动作。智能体建议必须先由人纳入和接受；系统不会因此修改代码、调用工具、创建分支/PR、合并或部署。
 - 智能体没有 Shell、任意文件系统、代码修改、Git 写入、部署或 MCP 工具调用权限。
 - 受限 JSON 导出不是数据库备份，不包含凭据、向量、上传二进制和完整运行账本。
 
@@ -153,6 +161,8 @@ git diff --check
 V3_POSTGRES_GATE=1 pnpm exec tsx --test test/v3-postgres.test.ts
 ACTION_ENGINE_POSTGRES_GATE=1 pnpm test:action-engine-postgres
 MCP_CAPABILITIES_POSTGRES_GATE=1 pnpm test:mcp-capabilities-postgres
+PROJECT_PLAN_POSTGRES_GATE=1 pnpm test:project-plan-postgres
+PROJECT_INTELLIGENCE_POSTGRES_GATE=1 pnpm test:project-intelligence-postgres
 pnpm exec prisma migrate status --config prisma.config.ts
 ```
 
@@ -175,6 +185,7 @@ pnpm exec prisma migrate status --config prisma.config.ts
 - `/projects/:projectId/automations`：自动化。
 - `/projects/:projectId/actions`：动作策略、审批和审计。
 - `/projects/:projectId/tools`：MCP 工具授权与调用动作创建。
+- `/projects/:projectId/plan`：目标、工作项、依赖与计划审计。
 - `/projects/:projectId/control`：AI 路由。
 - `/projects/:projectId/memory`：抽取、索引、搜索和 RAG。
 - `/projects/:projectId/memory-quality`：记忆质量与生命周期。
@@ -183,4 +194,4 @@ pnpm exec prisma migrate status --config prisma.config.ts
 
 ## 历史材料
 
-V1 CLI 手册和历史运行合同继续保留用于兼容与审计，但不覆盖 V3.2.0 的页面能力。当前能力、限制和使用方式以本 README、页面指南和操作手册为准。
+V1 CLI 手册和历史运行合同继续保留用于兼容与审计，但不覆盖 V4.0.0 的页面能力。当前能力、限制和使用方式以本 README、页面指南和操作手册为准。

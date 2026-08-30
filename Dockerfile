@@ -26,7 +26,7 @@ ENV DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build"
 
 COPY . .
 RUN pnpm db:generate
-RUN pnpm build
+RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm build
 
 FROM base AS migrate
 

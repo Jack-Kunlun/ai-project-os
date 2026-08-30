@@ -23,10 +23,14 @@ const emptyPayload: DashboardPayload = {
     pendingRecommendations: 0,
     openImpactSuggestions: 0,
     pendingActionApprovals: 0,
+    atRiskWorlds: 0,
+    attentionWorlds: 0,
+    insufficientDataWorlds: 0,
   },
   projects: [],
   recentJobs: [],
   operations: [],
+  worlds: [],
 };
 
 const jobLabels: Record<JobKind, string> = {
@@ -94,6 +98,10 @@ export function DashboardClient({ username }: { username: string }) {
 
   const nextStep = useMemo(() => {
     const { summary, projects } = payload;
+    const riskyWorld = payload.worlds.find((entry) => entry.world.status === "at_risk");
+    if (riskyWorld) {
+      return { label: `核对「${riskyWorld.project.name}」的项目状态`, detail: `当前有 ${riskyWorld.world.counts.issues} 个问题、${riskyWorld.world.counts.risks} 个风险和 ${riskyWorld.world.counts.activeConflicts} 个事实冲突。`, href: `/projects/${riskyWorld.project.id}/world`, action: "打开项目状态" };
+    }
     const atRisk = payload.operations.find((entry) => entry.health.status === "atRisk");
     if (atRisk) {
       return { label: `处理「${atRisk.project.name}」的计划风险`, detail: `当前有 ${atRisk.health.counts.overdue} 项逾期、${atRisk.health.counts.blocked} 项受阻。`, href: `/projects/${atRisk.project.id}/plan`, action: "打开项目计划" };
@@ -157,9 +165,10 @@ export function DashboardClient({ username }: { username: string }) {
           <MetricCard label="已确认事实" value={payload.summary.confirmedItems} detail="经过人工审核" icon="check" tone="emerald" loading={loading} />
           <MetricCard label="连接仓库" value={payload.summary.repositories} detail="多仓库只读来源" icon="branch" tone="cyan" loading={loading} />
           <MetricCard label="智能记忆" value={`${payload.summary.indexedProjects}/${payload.summary.projects}`} detail={payload.summary.activeJobs > 0 ? `${payload.summary.activeJobs} 个任务进行中` : payload.summary.indexedProjects > 0 ? `${payload.summary.indexedProjects} 个项目已建立索引` : "尚未建立活动索引"} icon="spark" tone="violet" loading={loading} />
-          <MetricCard label="计划风险" value={payload.summary.overdueWorkItems + payload.summary.blockedWorkItems} detail={payload.summary.atRiskProjects > 0 ? `${payload.summary.atRiskProjects} 个项目需处理` : "无逾期或受阻项"} icon="alert" tone="rose" loading={loading} />
+          <MetricCard label="项目状态" value={payload.summary.atRiskWorlds + payload.summary.attentionWorlds} detail={payload.summary.atRiskWorlds > 0 ? `${payload.summary.atRiskWorlds} 个项目存在风险` : payload.summary.attentionWorlds > 0 ? `${payload.summary.attentionWorlds} 个项目需关注` : "当前状态稳定"} icon="alert" tone="rose" loading={loading} />
         </section>
 
+        <WorldStatusPanel payload={payload} loading={loading} />
         <OperationsPanel payload={payload} loading={loading} />
 
         <section className="mt-6 grid gap-6 lg:grid-cols-[0.82fr_1.18fr]">
@@ -184,6 +193,16 @@ function MetricCard({ label, value, detail, icon, tone, loading }: { label: stri
 
 function OperationsPanel({ payload, loading }: { payload: DashboardPayload; loading: boolean }) {
   return <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Project operations</p><h2 className="mt-2 text-xl font-semibold">项目运营提醒</h2><p className="mt-2 text-xs leading-5 text-slate-500">这里只汇总需要处理的跨项目信号；项目创建、搜索和完整列表仍在独立“项目”入口。</p></div><div className="flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-rose-50 px-3 py-1 font-semibold text-rose-700">逾期 {payload.summary.overdueWorkItems}</span><span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700">受阻 {payload.summary.blockedWorkItems}</span><span className="rounded-full bg-cyan-50 px-3 py-1 font-semibold text-cyan-700">变更待评估 {payload.summary.openImpactSuggestions}</span><span className="rounded-full bg-violet-50 px-3 py-1 font-semibold text-violet-700">动作待审批 {payload.summary.pendingActionApprovals}</span></div></div>{loading ? <div className="mt-5 h-20 animate-pulse rounded-2xl bg-slate-100" /> : payload.operations.length === 0 ? <div className="mt-5 rounded-2xl bg-emerald-50 px-5 py-7 text-center text-sm text-emerald-700">当前没有逾期、受阻或其他需要关注的项目计划信号。</div> : <div className="mt-5 grid gap-3 lg:grid-cols-2">{payload.operations.map((entry) => <Link key={entry.project.id} href={`/projects/${entry.project.id}/plan`} className="group rounded-2xl border border-slate-200 p-4 transition hover:border-indigo-200 hover:bg-indigo-50/40"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-slate-800">{entry.project.name}</h3><p className="mt-2 text-xs leading-5 text-slate-500">逾期 {entry.health.counts.overdue} · 受阻 {entry.health.counts.blocked} · 即将到期 {entry.health.counts.dueSoon} · 未分配 {entry.health.counts.unassigned}</p></div><span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${entry.health.status === "atRisk" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{entry.health.status === "atRisk" ? "需立即处理" : "待处理"}</span></div><p className="mt-3 text-xs font-semibold text-indigo-600">进入项目计划 →</p></Link>)}</div>}</section>;
+}
+
+function WorldStatusPanel({ payload, loading }: { payload: DashboardPayload; loading: boolean }) {
+  const metadata = {
+    at_risk: { label: "存在风险", tone: "bg-rose-100 text-rose-700", border: "hover:border-rose-200 hover:bg-rose-50/40" },
+    needs_attention: { label: "需要关注", tone: "bg-amber-100 text-amber-700", border: "hover:border-amber-200 hover:bg-amber-50/40" },
+    insufficient_data: { label: "资料不足", tone: "bg-slate-100 text-slate-600", border: "hover:border-slate-300 hover:bg-slate-50" },
+    on_track: { label: "运行正常", tone: "bg-emerald-100 text-emerald-700", border: "hover:border-emerald-200 hover:bg-emerald-50/40" },
+  } as const;
+  return <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Project world state</p><h2 className="mt-2 text-xl font-semibold">跨项目状态提醒</h2><p className="mt-2 text-xs leading-5 text-slate-500">由已确认事实、关系、冲突和计划健康度确定性计算；项目详情仍在独立项目入口。</p></div><div className="flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-rose-50 px-3 py-1 font-semibold text-rose-700">风险 {payload.summary.atRiskWorlds}</span><span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-700">关注 {payload.summary.attentionWorlds}</span><span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-600">资料不足 {payload.summary.insufficientDataWorlds}</span></div></div>{loading ? <div className="mt-5 h-20 animate-pulse rounded-2xl bg-slate-100" /> : payload.worlds.length === 0 ? <div className="mt-5 rounded-2xl bg-emerald-50 px-5 py-7 text-center text-sm text-emerald-700">所有可访问项目的当前状态均为运行正常。</div> : <div className="mt-5 grid gap-3 lg:grid-cols-2">{payload.worlds.map((entry) => { const meta = metadata[entry.world.status]; return <Link key={entry.project.id} href={`/projects/${entry.project.id}/world`} className={`group rounded-2xl border border-slate-200 p-4 transition ${meta.border}`}><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-slate-800">{entry.project.name}</h3><p className="mt-2 text-xs leading-5 text-slate-500">事实 {entry.world.counts.activeFacts} · 问题 {entry.world.counts.issues} · 风险 {entry.world.counts.risks} · 冲突 {entry.world.counts.activeConflicts}</p></div><span className={`rounded-full px-3 py-1 text-[11px] font-semibold ${meta.tone}`}>{meta.label}</span></div><p className="mt-3 text-xs font-semibold text-indigo-600">进入项目状态 →</p></Link>; })}</div>}</section>;
 }
 
 function ReadinessPanel({ payload, loading }: { payload: DashboardPayload; loading: boolean }) {

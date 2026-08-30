@@ -1,4 +1,5 @@
 import type { ProjectPlanHealth } from "@/lib/project-operations";
+import type { ProjectWorldStatus } from "@/lib/project-world";
 
 export type JobKind = "assetExtract" | "githubScan" | "githubMaterialSync" | "githubProjectSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
 export type JobStatus = "queued" | "waitingConsent" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
@@ -87,8 +88,34 @@ export type DashboardPayload = {
     pendingRecommendations: number;
     openImpactSuggestions: number;
     pendingActionApprovals: number;
+    atRiskWorlds: number;
+    attentionWorlds: number;
+    insufficientDataWorlds: number;
   };
   projects: WorkspaceProject[];
   recentJobs: RecentJob[];
   operations: Array<{ project: { id: string; name: string }; health: ProjectPlanHealth }>;
+  worlds: Array<{
+    project: { id: string; name: string };
+    world: {
+      status: ProjectWorldStatus;
+      counts: {
+        activeFacts: number;
+        decisions: number;
+        progress: number;
+        issues: number;
+        risks: number;
+        scheduled: number;
+        expired: number;
+        superseded: number;
+        sourceRetired: number;
+        activeRelations: number;
+        staleRelations: number;
+        openQualityIssues: number;
+        activeConflicts: number;
+        linkedWorkItems: number;
+      };
+      planHealth: ProjectPlanHealth;
+    };
+  }>;
 };

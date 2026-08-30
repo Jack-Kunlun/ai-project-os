@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 import { accessibleProjectWhere } from "@/lib/access-control";
 import { getProjectOperationsSummaries } from "@/lib/project-operations";
+import { getProjectWorldSummaries } from "@/lib/project-world";
 
 export const dynamic = "force-dynamic";
 
@@ -117,7 +118,9 @@ export async function GET(request: Request) {
 
     const verifiedProviders = providers.filter((provider) => provider.status === "verified");
     const projectOperations = await getProjectOperationsSummaries(projects.map((project) => project.id), 3, db);
+    const projectWorlds = await getProjectWorldSummaries(projects.map((project) => project.id), db, projectOperations);
     const operations = projects.map((project) => ({ project: { id: project.id, name: project.name }, health: projectOperations.get(project.id)! }));
+    const worlds = projects.map((project) => ({ project: { id: project.id, name: project.name }, world: projectWorlds.get(project.id)! }));
     const operationsSummary = operations.reduce((current, entry) => ({
       atRiskProjects: current.atRiskProjects + (entry.health.status === "atRisk" ? 1 : 0),
       overdueWorkItems: current.overdueWorkItems + entry.health.counts.overdue,
@@ -136,6 +139,11 @@ export async function GET(request: Request) {
       }),
       { confirmedItems: 0, repositories: 0, indexedProjects: 0, routedProjects: 0, assets: 0 },
     );
+    const worldSummary = worlds.reduce((current, entry) => ({
+      atRiskWorlds: current.atRiskWorlds + (entry.world.status === "at_risk" ? 1 : 0),
+      attentionWorlds: current.attentionWorlds + (entry.world.status === "needs_attention" ? 1 : 0),
+      insufficientDataWorlds: current.insufficientDataWorlds + (entry.world.status === "insufficient_data" ? 1 : 0),
+    }), { atRiskWorlds: 0, attentionWorlds: 0, insufficientDataWorlds: 0 });
 
     const publicProjects = projects.map((project) => ({
       ...project,
@@ -158,12 +166,20 @@ export async function GET(request: Request) {
             (provider) => provider.defaultEmbeddingModelId !== null && provider.embeddingDimensions !== null,
           ).length,
           ...operationsSummary,
+          ...worldSummary,
         },
         projects: publicProjects,
         recentJobs: publicRecentJobs,
         operations: operations
           .filter((entry) => entry.health.status !== "healthy")
           .sort((left, right) => (left.health.status === "atRisk" ? 0 : 1) - (right.health.status === "atRisk" ? 0 : 1) || right.health.counts.overdue - left.health.counts.overdue)
+          .slice(0, 8),
+        worlds: worlds
+          .filter((entry) => entry.world.status !== "on_track")
+          .sort((left, right) => {
+            const rank = { at_risk: 0, needs_attention: 1, insufficient_data: 2, on_track: 3 } as const;
+            return rank[left.world.status] - rank[right.world.status] || right.world.counts.activeConflicts - left.world.counts.activeConflicts;
+          })
           .slice(0, 8),
       },
       { headers: { "cache-control": "no-store" } },

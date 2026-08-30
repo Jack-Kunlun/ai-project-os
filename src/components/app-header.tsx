@@ -2,7 +2,7 @@ import Link from "next/link";
 import { APP_VERSION } from "@/lib/version";
 
 type PrimarySection = "dashboard" | "projects" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide";
-type ProjectSection = "overview" | "assets" | "externalSources" | "repositories" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance";
+type ProjectSection = "overview" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance";
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid" },
@@ -17,6 +17,7 @@ const projectItems = [
   { key: "assets", label: "文件资料", suffix: "/assets" },
   { key: "externalSources", label: "外部资料", suffix: "/external-sources" },
   { key: "repositories", label: "代码仓库", suffix: "/repositories" },
+  { key: "world", label: "项目状态", suffix: "/world" },
   { key: "plan", label: "项目计划", suffix: "/plan" },
   { key: "automations", label: "自动化", suffix: "/automations" },
   { key: "tools", label: "工具权限", suffix: "/tools" },

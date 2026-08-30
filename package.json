@@ -1,6 +1,6 @@
 {
   "name": "ai-project-os",
-  "version": "4.1.0",
+  "version": "5.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -22,6 +22,7 @@
     "test:action-engine-postgres": "tsx --test test/action-engine-postgres.test.ts",
     "test:mcp-capabilities-postgres": "tsx --test test/mcp-capabilities-postgres.test.ts",
     "test:project-plan-postgres": "tsx --test test/project-plan-postgres.test.ts",
+    "test:project-world-postgres": "tsx --test test/project-world-postgres.test.ts",
     "project-snapshot:demo": "tsx scripts/project-snapshot-demo.ts",
     "project-ai:config": "tsx scripts/project-ai-config.ts",
     "github-repository": "tsx scripts/github-repository.ts",

@@ -34,6 +34,7 @@
     "repository-ai:grant": "tsx scripts/repository-model-grant.ts",
     "repository-material-ai:grant": "tsx scripts/repository-material-model-grant.ts",
     "repository-code:search": "tsx scripts/repository-code-search.ts",
+    "external:acceptance": "tsx scripts/external-service-acceptance.ts",
     "db:validate": "prisma validate --config prisma.config.ts && pnpm db:migrations:validate",
     "db:migrations:validate": "tsx scripts/validate-migrations.ts",
     "db:generate": "prisma generate --config prisma.config.ts",

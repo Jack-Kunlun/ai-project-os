@@ -10,6 +10,7 @@ AI Project OS V5.0.1 是一套可本地部署的项目长期记忆、时态项�
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
 - 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
 - 运行监控基线：[docs/monitoring.md](docs/monitoring.md)。
+- 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
 - 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前候选尚未发布。
 - V5.0.1 发布说明：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)。
 - V5.0.0 发布说明：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)。
@@ -189,6 +190,8 @@ pnpm exec prisma migrate status --config prisma.config.ts
 ```
 
 所有 PostgreSQL 门禁都必须把 `DATABASE_URL` 指向名称可识别、可整体丢弃的专用测试数据库；不得对正式数据库运行。`pnpm build` 使用 Next.js Webpack 构建。真实 PostgreSQL V3 测试使用本地签名 OIDC 服务与隔离测试数据，不调用真实模型供应商。
+
+真实模型、Git、OIDC 和 MCP 验收不能由本地替代服务或 CI 冒充。按[外部服务现场验收](docs/external-service-acceptance.md)完成页面操作后，在同一部署数据库上运行 `pnpm external:acceptance`；命令只读取脱敏证据计数，不会读取或输出凭据。
 
 ## 主要页面
 

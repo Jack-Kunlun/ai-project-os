@@ -563,4 +563,5 @@ pg_restore -l ai-project-os.dump
 - [ ] 项目状态只纳入当前有效事实；同项目/Viewer/Editor/Owner 边界、关系版本绑定、陈旧提示、替代链无环、快照幂等和不可变审计符合预期。
 - [ ] Viewer/Editor/Owner 权限边界符合预期。
 - [ ] OIDC 测试账号可以登录，未知身份和邮箱冲突被拒绝。
+- [ ] 在真实外部服务上完成模型调用、仓库同步、OIDC 登录和经审批 MCP 调用，随后 `pnpm external:acceptance` 返回 `ok: true`；未配置能力必须在发布记录中明确排除，不能用模拟服务替代。
 - [ ] PostgreSQL、主密钥和上传文件都有可恢复备份。

@@ -123,16 +123,35 @@ enum ProjectEvidenceRangeUnit {
 }
 
 enum ProjectItemRevisionAction {
-  legacyImport    @map("legacy_import")
-  manualCreated   @map("manual_created")
-  aiCreated       @map("ai_created")
+  legacyImport       @map("legacy_import")
+  manualCreated      @map("manual_created")
+  aiCreated          @map("ai_created")
   edited
   confirmed
   dismissed
   reopened
-  rebindSource    @map("rebind_source")
-  repairEvidence  @map("repair_evidence")
-  metadataUpdated @map("metadata_updated")
+  rebindSource       @map("rebind_source")
+  repairEvidence     @map("repair_evidence")
+  metadataUpdated    @map("metadata_updated")
+  superseded
+  supersessionLinked @map("supersession_linked")
+}
+
+enum ProjectFactRelationKind {
+  supports
+  contradicts
+  dependsOn   @map("depends_on")
+  blocks
+  causedBy    @map("caused_by")
+  resolves
+  relatesTo   @map("relates_to")
+}
+
+enum ProjectWorldAuditEvent {
+  relationCreated @map("relation_created")
+  relationRetired @map("relation_retired")
+  factSuperseded  @map("fact_superseded")
+  stateCaptured   @map("state_captured")
 }
 
 enum ProjectItemRevisionIntegrityState {
@@ -993,6 +1012,9 @@ model Project {
   projectWorkItemEvidenceLinks         ProjectWorkItemEvidenceLink[]
   projectPlanImpactSuggestions         ProjectPlanImpactSuggestion[]
   projectPlanAudits                    ProjectPlanAudit[]
+  factRelations                        ProjectFactRelation[]
+  worldSnapshots                       ProjectWorldSnapshot[]
+  worldAudits                          ProjectWorldAudit[]
   lifecycleRevisions                   ProjectLifecycleRevision[]
   dataExportAudits                     ProjectDataExportAudit[]
   memoryQualityIssues                  MemoryQualityIssue[]
@@ -2217,39 +2239,44 @@ model ProjectSource {
 }
 
 model ProjectItem {
-  id                   String                  @id @default(uuid()) @db.Uuid
-  projectId            String                  @db.Uuid
-  type                 ProjectItemType
-  reviewStatus         ProjectItemReviewStatus @default(candidate)
-  sourceId             String                  @db.Uuid
-  title                String
-  content              String                  @db.Text
-  sourceExcerpt        String?                 @db.Text
-  occurredAt           DateTime?
-  confirmedAt          DateTime?
-  confidence           Float?
-  importance           Int                     @default(50)
-  validFrom            DateTime?
-  validUntil           DateTime?
-  pinned               Boolean                 @default(false)
-  lastVerifiedAt       DateTime?
-  supersedesItemId     String?                 @db.Uuid
-  metadata             Json                    @default("{}") @db.JsonB
-  createdAt            DateTime                @default(now())
-  updatedAt            DateTime                @updatedAt
-  project              Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  source               ProjectSource           @relation("SourceItems", fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  supersedesItem       ProjectItem?            @relation("ItemSupersession", fields: [projectId, supersedesItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  supersededBy         ProjectItem[]           @relation("ItemSupersession")
-  aiCandidateClaim     AiCandidateClaim?       @relation("AiCandidateItem")
-  webAiCandidate       WebAiCandidate?         @relation("WebAiCandidateItem")
-  evidences            ProjectItemEvidence[]
-  revisions            ProjectItemRevision[]
-  primaryQualityIssues MemoryQualityIssue[]    @relation("MemoryQualityPrimaryItem")
-  relatedQualityIssues MemoryQualityIssue[]    @relation("MemoryQualityRelatedItem")
+  id                       String                        @id @default(uuid()) @db.Uuid
+  projectId                String                        @db.Uuid
+  type                     ProjectItemType
+  reviewStatus             ProjectItemReviewStatus       @default(candidate)
+  sourceId                 String                        @db.Uuid
+  title                    String
+  content                  String                        @db.Text
+  sourceExcerpt            String?                       @db.Text
+  occurredAt               DateTime?
+  confirmedAt              DateTime?
+  confidence               Float?
+  importance               Int                           @default(50)
+  validFrom                DateTime?
+  validUntil               DateTime?
+  pinned                   Boolean                       @default(false)
+  lastVerifiedAt           DateTime?
+  supersedesItemId         String?                       @db.Uuid
+  metadata                 Json                          @default("{}") @db.JsonB
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+  project                  Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source                   ProjectSource                 @relation("SourceItems", fields: [projectId, sourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  supersedesItem           ProjectItem?                  @relation("ItemSupersession", fields: [projectId, supersedesItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  supersededBy             ProjectItem[]                 @relation("ItemSupersession")
+  aiCandidateClaim         AiCandidateClaim?             @relation("AiCandidateItem")
+  webAiCandidate           WebAiCandidate?               @relation("WebAiCandidateItem")
+  evidences                ProjectItemEvidence[]
+  revisions                ProjectItemRevision[]
+  primaryQualityIssues     MemoryQualityIssue[]          @relation("MemoryQualityPrimaryItem")
+  relatedQualityIssues     MemoryQualityIssue[]          @relation("MemoryQualityRelatedItem")
   projectPlanEvidenceLinks ProjectWorkItemEvidenceLink[] @relation("ProjectPlanEvidenceProjectItem")
+  outgoingFactRelations    ProjectFactRelation[]         @relation("ProjectFactRelationSource")
+  incomingFactRelations    ProjectFactRelation[]         @relation("ProjectFactRelationTarget")
+  worldAuditSourceItems    ProjectWorldAudit[]           @relation("ProjectWorldAuditSourceItem")
+  worldAuditTargetItems    ProjectWorldAudit[]           @relation("ProjectWorldAuditTargetItem")
 
   @@unique([projectId, id])
+  @@unique([projectId, supersedesItemId])
   @@index([projectId, reviewStatus])
   @@index([projectId, type])
   @@index([sourceId])
@@ -2318,6 +2345,8 @@ model ProjectItemRevision {
   project                     Project                           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   item                        ProjectItem                       @relation(fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
   evidenceLinks               ProjectItemRevisionEvidence[]
+  outgoingFactRelations       ProjectFactRelation[]             @relation("ProjectFactRelationSourceRevision")
+  incomingFactRelations       ProjectFactRelation[]             @relation("ProjectFactRelationTargetRevision")
 
   @@unique([projectId, id])
   @@unique([projectId, projectItemId, id])
@@ -2341,6 +2370,86 @@ model ProjectItemRevisionEvidence {
   @@unique([projectId, revisionId, evidenceId])
   @@index([projectId, projectItemId, revisionId])
   @@index([projectId, projectItemId, evidenceId])
+}
+
+model ProjectFactRelation {
+  id               String                  @id @default(uuid()) @db.Uuid
+  projectId        String                  @db.Uuid
+  sourceItemId     String                  @db.Uuid
+  targetItemId     String                  @db.Uuid
+  sourceRevisionId String                  @db.Uuid
+  targetRevisionId String                  @db.Uuid
+  kind             ProjectFactRelationKind
+  rationale        String                  @db.Text
+  fingerprint      String                  @db.Char(64)
+  createdById      String                  @db.Uuid
+  createdAt        DateTime                @default(now())
+  retiredAt        DateTime?
+  retiredById      String?                 @db.Uuid
+  retirementReason String?                 @db.Text
+  project          Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  sourceItem       ProjectItem             @relation("ProjectFactRelationSource", fields: [projectId, sourceItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  targetItem       ProjectItem             @relation("ProjectFactRelationTarget", fields: [projectId, targetItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  sourceRevision   ProjectItemRevision     @relation("ProjectFactRelationSourceRevision", fields: [projectId, sourceItemId, sourceRevisionId], references: [projectId, projectItemId, id], onDelete: NoAction, onUpdate: Cascade)
+  targetRevision   ProjectItemRevision     @relation("ProjectFactRelationTargetRevision", fields: [projectId, targetItemId, targetRevisionId], references: [projectId, projectItemId, id], onDelete: NoAction, onUpdate: Cascade)
+  createdBy        AppUser                 @relation("ProjectFactRelationCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  retiredBy        AppUser?                @relation("ProjectFactRelationRetiredBy", fields: [retiredById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  worldAudits      ProjectWorldAudit[]
+
+  @@unique([projectId, id])
+  @@index([projectId, fingerprint])
+  @@index([projectId, sourceItemId, retiredAt])
+  @@index([projectId, targetItemId, retiredAt])
+  @@index([projectId, sourceItemId, sourceRevisionId])
+  @@index([projectId, targetItemId, targetRevisionId])
+  @@index([createdById, createdAt])
+  @@index([retiredById, retiredAt])
+}
+
+model ProjectWorldSnapshot {
+  id                       String              @id @default(uuid()) @db.Uuid
+  projectId                String              @db.Uuid
+  schemaVersion            Int                 @default(1)
+  asOf                     DateTime
+  status                   String              @db.VarChar(32)
+  inputManifestFingerprint String              @db.Char(64)
+  snapshotFingerprint      String              @db.Char(64)
+  payload                  Json                @db.JsonB
+  capturedById             String              @db.Uuid
+  createdAt                DateTime            @default(now())
+  project                  Project             @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  capturedBy               AppUser             @relation("ProjectWorldSnapshotCapturedBy", fields: [capturedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  worldAudits              ProjectWorldAudit[]
+
+  @@unique([projectId, id])
+  @@unique([projectId, snapshotFingerprint])
+  @@index([projectId, createdAt])
+  @@index([capturedById, createdAt])
+}
+
+model ProjectWorldAudit {
+  id           String                 @id @default(uuid()) @db.Uuid
+  projectId    String                 @db.Uuid
+  event        ProjectWorldAuditEvent
+  actorId      String                 @db.Uuid
+  relationId   String?                @db.Uuid
+  snapshotId   String?                @db.Uuid
+  sourceItemId String?                @db.Uuid
+  targetItemId String?                @db.Uuid
+  details      Json                   @default("{}") @db.JsonB
+  createdAt    DateTime               @default(now())
+  project      Project                @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  actor        AppUser                @relation("ProjectWorldAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  relation     ProjectFactRelation?   @relation(fields: [projectId, relationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  snapshot     ProjectWorldSnapshot?  @relation(fields: [projectId, snapshotId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  sourceItem   ProjectItem?           @relation("ProjectWorldAuditSourceItem", fields: [projectId, sourceItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  targetItem   ProjectItem?           @relation("ProjectWorldAuditTargetItem", fields: [projectId, targetItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@index([projectId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([projectId, relationId])
+  @@index([projectId, snapshotId])
 }
 
 model EmbeddingProfile {
@@ -3381,6 +3490,10 @@ model AppUser {
   removedWorkItemEvidenceLinks ProjectWorkItemEvidenceLink[]     @relation("ProjectWorkItemEvidenceRemovedBy")
   decidedPlanImpacts           ProjectPlanImpactSuggestion[]     @relation("ProjectPlanImpactDecidedBy")
   projectPlanAuditEvents       ProjectPlanAudit[]                @relation("ProjectPlanAuditActor")
+  createdFactRelations         ProjectFactRelation[]             @relation("ProjectFactRelationCreatedBy")
+  retiredFactRelations         ProjectFactRelation[]             @relation("ProjectFactRelationRetiredBy")
+  capturedWorldSnapshots       ProjectWorldSnapshot[]            @relation("ProjectWorldSnapshotCapturedBy")
+  projectWorldAuditEvents      ProjectWorldAudit[]               @relation("ProjectWorldAuditActor")
   resolvedMemoryQualityIssues  MemoryQualityIssue[]
   createdWebSources            WebSource[]
   createdWorkspaces            Workspace[]                       @relation("WorkspaceCreatedBy")

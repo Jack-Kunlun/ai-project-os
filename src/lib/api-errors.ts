@@ -36,6 +36,7 @@ import { ActionEngineError } from "@/lib/action-engine";
 import { ActionResultIntakeError } from "@/lib/action-result-intake";
 import { McpCapabilityError } from "@/lib/mcp";
 import { ProjectPlanError } from "@/lib/project-plan";
+import { ProjectWorldError } from "@/lib/project-world";
 
 export type ApiErrorBody = {
   error: {
@@ -58,6 +59,25 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof ProjectWorldError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PROJECT_WORLD_INVALID_INPUT: [400, "项目世界模型请求无效"],
+      PROJECT_WORLD_PROJECT_NOT_FOUND: [404, "项目不存在"],
+      PROJECT_WORLD_TOO_MANY_FACTS: [413, "项目事实超过单次状态计算上限"],
+      PROJECT_WORLD_FACT_NOT_FOUND: [404, "项目事实不存在"],
+      PROJECT_WORLD_CONFIRMED_FACTS_REQUIRED: [422, "关系两端必须是当前已确认事实"],
+      PROJECT_WORLD_RELATION_NOT_FOUND: [404, "事实关系不存在"],
+      PROJECT_WORLD_RELATION_CONFLICT: [409, "该事实关系已经存在"],
+      PROJECT_WORLD_RELATION_CHANGED: [409, "事实关系已变化，请刷新后重试"],
+      PROJECT_WORLD_SUPERSESSION_INVALID: [400, "事实替代请求无效"],
+      PROJECT_WORLD_SUPERSESSION_CONFLICT: [409, "事实状态或版本已变化，请刷新后重试"],
+      PROJECT_WORLD_SUPERSESSION_CYCLE: [409, "事实替代会形成循环"],
+      PROJECT_WORLD_SNAPSHOT_TOO_LARGE: [413, "项目状态快照超过安全上限"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "项目世界模型处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof ProjectPlanError) {
     const mapping: Record<string, readonly [number, string]> = {
       PROJECT_PLAN_INVALID_INPUT: [400, "项目计划请求无效"],

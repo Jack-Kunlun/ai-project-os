@@ -328,7 +328,9 @@ const operationsEvidenceSelect = {
   repositorySyncRun: { select: { status: true, reconciliationRequired: true, manifestFingerprint: true } },
 } satisfies Prisma.ProjectWorkItemEvidenceLinkSelect;
 
-export async function getProjectOperationsSummaries(projectIds: readonly string[], dueSoonDays = 3, db: PrismaClient = getDb()) {
+type ProjectOperationsDb = PrismaClient | Prisma.TransactionClient;
+
+export async function getProjectOperationsSummaries(projectIds: readonly string[], dueSoonDays = 3, db: ProjectOperationsDb = getDb()) {
   if (projectIds.length === 0) return new Map<string, ProjectPlanHealth>();
   const where = { projectId: { in: [...projectIds] } };
   const [projects, workItems, dependencies, evidenceLinks, impacts, actions, projectMembers, workspaceMembers] = await Promise.all([
@@ -368,6 +370,6 @@ export async function getProjectOperationsSummaries(projectIds: readonly string[
   return summaries;
 }
 
-export async function getProjectOperationsSummary(projectId: string, dueSoonDays = 3, db: PrismaClient = getDb()): Promise<ProjectPlanHealth> {
+export async function getProjectOperationsSummary(projectId: string, dueSoonDays = 3, db: ProjectOperationsDb = getDb()): Promise<ProjectPlanHealth> {
   return (await getProjectOperationsSummaries([projectId], dueSoonDays, db)).get(projectId)!;
 }

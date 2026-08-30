@@ -32,6 +32,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "mcp-capabilities", file: "test/mcp-capabilities-postgres.test.ts", database: "ai_project_os_mcp_capabilities_test", gateEnv: "MCP_CAPABILITIES_POSTGRES_GATE", setup: "migrate" },
   { id: "project-plan", file: "test/project-plan-postgres.test.ts", database: "ai_project_os_project_plan_test", gateEnv: "PROJECT_PLAN_POSTGRES_GATE", setup: "migrate" },
   { id: "project-world", file: "test/project-world-postgres.test.ts", database: "ai_project_os_v5_gate_world", gateEnv: "PROJECT_WORLD_POSTGRES_GATE", setup: "migrate" },
+  { id: "worker-health", file: "test/worker-health-postgres.test.ts", database: "ai_project_os_worker_health_test", gateEnv: "WORKER_HEALTH_POSTGRES_GATE", setup: "migrate" },
 ]);
 
 export const POSTGRES_GATE_TEST_USER = "ai_project_os_gate";

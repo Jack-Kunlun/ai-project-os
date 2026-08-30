@@ -23,6 +23,7 @@
     "test:mcp-capabilities-postgres": "tsx --test test/mcp-capabilities-postgres.test.ts",
     "test:project-plan-postgres": "tsx --test test/project-plan-postgres.test.ts",
     "test:project-world-postgres": "tsx --test test/project-world-postgres.test.ts",
+    "test:worker-health-postgres": "tsx --test test/worker-health-postgres.test.ts",
     "test:postgres-gates": "tsx scripts/run-postgres-gates.ts",
     "project-snapshot:demo": "tsx scripts/project-snapshot-demo.ts",
     "project-ai:config": "tsx scripts/project-ai-config.ts",

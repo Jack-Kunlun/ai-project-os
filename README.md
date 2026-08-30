@@ -9,6 +9,7 @@ AI Project OS V5.0.1 是一套可本地部署的项目长期记忆、时态项�
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
 - 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
+- 运行监控基线：[docs/monitoring.md](docs/monitoring.md)。
 - 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前候选尚未发布。
 - V5.0.1 发布说明：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)。
 - V5.0.0 发布说明：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)。
@@ -145,7 +146,9 @@ docker compose ps --all
 - `postgres`：healthy
 - `migrate`：Exited (0)
 - `app`：healthy
-- `worker`：running
+- `worker`：healthy
+
+`/api/health` 会分别报告数据库与 Worker 心跳；Worker 日志为单行 JSON，可按[运行监控基线](docs/monitoring.md)采集和告警。
 
 Compose 使用三个命名卷：`ai-project-os-pgdata`、`ai-project-os-secrets`、`ai-project-os-uploads`。不要执行 `docker compose down -v`，该命令会删除数据库、凭据主密钥和上传文件。
 

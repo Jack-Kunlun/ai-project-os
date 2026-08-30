@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { APP_VERSION } from "@/lib/version";
+import { readWorkerHealth } from "@/lib/worker-health";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +11,13 @@ export async function GET() {
   try {
     const db = getDb();
     await db.$queryRaw`SELECT 1`;
+    const worker = await readWorkerHealth(db);
 
     return NextResponse.json({
       status: "ok",
       version: APP_VERSION,
       database: "up",
+      worker,
       latencyMs: Date.now() - startedAt,
       timestamp: new Date().toISOString(),
     });

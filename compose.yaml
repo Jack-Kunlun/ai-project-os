@@ -38,6 +38,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       AI_PROJECT_OS_MASTER_KEY_FILE: /var/lib/ai-project-os-secrets/master.key
+      AI_PROJECT_OS_WORKER_NAME: ${AI_PROJECT_OS_WORKER_NAME:-automation-primary}
     volumes:
       - ai_project_os_secrets:/var/lib/ai-project-os-secrets
       - ai_project_os_uploads:/var/lib/ai-project-os/uploads
@@ -71,11 +72,18 @@ services:
       NODE_ENV: production
       DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       AI_PROJECT_OS_MASTER_KEY_FILE: /var/lib/ai-project-os-secrets/master.key
+      AI_PROJECT_OS_WORKER_NAME: ${AI_PROJECT_OS_WORKER_NAME:-automation-primary}
     volumes:
       - ai_project_os_secrets:/var/lib/ai-project-os-secrets
       - ai_project_os_uploads:/var/lib/ai-project-os/uploads
     restart: unless-stopped
     init: true
+    healthcheck:
+      test: ["CMD", "node", "node_modules/tsx/dist/cli.mjs", "scripts/worker-healthcheck.ts"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
 
 volumes:
   ai_project_os_pgdata:

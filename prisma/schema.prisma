@@ -363,6 +363,13 @@ enum AutomationRunStatus {
   skipped
 }
 
+enum WorkerRuntimeStatus {
+  starting
+  running
+  degraded
+  stopping
+}
+
 enum NotificationKind {
   automationSucceeded    @map("automation_succeeded")
   automationFailed       @map("automation_failed")
@@ -4053,6 +4060,20 @@ model AutomationRun {
   @@unique([automationRuleId, scheduledFor])
   @@index([status, leaseExpiresAt])
   @@index([projectId, createdAt])
+}
+
+model WorkerRuntime {
+  name                  String              @id @db.VarChar(64)
+  instanceIdHash        String              @db.Char(64)
+  status                WorkerRuntimeStatus @default(starting)
+  startedAt             DateTime
+  heartbeatAt           DateTime
+  lastActionCycleAt     DateTime?
+  lastAutomationCycleAt DateTime?
+  consecutiveFailures   Int                 @default(0)
+  updatedAt             DateTime            @updatedAt
+
+  @@index([status, heartbeatAt])
 }
 
 model Notification {

@@ -50,7 +50,7 @@ docker compose ps --all
 - `postgres`：`healthy`
 - `migrate`：`Exited (0)`
 - `app`：`healthy`
-- `worker`：`running`
+- `worker`：`healthy`
 
 健康检查：
 
@@ -58,7 +58,7 @@ docker compose ps --all
 curl --fail http://127.0.0.1:3000/api/health
 ```
 
-响应应包含 `status: ok`、`database: up` 和 `version: 5.0.1`。
+响应应包含 `status: ok`、`database: up`、`worker.status: up` 和 `version: 5.0.1`。应用存活与 Worker 健康是两个独立信号：Worker 缺失、停止、降级或心跳超过 45 秒时，接口仍可返回应用 `status: ok`，但 `worker.status` 会明确显示异常状态，Worker 容器健康检查也会失败。
 
 ### 2.2 初始化管理员
 
@@ -520,7 +520,9 @@ pg_restore -l ai-project-os.dump
 
 ### 18.5 自动化没有运行
 
-确认 `worker` 容器正在运行、规则为“运行中”、项目未归档且下次运行时间已到。连续失败三次的规则会自动暂停。
+确认 `worker` 容器为 `healthy`，并在 `/api/health` 中看到 `worker.status: up`；随后检查规则为“运行中”、项目未归档且下次运行时间已到。`worker.status: stale` 表示心跳超过 45 秒，`degraded` 表示最近一次数据库领取循环发生基础设施异常。连续失败三次的规则会自动暂停。
+
+使用 `docker compose logs worker` 查看单行 JSON 事件。建议对容器非健康、`worker.status` 非 `up`、`worker.*_failed` 事件和连续重启分别告警；字段语义、采集边界和建议阈值见[运行监控基线](monitoring.md)。
 
 ### 18.6 动作一直等待或执行失败
 
@@ -544,8 +546,8 @@ pg_restore -l ai-project-os.dump
 
 ## 19. 验收清单
 
-- [ ] `/api/health` 显示版本 5.0.1、数据库正常。
-- [ ] `postgres`、`app` 健康，`migrate` 成功退出，`worker` 运行。
+- [ ] `/api/health` 显示版本 5.0.1、数据库正常且 `worker.status` 为 `up`。
+- [ ] `postgres`、`app`、`worker` 健康，`migrate` 成功退出。
 - [ ] 管理员可登录，个人中心可轮换密码。
 - [ ] 模型连接在页面测试通过。
 - [ ] Git 连接验证通过，项目仓库能固定 commit 并发布快照。

@@ -18,7 +18,7 @@ type Citation = {
 
 type Observation = { text: string; citations: string[] };
 type ReportBody = {
-  status: "on_track" | "needs_attention" | "at_risk" | "unknown";
+  status: "on_track" | "needs_attention" | "at_risk" | "insufficient_data" | "unknown";
   headline: string;
   summary: string;
   citations: string[];
@@ -216,8 +216,8 @@ function BriefPanel({ projectId, report, ready, onReload }: { projectId: string;
 
 function ReportView({ report }: { report: Report }) {
   const citationNumbers = useMemo(() => new Map(report.citations.map((citation, index) => [citation.id, index + 1])), [report.citations]);
-  const statusStyle = { on_track: "bg-emerald-100 text-emerald-700", needs_attention: "bg-amber-100 text-amber-800", at_risk: "bg-rose-100 text-rose-700", unknown: "bg-slate-100 text-slate-600" }[report.report.status];
-  const statusLabel = { on_track: "进展正常", needs_attention: "需要关注", at_risk: "存在风险", unknown: "证据不足" }[report.report.status];
+  const statusStyle = { on_track: "bg-emerald-100 text-emerald-700", needs_attention: "bg-amber-100 text-amber-800", at_risk: "bg-rose-100 text-rose-700", insufficient_data: "bg-slate-100 text-slate-600", unknown: "bg-slate-100 text-slate-600" }[report.report.status];
+  const statusLabel = { on_track: "进展正常", needs_attention: "需要关注", at_risk: "存在风险", insufficient_data: "资料不足", unknown: "证据不足" }[report.report.status];
   return <div className="mt-7"><div className="rounded-2xl bg-slate-950 p-6 text-white"><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle}`}>{statusLabel}</span><span className="text-xs text-slate-400">{formatDate(report.createdAt)} · {report.providerConnection.name} / {report.modelId}</span></div><h3 className="mt-5 text-2xl font-semibold">{report.report.headline}</h3><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{report.report.summary}</p><CitationChips ids={report.report.citations} numbers={citationNumbers} /></div><div className="mt-6 grid gap-4 lg:grid-cols-2">{reportSections.map((section) => <ObservationSection key={section.key} title={section.label} observations={report.report[section.key]} numbers={citationNumbers} />)}</div><EvidenceList citations={report.citations} /><RunMeta inputTokens={report.inputTokens} outputTokens={report.outputTokens} fingerprint={report.inputManifestFingerprint} /></div>;
 }
 

@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-ai_project_os}
     ports:
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - ai_project_os_pgdata:/var/lib/postgresql
     healthcheck:
@@ -87,8 +87,8 @@ services:
 
 volumes:
   ai_project_os_pgdata:
-    name: ai-project-os-pgdata
+    name: ${AI_PROJECT_OS_PGDATA_VOLUME:-ai-project-os-pgdata}
   ai_project_os_secrets:
-    name: ai-project-os-secrets
+    name: ${AI_PROJECT_OS_SECRETS_VOLUME:-ai-project-os-secrets}
   ai_project_os_uploads:
-    name: ai-project-os-uploads
+    name: ${AI_PROJECT_OS_UPLOADS_VOLUME:-ai-project-os-uploads}

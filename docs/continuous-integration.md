@@ -21,6 +21,8 @@
 - 工作流不接收模型 API Key、Git Token/SSH Key、OIDC Client Secret 或 MCP Bearer Token，也不会调用真实外部服务。
 - `pnpm test:browser-e2e` 会执行生产构建，但不能替代正式部署的备份恢复、Compose 状态或入口代理验收。
 
+需要在正式本地实例旁运行候选 Compose 验收时，应使用独立 Compose 项目名，并同时覆盖 `POSTGRES_PORT`、`APP_PORT`、`AI_PROJECT_OS_PGDATA_VOLUME`、`AI_PROJECT_OS_SECRETS_VOLUME` 和 `AI_PROJECT_OS_UPLOADS_VOLUME`。缺少任何卷覆盖都可能复用正式数据，因此不属于隔离验收。
+
 ## 本地复现
 
 先准备绑定 `127.0.0.1:56432` 的一次性 PostgreSQL 18 + pgvector 管理库，在未提交的 shell 环境中设置 `POSTGRES_GATE_ADMIN_URL` 和不少于 16 位的 `POSTGRES_GATE_TEST_PASSWORD`，再执行：

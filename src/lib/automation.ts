@@ -3,6 +3,7 @@ import { Prisma, type AppUser, type AutomationRuleKind, type PrismaClient } from
 import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
+import { getProjectOperationsSummary } from "@/lib/project-operations";
 
 const AUTOMATION_LEASE_MS = 10 * 60 * 1_000;
 const AUTOMATION_HEARTBEAT_MS = 60 * 1_000;
@@ -25,10 +26,11 @@ export class AutomationError extends Error {
   }
 }
 
-const kindSchema = z.enum(["repositorySync", "memoryQuality", "memoryIndex", "projectBrief", "webSourceSync"]);
+const kindSchema = z.enum(["repositorySync", "memoryQuality", "memoryIndex", "projectBrief", "webSourceSync", "projectPlanHealth"]);
 const repositoryConfigSchema = z.object({ linkIds: z.array(z.string().uuid()).max(100).default([]) }).strict();
 const emptyConfigSchema = z.object({}).strict();
 const memoryIndexConfigSchema = z.object({ mode: z.literal("incremental").default("incremental") }).strict();
+const projectPlanHealthConfigSchema = z.object({ dueSoonDays: z.number().int().min(1).max(14).default(3), includeAssignees: z.boolean().default(true) }).strict();
 const createRuleSchema = z.object({
   name: z.string().trim().min(1).max(100),
   kind: kindSchema,
@@ -95,6 +97,8 @@ function canonicalConfig(kind: AutomationRuleKind, value: unknown): Prisma.Input
     ? repositoryConfigSchema.parse(value ?? {})
     : kind === "memoryIndex"
       ? memoryIndexConfigSchema.parse(value ?? {})
+      : kind === "projectPlanHealth"
+        ? projectPlanHealthConfigSchema.parse(value ?? {})
       : emptyConfigSchema.parse(value ?? {});
   return parsed as Prisma.InputJsonObject;
 }
@@ -106,7 +110,7 @@ function notificationKey(input: string): string {
 async function createNotification(input: Readonly<{
   userId: string;
   projectId: string | null;
-  kind: "automationSucceeded" | "automationFailed" | "consentRequired" | "memoryQuality" | "system";
+  kind: "automationSucceeded" | "automationFailed" | "consentRequired" | "memoryQuality" | "projectPlanHealth" | "system";
   severity: "info" | "success" | "warning" | "error";
   title: string;
   body: string;
@@ -365,6 +369,42 @@ async function executeRepositorySync(run: ClaimedRun, db: PrismaClient) {
   await completeRun(run, { status: "succeeded", jobIds, result: { repositoryCount: links.length } }, db);
 }
 
+async function executeProjectPlanHealth(run: ClaimedRun, db: PrismaClient) {
+  const config = projectPlanHealthConfigSchema.parse(run.rule.config);
+  const health = await getProjectOperationsSummary(run.projectId, config.dueSoonDays, db);
+  const assigneeIds = new Set(health.signals.flatMap((signal) => signal.assigneeId === null ? [] : [signal.assigneeId]));
+  const candidateIds = new Set([run.rule.createdById, ...(config.includeAssignees ? [...assigneeIds] : [])]);
+  const eligibleRecipients = await db.appUser.findMany({
+      where: {
+        id: { in: [...candidateIds] },
+        disabledAt: null,
+        OR: [
+          { projectMemberships: { some: { projectId: run.projectId } } },
+          { workspaceMemberships: { some: { workspace: { projects: { some: { id: run.projectId } } }, role: { in: ["owner", "admin"] } } } },
+        ],
+      },
+      select: { id: true },
+    });
+  const recipients = new Set(eligibleRecipients.map((entry) => entry.id));
+  const dayKey = run.scheduledFor.toISOString().slice(0, 10);
+  const body = health.status === "healthy"
+    ? "当前没有逾期、受阻、缺少负责人或缺少验收证据的活动工作项。"
+    : `逾期 ${health.counts.overdue} 项、受阻 ${health.counts.blocked} 项、即将到期 ${health.counts.dueSoon} 项、未分配 ${health.counts.unassigned} 项、验收或证据缺口 ${health.counts.missingAcceptance + health.counts.missingEvidence + health.counts.staleEvidence} 项；另有 ${health.counts.openImpacts} 条仓库变更待评估。`;
+  for (const userId of recipients) {
+    await createNotification({
+      userId,
+      projectId: run.projectId,
+      kind: "projectPlanHealth",
+      severity: health.status === "atRisk" ? "error" : health.status === "attention" ? "warning" : "success",
+      title: health.status === "atRisk" ? "项目计划存在逾期或受阻工作" : health.status === "attention" ? "项目计划有待处理事项" : "项目计划运行正常",
+      body,
+      actionHref: `/projects/${run.projectId}/plan`,
+      dedupeKey: `project-plan-health:${run.automationRuleId}:${dayKey}:${userId}`,
+    }, db);
+  }
+  await completeRun(run, { status: "succeeded", result: { health, notifiedUserCount: recipients.size } }, db);
+}
+
 async function executeRun(run: ClaimedRun, db: PrismaClient): Promise<void> {
   if (run.rule.kind === "repositorySync") {
     await executeRepositorySync(run, db);
@@ -400,6 +440,10 @@ async function executeRun(run: ClaimedRun, db: PrismaClient): Promise<void> {
     const { syncAllProjectWebSources } = await import("@/lib/web-sources");
     const result = await syncAllProjectWebSources(run.projectId, run.rule.createdBy, db);
     await completeRun(run, { status: "succeeded", result: { sourceCount: result.length } }, db);
+    return;
+  }
+  if (run.rule.kind === "projectPlanHealth") {
+    await executeProjectPlanHealth(run, db);
     return;
   }
   await completeRun(run, { status: "waitingConsent", result: { reason: "MODEL_TRANSFER_REQUIRES_CONFIRMATION" } }, db);

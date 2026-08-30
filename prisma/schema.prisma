@@ -317,11 +317,12 @@ enum BackgroundJobReconciliationResolution {
 }
 
 enum AutomationRuleKind {
-  repositorySync @map("repository_sync")
-  memoryQuality  @map("memory_quality")
-  memoryIndex    @map("memory_index")
-  projectBrief   @map("project_brief")
-  webSourceSync  @map("web_source_sync")
+  repositorySync    @map("repository_sync")
+  memoryQuality     @map("memory_quality")
+  memoryIndex       @map("memory_index")
+  projectBrief      @map("project_brief")
+  webSourceSync     @map("web_source_sync")
+  projectPlanHealth @map("project_plan_health")
 }
 
 enum AutomationRuleStatus {
@@ -339,13 +340,14 @@ enum AutomationRunStatus {
 }
 
 enum NotificationKind {
-  automationSucceeded @map("automation_succeeded")
-  automationFailed    @map("automation_failed")
-  consentRequired     @map("consent_required")
-  memoryQuality       @map("memory_quality")
+  automationSucceeded    @map("automation_succeeded")
+  automationFailed       @map("automation_failed")
+  consentRequired        @map("consent_required")
+  memoryQuality          @map("memory_quality")
   actionApprovalRequired @map("action_approval_required")
   actionCompleted        @map("action_completed")
   actionFailed           @map("action_failed")
+  projectPlanHealth      @map("project_plan_health")
   system
 }
 
@@ -427,17 +429,36 @@ enum ProjectWorkItemOrigin {
 
 enum ProjectPlanEntityType {
   objective
-  workItem   @map("work_item")
+  workItem         @map("work_item")
   dependency
+  evidenceLink     @map("evidence_link")
+  impactSuggestion @map("impact_suggestion")
 }
 
 enum ProjectPlanAuditEvent {
   created
   updated
-  statusChanged     @map("status_changed")
+  statusChanged          @map("status_changed")
   recommendationPromoted @map("recommendation_promoted")
-  dependencyAdded  @map("dependency_added")
-  dependencyRemoved @map("dependency_removed")
+  dependencyAdded        @map("dependency_added")
+  dependencyRemoved      @map("dependency_removed")
+  evidenceLinked         @map("evidence_linked")
+  evidenceRemoved        @map("evidence_removed")
+  impactDetected         @map("impact_detected")
+  impactAcknowledged     @map("impact_acknowledged")
+  impactDismissed        @map("impact_dismissed")
+}
+
+enum ProjectPlanEvidenceKind {
+  projectItem    @map("project_item")
+  projectSource  @map("project_source")
+  repositorySync @map("repository_sync")
+}
+
+enum ProjectPlanImpactStatus {
+  proposed
+  acknowledged
+  dismissed
 }
 
 enum MemoryQualityIssueKind {
@@ -969,6 +990,8 @@ model Project {
   projectObjectives                    ProjectObjective[]
   projectWorkItems                     ProjectWorkItem[]
   projectWorkItemDependencies          ProjectWorkItemDependency[]
+  projectWorkItemEvidenceLinks         ProjectWorkItemEvidenceLink[]
+  projectPlanImpactSuggestions         ProjectPlanImpactSuggestion[]
   projectPlanAudits                    ProjectPlanAudit[]
   lifecycleRevisions                   ProjectLifecycleRevision[]
   dataExportAudits                     ProjectDataExportAudit[]
@@ -2181,6 +2204,7 @@ model ProjectSource {
   gitRepositorySnapshotEntries   GitRepositorySnapshotEntry[]         @relation("GitRepositorySnapshotSource")
   webSourceRevisions             WebSourceRevision[]                  @relation("WebSourceRevisionProjectSource")
   actionResultImport             ProjectActionResultImport?
+  projectPlanEvidenceLinks       ProjectWorkItemEvidenceLink[]        @relation("ProjectPlanEvidenceProjectSource")
 
   @@unique([projectId, id])
   @@unique([projectId, id, originScope])
@@ -2223,6 +2247,8 @@ model ProjectItem {
   revisions            ProjectItemRevision[]
   primaryQualityIssues MemoryQualityIssue[]    @relation("MemoryQualityPrimaryItem")
   relatedQualityIssues MemoryQualityIssue[]    @relation("MemoryQualityRelatedItem")
+  projectPlanEvidenceLinks ProjectWorkItemEvidenceLink[] @relation("ProjectPlanEvidenceProjectItem")
+  projectPlanEvidenceLinks ProjectWorkItemEvidenceLink[] @relation("ProjectPlanEvidenceProjectItem")
 
   @@unique([projectId, id])
   @@index([projectId, reviewStatus])
@@ -3349,8 +3375,12 @@ model AppUser {
   importedActionResults        ProjectActionResultImport[]       @relation("ProjectActionResultImportedBy")
   createdProjectObjectives     ProjectObjective[]                @relation("ProjectObjectiveCreatedBy")
   createdProjectWorkItems      ProjectWorkItem[]                 @relation("ProjectWorkItemCreatedBy")
+  assignedProjectWorkItems     ProjectWorkItem[]                 @relation("ProjectWorkItemAssignee")
   createdWorkItemDependencies  ProjectWorkItemDependency[]       @relation("ProjectWorkItemDependencyCreatedBy")
   removedWorkItemDependencies  ProjectWorkItemDependency[]       @relation("ProjectWorkItemDependencyRemovedBy")
+  createdWorkItemEvidenceLinks ProjectWorkItemEvidenceLink[]     @relation("ProjectWorkItemEvidenceCreatedBy")
+  removedWorkItemEvidenceLinks ProjectWorkItemEvidenceLink[]     @relation("ProjectWorkItemEvidenceRemovedBy")
+  decidedPlanImpacts           ProjectPlanImpactSuggestion[]     @relation("ProjectPlanImpactDecidedBy")
   projectPlanAuditEvents       ProjectPlanAudit[]                @relation("ProjectPlanAuditActor")
   resolvedMemoryQualityIssues  MemoryQualityIssue[]
   createdWebSources            WebSource[]
@@ -4115,6 +4145,8 @@ model ProjectGitHubSyncRun {
   entries                      ProjectGitHubSyncEntry[]
   changes                      ProjectGitHubSyncChange[]
   reconciliation               ProjectGitHubSyncReconciliation?
+  projectPlanEvidenceLinks     ProjectWorkItemEvidenceLink[]    @relation("ProjectPlanEvidenceRepositorySync")
+  projectPlanImpactSuggestion  ProjectPlanImpactSuggestion?
 
   @@unique([projectId, id])
   @@unique([projectId, parentJobId], map: "ProjectGitHubSyncRun_project_job_key")
@@ -4414,34 +4446,40 @@ model ProjectObjective {
 }
 
 model ProjectWorkItem {
-  id                  String                  @id @default(uuid()) @db.Uuid
-  projectId           String                  @db.Uuid
-  objectiveId         String?                 @db.Uuid
-  title               String                  @db.VarChar(160)
-  description         String?                 @db.Text
-  status              ProjectWorkItemStatus   @default(planned)
-  priority            ProjectWorkItemPriority @default(medium)
-  targetDate          DateTime?               @db.Date
-  origin              ProjectWorkItemOrigin   @default(manual)
-  agentRunId          String?                 @db.Uuid
+  id                  String                        @id @default(uuid()) @db.Uuid
+  projectId           String                        @db.Uuid
+  objectiveId         String?                       @db.Uuid
+  title               String                        @db.VarChar(160)
+  description         String?                       @db.Text
+  acceptanceCriteria  String?                       @db.Text
+  status              ProjectWorkItemStatus         @default(planned)
+  priority            ProjectWorkItemPriority       @default(medium)
+  targetDate          DateTime?                     @db.Date
+  assigneeId          String?                       @db.Uuid
+  origin              ProjectWorkItemOrigin         @default(manual)
+  agentRunId          String?                       @db.Uuid
   recommendationIndex Int?
-  evidenceSnapshot    Json?                   @db.JsonB
-  evidenceFingerprint String?                 @db.Char(64)
-  createdById         String                  @db.Uuid
-  createdAt           DateTime                @default(now())
-  updatedAt           DateTime                @updatedAt
+  evidenceSnapshot    Json?                         @db.JsonB
+  evidenceFingerprint String?                       @db.Char(64)
+  createdById         String                        @db.Uuid
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
   completedAt         DateTime?
-  project             Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  objective           ProjectObjective?       @relation(fields: [projectId, objectiveId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  agentRun            ProjectAgentRun?        @relation(fields: [projectId, agentRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  createdBy           AppUser                 @relation("ProjectWorkItemCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  dependencies        ProjectWorkItemDependency[] @relation("ProjectWorkItemDependencies")
-  dependents          ProjectWorkItemDependency[] @relation("ProjectWorkItemDependents")
+  project             Project                       @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  objective           ProjectObjective?             @relation(fields: [projectId, objectiveId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  agentRun            ProjectAgentRun?              @relation(fields: [projectId, agentRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  createdBy           AppUser                       @relation("ProjectWorkItemCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  assignee            AppUser?                      @relation("ProjectWorkItemAssignee", fields: [assigneeId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  dependencies        ProjectWorkItemDependency[]   @relation("ProjectWorkItemDependencies")
+  dependents          ProjectWorkItemDependency[]   @relation("ProjectWorkItemDependents")
+  evidenceLinks       ProjectWorkItemEvidenceLink[]
 
   @@unique([projectId, id])
   @@unique([projectId, agentRunId, recommendationIndex])
   @@index([projectId, status, priority, updatedAt])
   @@index([projectId, objectiveId, status])
+  @@index([projectId, assigneeId, status])
+  @@index([projectId, targetDate, status])
   @@index([createdById, createdAt])
 }
 
@@ -4465,6 +4503,60 @@ model ProjectWorkItemDependency {
   @@index([projectId, dependsOnId, removedAt])
   @@index([createdById, createdAt])
   @@index([removedById, removedAt])
+}
+
+model ProjectWorkItemEvidenceLink {
+  id                  String                  @id @default(uuid()) @db.Uuid
+  projectId           String                  @db.Uuid
+  workItemId          String                  @db.Uuid
+  kind                ProjectPlanEvidenceKind
+  projectItemId       String?                 @db.Uuid
+  projectSourceId     String?                 @db.Uuid
+  repositorySyncRunId String?                 @db.Uuid
+  label               String                  @db.VarChar(200)
+  evidenceSnapshot    Json                    @db.JsonB
+  evidenceFingerprint String                  @db.Char(64)
+  createdById         String                  @db.Uuid
+  createdAt           DateTime                @default(now())
+  removedAt           DateTime?
+  removedById         String?                 @db.Uuid
+  project             Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  workItem            ProjectWorkItem         @relation(fields: [projectId, workItemId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
+  projectItem         ProjectItem?            @relation("ProjectPlanEvidenceProjectItem", fields: [projectId, projectItemId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  projectSource       ProjectSource?          @relation("ProjectPlanEvidenceProjectSource", fields: [projectId, projectSourceId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  repositorySyncRun   ProjectGitHubSyncRun?   @relation("ProjectPlanEvidenceRepositorySync", fields: [projectId, repositorySyncRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  createdBy           AppUser                 @relation("ProjectWorkItemEvidenceCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  removedBy           AppUser?                @relation("ProjectWorkItemEvidenceRemovedBy", fields: [removedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@index([projectId, workItemId, removedAt])
+  @@index([projectId, projectItemId])
+  @@index([projectId, projectSourceId])
+  @@index([projectId, repositorySyncRunId])
+  @@index([createdById, createdAt])
+  @@index([removedById, removedAt])
+}
+
+model ProjectPlanImpactSuggestion {
+  id                  String                  @id @default(uuid()) @db.Uuid
+  projectId           String                  @db.Uuid
+  repositorySyncRunId String                  @db.Uuid
+  status              ProjectPlanImpactStatus @default(proposed)
+  title               String                  @db.VarChar(160)
+  summary             String                  @db.Text
+  evidenceSnapshot    Json                    @db.JsonB
+  evidenceFingerprint String                  @db.Char(64)
+  createdAt           DateTime                @default(now())
+  decidedAt           DateTime?
+  decidedById         String?                 @db.Uuid
+  project             Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  repositorySyncRun   ProjectGitHubSyncRun    @relation(fields: [projectId, repositorySyncRunId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
+  decidedBy           AppUser?                @relation("ProjectPlanImpactDecidedBy", fields: [decidedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, repositorySyncRunId])
+  @@index([projectId, status, createdAt])
+  @@index([decidedById, decidedAt])
 }
 
 model ProjectPlanAudit {

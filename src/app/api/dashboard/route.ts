@@ -4,6 +4,7 @@ import { handleApiError } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 import { accessibleProjectWhere } from "@/lib/access-control";
+import { getProjectOperationsSummaries } from "@/lib/project-operations";
 
 export const dynamic = "force-dynamic";
 
@@ -115,6 +116,16 @@ export async function GET(request: Request) {
     ]);
 
     const verifiedProviders = providers.filter((provider) => provider.status === "verified");
+    const projectOperations = await getProjectOperationsSummaries(projects.map((project) => project.id), 3, db);
+    const operations = projects.map((project) => ({ project: { id: project.id, name: project.name }, health: projectOperations.get(project.id)! }));
+    const operationsSummary = operations.reduce((current, entry) => ({
+      atRiskProjects: current.atRiskProjects + (entry.health.status === "atRisk" ? 1 : 0),
+      overdueWorkItems: current.overdueWorkItems + entry.health.counts.overdue,
+      blockedWorkItems: current.blockedWorkItems + entry.health.counts.blocked,
+      pendingRecommendations: current.pendingRecommendations + entry.health.counts.pendingRecommendations,
+      openImpactSuggestions: current.openImpactSuggestions + entry.health.counts.openImpacts,
+      pendingActionApprovals: current.pendingActionApprovals + entry.health.counts.pendingApprovals,
+    }), { atRiskProjects: 0, overdueWorkItems: 0, blockedWorkItems: 0, pendingRecommendations: 0, openImpactSuggestions: 0, pendingActionApprovals: 0 });
     const summary = projects.reduce(
       (current, project) => ({
         confirmedItems: current.confirmedItems + project._count.items,
@@ -146,9 +157,14 @@ export async function GET(request: Request) {
           embeddingProviders: verifiedProviders.filter(
             (provider) => provider.defaultEmbeddingModelId !== null && provider.embeddingDimensions !== null,
           ).length,
+          ...operationsSummary,
         },
         projects: publicProjects,
         recentJobs: publicRecentJobs,
+        operations: operations
+          .filter((entry) => entry.health.status !== "healthy")
+          .sort((left, right) => (left.health.status === "atRisk" ? 0 : 1) - (right.health.status === "atRisk" ? 0 : 1) || right.health.counts.overdue - left.health.counts.overdue)
+          .slice(0, 8),
       },
       { headers: { "cache-control": "no-store" } },
     );

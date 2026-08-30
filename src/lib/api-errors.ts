@@ -65,12 +65,19 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_PLAN_OBJECTIVE_NOT_FOUND: [404, "项目目标不存在"],
       PROJECT_PLAN_WORK_ITEM_NOT_FOUND: [404, "工作项不存在"],
       PROJECT_PLAN_DEPENDENCY_NOT_FOUND: [404, "工作项依赖不存在"],
+      PROJECT_PLAN_EVIDENCE_NOT_FOUND: [404, "可关联证据不存在、未确认或已经失效"],
+      PROJECT_PLAN_IMPACT_NOT_FOUND: [404, "仓库变更影响信号不存在"],
       PROJECT_PLAN_RECOMMENDATION_NOT_FOUND: [404, "智能体建议不存在或已变化"],
       PROJECT_PLAN_EVIDENCE_INVALID: [422, "智能体建议缺少完整、可验证的证据快照"],
+      PROJECT_PLAN_ASSIGNEE_NOT_ELIGIBLE: [422, "负责人必须是当前项目可编辑成员或工作区管理员"],
       PROJECT_PLAN_VERSION_CONFLICT: [409, "项目计划已被其他成员更新，请刷新后重试"],
       PROJECT_PLAN_STATUS_CONFLICT: [409, "当前状态不能执行该计划变更"],
+      PROJECT_PLAN_READINESS_REQUIRED: [422, "工作项开始或完成前必须设置负责人和验收标准"],
+      PROJECT_PLAN_COMPLETION_EVIDENCE_REQUIRED: [422, "工作项完成前必须至少关联一条有效证据"],
       PROJECT_PLAN_DEPENDENCY_CONFLICT: [409, "该工作项依赖已经存在"],
       PROJECT_PLAN_DEPENDENCY_CYCLE: [409, "该依赖会形成循环，不能保存"],
+      PROJECT_PLAN_EVIDENCE_CONFLICT: [409, "该证据已经关联到工作项"],
+      PROJECT_PLAN_IMPACT_CONFLICT: [409, "仓库变更影响信号已经被其他成员处理"],
     };
     const [status, message] = mapping[error.code] ?? [500, "项目计划处理失败"];
     return { status, body: { error: { code: error.code, message } } };

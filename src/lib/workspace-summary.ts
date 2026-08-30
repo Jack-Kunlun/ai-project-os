@@ -1,3 +1,5 @@
+import type { ProjectPlanHealth } from "@/lib/project-operations";
+
 export type JobKind = "assetExtract" | "githubScan" | "githubMaterialSync" | "githubProjectSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
 export type JobStatus = "queued" | "waitingConsent" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
 export type JobAttemptStatus = "running" | "succeeded" | "failed" | "unknown" | "cancelled";
@@ -79,7 +81,14 @@ export type DashboardPayload = {
     pendingAssetReviews: number;
     generationProviders: number;
     embeddingProviders: number;
+    atRiskProjects: number;
+    overdueWorkItems: number;
+    blockedWorkItems: number;
+    pendingRecommendations: number;
+    openImpactSuggestions: number;
+    pendingActionApprovals: number;
   };
   projects: WorkspaceProject[];
   recentJobs: RecentJob[];
+  operations: Array<{ project: { id: string; name: string }; health: ProjectPlanHealth }>;
 };

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 
-type RuleKind = "repositorySync" | "memoryQuality" | "memoryIndex" | "projectBrief" | "webSourceSync";
+type RuleKind = "repositorySync" | "memoryQuality" | "memoryIndex" | "projectBrief" | "webSourceSync" | "projectPlanHealth";
 type AutomationRun = { id: string; status: string; scheduledFor: string; failureCode: string | null; completedAt: string | null; result: unknown };
 type AutomationRule = {
   id: string;
@@ -23,6 +23,7 @@ const kindLabels: Record<RuleKind, string> = {
   memoryIndex: "增量记忆索引",
   projectBrief: "项目状态简报",
   webSourceSync: "网页来源刷新",
+  projectPlanHealth: "项目计划健康提醒",
 };
 
 async function responseError(response: Response, fallback: string) {
@@ -82,18 +83,20 @@ function AutomationForm({ projectId, onCreated }: { projectId: string; onCreated
   const [name, setName] = useState("每日代码仓库同步");
   const [kind, setKind] = useState<RuleKind>("repositorySync");
   const [intervalMinutes, setIntervalMinutes] = useState("1440");
+  const [dueSoonDays, setDueSoonDays] = useState("3");
+  const [includeAssignees, setIncludeAssignees] = useState(true);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   function chooseKind(value: RuleKind) {
     setKind(value);
-    setName(value === "repositorySync" ? "每日代码仓库同步" : value === "memoryQuality" ? "每日记忆质量检查" : value === "memoryIndex" ? "增量记忆索引提醒" : value === "projectBrief" ? "项目简报提醒" : "网页来源刷新");
+    setName(value === "repositorySync" ? "每日代码仓库同步" : value === "memoryQuality" ? "每日记忆质量检查" : value === "memoryIndex" ? "增量记忆索引提醒" : value === "projectBrief" ? "项目简报提醒" : value === "projectPlanHealth" ? "每日项目计划健康提醒" : "网页来源刷新");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setMessage(null);
     try {
-      const config = kind === "repositorySync" ? { linkIds: [] } : kind === "memoryIndex" ? { mode: "incremental" } : {};
+      const config = kind === "repositorySync" ? { linkIds: [] } : kind === "memoryIndex" ? { mode: "incremental" } : kind === "projectPlanHealth" ? { dueSoonDays: Number(dueSoonDays), includeAssignees } : {};
       const response = await fetch(`/api/projects/${projectId}/automations`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, kind, intervalMinutes: Number(intervalMinutes), config }) });
       if (!response.ok) throw new Error(await responseError(response, "自动化规则创建失败"));
       const rule = (await response.json() as { rule: AutomationRule }).rule;
@@ -102,7 +105,7 @@ function AutomationForm({ projectId, onCreated }: { projectId: string; onCreated
     finally { setPending(false); }
   }
 
-  return <form onSubmit={submit} className="h-fit rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">New rule</p><h2 className="mt-2 text-2xl font-semibold">添加自动化</h2><Field label="任务类型"><select value={kind} onChange={(event) => chooseKind(event.target.value as RuleKind)} className="field">{Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field><Field label="规则名称"><input value={name} onChange={(event) => setName(event.target.value)} className="field" required /></Field><Field label="执行间隔"><select value={intervalMinutes} onChange={(event) => setIntervalMinutes(event.target.value)} className="field"><option value="60">每小时</option><option value="360">每 6 小时</option><option value="720">每 12 小时</option><option value="1440">每天</option><option value="10080">每周</option></select></Field>{kind === "memoryIndex" || kind === "projectBrief" ? <p className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-700">此任务涉及模型数据发送。到期后系统只生成待确认通知，由你在页面核对模型、范围和外发内容。</p> : null}{message ? <p role="status" className="mt-4 text-xs text-slate-600">{message}</p> : null}<button disabled={pending} className="mt-6 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">{pending ? "保存中…" : "保存自动化规则"}</button><style jsx>{`.field{margin-top:.5rem;width:100%;border-radius:.75rem;border:1px solid #cbd5e1;background:white;padding:.72rem .9rem;font-size:.875rem;color:#0f172a;outline:none}.field:focus{border-color:#818cf8;box-shadow:0 0 0 3px rgba(129,140,248,.14)}`}</style></form>;
+  return <form onSubmit={submit} className="h-fit rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">New rule</p><h2 className="mt-2 text-2xl font-semibold">添加自动化</h2><Field label="任务类型"><select value={kind} onChange={(event) => chooseKind(event.target.value as RuleKind)} className="field">{Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field><Field label="规则名称"><input value={name} onChange={(event) => setName(event.target.value)} className="field" required /></Field><Field label="执行间隔"><select value={intervalMinutes} onChange={(event) => setIntervalMinutes(event.target.value)} className="field"><option value="60">每小时</option><option value="360">每 6 小时</option><option value="720">每 12 小时</option><option value="1440">每天</option><option value="10080">每周</option></select></Field>{kind === "projectPlanHealth" ? <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 p-4"><Field label="即将到期窗口"><select value={dueSoonDays} onChange={(event) => setDueSoonDays(event.target.value)} className="field"><option value="1">1 天</option><option value="3">3 天</option><option value="7">7 天</option><option value="14">14 天</option></select></Field><label className="mt-4 flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={includeAssignees} onChange={(event) => setIncludeAssignees(event.target.checked)} />同时提醒相关负责人</label><p className="mt-3 text-xs leading-5 text-indigo-700">此检查只读取本地计划、审批和证据状态，不调用模型，也不发送项目内容到外部服务。</p></div> : null}{kind === "memoryIndex" || kind === "projectBrief" ? <p className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-700">此任务涉及模型数据发送。到期后系统只生成待确认通知，由你在页面核对模型、范围和外发内容。</p> : null}{message ? <p role="status" className="mt-4 text-xs text-slate-600">{message}</p> : null}<button disabled={pending} className="mt-6 flex min-h-11 w-full items-center justify-center rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">{pending ? "保存中…" : "保存自动化规则"}</button><style jsx>{`.field{margin-top:.5rem;width:100%;border-radius:.75rem;border:1px solid #cbd5e1;background:white;padding:.72rem .9rem;font-size:.875rem;color:#0f172a;outline:none}.field:focus{border-color:#818cf8;box-shadow:0 0 0 3px rgba(129,140,248,.14)}`}</style></form>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="mt-5 block text-sm font-medium text-slate-700">{label}{children}</label>; }

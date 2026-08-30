@@ -10,6 +10,7 @@ import {
 } from "../src/lib/project-lifecycle";
 import { exportProjectData } from "../src/lib/project-export";
 import { getProjectUsageSummary } from "../src/lib/project-usage";
+import { hashSourceContent } from "../src/lib/source";
 
 const shouldRun = process.env.PROJECT_LIFECYCLE_POSTGRES_GATE === "1";
 
@@ -66,14 +67,16 @@ test(
         where: { id: job.id },
         data: { status: "cancelled", stage: "cancelled", completedAt: new Date() },
       });
+      const sourceText = "exported project evidence";
+      const sourceHash = hashSourceContent(sourceText);
       await db.projectSource.create({
         data: {
           projectId,
           kind: "manual",
           originScope: "project",
-          contentText: "exported project evidence",
-          contentHash: "c".repeat(64),
-          manualContentDedupeKey: "c".repeat(64),
+          contentText: sourceText,
+          contentHash: sourceHash,
+          manualContentDedupeKey: sourceHash,
         },
       });
 

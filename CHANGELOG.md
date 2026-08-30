@@ -2,6 +2,10 @@
 
 本项目采用语义化版本。面向用户的能力、限制和升级要求以对应版本的发布说明为准。
 
+## [Unreleased]
+
+- 修复 ProjectSource provenance PostgreSQL gate 与 integrity smoke 对第49个迁移的兼容/一致性验证。
+
 ## [5.0.0] - 2026-08-30
 
 发布说明：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)

@@ -9,6 +9,7 @@ import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
 import { reviewWebAiCandidate, runAutoExtractJob } from "../src/lib/web-auto-extract";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
+import { hashSourceContent } from "../src/lib/source";
 import { runRagAnswerJob, runSemanticSearchJob } from "../src/lib/web-rag";
 
 const shouldRun = process.env.WEB_AI_POSTGRES_GATE === "1";
@@ -90,14 +91,16 @@ test(
       await db.project.create({
         data: { id: projectId, name: `V2 workflow ${suffix}`, slug: `v2-workflow-${suffix}` },
       });
+      const sourceText = "会议结论：项目决定采用统一记忆索引。所有回答必须保留证据引用。";
+      const sourceHash = hashSourceContent(sourceText);
       const source = await db.projectSource.create({
         data: {
           projectId,
           kind: "manual",
           originScope: "project",
-          contentText: "会议结论：项目决定采用统一记忆索引。所有回答必须保留证据引用。",
-          contentHash: "c".repeat(64),
-          manualContentDedupeKey: "c".repeat(64),
+          contentText: sourceText,
+          contentHash: sourceHash,
+          manualContentDedupeKey: sourceHash,
         },
       });
       const provider = await createProviderConnection({

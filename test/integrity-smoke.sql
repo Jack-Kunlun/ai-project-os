@@ -42,8 +42,8 @@ VALUES
 
 INSERT INTO "ProjectSource" ("id", "projectId", "kind", "contentText", "contentHash")
 VALUES
-  ('11111111-1111-4111-8111-111111111112', '11111111-1111-4111-8111-111111111111', 'manual', 'source A', 'integrity-smoke-source-a'),
-  ('22222222-2222-4222-8222-222222222223', '22222222-2222-4222-8222-222222222222', 'manual', 'source B', 'integrity-smoke-source-b');
+  ('11111111-1111-4111-8111-111111111112', '11111111-1111-4111-8111-111111111111', 'manual', 'source A', encode(digest(convert_to('source A', 'UTF8'), 'sha256'), 'hex')),
+  ('22222222-2222-4222-8222-222222222223', '22222222-2222-4222-8222-222222222222', 'manual', 'source B', encode(digest(convert_to('source B', 'UTF8'), 'sha256'), 'hex'));
 
 INSERT INTO "ProjectScan" ("id", "projectId", "trigger", "status")
 VALUES
@@ -63,7 +63,11 @@ VALUES
 INSERT INTO "ProjectSnapshot" ("id", "projectId", "scanId", "payload")
 VALUES ('11111111-1111-4111-8111-111111111116', '11111111-1111-4111-8111-111111111111', '11111111-1111-4111-8111-111111111113', '{}'::jsonb);
 
-SET CONSTRAINTS ALL IMMEDIATE;
+SET CONSTRAINTS
+  "ProjectItem_projectId_sourceId_fkey",
+  "ProjectItem_projectId_supersedesItemId_fkey",
+  "ProjectSnapshot_projectId_scanId_fkey"
+IMMEDIATE;
 \echo 'same-project relationships: PASS'
 
 -- A ProjectItem in A must not point to B's source. The deferred constraint is

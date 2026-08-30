@@ -12,6 +12,7 @@ import { createProjectPlanEntry, getProjectPlan } from "../src/lib/project-plan"
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
 import { claimProjectJob, reconcileProjectJob } from "../src/lib/project-workflow";
+import { hashSourceContent } from "../src/lib/source";
 import {
   listProjectIntelligence,
   PROJECT_AGENT_TOOLS,
@@ -127,14 +128,16 @@ test(
       await db.project.create({
         data: { id: projectId, name: `Intelligence ${suffix}`, slug: `intelligence-${suffix}` },
       });
+      const sourceText = "会议结论：项目决定采用统一记忆索引。所有回答必须保留证据引用。";
+      const sourceHash = hashSourceContent(sourceText);
       const source = await db.projectSource.create({
         data: {
           projectId,
           kind: "manual",
           originScope: "project",
-          contentText: "会议结论：项目决定采用统一记忆索引。所有回答必须保留证据引用。",
-          contentHash: "d".repeat(64),
-          manualContentDedupeKey: "d".repeat(64),
+          contentText: sourceText,
+          contentHash: sourceHash,
+          manualContentDedupeKey: sourceHash,
         },
       });
       await db.$transaction(async (tx) => {

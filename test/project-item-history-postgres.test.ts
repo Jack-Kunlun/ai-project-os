@@ -24,6 +24,7 @@ const projectId = "11111111-1111-4111-8111-111111111111";
 const otherProjectId = "22222222-2222-4222-8222-222222222222";
 const sourceId = "33333333-3333-4333-8333-333333333333";
 const otherSourceId = "44444444-4444-4444-8444-444444444444";
+const hashMismatchSourceId = "77777777-7777-4777-8777-777777777777";
 const legacyItemId = "55555555-5555-4555-8555-555555555555";
 const sourceText = "First evidence. Second evidence.";
 const sourceHash = hashSourceContent(sourceText);
@@ -249,6 +250,23 @@ test(
             },
           ],
         });
+
+        const hashMismatchText = "Valid source content";
+        const hashMismatchHash = hashSourceContent(hashMismatchText);
+        await assert.rejects(
+          () => raw.query(
+            `INSERT INTO "ProjectSource"
+               ("id", "projectId", "kind", "originScope", "contentText", "contentHash", "manualContentDedupeKey")
+             VALUES ($1, $2, 'manual', 'project', $3, $4, $5)`,
+            [hashMismatchSourceId, projectId, hashMismatchText, "0".repeat(64), hashMismatchHash],
+          ),
+          (error: unknown) => {
+            if (typeof error !== "object" || error === null) return false;
+            const candidate = error as { code?: string; message?: string };
+            return candidate.code === "23514"
+              && candidate.message?.includes("project source content hash does not match content") === true;
+          },
+        );
 
         const chunkService = createSourceChunkService({ db: prisma });
         const [firstChunks, replayedChunks] = await Promise.all([

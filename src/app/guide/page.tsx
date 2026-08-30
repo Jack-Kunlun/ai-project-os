@@ -19,11 +19,12 @@ const workflow = [
   { number: "04", title: "接入资料", detail: "上传文件，添加网页和多个代码仓库。", href: "#project-data" },
   { number: "05", title: "建立记忆", detail: "审核 AI 候选，构建兼容的语义索引。", href: "#memory" },
   { number: "06", title: "维护质量", detail: "检查冲突、过期与低置信度记忆。", href: "#quality" },
-  { number: "07", title: "设置自动化", detail: "定时同步来源、检查计划健康并接收通知。", href: "#automation" },
-  { number: "08", title: "管理动作", detail: "设置项目策略，完成 Owner 审批并核对审计。", href: "#actions" },
-  { number: "09", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
-  { number: "10", title: "维护项目计划", detail: "落实负责人、期限、验收、证据和仓库变化核对。", href: "#plan" },
-  { number: "11", title: "团队协作", detail: "管理角色、邀请和企业 OIDC 登录。", href: "#team" },
+  { number: "07", title: "核对项目状态", detail: "治理事实关系、替代链、冲突和不可变状态快照。", href: "#world" },
+  { number: "08", title: "设置自动化", detail: "定时同步来源、检查计划健康并接收通知。", href: "#automation" },
+  { number: "09", title: "管理动作", detail: "设置项目策略，完成 Owner 审批并核对审计。", href: "#actions" },
+  { number: "10", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
+  { number: "11", title: "维护项目计划", detail: "落实负责人、期限、验收、证据和仓库变化核对。", href: "#plan" },
+  { number: "12", title: "团队协作", detail: "管理角色、邀请和企业 OIDC 登录。", href: "#team" },
 ] as const;
 
 const providerRows = [
@@ -44,7 +45,7 @@ export default async function GuidePage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-600">Start to finish</p>
             <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight tracking-[-0.04em] sm:text-6xl">从第一次配置，到可信的项目回答。</h1>
-            <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600">按推荐顺序完成连接、资料、智能记忆、自动化、受控动作、项目计划和团队权限。每一步都保留来源、审核状态和证据引用；只有你在页面明确确认后，相关内容才会发送给模型供应商。</p>
+            <p className="mt-6 max-w-3xl text-base leading-8 text-slate-600">按推荐顺序完成连接、资料、智能记忆、项目状态、自动化、受控动作、项目计划和团队权限。每一步都保留来源、审核状态和证据引用；只有你在页面明确确认后，相关内容才会发送给模型供应商。</p>
           </div>
           <div className="rounded-3xl bg-slate-950 p-6 text-white">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Before you start</p>
@@ -78,10 +79,10 @@ export default async function GuidePage() {
           <GuideSection id="dashboard" eyebrow="Command center" title="从 Dashboard 开始工作">
             <p className="text-sm leading-7 text-slate-600">Dashboard 不是静态欢迎页，而是每次打开系统后的工作入口。它会把跨项目状态压缩成当前最值得处理的一步，减少在不同页面之间来回查找。</p>
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <InfoCard title="先看推荐下一步">存在逾期或受阻计划时，系统优先链接到对应项目；否则再按模型连接、项目、四条 AI 路由、待确认文件和智能记忆索引判断下一步。</InfoCard>
+              <InfoCard title="先看推荐下一步">项目世界状态存在风险时，系统优先链接到对应项目；否则再按计划风险、模型连接、项目、四条 AI 路由、待确认文件和智能记忆索引判断下一步。</InfoCard>
               <InfoCard title="检查工作空间就绪度">四步进度用于判断基础能力是否真的可用；容器健康但模型或索引缺失时，不会显示为完整就绪。</InfoCard>
               <InfoCard title="继续最近任务">文件识别、仓库扫描、同步、抽取、索引、问答、简报和智能体运行会显示持久化状态，可直接回到所属项目。</InfoCard>
-              <InfoCard title="处理项目运营提醒">Dashboard 汇总逾期、受阻、仓库变化待评估和动作待审批；项目搜索、创建和完整列表仍位于独立“项目”页。</InfoCard>
+              <InfoCard title="处理跨项目信号">Dashboard 分开汇总项目世界状态和计划运营提醒；项目搜索、创建和完整列表仍位于独立“项目”页。</InfoCard>
             </div>
             <div className="mt-5 flex flex-wrap gap-3"><Link href="/dashboard" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">打开 Dashboard</Link><Link href="/projects" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">打开项目</Link></div>
           </GuideSection>
@@ -198,6 +199,16 @@ export default async function GuidePage() {
             <Callout tone="amber" title="质量分不是事实真伪判断">分数用于排序治理工作，不会自动删除、合并或替代事实。冲突和重复仍需要人结合来源处理。</Callout>
           </GuideSection>
 
+          <GuideSection id="world" eyebrow="Temporal project world model" title="把已确认事实治理为当前项目状态">
+            <Step number="1" title="先读确定性状态">进入项目“项目状态”。系统只用当前有效、已确认事实，结合开放冲突和项目计划健康度计算“运行正常”“需要关注”“存在风险”或“资料不足”；这个状态不是模型猜测。</Step>
+            <Step number="2" title="核对事实与证据版本">每张事实卡都显示类型、来源、当前修订、证据清单指纹和关联工作项。尚未生效、已过期、来源退役或被替代的事实保留在历史区，不参与当前状态。</Step>
+            <Step number="3" title="人工建立有类型的关系">Editor 或 Owner 可建立支持、冲突、依赖、阻断、因果、解决或相关关系。关系固定双方当前修订；端点事实再发生变化时，旧关系自动显示为“版本已变化”，不会静默跟随新内容。</Step>
+            <Step number="4" title="用新事实替代旧事实">选择两条同类型当前事实并填写理由。确认后旧事实转为只读历史，新事实记录前任；替代链不能重复、分叉或形成循环，也不能撤回成旧事实。</Step>
+            <Step number="5" title="固化不可变状态快照">点击“固化当前状态”保存当时的状态、事实修订、关系、质量和计划输入指纹。输入没有变化时不会重复创建快照；快照和治理审计只追加、不覆盖。</Step>
+            <Callout tone="amber" title="系统不会自动建立世界模型事实">AI 抽取仍只产生候选；事实确认、关系建立、替代和快照固化都需要有权限的用户在页面操作。智能简报与只读智能体会读取同一确定性状态，但不能更改它，也不能据此执行代码、Git、Shell、MCP 或部署动作。</Callout>
+            <div className="mt-5"><Link href="/projects" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">选择项目并打开项目状态</Link></div>
+          </GuideSection>
+
           <GuideSection id="automation" eyebrow="Persistent automation" title="让来源维护按计划运行">
             <Step number="1" title="选择可自动执行的任务">仓库同步、网页刷新和记忆质量检查可以由独立 Worker 自动运行并保存租约与结果。</Step>
             <Step number="2" title="理解模型任务的停点">记忆索引和项目简报到期时只产生待确认通知；进入对应页面核对供应商、模型和输入范围后再发送。</Step>
@@ -225,7 +236,7 @@ export default async function GuidePage() {
 
           <GuideSection id="agent" eyebrow="Project intelligence" title="生成简报并运行只读智能体">
             <Step number="1" title="先检查就绪状态">页面必须同时显示生成模型路由、向量模型路由和兼容记忆索引已经就绪。缺少任意一项时，运行按钮保持禁用。</Step>
-            <Step number="2" title="生成项目当前状态">勾选当次传输确认后生成简报。结果按进展、决策、问题、风险、关注事项和待确认问题组织，并保存证据快照。</Step>
+            <Step number="2" title="生成项目当前状态">勾选当次传输确认后生成简报。简报使用“项目状态”的确定性状态、当前事实、关系与输入指纹，结果按进展、决策、问题、风险、关注事项和待确认问题组织，并保存证据快照；模型不能覆盖确定性状态。</Step>
             <Step number="3" title="提出一个可调查的问题">适合询问“当前最大风险是什么”“哪些决策仍缺少证据”“最近完成了什么”。问题越具体，检索计划越有效。</Step>
             <Step number="4" title="核对引用和轨迹">查看回答引用的证据、只读工具执行顺序、建议和不确定性。证据不足时应补资料，而不是把推测直接当作事实。</Step>
             <Callout tone="slate" title="智能体不会做什么">当前智能体没有 Shell、任意文件系统、代码修改、Git 写入、MCP 工具调用或部署权限。它也不能自行创建或批准“动作与审批”中的动作。自动化可以提醒你生成简报，但每次模型外发仍需由你在页面确认。</Callout>
@@ -255,7 +266,7 @@ export default async function GuidePage() {
 
           <GuideSection id="routine" eyebrow="Operating rhythm" title="推荐的日常更新顺序">
             <div className="rounded-2xl bg-slate-950 p-6 text-sm leading-7 text-slate-200">
-              新文件、网页或代码变化 → 解析/刷新/扫描来源 → 自动抽取 → 人工审核 → 重建语义索引 → 核对仓库变化 → 更新工作项负责人/验收/证据 → 处理计划健康提醒 → 生成新简报或提问
+              新文件、网页或代码变化 → 解析/刷新/扫描来源 → 自动抽取 → 人工审核 → 核对事实关系与替代链 → 重建语义索引 → 核对仓库变化 → 更新工作项负责人/验收/证据 → 固化项目状态 → 生成新简报或提问
             </div>
             <p className="mt-5 text-sm leading-7 text-slate-600">如果只更新了人工确认条目但没有重建索引，项目概览和已确认条目工具仍能读取最新状态，但语义记忆仍基于上一代索引。为了让检索和智能体结果一致，建议完成整条更新链路。</p>
           </GuideSection>
@@ -273,6 +284,7 @@ export default async function GuidePage() {
               <InfoCard title="OIDC 登录被拒绝">检查回调地址、Issuer、Client、Secret、Scopes 和 Token 认证方式；相同邮箱的本地账号不会自动合并。</InfoCard>
               <InfoCard title="自动化没有运行">确认 Worker 正在运行、规则已启用、项目未归档且执行时间已到。连续失败三次的规则会自动暂停。</InfoCard>
               <InfoCard title="工作项不能开始或完成">开始前补齐当前可编辑负责人和验收标准；完成前再关联至少一条活动证据。证据显示“需复核”时先核对来源变化。</InfoCard>
+              <InfoCard title="关系显示版本已变化">关系绑定的是建立时双方的精确修订。先核对事实新版本，再退役旧关系并按当前证据建立新关系；系统不会自动迁移关系。</InfoCard>
               <InfoCard title="动作一直等待或失败">等待审批时联系项目 Owner；超过 24 小时需要重新创建。排队后检查 Worker，失败后先查看安全错误码和审计；系统不会自动重试外部读取。</InfoCard>
               <InfoCard title="按钮保持禁用">确认前置配置是否就绪、必填内容是否完成，并勾选当前操作的传输确认复选框。</InfoCard>
               <InfoCard title="任务失败或状态变化">刷新页面查看持久化任务状态。失败不会替换上一代已发布仓库数据或索引。</InfoCard>

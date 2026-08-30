@@ -37,12 +37,21 @@ const grantSchema = z.object({
 }).strict();
 
 const revokeSchema = z.object({ expectedUpdatedAt: z.string().datetime({ offset: true }) }).strict();
+const attestSchema = z.object({
+  note: z.string().trim().max(2_000).nullable().optional(),
+  evidence: z.record(z.string(), z.unknown()).default({}),
+}).strict();
+const revokeAttestationSchema = z.object({
+  expectedAttestedAt: z.string().datetime({ offset: true }),
+  note: z.string().trim().max(2_000).nullable().optional(),
+}).strict();
 const clientCallSchema = z.object({ grantId: z.string().uuid(), arguments: z.unknown() }).strict();
 const snapshotSchema = z.object({
   grantId: z.string().uuid(),
   connectionId: z.string().uuid(),
   toolName: z.string().regex(TOOL_NAME_PATTERN),
   toolDefinitionId: z.string().uuid(),
+  attestationId: z.string().uuid(),
   toolDefinitionFingerprint: z.string().regex(FINGERPRINT_PATTERN),
   networkFingerprint: z.string().regex(FINGERPRINT_PATTERN),
   credentialFingerprint: z.string().regex(FINGERPRINT_PATTERN),
@@ -75,18 +84,60 @@ const connectionSelect = {
       inputSchema: true,
       outputSchema: true,
       annotations: true,
-      readOnlyEligible: true,
+      remoteReadOnlyHint: true,
       definitionFingerprint: true,
       discoveredAt: true,
+      attestations: {
+        orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }],
+        take: 1,
+        select: {
+          id: true,
+          definitionFingerprint: true,
+          networkFingerprint: true,
+          credentialFingerprint: true,
+          attestedAt: true,
+          audits: { orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 8, select: { event: true } },
+        },
+      },
     },
   },
 } satisfies Prisma.McpConnectionSelect;
+
+type McpDb = PrismaClient | Prisma.TransactionClient;
+type McpFingerprintTuple = Readonly<{
+  connectionId: string;
+  toolDefinitionId: string;
+  toolName: string;
+  definitionFingerprint: string;
+  networkFingerprint: string;
+  credentialFingerprint: string;
+}>;
+
+const attestationPublicSelect = {
+  id: true,
+  connectionId: true,
+  toolDefinitionId: true,
+  toolName: true,
+  definitionFingerprint: true,
+  networkFingerprint: true,
+  credentialFingerprint: true,
+  verifiedBy: { select: { id: true, username: true, displayName: true } },
+  note: true,
+  evidence: true,
+  attestedAt: true,
+  createdAt: true,
+  audits: {
+    orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
+    select: { id: true, event: true, actorId: true, details: true, createdAt: true },
+  },
+} satisfies Prisma.McpToolAttestationSelect;
 
 export type McpActionSnapshot = Readonly<{
   grantId: string;
   connectionId: string;
   toolName: string;
   toolDefinitionId: string;
+  attestationId: string;
   toolDefinitionFingerprint: string;
   networkFingerprint: string;
   credentialFingerprint: string;
@@ -115,6 +166,146 @@ function stableInputObject(value: unknown): Readonly<Record<string, JsonValue>> 
   const normalized = stableMcpJson(value);
   if (typeof normalized !== "object" || normalized === null || Array.isArray(normalized)) return failMcp("MCP_TOOL_INPUT_INVALID");
   return normalized;
+}
+
+async function activeMcpAttestation(db: McpDb, tuple: McpFingerprintTuple) {
+  const candidates = await db.mcpToolAttestation.findMany({
+    where: {
+      connectionId: tuple.connectionId,
+      toolDefinitionId: tuple.toolDefinitionId,
+      toolName: tuple.toolName,
+      definitionFingerprint: tuple.definitionFingerprint,
+      networkFingerprint: tuple.networkFingerprint,
+      credentialFingerprint: tuple.credentialFingerprint,
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    include: { audits: { select: { event: true } } },
+  });
+  const latest = candidates[0];
+  return latest !== undefined && latest.audits.some((audit) => audit.event === "attested") && !latest.audits.some((audit) => audit.event === "revoked") ? latest : null;
+}
+
+function assertMcpAdmin(actor: AccessUser): void {
+  if (actor.role !== "admin") return failMcp("MCP_ADMIN_REQUIRED");
+}
+
+function attestationEvidence(value: unknown): Prisma.InputJsonValue {
+  const normalized = stableMcpJson(value);
+  if (typeof normalized !== "object" || normalized === null || Array.isArray(normalized) || Buffer.byteLength(JSON.stringify(normalized), "utf8") > 16 * 1024) {
+    return failMcp("MCP_INVALID_INPUT");
+  }
+  return normalized as Prisma.InputJsonValue;
+}
+
+async function loadMcpAttestationDefinition(db: McpDb, toolDefinitionId: string) {
+  const definition = await db.mcpToolDefinition.findUnique({
+    where: { id: toolDefinitionId },
+    include: { connection: { include: { credential: true } } },
+  });
+  if (definition === null) return failMcp("MCP_TOOL_NOT_FOUND");
+  if (!definition.current) return failMcp("MCP_TOOL_DEFINITION_STALE");
+  if (!definition.remoteReadOnlyHint) return failMcp("MCP_TOOL_NOT_READ_ONLY");
+  if (definition.connection.status !== "verified" || definition.connection.resolvedAddressFingerprint === null) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
+  return {
+    definition,
+    tuple: {
+      connectionId: definition.connectionId,
+      toolDefinitionId: definition.id,
+      toolName: definition.name,
+      definitionFingerprint: definition.definitionFingerprint,
+      networkFingerprint: definition.connection.resolvedAddressFingerprint,
+      credentialFingerprint: definition.connection.credential?.secretFingerprint ?? noCredentialFingerprint(),
+    } satisfies McpFingerprintTuple,
+  };
+}
+
+export async function attestMcpToolDefinition(
+  toolDefinitionIdInput: unknown,
+  input: unknown,
+  actor: AccessUser,
+  db: PrismaClient = getDb(),
+  connectionIdInput?: unknown,
+) {
+  assertMcpAdmin(actor);
+  const toolDefinitionId = uuid(toolDefinitionIdInput);
+  const expectedConnectionId = connectionIdInput === undefined ? null : uuid(connectionIdInput);
+  const parsed = attestSchema.safeParse(input);
+  if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
+  const evidence = attestationEvidence(parsed.data.evidence);
+  const loaded = await loadMcpAttestationDefinition(db, toolDefinitionId);
+  if (expectedConnectionId !== null && loaded.tuple.connectionId !== expectedConnectionId) return failMcp("MCP_TOOL_NOT_FOUND");
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${loaded.tuple.connectionId}::text, 32010003))`);
+    const current = await loadMcpAttestationDefinition(tx, toolDefinitionId);
+    if (JSON.stringify(current.tuple) !== JSON.stringify(loaded.tuple)) return failMcp("MCP_TOOL_DEFINITION_STALE");
+    const now = new Date();
+    const attestation = await tx.mcpToolAttestation.create({
+      data: {
+        id: randomUUID(),
+        connectionId: current.tuple.connectionId,
+        toolDefinitionId: current.tuple.toolDefinitionId,
+        toolName: current.tuple.toolName,
+        definitionFingerprint: current.tuple.definitionFingerprint,
+        networkFingerprint: current.tuple.networkFingerprint,
+        credentialFingerprint: current.tuple.credentialFingerprint,
+        verifiedById: actor.id,
+        note: parsed.data.note ?? null,
+        evidence,
+        attestedAt: now,
+        createdAt: now,
+      },
+    });
+    await tx.mcpToolAttestationAudit.create({
+      data: {
+        id: randomUUID(),
+        attestationId: attestation.id,
+        connectionId: current.tuple.connectionId,
+        toolDefinitionId: current.tuple.toolDefinitionId,
+        event: "attested",
+        actorId: actor.id,
+        definitionFingerprint: current.tuple.definitionFingerprint,
+        networkFingerprint: current.tuple.networkFingerprint,
+        credentialFingerprint: current.tuple.credentialFingerprint,
+        details: { note: parsed.data.note ?? null, evidence },
+      },
+    });
+    return tx.mcpToolAttestation.findUniqueOrThrow({ where: { id: attestation.id }, select: attestationPublicSelect });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function revokeMcpToolAttestation(
+  attestationIdInput: unknown,
+  input: unknown,
+  actor: AccessUser,
+  db: PrismaClient = getDb(),
+) {
+  assertMcpAdmin(actor);
+  const attestationId = uuid(attestationIdInput);
+  const parsed = revokeAttestationSchema.safeParse(input);
+  if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${attestationId}::text, 32010004))`);
+    const existing = await tx.mcpToolAttestation.findUnique({ where: { id: attestationId }, include: { audits: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] } } });
+    if (existing === null) return failMcp("MCP_ATTESTATION_NOT_FOUND");
+    if (existing.attestedAt.getTime() !== timestamp(parsed.data.expectedAttestedAt).getTime()) return failMcp("MCP_ATTESTATION_CONFLICT");
+    if (!existing.audits.some((audit) => audit.event === "revoked")) {
+      await tx.mcpToolAttestationAudit.create({
+        data: {
+          id: randomUUID(),
+          attestationId: existing.id,
+          connectionId: existing.connectionId,
+          toolDefinitionId: existing.toolDefinitionId,
+          event: "revoked",
+          actorId: actor.id,
+          definitionFingerprint: existing.definitionFingerprint,
+          networkFingerprint: existing.networkFingerprint,
+          credentialFingerprint: existing.credentialFingerprint,
+          details: { note: parsed.data.note ?? null },
+        },
+      });
+    }
+    return tx.mcpToolAttestation.findUniqueOrThrow({ where: { id: existing.id }, select: attestationPublicSelect });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 export async function listMcpConnections(db: PrismaClient = getDb()) {
@@ -233,7 +424,7 @@ export async function discoverMcpConnectionTools(connectionIdInput: unknown, db:
               inputSchema: tool.inputSchema as Prisma.InputJsonValue,
               outputSchema: tool.outputSchema === null ? Prisma.DbNull : tool.outputSchema as Prisma.InputJsonValue,
               annotations: tool.annotations as Prisma.InputJsonValue,
-              readOnlyEligible: tool.readOnlyEligible, definitionFingerprint: tool.definitionFingerprint,
+              remoteReadOnlyHint: tool.remoteReadOnlyHint, definitionFingerprint: tool.definitionFingerprint,
               current: true, discoveredAt: now, supersededAt: null,
             },
           });
@@ -250,7 +441,7 @@ export async function discoverMcpConnectionTools(connectionIdInput: unknown, db:
         select: connectionSelect,
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    return Object.freeze({ connection: stored, discoveredCount: discovery.tools.length, eligibleCount: discovery.tools.filter((tool) => tool.readOnlyEligible).length, rejectedCount: discovery.rejectedCount });
+    return Object.freeze({ connection: stored, discoveredCount: discovery.tools.length, eligibleCount: discovery.tools.filter((tool) => tool.remoteReadOnlyHint).length, rejectedCount: discovery.rejectedCount });
   } catch (error) {
     const code = error instanceof McpCapabilityError ? error.code : "MCP_TRANSPORT_FAILED";
     const marked = await db.mcpConnection.updateMany({
@@ -268,6 +459,10 @@ const grantSelect = {
   connectionId: true,
   toolName: true,
   toolDefinitionId: true,
+  attestationId: true,
+  definitionFingerprint: true,
+  networkFingerprint: true,
+  credentialFingerprint: true,
   status: true,
   acknowledgedAt: true,
   revokedAt: true,
@@ -277,10 +472,11 @@ const grantSelect = {
   toolDefinition: {
     select: {
       id: true, name: true, title: true, description: true, inputSchema: true, annotations: true,
-      readOnlyEligible: true, definitionFingerprint: true, current: true,
+      remoteReadOnlyHint: true, definitionFingerprint: true, current: true,
       connection: { select: { id: true, name: true, status: true, endpointUrl: true } },
     },
   },
+  attestation: { select: { id: true, definitionFingerprint: true, networkFingerprint: true, credentialFingerprint: true, attestedAt: true } },
   audits: { orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 8, select: { id: true, event: true, definitionFingerprint: true, details: true, createdAt: true, actor: { select: { username: true, displayName: true } } } },
 } satisfies Prisma.ProjectMcpToolGrantSelect;
 
@@ -295,7 +491,12 @@ export async function getProjectMcpToolCenter(projectIdInput: unknown, actor: Ac
       orderBy: [{ connection: { name: "asc" } }, { name: "asc" }],
       select: {
         id: true, name: true, title: true, description: true, inputSchema: true, annotations: true,
-        readOnlyEligible: true, definitionFingerprint: true, discoveredAt: true,
+        remoteReadOnlyHint: true, definitionFingerprint: true, discoveredAt: true,
+        attestations: {
+          orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }],
+          take: 1,
+          select: { id: true, definitionFingerprint: true, networkFingerprint: true, credentialFingerprint: true, attestedAt: true, audits: { select: { event: true } } },
+        },
         connection: { select: { id: true, name: true, endpointUrl: true, status: true, lastDiscoveredAt: true } },
       },
     }),
@@ -304,9 +505,18 @@ export async function getProjectMcpToolCenter(projectIdInput: unknown, actor: Ac
   ]);
   if (project === null) return failMcp("MCP_GRANT_NOT_FOUND");
   const currentIds = new Set(definitions.map((definition) => definition.id));
+  const definitionViews = definitions.map(({ attestations, ...definition }) => {
+    const latestAttestation = attestations[0];
+    const attested = definition.connection.status === "verified"
+      && latestAttestation !== undefined
+      && latestAttestation.definitionFingerprint === definition.definitionFingerprint
+      && latestAttestation.audits.some((audit) => audit.event === "attested")
+      && !latestAttestation.audits.some((audit) => audit.event === "revoked");
+    return Object.freeze({ ...definition, attested, attestationId: attested ? latestAttestation.id : null });
+  });
   return Object.freeze({
-    definitions,
-    grants: grants.map((grant) => Object.freeze({ ...grant, stale: grant.status === "active" && (!currentIds.has(grant.toolDefinitionId) || grant.toolDefinition.connection.status !== "verified") })),
+    definitions: definitionViews,
+    grants: grants.map((grant) => Object.freeze({ ...grant, stale: grant.status === "active" && (!currentIds.has(grant.toolDefinitionId) || grant.toolDefinition.connection.status !== "verified" || grant.attestationId === null || grant.attestation === null) })),
     canManage: permission === "owner",
     canInvoke: permission === "owner" || permission === "edit",
     archived: project.archivedAt !== null,
@@ -322,20 +532,36 @@ export async function grantProjectMcpTool(projectIdInput: unknown, input: unknow
   return db.$transaction(async (tx) => {
     const definition = await tx.mcpToolDefinition.findUnique({
       where: { id: parsed.data.toolDefinitionId },
-      include: { connection: true },
+      include: { connection: { include: { credential: true } } },
     });
     if (definition === null || !definition.current) return failMcp("MCP_TOOL_NOT_FOUND");
-    if (!definition.readOnlyEligible) return failMcp("MCP_TOOL_NOT_READ_ONLY");
-    if (definition.connection.status !== "verified") return failMcp("MCP_CONNECTION_NOT_VERIFIED");
+    if (!definition.remoteReadOnlyHint) return failMcp("MCP_TOOL_NOT_READ_ONLY");
+    if (definition.connection.status !== "verified" || definition.connection.resolvedAddressFingerprint === null) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
+    const attestation = await activeMcpAttestation(tx, {
+      connectionId: definition.connectionId,
+      toolDefinitionId: definition.id,
+      toolName: definition.name,
+      definitionFingerprint: definition.definitionFingerprint,
+      networkFingerprint: definition.connection.resolvedAddressFingerprint,
+      credentialFingerprint: definition.connection.credential?.secretFingerprint ?? noCredentialFingerprint(),
+    });
+    if (attestation === null) return failMcp("MCP_TOOL_NOT_ATTESTED");
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:${definition.connectionId}:${definition.name}`}::text, 32010001))`);
     const existing = await tx.projectMcpToolGrant.findUnique({ where: { projectId_connectionId_toolName: { projectId, connectionId: definition.connectionId, toolName: definition.name } } });
     const expected = parsed.data.expectedUpdatedAt === null ? null : timestamp(parsed.data.expectedUpdatedAt);
     if ((existing === null) !== (expected === null) || (existing !== null && expected !== null && existing.updatedAt.getTime() !== expected.getTime())) return failMcp("MCP_GRANT_CONFLICT");
-    if (existing?.status === "active" && existing.toolDefinitionId === definition.id) return tx.projectMcpToolGrant.findUniqueOrThrow({ where: { id: existing.id }, select: grantSelect });
+    if (
+      existing?.status === "active"
+      && existing.toolDefinitionId === definition.id
+      && existing.attestationId === attestation.id
+      && existing.definitionFingerprint === definition.definitionFingerprint
+      && existing.networkFingerprint === definition.connection.resolvedAddressFingerprint
+      && existing.credentialFingerprint === (definition.connection.credential?.secretFingerprint ?? noCredentialFingerprint())
+    ) return tx.projectMcpToolGrant.findUniqueOrThrow({ where: { id: existing.id }, select: grantSelect });
     const now = new Date();
     const grant = existing === null
-      ? await tx.projectMcpToolGrant.create({ data: { id: randomUUID(), projectId, connectionId: definition.connectionId, toolName: definition.name, toolDefinitionId: definition.id, status: "active", managedById: actor.id, acknowledgedAt: now, revokedAt: null, createdAt: now, updatedAt: now } })
-      : await tx.projectMcpToolGrant.update({ where: { id: existing.id }, data: { toolDefinitionId: definition.id, status: "active", managedById: actor.id, acknowledgedAt: now, revokedAt: null, updatedAt: now } });
+      ? await tx.projectMcpToolGrant.create({ data: { id: randomUUID(), projectId, connectionId: definition.connectionId, toolName: definition.name, toolDefinitionId: definition.id, attestationId: attestation.id, definitionFingerprint: definition.definitionFingerprint, networkFingerprint: definition.connection.resolvedAddressFingerprint, credentialFingerprint: definition.connection.credential?.secretFingerprint ?? noCredentialFingerprint(), status: "active", managedById: actor.id, acknowledgedAt: now, revokedAt: null, createdAt: now, updatedAt: now } })
+      : await tx.projectMcpToolGrant.update({ where: { id: existing.id }, data: { toolDefinitionId: definition.id, attestationId: attestation.id, definitionFingerprint: definition.definitionFingerprint, networkFingerprint: definition.connection.resolvedAddressFingerprint, credentialFingerprint: definition.connection.credential?.secretFingerprint ?? noCredentialFingerprint(), status: "active", managedById: actor.id, acknowledgedAt: now, revokedAt: null, updatedAt: now } });
     await tx.projectMcpToolGrantAudit.create({
       data: { id: randomUUID(), projectId, grantId: grant.id, event: existing === null ? "granted" : "refreshed", actorId: actor.id, definitionFingerprint: definition.definitionFingerprint, details: { connectionId: definition.connectionId, toolName: definition.name, previousDefinitionId: existing?.toolDefinitionId ?? null } },
     });
@@ -369,24 +595,37 @@ export async function buildMcpActionSnapshot(projectIdInput: unknown, input: unk
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
   const grant = await db.projectMcpToolGrant.findFirst({
     where: { id: parsed.data.grantId, projectId },
-    include: { toolDefinition: { include: { connection: { include: { credential: true } } } } },
+    include: { attestation: true, toolDefinition: { include: { connection: { include: { credential: true } } } } },
   });
   if (grant === null) return failMcp("MCP_GRANT_NOT_FOUND");
   if (grant.status !== "active") return failMcp("MCP_GRANT_REVOKED");
   const definition = grant.toolDefinition;
   const connection = definition.connection;
   if (!definition.current) return failMcp("MCP_TOOL_DEFINITION_STALE");
-  if (!definition.readOnlyEligible) return failMcp("MCP_TOOL_NOT_READ_ONLY");
+  if (!definition.remoteReadOnlyHint) return failMcp("MCP_TOOL_NOT_READ_ONLY");
   if (connection.status !== "verified" || connection.resolvedAddressFingerprint === null) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
+  const credentialFingerprint = connection.credential?.secretFingerprint ?? noCredentialFingerprint();
+  const attestation = grant.attestationId === null
+    ? null
+    : await activeMcpAttestation(db, {
+      connectionId: connection.id,
+      toolDefinitionId: definition.id,
+      toolName: definition.name,
+      definitionFingerprint: definition.definitionFingerprint,
+      networkFingerprint: connection.resolvedAddressFingerprint,
+      credentialFingerprint,
+    });
+  if (attestation === null || attestation.id !== grant.attestationId) return failMcp("MCP_TOOL_NOT_ATTESTED");
   const argumentsValue = canonicalMcpToolArguments(definition.inputSchema, parsed.data.arguments);
   return Object.freeze({
     grantId: grant.id,
     connectionId: connection.id,
     toolName: definition.name,
     toolDefinitionId: definition.id,
+    attestationId: attestation.id,
     toolDefinitionFingerprint: definition.definitionFingerprint,
     networkFingerprint: connection.resolvedAddressFingerprint,
-    credentialFingerprint: connection.credential?.secretFingerprint ?? noCredentialFingerprint(),
+    credentialFingerprint,
     arguments: stableInputObject(argumentsValue),
   });
 }
@@ -402,16 +641,28 @@ export async function executeMcpActionSnapshot(projectIdInput: unknown, input: u
   const snapshot = canonicalMcpActionSnapshot(input);
   const grant = await db.projectMcpToolGrant.findFirst({
     where: { id: snapshot.grantId, projectId },
-    include: { toolDefinition: { include: { connection: { include: { credential: true } } } } },
+    include: { attestation: true, toolDefinition: { include: { connection: { include: { credential: true } } } } },
   });
   if (grant === null) return failMcp("MCP_GRANT_NOT_FOUND");
   if (grant.status !== "active") return failMcp("MCP_GRANT_REVOKED");
   const definition = grant.toolDefinition;
   const connection = definition.connection;
-  if (grant.connectionId !== snapshot.connectionId || grant.toolName !== snapshot.toolName || grant.toolDefinitionId !== snapshot.toolDefinitionId || !definition.current || definition.definitionFingerprint !== snapshot.toolDefinitionFingerprint) return failMcp("MCP_TOOL_DEFINITION_STALE");
-  if (!definition.readOnlyEligible) return failMcp("MCP_TOOL_NOT_READ_ONLY");
+  if (grant.connectionId !== snapshot.connectionId || grant.toolName !== snapshot.toolName || grant.toolDefinitionId !== snapshot.toolDefinitionId || grant.attestationId !== snapshot.attestationId || !definition.current || definition.definitionFingerprint !== snapshot.toolDefinitionFingerprint) return failMcp("MCP_TOOL_DEFINITION_STALE");
+  if (!definition.remoteReadOnlyHint) return failMcp("MCP_TOOL_NOT_READ_ONLY");
   if (connection.status !== "verified" || connection.resolvedAddressFingerprint !== snapshot.networkFingerprint) return failMcp("MCP_NETWORK_CHANGED");
-  if ((connection.credential?.secretFingerprint ?? noCredentialFingerprint()) !== snapshot.credentialFingerprint) return failMcp("MCP_TOOL_DEFINITION_STALE");
+  const credentialFingerprint = connection.credential?.secretFingerprint ?? noCredentialFingerprint();
+  if (credentialFingerprint !== snapshot.credentialFingerprint || grant.attestation === null) return failMcp("MCP_TOOL_DEFINITION_STALE");
+  const attestation = grant.attestationId === null
+    ? null
+    : await activeMcpAttestation(db, {
+      connectionId: connection.id,
+      toolDefinitionId: definition.id,
+      toolName: definition.name,
+      definitionFingerprint: definition.definitionFingerprint,
+      networkFingerprint: snapshot.networkFingerprint,
+      credentialFingerprint,
+    });
+  if (attestation === null || attestation.id !== snapshot.attestationId) return failMcp("MCP_TOOL_NOT_ATTESTED");
   const argumentsValue = canonicalMcpToolArguments(definition.inputSchema, snapshot.arguments);
   const result = await callMcpTool({
     endpointUrl: connection.endpointUrl,

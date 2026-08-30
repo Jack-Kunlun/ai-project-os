@@ -11,9 +11,13 @@ import { ActionResultIntakeError, importProjectActionResult } from "../src/lib/a
 import { getDb } from "../src/lib/db";
 import {
   McpCapabilityError,
+  attestMcpToolDefinition,
+  buildMcpActionSnapshot,
   createMcpConnection,
   discoverMcpConnectionTools,
+  executeMcpActionSnapshot,
   grantProjectMcpTool,
+  revokeMcpToolAttestation,
   revokeProjectMcpToolGrant,
   updateMcpConnection,
 } from "../src/lib/mcp";
@@ -88,8 +92,41 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
     assert.equal(discovery.discoveredCount, 1);
     assert.equal(discovery.eligibleCount, 1);
     const definition = await db.mcpToolDefinition.findFirstOrThrow({ where: { connectionId: connection.id, current: true } });
+    await assert.rejects(
+      () => grantProjectMcpTool(projectId, { toolDefinitionId: definition.id, acknowledgeReadOnly: true, expectedUpdatedAt: null }, admin, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
+    );
+    const attestation = await attestMcpToolDefinition(definition.id, { note: "核对只读工具", evidence: { test: true } }, admin, db);
+    assert.equal(attestation.toolDefinitionId, definition.id);
+    assert.equal(attestation.audits.filter((audit) => audit.event === "attested").length, 1);
     const grant = await grantProjectMcpTool(projectId, { toolDefinitionId: definition.id, acknowledgeReadOnly: true, expectedUpdatedAt: null }, admin, db);
     assert.equal(grant.status, "active");
+    const connectionBeforeDrift = await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id }, select: { resolvedAddressFingerprint: true } });
+    assert.ok(connectionBeforeDrift.resolvedAddressFingerprint);
+    await db.mcpConnection.update({ where: { id: connection.id }, data: { resolvedAddressFingerprint: "a".repeat(64) } });
+    await assert.rejects(
+      () => buildMcpActionSnapshot(projectId, { grantId: grant.id, arguments: { query: "release", revision: 1 } }, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
+    );
+    await db.mcpConnection.update({ where: { id: connection.id }, data: { resolvedAddressFingerprint: connectionBeforeDrift.resolvedAddressFingerprint } });
+    const executableSnapshot = await buildMcpActionSnapshot(projectId, { grantId: grant.id, arguments: { query: "release", revision: 1 } }, db);
+    await db.mcpConnection.update({ where: { id: connection.id }, data: { resolvedAddressFingerprint: "c".repeat(64) } });
+    await assert.rejects(
+      () => executeMcpActionSnapshot(projectId, executableSnapshot, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_NETWORK_CHANGED",
+    );
+    await db.mcpConnection.update({ where: { id: connection.id }, data: { resolvedAddressFingerprint: connectionBeforeDrift.resolvedAddressFingerprint } });
+    const credentialBeforeDrift = await db.externalCredential.findUniqueOrThrow({ where: { id: credentialId! }, select: { secretFingerprint: true } });
+    await db.externalCredential.update({ where: { id: credentialId! }, data: { secretFingerprint: "b".repeat(64) } });
+    await assert.rejects(
+      () => buildMcpActionSnapshot(projectId, { grantId: grant.id, arguments: { query: "release", revision: 1 } }, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
+    );
+    await assert.rejects(
+      () => executeMcpActionSnapshot(projectId, executableSnapshot, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_DEFINITION_STALE",
+    );
+    await db.externalCredential.update({ where: { id: credentialId! }, data: { secretFingerprint: credentialBeforeDrift.secretFingerprint } });
     await assert.rejects(
       () => updateProjectActionPolicy(projectId, "project.mcp.read-tool.invoke", { mode: "automatic", expectedUpdatedAt: null }, admin, db),
       (error: unknown) => error instanceof ActionEngineError && error.code === "ACTION_INVALID_INPUT",
@@ -146,8 +183,20 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_DEFINITION_STALE",
     );
     const current = await db.mcpToolDefinition.findFirstOrThrow({ where: { connectionId: connection.id, current: true } });
+    const currentAttestation = await attestMcpToolDefinition(current.id, { note: "重新核对新定义", evidence: { test: true } }, admin, db);
     const refreshed = await grantProjectMcpTool(projectId, { toolDefinitionId: current.id, acknowledgeReadOnly: true, expectedUpdatedAt: (await db.projectMcpToolGrant.findUniqueOrThrow({ where: { id: grant.id } })).updatedAt.toISOString() }, admin, db);
     assert.equal(refreshed.toolDefinitionId, current.id);
+    const refreshedSnapshot = await buildMcpActionSnapshot(projectId, { grantId: refreshed.id, arguments: { query: "release", revision: 2 } }, db);
+    const revokedAttestation = await revokeMcpToolAttestation(currentAttestation.id, { expectedAttestedAt: currentAttestation.attestedAt.toISOString(), note: "撤销测试" }, admin, db);
+    assert.equal(revokedAttestation.audits.filter((audit) => audit.event === "revoked").length, 1);
+    await assert.rejects(
+      () => buildMcpActionSnapshot(projectId, { grantId: refreshed.id, arguments: { query: "release", revision: 2 } }, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
+    );
+    await assert.rejects(
+      () => executeMcpActionSnapshot(projectId, refreshedSnapshot, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
+    );
     const revoked = await revokeProjectMcpToolGrant(projectId, refreshed.id, { expectedUpdatedAt: refreshed.updatedAt.toISOString() }, admin, db);
     assert.equal(revoked.status, "revoked");
     const audit = await db.projectMcpToolGrantAudit.findFirstOrThrow({ where: { grantId: grant.id } });

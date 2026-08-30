@@ -6,12 +6,14 @@ import { assertWorkspaceAdmin, type AccessUser } from "@/lib/access-control";
 import { createSession, type CreatedSession } from "@/lib/auth";
 import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
+import { canonicalInternalReturnPath } from "@/lib/redirects";
 import { highestProjectRole, highestWorkspaceRole } from "@/lib/workspaces";
 import { resolveSecureEndpointFingerprint, securePinnedJsonRequest, WebSourceError } from "@/lib/web-sources";
 
 export const OIDC_STATE_COOKIE_NAME = "ai_project_os_oidc_state" as const;
 const OIDC_ATTEMPT_LIFETIME_MS = 10 * 60 * 1_000;
-const SAFE_RETURN_PATH = /^\/[A-Za-z0-9/_?=&.-]{0,1023}$/u;
+const OIDC_MAX_ACTIVE_ATTEMPTS = 200;
+const OIDC_ATTEMPT_LOCK_NAMESPACE = 20260830;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DOMAIN_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))+$/u;
 const SCOPE_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/u;
@@ -299,48 +301,56 @@ function decodeFlow(value: string): Readonly<{ verifier: string; nonce: string }
   }
 }
 
-async function cleanupExpiredOidcAttempts(db: PrismaClient): Promise<void> {
-  const expired = await db.oidcLoginAttempt.findMany({
-    where: { expiresAt: { lte: new Date() } },
-    take: 500,
-    select: { id: true, credentialId: true },
-  });
-  if (expired.length === 0) return;
-  await db.$transaction(async (tx) => {
-    await tx.oidcLoginAttempt.deleteMany({ where: { id: { in: expired.map((attempt) => attempt.id) }, expiresAt: { lte: new Date() } } });
-    await tx.externalCredential.deleteMany({
-      where: {
-        id: { in: expired.map((attempt) => attempt.credentialId) },
-        oidcLoginAttempts: { none: {} },
-      },
-    });
-  });
-}
-
 export async function beginOidcLogin(input: Readonly<{ providerId: unknown; redirectUri: string; returnTo?: unknown }>, db: PrismaClient = getDb()) {
   const providerId = uuid(input.providerId);
-  await cleanupExpiredOidcAttempts(db);
-  const provider = await db.oidcProvider.findUnique({ where: { id: providerId } });
-  if (provider === null) return fail("OIDC_PROVIDER_NOT_FOUND");
-  if (provider.status !== "verified" || provider.disabledAt !== null || provider.authorizationEndpoint === null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
-  if ((await db.oidcLoginAttempt.count({ where: { providerId, expiresAt: { gt: new Date() }, consumedAt: null } })) >= 200) return fail("OIDC_FLOW_INVALID");
   let redirectUri: URL;
   try { redirectUri = new URL(input.redirectUri); } catch { return fail("OIDC_INVALID_INPUT"); }
   if (!redirectUri.pathname.endsWith("/api/auth/oidc/callback") || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash) return fail("OIDC_INVALID_INPUT");
   if (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(redirectUri.hostname)) return fail("OIDC_INVALID_INPUT");
-  const returnTo = typeof input.returnTo === "string" && SAFE_RETURN_PATH.test(input.returnTo) ? input.returnTo : "/dashboard";
+  const returnTo = canonicalInternalReturnPath(input.returnTo);
   const state = randomBytes(32).toString("base64url");
   const nonce = randomBytes(32).toString("base64url");
   const verifier = randomBytes(48).toString("base64url");
-  const flowCredential = await createCredential("oidcFlow", encodeFlow({ verifier, nonce }), db);
-  try {
-    await db.oidcLoginAttempt.create({
-      data: { providerId, credentialId: flowCredential.id, stateHash: sha256(state), nonceHash: sha256(nonce), redirectUri: redirectUri.toString(), returnTo, expiresAt: new Date(Date.now() + OIDC_ATTEMPT_LIFETIME_MS) },
+  const expiresAt = new Date(Date.now() + OIDC_ATTEMPT_LIFETIME_MS);
+  const provider = await db.$transaction(async (tx) => {
+    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${providerId}::text, ${OIDC_ATTEMPT_LOCK_NAMESPACE}))`);
+    const lockedProvider = await tx.oidcProvider.findUnique({ where: { id: providerId } });
+    if (lockedProvider === null) return fail("OIDC_PROVIDER_NOT_FOUND");
+    if (lockedProvider.status !== "verified" || lockedProvider.disabledAt !== null || lockedProvider.authorizationEndpoint === null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
+
+    const now = new Date();
+    const expired = await tx.oidcLoginAttempt.findMany({
+      where: { providerId, expiresAt: { lte: now } },
+      take: 500,
+      select: { id: true, credentialId: true },
     });
-  } catch (error) {
-    await db.externalCredential.deleteMany({ where: { id: flowCredential.id } });
-    throw error;
-  }
+    if (expired.length > 0) {
+      await tx.oidcLoginAttempt.deleteMany({ where: { id: { in: expired.map((attempt) => attempt.id) }, expiresAt: { lte: now } } });
+      await tx.externalCredential.deleteMany({ where: { id: { in: expired.map((attempt) => attempt.credentialId) }, oidcLoginAttempts: { none: {} } } });
+    }
+
+    let activeCount = await tx.oidcLoginAttempt.count({ where: { providerId, expiresAt: { gt: now }, consumedAt: null } });
+    while (activeCount >= OIDC_MAX_ACTIVE_ATTEMPTS) {
+      const evictCount = Math.min(activeCount - OIDC_MAX_ACTIVE_ATTEMPTS + 1, 500);
+      const evicted = await tx.oidcLoginAttempt.findMany({
+        where: { providerId, expiresAt: { gt: now }, consumedAt: null },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        take: evictCount,
+        select: { id: true, credentialId: true },
+      });
+      if (evicted.length === 0) return fail("OIDC_FLOW_INVALID");
+      await tx.oidcLoginAttempt.deleteMany({ where: { id: { in: evicted.map((attempt) => attempt.id) } } });
+      await tx.externalCredential.deleteMany({ where: { id: { in: evicted.map((attempt) => attempt.credentialId) }, oidcLoginAttempts: { none: {} } } });
+      activeCount -= evicted.length;
+    }
+
+    const flowCredential = await createCredential("oidcFlow", encodeFlow({ verifier, nonce }), tx);
+    await tx.oidcLoginAttempt.create({
+      data: { providerId, credentialId: flowCredential.id, stateHash: sha256(state), nonceHash: sha256(nonce), redirectUri: redirectUri.toString(), returnTo, expiresAt },
+    });
+    return lockedProvider;
+  });
+  if (provider.authorizationEndpoint === null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
   const authorization = new URL(provider.authorizationEndpoint);
   authorization.searchParams.set("client_id", provider.clientId);
   authorization.searchParams.set("response_type", "code");
@@ -350,7 +360,7 @@ export async function beginOidcLogin(input: Readonly<{ providerId: unknown; redi
   authorization.searchParams.set("nonce", nonce);
   authorization.searchParams.set("code_challenge", base64urlSha256(verifier));
   authorization.searchParams.set("code_challenge_method", "S256");
-  return Object.freeze({ authorizationUrl: authorization.toString(), state, expiresAt: new Date(Date.now() + OIDC_ATTEMPT_LIFETIME_MS) });
+  return Object.freeze({ authorizationUrl: authorization.toString(), state, expiresAt });
 }
 
 function safeClaim(value: unknown, maximum: number): string | null {
@@ -474,7 +484,7 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     await tx.oidcLoginAttempt.delete({ where: { id: attempt.id } });
     await tx.externalCredential.delete({ where: { id: attempt.credentialId } });
     const session = await createSession(tx, identity.user);
-    return Object.freeze({ session, returnTo: attempt.returnTo });
+    return Object.freeze({ session, returnTo: canonicalInternalReturnPath(attempt.returnTo) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 

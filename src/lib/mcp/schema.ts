@@ -27,6 +27,9 @@ export type NormalizedMcpTool = Readonly<{
   inputSchema: JsonObject;
   outputSchema: JsonObject | null;
   annotations: JsonObject;
+  /** Untrusted read-only/destructive hints supplied by the remote server. */
+  remoteReadOnlyHint: boolean;
+  /** @deprecated Use remoteReadOnlyHint. This compatibility alias is never an authorization signal. */
   readOnlyEligible: boolean;
   definitionFingerprint: string;
 }>;
@@ -145,7 +148,7 @@ export function normalizeMcpToolDefinition(value: unknown): NormalizedMcpTool {
     return failMcp("MCP_TOOL_CATALOG_INVALID");
   }
   const normalizedAnnotations = annotations as JsonObject;
-  const readOnlyEligible = normalizedAnnotations.readOnlyHint === true && normalizedAnnotations.destructiveHint === false;
+  const remoteReadOnlyHint = normalizedAnnotations.readOnlyHint === true && normalizedAnnotations.destructiveHint === false;
   const identity: JsonObject = {
     name: value.name,
     title,
@@ -155,7 +158,19 @@ export function normalizeMcpToolDefinition(value: unknown): NormalizedMcpTool {
     annotations: normalizedAnnotations,
   };
   const definitionFingerprint = createHash("sha256").update(stableJson(identity), "utf8").digest("hex");
-  return Object.freeze({ name: value.name, title, description, inputSchema, outputSchema, annotations: normalizedAnnotations, readOnlyEligible, definitionFingerprint });
+  return Object.freeze({
+    name: value.name,
+    title,
+    description,
+    inputSchema,
+    outputSchema,
+    annotations: normalizedAnnotations,
+    remoteReadOnlyHint,
+    // Keep the old in-memory shape for callers that only render the remote hint.
+    // Persistence and authorization use remoteReadOnlyHint plus an admin attestation.
+    readOnlyEligible: remoteReadOnlyHint,
+    definitionFingerprint,
+  });
 }
 
 function equalJson(left: JsonValue, right: JsonValue): boolean {

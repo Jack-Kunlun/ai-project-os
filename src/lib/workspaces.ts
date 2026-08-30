@@ -4,10 +4,10 @@ import { z } from "zod";
 import { AccessControlError, assertWorkspaceAdmin, type AccessUser } from "@/lib/access-control";
 import { createPasswordRecord, DEFAULT_WORKSPACE_ID } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { canonicalInternalReturnPath } from "@/lib/redirects";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
-const SAFE_RETURN_PATH = /^\/[A-Za-z0-9/_?=&.-]{0,1023}$/u;
 
 export type WorkspaceErrorCode =
   | "WORKSPACE_INVALID_INPUT"
@@ -227,7 +227,7 @@ export async function listWorkspaceInvitations(workspaceIdInput: unknown, actor:
 
 export async function acceptWorkspaceInvitation(tokenInput: unknown, actor: Pick<AppUser, "id" | "email">, returnToInput: unknown, db: PrismaClient = getDb()) {
   if (typeof tokenInput !== "string" || !/^[A-Za-z0-9_-]{40,128}$/u.test(tokenInput)) return fail("WORKSPACE_INVALID_INPUT");
-  const returnTo = typeof returnToInput === "string" && SAFE_RETURN_PATH.test(returnToInput) ? returnToInput : "/dashboard";
+  const returnTo = canonicalInternalReturnPath(returnToInput);
   return db.$transaction(async (tx) => {
     const invitation = await tx.workspaceInvitation.findUnique({ where: { tokenHash: hashToken(tokenInput) } });
     if (invitation === null || invitation.revokedAt !== null || invitation.acceptedAt !== null) return fail("WORKSPACE_INVITATION_NOT_FOUND");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -244,6 +244,28 @@ const grantOperationProfileGuardMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260829070000_restore_grant_operation_profile_guard/migration.sql",
 );
+const memoryQualityMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829190000_add_memory_quality/migration.sql",
+);
+const currentSchemaThroughMemoryQualityMigrationPaths = [
+  join(repositoryRoot, "prisma/migrations/20260829080000_add_web_control_plane/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829090000_expand_web_ai_jobs/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829100000_add_project_intelligence/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829110000_add_project_ai_route_revisions/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829120000_add_recoverable_job_attempts/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829130000_add_github_project_sync_job_kind/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829131000_add_project_github_sync_runs/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829140000_add_memory_index_build_modes/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829141000_add_memory_index_candidates/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829142000_add_background_job_reconciliations/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829150000_add_project_lifecycle_and_export_audits/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829151000_guard_archived_project_jobs/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829160000_add_project_assets/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829170000_add_multi_git_repositories/migration.sql"),
+  join(repositoryRoot, "prisma/migrations/20260829180000_add_automation_worker/migration.sql"),
+  memoryQualityMigrationPath,
+] as const;
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
   join(repositoryRoot, "prisma/migrations/20260826030732_integrity_boundaries/migration.sql"),
@@ -723,33 +745,31 @@ async function applyAiMigrationsBeforeCandidatePublication(
   ]);
 }
 
+async function applyCurrentSchemaThroughMemoryQuality(client: Client): Promise<void> {
+  await transaction(
+    client,
+    await Promise.all(
+      currentSchemaThroughMemoryQualityMigrationPaths.map(async (path) => ({
+        sql: await loadSql(path),
+      })),
+    ),
+  );
+}
+
+async function migrationNamesFromDisk(): Promise<readonly string[]> {
+  const entries = await readdir(join(repositoryRoot, "prisma/migrations"), { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+}
+
 async function assertEmptyDatabaseCatalog(client: Client): Promise<void> {
   const migrations = await safeQuery<{ migration_name: string }>(
     client,
     'SELECT "migration_name" FROM "_prisma_migrations" ORDER BY "started_at"',
   );
-  const expectedMigrations = [
-    "20260826021100_init",
-    "20260826030732_integrity_boundaries",
-    "20260827090000_add_ai_runtime_governance",
-    "20260827120000_add_ai_memory_candidates",
-    "20260827140000_add_item_evidence_history",
-    "20260828100000_add_source_chunks",
-    "20260828123000_add_index_generations",
-    "20260828150000_publish_ai_candidate_items",
-    "20260828170000_add_ai_operation_profiles",
-    "20260828210000_add_project_rag_snapshots",
-    "20260828233000_add_ai_derived_artifacts",
-    "20260829010000_add_github_repository_ledger",
-    "20260829020000_bind_github_scan_security",
-    "20260829033000_add_repository_code_indexes",
-    "20260829050000_add_repository_material_ledger",
-    "20260829051000_harden_repository_material_policy",
-    "20260829052000_seal_repository_material_terminal_rows",
-    "20260829053000_add_repository_material_indexes",
-    "20260829060000_add_repository_rag_snapshots",
-    "20260829070000_restore_grant_operation_profile_guard",
-  ];
+  const expectedMigrations = await migrationNamesFromDisk();
   requireCondition(
     JSON.stringify(migrations.rows.map((row) => row.migration_name)) ===
       JSON.stringify(expectedMigrations),
@@ -3960,6 +3980,11 @@ async function runAtomicRuntimeCandidateCompletion(
 
 async function runCandidateMemoryMatrix(client: Client, url: string): Promise<void> {
   await setupFreshLiveGrant(client);
+  // The candidate service uses the current ProjectItem model, which includes
+  // the memory-quality columns introduced after the AI runtime upgrade set.
+  // Keep this legacy-path fixture explicit instead of relying on the full
+  // deploy performed by the empty-database path.
+  await applyCurrentSchemaThroughMemoryQuality(client);
   await insertPolicyRevision(
     client,
     revisionA2Id,

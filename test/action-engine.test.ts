@@ -44,13 +44,22 @@ test("动作输入严格、规范且指纹绑定项目与能力", () => {
     connectionId: "00000000-0000-4000-8000-000000000202",
     toolName: "project.search",
     toolDefinitionId: "00000000-0000-4000-8000-000000000203",
+    attestationId: "00000000-0000-4000-8000-000000000204",
     toolDefinitionFingerprint: "a".repeat(64),
     networkFingerprint: "b".repeat(64),
     credentialFingerprint: "c".repeat(64),
     arguments: { query: "release" },
   };
   assert.deepEqual(canonicalProjectActionInput("project.mcp.read-tool.invoke", mcpSnapshot), mcpSnapshot);
-  assert.notEqual(projectActionInputFingerprint(projectA, "project.mcp.read-tool.invoke", mcpSnapshot), first);
+  const mcpFingerprint = projectActionInputFingerprint(projectA, "project.mcp.read-tool.invoke", mcpSnapshot);
+  assert.notEqual(mcpFingerprint, first);
+  assert.notEqual(
+    mcpFingerprint,
+    projectActionInputFingerprint(projectA, "project.mcp.read-tool.invoke", {
+      ...mcpSnapshot,
+      attestationId: "00000000-0000-4000-8000-000000000205",
+    }),
+  );
 });
 
 test("动作状态机只允许审批、队列和一次执行收口", () => {

@@ -109,8 +109,9 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     assert.equal((await db.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId } } })).role, "member");
     assert.equal((await db.projectMembership.findUniqueOrThrow({ where: { projectId_userId: { projectId: projectB, userId: memberId } } })).role, "editor");
 
-    const sourceHash = digest(`quality-${suffix}`);
-    const source = await db.projectSource.create({ data: { projectId: projectB, kind: "manual", contentText: "数据库选择 PostgreSQL。自动同步已启用。风险需要复核。", contentHash: sourceHash, manualContentDedupeKey: sourceHash } });
+    const sourceText = "数据库选择 PostgreSQL。自动同步已启用。风险需要复核。";
+    const sourceHash = digest(sourceText);
+    const source = await db.projectSource.create({ data: { projectId: projectB, kind: "manual", contentText: sourceText, contentHash: sourceHash, manualContentDedupeKey: sourceHash } });
     const importedContent = `相同正文，保留不同来源。${suffix}`;
     const importedHash = digest(importedContent);
     await db.projectSource.createMany({ data: [
@@ -187,6 +188,15 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     assert.equal(await db.appSession.count({ where: { userId: oidcUser.id, revokedAt: null } }), 1);
     await assert.rejects(() => completeOidcLogin({ code: "valid-code", state: flow.state, cookieState: flow.state }, db), (error: unknown) => error instanceof OidcError && error.code === "OIDC_FLOW_INVALID");
 
+    const capacityStates: string[] = [];
+    for (let index = 0; index < 200; index += 1) {
+      capacityStates.push((await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/dashboard" }, db)).state);
+    }
+    assert.equal(await db.oidcLoginAttempt.count({ where: { providerId: provider.id, consumedAt: null } }), 200);
+    await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/dashboard" }, db);
+    assert.equal(await db.oidcLoginAttempt.count({ where: { providerId: provider.id, consumedAt: null } }), 200);
+    assert.equal(await db.oidcLoginAttempt.count({ where: { providerId: provider.id, stateHash: digest(capacityStates[0]!), consumedAt: null } }), 0);
+
     tokenEmail = `collision-${suffix}@example.com`;
     tokenSubject = `collision-subject-${suffix}`;
     const collisionUser = await db.appUser.create({ data: { username: `collision_${suffix}`, email: tokenEmail, role: "member", passwordHash: null, passwordSalt: null } });
@@ -208,9 +218,13 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     await updateProjectLifecycle({ projectId: projectB, actorId: admin.id, action: "restore", expectedUpdatedAt: archived.project.updatedAt }, db);
     assert.equal(await db.automationRule.count({ where: { projectId: projectB, status: "active" } }), 0);
   } finally {
+    const pendingOidcCredentials = oidcProviderId === null
+      ? []
+      : (await db.oidcLoginAttempt.findMany({ where: { providerId: oidcProviderId }, select: { credentialId: true } })).map((attempt) => attempt.credentialId);
     if (oidcProviderId !== null) await db.oidcProvider.deleteMany({ where: { id: oidcProviderId } });
     if (oidcProviderCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: oidcProviderCredentialId } });
     if (failedFlowCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: failedFlowCredentialId } });
+    if (pendingOidcCredentials.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: pendingOidcCredentials } } });
     await db.project.deleteMany({ where: { id: { in: [projectA, projectB] } } });
     if (oidcUserId !== null) await db.appUser.deleteMany({ where: { id: oidcUserId } });
     if (collisionUserId !== null) await db.appUser.deleteMany({ where: { id: collisionUserId } });

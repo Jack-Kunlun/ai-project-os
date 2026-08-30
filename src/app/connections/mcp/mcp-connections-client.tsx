@@ -9,9 +9,17 @@ type ToolDefinition = {
   name: string;
   title: string | null;
   description: string | null;
-  readOnlyEligible: boolean;
+  remoteReadOnlyHint: boolean;
   definitionFingerprint: string;
   discoveredAt: string;
+  attestations: Array<{
+    id: string;
+    definitionFingerprint: string;
+    networkFingerprint: string;
+    credentialFingerprint: string;
+    attestedAt: string;
+    audits: Array<{ event: "attested" | "revoked" }>;
+  }>;
 };
 
 type Connection = {
@@ -43,6 +51,16 @@ const statusTones = {
 async function responseError(response: Response, fallback: string) {
   try { return (await response.json() as { error?: { message?: string } }).error?.message ?? fallback; }
   catch { return fallback; }
+}
+
+function activeAttestation(tool: ToolDefinition) {
+  const latest = tool.attestations[0];
+  return latest !== undefined
+    && latest.definitionFingerprint === tool.definitionFingerprint
+    && latest.audits.some((audit) => audit.event === "attested")
+    && !latest.audits.some((audit) => audit.event === "revoked")
+    ? latest
+    : null;
 }
 
 export function McpConnectionsClient({ username }: { username: string }) {
@@ -136,6 +154,42 @@ function McpConnectionCard({ connection, onChanged }: { connection: Connection; 
     finally { setPending(null); }
   }
 
-  const eligible = connection.toolDefinitions.filter((tool) => tool.readOnlyEligible).length;
-  return <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusTones[connection.status]}`}>{statusLabels[connection.status]}</span></div><p className="mt-2 break-all text-xs text-slate-500">{connection.endpointUrl}</p></div><div className="text-right text-xs text-slate-400"><p>{eligible} / {connection.toolDefinitions.length} 个可授权</p><p className="mt-1">凭据 ····{connection.credential?.maskedSuffix ?? "无"}</p></div></div><div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><p>协议：{connection.protocolVersion ?? "待发现"}</p><p>内网访问：{connection.allowPrivateNetwork ? "已显式允许" : "禁止"}</p><p>最近发现：{connection.lastDiscoveredAt ? new Date(connection.lastDiscoveredAt).toLocaleString("zh-CN") : "尚未执行"}</p><p className={connection.lastErrorCode ? "text-rose-600" : ""}>最近错误：{connection.lastErrorCode ?? "无"}</p></div>{connection.toolDefinitions.length > 0 ? <details className="mt-5 rounded-2xl bg-slate-50 p-4"><summary className="cursor-pointer text-xs font-semibold text-slate-700">查看当前工具定义</summary><div className="mt-3 space-y-2">{connection.toolDefinitions.map((tool) => <div key={tool.id} className="flex items-start justify-between gap-3 rounded-xl bg-white px-3 py-3 text-xs"><div><p className="font-semibold text-slate-800">{tool.title || tool.name}</p><p className="mt-1 font-mono text-[10px] text-slate-400">{tool.name} · {tool.definitionFingerprint.slice(0, 12)}…</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${tool.readOnlyEligible ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{tool.readOnlyEligible ? "可授权" : "声明不足"}</span></div>)}</div></details> : null}{connection.authKind === "bearer" && connection.status !== "disabled" ? <div className="mt-4 flex gap-2"><input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="输入新 Token 进行轮换" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm" /><button type="button" onClick={() => void update({ bearerToken: token }, "token", "凭据已轮换；请重新发现工具后再调用。")} disabled={pending !== null || token.length < 8} className="flex min-h-11 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-700 disabled:opacity-40">轮换凭据</button></div> : null}<div className="mt-5 flex flex-wrap items-center justify-between gap-3">{message ? <p role="status" className="flex-1 text-xs leading-5 text-slate-600">{message}</p> : <span />}{connection.status !== "disabled" ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void update({ trustCurrentNetwork: true }, "trust", "已固定当前解析地址；请重新发现工具。") } disabled={pending !== null} className="flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50">重新确认网络</button><button type="button" onClick={() => void discover()} disabled={pending !== null} className="flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{pending === "discover" ? "发现中…" : "发现并固化工具"}</button><button type="button" onClick={() => void update({ enabled: false }, "disable", "连接已停用；现有项目授权会立即失败关闭。") } disabled={pending !== null} className="flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">停用</button></div> : <button type="button" onClick={() => void update({ enabled: true }, "enable", "连接已启用；需要重新发现工具。") } disabled={pending !== null} className="flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">重新启用</button>}</div></article>;
+  async function attest(tool: ToolDefinition) {
+    setPending(`attest:${tool.id}`); setMessage(null);
+    try {
+      const response = await fetch(`/api/settings/mcp-connections/${connection.id}/tools/${tool.id}/attestation`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ note: "管理员在控制台核对工具定义、网络和凭据后认证。", evidence: { source: "mcp-connection-console" } }),
+      });
+      if (!response.ok) throw new Error(await responseError(response, "工具认证失败"));
+      const attestation = (await response.json() as { attestation: ToolDefinition["attestations"][number] }).attestation;
+      onChanged({ ...connection, toolDefinitions: connection.toolDefinitions.map((entry) => entry.id === tool.id ? { ...entry, attestations: [attestation] } : entry) });
+      setMessage(`已认证 ${tool.name}。网络、凭据或定义变化后需要重新认证。`);
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "工具认证失败"); }
+    finally { setPending(null); }
+  }
+
+  async function revokeAttestation(tool: ToolDefinition) {
+    const attestation = activeAttestation(tool);
+    if (attestation === null) return;
+    if (!window.confirm(`撤销 ${tool.name} 的管理员认证？项目授权和后续调用将立即失败关闭。`)) return;
+    setPending(`revoke-attest:${tool.id}`); setMessage(null);
+    try {
+      const response = await fetch(`/api/settings/mcp-connections/${connection.id}/tools/${tool.id}/attestation`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ attestationId: attestation.id, expectedAttestedAt: attestation.attestedAt, note: "管理员在控制台主动撤销认证。" }),
+      });
+      if (!response.ok) throw new Error(await responseError(response, "撤销工具认证失败"));
+      const revoked = (await response.json() as { attestation: ToolDefinition["attestations"][number] }).attestation;
+      onChanged({ ...connection, toolDefinitions: connection.toolDefinitions.map((entry) => entry.id === tool.id ? { ...entry, attestations: [{ ...attestation, audits: [...attestation.audits, { event: "revoked" as const }] }] } : entry) });
+      void revoked;
+      setMessage(`已撤销 ${tool.name} 的管理员认证。`);
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "撤销工具认证失败"); }
+    finally { setPending(null); }
+  }
+
+  const attestedCount = connection.toolDefinitions.filter((tool) => activeAttestation(tool) !== null).length;
+  return <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex flex-wrap items-center gap-2"><h3 className="text-lg font-semibold">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusTones[connection.status]}`}>{statusLabels[connection.status]}</span></div><p className="mt-2 break-all text-xs text-slate-500">{connection.endpointUrl}</p></div><div className="text-right text-xs text-slate-400"><p>{attestedCount} / {connection.toolDefinitions.length} 个已认证</p><p className="mt-1">凭据 ····{connection.credential?.maskedSuffix ?? "无"}</p></div></div><div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><p>协议：{connection.protocolVersion ?? "待发现"}</p><p>内网访问：{connection.allowPrivateNetwork ? "已显式允许" : "禁止"}</p><p>最近发现：{connection.lastDiscoveredAt ? new Date(connection.lastDiscoveredAt).toLocaleString("zh-CN") : "尚未执行"}</p><p className={connection.lastErrorCode ? "text-rose-600" : ""}>最近错误：{connection.lastErrorCode ?? "无"}</p></div>{connection.toolDefinitions.length > 0 ? <details className="mt-5 rounded-2xl bg-slate-50 p-4"><summary className="cursor-pointer text-xs font-semibold text-slate-700">查看当前工具定义与管理员认证</summary><div className="mt-3 space-y-2">{connection.toolDefinitions.map((tool) => { const attestation = activeAttestation(tool); return <div key={tool.id} className="rounded-xl bg-white px-3 py-3 text-xs"><div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-slate-800">{tool.title || tool.name}</p><p className="mt-1 font-mono text-[10px] text-slate-400">{tool.name} · {tool.definitionFingerprint.slice(0, 12)}…</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${attestation !== null ? "bg-emerald-50 text-emerald-700" : tool.remoteReadOnlyHint ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>{attestation !== null ? "管理员已认证" : tool.remoteReadOnlyHint ? "仅远端声明" : "声明不足"}</span></div>{tool.remoteReadOnlyHint ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2"><p className="text-[11px] text-slate-500">远端提示不具备授权资格，必须由管理员认证。</p>{attestation !== null ? <button type="button" onClick={() => void revokeAttestation(tool)} disabled={pending !== null} className="flex min-h-9 items-center justify-center rounded-lg border border-rose-200 px-3 py-1.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50">撤销认证</button> : <button type="button" onClick={() => void attest(tool)} disabled={pending !== null || connection.status !== "verified"} className="flex min-h-9 items-center justify-center rounded-lg bg-slate-950 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">{pending === `attest:${tool.id}` ? "认证中…" : "管理员认证"}</button>}</div> : null}</div>; })}</div></details> : null}{connection.authKind === "bearer" && connection.status !== "disabled" ? <div className="mt-4 flex gap-2"><input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="输入新 Token 进行轮换" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 text-sm" /><button type="button" onClick={() => void update({ bearerToken: token }, "token", "凭据已轮换；请重新发现工具后再调用。")} disabled={pending !== null || token.length < 8} className="flex min-h-11 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-700 disabled:opacity-40">轮换凭据</button></div> : null}<div className="mt-5 flex flex-wrap items-center justify-between gap-3">{message ? <p role="status" className="flex-1 text-xs leading-5 text-slate-600">{message}</p> : <span />}{connection.status !== "disabled" ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => void update({ trustCurrentNetwork: true }, "trust", "已固定当前解析地址；请重新发现工具。")} disabled={pending !== null} className="flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50">重新确认网络</button><button type="button" onClick={() => void discover()} disabled={pending !== null} className="flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{pending === "discover" ? "发现中…" : "发现并固化工具"}</button><button type="button" onClick={() => void update({ enabled: false }, "disable", "连接已停用；现有项目授权会立即失败关闭。")} disabled={pending !== null} className="flex min-h-10 items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">停用</button></div> : <button type="button" onClick={() => void update({ enabled: true }, "enable", "连接已启用；需要重新发现工具。")} disabled={pending !== null} className="flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">重新启用</button>}</div></article>;
 }

@@ -33,6 +33,7 @@ function mcpCode(error: unknown): string {
 
 test("MCP 工具定义只把明确只读且非破坏性的工具列为可授权", () => {
   const normalized = normalizeMcpToolDefinition(readOnlyTool);
+  assert.equal(normalized.remoteReadOnlyHint, true);
   assert.equal(normalized.readOnlyEligible, true);
   assert.match(normalized.definitionFingerprint, /^[0-9a-f]{64}$/u);
   assert.equal(normalizeMcpToolDefinition({ ...readOnlyTool, name: "unsafe", annotations: { readOnlyHint: true } }).readOnlyEligible, false);

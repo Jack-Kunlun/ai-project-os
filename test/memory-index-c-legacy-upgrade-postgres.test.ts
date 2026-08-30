@@ -1,6 +1,6 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
@@ -83,6 +83,14 @@ async function stageMigrations(tempRoot: string, names: readonly string[]): Prom
   }
 }
 
+async function migrationNamesFromDisk(): Promise<readonly string[]> {
+  const entries = await readdir(join(repositoryRoot, "prisma", "migrations"), { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+}
+
 async function deployStagedMigrations(tempRoot: string, url: string): Promise<void> {
   await execFile(
     "pnpm",
@@ -131,7 +139,7 @@ test(
       rawConnected = true;
       process.env.DATABASE_URL = url;
       process.env.AI_PROJECT_OS_MASTER_KEY_FILE = masterKeyPath;
-      await raw.query("DROP OWNED BY CURRENT_USER CASCADE;");
+      await raw.query("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;");
 
       tempRoot = await mkdtemp(join(tmpdir(), "ai-project-os-memory-index-c-legacy-"));
       await mkdir(join(tempRoot, "prisma"), { recursive: true });
@@ -202,16 +210,28 @@ export default defineConfig({
       );
       assert.equal(legacyRows.rows.filter((row) => row.jobId === null && row.status === "staging").length, 2);
 
+      // The legacy schema has AppUser but no displayName. Seed the fixture with
+      // raw SQL and do not let the current Prisma Client inspect that schema.
+      await raw.query(
+        `INSERT INTO "AppUser"
+          ("id", "username", "passwordHash", "passwordSalt", "role", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, 'admin', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [userId, `memory_index_legacy_${projectId.slice(0, 8)}`, "a".repeat(43), "b".repeat(22)],
+      );
+
+      const currentMigrationNames = await migrationNamesFromDisk();
+      const legacyMigrationNames = new Set<string>(migrationNames);
+      const candidateMigrationNames = new Set([
+        "20260829140000_add_memory_index_build_modes",
+        "20260829141000_add_memory_index_candidates",
+      ]);
+      await stageMigrations(
+        tempRoot,
+        currentMigrationNames.filter((name) => !legacyMigrationNames.has(name) && !candidateMigrationNames.has(name)),
+      );
+      await deployStagedMigrations(tempRoot, url);
+
       db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
-      await db.appUser.create({
-        data: {
-          id: userId,
-          username: `memory_index_legacy_${projectId.slice(0, 8)}`,
-          passwordHash: "a".repeat(43),
-          passwordSalt: "b".repeat(22),
-          role: "admin",
-        },
-      });
       await upsertProjectAiRoute(projectId, {
         operation: "embedding",
         providerConnectionId: legacyProviderId,

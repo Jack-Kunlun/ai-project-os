@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ApiError } from "@/lib/api-errors";
-import { handleApiError } from "@/lib/api-response";
+import { handleApiError, readRequestBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { assertProjectActive } from "@/lib/project-lifecycle";
 import { listProjectAssets, uploadProjectAsset } from "@/lib/project-assets/service";
@@ -36,13 +36,16 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     if (!contentType.toLowerCase().startsWith("multipart/form-data;")) {
       throw new ApiError(415, "ASSET_UPLOAD_CONTENT_TYPE_INVALID", "Upload must use multipart/form-data");
     }
-    const contentLength = Number(request.headers.get("content-length") ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_REQUEST_BYTES) {
-      throw new ApiError(413, "ASSET_FILE_TOO_LARGE", "Upload request is too large");
-    }
+    const body = await readRequestBody(request, MAX_UPLOAD_REQUEST_BYTES, () =>
+      new ApiError(413, "ASSET_FILE_TOO_LARGE", "Upload request is too large"),
+    );
     let form: FormData;
     try {
-      form = await request.formData();
+      form = await new Request(request.url, {
+        method: request.method,
+        headers: new Headers(request.headers),
+        body: new Blob([body]),
+      }).formData();
     } catch {
       throw new ApiError(400, "ASSET_UPLOAD_INVALID", "Upload form is invalid");
     }

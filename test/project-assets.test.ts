@@ -57,11 +57,11 @@ function zip(entries: ReadonlyArray<readonly [string, string]>): Buffer {
   return Buffer.concat([...localParts, centralDirectory, end]);
 }
 
-function emptyPdf(): Buffer {
+function emptyPdf(width = 120, height = 120): Buffer {
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 120 120] /Resources << >> /Contents 4 0 R >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << >> /Contents 4 0 R >>`,
     "<< /Length 0 >>\nstream\n\nendstream",
   ];
   let body = "%PDF-1.4\n";
@@ -150,6 +150,13 @@ test("scanned PDF pages stay pending for vision and can be rendered safely", asy
   assert.equal(pages[0]!.requiresVision, true);
   const rendered = await renderPdfPageForVision(pdf, 1);
   assert.equal(rendered.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+});
+
+test("巨幅 PDF 在分配 canvas 前被拒绝", async () => {
+  await assert.rejects(
+    () => renderPdfPageForVision(emptyPdf(20_000, 20_000), 1),
+    (error: unknown) => error instanceof Error && error.message === "ASSET_DOCUMENT_TOO_LARGE",
+  );
 });
 
 test("unsafe Office archive paths are rejected before extraction", async () => {

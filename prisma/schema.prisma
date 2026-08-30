@@ -219,6 +219,11 @@ enum McpConnectionStatus {
   disabled
 }
 
+enum McpToolAttestationAuditEvent {
+  attested
+  revoked
+}
+
 enum ProjectMcpToolGrantStatus {
   active
   revoked
@@ -3471,6 +3476,8 @@ model AppUser {
   createdGitConnections        GitConnection[]
   createdGitRepositoryLinks    ProjectGitRepositoryLink[]
   createdMcpConnections        McpConnection[]
+  verifiedMcpToolAttestations  McpToolAttestation[]
+  mcpToolAttestationAudits     McpToolAttestationAudit[]
   managedMcpToolGrants         ProjectMcpToolGrant[]             @relation("ProjectMcpToolGrantManagedBy")
   mcpToolGrantAuditEvents      ProjectMcpToolGrantAudit[]
   automationRules              AutomationRule[]
@@ -3705,6 +3712,7 @@ model McpConnection {
   credential                 ExternalCredential? @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   createdBy                  AppUser             @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   toolDefinitions            McpToolDefinition[]
+  toolAttestations           McpToolAttestation[]
 
   @@index([status, updatedAt])
   @@index([createdById, createdAt])
@@ -3719,13 +3727,14 @@ model McpToolDefinition {
   inputSchema           Json                  @db.JsonB
   outputSchema          Json?                 @db.JsonB
   annotations           Json                  @default("{}") @db.JsonB
-  readOnlyEligible      Boolean
+  remoteReadOnlyHint    Boolean               @map("readOnlyEligible")
   definitionFingerprint String                @db.Char(64)
   current               Boolean               @default(true)
   discoveredAt          DateTime              @default(now())
   supersededAt          DateTime?
   connection            McpConnection         @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   projectGrants         ProjectMcpToolGrant[]
+  attestations          McpToolAttestation[]
 
   @@unique([connectionId, name, definitionFingerprint])
   @@unique([id, connectionId, name])
@@ -3738,6 +3747,10 @@ model ProjectMcpToolGrant {
   connectionId      String                    @db.Uuid
   toolName          String                    @db.VarChar(128)
   toolDefinitionId  String                    @db.Uuid
+  attestationId     String?                   @db.Uuid
+  definitionFingerprint String?               @db.Char(64)
+  networkFingerprint    String?               @db.Char(64)
+  credentialFingerprint String?               @db.Char(64)
   status            ProjectMcpToolGrantStatus @default(active)
   managedById       String                    @db.Uuid
   acknowledgedAt    DateTime
@@ -3748,12 +3761,57 @@ model ProjectMcpToolGrant {
   toolDefinition    McpToolDefinition         @relation(fields: [toolDefinitionId, connectionId, toolName], references: [id, connectionId, name], onDelete: NoAction, onUpdate: Cascade)
   managedBy         AppUser                   @relation("ProjectMcpToolGrantManagedBy", fields: [managedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   audits            ProjectMcpToolGrantAudit[]
+  attestation       McpToolAttestation?       @relation(fields: [attestationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
 
   @@unique([projectId, connectionId, toolName])
   @@unique([projectId, id])
   @@index([projectId, status, updatedAt])
   @@index([toolDefinitionId])
   @@index([managedById, updatedAt])
+}
+
+model McpToolAttestation {
+  id                    String                    @id @default(uuid()) @db.Uuid
+  connectionId          String                    @db.Uuid
+  toolDefinitionId      String                    @db.Uuid
+  toolName              String                    @db.VarChar(128)
+  definitionFingerprint String                    @db.Char(64)
+  networkFingerprint    String                    @db.Char(64)
+  credentialFingerprint String                    @db.Char(64)
+  verifiedById          String                    @db.Uuid
+  note                  String?                   @db.Text
+  evidence              Json                      @default("{}") @db.JsonB
+  attestedAt            DateTime                  @default(now())
+  createdAt             DateTime                  @default(now())
+  connection            McpConnection             @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  toolDefinition        McpToolDefinition         @relation(fields: [toolDefinitionId, connectionId, toolName], references: [id, connectionId, name], onDelete: NoAction, onUpdate: Cascade)
+  verifiedBy            AppUser                   @relation(fields: [verifiedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  grants                ProjectMcpToolGrant[]
+  audits                McpToolAttestationAudit[]
+
+  @@index([connectionId, toolDefinitionId, toolName, definitionFingerprint, networkFingerprint, credentialFingerprint])
+  @@index([connectionId, toolDefinitionId, createdAt])
+  @@index([verifiedById, createdAt])
+}
+
+model McpToolAttestationAudit {
+  id                    String                      @id @default(uuid()) @db.Uuid
+  attestationId         String                      @db.Uuid
+  connectionId          String                      @db.Uuid
+  toolDefinitionId      String                      @db.Uuid
+  event                 McpToolAttestationAuditEvent
+  actorId               String                      @db.Uuid
+  definitionFingerprint String                      @db.Char(64)
+  networkFingerprint    String                      @db.Char(64)
+  credentialFingerprint String                      @db.Char(64)
+  details               Json                        @default("{}") @db.JsonB
+  createdAt             DateTime                    @default(now())
+  attestation           McpToolAttestation           @relation(fields: [attestationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  actor                 AppUser                     @relation(fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([attestationId, createdAt])
+  @@index([connectionId, toolDefinitionId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model ProjectMcpToolGrantAudit {

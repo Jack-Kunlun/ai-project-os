@@ -709,7 +709,10 @@ export async function publishGitRepositorySnapshot(input: Readonly<{
           })
         : await tx.projectSource.update({
             where: { projectId_id: { projectId: input.projectId, id: existing.id } },
-            data: { retiredAt: null, capturedAt: completedAt, externalRef: file.externalRef },
+            // A frozen Git revision is immutable evidence.  Reusing it only
+            // makes the lifecycle visible again; the later snapshot carries
+            // the new synchronization time.
+            data: { retiredAt: null },
             select: { id: true },
           });
       await tx.gitRepositorySnapshotEntry.create({

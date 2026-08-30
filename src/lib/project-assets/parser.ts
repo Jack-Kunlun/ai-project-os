@@ -3,11 +3,15 @@ import type {
   ProjectAssetExtractionMethod,
   ProjectAssetSegmentLocatorKind,
 } from "@prisma/client";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { readSelectedZipEntries } from "@/lib/project-assets/archive";
 
 export const PROJECT_ASSET_PARSER_VERSION = "project-asset-parser:v1" as const;
 export const MAX_DOCUMENT_PAGES = 300;
 export const MAX_VISION_SEGMENTS_PER_ASSET = 20;
+export const MAX_PDF_RENDER_EDGE = 8_192;
+export const MAX_PDF_RENDER_PIXELS = 20_000_000;
+const PDF_VISION_SCALE = 1.5;
 const MAX_EXTRACTED_CHARS = 1_000_000;
 const MAX_SPREADSHEET_CELLS = 50_000;
 const MAX_SEGMENT_CHARS = 50_000;
@@ -315,25 +319,42 @@ export async function parseAssetBuffer(input: Readonly<{
 }
 
 export async function renderPdfPageForVision(buffer: Buffer, pageNumber: number): Promise<Buffer> {
+  type RenderCanvas = { getContext: (contextType: "2d") => unknown; encode: (format: "png") => Promise<Uint8Array> };
+  let loading: PDFDocumentLoadingTask | null = null;
+  let document: PDFDocumentProxy | null = null;
+  let page: PDFPageProxy | null = null;
+  let canvas: RenderCanvas | null = null;
   try {
     const [pdfjs, canvasModule] = await Promise.all([
       import("pdfjs-dist/legacy/build/pdf.mjs"),
       import("@napi-rs/canvas"),
     ]);
-    const loading = pdfjs.getDocument({ data: new Uint8Array(buffer), useSystemFonts: true });
-    const document = await loading.promise;
-    if (pageNumber < 1 || pageNumber > document.numPages) return fail("ASSET_DOCUMENT_INVALID");
-    const page = await document.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 1.5 });
-    const canvas = canvasModule.createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const loadTask = pdfjs.getDocument({ data: new Uint8Array(buffer), useSystemFonts: true });
+    loading = loadTask;
+    document = await loadTask.promise;
+    if (!Number.isSafeInteger(pageNumber) || pageNumber < 1 || pageNumber > document.numPages) return fail("ASSET_DOCUMENT_INVALID");
+    page = await document.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: PDF_VISION_SCALE });
+    const width = Math.ceil(viewport.width);
+    const height = Math.ceil(viewport.height);
+    if (
+      !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) ||
+      !Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
+      width <= 0 || height <= 0 || width > MAX_PDF_RENDER_EDGE || height > MAX_PDF_RENDER_EDGE ||
+      width * height > MAX_PDF_RENDER_PIXELS
+    ) return fail("ASSET_DOCUMENT_TOO_LARGE");
+    canvas = canvasModule.createCanvas(width, height);
     const context = canvas.getContext("2d");
     await page.render({ canvasContext: context as never, viewport, canvas: canvas as never }).promise;
     const rendered = await canvas.encode("png");
-    page.cleanup();
-    await document.destroy();
     return Buffer.from(rendered);
   } catch (error) {
     if (error instanceof ProjectAssetParserError) throw error;
     return fail("ASSET_DOCUMENT_INVALID");
+  } finally {
+    try { page?.cleanup(); } catch { /* best effort cleanup */ }
+    if (document !== null) await document.destroy().catch(() => undefined);
+    else if (loading !== null) await loading.destroy().catch(() => undefined);
+    canvas = null;
   }
 }

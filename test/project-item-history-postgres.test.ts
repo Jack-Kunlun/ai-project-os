@@ -8,6 +8,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
 import { createSourceChunkService } from "@/lib/ai-memory";
+import { createSession, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { hashSourceContent } from "@/lib/source";
 
 const execFile = promisify(execFileCallback);
@@ -187,6 +188,17 @@ test(
       const adapter = new PrismaPg({ connectionString: url });
       const prisma = new PrismaClient({ adapter });
       try {
+        const admin = await prisma.appUser.create({
+          data: { username: "history_admin_gate", role: "admin" },
+        });
+        const session = await createSession(prisma, admin);
+        const requestHeaders = {
+          "content-type": "application/json",
+          origin: "http://localhost",
+          host: "localhost",
+          cookie: `${SESSION_COOKIE_NAME}=${session.token}`,
+        };
+
         const extensions = await raw.query<{ extname: string; extversion: string }>(
           `SELECT extname, extversion
              FROM pg_extension
@@ -255,6 +267,43 @@ test(
           where: { projectId_id: { projectId, id: sourceId } },
           data: { contentText: "forged source revision" },
         }));
+        await expectRejected(() => prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { contentHash: "0".repeat(64) },
+        }));
+        await expectRejected(() => prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { externalRef: "forged://source" },
+        }));
+        await expectRejected(() => prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { capturedAt: new Date("2026-01-01T00:00:00.000Z") },
+        }));
+        await expectRejected(() => prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { ingestedAt: new Date("2026-01-01T00:00:00.000Z") },
+        }));
+        await expectRejected(() => prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { manualContentDedupeKey: "forged-dedupe" },
+        }));
+        await expectRejected(() => prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { storageKey: "forged-storage" },
+        }));
+        await expectRejected(() => prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { kind: "document" },
+        }));
+        const retiredAt = new Date("2026-01-02T00:00:00.000Z");
+        await prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { retiredAt },
+        });
+        await prisma.projectSource.update({
+          where: { projectId_id: { projectId, id: sourceId } },
+          data: { retiredAt: null },
+        });
         await expectRejected(() => prisma.sourceChunk.update({
           where: { id: firstChunks[0]!.id },
           data: { contentText: "forged chunk" },
@@ -267,7 +316,7 @@ test(
         const createdResponse = await itemRoute.POST(
           new Request("http://localhost/api/items", {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: requestHeaders,
             body: JSON.stringify({
               type: "decision",
               sourceId,
@@ -287,7 +336,7 @@ test(
         const confirmOnce = () => itemDetailRoute.PATCH(
           new Request("http://localhost/api/items", {
             method: "PATCH",
-            headers: { "content-type": "application/json" },
+            headers: requestHeaders,
             body: JSON.stringify({
               action: "confirm",
               expectedUpdatedAt: createdBody.item.updatedAt,
@@ -306,7 +355,7 @@ test(
         const editedResponse = await itemDetailRoute.PATCH(
           new Request("http://localhost/api/items", {
             method: "PATCH",
-            headers: { "content-type": "application/json" },
+            headers: requestHeaders,
             body: JSON.stringify({
               action: "edit",
               type: "risk",
@@ -328,7 +377,7 @@ test(
         const staleResponse = await itemDetailRoute.PATCH(
           new Request("http://localhost/api/items", {
             method: "PATCH",
-            headers: { "content-type": "application/json" },
+            headers: requestHeaders,
             body: JSON.stringify({
               action: "dismiss",
               expectedUpdatedAt: confirmedBody.item.updatedAt,
@@ -356,7 +405,7 @@ test(
         }), 1);
 
         const deleteResponse = await sourceDetailRoute.DELETE(
-          new Request("http://localhost/api/sources", { method: "DELETE" }),
+          new Request("http://localhost/api/sources", { method: "DELETE", headers: requestHeaders }),
           { params: Promise.resolve({ projectId, sourceId }) },
         );
         assert.equal(deleteResponse.status, 409);

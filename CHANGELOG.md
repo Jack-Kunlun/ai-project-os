@@ -4,7 +4,19 @@
 
 ## [Unreleased]
 
-- 修复 ProjectSource provenance PostgreSQL gate 与 integrity smoke 对第49个迁移的兼容/一致性验证。
+## [5.0.1] - 2026-08-31
+
+发布说明：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)
+
+### 安全
+
+- 来源正文与 SHA-256 在数据库写入时强制一致，来源证明除生命周期标记外不可改写。
+- MCP 只读工具必须由管理员对精确工具定义、网络与凭据指纹追加式认证；撤销或任一指纹漂移都会失败关闭。
+- 收紧 OIDC 回跳、匿名登录流程容量、JSON/multipart 请求体和 PDF 视觉渲染资源边界，并升级 `yauzl` 安全修复版本。
+
+### 验证
+
+- 修复 ProjectSource provenance PostgreSQL gate 与 integrity smoke 对第 49 个迁移的兼容/一致性验证。
 - 增加统一的一次性 PostgreSQL 门禁执行器，完整覆盖 22 个显式数据库 gate，并限制为固定回环测试端口和白名单数据库。
 
 ## [5.0.0] - 2026-08-30

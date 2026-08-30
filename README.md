@@ -8,6 +8,7 @@ AI Project OS V5.0.0 是一套可本地部署的项目长期记忆、时态项�
 
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
+- 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前候选保持冻结，完成其中的发布门禁前不得标记版本或部署。
 - V5.0.0 发布说明：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)。
 - V4.1.0 发布说明：[docs/releases/v4.1.0.md](docs/releases/v4.1.0.md)。
 - V4.0.0 发布说明：[docs/releases/v4.0.0.md](docs/releases/v4.0.0.md)。

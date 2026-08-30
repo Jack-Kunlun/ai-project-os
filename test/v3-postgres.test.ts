@@ -79,8 +79,8 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   assert.ok(address && typeof address === "object");
   issuer = `http://127.0.0.1:${address.port}/tenant-${suffix}`;
 
-  const admin = await db.appUser.findFirstOrThrow({ where: { role: "admin" } });
   try {
+    const admin = await db.appUser.findFirstOrThrow({ where: { role: "admin" } });
     const memberEmail = `v3-member-${suffix}@example.com`;
     await db.appUser.create({ data: { id: memberId, username: `v3_member_${suffix}`, email: memberEmail, role: "member", passwordHash: null, passwordSalt: null } });
     await db.workspace.create({ data: { id: roleWorkspaceId, name: `Role safety ${suffix}`, slug: `role-safety-${suffix}`, createdById: admin.id } });

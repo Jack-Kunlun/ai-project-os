@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 - 修复 ProjectSource provenance PostgreSQL gate 与 integrity smoke 对第49个迁移的兼容/一致性验证。
+- 增加统一的一次性 PostgreSQL 门禁执行器，完整覆盖 22 个显式数据库 gate，并限制为固定回环测试端口和白名单数据库。
 
 ## [5.0.0] - 2026-08-30
 

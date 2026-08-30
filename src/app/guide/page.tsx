@@ -19,10 +19,10 @@ const workflow = [
   { number: "04", title: "接入资料", detail: "上传文件，添加网页和多个代码仓库。", href: "#project-data" },
   { number: "05", title: "建立记忆", detail: "审核 AI 候选，构建兼容的语义索引。", href: "#memory" },
   { number: "06", title: "维护质量", detail: "检查冲突、过期与低置信度记忆。", href: "#quality" },
-  { number: "07", title: "设置自动化", detail: "定时同步来源并接收待确认通知。", href: "#automation" },
+  { number: "07", title: "设置自动化", detail: "定时同步来源、检查计划健康并接收通知。", href: "#automation" },
   { number: "08", title: "管理动作", detail: "设置项目策略，完成 Owner 审批并核对审计。", href: "#actions" },
   { number: "09", title: "运行智能体", detail: "生成状态简报，或开展一次只读调查。", href: "#agent" },
-  { number: "10", title: "维护项目计划", detail: "把建议转为有证据、由人推进的目标和工作项。", href: "#plan" },
+  { number: "10", title: "维护项目计划", detail: "落实负责人、期限、验收、证据和仓库变化核对。", href: "#plan" },
   { number: "11", title: "团队协作", detail: "管理角色、邀请和企业 OIDC 登录。", href: "#team" },
 ] as const;
 
@@ -78,12 +78,12 @@ export default async function GuidePage() {
           <GuideSection id="dashboard" eyebrow="Command center" title="从 Dashboard 开始工作">
             <p className="text-sm leading-7 text-slate-600">Dashboard 不是静态欢迎页，而是每次打开系统后的工作入口。它会把跨项目状态压缩成当前最值得处理的一步，减少在不同页面之间来回查找。</p>
             <div className="mt-6 grid gap-4 md:grid-cols-2">
-              <InfoCard title="先看推荐下一步">系统按模型连接、项目、四条 AI 路由、待确认文件和智能记忆索引依次判断缺口，并直接链接到需要处理的页面。</InfoCard>
+              <InfoCard title="先看推荐下一步">存在逾期或受阻计划时，系统优先链接到对应项目；否则再按模型连接、项目、四条 AI 路由、待确认文件和智能记忆索引判断下一步。</InfoCard>
               <InfoCard title="检查工作空间就绪度">四步进度用于判断基础能力是否真的可用；容器健康但模型或索引缺失时，不会显示为完整就绪。</InfoCard>
               <InfoCard title="继续最近任务">文件识别、仓库扫描、同步、抽取、索引、问答、简报和智能体运行会显示持久化状态，可直接回到所属项目。</InfoCard>
-              <InfoCard title="进入项目管理">项目搜索、创建和工作区入口位于独立“项目”页；Dashboard 只保留跨项目概览和任务状态。</InfoCard>
+              <InfoCard title="处理项目运营提醒">Dashboard 汇总逾期、受阻、仓库变化待评估和动作待审批；项目搜索、创建和完整列表仍位于独立“项目”页。</InfoCard>
             </div>
-            <div className="mt-5 flex flex-wrap gap-3"><Link href="/dashboard" className="inline-flex rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">打开 Dashboard</Link><Link href="/projects" className="inline-flex rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">打开项目</Link></div>
+            <div className="mt-5 flex flex-wrap gap-3"><Link href="/dashboard" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">打开 Dashboard</Link><Link href="/projects" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-600 hover:border-indigo-200 hover:text-indigo-700">打开项目</Link></div>
           </GuideSection>
 
           <GuideSection id="profile" eyebrow="Personal center" title="管理个人信息与登录安全">
@@ -113,7 +113,7 @@ export default async function GuidePage() {
               </table>
             </div>
             <Callout tone="amber" title="模型与维度必须准确">向量模型 ID 和维度必须与供应商实际配置一致。更换向量供应商、模型或维度后，旧索引会被标记为不兼容，必须重新建立索引。</Callout>
-            <div className="mt-5"><Link href="/settings" className="inline-flex rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">前往模型与系统设置</Link></div>
+            <div className="mt-5"><Link href="/settings" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">前往模型与系统设置</Link></div>
           </GuideSection>
 
           <GuideSection id="connections" eyebrow="Git connections" title="连接不同来源的 Git 服务">
@@ -125,7 +125,7 @@ export default async function GuidePage() {
               <InfoCard title="最小权限">只授予需要的仓库读取权限。不要使用个人主 SSH Key，也不要把 Token 写进项目资料或仓库 URL。</InfoCard>
             </div>
             <Callout tone="slate" title="Git 连接器只读">通用 Git 连接器只读取受控目录中的代码和文本，不创建分支、提交、Issue 或 PR。GitHub 的 Issue、PR、Release 扩展同步仍使用既有 GitHub 专用入口。</Callout>
-            <div className="mt-5"><Link href="/connections" className="inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往连接器</Link></div>
+            <div className="mt-5"><Link href="/connections" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往连接器</Link></div>
           </GuideSection>
 
           <GuideSection id="files" eyebrow="Files & vision" title="上传文件并核对图片识别">
@@ -202,8 +202,9 @@ export default async function GuidePage() {
             <Step number="1" title="选择可自动执行的任务">仓库同步、网页刷新和记忆质量检查可以由独立 Worker 自动运行并保存租约与结果。</Step>
             <Step number="2" title="理解模型任务的停点">记忆索引和项目简报到期时只产生待确认通知；进入对应页面核对供应商、模型和输入范围后再发送。</Step>
             <Step number="3" title="查看运行记录和通知">每条规则显示下次运行、最近结果和连续失败次数；连续失败三次会自动暂停，通知中心提供安全错误码和处理入口。</Step>
-            <Step number="4" title="归档前收口">项目归档会暂停活动规则，运行中的自动化会阻止归档；项目恢复后规则不会自动重启。</Step>
-            <div className="mt-5"><Link href="/notifications" className="inline-flex rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700">打开通知中心</Link></div>
+            <Step number="4" title="设置计划健康提醒">选择 1、3、7 或 14 天到期窗口，并决定是否提醒相关负责人。检查只读取本地计划、证据和审批状态，不调用模型；发送前会重新校验接收者权限。</Step>
+            <Step number="5" title="归档前收口">项目归档会暂停活动规则，运行中的自动化会阻止归档；项目恢复后规则不会自动重启。</Step>
+            <div className="mt-5"><Link href="/notifications" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700">打开通知中心</Link></div>
           </GuideSection>
 
           <GuideSection id="actions" eyebrow="Controlled action engine" title="用策略和审批控制项目动作">
@@ -231,10 +232,12 @@ export default async function GuidePage() {
           </GuideSection>
 
           <GuideSection id="plan" eyebrow="Evidence-driven plan" title="把证据转成由人推进的项目计划">
-            <Step number="1" title="先建立目标与工作项">进入项目“项目计划”。手工目标从草稿开始，手工工作项从已计划开始；Editor 或 Owner 可以补充标题、说明、优先级和目标归属。</Step>
+            <Step number="1" title="先建立目标与工作项">进入项目“项目计划”。为工作项设置可编辑负责人、目标日期和独立验收标准；没有负责人和验收标准时不能开始。</Step>
             <Step number="2" title="核对智能体建议的证据">只读智能体产生建议后，页面会同时显示引用来源和输入清单指纹。选择“纳入计划”只会固化一条 <code>proposed</code> 工作项，不会自动接受或执行。</Step>
-            <Step number="3" title="由人决定是否接受和推进">Editor 或 Owner 查看证据快照后，手工把建议接受为已计划，再按实际进度标记进行中、已阻塞、已完成或已取消。完成目标同样需要人工操作。</Step>
-            <Step number="4" title="维护依赖与审计">工作项依赖会在服务端检查重复和循环；移除依赖只会标记失效，不删除历史。创建、状态变化、证据纳入和依赖调整都会进入追加式审计。</Step>
+            <Step number="3" title="关联可验证完成证据">从已确认事实或活动项目来源中选择证据；系统固定内容快照和指纹。完成工作项前至少需要一条活动证据，来源变化后会提示重新核对。</Step>
+            <Step number="4" title="核对仓库变化">点击“检查最新同步”只会生成确定性变化清单，不会推断影响。由人把相关信号关联到工作项，或核对后忽略。</Step>
+            <Step number="5" title="由人决定是否推进">Editor 或 Owner 按实际进度更新状态。已完成和已取消是不可改写终态；被取消的前置依赖不会被当作已完成。</Step>
+            <Step number="6" title="查看健康与审计">健康卡和 Dashboard 显示逾期、受阻、依赖和运营缺口。创建、状态、证据、变化决策与依赖调整都会进入追加式审计。</Step>
             <Callout tone="amber" title="项目计划不是自动执行器">计划项只表达经用户核对的目标、工作和依赖。系统不会根据建议自动修改代码、调用 MCP、创建 Git 分支或 PR、合并、运行 Shell 或部署；动作中心的审批边界也不会被项目计划绕过。</Callout>
             <div className="mt-5"><Link href="/projects" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">选择项目并打开项目计划</Link></div>
           </GuideSection>
@@ -247,12 +250,12 @@ export default async function GuidePage() {
               <InfoCard title="OIDC 登录">配置 Issuer、Client、Secret、Scopes 和 Token 认证方式。系统使用 Authorization Code + PKCE，并校验 issuer、audience、nonce、过期时间和 JWKS 签名。</InfoCard>
             </div>
             <Callout tone="amber" title="相同邮箱不会自动绑定">OIDC 未知身份若使用已有本地账户邮箱，登录会被拒绝。V{APP_VERSION} 尚未提供显式身份绑定页面，这一限制用于防止邮箱劫持。</Callout>
-            <div className="mt-5"><Link href="/team" className="inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往团队</Link></div>
+            <div className="mt-5"><Link href="/team" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往团队</Link></div>
           </GuideSection>
 
           <GuideSection id="routine" eyebrow="Operating rhythm" title="推荐的日常更新顺序">
             <div className="rounded-2xl bg-slate-950 p-6 text-sm leading-7 text-slate-200">
-              新文件、网页或代码变化 → 解析/刷新/扫描来源 → 自动抽取 → 人工审核 → 处理质量问题 → 重建语义索引 → 生成新简报或提问 → 核对引用与不确定性
+              新文件、网页或代码变化 → 解析/刷新/扫描来源 → 自动抽取 → 人工审核 → 重建语义索引 → 核对仓库变化 → 更新工作项负责人/验收/证据 → 处理计划健康提醒 → 生成新简报或提问
             </div>
             <p className="mt-5 text-sm leading-7 text-slate-600">如果只更新了人工确认条目但没有重建索引，项目概览和已确认条目工具仍能读取最新状态，但语义记忆仍基于上一代索引。为了让检索和智能体结果一致，建议完成整条更新链路。</p>
           </GuideSection>
@@ -269,6 +272,7 @@ export default async function GuidePage() {
               <InfoCard title="网页来源无法刷新">确认页面无需登录或 JavaScript 渲染。公司内网页面需要明确授权；云元数据地址始终无法放行。</InfoCard>
               <InfoCard title="OIDC 登录被拒绝">检查回调地址、Issuer、Client、Secret、Scopes 和 Token 认证方式；相同邮箱的本地账号不会自动合并。</InfoCard>
               <InfoCard title="自动化没有运行">确认 Worker 正在运行、规则已启用、项目未归档且执行时间已到。连续失败三次的规则会自动暂停。</InfoCard>
+              <InfoCard title="工作项不能开始或完成">开始前补齐当前可编辑负责人和验收标准；完成前再关联至少一条活动证据。证据显示“需复核”时先核对来源变化。</InfoCard>
               <InfoCard title="动作一直等待或失败">等待审批时联系项目 Owner；超过 24 小时需要重新创建。排队后检查 Worker，失败后先查看安全错误码和审计；系统不会自动重试外部读取。</InfoCard>
               <InfoCard title="按钮保持禁用">确认前置配置是否就绪、必填内容是否完成，并勾选当前操作的传输确认复选框。</InfoCard>
               <InfoCard title="任务失败或状态变化">刷新页面查看持久化任务状态。失败不会替换上一代已发布仓库数据或索引。</InfoCard>

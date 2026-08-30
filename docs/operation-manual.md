@@ -84,6 +84,12 @@ Compose 会先执行所有未应用迁移，再启动应用和 Worker。不要�
 
 响应头由应用统一提供；HSTS 只能由确认全站 HTTPS 的入口代理启用。不要在仍需 HTTP 访问的环境中提前启用 HSTS。
 
+### 2.5 持续集成
+
+仓库的 GitHub Actions 工作流会在 push 和 pull request 上执行 Prisma/迁移校验、Lint、类型检查、默认测试全集、全部一次性 PostgreSQL 门禁和生产模式浏览器 smoke。工作流不读取真实模型、Git、OIDC 或 MCP 凭据；完整顺序、失败产物和本地复现方式见[持续集成与浏览器门禁](continuous-integration.md)。
+
+绿色 CI 不代表正式部署、备份恢复或外部服务已经验收。使用 Gitee、公司自建 Git 或其他 CI 平台时，应移植同一组仓库命令和隔离边界，而不是把 GitHub 当作唯一代码托管能力。
+
 ## 3. 页面导航
 
 顶部主导航：
@@ -546,6 +552,7 @@ pg_restore -l ai-project-os.dump
 
 ## 19. 验收清单
 
+- [ ] CI 中 Prisma/迁移校验、Lint、类型检查、完整默认测试集、全部 PostgreSQL 门禁和生产浏览器 smoke 均通过。
 - [ ] `/api/health` 显示版本 5.0.1、数据库正常且 `worker.status` 为 `up`。
 - [ ] `postgres`、`app`、`worker` 健康，`migrate` 成功退出。
 - [ ] 管理员可登录，个人中心可轮换密码。

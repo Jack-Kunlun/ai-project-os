@@ -10,6 +10,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
+    "test:browser-e2e": "tsx scripts/run-browser-e2e.ts",
     "test:ai-runtime-postgres": "tsx --test test/ai-runtime-postgres.test.ts",
     "test:v1-storage-postgres": "tsx --test test/project-item-history-postgres.test.ts",
     "test:corpus-index-postgres": "tsx --test test/corpus-index-postgres.test.ts",
@@ -55,6 +56,7 @@
     "zod": "4.1.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "8.15.5",

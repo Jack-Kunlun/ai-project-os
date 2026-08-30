@@ -8,7 +8,8 @@ AI Project OS V5.0.1 是一套可本地部署的项目长期记忆、时态项�
 
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
-- 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前没有活动候选。
+- 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
+- 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前候选尚未发布。
 - V5.0.1 发布说明：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)。
 - V5.0.0 发布说明：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)。
 - V4.1.0 发布说明：[docs/releases/v4.1.0.md](docs/releases/v4.1.0.md)。
@@ -148,7 +149,7 @@ docker compose ps --all
 
 Compose 使用三个命名卷：`ai-project-os-pgdata`、`ai-project-os-secrets`、`ai-project-os-uploads`。不要执行 `docker compose down -v`，该命令会删除数据库、凭据主密钥和上传文件。
 
-如使用 HTTPS 反向代理，可设置基础设施开关 `AI_PROJECT_OS_SECURE_COOKIES=true`。`POSTGRES_PASSWORD` 若包含 URL 保留字符，需要先进行 URL 编码。
+面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。`POSTGRES_PASSWORD` 若包含 URL 保留字符，需要先进行 URL 编码。
 
 ## 本地开发
 

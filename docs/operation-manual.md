@@ -78,6 +78,12 @@ curl --fail http://127.0.0.1:3000/api/health
 
 Compose 会先执行所有未应用迁移，再启动应用和 Worker。不要执行 `docker compose down -v`。
 
+### 2.4 对外提供服务
+
+默认 Compose 绑定本机端口，适合本地使用。面向局域网或公网提供服务前，必须使用受信任的 HTTPS 反向代理，设置 `AI_PROJECT_OS_SECURE_COOKIES=true`，限制应用和数据库端口只允许必要来源访问，并为登录、OIDC 发起和初始化接口配置入口限流。完整核对项和 Nginx 示例见[部署安全基线](deployment-security.md)。
+
+响应头由应用统一提供；HSTS 只能由确认全站 HTTPS 的入口代理启用。不要在仍需 HTTP 访问的环境中提前启用 HSTS。
+
 ## 3. 页面导航
 
 顶部主导航：

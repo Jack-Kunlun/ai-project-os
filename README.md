@@ -8,6 +8,7 @@ AI Project OS V4.1.0 是一套可本地部署的项目长期记忆、只读项�
 
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
+- V4.1.0 发布说明：[docs/releases/v4.1.0.md](docs/releases/v4.1.0.md)。
 - V4.0.0 发布说明：[docs/releases/v4.0.0.md](docs/releases/v4.0.0.md)。
 - V3.2.0 发布说明：[docs/releases/v3.2.0.md](docs/releases/v3.2.0.md)。
 - V3.1.0 发布说明：[docs/releases/v3.1.0.md](docs/releases/v3.1.0.md)。

@@ -8,7 +8,7 @@ AI Project OS V5.0.1 是一套可本地部署的项目长期记忆、时态项�
 
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
-- V5.0.1 发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前候选保持冻结，完成其中的发布门禁前不得标记版本或部署。
+- 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前没有活动候选。
 - V5.0.1 发布说明：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)。
 - V5.0.0 发布说明：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)。
 - V4.1.0 发布说明：[docs/releases/v4.1.0.md](docs/releases/v4.1.0.md)。
@@ -24,7 +24,7 @@ AI Project OS V5.0.1 是一套可本地部署的项目长期记忆、时态项�
 1. 启动 Docker Compose，初始化本地管理员。
 2. 在“模型设置”添加并测试 OpenAI、DeepSeek、Qwen 或 GLM。
 3. 在“连接器”配置需要使用的 Git 服务。
-4. 如需外部工具，在“连接器 → MCP 只读工具”验证服务，再由项目 Owner 在“工具权限”逐项授权。
+4. 如需外部工具，在“连接器 → MCP 只读工具”验证服务并由管理员认证精确工具，再由项目 Owner 在“工具权限”逐项授权。
 5. 创建项目，在项目“智能控制台”分配视觉、抽取、向量与生成模型。
 6. 上传文件，或添加网页、本地文件夹和一个或多个代码仓库。
 7. 审核 AI 候选并建立语义索引。

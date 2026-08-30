@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 const workflow = [
   { number: "01", title: "配置模型", detail: "添加并测试生成、视觉与向量供应商。", href: "#providers" },
   { number: "02", title: "连接 Git", detail: "配置 GitHub、Gitee、自建 Git 等只读连接。", href: "#connections" },
-  { number: "03", title: "连接 MCP", detail: "发现远程只读工具并为项目逐项授权。", href: "#mcp" },
+  { number: "03", title: "连接 MCP", detail: "发现远程只读工具，完成管理员认证后再为项目逐项授权。", href: "#mcp" },
   { number: "04", title: "接入资料", detail: "上传文件，添加网页和多个代码仓库。", href: "#project-data" },
   { number: "05", title: "建立记忆", detail: "审核 AI 候选，构建兼容的语义索引。", href: "#memory" },
   { number: "06", title: "维护质量", detail: "检查冲突、过期与低置信度记忆。", href: "#quality" },
@@ -97,9 +97,10 @@ export default async function GuidePage() {
           <GuideSection id="mcp" eyebrow="Controlled MCP" title="连接并授权远程只读工具">
             <Step number="1" title="由管理员添加远程服务">进入“连接器 → MCP 只读工具”，填写 Streamable HTTP 端点和可选 Bearer Token。公网必须使用 HTTPS；公司内网需要明确开启内网访问。当前不运行 stdio、本地子进程或旧式 HTTP+SSE。</Step>
             <Step number="2" title="发现并固化工具定义">执行“发现并固化工具”。系统固定 DNS 地址，分页读取工具目录，并把名称、说明、输入/输出 Schema、annotations 和定义指纹保存为追加式快照。不兼容或过大的 Schema 会被拒绝。</Step>
-            <Step number="3" title="由项目 Owner 逐项授权">进入项目“工具权限”。只有同时声明 <code>readOnlyHint=true</code> 和 <code>destructiveHint=false</code> 的当前定义可供授权；Owner 仍需确认远端服务和凭据本身可信且只读。</Step>
-            <Step number="4" title="填写参数并创建动作">Editor 或 Owner 按固化的输入 Schema 填写 JSON 参数。系统把项目、授权、工具定义、参数、网络和凭据指纹一起固化为动作；不会立即访问远端。</Step>
-            <Step number="5" title="逐次审批并核对结果">Owner 到“动作与审批”展开完整参数后批准。MCP 调用不允许“自动执行”；执行前再次核对全部快照，任何授权撤销、工具更新、DNS 变化或凭据轮换都会失败关闭。</Step>
+            <Step number="3" title="由管理员认证精确工具">只有同时声明 <code>readOnlyHint=true</code> 和 <code>destructiveHint=false</code> 的当前定义可申请认证。管理员必须核对精确工具定义、当前网络解析和凭据指纹，再点击“管理员认证”；远端声明本身不产生授权资格。</Step>
+            <Step number="4" title="由项目 Owner 逐项授权">进入项目“工具权限”，只从管理员已认证的当前目录中选择工具。Owner 仍需确认远端服务和凭据本身可信且只读。</Step>
+            <Step number="5" title="填写参数并创建动作">Editor 或 Owner 按固化的输入 Schema 填写 JSON 参数。系统把项目、管理员认证、授权、工具定义、参数、网络和凭据指纹一起固化为动作；不会立即访问远端。</Step>
+            <Step number="6" title="逐次审批并核对结果">Owner 到“动作与审批”展开完整参数后批准。MCP 调用不允许“自动执行”；执行前再次核对全部快照，任何认证撤销、授权撤销、工具更新、DNS 变化或凭据轮换都会失败关闭。</Step>
             <Callout tone="amber" title="远端声明不是安全保证">MCP annotations 按协议属于未受信提示。系统的门禁可以阻止未授权、未审批或发生漂移的调用，但不能证明第三方服务实际只读。应使用你控制或充分信任的服务、最小权限 Token 和独立审计。</Callout>
             <Callout tone="slate" title="结果不会自动进入 AI">工具结果默认只保存在对应动作记录中，响应体有超时和大小限制；图片、音频与资源链接不会自动展开。成功结果可以在“动作与审批”中由 Editor 或 Owner 人工固化为未审核项目资料；仍需后续审核与索引重建，才会参与记忆、RAG 或项目智能体。</Callout>
             <div className="mt-5"><Link href="/connections/mcp" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往 MCP 连接</Link></div>

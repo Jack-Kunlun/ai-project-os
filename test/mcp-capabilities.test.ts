@@ -96,3 +96,15 @@ test("MCP 数据库迁移固定逐次审批、当前定义唯一和追加式审�
   assert.match(migration, /project MCP tool grant audit is immutable/u);
   assert.doesNotMatch(migration, /stdio|shell\.execute|code\.write|deploy\.execute/u);
 });
+
+test("MCP 页面指南要求管理员认证后才能进入项目授权", async () => {
+  const [guide, connections] = await Promise.all([
+    readFile("src/app/guide/page.tsx", "utf8"),
+    readFile("src/app/connections/mcp/mcp-connections-client.tsx", "utf8"),
+  ]);
+  assert.match(guide, /由管理员认证精确工具/u);
+  assert.match(guide, /远端声明本身不产生授权资格/u);
+  assert.match(guide, /任何认证撤销、授权撤销/u);
+  assert.match(connections, /管理员认证精确定义、网络和凭据指纹/u);
+  assert.match(connections, /完成工具发现与管理员认证/u);
+});

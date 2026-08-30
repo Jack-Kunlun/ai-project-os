@@ -86,7 +86,7 @@ export function McpConnectionsClient({ username }: { username: string }) {
       <AppHeader username={username} active="connections" />
       <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
         <section className="grid gap-8 rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 lg:grid-cols-[1.2fr_.8fr] lg:px-10">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Controlled capability connections</p><h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">MCP 只读工具连接</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">管理员在页面登记远程 Streamable HTTP 服务并发现工具。工具声明先固化为快照，只有明确声明只读且非破坏性的定义才能由项目 Owner 授权。</p></div>
+          <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Controlled capability connections</p><h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">MCP 只读工具连接</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">管理员在页面登记远程 Streamable HTTP 服务并发现工具。工具声明先固化为快照；只有明确声明只读且非破坏性，并由管理员认证精确定义、网络和凭据指纹的当前工具，才能由项目 Owner 授权。</p></div>
           <div className="grid grid-cols-2 gap-3 text-xs">{["仅远程 HTTPS / 受信内网", "Bearer 凭据加密", "工具定义追加式快照", "调用必须逐次审批"].map((item) => <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-slate-200">{item}</div>)}</div>
         </section>
         <ConnectionTabs active="mcp" />
@@ -94,7 +94,7 @@ export function McpConnectionsClient({ username }: { username: string }) {
         {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}
         <div className="mt-8 grid gap-7 xl:grid-cols-[.82fr_1.18fr]">
           <McpConnectionForm onCreated={(connection) => setConnections((current) => [...current, connection])} />
-          <section><div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Configured</p><h2 className="mt-2 text-2xl font-semibold">已配置服务</h2></div><span className="text-xs text-slate-400">{loading ? "读取中…" : `${connections.length} 个`}</span></div><div className="space-y-4">{!loading && connections.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">先添加远程 MCP 服务并完成工具发现，再到项目“工具权限”页逐项授权。</div> : null}{connections.map((connection) => <McpConnectionCard key={connection.id} connection={connection} onChanged={(next) => setConnections((current) => current.map((item) => item.id === next.id ? next : item))} />)}</div></section>
+          <section><div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Configured</p><h2 className="mt-2 text-2xl font-semibold">已配置服务</h2></div><span className="text-xs text-slate-400">{loading ? "读取中…" : `${connections.length} 个`}</span></div><div className="space-y-4">{!loading && connections.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">先添加远程 MCP 服务，完成工具发现与管理员认证，再到项目“工具权限”页逐项授权。</div> : null}{connections.map((connection) => <McpConnectionCard key={connection.id} connection={connection} onChanged={(next) => setConnections((current) => current.map((item) => item.id === next.id ? next : item))} />)}</div></section>
         </div>
       </div>
     </main>

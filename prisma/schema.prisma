@@ -2248,7 +2248,6 @@ model ProjectItem {
   primaryQualityIssues MemoryQualityIssue[]    @relation("MemoryQualityPrimaryItem")
   relatedQualityIssues MemoryQualityIssue[]    @relation("MemoryQualityRelatedItem")
   projectPlanEvidenceLinks ProjectWorkItemEvidenceLink[] @relation("ProjectPlanEvidenceProjectItem")
-  projectPlanEvidenceLinks ProjectWorkItemEvidenceLink[] @relation("ProjectPlanEvidenceProjectItem")
 
   @@unique([projectId, id])
   @@index([projectId, reviewStatus])

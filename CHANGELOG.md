@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [5.1.2] - 2026-08-31
+
+发布说明：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)
+
+### 安全
+
+- 生产 Compose 显式把 `AI_PROJECT_OS_SECURE_COOKIES` 传递给应用容器，确保 HTTPS 部署启用的安全 Cookie 配置不会停留在宿主机 `.env`。
+- 增加 Compose 回归断言，固定该变量只注入 `app` 服务，并保留本地 HTTP 所需的安全默认值。
+
+### 验证
+
+- 精确候选提交 `ec4f7e3` 通过 GitHub Actions CI #13：Prisma/迁移、Lint、类型检查、覆盖率、23 个 PostgreSQL 门禁、生产浏览器/WCAG、性能预算和隔离 Compose 候选门禁全部成功。
+- 同一候选通过本地 `releaseEligible:true` 容器门禁，确认版本 `5.1.2`、50 个迁移、健康、重启持久性和精确资源清理。
+
 ## [5.1.1] - 2026-08-31
 
 发布说明：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)

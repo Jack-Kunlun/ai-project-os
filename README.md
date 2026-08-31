@@ -13,8 +13,8 @@ AI Project OS V5.1.1 是一套可本地部署的项目长期记忆、时态项�
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前候选为 V5.1.1。
-- V5.1.1 候选说明：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
+- 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前没有活动候选。
+- V5.1.1 发布说明：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
 - V5.1.0 发布说明：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。
 - V5.0.1 发布说明：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)。
 - V5.0.0 发布说明：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)。

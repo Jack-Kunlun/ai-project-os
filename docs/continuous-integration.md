@@ -11,10 +11,13 @@
 3. 对一次性、名称受限的测试数据库实际运行 `pnpm test:postgres-gates` 中登记的全部 PostgreSQL 门禁。
 4. 安装 Chromium，并通过 `pnpm test:browser-e2e` 构建和启动生产模式应用与 Worker。
 5. 在全新数据库中初始化管理员，检查安全响应头、Dashboard、健康接口、项目列表、使用指南和 MCP 连接页；同时拒绝浏览器控制台错误，并对关键页面执行 WCAG 2.2 A/AA 自动扫描。
+6. 对同一次生产构建执行 `pnpm performance:check`，校验共享 JavaScript、单文件 JavaScript、全局 CSS、全部静态客户端资源，以及五个关键路由的 gzip 体积预算。
 
 浏览器门禁固定为单 Worker，失败时保留截图、trace、视频和 HTML 报告。数据库和临时主密钥在门禁结束时精确清理；运行器只接受 `127.0.0.1:56432/postgres` 或等价 loopback 管理地址，并且只操作固定的 `ai_project_os_browser_e2e_test` 数据库。应用端口默认从 loopback 动态分配；如显式设置 `BROWSER_E2E_PORT`，运行器会先拒绝已被占用的端口。Playwright 只接受运行器注入的 `http://127.0.0.1:<port>`，避免误测其他本地服务。
 
 可访问性扫描由锁定版本的 `@axe-core/playwright` 在本机浏览器上下文执行，不把页面内容发送给第三方服务。自动扫描不能替代键盘操作、屏幕阅读器和人工认知可用性评审，但任何已覆盖页面的 WCAG A/AA 违规都会直接使门禁失败。
+
+性能预算保存在 `config/performance-budgets.json`。当前生产基线的共享 JavaScript 上限为 145 KiB、最大单个 JavaScript 文件为 75 KiB、全局 CSS 为 13 KiB、全部静态客户端资源为 540 KiB；setup、Dashboard、项目列表、指南和 MCP 连接路由分别使用 155、165、165、155 和 175 KiB 的 JavaScript 上限。所有数值均按每个构建文件独立 gzip 后计算，避免机器速度与临时负载造成误报；调整预算必须和可解释的产品或依赖变化一起评审。`pnpm test:performance` 会使用不可连接的 loopback 数据库占位地址生成新的生产构建再检查预算，避免误连部署数据库；CI 已有浏览器门禁产物，因此直接运行 `pnpm performance:check`。
 
 ## 安全边界
 

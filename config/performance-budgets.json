@@ -1,0 +1,16 @@
+{
+  "formatVersion": 1,
+  "budgets": {
+    "sharedJavaScriptGzipBytes": 148480,
+    "largestJavaScriptAssetGzipBytes": 76800,
+    "globalCssGzipBytes": 13312,
+    "totalStaticClientGzipBytes": 552960
+  },
+  "criticalRoutes": {
+    "/setup": 158720,
+    "/dashboard": 168960,
+    "/projects": 168960,
+    "/guide": 158720,
+    "/connections/mcp": 179200
+  }
+}

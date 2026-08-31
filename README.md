@@ -177,6 +177,7 @@ pnpm worker
 ```bash
 pnpm test
 pnpm test:coverage
+pnpm test:performance
 pnpm lint
 pnpm typecheck
 pnpm build

@@ -23,13 +23,13 @@ test("first-run administrator can reach protected pages with production security
 
   await expect(page).toHaveURL(/\/dashboard$/u);
   await expect(page.getByRole("heading", { name: "欢迎回来，browser_admin" })).toBeVisible();
-  await expect(page.getByText("Project intelligence · V5.0.1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Project intelligence · V5.1.0", { exact: true })).toBeVisible();
 
   const healthResponse = await request.get("/api/health");
   expect(healthResponse.ok()).toBe(true);
   expect(await healthResponse.json()).toMatchObject({
     status: "ok",
-    version: "5.0.1",
+    version: "5.1.0",
     database: "up",
     worker: { status: "up", consecutiveFailures: 0 },
   });

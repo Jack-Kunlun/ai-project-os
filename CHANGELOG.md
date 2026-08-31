@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 增加 Worker 持久化心跳、容器健康检查和 `/api/health` 独立 Worker 状态，便于区分应用存活与后台执行能力。
+- 增加真实模型、Git、OIDC 和第三方 MCP 的只读现场验收命令，以及 PostgreSQL 与生产浏览器发布门禁的 GitHub Actions 工作流。
+
+### 安全
+
+- 为所有页面和 API 增加 CSP、点击劫持、MIME 嗅探、Referrer 与浏览器能力限制响应头，并提供 HTTPS 反向代理与入口限流基线。
+- Worker 运行日志改为稳定结构化事件，不输出凭据、外部正文或内部异常细节。
+
+### 部署
+
+- Compose 支持覆盖端口和三个持久化卷名，可在不触碰正式实例的前提下运行隔离候选部署与浏览器验收。
+
 ## [5.0.1] - 2026-08-31
 
 发布说明：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)

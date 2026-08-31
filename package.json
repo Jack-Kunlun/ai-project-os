@@ -14,6 +14,7 @@
     "test:browser-e2e": "tsx scripts/run-browser-e2e.ts",
     "performance:check": "node --import tsx scripts/check-performance-budget.ts",
     "test:performance": "node --import tsx scripts/run-performance-gate.ts",
+    "release:local": "node --import tsx scripts/run-local-release.ts",
     "test:ai-runtime-postgres": "tsx --test test/ai-runtime-postgres.test.ts",
     "test:v1-storage-postgres": "tsx --test test/project-item-history-postgres.test.ts",
     "test:corpus-index-postgres": "tsx --test test/corpus-index-postgres.test.ts",

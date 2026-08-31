@@ -23,6 +23,7 @@ FROM deps AS builder
 
 # Prisma config is evaluated during generate; use a non-secret build-only URL.
 ENV DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build"
+ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY . .
 RUN pnpm db:generate

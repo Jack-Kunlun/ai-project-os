@@ -11,6 +11,7 @@ AI Project OS V5.1.0 是一套可本地部署的项目长期记忆、时态项�
 - 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
 - 运行监控基线：[docs/monitoring.md](docs/monitoring.md)。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
+- 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
 - 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前没有活动候选。
 - V5.1.0 发布说明：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。
@@ -188,6 +189,7 @@ git diff --check
 pnpm test:postgres-gates
 pnpm exec playwright install chromium
 pnpm test:browser-e2e
+pnpm release:local
 
 V3_POSTGRES_GATE=1 pnpm exec tsx --test test/v3-postgres.test.ts
 ACTION_ENGINE_POSTGRES_GATE=1 pnpm test:action-engine-postgres

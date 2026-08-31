@@ -86,7 +86,7 @@ Compose 会先执行所有未应用迁移，再启动应用和 Worker。不要�
 
 ### 2.5 持续集成
 
-仓库的 GitHub Actions 工作流会在 push 和 pull request 上执行 Prisma/迁移校验、Lint、类型检查、默认测试全集、全部一次性 PostgreSQL 门禁和生产模式浏览器 smoke。工作流不读取真实模型、Git、OIDC 或 MCP 凭据；完整顺序、失败产物和本地复现方式见[持续集成与浏览器门禁](continuous-integration.md)。
+仓库的 GitHub Actions 工作流会在 push 和 pull request 上执行 Prisma/迁移校验、Lint、类型检查、覆盖率、全部一次性 PostgreSQL 门禁、生产模式浏览器与无障碍 E2E、性能预算，以及隔离 Compose 候选构建/迁移/重启门禁。工作流不读取真实模型、Git、OIDC 或 MCP 凭据；完整顺序、失败产物和本地复现方式见[持续集成与浏览器门禁](continuous-integration.md)，容器候选边界见[本地持续交付候选门禁](local-release.md)。
 
 绿色 CI 不代表正式部署、备份恢复或外部服务已经验收。使用 Gitee、公司自建 Git 或其他 CI 平台时，应移植同一组仓库命令和隔离边界，而不是把 GitHub 当作唯一代码托管能力。
 

@@ -55,7 +55,7 @@ export function SetupForm() {
           <p className="mt-6 max-w-lg text-sm leading-7 text-slate-300">管理员账号用于保护项目资料、GitHub 仓库身份和模型凭据。供应商 API Key 将在页面录入并由服务端加密保存。</p>
         </section>
         <form onSubmit={submit} className="p-9 sm:p-12">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">本地管理员</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">本地管理员</p>
           <h2 className="mt-3 text-2xl font-semibold tracking-tight">初始化 AI Project OS</h2>
           <label className="mt-8 block text-sm font-medium" htmlFor="setup-username">用户名</label>
           <input id="setup-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />

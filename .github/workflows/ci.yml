@@ -73,7 +73,7 @@ jobs:
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Run production browser smoke
+      - name: Run production browser and accessibility gates
         run: pnpm test:browser-e2e
 
       - name: Upload browser diagnostics

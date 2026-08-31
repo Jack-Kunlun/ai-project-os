@@ -188,7 +188,7 @@ function MetricCard({ label, value, detail, icon, tone, loading }: { label: stri
     violet: "bg-violet-50 text-violet-600",
     rose: "bg-rose-50 text-rose-600",
   } as const;
-  return <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><div className="flex items-start justify-between"><div><p className="text-xs font-semibold text-slate-500">{label}</p>{loading ? <div className="mt-3 h-8 w-16 animate-pulse rounded bg-slate-100" /> : <p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p>}</div><span className={`flex h-10 w-10 items-center justify-center rounded-xl ${tones[tone]}`}><DashboardIcon name={icon} /></span></div><p className="mt-4 text-xs text-slate-400">{detail}</p></article>;
+  return <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm"><div className="flex items-start justify-between"><div><p className="text-xs font-semibold text-slate-500">{label}</p>{loading ? <div className="mt-3 h-8 w-16 animate-pulse rounded bg-slate-100" /> : <p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p>}</div><span className={`flex h-10 w-10 items-center justify-center rounded-xl ${tones[tone]}`}><DashboardIcon name={icon} /></span></div><p className="mt-4 text-xs text-slate-500">{detail}</p></article>;
 }
 
 function OperationsPanel({ payload, loading }: { payload: DashboardPayload; loading: boolean }) {

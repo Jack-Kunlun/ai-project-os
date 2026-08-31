@@ -90,7 +90,7 @@ export function ProjectsClient({ username }: { username: string }) {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Projects</p>
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">我的项目</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500">集中管理项目空间，并直接进入资料、智能控制台、记忆或智能体。</p>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">集中管理项目空间，并直接进入资料、智能控制台、记忆或智能体。</p>
           </div>
           <button type="button" onClick={() => setCreateOpen(true)} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500">＋ 新建项目</button>
         </section>

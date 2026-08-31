@@ -39,3 +39,8 @@ button:not(:disabled) {
   background: #c7d2fe;
   color: #1e1b4b;
 }
+
+/* Tailwind's slate-400 is too light for small secondary text on light surfaces. */
+.text-slate-400 {
+  color: #475569;
+}

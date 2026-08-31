@@ -11,8 +11,13 @@ test("browser gate stays isolated and exercises the production server", async ()
     read("scripts/run-browser-e2e.ts"),
     read("e2e/smoke.spec.ts"),
   ]);
+  const manifest = JSON.parse(packageJson) as {
+    devDependencies: Record<string, string>;
+    scripts: Record<string, string>;
+  };
 
-  assert.equal(JSON.parse(packageJson).scripts["test:browser-e2e"], "tsx scripts/run-browser-e2e.ts");
+  assert.equal(manifest.scripts["test:browser-e2e"], "tsx scripts/run-browser-e2e.ts");
+  assert.equal(manifest.devDependencies["@axe-core/playwright"], "4.13.0");
   assert.match(config, /workers:\s*1/u);
   assert.match(config, /BROWSER_E2E_BASE_URL_REQUIRED/u);
   assert.match(config, /parsed\.hostname !== "127\.0\.0\.1"/u);
@@ -27,6 +32,9 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(runner, /DROP DATABASE IF EXISTS/u);
   assert.match(smoke, /content-security-policy/u);
   assert.match(smoke, /worker: \{ status: "up"/u);
+  assert.match(smoke, /AxeBuilder/u);
+  assert.match(smoke, /wcag22aa/u);
+  assert.match(smoke, /expectNoAccessibilityViolations/u);
   assert.match(smoke, /expect\(browserErrors\)\.toEqual\(\[\]\)/u);
 });
 
@@ -46,7 +54,9 @@ test("CI uses pinned least-privilege actions and runs all bounded gates", async 
 });
 
 test("coverage gate measures all source TypeScript with explicit ratchet thresholds", async () => {
-  const packageJson = JSON.parse(await read("package.json")) as { scripts: Record<string, string> };
+  const packageJson = JSON.parse(await read("package.json")) as {
+    scripts: Record<string, string>;
+  };
   const command = packageJson.scripts["test:coverage"];
 
   assert.match(command, /--experimental-test-coverage/u);

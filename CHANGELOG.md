@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-08-31
+
+发布说明：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)
+
 ### 新增
 
 - 增加 Worker 持久化心跳、容器健康检查和 `/api/health` 独立 Worker 状态，便于区分应用存活与后台执行能力。

@@ -64,8 +64,8 @@ jobs:
           pnpm lint
           pnpm typecheck
 
-      - name: Run default test suite
-        run: pnpm test
+      - name: Run default test suite with coverage thresholds
+        run: pnpm test:coverage
 
       - name: Run every PostgreSQL gate
         run: pnpm test:postgres-gates

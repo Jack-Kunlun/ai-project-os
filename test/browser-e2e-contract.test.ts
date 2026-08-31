@@ -38,8 +38,21 @@ test("CI uses pinned least-privilege actions and runs all bounded gates", async 
   assert.match(workflow, /actions\/setup-node@820762786026740c76f36085b0efc47a31fe5020/u);
   assert.match(workflow, /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a/u);
   assert.match(workflow, /pnpm install --frozen-lockfile/u);
+  assert.match(workflow, /pnpm test:coverage/u);
   assert.match(workflow, /pnpm test:postgres-gates/u);
   assert.match(workflow, /playwright install --with-deps chromium/u);
   assert.match(workflow, /pnpm test:browser-e2e/u);
   assert.doesNotMatch(workflow, /secrets\./u);
+});
+
+test("coverage gate measures all source TypeScript with explicit ratchet thresholds", async () => {
+  const packageJson = JSON.parse(await read("package.json")) as { scripts: Record<string, string> };
+  const command = packageJson.scripts["test:coverage"];
+
+  assert.match(command, /--experimental-test-coverage/u);
+  assert.match(command, /--test-coverage-lines=60/u);
+  assert.match(command, /--test-coverage-branches=78/u);
+  assert.match(command, /--test-coverage-functions=67/u);
+  assert.match(command, /--test-coverage-include=src\/\*\*\/\*\.ts/u);
+  assert.match(command, /--test-coverage-include=src\/\*\*\/\*\.tsx/u);
 });

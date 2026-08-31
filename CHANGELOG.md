@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 验证
+
+- 增加覆盖全部 `src` TypeScript/TSX 的测试覆盖率门禁，当前基线要求行、分支和函数覆盖率分别不少于 60%、78% 和 67%。
+
 ## [5.1.0] - 2026-08-31
 
 发布说明：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)

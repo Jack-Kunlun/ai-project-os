@@ -10,6 +10,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-lines=60 --test-coverage-branches=78 --test-coverage-functions=67 '--test-coverage-include=src/**/*.ts' '--test-coverage-include=src/**/*.tsx' '--test-coverage-exclude=src/**/*.d.ts' test/*.test.ts",
     "test:browser-e2e": "tsx scripts/run-browser-e2e.ts",
     "test:ai-runtime-postgres": "tsx --test test/ai-runtime-postgres.test.ts",
     "test:v1-storage-postgres": "tsx --test test/project-item-history-postgres.test.ts",

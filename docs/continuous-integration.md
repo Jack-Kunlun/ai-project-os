@@ -7,7 +7,7 @@
 工作流使用 Node.js 24、pnpm 10 和带 pgvector 的 PostgreSQL 18，依次执行：
 
 1. 冻结锁文件安装依赖，生成并校验 Prisma Client 和完整迁移目录。
-2. 运行 Lint、TypeScript 类型检查和完整默认测试集。
+2. 运行 Lint、TypeScript 类型检查和完整默认测试集；覆盖率门禁要求源代码行覆盖率不少于 60%、分支覆盖率不少于 78%、函数覆盖率不少于 67%。
 3. 对一次性、名称受限的测试数据库实际运行 `pnpm test:postgres-gates` 中登记的全部 PostgreSQL 门禁。
 4. 安装 Chromium，并通过 `pnpm test:browser-e2e` 构建和启动生产模式应用与 Worker。
 5. 在全新数据库中初始化管理员，检查安全响应头、Dashboard、健康接口、使用指南和 MCP 连接页；同时拒绝浏览器控制台错误。
@@ -28,6 +28,7 @@
 先准备绑定 `127.0.0.1:56432` 的一次性 PostgreSQL 18 + pgvector 管理库，在未提交的 shell 环境中设置 `POSTGRES_GATE_ADMIN_URL` 和不少于 16 位的 `POSTGRES_GATE_TEST_PASSWORD`，再执行：
 
 ```bash
+pnpm test:coverage
 pnpm test:postgres-gates
 pnpm exec playwright install chromium
 pnpm test:browser-e2e

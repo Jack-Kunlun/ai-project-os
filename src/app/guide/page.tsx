@@ -6,8 +6,8 @@ import { requirePageSession } from "@/lib/auth";
 import { APP_VERSION } from "@/lib/version";
 
 export const metadata: Metadata = {
-  title: `使用指南 · AI Project OS V${APP_VERSION}`,
-  description: `AI Project OS V${APP_VERSION} 从连接配置、资料接入到自动化、受控动作、团队治理与智能体的页面操作指南。`,
+  title: `使用指南 · AI Project OS 内部开发版 ${APP_VERSION}`,
+  description: `AI Project OS 内部开发版 ${APP_VERSION} 从连接配置、资料接入到自动化、受控动作、团队治理与智能体的页面操作指南。`,
 };
 
 export const dynamic = "force-dynamic";
@@ -261,7 +261,7 @@ export default async function GuidePage() {
               <InfoCard title="邀请链接">建议限定邮箱。链接只在创建后显示一次，请立即复制并通过安全渠道发送；接受者邮箱必须匹配。</InfoCard>
               <InfoCard title="OIDC 登录">配置 Issuer、Client、Secret、Scopes 和 Token 认证方式。系统使用 Authorization Code + PKCE，并校验 issuer、audience、nonce、过期时间和 JWKS 签名。</InfoCard>
             </div>
-            <Callout tone="amber" title="相同邮箱不会自动绑定">OIDC 未知身份若使用已有本地账户邮箱，登录会被拒绝。V{APP_VERSION} 尚未提供显式身份绑定页面，这一限制用于防止邮箱劫持。</Callout>
+            <Callout tone="amber" title="相同邮箱不会自动绑定">OIDC 未知身份若使用已有本地账户邮箱，登录会被拒绝。内部开发版 {APP_VERSION} 尚未提供显式身份绑定页面，这一限制用于防止邮箱劫持。</Callout>
             <div className="mt-5"><Link href="/team" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700">前往团队</Link></div>
           </GuideSection>
 
@@ -308,7 +308,7 @@ export default async function GuidePage() {
         </div>
 
         <footer className="mt-12 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 py-7 text-xs text-slate-400">
-          <span>AI Project OS V{APP_VERSION} · 页面操作指南</span>
+          <span>AI Project OS 内部开发版 {APP_VERSION} · 页面操作指南</span>
           <Link href="/dashboard" className="font-semibold text-indigo-600 hover:text-indigo-700">返回 Dashboard</Link>
         </footer>
       </div>

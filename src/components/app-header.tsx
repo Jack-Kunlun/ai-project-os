@@ -53,7 +53,7 @@ export function AppHeader({
           </span>
           <span className="hidden sm:block">
             <span className="block text-sm font-bold tracking-[0.14em] text-slate-950">AI PROJECT OS</span>
-            <span className="mt-0.5 block text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">Project intelligence · V{APP_VERSION}</span>
+            <span className="mt-0.5 block text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">内部开发版 · {APP_VERSION}</span>
           </span>
         </Link>
 

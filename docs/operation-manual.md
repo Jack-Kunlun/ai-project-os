@@ -1,6 +1,8 @@
-# AI Project OS V5.1.2 操作手册
+# AI Project OS 0.1.0-dev.1 内部开发版操作手册
 
-本文档面向本地管理员、工作区管理员和项目成员，说明 AI Project OS V5.1.2 的部署、页面配置、资料接入、智能记忆、时态项目世界模型、自动化、受控动作、远程只读 MCP 工具、证据驱动项目运营、团队权限、OIDC、备份和排错。
+本文档面向本地管理员、工作区管理员和项目成员，说明 AI Project OS 0.1.0-dev.1 内部开发版的本地部署、页面配置、资料接入、智能记忆、时态项目世界模型、自动化、受控动作、远程只读 MCP 工具、证据驱动项目运营、团队权限、OIDC、备份和排错。
+
+当前状态：`INTERNAL_DEVELOPMENT`。正式发布基线为空，首个正式公开版本计划为 `1.0.0`。生产部署入口在首个正式 `v1.0.0` 前静态禁用，`0.1.0-dev.1` 不得进入生产 tag 通道。
 
 页面内简明指南：<http://127.0.0.1:3000/guide>
 
@@ -58,13 +60,13 @@ docker compose ps --all
 curl --fail http://127.0.0.1:3000/api/health
 ```
 
-响应应包含 `status: ok`、`database: up`、`worker.status: up` 和 `version: 5.1.2`。应用存活与 Worker 健康是两个独立信号：Worker 缺失、停止、降级或心跳超过 45 秒时，接口仍可返回应用 `status: ok`，但 `worker.status` 会明确显示异常状态，Worker 容器健康检查也会失败。
+响应应包含 `status: ok`、`database: up`、`worker.status: up` 和 `version: 0.1.0-dev.1`。应用存活与 Worker 健康是两个独立信号：Worker 缺失、停止、降级或心跳超过 45 秒时，接口仍可返回应用 `status: ok`，但 `worker.status` 会明确显示异常状态，Worker 容器健康检查也会失败。
 
 ### 2.2 初始化管理员
 
 首次打开 <http://127.0.0.1:3000> 会进入初始化页。管理员用户名为 3–64 位；密码为 12–128 位，并且同时包含字母和数字。
 
-初始化完成后，系统建立默认工作区，并把管理员加入为 Owner。V5.1.2 页面当前只管理这个默认工作区，不提供工作区创建或切换。
+初始化完成后，系统建立默认工作区，并把管理员加入为 Owner。当前内部开发版页面只管理这个默认工作区，不提供工作区创建或切换。
 
 ### 2.3 更新现有部署
 
@@ -172,7 +174,7 @@ https://project-os.example.com/api/auth/oidc/callback
 
 登录回跳只接受单个前导斜杠的本站路径；绝对 URL、协议相对路径、反斜线以及编码或双重编码的路径分隔符都会安全降级到 Dashboard。每个身份源最多保留 200 条未消费登录流程；创建新流程时会在同一事务中清理过期流程，并淘汰最旧流程，不会因为匿名请求把所有用户锁死。匿名请求的速率限制仍应由反向代理或部署平台负责。
 
-登录时系统校验 issuer、audience、nonce、过期时间和 JWKS 签名。相同邮箱的已有本地账户不会自动绑定；系统会拒绝这次 OIDC 登录，避免身份劫持。V5.1.2 尚无页面化显式绑定流程。
+登录时系统校验 issuer、audience、nonce、过期时间和 JWKS 签名。相同邮箱的已有本地账户不会自动绑定；系统会拒绝这次 OIDC 登录，避免身份劫持。当前内部开发版尚无页面化显式绑定流程。
 
 ## 6. 配置模型供应商
 
@@ -553,7 +555,7 @@ pg_restore -l ai-project-os.dump
 ## 19. 验收清单
 
 - [ ] CI 中 Prisma/迁移校验、Lint、类型检查、完整默认测试集、全部 PostgreSQL 门禁和生产浏览器 smoke 均通过。
-- [ ] `/api/health` 显示版本 5.1.2、数据库正常且 `worker.status` 为 `up`。
+- [ ] `/api/health` 显示版本 `0.1.0-dev.1`、数据库正常且 `worker.status` 为 `up`。
 - [ ] `postgres`、`app`、`worker` 健康，`migrate` 成功退出。
 - [ ] 管理员可登录，个人中心可轮换密码。
 - [ ] 模型连接在页面测试通过。
@@ -570,5 +572,5 @@ pg_restore -l ai-project-os.dump
 - [ ] 项目状态只纳入当前有效事实；同项目/Viewer/Editor/Owner 边界、关系版本绑定、陈旧提示、替代链无环、快照幂等和不可变审计符合预期。
 - [ ] Viewer/Editor/Owner 权限边界符合预期。
 - [ ] OIDC 测试账号可以登录，未知身份和邮箱冲突被拒绝。
-- [ ] 在真实外部服务上完成模型调用、仓库同步、OIDC 登录和经审批 MCP 调用，随后 `pnpm external:acceptance` 返回 `ok: true`；未配置能力必须在发布记录中明确排除，不能用模拟服务替代。
+- [ ] 在真实外部服务上完成模型调用、仓库同步、OIDC 登录和经审批 MCP 调用，随后 `pnpm external:acceptance` 返回 `ok: true`；未配置能力必须在内部验收记录中明确排除，不能用模拟服务替代。
 - [ ] PostgreSQL、主密钥和上传文件都有可恢复备份。

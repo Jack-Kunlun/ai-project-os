@@ -34,6 +34,15 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
+test("production workflow is statically fail-closed before the first formal v1.0.0 release", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+
+  assert.match(workflow, /PRODUCTION_DEPLOYMENT_DISABLED_BEFORE_V1_0_0/u);
+  assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' && false \}\}/u);
+  assert.match(workflow, /\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$/u);
+  assert.doesNotMatch(workflow, /0\.1\.0-dev\.1/u);
+});
+
 test("forced-command gateway accepts only a release tag and exact commit", async () => {
   const gateway = await readFile(gatewayPath, "utf8");
 

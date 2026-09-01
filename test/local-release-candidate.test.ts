@@ -10,7 +10,7 @@ import {
 } from "../scripts/local-release-candidate";
 
 test("candidate identity scopes every destructive target to one generated project", () => {
-  const identity = createCandidateIdentity("m5abcdeffeed", "5.1.2");
+  const identity = createCandidateIdentity("m5abcdeffeed", "0.1.0-dev.1");
   assert.match(identity.projectName, /^ai-project-os-candidate-/u);
   assert.ok(Object.values(identity.volumes).every((value) => value.startsWith(identity.projectName)));
   assert.ok(Object.values(identity.images).every((value) => value.startsWith(identity.projectName)));
@@ -41,7 +41,7 @@ test("release version must agree across package, application, and OCI metadata",
     readFile("src/lib/version.ts", "utf8"),
     readFile("Dockerfile", "utf8"),
   ]);
-  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "5.1.2");
+  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "0.1.0-dev.1");
   assert.throws(
     () => readCoherentVersion(packageJson, 'export const APP_VERSION = "9.9.9";', dockerfile),
     /LOCAL_RELEASE_VERSION_MISMATCH/u,

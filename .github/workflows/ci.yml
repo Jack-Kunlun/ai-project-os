@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   verify:
-    name: Verify release gates
+    name: Verify internal delivery gates
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     services:

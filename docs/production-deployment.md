@@ -1,10 +1,13 @@
-# GitHub Actions 生产部署
+# GitHub Actions 生产部署（未来能力，当前禁用）
 
-AI Project OS 支持从 GitHub Actions 的 **Deploy production** 工作流手动部署已经发布并通过标签 CI 的版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
+状态：`PLANNED`。AI Project OS 当前仍处于 `0.1.0-dev.1` 内部开发阶段，没有正式发布基线；首个正式公开版本计划为 `1.0.0`。在 `v1.0.0` 正式发布前，**Deploy production** 工作流的生产 job 通过静态 `if: ... && false` fail-closed，任何手动触发都不会执行检出、SSH、部署或健康检查。
+
+未来启用后，AI Project OS 才会从 GitHub Actions 的 **Deploy production** 工作流手动部署已经正式发布并通过标签 CI 的版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 
 ## 安全模型
 
-- 工作流只能通过 `workflow_dispatch` 手动触发，并且必须从 `main` 运行。
+- 当前工作流 job 静态禁用，原因是项目尚未达到首个正式 `v1.0.0` 发布；重新启用前必须保留同一 fail-closed 原则。
+- 启用后工作流只能通过 `workflow_dispatch` 手动触发，并且必须从 `main` 运行。
 - 输入只接受 `vX.Y.Z`，目标必须是 annotated tag，且 `package.json` 版本必须匹配。
 - 部署前会通过 GitHub API 确认该标签、该精确提交的 `CI` push 运行已经 `completed/success`。
 - GitHub 使用独立 ED25519 私钥；服务器对应公钥带 `restrict` 和 forced-command，不能获取 Shell、PTY、端口转发或执行任意命令。
@@ -50,13 +53,17 @@ sudo deploy/production/install-production-deploy.sh \
 
 不要把私钥、数据库密码、服务器 `.env` 或外部服务凭据保存为仓库文件、Actions artifact 或普通变量。
 
-## 点击部署
+## 启用后的部署流程（未来计划）
+
+首个正式 `v1.0.0` 发布并完成独立发布验收前，不要配置或点击生产部署入口。`0.1.0-dev.1` 以及任何 `-dev`/候选版本都不能进入生产 tag 通道。
+
+在未来启用后：
 
 1. 打开 GitHub 仓库的 **Actions**。
 2. 选择 **Deploy production**。
 3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag。
 4. 如配置了 Environment 审批，批准该部署。
-5. 工作流会依次完成标签/CI 验证、受限 SSH 部署、公网健康与 HTTP→HTTPS 跳转验证。
+5. 工作流才会依次完成标签/CI 验证、受限 SSH 部署、公网健康与 HTTP→HTTPS 跳转验证。
 
 成功日志只报告 tag、提交、备份目录和健康状态，不输出密码或连接字符串。生产部署结果保存在 `/var/lib/ai-project-os/last-deployment`，权限为 `root:root 0600`。
 

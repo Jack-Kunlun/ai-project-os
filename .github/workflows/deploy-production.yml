@@ -1,12 +1,12 @@
-name: Deploy production
+name: Deploy production (planned; disabled until v1.0.0)
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Annotated release tag to deploy (for example, v5.1.2)
+        description: Future annotated release tag after the first formal v1.0.0 release (for example, v1.0.0)
         required: true
-        default: v5.1.2
+        default: v1.0.0
         type: string
 
 permissions:
@@ -19,8 +19,9 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy verified release tag
-    if: ${{ github.ref == 'refs/heads/main' }}
+    name: Deploy verified release tag (disabled until v1.0.0)
+    # PRODUCTION_DEPLOYMENT_DISABLED_BEFORE_V1_0_0: this job must remain skipped while the product is internal development.
+    if: ${{ github.ref == 'refs/heads/main' && false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment:

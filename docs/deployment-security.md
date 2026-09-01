@@ -1,6 +1,6 @@
 # 部署安全基线
 
-本文档适用于需要把 AI Project OS 暴露到本机之外的部署。默认 Compose 是本地运行基线，不等同于公网生产部署。
+本文档适用于未来需要把 AI Project OS 暴露到本机之外的部署。默认 Compose 是本地运行基线，不等同于公网生产部署。当前版本 `0.1.0-dev.1` 仍处于内部开发阶段，正式发布基线为空；首个正式 `v1.0.0` 前生产部署入口保持禁用，内部开发版本不得进入生产 tag 通道。
 
 ## 必须满足的边界
 
@@ -36,4 +36,4 @@ curl --fail https://project-os.example.com/api/health
 
 `/api/health` 可用于存活探测，但它不证明登录、外部连接、持久化或备份可用。发布验收仍需分别覆盖数据库迁移、恢复演练、Worker、页面和真实外部服务。
 
-需要从 GitHub Actions 手动发布已经通过标签 CI 的版本时，使用[GitHub Actions 生产部署](production-deployment.md)中的 forced-command、root-owned 部署入口和备份边界；不要把通用 SSH Shell、Docker socket 或不受限 sudo 权限交给工作流。
+首个正式 `v1.0.0` 发布并完成启用评审后，如需从 GitHub Actions 手动部署已经通过标签 CI 的版本，再使用[GitHub Actions 生产部署](production-deployment.md)中的 forced-command、root-owned 部署入口和备份边界；当前工作流保持静态禁用，绝不要把 `0.1.0-dev.1` 或其他 `-dev` 版本送入生产 tag 通道，也不要把通用 SSH Shell、Docker socket 或不受限 sudo 权限交给工作流。

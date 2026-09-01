@@ -4,27 +4,31 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 外部模型、Git、OIDC 与 MCP 需由每个部署自行配置并现场验证；模型输出与自动抽取结果均需人工审核。项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
+当前版本状态：`INTERNAL_DEVELOPMENT` · `0.1.0-dev.1`
+
+正式发布基线：无。首个正式公开版本计划为 `1.0.0`；在此之前生产部署入口静态禁用，`0.1.0-dev.1` 不得进入生产 tag 通道。
+
 ## 从哪里开始
 
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
 - 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
-- GitHub Actions 生产部署：[docs/production-deployment.md](docs/production-deployment.md)。
+- GitHub Actions 生产部署（未来能力，当前禁用）：[docs/production-deployment.md](docs/production-deployment.md)。
 - 运行监控基线：[docs/monitoring.md](docs/monitoring.md)。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 未发布候选状态：[docs/releases/next.md](docs/releases/next.md)。当前没有活动候选。
-- V5.1.2 发布说明：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
-- V5.1.1 发布说明：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
-- V5.1.0 发布说明：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。
-- V5.0.1 发布说明：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)。
-- V5.0.0 发布说明：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)。
-- V4.1.0 发布说明：[docs/releases/v4.1.0.md](docs/releases/v4.1.0.md)。
-- V4.0.0 发布说明：[docs/releases/v4.0.0.md](docs/releases/v4.0.0.md)。
-- V3.2.0 发布说明：[docs/releases/v3.2.0.md](docs/releases/v3.2.0.md)。
-- V3.1.0 发布说明：[docs/releases/v3.1.0.md](docs/releases/v3.1.0.md)。
-- V3.0.0 发布说明：[docs/releases/v3.0.0.md](docs/releases/v3.0.0.md)。
+- 当前内部开发状态：[docs/releases/next.md](docs/releases/next.md)。
+- V5.1.2 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
+- V5.1.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
+- V5.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。
+- V5.0.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)。
+- V5.0.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)。
+- V4.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v4.1.0.md](docs/releases/v4.1.0.md)。
+- V4.0.0 内部研发里程碑记录（非正式发布）：[docs/releases/v4.0.0.md](docs/releases/v4.0.0.md)。
+- V3.2.0 内部研发里程碑记录（非正式发布）：[docs/releases/v3.2.0.md](docs/releases/v3.2.0.md)。
+- V3.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v3.1.0.md](docs/releases/v3.1.0.md)。
+- V3.0.0 内部研发里程碑记录（非正式发布）：[docs/releases/v3.0.0.md](docs/releases/v3.0.0.md)。
 - 版本记录：[CHANGELOG.md](CHANGELOG.md)。
 - 历史 CLI 手册：[docs/v1-operations.md](docs/v1-operations.md)，仅用于兼容旧流程。
 
@@ -48,7 +52,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 当前能力
 
-| 能力 | V5.1.2 行为 |
+| 能力 | 0.1.0-dev.1 内部开发版行为 |
 | --- | --- |
 | Dashboard | 汇总跨项目世界状态、配置就绪度、计划风险、运营提醒、推荐下一步和最近任务；项目管理保持为独立顶部入口 |
 | 项目与个人中心 | 项目搜索、创建、软归档、恢复和受限 JSON 导出；个人资料、登录名、密码和活动会话管理 |
@@ -121,7 +125,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 当前限制
 
-- V5.1.2 当前提供一个由旧数据迁移得到的默认工作区；数据模型支持多个工作区，但页面尚未提供工作区创建和切换。
+- 当前内部开发版 `0.1.0-dev.1` 提供一个由旧数据迁移得到的默认工作区；数据模型支持多个工作区，但页面尚未提供工作区创建和切换。
 - OIDC 不提供“按邮箱自动合并已有本地账户”。已有账户需要未来的显式身份绑定流程；当前遇到相同邮箱会拒绝登录，避免账户劫持。
 - Git 通用连接器读取代码与文本快照；Issue、PR、Release 等扩展资料目前仍是 GitHub 专用能力。
 - 网页来源只抓取服务端可读取的静态文本，不执行 JavaScript，也不提供页面登录或自定义请求头。
@@ -159,7 +163,7 @@ docker compose ps --all
 
 Compose 默认使用三个命名卷：`ai-project-os-pgdata`、`ai-project-os-secrets`、`ai-project-os-uploads`。不要执行 `docker compose down -v`，该命令会删除数据库、凭据主密钥和上传文件。需要并行运行一次性候选验收时，必须同时改用独立 `POSTGRES_PORT`、`APP_PORT`、`AI_PROJECT_OS_PGDATA_VOLUME`、`AI_PROJECT_OS_SECRETS_VOLUME` 和 `AI_PROJECT_OS_UPLOADS_VOLUME`；不要让候选栈复用正式卷。
 
-面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。`POSTGRES_PASSWORD` 若包含 URL 保留字符，需要先进行 URL 编码。
+面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。当前生产部署入口仍为未来能力，首个正式 `v1.0.0` 前不可执行；`POSTGRES_PASSWORD` 若包含 URL 保留字符，需要先进行 URL 编码。
 
 ## 本地开发
 
@@ -234,4 +238,4 @@ pnpm exec prisma migrate status --config prisma.config.ts
 
 ## 历史材料
 
-V1 CLI 手册和历史运行合同继续保留用于兼容与审计，但不覆盖 V5.1.2 的页面能力。当前能力、限制和使用方式以本 README、页面指南和操作手册为准。
+V1 CLI 手册和历史运行合同继续保留用于兼容与审计，但不覆盖当前内部开发版 `0.1.0-dev.1` 的页面能力。当前能力、限制和使用方式以本 README、页面指南和操作手册为准。

@@ -1,12 +1,16 @@
 # 更新日志
 
-本项目采用语义化版本。面向用户的能力、限制和升级要求以对应版本的发布说明为准。
+本项目采用语义化版本。当前状态为 `INTERNAL_DEVELOPMENT`，内部开发基线为 `0.1.0-dev.1`，尚无正式发布基线；首个正式公开版本计划为 `1.0.0`。
 
-## [Unreleased]
+V3–V5 条目是内部研发里程碑记录（非正式发布），保留实现、测试、迁移、限制和日期证据，不代表公开发布或生产部署。
 
-## [5.1.2] - 2026-08-31
+## [0.1.0-dev.1] - 内部开发基线
 
-发布说明：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)
+当前版本用于内部开发、集成和验收。生产部署入口在首个正式 `v1.0.0` 前静态禁用，内部开发版本不得进入生产 tag 通道。
+
+## [5.1.2 内部研发里程碑（非正式发布）] - 2026-08-31
+
+里程碑记录：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)
 
 ### 安全
 
@@ -18,9 +22,9 @@
 - 精确候选提交 `ec4f7e3` 通过 GitHub Actions CI #13：Prisma/迁移、Lint、类型检查、覆盖率、23 个 PostgreSQL 门禁、生产浏览器/WCAG、性能预算和隔离 Compose 候选门禁全部成功。
 - 同一候选通过本地 `releaseEligible:true` 容器门禁，确认版本 `5.1.2`、50 个迁移、健康、重启持久性和精确资源清理。
 
-## [5.1.1] - 2026-08-31
+## [5.1.1 内部研发里程碑（非正式发布）] - 2026-08-31
 
-发布说明：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)
+里程碑记录：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)
 
 ### 验证
 
@@ -32,9 +36,9 @@
 
 - 增加隔离本地 Compose 候选门禁，自动验证镜像版本、迁移、健康与重启持久性，并精确清理候选容器、网络、卷和镜像。
 
-## [5.1.0] - 2026-08-31
+## [5.1.0 内部研发里程碑（非正式发布）] - 2026-08-31
 
-发布说明：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)
+里程碑记录：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)
 
 ### 新增
 
@@ -50,9 +54,9 @@
 
 - Compose 支持覆盖端口和三个持久化卷名，可在不触碰正式实例的前提下运行隔离候选部署与浏览器验收。
 
-## [5.0.1] - 2026-08-31
+## [5.0.1 内部研发里程碑（非正式发布）] - 2026-08-31
 
-发布说明：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)
+里程碑记录：[docs/releases/v5.0.1.md](docs/releases/v5.0.1.md)
 
 ### 安全
 
@@ -65,9 +69,9 @@
 - 修复 ProjectSource provenance PostgreSQL gate 与 integrity smoke 对第 49 个迁移的兼容/一致性验证。
 - 增加统一的一次性 PostgreSQL 门禁执行器，完整覆盖 22 个显式数据库 gate，并限制为固定回环测试端口和白名单数据库。
 
-## [5.0.0] - 2026-08-30
+## [5.0.0 内部研发里程碑（非正式发布）] - 2026-08-30
 
-发布说明：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)
+里程碑记录：[docs/releases/v5.0.0.md](docs/releases/v5.0.0.md)
 
 ### 新增
 
@@ -82,9 +86,9 @@
 - 被替代事实继续保留确认时间、来源证据和 AI 候选来源一致性；关系、快照和审计采用追加式保护。
 - AI 不会自动确认事实、建立关系、替代事实或覆盖确定性状态，也不会获得代码、Git、Shell、MCP 写入或部署能力。
 
-## [4.1.0] - 2026-08-30
+## [4.1.0 内部研发里程碑（非正式发布）] - 2026-08-30
 
-发布说明：[docs/releases/v4.1.0.md](docs/releases/v4.1.0.md)
+里程碑记录：[docs/releases/v4.1.0.md](docs/releases/v4.1.0.md)
 
 ### 新增
 
@@ -108,9 +112,9 @@
 - 已登录生产预览完成 Dashboard、项目计划、自动化和使用指南验收；计划按钮保持文本居中，控制台无警告或错误。
 - Docker Compose 正式升级成功：迁移容器正常退出，应用与 PostgreSQL 健康，Worker 持续运行；重启应用和 Worker 后健康接口、版本与既有数据保持正常。
 
-## [4.0.0] - 2026-08-30
+## [4.0.0 内部研发里程碑（非正式发布）] - 2026-08-30
 
-发布说明：[docs/releases/v4.0.0.md](docs/releases/v4.0.0.md)
+里程碑记录：[docs/releases/v4.0.0.md](docs/releases/v4.0.0.md)
 
 ### 新增
 
@@ -133,9 +137,9 @@
 - Prisma Schema、类型检查、Lint、本地与 Docker 生产构建、Docker Compose 运行验收通过。
 - 认证后页面确认 V4.0.0、项目计划、MCP 结果纳入和页面指南；共享 Header 一致，关键按钮文字居中，浏览器无警告或错误。
 
-## [3.2.0] - 2026-08-30
+## [3.2.0 内部研发里程碑（非正式发布）] - 2026-08-30
 
-发布说明：[docs/releases/v3.2.0.md](docs/releases/v3.2.0.md)
+里程碑记录：[docs/releases/v3.2.0.md](docs/releases/v3.2.0.md)
 
 ### 新增
 
@@ -159,9 +163,9 @@
 - Prisma Schema、类型检查、Lint、生产构建和 Docker Compose 运行验收通过。
 - 认证后页面确认 V3.2.0、MCP 连接、项目工具权限、动作中心与页面指南；共享 Header 一致，关键按钮文字居中，浏览器无警告或错误。
 
-## [3.1.0] - 2026-08-29
+## [3.1.0 内部研发里程碑（非正式发布）] - 2026-08-29
 
-发布说明：[docs/releases/v3.1.0.md](docs/releases/v3.1.0.md)
+里程碑记录：[docs/releases/v3.1.0.md](docs/releases/v3.1.0.md)
 
 ### 新增
 
@@ -182,9 +186,9 @@
 - 完整测试、真实 PostgreSQL Action Engine 门禁、类型检查、Lint、生产构建和 Docker Compose 运行验收通过。
 - 认证后页面确认 V3.1.0、动作中心、共享 Header、页面指南和按钮文字居中，无浏览器警告或错误。
 
-## [3.0.0] - 2026-08-29
+## [3.0.0 内部研发里程碑（非正式发布）] - 2026-08-29
 
-发布说明：[docs/releases/v3.0.0.md](docs/releases/v3.0.0.md)
+里程碑记录：[docs/releases/v3.0.0.md](docs/releases/v3.0.0.md)
 
 ### 新增
 

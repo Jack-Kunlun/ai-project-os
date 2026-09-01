@@ -30,6 +30,11 @@ const updateConnectionSchema = z.object({
   expectedUpdatedAt: z.string().datetime({ offset: true }),
 }).strict();
 
+const deleteConnectionSchema = z.object({
+  confirmationName: z.string().min(1).max(80),
+  expectedUpdatedAt: z.string().datetime({ offset: true }),
+}).strict();
+
 const grantSchema = z.object({
   toolDefinitionId: z.string().uuid(),
   acknowledgeReadOnly: z.literal(true),
@@ -382,6 +387,37 @@ export async function updateMcpConnection(connectionIdInput: unknown, input: unk
     });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return failMcp("MCP_CONNECTION_NAME_CONFLICT");
+    throw error;
+  }
+}
+
+export async function deleteMcpConnection(connectionIdInput: unknown, input: unknown, db: PrismaClient = getDb()) {
+  const connectionId = uuid(connectionIdInput);
+  const parsed = deleteConnectionSchema.safeParse(input);
+  if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
+  try {
+    return await db.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010005))`);
+      const connection = await tx.mcpConnection.findUnique({
+        where: { id: connectionId },
+        select: { id: true, name: true, status: true, credentialId: true, updatedAt: true },
+      });
+      if (connection === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
+      if (connection.updatedAt.getTime() !== timestamp(parsed.data.expectedUpdatedAt).getTime()) {
+        return failMcp("MCP_CONNECTION_CONFLICT");
+      }
+      if (connection.status !== "disabled") return failMcp("MCP_CONNECTION_DELETE_REQUIRES_DISABLED");
+      if (connection.name !== parsed.data.confirmationName) return failMcp("MCP_CONNECTION_CONFIRMATION_MISMATCH");
+      const grantCount = await tx.projectMcpToolGrant.count({ where: { connectionId } });
+      if (grantCount > 0) return failMcp("MCP_CONNECTION_IN_USE");
+      await tx.mcpConnection.delete({ where: { id: connection.id } });
+      if (connection.credentialId !== null) {
+        await tx.externalCredential.delete({ where: { id: connection.credentialId } });
+      }
+      return Object.freeze({ id: connection.id });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    if (isPrismaCode(error, "P2003")) return failMcp("MCP_CONNECTION_IN_USE");
     throw error;
   }
 }

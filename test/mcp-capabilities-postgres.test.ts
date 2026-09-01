@@ -14,6 +14,7 @@ import {
   attestMcpToolDefinition,
   buildMcpActionSnapshot,
   createMcpConnection,
+  deleteMcpConnection,
   discoverMcpConnectionTools,
   executeMcpActionSnapshot,
   grantProjectMcpTool,
@@ -66,6 +67,8 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
   process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
   let connectionId: string | null = null;
   let credentialId: string | null = null;
+  let disposableConnectionId: string | null = null;
+  let disposableCredentialId: string | null = null;
 
   await db.appUser.createMany({ data: [
     { id: adminId, username: `mcp_admin_${suffix}`, role: "admin" },
@@ -201,11 +204,55 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
     assert.equal(revoked.status, "revoked");
     const audit = await db.projectMcpToolGrantAudit.findFirstOrThrow({ where: { grantId: grant.id } });
     await assert.rejects(() => db.projectMcpToolGrantAudit.update({ where: { id: audit.id }, data: { details: { changed: true } } }));
+
+    const currentConnection = await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id } });
+    const disabledInUse = await updateMcpConnection(connection.id, {
+      enabled: false,
+      expectedUpdatedAt: currentConnection.updatedAt.toISOString(),
+    }, db);
+    await assert.rejects(
+      () => deleteMcpConnection(connection.id, {
+        confirmationName: connection.name,
+        expectedUpdatedAt: disabledInUse.updatedAt.toISOString(),
+      }, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_IN_USE",
+    );
+
+    const disposable = await createMcpConnection({
+      name: `Disposable MCP ${suffix}`,
+      endpointUrl: `http://127.0.0.1:${address.port}/unused`,
+      authKind: "bearer",
+      bearerToken: `${token}-unused`,
+      allowPrivateNetwork: true,
+    }, admin, db);
+    disposableConnectionId = disposable.id;
+    disposableCredentialId = (await db.mcpConnection.findUniqueOrThrow({ where: { id: disposable.id }, select: { credentialId: true } })).credentialId;
+    const disposableDisabled = await updateMcpConnection(disposable.id, {
+      enabled: false,
+      expectedUpdatedAt: disposable.updatedAt.toISOString(),
+    }, db);
+    await assert.rejects(
+      () => deleteMcpConnection(disposable.id, {
+        confirmationName: "wrong name",
+        expectedUpdatedAt: disposableDisabled.updatedAt.toISOString(),
+      }, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_CONFIRMATION_MISMATCH",
+    );
+    await deleteMcpConnection(disposable.id, {
+      confirmationName: disposable.name,
+      expectedUpdatedAt: disposableDisabled.updatedAt.toISOString(),
+    }, db);
+    assert.equal(await db.mcpConnection.count({ where: { id: disposable.id } }), 0);
+    assert.equal(await db.externalCredential.count({ where: { id: disposableCredentialId! } }), 0);
+    disposableConnectionId = null;
+    disposableCredentialId = null;
     assert.deepEqual(requests, ["tools/list", "tools/call", "tools/list"]);
   } finally {
     await db.project.deleteMany({ where: { id: projectId } });
     if (connectionId !== null) await db.mcpConnection.deleteMany({ where: { id: connectionId } });
     if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
+    if (disposableConnectionId !== null) await db.mcpConnection.deleteMany({ where: { id: disposableConnectionId } });
+    if (disposableCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: disposableCredentialId } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });
     await db.appUser.deleteMany({ where: { id: { in: [adminId, editorId] } } });
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

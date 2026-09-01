@@ -95,7 +95,9 @@ export function SettingsClient({ username }: { username: string }) {
 
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
 
-        <section className="grid gap-6 lg:grid-cols-[0.72fr_1.28fr]">
+        <ProviderCapabilityMatrix catalog={catalog} />
+
+        <section className="mt-8 grid gap-6 lg:grid-cols-[0.72fr_1.28fr]">
           <ProviderCreateForm catalog={catalog} onCreated={(provider) => setProviders((current) => [...current, provider])} />
           <div className="space-y-4">
             <div className="flex items-end justify-between px-1">
@@ -113,12 +115,40 @@ export function SettingsClient({ username }: { username: string }) {
                 provider={provider}
                 catalog={catalog.find((entry) => entry.kind === provider.kind)}
                 onChanged={(next) => setProviders((current) => current.map((entry) => entry.id === next.id ? next : entry))}
+                onRemoved={(providerId) => setProviders((current) => current.filter((entry) => entry.id !== providerId))}
               />
             ))}
           </div>
         </section>
       </div>
     </main>
+  );
+}
+
+function ProviderCapabilityMatrix({ catalog }: { catalog: ProviderCatalogEntry[] }) {
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+      <div className="border-b border-slate-100 pb-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Model capabilities</p>
+        <h2 className="mt-2 text-2xl font-semibold">供应商与模型能力</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-500">以下是系统当前内置的模型建议。生成模型用于自动抽取和引用式问答；向量模型专门用于语义索引，两者可以选择不同供应商。</p>
+      </div>
+      {catalog.length === 0 ? <div className="mt-5 h-28 animate-pulse rounded-2xl bg-slate-100" /> : (
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          {catalog.map((entry) => (
+            <article key={entry.kind} className={`rounded-2xl border p-5 ${entry.supportsEmbeddings ? "border-slate-200 bg-slate-50" : "border-amber-200 bg-amber-50"}`}>
+              <div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-slate-800">{entry.displayName}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${entry.supportsEmbeddings ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>{entry.supportsEmbeddings ? "支持语义向量" : "不支持语义向量"}</span></div>
+              <dl className="mt-4 space-y-3 text-xs leading-5">
+                <div><dt className="font-semibold text-slate-500">生成 / 文档抽取</dt><dd className="mt-1 text-slate-700">{entry.generationModelSuggestions.join("、")}</dd></div>
+                <div><dt className="font-semibold text-slate-500">语义向量</dt><dd className={`mt-1 ${entry.supportsEmbeddings ? "text-slate-700" : "font-medium text-amber-800"}`}>{entry.supportsEmbeddings ? entry.embeddingModelSuggestions.map((model) => `${model.id}（${model.dimensions} 维）`).join("、") : "本系统当前未接入该供应商的向量模型；请选 OpenAI、Qwen 或 GLM"}</dd></div>
+                <div><dt className="font-semibold text-slate-500">图片识别</dt><dd className="mt-1 text-slate-700">{entry.supportsVision ? entry.visionModelSuggestions.join("、") : "不支持"}</dd></div>
+              </dl>
+            </article>
+          ))}
+        </div>
+      )}
+      <p className="mt-4 rounded-xl bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-800">DeepSeek 可以用于文档自动抽取；它在这里缺少的是向量能力，而不是文档理解能力。抽取时系统会用服务端证据块定位真实原文，并逐条显示定位、校正、跳过和重复统计。</p>
+    </section>
   );
 }
 
@@ -222,7 +252,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className="mt-5 block text-sm font-medium text-slate-200">{label}{children}</label>;
 }
 
-function ProviderCard({ provider, catalog, onChanged }: { provider: Provider; catalog?: ProviderCatalogEntry; onChanged: (provider: Provider) => void }) {
+function ProviderCard({ provider, catalog, onChanged, onRemoved }: { provider: Provider; catalog?: ProviderCatalogEntry; onChanged: (provider: Provider) => void; onRemoved: (providerId: string) => void }) {
   const [testing, setTesting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [pending, setPending] = useState(false);
@@ -298,6 +328,26 @@ function ProviderCard({ provider, catalog, onChanged }: { provider: Provider; ca
     }
   }
 
+  async function removeConnection() {
+    const confirmationName = window.prompt(`永久删除会同时移除加密凭据，且不可恢复。请输入连接名称“${provider.name}”确认：`);
+    if (confirmationName === null) return;
+    setPending(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/settings/providers/${provider.id}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirmationName }),
+      });
+      if (!response.ok) throw new Error(await readError(response, "供应商连接删除失败"));
+      onRemoved(provider.id);
+    } catch (deleteError) {
+      setMessage(deleteError instanceof Error ? deleteError.message : "供应商连接删除失败");
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -309,6 +359,7 @@ function ProviderCard({ provider, catalog, onChanged }: { provider: Provider; ca
       </div>
       <dl className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">生成模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultGenerationModelId}</dd></div><div><dt className="text-slate-400">图片识别</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultVisionModelId ?? "未配置"}</dd></div><div><dt className="text-slate-400">向量模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} 维` : "未配置"}</dd></div></dl>
       {editing ? <form onSubmit={save} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2"><EditField label="连接名称"><input value={name} onChange={(event) => setName(event.target.value)} required className="edit-field" /></EditField><EditField label="生成模型"><input value={generationModelId} onChange={(event) => setGenerationModelId(event.target.value)} required className="edit-field" /></EditField>{catalog?.supportsVision ? <EditField label="图片识别模型"><input value={visionModelId} onChange={(event) => setVisionModelId(event.target.value)} className="edit-field" /></EditField> : null}{catalog?.supportsEmbeddings ? <><EditField label="向量模型（留空即关闭）"><input value={embeddingModelId} onChange={(event) => setEmbeddingModelId(event.target.value)} className="edit-field" /></EditField><EditField label="向量维度"><input type="number" value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} disabled={!embeddingModelId} className="edit-field" /></EditField></> : null}<EditField label="替换 API Key（可选）"><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" className="edit-field" /></EditField><div className="flex items-end gap-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">保存变更</button><button type="button" onClick={() => void toggleEnabled()} disabled={pending || (provider.status !== "disabled" && provider._count.projectRoutes > 0)} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-600 disabled:opacity-40">{provider.status === "disabled" ? "重新启用" : "停用连接"}</button></div><style jsx>{`.edit-field{margin-top:.4rem;width:100%;border-radius:.75rem;border:1px solid #e2e8f0;padding:.7rem .85rem;font-size:.8rem;outline:none}.edit-field:focus{border-color:#818cf8;box-shadow:0 0 0 2px #e0e7ff}`}</style></form> : null}
+      {provider.status === "disabled" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3"><p className="text-xs leading-5 text-rose-700">永久删除仅适用于没有项目路由或历史审计引用的连接，并会同时删除加密凭据。</p><button type="button" onClick={() => void removeConnection()} disabled={pending} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">永久删除</button></div> : null}
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}
       {provider.lastErrorCode ? <p className="mt-2 text-xs text-rose-600">安全错误码：{provider.lastErrorCode}</p> : null}
     </article>

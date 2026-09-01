@@ -127,6 +127,9 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MCP_CONNECTION_CONFLICT: [409, "MCP 连接已被其他管理员更新，请刷新后重试"],
       MCP_CONNECTION_DISABLED: [409, "MCP 连接已停用"],
       MCP_CONNECTION_NOT_VERIFIED: [409, "MCP 连接尚未成功发现工具"],
+      MCP_CONNECTION_IN_USE: [409, "MCP 连接仍被项目工具授权或历史审计引用，无法永久删除"],
+      MCP_CONNECTION_DELETE_REQUIRES_DISABLED: [409, "请先停用 MCP 连接，再执行永久删除"],
+      MCP_CONNECTION_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
       MCP_NETWORK_BLOCKED: [403, "MCP 地址位于未授权的内网或保留网络"],
       MCP_NETWORK_CHANGED: [409, "MCP 域名解析地址已变化，请管理员重新确认网络"],
       MCP_TRANSPORT_FAILED: [502, "MCP 远程连接失败"],
@@ -193,6 +196,9 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       OIDC_PROVIDER_NOT_FOUND: [404, "OIDC 身份源不存在"],
       OIDC_PROVIDER_CONFLICT: [409, "OIDC 身份源名称或客户端配置已存在"],
       OIDC_PROVIDER_NOT_VERIFIED: [409, "OIDC 身份源尚未验证或已停用"],
+      OIDC_PROVIDER_IN_USE: [409, "OIDC 身份源仍有关联账户身份，无法永久删除；请先迁移并解除身份绑定"],
+      OIDC_PROVIDER_DELETE_REQUIRES_DISABLED: [409, "请先停用 OIDC 身份源，再执行永久删除"],
+      OIDC_PROVIDER_CONFIRMATION_MISMATCH: [400, "身份源名称确认不一致，未执行删除"],
       OIDC_DISCOVERY_FAILED: [422, "OIDC Discovery 文档不符合安全要求"],
       OIDC_NETWORK_BLOCKED: [403, "OIDC 地址位于未授权的内网或保留网络"],
       OIDC_NETWORK_CHANGED: [409, "OIDC 域名解析地址已变化，请管理员重新验证"],
@@ -271,8 +277,10 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       GIT_CONNECTION_INVALID_INPUT: [400, "Git 服务配置无效"],
       GIT_CONNECTION_NOT_FOUND: [404, "Git 服务连接不存在"],
       GIT_CONNECTION_NAME_CONFLICT: [409, "Git 服务连接名称已存在"],
-      GIT_CONNECTION_IN_USE: [409, "Git 服务仍有关联仓库，无法停用"],
+      GIT_CONNECTION_IN_USE: [409, "Git 服务仍被项目仓库关联或历史记录引用，无法停用或永久删除"],
       GIT_CONNECTION_DISABLED: [409, "Git 服务连接已停用"],
+      GIT_CONNECTION_DELETE_REQUIRES_DISABLED: [409, "请先停用 Git 服务连接，再执行永久删除"],
+      GIT_CONNECTION_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
       GIT_REPOSITORY_NOT_FOUND: [404, "Git 仓库或分支不存在"],
       GIT_REPOSITORY_CONFLICT: [409, "该项目已经关联此仓库"],
       GIT_REPOSITORY_EMPTY: [422, "仓库或所选分支没有可扫描内容"],
@@ -431,7 +439,9 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_PROVIDER_INVALID_INPUT: [400, "供应商配置无效"],
       AI_PROVIDER_NOT_FOUND: [404, "供应商连接不存在"],
       AI_PROVIDER_NAME_CONFLICT: [409, "供应商连接名称已存在"],
-      AI_PROVIDER_IN_USE: [409, "供应商仍被项目路由使用，无法停用"],
+      AI_PROVIDER_IN_USE: [409, "供应商仍被项目路由或历史审计记录引用，无法停用或永久删除"],
+      AI_PROVIDER_DELETE_REQUIRES_DISABLED: [409, "请先停用供应商连接，再执行永久删除"],
+      AI_PROVIDER_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };
@@ -522,8 +532,12 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_ARCHIVED: { status: 409, message: "项目已归档，请先恢复后再操作" },
       PROJECT_ALREADY_ACTIVE: { status: 409, message: "项目当前未归档" },
       PROJECT_LIFECYCLE_STALE: { status: 409, message: "项目状态已变化，请刷新后重试" },
-      PROJECT_HAS_UNRESOLVED_JOBS: { status: 409, message: "项目仍有运行中或待人工收口的任务，暂不能归档" },
+      PROJECT_HAS_UNRESOLVED_JOBS: { status: 409, message: "项目仍有运行中或待人工收口的任务，暂不能归档或永久删除" },
       PROJECT_LIFECYCLE_CONFLICT: { status: 409, message: "项目状态正在变化，请稍后重试" },
+      PROJECT_DELETE_REQUIRES_ARCHIVED: { status: 409, message: "只有已归档项目可以永久删除" },
+      PROJECT_DELETE_CONFIRMATION_MISMATCH: { status: 400, message: "项目名称确认不一致，未执行删除" },
+      PROJECT_DELETE_ACTIVE_UPLOAD: { status: 409, message: "项目仍有上传请求或文件解析租约，请稍后再删除" },
+      PROJECT_DELETE_CONFLICT: { status: 409, message: "项目删除依赖正在变化或仍有受保护引用，请刷新后重试" },
     } as const;
     const mapped = errors[error.code];
     return { status: mapped.status, body: { error: { code: error.code, message: mapped.message } } };
@@ -618,8 +632,8 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AUTO_EXTRACT_INVALID_INPUT: "自动抽取输入无效",
       AUTO_EXTRACT_SOURCE_NOT_FOUND: "一个或多个资料不存在",
       AUTO_EXTRACT_SOURCE_TOO_LARGE: "所选资料超过单次抽取上限",
-      AUTO_EXTRACT_INVALID_MODEL_OUTPUT: "模型未返回可验证的结构化候选",
-      AUTO_EXTRACT_SOURCE_EXCERPT_MISMATCH: "模型候选无法精确回溯到原文",
+      AUTO_EXTRACT_INVALID_MODEL_OUTPUT: "模型返回的 JSON 结构不完整或无法验证；可减少单次资料量、缩短资料或切换生成模型后重试",
+      AUTO_EXTRACT_SOURCE_EXCERPT_MISMATCH: "模型候选无法精确回溯到原文；系统未写入这些候选，请缩小资料范围或切换生成模型后重试",
       AUTO_EXTRACT_CANDIDATE_CONFLICT: "候选已被其他操作更新，请刷新",
     } as const;
     const status = error.code.includes("CONFLICT") ? 409 : 422;

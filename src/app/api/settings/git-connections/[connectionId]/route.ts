@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { disableGitConnection, updateGitConnection } from "@/lib/git";
+import { deleteGitConnection, updateGitConnection } from "@/lib/git";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
@@ -26,8 +26,11 @@ export async function DELETE(request: Request, context: { params: Promise<{ conn
   try {
     assertSameOrigin(request);
     await requireApiSession(request);
-    const connection = await disableGitConnection(await connectionId(context.params));
-    return NextResponse.json({ connection });
+    const deleted = await deleteGitConnection(
+      await connectionId(context.params),
+      await readJsonBody(request),
+    );
+    return NextResponse.json({ deleted });
   } catch (error) {
     return handleApiError(error);
   }

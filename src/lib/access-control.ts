@@ -141,7 +141,8 @@ export async function authorizeApiRequest(user: AccessUser, request: Request, db
   if (!parsedProjectId.success) return;
   const write = !["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase());
   const ownerOnly = write && (
-    /\/(?:lifecycle|export|action-policies|mcp-tool-grants)(?:\/|$)/u.test(path)
+    (request.method.toUpperCase() === "DELETE" && /^\/api\/projects\/[^/]+\/?$/u.test(path))
+    || /\/(?:lifecycle|export|action-policies|mcp-tool-grants)(?:\/|$)/u.test(path)
     || /\/actions\/[0-9a-f-]+\/decision(?:\/|$)/iu.test(path)
   );
   await assertProjectAccess(user, canonicalProjectId(parsedProjectId.data), ownerOnly ? "owner" : write ? "edit" : "view", db);

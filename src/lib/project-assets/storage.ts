@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ProjectAssetKind } from "@prisma/client";
 import { DEFAULT_UPLOAD_POLICY, getUploadPolicy } from "@/lib/project-assets/policy";
@@ -195,6 +195,73 @@ function storagePath(storageKey: string): string {
   const resolved = path.resolve(root, storageKey);
   if (!resolved.startsWith(`${root}${path.sep}`)) return fail("ASSET_STORAGE_INVALID_KEY");
   return resolved;
+}
+
+function deletionStagingPaths(deletionId: string): Readonly<{ staged: string; stagingRoot: string }> {
+  if (!UUID_PATTERN.test(deletionId)) return fail("ASSET_STORAGE_INVALID_KEY");
+  const root = path.resolve(assetStorageRoot());
+  const stagingRoot = path.resolve(root, ".project-deletions");
+  const staged = path.resolve(stagingRoot, deletionId);
+  if (!staged.startsWith(`${stagingRoot}${path.sep}`)) return fail("ASSET_STORAGE_INVALID_KEY");
+  return Object.freeze({ staged, stagingRoot });
+}
+
+function projectStorageDeletionPaths(projectId: string, deletionId: string): Readonly<{ source: string; staged: string; stagingRoot: string }> {
+  if (!UUID_PATTERN.test(projectId)) return fail("ASSET_STORAGE_INVALID_KEY");
+  const root = path.resolve(assetStorageRoot());
+  const source = path.resolve(root, projectId);
+  if (!source.startsWith(`${root}${path.sep}`)) return fail("ASSET_STORAGE_INVALID_KEY");
+  return Object.freeze({ source, ...deletionStagingPaths(deletionId) });
+}
+
+async function pathExists(location: string): Promise<boolean> {
+  try {
+    await stat(location);
+    return true;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return false;
+    return fail("ASSET_STORAGE_UNAVAILABLE");
+  }
+}
+
+export async function stageProjectAssetStorageForDeletion(projectId: string, deletionId: string): Promise<boolean> {
+  const paths = projectStorageDeletionPaths(projectId, deletionId);
+  const [stagedExists, sourceExists] = await Promise.all([pathExists(paths.staged), pathExists(paths.source)]);
+  if (stagedExists && sourceExists) return fail("ASSET_STORAGE_UNAVAILABLE");
+  if (stagedExists) return true;
+  if (!sourceExists) return false;
+  try {
+    await mkdir(paths.stagingRoot, { recursive: true, mode: 0o700 });
+    await rename(paths.source, paths.staged);
+    return true;
+  } catch {
+    return fail("ASSET_STORAGE_UNAVAILABLE");
+  }
+}
+
+export async function restoreStagedProjectAssetStorage(projectId: string, deletionId: string): Promise<void> {
+  const paths = projectStorageDeletionPaths(projectId, deletionId);
+  if (!(await pathExists(paths.staged))) return;
+  if (await pathExists(paths.source)) return fail("ASSET_STORAGE_UNAVAILABLE");
+  try {
+    await rename(paths.staged, paths.source);
+  } catch {
+    return fail("ASSET_STORAGE_UNAVAILABLE");
+  }
+}
+
+export async function purgeStagedProjectAssetStorage(deletionId: string): Promise<void> {
+  const paths = deletionStagingPaths(deletionId);
+  try {
+    await rm(paths.staged, { recursive: true, force: true });
+    try {
+      await rmdir(paths.stagingRoot);
+    } catch (error) {
+      if (!(typeof error === "object" && error !== null && "code" in error && (error.code === "ENOENT" || error.code === "ENOTEMPTY"))) throw error;
+    }
+  } catch {
+    return fail("ASSET_STORAGE_UNAVAILABLE");
+  }
 }
 
 export function assetBlobStorageKey(projectId: string, assetId: string, versionId: string): string {

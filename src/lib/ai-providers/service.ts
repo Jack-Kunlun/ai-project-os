@@ -18,7 +18,9 @@ export type ProviderServiceErrorCode =
   | "AI_PROVIDER_INVALID_INPUT"
   | "AI_PROVIDER_NOT_FOUND"
   | "AI_PROVIDER_NAME_CONFLICT"
-  | "AI_PROVIDER_IN_USE";
+  | "AI_PROVIDER_IN_USE"
+  | "AI_PROVIDER_DELETE_REQUIRES_DISABLED"
+  | "AI_PROVIDER_CONFIRMATION_MISMATCH";
 
 export class ProviderServiceError extends Error {
   constructor(readonly code: ProviderServiceErrorCode) {
@@ -47,6 +49,10 @@ const updateSchema = z.object({
   embeddingModelId: modelIdSchema.nullable().optional(),
   embeddingDimensions: z.number().int().min(8).max(8192).nullable().optional(),
   enabled: z.boolean().optional(),
+}).strict();
+
+const deleteSchema = z.object({
+  confirmationName: z.string().min(1).max(80),
 }).strict();
 
 const providerSelect = {
@@ -147,6 +153,10 @@ export async function updateProviderConnection(
   const parsed = updateSchema.parse(input);
   const existing = await db.aiProviderConnection.findUnique({ where: { id: providerId } });
   if (existing === null) return fail("AI_PROVIDER_NOT_FOUND");
+  if (parsed.enabled === false) {
+    const routeCount = await db.projectAiRoute.count({ where: { providerConnectionId: providerId } });
+    if (routeCount > 0) return fail("AI_PROVIDER_IN_USE");
+  }
   const nextModel = parsed.embeddingModelId === undefined
     ? existing.defaultEmbeddingModelId
     : parsed.embeddingModelId;
@@ -209,6 +219,53 @@ export async function disableProviderConnection(providerId: string, db: PrismaCl
     data: { status: "disabled", disabledAt: new Date() },
     select: providerSelect,
   });
+}
+
+export async function deleteProviderConnection(
+  providerId: string,
+  input: unknown,
+  db: PrismaClient = getDb(),
+) {
+  const parsed = deleteSchema.parse(input);
+  try {
+    return await db.$transaction(async (tx) => {
+      const provider = await tx.aiProviderConnection.findUnique({
+        where: { id: providerId },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          credentialId: true,
+          _count: {
+            select: {
+              projectRoutes: true,
+              aiRouteRevisionsOld: true,
+              aiRouteRevisionsNew: true,
+              webAiGrants: true,
+              memoryIndexGenerations: true,
+              ragAnswers: true,
+              webAiCandidates: true,
+              providerCalls: true,
+              intelligenceReports: true,
+              projectAgentRuns: true,
+              assetExtractionRuns: true,
+              assetSegments: true,
+            },
+          },
+        },
+      });
+      if (provider === null) return fail("AI_PROVIDER_NOT_FOUND");
+      if (provider.status !== "disabled") return fail("AI_PROVIDER_DELETE_REQUIRES_DISABLED");
+      if (provider.name !== parsed.confirmationName) return fail("AI_PROVIDER_CONFIRMATION_MISMATCH");
+      if (Object.values(provider._count).some((count) => count > 0)) return fail("AI_PROVIDER_IN_USE");
+      await tx.aiProviderConnection.delete({ where: { id: provider.id } });
+      await tx.externalCredential.delete({ where: { id: provider.credentialId } });
+      return Object.freeze({ id: provider.id });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    if (isKnown(error, "P2003")) return fail("AI_PROVIDER_IN_USE");
+    throw error;
+  }
 }
 
 export async function testProviderConnection(providerId: string, db: PrismaClient = getDb()) {

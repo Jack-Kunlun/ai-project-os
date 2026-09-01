@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { runProjectActionWorkerCycle } from "@/lib/action-engine";
 import { runAutomationWorkerCycle } from "@/lib/automation";
 import { getDb } from "@/lib/db";
+import { reconcileProjectDeletionStorage } from "@/lib/project-lifecycle";
 import { reconcileStaleProjectAssetUploadReservations } from "@/lib/project-assets/quota";
 import { runProjectAssetParsingWorkerCycle } from "@/lib/project-assets/service";
 import {
@@ -88,6 +89,16 @@ async function main() {
       } catch {
         cycleFailures += 1;
         writeLog("error", "worker.upload_reservation_cleanup_failed", { errorCode: "UPLOAD_RESERVATION_CLEANUP_FAILED" });
+      }
+
+      try {
+        const result = await reconcileProjectDeletionStorage(db);
+        if (result.completed > 0 || result.failed > 0) {
+          writeLog(result.failed > 0 ? "warn" : "info", "worker.project_deletion_storage_cleanup_completed", result);
+        }
+      } catch {
+        cycleFailures += 1;
+        writeLog("error", "worker.project_deletion_storage_cleanup_failed", { errorCode: "PROJECT_DELETION_STORAGE_CLEANUP_FAILED" });
       }
 
       try {

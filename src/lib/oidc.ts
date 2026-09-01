@@ -24,6 +24,9 @@ export type OidcErrorCode =
   | "OIDC_PROVIDER_NOT_FOUND"
   | "OIDC_PROVIDER_CONFLICT"
   | "OIDC_PROVIDER_NOT_VERIFIED"
+  | "OIDC_PROVIDER_IN_USE"
+  | "OIDC_PROVIDER_DELETE_REQUIRES_DISABLED"
+  | "OIDC_PROVIDER_CONFIRMATION_MISMATCH"
   | "OIDC_DISCOVERY_FAILED"
   | "OIDC_NETWORK_BLOCKED"
   | "OIDC_NETWORK_CHANGED"
@@ -63,6 +66,11 @@ const providerUpdateSchema = z.object({
   allowedEmailDomains: z.array(z.string().trim().toLowerCase().regex(DOMAIN_PATTERN)).max(100).optional(),
   enabled: z.boolean().optional(),
   rediscover: z.boolean().optional(),
+}).strict();
+
+const providerDeleteSchema = z.object({
+  confirmationName: z.string().min(1).max(100),
+  expectedUpdatedAt: z.string().datetime({ offset: true }),
 }).strict();
 
 const discoverySchema = z.object({
@@ -282,6 +290,49 @@ export async function updateOidcProvider(workspaceIdInput: unknown, providerIdIn
     });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return fail("OIDC_PROVIDER_CONFLICT");
+    throw error;
+  }
+}
+
+export async function deleteOidcProvider(workspaceIdInput: unknown, providerIdInput: unknown, input: unknown, actor: AccessUser, db: PrismaClient = getDb()) {
+  const workspaceId = uuid(workspaceIdInput);
+  const providerId = uuid(providerIdInput);
+  await assertWorkspaceAdmin(actor, workspaceId, db);
+  const parsed = providerDeleteSchema.parse(input);
+  try {
+    return await db.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${providerId}::text, ${OIDC_ATTEMPT_LOCK_NAMESPACE}))`);
+      const provider = await tx.oidcProvider.findFirst({
+        where: { id: providerId, workspaceId },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          credentialId: true,
+          updatedAt: true,
+          _count: { select: { identities: true } },
+          loginAttempts: { select: { credentialId: true } },
+        },
+      });
+      if (provider === null) return fail("OIDC_PROVIDER_NOT_FOUND");
+      if (provider.updatedAt.getTime() !== new Date(parsed.expectedUpdatedAt).getTime()) return fail("OIDC_PROVIDER_CONFLICT");
+      if (provider.status !== "disabled") return fail("OIDC_PROVIDER_DELETE_REQUIRES_DISABLED");
+      if (provider.name !== parsed.confirmationName) return fail("OIDC_PROVIDER_CONFIRMATION_MISMATCH");
+      if (provider._count.identities > 0) return fail("OIDC_PROVIDER_IN_USE");
+      const flowCredentialIds = provider.loginAttempts.map((attempt) => attempt.credentialId);
+      await tx.oidcLoginAttempt.deleteMany({ where: { providerId: provider.id } });
+      await tx.oidcProvider.delete({ where: { id: provider.id } });
+      await tx.externalCredential.deleteMany({
+        where: {
+          id: { in: [provider.credentialId, ...flowCredentialIds] },
+          oidcProviders: { none: {} },
+          oidcLoginAttempts: { none: {} },
+        },
+      });
+      return Object.freeze({ id: provider.id });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    if (isPrismaCode(error, "P2003")) return fail("OIDC_PROVIDER_IN_USE");
     throw error;
   }
 }

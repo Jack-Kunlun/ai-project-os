@@ -47,6 +47,8 @@ export type GitServiceErrorCode =
   | "GIT_CONNECTION_NAME_CONFLICT"
   | "GIT_CONNECTION_IN_USE"
   | "GIT_CONNECTION_DISABLED"
+  | "GIT_CONNECTION_DELETE_REQUIRES_DISABLED"
+  | "GIT_CONNECTION_CONFIRMATION_MISMATCH"
   | "GIT_REPOSITORY_NOT_FOUND"
   | "GIT_REPOSITORY_CONFLICT"
   | "GIT_REPOSITORY_EMPTY"
@@ -87,6 +89,10 @@ const updateConnectionSchema = z.object({
   tlsCaCertificate: z.string().max(32_768).nullable().optional(),
   sshKnownHost: z.string().max(4096).nullable().optional(),
   enabled: z.boolean().optional(),
+}).strict();
+
+const deleteConnectionSchema = z.object({
+  confirmationName: z.string().min(1).max(80),
 }).strict();
 
 const repositoryProbeSchema = z.object({
@@ -490,6 +496,13 @@ export async function updateGitConnection(connectionIdInput: unknown, input: unk
   const parsed = updateConnectionSchema.parse(input);
   const existing = await db.gitConnection.findUnique({ where: { id: connectionId } });
   if (existing === null) return fail("GIT_CONNECTION_NOT_FOUND");
+  if (parsed.enabled === false) {
+    const activeLink = await db.projectGitRepositoryLink.findFirst({
+      where: { repository: { gitConnectionId: connectionId }, status: "active" },
+      select: { id: true },
+    });
+    if (activeLink !== null) return fail("GIT_CONNECTION_IN_USE");
+  }
   const tlsCaCertificate = parsed.tlsCaCertificate === undefined
     ? undefined
     : existing.transport === "https" ? canonicalTlsCaCertificate(parsed.tlsCaCertificate) : null;
@@ -539,6 +552,42 @@ export async function disableGitConnection(connectionIdInput: unknown, db: Prism
     data: { status: "disabled", disabledAt: new Date() },
     select: connectionSelect,
   });
+}
+
+export async function deleteGitConnection(connectionIdInput: unknown, input: unknown, db: PrismaClient = getDb()) {
+  const connectionId = uuid(connectionIdInput);
+  const parsed = deleteConnectionSchema.parse(input);
+  try {
+    return await db.$transaction(async (tx) => {
+      const connection = await tx.gitConnection.findUnique({
+        where: { id: connectionId },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          credentialId: true,
+          repositories: {
+            select: { projectLinks: { select: { id: true }, take: 1 } },
+          },
+        },
+      });
+      if (connection === null) return fail("GIT_CONNECTION_NOT_FOUND");
+      if (connection.status !== "disabled") return fail("GIT_CONNECTION_DELETE_REQUIRES_DISABLED");
+      if (connection.name !== parsed.confirmationName) return fail("GIT_CONNECTION_CONFIRMATION_MISMATCH");
+      if (connection.repositories.some((repository) => repository.projectLinks.length > 0)) {
+        return fail("GIT_CONNECTION_IN_USE");
+      }
+      await tx.gitRepository.deleteMany({ where: { gitConnectionId: connection.id } });
+      await tx.gitConnection.delete({ where: { id: connection.id } });
+      if (connection.credentialId !== null) {
+        await tx.externalCredential.delete({ where: { id: connection.credentialId } });
+      }
+      return Object.freeze({ id: connection.id });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    if (isPrismaCode(error, "P2003")) return fail("GIT_CONNECTION_IN_USE");
+    throw error;
+  }
 }
 
 export async function testGitConnection(connectionIdInput: unknown, input: unknown, db: PrismaClient = getDb()) {

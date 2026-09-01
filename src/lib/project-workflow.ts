@@ -312,6 +312,10 @@ export function serializeProjectJobResult(kind: BackgroundJobKind, value: unknow
       sourceCount: "integer",
       candidateCount: "integer",
       duplicateCount: "integer",
+      returnedCandidateCount: "integer",
+      rejectedCandidateCount: "integer",
+      recoveredExcerptCount: "integer",
+      anchoredExcerptCount: "integer",
       manifest: "hash",
     }));
   }

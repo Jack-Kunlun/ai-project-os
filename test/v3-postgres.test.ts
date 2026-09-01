@@ -11,7 +11,7 @@ import { createProjectAutomationRule, runAutomationWorkerCycle } from "../src/li
 import { DEFAULT_WORKSPACE_ID } from "../src/lib/auth";
 import { getDb } from "../src/lib/db";
 import { analyzeProjectMemoryQuality, resolveMemoryQualityIssue, updateProjectItemMemoryMetadata } from "../src/lib/memory-quality";
-import { beginOidcLogin, completeOidcLogin, createOidcProvider, OidcError, updateOidcProvider } from "../src/lib/oidc";
+import { beginOidcLogin, completeOidcLogin, createOidcProvider, deleteOidcProvider, OidcError, updateOidcProvider } from "../src/lib/oidc";
 import { appendProjectItemRevision, createPrimaryProjectItemEvidence } from "../src/lib/project-item-history";
 import { updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { createProjectWebSource, syncProjectWebSource } from "../src/lib/web-sources";
@@ -37,6 +37,8 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   let oidcUserId: string | null = null;
   let collisionUserId: string | null = null;
   let failedFlowCredentialId: string | null = null;
+  let disposableOidcProviderId: string | null = null;
+  let disposableOidcCredentialId: string | null = null;
   let documentText = "<html><head><title>V3 文档</title></head><body><h1>首次版本</h1><p>连接器已启用。</p></body></html>";
   let expectedNonce = "";
   let expectedChallenge = "";
@@ -102,6 +104,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     await assert.rejects(() => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectA}/items`, { method: "POST" }), db), (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN");
     await authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectB}/items`, { method: "POST" }), db);
     await assert.rejects(() => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectB}/lifecycle`, { method: "PATCH" }), db), (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN");
+    await assert.rejects(() => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectB}`, { method: "DELETE" }), db), (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN");
     await assert.rejects(() => authorizeApiRequest(member, new Request("http://localhost/api/settings/providers", { method: "GET" }), db), (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN");
     await assert.rejects(() => updateWorkspaceMember(roleWorkspaceId, memberId, { workspaceRole: "viewer" }, admin, db), (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_LAST_OWNER_REQUIRED");
     const invitation = await createWorkspaceInvitation(DEFAULT_WORKSPACE_ID, { email: memberEmail, workspaceRole: "viewer", projectId: projectB, projectRole: "viewer", expiresInDays: 7 }, admin, db);
@@ -212,6 +215,45 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     failedFlowCredentialId = (await db.oidcLoginAttempt.findUniqueOrThrow({ where: { stateHash: digest(collisionFlow.state) }, select: { credentialId: true } })).credentialId;
     assert.equal(await db.oidcIdentity.count({ where: { providerId: provider.id, subject: tokenSubject } }), 0);
 
+    const disabledInUseProvider = await updateOidcProvider(DEFAULT_WORKSPACE_ID, provider.id, { enabled: false }, admin, db);
+    await assert.rejects(
+      () => deleteOidcProvider(DEFAULT_WORKSPACE_ID, provider.id, {
+        confirmationName: provider.name,
+        expectedUpdatedAt: disabledInUseProvider.updatedAt.toISOString(),
+      }, admin, db),
+      (error: unknown) => error instanceof OidcError && error.code === "OIDC_PROVIDER_IN_USE",
+    );
+
+    const disposableProvider = await createOidcProvider(DEFAULT_WORKSPACE_ID, {
+      name: `Disposable OIDC ${suffix}`,
+      issuerUrl: issuer,
+      clientId: `disposable-client-${suffix}`,
+      clientSecret: `disposable-secret-${suffix}-123456`,
+      scopes: ["openid", "profile", "email"],
+      allowPrivateNetwork: true,
+      autoProvision: false,
+      defaultWorkspaceRole: "viewer",
+      allowedEmailDomains: [],
+    }, admin, db);
+    disposableOidcProviderId = disposableProvider.id;
+    disposableOidcCredentialId = (await db.oidcProvider.findUniqueOrThrow({ where: { id: disposableProvider.id }, select: { credentialId: true } })).credentialId;
+    const disposableDisabled = await updateOidcProvider(DEFAULT_WORKSPACE_ID, disposableProvider.id, { enabled: false }, admin, db);
+    await assert.rejects(
+      () => deleteOidcProvider(DEFAULT_WORKSPACE_ID, disposableProvider.id, {
+        confirmationName: "wrong name",
+        expectedUpdatedAt: disposableDisabled.updatedAt.toISOString(),
+      }, admin, db),
+      (error: unknown) => error instanceof OidcError && error.code === "OIDC_PROVIDER_CONFIRMATION_MISMATCH",
+    );
+    await deleteOidcProvider(DEFAULT_WORKSPACE_ID, disposableProvider.id, {
+      confirmationName: disposableProvider.name,
+      expectedUpdatedAt: disposableDisabled.updatedAt.toISOString(),
+    }, admin, db);
+    assert.equal(await db.oidcProvider.count({ where: { id: disposableProvider.id } }), 0);
+    assert.equal(await db.externalCredential.count({ where: { id: disposableOidcCredentialId } }), 0);
+    disposableOidcProviderId = null;
+    disposableOidcCredentialId = null;
+
     const activeProject = await db.project.findUniqueOrThrow({ where: { id: projectB }, select: { updatedAt: true } });
     const archived = await updateProjectLifecycle({ projectId: projectB, actorId: admin.id, action: "archive", expectedUpdatedAt: activeProject.updatedAt }, db);
     assert.equal(await db.automationRule.count({ where: { projectId: projectB, status: "active" } }), 0);
@@ -224,6 +266,8 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     if (oidcProviderId !== null) await db.oidcProvider.deleteMany({ where: { id: oidcProviderId } });
     if (oidcProviderCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: oidcProviderCredentialId } });
     if (failedFlowCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: failedFlowCredentialId } });
+    if (disposableOidcProviderId !== null) await db.oidcProvider.deleteMany({ where: { id: disposableOidcProviderId } });
+    if (disposableOidcCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: disposableOidcCredentialId } });
     if (pendingOidcCredentials.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: pendingOidcCredentials } } });
     await db.project.deleteMany({ where: { id: { in: [projectA, projectB] } } });
     if (oidcUserId !== null) await db.appUser.deleteMany({ where: { id: oidcUserId } });

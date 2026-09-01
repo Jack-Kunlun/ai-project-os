@@ -7,6 +7,7 @@ import { AppHeader } from "@/components/app-header";
 import { jobStatusLabels, type JobKind, type WorkspaceProject } from "@/lib/workspace-summary";
 
 type ProjectsView = "active" | "archived";
+type LifecycleAction = "archive" | "restore" | "delete";
 type ProjectsPayload = {
   view: ProjectsView;
   counts: { active: number; archived: number };
@@ -54,7 +55,7 @@ export function ProjectsClient({ username }: { username: string }) {
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<ProjectsView>("active");
-  const [lifecycle, setLifecycle] = useState<{ project: WorkspaceProject; action: "archive" | "restore" } | null>(null);
+  const [lifecycle, setLifecycle] = useState<{ project: WorkspaceProject; action: LifecycleAction } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,12 +131,12 @@ export function ProjectsClient({ username }: { username: string }) {
       </div>
 
       {createOpen ? <CreateProjectDialog onClose={() => setCreateOpen(false)} onCreated={load} /> : null}
-      {lifecycle ? <LifecycleDialog value={lifecycle} onClose={() => setLifecycle(null)} onChanged={async (action) => { await load(); setMessage(action === "archive" ? "项目已归档，数据与审计记录均已保留。" : "项目已恢复，可以继续操作。"); setLifecycle(null); }} /> : null}
+      {lifecycle ? <LifecycleDialog value={lifecycle} onClose={() => setLifecycle(null)} onChanged={async (action, storageCleanupStatus) => { await load(); setMessage(action === "archive" ? "项目已归档，数据与审计记录均已保留。" : action === "restore" ? "项目已恢复，可以继续操作。" : storageCleanupStatus === "pending" ? "项目数据已永久删除；本地文件清理异常已记录，后台会继续重试。" : "项目及本地文件已永久删除；系统仅保留不含项目内容的最小删除回执。"); setLifecycle(null); }} /> : null}
     </main>
   );
 }
 
-function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLifecycle: (action: "archive" | "restore") => void }) {
+function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLifecycle: (action: LifecycleAction) => void }) {
   const router = useRouter();
   const archived = project.archivedAt !== null;
   const [exporting, setExporting] = useState(false);
@@ -200,7 +201,7 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
       )}
       <div className="mt-5 flex flex-wrap gap-2">
         {archived ? (
-          <><button type="button" onClick={() => onLifecycle("restore")} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">恢复项目</button><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button></>
+          <><button type="button" onClick={() => onLifecycle("restore")} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">恢复项目</button><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("delete")} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50">永久删除</button></>
         ) : (
           <><QuickLink href={`/projects/${project.id}`} label="资料" /><QuickLink href={`/projects/${project.id}/assets`} label="文件" /><QuickLink href={`/projects/${project.id}/control`} label="控制台" /><QuickLink href={`/projects/${project.id}/memory`} label="记忆" /><QuickLink href={`/projects/${project.id}/intelligence`} label="智能体" primary /><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("archive")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:border-amber-200 hover:text-amber-700">归档</button></>
         )}
@@ -211,31 +212,33 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
   );
 }
 
-function LifecycleDialog({ value, onClose, onChanged }: { value: { project: WorkspaceProject; action: "archive" | "restore" }; onClose: () => void; onChanged: (action: "archive" | "restore") => Promise<void> }) {
+function LifecycleDialog({ value, onClose, onChanged }: { value: { project: WorkspaceProject; action: LifecycleAction }; onClose: () => void; onChanged: (action: LifecycleAction, storageCleanupStatus?: "completed" | "pending") => Promise<void> }) {
   const [confirmation, setConfirmation] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const archive = value.action === "archive";
-  const confirmed = !archive || confirmation === value.project.name;
+  const remove = value.action === "delete";
+  const confirmed = value.action === "restore" || confirmation === value.project.name;
 
   async function submit() {
     if (!confirmed || pending) return;
     setPending(true); setError(null);
     try {
-      const response = await fetch(`/api/projects/${value.project.id}/lifecycle`, {
-        method: "POST",
+      const response = await fetch(remove ? `/api/projects/${value.project.id}` : `/api/projects/${value.project.id}/lifecycle`, {
+        method: remove ? "DELETE" : "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: value.action, expectedUpdatedAt: value.project.updatedAt }),
+        body: JSON.stringify(remove ? { confirmationName: confirmation, expectedUpdatedAt: value.project.updatedAt } : { action: value.action, expectedUpdatedAt: value.project.updatedAt }),
       });
-      if (!response.ok) throw new Error(await readError(response, archive ? "项目归档失败" : "项目恢复失败"));
-      await onChanged(value.action);
+      if (!response.ok) throw new Error(await readError(response, archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败"));
+      const storageCleanupStatus = remove ? (await response.json() as { deleted: { storageCleanupStatus: "completed" | "pending" } }).deleted.storageCleanupStatus : undefined;
+      await onChanged(value.action, storageCleanupStatus);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : archive ? "项目归档失败" : "项目恢复失败");
+      setError(submitError instanceof Error ? submitError.message : archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败");
       setPending(false);
     }
   }
 
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="project-lifecycle-title" className="w-full max-w-lg rounded-t-[2rem] bg-white p-7 shadow-2xl sm:rounded-[2rem] sm:p-8"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project lifecycle</p><h2 id="project-lifecycle-title" className="mt-2 text-2xl font-semibold">{archive ? `归档「${value.project.name}」` : `恢复「${value.project.name}」`}</h2><p className="mt-3 text-sm leading-6 text-slate-500">{archive ? "归档后项目将移出进行中列表，并拒绝修改和新任务。数据、历史审计和模型用量不会删除。" : "恢复后项目会重新出现在进行中列表，并可继续修改资料、同步仓库和运行 AI 任务。"}</p>{archive ? <label className="mt-5 block text-sm font-semibold text-slate-700">输入项目名称以确认<input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-amber-300 focus:ring-4 focus:ring-amber-100" /></label> : null}{error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}<div className="mt-7 flex justify-end gap-3"><button type="button" onClick={onClose} disabled={pending} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">取消</button><button type="button" onClick={() => void submit()} disabled={!confirmed || pending} className={`rounded-xl px-5 py-3 text-sm font-semibold text-white disabled:opacity-40 ${archive ? "bg-amber-600" : "bg-indigo-600"}`}>{pending ? "处理中…" : archive ? "确认归档" : "恢复项目"}</button></div></section></div>;
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="project-lifecycle-title" className="w-full max-w-lg rounded-t-[2rem] bg-white p-7 shadow-2xl sm:rounded-[2rem] sm:p-8"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project lifecycle</p><h2 id="project-lifecycle-title" className="mt-2 text-2xl font-semibold">{archive ? `归档「${value.project.name}」` : remove ? `永久删除「${value.project.name}」` : `恢复「${value.project.name}」`}</h2><p className={`mt-3 text-sm leading-6 ${remove ? "text-rose-700" : "text-slate-500"}`}>{archive ? "归档后项目将移出进行中列表，并拒绝修改和新任务。数据、历史审计和模型用量不会删除。" : remove ? "此操作不可恢复：项目资料、文件、仓库快照、模型路由、候选、记忆索引、智能体记录和项目审计都会删除。建议先导出 JSON；系统仅保留不含项目名称或内容的最小删除回执。" : "恢复后项目会重新出现在进行中列表，并可继续修改资料、同步仓库和运行 AI 任务。"}</p>{archive || remove ? <label className="mt-5 block text-sm font-semibold text-slate-700">输入项目名称以确认<input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${remove ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-amber-300 focus:ring-amber-100"}`} /></label> : null}{error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}<div className="mt-7 flex justify-end gap-3"><button type="button" onClick={onClose} disabled={pending} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">取消</button><button type="button" onClick={() => void submit()} disabled={!confirmed || pending} className={`rounded-xl px-5 py-3 text-sm font-semibold text-white disabled:opacity-40 ${remove ? "bg-rose-600" : archive ? "bg-amber-600" : "bg-indigo-600"}`}>{pending ? "处理中…" : archive ? "确认归档" : remove ? "确认永久删除" : "恢复项目"}</button></div></section></div>;
 }
 
 function SmallStat({ label, value }: { label: string; value: number }) {

@@ -636,6 +636,28 @@ test("job result serializers keep search and answer payloads explicit", () => {
     payload: "do-not-return",
   }) as Record<string, unknown>;
   assert.deepEqual(abandoned, { reconciliation: "explicitAbandon" });
+
+  const extraction = serializeProjectJobResult("autoExtract", {
+    sourceCount: 2,
+    returnedCandidateCount: 7,
+    candidateCount: 4,
+    rejectedCandidateCount: 2,
+    recoveredExcerptCount: 1,
+    anchoredExcerptCount: 2,
+    duplicateCount: 1,
+    manifest: "c".repeat(64),
+    rawModelOutput: "do-not-return",
+  }) as Record<string, unknown>;
+  assert.deepEqual(extraction, {
+    sourceCount: 2,
+    candidateCount: 4,
+    duplicateCount: 1,
+    returnedCandidateCount: 7,
+    rejectedCandidateCount: 2,
+    recoveredExcerptCount: 1,
+    anchoredExcerptCount: 2,
+    manifest: "c".repeat(64),
+  });
 });
 
 test("job action routes consistently use the public mapper", () => {

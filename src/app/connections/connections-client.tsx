@@ -100,7 +100,7 @@ export function ConnectionsClient({ username }: { username: string }) {
             </div>
             <div className="space-y-4">
               {!loading && connections.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">先添加一个 Git 服务，再到项目的“代码仓库”页关联仓库。</div> : null}
-              {connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} onChanged={(next) => setConnections((current) => current.map((item) => item.id === next.id ? next : item))} />)}
+              {connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} onChanged={(next) => setConnections((current) => current.map((item) => item.id === next.id ? next : item))} onRemoved={(connectionId) => setConnections((current) => current.filter((item) => item.id !== connectionId))} />)}
             </div>
           </section>
         </div>
@@ -219,7 +219,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className="mt-4 block text-sm font-medium text-slate-700">{label}{children}</label>;
 }
 
-function ConnectionCard({ connection, onChanged }: { connection: Connection; onChanged: (connection: Connection) => void }) {
+function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Connection; onChanged: (connection: Connection) => void; onRemoved: (connectionId: string) => void }) {
   const [repositoryPath, setRepositoryPath] = useState("");
   const [trackedRef, setTrackedRef] = useState("main");
   const [testing, setTesting] = useState(false);
@@ -243,17 +243,33 @@ function ConnectionCard({ connection, onChanged }: { connection: Connection; onC
     }
   }
 
-  async function disable() {
+  async function toggleEnabled() {
     setDisabling(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/settings/git-connections/${connection.id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error(await responseError(response, "停用失败"));
+      const response = await fetch(`/api/settings/git-connections/${connection.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: connection.status === "disabled" }) });
+      if (!response.ok) throw new Error(await responseError(response, "状态更新失败"));
       const payload = await response.json() as { connection: Connection };
       onChanged(payload.connection);
-      setMessage("连接已停用；加密凭据仍保留，便于审计和后续恢复。");
+      setMessage(connection.status === "disabled" ? "连接已重新启用；请再次执行只读验证。" : "连接已停用；加密凭据仍保留，可重新启用或在无引用时永久删除。");
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "停用失败");
+      setMessage(cause instanceof Error ? cause.message : "状态更新失败");
+    } finally {
+      setDisabling(false);
+    }
+  }
+
+  async function removeConnection() {
+    const confirmationName = window.prompt(`永久删除会移除连接、未关联仓库身份和加密凭据，且不可恢复。请输入连接名称“${connection.name}”确认：`);
+    if (confirmationName === null) return;
+    setDisabling(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/settings/git-connections/${connection.id}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmationName }) });
+      if (!response.ok) throw new Error(await responseError(response, "永久删除失败"));
+      onRemoved(connection.id);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "永久删除失败");
     } finally {
       setDisabling(false);
     }
@@ -267,7 +283,8 @@ function ConnectionCard({ connection, onChanged }: { connection: Connection; onC
       </div>
       <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><p>内网访问：{connection.allowPrivateNetwork ? "已显式允许" : "禁止"}</p><p>最近验证：{connection.lastTestedAt ? new Date(connection.lastTestedAt).toLocaleString("zh-CN") : "尚未验证"}</p>{connection.lastErrorCode ? <p className="sm:col-span-2 text-rose-600">最近错误：{connection.lastErrorCode}</p> : null}</div>
       {connection.status !== "disabled" ? <form onSubmit={test} className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[1fr_8rem_auto]"><input value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder="组织/仓库" required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><input value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><button disabled={testing} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{testing ? "验证中…" : "只读验证"}</button></form> : null}
-      <div className="mt-4 flex items-center justify-between gap-3">{message ? <p role="status" className="text-xs leading-5 text-slate-600">{message}</p> : <span />}{connection.status !== "disabled" ? <button onClick={() => void disable()} disabled={disabling} className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">{disabling ? "停用中…" : "停用连接"}</button> : null}</div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">{message ? <p role="status" className="text-xs leading-5 text-slate-600">{message}</p> : <span />}{connection.status !== "disabled" ? <button onClick={() => void toggleEnabled()} disabled={disabling} className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">{disabling ? "停用中…" : "停用连接"}</button> : <div className="flex flex-wrap items-center gap-2"><button onClick={() => void toggleEnabled()} disabled={disabling} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">重新启用</button><button onClick={() => void removeConnection()} disabled={disabling} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">永久删除</button></div>}</div>
+      {connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">只有未被任何项目仓库关联的连接可以永久删除；仍有历史关联时系统会拒绝删除。</p> : null}
     </article>
   );
 }

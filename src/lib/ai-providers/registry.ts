@@ -32,7 +32,7 @@ export const PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = Object.freeze
     displayName: "DeepSeek",
     baseUrl: "https://api.deepseek.com",
     apiKeyLabel: "DeepSeek API Key",
-    generationModelSuggestions: Object.freeze(["deepseek-chat", "deepseek-reasoner"]),
+    generationModelSuggestions: Object.freeze(["deepseek-v4-flash", "deepseek-v4-pro"]),
     embeddingModelSuggestions: Object.freeze([]),
     visionModelSuggestions: Object.freeze(["deepseek-v4-flash-vision-exp"]),
     supportsEmbeddings: false,

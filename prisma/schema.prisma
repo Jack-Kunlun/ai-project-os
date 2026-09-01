@@ -198,6 +198,13 @@ enum ProjectLifecycleAction {
   restored
 }
 
+enum ProjectDeletionStatus {
+  pending
+  databaseDeleted @map("database_deleted")
+  completed
+  cleanupFailed   @map("cleanup_failed")
+}
+
 enum ExternalCredentialKind {
   aiProvider @map("ai_provider")
   github
@@ -1075,6 +1082,28 @@ model ProjectDataExportAudit {
   @@unique([projectId, id])
   @@index([projectId, createdAt])
   @@index([requestedById, createdAt])
+}
+
+model ProjectDeletionReceipt {
+  id                 String                @id @default(uuid()) @db.Uuid
+  deletedProjectId   String                @unique @db.Uuid
+  workspaceId        String                @db.Uuid
+  requestedById      String?               @db.Uuid
+  projectFingerprint String                @db.Char(64)
+  expectedUpdatedAt  DateTime
+  status             ProjectDeletionStatus @default(pending)
+  storageStaged      Boolean               @default(false)
+  storageFailureCode String?               @db.VarChar(64)
+  requestedAt        DateTime              @default(now())
+  databaseDeletedAt  DateTime?
+  completedAt        DateTime?
+  updatedAt          DateTime              @updatedAt
+  workspace          Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  requestedBy        AppUser?              @relation(fields: [requestedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([status, requestedAt])
+  @@index([workspaceId, requestedAt])
+  @@index([requestedById, requestedAt])
 }
 
 model GitHubConnection {
@@ -3524,6 +3553,7 @@ model AppUser {
   backgroundJobReconciliations BackgroundJobReconciliation[]
   projectLifecycleRevisions    ProjectLifecycleRevision[]
   projectDataExportAudits      ProjectDataExportAudit[]
+  projectDeletionReceipts      ProjectDeletionReceipt[]
   uploadedProjectAssets        ProjectAsset[]                    @relation("ProjectAssetUploadedBy")
   projectAssetUploadAdmissions ProjectAssetUploadAdmission[]
   projectAssetUploadReservations ProjectAssetUploadReservation[]
@@ -3595,6 +3625,7 @@ model Workspace {
   assetUploadReservations ProjectAssetUploadReservation[]
   invitations   WorkspaceInvitation[]
   oidcProviders OidcProvider[]
+  projectDeletionReceipts ProjectDeletionReceipt[]
 
   @@index([createdById, createdAt])
 }

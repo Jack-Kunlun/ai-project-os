@@ -1,10 +1,11 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
-import { assertProjectActive } from "@/lib/project-lifecycle";
+import { assertProjectActive, deleteArchivedProject } from "@/lib/project-lifecycle";
 import { projectIdSchema, updateProjectSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,11 @@ const projectDetailSelect = {
     },
   },
 } as const;
+
+const deleteProjectSchema = z.object({
+  confirmationName: z.string().min(1).max(120),
+  expectedUpdatedAt: z.string().datetime({ offset: true }),
+}).strict();
 
 function isKnownError(error: unknown, code: string): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
@@ -82,6 +88,24 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
       return handleApiError(new ApiError(400, "PROJECT_SLUG_CONFLICT", "A project with this slug already exists"));
     }
 
+    return handleApiError(error);
+  }
+}
+
+export async function DELETE(request: Request, context: { params: Promise<{ projectId: string }> }) {
+  try {
+    assertSameOrigin(request);
+    const user = await requireApiSession(request);
+    const projectId = await parseProjectId(context.params);
+    const input = deleteProjectSchema.parse(await readJsonBody(request));
+    const deleted = await deleteArchivedProject({
+      projectId,
+      actorId: user.id,
+      confirmationName: input.confirmationName,
+      expectedUpdatedAt: new Date(input.expectedUpdatedAt),
+    });
+    return NextResponse.json({ deleted });
+  } catch (error) {
     return handleApiError(error);
   }
 }

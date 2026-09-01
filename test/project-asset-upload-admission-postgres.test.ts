@@ -82,7 +82,7 @@ test(
 );
 
 test(
-  "quota rejection creates no reservation and writes no blob",
+  "quota rejection creates no additional reservation and writes no blob",
   { skip: !shouldRun ? "PROJECT_ASSET_UPLOAD_POSTGRES_GATE=1 is required" : false },
   async () => {
     const db = getDb();
@@ -92,20 +92,41 @@ test(
     const project = await db.project.create({ data: { name: `Quota gate ${suffix}`, slug: `quota-project-${suffix}`, workspaceId: workspace.id } });
     const assetRoot = await mkdtemp(path.join(os.tmpdir(), `ai-project-os-upload-quota-${suffix}-`));
     const previousRoot = process.env.AI_PROJECT_OS_ASSET_DIR;
+    const previousImageBytes = process.env.AI_PROJECT_OS_UPLOAD_MAX_IMAGE_BYTES;
+    const previousFileBytes = process.env.AI_PROJECT_OS_UPLOAD_MAX_FILE_BYTES;
+    const previousRequestBytes = process.env.AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES;
     const previousProjectBytes = process.env.AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES;
+    const reservationId = randomUUID();
     process.env.AI_PROJECT_OS_ASSET_DIR = assetRoot;
-    process.env.AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES = "1";
+    process.env.AI_PROJECT_OS_UPLOAD_MAX_IMAGE_BYTES = "10";
+    process.env.AI_PROJECT_OS_UPLOAD_MAX_FILE_BYTES = "10";
+    process.env.AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES = "11";
+    process.env.AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES = "10";
     try {
+      await createProjectAssetUploadReservation({
+        id: reservationId,
+        projectId: project.id,
+        userId: user.id,
+        storageKey: assetBlobStorageKey(project.id, randomUUID(), randomUUID()),
+        sizeBytes: 1,
+      }, db);
       await assert.rejects(
         () => uploadProjectAsset({ projectId: project.id, requestedBy: user, fileName: "quota.md", buffer: Buffer.from("quota test", "utf8") }, db),
         (error: unknown) => error instanceof UploadQuotaError && error.code === "PROJECT_ASSET_PROJECT_QUOTA_EXCEEDED",
       );
       assert.equal(await db.projectAsset.count({ where: { projectId: project.id } }), 0);
-      assert.equal(await db.projectAssetUploadReservation.count({ where: { projectId: project.id } }), 0);
+      assert.equal(await db.projectAssetUploadReservation.count({ where: { projectId: project.id } }), 1);
       assert.deepEqual(await filesUnder(assetRoot), []);
     } finally {
+      await db.projectAssetUploadReservation.deleteMany({ where: { id: reservationId } });
       if (previousRoot === undefined) delete process.env.AI_PROJECT_OS_ASSET_DIR;
       else process.env.AI_PROJECT_OS_ASSET_DIR = previousRoot;
+      if (previousImageBytes === undefined) delete process.env.AI_PROJECT_OS_UPLOAD_MAX_IMAGE_BYTES;
+      else process.env.AI_PROJECT_OS_UPLOAD_MAX_IMAGE_BYTES = previousImageBytes;
+      if (previousFileBytes === undefined) delete process.env.AI_PROJECT_OS_UPLOAD_MAX_FILE_BYTES;
+      else process.env.AI_PROJECT_OS_UPLOAD_MAX_FILE_BYTES = previousFileBytes;
+      if (previousRequestBytes === undefined) delete process.env.AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES;
+      else process.env.AI_PROJECT_OS_UPLOAD_MAX_REQUEST_BYTES = previousRequestBytes;
       if (previousProjectBytes === undefined) delete process.env.AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES;
       else process.env.AI_PROJECT_OS_UPLOAD_MAX_PROJECT_BYTES = previousProjectBytes;
       await db.project.delete({ where: { id: project.id } });

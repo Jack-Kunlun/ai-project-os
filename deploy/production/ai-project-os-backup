@@ -1,0 +1,481 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+umask 077
+
+readonly MODE=${1-}
+readonly TARGET_TAG=${2-}
+readonly COMPOSE_PROJECT=ai-project-os
+readonly BACKUP_ROOT=/var/backups/ai-project-os
+readonly BACKUP_STATE_ROOT=/var/lib/ai-project-os-backup
+readonly STAGING_ROOT=$BACKUP_STATE_ROOT/staging
+readonly RESULT_FILE=$BACKUP_STATE_ROOT/last-success
+readonly LOCK_FILE=/run/lock/ai-project-os-backup.lock
+readonly DEPLOY_LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+readonly COS_ENV_FILE=/etc/ai-project-os/cos-backup.env
+readonly COSCLI_CONFIG=/etc/ai-project-os/coscli.yaml
+readonly AGE_RECIPIENT_FILE=/etc/ai-project-os/production-backup-age.pub
+readonly COSCLI=/usr/local/bin/coscli
+readonly MIN_FREE_BYTES=5368709120
+readonly LOCAL_RETENTION_DAYS_DEFAULT=14
+readonly LOCAL_MIN_VERIFIED_DEFAULT=3
+readonly LOCK_WAIT_SECONDS=600
+
+declare -a PAUSED_WRITERS=()
+INCOMPLETE_DIR=
+STAGING_ARCHIVE=
+STAGING_CHECKSUM=
+RETENTION_REMOVED=0
+
+fail() {
+  local marker=$1
+  local exit_code=${2-1}
+
+  printf '%s\n' "$marker" >&2
+  exit "$exit_code"
+}
+
+resume_writers() {
+  local container_id
+  local resume_failed=0
+  local -a still_paused=()
+
+  for container_id in "${PAUSED_WRITERS[@]}"; do
+    if [[ "$(docker inspect --format '{{.State.Paused}}' "$container_id" 2>/dev/null || true)" == true ]]; then
+      if ! docker unpause "$container_id" >/dev/null; then
+        resume_failed=1
+        still_paused+=("$container_id")
+      fi
+    fi
+  done
+  PAUSED_WRITERS=("${still_paused[@]}")
+  return "$resume_failed"
+}
+
+cleanup_on_exit() {
+  local exit_status=$?
+
+  if ! resume_writers; then
+    printf 'BACKUP_WRITER_RESUME_FAILED\n' >&2
+  fi
+
+  if [[ -n "$INCOMPLETE_DIR" && -d "$INCOMPLETE_DIR" ]]; then
+    rm -rf --one-file-system -- "$INCOMPLETE_DIR"
+  fi
+  if [[ -n "$STAGING_ARCHIVE" && -f "$STAGING_ARCHIVE" ]]; then
+    rm -f -- "$STAGING_ARCHIVE"
+  fi
+  if [[ -n "$STAGING_CHECKSUM" && -f "$STAGING_CHECKSUM" ]]; then
+    rm -f -- "$STAGING_CHECKSUM"
+  fi
+
+  return "$exit_status"
+}
+
+trap cleanup_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+require_root_owned_file() {
+  local path=$1
+  local expected_mode=$2
+
+  [[ -f "$path" ]] || fail "BACKUP_REQUIRED_FILE_MISSING path=$path" 70
+  [[ "$(stat -c %U:%G "$path")" == root:root ]] ||
+    fail "BACKUP_REQUIRED_FILE_OWNER_INVALID path=$path" 70
+  [[ "$(stat -c %a "$path")" == "$expected_mode" ]] ||
+    fail "BACKUP_REQUIRED_FILE_MODE_INVALID path=$path" 70
+}
+
+read_config_value() {
+  local key=$1
+  local required=${2-required}
+  local line value
+  local -a matches=()
+
+  mapfile -t matches < <(grep -E "^${key}=" "$COS_ENV_FILE" || true)
+  if (( ${#matches[@]} == 0 )) && [[ "$required" == optional ]]; then
+    return 1
+  fi
+  (( ${#matches[@]} == 1 )) || fail "BACKUP_CONFIG_KEY_INVALID key=$key" 71
+
+  line=${matches[0]}
+  value=${line#*=}
+  if [[ "$value" == \'*\' || "$value" == \"*\" ]]; then
+    [[ ${#value} -ge 2 && "${value:0:1}" == "${value: -1}" ]] ||
+      fail "BACKUP_CONFIG_VALUE_INVALID key=$key" 71
+    value=${value:1:${#value}-2}
+  fi
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] ||
+    fail "BACKUP_CONFIG_VALUE_INVALID key=$key" 71
+
+  printf '%s' "$value"
+}
+
+read_optional_positive_integer() {
+  local key=$1
+  local default_value=$2
+  local value
+
+  if ! value=$(read_config_value "$key" optional); then
+    printf '%s' "$default_value"
+    return
+  fi
+  [[ "$value" =~ ^[0-9]+$ ]] || fail "BACKUP_CONFIG_VALUE_INVALID key=$key" 71
+  (( value >= 1 && value <= 3650 )) || fail "BACKUP_CONFIG_VALUE_INVALID key=$key" 71
+  printf '%s' "$value"
+}
+
+service_container_ids() {
+  local service=$1
+
+  docker ps -q \
+    --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=$service"
+}
+
+all_stack_container_ids() {
+  docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT"
+}
+
+require_single_running_container() {
+  local service=$1
+  local state
+  local -a ids=()
+
+  mapfile -t ids < <(service_container_ids "$service")
+  (( ${#ids[@]} == 1 )) || fail "BACKUP_STACK_SERVICE_INVALID service=$service count=${#ids[@]}" 72
+  state=$(docker inspect --format '{{.State.Status}}:{{.State.Paused}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "${ids[0]}")
+  [[ "$state" == running:false:healthy ]] ||
+    fail "BACKUP_STACK_SERVICE_NOT_HEALTHY service=$service state=$state" 72
+
+  printf '%s' "${ids[0]}"
+}
+
+wait_for_writer_health() {
+  local attempt container_id state
+  local all_healthy
+
+  for (( attempt = 1; attempt <= 36; attempt++ )); do
+    all_healthy=1
+    for container_id in "$@"; do
+      state=$(docker inspect --format '{{.State.Status}}:{{.State.Paused}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container_id" 2>/dev/null || true)
+      if [[ "$state" != running:false:healthy ]]; then
+        all_healthy=0
+        break
+      fi
+    done
+    if (( all_healthy == 1 )); then
+      printf 'BACKUP_WRITERS_HEALTHY wait_attempt=%s\n' "$attempt"
+      return 0
+    fi
+    sleep 5
+  done
+
+  return 1
+}
+
+write_result() {
+  local status=$1
+  local result_reason=$2
+  local source_path=$3
+  local archive_object=$4
+  local checksum_object=$5
+  local archive_sha256=$6
+  local completed_at=$7
+  local temporary_result
+
+  temporary_result=$(mktemp "$BACKUP_STATE_ROOT/.last-success.XXXXXX")
+  {
+    printf 'status=%s\n' "$status"
+    printf 'reason=%s\n' "$result_reason"
+    printf 'source=%s\n' "$source_path"
+    printf 'archive_object=%s\n' "$archive_object"
+    printf 'checksum_object=%s\n' "$checksum_object"
+    printf 'archive_sha256=%s\n' "$archive_sha256"
+    printf 'completed_at=%s\n' "$completed_at"
+  } > "$temporary_result"
+  chmod 600 "$temporary_result"
+  mv -f -- "$temporary_result" "$RESULT_FILE"
+}
+
+verify_remote_object() {
+  local object_uri=$1
+  local local_path=$2
+  local kind=$3
+  local stat_output remote_size remote_crc local_size
+
+  if ! stat_output=$("$COSCLI" stat "$object_uri" \
+    -c "$COSCLI_CONFIG" \
+    --init-skip 2>&1); then
+    printf '%s\n' "$stat_output" >&2
+    fail "BACKUP_COS_STAT_FAILED type=$kind" 74
+  fi
+
+  remote_size=$(sed -n 's/.*Content-Length:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<<"$stat_output" | tail -n 1)
+  remote_crc=$(sed -n 's/.*x-cos-hash-crc64ecma:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<<"$stat_output" | tail -n 1)
+  local_size=$(stat -c %s "$local_path")
+
+  [[ "$remote_size" == "$local_size" ]] ||
+    fail "BACKUP_COS_SIZE_MISMATCH type=$kind local=$local_size remote=${remote_size:-missing}" 74
+  [[ "$remote_crc" =~ ^[0-9]+$ ]] || fail "BACKUP_COS_CRC64_MISSING type=$kind" 74
+
+  printf 'BACKUP_COS_OBJECT_VERIFIED type=%s bytes=%s crc64=%s object=%s\n' \
+    "$kind" "$remote_size" "$remote_crc" "$object_uri"
+}
+
+upload_object() {
+  local local_path=$1
+  local object_uri=$2
+  local kind=$3
+
+  "$COSCLI" cp "$local_path" "$object_uri" \
+    -c "$COSCLI_CONFIG" \
+    --init-skip \
+    --disable-log \
+    --process-log=false \
+    --fail-output=false \
+    --disable-checksum=false \
+    --disable-crc64=false \
+    --check-point=false \
+    --err-retry-num 5 \
+    --err-retry-interval 3
+
+  verify_remote_object "$object_uri" "$local_path" "$kind"
+}
+
+cleanup_verified_local_backups() {
+  local current_backup=$1
+  local retention_days=$2
+  local minimum_verified=$3
+  local now cutoff path name marker created_at
+  local verified_count removable_count
+  local -a verified_backups=()
+  local -a expired_backups=()
+
+  now=$(date +%s)
+  cutoff=$(( now - retention_days * 86400 ))
+
+  while IFS= read -r -d '' path; do
+    [[ ! -L "$path" ]] || continue
+    [[ "$(dirname -- "$path")" == "$BACKUP_ROOT" ]] || continue
+    name=$(basename -- "$path")
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v[0-9]+\.[0-9]+\.[0-9]+)\.[A-Za-z0-9]{6}$ ]] || continue
+
+    marker=$path/.cos-upload-verified
+    [[ -f "$marker" && ! -L "$marker" ]] || continue
+    [[ "$(stat -c %U:%G "$marker")" == root:root ]] || continue
+    [[ "$(stat -c %a "$marker")" == 600 ]] || continue
+    grep -qx 'status=COS_UPLOAD_VERIFIED' "$marker" || continue
+
+    verified_backups+=("$path")
+    created_at=$(stat -c %Y "$path")
+    if (( created_at < cutoff )); then
+      expired_backups+=("$path")
+    fi
+  done < <(find -P "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -print0)
+
+  verified_count=${#verified_backups[@]}
+  removable_count=$(( verified_count - minimum_verified ))
+  if (( removable_count <= 0 || ${#expired_backups[@]} == 0 )); then
+    return
+  fi
+
+  mapfile -t expired_backups < <(printf '%s\n' "${expired_backups[@]}" | sort)
+  for path in "${expired_backups[@]}"; do
+    (( removable_count > 0 )) || break
+    [[ "$path" != "$current_backup" ]] || continue
+
+    name=$(basename -- "$path")
+    [[ "$(dirname -- "$path")" == "$BACKUP_ROOT" ]] || fail "BACKUP_RETENTION_PATH_INVALID" 75
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v[0-9]+\.[0-9]+\.[0-9]+)\.[A-Za-z0-9]{6}$ ]] ||
+      fail "BACKUP_RETENTION_NAME_INVALID name=$name" 75
+    [[ -f "$path/.cos-upload-verified" ]] || fail "BACKUP_RETENTION_MARKER_MISSING name=$name" 75
+    grep -qx 'status=COS_UPLOAD_VERIFIED' "$path/.cos-upload-verified" ||
+      fail "BACKUP_RETENTION_MARKER_INVALID name=$name" 75
+
+    rm -rf --one-file-system -- "$path"
+    removable_count=$(( removable_count - 1 ))
+    RETENTION_REMOVED=$(( RETENTION_REMOVED + 1 ))
+    printf 'BACKUP_LOCAL_VERIFIED_REMOVED name=%s\n' "$name"
+  done
+}
+
+if [[ $EUID -ne 0 ]]; then
+  fail 'BACKUP_ROOT_REQUIRED' 70
+fi
+
+case "$MODE" in
+  daily|manual)
+    [[ -z "$TARGET_TAG" ]] || fail 'BACKUP_ARGUMENTS_INVALID' 64
+    reason=$MODE
+    ;;
+  pre-deploy)
+    [[ "$TARGET_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'BACKUP_TARGET_TAG_INVALID' 64
+    [[ "${AI_PROJECT_OS_DEPLOY_LOCK_HELD-}" == 1 ]] || fail 'BACKUP_PRE_DEPLOY_CALLER_INVALID' 75
+    reason="pre-deploy-to-$TARGET_TAG"
+    ;;
+  *)
+    fail 'BACKUP_USAGE: ai-project-os-backup daily|manual|pre-deploy <vX.Y.Z>' 64
+    ;;
+esac
+readonly reason
+
+if [[ "$MODE" != pre-deploy ]]; then
+  exec 8>"$DEPLOY_LOCK_FILE"
+  if ! flock -w "$LOCK_WAIT_SECONDS" 8; then
+    fail 'BACKUP_DEPLOYMENT_IN_PROGRESS' 75
+  fi
+fi
+
+exec 9>"$LOCK_FILE"
+if ! flock -w "$LOCK_WAIT_SECONDS" 9; then
+  fail 'BACKUP_ALREADY_RUNNING' 75
+fi
+
+for required_command in age awk basename chmod chown date df dirname docker find flock gzip grep install mktemp mv rm sed sha256sum sort stat tail tar timeout tr; do
+  command -v "$required_command" >/dev/null || fail "BACKUP_COMMAND_MISSING command=$required_command" 70
+done
+
+require_root_owned_file "$COS_ENV_FILE" 600
+require_root_owned_file "$COSCLI_CONFIG" 600
+require_root_owned_file "$AGE_RECIPIENT_FILE" 644
+[[ "$("$COSCLI" --version)" == 'coscli version v1.0.9' ]] || fail 'BACKUP_COSCLI_VERSION_INVALID' 70
+grep -Eq '^age1[0-9a-z]{58}$' "$AGE_RECIPIENT_FILE" || fail 'BACKUP_AGE_RECIPIENT_INVALID' 71
+
+COS_BUCKET=$(read_config_value COS_BACKUP_BUCKET)
+COS_REGION=$(read_config_value COS_BACKUP_REGION)
+COS_PREFIX=$(read_config_value COS_BACKUP_PREFIX)
+LOCAL_RETENTION_DAYS=$(read_optional_positive_integer LOCAL_RETENTION_DAYS "$LOCAL_RETENTION_DAYS_DEFAULT")
+LOCAL_MIN_VERIFIED=$(read_optional_positive_integer LOCAL_MIN_VERIFIED "$LOCAL_MIN_VERIFIED_DEFAULT")
+readonly COS_BUCKET COS_REGION COS_PREFIX LOCAL_RETENTION_DAYS LOCAL_MIN_VERIFIED
+
+[[ "$COS_BUCKET" =~ ^ai-project-os-backup-[0-9]+$ ]] || fail 'BACKUP_COS_BUCKET_INVALID' 71
+[[ "$COS_REGION" == ap-hongkong ]] || fail 'BACKUP_COS_REGION_INVALID' 71
+[[ "$COS_PREFIX" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*[A-Za-z0-9]$ ]] || fail 'BACKUP_COS_PREFIX_INVALID' 71
+[[ "$COS_PREFIX" != /* && "$COS_PREFIX" != */ && "$COS_PREFIX" != *..* && "$COS_PREFIX" != *//* ]] ||
+  fail 'BACKUP_COS_PREFIX_INVALID' 71
+
+install -d -o root -g root -m 0700 "$BACKUP_ROOT" "$BACKUP_STATE_ROOT" "$STAGING_ROOT"
+
+available_bytes=$(df --output=avail -B1 "$BACKUP_ROOT" | tail -n 1 | tr -d ' ')
+if [[ ! "$available_bytes" =~ ^[0-9]+$ ]] || (( available_bytes < MIN_FREE_BYTES )); then
+  fail 'BACKUP_INSUFFICIENT_SPACE' 73
+fi
+
+mapfile -t stack_container_ids < <(all_stack_container_ids)
+if (( ${#stack_container_ids[@]} == 0 )); then
+  if [[ "$MODE" == pre-deploy ]]; then
+    completed_at=$(date -Is)
+    write_result SKIPPED_NO_STACK "$reason" none-first-deploy none none none "$completed_at"
+    printf 'BACKUP_SKIPPED_NO_STACK reason=%s\n' "$reason"
+    exit 0
+  fi
+  fail 'BACKUP_STACK_NOT_FOUND' 72
+fi
+
+postgres_id=$(require_single_running_container postgres)
+app_id=$(require_single_running_container app)
+worker_id=$(require_single_running_container worker)
+readonly postgres_id app_id worker_id
+
+backup_timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+INCOMPLETE_DIR=$(mktemp -d "$BACKUP_ROOT/.incomplete-${backup_timestamp}-${reason}.XXXXXX")
+chown root:root "$INCOMPLETE_DIR"
+chmod 700 "$INCOMPLETE_DIR"
+backup_name=${INCOMPLETE_DIR##*/}
+backup_name=${backup_name#.incomplete-}
+backup_path=$BACKUP_ROOT/$backup_name
+
+docker pause "$app_id" >/dev/null
+PAUSED_WRITERS+=("$app_id")
+docker pause "$worker_id" >/dev/null
+PAUSED_WRITERS+=("$worker_id")
+
+timeout 1800 docker exec "$postgres_id" sh -ec \
+  'exec pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom' \
+  > "$INCOMPLETE_DIR/postgres.dump"
+[[ -s "$INCOMPLETE_DIR/postgres.dump" ]] || fail 'BACKUP_POSTGRES_DUMP_EMPTY' 73
+timeout 300 docker exec -i "$postgres_id" pg_restore --list \
+  < "$INCOMPLETE_DIR/postgres.dump" >/dev/null
+
+timeout 900 docker cp "$app_id:/var/lib/ai-project-os-secrets/." - | gzip -n -9 \
+  > "$INCOMPLETE_DIR/secrets.tar.gz"
+timeout 1800 docker cp "$app_id:/var/lib/ai-project-os/uploads/." - | gzip -n -9 \
+  > "$INCOMPLETE_DIR/uploads.tar.gz"
+resume_writers || fail 'BACKUP_WRITER_RESUME_FAILED' 73
+wait_for_writer_health "$app_id" "$worker_id" || fail 'BACKUP_WRITER_HEALTH_TIMEOUT' 73
+
+tar -tzf "$INCOMPLETE_DIR/secrets.tar.gz" >/dev/null
+tar -tzf "$INCOMPLETE_DIR/uploads.tar.gz" >/dev/null
+
+created_at=$(date -Is)
+{
+  printf 'format_version=1\n'
+  printf 'created_at=%s\n' "$created_at"
+  printf 'reason=%s\n' "$reason"
+  printf 'compose_project=%s\n' "$COMPOSE_PROJECT"
+  printf 'writers_quiesced=true\n'
+  printf 'cos_region=%s\n' "$COS_REGION"
+} > "$INCOMPLETE_DIR/backup-metadata.env"
+
+(
+  cd "$INCOMPLETE_DIR"
+  sha256sum postgres.dump secrets.tar.gz uploads.tar.gz backup-metadata.env > SHA256SUMS
+  sha256sum --check SHA256SUMS >/dev/null
+)
+
+mv -- "$INCOMPLETE_DIR" "$backup_path"
+INCOMPLETE_DIR=
+
+archive_name=$backup_name.tar.age
+checksum_name=$archive_name.sha256
+STAGING_ARCHIVE=$STAGING_ROOT/$archive_name
+STAGING_CHECKSUM=$STAGING_ROOT/$checksum_name
+
+tar -C "$BACKUP_ROOT" -cf - "$backup_name" | \
+  age --encrypt --recipients-file "$AGE_RECIPIENT_FILE" --output "$STAGING_ARCHIVE"
+[[ -s "$STAGING_ARCHIVE" ]] || fail 'BACKUP_ENCRYPTED_ARCHIVE_EMPTY' 73
+chmod 600 "$STAGING_ARCHIVE"
+
+(
+  cd "$STAGING_ROOT"
+  sha256sum "$archive_name" > "$checksum_name"
+  sha256sum --check "$checksum_name" >/dev/null
+)
+chmod 600 "$STAGING_CHECKSUM"
+archive_sha256=$(awk '{print $1}' "$STAGING_CHECKSUM")
+
+object_date_path=$(date -u -d "@$(stat -c %Y "$backup_path")" +%Y/%m/%d)
+object_prefix="${COS_PREFIX%/}/backups/$object_date_path/$backup_name"
+archive_object="cos://$COS_BUCKET/$object_prefix/$archive_name"
+checksum_object="cos://$COS_BUCKET/$object_prefix/$checksum_name"
+
+upload_object "$STAGING_ARCHIVE" "$archive_object" archive
+upload_object "$STAGING_CHECKSUM" "$checksum_object" sha256
+
+verified_at=$(date -Is)
+marker_tmp=$(mktemp "$backup_path/.cos-upload-verified.tmp.XXXXXX")
+{
+  printf 'status=COS_UPLOAD_VERIFIED\n'
+  printf 'verified_at=%s\n' "$verified_at"
+  printf 'archive_object=%s\n' "$archive_object"
+  printf 'checksum_object=%s\n' "$checksum_object"
+  printf 'archive_sha256=%s\n' "$archive_sha256"
+} > "$marker_tmp"
+chmod 600 "$marker_tmp"
+mv -f -- "$marker_tmp" "$backup_path/.cos-upload-verified"
+
+write_result COS_UPLOAD_VERIFIED "$reason" "$backup_path" "$archive_object" \
+  "$checksum_object" "$archive_sha256" "$verified_at"
+
+cleanup_verified_local_backups "$backup_path" "$LOCAL_RETENTION_DAYS" "$LOCAL_MIN_VERIFIED"
+
+rm -f -- "$STAGING_ARCHIVE" "$STAGING_CHECKSUM"
+STAGING_ARCHIVE=
+STAGING_CHECKSUM=
+
+printf 'BACKUP_OK reason=%s source=%s object=%s sha256=%s retention_removed=%s\n' \
+  "$reason" "$backup_path" "$archive_object" "$archive_sha256" "$RETENTION_REMOVED"

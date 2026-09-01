@@ -23,7 +23,7 @@ jobs:
     # PRODUCTION_DEPLOYMENT_DISABLED_BEFORE_V1_0_0: this job must remain skipped while the product is internal development.
     if: ${{ github.ref == 'refs/heads/main' && false }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 120
     environment:
       name: production
       url: https://ai-project-os.com
@@ -108,10 +108,13 @@ jobs:
           ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" >/dev/null
           ssh-keygen -F 38.76.205.30 -f "$RUNNER_TEMP/ai-project-os-ssh/known_hosts" >/dev/null
 
-      - name: Deploy through forced-command gateway
+      - name: Create verified offsite backup and deploy through forced-command gateway
         run: |
           set -euo pipefail
+          umask 077
 
+          deployment_output_file="$RUNNER_TEMP/ai-project-os-ssh/deployment-output.log"
+          set +e
           ssh \
             -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
             -o BatchMode=yes \
@@ -119,8 +122,31 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
             -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=6 \
             ai-project-os-actions@38.76.205.30 \
-            "deploy $DEPLOY_TAG $DEPLOY_SHA"
+            "deploy $DEPLOY_TAG $DEPLOY_SHA" 2>&1 | tee "$deployment_output_file"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+
+          if (( pipeline_status[0] != 0 )); then
+            exit "${pipeline_status[0]}"
+          fi
+          if (( pipeline_status[1] != 0 )); then
+            echo "PRODUCTION_DEPLOY_OUTPUT_CAPTURE_FAILED" >&2
+            exit 74
+          fi
+
+          grep -q '^DEPLOY_OK ' "$deployment_output_file"
+
+          backup_object=$(sed -n 's/^DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
+            "$deployment_output_file" | tail -n 1)
+          if [[ "$backup_object" != none-first-deploy && \
+            ! "$backup_object" =~ ^cos://[^/]+/production/backups/ ]]; then
+            echo "PRODUCTION_BACKUP_RESULT_INVALID" >&2
+            exit 68
+          fi
+          printf 'DEPLOY_BACKUP_OBJECT=%s\n' "$backup_object" >> "$GITHUB_ENV"
 
       - name: Verify public production health
         run: |
@@ -157,6 +183,7 @@ jobs:
           printf '### Production deployment\n\n' >> "$GITHUB_STEP_SUMMARY"
           printf -- '- Tag: `%s`\n' "$DEPLOY_TAG" >> "$GITHUB_STEP_SUMMARY"
           printf -- '- Revision: `%s`\n' "$DEPLOY_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Pre-deploy backup: `%s`\n' "$DEPLOY_BACKUP_OBJECT" >> "$GITHUB_STEP_SUMMARY"
           printf -- '- Health: `status=ok`, `database=up`, `worker=up`\n' >> "$GITHUB_STEP_SUMMARY"
           printf -- '- URL: https://ai-project-os.com\n' >> "$GITHUB_STEP_SUMMARY"
 

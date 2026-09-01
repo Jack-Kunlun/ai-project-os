@@ -7,6 +7,10 @@ import test from "node:test";
 const repositoryRoot = process.cwd();
 const workflowPath = path.join(repositoryRoot, ".github/workflows/deploy-production.yml");
 const deploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-deploy");
+const backupPath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup");
+const backupInstallerPath = path.join(repositoryRoot, "deploy/production/install-production-backup.sh");
+const backupServicePath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup.service");
+const backupTimerPath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup.timer");
 const gatewayPath = path.join(repositoryRoot, "deploy/production/ai-project-os-actions-gateway");
 const installerPath = path.join(repositoryRoot, "deploy/production/install-production-deploy.sh");
 const sudoersPath = path.join(repositoryRoot, "deploy/production/ai-project-os-deploy.sudoers");
@@ -30,6 +34,9 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.match(workflow, /StrictHostKeyChecking=yes/u);
   assert.match(workflow, /ai-project-os-actions@38\.76\.205\.30/u);
   assert.match(workflow, /"deploy \$DEPLOY_TAG \$DEPLOY_SHA"/u);
+  assert.match(workflow, /Create verified offsite backup and deploy/u);
+  assert.match(workflow, /PRODUCTION_BACKUP_RESULT_INVALID/u);
+  assert.match(workflow, /DEPLOY_BACKUP_OBJECT/u);
   assert.match(workflow, /\.worker\.consecutiveFailures == 0/u);
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
@@ -52,7 +59,7 @@ test("forced-command gateway accepts only a release tag and exact commit", async
   assert.match(gateway, /AI_PROJECT_OS_DEPLOY_COMMAND_DENIED/u);
 });
 
-test("root deployer verifies source, backs up state, migrates, and waits for health", async () => {
+test("root deployer verifies source, requires a verified offsite backup, migrates, and waits for health", async () => {
   const deployment = await readFile(deploymentPath, "utf8");
 
   assert.match(deployment, /REPOSITORY_URL=https:\/\/github\.com\/Jack-Kunlun\/ai-project-os\.git/u);
@@ -62,15 +69,94 @@ test("root deployer verifies source, backs up state, migrates, and waits for hea
   assert.match(deployment, /python3 -c/u);
   assert.match(deployment, /production\.env/u);
   assert.match(deployment, /AI_PROJECT_OS_SECURE_COOKIES=true/u);
-  assert.match(deployment, /pg_dump/u);
-  assert.match(deployment, /pg_restore --list/u);
-  assert.match(deployment, /secrets\.tar\.gz/u);
-  assert.match(deployment, /uploads\.tar\.gz/u);
-  assert.match(deployment, /sha256sum/u);
+  assert.match(deployment, /ai-project-os-backup/u);
+  assert.match(deployment, /AI_PROJECT_OS_DEPLOY_LOCK_HELD=1/u);
+  assert.match(deployment, /pre-deploy "\$RELEASE_TAG"/u);
+  assert.match(deployment, /DEPLOY_PRE_BACKUP_RESULT_INVALID/u);
+  assert.match(deployment, /backup_object/u);
   assert.match(deployment, /--force-recreate migrate app worker/u);
   assert.match(deployment, /consecutiveFailures/u);
   assert.match(deployment, /https:\/\/ai-project-os\.com\/api\/health/u);
   assert.doesNotMatch(deployment, /\bcompose down\b|down[^\n]*-v/u);
+  assert.ok(
+    deployment.indexOf('"$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG"') < deployment.indexOf("compose up -d postgres"),
+    "offsite backup must complete before any production container replacement",
+  );
+});
+
+test("backup quiesces writers, verifies encrypted COS objects, and deletes only marked local backups", async () => {
+  const backup = await readFile(backupPath, "utf8");
+  const remoteVerificationFunction = backup.slice(
+    backup.indexOf("verify_remote_object()"),
+    backup.indexOf("upload_object()"),
+  );
+
+  assert.match(backup, /docker pause "\$app_id"/u);
+  assert.match(backup, /docker pause "\$worker_id"/u);
+  assert.match(backup, /trap cleanup_on_exit EXIT/u);
+  assert.match(backup, /BACKUP_STACK_SERVICE_NOT_HEALTHY/u);
+  assert.match(backup, /wait_for_writer_health "\$app_id" "\$worker_id"/u);
+  assert.match(backup, /BACKUP_WRITER_HEALTH_TIMEOUT/u);
+  assert.ok(
+    backup.indexOf('wait_for_writer_health "$app_id" "$worker_id"') <
+      backup.indexOf('upload_object "$STAGING_ARCHIVE"'),
+    "writer health must recover before offsite upload and success",
+  );
+  assert.match(backup, /pg_dump/u);
+  assert.match(backup, /pg_restore --list/u);
+  assert.match(backup, /docker cp "\$app_id:.*ai-project-os-secrets/u);
+  assert.match(backup, /docker cp "\$app_id:.*ai-project-os\/uploads/u);
+  assert.match(backup, /age --encrypt --recipients-file/u);
+  assert.match(backup, /--disable-checksum=false/u);
+  assert.match(backup, /--disable-crc64=false/u);
+  assert.match(backup, /Content-Length/u);
+  assert.match(backup, /x-cos-hash-crc64ecma/u);
+  assert.match(remoteVerificationFunction, /"\$COSCLI" stat "\$object_uri"/u);
+  assert.doesNotMatch(remoteVerificationFunction, /--disable-log/u);
+  assert.match(backup, /status=COS_UPLOAD_VERIFIED/u);
+  assert.match(backup, /LOCAL_RETENTION_DAYS_DEFAULT=14/u);
+  assert.match(backup, /LOCAL_MIN_VERIFIED_DEFAULT=3/u);
+  assert.match(backup, /\.cos-upload-verified/u);
+  assert.match(backup, /ai-project-os-deploy\.lock/u);
+  assert.match(backup, /BACKUP_DEPLOYMENT_IN_PROGRESS/u);
+  assert.match(backup, /BACKUP_PRE_DEPLOY_CALLER_INVALID/u);
+  assert.match(backup, /rm -rf --one-file-system -- "\$path"/u);
+  assert.doesNotMatch(backup, /docker (system|volume|image) prune|find[^\n]*-delete/u);
+  assert.doesNotMatch(backup, /read_config_value COS_SECRET_(ID|KEY)/u);
+  assert.ok(
+    backup.indexOf("upload_object \"$STAGING_CHECKSUM\"") <
+      backup.indexOf('mv -f -- "$marker_tmp" "$backup_path/.cos-upload-verified"'),
+    "remote verification must finish before the local success marker is installed",
+  );
+  assert.ok(
+    backup.indexOf('mv -f -- "$marker_tmp" "$backup_path/.cos-upload-verified"') <
+      backup.lastIndexOf('cleanup_verified_local_backups "$backup_path"'),
+    "retention must run only after the current backup has a verified marker",
+  );
+});
+
+test("backup installer and timer are root-only, persistent, and daily", async () => {
+  const installer = await readFile(backupInstallerPath, "utf8");
+  const service = await readFile(backupServicePath, "utf8");
+  const timer = await readFile(backupTimerPath, "utf8");
+
+  assert.match(installer, /cos-backup\.env/u);
+  assert.match(installer, /COS_BACKUP_BUCKET/u);
+  assert.match(installer, /COS_BACKUP_REGION/u);
+  assert.match(installer, /COS_BACKUP_PREFIX/u);
+  assert.match(installer, /coscli\.yaml/u);
+  assert.match(installer, /production-backup-age\.pub/u);
+  assert.match(installer, /root:root/u);
+  assert.match(installer, /systemd-analyze verify/u);
+  assert.match(installer, /--enable-timer/u);
+  assert.match(installer, /systemctl enable --now ai-project-os-backup\.timer/u);
+  assert.match(service, /ExecStart=\/usr\/local\/sbin\/ai-project-os-backup daily/u);
+  assert.match(service, /NoNewPrivileges=true/u);
+  assert.match(service, /ProtectSystem=full/u);
+  assert.match(service, /TimeoutStartSec=2h/u);
+  assert.match(timer, /OnCalendar=\*-\*-\* 03:20:00/u);
+  assert.match(timer, /RandomizedDelaySec=20m/u);
+  assert.match(timer, /Persistent=true/u);
 });
 
 test("installer keeps secrets root-only and installs a restricted Actions key", async () => {
@@ -89,7 +175,7 @@ test("installer keeps secrets root-only and installs a restricted Actions key", 
 });
 
 test("production shell entrypoints pass bash syntax validation", () => {
-  for (const scriptPath of [deploymentPath, gatewayPath, installerPath]) {
+  for (const scriptPath of [deploymentPath, backupPath, gatewayPath, installerPath, backupInstallerPath]) {
     const result = spawnSync("bash", ["-n", scriptPath], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
   }

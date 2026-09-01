@@ -43,6 +43,9 @@ if [[ "$key_type" != ssh-ed25519 || ! "$key_body" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]; 
 fi
 ssh-keygen -lf "$ACTIONS_PUBLIC_KEY_FILE" >/dev/null
 
+bash -n "$SOURCE_DIR/install-production-backup.sh"
+"$SOURCE_DIR/install-production-backup.sh" --enable-timer
+
 install -o root -g root -m 0755 \
   "$SOURCE_DIR/ai-project-os-deploy" \
   /usr/local/sbin/ai-project-os-deploy

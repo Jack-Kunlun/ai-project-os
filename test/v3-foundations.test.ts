@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import type { PrismaClient } from "@prisma/client";
+import { AccessControlError, authorizeApiRequest } from "../src/lib/access-control";
 import { memoryTextSimilarity, normalizeMemoryText } from "../src/lib/memory-quality";
 import { canonicalIssuerUrl, OidcError } from "../src/lib/oidc";
 import { canonicalWebSourceUrl, extractWebDocument, WebSourceError } from "../src/lib/web-sources";
@@ -66,6 +68,46 @@ test("服务端权限入口覆盖所有项目 API 与全局连接设置", async 
   assert.match(auth, /authorizeApiRequest\(user, request, db\)/u);
   assert.match(projectLayout, /assertProjectAccess\(user, parsed\.data, "view"\)/u);
   assert.match(syncPage, /assertProjectAccess\(user, projectId, "view"\)/u);
+});
+
+test("项目 API 授权对 UUID 大小写、编码路径和新版 UUID 使用同一 RBAC 记录", async () => {
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  const projectIdV7 = "0198f1a0-7b2c-7def-8abc-1234567890ab";
+  const seen: string[] = [];
+  let role: "viewer" | "editor" = "viewer";
+  const db = {
+    project: {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        seen.push(where.id);
+        return { workspace: { memberships: [] }, memberships: [{ role }] };
+      },
+      count: async () => 1,
+    },
+  } as unknown as PrismaClient;
+  const member = { id: "22222222-2222-4222-8222-222222222222", role: "member" as const };
+
+  await assert.rejects(
+    () => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectId}/items`, { method: "POST" }), db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+  await assert.rejects(
+    () => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectId.toUpperCase()}/items`, { method: "POST" }), db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+  await assert.rejects(
+    () => authorizeApiRequest(member, new Request(`http://localhost/api/%70rojects/${projectId.replaceAll("1", "%31")}/items`, { method: "POST" }), db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+  await assert.rejects(
+    () => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectIdV7}/items`, { method: "POST" }), db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+  assert.deepEqual(seen, [projectId, projectId, projectId, projectIdV7]);
+
+  role = "editor";
+  await authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectId}/items`, { method: "POST" }), db);
+  await authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectId.toUpperCase()}/items`, { method: "POST" }), db);
+  assert.deepEqual(seen, [projectId, projectId, projectId, projectIdV7, projectId, projectId]);
 });
 
 test("自动化 Worker 入口兼容容器内 CommonJS 转换", async () => {

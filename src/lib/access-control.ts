@@ -1,7 +1,27 @@
 import { Prisma, type AppUserRole, type PrismaClient, type ProjectMembershipRole, type WorkspaceMembershipRole } from "@prisma/client";
+import { z } from "zod";
 import { getDb } from "@/lib/db";
 
-const PROJECT_PATH_PATTERN = /^\/api\/projects\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\/|$)/u;
+const PROJECT_ID_SCHEMA = z.string().uuid();
+const PROJECT_PATH_PATTERN = /^\/api\/projects\/([^/]+)(?:\/|$)/u;
+
+function canonicalProjectId(projectId: string): string {
+  return PROJECT_ID_SCHEMA.safeParse(projectId).success ? projectId.toLowerCase() : projectId;
+}
+
+function decodedApiPath(request: Request): string {
+  const rawPath = new URL(request.url).pathname;
+  try {
+    // Next.js decodes dynamic route parameters before route handlers receive
+    // them. Authorization must inspect that same representation exactly once,
+    // otherwise percent-encoded project paths can bypass the global RBAC gate.
+    return decodeURIComponent(rawPath);
+  } catch {
+    // A malformed escape cannot be a valid Next.js project route. Keep the raw
+    // path so it cannot accidentally become a different authorized resource.
+    return rawPath;
+  }
+}
 
 export type AccessControlErrorCode =
   | "ACCESS_FORBIDDEN"
@@ -48,11 +68,12 @@ export function accessibleProjectWhere(user: AccessUser): Prisma.ProjectWhereInp
 }
 
 export async function getProjectPermission(user: AccessUser, projectId: string, db: PrismaClient = getDb()): Promise<ProjectPermission | null> {
+  const canonicalId = canonicalProjectId(projectId);
   if (user.role === "admin") {
-    return (await db.project.count({ where: { id: projectId } })) === 1 ? "owner" : null;
+    return (await db.project.count({ where: { id: canonicalId } })) === 1 ? "owner" : null;
   }
   const project = await db.project.findUnique({
-    where: { id: projectId },
+    where: { id: canonicalId },
     select: {
       workspace: { select: { memberships: { where: { userId: user.id }, take: 1, select: { role: true } } } },
       memberships: { where: { userId: user.id }, take: 1, select: { role: true } },
@@ -67,9 +88,10 @@ export async function getProjectPermission(user: AccessUser, projectId: string, 
 }
 
 export async function assertProjectAccess(user: AccessUser, projectId: string, required: ProjectPermission, db: PrismaClient = getDb()): Promise<ProjectPermission> {
-  const permission = await getProjectPermission(user, projectId, db);
+  const canonicalId = canonicalProjectId(projectId);
+  const permission = await getProjectPermission(user, canonicalId, db);
   if (permission === null) {
-    const exists = await db.project.count({ where: { id: projectId } });
+    const exists = await db.project.count({ where: { id: canonicalId } });
     if (exists === 0) return fail("ACCESS_PROJECT_NOT_FOUND");
     return fail("ACCESS_FORBIDDEN");
   }
@@ -108,17 +130,19 @@ export async function resolveProjectCreationWorkspace(user: AccessUser, db: Pris
 }
 
 export async function authorizeApiRequest(user: AccessUser, request: Request, db: PrismaClient = getDb()): Promise<void> {
-  const path = new URL(request.url).pathname;
+  const path = decodedApiPath(request);
   if (path.startsWith("/api/settings/")) {
     if (user.role !== "admin") return fail("ACCESS_FORBIDDEN");
     return;
   }
-  const projectId = path.match(PROJECT_PATH_PATTERN)?.[1];
-  if (projectId === undefined) return;
+  const projectIdCandidate = path.match(PROJECT_PATH_PATTERN)?.[1];
+  if (projectIdCandidate === undefined) return;
+  const parsedProjectId = PROJECT_ID_SCHEMA.safeParse(projectIdCandidate);
+  if (!parsedProjectId.success) return;
   const write = !["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase());
   const ownerOnly = write && (
     /\/(?:lifecycle|export|action-policies|mcp-tool-grants)(?:\/|$)/u.test(path)
-    || /\/actions\/[0-9a-f-]+\/decision(?:\/|$)/u.test(path)
+    || /\/actions\/[0-9a-f-]+\/decision(?:\/|$)/iu.test(path)
   );
-  await assertProjectAccess(user, projectId, ownerOnly ? "owner" : write ? "edit" : "view", db);
+  await assertProjectAccess(user, canonicalProjectId(parsedProjectId.data), ownerOnly ? "owner" : write ? "edit" : "view", db);
 }

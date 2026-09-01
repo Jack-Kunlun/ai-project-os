@@ -17,6 +17,8 @@ export function isProjectSnapshotGenerationConflict(error: unknown): boolean {
   if (error.code === "P2034") return true;
   if (error.code !== "P2010" || !isRecord(error.meta)) return false;
 
+  if (error.meta.code === "40001") return true;
+
   const driverAdapterError = error.meta.driverAdapterError;
   if (!isRecord(driverAdapterError) || !isRecord(driverAdapterError.cause)) return false;
 

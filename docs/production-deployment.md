@@ -14,7 +14,7 @@
 - forced-command 只接受 `deploy <tag> <40 位 SHA>`，再调用 root 持有的固定部署程序。专用系统账号 `ai-project-os-actions` 没有人工登录密钥；`deploy` 用户不加入 `docker` 组，也不获得无密码 sudo。
 - 服务器会再次通过 GitHub 公共 API 核验标签 CI，专用私钥本身不能绕过发布门禁。
 - 生产 `.env` 位于 `/etc/ai-project-os/production.env`，权限为 `root:root 0600`，不会进入仓库、Actions 日志或部署结果。
-- 每次替换容器前，会把 PostgreSQL、自持主密钥卷和上传卷备份到 `/var/backups/ai-project-os/<timestamp>-to-<tag>.*`，并校验 dump、tar 和 SHA-256。
+- 每次替换容器前，会在同一停写窗口生成 PostgreSQL、自持主密钥卷和上传卷备份，校验 dump、tar 和 SHA-256，以 age 公钥加密并上传 COS；只有远端长度与 CRC64 验证通过才允许继续部署。完整合同见[生产异地备份](production-backup.md)。
 - 同一时间只允许一个生产部署；GitHub 与服务器两侧均禁止并发覆盖。
 
 ## 一次性服务器准备
@@ -40,7 +40,7 @@ sudo deploy/production/install-production-deploy.sh \
 2. 使用 `visudo` 校验并安装只允许固定部署程序的 sudoers 规则。
 3. 把现有生产 `.env` 复制到 `/etc/ai-project-os/production.env`，设为 `root:root 0600`，同时收紧旧文件权限。
 4. 创建密码锁定的专用系统账号 `ai-project-os-actions`，只为该账号追加受限 Actions 公钥；现有 `deploy` 人工运维账号和公钥保持不变。
-5. 创建 root-only 的备份与部署结果目录。
+5. 校验并安装 root-only 的 COS/age 备份脚本、每日 systemd timer、备份与部署结果目录；备份配置不完整时安装失败关闭。
 
 ## GitHub Environment
 
@@ -63,19 +63,19 @@ sudo deploy/production/install-production-deploy.sh \
 2. 选择 **Deploy production**。
 3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag。
 4. 如配置了 Environment 审批，批准该部署。
-5. 工作流才会依次完成标签/CI 验证、受限 SSH 部署、公网健康与 HTTP→HTTPS 跳转验证。
+5. 工作流才会依次完成标签/CI 验证、受限 SSH、加密异地备份、部署、公网健康与 HTTP→HTTPS 跳转验证。
 
-成功日志只报告 tag、提交、备份目录和健康状态，不输出密码或连接字符串。生产部署结果保存在 `/var/lib/ai-project-os/last-deployment`，权限为 `root:root 0600`。
+成功日志只报告 tag、提交、本地备份目录、COS 对象路径和健康状态，不输出密码或连接字符串。生产部署结果保存在 `/var/lib/ai-project-os/last-deployment`，权限为 `root:root 0600`。
 
 ## 失败与恢复边界
 
 - 标签 CI 缺失或失败：部署不会连接服务器。
-- SSH、备份、磁盘空间或当前容器状态异常：部署在迁移前失败关闭。
+- SSH、本地备份、age 加密、COS 上传/远端校验、磁盘空间或当前容器状态异常：部署在迁移前失败关闭；失败备份没有远端成功标记，因此不会触发本地清理。
 - 构建失败：旧容器保持运行，已创建的备份保留。
 - 迁移或新容器健康失败：工作流失败并保留备份与容器现场；不会自动回滚数据库，因为新迁移可能与旧代码不兼容。
 - 人工恢复前先确定目标版本的数据兼容性，再选择重新部署修复版本或从对应备份恢复 PostgreSQL、主密钥和上传卷。
 
-备份当前不会自动删除。应按磁盘容量和合规要求另行制定保留、异机复制与恢复演练策略；“成功创建备份”不等于“恢复已经验证”。
+服务器只自动删除超过本地保留期、已通过远端验证并带 root-only 标记的旧备份，同时保留最小副本数；无标记的手工或失败备份不会删除。COS 生命周期仍需在定时运行、部署前备份和独立恢复均通过后另行配置。“成功上传备份”不等于“恢复已经验证”。
 
 ## 部署后仍需人工验收
 

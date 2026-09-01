@@ -10,10 +10,9 @@ readonly REPOSITORY_URL=https://github.com/Jack-Kunlun/ai-project-os.git
 readonly REPOSITORY_DIR=/srv/ai-project-os/repository
 readonly ENV_FILE=/etc/ai-project-os/production.env
 readonly COMPOSE_PROJECT=ai-project-os
-readonly BACKUP_ROOT=/var/backups/ai-project-os
+readonly BACKUP_SCRIPT=/usr/local/sbin/ai-project-os-backup
 readonly RESULT_FILE=/var/lib/ai-project-os/last-deployment
 readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
-readonly MIN_FREE_BYTES=5368709120
 
 if [[ $EUID -ne 0 ]]; then
   printf 'DEPLOY_ROOT_REQUIRED\n' >&2
@@ -47,7 +46,6 @@ grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE"
 grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$ENV_FILE"
 
 install -d -o root -g root -m 0755 /srv/ai-project-os
-install -d -o root -g root -m 0700 "$BACKUP_ROOT"
 install -d -o root -g root -m 0700 "$(dirname "$RESULT_FILE")"
 
 if [[ ! -d "$REPOSITORY_DIR/.git" ]]; then
@@ -123,51 +121,23 @@ compose() {
 
 compose config --quiet
 
-available_bytes=$(df --output=avail -B1 "$BACKUP_ROOT" | tail -n 1 | tr -d ' ')
-if [[ ! "$available_bytes" =~ ^[0-9]+$ ]] || (( available_bytes < MIN_FREE_BYTES )); then
-  printf 'DEPLOY_INSUFFICIENT_BACKUP_SPACE\n' >&2
-  exit 69
-fi
+test -x "$BACKUP_SCRIPT"
+backup_output=$(AI_PROJECT_OS_DEPLOY_LOCK_HELD=1 "$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG")
+printf '%s\n' "$backup_output"
 
-current_postgres_id=$(docker ps -q \
-  --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-  --filter 'label=com.docker.compose.service=postgres')
-current_app_id=$(docker ps -q \
-  --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
-  --filter 'label=com.docker.compose.service=app')
-
-backup_path=none-first-deploy
-if [[ -n "$current_postgres_id" || -n "$current_app_id" ]]; then
-  if [[ -z "$current_postgres_id" || -z "$current_app_id" ]]; then
-    printf 'DEPLOY_CURRENT_STACK_INCOMPLETE\n' >&2
-    exit 71
+if grep -q '^BACKUP_SKIPPED_NO_STACK ' <<<"$backup_output"; then
+  backup_path=none-first-deploy
+  backup_object=none-first-deploy
+else
+  backup_path=$(sed -n 's/^BACKUP_OK .* source=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+  backup_object=$(sed -n 's/^BACKUP_OK .* object=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+  if [[ ! "$backup_path" =~ ^/var/backups/ai-project-os/[^/]+$ ]] || \
+    [[ ! "$backup_object" =~ ^cos://[^/]+/production/backups/ ]]; then
+    printf 'DEPLOY_PRE_BACKUP_RESULT_INVALID\n' >&2
+    exit 69
   fi
-
-  backup_timestamp=$(date -u +%Y%m%dT%H%M%SZ)
-  backup_path=$(mktemp -d "$BACKUP_ROOT/${backup_timestamp}-to-${RELEASE_TAG}.XXXXXX")
-  chown root:root "$backup_path"
-  chmod 700 "$backup_path"
-
-  docker exec "$current_postgres_id" sh -ec \
-    'exec pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom' \
-    > "$backup_path/postgres.dump"
-  test -s "$backup_path/postgres.dump"
-  docker exec -i "$current_postgres_id" pg_restore --list \
-    < "$backup_path/postgres.dump" >/dev/null
-
-  docker exec "$current_app_id" tar -C /var/lib/ai-project-os-secrets -czf - . \
-    > "$backup_path/secrets.tar.gz"
-  docker exec "$current_app_id" tar -C /var/lib/ai-project-os/uploads -czf - . \
-    > "$backup_path/uploads.tar.gz"
-  tar -tzf "$backup_path/secrets.tar.gz" >/dev/null
-  tar -tzf "$backup_path/uploads.tar.gz" >/dev/null
-
-  sha256sum \
-    "$backup_path/postgres.dump" \
-    "$backup_path/secrets.tar.gz" \
-    "$backup_path/uploads.tar.gz" \
-    > "$backup_path/SHA256SUMS"
 fi
+readonly backup_path backup_object
 
 wait_for_stack() {
   local attempt postgres_id migrate_id app_id worker_id
@@ -222,10 +192,11 @@ completed_at=$(date -Is)
   printf 'states=%s\n' "$STACK_STATES"
   printf 'health=%s\n' "$STACK_HEALTH"
   printf 'backup=%s\n' "$backup_path"
+  printf 'backup_object=%s\n' "$backup_object"
   printf 'completed_at=%s\n' "$completed_at"
 } > "$RESULT_FILE"
 
 chmod 600 "$RESULT_FILE"
 
-printf 'DEPLOY_OK tag=%s revision=%s backup=%s\n' \
-  "$RELEASE_TAG" "$EXPECTED_REVISION" "$backup_path"
+printf 'DEPLOY_OK tag=%s revision=%s backup=%s backup_object=%s\n' \
+  "$RELEASE_TAG" "$EXPECTED_REVISION" "$backup_path" "$backup_object"

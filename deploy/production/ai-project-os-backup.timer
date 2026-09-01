@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the AI Project OS encrypted offsite backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=20m
+AccuracySec=1m
+Persistent=true
+Unit=ai-project-os-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -81,7 +81,7 @@ export function AppHeader({
           </span>
         </Link>
 
-        <nav className="order-3 flex w-full flex-wrap items-center gap-1 rounded-2xl bg-slate-100/80 p-1 md:order-2 md:w-auto" aria-label="全局导航">
+        <nav className="order-3 flex w-full flex-wrap items-center gap-1 rounded-2xl bg-slate-100/80 p-1 xl:order-2 xl:w-auto" aria-label="全局导航">
           {primaryItems.map((item) => {
             const isActive = item.key === active;
             return (
@@ -98,7 +98,7 @@ export function AppHeader({
           })}
         </nav>
 
-        <div className="order-2 flex items-center gap-2 md:order-3">
+        <div className="order-2 flex items-center gap-2 xl:order-3">
           <Link
             href="/notifications"
             aria-label="打开通知中心"
@@ -131,55 +131,62 @@ export function AppHeader({
       </div>
 
       {projectId ? (
-        <div className="border-t border-slate-100 bg-slate-50/80">
-          <nav className="mx-auto flex max-w-7xl flex-wrap items-center gap-1 px-5 py-2 sm:px-8 lg:px-10" aria-label="项目导航">
-            <Link
-              href="/projects"
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 hover:bg-white hover:text-slate-900"
-            >
-              项目列表
-            </Link>
-            <Link
-              href={`/projects/${projectId}`}
-              aria-current={projectSection === "overview" ? "page" : undefined}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "overview" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white hover:text-slate-900"}`}
-            >
-              当前项目
-            </Link>
-            {projectGroups.map((group) => {
-              const groupActive = group.items.some((item) => item.key === projectSection);
-              return (
-                <details key={group.key} className="group relative">
-                  <summary aria-current={groupActive ? "page" : undefined} className={`flex cursor-pointer list-none items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 marker:hidden [&::-webkit-details-marker]:hidden ${groupActive ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white hover:text-slate-900"}`}>
-                    {group.label}
-                    <span aria-hidden="true" className="text-[10px] opacity-70">⌄</span>
-                  </summary>
-                  <div className="absolute left-0 top-full z-50 mt-1 min-w-40 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-950/10">
-                    {group.items.map((item) => {
-                      const isActive = item.key === projectSection;
-                      return (
-                        <Link
-                          key={item.key}
-                          href={`/projects/${projectId}${item.suffix}`}
-                          aria-current={isActive ? "page" : undefined}
-                          className={`block rounded-lg px-3 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${isActive ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}
-                        >
-                          {item.label}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </details>
-              );
-            })}
-            <Link
-              href={`${guideHref}#project-data`}
-              aria-current={projectSection === "guide" ? "page" : undefined}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "guide" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white hover:text-slate-900"}`}
-            >
-              查看指引
-            </Link>
-          </nav>
+        <div className="border-t border-slate-100 bg-slate-50/90">
+          <div className="mx-auto max-w-7xl px-5 py-2.5 sm:px-8 lg:px-10">
+            <nav className="flex w-full flex-wrap items-center gap-1 rounded-xl border border-slate-200/80 bg-white/70 p-1 shadow-sm shadow-slate-950/[0.02]" aria-label="项目导航">
+              <Link
+                href="/projects"
+                className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 hover:bg-indigo-50 hover:text-indigo-700"
+              >
+                <NavIcon name="arrow-left" />
+                项目列表
+              </Link>
+              <span aria-hidden="true" className="mx-1 hidden h-5 w-px bg-slate-200 sm:block" />
+              <Link
+                href={`/projects/${projectId}`}
+                aria-current={projectSection === "overview" ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "overview" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="home" />
+                项目首页
+              </Link>
+              {projectGroups.map((group) => {
+                const groupActive = group.items.some((item) => item.key === projectSection);
+                return (
+                  <details key={group.key} className="group relative">
+                    <summary aria-current={groupActive ? "page" : undefined} className={`flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 marker:hidden [&::-webkit-details-marker]:hidden ${groupActive ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}>
+                      {group.label}
+                      <svg aria-hidden="true" viewBox="0 0 12 12" className="h-3 w-3 opacity-60 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m3 4.5 3 3 3-3" /></svg>
+                    </summary>
+                    <div className="absolute left-0 top-full z-50 mt-2 min-w-44 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/10">
+                      <p className="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{group.label}</p>
+                      {group.items.map((item) => {
+                        const isActive = item.key === projectSection;
+                        return (
+                          <Link
+                            key={item.key}
+                            href={`/projects/${projectId}${item.suffix}`}
+                            aria-current={isActive ? "page" : undefined}
+                            className={`block rounded-xl px-3 py-2.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${isActive ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"}`}
+                          >
+                            {item.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </details>
+                );
+              })}
+              <Link
+                href={`${guideHref}#project-data`}
+                aria-current={projectSection === "guide" ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "guide" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="book" />
+                查看指引
+              </Link>
+            </nav>
+          </div>
         </div>
       ) : null}
     </header>
@@ -193,6 +200,9 @@ function NavIcon({ name }: { name: string }) {
     help: <><circle cx="12" cy="12" r="9" /><path d="M9.8 9.2a2.4 2.4 0 1 1 3.5 2.15c-.8.4-1.3.9-1.3 1.9" /><path d="M12 17h.01" /></>,
     sliders: <><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></>,
     link: <><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.15 1.15" /><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.15-1.15" /></>,
+    "arrow-left": <><path d="m15 18-6-6 6-6" /><path d="M9 12h10" /></>,
+    home: <><path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10" /><path d="M9 20v-6h6v6" /></>,
+    book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /></>,
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
     users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
   };

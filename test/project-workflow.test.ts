@@ -6,6 +6,7 @@ import test from "node:test";
 import { mapApiError } from "../src/lib/api-errors";
 import { classifyGitHubJobError, classifyGitHubJobResult } from "../src/lib/background-jobs";
 import { GitHubReadError } from "../src/lib/github/read-only-client";
+import { projectJobFailurePresentation } from "../src/lib/project-job-failure";
 import {
   cancelProjectJob,
   claimProjectJob,
@@ -16,6 +17,7 @@ import {
   isLeaseExpired,
   markProviderAcknowledged,
   markProviderDispatched,
+  projectJobNotificationContent,
   ProjectWorkflowError,
   reconcileProjectJob,
   rejectProjectJobRetry,
@@ -32,6 +34,7 @@ type JobStatus = "queued" | "waitingConsent" | "running" | "succeeded" | "failed
 type FakeJob = {
   id: string;
   projectId: string;
+  requestedById: string;
   kind: "projectBrief" | "memoryIndex" | "githubProjectSync" | "githubScan" | "githubMaterialSync";
   status: JobStatus;
   stage: string;
@@ -76,11 +79,24 @@ type FakeJobReconciliation = {
   evidenceFingerprint: string;
 };
 
+type FakeNotification = {
+  userId: string;
+  projectId: string;
+  kind: "system";
+  severity: "info" | "success" | "warning" | "error";
+  title: string;
+  body: string;
+  actionHref: string;
+  dedupeKey: string;
+  readAt: Date | null;
+};
+
 class FakeWorkflowDb {
   readonly jobs = new Map<string, FakeJob>();
   readonly attempts = new Map<string, FakeAttempt>();
   readonly audits = new Map<string, FakeProviderCallAudit>();
   readonly reconciliations = new Map<string, FakeJobReconciliation>();
+  readonly notifications = new Map<string, FakeNotification>();
   readonly users = new Set<string>();
 
   readonly backgroundJob = {
@@ -167,6 +183,24 @@ class FakeWorkflowDb {
     findUnique: async ({ where }: { where: { id: string } }) => this.users.has(where.id) ? { id: where.id } : null,
   };
 
+  readonly notification = {
+    upsert: async ({ where, create, update }: {
+      where: { userId_dedupeKey: { userId: string; dedupeKey: string } };
+      create: Omit<FakeNotification, "readAt">;
+      update: Partial<FakeNotification>;
+    }) => {
+      const key = `${where.userId_dedupeKey.userId}:${where.userId_dedupeKey.dedupeKey}`;
+      const existing = this.notifications.get(key);
+      if (existing) {
+        Object.assign(existing, update);
+        return existing;
+      }
+      const notification = { ...create, readAt: null };
+      this.notifications.set(key, notification);
+      return notification;
+    },
+  };
+
   async $executeRaw(query: unknown): Promise<number> {
     void query;
     return 0;
@@ -181,6 +215,7 @@ class FakeWorkflowDb {
     const job: FakeJob = {
       id: randomUUID(),
       projectId,
+      requestedById: randomUUID(),
       kind: "projectBrief",
       status,
       stage: status,
@@ -260,6 +295,11 @@ test("attempt claim, heartbeat and dispatch state are token-bound", async () => 
   await finishProjectJob({ jobId: job.id, ...claim, result: { ok: true } }, fake as never);
   assert.equal(job.status, "succeeded");
   assert.equal(fake.attempts.get(claim.attemptId)?.status, "succeeded");
+  assert.equal(fake.notifications.size, 1);
+  const notification = [...fake.notifications.values()][0];
+  assert.equal(notification?.userId, job.requestedById);
+  assert.equal(notification?.actionHref, `/projects/${job.projectId}/jobs/${job.id}`);
+  assert.match(notification?.title ?? "", /项目简报.*完成/u);
 });
 
 test("expired running lease reconciles to unknown without provider retry", async () => {
@@ -658,6 +698,59 @@ test("job result serializers keep search and answer payloads explicit", () => {
     anchoredExcerptCount: 2,
     manifest: "c".repeat(64),
   });
+});
+
+test("耗时项目任务生成可点击的完成、失败和待确认通知", () => {
+  const projectId = randomUUID();
+  const jobId = randomUUID();
+  const success = projectJobNotificationContent({ projectId, jobId, kind: "gitRepositorySync", status: "succeeded", failureCode: null });
+  assert.equal(success?.severity, "success");
+  assert.equal(success?.actionHref, `/projects/${projectId}/jobs/${jobId}`);
+  assert.match(success?.title ?? "", /代码仓库扫描.*完成/u);
+
+  const failed = projectJobNotificationContent({ projectId, jobId, kind: "memoryIndex", status: "failed", failureCode: "INDEX_FAILED" });
+  assert.equal(failed?.severity, "error");
+  assert.match(failed?.body ?? "", /INDEX_FAILED/u);
+
+  const oversized = projectJobNotificationContent({ projectId, jobId, kind: "gitRepositorySync", status: "failed", failureCode: "GIT_REPOSITORY_TOO_LARGE" });
+  assert.match(oversized?.body ?? "", /2,000 个文本文件/u);
+  assert.match(oversized?.body ?? "", /单文件 96 KiB/u);
+  assert.match(oversized?.body ?? "", /文本合计 12 MiB/u);
+  assert.match(oversized?.body ?? "", /配置扫描范围/u);
+  assert.match(oversized?.body ?? "", /GIT_REPOSITORY_TOO_LARGE/u);
+
+  const unknown = projectJobNotificationContent({ projectId, jobId, kind: "projectAgent", status: "unknown", failureCode: "RECONCILIATION_REQUIRED" });
+  assert.equal(unknown?.severity, "warning");
+  assert.match(unknown?.body ?? "", /不会自动重试/u);
+  assert.equal(projectJobNotificationContent({ projectId, jobId, kind: "semanticSearch", status: "succeeded", failureCode: null }), null);
+});
+
+test("项目任务失败信息给出安全的中文原因、处理建议和排查代码", () => {
+  const authentication = projectJobFailurePresentation("GIT_AUTHENTICATION_FAILED");
+  assert.match(authentication.summary, /拒绝.*凭据/u);
+  assert.match(authentication.action, /只读仓库权限/u);
+  assert.equal(authentication.code, "GIT_AUTHENTICATION_FAILED");
+
+  const integrity = projectJobFailurePresentation("GITHUB_CODE_SCAN_INTEGRITY_ERROR");
+  assert.match(integrity.summary, /完整性校验/u);
+  assert.match(integrity.action, /管理员/u);
+
+  const unsafe = projectJobFailurePresentation("failure: secret response body");
+  assert.equal(unsafe.code, null);
+  assert.doesNotMatch(`${unsafe.summary} ${unsafe.action}`, /secret response body/u);
+});
+
+test("通用 Git 仓库扫描结果只公开任务详情需要的字段", () => {
+  const result = serializeProjectJobResult("gitRepositorySync", {
+    linkId: randomUUID(),
+    snapshotId: randomUUID(),
+    commitSha: "a".repeat(40),
+    fileCount: 832,
+    credential: "do-not-return",
+  }) as Record<string, unknown>;
+  assert.equal(result.fileCount, 832);
+  assert.equal(result.commitSha, "a".repeat(40));
+  assert.equal("credential" in result, false);
 });
 
 test("job action routes consistently use the public mapper", () => {

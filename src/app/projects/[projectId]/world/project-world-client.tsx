@@ -261,10 +261,10 @@ export function ProjectWorldClient({ username, projectId }: { username: string; 
           <Metric label="状态快照" value={world?.snapshots.length ?? 0} detail="不可变历史" loading={loading} />
         </section>
 
-        <section className="mt-8 grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
-          <div>
+        <section className="mt-8 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]">
+          <div className="min-w-0">
             <SectionHeading eyebrow="Current facts" title="当前项目事实" detail="仅当前有效事实参与状态判断；尚未生效、已过期、被替代和来源退役的事实保留在历史中。" />
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-2">
               {!loading && activeFacts.length === 0 ? <Empty title="尚无当前有效事实" detail="先在“资料与条目”中新增或确认带证据的项目事实。" href={`/projects/${projectId}`} action="管理项目事实" /> : activeFacts.map((fact) => <FactCard key={fact.id} fact={fact} />)}
             </div>
           </div>
@@ -339,7 +339,7 @@ function SectionHeading({ eyebrow, title, detail, compact = false }: { eyebrow: 
 
 function FactCard({ fact }: { fact: WorldFact }) {
   const meta = factMeta[fact.type];
-  return <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.tone}`}>{meta.label}</span><span className="text-[11px] text-slate-400">证据版本 #{fact.revision.number}</span></div><h3 className="mt-4 text-lg font-semibold text-slate-900">{fact.title}</h3><p className="mt-2 line-clamp-4 text-sm leading-6 text-slate-600">{fact.content}</p><div className="mt-4 rounded-2xl bg-slate-50 p-4 text-xs text-slate-500"><p>来源：{fact.source.kind}{fact.source.externalRef ? ` · ${fact.source.externalRef}` : ""}</p><p className="mt-2 font-mono" title={fact.revision.evidenceManifestFingerprint}>证据清单 {shortFingerprint(fact.revision.evidenceManifestFingerprint)}</p>{fact.workItems.length > 0 ? <p className="mt-2">工作项：{fact.workItems.map((item) => item.title).join("、")}</p> : null}</div></article>;
+  return <article className="min-w-0 max-w-full overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.tone}`}>{meta.label}</span><span className="text-[11px] text-slate-400">证据版本 #{fact.revision.number}</span></div><h3 className="mt-4 [overflow-wrap:anywhere] text-lg font-semibold text-slate-900">{fact.title}</h3><p className="mt-2 line-clamp-4 [overflow-wrap:anywhere] text-sm leading-6 text-slate-600">{fact.content}</p><div className="mt-4 min-w-0 max-w-full overflow-hidden rounded-2xl bg-slate-50 p-4 text-xs text-slate-500"><p className="max-w-full [overflow-wrap:anywhere]">来源：{fact.source.kind}{fact.source.externalRef ? ` · ${fact.source.externalRef}` : ""}</p><p className="mt-2 break-all font-mono" title={fact.revision.evidenceManifestFingerprint}>证据清单 {shortFingerprint(fact.revision.evidenceManifestFingerprint)}</p>{fact.workItems.length > 0 ? <p className="mt-2 [overflow-wrap:anywhere]">工作项：{fact.workItems.map((item) => item.title).join("、")}</p> : null}</div></article>;
 }
 
 function Workbench({ title, eyebrow, description, children }: { title: string; eyebrow: string; description: string; children: React.ReactNode }) {

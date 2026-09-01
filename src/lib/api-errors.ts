@@ -284,7 +284,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       GIT_REPOSITORY_NOT_FOUND: [404, "Git 仓库或分支不存在"],
       GIT_REPOSITORY_CONFLICT: [409, "该项目已经关联此仓库"],
       GIT_REPOSITORY_EMPTY: [422, "仓库或所选分支没有可扫描内容"],
-      GIT_REPOSITORY_TOO_LARGE: [413, "仓库扫描范围超过安全上限，请缩小目录范围"],
+      GIT_REPOSITORY_TOO_LARGE: [413, "扫描范围超过 2,000 个文本文件或 12 MiB 文本总量，请缩小包含目录"],
       GIT_REPOSITORY_BINARY_ONLY: [422, "扫描范围内没有可识别的文本代码文件"],
       GIT_REPOSITORY_LINK_NOT_FOUND: [404, "项目仓库关联不存在"],
       GIT_REPOSITORY_LINK_DISABLED: [409, "项目仓库关联已停用"],

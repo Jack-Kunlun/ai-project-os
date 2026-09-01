@@ -12,6 +12,7 @@ import {
   canonicalTrackedRef,
   decodeGitCredential,
   encodeGitCredential,
+  gitRepositoryScanPolicy,
   GitSafetyError,
 } from "../src/lib/git";
 
@@ -44,6 +45,14 @@ test("扫描范围和信任材料不能携带路径穿越或多行注入", () =>
   assert.match(canonicalTlsCaCertificate("-----BEGIN CERTIFICATE-----\nQUJDRA==\n-----END CERTIFICATE-----") ?? "", /END CERTIFICATE/u);
   assert.equal(canonicalSshKnownHost("git.example.com ssh-ed25519 QUJDRA=="), "git.example.com ssh-ed25519 QUJDRA==");
   assert.equal(safetyCode(() => canonicalSshKnownHost("git.example.com ssh-ed25519 QUJDRA==\nattacker ssh-rsa QQ==")), "GIT_SSH_KNOWN_HOST_INVALID");
+});
+
+test("仓库扫描上限覆盖常规 monorepo 并保持单文件与总量保护", () => {
+  assert.deepEqual(gitRepositoryScanPolicy(), {
+    maxScannedFiles: 2_000,
+    maxFileBytes: 96 * 1024,
+    maxTotalBytes: 12 * 1024 * 1024,
+  });
 });
 
 test("Git Token、密码和 SSH 私钥使用统一密文载荷且不会以明文写入模型字段", () => {

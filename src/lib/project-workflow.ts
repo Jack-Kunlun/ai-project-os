@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
+import { projectJobFailurePresentation } from "@/lib/project-job-failure";
 
 const JOB_LOCK_NAMESPACE = 23082026;
 // The current monolith executes a job in one request. Keep enough headroom for
@@ -96,6 +97,93 @@ function safeFailureCode(error: unknown): string {
   return "PROJECT_WORKFLOW_FAILED";
 }
 
+const NOTIFIABLE_PROJECT_JOB_KINDS = new Set<BackgroundJobKind>([
+  "assetExtract",
+  "githubScan",
+  "githubMaterialSync",
+  "githubProjectSync",
+  "gitRepositorySync",
+  "memoryIndex",
+  "autoExtract",
+  "projectBrief",
+  "projectAgent",
+]);
+
+const PROJECT_JOB_LABELS: Readonly<Record<BackgroundJobKind, string>> = Object.freeze({
+  assetExtract: "图片或扫描件识别",
+  githubScan: "GitHub 代码扫描",
+  githubMaterialSync: "GitHub 资料同步",
+  githubProjectSync: "GitHub 项目同步",
+  gitRepositorySync: "代码仓库扫描",
+  memoryIndex: "项目记忆索引",
+  autoExtract: "项目资料自动抽取",
+  semanticSearch: "项目记忆检索",
+  ragAnswer: "引用式问答",
+  projectBrief: "项目简报",
+  projectAgent: "项目智能体调查",
+});
+
+export function projectJobNotificationContent(input: Readonly<{
+  projectId: string;
+  jobId: string;
+  kind: BackgroundJobKind;
+  status: "succeeded" | "failed" | "unknown";
+  failureCode: string | null;
+}>) {
+  if (!NOTIFIABLE_PROJECT_JOB_KINDS.has(input.kind)) return null;
+  const label = PROJECT_JOB_LABELS[input.kind];
+  const failure = projectJobFailurePresentation(input.failureCode);
+  const codeSuffix = failure.code ? ` 错误代码：${failure.code}。` : "";
+  return Object.freeze({
+    severity: input.status === "succeeded" ? "success" as const : input.status === "failed" ? "error" as const : "warning" as const,
+    title: input.status === "succeeded" ? `${label}已完成` : input.status === "failed" ? `${label}未完成` : `${label}结果待确认`,
+    body: input.status === "succeeded"
+      ? "任务已经结束。点击查看结果、执行阶段和尝试记录。"
+      : input.status === "failed"
+        ? `${failure.summary} ${failure.action}${codeSuffix}`
+        : `任务结果无法安全确认，系统不会自动重试。${failure.action}${codeSuffix}`,
+    actionHref: `/projects/${input.projectId}/jobs/${input.jobId}`,
+  });
+}
+
+async function tryCreateProjectJobNotification(input: Readonly<{
+  id: string;
+  projectId: string | null;
+  requestedById: string;
+  kind: BackgroundJobKind;
+}>, status: "succeeded" | "failed" | "unknown", failureCode: string | null, db: WorkflowDb): Promise<void> {
+  if (input.projectId === null) return;
+  const content = projectJobNotificationContent({ projectId: input.projectId, jobId: input.id, kind: input.kind, status, failureCode });
+  if (content === null) return;
+  const notificationClient = (db as WorkflowDb & { notification?: PrismaClient["notification"] }).notification;
+  if (!notificationClient) return;
+  const dedupeKey = createHash("sha256").update(`project-job:${input.id}:${status}`, "utf8").digest("hex");
+  try {
+    await notificationClient.upsert({
+      where: { userId_dedupeKey: { userId: input.requestedById, dedupeKey } },
+      create: {
+        userId: input.requestedById,
+        projectId: input.projectId,
+        kind: "system",
+        severity: content.severity,
+        title: content.title,
+        body: content.body,
+        actionHref: content.actionHref,
+        dedupeKey,
+      },
+      update: {
+        severity: content.severity,
+        title: content.title,
+        body: content.body,
+        actionHref: content.actionHref,
+        readAt: null,
+      },
+    });
+  } catch {
+    console.error("Project job notification could not be persisted");
+  }
+}
+
 function safeNullableFailureCode(value: unknown): string | null {
   return typeof value === "string" && /^[A-Z0-9_]{3,64}$/.test(value) ? value : null;
 }
@@ -118,6 +206,10 @@ function safeResultNumber(value: unknown): number | null {
 
 function safeResultHash(value: unknown, length: 40 | 64): string | null {
   return typeof value === "string" && new RegExp(`^[a-f0-9]{${length}}$`).test(value) ? value : null;
+}
+
+function safeResultCommitHash(value: unknown): string | null {
+  return typeof value === "string" && /^[a-f0-9]{40,64}$/u.test(value) ? value : null;
 }
 
 function safeResultDate(value: unknown): string | null {
@@ -294,6 +386,14 @@ export function serializeProjectJobResult(kind: BackgroundJobKind, value: unknow
   if (kind === "githubScan") return Object.freeze(serializeCodeScanResult(value));
   if (kind === "githubMaterialSync") return Object.freeze(serializeMaterialSyncResult(value));
   if (kind === "githubProjectSync") return Object.freeze(serializeGitHubProjectSyncResult(value));
+  if (kind === "gitRepositorySync") {
+    return Object.freeze({
+      linkId: safeResultString(value.linkId, 128),
+      snapshotId: safeResultString(value.snapshotId, 128),
+      commitSha: safeResultCommitHash(value.commitSha),
+      fileCount: safeResultInteger(value.fileCount),
+    });
+  }
   if (kind === "semanticSearch") {
     const results = Array.isArray(value.results)
       ? value.results.map(serializeSearchResult).filter((result): result is Record<string, unknown> => result !== null).slice(0, 10)
@@ -391,7 +491,7 @@ export async function withProjectJobLock<T>(
 async function findJobForAttempt(tx: Prisma.TransactionClient, jobId: string) {
   return tx.backgroundJob.findUnique({
     where: { id: jobId },
-    select: { id: true, kind: true, status: true, stage: true },
+    select: { id: true, projectId: true, requestedById: true, kind: true, status: true, stage: true },
   });
 }
 
@@ -480,11 +580,11 @@ export async function heartbeatProjectJob(
   return withJobLock(db, input.jobId, async (tx) => {
     await verifyAttempt(tx, input);
     const now = new Date();
-    const updated = await tx.backgroundJobAttempt.updateMany({
+    const attemptUpdated = await tx.backgroundJobAttempt.updateMany({
       where: { id: input.attemptId, jobId: input.jobId, status: "running" },
       data: { heartbeatAt: now, leaseExpiresAt: new Date(now.getTime() + DEFAULT_JOB_LEASE_MS) },
     });
-    if (updated.count !== 1) return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
+    if (attemptUpdated.count !== 1) return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
     return true;
   });
 }
@@ -625,15 +725,15 @@ export async function finishProjectJob(
   input: Readonly<{ jobId: string; attemptId: string; claimToken: string; result: unknown; allowExpired?: boolean }>,
   db: WorkflowDb = getDb(),
 ) {
-  return withJobLock(db, input.jobId, async (tx) => {
+  const outcome = await withJobLock(db, input.jobId, async (tx) => {
     const { job } = await verifyAttempt(tx, input, { allowExpired: input.allowExpired === true });
     const completedAt = new Date();
-    const updated = await tx.backgroundJobAttempt.updateMany({
+    const attemptUpdated = await tx.backgroundJobAttempt.updateMany({
       where: { id: input.attemptId, jobId: input.jobId, status: "running" },
       data: { status: "succeeded", completedAt, heartbeatAt: completedAt },
     });
-    if (updated.count !== 1) return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
-    return tx.backgroundJob.update({
+    if (attemptUpdated.count !== 1) return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
+    const updated = await tx.backgroundJob.update({
       where: { id: input.jobId },
       data: {
         status: "succeeded",
@@ -646,17 +746,22 @@ export async function finishProjectJob(
         reconciliationRequired: false,
       },
     });
+    return Object.freeze({ updated, job });
   });
+  await tryCreateProjectJobNotification(outcome.job, "succeeded", null, db);
+  return outcome.updated;
 }
 
 export async function failProjectJob(
   input: Readonly<{ jobId: string; attemptId: string; claimToken: string; error: unknown; result?: unknown; allowExpired?: boolean }>,
   db: WorkflowDb = getDb(),
 ): Promise<boolean> {
-  return withJobLock(db, input.jobId, async (tx) => {
+  const outcome = await withJobLock(db, input.jobId, async (tx) => {
     const job = await findJobForAttempt(tx, input.jobId);
     if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
-    if (job.status === "unknown" || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled") return false;
+    if (job.status === "unknown" || job.status === "succeeded" || job.status === "failed" || job.status === "cancelled") {
+      return Object.freeze({ changed: false, job: null, failureCode: null });
+    }
     await verifyAttempt(tx, input, { allowExpired: input.allowExpired === true });
     const completedAt = new Date();
     const code = safeFailureCode(input.error);
@@ -676,18 +781,22 @@ export async function failProjectJob(
       where: { id: input.jobId },
       data,
     });
-    return true;
+    return Object.freeze({ changed: true, job, failureCode: code });
   });
+  if (outcome.changed && outcome.job !== null) {
+    await tryCreateProjectJobNotification(outcome.job, "failed", outcome.failureCode, db);
+  }
+  return outcome.changed;
 }
 
 export async function markProjectJobUnknown(
   input: Readonly<{ jobId: string; attemptId: string; claimToken: string; error: unknown; result?: unknown }>,
   db: WorkflowDb = getDb(),
 ): Promise<boolean> {
-  return withJobLock(db, input.jobId, async (tx) => {
+  const outcome = await withJobLock(db, input.jobId, async (tx) => {
     const job = await findJobForAttempt(tx, input.jobId);
     if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
-    if (job.status === "unknown") return false;
+    if (job.status === "unknown") return Object.freeze({ changed: false, job: null, failureCode: null });
     if (job.status !== "running") return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
     await verifyAttempt(tx, input, { allowExpired: true });
     const completedAt = new Date();
@@ -708,8 +817,12 @@ export async function markProjectJobUnknown(
       where: { id: input.jobId },
       data,
     });
-    return true;
+    return Object.freeze({ changed: true, job, failureCode: code });
   });
+  if (outcome.changed && outcome.job !== null) {
+    await tryCreateProjectJobNotification(outcome.job, "unknown", outcome.failureCode, db);
+  }
+  return outcome.changed;
 }
 
 function publicAttempt(attempt: {

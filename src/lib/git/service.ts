@@ -15,6 +15,7 @@ import {
 } from "@/lib/project-workflow";
 import { decodeGitCredential, encodeGitCredential, type GitCredentialPayload } from "./credentials";
 import { gitRemoteUrl, GitRunnerError, withGitRunner } from "./runner";
+import { GIT_REPOSITORY_SCAN_POLICY } from "./scan-policy";
 import {
   assertPinnedGitEndpoint,
   canonicalExcludePatterns,
@@ -28,9 +29,9 @@ import {
   resolveGitEndpoint,
 } from "./safety";
 
-const MAX_SCANNED_FILES = 600;
-const MAX_FILE_BYTES = 96 * 1024;
-const MAX_TOTAL_BYTES = 12 * 1024 * 1024;
+const MAX_SCANNED_FILES = GIT_REPOSITORY_SCAN_POLICY.maxScannedFiles;
+const MAX_FILE_BYTES = GIT_REPOSITORY_SCAN_POLICY.maxFileBytes;
+const MAX_TOTAL_BYTES = GIT_REPOSITORY_SCAN_POLICY.maxTotalBytes;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SAFE_PATH_PATTERN = /^(?!\/)(?!.*(?:^|\/)\.\.?\/?$)(?!.*[\u0000-\u001f\u007f-\u009f\\])[^\u0000]{1,1024}$/u;
 const TEXT_EXTENSIONS = new Set([
@@ -40,6 +41,10 @@ const TEXT_EXTENSIONS = new Set([
   ".vue", ".xml", ".yaml", ".yml", ".zsh",
 ]);
 const ALWAYS_EXCLUDED_SEGMENTS = new Set([".git", ".next", ".nuxt", "coverage", "dist", "node_modules", "target", "vendor"]);
+
+export function gitRepositoryScanPolicy() {
+  return GIT_REPOSITORY_SCAN_POLICY;
+}
 
 export type GitServiceErrorCode =
   | "GIT_CONNECTION_INVALID_INPUT"

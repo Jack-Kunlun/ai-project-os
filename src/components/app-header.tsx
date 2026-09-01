@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { APP_VERSION } from "@/lib/version";
+import { NotificationBell } from "./notification-bell";
 
 type PrimarySection = "dashboard" | "projects" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide";
 type ProjectSection = "overview" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
@@ -13,7 +14,6 @@ const primaryItems = [
 ] as const;
 
 const projectItems = [
-  { key: "overview", label: "资料与条目", suffix: "" },
   { key: "assets", label: "文件资料", suffix: "/assets" },
   { key: "externalSources", label: "外部资料", suffix: "/external-sources" },
   { key: "repositories", label: "代码仓库", suffix: "/repositories" },
@@ -31,19 +31,9 @@ const projectItems = [
 
 const projectGroups = [
   {
-    key: "sources",
-    label: "资料",
-    items: projectItems.filter((item) => ["assets", "externalSources", "repositories"].includes(item.key)),
-  },
-  {
     key: "management",
     label: "项目管理",
     items: projectItems.filter((item) => ["world", "plan", "automations"].includes(item.key)),
-  },
-  {
-    key: "intelligence",
-    label: "智能能力",
-    items: projectItems.filter((item) => ["control", "memory", "memoryQuality", "intelligence"].includes(item.key)),
   },
   {
     key: "governance",
@@ -51,6 +41,9 @@ const projectGroups = [
     items: projectItems.filter((item) => ["tools", "actions", "governance"].includes(item.key)),
   },
 ] as const;
+
+const materialSections: readonly ProjectSection[] = ["assets", "externalSources", "repositories"];
+const intelligenceSections: readonly ProjectSection[] = ["control", "memory", "memoryQuality", "intelligence"];
 
 export function AppHeader({
   username,
@@ -99,15 +92,7 @@ export function AppHeader({
         </nav>
 
         <div className="order-2 flex items-center gap-2 xl:order-3">
-          <Link
-            href="/notifications"
-            aria-label="打开通知中心"
-            aria-current={active === "notifications" ? "page" : undefined}
-            title="通知中心"
-            className={`flex h-11 w-11 items-center justify-center rounded-full border transition ${active === "notifications" ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700"}`}
-          >
-            <NavIcon name="bell" />
-          </Link>
+          <NotificationBell active={active === "notifications"} />
           <Link
             href={guideHref}
             aria-label="打开帮助与使用指南"
@@ -148,7 +133,23 @@ export function AppHeader({
                 className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "overview" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
               >
                 <NavIcon name="home" />
-                项目首页
+                项目概览
+              </Link>
+              <Link
+                href={`/projects/${projectId}#project-materials`}
+                aria-current={projectSection && materialSections.includes(projectSection) ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && materialSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="folder" />
+                项目资料
+              </Link>
+              <Link
+                href={`/projects/${projectId}/intelligence`}
+                aria-current={projectSection && intelligenceSections.includes(projectSection) ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && intelligenceSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="sparkles" />
+                AI 工作台
               </Link>
               {projectGroups.map((group) => {
                 const groupActive = group.items.some((item) => item.key === projectSection);
@@ -205,6 +206,7 @@ function NavIcon({ name }: { name: string }) {
     book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /></>,
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
     users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
+    sparkles: <><path d="m12 3 1.15 3.1L16 7.25l-2.85 1.15L12 11.5 10.85 8.4 8 7.25l2.85-1.15L12 3Z" /><path d="m18.5 13 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" /><path d="m5.5 12 .95 2.55L9 15.5l-2.55.95L5.5 19l-.95-2.55L2 15.5l2.55-.95L5.5 12Z" /></>,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }

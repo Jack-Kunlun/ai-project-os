@@ -6,6 +6,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
 import { isProjectSnapshotStale } from "@/lib/project-snapshot-stale";
 import type { SnapshotRecord } from "@/lib/project-snapshot";
+import { ProjectMaterialIntake } from "./project-material-intake";
 
 type ProjectItem = {
   id: string;
@@ -239,14 +240,10 @@ export function ProjectDetailClient({ username }: { username: string }) {
   const [isGeneratingSnapshot, setIsGeneratingSnapshot] = useState(false);
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [snapshotSuccess, setSnapshotSuccess] = useState<string | null>(null);
-  const [isCreatingSource, setIsCreatingSource] = useState(false);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [isSavingItem, setIsSavingItem] = useState(false);
   const [itemActionId, setItemActionId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [sourceContent, setSourceContent] = useState("");
-  const [sourceExternalRef, setSourceExternalRef] = useState("");
-  const [sourceCapturedAt, setSourceCapturedAt] = useState("");
   const [itemForm, setItemForm] = useState<ItemFormState>({
     type: "progress",
     sourceId: "",
@@ -366,52 +363,6 @@ export function ProjectDetailClient({ username }: { username: string }) {
     setIsSourcesLoading(false);
     setIsItemsLoading(false);
     setIsSnapshotLoading(false);
-  }
-
-  async function handleSourceSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!projectId || !sourceContent.trim()) return;
-
-    let capturedAt: string | undefined;
-    if (sourceCapturedAt) {
-      const capturedDate = new Date(sourceCapturedAt);
-      if (Number.isNaN(capturedDate.getTime())) {
-        setSourceError("资料时间格式无效");
-        setSourceSuccess(null);
-        return;
-      }
-      capturedAt = capturedDate.toISOString();
-    }
-
-    setIsCreatingSource(true);
-    setSourceError(null);
-    setSourceSuccess(null);
-
-    try {
-      const response = await fetch(`/api/projects/${projectId}/sources`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          contentText: sourceContent,
-          externalRef: sourceExternalRef,
-          capturedAt,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(await readError(response, "资料保存失败"));
-      }
-
-      setSourceContent("");
-      setSourceExternalRef("");
-      setSourceCapturedAt("");
-      await reloadProjectAndSources();
-      setSourceSuccess("候选资料已保存。");
-    } catch (createError) {
-      setSourceError(createError instanceof Error ? createError.message : "资料保存失败");
-    } finally {
-      setIsCreatingSource(false);
-    }
   }
 
   async function handleDeleteSource(source: ProjectSource) {
@@ -657,9 +608,13 @@ export function ProjectDetailClient({ username }: { username: string }) {
         <div>
           <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project workspace</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name}</h1>
-          <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">{project.description || "项目描述尚未补充。先接入来源，再人工创建并确认条目，最后手动生成可追溯快照。"}</p>
+          <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">{project.description || "项目描述尚未补充。先添加资料并完成审核，再建立可查询、可引用的项目记忆。"}</p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2"><Link href={`/projects/${projectId}/control`} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">智能控制台</Link><Link href={`/projects/${projectId}/memory`} className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">智能记忆</Link><Link href={`/projects/${projectId}/intelligence`} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">项目智能体</Link></div>
+        <div className="flex shrink-0 flex-wrap gap-2"><a href="#project-materials" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">添加项目资料</a><Link href={`/projects/${projectId}/intelligence`} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">打开 AI 工作台</Link></div>
+      </div>
+
+      <div className="mt-8">
+        <ProjectMaterialIntake projectId={projectId} onChanged={reloadProjectAndSources} />
       </div>
 
       <section className="mt-8 grid gap-4 md:grid-cols-3">
@@ -667,6 +622,8 @@ export function ProjectDetailClient({ username }: { username: string }) {
         <PlaceholderCard {...labels.items} count={project._count.items} detail="可人工创建、编辑并确认条目；每条 Item 都保留 Source 追溯。" />
         <PlaceholderCard {...labels.snapshots} count={project._count.snapshots} detail="历史快照保留在数据库；页面只展示最新一份，并标注是否需要手动重新生成。" />
       </section>
+
+      <AiCapabilityGuide projectId={projectId} />
 
       <SnapshotPanel
         snapshot={snapshot}
@@ -679,12 +636,12 @@ export function ProjectDetailClient({ username }: { username: string }) {
         onGenerate={() => void handleGenerateSnapshot()}
       />
 
-      <section aria-labelledby="sources-heading" className="mt-10 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+      <section id="source-library" aria-labelledby="sources-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Source intake</p>
-            <h2 id="sources-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">项目资料</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">手工接入原始候选资料，保留精确内容与 SHA-256，供人工创建条目时引用和追溯。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Source library</p>
+            <h2 id="sources-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">已接入资料</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">统一查看文本、文件、网页和仓库发布的可追溯来源。这里展示的是资料，不等同于已确认事实或 AI 结论。</p>
           </div>
           <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isSourcesLoading ? "读取中…" : `${sources.length} 条候选资料`}</span>
         </div>
@@ -700,53 +657,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
           <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite">{sourceSuccess}</div>
         ) : null}
 
-        <div className="mt-8 grid min-w-0 gap-8 lg:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
-          <form onSubmit={handleSourceSubmit} className="min-w-0 rounded-2xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-950/10" aria-labelledby="source-form-heading">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Manual source</p>
-            <h3 id="source-form-heading" className="mt-3 text-xl font-semibold tracking-tight">接入一条候选资料</h3>
-
-            <label className="mt-6 block text-sm font-medium text-slate-200" htmlFor="source-external-ref">来源链接 <span className="font-normal text-slate-500">（可选）</span></label>
-            <input
-              id="source-external-ref"
-              type="url"
-              value={sourceExternalRef}
-              onChange={(event) => setSourceExternalRef(event.target.value)}
-              placeholder="https://example.com/document"
-              maxLength={2048}
-              autoComplete="url"
-              className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30"
-            />
-
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="source-captured-at">资料时间 <span className="font-normal text-slate-500">（可选）</span></label>
-            <input
-              id="source-captured-at"
-              type="datetime-local"
-              value={sourceCapturedAt}
-              onChange={(event) => setSourceCapturedAt(event.target.value)}
-              className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition [color-scheme:dark] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30"
-            />
-
-            <label className="mt-4 block text-sm font-medium text-slate-200" htmlFor="source-content">原始资料内容 <span className="text-rose-300">（必填）</span></label>
-            <textarea
-              id="source-content"
-              value={sourceContent}
-              onChange={(event) => setSourceContent(event.target.value)}
-              placeholder="粘贴项目日报、会议记录或其他原始资料……"
-              maxLength={100000}
-              rows={10}
-              required
-              className="mt-2 w-full resize-y rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30"
-            />
-            <p className="mt-2 text-xs leading-5 text-slate-500">保留原文空格与换行；内容预览只做确定性截取，不会生成摘要。</p>
-            <button
-              type="submit"
-              disabled={isCreatingSource || !sourceContent.trim()}
-              className="mt-5 flex w-full items-center justify-center rounded-xl bg-indigo-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-300 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isCreatingSource ? "保存中…" : "保存候选资料"}
-            </button>
-          </form>
-
+        <div className="mt-8 min-w-0">
           <div className="min-w-0">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -763,7 +674,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
             ) : sources.length === 0 ? (
               <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
                 <p className="text-sm font-medium text-slate-700">还没有候选资料</p>
-                <p className="mt-2 text-sm leading-6 text-slate-500">从左侧接入第一条原始内容，之后可以在这里查看精确 hash 与原文。</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">从页面上方输入文本、上传文件或文件夹，也可以添加网页和代码仓库。</p>
               </div>
             ) : (
               <ul className="mt-5 min-w-0 space-y-4" aria-label="项目候选资料列表">
@@ -1302,6 +1213,26 @@ function ProjectShell({ children, username, projectId }: { children: ReactNode; 
         <div className="py-10">{children}</div>
       </div>
     </main>
+  );
+}
+
+function AiCapabilityGuide({ projectId }: { projectId: string }) {
+  const capabilities = [
+    { title: "识别与整理", detail: "解析文档；图片和扫描件可用视觉模型识别；从资料中抽取待审核候选。", requirement: "图片识别和自动抽取需要先配置对应模型" },
+    { title: "建立与查询记忆", detail: "把已审核资料和仓库代码建立向量索引，支持语义检索与带来源引用的回答。", requirement: "需要生成模型、向量模型和兼容索引" },
+    { title: "只读项目调查", detail: "生成项目简报，或让智能体读取当前事实、记忆和仓库状态回答问题。", requirement: "只读，不会修改代码、Git 或项目数据" },
+  ] as const;
+  return (
+    <section id="ai-capabilities" className="mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-slate-950 p-7 text-white shadow-sm sm:p-8">
+      <div className="flex flex-wrap items-start justify-between gap-5">
+        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">How AI works</p><h2 className="mt-2 text-2xl font-semibold">项目记忆和 AI 能力怎么用</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">只需要按一条主流程操作：添加资料 → 审核内容 → 建立索引 → 查询或调查。未审核资料不会自动成为事实。</p></div>
+        <Link href={`/projects/${projectId}/intelligence`} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-white px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-indigo-50">打开 AI 工作台</Link>
+      </div>
+      <div className="mt-6 grid gap-3 md:grid-cols-3">
+        {capabilities.map((capability, index) => <article key={capability.title} className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.06] p-5"><span className="text-xs font-semibold text-indigo-300">0{index + 1}</span><h3 className="mt-3 text-base font-semibold">{capability.title}</h3><p className="mt-2 text-xs leading-5 text-slate-300">{capability.detail}</p><p className="mt-4 border-t border-white/10 pt-3 text-[11px] leading-5 text-slate-400">{capability.requirement}</p></article>)}
+      </div>
+      <div className="mt-6 flex flex-wrap gap-2"><Link href={`/projects/${projectId}/control`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">配置项目模型</Link><Link href={`/projects/${projectId}/memory`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">建立记忆与查询</Link><Link href={`/projects/${projectId}/memory-quality`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">检查记忆质量</Link></div>
+    </section>
   );
 }
 

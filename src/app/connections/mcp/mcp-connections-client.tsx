@@ -91,6 +91,7 @@ export function McpConnectionsClient({ username }: { username: string }) {
         </section>
         <ConnectionTabs active="mcp" />
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900"><strong>安全边界：</strong>服务端的 <code>readOnlyHint</code> 只是未受信声明。本系统还要求 <code>destructiveHint=false</code>、管理员验证、Owner 明确授权和每次审批；远端服务本身仍必须由你信任并使用只读凭据。当前不支持 stdio、本地进程、旧式 HTTP+SSE 或执行中继续索取输入。</div>
+        <McpConfigurationGuide />
         {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}
         <div className="mt-8 grid gap-7 xl:grid-cols-[.82fr_1.18fr]">
           <McpConnectionForm onCreated={(connection) => setConnections((current) => [...current, connection])} />
@@ -98,6 +99,32 @@ export function McpConnectionsClient({ username }: { username: string }) {
         </div>
       </div>
     </main>
+  );
+}
+
+function McpConfigurationGuide() {
+  return (
+    <details className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
+      <summary className="cursor-pointer text-sm font-semibold text-indigo-950">配置示例与授权流程（示例不含任何秘密）</summary>
+      <div className="mt-4 grid gap-5 text-xs leading-5 text-indigo-950 lg:grid-cols-[.85fr_1.15fr]">
+        <div>
+          <p className="font-semibold">安全示例</p>
+          <pre className="mt-2 whitespace-pre-wrap rounded-xl bg-white p-3 font-mono text-[10px] text-slate-600 ring-1 ring-indigo-100">{`名称: 团队知识工具\n端点: https://mcp.example.com/mcp\n认证: Bearer Token\nToken: 仅填写在表单，不要写入 URL`}</pre>
+          <p className="mt-2 text-slate-600">公网端点必须使用 HTTPS；内网服务仅在明确受信时开启内网访问。示例 Token 是说明文字，不会自动填入或提交。</p>
+        </div>
+        <div>
+          <p className="font-semibold">必须按顺序完成</p>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-slate-700">
+            <li>保存连接：服务端加密保存可选 Bearer 凭据，只支持远程 Streamable HTTP。</li>
+            <li>发现快照：管理员发起工具发现，固化工具定义、Schema、网络与凭据指纹。</li>
+            <li>管理员认证：管理员逐个核对当前定义，只认证明确只读且非破坏性的工具。</li>
+            <li>项目 Owner 授权：在项目“工具权限”中从当前已认证目录逐项授权。</li>
+            <li>每次单独审批：Editor/Owner 创建动作后，由 Owner 核对参数并逐次批准；不会自动执行。</li>
+          </ol>
+          <p className="mt-2 text-slate-600">系统不支持 stdio、本地子进程、旧式 HTTP+SSE、执行中交互输入或任何写操作。远端 annotations 仍是不可信提示，真实服务与凭据必须由接入方自行信任和最小化。</p>
+        </div>
+      </div>
+    </details>
   );
 }
 

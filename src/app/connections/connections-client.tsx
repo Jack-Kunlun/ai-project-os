@@ -171,6 +171,7 @@ function ConnectionForm({ catalog, onCreated }: { catalog: CatalogEntry[]; onCre
     <form onSubmit={submit} className="h-fit rounded-3xl border border-slate-200 bg-white p-6 shadow-sm lg:p-7">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">New connection</p>
       <h2 className="mt-2 text-2xl font-semibold">添加 Git 服务</h2>
+      <GitConfigurationGuide />
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <Field label="服务类型"><select value={providerKind} onChange={(event) => chooseProvider(event.target.value as ProviderKind)} className="field">{catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{entry.label}</option>)}</select></Field>
         <Field label="传输协议"><select value={transport} onChange={(event) => chooseTransport(event.target.value as Transport)} className="field"><option value="https">HTTPS</option><option value="ssh">SSH</option></select></Field>
@@ -189,6 +190,27 @@ function ConnectionForm({ catalog, onCreated }: { catalog: CatalogEntry[]; onCre
       <button disabled={pending || catalog.length === 0} className="mt-6 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50">{pending ? "加密保存中…" : "加密保存连接"}</button>
       <style jsx>{`.field{margin-top:.5rem;width:100%;border-radius:.75rem;border:1px solid #cbd5e1;background:white;padding:.72rem .9rem;font-size:.875rem;color:#0f172a;outline:none}.field:focus{border-color:#818cf8;box-shadow:0 0 0 3px rgba(129,140,248,.14)}.field:disabled{background:#f1f5f9;color:#64748b}`}</style>
     </form>
+  );
+}
+
+function GitConfigurationGuide() {
+  return (
+    <details className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
+      <summary className="cursor-pointer text-sm font-semibold text-indigo-950">配置示例与流程（示例不含任何秘密）</summary>
+      <div className="mt-4 space-y-4 text-xs leading-5 text-indigo-950">
+        <ol className="list-decimal space-y-1 pl-5">
+          <li>先选择服务类型和传输协议，再填写服务根地址与只读认证信息。</li>
+          <li>点击“加密保存连接”后，在右侧填写仓库路径和跟踪分支，执行一次只读验证。</li>
+          <li>验证通过后，进入项目“代码仓库”关联仓库；项目内不重复录入凭据。</li>
+        </ol>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl bg-white p-3 ring-1 ring-indigo-100"><p className="font-semibold">公网 HTTPS</p><pre className="mt-2 whitespace-pre-wrap font-mono text-[10px] text-slate-600">{`地址: https://github.com\n认证: Access Token（只读）`}</pre><p className="mt-2 text-slate-500">Token 只填入密码字段，不要拼进 URL。</p></div>
+          <div className="rounded-xl bg-white p-3 ring-1 ring-indigo-100"><p className="font-semibold">自建 HTTPS / CA</p><pre className="mt-2 whitespace-pre-wrap font-mono text-[10px] text-slate-600">{`地址: https://git.example.com\n认证: Access Token\nCA: -----BEGIN CERTIFICATE-----`}</pre><p className="mt-2 text-slate-500">自签服务粘贴可信 CA；内网地址还需显式允许。</p></div>
+          <div className="rounded-xl bg-white p-3 ring-1 ring-indigo-100"><p className="font-semibold">SSH Deploy Key</p><pre className="mt-2 whitespace-pre-wrap font-mono text-[10px] text-slate-600">{`地址: ssh://git@git.example.com:22\n认证: SSH Deploy Key\nknown_hosts: git.example.com ssh-ed25519 AAAA…`}</pre><p className="mt-2 text-slate-500">必须粘贴完整单行“主机 算法 base64 公钥”；示例公钥仅占位，生产请使用管理员核验的精确记录。</p></div>
+        </div>
+        <p className="text-slate-600">以上占位值仅用于说明字段位置，不会自动填入或提交；真实 Token、私钥和 CA 只能通过认证后的连接表单发送到服务端加密保存。</p>
+      </div>
+    </details>
   );
 }
 

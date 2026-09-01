@@ -164,8 +164,8 @@ export function ProjectWorldClient({ username, projectId }: { username: string; 
   const [successorItemId, setSuccessorItemId] = useState("");
   const [supersessionReason, setSupersessionReason] = useState("");
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     try {
       const response = await fetch(`/api/projects/${projectId}/world`, { cache: "no-store" });
       if (!response.ok) throw new Error(await responseError(response, "项目状态加载失败"));
@@ -174,12 +174,12 @@ export function ProjectWorldClient({ username, projectId }: { username: string; 
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "项目状态加载失败");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [projectId]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void reload(), 0);
+    const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
 

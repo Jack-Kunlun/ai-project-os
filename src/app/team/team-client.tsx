@@ -23,8 +23,8 @@ export function TeamClient({ username }: { username: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     try {
       const overviewResponse = await fetch("/api/workspaces/current", { cache: "no-store" });
       if (!overviewResponse.ok) throw new Error(await responseError(overviewResponse, "工作区加载失败"));
@@ -44,9 +44,9 @@ export function TeamClient({ username }: { username: string }) {
       }
       setError(null);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "工作区加载失败"); }
-    finally { setLoading(false); }
+    finally { if (showLoading) setLoading(false); }
   }, []);
-  useEffect(() => { const timer = window.setTimeout(() => void reload(), 0); return () => window.clearTimeout(timer); }, [reload]);
+  useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
   const canAdmin = overview !== null && ["owner", "admin"].includes(overview.role);
 
   return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="team" /><div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12"><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10"><div className="flex flex-wrap items-end justify-between gap-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Workspace & identity</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">团队与访问控制</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">集中管理本地成员、项目授权和企业 OIDC。所有项目访问由服务端角色校验，页面状态只用于解释权限，不作为安全边界。</p></div>{overview ? <div className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4 text-right"><p className="text-xs text-violet-200">{overview.workspace.name}</p><strong className="mt-1 block text-lg">{overview.role}</strong></div> : null}</div></section>{error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{overview ? <section className="mt-7 grid gap-4 sm:grid-cols-3"><Metric label="成员" value={overview.counts.memberships} /><Metric label="项目" value={overview.counts.projects} /><Metric label="企业身份源" value={overview.counts.oidcProviders} /></section> : null}{!loading && !canAdmin ? <div className="mt-8 rounded-3xl border border-slate-200 bg-white px-6 py-14 text-center"><h2 className="text-xl font-semibold">当前角色无需管理团队配置</h2><p className="mt-3 text-sm text-slate-500">工作区 Owner 或 Admin 可以管理成员、邀请与 OIDC 身份源。</p></div> : null}{canAdmin && overview ? <><nav className="mt-8 flex gap-2 overflow-x-auto rounded-2xl bg-slate-100 p-1" aria-label="团队设置">{([['members','成员与权限'],['invitations','邀请链接'],['oidc','企业 OIDC']] as const).map(([key,label]) => <button key={key} onClick={() => setView(key)} className={`shrink-0 rounded-xl px-5 py-2.5 text-sm font-semibold ${view === key ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"}`}>{label}</button>)}</nav><div className="mt-6">{view === "members" ? <MembersView workspaceId={overview.workspace.id} members={members} projects={members[0]?.workspace.projects ?? []} onReload={reload} /> : view === "invitations" ? <InvitationsView workspaceId={overview.workspace.id} invitations={invitations} projects={members[0]?.workspace.projects ?? []} /> : <OidcView workspaceId={overview.workspace.id} providers={providers} onReload={reload} />}</div></> : null}</div></main>;

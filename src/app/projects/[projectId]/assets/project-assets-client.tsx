@@ -107,8 +107,8 @@ export function ProjectAssetsClient({ username }: { username: string }) {
   const [policy, setPolicy] = useState<PublicUploadPolicy>(DEFAULT_UPLOAD_POLICY);
   const [usage, setUsage] = useState<UploadUsage>({ projectBytes: "0", activeAssetCount: 0, retainedObjectCount: 0, activeUploads: 0 });
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     try {
       const [projectResponse, assetsResponse] = await Promise.all([
         fetch(`/api/projects/${projectId}`, { cache: "no-store" }),
@@ -135,12 +135,12 @@ export function ProjectAssetsClient({ username }: { username: string }) {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "文件资料加载失败");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [projectId]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void reload(), 0);
+    const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
 

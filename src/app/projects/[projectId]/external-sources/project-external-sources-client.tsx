@@ -30,17 +30,17 @@ export function ProjectExternalSourcesClient({ username, projectId }: { username
   const [sources, setSources] = useState<WebSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     try {
       const response = await fetch(`/api/projects/${projectId}/web-sources`, { cache: "no-store" });
       if (!response.ok) throw new Error(await responseError(response, "外部资料加载失败"));
       setSources((await response.json() as { sources: WebSource[] }).sources);
       setError(null);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "外部资料加载失败"); }
-    finally { setLoading(false); }
+    finally { if (showLoading) setLoading(false); }
   }, [projectId]);
-  useEffect(() => { const timer = window.setTimeout(() => void reload(), 0); return () => window.clearTimeout(timer); }, [reload]);
+  useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
 
   return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="externalSources" /><div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12"><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">External knowledge</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">外部资料入口</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">添加公开网页或经你明确授权的内网页面。系统固定 DNS 解析、逐跳检查重定向、限制响应体并只提取文本；网页内容作为不可信资料保存，不会被当作系统指令执行。</p></section>{error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}<div className="mt-8 grid gap-7 xl:grid-cols-[.78fr_1.22fr]"><div className="space-y-5"><WebSourceForm projectId={projectId} onCreated={(source) => setSources((current) => [source, ...current])} /><section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Local folders</p><h2 className="mt-2 text-xl font-semibold">本地文件夹批量导入</h2><p className="mt-3 text-sm leading-6 text-slate-600">从文件资料页选择一个文件夹。浏览器只上传你选中的、受支持且满足大小限制的文件，并逐个保留原文件名和审核状态。</p><Link href={`/projects/${projectId}/assets`} className="mt-5 inline-flex rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700">前往文件资料</Link></section></div><section><div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Web sources</p><h2 className="mt-2 text-2xl font-semibold">网页资料</h2></div><span className="text-xs text-slate-400">{loading ? "读取中…" : `${sources.length} 个`}</span></div><div className="space-y-4">{!loading && sources.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">还没有网页来源。添加后会立即抓取一次并发布为可追溯资料。</div> : sources.map((source) => <WebSourceCard key={source.id} projectId={projectId} source={source} onReload={reload} />)}</div></section></div></div></main>;
 }

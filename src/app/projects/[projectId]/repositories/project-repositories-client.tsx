@@ -56,8 +56,8 @@ export function ProjectRepositoriesClient({ username, projectId }: { username: s
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     try {
       const [connectionResponse, repositoryResponse] = await Promise.all([
         fetch("/api/settings/git-connections", { cache: "no-store" }),
@@ -73,12 +73,12 @@ export function ProjectRepositoriesClient({ username, projectId }: { username: s
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "项目仓库加载失败");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [projectId]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void reload(), 0);
+    const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
 

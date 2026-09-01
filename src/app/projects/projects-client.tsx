@@ -57,8 +57,8 @@ export function ProjectsClient({ username }: { username: string }) {
   const [view, setView] = useState<ProjectsView>("active");
   const [lifecycle, setLifecycle] = useState<{ project: WorkspaceProject; action: LifecycleAction } | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     try {
       const response = await fetch(`/api/projects?view=${view}`, { cache: "no-store" });
       if (!response.ok) throw new Error(await readError(response, "项目列表加载失败"));
@@ -67,12 +67,12 @@ export function ProjectsClient({ username }: { username: string }) {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "项目列表加载失败");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [view]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
+    const timer = window.setTimeout(() => void load({ showLoading: true }), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
 

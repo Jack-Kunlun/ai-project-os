@@ -112,8 +112,8 @@ export function ProjectControlClient({ username }: { username: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     try {
       const [projectResponse, routeResponse, repositoryResponse, jobResponse] = await Promise.all([
         fetch(`/api/projects/${projectId}`, { cache: "no-store" }),
@@ -139,12 +139,12 @@ export function ProjectControlClient({ username }: { username: string }) {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "控制台加载失败");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [projectId]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void reload(), 0);
+    const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
 

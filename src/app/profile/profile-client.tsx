@@ -37,7 +37,6 @@ function formatDate(value: string | null): string {
 }
 
 export function ProfileClient({ username: initialUsername }: { username: string }) {
-  const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [headerUsername, setHeaderUsername] = useState(initialUsername);
   const [loading, setLoading] = useState(true);
@@ -125,7 +124,7 @@ export function ProfileClient({ username: initialUsername }: { username: string 
             <h2 className="mt-2 text-xl font-semibold">登录与安全</h2>
           </div>
           <ProfileDetailsForm key={`${profile?.displayName ?? ""}:${profile?.email ?? ""}`} profile={profile} onUpdated={(details) => setProfile((current) => current ? { ...current, ...details } : current)} />
-          <UsernameForm key={profile?.username ?? "loading"} profile={profile} loading={loading} onUpdated={(username) => { setHeaderUsername(username); setProfile((current) => current ? { ...current, username } : current); router.refresh(); }} />
+          <UsernameForm key={profile?.username ?? "loading"} profile={profile} loading={loading} onUpdated={(username) => { setHeaderUsername(username); setProfile((current) => current ? { ...current, username } : current); }} />
           <PasswordForm hasLocalPassword={profile?.hasLocalPassword ?? true} />
         </section>
 

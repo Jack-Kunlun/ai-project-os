@@ -58,8 +58,8 @@ export function ProjectMemoryQualityClient({ username, projectId }: { username: 
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     try {
       const response = await fetch(`/api/projects/${projectId}/memory-quality`, { cache: "no-store" });
       if (!response.ok) throw new Error(await responseError(response, "记忆质量加载失败"));
@@ -68,11 +68,11 @@ export function ProjectMemoryQualityClient({ username, projectId }: { username: 
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "记忆质量加载失败");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [projectId]);
 
-  useEffect(() => { const timer = window.setTimeout(() => void reload(), 0); return () => window.clearTimeout(timer); }, [reload]);
+  useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
 
   async function analyze() {
     setAnalyzing(true); setError(null);

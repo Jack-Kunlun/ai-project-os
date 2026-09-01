@@ -205,20 +205,20 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
     setUsage(payload.usage);
   }, [projectId]);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     setError(null);
     try {
       await Promise.all([fetchSummary(), fetchReviews(), fetchOperations(), fetchRoutes(), fetchUsage(usageDays)]);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "治理数据加载失败");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [fetchOperations, fetchReviews, fetchRoutes, fetchSummary, fetchUsage, usageDays]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void reload(), 0);
+    const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
 

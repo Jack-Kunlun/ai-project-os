@@ -46,8 +46,8 @@ export function ProjectAutomationsClient({ username, projectId }: { username: st
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
     try {
       const response = await fetch(`/api/projects/${projectId}/automations`, { cache: "no-store" });
       if (!response.ok) throw new Error(await responseError(response, "自动化规则加载失败"));
@@ -56,11 +56,11 @@ export function ProjectAutomationsClient({ username, projectId }: { username: st
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "自动化规则加载失败");
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [projectId]);
 
-  useEffect(() => { const timer = window.setTimeout(() => void reload(), 0); return () => window.clearTimeout(timer); }, [reload]);
+  useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">

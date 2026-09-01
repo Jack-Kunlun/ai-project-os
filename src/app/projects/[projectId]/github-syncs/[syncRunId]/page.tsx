@@ -2,6 +2,7 @@ import Link from "next/link";
 import { z } from "zod";
 import { assertProjectAccess } from "@/lib/access-control";
 import { requirePageSession } from "@/lib/auth";
+import { AppHeader } from "@/components/app-header";
 import {
   getProjectGitHubSync,
   PROJECT_GITHUB_SYNC_CHANGE_PAGE_MAX,
@@ -73,8 +74,9 @@ export default async function ProjectGitHubSyncPage({
   const previousOffset = Math.max(0, sync.changeOffset - sync.changeLimit);
   const nextOffset = sync.changeOffset + sync.changes.length;
 
-  return <main className="min-h-screen bg-slate-50 px-5 py-10 text-slate-950 sm:px-8">
-    <div className="mx-auto max-w-6xl">
+  return <main className="min-h-screen bg-slate-50 text-slate-950">
+    <AppHeader username={user.username} active="projects" projectId={projectId} projectSection="control" />
+    <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
       <Link href={`/projects/${projectId}/control`} className="text-sm font-semibold text-indigo-700 hover:underline">← 返回项目控制台</Link>
       <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-9">
         <div className="flex flex-wrap items-start justify-between gap-4">

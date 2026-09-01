@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
+import { z } from "zod";
 import { AppHeader } from "@/components/app-header";
+import { AccessControlError, assertProjectAccess } from "@/lib/access-control";
 import { requirePageSession } from "@/lib/auth";
+import { getUploadPolicy } from "@/lib/project-assets/policy";
 import { APP_VERSION } from "@/lib/version";
 
 export const metadata: Metadata = {
@@ -34,12 +38,29 @@ const providerRows = [
   ["GLM（智谱开放平台）", "生成 + 图片识别 + 向量", "适合国内 API 接入的一体化配置"],
 ] as const;
 
-export default async function GuidePage() {
+export default async function GuidePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ projectId?: string | string[] }>;
+}) {
   const user = await requirePageSession();
+  const uploadPolicy = getUploadPolicy();
+  const rawProjectId = (await searchParams).projectId;
+  const parsedProjectId = typeof rawProjectId === "string" ? z.string().uuid().safeParse(rawProjectId) : null;
+  const projectId = parsedProjectId?.success ? parsedProjectId.data.toLowerCase() : undefined;
+  if (rawProjectId !== undefined && projectId === undefined) notFound();
+  if (projectId !== undefined) {
+    try {
+      await assertProjectAccess(user, projectId, "view");
+    } catch (error) {
+      if (error instanceof AccessControlError && ["ACCESS_FORBIDDEN", "ACCESS_PROJECT_NOT_FOUND"].includes(error.code)) notFound();
+      throw error;
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={user.username} active="guide" />
+      <AppHeader username={user.username} active="guide" projectId={projectId} projectSection={projectId ? "guide" : undefined} />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <section className="grid gap-8 pb-12 pt-14 lg:grid-cols-[1.35fr_0.65fr] lg:items-end">
           <div>
@@ -131,12 +152,13 @@ export default async function GuidePage() {
           </GuideSection>
 
           <GuideSection id="files" eyebrow="Files & vision" title="上传文件并核对图片识别">
-            <Step number="1" title="选择文件">进入项目“文件资料”，一次最多选择 10 个文件。支持 TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG 和 WebP；单文件最大 25 MiB，图片最大 10 MiB / 2000 万像素。</Step>
+            <Step number="1" title="选择文件">进入项目“文件资料”，一次最多选择 {uploadPolicy.maxFiles} 个文件，页面会逐个提交，服务端每个请求只接收一个文件。支持 TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG 和 WebP；单文件最大 {formatUploadBytes(uploadPolicy.maxFileBytes)}，图片最大 {formatUploadBytes(uploadPolicy.maxImageBytes)} / 2000 万像素。</Step>
             <Step number="2" title="先完成本地解析">文本与 Office 文档优先在本机提取文字并保留段落、页码、幻灯片、工作表和单元格范围。可提取的文字不会发送给视觉模型；Office 文档中的嵌入图片当前不会单独识别。</Step>
             <Step number="3" title="按需识别图片或扫描页">原始图片和无足够本地文字的 PDF 扫描页会停在“等待图片识别”。页面会显示待发送片段数量；勾选当次传输确认后，系统才按项目视觉路由逐页调用第三方模型。单文件最多处理 20 个视觉片段。</Step>
             <Step number="4" title="逐片段人工确认">模型返回的文字和视觉描述只进入待审核区。可以编辑后接受，也可以驳回；全部片段处理完后，接受的内容才会一起发布到项目资料库并参与后续索引。</Step>
             <Step number="5" title="移除或恢复">移除文件会让其来源停止参与新的抽取、索引和智能体读取，旧索引会提示待重建。原文件和审计记录保留；重新上传完全相同的文件即可恢复原资产与来源。</Step>
             <Callout tone="amber" title="图片识别会使用供应商额度">视觉调用可能产生费用。只上传有权处理的文件，发送前核对供应商、模型、片段数量和敏感信息。供应商结果未知时系统不会自动重试或发布。</Callout>
+            <Callout tone="slate" title="上传容量与请求边界由服务端执行">当前策略为每项目最多 {formatUploadBytes(uploadPolicy.maxProjectBytes)}、每工作区 {formatUploadBytes(uploadPolicy.maxWorkspaceBytes)}、整套部署 {formatUploadBytes(uploadPolicy.maxDeploymentBytes)} 和 {uploadPolicy.maxProjectAssets} 个活动文件；保留文件对象数分别限制为 {uploadPolicy.maxProjectRetainedObjects} / {uploadPolicy.maxWorkspaceRetainedObjects} / {uploadPolicy.maxDeploymentRetainedObjects}。每用户每分钟最多 {uploadPolicy.maxUploadsPerMinute} 次上传请求，同时最多 {uploadPolicy.maxConcurrentUploads} 个；整套部署同时最多 {uploadPolicy.maxGlobalConcurrentUploads} 个。单文件、图片、请求体和单次选择上限分别为 {formatUploadBytes(uploadPolicy.maxFileBytes)}、{formatUploadBytes(uploadPolicy.maxImageBytes)}、{formatUploadBytes(uploadPolicy.maxRequestBytes)} 和 {uploadPolicy.maxFiles} 个。项目页只展示项目用量与项目保留对象数，工作区与部署实际总量不会向普通项目成员公开，但服务端仍会执行对应限制。已登记版本与持久化上传预留都会计入预算；软删除但仍保留的文件继续计费，恢复同一文件不会重复计费。本地解析任务与文件登记原子入库，worker 会恢复中断任务；解析失败时可在文件卡片中人工重试。实际磁盘水位、备份保留和物理清理仍需运维监控与处理。</Callout>
           </GuideSection>
 
           <GuideSection id="project-data" eyebrow="Project setup" title="创建项目并准备可信资料">
@@ -314,6 +336,18 @@ export default async function GuidePage() {
       </div>
     </main>
   );
+}
+
+function formatUploadBytes(value: number): string {
+  const units = ["B", "KiB", "MiB", "GiB"] as const;
+  let amount = value;
+  let unitIndex = 0;
+  while (amount >= 1024 && unitIndex < units.length - 1) {
+    amount /= 1024;
+    unitIndex += 1;
+  }
+  const rounded = Number.isInteger(amount) ? String(amount) : amount.toFixed(1);
+  return `${rounded} ${units[unitIndex]}`;
 }
 
 function GuideSection({ id, eyebrow, title, children }: { id: string; eyebrow: string; title: string; children: ReactNode }) {

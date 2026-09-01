@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { jobStatusLabels, type JobKind, type WorkspaceProject } from "@/lib/workspace-summary";
 
@@ -135,6 +136,7 @@ export function ProjectsClient({ username }: { username: string }) {
 }
 
 function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLifecycle: (action: "archive" | "restore") => void }) {
+  const router = useRouter();
   const archived = project.archivedAt !== null;
   const [exporting, setExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
@@ -168,8 +170,18 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
       setExporting(false);
     }
   }
+  function openProjectFromCard(event: MouseEvent<HTMLElement>) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("a,button,input,select,textarea,summary,details,label,form,[role=button],[role=link],[contenteditable=true]")) return;
+    router.push(`/projects/${project.id}`);
+  }
+
   return (
-    <article className={`group rounded-3xl border bg-white p-6 shadow-sm transition ${archived ? "border-slate-200 opacity-90" : "border-slate-200/80 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-xl hover:shadow-indigo-950/5"}`}>
+    <article
+      className={`group rounded-3xl border bg-white p-6 shadow-sm transition ${archived ? "border-slate-200 opacity-90" : "border-slate-200/80 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-xl hover:shadow-indigo-950/5"}`}
+      onDoubleClick={openProjectFromCard}
+      aria-label={`双击打开项目 ${project.name}`}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           {archived ? <h2 className="truncate text-xl font-semibold tracking-tight text-slate-700">{project.name}</h2> : <Link href={`/projects/${project.id}`} className="block truncate text-xl font-semibold tracking-tight text-slate-900 transition group-hover:text-indigo-700">{project.name}</Link>}

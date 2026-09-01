@@ -2,7 +2,7 @@ import Link from "next/link";
 import { APP_VERSION } from "@/lib/version";
 
 type PrimarySection = "dashboard" | "projects" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide";
-type ProjectSection = "overview" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance";
+type ProjectSection = "overview" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid" },
@@ -29,6 +29,29 @@ const projectItems = [
   { key: "governance", label: "治理与审核", suffix: "/governance" },
 ] as const;
 
+const projectGroups = [
+  {
+    key: "sources",
+    label: "资料",
+    items: projectItems.filter((item) => ["assets", "externalSources", "repositories"].includes(item.key)),
+  },
+  {
+    key: "management",
+    label: "项目管理",
+    items: projectItems.filter((item) => ["world", "plan", "automations"].includes(item.key)),
+  },
+  {
+    key: "intelligence",
+    label: "智能能力",
+    items: projectItems.filter((item) => ["control", "memory", "memoryQuality", "intelligence"].includes(item.key)),
+  },
+  {
+    key: "governance",
+    label: "治理",
+    items: projectItems.filter((item) => ["tools", "actions", "governance"].includes(item.key)),
+  },
+] as const;
+
 export function AppHeader({
   username,
   active,
@@ -42,6 +65,7 @@ export function AppHeader({
 }) {
   const initial = username.slice(0, 1).toUpperCase();
   const guideActive = active === "guide";
+  const guideHref = projectId ? `/guide?projectId=${encodeURIComponent(projectId)}` : "/guide";
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
@@ -57,7 +81,7 @@ export function AppHeader({
           </span>
         </Link>
 
-        <nav className="order-3 flex w-full items-center gap-1 overflow-x-auto rounded-2xl bg-slate-100/80 p-1 md:order-2 md:w-auto" aria-label="全局导航">
+        <nav className="order-3 flex w-full flex-wrap items-center gap-1 rounded-2xl bg-slate-100/80 p-1 md:order-2 md:w-auto" aria-label="全局导航">
           {primaryItems.map((item) => {
             const isActive = item.key === active;
             return (
@@ -65,7 +89,7 @@ export function AppHeader({
                 key={item.key}
                 href={item.href}
                 aria-current={isActive ? "page" : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition ${isActive ? "bg-white text-slate-950 shadow-sm" : "text-slate-600 hover:bg-white/70 hover:text-slate-900"}`}
+                className={`flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${isActive ? "bg-white text-slate-950 shadow-sm" : "text-slate-600 hover:bg-white/70 hover:text-slate-900"}`}
               >
                 <NavIcon name={item.icon} />
                 {item.label}
@@ -85,7 +109,7 @@ export function AppHeader({
             <NavIcon name="bell" />
           </Link>
           <Link
-            href="/guide"
+            href={guideHref}
             aria-label="打开帮助与使用指南"
             aria-current={guideActive ? "page" : undefined}
             title="帮助与使用指南"
@@ -108,22 +132,53 @@ export function AppHeader({
 
       {projectId ? (
         <div className="border-t border-slate-100 bg-slate-50/80">
-          <nav className="mx-auto flex max-w-7xl items-center gap-1 overflow-x-auto px-5 py-2 sm:px-8 lg:px-10" aria-label="项目导航">
-            <span className="mr-2 shrink-0 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">当前项目</span>
-            {projectItems.map((item) => {
-              const isActive = item.key === projectSection;
+          <nav className="mx-auto flex max-w-7xl flex-wrap items-center gap-1 px-5 py-2 sm:px-8 lg:px-10" aria-label="项目导航">
+            <Link
+              href="/projects"
+              className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 hover:bg-white hover:text-slate-900"
+            >
+              项目列表
+            </Link>
+            <Link
+              href={`/projects/${projectId}`}
+              aria-current={projectSection === "overview" ? "page" : undefined}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "overview" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white hover:text-slate-900"}`}
+            >
+              当前项目
+            </Link>
+            {projectGroups.map((group) => {
+              const groupActive = group.items.some((item) => item.key === projectSection);
               return (
-                <Link
-                  key={item.key}
-                  href={`/projects/${projectId}${item.suffix}`}
-                  aria-current={isActive ? "page" : undefined}
-                  className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${isActive ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white hover:text-slate-900"}`}
-                >
-                  {item.label}
-                </Link>
+                <details key={group.key} className="group relative">
+                  <summary aria-current={groupActive ? "page" : undefined} className={`flex cursor-pointer list-none items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 marker:hidden [&::-webkit-details-marker]:hidden ${groupActive ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white hover:text-slate-900"}`}>
+                    {group.label}
+                    <span aria-hidden="true" className="text-[10px] opacity-70">⌄</span>
+                  </summary>
+                  <div className="absolute left-0 top-full z-50 mt-1 min-w-40 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-950/10">
+                    {group.items.map((item) => {
+                      const isActive = item.key === projectSection;
+                      return (
+                        <Link
+                          key={item.key}
+                          href={`/projects/${projectId}${item.suffix}`}
+                          aria-current={isActive ? "page" : undefined}
+                          className={`block rounded-lg px-3 py-2 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${isActive ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}
+                        >
+                          {item.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </details>
               );
             })}
-            <Link href="/guide#project-data" className="ml-auto shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50">查看指引</Link>
+            <Link
+              href={`${guideHref}#project-data`}
+              aria-current={projectSection === "guide" ? "page" : undefined}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "guide" ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-white hover:text-slate-900"}`}
+            >
+              查看指引
+            </Link>
           </nav>
         </div>
       ) : null}

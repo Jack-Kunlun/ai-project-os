@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
+import { DEFAULT_UPLOAD_POLICY, type PublicUploadPolicy } from "@/lib/project-assets/policy";
 
 type AssetStatus = "uploaded" | "parsing" | "waitingVision" | "awaitingReview" | "ready" | "failed" | "deleted";
 type Segment = {
@@ -42,6 +43,13 @@ type Asset = {
     visionSegmentCount: number;
     failureCode: string | null;
   };
+};
+
+type UploadUsage = {
+  projectBytes: string;
+  activeAssetCount: number;
+  retainedObjectCount: number;
+  activeUploads: number;
 };
 
 const statusLabels: Record<AssetStatus, string> = {
@@ -93,8 +101,11 @@ export function ProjectAssetsClient({ username }: { username: string }) {
   const [error, setError] = useState<string | null>(null);
   const [recognizing, setRecognizing] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
   const [consents, setConsents] = useState<Record<string, boolean>>({});
   const [edits, setEdits] = useState<Record<string, string>>({});
+  const [policy, setPolicy] = useState<PublicUploadPolicy>(DEFAULT_UPLOAD_POLICY);
+  const [usage, setUsage] = useState<UploadUsage>({ projectBytes: "0", activeAssetCount: 0, retainedObjectCount: 0, activeUploads: 0 });
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -108,9 +119,11 @@ export function ProjectAssetsClient({ username }: { username: string }) {
         throw new Error(await readError(failed, "文件资料加载失败"));
       }
       const projectPayload = await projectResponse.json() as { project: { name: string } };
-      const assetsPayload = await assetsResponse.json() as { assets: Asset[] };
+      const assetsPayload = await assetsResponse.json() as { assets: Asset[]; policy?: PublicUploadPolicy; usage?: UploadUsage };
       setProjectName(projectPayload.project.name);
       setAssets(assetsPayload.assets);
+      if (assetsPayload.policy) setPolicy(assetsPayload.policy);
+      if (assetsPayload.usage) setUsage(assetsPayload.usage);
       setEdits((current) => {
         const next = { ...current };
         for (const asset of assetsPayload.assets) {
@@ -135,8 +148,12 @@ export function ProjectAssetsClient({ username }: { username: string }) {
     count + asset.segments.filter((segment) => segment.reviewStatus === "pending" && !segment.requiresVision).length, 0), [assets]);
 
   function chooseFiles(event: ChangeEvent<HTMLInputElement>) {
-    setFiles(Array.from(event.target.files ?? []).slice(0, 100));
-    setMessage(null);
+    const selected = Array.from(event.target.files ?? []);
+    setFiles(selected.slice(0, policy.maxFiles));
+    if (selected.length > policy.maxFiles) {
+      setMessage(`已只保留前 ${policy.maxFiles} 个文件；单次最多选择 ${policy.maxFiles} 个。`);
+    }
+    else setMessage(null);
   }
 
   async function upload() {
@@ -145,21 +162,26 @@ export function ProjectAssetsClient({ username }: { username: string }) {
     setError(null);
     let uploaded = 0;
     const failures: string[] = [];
+    const parseFailures: string[] = [];
     for (const file of files) {
       try {
         const form = new FormData();
         form.set("file", file);
         const response = await fetch(`/api/projects/${projectId}/assets`, { method: "POST", body: form });
         if (!response.ok) throw new Error(await readError(response, "上传失败"));
+        const payload = await response.json() as { asset?: Asset };
         uploaded += 1;
+        if (payload.asset?.status === "failed") parseFailures.push(file.name);
       } catch (uploadError) {
         failures.push(`${file.name}：${uploadError instanceof Error ? uploadError.message : "上传失败"}`);
       }
     }
     setFiles([]);
     setMessage(failures.length === 0
-      ? `已上传并解析 ${uploaded} 个文件。`
-      : `成功 ${uploaded} 个，失败 ${failures.length} 个：${failures.join("；")}`);
+      ? parseFailures.length === 0
+        ? `已上传并解析 ${uploaded} 个文件。`
+        : `已保存 ${uploaded} 个文件，其中 ${parseFailures.length} 个本地解析失败，可在文件卡片中重试：${parseFailures.join("、")}`
+      : `成功保存 ${uploaded} 个，上传失败 ${failures.length} 个：${failures.join("；")}`);
     await reload();
     setUploading(false);
   }
@@ -224,6 +246,26 @@ export function ProjectAssetsClient({ username }: { username: string }) {
     }
   }
 
+  async function retryParsing(asset: Asset) {
+    setRetrying(asset.id);
+    setMessage(null);
+    setError(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/assets/${asset.id}/retry`, { method: "POST" });
+      if (!response.ok) throw new Error(await readError(response, "重新解析失败"));
+      const payload = await response.json() as { asset: Asset };
+      setMessage(payload.asset.status === "failed"
+        ? "文件仍无法解析。请核对文件是否损坏、加密或超过格式安全限制。"
+        : "文件已重新解析。若页面仍显示处理中，worker 会继续完成该持久任务。");
+      await reload();
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : "重新解析失败");
+      await reload();
+    } finally {
+      setRetrying(null);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="assets" />
@@ -241,8 +283,15 @@ export function ProjectAssetsClient({ username }: { username: string }) {
 
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
           <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
-            <div><h2 className="text-xl font-semibold">上传文件或文件夹</h2><p className="mt-2 text-xs leading-6 text-slate-500">单文件最大 25 MiB，图片最大 10 MiB / 2000 万像素；单次最多导入 100 个受支持文件。支持 TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP。</p><div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-indigo-50/60 px-6 text-center text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><input type="file" multiple accept=".txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx,.png,.jpg,.jpeg,.webp" onChange={chooseFiles} className="sr-only" /><span>{files.length > 0 ? `已选择 ${files.length} 个文件` : "选择一个或多个文件"}</span></label><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 px-6 text-center text-sm font-semibold text-violet-700 hover:bg-violet-50"><input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseFiles} className="sr-only" /><span>选择整个本地文件夹</span></label></div>{files.length > 0 ? <p className="mt-3 line-clamp-2 text-xs text-slate-500">{files.map((file) => file.webkitRelativePath || file.name).join("、")}</p> : null}</div>
+            <div><h2 className="text-xl font-semibold">上传文件或文件夹</h2><p className="mt-2 text-xs leading-6 text-slate-500">单文件最大 {formatBytes(policy.maxFileBytes)}，图片最大 {formatBytes(policy.maxImageBytes)} / 2000 万像素；单次最多选择 {policy.maxFiles} 个，multipart 请求最大 {formatBytes(policy.maxRequestBytes)}。支持 TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP。</p><div className="mt-5 grid gap-3 sm:grid-cols-2"><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-indigo-50/60 px-6 text-center text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><input type="file" multiple accept=".txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx,.png,.jpg,.jpeg,.webp" onChange={chooseFiles} className="sr-only" /><span>{files.length > 0 ? `已选择 ${files.length} 个文件` : "选择一个或多个文件"}</span></label><label className="flex min-h-28 cursor-pointer items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 px-6 text-center text-sm font-semibold text-violet-700 hover:bg-violet-50"><input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple onChange={chooseFiles} className="sr-only" /><span>选择整个本地文件夹</span></label></div>{files.length > 0 ? <p className="mt-3 line-clamp-2 text-xs text-slate-500">{files.map((file) => file.webkitRelativePath || file.name).join("、")}</p> : null}<p className="mt-4 text-xs leading-5 text-slate-500">服务端每次请求只接收一个文件，页面会按选择逐个提交；服务端还会按项目 {formatBytes(policy.maxProjectBytes)}、工作区 {formatBytes(policy.maxWorkspaceBytes)}、部署 {formatBytes(policy.maxDeploymentBytes)}、活动文件 {policy.maxProjectAssets} 以及保留对象 {policy.maxProjectRetainedObjects} / {policy.maxWorkspaceRetainedObjects} / {policy.maxDeploymentRetainedObjects} 限制；每用户每分钟最多 {policy.maxUploadsPerMinute} 次请求，同时最多 {policy.maxConcurrentUploads} 个，整套部署同时最多 {policy.maxGlobalConcurrentUploads} 个上传。</p></div>
             <button type="button" onClick={() => void upload()} disabled={uploading || files.length === 0} className="inline-flex h-12 min-w-36 items-center justify-center rounded-xl bg-slate-950 px-6 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40">{uploading ? "上传并解析中…" : "上传并解析"}</button>
+          </div>
+          <div className="mt-6 grid gap-3 border-t border-slate-100 pt-5 text-xs text-slate-500 sm:grid-cols-2 lg:grid-cols-3">
+            <QuotaStat label="项目已用" value={`${formatBytes(Number(usage.projectBytes))} / ${formatBytes(policy.maxProjectBytes)}`} />
+            <QuotaStat label="工作区上限（实际用量仅服务端校验）" value={formatBytes(policy.maxWorkspaceBytes)} />
+            <QuotaStat label="部署上限（实际用量仅服务端校验）" value={formatBytes(policy.maxDeploymentBytes)} />
+            <QuotaStat label="活动文件 / 进行中" value={`${usage.activeAssetCount} / ${policy.maxProjectAssets} · ${usage.activeUploads} / ${policy.maxConcurrentUploads}`} />
+            <QuotaStat label="项目保留对象" value={`${usage.retainedObjectCount} / ${policy.maxProjectRetainedObjects}`} />
           </div>
         </section>
 
@@ -250,7 +299,7 @@ export function ProjectAssetsClient({ username }: { username: string }) {
           <div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Asset library</p><h2 className="mt-2 text-2xl font-semibold">已上传文件</h2></div><button type="button" onClick={() => void reload()} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-600">刷新</button></div>
           {loading ? <div className="mt-5 h-40 animate-pulse rounded-3xl bg-slate-200" /> : assets.length === 0 ? <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">还没有文件。上传后，系统会显示解析、识别、审核与发布状态。</div> : <div className="mt-5 space-y-5">{assets.map((asset) => (
             <article key={asset.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4 p-6 sm:p-7"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="max-w-xl truncate text-lg font-semibold">{asset.displayName}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">{kindLabels[asset.kind]}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusTone(asset.status)}`}>{statusLabels[asset.status]}</span></div><p className="mt-2 text-xs text-slate-400">{asset.version ? `${formatBytes(asset.version.sizeBytes)} · ${asset.version.mimeType}` : "版本信息不可用"} · {formatDate(asset.createdAt)}</p><p className="mt-3 text-xs leading-5 text-slate-500">已形成 {asset.segments.filter((segment) => segment.projectSourceId !== null).length} 个活动资料来源，共 {asset.segments.length} 个可定位片段。{asset.latestRun?.modelId ? ` 最近视觉模型：${asset.latestRun.modelId}。` : ""}</p>{asset.version?.failureCode || asset.latestRun?.failureCode ? <p className="mt-2 text-xs text-rose-600">失败代码：{asset.version?.failureCode ?? asset.latestRun?.failureCode}</p> : null}</div><div className="flex flex-wrap items-center gap-2"><a href={`/api/projects/${projectId}/assets/${asset.id}/download`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600">查看原文件</a><button type="button" onClick={() => void remove(asset)} className="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 px-4 text-xs font-semibold text-rose-700">移除</button></div></div>
+              <div className="flex flex-wrap items-start justify-between gap-4 p-6 sm:p-7"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="max-w-xl truncate text-lg font-semibold">{asset.displayName}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">{kindLabels[asset.kind]}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusTone(asset.status)}`}>{statusLabels[asset.status]}</span></div><p className="mt-2 text-xs text-slate-400">{asset.version ? `${formatBytes(asset.version.sizeBytes)} · ${asset.version.mimeType}` : "版本信息不可用"} · {formatDate(asset.createdAt)}</p><p className="mt-3 text-xs leading-5 text-slate-500">已形成 {asset.segments.filter((segment) => segment.projectSourceId !== null).length} 个活动资料来源，共 {asset.segments.length} 个可定位片段。{asset.latestRun?.modelId ? ` 最近视觉模型：${asset.latestRun.modelId}。` : ""}</p>{asset.version?.failureCode || asset.latestRun?.failureCode ? <p className="mt-2 text-xs text-rose-600">失败代码：{asset.version?.failureCode ?? asset.latestRun?.failureCode}</p> : null}</div><div className="flex flex-wrap items-center gap-2">{asset.status === "failed" ? <button type="button" onClick={() => void retryParsing(asset)} disabled={retrying !== null} className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-semibold text-white disabled:opacity-40">{retrying === asset.id ? "重新解析中…" : "重新解析"}</button> : null}<a href={`/api/projects/${projectId}/assets/${asset.id}/download`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600">查看原文件</a><button type="button" onClick={() => void remove(asset)} className="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 px-4 text-xs font-semibold text-rose-700">移除</button></div></div>
 
               {asset.status === "waitingVision" ? <div className="border-t border-amber-100 bg-amber-50/70 p-6 sm:px-7"><h4 className="text-sm font-semibold text-amber-950">需要视觉模型识别</h4><p className="mt-2 text-xs leading-5 text-amber-900">系统只发送该图片，或 PDF 中无足够本地文字的扫描页；不会发送项目中的其他资料。本次共有 {asset.segments.filter((segment) => segment.requiresVision).length} 个待识别片段。请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置“图片与扫描件识别”路由。</p><label className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-white/70 px-4 py-3 text-xs leading-5 text-amber-950"><input type="checkbox" checked={consents[asset.id] ?? false} onChange={(event) => setConsents((current) => ({ ...current, [asset.id]: event.target.checked }))} className="mt-0.5" /><span>我确认将“{asset.displayName}”中上述 {asset.segments.filter((segment) => segment.requiresVision).length} 个图片或扫描页发送给项目当前配置的第三方视觉模型，并使用我的供应商额度。识别结果必须由我逐项确认后才会发布。</span></label><button type="button" onClick={() => void recognize(asset)} disabled={!consents[asset.id] || recognizing !== null} className="mt-4 inline-flex h-11 items-center justify-center rounded-xl bg-amber-900 px-5 text-xs font-semibold text-white disabled:opacity-40">{recognizing === asset.id ? "识别中…" : "开始图片识别"}</button></div> : null}
 
@@ -261,4 +310,8 @@ export function ProjectAssetsClient({ username }: { username: string }) {
       </div>
     </main>
   );
+}
+
+function QuotaStat({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-xl bg-slate-50 px-3 py-3"><p className="font-semibold text-slate-700">{value}</p><p className="mt-1 text-[11px] text-slate-400">{label}</p></div>;
 }

@@ -1,12 +1,13 @@
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, rename, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ProjectAssetKind } from "@prisma/client";
+import { DEFAULT_UPLOAD_POLICY, getUploadPolicy } from "@/lib/project-assets/policy";
 
-export const MAX_ASSET_FILE_BYTES = 25 * 1024 * 1024;
-export const MAX_IMAGE_FILE_BYTES = 10 * 1024 * 1024;
-export const MAX_UPLOAD_FILES = 10;
-export const MAX_UPLOAD_REQUEST_BYTES = 55 * 1024 * 1024;
+export const MAX_ASSET_FILE_BYTES = DEFAULT_UPLOAD_POLICY.maxFileBytes;
+export const MAX_IMAGE_FILE_BYTES = DEFAULT_UPLOAD_POLICY.maxImageBytes;
+export const MAX_UPLOAD_FILES = DEFAULT_UPLOAD_POLICY.maxFiles;
+export const MAX_UPLOAD_REQUEST_BYTES = DEFAULT_UPLOAD_POLICY.maxRequestBytes;
 export const MAX_IMAGE_PIXELS = 20_000_000;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -124,12 +125,13 @@ function assertUtf8Text(buffer: Buffer): void {
 }
 
 export function detectAssetFile(fileName: string, buffer: Buffer): DetectedAssetFile {
+  const policy = getUploadPolicy();
   if (buffer.length === 0) return fail("ASSET_FILE_EMPTY");
-  if (buffer.length > MAX_ASSET_FILE_BYTES) return fail("ASSET_FILE_TOO_LARGE");
+  if (buffer.length > policy.maxFileBytes) return fail("ASSET_FILE_TOO_LARGE");
   const extension = path.extname(fileName).toLowerCase();
   const detectedImageMime = imageMime(buffer);
   if (detectedImageMime !== null) {
-    if (buffer.length > MAX_IMAGE_FILE_BYTES) return fail("ASSET_FILE_TOO_LARGE");
+    if (buffer.length > policy.maxImageBytes) return fail("ASSET_FILE_TOO_LARGE");
     assertImageDimensions(buffer, detectedImageMime);
     const expected = detectedImageMime === "image/png" ? ".png" : detectedImageMime === "image/jpeg" ? new Set([".jpg", ".jpeg"]) : ".webp";
     if (typeof expected === "string" ? extension !== expected : !expected.has(extension)) return fail("ASSET_FILE_SIGNATURE_INVALID");
@@ -189,10 +191,43 @@ export function assetStorageRoot(): string {
 
 function storagePath(storageKey: string): string {
   if (!STORAGE_KEY_PATTERN.test(storageKey)) return fail("ASSET_STORAGE_INVALID_KEY");
-  const root = assetStorageRoot();
+  const root = path.resolve(assetStorageRoot());
   const resolved = path.resolve(root, storageKey);
   if (!resolved.startsWith(`${root}${path.sep}`)) return fail("ASSET_STORAGE_INVALID_KEY");
   return resolved;
+}
+
+export function assetBlobStorageKey(projectId: string, assetId: string, versionId: string): string {
+  if (![projectId, assetId, versionId].every((value) => UUID_PATTERN.test(value))) {
+    return fail("ASSET_STORAGE_INVALID_KEY");
+  }
+  return `${projectId}/${assetId}/${versionId}/original`;
+}
+
+async function unlinkIfPresent(location: string): Promise<void> {
+  try {
+    await unlink(location);
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return;
+    throw error;
+  }
+}
+
+async function removeEmptyParentDirectories(location: string): Promise<void> {
+  // A storage key is root/project/asset/version/original. Stop after the
+  // version, asset and project directories; never attempt to remove root.
+  let directory = path.dirname(location);
+  for (let level = 0; level < 3; level += 1) {
+    try {
+      await rmdir(directory);
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && (error.code === "ENOENT" || error.code === "ENOTEMPTY")) {
+        return;
+      }
+      throw error;
+    }
+    directory = path.dirname(directory);
+  }
 }
 
 export async function writeAssetBlob(input: Readonly<{
@@ -201,20 +236,25 @@ export async function writeAssetBlob(input: Readonly<{
   versionId: string;
   buffer: Buffer;
 }>): Promise<string> {
-  if (![input.projectId, input.assetId, input.versionId].every((value) => UUID_PATTERN.test(value))) {
-    return fail("ASSET_STORAGE_INVALID_KEY");
-  }
-  const storageKey = `${input.projectId}/${input.assetId}/${input.versionId}/original`;
+  const storageKey = assetBlobStorageKey(input.projectId, input.assetId, input.versionId);
   const destination = storagePath(storageKey);
   const directory = path.dirname(destination);
-  const temporary = path.join(directory, `${randomUUID()}.tmp`);
+  const temporary = `${destination}.tmp`;
   try {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(temporary, input.buffer, { flag: "wx", mode: 0o600 });
     await rename(temporary, destination);
     return storageKey;
   } catch {
-    await unlink(temporary).catch(() => undefined);
+    try {
+      // A failed rename/write can leave either path behind. Do not silently
+      // swallow cleanup errors: callers must retain the durable reservation
+      // until both paths are confirmed absent.
+      await unlinkIfPresent(temporary);
+      await unlinkIfPresent(destination);
+    } catch {
+      return fail("ASSET_STORAGE_UNAVAILABLE");
+    }
     return fail("ASSET_STORAGE_UNAVAILABLE");
   }
 }
@@ -223,7 +263,7 @@ export async function readAssetBlob(storageKey: string, expectedBytes?: bigint):
   const location = storagePath(storageKey);
   try {
     const metadata = await stat(location);
-    if (!metadata.isFile() || metadata.size <= 0 || metadata.size > MAX_ASSET_FILE_BYTES) {
+    if (!metadata.isFile() || metadata.size <= 0 || metadata.size > getUploadPolicy().maxFileBytes) {
       return fail("ASSET_STORAGE_UNAVAILABLE");
     }
     if (expectedBytes !== undefined && BigInt(metadata.size) !== expectedBytes) return fail("ASSET_STORAGE_UNAVAILABLE");
@@ -235,9 +275,20 @@ export async function readAssetBlob(storageKey: string, expectedBytes?: bigint):
 }
 
 export async function removeAssetBlob(storageKey: string): Promise<void> {
+  const location = storagePath(storageKey);
+  for (const artifact of [location, `${location}.tmp`]) {
+    try {
+      await unlink(artifact);
+    } catch (error) {
+      if (error instanceof ProjectAssetStorageError) throw error;
+      if (!(typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT")) {
+        throw new ProjectAssetStorageError("ASSET_STORAGE_UNAVAILABLE");
+      }
+    }
+  }
   try {
-    await unlink(storagePath(storageKey));
-  } catch (error) {
-    if (error instanceof ProjectAssetStorageError) throw error;
+    await removeEmptyParentDirectories(location);
+  } catch {
+    throw new ProjectAssetStorageError("ASSET_STORAGE_UNAVAILABLE");
   }
 }

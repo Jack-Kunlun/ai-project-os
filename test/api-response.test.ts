@@ -54,3 +54,23 @@ test("bounded request reader rejects invalid Content-Length without trusting it"
     "400:REQUEST_CONTENT_LENGTH_INVALID",
   );
 });
+
+test("bounded request reader aborts a body that exceeds its total read deadline", async () => {
+  const body = new ReadableStream<Uint8Array>({
+    pull() {
+      return new Promise<void>(() => undefined);
+    },
+  });
+  const request = new Request("http://localhost/api/test", {
+    method: "POST",
+    body,
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+  assert.equal(
+    await errorCode(() => readRequestBody(request, 32, undefined, {
+      milliseconds: 5,
+      error: () => new ApiError(408, "REQUEST_BODY_TIMEOUT", "Request body timed out"),
+    })),
+    "408:REQUEST_BODY_TIMEOUT",
+  );
+});

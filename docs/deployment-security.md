@@ -7,7 +7,7 @@
 1. 在应用前使用受信任的 HTTPS 反向代理，只开放 443；80 仅用于跳转到 HTTPS。
 2. 将 `AI_PROJECT_OS_SECURE_COOKIES=true` 写入未提交的部署 `.env`，并确认所有浏览器入口都经过 HTTPS。
 3. 数据库端口不得暴露到不受信任网络；应用端口只允许反向代理访问。
-4. 在入口层对 `/api/auth/login`、`/api/auth/oidc/start/*` 和 `/api/setup` 按来源限流，并在多实例部署中改用共享限流设施。
+4. 在入口层对 `/api/auth/login`、`/api/auth/oidc/start/*`、`/api/setup` 和项目上传入口按来源限流，并在多实例部署中改用共享限流设施。应用本身还会用 PostgreSQL durable admission 做按用户速率、单用户并发和全部署并发控制；默认在读取正文前最多放行 2 个上传。
 5. 使用独立的只读或最小权限外部服务凭据，定期轮换；主密钥、数据库备份和上传卷必须分开保管。
 6. 保留代理访问日志和应用日志，但不得记录 Cookie、Authorization、密码、API Key、Token 或请求正文。
 
@@ -22,6 +22,8 @@
 3. 确认 `127.0.0.1:3000` 与实际应用监听地址一致。
 4. 根据受信任代理层级配置真实客户端地址；不要信任任意来源传入的 `X-Forwarded-For`。
 5. 执行 `nginx -t`，然后在维护窗口重载 Nginx。
+
+示例对 `/api/projects/<projectId>/assets` 增加了 31 MiB body 上限、防御性请求限速、连接数和 body timeout。它只是部署参考，不能证明当前生产代理已加载；上线前仍需按实际入口配置、检查和现场验证。容量、保留对象数、速率和并发的最终判断由应用服务端与 PostgreSQL 事务策略执行。
 
 如果入口不是 Nginx，应在负载均衡器、Ingress 或平台网关中实现同等的 TLS、HSTS、端口隔离、请求体限制和认证入口限流。
 

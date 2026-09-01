@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { runProjectActionWorkerCycle } from "@/lib/action-engine";
 import { runAutomationWorkerCycle } from "@/lib/automation";
 import { getDb } from "@/lib/db";
+import { reconcileStaleProjectAssetUploadReservations } from "@/lib/project-assets/quota";
+import { runProjectAssetParsingWorkerCycle } from "@/lib/project-assets/service";
 import {
   getWorkerName,
   recordWorkerHeartbeat,
@@ -78,6 +80,27 @@ async function main() {
     while (!stopping) {
       let claimed = 0;
       let cycleFailures = 0;
+      try {
+        const reconciled = await reconcileStaleProjectAssetUploadReservations(db);
+        if (reconciled > 0) {
+          writeLog("info", "worker.upload_reservation_cleanup_completed", { reconciled });
+        }
+      } catch {
+        cycleFailures += 1;
+        writeLog("error", "worker.upload_reservation_cleanup_failed", { errorCode: "UPLOAD_RESERVATION_CLEANUP_FAILED" });
+      }
+
+      try {
+        const result = await runProjectAssetParsingWorkerCycle({ maximumRuns: 5 }, db);
+        claimed += result.claimed;
+        if (result.claimed > 0 || result.recovered > 0 || result.failed > 0) {
+          writeLog(result.failed > 0 ? "warn" : "info", "worker.asset_parse_cycle_completed", result);
+        }
+      } catch {
+        cycleFailures += 1;
+        writeLog("error", "worker.asset_parse_cycle_failed", { errorCode: "ASSET_PARSE_CYCLE_FAILED" });
+      }
+
       try {
         const result = await runProjectActionWorkerCycle({ workerId, maximumActions: 5 }, db);
         claimed += result.claimed;

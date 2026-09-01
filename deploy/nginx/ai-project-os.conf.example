@@ -2,6 +2,10 @@
 # hostname and certificate paths. Keep the application port private.
 
 limit_req_zone $binary_remote_addr zone=ai_project_os_auth:10m rate=10r/m;
+# Defensive edge limits for uploads. The application database admission policy
+# remains authoritative; this example is not proof that production uses it.
+limit_req_zone $binary_remote_addr zone=ai_project_os_upload:10m rate=20r/m;
+limit_conn_zone $binary_remote_addr zone=ai_project_os_upload_conn:10m;
 
 server {
     listen 80;
@@ -21,7 +25,7 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
 
     add_header Strict-Transport-Security "max-age=31536000" always;
-    client_max_body_size 56m;
+    client_max_body_size 31m;
 
     location = /api/auth/login {
         limit_req zone=ai_project_os_auth burst=5 nodelay;
@@ -35,6 +39,13 @@ server {
 
     location ~ ^/api/auth/oidc/start/ {
         limit_req zone=ai_project_os_auth burst=5 nodelay;
+        include /etc/nginx/snippets/ai-project-os-proxy.conf;
+    }
+
+    location ~* ^/api/projects/[0-9a-f-]{36}/assets$ {
+        limit_req zone=ai_project_os_upload burst=4 nodelay;
+        limit_conn ai_project_os_upload_conn 2;
+        client_body_timeout 60s;
         include /etc/nginx/snippets/ai-project-os-proxy.conf;
     }
 

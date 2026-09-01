@@ -24,6 +24,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "project-github-sync", file: "test/project-github-sync-postgres.test.ts", database: "ai_project_os_project_sync_test", gateEnv: "GITHUB_PROJECT_SYNC_POSTGRES_GATE", databaseUrlEnv: "GITHUB_PROJECT_SYNC_TEST_DATABASE_URL", setup: "self" },
   { id: "v3", file: "test/v3-postgres.test.ts", database: "ai_project_os_v3_test", gateEnv: "V3_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
   { id: "project-assets", file: "test/project-assets-postgres.test.ts", database: "ai_project_os_project_assets_test", gateEnv: "PROJECT_ASSET_POSTGRES_GATE", setup: "migrate" },
+  { id: "project-asset-upload", file: "test/project-asset-upload-admission-postgres.test.ts", database: "ai_project_os_project_asset_upload_test", gateEnv: "PROJECT_ASSET_UPLOAD_POSTGRES_GATE", setup: "migrate" },
   { id: "project-workflow", file: "test/project-workflow-postgres.test.ts", database: "ai_project_os_project_workflow_test", gateEnv: "PROJECT_WORKFLOW_POSTGRES_GATE", setup: "migrate" },
   { id: "web-ai-workflow", file: "test/web-ai-workflow-postgres.test.ts", database: "ai_project_os_web_ai_test", gateEnv: "WEB_AI_POSTGRES_GATE", setup: "migrate" },
   { id: "project-intelligence", file: "test/project-intelligence-postgres.test.ts", database: "ai_project_os_project_intelligence_test", gateEnv: "PROJECT_INTELLIGENCE_POSTGRES_GATE", setup: "migrate" },

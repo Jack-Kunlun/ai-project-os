@@ -923,6 +923,8 @@ model Project {
   assetVersions                        ProjectAssetVersion[]
   assetSegments                        ProjectAssetSegment[]
   assetExtractionRuns                  ProjectAssetExtractionRun[]
+  uploadAdmissions                     ProjectAssetUploadAdmission[]
+  uploadReservations                   ProjectAssetUploadReservation[]
   items                                ProjectItem[]
   scans                                ProjectScan[]
   snapshots                            ProjectSnapshot[]
@@ -2188,6 +2190,8 @@ model ProjectAssetExtractionRun {
   localSegmentCount        Int                             @default(0)
   visionSegmentCount       Int                             @default(0)
   failureCode              String?                         @db.VarChar(64)
+  leaseToken               String?                         @db.VarChar(64)
+  attemptCount             Int                             @default(0)
   createdAt                DateTime                        @default(now())
   startedAt                DateTime?
   completedAt              DateTime?
@@ -2201,6 +2205,48 @@ model ProjectAssetExtractionRun {
   @@index([projectId, status, createdAt])
   @@index([projectAssetVersionId])
   @@index([providerConnectionId])
+  @@index([status, startedAt, createdAt])
+}
+
+model ProjectAssetUploadAdmission {
+  id              String    @id @default(uuid()) @db.Uuid
+  projectId       String    @db.Uuid
+  workspaceId     String    @db.Uuid
+  userId          String    @db.Uuid
+  windowStartedAt DateTime
+  leaseExpiresAt  DateTime
+  releasedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user            AppUser   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, releasedAt, leaseExpiresAt], map: "AssetUploadAdmission_user_active_idx")
+  @@index([releasedAt, leaseExpiresAt])
+  @@index([createdAt, id])
+  @@index([leaseExpiresAt, createdAt, id])
+  @@index([projectId, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+model ProjectAssetUploadReservation {
+  id              String    @id @default(uuid()) @db.Uuid
+  projectId       String    @db.Uuid
+  workspaceId     String    @db.Uuid
+  userId          String    @db.Uuid
+  storageKey      String    @unique @db.VarChar(1024)
+  sizeBytes       BigInt
+  leaseExpiresAt  DateTime
+  createdAt       DateTime  @default(now())
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  user            AppUser   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([leaseExpiresAt, createdAt, id])
+  @@index([projectId, createdAt, id])
+  @@index([workspaceId, createdAt, id])
+  @@index([userId, createdAt, id])
 }
 
 model ProjectSource {
@@ -3479,6 +3525,8 @@ model AppUser {
   projectLifecycleRevisions    ProjectLifecycleRevision[]
   projectDataExportAudits      ProjectDataExportAudit[]
   uploadedProjectAssets        ProjectAsset[]                    @relation("ProjectAssetUploadedBy")
+  projectAssetUploadAdmissions ProjectAssetUploadAdmission[]
+  projectAssetUploadReservations ProjectAssetUploadReservation[]
   reviewedProjectAssetSegments ProjectAssetSegment[]             @relation("ProjectAssetSegmentReviewedBy")
   createdGitConnections        GitConnection[]
   createdGitRepositoryLinks    ProjectGitRepositoryLink[]
@@ -3543,6 +3591,8 @@ model Workspace {
   createdBy     AppUser?              @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   memberships   WorkspaceMembership[]
   projects      Project[]
+  assetUploadAdmissions ProjectAssetUploadAdmission[]
+  assetUploadReservations ProjectAssetUploadReservation[]
   invitations   WorkspaceInvitation[]
   oidcProviders OidcProvider[]
 

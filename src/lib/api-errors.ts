@@ -25,6 +25,9 @@ import { ProjectAssetError } from "@/lib/project-assets/service";
 import { ProjectAssetStorageError } from "@/lib/project-assets/storage";
 import { ProjectAssetParserError } from "@/lib/project-assets/parser";
 import { ProjectAssetArchiveError } from "@/lib/project-assets/archive";
+import { UploadAdmissionError } from "@/lib/project-assets/admission";
+import { UploadQuotaError } from "@/lib/project-assets/quota";
+import { UploadPolicyConfigurationError } from "@/lib/project-assets/policy";
 import { GitRunnerError, GitSafetyError, GitServiceError } from "@/lib/git";
 import { AutomationError } from "@/lib/automation";
 import { MemoryQualityError } from "@/lib/memory-quality";
@@ -321,9 +324,42 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_ASSET_INVALID_STATE: [409, "文件资料状态已变化，请刷新后重试"],
       PROJECT_ASSET_SEGMENT_NOT_FOUND: [404, "待审核识别片段不存在"],
       PROJECT_ASSET_SEGMENT_ALREADY_REVIEWED: [409, "该识别片段已经审核"],
+      PROJECT_ASSET_PROJECT_QUOTA_EXCEEDED: [413, "项目文件容量已达上限"],
+      PROJECT_ASSET_WORKSPACE_QUOTA_EXCEEDED: [413, "工作区文件容量已达上限"],
+      PROJECT_ASSET_DEPLOYMENT_QUOTA_EXCEEDED: [413, "部署文件容量已达上限"],
+      PROJECT_ASSET_COUNT_QUOTA_EXCEEDED: [413, "项目活动文件数量已达上限"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof UploadQuotaError) {
+    const mapping = {
+      PROJECT_ASSET_PROJECT_QUOTA_EXCEEDED: [413, "项目文件容量已达上限"],
+      PROJECT_ASSET_WORKSPACE_QUOTA_EXCEEDED: [413, "工作区文件容量已达上限"],
+      PROJECT_ASSET_DEPLOYMENT_QUOTA_EXCEEDED: [413, "部署文件容量已达上限"],
+      PROJECT_ASSET_COUNT_QUOTA_EXCEEDED: [413, "项目活动文件数量已达上限"],
+      PROJECT_ASSET_PROJECT_RETAINED_OBJECTS_EXCEEDED: [413, "项目保留文件对象数量已达上限"],
+      PROJECT_ASSET_WORKSPACE_RETAINED_OBJECTS_EXCEEDED: [413, "工作区保留文件对象数量已达上限"],
+      PROJECT_ASSET_DEPLOYMENT_RETAINED_OBJECTS_EXCEEDED: [413, "部署保留文件对象数量已达上限"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof UploadAdmissionError) {
+    const mapping = {
+      UPLOAD_ADMISSION_PROJECT_NOT_FOUND: [404, "项目不存在"],
+      UPLOAD_RATE_LIMITED: [429, "上传请求过于频繁，请稍后再试"],
+      UPLOAD_CONCURRENCY_LIMITED: [429, "当前已有过多上传进行中，请稍后再试"],
+      UPLOAD_GLOBAL_CONCURRENCY_LIMITED: [429, "服务器当前已有过多上传进行中，请稍后再试"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof UploadPolicyConfigurationError) {
+    return { status: 503, body: { error: { code: "UPLOAD_POLICY_INVALID", message: "上传策略配置无效，服务暂不可用" } } };
   }
 
   if (error instanceof ProjectAssetStorageError) {
@@ -336,7 +372,11 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       ASSET_STORAGE_INVALID_KEY: "文件存储标识无效",
       ASSET_STORAGE_UNAVAILABLE: "本地文件存储不可用",
     } as const;
-    const status = error.code === "ASSET_STORAGE_UNAVAILABLE" ? 503 : 422;
+    const status = error.code === "ASSET_STORAGE_UNAVAILABLE"
+      ? 503
+      : error.code === "ASSET_FILE_TOO_LARGE" || error.code === "ASSET_IMAGE_TOO_LARGE"
+        ? 413
+        : 422;
     return { status, body: { error: { code: error.code, message: messages[error.code] } } };
   }
 

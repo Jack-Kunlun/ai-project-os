@@ -25,6 +25,7 @@ export async function readRequestBody(
   request: Request,
   maxBytes: number,
   tooLarge: () => ApiError = requestBodyTooLarge,
+  timeout?: Readonly<{ milliseconds: number; error: () => Error }>,
 ): Promise<Uint8Array<ArrayBuffer>> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new Error("readRequestBody requires a positive safe integer limit");
@@ -43,12 +44,29 @@ export async function readRequestBody(
   }
 
   if (request.body === null) return new Uint8Array() as Uint8Array<ArrayBuffer>;
+  if (timeout !== undefined && (!Number.isSafeInteger(timeout.milliseconds) || timeout.milliseconds <= 0)) {
+    throw new Error("readRequestBody timeout must be a positive safe integer");
+  }
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  const deadline = timeout === undefined ? null : Date.now() + timeout.milliseconds;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const remaining = deadline === null ? null : deadline - Date.now();
+      if (remaining !== null && remaining <= 0) throw timeout!.error();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const read = reader.read();
+      const { done, value } = remaining === null
+        ? await read
+        : await Promise.race([
+            read,
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(() => reject(timeout!.error()), remaining);
+            }),
+          ]).finally(() => {
+            if (timer !== undefined) clearTimeout(timer);
+          });
       if (done) break;
       if (!(value instanceof Uint8Array)) throw new Error("Request body chunk is invalid");
       total += value.byteLength;
@@ -58,6 +76,9 @@ export async function readRequestBody(
       }
       chunks.push(value);
     }
+  } catch (error) {
+    await reader.cancel("REQUEST_BODY_ABORTED").catch(() => undefined);
+    throw error;
   } finally {
     reader.releaseLock();
   }

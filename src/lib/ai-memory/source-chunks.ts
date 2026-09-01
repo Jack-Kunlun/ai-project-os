@@ -10,7 +10,8 @@ import {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
-const DEFAULT_RETRY_LIMIT = 3;
+const DEFAULT_RETRY_LIMIT = 5;
+const RETRY_BASE_DELAY_MS = 100;
 
 export type SourceChunkErrorCode =
   | "SOURCE_CHUNK_INVALID_INPUT"
@@ -78,6 +79,12 @@ function isPrismaCode(error: unknown, code: string): boolean {
   } catch {
     return false;
   }
+}
+
+async function waitBeforeRetry(attempt: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, RETRY_BASE_DELAY_MS * (2 ** attempt));
+  });
 }
 
 function matchesChunk(
@@ -226,7 +233,10 @@ export function createSourceChunkService(options: {
         } catch (error) {
           if (error instanceof SourceChunkError) throw error;
           const retryable = isPrismaCode(error, "P2002") || isPrismaCode(error, "P2034");
-          if (retryable && attempt + 1 < retryLimit) continue;
+          if (retryable && attempt + 1 < retryLimit) {
+            await waitBeforeRetry(attempt);
+            continue;
+          }
           if (retryable) return fail("SOURCE_CHUNK_WRITE_CONFLICT");
           throw error;
         }

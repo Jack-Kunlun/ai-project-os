@@ -35,3 +35,5 @@ curl --fail https://project-os.example.com/api/health
 人工检查响应中包含 `Content-Security-Policy`、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY` 和 `Strict-Transport-Security`。随后在浏览器完成管理员登录、项目列表、文件上传和已配置外部连接的现场测试，并确认浏览器控制台没有 CSP 阻断当前产品流程。
 
 `/api/health` 可用于存活探测，但它不证明登录、外部连接、持久化或备份可用。发布验收仍需分别覆盖数据库迁移、恢复演练、Worker、页面和真实外部服务。
+
+需要从 GitHub Actions 手动发布已经通过标签 CI 的版本时，使用[GitHub Actions 生产部署](production-deployment.md)中的 forced-command、root-owned 部署入口和备份边界；不要把通用 SSH Shell、Docker socket 或不受限 sudo 权限交给工作流。

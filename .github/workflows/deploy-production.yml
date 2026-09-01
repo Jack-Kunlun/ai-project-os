@@ -1,0 +1,164 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Annotated release tag to deploy (for example, v5.1.2)
+        required: true
+        default: v5.1.2
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ai-project-os-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy verified release tag
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: production
+      url: https://ai-project-os.com
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve release tag and require its successful CI
+        env:
+          DEPLOY_TAG_INPUT: ${{ inputs.tag }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$DEPLOY_TAG_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "DEPLOY_TAG_INVALID" >&2
+            exit 64
+          fi
+
+          git fetch --force --no-tags origin \
+            "refs/tags/$DEPLOY_TAG_INPUT:refs/tags/$DEPLOY_TAG_INPUT"
+
+          if [[ "$(git cat-file -t "refs/tags/$DEPLOY_TAG_INPUT")" != tag ]]; then
+            echo "DEPLOY_TAG_NOT_ANNOTATED" >&2
+            exit 65
+          fi
+
+          deploy_sha=$(git rev-parse "refs/tags/$DEPLOY_TAG_INPUT^{}")
+          package_version=$(git show "$deploy_sha:package.json" | node -e \
+            "let value='';process.stdin.on('data',chunk=>value+=chunk);process.stdin.on('end',()=>process.stdout.write(JSON.parse(value).version));")
+
+          if [[ "v$package_version" != "$DEPLOY_TAG_INPUT" ]]; then
+            echo "DEPLOY_TAG_VERSION_MISMATCH" >&2
+            exit 66
+          fi
+
+          runs_url="https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$deploy_sha&per_page=100"
+          runs_json=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$runs_url")
+
+          if ! jq --exit-status \
+            --arg sha "$deploy_sha" \
+            --arg tag "$DEPLOY_TAG_INPUT" \
+            '.workflow_runs | any(
+              .head_sha == $sha and
+              .head_branch == $tag and
+              .event == "push" and
+              .status == "completed" and
+              .conclusion == "success"
+            )' <<<"$runs_json" >/dev/null; then
+            echo "DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND" >&2
+            exit 67
+          fi
+
+          printf 'DEPLOY_TAG=%s\n' "$DEPLOY_TAG_INPUT" >> "$GITHUB_ENV"
+          printf 'DEPLOY_SHA=%s\n' "$deploy_sha" >> "$GITHUB_ENV"
+
+      - name: Prepare restricted production SSH identity
+        env:
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          test -n "$PRODUCTION_SSH_PRIVATE_KEY"
+          test -n "$PRODUCTION_SSH_KNOWN_HOSTS"
+
+          install -d -m 700 "$RUNNER_TEMP/ai-project-os-ssh"
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"
+
+          ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" >/dev/null
+          ssh-keygen -F 38.76.205.30 -f "$RUNNER_TEMP/ai-project-os-ssh/known_hosts" >/dev/null
+
+      - name: Deploy through forced-command gateway
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            ai-project-os-actions@38.76.205.30 \
+            "deploy $DEPLOY_TAG $DEPLOY_SHA"
+
+      - name: Verify public production health
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 30); do
+            if health_json=$(curl --fail --silent --show-error \
+              --connect-timeout 10 \
+              --max-time 20 \
+              https://ai-project-os.com/api/health); then
+              if jq --exit-status \
+                --arg version "${DEPLOY_TAG#v}" \
+                '.status == "ok" and
+                 .version == $version and
+                 .database == "up" and
+                 .worker.status == "up" and
+                 .worker.consecutiveFailures == 0' \
+                <<<"$health_json" >/dev/null; then
+                break
+              fi
+            fi
+
+            if [[ "$attempt" == 30 ]]; then
+              echo "PRODUCTION_PUBLIC_HEALTH_TIMEOUT" >&2
+              exit 68
+            fi
+            sleep 10
+          done
+
+          redirect_headers=$(curl --silent --show-error --dump-header - --output /dev/null \
+            --connect-timeout 10 --max-time 20 http://ai-project-os.com/)
+          grep -Eiq '^location: https://ai-project-os\.com/' <<<"$redirect_headers"
+
+          printf '### Production deployment\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Tag: `%s`\n' "$DEPLOY_TAG" >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Revision: `%s`\n' "$DEPLOY_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Health: `status=ok`, `database=up`, `worker=up`\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- URL: https://ai-project-os.com\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove production SSH identity
+        if: ${{ always() }}
+        run: rm -rf -- "$RUNNER_TEMP/ai-project-os-ssh"

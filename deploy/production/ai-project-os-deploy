@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+
+readonly RELEASE_TAG=${1-}
+readonly EXPECTED_REVISION=${2-}
+readonly REPOSITORY_URL=https://github.com/Jack-Kunlun/ai-project-os.git
+readonly REPOSITORY_DIR=/srv/ai-project-os/repository
+readonly ENV_FILE=/etc/ai-project-os/production.env
+readonly COMPOSE_PROJECT=ai-project-os
+readonly BACKUP_ROOT=/var/backups/ai-project-os
+readonly RESULT_FILE=/var/lib/ai-project-os/last-deployment
+readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+readonly MIN_FREE_BYTES=5368709120
+
+if [[ $EUID -ne 0 ]]; then
+  printf 'DEPLOY_ROOT_REQUIRED\n' >&2
+  exit 70
+fi
+
+if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  printf 'DEPLOY_TAG_INVALID\n' >&2
+  exit 64
+fi
+
+if [[ ! "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+  printf 'DEPLOY_REVISION_INVALID\n' >&2
+  exit 65
+fi
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  printf 'DEPLOY_ALREADY_RUNNING\n' >&2
+  exit 75
+fi
+
+for required_command in curl docker flock git grep mktemp python3 sed sha256sum tar; do
+  command -v "$required_command" >/dev/null
+done
+
+test -r "$ENV_FILE"
+test "$(stat -c %U:%G "$ENV_FILE")" = root:root
+test "$(stat -c %a "$ENV_FILE")" = 600
+grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE"
+grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$ENV_FILE"
+
+install -d -o root -g root -m 0755 /srv/ai-project-os
+install -d -o root -g root -m 0700 "$BACKUP_ROOT"
+install -d -o root -g root -m 0700 "$(dirname "$RESULT_FILE")"
+
+if [[ ! -d "$REPOSITORY_DIR/.git" ]]; then
+  temporary_repository="${REPOSITORY_DIR}.init.$$"
+  trap 'rm -rf -- "${temporary_repository-}"' EXIT
+  git clone --filter=blob:none --no-checkout "$REPOSITORY_URL" "$temporary_repository"
+  chown -R root:root "$temporary_repository"
+  mv -- "$temporary_repository" "$REPOSITORY_DIR"
+  trap - EXIT
+fi
+
+test "$(stat -c %U:%G "$REPOSITORY_DIR")" = root:root
+test "$(git -C "$REPOSITORY_DIR" remote get-url origin)" = "$REPOSITORY_URL"
+
+git -C "$REPOSITORY_DIR" fetch --force --no-tags origin \
+  "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+
+if [[ "$(git -C "$REPOSITORY_DIR" cat-file -t "refs/tags/$RELEASE_TAG")" != tag ]]; then
+  printf 'DEPLOY_TAG_NOT_ANNOTATED\n' >&2
+  exit 66
+fi
+
+resolved_revision=$(git -C "$REPOSITORY_DIR" rev-parse "refs/tags/$RELEASE_TAG^{}")
+if [[ "$resolved_revision" != "$EXPECTED_REVISION" ]]; then
+  printf 'DEPLOY_TAG_REVISION_MISMATCH\n' >&2
+  exit 67
+fi
+
+ci_runs_url="https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$EXPECTED_REVISION&per_page=100"
+ci_runs_json=$(curl --fail --silent --show-error \
+  --header 'Accept: application/vnd.github+json' \
+  --header 'X-GitHub-Api-Version: 2022-11-28' \
+  "$ci_runs_url")
+
+if ! python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+revision, tag = sys.argv[1:3]
+accepted = any(
+    run.get("head_sha") == revision
+    and run.get("head_branch") == tag
+    and run.get("event") == "push"
+    and run.get("status") == "completed"
+    and run.get("conclusion") == "success"
+    for run in payload.get("workflow_runs", [])
+)
+raise SystemExit(0 if accepted else 1)
+' "$EXPECTED_REVISION" "$RELEASE_TAG" <<<"$ci_runs_json"; then
+  printf 'DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND\n' >&2
+  exit 72
+fi
+
+git -C "$REPOSITORY_DIR" checkout --detach --force "$EXPECTED_REVISION"
+test -z "$(git -C "$REPOSITORY_DIR" status --porcelain)"
+
+package_version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' \
+  "$REPOSITORY_DIR/package.json" | head -n 1)
+if [[ "v$package_version" != "$RELEASE_TAG" ]]; then
+  printf 'DEPLOY_PACKAGE_VERSION_MISMATCH\n' >&2
+  exit 68
+fi
+
+compose() {
+  docker compose \
+    --project-name "$COMPOSE_PROJECT" \
+    --env-file "$ENV_FILE" \
+    --project-directory "$REPOSITORY_DIR" \
+    --file "$REPOSITORY_DIR/compose.yaml" \
+    "$@"
+}
+
+compose config --quiet
+
+available_bytes=$(df --output=avail -B1 "$BACKUP_ROOT" | tail -n 1 | tr -d ' ')
+if [[ ! "$available_bytes" =~ ^[0-9]+$ ]] || (( available_bytes < MIN_FREE_BYTES )); then
+  printf 'DEPLOY_INSUFFICIENT_BACKUP_SPACE\n' >&2
+  exit 69
+fi
+
+current_postgres_id=$(docker ps -q \
+  --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+  --filter 'label=com.docker.compose.service=postgres')
+current_app_id=$(docker ps -q \
+  --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+  --filter 'label=com.docker.compose.service=app')
+
+backup_path=none-first-deploy
+if [[ -n "$current_postgres_id" || -n "$current_app_id" ]]; then
+  if [[ -z "$current_postgres_id" || -z "$current_app_id" ]]; then
+    printf 'DEPLOY_CURRENT_STACK_INCOMPLETE\n' >&2
+    exit 71
+  fi
+
+  backup_timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+  backup_path=$(mktemp -d "$BACKUP_ROOT/${backup_timestamp}-to-${RELEASE_TAG}.XXXXXX")
+  chown root:root "$backup_path"
+  chmod 700 "$backup_path"
+
+  docker exec "$current_postgres_id" sh -ec \
+    'exec pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom' \
+    > "$backup_path/postgres.dump"
+  test -s "$backup_path/postgres.dump"
+  docker exec -i "$current_postgres_id" pg_restore --list \
+    < "$backup_path/postgres.dump" >/dev/null
+
+  docker exec "$current_app_id" tar -C /var/lib/ai-project-os-secrets -czf - . \
+    > "$backup_path/secrets.tar.gz"
+  docker exec "$current_app_id" tar -C /var/lib/ai-project-os/uploads -czf - . \
+    > "$backup_path/uploads.tar.gz"
+  tar -tzf "$backup_path/secrets.tar.gz" >/dev/null
+  tar -tzf "$backup_path/uploads.tar.gz" >/dev/null
+
+  sha256sum \
+    "$backup_path/postgres.dump" \
+    "$backup_path/secrets.tar.gz" \
+    "$backup_path/uploads.tar.gz" \
+    > "$backup_path/SHA256SUMS"
+fi
+
+wait_for_stack() {
+  local attempt postgres_id migrate_id app_id worker_id
+  local postgres_state migrate_state app_state worker_state health_body
+
+  for attempt in $(seq 1 60); do
+    postgres_id=$(compose ps -q postgres)
+    migrate_id=$(compose ps -aq migrate)
+    app_id=$(compose ps -q app)
+    worker_id=$(compose ps -q worker)
+
+    if [[ -n "$postgres_id" && -n "$migrate_id" && -n "$app_id" && -n "$worker_id" ]]; then
+      postgres_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$postgres_id")
+      migrate_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$migrate_id")
+      app_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$app_id")
+      worker_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id")
+
+      if [[ "$postgres_state" == healthy && "$migrate_state" == exited:0 && "$app_state" == healthy && "$worker_state" == healthy ]]; then
+        health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)
+        grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body"
+        grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${RELEASE_TAG#v}"'"' <<<"$health_body"
+        grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
+        grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
+        grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$health_body"
+        STACK_HEALTH=$health_body
+        STACK_STATES="postgres=$postgres_state migrate=$migrate_state app=$app_state worker=$worker_state"
+        return 0
+      fi
+    fi
+
+    sleep 5
+  done
+
+  printf 'DEPLOY_STACK_HEALTH_TIMEOUT\n' >&2
+  compose ps -a >&2
+  return 1
+}
+
+compose up -d postgres
+compose up -d --build --force-recreate migrate app worker
+wait_for_stack
+
+public_health=$(curl --fail --silent --show-error https://ai-project-os.com/api/health)
+grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${RELEASE_TAG#v}"'"' <<<"$public_health"
+grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$public_health"
+
+completed_at=$(date -Is)
+{
+  printf 'DEPLOY_OK\n'
+  printf 'tag=%s\n' "$RELEASE_TAG"
+  printf 'revision=%s\n' "$EXPECTED_REVISION"
+  printf 'states=%s\n' "$STACK_STATES"
+  printf 'health=%s\n' "$STACK_HEALTH"
+  printf 'backup=%s\n' "$backup_path"
+  printf 'completed_at=%s\n' "$completed_at"
+} > "$RESULT_FILE"
+
+chmod 600 "$RESULT_FILE"
+
+printf 'DEPLOY_OK tag=%s revision=%s backup=%s\n' \
+  "$RELEASE_TAG" "$EXPECTED_REVISION" "$backup_path"

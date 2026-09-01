@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+original_command=${SSH_ORIGINAL_COMMAND-}
+
+if [[ "$original_command" =~ ^deploy\ (v[0-9]+\.[0-9]+\.[0-9]+)\ ([0-9a-f]{40})$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-deploy "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+fi
+
+printf 'AI_PROJECT_OS_DEPLOY_COMMAND_DENIED\n' >&2
+exit 64

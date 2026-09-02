@@ -64,7 +64,10 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
     }
   }, [cursor, deferredSearch, itemType, projectId]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   function resetPage() {
     setCursor(null);
@@ -137,4 +140,3 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
     </section>
   );
 }
-

@@ -114,6 +114,48 @@ jobs:
           ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" >/dev/null
           ssh-keygen -F "$PRODUCTION_SSH_HOST" -f "$RUNNER_TEMP/ai-project-os-ssh/known_hosts" >/dev/null
 
+      - name: Sync GitHub OAuth configuration through restricted stdin
+        env:
+          GITHUB_OAUTH_CLIENT_ID: ${{ vars.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID }}
+          GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if (( ${#GITHUB_OAUTH_CLIENT_ID} < 8 || ${#GITHUB_OAUTH_CLIENT_ID} > 512 )) ||
+            [[ ! "$GITHUB_OAUTH_CLIENT_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "PRODUCTION_GITHUB_OAUTH_CLIENT_ID_INVALID" >&2
+            exit 64
+          fi
+          if (( ${#GITHUB_OAUTH_CLIENT_SECRET} < 8 || ${#GITHUB_OAUTH_CLIENT_SECRET} > 512 )) ||
+            [[ ! "$GITHUB_OAUTH_CLIENT_SECRET" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "PRODUCTION_GITHUB_OAUTH_CLIENT_SECRET_INVALID" >&2
+            exit 65
+          fi
+
+          config_output=$(
+            printf '%s\n%s\n%s\n' \
+              'AI_PROJECT_OS_GITHUB_OAUTH_CONFIG_V1' \
+              "$GITHUB_OAUTH_CLIENT_ID" \
+              "$GITHUB_OAUTH_CLIENT_SECRET" | \
+              ssh \
+                -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+                -o BatchMode=yes \
+                -o IdentitiesOnly=yes \
+                -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+                -o ConnectTimeout=15 \
+                "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+                "configure-github-oauth"
+          )
+          unset GITHUB_OAUTH_CLIENT_SECRET
+
+          if [[ "$config_output" != PRODUCTION_GITHUB_OAUTH_CONFIG_OK ]]; then
+            echo "PRODUCTION_GITHUB_OAUTH_CONFIG_RESULT_INVALID" >&2
+            exit 66
+          fi
+          printf '%s\n' "$config_output"
+
       - name: Create verified offsite backup and deploy through forced-command gateway
         run: |
           set -euo pipefail

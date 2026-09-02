@@ -14,6 +14,7 @@ const backupServicePath = path.join(repositoryRoot, "deploy/production/ai-projec
 const backupTimerPath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup.timer");
 const productionComposeOverridePath = path.join(repositoryRoot, "deploy/production/compose.operations.yaml");
 const gatewayPath = path.join(repositoryRoot, "deploy/production/ai-project-os-actions-gateway");
+const githubOAuthConfiguratorPath = path.join(repositoryRoot, "deploy/production/ai-project-os-configure-github-oauth");
 const installerPath = path.join(repositoryRoot, "deploy/production/install-production-deploy.sh");
 const sudoersPath = path.join(repositoryRoot, "deploy/production/ai-project-os-deploy.sudoers");
 
@@ -33,6 +34,11 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.match(workflow, /\.head_branch == \$tag/u);
   assert.match(workflow, /PRODUCTION_SSH_PRIVATE_KEY/u);
   assert.match(workflow, /PRODUCTION_SSH_KNOWN_HOSTS/u);
+  assert.match(workflow, /vars\.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID/u);
+  assert.match(workflow, /secrets\.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET/u);
+  assert.match(workflow, /AI_PROJECT_OS_GITHUB_OAUTH_CONFIG_V1/u);
+  assert.match(workflow, /"configure-github-oauth"/u);
+  assert.match(workflow, /PRODUCTION_GITHUB_OAUTH_CONFIG_OK/u);
   assert.match(workflow, /StrictHostKeyChecking=yes/u);
   assert.match(workflow, /vars\.PRODUCTION_SSH_HOST/u);
   assert.match(workflow, /PRODUCTION_SSH_HOST_INVALID/u);
@@ -43,6 +49,12 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.match(workflow, /PRODUCTION_BACKUP_RESULT_INVALID/u);
   assert.match(workflow, /DEPLOY_BACKUP_OBJECT/u);
   assert.match(workflow, /\.worker\.consecutiveFailures == 0/u);
+  assert.ok(
+    workflow.indexOf("Sync GitHub OAuth configuration through restricted stdin") <
+      workflow.indexOf("Create verified offsite backup and deploy through forced-command gateway"),
+    "production OAuth configuration must be synchronized before deployment starts",
+  );
+  assert.doesNotMatch(workflow, /configure-github-oauth[^\n]*(GITHUB_OAUTH_CLIENT_ID|GITHUB_OAUTH_CLIENT_SECRET)/u);
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
@@ -55,13 +67,42 @@ test("production workflow is statically fail-closed before the first formal v1.0
   assert.doesNotMatch(workflow, /0\.1\.0-dev\.1/u);
 });
 
-test("forced-command gateway accepts only a release tag and exact commit", async () => {
+test("forced-command gateway accepts only an exact deploy or GitHub OAuth configuration command", async () => {
   const gateway = await readFile(gatewayPath, "utf8");
 
   assert.match(gateway, /SSH_ORIGINAL_COMMAND/u);
   assert.match(gateway, /\^deploy\\ \(v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\)\\ \(\[0-9a-f\]\{40\}\)\$/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-deploy/u);
+  assert.match(gateway, /original_command.*== configure-github-oauth/u);
+  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-configure-github-oauth/u);
   assert.match(gateway, /AI_PROJECT_OS_DEPLOY_COMMAND_DENIED/u);
+});
+
+test("root GitHub OAuth configurator validates fixed stdin and atomically preserves the production environment", async () => {
+  const configurator = await readFile(githubOAuthConfiguratorPath, "utf8");
+
+  assert.match(configurator, /EUID -ne 0/u);
+  assert.match(configurator, /ENV_FILE=\/etc\/ai-project-os\/production\.env/u);
+  assert.match(configurator, /PAYLOAD_HEADER=AI_PROJECT_OS_GITHUB_OAUTH_CONFIG_V1/u);
+  assert.match(configurator, /IFS= read -r -n 128 payload_header/u);
+  assert.match(configurator, /IFS= read -r -n 513 client_id/u);
+  assert.match(configurator, /IFS= read -r -n 513 client_secret/u);
+  assert.match(configurator, /PRODUCTION_GITHUB_OAUTH_PAYLOAD_INVALID/u);
+  assert.match(configurator, /\$\{#client_id\} >= 8/u);
+  assert.match(configurator, /\$\{#client_secret\} >= 8/u);
+  assert.match(configurator, /\[A-Za-z0-9\._-\]\+\$/u);
+  assert.match(configurator, /! -L "\$ENV_FILE"/u);
+  assert.match(configurator, /root:root/u);
+  assert.match(configurator, /== 600/u);
+  assert.match(configurator, /PRODUCTION_GITHUB_OAUTH_ENV_DUPLICATE_KEY/u);
+  assert.match(configurator, /ai-project-os-deploy\.lock/u);
+  assert.match(configurator, /flock -n 9/u);
+  assert.match(configurator, /PRODUCTION_GITHUB_OAUTH_DEPLOYMENT_IN_PROGRESS/u);
+  assert.match(configurator, /mktemp "\$ENV_DIRECTORY\/\.production\.env\.github-oauth\.XXXXXX"/u);
+  assert.match(configurator, /mv -f -- "\$temporary_env" "\$ENV_FILE"/u);
+  assert.match(configurator, /client_secret=/u);
+  assert.match(configurator, /PRODUCTION_GITHUB_OAUTH_CONFIG_OK/u);
+  assert.doesNotMatch(configurator, /set -x|echo[^\n]*client_secret/iu);
 });
 
 test("root deployer verifies source, requires a verified offsite backup, migrates, and waits for health", async () => {
@@ -74,6 +115,10 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   assert.match(deployment, /python3 -c/u);
   assert.match(deployment, /production\.env/u);
   assert.match(deployment, /AI_PROJECT_OS_SECURE_COOKIES=true/u);
+  assert.match(deployment, /validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID/u);
+  assert.match(deployment, /validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET/u);
+  assert.match(deployment, /DEPLOY_GITHUB_OAUTH_CLIENT_ID_INVALID/u);
+  assert.match(deployment, /DEPLOY_GITHUB_OAUTH_CLIENT_SECRET_INVALID/u);
   assert.match(deployment, /ai-project-os-backup/u);
   assert.match(deployment, /AI_PROJECT_OS_DEPLOY_LOCK_HELD=1/u);
   assert.match(deployment, /pre-deploy "\$RELEASE_TAG"/u);
@@ -371,12 +416,16 @@ test("installer keeps secrets root-only and installs a restricted Actions key", 
   assert.match(installer, /TARGET_USER=ai-project-os-actions/u);
   assert.match(installer, /useradd/u);
   assert.match(installer, /ai-project-os-actions-gateway/u);
+  assert.match(installer, /ai-project-os-configure-github-oauth/u);
   assert.match(installer, /INSTALL_ACTIONS_AUTHORIZED_KEYS_NOT_EXCLUSIVE/u);
   assert.match(installer, /temporary_authorized_keys/u);
   assert.match(installer, /--reuse-existing-actions-key/u);
   assert.match(installer, /INSTALL_EXISTING_ACTIONS_KEY_INVALID/u);
   assert.match(installer, /visudo -cf/u);
-  assert.equal(sudoers.trim(), "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-deploy");
+  assert.deepEqual(sudoers.trim().split("\n"), [
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-deploy",
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-github-oauth",
+  ]);
 });
 
 test("production shell entrypoints pass bash syntax validation", () => {
@@ -388,7 +437,7 @@ test("production shell entrypoints pass bash syntax validation", () => {
     "bootstrap-production-host",
     "migrate-production-host",
   ].map((name) => path.join(repositoryRoot, "deploy/production", name));
-  for (const scriptPath of [deploymentPath, backupPath, gatewayPath, installerPath, backupInstallerPath, ...additionalScripts]) {
+  for (const scriptPath of [deploymentPath, backupPath, gatewayPath, githubOAuthConfiguratorPath, installerPath, backupInstallerPath, ...additionalScripts]) {
     const result = spawnSync("bash", ["-n", scriptPath], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
   }

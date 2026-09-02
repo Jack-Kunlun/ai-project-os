@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+
+readonly ENV_FILE=/etc/ai-project-os/production.env
+readonly ENV_DIRECTORY=/etc/ai-project-os
+readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+readonly PAYLOAD_HEADER=AI_PROJECT_OS_GITHUB_OAUTH_CONFIG_V1
+readonly CLIENT_ID_KEY=AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID
+readonly CLIENT_SECRET_KEY=AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET
+
+temporary_env=
+
+fail() {
+  local marker=$1
+  local exit_code=${2-1}
+
+  printf '%s\n' "$marker" >&2
+  exit "$exit_code"
+}
+
+cleanup() {
+  if [[ -n "$temporary_env" && -f "$temporary_env" ]]; then
+    rm -f -- "$temporary_env"
+  fi
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [[ $EUID -ne 0 ]]; then
+  fail "PRODUCTION_GITHUB_OAUTH_CONFIG_ROOT_REQUIRED" 70
+fi
+
+[[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_INVALID" 70
+[[ "$(stat -c %U:%G "$ENV_FILE")" == root:root ]] ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_OWNER_INVALID" 70
+[[ "$(stat -c %a "$ENV_FILE")" == 600 ]] ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_MODE_INVALID" 70
+grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_BASELINE_INVALID" 70
+grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$ENV_FILE" ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_BASELINE_INVALID" 70
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  fail "PRODUCTION_GITHUB_OAUTH_DEPLOYMENT_IN_PROGRESS" 75
+fi
+
+IFS= read -r -n 128 payload_header || fail "PRODUCTION_GITHUB_OAUTH_PAYLOAD_INVALID" 64
+IFS= read -r -n 513 client_id || fail "PRODUCTION_GITHUB_OAUTH_PAYLOAD_INVALID" 64
+IFS= read -r -n 513 client_secret || fail "PRODUCTION_GITHUB_OAUTH_PAYLOAD_INVALID" 64
+if IFS= read -r -n 1 _unexpected_input; then
+  fail "PRODUCTION_GITHUB_OAUTH_PAYLOAD_INVALID" 64
+fi
+
+[[ "$payload_header" == "$PAYLOAD_HEADER" ]] ||
+  fail "PRODUCTION_GITHUB_OAUTH_PAYLOAD_INVALID" 64
+(( ${#client_id} >= 8 && ${#client_id} <= 512 )) ||
+  fail "PRODUCTION_GITHUB_OAUTH_CLIENT_ID_INVALID" 65
+[[ "$client_id" =~ ^[A-Za-z0-9._-]+$ ]] ||
+  fail "PRODUCTION_GITHUB_OAUTH_CLIENT_ID_INVALID" 65
+(( ${#client_secret} >= 8 && ${#client_secret} <= 512 )) ||
+  fail "PRODUCTION_GITHUB_OAUTH_CLIENT_SECRET_INVALID" 65
+[[ "$client_secret" =~ ^[A-Za-z0-9._-]+$ ]] ||
+  fail "PRODUCTION_GITHUB_OAUTH_CLIENT_SECRET_INVALID" 65
+
+client_id_count=$(grep -Ec "^${CLIENT_ID_KEY}=" "$ENV_FILE" || true)
+client_secret_count=$(grep -Ec "^${CLIENT_SECRET_KEY}=" "$ENV_FILE" || true)
+(( client_id_count <= 1 && client_secret_count <= 1 )) ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_DUPLICATE_KEY" 71
+
+temporary_env=$(mktemp "$ENV_DIRECTORY/.production.env.github-oauth.XXXXXX")
+client_id_written=0
+client_secret_written=0
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+  case "$line" in
+    "${CLIENT_ID_KEY}="*)
+      printf '%s=%s\n' "$CLIENT_ID_KEY" "$client_id"
+      client_id_written=1
+      ;;
+    "${CLIENT_SECRET_KEY}="*)
+      printf '%s=%s\n' "$CLIENT_SECRET_KEY" "$client_secret"
+      client_secret_written=1
+      ;;
+    *)
+      printf '%s\n' "$line"
+      ;;
+  esac
+done < "$ENV_FILE" > "$temporary_env"
+
+if (( client_id_written == 0 )); then
+  printf '%s=%s\n' "$CLIENT_ID_KEY" "$client_id" >> "$temporary_env"
+fi
+if (( client_secret_written == 0 )); then
+  printf '%s=%s\n' "$CLIENT_SECRET_KEY" "$client_secret" >> "$temporary_env"
+fi
+
+[[ "$(grep -Ec "^${CLIENT_ID_KEY}=" "$temporary_env")" == 1 ]] ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_WRITE_INVALID" 72
+[[ "$(grep -Ec "^${CLIENT_SECRET_KEY}=" "$temporary_env")" == 1 ]] ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_WRITE_INVALID" 72
+grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$temporary_env" ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_WRITE_INVALID" 72
+grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$temporary_env" ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_WRITE_INVALID" 72
+
+chown root:root "$temporary_env"
+chmod 600 "$temporary_env"
+mv -f -- "$temporary_env" "$ENV_FILE"
+temporary_env=
+client_secret=
+
+printf 'PRODUCTION_GITHUB_OAUTH_CONFIG_OK\n'

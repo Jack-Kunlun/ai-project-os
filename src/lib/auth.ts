@@ -374,9 +374,10 @@ export function assertSameOrigin(request: Request): void {
   }
 }
 
-export function sessionCookie(token: string, expiresAt: Date): string {
+export function sessionCookie(token: string, expiresAt: Date, persistent = true): string {
   const secure = process.env.AI_PROJECT_OS_SECURE_COOKIES === "true" ? "; Secure" : "";
-  return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}${secure}`;
+  const expires = persistent ? `; Expires=${expiresAt.toUTCString()}` : "";
+  return `${SESSION_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${expires}${secure}`;
 }
 
 export function expiredSessionCookie(): string {

@@ -212,6 +212,12 @@ enum ExternalCredentialKind {
   mcp
   oidcClient @map("oidc_client")
   oidcFlow   @map("oidc_flow")
+  githubOauthFlow @map("github_oauth_flow")
+}
+
+enum GitHubOauthIntent {
+  login
+  link
 }
 
 enum McpAuthKind {
@@ -3595,6 +3601,8 @@ model AppUser {
   acceptedWorkspaceInvitations WorkspaceInvitation[]             @relation("WorkspaceInvitationAcceptedBy")
   createdOidcProviders         OidcProvider[]
   oidcIdentities               OidcIdentity[]
+  githubIdentity               GitHubIdentity?
+  githubOauthAttempts          GitHubOauthAttempt[]
 }
 
 model AppSession {
@@ -3757,6 +3765,40 @@ model OidcLoginAttempt {
   @@index([expiresAt, consumedAt])
 }
 
+model GitHubIdentity {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @unique @db.Uuid
+  githubUserId BigInt   @unique
+  login        String   @db.VarChar(64)
+  email        String   @db.VarChar(320)
+  displayName  String?  @db.VarChar(160)
+  lastLoginAt  DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         AppUser  @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId, lastLoginAt])
+}
+
+model GitHubOauthAttempt {
+  id           String              @id @default(uuid()) @db.Uuid
+  credentialId String              @unique @db.Uuid
+  stateHash    String              @unique @db.Char(64)
+  intent       GitHubOauthIntent
+  linkUserId   String?             @db.Uuid
+  redirectUri  String              @db.VarChar(2048)
+  returnTo     String              @db.VarChar(1024)
+  remember     Boolean             @default(true)
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime            @default(now())
+  credential   ExternalCredential  @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  linkUser     AppUser?            @relation(fields: [linkUserId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([expiresAt, consumedAt])
+  @@index([linkUserId, expiresAt])
+}
+
 model ExternalCredential {
   id                String                   @id @default(uuid()) @db.Uuid
   kind              ExternalCredentialKind
@@ -3775,6 +3817,7 @@ model ExternalCredential {
   mcpConnection     McpConnection?
   oidcProviders     OidcProvider[]
   oidcLoginAttempts OidcLoginAttempt[]
+  githubOauthAttempts GitHubOauthAttempt[]
   githubSyncEntries ProjectGitHubSyncEntry[]
 
   @@index([kind, updatedAt])

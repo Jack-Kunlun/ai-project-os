@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 import { projectJobFailurePresentation } from "@/lib/project-job-failure";
 
 type Connection = {
@@ -92,6 +93,7 @@ export function ProjectRepositoriesClient({ username, projectId }: { username: s
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="repositories" />
       <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
+        <div className="mb-5"><ProjectMaterialsParentLink projectId={projectId} /></div>
         <section className="flex flex-col justify-between gap-6 rounded-[2rem] border border-slate-200 bg-white p-7 shadow-sm lg:flex-row lg:items-end lg:p-9">
           <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Repository memory</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目代码仓库</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">一个项目可以关联多个不同 Git 服务的仓库。每次扫描会先冻结分支提交，完整读取允许范围，再一次性发布新快照；失败不会污染当前记忆。</p></div>
           <div className="grid shrink-0 grid-cols-3 gap-3 text-center text-xs"><Metric label="仓库" value={String(repositories.filter((item) => item.status === "active").length)} /><Metric label="已发布" value={String(repositories.filter((item) => item.snapshotPointer).length)} /><Metric label="连接" value={String(new Set(repositories.map((item) => item.repository.connection.id)).size)} /></div>

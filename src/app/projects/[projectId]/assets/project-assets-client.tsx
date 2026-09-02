@@ -6,6 +6,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useState, type Chang
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
+import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 import { DEFAULT_UPLOAD_POLICY, type PublicUploadPolicy } from "@/lib/project-assets/policy";
@@ -289,6 +290,7 @@ export function ProjectAssetsClient({ username }: { username: string }) {
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="assets" />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
+        <ProjectMaterialsParentLink projectId={projectId} />
         <section className="pb-8 pt-10">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project files</p>
           <div className="mt-3 flex flex-wrap items-end justify-between gap-5">

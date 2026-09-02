@@ -58,7 +58,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 | Dashboard | 汇总跨项目世界状态、配置就绪度、计划风险、运营提醒、推荐下一步和最近任务；项目管理保持为独立顶部入口 |
 | 项目与个人中心 | 项目搜索、创建、软归档、恢复和受限 JSON 导出；个人资料、登录名、密码和活动会话管理 |
 | 多用户与 RBAC | 工作区角色 Owner/Admin/Member/Viewer，项目角色 Owner/Editor/Viewer；服务端对页面和 API 统一鉴权 |
-| 邀请与 OIDC | 邮箱限定邀请；OpenID Connect Authorization Code + PKCE；支持 `client_secret_post` / `client_secret_basic`、受控自动建号和企业内网显式授权 |
+| 邀请、GitHub 登录与 OIDC | 邮箱限定邀请；GitHub OAuth Authorization Code + PKCE 与个人中心显式绑定；OpenID Connect Authorization Code + PKCE、受控自动建号和企业内网显式授权 |
 | 模型供应商 | 页面配置 OpenAI、DeepSeek、Qwen、GLM 的 API Key、生成/视觉/向量模型并测试连接；密钥不回显 |
 | 项目 AI 路由 | 每个项目独立选择图片识别、自动抽取、向量索引和引用式生成模型；路由变更保留审计与影响提示 |
 | 文件与图片识别 | TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP；本地解析文本，图片和扫描 PDF 经当次授权后调用视觉模型并逐片段审核 |

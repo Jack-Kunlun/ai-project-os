@@ -46,6 +46,27 @@ test "$(stat -c %a "$ENV_FILE")" = 600
 grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE"
 grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$ENV_FILE"
 
+validate_github_oauth_env_value() {
+  local key=$1
+  local value
+  local -a matches=()
+
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} == 1 )) || return 1
+  value=${matches[0]#*=}
+  (( ${#value} >= 8 && ${#value} <= 512 )) || return 1
+  [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID || {
+  printf 'DEPLOY_GITHUB_OAUTH_CLIENT_ID_INVALID\n' >&2
+  exit 70
+}
+validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET || {
+  printf 'DEPLOY_GITHUB_OAUTH_CLIENT_SECRET_INVALID\n' >&2
+  exit 70
+}
+
 install -d -o root -g root -m 0755 /srv/ai-project-os
 install -d -o root -g root -m 0700 "$(dirname "$RESULT_FILE")"
 

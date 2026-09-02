@@ -38,6 +38,7 @@ export async function GET(request: Request) {
           id: true, username: true, displayName: true, email: true, role: true, passwordHash: true, createdAt: true, updatedAt: true,
           workspaceMemberships: { select: { role: true, workspace: { select: { id: true, name: true } } } },
           oidcIdentities: { select: { email: true, lastLoginAt: true, provider: { select: { id: true, name: true } } } },
+          githubIdentity: { select: { githubUserId: true, login: true, email: true, displayName: true, lastLoginAt: true } },
         },
       }),
       db.appSession.count({
@@ -50,8 +51,9 @@ export async function GET(request: Request) {
       }),
     ]);
     if (user === null) throw new ApiError(401, "AUTH_REQUIRED", "请先登录");
+    const { passwordHash, githubIdentity, ...safeUser } = user;
     return NextResponse.json(
-      { profile: { ...user, passwordHash: undefined, hasLocalPassword: user.passwordHash !== null, activeSessionCount, lastSeenAt: latestSession?.lastSeenAt ?? null, sessionExpiresAt: latestSession?.expiresAt ?? null } },
+      { profile: { ...safeUser, githubIdentity: githubIdentity ? { ...githubIdentity, githubUserId: githubIdentity.githubUserId.toString() } : null, hasLocalPassword: passwordHash !== null, activeSessionCount, lastSeenAt: latestSession?.lastSeenAt ?? null, sessionExpiresAt: latestSession?.expiresAt ?? null } },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {

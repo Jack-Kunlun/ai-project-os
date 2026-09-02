@@ -146,6 +146,25 @@ Compose 会先执行所有未应用迁移，再启动应用和 Worker。不要�
 
 停用会立即撤销该用户的活动会话。再次启用不会恢复已撤销会话，用户需要重新登录。停用用户不会删除其历史操作、证据或审计记录。
 
+### 4.5 配置 GitHub 登录
+
+在 GitHub 创建 OAuth App，并把当前部署的回调地址登记为：
+
+```text
+http://127.0.0.1:3000/api/auth/github/callback
+```
+
+本地部署将 OAuth App 的 Client ID 和 Client Secret 写入未提交的 `.env`：
+
+```text
+AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID=...
+AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET=...
+```
+
+受管线上部署不要要求操作者登录服务器粘贴 OAuth Secret。在 GitHub `production` Environment 中，把线上 Client ID 保存为同名 Environment variable，把线上 Client Secret 保存为同名 Environment secret；已审批的生产 job 会经受限 SSH 标准输入和 root-owned 配置器原子更新运行配置。应用容器不能直接读取 GitHub Environment，且当前 `v1.0.0` 前静态禁用的生产 job 不会因配置了 Secret 而自动运行。
+
+重启应用后，已有用户先使用本地账户或企业身份登录，再到“个人中心 → 登录方式”明确绑定 GitHub。首次使用且系统中不存在同邮箱账号时，系统会创建 `member` 普通账号并加入默认工作区；若同邮箱账号已经存在，则不会静默合并，用户必须先登录原账号再明确绑定。GitHub 登录只读取用户资料和已验证主邮箱；本次临时访问令牌在身份验证后立即撤销，不作为长期服务凭据保存。
+
 ## 5. 配置 OIDC 企业登录
 
 在身份提供商中创建 Web/OIDC 应用，并登记回调地址：

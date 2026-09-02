@@ -35,6 +35,7 @@ import { WebSourceError } from "@/lib/web-sources";
 import { AccessControlError } from "@/lib/access-control";
 import { WorkspaceError } from "@/lib/workspaces";
 import { OidcError } from "@/lib/oidc";
+import { GitHubOAuthError } from "@/lib/github-oauth";
 import { ActionEngineError } from "@/lib/action-engine";
 import { ActionResultIntakeError } from "@/lib/action-result-intake";
 import { McpCapabilityError } from "@/lib/mcp";
@@ -210,6 +211,26 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       OIDC_ACCOUNT_DISABLED: [403, "账户已停用"],
     };
     const [status, message] = mapping[error.code] ?? [500, "OIDC 操作失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof GitHubOAuthError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      GITHUB_OAUTH_NOT_CONFIGURED: [503, "GitHub 登录尚未配置，请联系工作区管理员"],
+      GITHUB_OAUTH_CONFIG_INVALID: [500, "GitHub 登录配置无效，请联系工作区管理员"],
+      GITHUB_OAUTH_INVALID_INPUT: [400, "GitHub 登录请求无效"],
+      GITHUB_OAUTH_FLOW_INVALID: [400, "GitHub 登录状态无效或已经使用"],
+      GITHUB_OAUTH_FLOW_EXPIRED: [410, "GitHub 登录已过期，请重新开始"],
+      GITHUB_OAUTH_PROVIDER_REJECTED: [401, "GitHub 授权未完成"],
+      GITHUB_OAUTH_TOKEN_EXCHANGE_FAILED: [502, "GitHub 授权码交换失败"],
+      GITHUB_OAUTH_PROFILE_FAILED: [502, "GitHub 账户资料读取失败"],
+      GITHUB_OAUTH_EMAIL_REQUIRED: [403, "GitHub 账户必须提供一个已验证的主邮箱"],
+      GITHUB_OAUTH_TOKEN_REVOCATION_FAILED: [502, "GitHub 临时访问令牌撤销失败，本次登录已中止"],
+      GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED: [403, "系统中已有使用该邮箱的账号，请先使用原账号登录并在个人中心绑定 GitHub"],
+      GITHUB_OAUTH_IDENTITY_CONFLICT: [409, "该 GitHub 身份已绑定其他账户，或当前账户已绑定其他 GitHub 身份"],
+      GITHUB_OAUTH_ACCOUNT_DISABLED: [403, "账户已停用"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "GitHub 登录失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

@@ -15,6 +15,7 @@ type Profile = {
   hasLocalPassword: boolean;
   workspaceMemberships: Array<{ role: "owner" | "admin" | "member" | "viewer"; workspace: { id: string; name: string } }>;
   oidcIdentities: Array<{ email: string | null; lastLoginAt: string; provider: { id: string; name: string } }>;
+  githubIdentity: { githubUserId: string; login: string; email: string; displayName: string | null; lastLoginAt: string } | null;
   createdAt: string;
   updatedAt: string;
   activeSessionCount: number;
@@ -36,12 +37,26 @@ function formatDate(value: string | null): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "long", timeStyle: "short" }).format(new Date(value));
 }
 
+const githubStatusMessages: Record<string, { tone: "success" | "error"; text: string }> = {
+  linked: { tone: "success", text: "GitHub 身份已绑定，现在可以在登录页使用 GitHub 登录。" },
+  GITHUB_OAUTH_PROVIDER_REJECTED: { tone: "error", text: "GitHub 授权被取消，账户没有发生变化。" },
+  GITHUB_OAUTH_FLOW_EXPIRED: { tone: "error", text: "GitHub 绑定已过期，请重新开始。" },
+  GITHUB_OAUTH_IDENTITY_CONFLICT: { tone: "error", text: "该 GitHub 身份已绑定其他账户，或当前账户已绑定其他 GitHub 身份。" },
+  GITHUB_OAUTH_EMAIL_REQUIRED: { tone: "error", text: "GitHub 账户必须提供一个已验证的主邮箱。" },
+  GITHUB_OAUTH_TOKEN_REVOCATION_FAILED: { tone: "error", text: "GitHub 临时授权令牌未能安全撤销，本次绑定已中止。" },
+  failed: { tone: "error", text: "GitHub 身份绑定未完成，请重试或联系工作区管理员。" },
+};
+
 export function ProfileClient({
   username: initialUsername,
   canViewSystemOperations,
+  githubLoginAvailable,
+  githubStatus,
 }: {
   username: string;
   canViewSystemOperations: boolean;
+  githubLoginAvailable: boolean;
+  githubStatus?: string;
 }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [headerUsername, setHeaderUsername] = useState(initialUsername);
@@ -80,6 +95,7 @@ export function ProfileClient({
         </section>
 
         {error ? <div role="alert" className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline">重试</button></div> : null}
+        {githubStatus ? <Message {...(githubStatusMessages[githubStatus] ?? githubStatusMessages.failed)} /> : null}
 
         <section className="mt-7 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm">
           <div className="flex flex-col gap-5 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-7">
@@ -122,7 +138,7 @@ export function ProfileClient({
           </details>
         </section>
 
-        {profile ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace roles</p><h2 className="mt-2 text-lg font-semibold">工作区身份</h2><div className="mt-4 space-y-2">{profile.workspaceMemberships.map((membership) => <div key={membership.workspace.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{membership.workspace.name}</span><span className="text-xs font-semibold text-indigo-700">{membership.role}</span></div>)}</div></div><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Sign-in methods</p><h2 className="mt-2 text-lg font-semibold">登录方式</h2><div className="mt-4 space-y-2"><div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">本地密码：{profile.hasLocalPassword ? "已配置" : "未配置"}</div>{profile.oidcIdentities.map((identity) => <div key={identity.provider.id} className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-700">{identity.provider.name}{identity.email ? ` · ${identity.email}` : ""}</div>)}</div></div></section> : null}
+        {profile ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace roles</p><h2 className="mt-2 text-lg font-semibold">工作区身份</h2><div className="mt-4 space-y-2">{profile.workspaceMemberships.map((membership) => <div key={membership.workspace.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{membership.workspace.name}</span><span className="text-xs font-semibold text-indigo-700">{membership.role}</span></div>)}</div></div><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Sign-in methods</p><h2 className="mt-2 text-lg font-semibold">登录方式</h2><div className="mt-4 space-y-2"><div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">本地密码：{profile.hasLocalPassword ? "已配置" : "未配置"}</div>{profile.githubIdentity ? <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-white">GitHub · @{profile.githubIdentity.login}<span className="mt-1 block text-xs text-slate-300">{profile.githubIdentity.email}</span></div> : githubLoginAvailable ? <a href="/api/auth/github/start?intent=link&returnTo=%2Fprofile" className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50"><span>GitHub 尚未绑定</span><span className="text-indigo-600">立即绑定 →</span></a> : <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-400">GitHub 登录：当前部署未配置</div>}{profile.oidcIdentities.map((identity) => <div key={identity.provider.id} className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-700">{identity.provider.name}{identity.email ? ` · ${identity.email}` : ""}</div>)}</div></div></section> : null}
 
         {canViewSystemOperations ? <section className="mt-6 flex flex-col gap-5 rounded-3xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-7"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Initial super administrator</p><h2 className="mt-2 text-xl font-semibold">系统运维</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">只读查看生产备份、COS 同步和校验历史。页面不会获得服务器控制权限或任何备份密钥。</p></div><Link href="/system/operations" className="flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700">查看备份任务</Link></section> : null}
 

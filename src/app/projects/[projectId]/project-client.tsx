@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
@@ -543,13 +542,12 @@ export function ProjectDetailClient({ username }: { username: string }) {
 
   return (
     <ProjectShell username={username} projectId={projectId}>
-      <div className="flex flex-col gap-6 border-b border-slate-200/80 pb-8 sm:flex-row sm:items-end sm:justify-between">
+      <div className="border-b border-slate-200/80 pb-8">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project materials</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name} · 项目资料</h1>
           <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">在一个页面添加和管理文本、图片、文档、文件夹、网页与代码仓库资料。</p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2"><Link href={`/projects/${projectId}`} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">返回项目概览</Link><Link href={`/projects/${projectId}/intelligence`} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">打开 AI 工作台</Link></div>
       </div>
 
       <div className="mt-8">

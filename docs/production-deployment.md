@@ -50,6 +50,11 @@ sudo deploy/production/install-production-deploy.sh \
 
 - `PRODUCTION_SSH_PRIVATE_KEY`：上面生成的完整私钥内容。
 - `PRODUCTION_SSH_KNOWN_HOSTS`：经过现有可信 SSH 连接核对的服务器 ED25519 known_hosts 行。
+- `AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET`：线上 GitHub OAuth App 的 Client Secret。
+
+在 `production` 的 Environment variables 中添加：
+
+- `AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID`：线上 GitHub OAuth App 的 Client ID。
 
 并在 Environment variables 中添加：
 
@@ -58,6 +63,11 @@ sudo deploy/production/install-production-deploy.sh \
 不要把私钥、数据库密码、服务器 `.env` 或外部服务凭据保存为仓库文件、Actions artifact 或普通变量。
 
 整机迁移、最终停写、加密恢复与回退流程见[单节点主机迁移与恢复](production-host-migration.md)。
+
+生产 job 在任何备份、迁移或容器替换之前，通过受限 SSH key 的固定
+`configure-github-oauth` 命令把 OAuth 配置经标准输入发送给 root-owned 配置器。配置器只接受固定三行协议，校验 GitHub 凭据格式、生产 `.env` 的 owner/mode、数据库密码与安全 Cookie 基线，并在同一目录原子替换 `/etc/ai-project-os/production.env`。Client Secret 不进入命令参数、Actions 输出、部署结果或仓库；远端只返回 `PRODUCTION_GITHUB_OAUTH_CONFIG_OK`。
+
+该命令需要服务器已经安装当前版本的受限网关和配置器。部署工具升级仍属于一次性的服务器管理操作：从受信源码重新运行 `install-production-deploy.sh`，只更新 root-owned 工具与精确 sudoers allowlist，不需要管理员手工录入 OAuth 凭据。生产 job 在 `v1.0.0` 前仍保持静态禁用；配置 Environment 不会绕过这一门禁，也不会自动改动线上实例。
 
 ## 启用后的部署流程（未来计划）
 

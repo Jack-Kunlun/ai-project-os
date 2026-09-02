@@ -33,6 +33,22 @@ test("project overview and materials use separate routes with a compact navigati
   assert.match(materials, /ProjectMaterialIntake/u);
   assert.match(materials, /ProjectMaterialReviewQueue/u);
   assert.doesNotMatch(materials, /SnapshotPanel|AiCapabilityGuide|PlaceholderCard/u);
+  assert.doesNotMatch(materials, /返回项目概览|打开 AI 工作台/u);
+});
+
+test("project material operations return to their immediate parent", async () => {
+  const [parentLink, assets, externalSources, repositories] = await Promise.all([
+    readFile("src/components/project-parent-link.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/assets/project-assets-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/external-sources/project-external-sources-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/repositories/project-repositories-client.tsx", "utf8"),
+  ]);
+
+  assert.match(parentLink, /href=\{`\/projects\/\$\{projectId\}\/materials`\}/u);
+  assert.match(parentLink, /返回项目资料/u);
+  assert.match(assets, /ProjectMaterialsParentLink/u);
+  assert.match(externalSources, /ProjectMaterialsParentLink/u);
+  assert.match(repositories, /ProjectMaterialsParentLink/u);
 });
 
 test("AI workbench spacing and project management keep AI usage visible", async () => {

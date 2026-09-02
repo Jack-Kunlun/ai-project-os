@@ -6,6 +6,7 @@ import { handleApiError, readJsonBody } from "@/lib/api-response";
 const loginSchema = z.object({
   username: z.string(),
   password: z.string(),
+  remember: z.boolean().default(true),
 }).strict();
 
 export async function POST(request: Request) {
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
       {
         headers: {
           "cache-control": "no-store",
-          "set-cookie": sessionCookie(session.token, session.expiresAt),
+          "set-cookie": sessionCookie(session.token, session.expiresAt, input.remember),
         },
       },
     );

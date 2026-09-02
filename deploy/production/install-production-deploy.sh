@@ -89,6 +89,9 @@ install -o root -g root -m 0644 \
   "$SOURCE_DIR/compose.operations.yaml" \
   /etc/ai-project-os/compose.operations.yaml
 install -o root -g root -m 0755 \
+  "$SOURCE_DIR/ai-project-os-configure-github-oauth" \
+  /usr/local/sbin/ai-project-os-configure-github-oauth
+install -o root -g root -m 0755 \
   "$SOURCE_DIR/ai-project-os-actions-gateway" \
   /usr/local/sbin/ai-project-os-actions-gateway
 install -o root -g root -m 0755 \
@@ -158,15 +161,17 @@ trap - EXIT
 
 visudo -cf /etc/sudoers.d/ai-project-os-deploy >/dev/null
 bash -n /usr/local/sbin/ai-project-os-deploy
+bash -n /usr/local/sbin/ai-project-os-configure-github-oauth
 bash -n /usr/local/sbin/ai-project-os-actions-gateway
 bash -n /usr/local/sbin/ai-project-os-restore
 bash -n /usr/local/sbin/ai-project-os-source-state
 bash -n /usr/local/sbin/ai-project-os-activate-host
 bash -n /usr/local/sbin/ai-project-os-deactivate-host
 
-printf 'INSTALL_OK user=%s gateway=%s deployer=%s env=%s backup_timer=%s\n' \
+printf 'INSTALL_OK user=%s gateway=%s deployer=%s configurator=%s env=%s backup_timer=%s\n' \
   "$TARGET_USER" \
   /usr/local/sbin/ai-project-os-actions-gateway \
   /usr/local/sbin/ai-project-os-deploy \
+  /usr/local/sbin/ai-project-os-configure-github-oauth \
   "$PRODUCTION_ENV" \
   "${INSTALL_MODE#--}"

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useDeferredValue, useEffect, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { ListPagination } from "@/components/list-pagination";
+import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 
 type WebSource = {
   id: string;
@@ -77,6 +78,7 @@ export function ProjectExternalSourcesClient({ username, projectId }: { username
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="externalSources" />
       <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
+        <div className="mb-5"><ProjectMaterialsParentLink projectId={projectId} /></div>
         <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">External knowledge</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">外部资料入口</h1>

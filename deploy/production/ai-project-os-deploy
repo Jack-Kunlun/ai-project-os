@@ -45,6 +45,10 @@ test "$(stat -c %U:%G "$ENV_FILE")" = root:root
 test "$(stat -c %a "$ENV_FILE")" = 600
 grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE"
 grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$ENV_FILE"
+grep -qx 'AI_PROJECT_OS_PUBLIC_ORIGIN=https://ai-project-os.com' "$ENV_FILE" || {
+  printf 'DEPLOY_PUBLIC_ORIGIN_INVALID\n' >&2
+  exit 70
+}
 
 validate_github_oauth_env_value() {
   local key=$1

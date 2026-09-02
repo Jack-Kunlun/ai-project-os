@@ -7,6 +7,7 @@ import {
   GitHubOAuthError,
   githubOAuthFailurePath,
   githubOAuthProviderRejected,
+  githubOAuthPublicUrl,
 } from "@/lib/github-oauth";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
 
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
       cookieState: cookieValue(requestCookies, GITHUB_OAUTH_STATE_COOKIE_NAME),
       sessionUserId: sessionUser?.id,
     });
-    const response = NextResponse.redirect(new URL(canonicalInternalReturnPath(result.returnTo), url.origin), 303);
+    const response = NextResponse.redirect(githubOAuthPublicUrl(canonicalInternalReturnPath(result.returnTo)), 303);
     if (result.session !== null) {
       response.headers.append("set-cookie", sessionCookie(result.session.token, result.session.expiresAt, result.remember));
     }
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
     return response;
   } catch (error) {
     const failurePath = await githubOAuthFailurePath(state).catch(() => "/login");
-    const failureUrl = new URL(failurePath, url.origin);
+    const failureUrl = githubOAuthPublicUrl(failurePath);
     failureUrl.searchParams.set("github", error instanceof GitHubOAuthError ? error.code : "failed");
     const response = NextResponse.redirect(failureUrl, 303);
     response.headers.append("set-cookie", expiredGitHubOAuthStateCookie());

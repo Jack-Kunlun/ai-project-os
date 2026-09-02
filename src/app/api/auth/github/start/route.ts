@@ -11,7 +11,6 @@ export async function GET(request: Request) {
     const intent = requestUrl.searchParams.get("intent") === "link" ? "link" : "login";
     const user = intent === "link" ? await requireApiSession(request) : null;
     const result = await beginGitHubOAuth({
-      redirectUri: `${requestUrl.origin}/api/auth/github/callback`,
       returnTo: intent === "link" ? "/profile" : requestUrl.searchParams.get("returnTo") ?? undefined,
       intent,
       linkUserId: user?.id,

@@ -8,6 +8,7 @@ import {
   beginGitHubOAuth,
   completeGitHubOAuth,
   GitHubOAuthError,
+  githubOAuthPublicUrl,
   githubOAuthStateCookie,
   isGitHubOAuthConfigured,
 } from "@/lib/github-oauth";
@@ -138,16 +139,18 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
   const originalFetch = globalThis.fetch;
   const originalClientId = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID;
   const originalClientSecret = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET;
+  const originalPublicOrigin = process.env.AI_PROJECT_OS_PUBLIC_ORIGIN;
   const originalMasterKey = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
   process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = "Iv1.1234567890";
   process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = "github-oauth-secret-for-tests";
+  process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = "http://127.0.0.1:3000";
   process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(temp, "master.key");
 
   try {
     assert.equal(isGitHubOAuthConfigured(), true);
+    assert.equal(githubOAuthPublicUrl("/profile").toString(), "http://127.0.0.1:3000/profile");
     const store = fakeDb();
     const begun = await beginGitHubOAuth({
-      redirectUri: "http://127.0.0.1:3000/api/auth/github/callback",
       returnTo: "/profile",
       intent: "link",
       linkUserId: USER_ID,
@@ -158,6 +161,7 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     assert.equal(authorization.pathname, "/login/oauth/authorize");
     assert.equal(authorization.searchParams.get("code_challenge_method"), "S256");
     assert.equal(authorization.searchParams.get("scope"), "read:user user:email");
+    assert.equal(authorization.searchParams.get("redirect_uri"), "http://127.0.0.1:3000/api/auth/github/callback");
     assert.equal(authorization.searchParams.get("state"), begun.state);
     assert.equal(authorization.searchParams.has("client_secret"), false);
     assert.match(githubOAuthStateCookie(begun.state, begun.expiresAt), /HttpOnly; SameSite=Lax/u);
@@ -191,7 +195,6 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
 
     const registrationStore = fakeDb();
     const registration = await beginGitHubOAuth({
-      redirectUri: "http://127.0.0.1:3000/api/auth/github/callback",
       returnTo: "/dashboard",
       intent: "login",
       remember: true,
@@ -205,7 +208,6 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
 
     const registeredUserId = registered.session?.user.id;
     const returning = await beginGitHubOAuth({
-      redirectUri: "http://127.0.0.1:3000/api/auth/github/callback",
       returnTo: "/dashboard?query=hello%20world",
       intent: "login",
       remember: true,
@@ -225,7 +227,6 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
       disabledAt: null,
     });
     const existingEmailFlow = await beginGitHubOAuth({
-      redirectUri: "http://127.0.0.1:3000/api/auth/github/callback",
       returnTo: "/dashboard",
       intent: "login",
       remember: true,
@@ -242,7 +243,6 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     githubEmail = "x@github.test";
     const shortLoginStore = fakeDb();
     const shortLoginFlow = await beginGitHubOAuth({
-      redirectUri: "http://127.0.0.1:3000/api/auth/github/callback",
       returnTo: "/dashboard",
       intent: "login",
       remember: true,
@@ -253,6 +253,7 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     globalThis.fetch = originalFetch;
     if (originalClientId === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = originalClientId;
     if (originalClientSecret === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = originalClientSecret;
+    if (originalPublicOrigin === undefined) delete process.env.AI_PROJECT_OS_PUBLIC_ORIGIN; else process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = originalPublicOrigin;
     if (originalMasterKey === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE; else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = originalMasterKey;
     await rm(temp, { recursive: true, force: true });
   }
@@ -268,23 +269,34 @@ test("GitHub OAuth migration bounds return paths without rejecting valid percent
 test("GitHub OAuth stays unavailable for missing or partial deployment configuration", () => {
   const originalClientId = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID;
   const originalClientSecret = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET;
+  const originalPublicOrigin = process.env.AI_PROJECT_OS_PUBLIC_ORIGIN;
   try {
     delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID;
     delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET;
+    process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = "http://127.0.0.1:3000";
     assert.equal(isGitHubOAuthConfigured(), false);
+    assert.equal(githubOAuthPublicUrl("/login").toString(), "http://127.0.0.1:3000/login");
     process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = "Iv1.1234567890";
     assert.equal(isGitHubOAuthConfigured(), false);
+    process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = "github-oauth-secret-for-tests";
+    process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = "http://0.0.0.0:3000";
+    assert.equal(isGitHubOAuthConfigured(), false);
+    process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = "https://ai-project-os.com";
+    assert.equal(isGitHubOAuthConfigured(), true);
   } finally {
     if (originalClientId === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = originalClientId;
     if (originalClientSecret === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = originalClientSecret;
+    if (originalPublicOrigin === undefined) delete process.env.AI_PROJECT_OS_PUBLIC_ORIGIN; else process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = originalPublicOrigin;
   }
 });
 
 test("GitHub OAuth rejects a callback without the matching state cookie", async () => {
   const originalClientId = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID;
   const originalClientSecret = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET;
+  const originalPublicOrigin = process.env.AI_PROJECT_OS_PUBLIC_ORIGIN;
   process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = "Iv1.1234567890";
   process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = "github-oauth-secret-for-tests";
+  process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = "http://127.0.0.1:3000";
   try {
     await assert.rejects(
       completeGitHubOAuth({ code: "github-code", state: "a".repeat(43), cookieState: "b".repeat(43) }, fakeDb().db),
@@ -293,5 +305,6 @@ test("GitHub OAuth rejects a callback without the matching state cookie", async 
   } finally {
     if (originalClientId === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = originalClientId;
     if (originalClientSecret === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = originalClientSecret;
+    if (originalPublicOrigin === undefined) delete process.env.AI_PROJECT_OS_PUBLIC_ORIGIN; else process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = originalPublicOrigin;
   }
 });

@@ -10,6 +10,8 @@ readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 readonly PAYLOAD_HEADER=AI_PROJECT_OS_GITHUB_OAUTH_CONFIG_V1
 readonly CLIENT_ID_KEY=AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID
 readonly CLIENT_SECRET_KEY=AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET
+readonly PUBLIC_ORIGIN_KEY=AI_PROJECT_OS_PUBLIC_ORIGIN
+readonly PUBLIC_ORIGIN=https://ai-project-os.com
 
 temporary_env=
 
@@ -71,12 +73,14 @@ fi
 
 client_id_count=$(grep -Ec "^${CLIENT_ID_KEY}=" "$ENV_FILE" || true)
 client_secret_count=$(grep -Ec "^${CLIENT_SECRET_KEY}=" "$ENV_FILE" || true)
-(( client_id_count <= 1 && client_secret_count <= 1 )) ||
+public_origin_count=$(grep -Ec "^${PUBLIC_ORIGIN_KEY}=" "$ENV_FILE" || true)
+(( client_id_count <= 1 && client_secret_count <= 1 && public_origin_count <= 1 )) ||
   fail "PRODUCTION_GITHUB_OAUTH_ENV_DUPLICATE_KEY" 71
 
 temporary_env=$(mktemp "$ENV_DIRECTORY/.production.env.github-oauth.XXXXXX")
 client_id_written=0
 client_secret_written=0
+public_origin_written=0
 
 while IFS= read -r line || [[ -n "$line" ]]; do
   case "$line" in
@@ -87,6 +91,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     "${CLIENT_SECRET_KEY}="*)
       printf '%s=%s\n' "$CLIENT_SECRET_KEY" "$client_secret"
       client_secret_written=1
+      ;;
+    "${PUBLIC_ORIGIN_KEY}="*)
+      printf '%s=%s\n' "$PUBLIC_ORIGIN_KEY" "$PUBLIC_ORIGIN"
+      public_origin_written=1
       ;;
     *)
       printf '%s\n' "$line"
@@ -100,10 +108,15 @@ fi
 if (( client_secret_written == 0 )); then
   printf '%s=%s\n' "$CLIENT_SECRET_KEY" "$client_secret" >> "$temporary_env"
 fi
+if (( public_origin_written == 0 )); then
+  printf '%s=%s\n' "$PUBLIC_ORIGIN_KEY" "$PUBLIC_ORIGIN" >> "$temporary_env"
+fi
 
 [[ "$(grep -Ec "^${CLIENT_ID_KEY}=" "$temporary_env")" == 1 ]] ||
   fail "PRODUCTION_GITHUB_OAUTH_ENV_WRITE_INVALID" 72
 [[ "$(grep -Ec "^${CLIENT_SECRET_KEY}=" "$temporary_env")" == 1 ]] ||
+  fail "PRODUCTION_GITHUB_OAUTH_ENV_WRITE_INVALID" 72
+grep -qx "${PUBLIC_ORIGIN_KEY}=${PUBLIC_ORIGIN}" "$temporary_env" ||
   fail "PRODUCTION_GITHUB_OAUTH_ENV_WRITE_INVALID" 72
 grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$temporary_env" ||
   fail "PRODUCTION_GITHUB_OAUTH_ENV_WRITE_INVALID" 72

@@ -5,7 +5,7 @@
 ## 必须满足的边界
 
 1. 在应用前使用受信任的 HTTPS 反向代理，只开放 443；80 仅用于跳转到 HTTPS。
-2. 将 `AI_PROJECT_OS_SECURE_COOKIES=true` 写入未提交的部署 `.env`，并确认所有浏览器入口都经过 HTTPS。
+2. 将 `AI_PROJECT_OS_SECURE_COOKIES=true` 和浏览器实际使用的 HTTPS `AI_PROJECT_OS_PUBLIC_ORIGIN` 写入未提交的部署 `.env`；不得把容器内部的 `0.0.0.0` 用作公开 origin。
 3. 数据库端口不得暴露到不受信任网络；应用端口只允许反向代理访问。
 4. 在入口层对 `/api/auth/login`、`/api/auth/github/start`、`/api/auth/github/callback`、`/api/auth/oidc/start/*`、`/api/setup` 和项目上传入口按来源限流，并在多实例部署中改用共享限流设施。应用本身还会用 PostgreSQL durable admission 做按用户速率、单用户并发和全部署并发控制；默认在读取正文前最多放行 2 个上传。
 5. 使用独立的只读或最小权限外部服务凭据，定期轮换；主密钥、数据库备份和上传卷必须分开保管。

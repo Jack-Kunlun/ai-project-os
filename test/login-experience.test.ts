@@ -23,6 +23,9 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.match(page, /isGitHubOAuthConfigured/u);
   assert.match(localRoute, /remember/u);
   assert.match(githubStart, /beginGitHubOAuth/u);
+  assert.doesNotMatch(githubStart, /requestUrl\.origin/u);
   assert.match(githubCallback, /completeGitHubOAuth/u);
+  assert.match(githubCallback, /githubOAuthPublicUrl/u);
+  assert.doesNotMatch(githubCallback, /url\.origin/u);
   assert.match(profile, /intent=link/u);
 });

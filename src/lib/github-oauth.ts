@@ -45,7 +45,7 @@ export class GitHubOAuthError extends Error {
   }
 }
 
-type GitHubOAuthConfig = Readonly<{ clientId: string; clientSecret: string }>;
+type GitHubOAuthConfig = Readonly<{ clientId: string; clientSecret: string; publicOrigin: string }>;
 type GitHubProfile = Readonly<{ githubUserId: bigint; login: string; email: string; displayName: string | null }>;
 
 const tokenSchema = z.object({
@@ -85,6 +85,18 @@ function secureEqual(left: string, right: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function readPublicOrigin(): string {
+  const configuredPublicOrigin = process.env.AI_PROJECT_OS_PUBLIC_ORIGIN ?? "";
+  let publicUrl: URL;
+  try { publicUrl = new URL(configuredPublicOrigin); } catch { return fail("GITHUB_OAUTH_CONFIG_INVALID"); }
+  if (
+    publicUrl.pathname !== "/" || publicUrl.username.length > 0 || publicUrl.password.length > 0 ||
+    publicUrl.search.length > 0 || publicUrl.hash.length > 0 ||
+    (publicUrl.protocol !== "https:" && !(publicUrl.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(publicUrl.hostname)))
+  ) return fail("GITHUB_OAUTH_CONFIG_INVALID");
+  return publicUrl.origin;
+}
+
 function readConfig(): GitHubOAuthConfig {
   const clientId = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID ?? "";
   const clientSecret = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET ?? "";
@@ -93,7 +105,7 @@ function readConfig(): GitHubOAuthConfig {
     clientId.length < 8 || clientId.length > 512 || !/^[A-Za-z0-9._-]+$/u.test(clientId) ||
     clientSecret.length < 8 || clientSecret.length > 512 || /\s/u.test(clientSecret) || CONTROL_PATTERN.test(clientSecret)
   ) return fail("GITHUB_OAUTH_CONFIG_INVALID");
-  return Object.freeze({ clientId, clientSecret });
+  return Object.freeze({ clientId, clientSecret, publicOrigin: readPublicOrigin() });
 }
 
 export function isGitHubOAuthConfigured(): boolean {
@@ -103,17 +115,6 @@ export function isGitHubOAuthConfigured(): boolean {
   } catch {
     return false;
   }
-}
-
-function canonicalRedirectUri(value: string): string {
-  let url: URL;
-  try { url = new URL(value); } catch { return fail("GITHUB_OAUTH_INVALID_INPUT"); }
-  if (
-    url.pathname !== "/api/auth/github/callback" || url.username.length > 0 || url.password.length > 0 ||
-    url.search.length > 0 || url.hash.length > 0 ||
-    (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))
-  ) return fail("GITHUB_OAUTH_INVALID_INPUT");
-  return url.toString();
 }
 
 function canonicalIntent(value: unknown): GitHubOauthIntent {
@@ -132,7 +133,6 @@ function canonicalLinkUserId(value: unknown, intent: GitHubOauthIntent): string 
 
 export async function beginGitHubOAuth(
   input: Readonly<{
-    redirectUri: string;
     returnTo?: unknown;
     intent: unknown;
     linkUserId?: unknown;
@@ -141,7 +141,7 @@ export async function beginGitHubOAuth(
   db: PrismaClient = getDb(),
 ) {
   const config = readConfig();
-  const redirectUri = canonicalRedirectUri(input.redirectUri);
+  const redirectUri = new URL("/api/auth/github/callback", `${config.publicOrigin}/`).toString();
   const returnTo = canonicalInternalReturnPath(input.returnTo);
   const intent = canonicalIntent(input.intent);
   const linkUserId = canonicalLinkUserId(input.linkUserId, intent);
@@ -199,6 +199,10 @@ export async function beginGitHubOAuth(
   authorization.searchParams.set("code_challenge", base64urlSha256(verifier));
   authorization.searchParams.set("code_challenge_method", "S256");
   return Object.freeze({ authorizationUrl: authorization.toString(), state, expiresAt });
+}
+
+export function githubOAuthPublicUrl(path: unknown): URL {
+  return new URL(canonicalInternalReturnPath(path, "/"), `${readPublicOrigin()}/`);
 }
 
 async function boundedJsonResponse(response: Response, failureCode: GitHubOAuthErrorCode): Promise<unknown> {

@@ -95,6 +95,8 @@ test("root GitHub OAuth configurator validates fixed stdin and atomically preser
   assert.match(configurator, /root:root/u);
   assert.match(configurator, /== 600/u);
   assert.match(configurator, /PRODUCTION_GITHUB_OAUTH_ENV_DUPLICATE_KEY/u);
+  assert.match(configurator, /PUBLIC_ORIGIN=https:\/\/ai-project-os\.com/u);
+  assert.match(configurator, /PUBLIC_ORIGIN_KEY=AI_PROJECT_OS_PUBLIC_ORIGIN/u);
   assert.match(configurator, /ai-project-os-deploy\.lock/u);
   assert.match(configurator, /flock -n 9/u);
   assert.match(configurator, /PRODUCTION_GITHUB_OAUTH_DEPLOYMENT_IN_PROGRESS/u);
@@ -115,6 +117,8 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   assert.match(deployment, /python3 -c/u);
   assert.match(deployment, /production\.env/u);
   assert.match(deployment, /AI_PROJECT_OS_SECURE_COOKIES=true/u);
+  assert.match(deployment, /AI_PROJECT_OS_PUBLIC_ORIGIN=https:\/\/ai-project-os\.com/u);
+  assert.match(deployment, /DEPLOY_PUBLIC_ORIGIN_INVALID/u);
   assert.match(deployment, /validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID/u);
   assert.match(deployment, /validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET/u);
   assert.match(deployment, /DEPLOY_GITHUB_OAUTH_CLIENT_ID_INVALID/u);

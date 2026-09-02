@@ -65,7 +65,7 @@ sudo deploy/production/install-production-deploy.sh \
 整机迁移、最终停写、加密恢复与回退流程见[单节点主机迁移与恢复](production-host-migration.md)。
 
 生产 job 在任何备份、迁移或容器替换之前，通过受限 SSH key 的固定
-`configure-github-oauth` 命令把 OAuth 配置经标准输入发送给 root-owned 配置器。配置器只接受固定三行协议，校验 GitHub 凭据格式、生产 `.env` 的 owner/mode、数据库密码与安全 Cookie 基线，并在同一目录原子替换 `/etc/ai-project-os/production.env`。Client Secret 不进入命令参数、Actions 输出、部署结果或仓库；远端只返回 `PRODUCTION_GITHUB_OAUTH_CONFIG_OK`。
+`configure-github-oauth` 命令把 OAuth 配置经标准输入发送给 root-owned 配置器。配置器只接受固定三行协议，校验 GitHub 凭据格式、生产 `.env` 的 owner/mode、数据库密码与安全 Cookie 基线，把公开 origin 固定为 `https://ai-project-os.com`，并在同一目录原子替换 `/etc/ai-project-os/production.env`。Client Secret 不进入命令参数、Actions 输出、部署结果或仓库；远端只返回 `PRODUCTION_GITHUB_OAUTH_CONFIG_OK`。
 
 该命令需要服务器已经安装当前版本的受限网关和配置器。部署工具升级仍属于一次性的服务器管理操作：从受信源码重新运行 `install-production-deploy.sh`，只更新 root-owned 工具与精确 sudoers allowlist，不需要管理员手工录入 OAuth 凭据。生产 job 在 `v1.0.0` 前仍保持静态禁用；配置 Environment 不会绕过这一门禁，也不会自动改动线上实例。
 

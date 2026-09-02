@@ -301,7 +301,7 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project management</p>
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目管理</h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">这里只处理项目计划、权限、动作审批、任务运行与模型路由等管理工作。资料候选审核已归入“项目资料”。</p>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">这里只处理状态治理、权限、动作审批、任务运行与模型路由等管理工作。项目计划和资料审核分别归入对应的独立入口。</p>
           </div>
           <button type="button" onClick={() => void Promise.all([reload(), fetchOperations(), fetchRoutes()])} disabled={loading || operationsLoading || routesLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button>
         </section>
@@ -309,7 +309,7 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}
         <nav aria-label="项目管理功能" className="mb-8 grid gap-3 sm:grid-cols-3">
-          <Link href={`/projects/${projectId}/plan`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">项目计划</span><span className="mt-1 block text-xs text-slate-500">查看目标、建议与执行顺序</span></Link>
+          <Link href={`/projects/${projectId}/world`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">状态治理</span><span className="mt-1 block text-xs text-slate-500">管理事实关系、替代链与状态快照</span></Link>
           <Link href={`/projects/${projectId}/actions`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">动作与审批</span><span className="mt-1 block text-xs text-slate-500">处理外部动作及人工审批</span></Link>
           <Link href={`/projects/${projectId}/tools`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">工具权限</span><span className="mt-1 block text-xs text-slate-500">管理项目可使用的只读工具</span></Link>
         </nav>

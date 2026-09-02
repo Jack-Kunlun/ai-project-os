@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type LoginFormProps = {
@@ -102,9 +103,9 @@ export function LoginForm({
               <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder="输入密码" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[15px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
             </div>
 
-            <div className="mt-5 flex items-center justify-between gap-4 text-sm">
-              <label className="flex cursor-pointer items-center gap-3 text-slate-600">
-                <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="h-5 w-5 accent-indigo-600" />
+            <div className="mt-5 flex items-center justify-between gap-4 text-[12px]">
+              <label className="flex cursor-pointer items-center gap-2.5 text-slate-600">
+                <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="h-4 w-4 accent-indigo-600" />
                 <span>记住我</span>
               </label>
               <button type="button" onClick={() => setHelpVisible((visible) => !visible)} className="font-semibold text-indigo-600 transition hover:text-indigo-500">忘记密码？</button>
@@ -132,8 +133,12 @@ export function LoginForm({
         </section>
       </div>
 
-      <footer className="mx-auto mt-3 flex max-w-[1280px] items-center justify-center gap-5 text-xs text-slate-400 sm:gap-8">
-        <span className="inline-flex items-center gap-1.5"><SmallShieldIcon />隐私政策</span><span className="h-3 w-px bg-slate-300" /><span>◇ 服务条款</span><span className="h-3 w-px bg-slate-300" /><a href="/guide" className="transition hover:text-indigo-600">◇ 帮助文档</a>
+      <footer className="mx-auto mt-6 flex max-w-[1280px] flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-slate-400 sm:mt-7 sm:gap-x-8">
+        <Link href="/privacy" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><SmallShieldIcon />隐私政策</Link>
+        <span className="h-3 w-px bg-slate-300" />
+        <Link href="/terms" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><TermsIcon />服务条款</Link>
+        <span className="h-3 w-px bg-slate-300" />
+        <Link href="/help" className="inline-flex items-center gap-1.5 transition hover:text-indigo-600"><HelpIcon />帮助文档</Link>
       </footer>
     </main>
   );
@@ -151,3 +156,5 @@ function ShieldIcon() { return <svg aria-hidden="true" width="25" height="25" vi
 function PeopleIcon() { return <svg aria-hidden="true" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.2" /><path d="M3.8 19v-2a4.4 4.4 0 0 1 4.4-4.4h1.6a4.4 4.4 0 0 1 4.4 4.4v2M15.5 13.5a3.8 3.8 0 0 1 4.7 3.7V19" /></svg>; }
 function BoltIcon() { return <svg aria-hidden="true" width="25" height="25" viewBox="0 0 24 24" fill="currentColor"><path d="M13.3 2 5.7 13h5L9.9 22 18.4 9.8h-5.2z" /></svg>; }
 function SmallShieldIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M12 3 19 6v5c0 4.6-2.8 7.7-7 10-4.2-2.3-7-5.4-7-10V6z" /><path d="m9 12 2 2 4-4" /></svg>; }
+function TermsIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M6 3.5h9l3 3V20H6z" /><path d="M15 3.5V7h3M9 11h6M9 14.5h6M9 18h4" /></svg>; }
+function HelpIcon() { return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><circle cx="12" cy="12" r="9" /><path d="M9.7 9.3a2.5 2.5 0 1 1 3.7 2.2c-.9.45-1.4 1-1.4 2" /><path d="M12 17.5h.01" /></svg>; }

@@ -3,12 +3,15 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("project overview and materials use separate routes with a compact navigation", async () => {
-  const [page, overview, materialsPage, materials, header] = await Promise.all([
+  const [page, overview, materialsPage, materials, header, dashboard, world, governance] = await Promise.all([
     readFile("src/app/projects/[projectId]/page.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-overview-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/materials/page.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-client.tsx", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
+    readFile("src/app/dashboard/dashboard-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/world/project-world-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/governance/project-governance-client.tsx", "utf8"),
   ]);
 
   assert.match(page, /ProjectOverviewClient/u);
@@ -17,8 +20,18 @@ test("project overview and materials use separate routes with a compact navigati
   assert.doesNotMatch(header, /href=\{`\/projects\/\$\{projectId\}#project-materials`\}/u);
   assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/governance`\}/u);
   assert.match(header, />\s*项目概览\s*</u);
+  assert.match(header, />\s*项目计划\s*</u);
+  assert.match(header, />\s*项目资料\s*</u);
+  assert.match(header, />\s*AI 工作台\s*</u);
   assert.match(header, />\s*项目自动化\s*</u);
   assert.match(header, />\s*项目管理\s*</u);
+  const orderedTabs = ["项目概览", "项目计划", "项目资料", "AI 工作台", "项目自动化", "项目管理"];
+  const tabPositions = orderedTabs.map((label) => header.indexOf(label));
+  assert.ok(tabPositions.every((position) => position >= 0));
+  assert.deepEqual([...tabPositions].sort((left, right) => left - right), tabPositions);
+  assert.match(header, /const overviewSections[^\n]*\["overview"\]/u);
+  assert.match(header, /const managementSections[^\n]*\["world", "tools", "actions", "governance"\]/u);
+  assert.match(header, /projectSection === "plan"/u);
   assert.match(header, /managementSections/u);
   assert.doesNotMatch(header, /<details|<summary|projectGroups/u);
   assert.doesNotMatch(header, /key: "governance",\s*label: "治理"/u);
@@ -27,13 +40,40 @@ test("project overview and materials use separate routes with a compact navigati
   assert.match(overview, /项目关键指标/u);
   assert.match(overview, /推荐下一步/u);
   assert.match(overview, /项目当前状态/u);
+  assert.match(overview, /\/api\/projects\/\$\{projectId\}\/world/u);
+  assert.match(overview, /id="current-state"/u);
+  assert.match(overview, /项目工作区/u);
+  assert.match(overview, /高级状态治理/u);
   assert.doesNotMatch(overview, /ProjectMaterialIntake/u);
+
+  assert.match(dashboard, /\/projects\/\$\{entry\.project\.id\}#current-state/u);
+  assert.doesNotMatch(dashboard, /href=\{`\/projects\/\$\{entry\.project\.id\}\/world`\}/u);
+  assert.match(world, /Advanced state governance/u);
+  assert.match(world, /返回项目管理/u);
+  assert.match(governance, />状态治理</u);
+  assert.match(governance, /\/world/u);
 
   assert.match(materials, /projectSection="materials"/u);
   assert.match(materials, /ProjectMaterialIntake/u);
   assert.match(materials, /ProjectMaterialReviewQueue/u);
   assert.doesNotMatch(materials, /SnapshotPanel|AiCapabilityGuide|PlaceholderCard/u);
   assert.doesNotMatch(materials, /返回项目概览|打开 AI 工作台/u);
+});
+
+test("grounded extraction uses bounded scrolling and explicit batch operations", async () => {
+  const memory = await readFile("src/app/projects/[projectId]/memory/project-memory-client.tsx", "utf8");
+
+  assert.match(memory, /MAX_BATCH_SELECTION = 10/u);
+  assert.match(memory, /选中前 10 条/u);
+  assert.match(memory, /反选/u);
+  assert.match(memory, /批量确认/u);
+  assert.match(memory, /批量驳回/u);
+  assert.match(memory, /lg:h-\[620px\]/u);
+  assert.match(memory, /aria-label="可选项目资料"/u);
+  assert.match(memory, /aria-label="待审核候选列表"/u);
+  assert.match(memory, /overflow-y-auto/u);
+  assert.match(memory, /expectedItemUpdatedAt: candidate\.projectItem\.updatedAt/u);
+  assert.match(memory, /for \(const candidate of batch\)/u);
 });
 
 test("project material operations return to their immediate parent", async () => {

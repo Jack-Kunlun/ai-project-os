@@ -267,9 +267,55 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
 
 function Metric({ label, value }: { label: string; value: string | number }) { return <div className="min-w-20 rounded-xl bg-slate-50 px-3 py-3 text-center"><p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div>; }
 
+const MAX_BATCH_SELECTION = 10;
+
 function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId: string; sources: Source[]; candidates: Candidate[]; onReload: () => Promise<unknown> }) {
-  const [selected, setSelected] = useState<string[]>([]); const [acknowledged, setAcknowledged] = useState(false); const [pending, setPending] = useState(false); const [reviewingId, setReviewingId] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null); const pendingCandidates = candidates.filter((candidate) => candidate.reviewStatus === "candidate");
-  function toggle(sourceId: string) { setSelected((current) => current.includes(sourceId) ? current.filter((id) => id !== sourceId) : current.length < 10 ? [...current, sourceId] : current); }
+  const [selected, setSelected] = useState<string[]>([]);
+  const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [batchReviewAction, setBatchReviewAction] = useState<"accept" | "dismiss" | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const pendingCandidates = candidates.filter((candidate) => candidate.reviewStatus === "candidate");
+  const pendingCandidateIds = new Set(pendingCandidates.map((candidate) => candidate.id));
+  const activeSelectedCandidates = selectedCandidates.filter((id) => pendingCandidateIds.has(id));
+
+  function toggle(sourceId: string) {
+    setSelected((current) => current.includes(sourceId)
+      ? current.filter((id) => id !== sourceId)
+      : current.length < MAX_BATCH_SELECTION ? [...current, sourceId] : current);
+  }
+
+  function selectFirstSources() {
+    setSelected(sources.slice(0, MAX_BATCH_SELECTION).map((source) => source.id));
+  }
+
+  function invertSources() {
+    setSelected((current) => {
+      const selectedSet = new Set(current);
+      return sources.filter((source) => !selectedSet.has(source.id)).slice(0, MAX_BATCH_SELECTION).map((source) => source.id);
+    });
+  }
+
+  function toggleCandidate(candidateId: string) {
+    setSelectedCandidates((current) => {
+      const available = current.filter((id) => pendingCandidateIds.has(id));
+      return available.includes(candidateId)
+        ? available.filter((id) => id !== candidateId)
+        : available.length < MAX_BATCH_SELECTION ? [...available, candidateId] : available;
+    });
+  }
+
+  function selectFirstCandidates() {
+    setSelectedCandidates(pendingCandidates.slice(0, MAX_BATCH_SELECTION).map((candidate) => candidate.id));
+  }
+
+  function invertCandidates() {
+    const selectedSet = new Set(activeSelectedCandidates);
+    setSelectedCandidates(pendingCandidates.filter((candidate) => !selectedSet.has(candidate.id)).slice(0, MAX_BATCH_SELECTION).map((candidate) => candidate.id));
+  }
+
   async function extract() {
     setPending(true);
     setMessage(null);
@@ -316,17 +362,22 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       setPending(false);
     }
   }
+
+  async function submitReview(candidate: Candidate, action: "accept" | "dismiss") {
+    const response = await fetch(`/api/projects/${projectId}/memory/candidates/${candidate.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action, expectedItemUpdatedAt: candidate.projectItem.updatedAt }),
+    });
+    if (!response.ok) throw new Error(await readError(response, "候选审核失败"));
+  }
+
   async function review(candidate: Candidate, action: "accept" | "dismiss") {
-    if (reviewingId !== null) return;
+    if (reviewingId !== null || batchReviewAction !== null) return;
     setReviewingId(candidate.id);
     setMessage(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/memory/candidates/${candidate.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, expectedItemUpdatedAt: candidate.projectItem.updatedAt }),
-      });
-      if (!response.ok) throw new Error(await readError(response, "候选审核失败"));
+      await submitReview(candidate, action);
       await onReload();
       setMessage(action === "accept" ? "已确认 1 条记忆，候选列表已局部更新。" : "已驳回 1 条候选，列表已局部更新。");
     } catch (reviewError) {
@@ -335,7 +386,108 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       setReviewingId(null);
     }
   }
-  return <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Grounded extraction</p><h2 className="mt-2 text-2xl font-semibold">自动抽取与人工审核</h2><p className="mt-2 text-sm leading-6 text-slate-500">每个候选都必须带有原文中的精确连续摘录。系统会逐条校验：有效候选继续进入人工审核，无法回溯的条目单独跳过，不再拖垮整批结果。</p></div><div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-7 lg:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]"><div className="min-w-0"><h3 className="text-sm font-semibold">选择资料（最多 10 条）</h3><div className="mt-3 max-h-72 min-w-0 max-w-full space-y-2 overflow-auto">{sources.length === 0 ? <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">还没有项目资料。</p> : sources.map((source) => <label key={source.id} className="flex min-w-0 max-w-full cursor-pointer items-start gap-3 rounded-xl border border-slate-200 p-3 text-xs"><input type="checkbox" checked={selected.includes(source.id)} onChange={() => toggle(source.id)} className="mt-0.5 shrink-0" /><span className="min-w-0 max-w-full"><span className="block font-semibold text-slate-700">{source.kind} · {source.originScope === "project" ? "项目资料" : "仓库资料"}</span><span className="mt-1 block text-slate-400 [overflow-wrap:anywhere]">{source.externalRef ?? source.contentHash}</span></span></label>)}</div><ConsentCheck checked={acknowledged} setChecked={setAcknowledged} /><button type="button" onClick={() => void extract()} disabled={pending || !acknowledged || selected.length === 0} className="mt-4 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "逐条分析并校验原文中…" : `抽取 ${selected.length} 条资料`}</button></div><div className="min-w-0"><div className="flex min-w-0 items-center justify-between gap-2"><h3 className="text-sm font-semibold">待审核候选</h3><span className="shrink-0 text-xs text-slate-400">{pendingCandidates.length} 条</span></div>{pendingCandidates.length === 0 ? <p className="mt-3 min-w-0 max-w-full rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">暂无待审核候选。</p> : <div className="mt-3 min-w-0 max-w-full space-y-3">{pendingCandidates.map((candidate) => <article key={candidate.id} className="min-w-0 max-w-full rounded-2xl border border-slate-200 p-5"><div className="flex min-w-0 max-w-full flex-wrap items-center gap-2"><span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">{candidate.projectItem.type}</span><span className="min-w-0 text-[11px] text-slate-400 [overflow-wrap:anywhere]">{candidate.providerConnection.name} · {candidate.modelId}</span></div><h4 className="mt-3 [overflow-wrap:anywhere] font-semibold">{candidate.projectItem.title}</h4><p className="mt-2 text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">{candidate.projectItem.content}</p><blockquote className="mt-4 border-l-2 border-indigo-200 pl-3 text-xs leading-5 text-slate-500 [overflow-wrap:anywhere]">{candidate.projectItem.sourceExcerpt}</blockquote><div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void review(candidate, "accept")} disabled={reviewingId !== null} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{reviewingId === candidate.id ? "确认中…" : "确认记忆"}</button><button type="button" onClick={() => void review(candidate, "dismiss")} disabled={reviewingId !== null} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{reviewingId === candidate.id ? "处理中…" : "驳回"}</button></div></article>)}</div>}</div></div>{message ? <p role="status" className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}</section>;
+
+  async function batchReview(action: "accept" | "dismiss") {
+    if (batchReviewAction !== null || reviewingId !== null || activeSelectedCandidates.length === 0) return;
+    const selectedSet = new Set(activeSelectedCandidates);
+    const batch = pendingCandidates.filter((candidate) => selectedSet.has(candidate.id)).slice(0, MAX_BATCH_SELECTION);
+    if (batch.length === 0) return;
+    setBatchReviewAction(action);
+    setMessage(null);
+    const succeeded: string[] = [];
+    const failures: string[] = [];
+    try {
+      for (const candidate of batch) {
+        try {
+          await submitReview(candidate, action);
+          succeeded.push(candidate.id);
+        } catch (reviewError) {
+          failures.push(reviewError instanceof Error ? reviewError.message : "候选审核失败");
+        }
+      }
+      await onReload();
+      const succeededSet = new Set(succeeded);
+      setSelectedCandidates((current) => current.filter((id) => !succeededSet.has(id)));
+      const actionLabel = action === "accept" ? "确认" : "驳回";
+      setMessage(failures.length === 0
+        ? `已批量${actionLabel} ${succeeded.length} 条候选，列表已局部更新。`
+        : `已批量${actionLabel} ${succeeded.length} 条；${failures.length} 条未处理：${failures[0]}`);
+    } catch (reviewError) {
+      const reason = reviewError instanceof Error ? reviewError.message : "候选列表刷新失败";
+      setMessage(`已处理 ${succeeded.length} 条，但候选列表刷新失败：${reason}`);
+    } finally {
+      setBatchReviewAction(null);
+    }
+  }
+
+  const reviewBusy = reviewingId !== null || batchReviewAction !== null;
+
+  return (
+    <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+      <div className="border-b border-slate-100 pb-6">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Grounded extraction</p>
+        <h2 className="mt-2 text-2xl font-semibold">自动抽取与人工审核</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-500">每个候选都必须带有原文中的精确连续摘录。系统会逐条校验：有效候选继续进入人工审核，无法回溯的条目单独跳过，不再拖垮整批结果。</p>
+      </div>
+
+      <div className="mt-6 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-7 lg:h-[620px] lg:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)]">
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold">选择资料（最多 10 条）</h3>
+            <span className="text-xs text-slate-400">已选 {selected.length} 条</span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={selectFirstSources} disabled={pending || sources.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40">选中前 10 条</button>
+            <button type="button" onClick={invertSources} disabled={pending || sources.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40">反选</button>
+          </div>
+          <div className="mt-3 min-h-72 min-w-0 max-w-full flex-1 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-2 pr-1 lg:min-h-0" aria-label="可选项目资料">
+            {sources.length === 0 ? <p className="flex h-full min-h-64 items-center justify-center rounded-xl p-4 text-sm text-slate-500">还没有项目资料。</p> : sources.map((source) => (
+              <label key={source.id} className={`flex min-w-0 max-w-full cursor-pointer items-start gap-3 rounded-xl border bg-white p-3 text-xs transition ${selected.includes(source.id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-slate-200 hover:border-indigo-200"}`}>
+                <input type="checkbox" checked={selected.includes(source.id)} onChange={() => toggle(source.id)} disabled={pending} className="mt-0.5 shrink-0" />
+                <span className="min-w-0 max-w-full"><span className="block font-semibold text-slate-700">{source.kind} · {source.originScope === "project" ? "项目资料" : "仓库资料"}</span><span className="mt-1 block text-slate-400 [overflow-wrap:anywhere]">{source.externalRef ?? source.contentHash}</span></span>
+              </label>
+            ))}
+          </div>
+          <ConsentCheck checked={acknowledged} setChecked={setAcknowledged} />
+          <button type="button" onClick={() => void extract()} disabled={pending || !acknowledged || selected.length === 0} className="mt-4 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "逐条分析并校验原文中…" : `抽取 ${selected.length} 条资料`}</button>
+        </div>
+
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold">待审核候选</h3>
+            <span className="shrink-0 text-xs text-slate-400">{pendingCandidates.length} 条 · 已选 {activeSelectedCandidates.length} 条</span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={selectFirstCandidates} disabled={reviewBusy || pendingCandidates.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40">选中前 10 条</button>
+            <button type="button" onClick={invertCandidates} disabled={reviewBusy || pendingCandidates.length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 disabled:opacity-40">反选</button>
+            <button type="button" onClick={() => void batchReview("accept")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{batchReviewAction === "accept" ? "批量确认中…" : "批量确认"}</button>
+            <button type="button" onClick={() => void batchReview("dismiss")} disabled={reviewBusy || activeSelectedCandidates.length === 0} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-40">{batchReviewAction === "dismiss" ? "批量驳回中…" : "批量驳回"}</button>
+          </div>
+          <div className="mt-3 min-h-72 min-w-0 max-w-full flex-1 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-3 pr-2 lg:min-h-0" aria-label="待审核候选列表">
+            {pendingCandidates.length === 0 ? (
+              <p className="flex h-full min-h-64 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">暂无待审核候选。</p>
+            ) : (
+              <div className="space-y-3">{pendingCandidates.map((candidate) => (
+                <article key={candidate.id} className={`min-w-0 max-w-full rounded-2xl border bg-white p-5 transition ${activeSelectedCandidates.includes(candidate.id) ? "border-indigo-300 ring-1 ring-indigo-100" : "border-slate-200"}`}>
+                  <label className="flex min-w-0 cursor-pointer items-start gap-3">
+                    <input type="checkbox" checked={activeSelectedCandidates.includes(candidate.id)} onChange={() => toggleCandidate(candidate.id)} disabled={reviewBusy} className="mt-1 shrink-0" aria-label={`选择候选：${candidate.projectItem.title}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 max-w-full flex-wrap items-center gap-2"><span className="shrink-0 rounded-full bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">{candidate.projectItem.type}</span><span className="min-w-0 text-[11px] text-slate-400 [overflow-wrap:anywhere]">{candidate.providerConnection.name} · {candidate.modelId}</span></span>
+                      <span className="mt-3 block [overflow-wrap:anywhere] font-semibold text-slate-900">{candidate.projectItem.title}</span>
+                    </span>
+                  </label>
+                  <p className="mt-2 text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">{candidate.projectItem.content}</p>
+                  <blockquote className="mt-4 border-l-2 border-indigo-200 pl-3 text-xs leading-5 text-slate-500 [overflow-wrap:anywhere]">{candidate.projectItem.sourceExcerpt}</blockquote>
+                  <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => void review(candidate, "accept")} disabled={reviewBusy} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{reviewingId === candidate.id ? "确认中…" : "确认记忆"}</button><button type="button" onClick={() => void review(candidate, "dismiss")} disabled={reviewBusy} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{reviewingId === candidate.id ? "处理中…" : "驳回"}</button></div>
+                </article>
+              ))}</div>
+            )}
+          </div>
+        </div>
+      </div>
+      {message ? <p role="status" className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}
+    </section>
+  );
 }
 
 function QueryPanel({ projectId, indexReady, answers, onReload }: { projectId: string; indexReady: boolean; answers: Answer[]; onReload: () => Promise<unknown> }) {

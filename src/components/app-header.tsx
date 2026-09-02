@@ -14,9 +14,9 @@ const primaryItems = [
 ] as const;
 
 const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources", "repositories"];
-const overviewSections: readonly ProjectSection[] = ["overview", "world"];
+const overviewSections: readonly ProjectSection[] = ["overview"];
 const intelligenceSections: readonly ProjectSection[] = ["control", "memory", "memoryQuality", "intelligence"];
-const managementSections: readonly ProjectSection[] = ["plan", "tools", "actions", "governance"];
+const managementSections: readonly ProjectSection[] = ["world", "tools", "actions", "governance"];
 
 export function AppHeader({
   username,
@@ -107,6 +107,14 @@ export function AppHeader({
               >
                 <NavIcon name="home" />
                 项目概览
+              </Link>
+              <Link
+                href={`/projects/${projectId}/plan`}
+                aria-current={projectSection === "plan" ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "plan" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="book" />
+                项目计划
               </Link>
               <Link
                 href={`/projects/${projectId}/materials`}

@@ -232,13 +232,14 @@ export function ProjectWorldClient({ username, projectId }: { username: string; 
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="world" />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
+        <div className="mb-5"><Link href={`/projects/${projectId}/governance`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700">← 返回项目管理</Link></div>
         <section className="relative overflow-hidden rounded-[2rem] bg-slate-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10">
           <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-violet-500/25 blur-3xl" />
           <div className="relative flex flex-wrap items-end justify-between gap-7">
             <div className="max-w-3xl">
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Temporal project world model</p>
-              <h1 className="mt-3 text-3xl font-semibold tracking-[-0.035em] sm:text-5xl">{world?.project.name ?? "项目状态"}</h1>
-              <p className="mt-4 text-sm leading-7 text-slate-300">把已确认事实、证据版本、人工关系、冲突和计划健康度合成为可追溯的当前状态。系统不会自动确认事实，也不会自动执行代码、Git、Shell 或部署动作。</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Advanced state governance</p>
+              <h1 className="mt-3 text-3xl font-semibold tracking-[-0.035em] sm:text-5xl">{world?.project.name ? `${world.project.name} · 状态治理` : "项目状态治理"}</h1>
+              <p className="mt-4 text-sm leading-7 text-slate-300">这里仅处理事实关系、替代链和不可变状态快照等高级管理操作；日常状态、风险与计划信号已经汇总到项目概览。</p>
             </div>
             <div className="min-w-64 rounded-2xl border border-white/10 bg-white/[0.06] p-5 backdrop-blur">
               <div className="flex items-center gap-3"><span className={`h-3 w-3 rounded-full ${meta.glow}`} /><span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${meta.tone}`}>{meta.label}</span></div>

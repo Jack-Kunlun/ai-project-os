@@ -22,12 +22,30 @@ type GovernanceSummary = {
   attentionTotal: number;
 };
 
+type WorldStatus = "on_track" | "needs_attention" | "at_risk" | "insufficient_data";
+type WorldSummary = {
+  status: WorldStatus;
+  counts: {
+    activeFacts: number;
+    decisions: number;
+    progress: number;
+    issues: number;
+    risks: number;
+    activeRelations: number;
+    activeConflicts: number;
+    openQualityIssues: number;
+    linkedWorkItems: number;
+  };
+  planHealth: { status: string; counts: { overdue: number; blocked: number; dueSoon: number; unassigned: number } };
+};
+
 type OverviewData = {
   project: Project;
   itemCounts: { candidate: number; confirmed: number; dismissed: number; superseded: number };
   snapshot: SnapshotRecord | null;
   snapshotStale: boolean;
   governance: GovernanceSummary;
+  world: WorldSummary;
 };
 
 async function readJson<T>(response: Response, fallback: string): Promise<T> {
@@ -39,6 +57,13 @@ async function readJson<T>(response: Response, fallback: string): Promise<T> {
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
+
+const worldStatusMeta: Record<WorldStatus, { label: string; detail: string; tone: string }> = {
+  on_track: { label: "运行正常", detail: "当前事实、关系与计划没有出现阻断信号。", tone: "bg-emerald-100 text-emerald-700" },
+  needs_attention: { label: "需要关注", detail: "存在需要核对的风险、关系或项目计划信号。", tone: "bg-amber-100 text-amber-800" },
+  at_risk: { label: "存在风险", detail: "存在问题、事实冲突或受阻计划，需要优先处理。", tone: "bg-rose-100 text-rose-700" },
+  insufficient_data: { label: "资料不足", detail: "当前还没有足够的已确认事实来判断项目状态。", tone: "bg-slate-100 text-slate-600" },
+};
 
 export function ProjectOverviewClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
@@ -52,11 +77,12 @@ export function ProjectOverviewClient({ username }: { username: string }) {
     if (showLoading) setLoading(true);
     setError(null);
     try {
-      const [projectPayload, itemsPayload, snapshotPayload, governancePayload] = await Promise.all([
+      const [projectPayload, itemsPayload, snapshotPayload, governancePayload, worldPayload] = await Promise.all([
         readJson<{ project: Project }>(await fetch(`/api/projects/${projectId}`, { cache: "no-store" }), "项目加载失败"),
         readJson<{ counts: OverviewData["itemCounts"] }>(await fetch(`/api/projects/${projectId}/items?page=1&pageSize=1`, { cache: "no-store" }), "项目事实加载失败"),
         readJson<{ snapshot: SnapshotRecord | null; stale: boolean }>(await fetch(`/api/projects/${projectId}/snapshots`, { cache: "no-store" }), "项目快照加载失败"),
         readJson<{ summary: GovernanceSummary }>(await fetch(`/api/projects/${projectId}/governance`, { cache: "no-store" }), "项目提醒加载失败"),
+        readJson<{ state: WorldSummary }>(await fetch(`/api/projects/${projectId}/world`, { cache: "no-store" }), "项目状态加载失败"),
       ]);
       setData({
         project: projectPayload.project,
@@ -64,6 +90,7 @@ export function ProjectOverviewClient({ username }: { username: string }) {
         snapshot: snapshotPayload.snapshot,
         snapshotStale: snapshotPayload.stale,
         governance: governancePayload.summary,
+        world: worldPayload.state,
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "项目概览加载失败");
@@ -84,10 +111,9 @@ export function ProjectOverviewClient({ username }: { username: string }) {
     const snapshotStale = data.snapshotStale;
     const githubIssues = data.governance.github.partial + data.governance.github.rateLimited + data.governance.github.unknown;
     const taskIssues = data.governance.jobs.failed + data.governance.jobs.reconciliationRequired;
-    const focus = data.snapshot?.payload.counts.focus ?? 0;
     const pendingContent = Math.max(data.governance.pendingReviews.total, candidates);
     const attentionTotal = data.governance.attentionTotal - data.governance.pendingReviews.total + pendingContent;
-    return { confirmed, candidates, snapshotStale, githubIssues, taskIssues, focus, pendingContent, attentionTotal };
+    return { confirmed, candidates, snapshotStale, githubIssues, taskIssues, pendingContent, attentionTotal };
   }, [data]);
 
   async function generateSnapshot() {
@@ -161,15 +187,15 @@ export function ProjectOverviewClient({ username }: { username: string }) {
             </section>
 
             <section className="mt-6 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-              <article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
+              <article id="current-state" className="scroll-mt-36 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Current state</p><h2 className="mt-2 text-xl font-semibold">项目当前状态</h2></div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${data.snapshot === null ? "bg-slate-100 text-slate-600" : summary.focus > 0 ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-700"}`}>{data.snapshot === null ? "尚无快照" : summary.focus > 0 ? "需要关注" : "状态稳定"}</span>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${worldStatusMeta[data.world.status].tone}`}>{worldStatusMeta[data.world.status].label}</span>
                 </div>
-                {data.snapshot ? (
-                  <><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><StateCount label="决策" value={data.snapshot.payload.counts.decisions} /><StateCount label="进展" value={data.snapshot.payload.counts.progress} /><StateCount label="问题" value={data.snapshot.payload.counts.issues} /><StateCount label="风险" value={data.snapshot.payload.counts.risks} /></div><p className="mt-5 text-xs text-slate-400">更新于 {formatDate(data.snapshot.generatedAt)}{summary.snapshotStale ? " · 已有新确认内容，建议更新" : " · 与当前确认内容一致"}</p></>
-                ) : <p className="mt-6 rounded-2xl bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">确认项目事实后，可生成第一份状态快照。</p>}
-                <div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => void generateSnapshot()} disabled={snapshotPending || summary.confirmed === 0 || data.project.archivedAt !== null} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{snapshotPending ? "更新中…" : data.snapshot ? "更新状态快照" : "生成状态快照"}</button><Link href={`/projects/${projectId}/world`} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700">查看完整状态</Link></div>
+                <p className="mt-3 text-sm leading-6 text-slate-500">{worldStatusMeta[data.world.status].detail}</p>
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"><StateCount label="当前事实" value={data.world.counts.activeFacts} /><StateCount label="事实关系" value={data.world.counts.activeRelations} /><StateCount label="问题与风险" value={data.world.counts.issues + data.world.counts.risks} /><StateCount label="逾期与受阻" value={data.world.planHealth.counts.overdue + data.world.planHealth.counts.blocked} /></div>
+                <div className="mt-5 rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">{data.snapshot ? <>最近状态快照：{formatDate(data.snapshot.generatedAt)}{summary.snapshotStale ? " · 已有新确认内容，建议更新" : " · 与当前确认内容一致"}</> : "确认项目事实后，可生成第一份不可变状态快照。"}</div>
+                <div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => void generateSnapshot()} disabled={snapshotPending || summary.confirmed === 0 || data.project.archivedAt !== null} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{snapshotPending ? "更新中…" : data.snapshot ? "更新状态快照" : "生成状态快照"}</button><Link href={`/projects/${projectId}/world`} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700">高级状态治理</Link></div>
               </article>
 
               <article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
@@ -181,6 +207,17 @@ export function ProjectOverviewClient({ username }: { username: string }) {
                 </div>
                 <Link href={`/projects/${projectId}/governance`} className="mt-5 inline-flex text-xs font-semibold text-indigo-600">进入项目管理 →</Link>
               </article>
+            </section>
+
+            <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-labelledby="workspace-map-title">
+              <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Project workspace</p><h2 id="workspace-map-title" className="mt-2 text-xl font-semibold">项目工作区</h2><p className="mt-2 text-sm leading-6 text-slate-500">五个工作入口各自承载明确职责；概览只汇总状态、信号和下一步。</p></div>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                <WorkspaceLink href={`/projects/${projectId}/plan`} title="项目计划" detail={`逾期 ${data.world.planHealth.counts.overdue} · 受阻 ${data.world.planHealth.counts.blocked}`} />
+                <WorkspaceLink href={`/projects/${projectId}/materials`} title="项目资料" detail={`${data.project._count.sources} 个来源 · ${data.project._count.assets} 个文件`} />
+                <WorkspaceLink href={`/projects/${projectId}/intelligence`} title="AI 工作台" detail={data.governance.index.compatible ? `索引可用 · ${data.governance.index.activeRecordCount} 条` : "需要检查路由或索引"} />
+                <WorkspaceLink href={`/projects/${projectId}/automations`} title="项目自动化" detail={summary.taskIssues > 0 ? `${summary.taskIssues} 个任务异常待处理` : "当前没有任务异常"} />
+                <WorkspaceLink href={`/projects/${projectId}/governance`} title="项目管理" detail={summary.attentionTotal > 0 ? `${summary.attentionTotal} 项需要收口` : "当前管理状态正常"} />
+              </div>
             </section>
           </>
         )}
@@ -200,4 +237,8 @@ function StateCount({ label, value }: { label: string; value: number }) {
 
 function AttentionRow({ label, value, href }: { label: string; value: number; href: string }) {
   return <Link href={href} className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0"><span className="text-sm font-medium text-slate-700">{label}</span><span className={`rounded-full px-3 py-1 text-xs font-semibold ${value > 0 ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{value > 0 ? value : "正常"}</span></Link>;
+}
+
+function WorkspaceLink({ href, title, detail }: { href: string; title: string; detail: string }) {
+  return <Link href={href} className="group rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50"><h3 className="text-sm font-semibold text-slate-800 group-hover:text-indigo-700">{title}</h3><p className="mt-2 text-xs leading-5 text-slate-500">{detail}</p><span className="mt-4 block text-xs font-semibold text-indigo-600">打开 →</span></Link>;
 }

@@ -223,13 +223,13 @@ export default async function GuidePage({
           </GuideSection>
 
           <GuideSection id="world" eyebrow="Temporal project world model" title="把已确认事实治理为当前项目状态">
-            <Step number="1" title="先读确定性状态">进入项目“项目状态”。系统只用当前有效、已确认事实，结合开放冲突和项目计划健康度计算“运行正常”“需要关注”“存在风险”或“资料不足”；这个状态不是模型猜测。</Step>
+            <Step number="1" title="先读确定性状态">在“项目概览”查看当前状态。系统只用当前有效、已确认事实，结合开放冲突和项目计划健康度计算“运行正常”“需要关注”“存在风险”或“资料不足”；这个状态不是模型猜测。</Step>
             <Step number="2" title="核对事实与证据版本">每张事实卡都显示类型、来源、当前修订、证据清单指纹和关联工作项。尚未生效、已过期、来源退役或被替代的事实保留在历史区，不参与当前状态。</Step>
-            <Step number="3" title="人工建立有类型的关系">Editor 或 Owner 可建立支持、冲突、依赖、阻断、因果、解决或相关关系。关系固定双方当前修订；端点事实再发生变化时，旧关系自动显示为“版本已变化”，不会静默跟随新内容。</Step>
+            <Step number="3" title="人工建立有类型的关系">从“项目管理”进入高级状态治理后，Editor 或 Owner 可建立支持、冲突、依赖、阻断、因果、解决或相关关系。关系固定双方当前修订；端点事实再发生变化时，旧关系自动显示为“版本已变化”，不会静默跟随新内容。</Step>
             <Step number="4" title="用新事实替代旧事实">选择两条同类型当前事实并填写理由。确认后旧事实转为只读历史，新事实记录前任；替代链不能重复、分叉或形成循环，也不能撤回成旧事实。</Step>
             <Step number="5" title="固化不可变状态快照">点击“固化当前状态”保存当时的状态、事实修订、关系、质量和计划输入指纹。输入没有变化时不会重复创建快照；快照和治理审计只追加、不覆盖。</Step>
             <Callout tone="amber" title="系统不会自动建立世界模型事实">AI 抽取仍只产生候选；事实确认、关系建立、替代和快照固化都需要有权限的用户在页面操作。智能简报与只读智能体会读取同一确定性状态，但不能更改它，也不能据此执行代码、Git、Shell、MCP 或部署动作。</Callout>
-            <div className="mt-5"><Link href="/projects" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">选择项目并打开项目状态</Link></div>
+            <div className="mt-5"><Link href="/projects" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-500">选择项目并打开项目概览</Link></div>
           </GuideSection>
 
           <GuideSection id="automation" eyebrow="Persistent automation" title="让来源维护按计划运行">
@@ -259,7 +259,7 @@ export default async function GuidePage({
 
           <GuideSection id="agent" eyebrow="Project intelligence" title="生成简报并运行只读智能体">
             <Step number="1" title="先检查就绪状态">页面必须同时显示生成模型路由、向量模型路由和兼容记忆索引已经就绪。缺少任意一项时，运行按钮保持禁用。</Step>
-            <Step number="2" title="生成项目当前状态">勾选当次传输确认后生成简报。简报使用“项目状态”的确定性状态、当前事实、关系与输入指纹，结果按进展、决策、问题、风险、关注事项和待确认问题组织，并保存证据快照；模型不能覆盖确定性状态。</Step>
+            <Step number="2" title="生成项目当前状态">勾选当次传输确认后生成简报。简报使用项目概览中的确定性状态、当前事实、关系与输入指纹，结果按进展、决策、问题、风险、关注事项和待确认问题组织，并保存证据快照；模型不能覆盖确定性状态。</Step>
             <Step number="3" title="提出一个可调查的问题">适合询问“当前最大风险是什么”“哪些决策仍缺少证据”“最近完成了什么”。问题越具体，检索计划越有效。</Step>
             <Step number="4" title="核对引用和轨迹">查看回答引用的证据、只读工具执行顺序、建议和不确定性。证据不足时应补资料，而不是把推测直接当作事实。</Step>
             <Callout tone="slate" title="智能体不会做什么">当前智能体没有 Shell、任意文件系统、代码修改、Git 写入、MCP 工具调用或部署权限。它也不能自行创建或批准“动作与审批”中的动作。自动化可以提醒你生成简报，但每次模型外发仍需由你在页面确认。</Callout>

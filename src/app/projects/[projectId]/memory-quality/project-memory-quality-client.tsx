@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ProjectIntelligenceParentLink } from "@/components/project-parent-link";
 
 type QualityKind = "duplicate" | "conflict" | "stale" | "missingEvidence" | "lowConfidence";
 type MemoryItem = {
@@ -91,6 +92,7 @@ export function ProjectMemoryQualityClient({ username, projectId }: { username: 
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="memoryQuality" />
       <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
+        <div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div>
         <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">
           <div className="flex flex-wrap items-end justify-between gap-6">
             <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Memory governance</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">记忆质量与生命周期</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">用确定性规则识别重复、冲突、过期、证据不足和低置信度记忆。检查本身不会调用模型，也不会把项目内容发送到外部服务。</p></div>

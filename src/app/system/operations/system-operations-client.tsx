@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ParentPageLink } from "@/components/parent-page-link";
 import type {
   BackupOperationsSnapshot,
   BackupRunState,
@@ -121,6 +122,7 @@ export function SystemOperationsClient({
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
       <AppHeader username={username} active="profile" />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
+        <div className="mb-5"><ParentPageLink href="/profile" label="返回个人中心" /></div>
         <section className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10">
           <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-indigo-500/25 blur-3xl" />
           <div className="relative flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between">

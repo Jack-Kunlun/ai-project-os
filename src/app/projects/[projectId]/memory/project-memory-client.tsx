@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ProjectIntelligenceParentLink } from "@/components/project-parent-link";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 
 type Source = {
@@ -141,7 +142,7 @@ export function ProjectMemoryClient({ username }: { username: string }) {
 
   useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
 
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" /><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI memory workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">从可追溯原文自动抽取候选，建立跨人工资料与多仓库代码的向量记忆，并通过语义检索和引用式问答找到项目答案。</p></section>{error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading || !index ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : <><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} indexReady={index.activeIndex !== null && index.compatible} answers={answers} onReload={reload} /></>}</div></main>;
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" /><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI memory workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">从可追溯原文自动抽取候选，建立跨人工资料与多仓库代码的向量记忆，并通过语义检索和引用式问答找到项目答案。</p></section>{error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading || !index ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : <><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} indexReady={index.activeIndex !== null && index.compatible} answers={answers} onReload={reload} /></>}</div></main>;
 }
 
 function ConsentCheck({ checked, setChecked }: { checked: boolean; setChecked: (value: boolean) => void }) {

@@ -252,7 +252,7 @@ export default async function GuidePage({
           <GuideSection id="governance" eyebrow="Governance & review" title="审核事实、收口异常并管理项目数据">
             <Step number="1" title="逐条审核候选">进入项目“治理与审核”，同时检查网页抽取候选和已验证运行候选。页面不提供批量接受，确认或驳回后会重新读取服务器状态。</Step>
             <Step number="2" title="区分失败和未知结果">失败表示已有明确终态；未知表示外部结果无法确认。只有具备对应不可变证据的任务才显示“人工收口”，该动作不会自动重试或改写为成功。</Step>
-            <Step number="3" title="查看模型用量">在 7、30、90 天之间切换，按供应商、模型和能力核对调用尝试与 Token。系统没有供应商价格快照，因此不会显示猜测费用。</Step>
+            <Step number="3" title="查看 AI 用量与计费">在 7、30、90 天之间切换，按当前模型路由、供应商和能力核对调用尝试与 Token。项目 Owner 或工作区管理员可以主动读取已接入 DeepSeek 账户的余额；最终扣费仍以供应商 Usage 账单为准，系统不会用缺少缓存命中与峰谷时段的数据猜测金额。</Step>
             <Step number="4" title="归档、恢复或导出">从“项目”页归档没有活动任务的项目；归档后项目变为只读，恢复后可继续操作。进行中和已归档项目都可导出受限 JSON。</Step>
             <Callout tone="amber" title="JSON 导出不是备份">导出包含文件元数据、解析/识别文本和审核状态，但不包含上传文件二进制、服务端存储路径、模型/Git/OIDC 凭据、向量、原始任务载荷、供应商请求 ID、仓库代码正文或完整数据库状态。文件会原样包含项目正文；若曾把密码或 Token 错误录入资料，它们也会出现。请按敏感业务数据保管，灾难恢复必须同时备份 PostgreSQL、主密钥和 uploads 卷。</Callout>
           </GuideSection>

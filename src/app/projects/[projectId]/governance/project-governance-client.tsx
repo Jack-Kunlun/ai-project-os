@@ -80,9 +80,29 @@ type UsageBreakdown = {
   runningRequests: number;
 };
 
+type CurrentRoute = {
+  operation: string;
+  providerConnectionId: string;
+  providerName: string;
+  providerKind: string;
+  providerStatus: string;
+  modelId: string;
+  balanceAvailable: boolean;
+};
+
+type ProviderBalance = {
+  providerConnectionId: string;
+  providerName: string;
+  providerKind: "deepseek";
+  isAvailable: boolean;
+  balances: Array<{ currency: "CNY" | "USD"; total: string; granted: string; toppedUp: string }>;
+  fetchedAt: string;
+};
+
 type Usage = {
   period: { days: 7 | 30 | 90; start: string; end: string };
   totals: UsageBreakdown;
+  routes: CurrentRoute[];
   byProvider: Array<UsageBreakdown & { providerName: string; providerKind: string; modelId: string; source: "current" | "legacy" }>;
   byOperation: Array<UsageBreakdown & { operation: string }>;
   pricing: { available: false; reason: string };
@@ -165,6 +185,10 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
   const [routeCursor, setRouteCursor] = useState<string | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [usageDays, setUsageDays] = useState<7 | 30 | 90>(30);
+  const [canReadProviderBalance, setCanReadProviderBalance] = useState(false);
+  const [providerBalances, setProviderBalances] = useState<Record<string, ProviderBalance>>({});
+  const [billingPending, setBillingPending] = useState<string | null>(null);
+  const [billingError, setBillingError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
@@ -201,8 +225,9 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
   }, [projectId]);
 
   const fetchUsage = useCallback(async (days: 7 | 30 | 90) => {
-    const payload = await readJson<{ usage: Usage }>(await fetch(`/api/projects/${projectId}/governance/usage?days=${days}`, { cache: "no-store" }));
+    const payload = await readJson<{ usage: Usage; permissions: { readProviderBalance: boolean } }>(await fetch(`/api/projects/${projectId}/governance/usage?days=${days}`, { cache: "no-store" }));
     setUsage(payload.usage);
+    setCanReadProviderBalance(payload.permissions.readProviderBalance);
   }, [projectId]);
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
@@ -289,21 +314,47 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
     }
   }
 
+  async function refreshProviderBalance(providerConnectionId: string) {
+    setBillingPending(providerConnectionId);
+    setBillingError(null);
+    try {
+      const payload = await readJson<{ balance: ProviderBalance }>(await fetch(`/api/projects/${projectId}/governance/provider-balance`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ providerConnectionId }),
+      }));
+      setProviderBalances((current) => ({ ...current, [providerConnectionId]: payload.balance }));
+    } catch (balanceError) {
+      setBillingError(balanceError instanceof Error ? balanceError.message : "供应商余额读取失败");
+    } finally {
+      setBillingPending(null);
+    }
+  }
+
+  const routedProviders = usage === null
+    ? []
+    : [...new Map(usage.routes.map((route) => [route.providerConnectionId, route])).values()];
+
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="governance" />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-10 sm:px-8 lg:px-10">
         <section className="flex flex-wrap items-end justify-between gap-5 pb-8">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Governance & review</p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">审核与治理</h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">优先处理需要你确认的内容和任务异常；模型用量、路由记录等低频审计默认收起。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project management</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目管理</h1>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">项目状态、计划、自动化、审核和 AI 用量集中在这里。用量与计费直接可见，低频任务和路由记录默认收起。</p>
           </div>
           <div className="flex flex-wrap gap-2"><Link href={`/projects/${projectId}/actions`} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">动作与审批</Link><Link href={`/projects/${projectId}/tools`} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">工具权限</Link><button type="button" onClick={() => void reload()} disabled={loading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button></div>
         </section>
 
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}
+        <nav aria-label="项目管理功能" className="mb-8 grid gap-3 sm:grid-cols-3">
+          <Link href={`/projects/${projectId}/world`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">项目状态</span><span className="mt-1 block text-xs text-slate-500">确认当前事实、关系与快照</span></Link>
+          <Link href={`/projects/${projectId}/plan`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">项目计划</span><span className="mt-1 block text-xs text-slate-500">查看目标、建议与执行顺序</span></Link>
+          <Link href={`/projects/${projectId}/automations`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">自动化</span><span className="mt-1 block text-xs text-slate-500">管理规则和最近运行结果</span></Link>
+        </nav>
         {loading || summary === null ? <div className="h-44 animate-pulse rounded-3xl bg-slate-200" /> : (
           <>
             <section className="grid gap-4 md:grid-cols-3">
@@ -312,15 +363,48 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
               <Metric label="语义索引" value={readinessLabels[summary.index.readiness] ?? summary.index.readiness} detail={`${summary.index.activeRecordCount} 条活动记忆`} tone={summary.index.compatible ? "emerald" : "amber"} />
             </section>
 
-            <details className="group mt-8 rounded-3xl border border-slate-200 bg-white shadow-sm">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>模型用量</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开低频审计</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
-              <div className="border-t border-slate-100 p-6 sm:p-8">
+            <section id="ai-usage" className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
-                <SectionHeader eyebrow="Model usage" title="模型用量" description="现行调用审计按每次受审计模型调用尝试计数；旧运行台账按 requestCount 汇总，两者来源独立，不重复计数。" border={false} />
+                <SectionHeader eyebrow="AI routes & billing" title="AI 用量与计费" description="直接查看项目当前使用的模型路由、调用次数与 Token。供应商实际账单与本地调用审计分开显示。" border={false} />
                 <div className="flex rounded-xl bg-slate-100 p-1" aria-label="用量统计周期">{([7, 30, 90] as const).map((days) => <button key={days} type="button" onClick={() => setUsageDays(days)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${usageDays === days ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{days} 天</button>)}</div>
               </div>
               {usage === null ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : (
                 <>
+                  <div className="mt-6">
+                    <h3 className="text-sm font-semibold text-slate-800">当前 AI 路由</h3>
+                    {usage.routes.length === 0 ? <p className="mt-3 rounded-2xl bg-slate-50 px-4 py-5 text-xs text-slate-500">当前项目尚未配置模型路由。</p> : <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{usage.routes.map((route) => (
+                      <article key={`${route.operation}:${route.providerConnectionId}`} className="rounded-2xl border border-slate-200 p-4">
+                        <div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-800">{operationLabels[route.operation] ?? route.operation}</p><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${route.providerStatus === "verified" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{route.providerStatus === "verified" ? "已验证" : route.providerStatus}</span></div>
+                        <p className="mt-3 text-sm font-semibold text-slate-700">{route.providerName}</p>
+                        <p className="mt-1 break-all text-xs text-slate-500">{route.modelId}</p>
+                      </article>
+                    ))}</div>}
+                  </div>
+
+                  <div className="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-5">
+                    <div className="grid gap-5 lg:grid-cols-[1.15fr_1fr]">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-800">供应商实际计费</h3>
+                        <p className="mt-2 text-xs leading-5 text-slate-600">本页的请求数与 Token 来自应用审计；实际扣费由供应商根据当次价格、缓存命中和计费时段结算。读取余额只会使用已保存的供应商凭据查询账户余额，不会发送项目资料。</p>
+                      </div>
+                      <div className="space-y-3">
+                        {routedProviders.length === 0 ? <p className="text-xs text-slate-500">配置模型路由后，可在这里查看对应供应商的计费入口。</p> : routedProviders.map((provider) => {
+                          const balance = providerBalances[provider.providerConnectionId];
+                          return (
+                            <article key={provider.providerConnectionId} className="rounded-xl border border-indigo-100 bg-white p-4">
+                              <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold text-slate-800">{provider.providerName}</p><p className="mt-1 text-[11px] text-slate-400">账户余额 · 非项目成本分摊</p></div>{provider.balanceAvailable && canReadProviderBalance ? <button type="button" onClick={() => void refreshProviderBalance(provider.providerConnectionId)} disabled={billingPending !== null} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{billingPending === provider.providerConnectionId ? "读取中…" : balance ? "刷新余额" : "读取账户余额"}</button> : null}</div>
+                              {provider.balanceAvailable && !canReadProviderBalance ? <p className="mt-3 text-xs text-slate-500">项目 Owner 或工作区管理员可读取账户余额。</p> : null}
+                              {!provider.balanceAvailable ? <p className="mt-3 text-xs text-slate-500">该供应商暂不支持应用内余额查询，请在供应商控制台核对账单。</p> : null}
+                              {balance ? <div className="mt-3 space-y-2">{balance.balances.map((item) => <div key={item.currency} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs"><span className="text-slate-500">{item.currency} 可用余额</span><span className="font-semibold text-slate-800">{item.total} {item.currency}</span></div>)}<p className="text-[10px] text-slate-400">{balance.isAvailable ? "账户可正常调用" : "账户当前不可调用"} · 查询于 {formatDate(balance.fetchedAt)}</p></div> : null}
+                              {provider.providerKind === "deepseek" ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold"><a href="https://platform.deepseek.com/usage" target="_blank" rel="noreferrer" className="text-indigo-700 underline decoration-indigo-200 underline-offset-4">查看实际用量</a><a href="https://api-docs.deepseek.com/zh-cn/quick_start/pricing/" target="_blank" rel="noreferrer" className="text-indigo-700 underline decoration-indigo-200 underline-offset-4">查看官方价格</a></div> : null}
+                            </article>
+                          );
+                        })}
+                        {billingError ? <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700">{billingError}</p> : null}
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <UsageMetric label="模型调用尝试" value={formatNumber(usage.totals.requestCount)} detail={`${formatNumber(usage.totals.recordCount)} 条审计/运行记录`} />
                     <UsageMetric label="输入 Token" value={formatNumber(usage.totals.inputTokens)} detail={`周期始于 ${formatDate(usage.period.start)}`} />
@@ -334,8 +418,7 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
                   <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">{usage.pricing.reason}。这里展示可核对的请求与 Token，不把 Token 直接换算为金额。</p>
                 </>
               )}
-              </div>
-            </details>
+            </section>
 
             <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               <SectionHeader eyebrow="Human review" title="待审核候选" description="逐条核对内容与原文摘录。接受后才成为项目事实；页面不提供批量接受。" />

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getProjectPermission } from "@/lib/access-control";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError } from "@/lib/api-response";
 import { requireApiSession } from "@/lib/auth";
@@ -19,7 +20,7 @@ export async function GET(
   context: { params: Promise<{ projectId: string }> },
 ) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const { projectId: rawProjectId } = await context.params;
     const projectId = idSchema.parse(rawProjectId);
     const searchParams = new URL(request.url).searchParams;
@@ -27,9 +28,15 @@ export async function GET(
       if (searchParams.getAll(key).length !== 1) throw new ApiError(400, "INVALID_QUERY", `Query parameter ${key} must be unique`);
     }
     const query = querySchema.parse(Object.fromEntries(searchParams));
-    const usage = await getProjectUsageSummary(projectId, query.days);
+    const [usage, permission] = await Promise.all([
+      getProjectUsageSummary(projectId, query.days),
+      getProjectPermission(user, projectId),
+    ]);
     if (usage === null) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found");
-    return NextResponse.json({ usage }, { headers: { "cache-control": "no-store" } });
+    return NextResponse.json(
+      { usage, permissions: { readProviderBalance: permission === "owner" } },
+      { headers: { "cache-control": "no-store" } },
+    );
   } catch (error) {
     return handleApiError(error);
   }

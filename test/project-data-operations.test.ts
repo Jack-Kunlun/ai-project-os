@@ -28,6 +28,14 @@ test("usage summary combines independent current and legacy ledgers without coun
         _sum: { requestCount: 4, inputTokens: 80, outputTokens: 20 },
       }],
     },
+    projectAiRoute: {
+      findMany: async () => [{
+        operation: "autoExtract",
+        providerConnectionId: "22222222-2222-4222-8222-222222222222",
+        modelId: "qwen-plus",
+        providerConnection: { name: "Qwen", kind: "qwen", status: "verified" },
+      }],
+    },
     aiProviderConnection: {
       findMany: async () => [{ id: "22222222-2222-4222-8222-222222222222", name: "Qwen", kind: "qwen" }],
     },
@@ -40,7 +48,17 @@ test("usage summary combines independent current and legacy ledgers without coun
   assert.equal(usage.totals.outputTokens, 50);
   assert.equal(usage.byProvider.length, 2);
   assert.equal(usage.byProvider.find((entry) => entry.source === "legacy")?.requestCount, 4);
+  assert.deepEqual(usage.routes, [{
+    operation: "autoExtract",
+    providerConnectionId: "22222222-2222-4222-8222-222222222222",
+    providerName: "Qwen",
+    providerKind: "qwen",
+    providerStatus: "verified",
+    modelId: "qwen-plus",
+    balanceAvailable: false,
+  }]);
   assert.equal(usage.pricing.available, false);
+  assert.match(usage.pricing.reason, /缓存命中和峰谷时段/u);
 });
 
 test("safe export request is optimistic and strict", () => {
@@ -68,6 +86,8 @@ test("export uses an authenticated POST, bounded attachment headers, and an expl
 test("usage API is a strict authenticated no-store read", async () => {
   const route = await readFile("src/app/api/projects/[projectId]/governance/usage/route.ts", "utf8");
   assert.match(route, /requireApiSession\(request\)/u);
+  assert.match(route, /getProjectPermission\(user, projectId\)/u);
+  assert.match(route, /readProviderBalance: permission === "owner"/u);
   assert.match(route, /z\.enum\(\["7", "30", "90"\]\)/u);
   assert.match(route, /cache-control": "no-store"/u);
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/u);

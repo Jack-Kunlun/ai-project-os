@@ -65,7 +65,7 @@ export async function getProjectUsageSummary(
 
   const periodEnd = new Date();
   const periodStart = new Date(periodEnd.getTime() - days * 24 * 60 * 60 * 1_000);
-  const [webRows, legacyRows] = await Promise.all([
+  const [webRows, legacyRows, routeRows] = await Promise.all([
     db.providerCallAudit.groupBy({
       by: ["providerConnectionId", "operation", "modelId", "status"],
       where: { createdAt: { gte: periodStart, lt: periodEnd }, job: { projectId } },
@@ -77,6 +77,16 @@ export async function getProjectUsageSummary(
       where: { projectId, createdAt: { gte: periodStart, lt: periodEnd } },
       _count: { _all: true },
       _sum: { requestCount: true, inputTokens: true, outputTokens: true },
+    }),
+    db.projectAiRoute.findMany({
+      where: { projectId },
+      orderBy: { operation: "asc" },
+      select: {
+        operation: true,
+        providerConnectionId: true,
+        modelId: true,
+        providerConnection: { select: { name: true, kind: true, status: true } },
+      },
     }),
   ]);
   const providerIds = [...new Set(webRows.map((row) => row.providerConnectionId))];
@@ -159,9 +169,18 @@ export async function getProjectUsageSummary(
     project: Object.freeze({ ...project, archivedAt: project.archivedAt?.toISOString() ?? null }),
     period: Object.freeze({ days, start: periodStart.toISOString(), end: periodEnd.toISOString() }),
     totals: publicUsage(totals),
+    routes: Object.freeze(routeRows.map((route) => Object.freeze({
+      operation: route.operation,
+      providerConnectionId: route.providerConnectionId,
+      providerName: route.providerConnection.name,
+      providerKind: route.providerConnection.kind,
+      providerStatus: route.providerConnection.status,
+      modelId: route.modelId,
+      balanceAvailable: route.providerConnection.kind === "deepseek",
+    }))),
     byProvider: Object.freeze(byProvider),
     byOperation: Object.freeze(byOperation),
-    pricing: Object.freeze({ available: false, reason: "未维护供应商价格快照，因此不估算费用" }),
+    pricing: Object.freeze({ available: false, reason: "未保存逐次价格、缓存命中和峰谷时段快照，因此不估算金额" }),
     sources: Object.freeze({
       current: "ProviderCallAudit，每条受审计模型调用尝试计一次",
       legacy: "AiRun 汇总台账，按 requestCount 计数且不与现行审计重复",

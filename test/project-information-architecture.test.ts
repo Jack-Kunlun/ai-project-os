@@ -15,7 +15,9 @@ test("project overview and materials use separate routes with a compact navigati
   assert.match(materialsPage, /ProjectDetailClient/u);
   assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/materials`\}/u);
   assert.doesNotMatch(header, /href=\{`\/projects\/\$\{projectId\}#project-materials`\}/u);
-  assert.equal((header.match(/key: "management"/gu) ?? []).length, 1);
+  assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/governance`\}/u);
+  assert.match(header, /managementSections/u);
+  assert.doesNotMatch(header, /<details|<summary|projectGroups/u);
   assert.doesNotMatch(header, /key: "governance",\s*label: "治理"/u);
 
   assert.match(overview, /Project overview/u);
@@ -28,7 +30,7 @@ test("project overview and materials use separate routes with a compact navigati
   assert.doesNotMatch(materials, /SnapshotPanel|AiCapabilityGuide|PlaceholderCard/u);
 });
 
-test("AI workbench spacing and governance low-frequency sections stay explicit", async () => {
+test("AI workbench spacing and project management keep AI usage visible", async () => {
   const [intelligence, governance] = await Promise.all([
     readFile("src/app/projects/[projectId]/intelligence/project-intelligence-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/governance/project-governance-client.tsx", "utf8"),
@@ -37,6 +39,10 @@ test("AI workbench spacing and governance low-frequency sections stay explicit",
   assert.match(intelligence, /className="space-y-7"/u);
   assert.doesNotMatch(intelligence, /id="project-brief" className="mt-8/u);
   assert.doesNotMatch(intelligence, /id="agent-investigation" className="mt-8/u);
-  assert.match(governance, /低频审计默认收起/u);
+  assert.match(governance, /用量与计费直接可见/u);
+  assert.match(governance, /id="ai-usage"/u);
+  assert.match(governance, /当前 AI 路由/u);
+  assert.match(governance, /读取账户余额/u);
+  assert.doesNotMatch(governance, /<summary[^>]*>[^<]*模型用量/u);
   assert.match(governance, /<details className="group mt-8/u);
 });

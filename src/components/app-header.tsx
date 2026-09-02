@@ -13,32 +13,9 @@ const primaryItems = [
   { key: "team", label: "团队", href: "/team", icon: "users" },
 ] as const;
 
-const projectItems = [
-  { key: "assets", label: "文件资料", suffix: "/assets" },
-  { key: "externalSources", label: "外部资料", suffix: "/external-sources" },
-  { key: "repositories", label: "代码仓库", suffix: "/repositories" },
-  { key: "world", label: "项目状态", suffix: "/world" },
-  { key: "plan", label: "项目计划", suffix: "/plan" },
-  { key: "automations", label: "自动化", suffix: "/automations" },
-  { key: "tools", label: "工具权限", suffix: "/tools" },
-  { key: "actions", label: "动作与审批", suffix: "/actions" },
-  { key: "control", label: "智能控制台", suffix: "/control" },
-  { key: "memory", label: "智能记忆", suffix: "/memory" },
-  { key: "memoryQuality", label: "记忆质量", suffix: "/memory-quality" },
-  { key: "intelligence", label: "项目智能体", suffix: "/intelligence" },
-  { key: "governance", label: "治理与审核", suffix: "/governance" },
-] as const;
-
-const projectGroups = [
-  {
-    key: "management",
-    label: "管理",
-    items: projectItems.filter((item) => ["world", "plan", "automations", "governance"].includes(item.key)),
-  },
-] as const;
-
 const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources", "repositories"];
 const intelligenceSections: readonly ProjectSection[] = ["control", "memory", "memoryQuality", "intelligence"];
+const managementSections: readonly ProjectSection[] = ["world", "plan", "automations", "tools", "actions", "governance"];
 
 export function AppHeader({
   username,
@@ -146,35 +123,14 @@ export function AppHeader({
                 <NavIcon name="sparkles" />
                 AI 工作台
               </Link>
-              {projectGroups.map((group) => {
-                const groupActive = group.items.some((item) => item.key === projectSection)
-                  || projectSection === "tools"
-                  || projectSection === "actions";
-                return (
-                  <details key={group.key} className="group relative">
-                    <summary aria-current={groupActive ? "page" : undefined} className={`flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 marker:hidden [&::-webkit-details-marker]:hidden ${groupActive ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}>
-                      {group.label}
-                      <svg aria-hidden="true" viewBox="0 0 12 12" className="h-3 w-3 opacity-60 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="m3 4.5 3 3 3-3" /></svg>
-                    </summary>
-                    <div className="absolute left-0 top-full z-50 mt-2 min-w-44 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/10">
-                      <p className="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{group.label}</p>
-                      {group.items.map((item) => {
-                        const isActive = item.key === projectSection;
-                        return (
-                          <Link
-                            key={item.key}
-                            href={`/projects/${projectId}${item.suffix}`}
-                            aria-current={isActive ? "page" : undefined}
-                            className={`block rounded-xl px-3 py-2.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${isActive ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"}`}
-                          >
-                            {item.label}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  </details>
-                );
-              })}
+              <Link
+                href={`/projects/${projectId}/governance`}
+                aria-current={projectSection && managementSections.includes(projectSection) ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && managementSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="sliders" />
+                管理
+              </Link>
             </nav>
           </div>
         </div>

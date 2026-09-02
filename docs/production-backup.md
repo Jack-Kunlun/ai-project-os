@@ -12,6 +12,7 @@
 - 默认只清理超过 14 天且带有效远端标记的本地备份，并始终保留至少 3 份已验证本地副本。现有手工备份因为没有自动上传标记，不会被删除。
 - 正式部署器在任何迁移、构建或容器替换前调用同一个脚本；远端备份失败会使部署失败关闭。
 - 每日/手工备份会先取得生产部署锁，部署期间不会启动；部署器持有同一把锁后再调用 `pre-deploy` 模式，避免定时备份与迁移或容器替换交叉运行。
+- 每次任务会把运行中、成功、失败或跳过状态原子写入 `/var/lib/ai-project-os-operations/backups`。这里只包含时间、任务类型、对象路径、大小、摘要、重试次数和安全错误码；生产 Compose 以只读方式将该目录挂载给应用，应用没有 Docker、systemd、备份正文或凭据访问权。
 
 COS 生命周期尚不由仓库脚本修改。必须先取得至少一次定时运行、一次部署前备份和一次独立恢复证据，再在腾讯云控制台配置远端保留策略。
 
@@ -56,6 +57,7 @@ sudo systemctl start ai-project-os-backup.service
 sudo systemctl status ai-project-os-backup.service --no-pager
 sudo journalctl -u ai-project-os-backup.service --since '-30 minutes' --no-pager
 sudo cat /var/lib/ai-project-os-backup/last-success
+sudo cat /var/lib/ai-project-os-operations/backups/current.json
 ```
 
 `last-success` 不包含凭据，但仍保持 `root:root 0600`。成功结果必须同时包含：
@@ -64,6 +66,8 @@ sudo cat /var/lib/ai-project-os-backup/last-success
 - `/var/backups/ai-project-os/...` 下的精确本地备份路径
 - 两个 `cos://.../production/backups/...` 对象
 - age 加密归档的 SHA-256
+
+`current.json` 与 `history/*.json` 是供系统运维页面读取的脱敏副本，保持 `root:root 0644` 并位于专用 `0755` 目录。页面仅对初始化应用时创建的首位超级管理员开放；其他系统管理员、工作区管理员和普通成员均不能通过受保护 API 读取。状态目录不包含 COS Secret、COSCLI 配置、age 私钥、数据库密码、原始日志或备份正文。
 
 不要仅凭 `systemctl start` 返回成功或 COS 中出现对象就宣称备份可恢复。管理员仍需下载归档、校验 sidecar、使用异地 age 私钥解密，并在 UUID 隔离数据库和卷中完成恢复演练。
 

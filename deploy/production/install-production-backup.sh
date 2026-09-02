@@ -46,6 +46,24 @@ install -d -o root -g root -m 0700 \
   /var/backups/ai-project-os \
   /var/lib/ai-project-os-backup \
   /var/lib/ai-project-os-backup/staging
+for public_status_directory in \
+  /var/lib/ai-project-os-operations \
+  /var/lib/ai-project-os-operations/backups \
+  /var/lib/ai-project-os-operations/backups/history; do
+  test ! -L "$public_status_directory"
+done
+install -d -o root -g root -m 0755 \
+  /var/lib/ai-project-os-operations \
+  /var/lib/ai-project-os-operations/backups \
+  /var/lib/ai-project-os-operations/backups/history
+
+for public_status_directory in \
+  /var/lib/ai-project-os-operations \
+  /var/lib/ai-project-os-operations/backups \
+  /var/lib/ai-project-os-operations/backups/history; do
+  test "$(stat -c %U:%G "$public_status_directory")" = root:root
+  test "$(stat -c %a "$public_status_directory")" = 755
+done
 
 install -o root -g root -m 0755 \
   "$SOURCE_DIR/ai-project-os-backup" \

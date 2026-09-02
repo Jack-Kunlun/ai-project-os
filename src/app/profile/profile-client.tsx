@@ -36,7 +36,13 @@ function formatDate(value: string | null): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "long", timeStyle: "short" }).format(new Date(value));
 }
 
-export function ProfileClient({ username: initialUsername }: { username: string }) {
+export function ProfileClient({
+  username: initialUsername,
+  canViewSystemOperations,
+}: {
+  username: string;
+  canViewSystemOperations: boolean;
+}) {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [headerUsername, setHeaderUsername] = useState(initialUsername);
@@ -118,6 +124,8 @@ export function ProfileClient({ username: initialUsername }: { username: string 
         </section>
 
         {profile ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace roles</p><h2 className="mt-2 text-lg font-semibold">工作区身份</h2><div className="mt-4 space-y-2">{profile.workspaceMemberships.map((membership) => <div key={membership.workspace.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{membership.workspace.name}</span><span className="text-xs font-semibold text-indigo-700">{membership.role}</span></div>)}</div></div><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Sign-in methods</p><h2 className="mt-2 text-lg font-semibold">登录方式</h2><div className="mt-4 space-y-2"><div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">本地密码：{profile.hasLocalPassword ? "已配置" : "未配置"}</div>{profile.oidcIdentities.map((identity) => <div key={identity.provider.id} className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-700">{identity.provider.name}{identity.email ? ` · ${identity.email}` : ""}</div>)}</div></div></section> : null}
+
+        {canViewSystemOperations ? <section className="mt-6 flex flex-col gap-5 rounded-3xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-7"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Initial super administrator</p><h2 className="mt-2 text-xl font-semibold">系统运维</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">只读查看生产备份、COS 同步和校验历史。页面不会获得服务器控制权限或任何备份密钥。</p></div><Link href="/system/operations" className="flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700">查看备份任务</Link></section> : null}
 
         <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm">
           <div className="px-6 py-6 sm:px-7">

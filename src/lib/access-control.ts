@@ -131,6 +131,10 @@ export async function resolveProjectCreationWorkspace(user: AccessUser, db: Pris
 
 export async function authorizeApiRequest(user: AccessUser, request: Request, db: PrismaClient = getDb()): Promise<void> {
   const path = decodedApiPath(request);
+  if (path.startsWith("/api/system/")) {
+    if (user.role !== "admin") return fail("ACCESS_FORBIDDEN");
+    return;
+  }
   if (path.startsWith("/api/settings/")) {
     if (user.role !== "admin") return fail("ACCESS_FORBIDDEN");
     return;

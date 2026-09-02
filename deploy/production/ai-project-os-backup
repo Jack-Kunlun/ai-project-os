@@ -12,6 +12,10 @@ readonly BACKUP_ROOT=/var/backups/ai-project-os
 readonly BACKUP_STATE_ROOT=/var/lib/ai-project-os-backup
 readonly STAGING_ROOT=$BACKUP_STATE_ROOT/staging
 readonly RESULT_FILE=$BACKUP_STATE_ROOT/last-success
+readonly PUBLIC_STATUS_ROOT=/var/lib/ai-project-os-operations/backups
+readonly PUBLIC_HISTORY_ROOT=$PUBLIC_STATUS_ROOT/history
+readonly PUBLIC_CURRENT_FILE=$PUBLIC_STATUS_ROOT/current.json
+readonly PUBLIC_HISTORY_MAX=120
 readonly LOCK_FILE=/run/lock/ai-project-os-backup.lock
 readonly DEPLOY_LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 readonly COS_ENV_FILE=/etc/ai-project-os/cos-backup.env
@@ -22,19 +26,220 @@ readonly MIN_FREE_BYTES=5368709120
 readonly LOCAL_RETENTION_DAYS_DEFAULT=14
 readonly LOCAL_MIN_VERIFIED_DEFAULT=3
 readonly LOCK_WAIT_SECONDS=600
+readonly COS_STAT_VERIFY_ATTEMPTS=8
+readonly COS_STAT_VERIFY_INITIAL_DELAY_SECONDS=1
+readonly COS_STAT_VERIFY_MAX_DELAY_SECONDS=8
 
 declare -a PAUSED_WRITERS=()
 INCOMPLETE_DIR=
 STAGING_ARCHIVE=
 STAGING_CHECKSUM=
 RETENTION_REMOVED=0
+PUBLIC_STATUS_ACTIVE=0
+PUBLIC_STATUS_FINALIZED=0
+PUBLIC_RUN_ID=
+PUBLIC_STARTED_AT=
+PUBLIC_STARTED_EPOCH=0
+PUBLIC_FAILURE_CODE_FILE=
+PUBLIC_BACKUP_NAME=
+PUBLIC_ARCHIVE_OBJECT=
+PUBLIC_ARCHIVE_SHA256=
+PUBLIC_ARCHIVE_BYTES=
+PUBLIC_VERIFICATION_ATTEMPTS=0
 
 fail() {
   local marker=$1
   local exit_code=${2-1}
+  local error_code=${marker%% *}
+
+  if (( PUBLIC_STATUS_ACTIVE == 1 )) &&
+    [[ "$error_code" =~ ^[A-Z][A-Z0-9_]{2,127}$ ]] &&
+    [[ -n "$PUBLIC_FAILURE_CODE_FILE" ]]; then
+    printf '%s\n' "$error_code" > "$PUBLIC_FAILURE_CODE_FILE" 2>/dev/null || true
+  fi
 
   printf '%s\n' "$marker" >&2
   exit "$exit_code"
+}
+
+timer_next_at() {
+  local raw_next parsed_next
+
+  command -v systemctl >/dev/null 2>&1 || return 0
+  raw_next=$(systemctl show ai-project-os-backup.timer \
+    --property=NextElapseUSecRealtime \
+    --value 2>/dev/null || true)
+  [[ -n "$raw_next" && "$raw_next" != n/a ]] || return 0
+  parsed_next=$(date -d "$raw_next" -Is 2>/dev/null || true)
+  if [[ "$parsed_next" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]]; then
+    printf '%s' "$parsed_next"
+  fi
+}
+
+json_string_or_null() {
+  local value=$1
+
+  if [[ -z "$value" ]]; then
+    printf 'null'
+  else
+    printf '"%s"' "$value"
+  fi
+}
+
+write_public_status_json() {
+  local output_file=$1
+  local state=$2
+  local completed_at=$3
+  local duration_seconds=$4
+  local error_code=$5
+  local next_run_at=$6
+
+  [[ "$PUBLIC_RUN_ID" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+$ ]] || return 1
+  [[ "$MODE" =~ ^(daily|manual|pre-deploy)$ ]] || return 1
+  [[ "$PUBLIC_STARTED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]] || return 1
+  [[ "$state" =~ ^(running|succeeded|failed|skipped)$ ]] || return 1
+  [[ -z "$TARGET_TAG" || "$TARGET_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  [[ -z "$completed_at" || "$completed_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]] || return 1
+  [[ -z "$duration_seconds" || "$duration_seconds" =~ ^[0-9]+$ ]] || return 1
+  [[ -z "$PUBLIC_BACKUP_NAME" || "$PUBLIC_BACKUP_NAME" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v[0-9]+\.[0-9]+\.[0-9]+)\.[A-Za-z0-9]{6}$ ]] || return 1
+  [[ -z "$PUBLIC_ARCHIVE_OBJECT" || "$PUBLIC_ARCHIVE_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]+$ ]] || return 1
+  [[ -z "$PUBLIC_ARCHIVE_SHA256" || "$PUBLIC_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ -z "$PUBLIC_ARCHIVE_BYTES" || "$PUBLIC_ARCHIVE_BYTES" =~ ^[0-9]+$ ]] || return 1
+  [[ "$RETENTION_REMOVED" =~ ^[0-9]+$ ]] || return 1
+  [[ "$PUBLIC_VERIFICATION_ATTEMPTS" =~ ^[0-9]+$ ]] || return 1
+  [[ -z "$error_code" || "$error_code" =~ ^[A-Z][A-Z0-9_]{2,127}$ ]] || return 1
+  [[ -z "$next_run_at" || "$next_run_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]] || return 1
+
+  {
+    printf '{\n'
+    printf '  "formatVersion": 1,\n'
+    printf '  "runId": "%s",\n' "$PUBLIC_RUN_ID"
+    printf '  "state": "%s",\n' "$state"
+    printf '  "trigger": "%s",\n' "$MODE"
+    printf '  "targetTag": '
+    json_string_or_null "$TARGET_TAG"
+    printf ',\n'
+    printf '  "startedAt": "%s",\n' "$PUBLIC_STARTED_AT"
+    printf '  "completedAt": '
+    json_string_or_null "$completed_at"
+    printf ',\n'
+    printf '  "durationSeconds": %s,\n' "${duration_seconds:-null}"
+    printf '  "backupName": '
+    json_string_or_null "$PUBLIC_BACKUP_NAME"
+    printf ',\n'
+    printf '  "archiveObject": '
+    json_string_or_null "$PUBLIC_ARCHIVE_OBJECT"
+    printf ',\n'
+    printf '  "archiveSha256": '
+    json_string_or_null "$PUBLIC_ARCHIVE_SHA256"
+    printf ',\n'
+    printf '  "archiveBytes": %s,\n' "${PUBLIC_ARCHIVE_BYTES:-null}"
+    printf '  "retentionRemoved": %s,\n' "$RETENTION_REMOVED"
+    printf '  "verificationAttempts": %s,\n' "$PUBLIC_VERIFICATION_ATTEMPTS"
+    printf '  "errorCode": '
+    json_string_or_null "$error_code"
+    printf ',\n'
+    printf '  "nextRunAt": '
+    json_string_or_null "$next_run_at"
+    printf '\n}\n'
+  } > "$output_file"
+}
+
+prune_public_status_history() {
+  local index history_file
+  local -a history_files=()
+
+  mapfile -t history_files < <(find -P "$PUBLIC_HISTORY_ROOT" \
+    -mindepth 1 -maxdepth 1 -type f \
+    -name '[0-9]*.json' -print | sort -r)
+  for (( index = PUBLIC_HISTORY_MAX; index < ${#history_files[@]}; index++ )); do
+    history_file=${history_files[$index]}
+    [[ "$(dirname -- "$history_file")" == "$PUBLIC_HISTORY_ROOT" ]] || continue
+    [[ "$(basename -- "$history_file")" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+\.json$ ]] || continue
+    rm -f -- "$history_file"
+  done
+}
+
+publish_public_status() {
+  local state=$1
+  local error_code=${2-}
+  local completed_at= duration_seconds= next_run_at=
+  local temporary_current temporary_history history_file
+
+  (( PUBLIC_STATUS_ACTIVE == 1 )) || return 1
+  if [[ "$state" != running ]]; then
+    completed_at=$(date -Is)
+    duration_seconds=$(( $(date +%s) - PUBLIC_STARTED_EPOCH ))
+  fi
+  next_run_at=$(timer_next_at)
+
+  temporary_current=$(mktemp "$PUBLIC_STATUS_ROOT/.current.XXXXXX") || return 1
+  if ! write_public_status_json "$temporary_current" "$state" "$completed_at" \
+    "$duration_seconds" "$error_code" "$next_run_at"; then
+    rm -f -- "$temporary_current"
+    return 1
+  fi
+  chmod 644 "$temporary_current" || { rm -f -- "$temporary_current"; return 1; }
+
+  if [[ "$state" != running ]]; then
+    history_file=$PUBLIC_HISTORY_ROOT/$PUBLIC_RUN_ID.json
+    temporary_history=$(mktemp "$PUBLIC_HISTORY_ROOT/.${PUBLIC_RUN_ID}.XXXXXX") || {
+      rm -f -- "$temporary_current"
+      return 1
+    }
+    if ! cp -- "$temporary_current" "$temporary_history" ||
+      ! chmod 644 "$temporary_history" ||
+      ! ln -- "$temporary_history" "$history_file"; then
+      rm -f -- "$temporary_current" "$temporary_history"
+      return 1
+    fi
+    rm -f -- "$temporary_history"
+  fi
+
+  mv -f -- "$temporary_current" "$PUBLIC_CURRENT_FILE" || {
+    rm -f -- "$temporary_current"
+    return 1
+  }
+  if [[ "$state" != running ]]; then
+    prune_public_status_history
+  fi
+}
+
+begin_public_status() {
+  if [[ -L /var/lib/ai-project-os-operations || -L "$PUBLIC_STATUS_ROOT" || -L "$PUBLIC_HISTORY_ROOT" ]]; then
+    printf 'BACKUP_PUBLIC_STATUS_PATH_UNSAFE\n' >&2
+    return 1
+  fi
+  install -d -o root -g root -m 0755 \
+    /var/lib/ai-project-os-operations \
+    "$PUBLIC_STATUS_ROOT" \
+    "$PUBLIC_HISTORY_ROOT" || return 1
+  [[ "$(stat -c %U:%G "$PUBLIC_STATUS_ROOT")" == root:root ]] || return 1
+  [[ "$(stat -c %a "$PUBLIC_STATUS_ROOT")" == 755 ]] || return 1
+  [[ "$(stat -c %U:%G "$PUBLIC_HISTORY_ROOT")" == root:root ]] || return 1
+  [[ "$(stat -c %a "$PUBLIC_HISTORY_ROOT")" == 755 ]] || return 1
+
+  PUBLIC_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(date +%s%N)"
+  PUBLIC_STARTED_AT=$(date -Is)
+  PUBLIC_STARTED_EPOCH=$(date +%s)
+  PUBLIC_FAILURE_CODE_FILE=$PUBLIC_STATUS_ROOT/.${PUBLIC_RUN_ID}.error
+  printf 'BACKUP_UNEXPECTED_FAILURE\n' > "$PUBLIC_FAILURE_CODE_FILE"
+  chmod 600 "$PUBLIC_FAILURE_CODE_FILE"
+  PUBLIC_STATUS_ACTIVE=1
+  publish_public_status running
+}
+
+finish_public_status() {
+  local state=$1
+  local error_code=${2-}
+
+  (( PUBLIC_STATUS_ACTIVE == 1 )) || return 0
+  if ! publish_public_status "$state" "$error_code"; then
+    printf 'BACKUP_PUBLIC_STATUS_WRITE_FAILED state=%s\n' "$state" >&2
+  fi
+  PUBLIC_STATUS_FINALIZED=1
+  rm -f -- "$PUBLIC_FAILURE_CODE_FILE" ||
+    printf 'BACKUP_PUBLIC_STATUS_ERROR_MARKER_CLEANUP_FAILED\n' >&2
 }
 
 resume_writers() {
@@ -56,6 +261,7 @@ resume_writers() {
 
 cleanup_on_exit() {
   local exit_status=$?
+  local error_code=BACKUP_UNEXPECTED_FAILURE
 
   if ! resume_writers; then
     printf 'BACKUP_WRITER_RESUME_FAILED\n' >&2
@@ -69,6 +275,16 @@ cleanup_on_exit() {
   fi
   if [[ -n "$STAGING_CHECKSUM" && -f "$STAGING_CHECKSUM" ]]; then
     rm -f -- "$STAGING_CHECKSUM"
+  fi
+
+  if (( PUBLIC_STATUS_ACTIVE == 1 && PUBLIC_STATUS_FINALIZED == 0 )); then
+    if [[ -f "$PUBLIC_FAILURE_CODE_FILE" ]]; then
+      read -r error_code < "$PUBLIC_FAILURE_CODE_FILE" || error_code=BACKUP_UNEXPECTED_FAILURE
+    fi
+    if [[ ! "$error_code" =~ ^[A-Z][A-Z0-9_]{2,127}$ ]]; then
+      error_code=BACKUP_UNEXPECTED_FAILURE
+    fi
+    finish_public_status failed "$error_code"
   fi
 
   return "$exit_status"
@@ -206,24 +422,57 @@ verify_remote_object() {
   local local_path=$2
   local kind=$3
   local stat_output remote_size remote_crc local_size
+  local attempt stat_status verify_delay
 
-  if ! stat_output=$("$COSCLI" stat "$object_uri" \
-    -c "$COSCLI_CONFIG" \
-    --init-skip 2>&1); then
-    printf '%s\n' "$stat_output" >&2
-    fail "BACKUP_COS_STAT_FAILED type=$kind" 74
+  local_size=$(stat -c %s "$local_path")
+  verify_delay=$COS_STAT_VERIFY_INITIAL_DELAY_SECONDS
+
+  for (( attempt = 1; attempt <= COS_STAT_VERIFY_ATTEMPTS; attempt++ )); do
+    PUBLIC_VERIFICATION_ATTEMPTS=$(( PUBLIC_VERIFICATION_ATTEMPTS + 1 ))
+    stat_output=
+    remote_size=
+    remote_crc=
+    stat_status=0
+
+    if stat_output=$(timeout 30 "$COSCLI" stat "$object_uri" \
+      -c "$COSCLI_CONFIG" \
+      --init-skip 2>&1); then
+      stat_status=0
+    else
+      stat_status=$?
+    fi
+
+    remote_size=$(sed -n 's/.*Content-Length:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<<"$stat_output" | tail -n 1)
+    remote_crc=$(sed -n 's/.*x-cos-hash-crc64ecma:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<<"$stat_output" | tail -n 1)
+
+    if (( stat_status == 0 )) &&
+      [[ "$remote_size" == "$local_size" ]] &&
+      [[ "$remote_crc" =~ ^[0-9]+$ ]]; then
+      printf 'BACKUP_COS_OBJECT_VERIFIED type=%s bytes=%s crc64=%s object=%s attempt=%s\n' \
+        "$kind" "$remote_size" "$remote_crc" "$object_uri" "$attempt"
+      return 0
+    fi
+
+    if (( attempt < COS_STAT_VERIFY_ATTEMPTS )); then
+      printf 'BACKUP_COS_OBJECT_VERIFY_RETRY type=%s attempt=%s status=%s local=%s remote=%s crc64=%s delay=%s\n' \
+        "$kind" "$attempt" "$stat_status" "$local_size" "${remote_size:-missing}" \
+        "${remote_crc:-missing}" "$verify_delay"
+      sleep "$verify_delay"
+      verify_delay=$(( verify_delay * 2 ))
+      if (( verify_delay > COS_STAT_VERIFY_MAX_DELAY_SECONDS )); then
+        verify_delay=$COS_STAT_VERIFY_MAX_DELAY_SECONDS
+      fi
+    fi
+  done
+
+  printf '%s\n' "$stat_output" >&2
+  if (( stat_status != 0 )); then
+    fail "BACKUP_COS_STAT_FAILED type=$kind status=$stat_status attempts=$COS_STAT_VERIFY_ATTEMPTS" 74
   fi
 
-  remote_size=$(sed -n 's/.*Content-Length:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<<"$stat_output" | tail -n 1)
-  remote_crc=$(sed -n 's/.*x-cos-hash-crc64ecma:[[:space:]]*\([0-9][0-9]*\).*/\1/p' <<<"$stat_output" | tail -n 1)
-  local_size=$(stat -c %s "$local_path")
-
   [[ "$remote_size" == "$local_size" ]] ||
-    fail "BACKUP_COS_SIZE_MISMATCH type=$kind local=$local_size remote=${remote_size:-missing}" 74
-  [[ "$remote_crc" =~ ^[0-9]+$ ]] || fail "BACKUP_COS_CRC64_MISSING type=$kind" 74
-
-  printf 'BACKUP_COS_OBJECT_VERIFIED type=%s bytes=%s crc64=%s object=%s\n' \
-    "$kind" "$remote_size" "$remote_crc" "$object_uri"
+    fail "BACKUP_COS_SIZE_MISMATCH type=$kind local=$local_size remote=${remote_size:-missing} attempts=$COS_STAT_VERIFY_ATTEMPTS" 74
+  fail "BACKUP_COS_CRC64_MISSING type=$kind attempts=$COS_STAT_VERIFY_ATTEMPTS" 74
 }
 
 upload_object() {
@@ -335,9 +584,17 @@ if ! flock -w "$LOCK_WAIT_SECONDS" 9; then
   fail 'BACKUP_ALREADY_RUNNING' 75
 fi
 
-for required_command in age awk basename chmod chown date df dirname docker find flock gzip grep install mktemp mv rm sed sha256sum sort stat tail tar timeout tr; do
+for required_command in age awk basename chmod chown cp date df dirname docker find flock gzip grep install ln mktemp mv rm sed sha256sum sort stat tail tar timeout tr; do
   command -v "$required_command" >/dev/null || fail "BACKUP_COMMAND_MISSING command=$required_command" 70
 done
+
+if ! begin_public_status; then
+  if [[ -n "$PUBLIC_FAILURE_CODE_FILE" ]]; then
+    rm -f -- "$PUBLIC_FAILURE_CODE_FILE"
+  fi
+  PUBLIC_STATUS_ACTIVE=0
+  printf 'BACKUP_PUBLIC_STATUS_UNAVAILABLE\n' >&2
+fi
 
 require_root_owned_file "$COS_ENV_FILE" 600
 require_root_owned_file "$COSCLI_CONFIG" 600
@@ -370,6 +627,7 @@ if (( ${#stack_container_ids[@]} == 0 )); then
   if [[ "$MODE" == pre-deploy ]]; then
     completed_at=$(date -Is)
     write_result SKIPPED_NO_STACK "$reason" none-first-deploy none none none "$completed_at"
+    finish_public_status skipped
     printf 'BACKUP_SKIPPED_NO_STACK reason=%s\n' "$reason"
     exit 0
   fi
@@ -388,6 +646,7 @@ chmod 700 "$INCOMPLETE_DIR"
 backup_name=${INCOMPLETE_DIR##*/}
 backup_name=${backup_name#.incomplete-}
 backup_path=$BACKUP_ROOT/$backup_name
+PUBLIC_BACKUP_NAME=$backup_name
 
 docker pause "$app_id" >/dev/null
 PAUSED_WRITERS+=("$app_id")
@@ -447,11 +706,14 @@ chmod 600 "$STAGING_ARCHIVE"
 )
 chmod 600 "$STAGING_CHECKSUM"
 archive_sha256=$(awk '{print $1}' "$STAGING_CHECKSUM")
+PUBLIC_ARCHIVE_SHA256=$archive_sha256
+PUBLIC_ARCHIVE_BYTES=$(stat -c %s "$STAGING_ARCHIVE")
 
 object_date_path=$(date -u -d "@$(stat -c %Y "$backup_path")" +%Y/%m/%d)
 object_prefix="${COS_PREFIX%/}/backups/$object_date_path/$backup_name"
 archive_object="cos://$COS_BUCKET/$object_prefix/$archive_name"
 checksum_object="cos://$COS_BUCKET/$object_prefix/$checksum_name"
+PUBLIC_ARCHIVE_OBJECT=$archive_object
 
 upload_object "$STAGING_ARCHIVE" "$archive_object" archive
 upload_object "$STAGING_CHECKSUM" "$checksum_object" sha256
@@ -476,6 +738,8 @@ cleanup_verified_local_backups "$backup_path" "$LOCAL_RETENTION_DAYS" "$LOCAL_MI
 rm -f -- "$STAGING_ARCHIVE" "$STAGING_CHECKSUM"
 STAGING_ARCHIVE=
 STAGING_CHECKSUM=
+
+finish_public_status succeeded
 
 printf 'BACKUP_OK reason=%s source=%s object=%s sha256=%s retention_removed=%s\n' \
   "$reason" "$backup_path" "$archive_object" "$archive_sha256" "$RETENTION_REMOVED"

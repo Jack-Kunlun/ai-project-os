@@ -1,0 +1,11 @@
+services:
+  app:
+    environment:
+      AI_PROJECT_OS_OPERATIONS_STATUS_ROOT: /var/lib/ai-project-os-operations/backups
+    volumes:
+      - type: bind
+        source: /var/lib/ai-project-os-operations/backups
+        target: /var/lib/ai-project-os-operations/backups
+        read_only: true
+        bind:
+          create_host_path: false

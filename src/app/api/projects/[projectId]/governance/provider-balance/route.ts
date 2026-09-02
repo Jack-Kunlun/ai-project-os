@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { ProviderBillingError, readProviderBalance } from "@/lib/provider-billing";
+import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,7 @@ export async function POST(
     const user = await requireApiSession(request);
     const projectId = idSchema.parse((await context.params).projectId);
     await assertProjectAccess(user, projectId, "owner");
+    await assertProjectActive(projectId);
     const input = bodySchema.parse(await readJsonBody(request));
     const balance = await readProviderBalance(projectId, input.providerConnectionId);
     return NextResponse.json(

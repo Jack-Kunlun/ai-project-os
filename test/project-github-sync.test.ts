@@ -207,7 +207,7 @@ test("sync API surfaces use the safe service boundary", () => {
   assert.doesNotMatch(detailRoute, /backgroundJob|leaseToken|webAiGrantId|idempotencyKey/);
   assert.match(control, /协调确认\/关闭未知结果/);
   assert.match(control, /不会重试，也不会调用 GitHub/);
-  assert.match(detailPage, /返回项目控制台/);
+  assert.match(detailPage, /返回项目管理/);
   assert.match(detailPage, /new Map\(sync\.entries\.map\(\(entry\) => \[entry\.targetKey, entry\.repositoryFullName\]\)\)/);
   assert.match(detailPage, /repositoryByTargetKey\.get\(change\.targetKey\)/);
 });

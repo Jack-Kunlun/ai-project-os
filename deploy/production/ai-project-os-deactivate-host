@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+umask 077
+
+readonly CONFIRMATION=${1-}
+readonly REPOSITORY_DIR=/srv/ai-project-os/repository
+readonly ENV_FILE=/etc/ai-project-os/production.env
+readonly COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
+readonly COMPOSE_PROJECT=ai-project-os
+readonly RESTORE_RESULT=/var/lib/ai-project-os/last-host-migration
+readonly RESULT_FILE=/var/lib/ai-project-os/last-host-deactivation
+readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2-1}"
+}
+
+compose() {
+  docker compose \
+    --project-name "$COMPOSE_PROJECT" \
+    --env-file "$ENV_FILE" \
+    --project-directory "$REPOSITORY_DIR" \
+    --file "$REPOSITORY_DIR/compose.yaml" \
+    --file "$COMPOSE_OVERRIDE" \
+    "$@"
+}
+
+[[ $EUID -eq 0 ]] || fail 'HOST_DEACTIVATION_ROOT_REQUIRED' 70
+[[ "$CONFIRMATION" == CONFIRM_ROLLBACK_TO_QUIESCED_SOURCE ]] || fail 'HOST_DEACTIVATION_CONFIRMATION_REQUIRED' 64
+for required_command in chmod date docker flock install mktemp mv stat systemctl; do
+  command -v "$required_command" >/dev/null || fail "HOST_DEACTIVATION_COMMAND_MISSING command=$required_command" 70
+done
+[[ -f "$RESTORE_RESULT" && ! -L "$RESTORE_RESULT" ]] || fail 'HOST_DEACTIVATION_RESTORE_RESULT_MISSING' 70
+[[ "$(stat -c %U:%G "$RESTORE_RESULT")" == root:root ]] || fail 'HOST_DEACTIVATION_RESTORE_RESULT_INVALID' 70
+[[ "$(stat -c %a "$RESTORE_RESULT")" == 600 ]] || fail 'HOST_DEACTIVATION_RESTORE_RESULT_INVALID' 70
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || fail 'HOST_DEACTIVATION_LOCK_BUSY' 75
+systemctl disable --now ai-project-os-backup.timer >/dev/null 2>&1 || true
+systemctl disable --now nginx
+compose stop worker
+[[ -z "$(compose ps -q worker)" ]] || fail 'HOST_DEACTIVATION_WORKER_STILL_RUNNING' 74
+
+postgres_id=$(compose ps -q postgres)
+app_id=$(compose ps -q app)
+[[ -n "$postgres_id" && -n "$app_id" ]] || fail 'HOST_DEACTIVATION_STANDBY_INCOMPLETE' 74
+[[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$postgres_id")" == healthy ]] ||
+  fail 'HOST_DEACTIVATION_POSTGRES_NOT_HEALTHY' 74
+[[ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$app_id")" == healthy ]] ||
+  fail 'HOST_DEACTIVATION_APP_NOT_HEALTHY' 74
+
+install -d -o root -g root -m 0700 /var/lib/ai-project-os
+result_tmp=$(mktemp /var/lib/ai-project-os/.last-host-deactivation.XXXXXX)
+{
+  printf 'HOST_DEACTIVATION_OK\n'
+  printf 'standby=true\n'
+  printf 'completed_at=%s\n' "$(date -Is)"
+} > "$result_tmp"
+chmod 600 "$result_tmp"
+mv -f -- "$result_tmp" "$RESULT_FILE"
+printf 'HOST_DEACTIVATION_OK standby=true source_resume_required=true\n'

@@ -14,6 +14,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
 - 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
 - GitHub Actions 生产部署（未来能力，当前禁用）：[docs/production-deployment.md](docs/production-deployment.md)。
+- 单节点主机迁移与恢复：[docs/production-host-migration.md](docs/production-host-migration.md)。
 - 运行监控基线：[docs/monitoring.md](docs/monitoring.md)。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。

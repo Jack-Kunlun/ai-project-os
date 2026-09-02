@@ -23,20 +23,24 @@ case "$INSTALL_MODE" in
     ;;
 esac
 
-for required_command in age coscli docker systemctl systemd-analyze; do
+for required_command in age coscli docker python3 systemctl systemd-analyze; do
   command -v "$required_command" >/dev/null
 done
 
 for path in "$COS_ENV_FILE" "$COSCLI_CONFIG"; do
   test -f "$path"
+  test ! -L "$path"
   test "$(stat -c %U:%G "$path")" = root:root
   test "$(stat -c %a "$path")" = 600
 done
 
 test -f "$AGE_RECIPIENT_FILE"
+test ! -L "$AGE_RECIPIENT_FILE"
 test "$(stat -c %U:%G "$AGE_RECIPIENT_FILE")" = root:root
 test "$(stat -c %a "$AGE_RECIPIENT_FILE")" = 644
-grep -Eq '^age1[0-9a-z]{58}$' "$AGE_RECIPIENT_FILE"
+mapfile -t age_recipients < "$AGE_RECIPIENT_FILE"
+test "${#age_recipients[@]}" = 1
+[[ "${age_recipients[0]}" =~ ^age1[0-9a-z]{58}$ ]]
 grep -Eq '^COS_BACKUP_BUCKET=' "$COS_ENV_FILE"
 grep -Eq '^COS_BACKUP_REGION=' "$COS_ENV_FILE"
 grep -Eq '^COS_BACKUP_PREFIX=' "$COS_ENV_FILE"
@@ -68,6 +72,10 @@ done
 install -o root -g root -m 0755 \
   "$SOURCE_DIR/ai-project-os-backup" \
   /usr/local/sbin/ai-project-os-backup
+install -d -o root -g root -m 0755 /usr/local/libexec/ai-project-os
+install -o root -g root -m 0755 \
+  "$SOURCE_DIR/ai_project_os_backup_artifact.py" \
+  /usr/local/libexec/ai-project-os/backup-artifact.py
 install -o root -g root -m 0644 \
   "$SOURCE_DIR/ai-project-os-backup.service" \
   /etc/systemd/system/ai-project-os-backup.service
@@ -76,6 +84,12 @@ install -o root -g root -m 0644 \
   /etc/systemd/system/ai-project-os-backup.timer
 
 bash -n /usr/local/sbin/ai-project-os-backup
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path("/usr/local/libexec/ai-project-os/backup-artifact.py")
+compile(path.read_text(encoding="utf-8"), str(path), "exec")
+PY
 systemd-analyze verify \
   /etc/systemd/system/ai-project-os-backup.service \
   /etc/systemd/system/ai-project-os-backup.timer

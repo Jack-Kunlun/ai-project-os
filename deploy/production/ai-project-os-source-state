@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+umask 077
+
+readonly MODE=${1-}
+readonly COMPOSE_PROJECT=ai-project-os
+readonly REPOSITORY_DIR=/srv/ai-project-os/repository
+readonly ENV_FILE=/etc/ai-project-os/production.env
+readonly COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
+readonly BACKUP_SCRIPT=/usr/local/sbin/ai-project-os-backup
+readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+readonly PRIVATE_MARKER=/var/lib/ai-project-os/source-quiesced
+readonly PUBLIC_MARKER=/var/lib/ai-project-os-operations/migration/source-quiesced.json
+
+QUIESCE_COMMITTED=0
+NGINX_WAS_ACTIVE=false
+BACKUP_TIMER_WAS_ENABLED=false
+PRIVATE_TMP=
+PUBLIC_TMP=
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2-1}"
+}
+
+compose() {
+  docker compose \
+    --project-name "$COMPOSE_PROJECT" \
+    --env-file "$ENV_FILE" \
+    --project-directory "$REPOSITORY_DIR" \
+    --file "$REPOSITORY_DIR/compose.yaml" \
+    --file "$COMPOSE_OVERRIDE" \
+    "$@"
+}
+
+service_container_id() {
+  local service=$1
+  local -a ids=()
+
+  mapfile -t ids < <(docker ps -q \
+    --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=$service")
+  (( ${#ids[@]} == 1 )) || fail "SOURCE_SERVICE_INVALID service=$service count=${#ids[@]}" 72
+  printf '%s' "${ids[0]}"
+}
+
+wait_for_writers() {
+  local app_id=$1
+  local worker_id=$2
+  local attempt app_state worker_state
+
+  for attempt in $(seq 1 36); do
+    app_state=$(docker inspect --format '{{.State.Status}}:{{.State.Paused}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$app_id" 2>/dev/null || true)
+    worker_state=$(docker inspect --format '{{.State.Status}}:{{.State.Paused}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$worker_id" 2>/dev/null || true)
+    if [[ "$app_state" == running:false:healthy && "$worker_state" == running:false:healthy ]]; then
+      return
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+rollback_failed_quiesce() {
+  local exit_status=$?
+  local container_id
+
+  if [[ "$MODE" == quiesce && "$QUIESCE_COMMITTED" == 0 ]]; then
+    while IFS= read -r container_id; do
+      [[ -n "$container_id" ]] || continue
+      if [[ "$(docker inspect --format '{{.State.Paused}}' "$container_id" 2>/dev/null || true)" == true ]]; then
+        docker unpause "$container_id" >/dev/null 2>&1 || true
+      fi
+    done < <(docker ps -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT")
+    if [[ "$NGINX_WAS_ACTIVE" == true ]]; then
+      if wait_for_writers "${app_id-}" "${worker_id-}"; then
+        systemctl enable --now nginx >/dev/null 2>&1 || true
+      else
+        printf 'SOURCE_ROLLBACK_WRITER_HEALTH_TIMEOUT\n' >&2
+      fi
+    fi
+    if [[ "$BACKUP_TIMER_WAS_ENABLED" == true ]]; then
+      systemctl enable --now ai-project-os-backup.timer >/dev/null 2>&1 || true
+    fi
+    [[ -z "$PRIVATE_TMP" ]] || rm -f -- "$PRIVATE_TMP"
+    [[ -z "$PUBLIC_TMP" ]] || rm -f -- "$PUBLIC_TMP"
+    rm -f -- "$PRIVATE_MARKER" "$PUBLIC_MARKER"
+  fi
+  return "$exit_status"
+}
+
+trap rollback_failed_quiesce EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+[[ $EUID -eq 0 ]] || fail 'SOURCE_STATE_ROOT_REQUIRED' 70
+[[ "$MODE" =~ ^(quiesce|resume)$ ]] || fail 'SOURCE_STATE_USAGE: ai-project-os-source-state quiesce|resume' 64
+for required_command in chmod date docker flock grep install mktemp mv rm sed seq sleep stat systemctl tail; do
+  command -v "$required_command" >/dev/null || fail "SOURCE_COMMAND_MISSING command=$required_command" 70
+done
+[[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] || fail 'SOURCE_ENV_MISSING' 70
+[[ -x "$BACKUP_SCRIPT" && ! -L "$BACKUP_SCRIPT" ]] || fail 'SOURCE_BACKUP_SCRIPT_MISSING' 70
+[[ -f "$COMPOSE_OVERRIDE" && ! -L "$COMPOSE_OVERRIDE" ]] || fail 'SOURCE_COMPOSE_OVERRIDE_MISSING' 70
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || fail 'SOURCE_DEPLOYMENT_LOCK_BUSY' 75
+
+install -d -o root -g root -m 0700 /var/lib/ai-project-os
+install -d -o root -g root -m 0755 /var/lib/ai-project-os-operations/migration
+
+app_id=$(service_container_id app)
+worker_id=$(service_container_id worker)
+
+if [[ "$MODE" == quiesce ]]; then
+  [[ ! -e "$PRIVATE_MARKER" && ! -e "$PUBLIC_MARKER" ]] || fail 'SOURCE_ALREADY_QUIESCED' 75
+  wait_for_writers "$app_id" "$worker_id" || fail 'SOURCE_WRITER_HEALTH_TIMEOUT' 74
+  systemctl is-active --quiet nginx || fail 'SOURCE_NGINX_NOT_ACTIVE' 72
+  NGINX_WAS_ACTIVE=true
+  if systemctl is-enabled --quiet ai-project-os-backup.timer; then
+    BACKUP_TIMER_WAS_ENABLED=true
+  fi
+  systemctl disable --now ai-project-os-backup.timer >/dev/null 2>&1 || true
+  systemctl disable --now nginx
+  systemctl is-active --quiet nginx && fail 'SOURCE_NGINX_STOP_FAILED' 74
+
+  backup_output=$(AI_PROJECT_OS_CUTOVER=1 AI_PROJECT_OS_CUTOVER_LOCK_HELD=1 \
+    "$BACKUP_SCRIPT" manual)
+  printf '%s\n' "$backup_output"
+  backup_name=$(sed -n 's/^BACKUP_OK .* source=\/var\/backups\/ai-project-os\/\([^ ]*\) .*/\1/p' \
+    <<<"$backup_output" | tail -n 1)
+  latest_manifest=$(sed -n 's/^BACKUP_OK .* manifest=\([^ ]*\) .*/\1/p' \
+    <<<"$backup_output" | tail -n 1)
+  [[ "$backup_name" =~ ^[0-9]{8}T[0-9]{6}Z-manual\.[A-Za-z0-9]{6}$ ]] ||
+    fail 'SOURCE_BACKUP_RESULT_INVALID' 73
+  [[ "$latest_manifest" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
+    fail 'SOURCE_BACKUP_RESULT_INVALID' 73
+  grep -q 'source_quiesced=true' <<<"$backup_output" || fail 'SOURCE_BACKUP_NOT_QUIESCED' 73
+  [[ "$(docker inspect --format '{{.State.Paused}}' "$app_id")" == true ]] || fail 'SOURCE_APP_NOT_PAUSED' 73
+  [[ "$(docker inspect --format '{{.State.Paused}}' "$worker_id")" == true ]] || fail 'SOURCE_WORKER_NOT_PAUSED' 73
+
+  quiesced_at=$(date -Is)
+  PRIVATE_TMP=$(mktemp /var/lib/ai-project-os/.source-quiesced.XXXXXX)
+  PUBLIC_TMP=$(mktemp /var/lib/ai-project-os-operations/migration/.source-quiesced.XXXXXX)
+  {
+    printf 'SOURCE_QUIESCED\n'
+    printf 'backup=%s\n' "$backup_name"
+    printf 'latest_manifest_object=%s\n' "$latest_manifest"
+    printf 'quiesced_at=%s\n' "$quiesced_at"
+    printf 'nginx_was_active=true\n'
+    printf 'backup_timer_was_enabled=%s\n' "$BACKUP_TIMER_WAS_ENABLED"
+  } > "$PRIVATE_TMP"
+  {
+    printf '{\n'
+    printf '  "formatVersion": 1,\n'
+    printf '  "state": "quiesced",\n'
+    printf '  "backupName": "%s",\n' "$backup_name"
+    printf '  "latestManifestObject": "%s",\n' "$latest_manifest"
+    printf '  "quiescedAt": "%s"\n' "$quiesced_at"
+    printf '}\n'
+  } > "$PUBLIC_TMP"
+  chmod 600 "$PRIVATE_TMP"
+  chmod 644 "$PUBLIC_TMP"
+  mv -f -- "$PRIVATE_TMP" "$PRIVATE_MARKER"
+  PRIVATE_TMP=
+  mv -f -- "$PUBLIC_TMP" "$PUBLIC_MARKER"
+  PUBLIC_TMP=
+  QUIESCE_COMMITTED=1
+  printf 'SOURCE_QUIESCED_OK backup=%s manifest=%s\n' "$backup_name" "$latest_manifest"
+  exit 0
+fi
+
+[[ -f "$PRIVATE_MARKER" && ! -L "$PRIVATE_MARKER" ]] || fail 'SOURCE_QUIESCE_MARKER_MISSING' 75
+[[ "$(stat -c %U:%G "$PRIVATE_MARKER")" == root:root ]] || fail 'SOURCE_QUIESCE_MARKER_INVALID' 75
+[[ "$(stat -c %a "$PRIVATE_MARKER")" == 600 ]] || fail 'SOURCE_QUIESCE_MARKER_INVALID' 75
+grep -qx 'SOURCE_QUIESCED' "$PRIVATE_MARKER" || fail 'SOURCE_QUIESCE_MARKER_INVALID' 75
+backup_timer_was_enabled=$(sed -n 's/^backup_timer_was_enabled=//p' "$PRIVATE_MARKER")
+[[ "$backup_timer_was_enabled" =~ ^(true|false)$ ]] || fail 'SOURCE_QUIESCE_MARKER_INVALID' 75
+[[ "$(docker inspect --format '{{.State.Paused}}' "$app_id")" == true ]] || fail 'SOURCE_APP_NOT_PAUSED' 73
+[[ "$(docker inspect --format '{{.State.Paused}}' "$worker_id")" == true ]] || fail 'SOURCE_WORKER_NOT_PAUSED' 73
+docker unpause "$app_id" >/dev/null
+docker unpause "$worker_id" >/dev/null
+wait_for_writers "$app_id" "$worker_id" || fail 'SOURCE_WRITER_HEALTH_TIMEOUT' 74
+systemctl enable --now nginx
+systemctl is-active --quiet nginx
+if [[ "$backup_timer_was_enabled" == true ]]; then
+  systemctl enable --now ai-project-os-backup.timer
+  systemctl is-active --quiet ai-project-os-backup.timer
+fi
+rm -f -- "$PRIVATE_MARKER" "$PUBLIC_MARKER"
+printf 'SOURCE_RESUMED_OK\n'

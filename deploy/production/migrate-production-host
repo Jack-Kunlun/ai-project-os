@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export LC_ALL=C
+umask 077
+
+readonly SOURCE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+SOURCE_HOST=
+TARGET_HOST=
+RELEASE_TAG=
+EXPECTED_REVISION=
+LATEST_MANIFEST_OBJECT=
+ROOT_IDENTITY=
+DEPLOY_IDENTITY=
+KNOWN_HOSTS=
+COS_READ_CONFIG=
+AGE_IDENTITY=
+TARGET_HOSTNAME=
+EVIDENCE_DIR=.migration-evidence
+DRY_RUN=0
+LOCAL_TEMP=
+REMOTE_STAGE=
+REMOTE_STAGE_CREATED=0
+REMOTE_HARDENED=0
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2-1}"
+}
+
+usage() {
+  cat >&2 <<'EOF'
+Usage: migrate-production-host \
+  --source-host <IPv4> \
+  --target-host <IPv4> \
+  --release-tag <vX.Y.Z> \
+  --revision <40-hex-sha> \
+  --manifest-object <cos://.../manifests/latest.json> \
+  --root-identity <new-host-root-private-key> \
+  --deploy-identity <deploy-private-key> \
+  --known-hosts <verified-known-hosts-file> \
+  --cos-read-config <temporary-read-only-coscli.yaml> \
+  --age-identity <offline-age-identity> \
+  --target-hostname <ai-project-os-prod-...> \
+  [--evidence-dir <directory>] [--dry-run]
+EOF
+  exit 64
+}
+
+local_file_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+}
+
+require_private_file() {
+  local path=$1
+  local label=$2
+  local mode
+
+  [[ -f "$path" && ! -L "$path" ]] || fail "MIGRATION_FILE_MISSING name=$label" 70
+  mode=$(local_file_mode "$path")
+  [[ "$mode" == 400 || "$mode" == 600 ]] || fail "MIGRATION_FILE_MODE_INVALID name=$label mode=$mode" 70
+}
+
+validate_ipv4() {
+  python3 - "$1" <<'PY'
+import ipaddress
+import sys
+
+try:
+    value = ipaddress.ip_address(sys.argv[1])
+except ValueError:
+    raise SystemExit(1)
+raise SystemExit(0 if value.version == 4 and value.is_global else 1)
+PY
+}
+
+cleanup() {
+  local exit_status=$?
+
+  if [[ -n "$LOCAL_TEMP" && -d "$LOCAL_TEMP" ]]; then
+    rm -rf -- "$LOCAL_TEMP"
+  fi
+  if (( REMOTE_STAGE_CREATED == 1 && REMOTE_HARDENED == 0 )) &&
+    [[ "$REMOTE_STAGE" =~ ^/run/ai-project-os-migration-[0-9]{8}T[0-9]{6}Z-[0-9]+$ ]]; then
+    ssh "${ROOT_SSH_OPTIONS[@]}" "root@$TARGET_HOST" \
+      "rm -rf --one-file-system -- $REMOTE_STAGE" >/dev/null 2>&1 || true
+  fi
+  return "$exit_status"
+}
+
+check_source_marker() {
+  local output_path=$1
+  local marker_manifest marker_state
+
+  ssh "${DEPLOY_SSH_OPTIONS[@]}" "deploy@$SOURCE_HOST" \
+    'exec cat /var/lib/ai-project-os-operations/migration/source-quiesced.json' \
+    > "$output_path"
+  marker_state=$(python3 - "$output_path" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+raw = path.read_bytes()
+if len(raw) < 2 or len(raw) > 32768:
+    raise SystemExit(1)
+value = json.loads(raw)
+expected = {"formatVersion", "state", "backupName", "latestManifestObject", "quiescedAt"}
+if not isinstance(value, dict) or set(value) != expected:
+    raise SystemExit(1)
+if value["formatVersion"] != 1 or value["state"] != "quiesced":
+    raise SystemExit(1)
+if re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-manual\.[A-Za-z0-9]{6}", value["backupName"]) is None:
+    raise SystemExit(1)
+if re.fullmatch(r"cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json", value["latestManifestObject"]) is None:
+    raise SystemExit(1)
+print(value["state"])
+PY
+  ) || fail 'MIGRATION_SOURCE_MARKER_INVALID' 73
+  [[ "$marker_state" == quiesced ]] || fail 'MIGRATION_SOURCE_NOT_QUIESCED' 75
+  marker_manifest=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["latestManifestObject"])' "$output_path")
+  [[ "$marker_manifest" == "$LATEST_MANIFEST_OBJECT" ]] || fail 'MIGRATION_SOURCE_MANIFEST_MISMATCH' 68
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --source-host|--target-host|--release-tag|--revision|--manifest-object|--root-identity|--deploy-identity|--known-hosts|--cos-read-config|--age-identity|--target-hostname|--evidence-dir)
+      (( $# >= 2 )) || usage
+      case "$1" in
+        --source-host) SOURCE_HOST=$2 ;;
+        --target-host) TARGET_HOST=$2 ;;
+        --release-tag) RELEASE_TAG=$2 ;;
+        --revision) EXPECTED_REVISION=$2 ;;
+        --manifest-object) LATEST_MANIFEST_OBJECT=$2 ;;
+        --root-identity) ROOT_IDENTITY=$2 ;;
+        --deploy-identity) DEPLOY_IDENTITY=$2 ;;
+        --known-hosts) KNOWN_HOSTS=$2 ;;
+        --cos-read-config) COS_READ_CONFIG=$2 ;;
+        --age-identity) AGE_IDENTITY=$2 ;;
+        --target-hostname) TARGET_HOSTNAME=$2 ;;
+        --evidence-dir) EVIDENCE_DIR=$2 ;;
+      esac
+      shift 2
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    *) usage ;;
+  esac
+done
+
+for required_command in awk cat chmod cp curl date git grep install mktemp mv python3 rm scp sed sha256sum ssh ssh-keygen stat tar tee; do
+  command -v "$required_command" >/dev/null || fail "MIGRATION_COMMAND_MISSING command=$required_command" 70
+done
+validate_ipv4 "$SOURCE_HOST" || fail 'MIGRATION_SOURCE_HOST_INVALID' 64
+validate_ipv4 "$TARGET_HOST" || fail 'MIGRATION_TARGET_HOST_INVALID' 64
+[[ "$SOURCE_HOST" != "$TARGET_HOST" ]] || fail 'MIGRATION_HOSTS_MUST_DIFFER' 64
+[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'MIGRATION_TAG_INVALID' 64
+[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'MIGRATION_REVISION_INVALID' 65
+[[ "$LATEST_MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
+  fail 'MIGRATION_MANIFEST_OBJECT_INVALID' 64
+[[ "$TARGET_HOSTNAME" =~ ^ai-project-os-prod-[a-z0-9-]{1,32}$ ]] || fail 'MIGRATION_HOSTNAME_INVALID' 64
+[[ "$EVIDENCE_DIR" != / && "$EVIDENCE_DIR" != *$'\n'* ]] || fail 'MIGRATION_EVIDENCE_DIR_INVALID' 64
+
+require_private_file "$ROOT_IDENTITY" root_identity
+require_private_file "$DEPLOY_IDENTITY" deploy_identity
+require_private_file "$COS_READ_CONFIG" cos_read_config
+require_private_file "$AGE_IDENTITY" age_identity
+[[ -f "$KNOWN_HOSTS" && ! -L "$KNOWN_HOSTS" ]] || fail 'MIGRATION_KNOWN_HOSTS_MISSING' 70
+known_hosts_mode=$(local_file_mode "$KNOWN_HOSTS")
+[[ "$known_hosts_mode" == 600 || "$known_hosts_mode" == 644 ]] || fail 'MIGRATION_KNOWN_HOSTS_MODE_INVALID' 70
+ssh-keygen -y -f "$ROOT_IDENTITY" >/dev/null || fail 'MIGRATION_ROOT_IDENTITY_INVALID' 71
+ssh-keygen -y -f "$DEPLOY_IDENTITY" >/dev/null || fail 'MIGRATION_DEPLOY_IDENTITY_INVALID' 71
+grep -Eq '^AGE-SECRET-KEY-1[0-9A-Z]+$' "$AGE_IDENTITY" || fail 'MIGRATION_AGE_IDENTITY_INVALID' 71
+grep -q 'secret_id:' "$COS_READ_CONFIG" || fail 'MIGRATION_COS_CONFIG_INVALID' 71
+grep -q 'secret_key:' "$COS_READ_CONFIG" || fail 'MIGRATION_COS_CONFIG_INVALID' 71
+ssh-keygen -F "$SOURCE_HOST" -f "$KNOWN_HOSTS" >/dev/null || fail 'MIGRATION_SOURCE_HOST_KEY_MISSING' 71
+ssh-keygen -F "$TARGET_HOST" -f "$KNOWN_HOSTS" >/dev/null || fail 'MIGRATION_TARGET_HOST_KEY_MISSING' 71
+
+LOCAL_TEMP=$(mktemp -d)
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+readonly -a BUNDLE_FILES=(
+  ai-project-os-actions-gateway
+  ai-project-os-activate-host
+  ai-project-os-backup
+  ai-project-os-backup.service
+  ai-project-os-backup.timer
+  ai-project-os-deactivate-host
+  ai-project-os-deploy
+  ai-project-os-deploy.sudoers
+  ai-project-os-restore
+  ai-project-os-source-state
+  ai_project_os_backup_artifact.py
+  bootstrap-production-host
+  compose.operations.yaml
+  install-production-backup.sh
+  install-production-deploy.sh
+  host/docker-daemon.json
+  host/ssh-hardening.conf
+  nginx/ai-project-os.conf
+  nginx/ai-project-os-proxy.conf
+)
+OPERATIONS_REPOSITORY=$(git -C "$SOURCE_DIR" rev-parse --show-toplevel 2>/dev/null) ||
+  fail 'MIGRATION_OPERATIONS_REPOSITORY_MISSING' 70
+OPERATIONS_REVISION=$(git -C "$OPERATIONS_REPOSITORY" rev-parse HEAD)
+[[ "$OPERATIONS_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'MIGRATION_OPERATIONS_REVISION_INVALID' 70
+declare -a BUNDLE_REPOSITORY_PATHS=()
+for bundle_file in "${BUNDLE_FILES[@]}"; do
+  [[ -f "$SOURCE_DIR/$bundle_file" && ! -L "$SOURCE_DIR/$bundle_file" ]] ||
+    fail "MIGRATION_BUNDLE_FILE_INVALID path=$bundle_file" 70
+  BUNDLE_REPOSITORY_PATHS+=("deploy/production/$bundle_file")
+done
+OPERATIONS_STATUS=$(git -C "$OPERATIONS_REPOSITORY" status --porcelain -- "${BUNDLE_REPOSITORY_PATHS[@]}")
+tar -C "$SOURCE_DIR" -czf "$LOCAL_TEMP/ops-bundle.tar.gz" "${BUNDLE_FILES[@]}"
+bundle_sha256=$(sha256sum "$LOCAL_TEMP/ops-bundle.tar.gz" | awk '{print $1}')
+printf '%s  ops-bundle.tar.gz\n' "$bundle_sha256" > "$LOCAL_TEMP/ops-bundle.tar.gz.sha256"
+cp -- "$COS_READ_CONFIG" "$LOCAL_TEMP/restore-coscli.yaml"
+cp -- "$AGE_IDENTITY" "$LOCAL_TEMP/restore-age.key"
+chmod 600 "$LOCAL_TEMP/restore-coscli.yaml" "$LOCAL_TEMP/restore-age.key"
+
+printf 'MIGRATION_PLAN source=%s target=%s tag=%s revision=%s manifest=%s hostname=%s\n' \
+  "$SOURCE_HOST" "$TARGET_HOST" "$RELEASE_TAG" "$EXPECTED_REVISION" \
+  "$LATEST_MANIFEST_OBJECT" "$TARGET_HOSTNAME"
+printf 'MIGRATION_BUNDLE_READY sha256=%s files=%s\n' "$bundle_sha256" "${#BUNDLE_FILES[@]}"
+if (( DRY_RUN == 1 )); then
+  printf 'MIGRATION_DRY_RUN_OK mutations=none operations_revision=%s operations_clean=%s\n' \
+    "$OPERATIONS_REVISION" "$([[ -z "$OPERATIONS_STATUS" ]] && printf true || printf false)"
+  exit 0
+fi
+[[ -z "$OPERATIONS_STATUS" ]] || fail 'MIGRATION_OPERATIONS_BUNDLE_NOT_CLEAN' 75
+
+readonly -a ROOT_SSH_OPTIONS=(
+  -i "$ROOT_IDENTITY"
+  -o BatchMode=yes
+  -o IdentitiesOnly=yes
+  -o StrictHostKeyChecking=yes
+  -o UserKnownHostsFile="$KNOWN_HOSTS"
+  -o ConnectTimeout=15
+  -o ServerAliveInterval=30
+  -o ServerAliveCountMax=6
+)
+readonly -a DEPLOY_SSH_OPTIONS=(
+  -i "$DEPLOY_IDENTITY"
+  -o BatchMode=yes
+  -o IdentitiesOnly=yes
+  -o StrictHostKeyChecking=yes
+  -o UserKnownHostsFile="$KNOWN_HOSTS"
+  -o ConnectTimeout=15
+  -o ServerAliveInterval=30
+  -o ServerAliveCountMax=6
+)
+
+check_source_marker "$LOCAL_TEMP/source-marker-before.json"
+REMOTE_STAGE="/run/ai-project-os-migration-$(date -u +%Y%m%dT%H%M%SZ)-$RANDOM$RANDOM"
+[[ "$REMOTE_STAGE" =~ ^/run/ai-project-os-migration-[0-9]{8}T[0-9]{6}Z-[0-9]+$ ]] ||
+  fail 'MIGRATION_REMOTE_STAGE_INVALID' 70
+ssh "${ROOT_SSH_OPTIONS[@]}" "root@$TARGET_HOST" "install -d -o root -g root -m 0700 $REMOTE_STAGE"
+REMOTE_STAGE_CREATED=1
+scp "${ROOT_SSH_OPTIONS[@]}" \
+  "$LOCAL_TEMP/ops-bundle.tar.gz" \
+  "$LOCAL_TEMP/ops-bundle.tar.gz.sha256" \
+  "$LOCAL_TEMP/restore-coscli.yaml" \
+  "$LOCAL_TEMP/restore-age.key" \
+  "root@$TARGET_HOST:$REMOTE_STAGE/"
+ssh "${ROOT_SSH_OPTIONS[@]}" "root@$TARGET_HOST" \
+  "cd $REMOTE_STAGE && sha256sum --check ops-bundle.tar.gz.sha256 && install -d -o root -g root -m 0700 source && tar --extract --gzip --file ops-bundle.tar.gz --directory source --no-same-owner --no-same-permissions && chmod 0600 restore-coscli.yaml restore-age.key && chmod 0755 source/bootstrap-production-host source/install-production-backup.sh source/install-production-deploy.sh source/ai-project-os-actions-gateway source/ai-project-os-activate-host source/ai-project-os-deactivate-host source/ai-project-os-backup source/ai-project-os-deploy source/ai-project-os-restore source/ai-project-os-source-state source/ai_project_os_backup_artifact.py"
+
+ssh "${ROOT_SSH_OPTIONS[@]}" "root@$TARGET_HOST" \
+  "bash $REMOTE_STAGE/source/bootstrap-production-host prepare $RELEASE_TAG $EXPECTED_REVISION $LATEST_MANIFEST_OBJECT $REMOTE_STAGE/restore-coscli.yaml $REMOTE_STAGE/restore-age.key $TARGET_HOSTNAME" \
+  | tee "$LOCAL_TEMP/target-prepare.log"
+grep -q '^HOST_PREPARE_OK ' "$LOCAL_TEMP/target-prepare.log" || fail 'MIGRATION_TARGET_PREPARE_RESULT_INVALID' 74
+
+ssh "${DEPLOY_SSH_OPTIONS[@]}" "deploy@$TARGET_HOST" \
+  'test "$(whoami)" = deploy && curl --fail --silent --show-error http://127.0.0.1:3000/api/health' \
+  > "$LOCAL_TEMP/target-standby-health.json"
+python3 - "$LOCAL_TEMP/target-standby-health.json" "${RELEASE_TAG#v}" <<'PY'
+import json
+import sys
+
+value = json.load(open(sys.argv[1]))
+if value.get("status") != "ok" or value.get("database") != "up" or value.get("version") != sys.argv[2]:
+    raise SystemExit(1)
+PY
+check_source_marker "$LOCAL_TEMP/source-marker-before-activation.json"
+
+ssh "${ROOT_SSH_OPTIONS[@]}" "root@$TARGET_HOST" \
+  "/usr/local/sbin/ai-project-os-activate-host $RELEASE_TAG $EXPECTED_REVISION CONFIRM_SOURCE_REMAINS_QUIESCED" \
+  | tee "$LOCAL_TEMP/target-activation.log"
+grep -q '^HOST_ACTIVATION_OK ' "$LOCAL_TEMP/target-activation.log" || fail 'MIGRATION_TARGET_ACTIVATION_RESULT_INVALID' 74
+
+curl --fail --silent --show-error \
+  --connect-timeout 10 --max-time 30 \
+  --resolve "ai-project-os.com:443:$TARGET_HOST" \
+  https://ai-project-os.com/api/health > "$LOCAL_TEMP/target-tls-health.json"
+python3 - "$LOCAL_TEMP/target-tls-health.json" "${RELEASE_TAG#v}" <<'PY'
+import json
+import sys
+
+value = json.load(open(sys.argv[1]))
+worker = value.get("worker", {})
+if not (
+    value.get("status") == "ok"
+    and value.get("database") == "up"
+    and value.get("version") == sys.argv[2]
+    and worker.get("status") == "up"
+    and worker.get("consecutiveFailures") == 0
+):
+    raise SystemExit(1)
+PY
+
+ssh "${ROOT_SSH_OPTIONS[@]}" "root@$TARGET_HOST" \
+  "bash $REMOTE_STAGE/source/bootstrap-production-host harden" \
+  | tee "$LOCAL_TEMP/target-hardening.log"
+grep -q '^HOST_SSH_HARDENED ' "$LOCAL_TEMP/target-hardening.log" || fail 'MIGRATION_TARGET_HARDENING_RESULT_INVALID' 74
+REMOTE_HARDENED=1
+ssh "${DEPLOY_SSH_OPTIONS[@]}" "deploy@$TARGET_HOST" 'test "$(whoami)" = deploy'
+if ssh "${ROOT_SSH_OPTIONS[@]}" "root@$TARGET_HOST" true >/dev/null 2>&1; then
+  fail 'MIGRATION_ROOT_LOGIN_STILL_ALLOWED' 73
+fi
+
+install -d -m 0700 "$EVIDENCE_DIR"
+evidence_path="$EVIDENCE_DIR/$(date -u +%Y%m%dT%H%M%SZ)-$TARGET_HOST.json"
+evidence_tmp=$(mktemp "$EVIDENCE_DIR/.migration.XXXXXX")
+backup_name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["backupName"])' \
+  "$LOCAL_TEMP/source-marker-before-activation.json")
+completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+cat > "$evidence_tmp" <<EOF
+{
+  "formatVersion": 1,
+  "sourceHost": "$SOURCE_HOST",
+  "targetHost": "$TARGET_HOST",
+  "targetHostname": "$TARGET_HOSTNAME",
+  "releaseTag": "$RELEASE_TAG",
+  "revision": "$EXPECTED_REVISION",
+  "backupName": "$backup_name",
+  "latestManifestObject": "$LATEST_MANIFEST_OBJECT",
+  "operationsBundleSha256": "$bundle_sha256",
+  "operationsRevision": "$OPERATIONS_REVISION",
+  "standbyHealthVerified": true,
+  "tlsHealthVerified": true,
+  "workerHealthVerified": true,
+  "backupTimerEnabled": true,
+  "sshHardened": true,
+  "completedAt": "$completed_at",
+  "dnsCutoverPending": true,
+  "githubProductionHostUpdatePending": true
+}
+EOF
+chmod 600 "$evidence_tmp"
+mv -f -- "$evidence_tmp" "$evidence_path"
+printf 'MIGRATION_TARGET_READY target=%s tag=%s revision=%s evidence=%s\n' \
+  "$TARGET_HOST" "$RELEASE_TAG" "$EXPECTED_REVISION" "$evidence_path"
+printf 'MIGRATION_EXTERNAL_GATES dns_a_and_api_to=%s github_production_ssh_host=%s source_remains_quiesced=true\n' \
+  "$TARGET_HOST" "$TARGET_HOST"

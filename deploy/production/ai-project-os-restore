@@ -1,0 +1,382 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+umask 077
+
+readonly RELEASE_TAG=${1-}
+readonly EXPECTED_REVISION=${2-}
+readonly LATEST_MANIFEST_OBJECT=${3-}
+readonly RESTORE_COSCLI_CONFIG=${4-}
+readonly AGE_IDENTITY_FILE=${5-}
+readonly RESTORE_MODE=${6-}
+readonly REPOSITORY_URL=https://github.com/Jack-Kunlun/ai-project-os.git
+readonly REPOSITORY_DIR=/srv/ai-project-os/repository
+readonly ENV_FILE=/etc/ai-project-os/production.env
+readonly COMPOSE_PROJECT=ai-project-os
+readonly COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
+readonly ARTIFACT_HELPER=/usr/local/libexec/ai-project-os/backup-artifact.py
+readonly COSCLI=/usr/local/bin/coscli
+readonly RESTORE_STATE_ROOT=/var/lib/ai-project-os-restore
+readonly RESULT_FILE=/var/lib/ai-project-os/last-host-migration
+readonly DEPLOY_LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+readonly BACKUP_LOCK_FILE=/run/lock/ai-project-os-backup.lock
+readonly POSTGRES_IMAGE='pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff'
+
+RESTORE_ROOT=
+EXTRACT_ROOT=
+HOST_CONFIG_ROOT=
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2-1}"
+}
+
+cleanup() {
+  local status=$?
+
+  if [[ -n "$RESTORE_ROOT" && -d "$RESTORE_ROOT" &&
+    "$(dirname -- "$RESTORE_ROOT")" == "$RESTORE_STATE_ROOT" &&
+    "$(basename -- "$RESTORE_ROOT")" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+$ ]]; then
+    rm -rf --one-file-system -- "$RESTORE_ROOT"
+  fi
+  if [[ "$RESTORE_COSCLI_CONFIG" == /run/ai-project-os-migration-*/* && -f "$RESTORE_COSCLI_CONFIG" ]]; then
+    rm -f -- "$RESTORE_COSCLI_CONFIG"
+  fi
+  if [[ "$AGE_IDENTITY_FILE" == /run/ai-project-os-migration-*/* && -f "$AGE_IDENTITY_FILE" ]]; then
+    rm -f -- "$AGE_IDENTITY_FILE"
+  fi
+  return "$status"
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+require_root_file() {
+  local path=$1
+  local mode=$2
+
+  [[ -f "$path" && ! -L "$path" ]] || fail "RESTORE_REQUIRED_FILE_MISSING path=$path" 70
+  [[ "$(stat -c %U:%G "$path")" == root:root ]] ||
+    fail "RESTORE_REQUIRED_FILE_OWNER_INVALID path=$path" 70
+  [[ "$(stat -c %a "$path")" == "$mode" ]] ||
+    fail "RESTORE_REQUIRED_FILE_MODE_INVALID path=$path" 70
+}
+
+read_env_value() {
+  local key=$1
+  local default_value=${2-}
+  local line value
+  local -a matches=()
+
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  if (( ${#matches[@]} == 0 )) && [[ -n "$default_value" ]]; then
+    printf '%s' "$default_value"
+    return
+  fi
+  (( ${#matches[@]} == 1 )) || fail "RESTORE_ENV_KEY_INVALID key=$key" 71
+  line=${matches[0]}
+  value=${line#*=}
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] ||
+    fail "RESTORE_ENV_VALUE_INVALID key=$key" 71
+  printf '%s' "$value"
+}
+
+compose() {
+  docker compose \
+    --project-name "$COMPOSE_PROJECT" \
+    --env-file "$ENV_FILE" \
+    --project-directory "$REPOSITORY_DIR" \
+    --file "$REPOSITORY_DIR/compose.yaml" \
+    --file "$COMPOSE_OVERRIDE" \
+    "$@"
+}
+
+verify_release() {
+  local resolved_revision package_version ci_runs_url ci_runs_json
+
+  install -d -o root -g root -m 0755 /srv/ai-project-os
+  if [[ ! -d "$REPOSITORY_DIR/.git" ]]; then
+    git clone --filter=blob:none --no-checkout "$REPOSITORY_URL" "$REPOSITORY_DIR"
+    chown -R root:root "$REPOSITORY_DIR"
+  fi
+  [[ "$(stat -c %U:%G "$REPOSITORY_DIR")" == root:root ]] || fail 'RESTORE_REPOSITORY_OWNER_INVALID' 70
+  [[ "$(git -C "$REPOSITORY_DIR" remote get-url origin)" == "$REPOSITORY_URL" ]] ||
+    fail 'RESTORE_REPOSITORY_REMOTE_INVALID' 70
+
+  git -C "$REPOSITORY_DIR" fetch --force --no-tags origin \
+    "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+  [[ "$(git -C "$REPOSITORY_DIR" cat-file -t "refs/tags/$RELEASE_TAG")" == tag ]] ||
+    fail 'RESTORE_TAG_NOT_ANNOTATED' 66
+  resolved_revision=$(git -C "$REPOSITORY_DIR" rev-parse "refs/tags/$RELEASE_TAG^{}")
+  [[ "$resolved_revision" == "$EXPECTED_REVISION" ]] || fail 'RESTORE_TAG_REVISION_MISMATCH' 67
+
+  ci_runs_url="https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$EXPECTED_REVISION&per_page=100"
+  ci_runs_json=$(curl --fail --silent --show-error \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'X-GitHub-Api-Version: 2022-11-28' \
+    "$ci_runs_url")
+  if ! python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+revision, tag = sys.argv[1:3]
+accepted = any(
+    run.get("head_sha") == revision
+    and run.get("head_branch") == tag
+    and run.get("event") == "push"
+    and run.get("status") == "completed"
+    and run.get("conclusion") == "success"
+    for run in payload.get("workflow_runs", [])
+)
+raise SystemExit(0 if accepted else 1)
+' "$EXPECTED_REVISION" "$RELEASE_TAG" <<<"$ci_runs_json"; then
+    fail 'RESTORE_TAG_SUCCESSFUL_CI_NOT_FOUND' 72
+  fi
+
+  git -C "$REPOSITORY_DIR" checkout --detach --force "$EXPECTED_REVISION"
+  [[ -z "$(git -C "$REPOSITORY_DIR" status --porcelain)" ]] || fail 'RESTORE_REPOSITORY_DIRTY' 70
+  package_version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$REPOSITORY_DIR/package.json" | head -n 1)
+  [[ "v$package_version" == "$RELEASE_TAG" ]] || fail 'RESTORE_PACKAGE_VERSION_MISMATCH' 68
+}
+
+wait_for_postgres() {
+  local attempt postgres_id state
+
+  for attempt in $(seq 1 60); do
+    postgres_id=$(compose ps -q postgres)
+    if [[ -n "$postgres_id" ]]; then
+      state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$postgres_id")
+      if [[ "$state" == healthy ]]; then
+        printf '%s' "$postgres_id"
+        return
+      fi
+    fi
+    sleep 5
+  done
+  fail 'RESTORE_POSTGRES_HEALTH_TIMEOUT' 74
+}
+
+restore_volume_archive() {
+  local volume_name=$1
+  local archive_path=$2
+  local mountpoint
+
+  [[ "$volume_name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{1,127}$ ]] || fail 'RESTORE_VOLUME_NAME_INVALID' 71
+  docker volume create "$volume_name" >/dev/null
+  mountpoint=$(docker volume inspect --format '{{.Mountpoint}}' "$volume_name")
+  [[ "$mountpoint" == /var/lib/docker/volumes/*/_data && -d "$mountpoint" && ! -L "$mountpoint" ]] ||
+    fail "RESTORE_VOLUME_MOUNTPOINT_INVALID volume=$volume_name" 73
+  [[ -z "$(find "$mountpoint" -mindepth 1 -maxdepth 1 -print -quit)" ]] ||
+    fail "RESTORE_VOLUME_NOT_EMPTY volume=$volume_name" 73
+  tar --extract --gzip --file "$archive_path" --directory "$mountpoint" \
+    --numeric-owner --same-owner --no-overwrite-dir
+}
+
+wait_for_standby() {
+  local attempt postgres_id migrate_id app_id worker_id
+  local postgres_state migrate_state app_state health_body
+
+  for attempt in $(seq 1 60); do
+    postgres_id=$(compose ps -q postgres)
+    migrate_id=$(compose ps -aq migrate)
+    app_id=$(compose ps -q app)
+    worker_id=$(compose ps -q worker)
+    if [[ -n "$postgres_id" && -n "$migrate_id" && -n "$app_id" && -z "$worker_id" ]]; then
+      postgres_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$postgres_id")
+      migrate_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$migrate_id")
+      app_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$app_id")
+      if [[ "$postgres_state" == healthy && "$migrate_state" == exited:0 &&
+        "$app_state" == healthy ]]; then
+        health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)
+        grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body"
+        grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${RELEASE_TAG#v}"'"' <<<"$health_body"
+        grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
+        grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$health_body"
+        printf '%s' "$health_body"
+        return
+      fi
+    fi
+    sleep 5
+  done
+  compose ps -a >&2
+  fail 'RESTORE_STANDBY_HEALTH_TIMEOUT' 74
+}
+
+if [[ $EUID -ne 0 ]]; then
+  fail 'RESTORE_ROOT_REQUIRED' 70
+fi
+[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'RESTORE_TAG_INVALID' 64
+[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'RESTORE_REVISION_INVALID' 65
+[[ "$LATEST_MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
+  fail 'RESTORE_MANIFEST_OBJECT_INVALID' 64
+[[ "$RESTORE_COSCLI_CONFIG" == /run/ai-project-os-migration-*/* ]] || fail 'RESTORE_COS_CONFIG_PATH_INVALID' 64
+[[ "$AGE_IDENTITY_FILE" == /run/ai-project-os-migration-*/* ]] || fail 'RESTORE_AGE_KEY_PATH_INVALID' 64
+[[ "$RESTORE_MODE" =~ ^(migration|recovery)$ ]] || fail 'RESTORE_MODE_INVALID' 64
+
+for required_command in age awk basename chmod chown curl cut date dirname docker find flock getent git grep head id install mktemp mv openssl python3 rm sed seq sha256sum sleep stat tar timeout useradd usermod wc; do
+  command -v "$required_command" >/dev/null || fail "RESTORE_COMMAND_MISSING command=$required_command" 70
+done
+require_root_file "$RESTORE_COSCLI_CONFIG" 600
+require_root_file "$AGE_IDENTITY_FILE" 600
+require_root_file "$COMPOSE_OVERRIDE" 644
+require_root_file "$ARTIFACT_HELPER" 755
+[[ "$("$COSCLI" --version)" == 'coscli version v1.0.9' ]] || fail 'RESTORE_COSCLI_VERSION_INVALID' 70
+grep -Eq '^AGE-SECRET-KEY-1[0-9A-Z]+$' "$AGE_IDENTITY_FILE" || fail 'RESTORE_AGE_KEY_INVALID' 71
+
+exec 8>"$DEPLOY_LOCK_FILE"
+flock -n 8 || fail 'RESTORE_DEPLOYMENT_LOCK_BUSY' 75
+exec 9>"$BACKUP_LOCK_FILE"
+flock -n 9 || fail 'RESTORE_BACKUP_LOCK_BUSY' 75
+
+if (( $(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" | wc -l) != 0 )); then
+  fail 'RESTORE_STACK_ALREADY_EXISTS' 75
+fi
+
+install -d -o root -g root -m 0700 "$RESTORE_STATE_ROOT"
+restore_id="$(date -u +%Y%m%dT%H%M%SZ)-$(date +%s%N)"
+RESTORE_ROOT=$RESTORE_STATE_ROOT/$restore_id
+install -d -o root -g root -m 0700 "$RESTORE_ROOT/download" "$RESTORE_ROOT/extracted" "$RESTORE_ROOT/host-config"
+EXTRACT_ROOT=$RESTORE_ROOT/extracted
+HOST_CONFIG_ROOT=$RESTORE_ROOT/host-config
+
+manifest_path=$RESTORE_ROOT/download/latest.json
+"$COSCLI" cp "$LATEST_MANIFEST_OBJECT" "$manifest_path" \
+  -c "$RESTORE_COSCLI_CONFIG" --init-skip --disable-log --process-log=false \
+  --fail-output=false --disable-checksum=false --disable-crc64=false --check-point=false
+chmod 600 "$manifest_path"
+mapfile -t manifest_values < <(python3 "$ARTIFACT_HELPER" manifest-values "$manifest_path")
+(( ${#manifest_values[@]} == 8 )) || fail 'RESTORE_MANIFEST_VALUES_INVALID' 71
+backup_name=${manifest_values[0]}
+manifest_created_at=${manifest_values[1]}
+manifest_app_version=${manifest_values[2]}
+archive_object=${manifest_values[3]}
+checksum_object=${manifest_values[4]}
+archive_sha256=${manifest_values[5]}
+archive_bytes=${manifest_values[6]}
+source_quiesced=${manifest_values[7]}
+[[ "$manifest_app_version" == "${RELEASE_TAG#v}" ]] || fail 'RESTORE_BACKUP_RELEASE_MISMATCH' 68
+if [[ "$RESTORE_MODE" == migration && "$source_quiesced" != true ]]; then
+  fail 'RESTORE_MIGRATION_BACKUP_NOT_QUIESCED' 68
+fi
+manifest_prefix=${LATEST_MANIFEST_OBJECT%/manifests/latest.json}
+[[ "$archive_object" == "$manifest_prefix"/backups/* ]] || fail 'RESTORE_BACKUP_OBJECT_SCOPE_INVALID' 71
+
+archive_name=${archive_object##*/}
+archive_path=$RESTORE_ROOT/download/$archive_name
+checksum_path=$RESTORE_ROOT/download/$archive_name.sha256
+"$COSCLI" cp "$archive_object" "$archive_path" \
+  -c "$RESTORE_COSCLI_CONFIG" --init-skip --disable-log --process-log=false \
+  --fail-output=false --disable-checksum=false --disable-crc64=false --check-point=false
+"$COSCLI" cp "$checksum_object" "$checksum_path" \
+  -c "$RESTORE_COSCLI_CONFIG" --init-skip --disable-log --process-log=false \
+  --fail-output=false --disable-checksum=false --disable-crc64=false --check-point=false
+chmod 600 "$archive_path" "$checksum_path"
+[[ "$(stat -c %s "$archive_path")" == "$archive_bytes" ]] || fail 'RESTORE_ARCHIVE_SIZE_MISMATCH' 73
+[[ "$(sha256sum "$archive_path" | awk '{print $1}')" == "$archive_sha256" ]] ||
+  fail 'RESTORE_ARCHIVE_SHA256_MISMATCH' 73
+(cd "$RESTORE_ROOT/download" && sha256sum --check "$(basename -- "$checksum_path")" >/dev/null) ||
+  fail 'RESTORE_CHECKSUM_SIDECAR_INVALID' 73
+
+decrypted_tar=$RESTORE_ROOT/backup.tar
+age --decrypt --identity "$AGE_IDENTITY_FILE" --output "$decrypted_tar" "$archive_path"
+chmod 600 "$decrypted_tar"
+[[ "$(python3 "$ARTIFACT_HELPER" validate-outer "$decrypted_tar")" == "$backup_name" ]] ||
+  fail 'RESTORE_ARCHIVE_MANIFEST_NAME_MISMATCH' 73
+tar --extract --file "$decrypted_tar" --directory "$EXTRACT_ROOT" --no-same-owner --no-same-permissions
+backup_root=$(python3 "$ARTIFACT_HELPER" validate-extracted "$EXTRACT_ROOT")
+metadata_app_version=$(sed -n 's/^app_version=//p' "$backup_root/backup-metadata.env")
+metadata_created_at=$(sed -n 's/^created_at=//p' "$backup_root/backup-metadata.env")
+metadata_source_quiesced=$(sed -n 's/^source_quiesced=//p' "$backup_root/backup-metadata.env")
+[[ "$metadata_app_version" == "$manifest_app_version" ]] || fail 'RESTORE_METADATA_APP_VERSION_MISMATCH' 73
+[[ "$metadata_created_at" == "$manifest_created_at" ]] || fail 'RESTORE_METADATA_CREATED_AT_MISMATCH' 73
+[[ "$metadata_source_quiesced" == "$source_quiesced" ]] || fail 'RESTORE_METADATA_QUIESCE_STATE_MISMATCH' 73
+tar --extract --gzip --file "$backup_root/host-config.tar.gz" --directory "$HOST_CONFIG_ROOT" \
+  --no-same-owner --no-same-permissions
+
+install -d -o root -g root -m 0700 /etc/ai-project-os
+install -d -o root -g root -m 0700 /etc/nginx/ssl/ai-project-os.com
+install -o root -g root -m 0600 "$HOST_CONFIG_ROOT/etc/ai-project-os/production.env" /etc/ai-project-os/production.env
+install -o root -g root -m 0600 "$HOST_CONFIG_ROOT/etc/ai-project-os/cos-backup.env" /etc/ai-project-os/cos-backup.env
+install -o root -g root -m 0600 "$HOST_CONFIG_ROOT/etc/ai-project-os/coscli.yaml" /etc/ai-project-os/coscli.yaml
+install -o root -g root -m 0644 "$HOST_CONFIG_ROOT/etc/ai-project-os/production-backup-age.pub" /etc/ai-project-os/production-backup-age.pub
+install -o root -g root -m 0644 "$HOST_CONFIG_ROOT/etc/nginx/ssl/ai-project-os.com/fullchain.crt" /etc/nginx/ssl/ai-project-os.com/fullchain.crt
+install -o root -g root -m 0600 "$HOST_CONFIG_ROOT/etc/nginx/ssl/ai-project-os.com/privkey.key" /etc/nginx/ssl/ai-project-os.com/privkey.key
+
+grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
+grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
+openssl x509 -in /etc/nginx/ssl/ai-project-os.com/fullchain.crt -checkend 86400 -noout >/dev/null ||
+  fail 'RESTORE_TLS_CERTIFICATE_INVALID' 71
+certificate_public_key=$(openssl x509 -in /etc/nginx/ssl/ai-project-os.com/fullchain.crt -pubkey -noout | sha256sum | awk '{print $1}')
+private_public_key=$(openssl pkey -in /etc/nginx/ssl/ai-project-os.com/privkey.key -pubout | sha256sum | awk '{print $1}')
+[[ "$certificate_public_key" == "$private_public_key" ]] || fail 'RESTORE_TLS_KEY_MISMATCH' 71
+
+if ! id deploy >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash --groups sudo,users deploy
+fi
+[[ "$(getent passwd deploy | cut -d: -f6)" == /home/deploy ]] || fail 'RESTORE_DEPLOY_USER_HOME_INVALID' 71
+usermod --append --groups sudo,users deploy
+deploy_password_hash=$(<"$HOST_CONFIG_ROOT/bootstrap/deploy-password.hash")
+[[ "$deploy_password_hash" == '$y$'* || "$deploy_password_hash" == '$6$'* ]] ||
+  fail 'RESTORE_DEPLOY_PASSWORD_HASH_INVALID' 71
+usermod --password "$deploy_password_hash" deploy
+install -d -o deploy -g deploy -m 0700 /home/deploy/.ssh
+install -o deploy -g deploy -m 0600 "$HOST_CONFIG_ROOT/bootstrap/deploy-authorized_keys" /home/deploy/.ssh/authorized_keys
+install -o root -g root -m 0600 "$HOST_CONFIG_ROOT/bootstrap/github-actions.pub" /run/ai-project-os-github-actions.pub
+
+verify_release
+compose config --quiet
+
+POSTGRES_USER=$(read_env_value POSTGRES_USER ai_project_os)
+POSTGRES_DB=$(read_env_value POSTGRES_DB ai_project_os)
+PGDATA_VOLUME=$(read_env_value AI_PROJECT_OS_PGDATA_VOLUME ai-project-os-pgdata)
+SECRETS_VOLUME=$(read_env_value AI_PROJECT_OS_SECRETS_VOLUME ai-project-os-secrets)
+UPLOADS_VOLUME=$(read_env_value AI_PROJECT_OS_UPLOADS_VOLUME ai-project-os-uploads)
+readonly POSTGRES_USER POSTGRES_DB PGDATA_VOLUME SECRETS_VOLUME UPLOADS_VOLUME
+for volume_name in "$PGDATA_VOLUME" "$SECRETS_VOLUME" "$UPLOADS_VOLUME"; do
+  if docker volume inspect "$volume_name" >/dev/null 2>&1; then
+    fail "RESTORE_TARGET_VOLUME_EXISTS volume=$volume_name" 75
+  fi
+done
+
+compose up -d postgres
+postgres_id=$(wait_for_postgres)
+timeout 1800 docker exec -i "$postgres_id" pg_restore \
+  --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" \
+  --clean --if-exists --no-owner --no-privileges < "$backup_root/postgres.dump"
+restore_volume_archive "$SECRETS_VOLUME" "$backup_root/secrets.tar.gz"
+restore_volume_archive "$UPLOADS_VOLUME" "$backup_root/uploads.tar.gz"
+secrets_mountpoint=$(docker volume inspect --format '{{.Mountpoint}}' "$SECRETS_VOLUME")
+[[ -f "$secrets_mountpoint/master.key" && ! -L "$secrets_mountpoint/master.key" ]] ||
+  fail 'RESTORE_MASTER_KEY_MISSING' 73
+[[ "$(stat -c %u:%g "$secrets_mountpoint/master.key")" == 1000:1000 ]] ||
+  fail 'RESTORE_MASTER_KEY_OWNER_INVALID' 73
+[[ "$(stat -c %a "$secrets_mountpoint/master.key")" == 600 ]] ||
+  fail 'RESTORE_MASTER_KEY_MODE_INVALID' 73
+
+compose build migrate app worker
+compose up -d --no-build --force-recreate migrate app
+standby_health=$(wait_for_standby)
+
+install -d -o root -g root -m 0700 "$(dirname -- "$RESULT_FILE")"
+result_tmp=$(mktemp "$(dirname -- "$RESULT_FILE")/.last-host-migration.XXXXXX")
+{
+  printf 'RESTORE_OK\n'
+  printf 'tag=%s\n' "$RELEASE_TAG"
+  printf 'revision=%s\n' "$EXPECTED_REVISION"
+  printf 'backup=%s\n' "$backup_name"
+  printf 'mode=%s\n' "$RESTORE_MODE"
+  printf 'source_quiesced=%s\n' "$source_quiesced"
+  printf 'manifest_created_at=%s\n' "$manifest_created_at"
+  printf 'archive_object=%s\n' "$archive_object"
+  printf 'standby=true\n'
+  printf 'health=%s\n' "$standby_health"
+  printf 'completed_at=%s\n' "$(date -Is)"
+} > "$result_tmp"
+chmod 600 "$result_tmp"
+mv -f -- "$result_tmp" "$RESULT_FILE"
+
+printf 'RESTORE_OK tag=%s revision=%s backup=%s archive=%s\n' \
+  "$RELEASE_TAG" "$EXPECTED_REVISION" "$backup_name" "$archive_object"

@@ -4,8 +4,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
-import { isProjectSnapshotStale } from "@/lib/project-snapshot-stale";
-import type { SnapshotRecord } from "@/lib/project-snapshot";
 import { ProjectMaterialIntake } from "./project-material-intake";
 
 type ProjectItem = {
@@ -67,12 +65,6 @@ type Project = {
 type ErrorPayload = {
   error?: { message?: string };
 };
-
-const labels = {
-  sources: { title: "Sources", subtitle: "项目资料来源", icon: "01" },
-  items: { title: "Items", subtitle: "事实与判断条目", icon: "02" },
-  snapshots: { title: "Snapshot", subtitle: "项目当前状态", icon: "03" },
-} as const;
 
 const itemTypes: Array<{ value: ProjectItem["type"]; label: string }> = [
   { value: "decision", label: "Decision · 决策" },
@@ -141,15 +133,6 @@ async function getItems(projectId: string): Promise<ProjectItem[]> {
     throw new Error(payload.error?.message ?? "项目条目加载失败");
   }
   return payload.items;
-}
-
-async function getSnapshot(projectId: string): Promise<SnapshotRecord | null> {
-  const response = await fetch(`/api/projects/${projectId}/snapshots`, { cache: "no-store" });
-  const payload = (await response.json()) as { snapshot?: SnapshotRecord | null; error?: { message?: string } };
-  if (!response.ok || !("snapshot" in payload)) {
-    throw new Error(payload.error?.message ?? "项目快照加载失败");
-  }
-  return payload.snapshot ?? null;
 }
 
 function formatSourceDate(value: string | null): string {
@@ -235,11 +218,6 @@ export function ProjectDetailClient({ username }: { username: string }) {
   const [itemSuccess, setItemSuccess] = useState<string | null>(null);
   const [isSourcesLoading, setIsSourcesLoading] = useState(true);
   const [isItemsLoading, setIsItemsLoading] = useState(true);
-  const [snapshot, setSnapshot] = useState<SnapshotRecord | null>(null);
-  const [isSnapshotLoading, setIsSnapshotLoading] = useState(true);
-  const [isGeneratingSnapshot, setIsGeneratingSnapshot] = useState(false);
-  const [snapshotError, setSnapshotError] = useState<string | null>(null);
-  const [snapshotSuccess, setSnapshotSuccess] = useState<string | null>(null);
   const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [isSavingItem, setIsSavingItem] = useState(false);
   const [itemActionId, setItemActionId] = useState<string | null>(null);
@@ -297,17 +275,6 @@ export function ProjectDetailClient({ username }: { username: string }) {
         if (!cancelled) setIsItemsLoading(false);
       });
 
-    void getSnapshot(projectId)
-      .then((loadedSnapshot) => {
-        if (!cancelled) setSnapshot(loadedSnapshot);
-      })
-      .catch((loadError: unknown) => {
-        if (!cancelled) setSnapshotError(loadError instanceof Error ? loadError.message : "项目快照加载失败");
-      })
-      .finally(() => {
-        if (!cancelled) setIsSnapshotLoading(false);
-      });
-
     return () => {
       cancelled = true;
     };
@@ -318,12 +285,10 @@ export function ProjectDetailClient({ username }: { username: string }) {
 
     setIsSourcesLoading(true);
     setIsItemsLoading(true);
-    setIsSnapshotLoading(true);
-    const [projectResult, sourcesResult, itemsResult, snapshotResult] = await Promise.allSettled([
+    const [projectResult, sourcesResult, itemsResult] = await Promise.allSettled([
       getProject(projectId),
       getSources(projectId),
       getItems(projectId),
-      getSnapshot(projectId),
     ]);
 
     if (projectResult.status === "fulfilled") {
@@ -353,16 +318,8 @@ export function ProjectDetailClient({ username }: { username: string }) {
       setItemError(itemsResult.reason instanceof Error ? itemsResult.reason.message : "项目条目加载失败");
     }
 
-    if (snapshotResult.status === "fulfilled") {
-      setSnapshot(snapshotResult.value);
-      setSnapshotError(null);
-    } else {
-      setSnapshotError(snapshotResult.reason instanceof Error ? snapshotResult.reason.message : "项目快照加载失败");
-    }
-
     setIsSourcesLoading(false);
     setIsItemsLoading(false);
-    setIsSnapshotLoading(false);
   }
 
   async function handleDeleteSource(source: ProjectSource) {
@@ -557,42 +514,8 @@ export function ProjectDetailClient({ username }: { username: string }) {
     }
   }
 
-  async function handleGenerateSnapshot() {
-    if (!projectId || isGeneratingSnapshot || isSnapshotLoading || confirmedItems.length === 0) return;
-
-    setIsGeneratingSnapshot(true);
-    setSnapshotError(null);
-    setSnapshotSuccess(null);
-
-    try {
-      const response = await fetch(`/api/projects/${projectId}/snapshots`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
-      });
-
-      if (!response.ok) {
-        throw new Error(await readError(response, "快照生成失败"));
-      }
-
-      const payload = (await response.json()) as { snapshot?: SnapshotRecord };
-      if (!payload.snapshot) {
-        throw new Error("快照生成响应无效");
-      }
-
-      setSnapshot(payload.snapshot);
-      setSnapshotSuccess("最新快照已生成，内容按本次确认状态固定保存。");
-      await reloadProjectAndSources();
-    } catch (generationError) {
-      setSnapshotError(generationError instanceof Error ? generationError.message : "快照生成失败");
-    } finally {
-      setIsGeneratingSnapshot(false);
-    }
-  }
-
   const selectedSource = sources.find((source) => source.id === itemForm.sourceId) ?? null;
   const isEditingItem = editingItemId !== null;
-  const confirmedItems = items.filter((item) => item.reviewStatus === "confirmed");
 
   if (error) {
     return <ProjectShell username={username} projectId={projectId}><div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</div></ProjectShell>;
@@ -606,35 +529,16 @@ export function ProjectDetailClient({ username }: { username: string }) {
     <ProjectShell username={username} projectId={projectId}>
       <div className="flex flex-col gap-6 border-b border-slate-200/80 pb-8 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project workspace</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name}</h1>
-          <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">{project.description || "项目描述尚未补充。先添加资料并完成审核，再建立可查询、可引用的项目记忆。"}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project materials</p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name} · 项目资料</h1>
+          <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">在一个页面添加和管理文本、图片、文档、文件夹、网页与代码仓库资料。</p>
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2"><a href="#project-materials" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">添加项目资料</a><Link href={`/projects/${projectId}/intelligence`} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">打开 AI 工作台</Link></div>
+        <div className="flex shrink-0 flex-wrap gap-2"><Link href={`/projects/${projectId}`} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-700">返回概览</Link><Link href={`/projects/${projectId}/intelligence`} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500">打开 AI 工作台</Link></div>
       </div>
 
       <div className="mt-8">
         <ProjectMaterialIntake projectId={projectId} onChanged={reloadProjectAndSources} />
       </div>
-
-      <section className="mt-8 grid gap-4 md:grid-cols-3">
-        <PlaceholderCard {...labels.sources} count={project._count.sources} detail="已接入人工候选资料；内容仍需后续确认，不等同于可信事实。" />
-        <PlaceholderCard {...labels.items} count={project._count.items} detail="可人工创建、编辑并确认条目；每条 Item 都保留 Source 追溯。" />
-        <PlaceholderCard {...labels.snapshots} count={project._count.snapshots} detail="历史快照保留在数据库；页面只展示最新一份，并标注是否需要手动重新生成。" />
-      </section>
-
-      <AiCapabilityGuide projectId={projectId} />
-
-      <SnapshotPanel
-        snapshot={snapshot}
-        snapshotCount={project._count.snapshots}
-        currentConfirmedItems={confirmedItems}
-        isLoading={isSnapshotLoading}
-        isGenerating={isGeneratingSnapshot}
-        error={snapshotError}
-        success={snapshotSuccess}
-        onGenerate={() => void handleGenerateSnapshot()}
-      />
 
       <section id="source-library" aria-labelledby="sources-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
@@ -1031,221 +935,11 @@ function ItemCard({
   );
 }
 
-function SnapshotPanel({
-  snapshot,
-  snapshotCount,
-  currentConfirmedItems,
-  isLoading,
-  isGenerating,
-  error,
-  success,
-  onGenerate,
-}: {
-  snapshot: SnapshotRecord | null;
-  snapshotCount: number;
-  currentConfirmedItems: ProjectItem[];
-  isLoading: boolean;
-  isGenerating: boolean;
-  error: string | null;
-  success: string | null;
-  onGenerate: () => void;
-}) {
-  const hasConfirmedItems = currentConfirmedItems.length > 0;
-  const isStale = snapshot ? isProjectSnapshotStale(snapshot.payload, currentConfirmedItems) : false;
-  const sectionDefinitions = [
-    { key: "decisions" as const, label: "决策", english: "Decisions" },
-    { key: "progress" as const, label: "进展", english: "Progress" },
-    { key: "issues" as const, label: "问题", english: "Issues" },
-    { key: "risks" as const, label: "风险", english: "Risks" },
-  ];
-
-  return (
-    <section aria-labelledby="snapshot-heading" className="mt-10 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
-      <div className="flex flex-col gap-5 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Project snapshot</p>
-          <h2 id="snapshot-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">最新项目快照</h2>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">快照只组装已确认 Item，并保存为本次读取点的不可变历史状态；不会自动生成或做优先级判断。</p>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">该快照始终只展示人工确认状态；AI 候选在人工接受前不会进入项目事实。</p>
-        </div>
-        <button
-          type="button"
-          onClick={onGenerate}
-          disabled={isLoading || isGenerating || !hasConfirmedItems}
-          className="shrink-0 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45"
-        >
-          {isGenerating ? "生成中…" : "生成最新快照"}
-        </button>
-      </div>
-
-      <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/70 px-5 py-4 text-sm leading-6 text-indigo-900" role="note">
-        {!hasConfirmedItems
-          ? snapshot
-            ? "当前没有已确认 Item，不能生成新的当前状态。页面中的旧 Snapshot 仅表示过去的读取点；请先在 Items 中核对并确认至少一条内容，再生成新的 Snapshot。"
-            : "当前没有已确认 Item，不能生成当前状态。请先在项目条目中确认至少一条内容，之后才能生成快照。"
-          : snapshot
-            ? "生成快照不会覆盖历史记录；页面只展示最新一份，更新确认内容后需要手动重新生成。"
-            : "当前已有已确认 Item，但还没有快照。点击右上角按钮生成第一份项目状态。"}
-      </div>
-
-      {error ? <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert">{error}</div> : null}
-      {success ? <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite">{success}</div> : null}
-
-      {isLoading ? (
-        <div className="mt-6 space-y-4" aria-label="正在加载项目快照">
-          <div className="h-28 animate-pulse rounded-2xl bg-slate-100" />
-          <div className="h-48 animate-pulse rounded-2xl bg-slate-100" />
-        </div>
-      ) : snapshot ? (
-        <div className="mt-7">
-          {isStale ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900" role="status">
-              <p><strong className="font-semibold">这份旧 Snapshot 只是历史读取点。</strong> 当前已确认 Item 与它不一致（可能新增、移除或重新确认了 Item），不能把它当作当前项目状态。</p>
-              <ol className="mt-3 list-decimal space-y-1 pl-5">
-                <li><a href="#items-heading" className="font-semibold text-amber-950 underline decoration-amber-400 underline-offset-4">前往 Items 编辑区域</a>，编辑后的条目会回到待确认状态。</li>
-                <li>核对对应 Source 的原文摘录，确认修正后的内容确实被原文支持。</li>
-                <li>重新确认条目，再点击“生成最新快照”读取新的当前状态。</li>
-              </ol>
-              <p className="mt-3">系统不会自动覆盖历史快照，也不会调用 LLM 判断优先级。</p>
-            </div>
-          ) : null}
-
-          <div className="mt-5 flex flex-col gap-3 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h3 className="text-xl font-semibold tracking-tight text-slate-950">截至 {formatSourceDate(snapshot.payload.readAt)} 的已确认项目状态</h3>
-              <p className="mt-2 text-sm text-slate-500">生成于 {formatSourceDate(snapshot.generatedAt)} · 已保留 {snapshotCount} 份历史快照 · 本份确认 Item {snapshot.payload.counts.confirmed} 条</p>
-            </div>
-            <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">读取点：{formatSourceDate(snapshot.payload.readAt)}</span>
-          </div>
-
-          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/80 p-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Focus</p>
-                <h4 className="mt-2 text-lg font-semibold text-slate-950">已确认问题与风险</h4>
-              </div>
-              <span className="rounded-full bg-white/80 px-3 py-1.5 text-xs font-medium text-amber-800">{snapshot.payload.counts.focus} 条</span>
-            </div>
-            <p className="mt-3 text-sm leading-6 text-amber-900">按 Issues 后 Risks 的确定性顺序展示，不表示优先级，也不是 AI 判断。</p>
-            {snapshot.payload.focus.itemIds.length === 0 ? (
-              <p className="mt-4 rounded-xl border border-dashed border-amber-300 bg-white/60 px-4 py-5 text-sm text-amber-800">本次快照没有已确认的问题或风险。</p>
-            ) : (
-              <div className="mt-4 space-y-4">
-                {[...snapshot.payload.sections.issues, ...snapshot.payload.sections.risks].map((item) => <SnapshotItemCard key={item.id} item={item} />)}
-              </div>
-            )}
-          </div>
-
-          <div className="mt-6 grid gap-5 xl:grid-cols-2">
-            {sectionDefinitions.map((section) => {
-              const sectionItems = snapshot.payload.sections[section.key];
-              return (
-                <section key={section.key} aria-labelledby={`snapshot-${section.key}-heading`} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">{section.english}</p>
-                      <h4 id={`snapshot-${section.key}-heading`} className="mt-1 text-lg font-semibold text-slate-950">{section.label}</h4>
-                    </div>
-                    <span className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-600">{sectionItems.length} 条</span>
-                  </div>
-                  {sectionItems.length === 0 ? (
-                    <p className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">本次没有已确认的{section.label}。</p>
-                  ) : (
-                    <div className="mt-4 space-y-4">{sectionItems.map((item) => <SnapshotItemCard key={item.id} item={item} />)}</div>
-                  )}
-                </section>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
-          {hasConfirmedItems ? (
-            <>
-              <p className="text-sm font-medium text-slate-700">已有 {currentConfirmedItems.length} 条已确认 Item，但还没有快照</p>
-              <p className="mt-2 text-sm leading-6 text-slate-500">生成快照后，这些已确认状态会按照当前读取点固定保存，并继续保留 Source 追溯。</p>
-            </>
-          ) : (
-            <>
-              <p className="text-sm font-medium text-slate-700">还没有可生成的项目状态</p>
-              <p className="mt-2 text-sm leading-6 text-slate-500">先创建并确认至少一条 Item，再回来生成 Snapshot。</p>
-            </>
-          )}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function SnapshotItemCard({ item }: { item: SnapshotRecord["payload"]["sections"]["decisions"][number] }) {
-  return (
-    <article className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">{item.type}</span>
-        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">已确认</span>
-      </div>
-      <h5 className="mt-3 text-base font-semibold tracking-tight text-slate-950">{item.title}</h5>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>
-
-      <div className="mt-4 border-t border-slate-100 pt-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">精确原文摘录</p>
-        <blockquote className="mt-2 whitespace-pre-wrap break-words border-l-2 border-indigo-200 pl-3 text-sm leading-6 text-slate-600">{item.provenance.sourceExcerpt}</blockquote>
-      </div>
-
-      <dl className="mt-4 grid gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500 sm:grid-cols-2">
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">发生时间</dt><dd className="mt-1">{formatSourceDate(item.occurredAt)}</dd></div>
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">确认时间</dt><dd className="mt-1">{formatSourceDate(item.confirmedAt)}</dd></div>
-        <div>
-          <dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Source 链接</dt>
-          <dd className="mt-1 min-w-0">{item.provenance.externalRef ? <a href={item.provenance.externalRef} target="_blank" rel="noopener noreferrer" className="block truncate text-indigo-600 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-700" title={item.provenance.externalRef}>{item.provenance.externalRef}</a> : "未提供外部链接"}</dd>
-        </div>
-        <div><dt className="font-semibold uppercase tracking-[0.12em] text-slate-400">Source SHA-256</dt><dd className="mt-1 break-all font-mono text-xs leading-5 text-slate-600">{item.provenance.contentHash}</dd></div>
-      </dl>
-    </article>
-  );
-}
-
 function ProjectShell({ children, username, projectId }: { children: ReactNode; username: string; projectId: string }) {
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="overview" />
-      <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <div className="py-10">{children}</div>
-      </div>
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" />
+      <div className="mx-auto max-w-6xl px-6 pb-16 pt-10 sm:px-10 lg:px-12">{children}</div>
     </main>
-  );
-}
-
-function AiCapabilityGuide({ projectId }: { projectId: string }) {
-  const capabilities = [
-    { title: "识别与整理", detail: "解析文档；图片和扫描件可用视觉模型识别；从资料中抽取待审核候选。", requirement: "图片识别和自动抽取需要先配置对应模型" },
-    { title: "建立与查询记忆", detail: "把已审核资料和仓库代码建立向量索引，支持语义检索与带来源引用的回答。", requirement: "需要生成模型、向量模型和兼容索引" },
-    { title: "只读项目调查", detail: "生成项目简报，或让智能体读取当前事实、记忆和仓库状态回答问题。", requirement: "只读，不会修改代码、Git 或项目数据" },
-  ] as const;
-  return (
-    <section id="ai-capabilities" className="mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-slate-950 p-7 text-white shadow-sm sm:p-8">
-      <div className="flex flex-wrap items-start justify-between gap-5">
-        <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">How AI works</p><h2 className="mt-2 text-2xl font-semibold">项目记忆和 AI 能力怎么用</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">只需要按一条主流程操作：添加资料 → 审核内容 → 建立索引 → 查询或调查。未审核资料不会自动成为事实。</p></div>
-        <Link href={`/projects/${projectId}/intelligence`} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-white px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-indigo-50">打开 AI 工作台</Link>
-      </div>
-      <div className="mt-6 grid gap-3 md:grid-cols-3">
-        {capabilities.map((capability, index) => <article key={capability.title} className="min-w-0 rounded-2xl border border-white/10 bg-white/[0.06] p-5"><span className="text-xs font-semibold text-indigo-300">0{index + 1}</span><h3 className="mt-3 text-base font-semibold">{capability.title}</h3><p className="mt-2 text-xs leading-5 text-slate-300">{capability.detail}</p><p className="mt-4 border-t border-white/10 pt-3 text-[11px] leading-5 text-slate-400">{capability.requirement}</p></article>)}
-      </div>
-      <div className="mt-6 flex flex-wrap gap-2"><Link href={`/projects/${projectId}/control`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">配置项目模型</Link><Link href={`/projects/${projectId}/memory`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">建立记忆与查询</Link><Link href={`/projects/${projectId}/memory-quality`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10">检查记忆质量</Link></div>
-    </section>
-  );
-}
-
-function PlaceholderCard({ title, subtitle, icon, count, detail }: { title: string; subtitle: string; icon: string; count: number; detail: string }) {
-  return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex items-start justify-between">
-        <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-xs font-semibold text-slate-500">{icon}</span>
-        <span className="text-3xl font-semibold tracking-tight text-slate-950">{count}</span>
-      </div>
-      <h2 className="mt-8 text-lg font-semibold text-slate-950">{title}</h2>
-      <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
-      <p className="mt-5 border-t border-slate-100 pt-4 text-xs leading-5 text-slate-400">{detail}</p>
-    </div>
   );
 }

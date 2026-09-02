@@ -101,8 +101,8 @@ test("upload route and UI share server policy, durable admission and quota usage
   assert.doesNotMatch(client, /最多导入 100 个/u);
   assert.doesNotMatch(header, /项目导航[\s\S]{0,500}overflow-x-auto/u);
   assert.match(header, /项目列表/u);
-  assert.match(header, /查看指引/u);
-  assert.match(header, /projectSection === "guide"/u);
+  assert.match(header, /\/materials/u);
+  assert.doesNotMatch(header, /查看指引/u);
   assert.doesNotMatch(login, /打开使用指南/u);
   assert.match(git, /公网 HTTPS/u);
   assert.match(git, /自建 HTTPS \/ CA/u);

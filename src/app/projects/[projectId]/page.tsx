@@ -1,7 +1,9 @@
 import { requirePageSession } from "@/lib/auth";
-import { ProjectDetailClient } from "./project-client";
+import { ProjectOverviewClient } from "./project-overview-client";
+
+export const dynamic = "force-dynamic";
 
 export default async function ProjectDetailPage() {
   const user = await requirePageSession();
-  return <ProjectDetailClient username={user.username} />;
+  return <ProjectOverviewClient username={user.username} />;
 }

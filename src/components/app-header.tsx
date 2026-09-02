@@ -3,7 +3,7 @@ import { APP_VERSION } from "@/lib/version";
 import { NotificationBell } from "./notification-bell";
 
 type PrimarySection = "dashboard" | "projects" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide";
-type ProjectSection = "overview" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
+type ProjectSection = "overview" | "materials" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid" },
@@ -32,17 +32,12 @@ const projectItems = [
 const projectGroups = [
   {
     key: "management",
-    label: "项目管理",
-    items: projectItems.filter((item) => ["world", "plan", "automations"].includes(item.key)),
-  },
-  {
-    key: "governance",
-    label: "治理",
-    items: projectItems.filter((item) => ["tools", "actions", "governance"].includes(item.key)),
+    label: "管理",
+    items: projectItems.filter((item) => ["world", "plan", "automations", "governance"].includes(item.key)),
   },
 ] as const;
 
-const materialSections: readonly ProjectSection[] = ["assets", "externalSources", "repositories"];
+const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources", "repositories"];
 const intelligenceSections: readonly ProjectSection[] = ["control", "memory", "memoryQuality", "intelligence"];
 
 export function AppHeader({
@@ -133,10 +128,10 @@ export function AppHeader({
                 className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "overview" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
               >
                 <NavIcon name="home" />
-                项目概览
+                概览
               </Link>
               <Link
-                href={`/projects/${projectId}#project-materials`}
+                href={`/projects/${projectId}/materials`}
                 aria-current={projectSection && materialSections.includes(projectSection) ? "page" : undefined}
                 className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && materialSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
               >
@@ -152,7 +147,9 @@ export function AppHeader({
                 AI 工作台
               </Link>
               {projectGroups.map((group) => {
-                const groupActive = group.items.some((item) => item.key === projectSection);
+                const groupActive = group.items.some((item) => item.key === projectSection)
+                  || projectSection === "tools"
+                  || projectSection === "actions";
                 return (
                   <details key={group.key} className="group relative">
                     <summary aria-current={groupActive ? "page" : undefined} className={`flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 marker:hidden [&::-webkit-details-marker]:hidden ${groupActive ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}>
@@ -178,14 +175,6 @@ export function AppHeader({
                   </details>
                 );
               })}
-              <Link
-                href={`${guideHref}#project-data`}
-                aria-current={projectSection === "guide" ? "page" : undefined}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "guide" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
-              >
-                <NavIcon name="book" />
-                查看指引
-              </Link>
             </nav>
           </div>
         </div>

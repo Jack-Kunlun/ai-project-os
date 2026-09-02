@@ -138,12 +138,11 @@ export function ProjectMaterialIntake({
   }
 
   return (
-    <section id="project-materials" className="scroll-mt-44 rounded-3xl border border-indigo-100 bg-white p-7 shadow-sm sm:p-8">
-      <div className="flex flex-wrap items-start justify-between gap-5 border-b border-slate-100 pb-6">
+    <section id="project-materials" className="scroll-mt-44 rounded-3xl border border-indigo-100 bg-white p-6 shadow-sm sm:p-7">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">One intake</p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">项目资料统一入口</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">输入文本、上传图片或文档、选择整个文件夹，都从这里开始。资料会进入同一套解析、审核、记忆与引用链路。</p>
+          <h2 className="text-xl font-semibold tracking-tight text-slate-950">添加项目资料</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">直接输入文本，或上传图片、文档和整个文件夹。</p>
         </div>
         <Link href={`/projects/${projectId}/assets`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700">管理全部文件</Link>
       </div>
@@ -151,12 +150,12 @@ export function ProjectMaterialIntake({
       {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-700">{error}</p> : null}
       {message ? <p role="status" aria-live="polite" className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-800">{message}</p> : null}
 
-      <div className="mt-7 grid min-w-0 gap-6 lg:grid-cols-2">
-        <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl bg-slate-950 p-6 text-white">
+      <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-2">
+        <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl bg-slate-950 p-5 text-white">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">输入文本</p>
           <h3 className="mt-2 text-xl font-semibold">粘贴一段项目资料</h3>
           <p className="mt-2 text-xs leading-5 text-slate-400">适合会议记录、项目进展、需求说明和临时笔记。系统保留原文，不会把未审核内容当成事实。</p>
-          <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={8} maxLength={100_000} required placeholder="直接输入或粘贴项目资料…" className="mt-5 w-full resize-y rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/20" />
+          <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder="直接输入或粘贴项目资料…" className="mt-4 w-full resize-y rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/20" />
           <details className="mt-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
             <summary className="cursor-pointer text-xs font-semibold text-slate-300">补充来源链接和资料时间（可选）</summary>
             <label className="mt-4 block text-xs text-slate-300">来源链接<input type="url" value={externalRef} onChange={(event) => setExternalRef(event.target.value)} maxLength={2_048} placeholder="https://example.com/document" className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500" /></label>
@@ -165,17 +164,17 @@ export function ProjectMaterialIntake({
           <button disabled={savingText || !contentText.trim()} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-indigo-300 disabled:cursor-not-allowed disabled:opacity-50">{savingText ? "保存中…" : "加入项目资料"}</button>
         </form>
 
-        <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-6">
+        <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">上传文件</p>
           <h3 className="mt-2 text-xl font-semibold text-slate-950">图片、文档或整个文件夹</h3>
           <p className="mt-2 text-xs leading-5 text-slate-500">支持常用文本、Office、PDF 与图片格式。图片和扫描件只有在你确认后才会发送给项目配置的视觉模型。</p>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-white px-5 text-center hover:border-indigo-400 hover:bg-indigo-50">
+            <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-white px-5 text-center hover:border-indigo-400 hover:bg-indigo-50">
               <input type="file" multiple accept={FILE_ACCEPT} onChange={chooseFiles} className="sr-only" />
               <span className="text-sm font-semibold text-indigo-700">选择图片或文档</span>
               <span className="mt-1 text-[11px] text-slate-400">可一次多选</span>
             </label>
-            <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-white px-5 text-center hover:border-violet-400 hover:bg-violet-50">
+            <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-white px-5 text-center hover:border-violet-400 hover:bg-violet-50">
               <input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple accept={FILE_ACCEPT} onChange={chooseFiles} className="sr-only" />
               <span className="text-sm font-semibold text-violet-700">选择整个文件夹</span>
               <span className="mt-1 text-[11px] text-slate-400">读取子目录中的受支持文件</span>
@@ -187,9 +186,9 @@ export function ProjectMaterialIntake({
         </div>
       </div>
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        <Link href={`/projects/${projectId}/external-sources`} className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 transition hover:border-cyan-300 hover:bg-cyan-50"><span className="text-sm font-semibold text-slate-800">添加网页资料</span><span className="mt-1 block text-xs leading-5 text-slate-500">抓取公开网页或经授权的内网页面，并保留原始地址。</span></Link>
-        <Link href={`/projects/${projectId}/repositories`} className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 transition hover:border-emerald-300 hover:bg-emerald-50"><span className="text-sm font-semibold text-slate-800">连接代码仓库</span><span className="mt-1 block text-xs leading-5 text-slate-500">关联 GitHub、Gitee、GitLab 或自建 Git，按固定提交只读扫描。</span></Link>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Link href={`/projects/${projectId}/external-sources`} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50">添加网页资料</Link>
+        <Link href={`/projects/${projectId}/repositories`} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50">连接代码仓库</Link>
       </div>
     </section>
   );

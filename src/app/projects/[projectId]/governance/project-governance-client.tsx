@@ -296,25 +296,25 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
         <section className="flex flex-wrap items-end justify-between gap-5 pb-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Governance & review</p>
-            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">治理与审核</h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">统一查看待审核事实、未知结果、GitHub 同步风险、索引状态与模型路由变更。这里不会自动重试任务、重建索引或接受候选。</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">审核与治理</h1>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">优先处理需要你确认的内容和任务异常；模型用量、路由记录等低频审计默认收起。</p>
           </div>
-          <button type="button" onClick={() => void reload()} disabled={loading} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm disabled:opacity-40">刷新事实状态</button>
+          <div className="flex flex-wrap gap-2"><Link href={`/projects/${projectId}/actions`} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">动作与审批</Link><Link href={`/projects/${projectId}/tools`} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">工具权限</Link><button type="button" onClick={() => void reload()} disabled={loading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button></div>
         </section>
 
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}
         {loading || summary === null ? <div className="h-44 animate-pulse rounded-3xl bg-slate-200" /> : (
           <>
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-              <Metric label="待审核" value={summary.pendingReviews.total} detail={`网页 ${summary.pendingReviews.web} · 已验证 ${summary.pendingReviews.verified}`} tone={summary.pendingReviews.total > 0 ? "amber" : "slate"} />
-              <Metric label="待人工收口" value={summary.jobs.reconciliationRequired} detail="unknown 不等同失败或成功" tone={summary.jobs.reconciliationRequired > 0 ? "rose" : "slate"} />
-              <Metric label="失败任务" value={summary.jobs.failed} detail="仅查看；重新执行需回原页面" tone={summary.jobs.failed > 0 ? "rose" : "slate"} />
-              <Metric label="GitHub 风险" value={summary.github.partial + summary.github.rateLimited + summary.github.unknown} detail={`部分 ${summary.github.partial} · 限流 ${summary.github.rateLimited} · 未知 ${summary.github.unknown}`} tone={summary.github.unknown > 0 ? "rose" : "amber"} />
+            <section className="grid gap-4 md:grid-cols-3">
+              <Metric label="需要处理" value={summary.pendingReviews.total + summary.jobs.reconciliationRequired} detail={`待审核 ${summary.pendingReviews.total} · 待人工收口 ${summary.jobs.reconciliationRequired}`} tone={summary.pendingReviews.total + summary.jobs.reconciliationRequired > 0 ? "amber" : "slate"} />
+              <Metric label="运行异常" value={summary.jobs.failed + summary.github.partial + summary.github.rateLimited + summary.github.unknown} detail={`失败任务 ${summary.jobs.failed} · 仓库风险 ${summary.github.partial + summary.github.rateLimited + summary.github.unknown}`} tone={summary.jobs.failed + summary.github.unknown > 0 ? "rose" : "slate"} />
               <Metric label="语义索引" value={readinessLabels[summary.index.readiness] ?? summary.index.readiness} detail={`${summary.index.activeRecordCount} 条活动记忆`} tone={summary.index.compatible ? "emerald" : "amber"} />
             </section>
 
-            <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+            <details className="group mt-8 rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>模型用量</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开低频审计</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
+              <div className="border-t border-slate-100 p-6 sm:p-8">
               <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
                 <SectionHeader eyebrow="Model usage" title="模型用量" description="现行调用审计按每次受审计模型调用尝试计数；旧运行台账按 requestCount 汇总，两者来源独立，不重复计数。" border={false} />
                 <div className="flex rounded-xl bg-slate-100 p-1" aria-label="用量统计周期">{([7, 30, 90] as const).map((days) => <button key={days} type="button" onClick={() => setUsageDays(days)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${usageDays === days ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{days} 天</button>)}</div>
@@ -334,7 +334,8 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
                   <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">{usage.pricing.reason}。这里展示可核对的请求与 Token，不把 Token 直接换算为金额。</p>
                 </>
               )}
-            </section>
+              </div>
+            </details>
 
             <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               <SectionHeader eyebrow="Human review" title="待审核候选" description="逐条核对内容与原文摘录。接受后才成为项目事实；页面不提供批量接受。" />
@@ -358,7 +359,9 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
               {reviewCursor ? <MoreButton pending={loadingMore === "reviews"} onClick={() => void loadMore("reviews")} /> : null}
             </section>
 
-            <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+            <details className="group mt-8 rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>任务运行记录</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开记录</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
+              <div className="border-t border-slate-100 p-6 sm:p-8">
               <SectionHeader eyebrow="Recoverable operations" title="任务异常与人工收口" description="未知结果不会自动重试。只有具备对应不可变证据的任务才显示人工收口动作。" />
               {operations.length === 0 ? <Empty text="当前没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => (
                 <article key={operation.id} className="flex flex-wrap items-start justify-between gap-4 py-5">
@@ -376,9 +379,12 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
                 </article>
               ))}</div>}
               {operationCursor ? <MoreButton pending={loadingMore === "operations"} onClick={() => void loadMore("operations")} /> : null}
-            </section>
+              </div>
+            </details>
 
-            <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+            <details className="group mt-8 rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>模型路由变更记录</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开低频审计</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
+              <div className="border-t border-slate-100 p-6 sm:p-8">
               <SectionHeader eyebrow="Immutable audit" title="模型路由变更记录" description="这里只显示已发生的路由修订，不提供编辑或回滚动作。切换模型不会改写历史记忆。" />
               {routes.length === 0 ? <Empty text="当前没有模型路由变更记录。" /> : <div className="mt-6 space-y-3">{routes.map((route) => (
                 <article key={route.id} className="rounded-2xl border border-slate-200 p-5">
@@ -388,7 +394,8 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
                 </article>
               ))}</div>}
               {routeCursor ? <MoreButton pending={loadingMore === "routes"} onClick={() => void loadMore("routes")} /> : null}
-            </section>
+              </div>
+            </details>
           </>
         )}
       </div>

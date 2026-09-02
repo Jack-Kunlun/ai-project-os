@@ -156,23 +156,24 @@ export function ProjectIntelligenceClient({ username }: { username: string }) {
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="intelligence" />
-      <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <section className="pb-10 pt-12">
+      <div className="mx-auto max-w-6xl px-6 pb-16 pt-10 sm:px-10 lg:px-12">
+        <section className="pb-8">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project AI workspace</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName} · AI 工作台</h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">在一个入口看清项目能用哪些 AI、需要什么前置条件，以及到哪里创建记忆、做查询或运行只读调查。所有生成结果都保留引用，不会自动写入已确认事实。</p>
         </section>
 
-        <CapabilityOverview projectId={projectId} />
-
-        {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
-        {loading || status === null ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" aria-label="正在加载项目智能体" /> : (
-          <>
-            <ReadinessPanel readiness={status.readiness} />
-            <BriefPanel projectId={projectId} report={status.reports[0] ?? null} ready={status.readiness.ready} onReload={reload} />
-            <AgentPanel projectId={projectId} runs={status.agentRuns} tools={status.tools} ready={status.readiness.ready} onReload={reload} />
-          </>
-        )}
+        <div className="space-y-7">
+          <CapabilityOverview projectId={projectId} />
+          {error ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
+          {loading || status === null ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" aria-label="正在加载项目智能体" /> : (
+            <>
+              <ReadinessPanel readiness={status.readiness} />
+              <BriefPanel projectId={projectId} report={status.reports[0] ?? null} ready={status.readiness.ready} onReload={reload} />
+              <AgentPanel projectId={projectId} runs={status.agentRuns} tools={status.tools} ready={status.readiness.ready} onReload={reload} />
+            </>
+          )}
+        </div>
       </div>
     </main>
   );
@@ -223,7 +224,7 @@ function BriefPanel({ projectId, report, ready, onReload }: { projectId: string;
     }
   }
 
-  return <section id="project-brief" className="mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5 border-b border-slate-100 pb-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Current state brief</p><h2 className="mt-2 text-2xl font-semibold">项目当前状态</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">聚合已确认条目、当前索引和仓库状态，生成可追溯的进展、决策、问题、风险与关注事项。</p></div><button type="button" onClick={() => void generate()} disabled={!ready || !acknowledged || pending} className="rounded-xl bg-indigo-600 px-5 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{pending ? "调查与生成中…" : report ? "重新生成简报" : "生成当前状态简报"}</button></div><ConsentCheck checked={acknowledged} onChange={setAcknowledged} />{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{report ? <ReportView report={report} /> : <div className="mt-6 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有项目智能简报。运行后，结果与证据快照会固定保存。</div>}</section>;
+  return <section id="project-brief" className="scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5 border-b border-slate-100 pb-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Current state brief</p><h2 className="mt-2 text-2xl font-semibold">项目当前状态</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">聚合已确认条目、当前索引和仓库状态，生成可追溯的进展、决策、问题、风险与关注事项。</p></div><button type="button" onClick={() => void generate()} disabled={!ready || !acknowledged || pending} className="rounded-xl bg-indigo-600 px-5 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{pending ? "调查与生成中…" : report ? "重新生成简报" : "生成当前状态简报"}</button></div><ConsentCheck checked={acknowledged} onChange={setAcknowledged} />{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{report ? <ReportView report={report} /> : <div className="mt-6 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有项目智能简报。运行后，结果与证据快照会固定保存。</div>}</section>;
 }
 
 function ReportView({ report }: { report: Report }) {
@@ -259,7 +260,7 @@ function AgentPanel({ projectId, runs, tools, ready, onReload }: { projectId: st
     }
   }
 
-  return <section id="agent-investigation" className="mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Read-only investigation</p><h2 className="mt-2 text-2xl font-semibold">向项目智能体提问</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">模型只能从固定工具中规划调查；服务端逐项校验并执行只读查询，最终回答只能引用本次工具取得的证据。</p><div className="mt-4 flex flex-wrap gap-2">{tools.map((tool) => <span key={tool} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">{toolLabels[tool]}</span>)}</div></div><form onSubmit={ask} className="mt-6"><label className="block text-sm font-semibold text-slate-700">你想了解什么？<textarea value={question} onChange={(event) => setQuestion(event.target.value)} minLength={2} maxLength={2_000} rows={4} placeholder="例如：目前最需要关注的风险是什么？哪些关键决策仍缺少证据？" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:bg-white" /></label><ConsentCheck checked={acknowledged} onChange={setAcknowledged} /><div className="mt-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">不提供 Shell、文件系统、代码修改或 GitHub 写入工具。</p><button disabled={!ready || !acknowledged || pending || question.trim().length < 2} className="shrink-0 rounded-xl bg-slate-950 px-5 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{pending ? "规划与调查中…" : "开始只读调查"}</button></div></form>{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{runs.length > 1 ? <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{runs.slice(0, 10).map((run) => <button key={run.id} type="button" onClick={() => setSelectedRunId(run.id)} className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${selectedRun?.id === run.id ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{formatDate(run.createdAt)}</button>)}</div> : null}{selectedRun ? <AgentRunView run={selectedRun} /> : <div className="mt-7 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有调查记录。每次计划、工具轨迹和证据引用都会随回答保存。</div>}</section>;
+  return <section id="agent-investigation" className="scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Read-only investigation</p><h2 className="mt-2 text-2xl font-semibold">向项目智能体提问</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">模型只能从固定工具中规划调查；服务端逐项校验并执行只读查询，最终回答只能引用本次工具取得的证据。</p><div className="mt-4 flex flex-wrap gap-2">{tools.map((tool) => <span key={tool} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">{toolLabels[tool]}</span>)}</div></div><form onSubmit={ask} className="mt-6"><label className="block text-sm font-semibold text-slate-700">你想了解什么？<textarea value={question} onChange={(event) => setQuestion(event.target.value)} minLength={2} maxLength={2_000} rows={4} placeholder="例如：目前最需要关注的风险是什么？哪些关键决策仍缺少证据？" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:bg-white" /></label><ConsentCheck checked={acknowledged} onChange={setAcknowledged} /><div className="mt-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">不提供 Shell、文件系统、代码修改或 GitHub 写入工具。</p><button disabled={!ready || !acknowledged || pending || question.trim().length < 2} className="shrink-0 rounded-xl bg-slate-950 px-5 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{pending ? "规划与调查中…" : "开始只读调查"}</button></div></form>{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{runs.length > 1 ? <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{runs.slice(0, 10).map((run) => <button key={run.id} type="button" onClick={() => setSelectedRunId(run.id)} className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${selectedRun?.id === run.id ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{formatDate(run.createdAt)}</button>)}</div> : null}{selectedRun ? <AgentRunView run={selectedRun} /> : <div className="mt-7 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有调查记录。每次计划、工具轨迹和证据引用都会随回答保存。</div>}</section>;
 }
 
 function AgentRunView({ run }: { run: AgentRun }) {

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { CursorPagination } from "@/components/list-pagination";
 
 type Summary = {
   project: { id: string; name: string };
@@ -13,22 +14,6 @@ type Summary = {
   index: { readiness: string; compatible: boolean; activeRecordCount: number; publishedAt: string | null };
   latestIndexInvalidation: { id: string; operation: string; createdAt: string } | null;
   attentionTotal: number;
-};
-
-type Review = {
-  source: "web" | "verified";
-  id: string;
-  createdAt: string;
-  model: { providerName: string | null; providerKind: string | null; modelId: string };
-  evidence: { sourceId: string; sourceKind: string; contentHash: string; excerpt: string };
-  item: {
-    id: string;
-    type: "decision" | "progress" | "issue" | "risk";
-    title: string;
-    content: string;
-    occurredAt: string | null;
-    updatedAt: string;
-  };
 };
 
 type Operation = {
@@ -109,7 +94,6 @@ type Usage = {
   sources: { current: string; legacy: string };
 };
 
-const itemLabels = { decision: "决策", progress: "进展", issue: "问题", risk: "风险" } as const;
 const jobLabels: Record<string, string> = {
   assetExtract: "文件图片识别",
   githubScan: "仓库代码扫描",
@@ -177,12 +161,23 @@ function statusTone(status: string): string {
 export function ProjectGovernanceClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
   const [summary, setSummary] = useState<Summary | null>(null);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [reviewCursor, setReviewCursor] = useState<string | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [operationCursor, setOperationCursor] = useState<string | null>(null);
+  const [operationNextCursor, setOperationNextCursor] = useState<string | null>(null);
+  const [operationHistory, setOperationHistory] = useState<Array<string | null>>([]);
+  const [operationSearch, setOperationSearch] = useState("");
+  const deferredOperationSearch = useDeferredValue(operationSearch);
+  const [operationKind, setOperationKind] = useState("all");
+  const [operationStatus, setOperationStatus] = useState("all");
+  const [operationsLoading, setOperationsLoading] = useState(true);
   const [routes, setRoutes] = useState<RouteRevision[]>([]);
   const [routeCursor, setRouteCursor] = useState<string | null>(null);
+  const [routeNextCursor, setRouteNextCursor] = useState<string | null>(null);
+  const [routeHistory, setRouteHistory] = useState<Array<string | null>>([]);
+  const [routeSearch, setRouteSearch] = useState("");
+  const deferredRouteSearch = useDeferredValue(routeSearch);
+  const [routeOperation, setRouteOperation] = useState("all");
+  const [routesLoading, setRoutesLoading] = useState(true);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [usageDays, setUsageDays] = useState<7 | 30 | 90>(30);
   const [canReadProviderBalance, setCanReadProviderBalance] = useState(false);
@@ -190,7 +185,6 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
   const [billingPending, setBillingPending] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -200,29 +194,36 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
     setSummary(payload.summary);
   }, [projectId]);
 
-  const fetchReviews = useCallback(async (cursor?: string, append = false) => {
+  const fetchOperations = useCallback(async () => {
+    setOperationsLoading(true);
     const query = new URLSearchParams({ limit: "20" });
-    if (cursor) query.set("cursor", cursor);
-    const page = await readJson<Page<Review>>(await fetch(`/api/projects/${projectId}/governance/reviews?${query}`, { cache: "no-store" }));
-    setReviews((current) => append ? [...current, ...page.items] : page.items);
-    setReviewCursor(page.nextCursor);
-  }, [projectId]);
+    if (operationCursor) query.set("cursor", operationCursor);
+    if (deferredOperationSearch.trim()) query.set("search", deferredOperationSearch.trim());
+    if (operationKind !== "all") query.set("kind", operationKind);
+    if (operationStatus !== "all") query.set("status", operationStatus);
+    try {
+      const page = await readJson<Page<Operation>>(await fetch(`/api/projects/${projectId}/governance/operations?${query}`, { cache: "no-store" }));
+      setOperations(page.items);
+      setOperationNextCursor(page.nextCursor);
+    } finally {
+      setOperationsLoading(false);
+    }
+  }, [deferredOperationSearch, operationCursor, operationKind, operationStatus, projectId]);
 
-  const fetchOperations = useCallback(async (cursor?: string, append = false) => {
+  const fetchRoutes = useCallback(async () => {
+    setRoutesLoading(true);
     const query = new URLSearchParams({ limit: "20" });
-    if (cursor) query.set("cursor", cursor);
-    const page = await readJson<Page<Operation>>(await fetch(`/api/projects/${projectId}/governance/operations?${query}`, { cache: "no-store" }));
-    setOperations((current) => append ? [...current, ...page.items] : page.items);
-    setOperationCursor(page.nextCursor);
-  }, [projectId]);
-
-  const fetchRoutes = useCallback(async (cursor?: string, append = false) => {
-    const query = new URLSearchParams({ limit: "20" });
-    if (cursor) query.set("cursor", cursor);
-    const page = await readJson<Page<RouteRevision>>(await fetch(`/api/projects/${projectId}/governance/routes?${query}`, { cache: "no-store" }));
-    setRoutes((current) => append ? [...current, ...page.items] : page.items);
-    setRouteCursor(page.nextCursor);
-  }, [projectId]);
+    if (routeCursor) query.set("cursor", routeCursor);
+    if (deferredRouteSearch.trim()) query.set("search", deferredRouteSearch.trim());
+    if (routeOperation !== "all") query.set("operation", routeOperation);
+    try {
+      const page = await readJson<Page<RouteRevision>>(await fetch(`/api/projects/${projectId}/governance/routes?${query}`, { cache: "no-store" }));
+      setRoutes(page.items);
+      setRouteNextCursor(page.nextCursor);
+    } finally {
+      setRoutesLoading(false);
+    }
+  }, [deferredRouteSearch, projectId, routeCursor, routeOperation]);
 
   const fetchUsage = useCallback(async (days: 7 | 30 | 90) => {
     const payload = await readJson<{ usage: Usage; permissions: { readProviderBalance: boolean } }>(await fetch(`/api/projects/${projectId}/governance/usage?days=${days}`, { cache: "no-store" }));
@@ -234,51 +235,21 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
     if (showLoading) setLoading(true);
     setError(null);
     try {
-      await Promise.all([fetchSummary(), fetchReviews(), fetchOperations(), fetchRoutes(), fetchUsage(usageDays)]);
+      await Promise.all([fetchSummary(), fetchUsage(usageDays)]);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "治理数据加载失败");
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [fetchOperations, fetchReviews, fetchRoutes, fetchSummary, fetchUsage, usageDays]);
+  }, [fetchSummary, fetchUsage, usageDays]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
 
-  async function reviewCandidate(review: Review, action: "accept" | "dismiss") {
-    const key = `${review.source}:${review.id}:${action}`;
-    setPending(key);
-    setMessage(null);
-    try {
-      const endpoint = review.source === "web"
-        ? `/api/projects/${projectId}/memory/candidates/${review.id}`
-        : `/api/projects/${projectId}/ai-memory/candidates/${review.id}`;
-      const body = review.source === "web" || action === "dismiss"
-        ? { action, expectedItemUpdatedAt: review.item.updatedAt }
-        : {
-            action,
-            expectedItemUpdatedAt: review.item.updatedAt,
-            type: review.item.type,
-            title: review.item.title,
-            content: review.item.content,
-            occurredAt: review.item.occurredAt,
-          };
-      await readJson(await fetch(endpoint, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      }));
-      await Promise.all([fetchSummary(), fetchReviews()]);
-      setMessage(action === "accept" ? "候选已确认并进入项目事实。" : "候选已驳回，审核记录已保留。");
-    } catch (reviewError) {
-      await Promise.allSettled([fetchSummary(), fetchReviews()]);
-      setMessage(reviewError instanceof Error ? reviewError.message : "审核失败，请刷新后重试");
-    } finally {
-      setPending(null);
-    }
-  }
+  useEffect(() => { const timer = window.setTimeout(() => void fetchOperations().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "任务记录加载失败")), 0); return () => window.clearTimeout(timer); }, [fetchOperations]);
+  useEffect(() => { const timer = window.setTimeout(() => void fetchRoutes().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "路由记录加载失败")), 0); return () => window.clearTimeout(timer); }, [fetchRoutes]);
 
   async function actOnJob(operation: Operation) {
     if (operation.capability.action === null) return;
@@ -298,19 +269,6 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
       setMessage(actionError instanceof Error ? actionError.message : "任务操作失败，请刷新后重试");
     } finally {
       setPending(null);
-    }
-  }
-
-  async function loadMore(kind: "reviews" | "operations" | "routes") {
-    setLoadingMore(kind);
-    try {
-      if (kind === "reviews" && reviewCursor) await fetchReviews(reviewCursor, true);
-      if (kind === "operations" && operationCursor) await fetchOperations(operationCursor, true);
-      if (kind === "routes" && routeCursor) await fetchRoutes(routeCursor, true);
-    } catch (moreError) {
-      setMessage(moreError instanceof Error ? moreError.message : "加载更多失败");
-    } finally {
-      setLoadingMore(null);
     }
   }
 
@@ -343,22 +301,22 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project management</p>
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目管理</h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">项目状态、计划、自动化、审核和 AI 用量集中在这里。用量与计费直接可见，低频任务和路由记录默认收起。</p>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">这里只处理项目计划、权限、动作审批、任务运行与模型路由等管理工作。资料候选审核已归入“项目资料”。</p>
           </div>
-          <div className="flex flex-wrap gap-2"><Link href={`/projects/${projectId}/actions`} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">动作与审批</Link><Link href={`/projects/${projectId}/tools`} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm">工具权限</Link><button type="button" onClick={() => void reload()} disabled={loading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button></div>
+          <button type="button" onClick={() => void Promise.all([reload(), fetchOperations(), fetchRoutes()])} disabled={loading || operationsLoading || routesLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button>
         </section>
 
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}
         <nav aria-label="项目管理功能" className="mb-8 grid gap-3 sm:grid-cols-3">
-          <Link href={`/projects/${projectId}/world`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">项目状态</span><span className="mt-1 block text-xs text-slate-500">确认当前事实、关系与快照</span></Link>
           <Link href={`/projects/${projectId}/plan`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">项目计划</span><span className="mt-1 block text-xs text-slate-500">查看目标、建议与执行顺序</span></Link>
-          <Link href={`/projects/${projectId}/automations`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">自动化</span><span className="mt-1 block text-xs text-slate-500">管理规则和最近运行结果</span></Link>
+          <Link href={`/projects/${projectId}/actions`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">动作与审批</span><span className="mt-1 block text-xs text-slate-500">处理外部动作及人工审批</span></Link>
+          <Link href={`/projects/${projectId}/tools`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">工具权限</span><span className="mt-1 block text-xs text-slate-500">管理项目可使用的只读工具</span></Link>
         </nav>
         {loading || summary === null ? <div className="h-44 animate-pulse rounded-3xl bg-slate-200" /> : (
           <>
             <section className="grid gap-4 md:grid-cols-3">
-              <Metric label="需要处理" value={summary.pendingReviews.total + summary.jobs.reconciliationRequired} detail={`待审核 ${summary.pendingReviews.total} · 待人工收口 ${summary.jobs.reconciliationRequired}`} tone={summary.pendingReviews.total + summary.jobs.reconciliationRequired > 0 ? "amber" : "slate"} />
+              <Metric label="待人工收口" value={summary.jobs.reconciliationRequired} detail="结果未知且需要人工确认的任务" tone={summary.jobs.reconciliationRequired > 0 ? "amber" : "slate"} />
               <Metric label="运行异常" value={summary.jobs.failed + summary.github.partial + summary.github.rateLimited + summary.github.unknown} detail={`失败任务 ${summary.jobs.failed} · 仓库风险 ${summary.github.partial + summary.github.rateLimited + summary.github.unknown}`} tone={summary.jobs.failed + summary.github.unknown > 0 ? "rose" : "slate"} />
               <Metric label="语义索引" value={readinessLabels[summary.index.readiness] ?? summary.index.readiness} detail={`${summary.index.activeRecordCount} 条活动记忆`} tone={summary.index.compatible ? "emerald" : "amber"} />
             </section>
@@ -420,33 +378,12 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
               )}
             </section>
 
-            <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
-              <SectionHeader eyebrow="Human review" title="待审核候选" description="逐条核对内容与原文摘录。接受后才成为项目事实；页面不提供批量接受。" />
-              {reviews.length === 0 ? <Empty text="当前没有待审核候选。" /> : <div className="mt-6 grid gap-4 lg:grid-cols-2">{reviews.map((review) => (
-                <article key={`${review.source}:${review.id}`} className="flex flex-col rounded-2xl border border-slate-200 p-5">
-                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                    <span className="rounded-full bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-700">{itemLabels[review.item.type]}</span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-600">{review.source === "web" ? "网页自动抽取" : "已验证 AI 运行"}</span>
-                    <span className="text-slate-400">{review.model.providerName ?? "冻结运行"} · {review.model.modelId}</span>
-                  </div>
-                  <h3 className="mt-4 text-lg font-semibold">{review.item.title}</h3>
-                  <p className="mt-2 flex-1 text-sm leading-6 text-slate-600">{review.item.content}</p>
-                  <blockquote className="mt-4 rounded-xl border-l-2 border-indigo-300 bg-indigo-50/60 px-4 py-3 text-xs leading-5 text-slate-600">{review.evidence.excerpt}</blockquote>
-                  <p className="mt-3 break-all text-[11px] text-slate-400">{review.evidence.sourceKind} · SHA-256 {review.evidence.contentHash.slice(0, 16)}… · {formatDate(review.createdAt)}</p>
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void reviewCandidate(review, "accept")} disabled={pending !== null} className="rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white disabled:opacity-40">{pending === `${review.source}:${review.id}:accept` ? "确认中…" : "确认记忆"}</button>
-                    <button type="button" onClick={() => void reviewCandidate(review, "dismiss")} disabled={pending !== null} className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{pending === `${review.source}:${review.id}:dismiss` ? "驳回中…" : "驳回"}</button>
-                  </div>
-                </article>
-              ))}</div>}
-              {reviewCursor ? <MoreButton pending={loadingMore === "reviews"} onClick={() => void loadMore("reviews")} /> : null}
-            </section>
-
-            <details className="group mt-8 rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <details id="task-runs" open className="group mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white shadow-sm">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>任务运行记录</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开记录</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
               <div className="border-t border-slate-100 p-6 sm:p-8">
               <SectionHeader eyebrow="Recoverable operations" title="任务异常与人工收口" description="未知结果不会自动重试。只有具备对应不可变证据的任务才显示人工收口动作。" />
-              {operations.length === 0 ? <Empty text="当前没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => (
+              <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only">搜索任务记录</span><input value={operationSearch} onChange={(event) => { setOperationSearch(event.target.value); setOperationCursor(null); setOperationHistory([]); }} placeholder="搜索执行阶段或错误代码" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only">按任务类型筛选</span><select value={operationKind} onChange={(event) => { setOperationKind(event.target.value); setOperationCursor(null); setOperationHistory([]); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部任务类型</option>{Object.entries(jobLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="sr-only">按任务状态筛选</span><select value={operationStatus} onChange={(event) => { setOperationStatus(event.target.value); setOperationCursor(null); setOperationHistory([]); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部状态</option>{["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"].map((value) => <option key={value} value={value}>{statusLabels[value]}</option>)}</select></label></div>
+              {operationsLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : operations.length === 0 ? <Empty text="当前筛选条件下没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => (
                 <article key={operation.id} className="flex flex-wrap items-start justify-between gap-4 py-5">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{jobLabels[operation.kind] ?? operation.kind}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusTone(operation.githubSync?.status ?? operation.status)}`}>{statusLabels[operation.githubSync?.status ?? operation.status] ?? (operation.githubSync?.status ?? operation.status)}</span></div>
@@ -461,22 +398,23 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
                   </div>
                 </article>
               ))}</div>}
-              {operationCursor ? <MoreButton pending={loadingMore === "operations"} onClick={() => void loadMore("operations")} /> : null}
+              <CursorPagination page={operationHistory.length + 1} hasPrevious={operationHistory.length > 0} hasNext={operationNextCursor !== null} disabled={operationsLoading} onPrevious={() => { const previous = operationHistory.at(-1) ?? null; setOperationHistory((current) => current.slice(0, -1)); setOperationCursor(previous); }} onNext={() => { if (!operationNextCursor) return; setOperationHistory((current) => [...current, operationCursor]); setOperationCursor(operationNextCursor); }} />
               </div>
             </details>
 
-            <details className="group mt-8 rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <details id="route-history" open className="group mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white shadow-sm">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>模型路由变更记录</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开低频审计</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
               <div className="border-t border-slate-100 p-6 sm:p-8">
               <SectionHeader eyebrow="Immutable audit" title="模型路由变更记录" description="这里只显示已发生的路由修订，不提供编辑或回滚动作。切换模型不会改写历史记忆。" />
-              {routes.length === 0 ? <Empty text="当前没有模型路由变更记录。" /> : <div className="mt-6 space-y-3">{routes.map((route) => (
+              <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_220px]"><label><span className="sr-only">搜索模型路由变更</span><input value={routeSearch} onChange={(event) => { setRouteSearch(event.target.value); setRouteCursor(null); setRouteHistory([]); }} placeholder="搜索供应商或模型 ID" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only">按 AI 能力筛选</span><select value={routeOperation} onChange={(event) => { setRouteOperation(event.target.value); setRouteCursor(null); setRouteHistory([]); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部 AI 能力</option>{Object.entries(operationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
+              {routesLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : routes.length === 0 ? <Empty text="当前筛选条件下没有模型路由变更记录。" /> : <div className="mt-6 space-y-3">{routes.map((route) => (
                 <article key={route.id} className="rounded-2xl border border-slate-200 p-5">
                   <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">{route.operation}</span>{route.indexInvalidated ? <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">索引已失效</span> : null}</div><span className="text-xs text-slate-400">{formatDate(route.createdAt)} · {route.actor}</span></div>
                   <div className="mt-4 grid gap-3 text-xs sm:grid-cols-[1fr_auto_1fr]"><RouteBox label="原路由" route={route.previous} /><span className="hidden self-center text-slate-300 sm:block">→</span><RouteBox label="新路由" route={route.current} /></div>
                   {route.indexInvalidated ? <p className="mt-3 text-xs text-amber-800">现有索引未被改写；请前往 <Link href={`/projects/${projectId}/memory`} className="font-semibold underline">智能记忆</Link> 显式重建。</p> : null}
                 </article>
               ))}</div>}
-              {routeCursor ? <MoreButton pending={loadingMore === "routes"} onClick={() => void loadMore("routes")} /> : null}
+              <CursorPagination page={routeHistory.length + 1} hasPrevious={routeHistory.length > 0} hasNext={routeNextCursor !== null} disabled={routesLoading} onPrevious={() => { const previous = routeHistory.at(-1) ?? null; setRouteHistory((current) => current.slice(0, -1)); setRouteCursor(previous); }} onNext={() => { if (!routeNextCursor) return; setRouteHistory((current) => [...current, routeCursor]); setRouteCursor(routeNextCursor); }} />
               </div>
             </details>
           </>
@@ -505,10 +443,6 @@ function UsageList({ title, empty, items }: { title: string; empty: string; item
 
 function Empty({ text }: { text: string }) {
   return <p className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">{text}</p>;
-}
-
-function MoreButton({ pending, onClick }: { pending: boolean; onClick: () => void }) {
-  return <button type="button" onClick={onClick} disabled={pending} className="mt-5 w-full rounded-xl border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-40">{pending ? "加载中…" : "加载更多"}</button>;
 }
 
 function RouteBox({ label, route }: { label: string; route: RouteRevision["previous"] | RouteRevision["current"] }) {

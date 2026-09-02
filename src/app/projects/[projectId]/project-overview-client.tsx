@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import { isProjectSnapshotStale } from "@/lib/project-snapshot-stale";
 import type { SnapshotRecord } from "@/lib/project-snapshot";
 
 type Project = {
@@ -13,13 +12,6 @@ type Project = {
   description: string | null;
   archivedAt: string | null;
   _count: { sources: number; assets: number; items: number; scans: number; snapshots: number };
-};
-
-type ProjectItem = {
-  id: string;
-  type: "decision" | "progress" | "issue" | "risk";
-  reviewStatus: "candidate" | "confirmed" | "dismissed" | "superseded";
-  confirmedAt: string | null;
 };
 
 type GovernanceSummary = {
@@ -32,8 +24,9 @@ type GovernanceSummary = {
 
 type OverviewData = {
   project: Project;
-  items: ProjectItem[];
+  itemCounts: { candidate: number; confirmed: number; dismissed: number; superseded: number };
   snapshot: SnapshotRecord | null;
+  snapshotStale: boolean;
   governance: GovernanceSummary;
 };
 
@@ -61,14 +54,15 @@ export function ProjectOverviewClient({ username }: { username: string }) {
     try {
       const [projectPayload, itemsPayload, snapshotPayload, governancePayload] = await Promise.all([
         readJson<{ project: Project }>(await fetch(`/api/projects/${projectId}`, { cache: "no-store" }), "项目加载失败"),
-        readJson<{ items: ProjectItem[] }>(await fetch(`/api/projects/${projectId}/items`, { cache: "no-store" }), "项目事实加载失败"),
-        readJson<{ snapshot: SnapshotRecord | null }>(await fetch(`/api/projects/${projectId}/snapshots`, { cache: "no-store" }), "项目快照加载失败"),
+        readJson<{ counts: OverviewData["itemCounts"] }>(await fetch(`/api/projects/${projectId}/items?page=1&pageSize=1`, { cache: "no-store" }), "项目事实加载失败"),
+        readJson<{ snapshot: SnapshotRecord | null; stale: boolean }>(await fetch(`/api/projects/${projectId}/snapshots`, { cache: "no-store" }), "项目快照加载失败"),
         readJson<{ summary: GovernanceSummary }>(await fetch(`/api/projects/${projectId}/governance`, { cache: "no-store" }), "项目提醒加载失败"),
       ]);
       setData({
         project: projectPayload.project,
-        items: itemsPayload.items,
+        itemCounts: itemsPayload.counts,
         snapshot: snapshotPayload.snapshot,
+        snapshotStale: snapshotPayload.stale,
         governance: governancePayload.summary,
       });
     } catch (cause) {
@@ -85,9 +79,9 @@ export function ProjectOverviewClient({ username }: { username: string }) {
 
   const summary = useMemo(() => {
     if (data === null) return null;
-    const confirmed = data.items.filter((item) => item.reviewStatus === "confirmed");
-    const candidates = data.items.filter((item) => item.reviewStatus === "candidate").length;
-    const snapshotStale = data.snapshot ? isProjectSnapshotStale(data.snapshot.payload, data.items) : false;
+    const confirmed = data.itemCounts.confirmed;
+    const candidates = data.itemCounts.candidate;
+    const snapshotStale = data.snapshotStale;
     const githubIssues = data.governance.github.partial + data.governance.github.rateLimited + data.governance.github.unknown;
     const taskIssues = data.governance.jobs.failed + data.governance.jobs.reconciliationRequired;
     const focus = data.snapshot?.payload.counts.focus ?? 0;
@@ -97,7 +91,7 @@ export function ProjectOverviewClient({ username }: { username: string }) {
   }, [data]);
 
   async function generateSnapshot() {
-    if (data === null || summary === null || summary.confirmed.length === 0 || snapshotPending) return;
+    if (data === null || summary === null || summary.confirmed === 0 || snapshotPending) return;
     setSnapshotPending(true);
     setError(null);
     setMessage(null);
@@ -119,7 +113,7 @@ export function ProjectOverviewClient({ username }: { username: string }) {
   const nextStep = (() => {
     if (data === null || summary === null) return null;
     if (data.project._count.sources === 0 && data.project._count.assets === 0) return { title: "添加第一份项目资料", detail: "输入文本，或上传图片、文档和文件夹。", href: `/projects/${projectId}/materials`, action: "添加资料" };
-    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "只有人工确认后的内容才会进入项目事实与记忆。", href: `/projects/${projectId}/governance`, action: "开始审核" };
+    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "只有人工确认后的内容才会进入项目事实与记忆。", href: `/projects/${projectId}/materials#review-queue`, action: "开始审核" };
     if (!data.governance.index.compatible) return { title: "建立或更新项目记忆", detail: "把已确认内容建立为可检索、可引用的语义索引。", href: `/projects/${projectId}/memory`, action: "管理记忆" };
     return { title: "查询项目或生成简报", detail: "当前项目已经具备可引用的智能查询基础。", href: `/projects/${projectId}/intelligence`, action: "打开 AI 工作台" };
   })();
@@ -162,7 +156,7 @@ export function ProjectOverviewClient({ username }: { username: string }) {
             <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="项目关键指标">
               <MetricCard label="资料来源" value={data.project._count.sources} detail="文本、网页与仓库来源" tone="indigo" />
               <MetricCard label="文件" value={data.project._count.assets} detail="图片、文档与文件夹内容" tone="cyan" />
-              <MetricCard label="已确认事实" value={summary.confirmed.length} detail={`全部条目 ${data.project._count.items}`} tone="emerald" />
+              <MetricCard label="已确认事实" value={summary.confirmed} detail={`全部条目 ${data.project._count.items}`} tone="emerald" />
               <MetricCard label="待处理" value={summary.attentionTotal} detail="审核、异常与人工收口" tone={summary.attentionTotal > 0 ? "rose" : "slate"} />
             </section>
 
@@ -175,17 +169,17 @@ export function ProjectOverviewClient({ username }: { username: string }) {
                 {data.snapshot ? (
                   <><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><StateCount label="决策" value={data.snapshot.payload.counts.decisions} /><StateCount label="进展" value={data.snapshot.payload.counts.progress} /><StateCount label="问题" value={data.snapshot.payload.counts.issues} /><StateCount label="风险" value={data.snapshot.payload.counts.risks} /></div><p className="mt-5 text-xs text-slate-400">更新于 {formatDate(data.snapshot.generatedAt)}{summary.snapshotStale ? " · 已有新确认内容，建议更新" : " · 与当前确认内容一致"}</p></>
                 ) : <p className="mt-6 rounded-2xl bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">确认项目事实后，可生成第一份状态快照。</p>}
-                <div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => void generateSnapshot()} disabled={snapshotPending || summary.confirmed.length === 0 || data.project.archivedAt !== null} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{snapshotPending ? "更新中…" : data.snapshot ? "更新状态快照" : "生成状态快照"}</button><Link href={`/projects/${projectId}/world`} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700">查看完整状态</Link></div>
+                <div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => void generateSnapshot()} disabled={snapshotPending || summary.confirmed === 0 || data.project.archivedAt !== null} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{snapshotPending ? "更新中…" : data.snapshot ? "更新状态快照" : "生成状态快照"}</button><Link href={`/projects/${projectId}/world`} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700">查看完整状态</Link></div>
               </article>
 
               <article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
                 <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Attention</p><h2 className="mt-2 text-xl font-semibold">需要关注</h2></div>
                 <div className="mt-5 divide-y divide-slate-100">
-                  <AttentionRow label="待审核内容" value={summary.pendingContent} href={`/projects/${projectId}/governance`} />
+                  <AttentionRow label="待审核内容" value={summary.pendingContent} href={`/projects/${projectId}/materials#review-queue`} />
                   <AttentionRow label="任务异常" value={summary.taskIssues} href={`/projects/${projectId}/governance`} />
                   <AttentionRow label="仓库同步风险" value={summary.githubIssues} href={`/projects/${projectId}/repositories`} />
                 </div>
-                <Link href={`/projects/${projectId}/governance`} className="mt-5 inline-flex text-xs font-semibold text-indigo-600">进入审核与治理 →</Link>
+                <Link href={`/projects/${projectId}/governance`} className="mt-5 inline-flex text-xs font-semibold text-indigo-600">进入项目管理 →</Link>
               </article>
             </section>
           </>

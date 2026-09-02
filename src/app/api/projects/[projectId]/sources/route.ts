@@ -5,8 +5,9 @@ import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { hashSourceContent } from "@/lib/source";
-import { createProjectSourceSchema, projectIdSchema } from "@/lib/validation";
+import { createProjectSourceSchema, listProjectSourcesQuerySchema, projectIdSchema } from "@/lib/validation";
 import { assertProjectActive } from "@/lib/project-lifecycle";
+import { listPagination } from "@/lib/list-pagination";
 
 export const dynamic = "force-dynamic";
 
@@ -44,14 +45,36 @@ export async function GET(request: Request, context: { params: Promise<{ project
     const projectId = await parseProjectId(context.params);
     const db = getDb();
     await assertProjectExists(projectId);
+    const searchParams = new URL(request.url).searchParams;
+    for (const key of new Set(searchParams.keys())) {
+      if (searchParams.getAll(key).length !== 1) throw new ApiError(400, "INVALID_QUERY", `Query parameter ${key} must be unique`);
+    }
+    const query = listProjectSourcesQuerySchema.parse(Object.fromEntries(searchParams));
+    const where: Prisma.ProjectSourceWhereInput = {
+      projectId,
+      retiredAt: null,
+      ...(query.kind === "all" ? {} : { kind: query.kind }),
+      ...(query.search ? {
+        OR: [
+          { externalRef: { contains: query.search, mode: "insensitive" } },
+          { contentText: { contains: query.search, mode: "insensitive" } },
+          { contentHash: { contains: query.search, mode: "insensitive" } },
+        ],
+      } : {}),
+    };
 
-    const sources = await db.projectSource.findMany({
-      where: { projectId, retiredAt: null },
-      orderBy: { ingestedAt: "desc" },
-      select: sourceSelect,
-    });
+    const [sources, total] = await Promise.all([
+      db.projectSource.findMany({
+        where,
+        orderBy: [{ ingestedAt: "desc" }, { id: "desc" }],
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+        select: sourceSelect,
+      }),
+      db.projectSource.count({ where }),
+    ]);
 
-    return NextResponse.json({ sources });
+    return NextResponse.json({ sources, pagination: listPagination(query.page, query.pageSize, total) });
   } catch (error) {
     return handleApiError(error);
   }

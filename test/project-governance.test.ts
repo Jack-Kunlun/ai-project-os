@@ -155,9 +155,17 @@ test("governance routes are authenticated no-store reads and UI reuses bounded a
     assert.doesNotMatch(source, /export async function (POST|PATCH|DELETE)/u);
   }
 
-  const client = await readFile("src/app/projects/[projectId]/governance/project-governance-client.tsx", "utf8");
-  assert.match(client, /\/memory\/candidates\/\$\{review\.id\}/u);
-  assert.match(client, /\/ai-memory\/candidates\/\$\{review\.id\}/u);
-  assert.match(client, /\/jobs\/\$\{operation\.id\}/u);
+  const [client, materialReviews, jobDetail] = await Promise.all([
+    readFile("src/app/projects/[projectId]/governance/project-governance-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/project-material-review-queue.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/jobs/[jobId]/project-job-detail-client.tsx", "utf8"),
+  ]);
+  assert.match(materialReviews, /\/memory\/candidates\/\$\{review\.id\}/u);
+  assert.match(materialReviews, /\/ai-memory\/candidates\/\$\{review\.id\}/u);
+  assert.match(client, /href=\{operation\.destination\}/u);
   assert.doesNotMatch(client, /action:\s*"acceptAll"|bulkAccept/u);
+  assert.doesNotMatch(client, /待审核候选/u);
+  assert.match(service, /`\/projects\/\$\{projectId\}\/jobs\/\$\{row\.id\}`/u);
+  assert.match(jobDetail, /返回项目管理/u);
+  assert.match(jobDetail, /governance#task-runs/u);
 });

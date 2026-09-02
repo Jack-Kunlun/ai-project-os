@@ -14,8 +14,9 @@ const primaryItems = [
 ] as const;
 
 const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources", "repositories"];
+const overviewSections: readonly ProjectSection[] = ["overview", "world"];
 const intelligenceSections: readonly ProjectSection[] = ["control", "memory", "memoryQuality", "intelligence"];
-const managementSections: readonly ProjectSection[] = ["world", "plan", "automations", "tools", "actions", "governance"];
+const managementSections: readonly ProjectSection[] = ["plan", "tools", "actions", "governance"];
 
 export function AppHeader({
   username,
@@ -101,11 +102,11 @@ export function AppHeader({
               <span aria-hidden="true" className="mx-1 hidden h-5 w-px bg-slate-200 sm:block" />
               <Link
                 href={`/projects/${projectId}`}
-                aria-current={projectSection === "overview" ? "page" : undefined}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "overview" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+                aria-current={projectSection && overviewSections.includes(projectSection) ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && overviewSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
               >
                 <NavIcon name="home" />
-                概览
+                项目概览
               </Link>
               <Link
                 href={`/projects/${projectId}/materials`}
@@ -124,12 +125,20 @@ export function AppHeader({
                 AI 工作台
               </Link>
               <Link
+                href={`/projects/${projectId}/automations`}
+                aria-current={projectSection === "automations" ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "automations" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="repeat" />
+                项目自动化
+              </Link>
+              <Link
                 href={`/projects/${projectId}/governance`}
                 aria-current={projectSection && managementSections.includes(projectSection) ? "page" : undefined}
                 className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && managementSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
               >
                 <NavIcon name="sliders" />
-                管理
+                项目管理
               </Link>
             </nav>
           </div>
@@ -152,6 +161,7 @@ function NavIcon({ name }: { name: string }) {
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
     users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
     sparkles: <><path d="m12 3 1.15 3.1L16 7.25l-2.85 1.15L12 11.5 10.85 8.4 8 7.25l2.85-1.15L12 3Z" /><path d="m18.5 13 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" /><path d="m5.5 12 .95 2.55L9 15.5l-2.55.95L5.5 19l-.95-2.55L2 15.5l2.55-.95L5.5 12Z" /></>,
+    repeat: <><path d="M17 2.5 21 6l-4 3.5" /><path d="M3 11V9a3 3 0 0 1 3-3h15" /><path d="m7 21.5-4-3.5L7 14.5" /><path d="M21 13v2a3 3 0 0 1-3 3H3" /></>,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }

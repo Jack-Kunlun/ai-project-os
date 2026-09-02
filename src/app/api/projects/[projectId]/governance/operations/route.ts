@@ -11,6 +11,9 @@ const idSchema = z.string().uuid();
 const querySchema = z.object({
   cursor: z.string().min(1).max(1024).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  search: z.string().trim().max(120).optional(),
+  kind: z.enum(["assetExtract", "githubScan", "githubMaterialSync", "githubProjectSync", "gitRepositorySync", "memoryIndex", "autoExtract", "semanticSearch", "ragAnswer", "projectBrief", "projectAgent"]).optional(),
+  status: z.enum(["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"]).optional(),
 }).strict();
 
 export async function GET(

@@ -3,11 +3,13 @@ import {
   Prisma,
   type PrismaClient,
   type ProjectActionPolicyMode,
+  type ProjectActionStatus,
 } from "@prisma/client";
 import { z } from "zod";
 import { assertProjectAccess, getProjectPermission, type AccessUser } from "@/lib/access-control";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
+import { listPagination } from "@/lib/list-pagination";
 import {
   buildMcpActionSnapshot,
   canonicalMcpActionSnapshot,
@@ -297,14 +299,34 @@ async function notifyProjectApprovers(projectId: string, actionId: string, reque
   }
 }
 
-export async function getProjectActionCenter(projectIdInput: unknown, actor: AccessUser, db: PrismaClient = getDb()) {
+export async function getProjectActionCenter(
+  projectIdInput: unknown,
+  actor: AccessUser,
+  input: Readonly<{ page: number; pageSize: number; search?: string; capability?: ProjectActionCapability; status?: ProjectActionStatus }>,
+  db: PrismaClient = getDb(),
+) {
   const projectId = uuid(projectIdInput);
   await assertProjectAccess(actor, projectId, "view", db);
   const permission = await getProjectPermission(actor, projectId, db);
   if (permission === null) return fail("ACTION_PROJECT_NOT_FOUND");
-  const [storedPolicies, actions, project] = await Promise.all([
+  const search = input.search?.trim();
+  const actionWhere: Prisma.ProjectActionWhereInput = {
+    projectId,
+    ...(input.capability ? { capability: input.capability } : {}),
+    ...(input.status ? { status: input.status } : {}),
+    ...(search ? { OR: [
+      { failureCode: { contains: search, mode: "insensitive" } },
+      { requestedBy: { is: { OR: [
+        { username: { contains: search, mode: "insensitive" } },
+        { displayName: { contains: search, mode: "insensitive" } },
+      ] } } },
+    ] } : {}),
+  };
+  const [storedPolicies, actions, actionTotal, importableActions, project] = await Promise.all([
     db.projectActionPolicy.findMany({ where: { projectId }, orderBy: { capability: "asc" }, select: { capability: true, mode: true, updatedAt: true, updatedBy: { select: { id: true, username: true, displayName: true } } } }),
-    db.projectAction.findMany({ where: { projectId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 100, select: actionSelect }),
+    db.projectAction.findMany({ where: actionWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (input.page - 1) * input.pageSize, take: input.pageSize, select: actionSelect }),
+    db.projectAction.count({ where: actionWhere }),
+    db.projectAction.findMany({ where: { projectId, capability: "project.mcp.read-tool.invoke", status: "succeeded" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20, select: actionSelect }),
     db.project.findUnique({ where: { id: projectId }, select: { archivedAt: true } }),
   ]);
   if (project === null) return fail("ACTION_PROJECT_NOT_FOUND");
@@ -326,6 +348,8 @@ export async function getProjectActionCenter(projectIdInput: unknown, actor: Acc
       ...action,
       canCancel: ["waitingApproval", "queued"].includes(action.status) && (permission === "owner" || action.requestedBy.id === actor.id),
     })),
+    importableActions: importableActions.map((action) => Object.freeze({ ...action, canCancel: false })),
+    pagination: listPagination(input.page, input.pageSize, actionTotal),
     canManagePolicies: permission === "owner",
     canApprove: permission === "owner",
     canImportResults: permission === "owner" || permission === "edit",

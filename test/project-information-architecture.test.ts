@@ -16,6 +16,9 @@ test("project overview and materials use separate routes with a compact navigati
   assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/materials`\}/u);
   assert.doesNotMatch(header, /href=\{`\/projects\/\$\{projectId\}#project-materials`\}/u);
   assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/governance`\}/u);
+  assert.match(header, />\s*项目概览\s*</u);
+  assert.match(header, />\s*项目自动化\s*</u);
+  assert.match(header, />\s*项目管理\s*</u);
   assert.match(header, /managementSections/u);
   assert.doesNotMatch(header, /<details|<summary|projectGroups/u);
   assert.doesNotMatch(header, /key: "governance",\s*label: "治理"/u);
@@ -23,10 +26,12 @@ test("project overview and materials use separate routes with a compact navigati
   assert.match(overview, /Project overview/u);
   assert.match(overview, /项目关键指标/u);
   assert.match(overview, /推荐下一步/u);
+  assert.match(overview, /项目当前状态/u);
   assert.doesNotMatch(overview, /ProjectMaterialIntake/u);
 
   assert.match(materials, /projectSection="materials"/u);
   assert.match(materials, /ProjectMaterialIntake/u);
+  assert.match(materials, /ProjectMaterialReviewQueue/u);
   assert.doesNotMatch(materials, /SnapshotPanel|AiCapabilityGuide|PlaceholderCard/u);
 });
 
@@ -39,10 +44,12 @@ test("AI workbench spacing and project management keep AI usage visible", async 
   assert.match(intelligence, /className="space-y-7"/u);
   assert.doesNotMatch(intelligence, /id="project-brief" className="mt-8/u);
   assert.doesNotMatch(intelligence, /id="agent-investigation" className="mt-8/u);
-  assert.match(governance, /用量与计费直接可见/u);
+  assert.match(governance, /AI 用量与计费/u);
   assert.match(governance, /id="ai-usage"/u);
   assert.match(governance, /当前 AI 路由/u);
   assert.match(governance, /读取账户余额/u);
   assert.doesNotMatch(governance, /<summary[^>]*>[^<]*模型用量/u);
-  assert.match(governance, /<details className="group mt-8/u);
+  assert.match(governance, /<details id="task-runs" open/u);
+  assert.match(governance, /<details id="route-history" open/u);
+  assert.doesNotMatch(governance, /待审核候选/u);
 });

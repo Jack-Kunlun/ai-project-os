@@ -9,6 +9,7 @@ import { createWithAvailableSlug, isUniqueConstraintError } from "@/lib/project-
 import { createProjectSchema, slugifyProjectName } from "@/lib/validation";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 import { accessibleProjectWhere, resolveProjectCreationWorkspace } from "@/lib/access-control";
+import { DEFAULT_LIST_PAGE_SIZE, listPagination, MAX_LIST_PAGE_SIZE } from "@/lib/list-pagination";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,9 @@ const projectSummarySelect = {
 
 const listProjectsQuerySchema = z.object({
   view: z.enum(["active", "archived"]).default("active"),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
+  search: z.string().trim().max(120).default(""),
 }).strict();
 
 export async function GET(request: Request) {
@@ -62,13 +66,28 @@ export async function GET(request: Request) {
     const query = listProjectsQuerySchema.parse(Object.fromEntries(searchParams));
     const archived = query.view === "archived";
     const accessWhere = accessibleProjectWhere(user);
-    const where: Prisma.ProjectWhereInput = { AND: [accessWhere, { archivedAt: archived ? { not: null } : null }] };
-    const [projects, activeCount, archivedCount] = await Promise.all([
+    const where: Prisma.ProjectWhereInput = {
+      AND: [
+        accessWhere,
+        { archivedAt: archived ? { not: null } : null },
+        ...(query.search ? [{
+          OR: [
+            { name: { contains: query.search, mode: "insensitive" as const } },
+            { description: { contains: query.search, mode: "insensitive" as const } },
+            { slug: { contains: query.search, mode: "insensitive" as const } },
+          ],
+        }] : []),
+      ],
+    };
+    const [projects, total, activeCount, archivedCount] = await Promise.all([
       db.project.findMany({
         where,
-        orderBy: { updatedAt: "desc" },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
         select: projectSummarySelect,
       }),
+      db.project.count({ where }),
       db.project.count({ where: { AND: [accessWhere, { archivedAt: null }] } }),
       db.project.count({ where: { AND: [accessWhere, { archivedAt: { not: null } }] } }),
     ]);
@@ -76,6 +95,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       view: query.view,
       counts: { active: activeCount, archived: archivedCount },
+      pagination: listPagination(query.page, query.pageSize, total),
       projects: projects.map((project) => ({
         ...project,
         backgroundJobs: project.backgroundJobs.map(toPublicProjectJob),

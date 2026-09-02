@@ -1,4 +1,4 @@
-import { Prisma, type BackgroundJobKind, type BackgroundJobStatus, type PrismaClient } from "@prisma/client";
+import { Prisma, type AiOperation, type BackgroundJobKind, type BackgroundJobStatus, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { toPublicProjectJob } from "@/lib/project-workflow";
@@ -310,16 +310,27 @@ export async function getProjectGovernanceSummary(projectId: string, db: PrismaC
 
 export async function listGovernanceReviews(
   projectId: string,
-  input: Readonly<{ cursor?: string; limit?: number }> = {},
+  input: Readonly<{ cursor?: string; limit?: number; search?: string; itemType?: "decision" | "progress" | "issue" | "risk" }> = {},
   db: PrismaClient = getDb(),
 ) {
   if (!(await projectExists(projectId, db))) return null;
   const limit = input.limit ?? GOVERNANCE_DEFAULT_LIMIT;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > GOVERNANCE_MAX_LIMIT) throw new ProjectGovernanceError("GOVERNANCE_LIMIT_INVALID");
   const cursor = input.cursor === undefined ? null : decodeGovernanceReviewCursor(input.cursor);
+  const projectItemFilter: Prisma.ProjectItemWhereInput = {
+    ...(input.itemType ? { type: input.itemType } : {}),
+    ...(input.search ? {
+      OR: [
+        { title: { contains: input.search, mode: "insensitive" } },
+        { content: { contains: input.search, mode: "insensitive" } },
+        { sourceExcerpt: { contains: input.search, mode: "insensitive" } },
+      ],
+    } : {}),
+  };
+  const hasProjectItemFilter = input.itemType !== undefined || Boolean(input.search);
   const [webRows, verifiedRows] = await Promise.all([
     db.webAiCandidate.findMany({
-      where: { projectId, reviewStatus: "candidate", ...reviewCursorFilter("web", cursor) },
+      where: { projectId, reviewStatus: "candidate", ...(hasProjectItemFilter ? { projectItem: projectItemFilter } : {}), ...reviewCursorFilter("web", cursor) },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: limit + 1,
       select: {
@@ -334,7 +345,7 @@ export async function listGovernanceReviews(
       },
     }),
     db.aiCandidateClaim.findMany({
-      where: { projectId, reviewStatus: "candidate", ...reviewCursorFilter("verified", cursor) },
+      where: { projectId, reviewStatus: "candidate", ...(hasProjectItemFilter ? { projectItem: projectItemFilter } : {}), ...reviewCursorFilter("verified", cursor) },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: limit + 1,
       select: {
@@ -366,17 +377,9 @@ function sanitizeWarnings(value: Prisma.JsonValue): readonly string[] {
   return Object.freeze(value.filter((entry): entry is string => typeof entry === "string").slice(0, 20).map((entry) => entry.slice(0, 256)));
 }
 
-function operationDestination(projectId: string, kind: BackgroundJobKind, syncRunId: string | null): string {
-  if (kind === "githubProjectSync" && syncRunId !== null) return `/projects/${projectId}/github-syncs/${syncRunId}`;
-  if (kind === "assetExtract") return `/projects/${projectId}/assets`;
-  if (kind === "memoryIndex" || kind === "autoExtract" || kind === "semanticSearch" || kind === "ragAnswer") return `/projects/${projectId}/memory`;
-  if (kind === "projectBrief" || kind === "projectAgent") return `/projects/${projectId}/intelligence`;
-  return `/projects/${projectId}/control`;
-}
-
 export async function listGovernanceOperations(
   projectId: string,
-  input: Readonly<{ cursor?: string; limit?: number }> = {},
+  input: Readonly<{ cursor?: string; limit?: number; search?: string; kind?: BackgroundJobKind; status?: BackgroundJobStatus }> = {},
   db: PrismaClient = getDb(),
 ) {
   if (!(await projectExists(projectId, db))) return null;
@@ -384,7 +387,20 @@ export async function listGovernanceOperations(
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > GOVERNANCE_MAX_LIMIT) throw new ProjectGovernanceError("GOVERNANCE_LIMIT_INVALID");
   const cursor = input.cursor === undefined ? null : decodeGovernanceListCursor("operations", input.cursor);
   const rows = await db.backgroundJob.findMany({
-    where: { projectId, ...listCursorFilter(cursor) },
+    where: {
+      projectId,
+      ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      AND: [
+        listCursorFilter(cursor),
+        ...(input.search ? [{
+          OR: [
+            { stage: { contains: input.search, mode: "insensitive" as const } },
+            { failureCode: { contains: input.search, mode: "insensitive" as const } },
+          ],
+        }] : []),
+      ],
+    },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     take: limit + 1,
     select: {
@@ -424,7 +440,7 @@ export async function listGovernanceOperations(
       startedAt: row.startedAt?.toISOString() ?? null,
       completedAt: row.completedAt?.toISOString() ?? null,
       capability: governanceJobCapability(row),
-      destination: operationDestination(projectId, row.kind, row.githubSyncRun?.id ?? null),
+      destination: `/projects/${projectId}/jobs/${row.id}`,
       githubSync: row.githubSyncRun === null ? null : Object.freeze({
         id: row.githubSyncRun.id,
         status: row.githubSyncRun.status,
@@ -450,7 +466,7 @@ export async function listGovernanceOperations(
 
 export async function listGovernanceRouteRevisions(
   projectId: string,
-  input: Readonly<{ cursor?: string; limit?: number }> = {},
+  input: Readonly<{ cursor?: string; limit?: number; search?: string; operation?: AiOperation }> = {},
   db: PrismaClient = getDb(),
 ) {
   if (!(await projectExists(projectId, db))) return null;
@@ -458,7 +474,21 @@ export async function listGovernanceRouteRevisions(
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > GOVERNANCE_MAX_LIMIT) throw new ProjectGovernanceError("GOVERNANCE_LIMIT_INVALID");
   const cursor = input.cursor === undefined ? null : decodeGovernanceListCursor("routes", input.cursor);
   const rows = await db.projectAiRouteRevision.findMany({
-    where: { projectId, ...listCursorFilter(cursor) },
+    where: {
+      projectId,
+      ...(input.operation ? { operation: input.operation } : {}),
+      AND: [
+        listCursorFilter(cursor),
+        ...(input.search ? [{
+          OR: [
+            { oldModelId: { contains: input.search, mode: "insensitive" as const } },
+            { newModelId: { contains: input.search, mode: "insensitive" as const } },
+            { oldProviderConnection: { is: { name: { contains: input.search, mode: "insensitive" as const } } } },
+            { newProviderConnection: { is: { name: { contains: input.search, mode: "insensitive" as const } } } },
+          ],
+        }] : []),
+      ],
+    },
     orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     take: limit + 1,
     select: {

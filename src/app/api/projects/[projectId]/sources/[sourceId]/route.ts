@@ -24,6 +24,29 @@ async function parseParams(params: Promise<{ projectId: string; sourceId: string
   };
 }
 
+export async function GET(request: Request, context: { params: Promise<{ projectId: string; sourceId: string }> }) {
+  try {
+    await requireApiSession(request);
+    const { projectId, sourceId } = await parseParams(context.params);
+    const source = await getDb().projectSource.findFirst({
+      where: { projectId, id: sourceId, retiredAt: null },
+      select: {
+        id: true,
+        kind: true,
+        externalRef: true,
+        contentText: true,
+        contentHash: true,
+        capturedAt: true,
+        ingestedAt: true,
+      },
+    });
+    if (!source) throw new ApiError(404, "SOURCE_NOT_FOUND", "Source not found");
+    return NextResponse.json({ source }, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    return handleApiError(error);
+  }
+}
+
 export async function DELETE(request: Request, context: { params: Promise<{ projectId: string; sourceId: string }> }) {
   try {
     assertSameOrigin(request);

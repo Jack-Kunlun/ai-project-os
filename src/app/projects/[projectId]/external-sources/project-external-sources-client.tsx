@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ListPagination } from "@/components/list-pagination";
 
 type WebSource = {
   id: string;
@@ -28,23 +29,107 @@ function formatDate(value: string | null) {
 
 export function ProjectExternalSourcesClient({ username, projectId }: { username: string; projectId: string }) {
   const [sources, setSources] = useState<WebSource[]>([]);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  const [status, setStatus] = useState<"all" | WebSource["status"]>("all");
+  const [pagination, setPagination] = useState({ page: 1, pageSize: 10, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
     try {
-      const response = await fetch(`/api/projects/${projectId}/web-sources`, { cache: "no-store" });
+      const query = new URLSearchParams({
+        page: String(page),
+        pageSize: "10",
+        status,
+        ...(deferredSearch.trim() ? { search: deferredSearch.trim() } : {}),
+      });
+      const response = await fetch(`/api/projects/${projectId}/web-sources?${query}`, { cache: "no-store" });
       if (!response.ok) throw new Error(await responseError(response, "外部资料加载失败"));
-      setSources((await response.json() as { sources: WebSource[] }).sources);
+      const payload = await response.json() as {
+        sources: WebSource[];
+        pagination: { page: number; pageSize: number; total: number; totalPages: number };
+      };
+      setSources(payload.sources);
+      setPagination(payload.pagination);
       setError(null);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "外部资料加载失败"); }
-    finally { if (showLoading) setLoading(false); }
-  }, [projectId]);
-  useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "外部资料加载失败");
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, [deferredSearch, page, projectId, status]);
 
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="externalSources" /><div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12"><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">External knowledge</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">外部资料入口</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">添加公开网页或经你明确授权的内网页面。系统固定 DNS 解析、逐跳检查重定向、限制响应体并只提取文本；网页内容作为不可信资料保存，不会被当作系统指令执行。</p></section>{error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}<div className="mt-8 grid gap-7 xl:grid-cols-[.78fr_1.22fr]"><div className="space-y-5"><WebSourceForm projectId={projectId} onCreated={(source) => setSources((current) => [source, ...current])} /><section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Local folders</p><h2 className="mt-2 text-xl font-semibold">本地文件夹批量导入</h2><p className="mt-3 text-sm leading-6 text-slate-600">从文件资料页选择一个文件夹。浏览器只上传你选中的、受支持且满足大小限制的文件，并逐个保留原文件名和审核状态。</p><Link href={`/projects/${projectId}/assets`} className="mt-5 inline-flex rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700">前往文件资料</Link></section></div><section><div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Web sources</p><h2 className="mt-2 text-2xl font-semibold">网页资料</h2></div><span className="text-xs text-slate-400">{loading ? "读取中…" : `${sources.length} 个`}</span></div><div className="space-y-4">{!loading && sources.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">还没有网页来源。添加后会立即抓取一次并发布为可追溯资料。</div> : sources.map((source) => <WebSourceCard key={source.id} projectId={projectId} source={source} onReload={reload} />)}</div></section></div></div></main>;
+  useEffect(() => {
+    const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
+    return () => window.clearTimeout(timer);
+  }, [reload]);
+
+  function resetFilters(next: { search?: string; status?: "all" | WebSource["status"] }) {
+    if (next.search !== undefined) setSearch(next.search);
+    if (next.status !== undefined) setStatus(next.status);
+    setPage(1);
+  }
+
+  return (
+    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="externalSources" />
+      <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
+        <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">External knowledge</p>
+          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">外部资料入口</h1>
+          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">添加公开网页或经你明确授权的内网页面。系统固定 DNS 解析、逐跳检查重定向、限制响应体并只提取文本；网页内容作为不可信资料保存，不会被当作系统指令执行。</p>
+        </section>
+        {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
+        <div className="mt-8 grid gap-7 xl:grid-cols-[.78fr_1.22fr]">
+          <div className="space-y-5">
+            <WebSourceForm projectId={projectId} onCreated={() => { setPage(1); void reload({ showLoading: true }); }} />
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Local folders</p>
+              <h2 className="mt-2 text-xl font-semibold">本地文件夹批量导入</h2>
+              <p className="mt-3 text-sm leading-6 text-slate-600">从文件资料页选择一个文件夹。浏览器只上传你选中的、受支持且满足大小限制的文件，并逐个保留原文件名和审核状态。</p>
+              <Link href={`/projects/${projectId}/assets`} className="mt-5 inline-flex rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700">前往文件资料</Link>
+            </section>
+          </div>
+          <section>
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3 px-1">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Web sources</p>
+                <h2 className="mt-2 text-2xl font-semibold">网页资料</h2>
+              </div>
+              <span className="text-xs text-slate-400">{loading ? "读取中…" : `${pagination.total} 个`}</span>
+            </div>
+            <div className="mb-4 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-[1fr_auto]">
+              <label>
+                <span className="sr-only">搜索网页资料</span>
+                <input value={search} onChange={(event) => resetFilters({ search: event.target.value })} placeholder="搜索来源名称、地址或页面标题" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100" />
+              </label>
+              <label>
+                <span className="sr-only">筛选网页资料状态</span>
+                <select value={status} onChange={(event) => resetFilters({ status: event.target.value as "all" | WebSource["status"] })} className="h-full min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-600">
+                  <option value="all">全部状态</option>
+                  <option value="active">已启用</option>
+                  <option value="error">需要处理</option>
+                  <option value="disabled">已停用</option>
+                </select>
+              </label>
+            </div>
+            <div className="space-y-4">
+              {!loading && sources.length === 0 ? (
+                <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">
+                  {search.trim() || status !== "all" ? "没有匹配的网页资料。" : "还没有网页来源。添加后会立即抓取一次并发布为可追溯资料。"}
+                </div>
+              ) : sources.map((source) => <WebSourceCard key={source.id} projectId={projectId} source={source} onReload={reload} />)}
+            </div>
+            <ListPagination {...pagination} disabled={loading} onPageChange={setPage} />
+          </section>
+        </div>
+      </div>
+    </main>
+  );
 }
-
 function WebSourceForm({ projectId, onCreated }: { projectId: string; onCreated: (source: WebSource) => void }) {
   const [name, setName] = useState(""); const [url, setUrl] = useState(""); const [allowPrivateNetwork, setAllowPrivateNetwork] = useState(false); const [pending, setPending] = useState(false); const [message, setMessage] = useState<string | null>(null);
   async function submit(event: FormEvent<HTMLFormElement>) {

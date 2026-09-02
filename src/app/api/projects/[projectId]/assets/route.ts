@@ -7,12 +7,20 @@ import { assertProjectActive } from "@/lib/project-lifecycle";
 import { acquireUploadAdmission, countActiveUploadAdmissions, releaseUploadAdmission } from "@/lib/project-assets/admission";
 import { getProjectAssetUploadUsage, publicProjectAssetUploadUsage } from "@/lib/project-assets/quota";
 import { getUploadPolicy, publicUploadPolicy } from "@/lib/project-assets/policy";
-import { listProjectAssets, uploadProjectAsset } from "@/lib/project-assets/service";
+import { listProjectAssetsPage, uploadProjectAsset } from "@/lib/project-assets/service";
+import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/list-pagination";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const projectIdSchema = z.string().uuid();
+const listAssetsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
+  search: z.string().trim().max(120).default(""),
+  kind: z.enum(["all", "text", "document", "spreadsheet", "presentation", "image"]).default("all"),
+  status: z.enum(["all", "uploaded", "parsing", "waitingVision", "awaitingReview", "ready", "failed"]).default("all"),
+}).strict();
 
 async function projectId(params: Promise<{ projectId: string }>): Promise<string> {
   return projectIdSchema.parse((await params).projectId);
@@ -23,10 +31,22 @@ export async function GET(request: Request, context: { params: Promise<{ project
     const user = await requireApiSession(request);
     const id = await projectId(context.params);
     const policy = getUploadPolicy();
-    const assets = await listProjectAssets(id);
+    const searchParams = new URL(request.url).searchParams;
+    for (const key of new Set(searchParams.keys())) {
+      if (searchParams.getAll(key).length !== 1) throw new ApiError(400, "INVALID_QUERY", `Query parameter ${key} must be unique`);
+    }
+    const query = listAssetsQuerySchema.parse(Object.fromEntries(searchParams));
+    const page = await listProjectAssetsPage(id, {
+      page: query.page,
+      pageSize: query.pageSize,
+      search: query.search,
+      ...(query.kind === "all" ? {} : { kind: query.kind }),
+      ...(query.status === "all" ? {} : { status: query.status }),
+    });
     const usage = await getProjectAssetUploadUsage(id);
     return NextResponse.json({
-      assets,
+      assets: page.items,
+      pagination: page.pagination,
       policy: publicUploadPolicy(policy),
       usage: {
         ...publicProjectAssetUploadUsage(usage),

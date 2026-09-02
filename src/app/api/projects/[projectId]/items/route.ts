@@ -9,8 +9,9 @@ import {
   createPrimaryProjectItemEvidence,
 } from "@/lib/project-item-history";
 import { isExactSourceExcerpt, projectItemSelect } from "@/lib/project-item";
-import { createProjectItemSchema, projectIdSchema } from "@/lib/validation";
+import { createProjectItemSchema, listProjectItemsQuerySchema, projectIdSchema } from "@/lib/validation";
 import { assertProjectActive } from "@/lib/project-lifecycle";
+import { listPagination } from "@/lib/list-pagination";
 
 export const dynamic = "force-dynamic";
 
@@ -37,14 +38,43 @@ export async function GET(request: Request, context: { params: Promise<{ project
     const projectId = await parseProjectId(context.params);
     const db = getDb();
     await assertProjectExists(db, projectId);
+    const searchParams = new URL(request.url).searchParams;
+    for (const key of new Set(searchParams.keys())) {
+      if (searchParams.getAll(key).length !== 1) throw new ApiError(400, "INVALID_QUERY", `Query parameter ${key} must be unique`);
+    }
+    const query = listProjectItemsQuerySchema.parse(Object.fromEntries(searchParams));
+    const where: Prisma.ProjectItemWhereInput = {
+      projectId,
+      ...(query.type === "all" ? {} : { type: query.type }),
+      ...(query.reviewStatus === "all" ? {} : { reviewStatus: query.reviewStatus }),
+      ...(query.search ? {
+        OR: [
+          { title: { contains: query.search, mode: "insensitive" } },
+          { content: { contains: query.search, mode: "insensitive" } },
+          { sourceExcerpt: { contains: query.search, mode: "insensitive" } },
+        ],
+      } : {}),
+    };
 
-    const items = await db.projectItem.findMany({
-      where: { projectId },
-      orderBy: { updatedAt: "desc" },
-      select: projectItemSelect,
-    });
+    const [items, total, statusCounts] = await Promise.all([
+      db.projectItem.findMany({
+        where,
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+        select: projectItemSelect,
+      }),
+      db.projectItem.count({ where }),
+      db.projectItem.groupBy({
+        by: ["reviewStatus"],
+        where: { projectId },
+        _count: { _all: true },
+      }),
+    ]);
+    const counts = { candidate: 0, confirmed: 0, dismissed: 0, superseded: 0 };
+    for (const entry of statusCounts) counts[entry.reviewStatus] = entry._count._all;
 
-    return NextResponse.json({ items });
+    return NextResponse.json({ items, counts, pagination: listPagination(query.page, query.pageSize, total) });
   } catch (error) {
     return handleApiError(error);
   }

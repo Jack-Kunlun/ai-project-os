@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { AppHeader } from "@/components/app-header";
 import { ConnectionTabs } from "@/components/connection-tabs";
 
@@ -155,7 +156,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className="mt-4 block text-sm font-medium text-slate-700">{label}{children}</label>;
 }
 
-function McpConnectionCard({ connection, onChanged, onRemoved }: { connection: Connection; onChanged: (connection: Connection) => void; onRemoved: (connectionId: string) => void }) {
+type McpConnectionCardProps = {
+  connection: Connection;
+  onChanged: (connection: Connection) => void;
+  onRemoved: (connectionId: string) => void;
+};
+
+function McpConnectionCard(props: McpConnectionCardProps) {
+  const { confirm, dialog } = useAppConfirmDialog();
+  return <>{dialog}<McpConnectionCardContent {...props} confirm={confirm} /></>;
+}
+
+function McpConnectionCardContent({ connection, onChanged, onRemoved, confirm }: McpConnectionCardProps & { confirm: ReturnType<typeof useAppConfirmDialog>["confirm"] }) {
   const [pending, setPending] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [token, setToken] = useState("");
@@ -182,8 +194,17 @@ function McpConnectionCard({ connection, onChanged, onRemoved }: { connection: C
   }
 
   async function removeConnection() {
-    const confirmationName = window.prompt(`永久删除会移除工具快照、管理员认证和加密凭据，且不可恢复。请输入连接名称“${connection.name}”确认：`);
-    if (confirmationName === null) return;
+    const confirmation = await confirm({
+      eyebrow: "Connection lifecycle",
+      title: `永久删除「${connection.name}」`,
+      description: "永久删除会移除工具快照、管理员认证和加密凭据，且不可恢复。",
+      inputLabel: `输入连接名称「${connection.name}」以确认`,
+      requiredValue: connection.name,
+      confirmLabel: "确认永久删除",
+      tone: "danger",
+    });
+    if (!confirmation.confirmed) return;
+    const confirmationName = confirmation.value;
     setPending("delete"); setMessage(null);
     try {
       const response = await fetch(`/api/settings/mcp-connections/${connection.id}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmationName, expectedUpdatedAt: connection.updatedAt }) });
@@ -212,7 +233,14 @@ function McpConnectionCard({ connection, onChanged, onRemoved }: { connection: C
   async function revokeAttestation(tool: ToolDefinition) {
     const attestation = activeAttestation(tool);
     if (attestation === null) return;
-    if (!window.confirm(`撤销 ${tool.name} 的管理员认证？项目授权和后续调用将立即失败关闭。`)) return;
+    const confirmation = await confirm({
+      eyebrow: "Tool attestation",
+      title: `撤销 ${tool.name} 的管理员认证`,
+      description: "撤销后，项目授权和后续调用将立即失败关闭。",
+      confirmLabel: "撤销认证",
+      tone: "danger",
+    });
+    if (!confirmation.confirmed) return;
     setPending(`revoke-attest:${tool.id}`); setMessage(null);
     try {
       const response = await fetch(`/api/settings/mcp-connections/${connection.id}/tools/${tool.id}/attestation`, {

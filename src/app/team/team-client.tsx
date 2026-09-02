@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { AppHeader } from "@/components/app-header";
 
 type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
@@ -128,10 +129,35 @@ function OidcForm({ workspaceId, onReload }: { workspaceId: string; onReload: ()
   </form>;
 }
 
-function OidcCard({ workspaceId, provider, onReload }: { workspaceId: string; provider: OidcProvider; onReload: () => Promise<void> }) {
+type OidcCardProps = { workspaceId: string; provider: OidcProvider; onReload: () => Promise<void> };
+
+function OidcCard(props: OidcCardProps) {
+  const { confirm, dialog } = useAppConfirmDialog();
+  return <>{dialog}<OidcCardContent {...props} confirm={confirm} /></>;
+}
+
+function OidcCardContent({ workspaceId, provider, onReload, confirm }: OidcCardProps & { confirm: ReturnType<typeof useAppConfirmDialog>["confirm"] }) {
   const [pending, setPending] = useState(false); const [message, setMessage] = useState<string | null>(null);
   async function patch(body: unknown) { setPending(true); setMessage(null); try { const response = await fetch(`/api/workspaces/${workspaceId}/oidc-providers/${provider.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); if (!response.ok) throw new Error(await responseError(response, "OIDC 更新失败")); await onReload(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "OIDC 更新失败"); } finally { setPending(false); } }
-  async function remove() { const confirmationName = window.prompt(`永久删除会移除 OIDC 配置与 Client Secret，且不可恢复。请输入身份源名称“${provider.name}”确认：`); if (confirmationName === null) return; setPending(true); setMessage(null); try { const response = await fetch(`/api/workspaces/${workspaceId}/oidc-providers/${provider.id}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmationName, expectedUpdatedAt: provider.updatedAt }) }); if (!response.ok) throw new Error(await responseError(response, "OIDC 永久删除失败")); await onReload(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "OIDC 永久删除失败"); } finally { setPending(false); } }
+  async function remove() {
+    const confirmation = await confirm({
+      eyebrow: "Identity provider lifecycle",
+      title: `永久删除「${provider.name}」`,
+      description: "永久删除会移除 OIDC 配置与 Client Secret，且不可恢复。已有成员身份绑定时系统会拒绝删除。",
+      inputLabel: `输入身份源名称「${provider.name}」以确认`,
+      requiredValue: provider.name,
+      confirmLabel: "确认永久删除",
+      tone: "danger",
+    });
+    if (!confirmation.confirmed) return;
+    setPending(true); setMessage(null);
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/oidc-providers/${provider.id}`, { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmationName: confirmation.value, expectedUpdatedAt: provider.updatedAt }) });
+      if (!response.ok) throw new Error(await responseError(response, "OIDC 永久删除失败"));
+      await onReload();
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "OIDC 永久删除失败"); }
+    finally { setPending(false); }
+  }
   return <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex flex-wrap justify-between gap-4"><div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{provider.name}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${provider.status === "verified" ? "bg-emerald-50 text-emerald-700" : provider.status === "disabled" ? "bg-slate-100 text-slate-500" : "bg-rose-50 text-rose-700"}`}>{provider.status}</span></div><p className="mt-2 max-w-lg truncate text-xs text-slate-500">{provider.issuerUrl}</p><p className="mt-2 text-xs text-slate-400">{provider.tokenAuthMethod === "clientSecretBasic" ? "client_secret_basic" : "client_secret_post"} · {provider.allowPrivateNetwork ? "内网已授权" : "仅公网 HTTPS"}</p><p className="mt-1 text-xs text-slate-400">自动加入：{provider.autoProvision ? (provider.allowedEmailDomains.length ? provider.allowedEmailDomains.join("、") : "任意已验证邮箱") : "关闭"}</p></div><div className="flex flex-wrap gap-2">{provider.status !== "disabled" ? <><button onClick={() => void patch({ rediscover: true })} disabled={pending} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold">重新验证</button><button onClick={() => void patch({ enabled: false })} disabled={pending} className="rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">停用</button></> : <><button onClick={() => void patch({ enabled: true })} disabled={pending} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">启用</button><button onClick={() => void remove()} disabled={pending} className="rounded-xl bg-rose-600 px-3 py-2 text-xs font-semibold text-white">永久删除</button></>}</div></div>{provider.status === "disabled" ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">已有成员身份绑定时系统会拒绝永久删除，避免用户失去唯一登录方式。</p> : null}{provider.lastErrorCode ? <p className="mt-3 text-xs text-rose-600">{provider.lastErrorCode}</p> : null}{message ? <p className="mt-3 text-xs text-rose-600">{message}</p> : null}</article>;
 }
 

@@ -15,6 +15,7 @@ import {
 import { parseAssetBuffer, PROJECT_ASSET_PARSER_VERSION } from "@/lib/project-assets/parser";
 import { getUploadPolicy } from "@/lib/project-assets/policy";
 import { isSerializableTransactionConflict, withSerializableRetry } from "@/lib/prisma-transaction";
+import { listPagination } from "@/lib/list-pagination";
 import {
   assetBlobStorageKey,
   assetContentHash,
@@ -173,6 +174,42 @@ export async function listProjectAssets(projectId: string, db: PrismaClient = ge
     select: { id: true },
   });
   return Object.freeze(await Promise.all(assets.map(async ({ id }) => publicAsset(await readAssetRecord(projectId, id, db)))));
+}
+
+export async function listProjectAssetsPage(
+  projectId: string,
+  input: Readonly<{
+    page: number;
+    pageSize: number;
+    search: string;
+    kind?: "text" | "document" | "spreadsheet" | "presentation" | "image";
+    status?: "uploaded" | "parsing" | "waitingVision" | "awaitingReview" | "ready" | "failed";
+  }>,
+  db: PrismaClient = getDb(),
+) {
+  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
+  if (project === null) return fail("PROJECT_ASSET_NOT_FOUND");
+  const where: Prisma.ProjectAssetWhereInput = {
+    projectId,
+    status: input.status ?? { not: "deleted" },
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.search ? { displayName: { contains: input.search, mode: "insensitive" } } : {}),
+  };
+  const [assets, total] = await Promise.all([
+    db.projectAsset.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (input.page - 1) * input.pageSize,
+      take: input.pageSize,
+      select: { id: true },
+    }),
+    db.projectAsset.count({ where }),
+  ]);
+  const items = await Promise.all(assets.map(async ({ id }) => publicAsset(await readAssetRecord(projectId, id, db))));
+  return Object.freeze({
+    items: Object.freeze(items),
+    pagination: listPagination(input.page, input.pageSize, total),
+  });
 }
 
 /**

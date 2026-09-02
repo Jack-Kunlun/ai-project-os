@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { AppHeader } from "@/components/app-header";
 
 type Definition = {
@@ -49,7 +50,14 @@ function displayName(user: { username: string; displayName: string | null }) {
   return user.displayName?.trim() || user.username;
 }
 
-export function ProjectToolsClient({ username, projectId }: { username: string; projectId: string }) {
+type ProjectToolsClientProps = { username: string; projectId: string };
+
+export function ProjectToolsClient(props: ProjectToolsClientProps) {
+  const { confirm, dialog } = useAppConfirmDialog();
+  return <>{dialog}<ProjectToolsContent {...props} confirm={confirm} /></>;
+}
+
+function ProjectToolsContent({ username, projectId, confirm }: ProjectToolsClientProps & { confirm: ReturnType<typeof useAppConfirmDialog>["confirm"] }) {
   const [center, setCenter] = useState<Center | null>(null);
   const [argumentsByGrant, setArgumentsByGrant] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<string | null>(null);
@@ -69,7 +77,14 @@ export function ProjectToolsClient({ username, projectId }: { username: string; 
   const grantByTool = useMemo(() => new Map(center?.grants.map((grant) => [`${grant.connectionId}:${grant.toolName}`, grant]) ?? []), [center]);
 
   async function grant(definition: Definition, existing: Grant | undefined) {
-    if (!window.confirm(`确认将 ${definition.connection.name} / ${definition.name} 作为只读工具授权给当前项目？远端声明不构成强制保证，请确认服务和凭据本身可信且只读。`)) return;
+    const confirmation = await confirm({
+      eyebrow: "Project capability grant",
+      title: `授权 ${definition.connection.name} / ${definition.name}`,
+      description: "远端声明不构成强制保证。请确认服务和凭据本身可信且只读；每次调用仍需按项目策略审批。",
+      confirmLabel: "授权给项目",
+      tone: "warning",
+    });
+    if (!confirmation.confirmed) return;
     setPending(`grant:${definition.id}`); setMessage(null); setError(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/mcp-tool-grants`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ toolDefinitionId: definition.id, acknowledgeReadOnly: true, expectedUpdatedAt: existing?.updatedAt ?? null }) });
@@ -80,7 +95,14 @@ export function ProjectToolsClient({ username, projectId }: { username: string; 
   }
 
   async function revoke(grant: Grant) {
-    if (!window.confirm("撤销该项目工具授权？尚未执行的动作会在执行前因授权变化失败关闭。")) return;
+    const confirmation = await confirm({
+      eyebrow: "Project capability grant",
+      title: "撤销项目工具授权",
+      description: "尚未执行的动作会在执行前因授权变化失败关闭。",
+      confirmLabel: "撤销授权",
+      tone: "danger",
+    });
+    if (!confirmation.confirmed) return;
     setPending(`revoke:${grant.id}`); setMessage(null); setError(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/mcp-tool-grants/${grant.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedUpdatedAt: grant.updatedAt }) });

@@ -14,6 +14,7 @@ import {
 } from "@/lib/project-snapshot";
 import { createProjectSnapshotSchema, projectIdSchema } from "@/lib/validation";
 import { assertProjectActive } from "@/lib/project-lifecycle";
+import { isProjectSnapshotStale } from "@/lib/project-snapshot-stale";
 
 export const dynamic = "force-dynamic";
 
@@ -239,7 +240,14 @@ export async function GET(request: Request, context: { params: Promise<{ project
     const db = getDb();
     await assertProjectExists(db, projectId);
     const snapshot = await getLatestSnapshot(db, projectId);
-    return NextResponse.json({ snapshot });
+    const currentItems = snapshot === null ? [] : await db.projectItem.findMany({
+      where: { projectId, reviewStatus: "confirmed" },
+      select: { id: true, reviewStatus: true, confirmedAt: true },
+    });
+    return NextResponse.json({
+      snapshot,
+      stale: snapshot === null ? false : isProjectSnapshotStale(snapshot.payload, currentItems),
+    });
   } catch (error) {
     return handleApiError(error);
   }

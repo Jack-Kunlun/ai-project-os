@@ -6,6 +6,7 @@ import { isIP, type LookupFunction } from "node:net";
 import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
+import { listPagination } from "@/lib/list-pagination";
 import { assertProjectActive } from "@/lib/project-lifecycle";
 import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
 
@@ -306,11 +307,35 @@ export function extractWebDocument(body: Buffer, contentType: string, finalUrl: 
   return Object.freeze({ title: title.slice(0, 512), text: `${prefix}${text}`.slice(0, MAX_SOURCE_CONTENT_LENGTH) });
 }
 
-export async function listProjectWebSources(projectIdInput: unknown, db: PrismaClient = getDb()) {
+export async function listProjectWebSources(
+  projectIdInput: unknown,
+  input: { page: number; pageSize: number; search?: string; status?: "active" | "disabled" | "error" },
+  db: PrismaClient = getDb(),
+) {
   const projectId = uuid(projectIdInput);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (project === null) return fail("WEB_SOURCE_PROJECT_NOT_FOUND");
-  return db.webSource.findMany({ where: { projectId }, orderBy: [{ createdAt: "desc" }, { id: "asc" }], select: webSourceSelect });
+  const search = input.search?.trim();
+  const where: Prisma.WebSourceWhereInput = {
+    projectId,
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(search ? { OR: [
+      { name: { contains: search, mode: "insensitive" } },
+      { url: { contains: search, mode: "insensitive" } },
+      { pointer: { is: { revision: { is: { title: { contains: search, mode: "insensitive" } } } } } },
+    ] } : {}),
+  };
+  const [sources, total] = await Promise.all([
+    db.webSource.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+      skip: (input.page - 1) * input.pageSize,
+      take: input.pageSize,
+      select: webSourceSelect,
+    }),
+    db.webSource.count({ where }),
+  ]);
+  return { sources, pagination: listPagination(input.page, input.pageSize, total) };
 }
 
 export async function createProjectWebSource(

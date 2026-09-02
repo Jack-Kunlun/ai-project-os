@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { MAX_SOURCE_CONTENT_LENGTH, isSafeExternalRef } from "@/lib/source";
+import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/list-pagination";
 
 const projectNameSchema = z.string().trim().min(1, "name is required").max(120, "name is too long");
 const projectSlugSchema = z
@@ -61,6 +62,8 @@ const sourceCapturedAtSchema = z.preprocess(
 );
 
 const projectItemTypeSchema = z.enum(["decision", "progress", "issue", "risk"]);
+const projectItemReviewStatusSchema = z.enum(["candidate", "confirmed", "dismissed", "superseded"]);
+const projectSourceKindSchema = z.enum(["document", "screenshot", "github", "git", "web", "manual", "mcp"]);
 const itemTitleSchema = z.string().trim().min(1, "title is required").max(160, "title is too long");
 const itemContentSchema = z.string().trim().min(1, "content is required").max(20_000, "content is too long");
 const itemSourceExcerptSchema = z
@@ -95,6 +98,23 @@ export const createProjectItemSchema = z
     occurredAt: itemOccurredAtSchema,
   })
   .strict();
+
+const listPageFields = {
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
+  search: z.string().trim().max(120).default(""),
+};
+
+export const listProjectSourcesQuerySchema = z.object({
+  ...listPageFields,
+  kind: projectSourceKindSchema.or(z.literal("all")).default("all"),
+}).strict();
+
+export const listProjectItemsQuerySchema = z.object({
+  ...listPageFields,
+  type: projectItemTypeSchema.or(z.literal("all")).default("all"),
+  reviewStatus: projectItemReviewStatusSchema.or(z.literal("all")).default("all"),
+}).strict();
 
 const editProjectItemSchema = z
   .object({

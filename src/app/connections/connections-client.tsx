@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { ConnectionTabs } from "@/components/connection-tabs";
+import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 
 type ProviderKind = "github" | "gitee" | "gitlab" | "gitea" | "forgejo" | "generic";
 type Transport = "https" | "ssh";
@@ -225,6 +226,7 @@ function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Conn
   const [testing, setTesting] = useState(false);
   const [disabling, setDisabling] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const { confirm, dialog } = useAppConfirmDialog();
 
   async function test(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -260,8 +262,9 @@ function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Conn
   }
 
   async function removeConnection() {
-    const confirmationName = window.prompt(`永久删除会移除连接、未关联仓库身份和加密凭据，且不可恢复。请输入连接名称“${connection.name}”确认：`);
-    if (confirmationName === null) return;
+    const confirmation = await confirm({ eyebrow: "Source connection", title: `永久删除“${connection.name}”？`, description: "连接、未关联仓库身份和加密凭据都会被删除，且不可恢复；仍有项目仓库引用时服务端会拒绝操作。", inputLabel: `输入连接名称“${connection.name}”以确认`, requiredValue: connection.name, confirmLabel: "确认永久删除", tone: "danger", maxLength: 120 });
+    if (!confirmation.confirmed) return;
+    const confirmationName = confirmation.value;
     setDisabling(true);
     setMessage(null);
     try {
@@ -276,7 +279,7 @@ function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Conn
   }
 
   return (
-    <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <><article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{statusLabels[connection.status]}</span></div><p className="mt-2 text-xs text-slate-500">{connection.providerKind.toUpperCase()} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div>
         <div className="text-right text-xs text-slate-400"><p>{connection._count.repositories} 个仓库身份</p><p className="mt-1">凭据 ····{connection.credential?.maskedSuffix ?? "无"}</p></div>
@@ -285,6 +288,6 @@ function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Conn
       {connection.status !== "disabled" ? <form onSubmit={test} className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[1fr_8rem_auto]"><input value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder="组织/仓库" required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><input value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" required className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-400" /><button disabled={testing} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{testing ? "验证中…" : "只读验证"}</button></form> : null}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">{message ? <p role="status" className="text-xs leading-5 text-slate-600">{message}</p> : <span />}{connection.status !== "disabled" ? <button onClick={() => void toggleEnabled()} disabled={disabling} className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">{disabling ? "停用中…" : "停用连接"}</button> : <div className="flex flex-wrap items-center gap-2"><button onClick={() => void toggleEnabled()} disabled={disabling} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">重新启用</button><button onClick={() => void removeConnection()} disabled={disabling} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">永久删除</button></div>}</div>
       {connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">只有未被任何项目仓库关联的连接可以永久删除；仍有历史关联时系统会拒绝删除。</p> : null}
-    </article>
+    </article>{dialog}</>
   );
 }

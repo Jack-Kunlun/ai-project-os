@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { ListPagination } from "@/components/list-pagination";
+import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { jobStatusLabels, type JobKind, type WorkspaceProject } from "@/lib/workspace-summary";
 
 type ProjectsView = "active" | "archived";
@@ -11,10 +13,11 @@ type LifecycleAction = "archive" | "restore" | "delete";
 type ProjectsPayload = {
   view: ProjectsView;
   counts: { active: number; archived: number };
+  pagination: ListPaginationState;
   projects: WorkspaceProject[];
 };
 
-const emptyPayload: ProjectsPayload = { view: "active", counts: { active: 0, archived: 0 }, projects: [] };
+const emptyPayload: ProjectsPayload = { view: "active", counts: { active: 0, archived: 0 }, pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 }, projects: [] };
 
 const jobLabels: Record<JobKind, string> = {
   assetExtract: "文件图片识别",
@@ -53,6 +56,8 @@ export function ProjectsClient({ username }: { username: string }) {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<ProjectsView>("active");
   const [lifecycle, setLifecycle] = useState<{ project: WorkspaceProject; action: LifecycleAction } | null>(null);
@@ -60,29 +65,25 @@ export function ProjectsClient({ username }: { username: string }) {
   const load = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
     try {
-      const response = await fetch(`/api/projects?view=${view}`, { cache: "no-store" });
+      const query = new URLSearchParams({ view, page: String(page), pageSize: "20" });
+      if (deferredSearch.trim()) query.set("search", deferredSearch.trim());
+      const response = await fetch(`/api/projects?${query}`, { cache: "no-store" });
       if (!response.ok) throw new Error(await readError(response, "项目列表加载失败"));
-      setPayload(await response.json() as ProjectsPayload);
+      const next = await response.json() as ProjectsPayload;
+      setPayload(next);
+      if (page > next.pagination.totalPages) setPage(next.pagination.totalPages);
       setError(null);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "项目列表加载失败");
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [view]);
+  }, [deferredSearch, page, view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load({ showLoading: true }), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
-
-  const filteredProjects = useMemo(() => {
-    const keyword = search.trim().toLocaleLowerCase("zh-CN");
-    if (!keyword) return payload.projects;
-    return payload.projects.filter((project) =>
-      `${project.name} ${project.description ?? ""} ${project.slug}`.toLocaleLowerCase("zh-CN").includes(keyword),
-    );
-  }, [payload.projects, search]);
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
@@ -103,29 +104,29 @@ export function ProjectsClient({ username }: { username: string }) {
         <section className="mt-7" aria-label="项目列表">
           <div className="flex flex-col gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2">
-              <button type="button" onClick={() => { setView("active"); setSearch(""); }} className={`rounded-lg px-3 py-2 text-xs font-semibold ${view === "active" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>进行中 {payload.counts.active}</button>
-              <button type="button" onClick={() => { setView("archived"); setSearch(""); }} className={`rounded-lg px-3 py-2 text-xs font-semibold ${view === "archived" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>已归档 {payload.counts.archived}</button>
-              <span className="ml-1 text-xs text-slate-400">{loading ? "正在读取…" : `当前 ${filteredProjects.length} 个`}</span>
+              <button type="button" onClick={() => { setView("active"); setSearch(""); setPage(1); }} className={`rounded-lg px-3 py-2 text-xs font-semibold ${view === "active" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>进行中 {payload.counts.active}</button>
+              <button type="button" onClick={() => { setView("archived"); setSearch(""); setPage(1); }} className={`rounded-lg px-3 py-2 text-xs font-semibold ${view === "archived" ? "bg-slate-950 text-white" : "bg-slate-100 text-slate-600"}`}>已归档 {payload.counts.archived}</button>
+              <span className="ml-1 text-xs text-slate-400">{loading ? "正在读取…" : `匹配 ${payload.pagination.total} 个`}</span>
             </div>
             <label className="relative block min-w-0 sm:w-72">
               <span className="sr-only">搜索项目</span>
               <svg aria-hidden="true" viewBox="0 0 24 24" className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索名称、描述或 slug" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-indigo-300 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+              <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="搜索名称、描述或 slug" className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none transition focus:border-indigo-300 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
             </label>
           </div>
 
           {loading ? (
             <div className="mt-5 grid gap-5 lg:grid-cols-2">{[1, 2].map((item) => <div key={item} className="h-64 animate-pulse rounded-3xl bg-slate-200" />)}</div>
-          ) : filteredProjects.length === 0 ? (
+          ) : payload.projects.length === 0 ? (
             <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
-              <p className="text-base font-semibold text-slate-800">{payload.projects.length === 0 ? view === "active" ? "还没有进行中的项目" : "还没有归档项目" : "没有匹配的项目"}</p>
-              <p className="mt-2 text-sm text-slate-500">{payload.projects.length === 0 ? view === "active" ? "创建项目后，就可以录入资料、连接仓库并建立智能记忆。" : "归档不会删除数据；归档项目会集中显示在这里并可随时恢复。" : "换一个项目名称、描述或 slug 关键词试试。"}</p>
-              {payload.projects.length === 0 && view === "active" ? <button type="button" onClick={() => setCreateOpen(true)} className="mt-5 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white">创建第一个项目</button> : null}
+              <p className="text-base font-semibold text-slate-800">{search.trim() ? "没有匹配的项目" : view === "active" ? "还没有进行中的项目" : "还没有归档项目"}</p>
+              <p className="mt-2 text-sm text-slate-500">{search.trim() ? "换一个项目名称、描述或 slug 关键词试试。" : view === "active" ? "创建项目后，就可以录入资料、连接仓库并建立智能记忆。" : "归档不会删除数据；归档项目会集中显示在这里并可随时恢复。"}</p>
+              {!search.trim() && view === "active" ? <button type="button" onClick={() => setCreateOpen(true)} className="mt-5 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white">创建第一个项目</button> : null}
             </div>
           ) : (
-            <div className="mt-5 grid gap-5 lg:grid-cols-2">
-              {filteredProjects.map((project) => <ProjectCard key={project.id} project={project} onLifecycle={(action) => { setMessage(null); setLifecycle({ project, action }); }} />)}
-            </div>
+            <><div className="mt-5 grid gap-5 lg:grid-cols-2">
+              {payload.projects.map((project) => <ProjectCard key={project.id} project={project} onLifecycle={(action) => { setMessage(null); setLifecycle({ project, action }); }} />)}
+            </div><ListPagination {...payload.pagination} onPageChange={setPage} disabled={loading} /></>
           )}
         </section>
       </div>
@@ -203,7 +204,7 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
         {archived ? (
           <><button type="button" onClick={() => onLifecycle("restore")} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">恢复项目</button><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("delete")} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50">永久删除</button></>
         ) : (
-          <><QuickLink href={`/projects/${project.id}`} label="资料" /><QuickLink href={`/projects/${project.id}/assets`} label="文件" /><QuickLink href={`/projects/${project.id}/control`} label="控制台" /><QuickLink href={`/projects/${project.id}/memory`} label="记忆" /><QuickLink href={`/projects/${project.id}/intelligence`} label="智能体" primary /><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("archive")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:border-amber-200 hover:text-amber-700">归档</button></>
+          <><QuickLink href={`/projects/${project.id}`} label="概览" /><QuickLink href={`/projects/${project.id}/materials`} label="资料" /><QuickLink href={`/projects/${project.id}/intelligence`} label="AI 工作台" primary /><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("archive")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:border-amber-200 hover:text-amber-700">归档</button></>
         )}
       </div>
       {exportMessage ? <p role="status" className="mt-3 text-[11px] leading-5 text-slate-500">{exportMessage}</p> : null}

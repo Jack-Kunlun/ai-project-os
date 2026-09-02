@@ -2,8 +2,11 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { ListPagination } from "@/components/list-pagination";
+import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 import { DEFAULT_UPLOAD_POLICY, type PublicUploadPolicy } from "@/lib/project-assets/policy";
 
@@ -94,6 +97,12 @@ export function ProjectAssetsClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
   const [projectName, setProjectName] = useState("项目");
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [pagination, setPagination] = useState<ListPaginationState>({ page: 1, pageSize: 10, total: 0, totalPages: 1 });
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  const [kindFilter, setKindFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -106,22 +115,25 @@ export function ProjectAssetsClient({ username }: { username: string }) {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [policy, setPolicy] = useState<PublicUploadPolicy>(DEFAULT_UPLOAD_POLICY);
   const [usage, setUsage] = useState<UploadUsage>({ projectBytes: "0", activeAssetCount: 0, retainedObjectCount: 0, activeUploads: 0 });
+  const { confirm, dialog } = useAppConfirmDialog();
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
     try {
       const [projectResponse, assetsResponse] = await Promise.all([
         fetch(`/api/projects/${projectId}`, { cache: "no-store" }),
-        fetch(`/api/projects/${projectId}/assets`, { cache: "no-store" }),
+        fetch(`/api/projects/${projectId}/assets?${new URLSearchParams({ page: String(page), pageSize: "10", ...(deferredSearch.trim() ? { search: deferredSearch.trim() } : {}), kind: kindFilter, status: statusFilter })}`, { cache: "no-store" }),
       ]);
       if (!projectResponse.ok || !assetsResponse.ok) {
         const failed = !projectResponse.ok ? projectResponse : assetsResponse;
         throw new Error(await readError(failed, "文件资料加载失败"));
       }
       const projectPayload = await projectResponse.json() as { project: { name: string } };
-      const assetsPayload = await assetsResponse.json() as { assets: Asset[]; policy?: PublicUploadPolicy; usage?: UploadUsage };
+      const assetsPayload = await assetsResponse.json() as { assets: Asset[]; pagination: ListPaginationState; policy?: PublicUploadPolicy; usage?: UploadUsage };
       setProjectName(projectPayload.project.name);
       setAssets(assetsPayload.assets);
+      setPagination(assetsPayload.pagination);
+      if (page > assetsPayload.pagination.totalPages) setPage(assetsPayload.pagination.totalPages);
       if (assetsPayload.policy) setPolicy(assetsPayload.policy);
       if (assetsPayload.usage) setUsage(assetsPayload.usage);
       setEdits((current) => {
@@ -137,7 +149,7 @@ export function ProjectAssetsClient({ username }: { username: string }) {
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [projectId]);
+  }, [deferredSearch, kindFilter, page, projectId, statusFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
@@ -234,7 +246,14 @@ export function ProjectAssetsClient({ username }: { username: string }) {
   }
 
   async function remove(asset: Asset) {
-    if (!window.confirm(`从项目中移除“${asset.displayName}”？已生成的资料来源会停止参与后续 AI 处理。原文件与审计记录会保留；以后重新上传同一文件即可恢复。`)) return;
+    const confirmation = await confirm({
+      eyebrow: "Project files",
+      title: `移除“${asset.displayName}”？`,
+      description: "已生成的资料来源会停止参与后续 AI 处理；原文件与审计记录仍会保留，重新上传同一文件可以恢复。",
+      confirmLabel: "确认移除",
+      tone: "danger",
+    });
+    if (!confirmation.confirmed) return;
     setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/assets/${asset.id}`, { method: "DELETE" });
@@ -274,7 +293,7 @@ export function ProjectAssetsClient({ username }: { username: string }) {
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project files</p>
           <div className="mt-3 flex flex-wrap items-end justify-between gap-5">
             <div><h1 className="text-4xl font-semibold tracking-[-0.04em]">{projectName} · 文件资料</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">上传文本、PDF、Word、PowerPoint、Excel 和图片。本地先完成结构化解析；图片与扫描 PDF 按项目配置调用视觉模型，人工确认后才进入项目记忆。</p></div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-right shadow-sm"><p className="text-xs text-slate-400">待人工确认</p><p className="mt-1 text-2xl font-semibold">{pendingCount}</p></div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-right shadow-sm"><p className="text-xs text-slate-400">当前页待人工确认</p><p className="mt-1 text-2xl font-semibold">{pendingCount}</p></div>
           </div>
         </section>
 
@@ -297,7 +316,8 @@ export function ProjectAssetsClient({ username }: { username: string }) {
 
         <section className="mt-8">
           <div className="flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Asset library</p><h2 className="mt-2 text-2xl font-semibold">已上传文件</h2></div><button type="button" onClick={() => void reload()} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-600">刷新</button></div>
-          {loading ? <div className="mt-5 h-40 animate-pulse rounded-3xl bg-slate-200" /> : assets.length === 0 ? <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">还没有文件。上传后，系统会显示解析、识别、审核与发布状态。</div> : <div className="mt-5 space-y-5">{assets.map((asset) => (
+          <div className="mt-5 grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only">搜索文件</span><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="搜索文件名" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:bg-white" /></label><label><span className="sr-only">按文件类型筛选</span><select value={kindFilter} onChange={(event) => { setKindFilter(event.target.value); setPage(1); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"><option value="all">全部文件类型</option>{Object.entries(kindLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="sr-only">按处理状态筛选</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700"><option value="all">全部处理状态</option>{Object.entries(statusLabels).filter(([value]) => value !== "deleted").map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
+          {loading ? <div className="mt-5 h-40 animate-pulse rounded-3xl bg-slate-200" /> : assets.length === 0 ? <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">{search.trim() || kindFilter !== "all" || statusFilter !== "all" ? "没有匹配的文件，请调整关键词或筛选条件。" : "还没有文件。上传后，系统会显示解析、识别、审核与发布状态。"}</div> : <div className="mt-5 space-y-5">{assets.map((asset) => (
             <article key={asset.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4 p-6 sm:p-7"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="max-w-xl truncate text-lg font-semibold">{asset.displayName}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">{kindLabels[asset.kind]}</span><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusTone(asset.status)}`}>{statusLabels[asset.status]}</span></div><p className="mt-2 text-xs text-slate-400">{asset.version ? `${formatBytes(asset.version.sizeBytes)} · ${asset.version.mimeType}` : "版本信息不可用"} · {formatDate(asset.createdAt)}</p><p className="mt-3 text-xs leading-5 text-slate-500">已形成 {asset.segments.filter((segment) => segment.projectSourceId !== null).length} 个活动资料来源，共 {asset.segments.length} 个可定位片段。{asset.latestRun?.modelId ? ` 最近视觉模型：${asset.latestRun.modelId}。` : ""}</p>{asset.version?.failureCode || asset.latestRun?.failureCode ? <p className="mt-2 text-xs text-rose-600">失败代码：{asset.version?.failureCode ?? asset.latestRun?.failureCode}</p> : null}</div><div className="flex flex-wrap items-center gap-2">{asset.status === "failed" ? <button type="button" onClick={() => void retryParsing(asset)} disabled={retrying !== null} className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-semibold text-white disabled:opacity-40">{retrying === asset.id ? "重新解析中…" : "重新解析"}</button> : null}<a href={`/api/projects/${projectId}/assets/${asset.id}/download`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600">查看原文件</a><button type="button" onClick={() => void remove(asset)} className="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 px-4 text-xs font-semibold text-rose-700">移除</button></div></div>
 
@@ -306,7 +326,9 @@ export function ProjectAssetsClient({ username }: { username: string }) {
               {asset.status === "awaitingReview" ? <div className="border-t border-indigo-100 bg-indigo-50/40 p-6 sm:px-7"><div className="mb-4"><h4 className="text-sm font-semibold text-indigo-950">确认识别结果</h4><p className="mt-2 text-xs leading-5 text-indigo-800">所有片段审核结束后，接受的内容才会一起发布到项目资料库；驳回的片段不会参与记忆与问答。</p></div><div className="space-y-4">{asset.segments.map((segment) => <div key={segment.id} className="rounded-2xl border border-indigo-100 bg-white p-5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">{segment.locatorLabel}</p><span className="text-[11px] text-slate-400">{segment.extractionMethod === "vision" ? `${segment.providerConnection?.name ?? "视觉模型"} · ${segment.modelId ?? "模型未记录"}` : "本地解析"}</span></div>{segment.reviewStatus === "pending" ? <><textarea value={edits[segment.id] ?? segment.contentText} onChange={(event) => setEdits((current) => ({ ...current, [segment.id]: event.target.value }))} rows={Math.min(12, Math.max(5, Math.ceil((edits[segment.id] ?? segment.contentText).length / 100)))} className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-700 outline-none focus:border-indigo-400" /><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void review(asset.id, segment, "accept")} disabled={reviewing !== null || !(edits[segment.id] ?? segment.contentText).trim()} className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white disabled:opacity-40">{reviewing === segment.id ? "保存中…" : "确认并保留"}</button><button type="button" onClick={() => void review(asset.id, segment, "dismiss")} disabled={reviewing !== null} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600 disabled:opacity-40">驳回片段</button></div></> : <p className="mt-3 text-xs text-slate-500">{segment.reviewStatus === "accepted" ? "已确认，等待文件其余片段完成。" : "已驳回，不会发布。"}</p>}</div>)}</div></div> : null}
             </article>
           ))}</div>}
+          <ListPagination {...pagination} onPageChange={setPage} disabled={loading} />
         </section>
+        {dialog}
       </div>
     </main>
   );

@@ -1,14 +1,15 @@
 # 生产异地备份
 
-本工具用于单节点生产实例的 PostgreSQL、凭据主密钥卷和上传卷备份。它可以独立于正式发布入口安装；GitHub Actions 生产部署在首个正式 `v1.0.0` 前仍保持静态禁用。
+本工具用于单节点实例的 PostgreSQL、凭据主密钥卷、上传卷和主机恢复配置备份。它可以独立于正式发布入口安装；GitHub Actions 生产部署在首个正式 `v1.0.0` 前仍保持静态禁用。
 
 ## 已实现边界
 
 - `ai-project-os-backup.timer` 每天在服务器本地时间 03:20 后的随机 20 分钟窗口内运行，并通过 `Persistent=true` 补跑关机期间错过的计划。
 - `app` 与 `worker` 在数据复制窗口短暂停顿；失败、超时或信号退出都会尝试恢复写入者。PostgreSQL custom dump、主密钥卷和上传卷因此来自同一停写窗口。恢复写入后，脚本会等待两项 Docker health 重新变为 `healthy`，才继续上传并报告成功。
-- 本地备份先校验 `pg_restore --list`、两个 tar 目录和内部 `SHA256SUMS`，然后以专用 age 公钥流式加密；服务器不持有解密私钥。
-- 加密归档和 SHA-256 sidecar 上传到 COS。COSCLI 必须完成整体 CRC64 校验，随后脚本通过 `HeadObject` 对比远端长度并要求 CRC64 元数据存在。
-- 只有两件对象均验证成功，备份目录才会获得 root-only 的 `.cos-upload-verified` 标记。无标记、上传失败或结构不完整的本地备份不会进入自动清理范围。
+- 格式版本 2 还会按严格白名单加入 `production.env`、COS 上传配置、age 公钥、TLS 证书/私钥、`deploy` 登录材料和 Actions 公钥。它们只存在于 age 加密归档内，不会写入公开 manifest、运维状态 JSON 或仓库。
+- 本地备份先校验 `pg_restore --list`、三个 tar 目录和内部 `SHA256SUMS`，然后以专用 age 公钥流式加密；服务器不持有解密私钥。
+- 加密归档、SHA-256 sidecar、不可变 manifest 和 `manifests/latest.json` 指针上传到 COS。COSCLI 必须完成整体 CRC64 校验，随后脚本通过 `HeadObject` 对比远端长度并要求 CRC64 元数据存在。
+- 只有四件对象均验证成功，备份目录才会获得 root-only 的 `.cos-upload-verified` 标记。无标记、上传失败或结构不完整的本地备份不会进入自动清理范围。
 - 默认只清理超过 14 天且带有效远端标记的本地备份，并始终保留至少 3 份已验证本地副本。现有手工备份因为没有自动上传标记，不会被删除。
 - 正式部署器在任何迁移、构建或容器替换前调用同一个脚本；远端备份失败会使部署失败关闭。
 - 每日/手工备份会先取得生产部署锁，部署期间不会启动；部署器持有同一把锁后再调用 `pre-deploy` 模式，避免定时备份与迁移或容器替换交叉运行。
@@ -64,8 +65,9 @@ sudo cat /var/lib/ai-project-os-operations/backups/current.json
 
 - `status=COS_UPLOAD_VERIFIED`
 - `/var/backups/ai-project-os/...` 下的精确本地备份路径
-- 两个 `cos://.../production/backups/...` 对象
+- 加密归档与 SHA-256 sidecar 的 `cos://.../production/backups/...` 对象
 - age 加密归档的 SHA-256
+- 不可变 manifest 与 `manifests/latest.json` 对象路径
 
 `current.json` 与 `history/*.json` 是供系统运维页面读取的脱敏副本，保持 `root:root 0644` 并位于专用 `0755` 目录。页面仅对初始化应用时创建的首位超级管理员开放；其他系统管理员、工作区管理员和普通成员均不能通过受保护 API 读取。状态目录不包含 COS Secret、COSCLI 配置、age 私钥、数据库密码、原始日志或备份正文。
 

@@ -4,7 +4,8 @@ set -Eeuo pipefail
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
 
-readonly ACTIONS_PUBLIC_KEY_FILE=${1-}
+readonly ACTIONS_PUBLIC_KEY_INPUT=${1-}
+readonly INSTALL_MODE=${2---enable-backup-timer}
 readonly TARGET_USER=ai-project-os-actions
 readonly TARGET_HOME=/var/lib/ai-project-os-actions
 readonly SOURCE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -12,15 +13,39 @@ readonly PRODUCTION_ENV=/etc/ai-project-os/production.env
 readonly LEGACY_ENV=/srv/ai-project-os/app/.env
 readonly AUTHORIZED_KEYS=$TARGET_HOME/.ssh/authorized_keys
 
+ACTIONS_PUBLIC_KEY_FILE=$ACTIONS_PUBLIC_KEY_INPUT
+DERIVED_PUBLIC_KEY_FILE=
+
 if [[ $EUID -ne 0 ]]; then
   printf 'INSTALL_ROOT_REQUIRED\n' >&2
   exit 70
 fi
 
-if [[ -z "$ACTIONS_PUBLIC_KEY_FILE" || ! -f "$ACTIONS_PUBLIC_KEY_FILE" ]]; then
+if [[ "$ACTIONS_PUBLIC_KEY_INPUT" == --reuse-existing-actions-key ]]; then
+  [[ -f "$AUTHORIZED_KEYS" && ! -L "$AUTHORIZED_KEYS" ]] || {
+    printf 'INSTALL_EXISTING_ACTIONS_KEY_MISSING\n' >&2
+    exit 64
+  }
+  mapfile -t existing_action_keys < <(grep -oE 'ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^[:cntrl:]]+)?$' "$AUTHORIZED_KEYS")
+  if (( ${#existing_action_keys[@]} != 1 )); then
+    printf 'INSTALL_EXISTING_ACTIONS_KEY_INVALID\n' >&2
+    exit 65
+  fi
+  DERIVED_PUBLIC_KEY_FILE=$(mktemp)
+  printf '%s\n' "${existing_action_keys[0]}" > "$DERIVED_PUBLIC_KEY_FILE"
+  ACTIONS_PUBLIC_KEY_FILE=$DERIVED_PUBLIC_KEY_FILE
+elif [[ -z "$ACTIONS_PUBLIC_KEY_FILE" || ! -f "$ACTIONS_PUBLIC_KEY_FILE" || -L "$ACTIONS_PUBLIC_KEY_FILE" ]]; then
   printf 'INSTALL_ACTIONS_PUBLIC_KEY_REQUIRED\n' >&2
   exit 64
 fi
+
+case "$INSTALL_MODE" in
+  --enable-backup-timer|--defer-backup-timer) ;;
+  *)
+    printf 'INSTALL_USAGE: install-production-deploy.sh <actions-public-key|--reuse-existing-actions-key> [--enable-backup-timer|--defer-backup-timer]\n' >&2
+    exit 64
+    ;;
+esac
 
 if ! id "$TARGET_USER" >/dev/null 2>&1; then
   useradd \
@@ -42,16 +67,42 @@ if [[ "$key_type" != ssh-ed25519 || ! "$key_body" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]; 
   exit 65
 fi
 ssh-keygen -lf "$ACTIONS_PUBLIC_KEY_FILE" >/dev/null
+if [[ -n "$DERIVED_PUBLIC_KEY_FILE" ]]; then
+  rm -f -- "$DERIVED_PUBLIC_KEY_FILE"
+  DERIVED_PUBLIC_KEY_FILE=
+fi
 
 bash -n "$SOURCE_DIR/install-production-backup.sh"
-"$SOURCE_DIR/install-production-backup.sh" --enable-timer
+if [[ "$INSTALL_MODE" == --enable-backup-timer ]]; then
+  "$SOURCE_DIR/install-production-backup.sh" --enable-timer
+else
+  "$SOURCE_DIR/install-production-backup.sh" install-only
+  systemctl disable --now ai-project-os-backup.timer >/dev/null 2>&1 || true
+fi
+
+install -d -o root -g root -m 0700 /etc/ai-project-os
 
 install -o root -g root -m 0755 \
   "$SOURCE_DIR/ai-project-os-deploy" \
   /usr/local/sbin/ai-project-os-deploy
+install -o root -g root -m 0644 \
+  "$SOURCE_DIR/compose.operations.yaml" \
+  /etc/ai-project-os/compose.operations.yaml
 install -o root -g root -m 0755 \
   "$SOURCE_DIR/ai-project-os-actions-gateway" \
   /usr/local/sbin/ai-project-os-actions-gateway
+install -o root -g root -m 0755 \
+  "$SOURCE_DIR/ai-project-os-restore" \
+  /usr/local/sbin/ai-project-os-restore
+install -o root -g root -m 0755 \
+  "$SOURCE_DIR/ai-project-os-source-state" \
+  /usr/local/sbin/ai-project-os-source-state
+install -o root -g root -m 0755 \
+  "$SOURCE_DIR/ai-project-os-activate-host" \
+  /usr/local/sbin/ai-project-os-activate-host
+install -o root -g root -m 0755 \
+  "$SOURCE_DIR/ai-project-os-deactivate-host" \
+  /usr/local/sbin/ai-project-os-deactivate-host
 
 temporary_sudoers=$(mktemp)
 trap 'rm -f -- "$temporary_sudoers"' EXIT
@@ -73,6 +124,7 @@ fi
 
 test "$(stat -c %U:%G "$PRODUCTION_ENV")" = root:root
 test "$(stat -c %a "$PRODUCTION_ENV")" = 600
+test ! -L "$PRODUCTION_ENV"
 grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$PRODUCTION_ENV"
 grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$PRODUCTION_ENV"
 
@@ -107,9 +159,14 @@ trap - EXIT
 visudo -cf /etc/sudoers.d/ai-project-os-deploy >/dev/null
 bash -n /usr/local/sbin/ai-project-os-deploy
 bash -n /usr/local/sbin/ai-project-os-actions-gateway
+bash -n /usr/local/sbin/ai-project-os-restore
+bash -n /usr/local/sbin/ai-project-os-source-state
+bash -n /usr/local/sbin/ai-project-os-activate-host
+bash -n /usr/local/sbin/ai-project-os-deactivate-host
 
-printf 'INSTALL_OK user=%s gateway=%s deployer=%s env=%s\n' \
+printf 'INSTALL_OK user=%s gateway=%s deployer=%s env=%s backup_timer=%s\n' \
   "$TARGET_USER" \
   /usr/local/sbin/ai-project-os-actions-gateway \
   /usr/local/sbin/ai-project-os-deploy \
-  "$PRODUCTION_ENV"
+  "$PRODUCTION_ENV" \
+  "${INSTALL_MODE#--}"

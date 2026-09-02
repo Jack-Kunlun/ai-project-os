@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+umask 077
+
+readonly RELEASE_TAG=${1-}
+readonly EXPECTED_REVISION=${2-}
+readonly CONFIRMATION=${3-}
+readonly REPOSITORY_DIR=/srv/ai-project-os/repository
+readonly ENV_FILE=/etc/ai-project-os/production.env
+readonly COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
+readonly COMPOSE_PROJECT=ai-project-os
+readonly RESTORE_RESULT=/var/lib/ai-project-os/last-host-migration
+readonly ACTIVATION_RESULT=/var/lib/ai-project-os/last-host-activation
+readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+
+ACTIVATION_COMMITTED=0
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2-1}"
+}
+
+compose() {
+  docker compose \
+    --project-name "$COMPOSE_PROJECT" \
+    --env-file "$ENV_FILE" \
+    --project-directory "$REPOSITORY_DIR" \
+    --file "$REPOSITORY_DIR/compose.yaml" \
+    --file "$COMPOSE_OVERRIDE" \
+    "$@"
+}
+
+rollback_failed_activation() {
+  local exit_status=$?
+
+  if (( ACTIVATION_COMMITTED == 0 )); then
+    systemctl disable --now ai-project-os-backup.timer >/dev/null 2>&1 || true
+    systemctl disable --now nginx >/dev/null 2>&1 || true
+    compose stop worker >/dev/null 2>&1 || true
+  fi
+  return "$exit_status"
+}
+
+trap rollback_failed_activation EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+[[ $EUID -eq 0 ]] || fail 'HOST_ACTIVATION_ROOT_REQUIRED' 70
+[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'HOST_ACTIVATION_TAG_INVALID' 64
+[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'HOST_ACTIVATION_REVISION_INVALID' 65
+[[ "$CONFIRMATION" == CONFIRM_SOURCE_REMAINS_QUIESCED ]] || fail 'HOST_ACTIVATION_CONFIRMATION_REQUIRED' 64
+for required_command in chmod curl date docker flock grep install mktemp mv nginx sed seq sleep stat systemctl; do
+  command -v "$required_command" >/dev/null || fail "HOST_ACTIVATION_COMMAND_MISSING command=$required_command" 70
+done
+[[ -f "$RESTORE_RESULT" && ! -L "$RESTORE_RESULT" ]] || fail 'HOST_ACTIVATION_RESTORE_RESULT_MISSING' 70
+[[ "$(stat -c %U:%G "$RESTORE_RESULT")" == root:root ]] || fail 'HOST_ACTIVATION_RESTORE_RESULT_INVALID' 70
+[[ "$(stat -c %a "$RESTORE_RESULT")" == 600 ]] || fail 'HOST_ACTIVATION_RESTORE_RESULT_INVALID' 70
+grep -qx 'RESTORE_OK' "$RESTORE_RESULT" || fail 'HOST_ACTIVATION_RESTORE_RESULT_INVALID' 70
+grep -qx "tag=$RELEASE_TAG" "$RESTORE_RESULT" || fail 'HOST_ACTIVATION_RESTORE_TAG_MISMATCH' 68
+grep -qx "revision=$EXPECTED_REVISION" "$RESTORE_RESULT" || fail 'HOST_ACTIVATION_RESTORE_REVISION_MISMATCH' 68
+grep -qx 'mode=migration' "$RESTORE_RESULT" || fail 'HOST_ACTIVATION_RESTORE_MODE_INVALID' 68
+grep -qx 'source_quiesced=true' "$RESTORE_RESULT" || fail 'HOST_ACTIVATION_SOURCE_NOT_QUIESCED' 68
+grep -qx 'standby=true' "$RESTORE_RESULT" || fail 'HOST_ACTIVATION_STANDBY_INVALID' 68
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || fail 'HOST_ACTIVATION_LOCK_BUSY' 75
+
+[[ -z "$(compose ps -q worker)" ]] || fail 'HOST_ACTIVATION_WORKER_ALREADY_RUNNING' 75
+systemctl disable --now ai-project-os-backup.timer >/dev/null 2>&1 || true
+systemctl disable --now nginx >/dev/null 2>&1 || true
+compose up -d --no-build worker
+
+for attempt in $(seq 1 60); do
+  postgres_id=$(compose ps -q postgres)
+  app_id=$(compose ps -q app)
+  worker_id=$(compose ps -q worker)
+  if [[ -n "$postgres_id" && -n "$app_id" && -n "$worker_id" ]]; then
+    postgres_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$postgres_id")
+    app_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$app_id")
+    worker_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id")
+    if [[ "$postgres_state" == healthy && "$app_state" == healthy && "$worker_state" == healthy ]]; then
+      health=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)
+      grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health"
+      grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${RELEASE_TAG#v}"'"' <<<"$health"
+      grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health"
+      grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$health"
+      grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$health"
+      break
+    fi
+  fi
+  [[ "$attempt" != 60 ]] || fail 'HOST_ACTIVATION_STACK_HEALTH_TIMEOUT' 74
+  sleep 5
+done
+
+nginx -t
+systemctl enable --now nginx
+systemctl reload nginx
+tls_health=$(curl --fail --silent --show-error \
+  --resolve ai-project-os.com:443:127.0.0.1 \
+  https://ai-project-os.com/api/health)
+grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${RELEASE_TAG#v}"'"' <<<"$tls_health"
+systemctl enable --now ai-project-os-backup.timer
+systemctl is-enabled --quiet ai-project-os-backup.timer
+systemctl is-active --quiet ai-project-os-backup.timer
+
+install -d -o root -g root -m 0700 /var/lib/ai-project-os
+result_tmp=$(mktemp /var/lib/ai-project-os/.last-host-activation.XXXXXX)
+{
+  printf 'HOST_ACTIVATION_OK\n'
+  printf 'tag=%s\n' "$RELEASE_TAG"
+  printf 'revision=%s\n' "$EXPECTED_REVISION"
+  printf 'backup=%s\n' "$(sed -n 's/^backup=//p' "$RESTORE_RESULT")"
+  printf 'completed_at=%s\n' "$(date -Is)"
+} > "$result_tmp"
+chmod 600 "$result_tmp"
+mv -f -- "$result_tmp" "$ACTIVATION_RESULT"
+ACTIVATION_COMMITTED=1
+printf 'HOST_ACTIVATION_OK tag=%s revision=%s dns_target_pending=true\n' "$RELEASE_TAG" "$EXPECTED_REVISION"

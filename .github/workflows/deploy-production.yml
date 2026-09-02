@@ -27,6 +27,8 @@ jobs:
     environment:
       name: production
       url: https://ai-project-os.com
+    env:
+      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
 
     steps:
       - name: Check out main
@@ -99,6 +101,10 @@ jobs:
 
           test -n "$PRODUCTION_SSH_PRIVATE_KEY"
           test -n "$PRODUCTION_SSH_KNOWN_HOSTS"
+          if [[ ! "$PRODUCTION_SSH_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo "PRODUCTION_SSH_HOST_INVALID" >&2
+            exit 64
+          fi
 
           install -d -m 700 "$RUNNER_TEMP/ai-project-os-ssh"
           printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519"
@@ -106,7 +112,7 @@ jobs:
           chmod 600 "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"
 
           ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" >/dev/null
-          ssh-keygen -F 38.76.205.30 -f "$RUNNER_TEMP/ai-project-os-ssh/known_hosts" >/dev/null
+          ssh-keygen -F "$PRODUCTION_SSH_HOST" -f "$RUNNER_TEMP/ai-project-os-ssh/known_hosts" >/dev/null
 
       - name: Create verified offsite backup and deploy through forced-command gateway
         run: |
@@ -124,7 +130,7 @@ jobs:
             -o ConnectTimeout=15 \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=6 \
-            ai-project-os-actions@38.76.205.30 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
             "deploy $DEPLOY_TAG $DEPLOY_SHA" 2>&1 | tee "$deployment_output_file"
           pipeline_status=("${PIPESTATUS[@]}")
           set -e

@@ -51,7 +51,13 @@ sudo deploy/production/install-production-deploy.sh \
 - `PRODUCTION_SSH_PRIVATE_KEY`：上面生成的完整私钥内容。
 - `PRODUCTION_SSH_KNOWN_HOSTS`：经过现有可信 SSH 连接核对的服务器 ED25519 known_hosts 行。
 
+并在 Environment variables 中添加：
+
+- `PRODUCTION_SSH_HOST`：当前生产主机的公网 IPv4。工作流不在源码中硬编码服务器地址；主机迁移后必须同时更新此变量和 `PRODUCTION_SSH_KNOWN_HOSTS`。
+
 不要把私钥、数据库密码、服务器 `.env` 或外部服务凭据保存为仓库文件、Actions artifact 或普通变量。
+
+整机迁移、最终停写、加密恢复与回退流程见[单节点主机迁移与恢复](production-host-migration.md)。
 
 ## 启用后的部署流程（未来计划）
 

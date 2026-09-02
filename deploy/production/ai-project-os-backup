@@ -21,6 +21,11 @@ readonly DEPLOY_LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 readonly COS_ENV_FILE=/etc/ai-project-os/cos-backup.env
 readonly COSCLI_CONFIG=/etc/ai-project-os/coscli.yaml
 readonly AGE_RECIPIENT_FILE=/etc/ai-project-os/production-backup-age.pub
+readonly PRODUCTION_ENV_FILE=/etc/ai-project-os/production.env
+readonly TLS_CERTIFICATE_FILE=/etc/nginx/ssl/ai-project-os.com/fullchain.crt
+readonly TLS_PRIVATE_KEY_FILE=/etc/nginx/ssl/ai-project-os.com/privkey.key
+readonly DEPLOY_AUTHORIZED_KEYS=/home/deploy/.ssh/authorized_keys
+readonly ACTIONS_AUTHORIZED_KEYS=/var/lib/ai-project-os-actions/.ssh/authorized_keys
 readonly COSCLI=/usr/local/bin/coscli
 readonly MIN_FREE_BYTES=5368709120
 readonly LOCAL_RETENTION_DAYS_DEFAULT=14
@@ -34,6 +39,7 @@ declare -a PAUSED_WRITERS=()
 INCOMPLETE_DIR=
 STAGING_ARCHIVE=
 STAGING_CHECKSUM=
+STAGING_MANIFEST=
 RETENTION_REMOVED=0
 PUBLIC_STATUS_ACTIVE=0
 PUBLIC_STATUS_FINALIZED=0
@@ -46,6 +52,8 @@ PUBLIC_ARCHIVE_OBJECT=
 PUBLIC_ARCHIVE_SHA256=
 PUBLIC_ARCHIVE_BYTES=
 PUBLIC_VERIFICATION_ATTEMPTS=0
+KEEP_WRITERS_QUIESCED=0
+CUTOVER_MODE=0
 
 fail() {
   local marker=$1
@@ -263,8 +271,10 @@ cleanup_on_exit() {
   local exit_status=$?
   local error_code=BACKUP_UNEXPECTED_FAILURE
 
-  if ! resume_writers; then
-    printf 'BACKUP_WRITER_RESUME_FAILED\n' >&2
+  if ! (( exit_status == 0 && KEEP_WRITERS_QUIESCED == 1 )); then
+    if ! resume_writers; then
+      printf 'BACKUP_WRITER_RESUME_FAILED\n' >&2
+    fi
   fi
 
   if [[ -n "$INCOMPLETE_DIR" && -d "$INCOMPLETE_DIR" ]]; then
@@ -275,6 +285,9 @@ cleanup_on_exit() {
   fi
   if [[ -n "$STAGING_CHECKSUM" && -f "$STAGING_CHECKSUM" ]]; then
     rm -f -- "$STAGING_CHECKSUM"
+  fi
+  if [[ -n "$STAGING_MANIFEST" && -f "$STAGING_MANIFEST" ]]; then
+    rm -f -- "$STAGING_MANIFEST"
   fi
 
   if (( PUBLIC_STATUS_ACTIVE == 1 && PUBLIC_STATUS_FINALIZED == 0 )); then
@@ -298,11 +311,89 @@ require_root_owned_file() {
   local path=$1
   local expected_mode=$2
 
-  [[ -f "$path" ]] || fail "BACKUP_REQUIRED_FILE_MISSING path=$path" 70
+  [[ -f "$path" && ! -L "$path" ]] || fail "BACKUP_REQUIRED_FILE_MISSING path=$path" 70
   [[ "$(stat -c %U:%G "$path")" == root:root ]] ||
     fail "BACKUP_REQUIRED_FILE_OWNER_INVALID path=$path" 70
   [[ "$(stat -c %a "$path")" == "$expected_mode" ]] ||
     fail "BACKUP_REQUIRED_FILE_MODE_INVALID path=$path" 70
+}
+
+require_owned_file() {
+  local path=$1
+  local expected_owner=$2
+  local expected_mode=$3
+
+  [[ -f "$path" && ! -L "$path" ]] || fail "BACKUP_REQUIRED_FILE_MISSING path=$path" 70
+  [[ "$(stat -c %U:%G "$path")" == "$expected_owner" ]] ||
+    fail "BACKUP_REQUIRED_FILE_OWNER_INVALID path=$path" 70
+  [[ "$(stat -c %a "$path")" == "$expected_mode" ]] ||
+    fail "BACKUP_REQUIRED_FILE_MODE_INVALID path=$path" 70
+}
+
+build_host_config_archive() {
+  local output_file=$1
+  local backup_directory=$2
+  local host_config_root=$backup_directory/.host-config
+  local deploy_password_hash actions_public_key
+  local certificate_public_key private_public_key
+  local -a action_keys=()
+
+  [[ "$(dirname -- "$host_config_root")" == "$backup_directory" ]] ||
+    fail 'BACKUP_HOST_CONFIG_PATH_INVALID' 73
+  [[ ! -e "$host_config_root" ]] || fail 'BACKUP_HOST_CONFIG_PATH_EXISTS' 73
+
+  require_root_owned_file "$PRODUCTION_ENV_FILE" 600
+  require_root_owned_file "$COSCLI_CONFIG" 600
+  require_root_owned_file "$COS_ENV_FILE" 600
+  require_root_owned_file "$AGE_RECIPIENT_FILE" 644
+  require_owned_file "$TLS_CERTIFICATE_FILE" root:root 644
+  require_owned_file "$TLS_PRIVATE_KEY_FILE" root:root 600
+  require_owned_file "$DEPLOY_AUTHORIZED_KEYS" deploy:deploy 600
+  require_owned_file "$ACTIONS_AUTHORIZED_KEYS" ai-project-os-actions:ai-project-os-actions 600
+
+  openssl x509 -in "$TLS_CERTIFICATE_FILE" -noout >/dev/null ||
+    fail 'BACKUP_TLS_CERTIFICATE_INVALID' 71
+  openssl pkey -in "$TLS_PRIVATE_KEY_FILE" -check -noout >/dev/null ||
+    fail 'BACKUP_TLS_PRIVATE_KEY_INVALID' 71
+  certificate_public_key=$(openssl x509 -in "$TLS_CERTIFICATE_FILE" -pubkey -noout | sha256sum | awk '{print $1}')
+  private_public_key=$(openssl pkey -in "$TLS_PRIVATE_KEY_FILE" -pubout | sha256sum | awk '{print $1}')
+  [[ "$certificate_public_key" == "$private_public_key" ]] || fail 'BACKUP_TLS_KEY_MISMATCH' 71
+
+  grep -Eq '^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^[:cntrl:]]+)?$' "$DEPLOY_AUTHORIZED_KEYS" ||
+    fail 'BACKUP_DEPLOY_AUTHORIZED_KEYS_INVALID' 71
+  if grep -Evq '^ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^[:cntrl:]]+)?$' "$DEPLOY_AUTHORIZED_KEYS"; then
+    fail 'BACKUP_DEPLOY_AUTHORIZED_KEYS_INVALID' 71
+  fi
+
+  mapfile -t action_keys < <(grep -oE 'ssh-ed25519 [A-Za-z0-9+/]+={0,2}( [^[:cntrl:]]+)?$' "$ACTIONS_AUTHORIZED_KEYS")
+  (( ${#action_keys[@]} == 1 )) || fail 'BACKUP_ACTIONS_AUTHORIZED_KEY_INVALID' 71
+  actions_public_key=${action_keys[0]}
+
+  deploy_password_hash=$(getent shadow deploy | cut -d: -f2)
+  [[ "$deploy_password_hash" == '$y$'* || "$deploy_password_hash" == '$6$'* ]] ||
+    fail 'BACKUP_DEPLOY_PASSWORD_HASH_INVALID' 71
+  [[ "$deploy_password_hash" =~ ^[^[:space:]:]{20,255}$ ]] ||
+    fail 'BACKUP_DEPLOY_PASSWORD_HASH_INVALID' 71
+
+  install -d -o root -g root -m 0700 \
+    "$host_config_root/etc/ai-project-os" \
+    "$host_config_root/etc/nginx/ssl/ai-project-os.com" \
+    "$host_config_root/bootstrap"
+  install -o root -g root -m 0600 "$PRODUCTION_ENV_FILE" "$host_config_root/etc/ai-project-os/production.env"
+  install -o root -g root -m 0600 "$COS_ENV_FILE" "$host_config_root/etc/ai-project-os/cos-backup.env"
+  install -o root -g root -m 0600 "$COSCLI_CONFIG" "$host_config_root/etc/ai-project-os/coscli.yaml"
+  install -o root -g root -m 0644 "$AGE_RECIPIENT_FILE" "$host_config_root/etc/ai-project-os/production-backup-age.pub"
+  install -o root -g root -m 0644 "$TLS_CERTIFICATE_FILE" "$host_config_root/etc/nginx/ssl/ai-project-os.com/fullchain.crt"
+  install -o root -g root -m 0600 "$TLS_PRIVATE_KEY_FILE" "$host_config_root/etc/nginx/ssl/ai-project-os.com/privkey.key"
+  install -o root -g root -m 0600 "$DEPLOY_AUTHORIZED_KEYS" "$host_config_root/bootstrap/deploy-authorized_keys"
+  printf '%s\n' "$deploy_password_hash" > "$host_config_root/bootstrap/deploy-password.hash"
+  printf '%s\n' "$actions_public_key" > "$host_config_root/bootstrap/github-actions.pub"
+  chmod 600 "$host_config_root/bootstrap/deploy-password.hash" "$host_config_root/bootstrap/github-actions.pub"
+
+  tar -C "$host_config_root" -czf "$output_file" .
+  chmod 600 "$output_file"
+  rm -rf --one-file-system -- "$host_config_root"
+  tar -tzf "$output_file" >/dev/null || fail 'BACKUP_HOST_CONFIG_ARCHIVE_INVALID' 73
 }
 
 read_config_value() {
@@ -400,7 +491,9 @@ write_result() {
   local archive_object=$4
   local checksum_object=$5
   local archive_sha256=$6
-  local completed_at=$7
+  local manifest_object=$7
+  local latest_manifest_object=$8
+  local completed_at=$9
   local temporary_result
 
   temporary_result=$(mktemp "$BACKUP_STATE_ROOT/.last-success.XXXXXX")
@@ -411,6 +504,8 @@ write_result() {
     printf 'archive_object=%s\n' "$archive_object"
     printf 'checksum_object=%s\n' "$checksum_object"
     printf 'archive_sha256=%s\n' "$archive_sha256"
+    printf 'manifest_object=%s\n' "$manifest_object"
+    printf 'latest_manifest_object=%s\n' "$latest_manifest_object"
     printf 'completed_at=%s\n' "$completed_at"
   } > "$temporary_result"
   chmod 600 "$temporary_result"
@@ -572,7 +667,17 @@ case "$MODE" in
 esac
 readonly reason
 
-if [[ "$MODE" != pre-deploy ]]; then
+case "${AI_PROJECT_OS_CUTOVER-0}" in
+  0) ;;
+  1)
+    [[ "$MODE" == manual && "${AI_PROJECT_OS_CUTOVER_LOCK_HELD-}" == 1 ]] ||
+      fail 'BACKUP_CUTOVER_CALLER_INVALID' 75
+    CUTOVER_MODE=1
+    ;;
+  *) fail 'BACKUP_CUTOVER_MODE_INVALID' 64 ;;
+esac
+
+if [[ "$MODE" != pre-deploy && "$CUTOVER_MODE" != 1 ]]; then
   exec 8>"$DEPLOY_LOCK_FILE"
   if ! flock -w "$LOCK_WAIT_SECONDS" 8; then
     fail 'BACKUP_DEPLOYMENT_IN_PROGRESS' 75
@@ -584,7 +689,7 @@ if ! flock -w "$LOCK_WAIT_SECONDS" 9; then
   fail 'BACKUP_ALREADY_RUNNING' 75
 fi
 
-for required_command in age awk basename chmod chown cp date df dirname docker find flock gzip grep install ln mktemp mv rm sed sha256sum sort stat tail tar timeout tr; do
+for required_command in age awk basename chmod chown cp cut date df dirname docker find flock getent gzip grep install ln mktemp mv openssl rm sed sha256sum sort stat tail tar timeout tr; do
   command -v "$required_command" >/dev/null || fail "BACKUP_COMMAND_MISSING command=$required_command" 70
 done
 
@@ -600,7 +705,9 @@ require_root_owned_file "$COS_ENV_FILE" 600
 require_root_owned_file "$COSCLI_CONFIG" 600
 require_root_owned_file "$AGE_RECIPIENT_FILE" 644
 [[ "$("$COSCLI" --version)" == 'coscli version v1.0.9' ]] || fail 'BACKUP_COSCLI_VERSION_INVALID' 70
-grep -Eq '^age1[0-9a-z]{58}$' "$AGE_RECIPIENT_FILE" || fail 'BACKUP_AGE_RECIPIENT_INVALID' 71
+mapfile -t age_recipients < "$AGE_RECIPIENT_FILE"
+(( ${#age_recipients[@]} == 1 )) || fail 'BACKUP_AGE_RECIPIENT_INVALID' 71
+[[ "${age_recipients[0]}" =~ ^age1[0-9a-z]{58}$ ]] || fail 'BACKUP_AGE_RECIPIENT_INVALID' 71
 
 COS_BUCKET=$(read_config_value COS_BACKUP_BUCKET)
 COS_REGION=$(read_config_value COS_BACKUP_REGION)
@@ -626,7 +733,7 @@ mapfile -t stack_container_ids < <(all_stack_container_ids)
 if (( ${#stack_container_ids[@]} == 0 )); then
   if [[ "$MODE" == pre-deploy ]]; then
     completed_at=$(date -Is)
-    write_result SKIPPED_NO_STACK "$reason" none-first-deploy none none none "$completed_at"
+    write_result SKIPPED_NO_STACK "$reason" none-first-deploy none none none none none "$completed_at"
     finish_public_status skipped
     printf 'BACKUP_SKIPPED_NO_STACK reason=%s\n' "$reason"
     exit 0
@@ -638,6 +745,10 @@ postgres_id=$(require_single_running_container postgres)
 app_id=$(require_single_running_container app)
 worker_id=$(require_single_running_container worker)
 readonly postgres_id app_id worker_id
+app_version=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$app_id")
+[[ "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
+  fail 'BACKUP_APP_VERSION_INVALID' 72
+readonly app_version
 
 backup_timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 INCOMPLETE_DIR=$(mktemp -d "$BACKUP_ROOT/.incomplete-${backup_timestamp}-${reason}.XXXXXX")
@@ -647,6 +758,8 @@ backup_name=${INCOMPLETE_DIR##*/}
 backup_name=${backup_name#.incomplete-}
 backup_path=$BACKUP_ROOT/$backup_name
 PUBLIC_BACKUP_NAME=$backup_name
+
+build_host_config_archive "$INCOMPLETE_DIR/host-config.tar.gz" "$INCOMPLETE_DIR"
 
 docker pause "$app_id" >/dev/null
 PAUSED_WRITERS+=("$app_id")
@@ -664,25 +777,31 @@ timeout 900 docker cp "$app_id:/var/lib/ai-project-os-secrets/." - | gzip -n -9 
   > "$INCOMPLETE_DIR/secrets.tar.gz"
 timeout 1800 docker cp "$app_id:/var/lib/ai-project-os/uploads/." - | gzip -n -9 \
   > "$INCOMPLETE_DIR/uploads.tar.gz"
-resume_writers || fail 'BACKUP_WRITER_RESUME_FAILED' 73
-wait_for_writer_health "$app_id" "$worker_id" || fail 'BACKUP_WRITER_HEALTH_TIMEOUT' 73
+if (( CUTOVER_MODE == 0 )); then
+  resume_writers || fail 'BACKUP_WRITER_RESUME_FAILED' 73
+  wait_for_writer_health "$app_id" "$worker_id" || fail 'BACKUP_WRITER_HEALTH_TIMEOUT' 73
+fi
 
 tar -tzf "$INCOMPLETE_DIR/secrets.tar.gz" >/dev/null
 tar -tzf "$INCOMPLETE_DIR/uploads.tar.gz" >/dev/null
+tar -tzf "$INCOMPLETE_DIR/host-config.tar.gz" >/dev/null
 
 created_at=$(date -Is)
 {
-  printf 'format_version=1\n'
+  printf 'format_version=2\n'
   printf 'created_at=%s\n' "$created_at"
   printf 'reason=%s\n' "$reason"
   printf 'compose_project=%s\n' "$COMPOSE_PROJECT"
   printf 'writers_quiesced=true\n'
   printf 'cos_region=%s\n' "$COS_REGION"
+  printf 'app_version=%s\n' "$app_version"
+  printf 'backup_name=%s\n' "$backup_name"
+  printf 'source_quiesced=%s\n' "$([[ "$CUTOVER_MODE" == 1 ]] && printf true || printf false)"
 } > "$INCOMPLETE_DIR/backup-metadata.env"
 
 (
   cd "$INCOMPLETE_DIR"
-  sha256sum postgres.dump secrets.tar.gz uploads.tar.gz backup-metadata.env > SHA256SUMS
+  sha256sum postgres.dump secrets.tar.gz uploads.tar.gz host-config.tar.gz backup-metadata.env > SHA256SUMS
   sha256sum --check SHA256SUMS >/dev/null
 )
 
@@ -691,8 +810,10 @@ INCOMPLETE_DIR=
 
 archive_name=$backup_name.tar.age
 checksum_name=$archive_name.sha256
+manifest_name=$backup_name.manifest.json
 STAGING_ARCHIVE=$STAGING_ROOT/$archive_name
 STAGING_CHECKSUM=$STAGING_ROOT/$checksum_name
+STAGING_MANIFEST=$STAGING_ROOT/$manifest_name
 
 tar -C "$BACKUP_ROOT" -cf - "$backup_name" | \
   age --encrypt --recipients-file "$AGE_RECIPIENT_FILE" --output "$STAGING_ARCHIVE"
@@ -713,10 +834,29 @@ object_date_path=$(date -u -d "@$(stat -c %Y "$backup_path")" +%Y/%m/%d)
 object_prefix="${COS_PREFIX%/}/backups/$object_date_path/$backup_name"
 archive_object="cos://$COS_BUCKET/$object_prefix/$archive_name"
 checksum_object="cos://$COS_BUCKET/$object_prefix/$checksum_name"
+manifest_object="cos://$COS_BUCKET/$object_prefix/$manifest_name"
+latest_manifest_object="cos://$COS_BUCKET/${COS_PREFIX%/}/manifests/latest.json"
 PUBLIC_ARCHIVE_OBJECT=$archive_object
+
+{
+  printf '{\n'
+  printf '  "formatVersion": 2,\n'
+  printf '  "backupName": "%s",\n' "$backup_name"
+  printf '  "createdAt": "%s",\n' "$created_at"
+  printf '  "appVersion": "%s",\n' "$app_version"
+  printf '  "archiveObject": "%s",\n' "$archive_object"
+  printf '  "checksumObject": "%s",\n' "$checksum_object"
+  printf '  "archiveSha256": "%s",\n' "$archive_sha256"
+  printf '  "archiveBytes": %s,\n' "$PUBLIC_ARCHIVE_BYTES"
+  printf '  "sourceQuiesced": %s\n' "$([[ "$CUTOVER_MODE" == 1 ]] && printf true || printf false)"
+  printf '}\n'
+} > "$STAGING_MANIFEST"
+chmod 600 "$STAGING_MANIFEST"
 
 upload_object "$STAGING_ARCHIVE" "$archive_object" archive
 upload_object "$STAGING_CHECKSUM" "$checksum_object" sha256
+upload_object "$STAGING_MANIFEST" "$manifest_object" manifest
+upload_object "$STAGING_MANIFEST" "$latest_manifest_object" latest-manifest
 
 verified_at=$(date -Is)
 marker_tmp=$(mktemp "$backup_path/.cos-upload-verified.tmp.XXXXXX")
@@ -726,20 +866,28 @@ marker_tmp=$(mktemp "$backup_path/.cos-upload-verified.tmp.XXXXXX")
   printf 'archive_object=%s\n' "$archive_object"
   printf 'checksum_object=%s\n' "$checksum_object"
   printf 'archive_sha256=%s\n' "$archive_sha256"
+  printf 'manifest_object=%s\n' "$manifest_object"
+  printf 'latest_manifest_object=%s\n' "$latest_manifest_object"
 } > "$marker_tmp"
 chmod 600 "$marker_tmp"
 mv -f -- "$marker_tmp" "$backup_path/.cos-upload-verified"
 
 write_result COS_UPLOAD_VERIFIED "$reason" "$backup_path" "$archive_object" \
-  "$checksum_object" "$archive_sha256" "$verified_at"
+  "$checksum_object" "$archive_sha256" "$manifest_object" "$latest_manifest_object" "$verified_at"
 
 cleanup_verified_local_backups "$backup_path" "$LOCAL_RETENTION_DAYS" "$LOCAL_MIN_VERIFIED"
 
-rm -f -- "$STAGING_ARCHIVE" "$STAGING_CHECKSUM"
+if (( CUTOVER_MODE == 1 )); then
+  KEEP_WRITERS_QUIESCED=1
+fi
+
+rm -f -- "$STAGING_ARCHIVE" "$STAGING_CHECKSUM" "$STAGING_MANIFEST"
 STAGING_ARCHIVE=
 STAGING_CHECKSUM=
+STAGING_MANIFEST=
 
 finish_public_status succeeded
 
-printf 'BACKUP_OK reason=%s source=%s object=%s sha256=%s retention_removed=%s\n' \
-  "$reason" "$backup_path" "$archive_object" "$archive_sha256" "$RETENTION_REMOVED"
+printf 'BACKUP_OK reason=%s source=%s object=%s manifest=%s sha256=%s retention_removed=%s source_quiesced=%s\n' \
+  "$reason" "$backup_path" "$archive_object" "$latest_manifest_object" "$archive_sha256" \
+  "$RETENTION_REMOVED" "$([[ "$CUTOVER_MODE" == 1 ]] && printf true || printf false)"

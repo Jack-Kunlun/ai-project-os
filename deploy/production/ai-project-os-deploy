@@ -11,7 +11,7 @@ readonly REPOSITORY_DIR=/srv/ai-project-os/repository
 readonly ENV_FILE=/etc/ai-project-os/production.env
 readonly COMPOSE_PROJECT=ai-project-os
 readonly BACKUP_SCRIPT=/usr/local/sbin/ai-project-os-backup
-readonly PRODUCTION_COMPOSE_OVERRIDE=$REPOSITORY_DIR/deploy/production/compose.operations.yaml
+readonly PRODUCTION_COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
 readonly RESULT_FILE=/var/lib/ai-project-os/last-deployment
 readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 

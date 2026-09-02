@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+export DEBIAN_FRONTEND=noninteractive
+umask 077
+
+readonly MODE=${1-}
+readonly RELEASE_TAG=${2-}
+readonly EXPECTED_REVISION=${3-}
+readonly LATEST_MANIFEST_OBJECT=${4-}
+readonly RESTORE_COSCLI_CONFIG=${5-}
+readonly AGE_IDENTITY_FILE=${6-}
+readonly TARGET_HOSTNAME=${7-}
+readonly SOURCE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+readonly STAGING_ROOT=$(dirname -- "$SOURCE_DIR")
+readonly COSCLI_VERSION=v1.0.9
+readonly COSCLI_URL=https://cosbrowser.cloud.tencent.com/software/coscli/coscli-linux-amd64
+readonly COSCLI_SHA256=a07de5ba2800147a700ed29036b0c76a4229088cee68e1682d0eae19b638a915
+readonly DOCKER_GPG_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2-1}"
+}
+
+require_source_file() {
+  local relative_path=$1
+  [[ -f "$SOURCE_DIR/$relative_path" && ! -L "$SOURCE_DIR/$relative_path" ]] ||
+    fail "HOST_SOURCE_FILE_INVALID path=$relative_path" 70
+}
+
+validate_host() {
+  local memory_bytes disk_bytes
+
+  [[ $EUID -eq 0 ]] || fail 'HOST_BOOTSTRAP_ROOT_REQUIRED' 70
+  [[ -f /etc/os-release ]] || fail 'HOST_OS_RELEASE_MISSING' 70
+  grep -qx 'ID=ubuntu' /etc/os-release || fail 'HOST_OS_UNSUPPORTED' 69
+  grep -qx 'VERSION_ID="24.04"' /etc/os-release || fail 'HOST_OS_VERSION_UNSUPPORTED' 69
+  [[ "$(uname -m)" == x86_64 ]] || fail 'HOST_ARCH_UNSUPPORTED' 69
+  (( $(nproc) >= 4 )) || fail 'HOST_CPU_INSUFFICIENT' 69
+  memory_bytes=$(awk '/^MemTotal:/ { print $2 * 1024 }' /proc/meminfo)
+  [[ "$memory_bytes" =~ ^[0-9]+$ ]] || fail 'HOST_MEMORY_UNKNOWN' 69
+  (( memory_bytes >= 8 * 1024 * 1024 * 1024 )) || fail 'HOST_MEMORY_INSUFFICIENT' 69
+  disk_bytes=$(df --output=size -B1 / | tail -n 1 | tr -d ' ')
+  [[ "$disk_bytes" =~ ^[0-9]+$ ]] || fail 'HOST_DISK_UNKNOWN' 69
+  (( disk_bytes >= 40 * 1024 * 1024 * 1024 )) || fail 'HOST_DISK_INSUFFICIENT' 69
+}
+
+configure_hostname_and_clock() {
+  local hosts_tmp cloud_tmp attempt
+
+  [[ "$TARGET_HOSTNAME" =~ ^ai-project-os-prod-[a-z0-9-]{1,32}$ ]] || fail 'HOST_NAME_INVALID' 64
+  hostnamectl set-hostname "$TARGET_HOSTNAME"
+  hosts_tmp=$(mktemp)
+  awk -v hostname="$TARGET_HOSTNAME" '
+    $1 == "127.0.1.1" { print "127.0.1.1 " hostname; found = 1; next }
+    { print }
+    END { if (!found) print "127.0.1.1 " hostname }
+  ' /etc/hosts > "$hosts_tmp"
+  install -o root -g root -m 0644 "$hosts_tmp" /etc/hosts
+  rm -f -- "$hosts_tmp"
+  install -d -o root -g root -m 0755 /etc/cloud/cloud.cfg.d
+  cloud_tmp=$(mktemp)
+  printf 'preserve_hostname: true\n' > "$cloud_tmp"
+  install -o root -g root -m 0644 "$cloud_tmp" /etc/cloud/cloud.cfg.d/99-ai-project-os-hostname.cfg
+  rm -f -- "$cloud_tmp"
+
+  timedatectl set-timezone Asia/Shanghai
+  timedatectl set-ntp true
+  systemctl restart systemd-timesyncd
+  for attempt in $(seq 1 24); do
+    if [[ "$(timedatectl show --property=NTPSynchronized --value)" == yes ]]; then
+      return
+    fi
+    sleep 5
+  done
+  fail 'HOST_NTP_NOT_SYNCHRONIZED' 74
+}
+
+configure_swap() {
+  local fstab_tmp
+
+  if [[ -z "$(swapon --show --noheadings)" ]]; then
+    [[ ! -e /swapfile ]] || fail 'HOST_SWAPFILE_UNMANAGED' 75
+    fallocate -l 4G /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null
+    swapon /swapfile
+    if ! grep -Eq '^/swapfile[[:space:]]+none[[:space:]]+swap[[:space:]]+sw[[:space:]]+0[[:space:]]+0$' /etc/fstab; then
+      fstab_tmp=$(mktemp)
+      cp -- /etc/fstab "$fstab_tmp"
+      printf '/swapfile none swap sw 0 0\n' >> "$fstab_tmp"
+      install -o root -g root -m 0644 "$fstab_tmp" /etc/fstab
+      rm -f -- "$fstab_tmp"
+    fi
+  fi
+  printf 'vm.swappiness=10\n' > /etc/sysctl.d/60-ai-project-os-swap.conf
+  chown root:root /etc/sysctl.d/60-ai-project-os-swap.conf
+  chmod 644 /etc/sysctl.d/60-ai-project-os-swap.conf
+  sysctl --load /etc/sysctl.d/60-ai-project-os-swap.conf >/dev/null
+}
+
+install_docker() {
+  local package key_tmp keyring_tmp fingerprint source_tmp
+  local -a conflict_packages=(docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc)
+
+  if ! command -v docker >/dev/null 2>&1; then
+    for package in "${conflict_packages[@]}"; do
+      if dpkg-query -W -f='${db:Status-Abbrev}' "$package" 2>/dev/null | grep -q '^ii'; then
+        fail "HOST_DOCKER_CONFLICT_PACKAGE package=$package" 75
+      fi
+    done
+    install -d -o root -g root -m 0755 /etc/apt/keyrings
+    key_tmp=$(mktemp)
+    keyring_tmp=$(mktemp)
+    curl --fail --silent --show-error --location \
+      https://download.docker.com/linux/ubuntu/gpg --output "$key_tmp"
+    fingerprint=$(gpg --batch --show-keys --with-colons "$key_tmp" | sed -n 's/^fpr:::::::::\([0-9A-F]*\):$/\1/p' | head -n 1)
+    [[ "$fingerprint" == "$DOCKER_GPG_FINGERPRINT" ]] || fail 'HOST_DOCKER_GPG_FINGERPRINT_INVALID' 73
+    gpg --batch --yes --dearmor --output "$keyring_tmp" "$key_tmp"
+    install -o root -g root -m 0644 "$keyring_tmp" /etc/apt/keyrings/docker.gpg
+    rm -f -- "$key_tmp" "$keyring_tmp"
+    source_tmp=$(mktemp)
+    printf '%s\n' \
+      'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable' \
+      > "$source_tmp"
+    install -o root -g root -m 0644 "$source_tmp" /etc/apt/sources.list.d/docker.list
+    rm -f -- "$source_tmp"
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  fi
+
+  for package in docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; do
+    dpkg-query -W -f='${db:Status-Abbrev}' "$package" 2>/dev/null | grep -q '^ii' ||
+      fail "HOST_DOCKER_OFFICIAL_PACKAGE_MISSING package=$package" 75
+  done
+
+  docker version >/dev/null
+  docker compose version >/dev/null
+  if (( $(docker ps -aq | wc -l) != 0 )); then
+    fail 'HOST_NOT_EMPTY_CONTAINERS_PRESENT' 75
+  fi
+  [[ -z "$(docker volume ls -q)" ]] || fail 'HOST_NOT_EMPTY_VOLUMES_PRESENT' 75
+  install -d -o root -g root -m 0755 /etc/docker
+  install -o root -g root -m 0644 "$SOURCE_DIR/host/docker-daemon.json" /etc/docker/daemon.json
+  dockerd --validate --config-file=/etc/docker/daemon.json >/dev/null
+  systemctl enable docker
+  systemctl restart docker
+  systemctl is-active --quiet docker
+  [[ "$(docker info --format '{{.LoggingDriver}}:{{.LiveRestoreEnabled}}')" == local:true ]] ||
+    fail 'HOST_DOCKER_DAEMON_CONFIG_INVALID' 73
+}
+
+install_coscli() {
+  local download_path
+
+  if [[ ! -x /usr/local/bin/coscli ]] ||
+    [[ "$(sha256sum /usr/local/bin/coscli 2>/dev/null | awk '{print $1}')" != "$COSCLI_SHA256" ]]; then
+    download_path=$(mktemp)
+    curl --fail --silent --show-error --location "$COSCLI_URL" --output "$download_path"
+    printf '%s  %s\n' "$COSCLI_SHA256" "$download_path" | sha256sum --check --status ||
+      fail 'HOST_COSCLI_SHA256_INVALID' 73
+    install -o root -g root -m 0755 "$download_path" /usr/local/bin/coscli
+    rm -f -- "$download_path"
+  fi
+  [[ "$(/usr/local/bin/coscli --version)" == "coscli version ${COSCLI_VERSION#v}" ]] ||
+    fail 'HOST_COSCLI_VERSION_INVALID' 73
+}
+
+configure_firewall() {
+  ufw default deny incoming
+  ufw default allow outgoing
+  ufw default deny routed
+  ufw limit 22/tcp comment SSH
+  ufw allow 80/tcp comment HTTP
+  ufw allow 443/tcp comment HTTPS
+  ufw --force enable
+  ufw status | grep -q '^Status: active$' || fail 'HOST_UFW_NOT_ACTIVE' 73
+}
+
+install_runtime_scripts() {
+  install -d -o root -g root -m 0700 /etc/ai-project-os
+  install -d -o root -g root -m 0755 /usr/local/libexec/ai-project-os
+  install -o root -g root -m 0755 "$SOURCE_DIR/ai_project_os_backup_artifact.py" \
+    /usr/local/libexec/ai-project-os/backup-artifact.py
+  install -o root -g root -m 0755 "$SOURCE_DIR/ai-project-os-restore" \
+    /usr/local/sbin/ai-project-os-restore
+  install -o root -g root -m 0644 "$SOURCE_DIR/compose.operations.yaml" \
+    /etc/ai-project-os/compose.operations.yaml
+}
+
+prepare_host() {
+  local script
+
+  [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'HOST_TAG_INVALID' 64
+  [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'HOST_REVISION_INVALID' 65
+  [[ "$LATEST_MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
+    fail 'HOST_MANIFEST_OBJECT_INVALID' 64
+  [[ "$RESTORE_COSCLI_CONFIG" == "$STAGING_ROOT"/* ]] || fail 'HOST_COS_CONFIG_PATH_INVALID' 64
+  [[ "$AGE_IDENTITY_FILE" == "$STAGING_ROOT"/* ]] || fail 'HOST_AGE_KEY_PATH_INVALID' 64
+
+  for script in \
+    ai-project-os-actions-gateway \
+    ai-project-os-activate-host \
+    ai-project-os-backup \
+    ai-project-os-backup.service \
+    ai-project-os-backup.timer \
+    ai-project-os-deploy \
+    ai-project-os-deactivate-host \
+    ai-project-os-deploy.sudoers \
+    ai-project-os-restore \
+    ai-project-os-source-state \
+    ai_project_os_backup_artifact.py \
+    compose.operations.yaml \
+    install-production-backup.sh \
+    install-production-deploy.sh \
+    host/docker-daemon.json \
+    host/ssh-hardening.conf \
+    nginx/ai-project-os.conf \
+    nginx/ai-project-os-proxy.conf; do
+    require_source_file "$script"
+  done
+
+  validate_host
+  apt-get update
+  apt-get install -y age ca-certificates curl git gnupg openssh-server python3 ufw
+  configure_firewall
+  apt-get install -y nginx
+  systemctl disable --now nginx >/dev/null 2>&1 || true
+  configure_hostname_and_clock
+  configure_swap
+  install_docker
+  install_coscli
+  install_runtime_scripts
+  install -d -o root -g root -m 0755 \
+    /var/lib/ai-project-os-operations \
+    /var/lib/ai-project-os-operations/backups \
+    /var/lib/ai-project-os-operations/backups/history
+
+  /usr/local/sbin/ai-project-os-restore \
+    "$RELEASE_TAG" \
+    "$EXPECTED_REVISION" \
+    "$LATEST_MANIFEST_OBJECT" \
+    "$RESTORE_COSCLI_CONFIG" \
+    "$AGE_IDENTITY_FILE" \
+    migration
+
+  "$SOURCE_DIR/install-production-deploy.sh" \
+    /run/ai-project-os-github-actions.pub \
+    --defer-backup-timer
+  rm -f -- /run/ai-project-os-github-actions.pub
+
+  install -d -o root -g root -m 0755 /etc/nginx/snippets
+  install -o root -g root -m 0644 "$SOURCE_DIR/nginx/ai-project-os-proxy.conf" \
+    /etc/nginx/snippets/ai-project-os-proxy.conf
+  install -o root -g root -m 0644 "$SOURCE_DIR/nginx/ai-project-os.conf" \
+    /etc/nginx/sites-available/ai-project-os.conf
+  ln -sfn /etc/nginx/sites-available/ai-project-os.conf /etc/nginx/sites-enabled/ai-project-os.conf
+  if [[ -e /etc/nginx/sites-enabled/default || -L /etc/nginx/sites-enabled/default ]]; then
+    [[ -L /etc/nginx/sites-enabled/default ]] || fail 'HOST_NGINX_DEFAULT_SITE_UNMANAGED' 75
+    rm -f -- /etc/nginx/sites-enabled/default
+  fi
+  nginx -t
+  systemctl disable --now nginx >/dev/null 2>&1 || true
+  systemctl disable --now ai-project-os-backup.timer >/dev/null 2>&1 || true
+  [[ -z "$(docker ps -q --filter label=com.docker.compose.project=ai-project-os \
+    --filter label=com.docker.compose.service=worker)" ]] || fail 'HOST_STANDBY_WORKER_RUNNING' 73
+  printf 'HOST_PREPARE_OK tag=%s revision=%s hostname=%s standby=true\n' \
+    "$RELEASE_TAG" "$EXPECTED_REVISION" "$TARGET_HOSTNAME"
+}
+
+harden_ssh() {
+  local effective_config
+
+  validate_host
+  [[ -f /home/deploy/.ssh/authorized_keys && ! -L /home/deploy/.ssh/authorized_keys ]] ||
+    fail 'HOST_DEPLOY_AUTHORIZED_KEYS_MISSING' 70
+  [[ "$(stat -c %U:%G /home/deploy/.ssh/authorized_keys)" == deploy:deploy ]] ||
+    fail 'HOST_DEPLOY_AUTHORIZED_KEYS_INVALID' 70
+  [[ "$(stat -c %a /home/deploy/.ssh/authorized_keys)" == 600 ]] ||
+    fail 'HOST_DEPLOY_AUTHORIZED_KEYS_INVALID' 70
+  ssh-keygen -lf /home/deploy/.ssh/authorized_keys >/dev/null || fail 'HOST_DEPLOY_AUTHORIZED_KEYS_INVALID' 70
+  install -d -o root -g root -m 0755 /etc/ssh/sshd_config.d
+  install -o root -g root -m 0644 "$SOURCE_DIR/host/ssh-hardening.conf" \
+    /etc/ssh/sshd_config.d/00-ai-project-os-hardening.conf
+  sshd -t
+  systemctl reload ssh
+  effective_config=$(sshd -T)
+  grep -qx 'permitrootlogin no' <<<"$effective_config" || fail 'HOST_SSH_HARDENING_INVALID' 73
+  grep -qx 'passwordauthentication no' <<<"$effective_config" || fail 'HOST_SSH_HARDENING_INVALID' 73
+  grep -qx 'kbdinteractiveauthentication no' <<<"$effective_config" || fail 'HOST_SSH_HARDENING_INVALID' 73
+  grep -qx 'pubkeyauthentication yes' <<<"$effective_config" || fail 'HOST_SSH_HARDENING_INVALID' 73
+  printf 'HOST_SSH_HARDENED deploy_public_key=yes root_login=no password_auth=no\n'
+  if [[ "$STAGING_ROOT" == /run/ai-project-os-migration-* && -d "$STAGING_ROOT" && ! -L "$STAGING_ROOT" ]]; then
+    rm -rf --one-file-system -- "$STAGING_ROOT"
+  fi
+}
+
+case "$MODE" in
+  prepare) prepare_host ;;
+  harden) harden_ssh ;;
+  *) fail 'HOST_BOOTSTRAP_USAGE' 64 ;;
+esac

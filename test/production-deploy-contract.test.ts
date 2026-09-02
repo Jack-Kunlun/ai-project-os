@@ -34,7 +34,10 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.match(workflow, /PRODUCTION_SSH_PRIVATE_KEY/u);
   assert.match(workflow, /PRODUCTION_SSH_KNOWN_HOSTS/u);
   assert.match(workflow, /StrictHostKeyChecking=yes/u);
-  assert.match(workflow, /ai-project-os-actions@38\.76\.205\.30/u);
+  assert.match(workflow, /vars\.PRODUCTION_SSH_HOST/u);
+  assert.match(workflow, /PRODUCTION_SSH_HOST_INVALID/u);
+  assert.match(workflow, /ai-project-os-actions@\$PRODUCTION_SSH_HOST/u);
+  assert.doesNotMatch(workflow, /38\.76\.205\.30/u);
   assert.match(workflow, /"deploy \$DEPLOY_TAG \$DEPLOY_SHA"/u);
   assert.match(workflow, /Create verified offsite backup and deploy/u);
   assert.match(workflow, /PRODUCTION_BACKUP_RESULT_INVALID/u);
@@ -370,12 +373,22 @@ test("installer keeps secrets root-only and installs a restricted Actions key", 
   assert.match(installer, /ai-project-os-actions-gateway/u);
   assert.match(installer, /INSTALL_ACTIONS_AUTHORIZED_KEYS_NOT_EXCLUSIVE/u);
   assert.match(installer, /temporary_authorized_keys/u);
+  assert.match(installer, /--reuse-existing-actions-key/u);
+  assert.match(installer, /INSTALL_EXISTING_ACTIONS_KEY_INVALID/u);
   assert.match(installer, /visudo -cf/u);
   assert.equal(sudoers.trim(), "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-deploy");
 });
 
 test("production shell entrypoints pass bash syntax validation", () => {
-  for (const scriptPath of [deploymentPath, backupPath, gatewayPath, installerPath, backupInstallerPath]) {
+  const additionalScripts = [
+    "ai-project-os-activate-host",
+    "ai-project-os-deactivate-host",
+    "ai-project-os-restore",
+    "ai-project-os-source-state",
+    "bootstrap-production-host",
+    "migrate-production-host",
+  ].map((name) => path.join(repositoryRoot, "deploy/production", name));
+  for (const scriptPath of [deploymentPath, backupPath, gatewayPath, installerPath, backupInstallerPath, ...additionalScripts]) {
     const result = spawnSync("bash", ["-n", scriptPath], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
   }

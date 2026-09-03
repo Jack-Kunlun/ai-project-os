@@ -18,7 +18,7 @@
 
 可访问性扫描由锁定版本的 `@axe-core/playwright` 在本机浏览器上下文执行，不把页面内容发送给第三方服务。自动扫描不能替代键盘操作、屏幕阅读器和人工认知可用性评审，但任何已覆盖页面的 WCAG A/AA 违规都会直接使门禁失败。
 
-性能预算保存在 `config/performance-budgets.json`。当前生产基线的共享 JavaScript 上限为 145 KiB、最大单个 JavaScript 文件为 75 KiB、全局 CSS 为 13 KiB、全部静态客户端资源为 540 KiB；setup、Dashboard、项目列表、指南和 MCP 连接路由分别使用 155、165、165、155 和 175 KiB 的 JavaScript 上限。所有数值均按每个构建文件独立 gzip 后计算，避免机器速度与临时负载造成误报；调整预算必须和可解释的产品或依赖变化一起评审。`pnpm test:performance` 会使用不可连接的 loopback 数据库占位地址生成新的生产构建再检查预算，避免误连部署数据库；CI 已有浏览器门禁产物，因此直接运行 `pnpm performance:check`。
+性能预算保存在 `config/performance-budgets.json`。当前生产基线的共享 JavaScript 上限为 145 KiB、最大单个 JavaScript 文件为 75 KiB、全局 CSS 为 13 KiB、全站静态资产库存为 550 KiB；setup、Dashboard、项目列表、指南和 MCP 连接路由分别使用 155、165、165、155 和 175 KiB 的 JavaScript 上限。全站静态资产库存是所有静态客户端构建文件逐文件 gzip 后的总量，不是首屏性能指标，也不等同于首屏加载体积。所有数值均按每个构建文件独立 gzip 后计算，避免机器速度与临时负载造成误报；调整预算必须和可解释的产品或依赖变化一起评审。`pnpm test:performance` 会使用不可连接的 loopback 数据库占位地址生成新的生产构建再检查预算，避免误连部署数据库；CI 已有浏览器门禁产物，因此直接运行 `pnpm performance:check`。
 
 容器交付门禁的隔离与清理规则见[本地持续交付候选门禁](local-release.md)。它只验证一次性本地候选，不发布镜像、不创建 tag、不升级正式 Compose，也不替代备份恢复和真实外部服务现场验收。
 

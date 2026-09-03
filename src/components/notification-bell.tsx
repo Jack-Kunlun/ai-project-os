@@ -21,11 +21,14 @@ export function NotificationBell({ active }: { active: boolean }) {
     const initial = window.setTimeout(() => void reload(), 0);
     const interval = window.setInterval(() => void reload(), 30_000);
     const onVisibility = () => { if (document.visibilityState === "visible") void reload(); };
+    const onNotificationsChanged = () => void reload();
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("ai-project-os:notifications-changed", onNotificationsChanged);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("ai-project-os:notifications-changed", onNotificationsChanged);
     };
   }, [reload]);
 

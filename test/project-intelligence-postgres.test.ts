@@ -410,6 +410,8 @@ test(
           providerConnectionId: provider.id,
           operation: "projectAnalysis",
           modelId: "generation-test",
+          billingUserId: user.id,
+          callKey: `test-audit-${suffix}`,
           status: "running",
         },
       });

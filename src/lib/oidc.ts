@@ -9,6 +9,7 @@ import { getDb } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
 import { highestProjectRole, highestWorkspaceRole } from "@/lib/workspaces";
 import { resolveSecureEndpointFingerprint, securePinnedJsonRequest, WebSourceError } from "@/lib/web-sources";
+import { issueVerifiedSignupGrant } from "@/lib/ai-entitlements";
 
 export const OIDC_STATE_COOKIE_NAME = "ai_project_os_oidc_state" as const;
 const OIDC_ATTEMPT_LIFETIME_MS = 10 * 60 * 1_000;
@@ -511,6 +512,7 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     if (provider.status !== "verified" || provider.disabledAt !== null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
     let identity = await tx.oidcIdentity.findUnique({ where: { providerId_subject: { providerId: provider.id, subject } }, include: { user: true } });
     let user = identity?.user ?? null;
+    const newlyCreated = user === null;
     const invitation = claimedEmail === null ? null : await tx.workspaceInvitation.findFirst({ where: { workspaceId: provider.workspaceId, email: claimedEmail, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "asc" } });
     const emailOwner = claimedEmail !== null && emailVerified ? await tx.appUser.findUnique({ where: { email: claimedEmail }, select: { id: true } }) : null;
     if (user === null && emailOwner !== null) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
@@ -519,6 +521,9 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     if (user === null && invitation === null && !(provider.autoProvision && domainAllowed)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     if (user === null) {
       user = await tx.appUser.create({ data: { username: await availableUsername(preferredUsername, tx), displayName, email: claimedEmail, role: "member", passwordHash: null, passwordSalt: null } });
+      if (newlyCreated && invitation === null && emailVerified) {
+        await issueVerifiedSignupGrant(user.id, { issuedById: null, now: new Date() }, tx);
+      }
     }
     if (user.disabledAt !== null) return fail("OIDC_ACCOUNT_DISABLED");
     const invitedWorkspaceRole = invitation?.workspaceRole ?? provider.defaultWorkspaceRole;

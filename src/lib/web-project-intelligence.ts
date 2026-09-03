@@ -16,6 +16,7 @@ import {
   failWebAiJob,
   finishWebAiJob,
   manifestFingerprint,
+  stableAiCallKey,
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
 import {
@@ -522,6 +523,9 @@ export async function runProjectBriefJob(input: Readonly<{
       attempt: claim,
       route: runtime.generationRoute,
       operation: "projectAnalysis",
+      callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "brief"),
+      requestPayload: { projectName: runtime.state.project.name, contexts: promptContexts(contexts) },
+      maxOutputTokens: runtime.generationRoute.maxOutputTokens,
       call: () => invokeChatCompletion({
         connection: runtime.generationRoute.providerConnection,
         operation: "projectAnalysis",
@@ -620,6 +624,7 @@ async function executeAgentPlan(input: Readonly<{
         route: input.embeddingRoute,
         index: input.index,
         take: call.arguments.take,
+        callKeyDiscriminator: `agent-memory-${trace.length}`,
       }, db);
       evidence = memoryEvidence(results);
     }
@@ -686,6 +691,9 @@ export async function runProjectAgentJob(input: Readonly<{
       attempt: claim,
       route: runtime.generationRoute,
       operation: "projectAnalysis",
+      callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "agent-plan"),
+      requestPayload: { question, projectName: runtime.state.project.name },
+      maxOutputTokens: Math.min(runtime.generationRoute.maxOutputTokens, 2_048),
       call: () => invokeChatCompletion({
         connection: runtime.generationRoute.providerConnection,
         operation: "projectAnalysis",
@@ -729,6 +737,9 @@ export async function runProjectAgentJob(input: Readonly<{
       attempt: claim,
       route: runtime.generationRoute,
       operation: "projectAnalysis",
+      callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "agent-answer"),
+      requestPayload: { question, objective: plan.objective, toolTrace: execution.trace, contexts: promptContexts(execution.contexts) },
+      maxOutputTokens: runtime.generationRoute.maxOutputTokens,
       call: () => invokeChatCompletion({
         connection: runtime.generationRoute.providerConnection,
         operation: "projectAnalysis",

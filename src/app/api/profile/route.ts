@@ -13,6 +13,7 @@ import {
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
+import { getPlatformTokenSummary } from "@/lib/ai-entitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
   try {
     const sessionUser = await requireApiSession(request);
     const db = getDb();
-    const [user, activeSessionCount, latestSession] = await Promise.all([
+    const [user, activeSessionCount, latestSession, entitlements] = await Promise.all([
       db.appUser.findUnique({
         where: { id: sessionUser.id },
         select: {
@@ -49,11 +50,12 @@ export async function GET(request: Request) {
         orderBy: { lastSeenAt: "desc" },
         select: { lastSeenAt: true, expiresAt: true },
       }),
+      getPlatformTokenSummary(sessionUser.id, db),
     ]);
     if (user === null) throw new ApiError(401, "AUTH_REQUIRED", "请先登录");
     const { passwordHash, githubIdentity, ...safeUser } = user;
     return NextResponse.json(
-      { profile: { ...safeUser, githubIdentity: githubIdentity ? { ...githubIdentity, githubUserId: githubIdentity.githubUserId.toString() } : null, hasLocalPassword: passwordHash !== null, activeSessionCount, lastSeenAt: latestSession?.lastSeenAt ?? null, sessionExpiresAt: latestSession?.expiresAt ?? null } },
+      { profile: { ...safeUser, githubIdentity: githubIdentity ? { ...githubIdentity, githubUserId: githubIdentity.githubUserId.toString() } : null, hasLocalPassword: passwordHash !== null, activeSessionCount, lastSeenAt: latestSession?.lastSeenAt ?? null, sessionExpiresAt: latestSession?.expiresAt ?? null, entitlements: { availableTokens: entitlements.availableTokens, reservedTokens: entitlements.reservedTokens, nextExpiryAt: entitlements.nextExpiryAt, membership: entitlements.membership } } },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {

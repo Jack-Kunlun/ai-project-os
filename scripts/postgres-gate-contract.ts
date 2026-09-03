@@ -28,6 +28,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "project-workflow", file: "test/project-workflow-postgres.test.ts", database: "ai_project_os_project_workflow_test", gateEnv: "PROJECT_WORKFLOW_POSTGRES_GATE", setup: "migrate" },
   { id: "web-ai-workflow", file: "test/web-ai-workflow-postgres.test.ts", database: "ai_project_os_web_ai_test", gateEnv: "WEB_AI_POSTGRES_GATE", setup: "migrate" },
   { id: "project-intelligence", file: "test/project-intelligence-postgres.test.ts", database: "ai_project_os_project_intelligence_test", gateEnv: "PROJECT_INTELLIGENCE_POSTGRES_GATE", setup: "migrate" },
+  { id: "ai-entitlements", file: "test/ai-entitlements-postgres.test.ts", database: "ai_project_os_ai_entitlements_test", gateEnv: "AI_ENTITLEMENTS_POSTGRES_GATE", setup: "migrate" },
   { id: "project-lifecycle", file: "test/project-lifecycle-postgres.test.ts", database: "ai_project_os_project_lifecycle_test", gateEnv: "PROJECT_LIFECYCLE_POSTGRES_GATE", setup: "migrate" },
   { id: "configuration-deletion", file: "test/configuration-deletion-postgres.test.ts", database: "ai_project_os_configuration_deletion_test", gateEnv: "CONFIGURATION_DELETION_POSTGRES_GATE", setup: "migrate" },
   { id: "action-engine", file: "test/action-engine-postgres.test.ts", database: "ai_project_os_action_engine_test", gateEnv: "ACTION_ENGINE_POSTGRES_GATE", setup: "migrate" },

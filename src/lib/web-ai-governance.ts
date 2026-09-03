@@ -11,6 +11,16 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 import { ProviderTransportError } from "@/lib/ai-providers";
+import {
+  assertAiOutboundEntitlement,
+  acquirePlatformTokenDispatchFence,
+  AiEntitlementError,
+  estimatePlatformTokens,
+  holdPlatformTokenReservation,
+  releasePlatformTokenReservation,
+  reservePlatformTokens,
+  settlePlatformTokenReservation,
+} from "@/lib/ai-entitlements";
 import { getDb } from "@/lib/db";
 import { jsonValue } from "@/lib/web-github";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
@@ -52,6 +62,11 @@ function fail(code: WebAiGovernanceErrorCode): never {
 
 export function manifestFingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+}
+
+/** Stable per-job call identity used by both the audit and token ledger. */
+export function stableAiCallKey(jobId: string, operation: string, discriminator: string): string {
+  return `ai:${createHash("sha256").update(`${jobId}:${operation}:${discriminator}`, "utf8").digest("hex")}`;
 }
 
 export function assertWebAiConsent(value: unknown): void {
@@ -102,6 +117,14 @@ export async function createGrantedWebAiJob(input: Readonly<{
   if (existing !== null) return Object.freeze({ jobId: existing.id, created: false });
 
   return db.$transaction(async (tx) => {
+    const billing = await assertAiOutboundEntitlement({
+      projectId: input.projectId,
+      requestedById: input.requestedBy.id,
+      route: input.route,
+      db: tx,
+      enforceConcurrency: true,
+    });
+    const jobId = randomUUID();
     const grant = await tx.webAiGrant.create({
       data: {
         projectId: input.projectId,
@@ -113,12 +136,15 @@ export async function createGrantedWebAiJob(input: Readonly<{
         modelId: input.route.modelId,
         consentVersion: WEB_AI_TRANSFER_CONSENT_VERSION,
         issuedById: input.requestedBy.id,
+        billingMode: billing.billingMode,
+        billingUserId: billing.billingUserId,
+        callKey: stableAiCallKey(jobId, input.route.operation, "grant"),
         expiresAt: new Date(Date.now() + GRANT_LIFETIME_MS),
       },
     });
     const job = await tx.backgroundJob.create({
       data: {
-        id: randomUUID(),
+        id: jobId,
         projectId: input.projectId,
         kind: input.kind,
         requestedById: input.requestedBy.id,
@@ -141,6 +167,13 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
   scopeIds: unknown;
   manifestFingerprint: string;
 }>, db: PrismaClient = getDb()) {
+  const billing = await assertAiOutboundEntitlement({
+    projectId: input.projectId,
+    requestedById: input.requestedBy.id,
+    route: input.route,
+    db,
+    enforceConcurrency: false,
+  });
   return db.webAiGrant.create({
     data: {
       projectId: input.projectId,
@@ -152,6 +185,9 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
       modelId: input.route.modelId,
       consentVersion: WEB_AI_TRANSFER_CONSENT_VERSION,
       issuedById: input.requestedBy.id,
+      billingMode: billing.billingMode,
+      billingUserId: billing.billingUserId,
+      callKey: stableAiCallKey(input.jobId, input.route.operation, "supplemental"),
       expiresAt: new Date(Date.now() + GRANT_LIFETIME_MS),
     },
   });
@@ -205,29 +241,109 @@ export async function auditedProviderCall<T>(input: Readonly<{
   attempt: JobAttemptClaim;
   route: RuntimeRoute;
   operation?: AiOperation;
+  callKey: string;
+  requestPayload?: unknown;
+  maxOutputTokens?: number;
   call: () => Promise<Readonly<T & {
     inputTokens: number;
     providerRequestId: string | null;
     outputTokens?: number;
+    usageKnown?: boolean;
   }>>;
 }>, db: PrismaClient = getDb()): Promise<T & {
   inputTokens: number;
   providerRequestId: string | null;
   outputTokens?: number;
+  usageKnown?: boolean;
 }> {
-  await markProviderDispatched({ jobId: input.jobId, ...input.attempt }, db);
-  const audit = await db.providerCallAudit.create({
-    data: {
-      jobId: input.jobId,
-      providerConnectionId: input.route.providerConnectionId,
-      operation: input.operation ?? input.route.operation,
-      modelId: input.route.modelId,
-      status: "running",
-    },
+  const operation = input.operation ?? input.route.operation;
+  const job = await db.backgroundJob.findUnique({ where: { id: input.jobId }, select: { requestedById: true } });
+  if (job === null) throw new Error("WEB_AI_JOB_NOT_FOUND");
+  const billing = await assertAiOutboundEntitlement({
+    projectId: input.route.projectId,
+    requestedById: job.requestedById,
+    route: input.route,
+    operation,
+    db,
+    enforceConcurrency: false,
   });
+  const billingUserId = billing.billingUserId;
+  let reservation: Awaited<ReturnType<typeof reservePlatformTokens>> | null = null;
+  let auditId: string | null = null;
+  let networkStarted = false;
+  let dispatchMarked = false;
+  let jobMarkedUnknown = false;
   try {
+    reservation = billing.reservationRequired
+      ? await reservePlatformTokens({
+          userId: billingUserId,
+          jobId: input.jobId,
+          providerConnectionId: input.route.providerConnectionId,
+          callKey: input.callKey,
+          operation,
+          modelId: input.route.modelId,
+          estimatedTokens: estimatePlatformTokens(input.requestPayload ?? { operation, modelId: input.route.modelId }, input.maxOutputTokens ?? input.route.maxOutputTokens),
+        }, db)
+      : null;
+    if (reservation !== null && (!reservation.created || reservation.status !== "reserved")) {
+      throw new AiEntitlementError(reservation.status === "held" ? "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED" : "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED");
+    }
+    await markProviderDispatched({ jobId: input.jobId, ...input.attempt }, db);
+    dispatchMarked = true;
+    if (reservation !== null && reservation.created) {
+      const fence = await acquirePlatformTokenDispatchFence({
+        userId: billingUserId,
+        callKey: input.callKey,
+      }, db);
+      if (fence === null || !fence.allowed || fence.status !== "reserved") {
+        throw new AiEntitlementError(fence?.status === "held" ? "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED" : "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED");
+      }
+    }
+    let audit;
+    try {
+      audit = await db.providerCallAudit.create({
+        data: {
+          jobId: input.jobId,
+          providerConnectionId: input.route.providerConnectionId,
+          operation,
+          modelId: input.route.modelId,
+          billingMode: billing.billingMode,
+          billingUserId,
+          callKey: input.callKey,
+          reservationId: reservation?.reservationId ?? null,
+          status: "running",
+        },
+      });
+    } catch (error) {
+      // The database unique key is the final guard for BYOK (which has no
+      // token reservation). A duplicate call must stop before HTTP rather
+      // than being treated as a fresh attempt.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new AiEntitlementError("AI_PROVIDER_CALL_RECONCILIATION_REQUIRED");
+      }
+      throw error;
+    }
+    auditId = audit.id;
+    networkStarted = true;
     const result = await input.call();
     await markProviderAcknowledged({ jobId: input.jobId, ...input.attempt }, db);
+    if (reservation !== null && reservation.created) {
+      const settled = await settlePlatformTokenReservation({
+        userId: billingUserId,
+        callKey: input.callKey,
+        actualTokens: result.inputTokens + (result.outputTokens ?? 0),
+        usageKnown: result.usageKnown === true,
+      }, db);
+      if (settled.status !== "settled") {
+        const settlementError = settled.status === "held" && result.usageKnown !== true
+          ? "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED"
+          : "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED";
+        await db.providerCallAudit.update({ where: { id: audit.id }, data: { status: "unknown", safeErrorCode: settlementError, usageKnown: result.usageKnown === true, providerRequestId: result.providerRequestId, inputTokens: result.inputTokens, outputTokens: result.outputTokens ?? 0, completedAt: new Date() } });
+        await markProjectJobUnknown({ jobId: input.jobId, ...input.attempt, error: new AiEntitlementError(settlementError) }, db);
+        jobMarkedUnknown = true;
+        throw new AiEntitlementError(settlementError);
+      }
+    }
     await db.providerCallAudit.update({
       where: { id: audit.id },
       data: {
@@ -235,34 +351,70 @@ export async function auditedProviderCall<T>(input: Readonly<{
         providerRequestId: result.providerRequestId,
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens ?? 0,
+        usageKnown: result.usageKnown === true,
         completedAt: new Date(),
       },
     });
     return result;
   } catch (error) {
-    const uncertain = isUncertainProviderDispatch(error);
+    const uncertain = networkStarted && isUncertainProviderDispatch(error);
     // Transport errors that do not carry the optional marker are conservative:
     // the request may already have reached the provider. Only an explicit
     // `false` is safe to classify as pre-dispatch.
-    const requestDispatched = !(
+    const requestDispatched = networkStarted && !(
       typeof error === "object" && error !== null &&
       "requestDispatched" in error &&
       (error as { requestDispatched?: unknown }).requestDispatched === false
     );
-    await db.providerCallAudit.updateMany({
-      where: { id: audit.id, status: "running" },
-      data: {
-        status: uncertain ? "unknown" : "failed",
-        safeErrorCode: safeFailureCode(error),
-        completedAt: new Date(),
-      },
-    });
-    if (!uncertain && !requestDispatched) {
-      await markProviderNotDispatched({ jobId: input.jobId, ...input.attempt }, db).catch(() => undefined);
+    let cleanupFailed = false;
+    const reconciliationError = () => new AiEntitlementError("AI_PROVIDER_CALL_RECONCILIATION_REQUIRED");
+    if (auditId !== null) {
+      try {
+        await db.providerCallAudit.updateMany({
+          where: { id: auditId, status: "running" },
+          data: {
+            // Once an audit exists, a non-explicit transport failure is
+            // conservatively unknown even when the transport did not attach
+            // its optional uncertainty marker.
+            status: requestDispatched || uncertain ? "unknown" : "failed",
+            safeErrorCode: safeFailureCode(error),
+            completedAt: new Date(),
+          },
+        });
+      } catch {
+        cleanupFailed = true;
+      }
     }
-    if (uncertain) {
-      await markProjectJobUnknown({ jobId: input.jobId, ...input.attempt, error }, db);
+    if (dispatchMarked && !requestDispatched) {
+      try {
+        await markProviderNotDispatched({ jobId: input.jobId, ...input.attempt }, db);
+      } catch {
+        cleanupFailed = true;
+      }
     }
+    if (reservation !== null && reservation.created) {
+      try {
+        if (!requestDispatched) {
+          await releasePlatformTokenReservation({ userId: billingUserId, callKey: input.callKey }, db);
+        } else {
+          await holdPlatformTokenReservation({ userId: billingUserId, callKey: input.callKey, errorCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED" }, db);
+        }
+      } catch {
+        // A failed release/hold is itself an unresolved accounting state. Do
+        // not hide it behind the original provider error or allow a retry.
+        cleanupFailed = true;
+      }
+    }
+    const mustReconcile = cleanupFailed || requestDispatched || uncertain || (error instanceof AiEntitlementError && (error.code === "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED" || error.code === "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED"));
+    if (mustReconcile && !jobMarkedUnknown) {
+      try {
+        await markProjectJobUnknown({ jobId: input.jobId, ...input.attempt, error: cleanupFailed ? reconciliationError() : error }, db);
+        jobMarkedUnknown = true;
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    if (cleanupFailed) throw reconciliationError();
     throw error;
   }
 }

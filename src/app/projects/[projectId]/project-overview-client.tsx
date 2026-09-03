@@ -209,16 +209,6 @@ export function ProjectOverviewClient({ username }: { username: string }) {
               </article>
             </section>
 
-            <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-labelledby="workspace-map-title">
-              <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Project workspace</p><h2 id="workspace-map-title" className="mt-2 text-xl font-semibold">项目工作区</h2><p className="mt-2 text-sm leading-6 text-slate-500">五个工作入口各自承载明确职责；概览只汇总状态、信号和下一步。</p></div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                <WorkspaceLink href={`/projects/${projectId}/plan`} title="项目计划" detail={`逾期 ${data.world.planHealth.counts.overdue} · 受阻 ${data.world.planHealth.counts.blocked}`} />
-                <WorkspaceLink href={`/projects/${projectId}/materials`} title="项目资料" detail={`${data.project._count.sources} 个来源 · ${data.project._count.assets} 个文件`} />
-                <WorkspaceLink href={`/projects/${projectId}/intelligence`} title="AI 工作台" detail={data.governance.index.compatible ? `索引可用 · ${data.governance.index.activeRecordCount} 条` : "需要检查路由或索引"} />
-                <WorkspaceLink href={`/projects/${projectId}/automations`} title="项目自动化" detail={summary.taskIssues > 0 ? `${summary.taskIssues} 个任务异常待处理` : "当前没有任务异常"} />
-                <WorkspaceLink href={`/projects/${projectId}/governance`} title="项目管理" detail={summary.attentionTotal > 0 ? `${summary.attentionTotal} 项需要收口` : "当前管理状态正常"} />
-              </div>
-            </section>
           </>
         )}
       </div>
@@ -237,8 +227,4 @@ function StateCount({ label, value }: { label: string; value: number }) {
 
 function AttentionRow({ label, value, href }: { label: string; value: number; href: string }) {
   return <Link href={href} className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0"><span className="text-sm font-medium text-slate-700">{label}</span><span className={`rounded-full px-3 py-1 text-xs font-semibold ${value > 0 ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-700"}`}>{value > 0 ? value : "正常"}</span></Link>;
-}
-
-function WorkspaceLink({ href, title, detail }: { href: string; title: string; detail: string }) {
-  return <Link href={href} className="group rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition hover:-translate-y-0.5 hover:border-indigo-200 hover:bg-indigo-50"><h3 className="text-sm font-semibold text-slate-800 group-hover:text-indigo-700">{title}</h3><p className="mt-2 text-xs leading-5 text-slate-500">{detail}</p><span className="mt-4 block text-xs font-semibold text-indigo-600">打开 →</span></Link>;
 }

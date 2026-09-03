@@ -38,12 +38,44 @@ type IdentityRecord = {
   lastLoginAt: Date;
 };
 
+type PlatformTokenGrantRecord = {
+  id: string;
+  userId: string;
+  kind: "signup" | "manual";
+  amount: number;
+  remainingTokens: number;
+  offerVersion: string;
+  issuedById: string | null;
+  issuedAt: Date;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type PlatformTokenLedgerEntryRecord = {
+  id: string;
+  userId: string;
+  grantId: string | null;
+  reservationId: string | null;
+  entryKind: "grant" | "reserve" | "settle" | "release" | "hold" | "adjustment";
+  amount: number;
+  usageTokens?: number | null;
+  reasonCode: string;
+  callKey: string | null;
+  idempotencyKey: string;
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+};
+
 function fakeDb() {
   const credentials = new Map<string, ExternalCredential>();
   const attempts = new Map<string, Attempt>();
   const identities = new Map<string, { id: string; userId: string; githubUserId: bigint; login: string; email: string; displayName: string | null; lastLoginAt: Date }>();
   const users = new Map<string, { id: string; username: string; role: "admin" | "member"; displayName?: string | null; email?: string | null; disabledAt: Date | null }>();
   const memberships: Array<{ workspaceId: string; userId: string; role: "member" }> = [];
+  const platformTokenGrants = new Map<string, PlatformTokenGrantRecord>();
+  const platformTokenLedgerEntries = new Map<string, PlatformTokenLedgerEntryRecord>();
   let sequence = 0;
   const user = { id: USER_ID, username: "admin", role: "admin" as const, disabledAt: null };
   users.set(user.id, user);
@@ -63,6 +95,40 @@ function fakeDb() {
     },
     workspaceMembership: {
       create: async ({ data }: { data: { workspaceId: string; userId: string; role: "member" } }) => { memberships.push(data); return data; },
+    },
+    platformTokenGrant: {
+      findUnique: async ({ where }: { where: { userId_kind: { userId: string; kind: PlatformTokenGrantRecord["kind"] } } }) => [...platformTokenGrants.values()].find((grant) => grant.userId === where.userId_kind.userId && grant.kind === where.userId_kind.kind) ?? null,
+      createMany: async ({ data, skipDuplicates }: { data: Omit<PlatformTokenGrantRecord, "revokedAt" | "createdAt" | "updatedAt">; skipDuplicates?: boolean }) => {
+        const duplicate = [...platformTokenGrants.values()].some((grant) => grant.userId === data.userId && grant.kind === data.kind);
+        if (duplicate) {
+          if (skipDuplicates) return { count: 0 };
+          throw new Error("FAKE_PLATFORM_TOKEN_GRANT_UNIQUE");
+        }
+        const now = new Date();
+        platformTokenGrants.set(data.id, { ...data, revokedAt: null, createdAt: now, updatedAt: now });
+        return { count: 1 };
+      },
+      findUniqueOrThrow: async ({ where }: { where: { userId_kind: { userId: string; kind: PlatformTokenGrantRecord["kind"] } } }) => {
+        const grant = [...platformTokenGrants.values()].find((candidate) => candidate.userId === where.userId_kind.userId && candidate.kind === where.userId_kind.kind);
+        if (grant === undefined) throw new Error("FAKE_PLATFORM_TOKEN_GRANT_NOT_FOUND");
+        return grant;
+      },
+    },
+    platformTokenLedgerEntry: {
+      createMany: async ({ data, skipDuplicates }: { data: Omit<PlatformTokenLedgerEntryRecord, "createdAt"> | Array<Omit<PlatformTokenLedgerEntryRecord, "createdAt">>; skipDuplicates?: boolean }) => {
+        const rows = Array.isArray(data) ? data : [data];
+        let count = 0;
+        for (const row of rows) {
+          const duplicate = [...platformTokenLedgerEntries.values()].some((entry) => entry.idempotencyKey === row.idempotencyKey);
+          if (duplicate) {
+            if (skipDuplicates) continue;
+            throw new Error("FAKE_PLATFORM_TOKEN_LEDGER_UNIQUE");
+          }
+          platformTokenLedgerEntries.set(row.id, { ...row, createdAt: new Date() });
+          count += 1;
+        }
+        return { count };
+      },
     },
     appSession: {
       create: async ({ data }: { data: Record<string, unknown> }) => ({ id: `session-${++sequence}`, ...data }),
@@ -131,7 +197,7 @@ function fakeDb() {
     ...tx,
     $transaction: async (callback: (client: typeof tx) => unknown) => callback(tx),
   } as unknown as PrismaClient;
-  return { db, credentials, attempts, identities, users, memberships };
+  return { db, credentials, attempts, identities, users, memberships, platformTokenGrants, platformTokenLedgerEntries };
 }
 
 test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient token revocation", async () => {
@@ -205,6 +271,15 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     assert.equal(registrationStore.users.size, 2);
     assert.deepEqual(registrationStore.memberships.map((membership) => membership.role), ["member"]);
     assert.equal(registrationStore.identities.size, 1);
+    assert.equal(registrationStore.platformTokenGrants.size, 1);
+    const signupGrant = [...registrationStore.platformTokenGrants.values()][0];
+    assert.equal(signupGrant?.amount, 500_000);
+    assert.equal(signupGrant?.remainingTokens, 500_000);
+    assert.equal(signupGrant?.kind, "signup");
+    assert.equal(registrationStore.platformTokenLedgerEntries.size, 1);
+    const signupLedger = [...registrationStore.platformTokenLedgerEntries.values()][0];
+    assert.equal(signupLedger?.amount, 500_000);
+    assert.equal(signupLedger?.idempotencyKey, `grant:signup:${registered.session?.user.id}`);
 
     const registeredUserId = registered.session?.user.id;
     const returning = await beginGitHubOAuth({
@@ -217,6 +292,8 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     assert.equal(signedIn.returnTo, "/dashboard?query=hello%20world");
     assert.equal(registrationStore.users.size, 2);
     assert.equal(registrationStore.identities.size, 1);
+    assert.equal(registrationStore.platformTokenGrants.size, 1);
+    assert.equal(registrationStore.platformTokenLedgerEntries.size, 1);
 
     const existingEmailStore = fakeDb();
     existingEmailStore.users.set("66666666-6666-4666-8666-666666666666", {
@@ -237,6 +314,8 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     );
     assert.equal(existingEmailStore.users.size, 2);
     assert.equal(existingEmailStore.identities.size, 0);
+    assert.equal(existingEmailStore.platformTokenGrants.size, 0);
+    assert.equal(existingEmailStore.platformTokenLedgerEntries.size, 0);
 
     githubUserId = 8;
     githubLogin = "x";

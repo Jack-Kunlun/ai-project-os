@@ -27,6 +27,7 @@ import {
   failWebAiJob,
   finishWebAiJob,
   manifestFingerprint,
+  stableAiCallKey,
   updateWebAiJobProgress,
   type RuntimeRoute,
 } from "@/lib/web-ai-governance";
@@ -945,6 +946,9 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
         jobId: granted.jobId,
         attempt: claim,
         route: plan.route,
+        callKey: stableAiCallKey(granted.jobId, "embedding", String(offset)),
+        requestPayload: { texts: generatedBatch.map((record) => record.contentText) },
+        maxOutputTokens: 128,
         call: () => invokeEmbeddings({
           connection: plan.route.providerConnection,
           modelId: plan.route.modelId,

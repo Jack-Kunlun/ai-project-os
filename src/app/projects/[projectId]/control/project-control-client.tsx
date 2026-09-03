@@ -13,7 +13,7 @@ type Provider = {
   name: string;
   kind: "openai" | "deepseek" | "qwen" | "glm";
   status: "configured" | "verified" | "error";
-  defaultGenerationModelId: string;
+  defaultGenerationModelId: string | null;
   defaultEmbeddingModelId: string | null;
   defaultVisionModelId: string | null;
   embeddingDimensions: number | null;
@@ -191,7 +191,12 @@ function AiRouteSection({ projectId, providers, routes, onChanged }: { projectId
 }
 
 function RouteCard({ operation, projectId, providers, current, onSaved }: { operation: keyof typeof operationInfo; projectId: string; providers: Provider[]; current?: AiRoute; onSaved: (route: AiRoute) => void }) {
-  const eligible = useMemo(() => providers.filter((provider) => provider.status === "verified" && (operation !== "embedding" || provider.defaultEmbeddingModelId !== null) && (operation !== "visionExtract" || provider.defaultVisionModelId !== null)), [providers, operation]);
+  const eligible = useMemo(() => providers.filter((provider) => {
+    if (provider.status !== "verified") return false;
+    if (operation === "embedding") return provider.defaultEmbeddingModelId !== null;
+    if (operation === "visionExtract") return provider.defaultVisionModelId !== null;
+    return provider.defaultGenerationModelId !== null;
+  }), [providers, operation]);
   const deepSeekConfigured = providers.some((provider) => provider.kind === "deepseek");
   const [providerId, setProviderId] = useState(current?.providerConnectionId ?? eligible[0]?.id ?? "");
   const [pending, setPending] = useState(false);

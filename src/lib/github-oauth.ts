@@ -5,6 +5,7 @@ import { createSession, DEFAULT_WORKSPACE_ID, type CreatedSession } from "@/lib/
 import { createCredential, readCredentialSecret } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
+import { issueVerifiedSignupGrant } from "@/lib/ai-entitlements";
 
 export const GITHUB_OAUTH_STATE_COOKIE_NAME = "ai_project_os_github_oauth_state" as const;
 
@@ -393,6 +394,7 @@ export async function completeGitHubOAuth(
       await tx.workspaceMembership.create({
         data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "member" },
       });
+      await issueVerifiedSignupGrant(user.id, { issuedById: null, now }, tx);
       identity = await tx.gitHubIdentity.create({
         data: { userId: user.id, ...profile, lastLoginAt: now },
         include: { user: true },

@@ -1,5 +1,6 @@
 import { Prisma, type AiOperation, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { type AccessUser } from "@/lib/access-control";
 import { getProviderDefinition, isSafeModelId } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 
@@ -29,12 +30,34 @@ export type ProjectAiRouteErrorCode =
   | "PROJECT_NOT_FOUND"
   | "AI_PROVIDER_NOT_FOUND"
   | "AI_PROVIDER_NOT_VERIFIED"
-  | "AI_PROVIDER_CAPABILITY_MISMATCH";
+  | "AI_PROVIDER_CAPABILITY_MISMATCH"
+  | "AI_PROVIDER_SCOPE_FORBIDDEN";
 
 export class ProjectAiRouteError extends Error {
   constructor(readonly code: ProjectAiRouteErrorCode) {
     super(code);
     this.name = "ProjectAiRouteError";
+  }
+}
+
+/** Route changes can select a workspace BYOK credential, so project-edit
+ * permission alone is insufficient; the current workspace Owner/Admin must
+ * explicitly approve the change. */
+export async function assertProjectAiRouteManager(
+  projectId: string,
+  actor: AccessUser,
+  db: PrismaClient = getDb(),
+): Promise<void> {
+  const project = await db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
+  if (project === null) return fail("PROJECT_NOT_FOUND");
+  const membership = await db.workspaceMembership.findUnique({
+    where: { workspaceId_userId: { workspaceId: project.workspaceId, userId: actor.id } },
+    select: { role: true },
+  });
+  // Project route writes can select workspace BYOK credentials. A global
+  // system-admin role does not grant access to an unrelated workspace.
+  if (membership === null || (membership.role !== "owner" && membership.role !== "admin")) {
+    return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
   }
 }
 
@@ -102,11 +125,17 @@ function validateTarget(
     status: string;
     defaultEmbeddingModelId: string | null;
     defaultVisionModelId: string | null;
+    defaultGenerationModelId: string | null;
     embeddingDimensions: number | null;
+    scope: "platform" | "workspace";
+    workspaceId: string | null;
   }> | null,
+  projectWorkspaceId?: string,
 ): void {
   if (provider === null) return fail("AI_PROVIDER_NOT_FOUND");
   if (provider.status !== "verified") return fail("AI_PROVIDER_NOT_VERIFIED");
+  if (provider.scope === "platform" && (provider.workspaceId !== null)) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
+  if (provider.scope === "workspace" && (projectWorkspaceId === undefined || provider.workspaceId !== projectWorkspaceId)) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
 
   const isEmbedding = input.operation === "embedding";
   if (isEmbedding) {
@@ -129,6 +158,9 @@ function validateTarget(
     }
   } else if (input.embeddingDimensions != null) {
     return fail("PROJECT_AI_ROUTE_INVALID_INPUT");
+  }
+  if (input.operation !== "embedding" && input.operation !== "visionExtract" && input.modelId !== provider.defaultGenerationModelId) {
+    return fail("AI_PROVIDER_CAPABILITY_MISMATCH");
   }
 }
 
@@ -210,7 +242,7 @@ async function readOperationState(
   providerConnectionId: string,
   db: RouteDb,
 ) {
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
+  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true } });
   if (project === null) return fail("PROJECT_NOT_FOUND");
   const provider = await db.aiProviderConnection.findUnique({
     where: { id: providerConnectionId },
@@ -220,7 +252,10 @@ async function readOperationState(
       status: true,
       defaultEmbeddingModelId: true,
       defaultVisionModelId: true,
+      defaultGenerationModelId: true,
       embeddingDimensions: true,
+      scope: true,
+      workspaceId: true,
     },
   });
   const current = await db.projectAiRoute.findUnique({
@@ -267,7 +302,7 @@ export async function previewProjectAiRouteChange(
   const parsed = routeSchema.parse(input);
   const next = routeData(parsed);
   const state = await readOperationState(projectId, parsed.operation, parsed.providerConnectionId, db);
-  validateTarget(parsed, state.provider);
+  validateTarget(parsed, state.provider, state.project.workspaceId);
   const changed = !routeValuesEqual(state.current, next);
   return Object.freeze({
     operation: parsed.operation,
@@ -277,9 +312,13 @@ export async function previewProjectAiRouteChange(
   });
 }
 
-export async function getProjectAiRoutes(projectId: string, db: PrismaClient = getDb()) {
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
+export async function getProjectAiRoutes(projectId: string, actor: AccessUser, db: PrismaClient = getDb()) {
+  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true } });
   if (project === null) return fail("PROJECT_NOT_FOUND");
+  const canViewWorkspaceProviders = await db.workspaceMembership.findUnique({
+    where: { workspaceId_userId: { workspaceId: project.workspaceId, userId: actor.id } },
+    select: { userId: true },
+  }) !== null;
   const [routes, providers] = await Promise.all([
     db.projectAiRoute.findMany({
       where: { projectId, operation: { in: [...SUPPORTED_OPERATIONS] } },
@@ -287,7 +326,10 @@ export async function getProjectAiRoutes(projectId: string, db: PrismaClient = g
       select: routeSelect,
     }),
     db.aiProviderConnection.findMany({
-      where: { status: { not: "disabled" } },
+      where: { status: { not: "disabled" }, OR: [
+        { scope: "platform" },
+        ...(canViewWorkspaceProviders ? [{ scope: "workspace" as const, workspaceId: project.workspaceId }] : []),
+      ] },
       orderBy: { name: "asc" },
       select: {
         id: true,
@@ -298,6 +340,8 @@ export async function getProjectAiRoutes(projectId: string, db: PrismaClient = g
         defaultEmbeddingModelId: true,
         defaultVisionModelId: true,
         embeddingDimensions: true,
+        scope: true,
+        workspaceId: true,
       },
     }),
   ]);
@@ -321,10 +365,17 @@ export async function upsertProjectAiRoute(
     return await db.$transaction(async (tx) => {
       await lockProjectRouteScope(tx, projectId);
       const state = await readOperationState(projectId, parsed.operation, parsed.providerConnectionId, tx);
-      validateTarget(parsed, state.provider);
+      validateTarget(parsed, state.provider, state.project.workspaceId);
       if (actorId !== undefined) {
         const actor = await tx.appUser.findUnique({ where: { id: actorId }, select: { id: true } });
         if (actor === null) return fail("PROJECT_AI_ROUTE_INVALID_INPUT");
+        const membership = await tx.workspaceMembership.findUnique({
+          where: { workspaceId_userId: { workspaceId: state.project.workspaceId, userId: actorId } },
+          select: { role: true },
+        });
+        if (membership === null || (membership.role !== "owner" && membership.role !== "admin")) {
+          return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
+        }
       }
 
       if (expectedUpdatedAt !== undefined) {
@@ -415,11 +466,28 @@ export async function requireProjectAiRoute(
   operation: SupportedOperation,
   db: RouteDb = getDb(),
 ) {
-  const route = await db.projectAiRoute.findUnique({
+  const [route, project] = await Promise.all([
+    db.projectAiRoute.findUnique({
     where: { projectId_operation: { projectId, operation } },
     include: { providerConnection: true },
-  });
+    }),
+    db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } }),
+  ]);
+  if (project === null) return fail("PROJECT_NOT_FOUND");
   if (route === null) return fail("PROJECT_AI_ROUTE_INVALID_INPUT");
   if (route.providerConnection.status !== "verified") return fail("AI_PROVIDER_NOT_VERIFIED");
+  if (
+    (route.providerConnection.scope === "platform" && route.providerConnection.workspaceId !== null) ||
+    (route.providerConnection.scope === "workspace" && route.providerConnection.workspaceId !== project.workspaceId)
+  ) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
+  if (operation === "embedding" && (route.modelId !== route.providerConnection.defaultEmbeddingModelId || route.embeddingDimensions !== route.providerConnection.embeddingDimensions)) {
+    return fail("AI_PROVIDER_CAPABILITY_MISMATCH");
+  }
+  if (operation === "visionExtract" && route.modelId !== route.providerConnection.defaultVisionModelId) {
+    return fail("AI_PROVIDER_CAPABILITY_MISMATCH");
+  }
+  if (operation !== "embedding" && operation !== "visionExtract" && route.modelId !== route.providerConnection.defaultGenerationModelId) {
+    return fail("AI_PROVIDER_CAPABILITY_MISMATCH");
+  }
   return route;
 }

@@ -4,6 +4,7 @@ import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import {
   getProjectAiRoutes,
+  assertProjectAiRouteManager,
   previewProjectAiRouteChange,
   upsertProjectAiRoute,
 } from "@/lib/project-ai-routes";
@@ -18,8 +19,8 @@ async function projectId(params: Promise<{ projectId: string }>): Promise<string
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
-    await requireApiSession(request);
-    return NextResponse.json(await getProjectAiRoutes(await projectId(context.params)));
+    const user = await requireApiSession(request);
+    return NextResponse.json(await getProjectAiRoutes(await projectId(context.params), user));
   } catch (error) {
     return handleApiError(error);
   }
@@ -28,8 +29,9 @@ export async function GET(request: Request, context: { params: Promise<{ project
 export async function POST(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const resolvedProjectId = await projectId(context.params);
+    await assertProjectAiRouteManager(resolvedProjectId, user);
     await assertProjectActive(resolvedProjectId);
     return NextResponse.json(await previewProjectAiRouteChange(
       resolvedProjectId,
@@ -45,6 +47,7 @@ export async function PUT(request: Request, context: { params: Promise<{ project
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const resolvedProjectId = await projectId(context.params);
+    await assertProjectAiRouteManager(resolvedProjectId, user);
     await assertProjectActive(resolvedProjectId);
     const result = await upsertProjectAiRoute(
       resolvedProjectId,

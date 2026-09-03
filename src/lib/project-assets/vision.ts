@@ -17,6 +17,7 @@ import {
   failWebAiJob,
   finishWebAiJob,
   manifestFingerprint,
+  stableAiCallKey,
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
 
@@ -198,6 +199,9 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
         attempt: claim,
         route,
         operation: "visionExtract",
+        callKey: stableAiCallKey(granted.jobId, "visionExtract", segment.id),
+        requestPayload: { segmentId: segment.id, prompt: promptFor(segment.locatorLabel), imageBytes: image.length },
+        maxOutputTokens: route.maxOutputTokens,
         call: async () => {
           const providerResult = await invokeVisionCompletion({
             connection: route.providerConnection,

@@ -11,15 +11,35 @@ import { listPagination } from "@/lib/list-pagination";
 
 export const dynamic = "force-dynamic";
 
-const sourceSelect = {
+const sourceSummarySelect = {
   id: true,
   kind: true,
-  externalRef: true,
-  contentText: true,
-  contentHash: true,
   capturedAt: true,
   ingestedAt: true,
 } as const;
+
+// Select the body only inside the server-side projection. The list response
+// below deliberately removes it and exposes a bounded preview instead.
+const sourceListRecordSelect = {
+  ...sourceSummarySelect,
+  contentText: true,
+} as const;
+
+const sourceDetailSelect = {
+  ...sourceSummarySelect,
+  contentText: true,
+  contentHash: true,
+} as const;
+
+function sourcePreview(contentText: string): string {
+  const compact = contentText.replace(/\s+/g, " ").trim();
+  return compact.length > 180 ? `${compact.slice(0, 180)}…` : compact;
+}
+
+function toSourceSummary(source: Prisma.ProjectSourceGetPayload<{ select: typeof sourceListRecordSelect }>) {
+  const { contentText, ...summary } = source;
+  return { ...summary, preview: sourcePreview(contentText) };
+}
 
 function isKnownError(error: unknown, code: string): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
@@ -69,12 +89,14 @@ export async function GET(request: Request, context: { params: Promise<{ project
         orderBy: [{ ingestedAt: "desc" }, { id: "desc" }],
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
-        select: sourceSelect,
+        select: sourceListRecordSelect,
       }),
       db.projectSource.count({ where }),
     ]);
 
-    return NextResponse.json({ sources, pagination: listPagination(query.page, query.pageSize, total) });
+    return NextResponse.json({ sources: sources.map(toSourceSummary), pagination: listPagination(query.page, query.pageSize, total) }, {
+      headers: { "cache-control": "no-store" },
+    });
   } catch (error) {
     return handleApiError(error);
   }
@@ -102,7 +124,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
         manualContentDedupeKey: contentHash,
         capturedAt: input.capturedAt ? new Date(input.capturedAt) : null,
       },
-      select: sourceSelect,
+      select: sourceDetailSelect,
     });
 
     return NextResponse.json({ source }, { status: 201 });

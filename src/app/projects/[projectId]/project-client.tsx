@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useDeferredValue, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
@@ -39,15 +40,15 @@ type ProjectItem = {
   };
 };
 
-type ProjectSource = {
+type ProjectSourceSummary = {
   id: string;
   kind: "document" | "screenshot" | "github" | "git" | "web" | "manual" | "mcp";
-  externalRef: string | null;
-  contentText: string;
-  contentHash: string;
+  preview: string;
   capturedAt: string | null;
   ingestedAt: string;
 };
+
+type ProjectSource = ProjectSourceSummary & { contentText: string; contentHash: string };
 
 type Project = {
   id: string;
@@ -70,7 +71,7 @@ type ErrorPayload = {
 };
 
 type ItemCounts = { candidate: number; confirmed: number; dismissed: number; superseded: number };
-type ProjectSourcePage = { sources: ProjectSource[]; pagination: ListPaginationState };
+type ProjectSourcePage = { sources: ProjectSourceSummary[]; pagination: ListPaginationState };
 type ProjectItemPage = { items: ProjectItem[]; counts: ItemCounts; pagination: ListPaginationState };
 const emptyPagination: ListPaginationState = { page: 1, pageSize: 20, total: 0, totalPages: 1 };
 
@@ -228,13 +229,14 @@ function itemActionText(action: ItemAction): string {
 export function ProjectDetailClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
-  const [sources, setSources] = useState<ProjectSource[]>([]);
+  const [sources, setSources] = useState<ProjectSourceSummary[]>([]);
   const [sourceDetails, setSourceDetails] = useState<Record<string, ProjectSource>>({});
   const [sourcePagination, setSourcePagination] = useState<ListPaginationState>(emptyPagination);
   const [sourceSearch, setSourceSearch] = useState("");
   const deferredSourceSearch = useDeferredValue(sourceSearch);
   const [sourceKind, setSourceKind] = useState("all");
   const [sourcePage, setSourcePage] = useState(1);
+  const [isSourceDetailLoading, setIsSourceDetailLoading] = useState(false);
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [itemCounts, setItemCounts] = useState<ItemCounts>({ candidate: 0, confirmed: 0, dismissed: 0, superseded: 0 });
   const [itemPagination, setItemPagination] = useState<ListPaginationState>(emptyPagination);
@@ -254,6 +256,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
   const [isSavingItem, setIsSavingItem] = useState(false);
   const [itemActionId, setItemActionId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [itemDraftDirty, setItemDraftDirty] = useState(false);
   const { confirm, dialog } = useAppConfirmDialog();
   const [itemForm, setItemForm] = useState<ItemFormState>({
     type: "progress",
@@ -280,11 +283,6 @@ export function ProjectDetailClient({ username }: { username: string }) {
       const loaded = await getSources(projectId, { page: sourcePage, search: deferredSourceSearch, kind: sourceKind });
       setSources(loaded.sources);
       setSourcePagination(loaded.pagination);
-      setSourceDetails((current) => {
-        const next = { ...current };
-        for (const source of loaded.sources) next[source.id] = source;
-        return next;
-      });
       setItemForm((current) => ({ ...current, sourceId: current.sourceId || loaded.sources[0]?.id || "" }));
       if (sourcePage > loaded.pagination.totalPages) setSourcePage(loaded.pagination.totalPages);
       setSourceError(null);
@@ -294,6 +292,22 @@ export function ProjectDetailClient({ username }: { username: string }) {
       setIsSourcesLoading(false);
     }
   }, [deferredSourceSearch, projectId, sourceKind, sourcePage]);
+
+  const loadSourceDetail = useCallback(async (sourceId: string): Promise<ProjectSource | null> => {
+    const cached = sourceDetails[sourceId];
+    if (cached) return cached;
+    setIsSourceDetailLoading(true);
+    try {
+      const source = await getSource(projectId, sourceId);
+      setSourceDetails((current) => ({ ...current, [source.id]: source }));
+      return source;
+    } catch (loadError) {
+      setSourceError(loadError instanceof Error ? loadError.message : "资料原文加载失败");
+      return null;
+    } finally {
+      setIsSourceDetailLoading(false);
+    }
+  }, [projectId, sourceDetails]);
 
   const loadItems = useCallback(async () => {
     setIsItemsLoading(true);
@@ -314,12 +328,17 @@ export function ProjectDetailClient({ username }: { username: string }) {
   useEffect(() => { const timer = window.setTimeout(() => void loadProject(), 0); return () => window.clearTimeout(timer); }, [loadProject]);
   useEffect(() => { const timer = window.setTimeout(() => void loadSources(), 0); return () => window.clearTimeout(timer); }, [loadSources]);
   useEffect(() => { const timer = window.setTimeout(() => void loadItems(), 0); return () => window.clearTimeout(timer); }, [loadItems]);
+  useEffect(() => {
+    if (!itemForm.sourceId || sourceDetails[itemForm.sourceId]) return;
+    const timer = window.setTimeout(() => void loadSourceDetail(itemForm.sourceId), 0);
+    return () => window.clearTimeout(timer);
+  }, [itemForm.sourceId, loadSourceDetail, sourceDetails]);
 
   const reloadProjectAndSources = useCallback(async (): Promise<void> => {
     await Promise.all([loadProject(), loadSources(), loadItems()]);
   }, [loadItems, loadProject, loadSources]);
 
-  async function handleDeleteSource(source: ProjectSource) {
+  async function handleDeleteSource(source: ProjectSourceSummary) {
     if (!projectId || deletingSourceId) return;
     const confirmation = await confirm({
       eyebrow: "Project materials",
@@ -350,20 +369,29 @@ export function ProjectDetailClient({ username }: { username: string }) {
   }
 
   async function handleEditItem(item: ProjectItem) {
-    if (item.reviewStatus === "superseded" || itemActionId || isSavingItem) return;
+    if (item.reviewStatus === "superseded" || itemActionId || isSavingItem || editingItemId === item.id) return;
+
+    if (itemDraftDirty) {
+      const confirmation = await confirm({
+        eyebrow: "Project item",
+        title: "放弃当前未保存内容？",
+        description: "切换到另一条项目条目会清空当前表单中的未保存内容。",
+        confirmLabel: "放弃并编辑",
+        cancelLabel: "继续编辑",
+        tone: "warning",
+      });
+      if (!confirmation.confirmed) return;
+    }
 
     setItemError(null);
     setItemSuccess(null);
-    if (!sourceDetails[item.sourceId]) {
-      try {
-        const source = await getSource(projectId, item.sourceId);
-        setSourceDetails((current) => ({ ...current, [source.id]: source }));
-      } catch (loadError) {
-        setItemError(loadError instanceof Error ? loadError.message : "资料原文加载失败");
-        return;
-      }
+    const source = await loadSourceDetail(item.sourceId);
+    if (!source) {
+      setItemError("资料原文加载失败");
+      return;
     }
     setEditingItemId(item.id);
+    setItemDraftDirty(false);
     setItemForm({
       type: item.type,
       sourceId: item.sourceId,
@@ -373,10 +401,15 @@ export function ProjectDetailClient({ username }: { username: string }) {
       occurredAt: toDateTimeLocal(item.occurredAt),
       expectedUpdatedAt: item.updatedAt,
     });
+    window.setTimeout(() => {
+      document.getElementById("project-item-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document.getElementById("item-title")?.focus();
+    }, 0);
   }
 
   function handleCancelEdit() {
     setEditingItemId(null);
+    setItemDraftDirty(false);
     setItemForm({
       type: "progress",
       sourceId: sources[0]?.id ?? "",
@@ -386,6 +419,11 @@ export function ProjectDetailClient({ username }: { username: string }) {
       occurredAt: "",
       expectedUpdatedAt: "",
     });
+  }
+
+  function updateItemForm(updater: (current: ItemFormState) => ItemFormState) {
+    setItemDraftDirty(true);
+    setItemForm(updater);
   }
 
   async function handleItemSubmit(event: FormEvent<HTMLFormElement>) {
@@ -457,6 +495,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
 
       if (isEditing) {
         setEditingItemId(null);
+        setItemDraftDirty(false);
         setItemForm({
           type: "progress",
           sourceId: itemForm.sourceId,
@@ -468,6 +507,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
         });
         setItemSuccess("条目已更新，已回到候选状态。");
       } else {
+        setItemDraftDirty(false);
         setItemForm({
           type: "progress",
           sourceId: itemForm.sourceId,
@@ -493,7 +533,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
   }
 
   async function handleItemAction(item: ProjectItem, action: ItemAction) {
-    if (!projectId || itemActionId || isSavingItem || editingItemId) return;
+    if (!projectId || itemActionId || isSavingItem || editingItemId === item.id) return;
 
     setItemActionId(item.id);
     setItemError(null);
@@ -604,43 +644,28 @@ export function ProjectDetailClient({ username }: { username: string }) {
             ) : (
               <ul className="mt-5 min-w-0 space-y-4" aria-label="项目候选资料列表">
                 {sources.map((source) => (
-                  <li key={source.id} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/70 p-5">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <li key={source.id} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">{source.kind}</span>
-                        <span className="text-xs text-slate-500">资料时间：{formatSourceDate(source.capturedAt)}</span>
-                        <span className="text-xs text-slate-400">接入于：{formatSourceDate(source.ingestedAt)}</span>
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">待审核资料</span>
+                        </div>
+                        <h4 className="mt-3 line-clamp-2 text-sm font-semibold leading-6 text-slate-900">{source.preview || "未提供文字预览"}</h4>
+                        <p className="mt-2 text-xs text-slate-500">{source.kind === "manual" ? "手工输入资料" : "外部来源已绑定"} · 最近接入于 {formatSourceDate(source.ingestedAt)}</p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => void handleDeleteSource(source)}
-                        disabled={deletingSourceId !== null}
-                        className="shrink-0 rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                        aria-label={`删除候选资料 ${sourcePreview(source.contentText).slice(0, 24)}`}
-                      >
-                        {deletingSourceId === source.id ? "删除中…" : "删除"}
-                      </button>
-                    </div>
-
-                    {source.externalRef ? (
-                      <a href={source.externalRef} target="_blank" rel="noopener noreferrer" className="mt-4 block text-sm font-medium text-indigo-600 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-700 [overflow-wrap:anywhere]" title={source.externalRef}>
-                        {source.externalRef}
-                      </a>
-                    ) : (
-                      <p className="mt-4 text-sm text-slate-400">未提供外部链接</p>
-                    )}
-
-                    <p className="mt-4 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">内容预览（非 AI 摘要）</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-700 [overflow-wrap:anywhere]">{sourcePreview(source.contentText)}</p>
-
-                    <details className="mt-4 min-w-0 rounded-xl border border-slate-200 bg-white px-4 py-3">
-                      <summary className="cursor-pointer text-sm font-medium text-slate-700">查看原文</summary>
-                      <pre className="mt-3 min-w-0 max-w-full overflow-auto whitespace-pre-wrap border-t border-slate-100 pt-3 text-sm leading-6 text-slate-600 [overflow-wrap:anywhere]">{source.contentText}</pre>
-                    </details>
-
-                    <div className="mt-4 border-t border-slate-200 pt-4">
-                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">SHA-256</p>
-                      <code className="mt-2 block break-all text-xs leading-5 text-slate-600">{source.contentHash}</code>
+                      <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+                        <Link href={`/projects/${projectId}/materials/sources/${source.id}`} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700">查看详情</Link>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteSource(source)}
+                          disabled={deletingSourceId !== null}
+                          className="inline-flex min-h-9 items-center justify-center rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`删除候选资料 ${source.preview.slice(0, 24)}`}
+                        >
+                          {deletingSourceId === source.id ? "删除中…" : "删除"}
+                        </button>
+                      </div>
                     </div>
                   </li>
                 ))}
@@ -668,8 +693,8 @@ export function ProjectDetailClient({ username }: { username: string }) {
           <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite">{itemSuccess}</div>
         ) : null}
 
-        <div className="mt-8 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
-          <form onSubmit={handleItemSubmit} className="min-w-0 max-w-full rounded-2xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-950/10" aria-labelledby="item-form-heading">
+        <div className="mt-8 grid min-w-0 items-start grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
+          <form id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full rounded-2xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-950/10" aria-labelledby="item-form-heading">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Manual item</p>
             <h3 id="item-form-heading" className="mt-3 text-xl font-semibold tracking-tight text-white">{isEditingItem ? "编辑项目条目" : "新增项目条目"}</h3>
             <p className="mt-2 text-sm leading-6 text-slate-400">{isEditingItem ? "编辑后条目会回到待确认状态；Source 归属保持不变。" : "先选择当前项目的 Source，再填写可以被原文精确支持的条目。"}</p>
@@ -678,7 +703,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
             <select
               id="item-source"
               value={itemForm.sourceId}
-              onChange={(event) => setItemForm((current) => ({ ...current, sourceId: event.target.value }))}
+              onChange={(event) => updateItemForm((current) => ({ ...current, sourceId: event.target.value }))}
               disabled={isEditingItem || isSavingItem || sourceOptions.length === 0}
               required
               className="mt-2 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition [color-scheme:dark] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
@@ -686,7 +711,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
               <option value="" className="bg-slate-950">选择当前项目的 Source</option>
               {sourceOptions.map((source) => (
                 <option key={source.id} value={source.id} className="bg-slate-950">
-                  {source.kind} · {sourcePreview(source.contentText).slice(0, 52)}
+                  {source.kind} · {sourcePreview(source.preview).slice(0, 52)}
                 </option>
               ))}
             </select>
@@ -696,7 +721,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
             <select
               id="item-type"
               value={itemForm.type}
-              onChange={(event) => setItemForm((current) => ({ ...current, type: event.target.value as ProjectItem["type"] }))}
+              onChange={(event) => updateItemForm((current) => ({ ...current, type: event.target.value as ProjectItem["type"] }))}
               disabled={isSavingItem}
               className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition [color-scheme:dark] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -707,7 +732,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
             <input
               id="item-title"
               value={itemForm.title}
-              onChange={(event) => setItemForm((current) => ({ ...current, title: event.target.value }))}
+              onChange={(event) => updateItemForm((current) => ({ ...current, title: event.target.value }))}
               maxLength={160}
               required
               disabled={isSavingItem}
@@ -719,7 +744,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
             <textarea
               id="item-content"
               value={itemForm.content}
-              onChange={(event) => setItemForm((current) => ({ ...current, content: event.target.value }))}
+              onChange={(event) => updateItemForm((current) => ({ ...current, content: event.target.value }))}
               maxLength={20000}
               rows={5}
               required
@@ -732,7 +757,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
             <textarea
               id="item-source-excerpt"
               value={itemForm.sourceExcerpt}
-              onChange={(event) => setItemForm((current) => ({ ...current, sourceExcerpt: event.target.value }))}
+              onChange={(event) => updateItemForm((current) => ({ ...current, sourceExcerpt: event.target.value }))}
               maxLength={10000}
               rows={5}
               required
@@ -746,7 +771,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
               id="item-occurred-at"
               type="datetime-local"
               value={itemForm.occurredAt}
-              onChange={(event) => setItemForm((current) => ({ ...current, occurredAt: event.target.value }))}
+              onChange={(event) => updateItemForm((current) => ({ ...current, occurredAt: event.target.value }))}
               disabled={isSavingItem}
               className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition [color-scheme:dark] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
             />
@@ -772,11 +797,11 @@ export function ProjectDetailClient({ username }: { username: string }) {
             </div>
           </form>
 
-          <div className="min-w-0 max-w-full rounded-2xl border border-indigo-100 bg-indigo-50/60 p-6">
+          <div className="min-w-0 max-w-full self-start rounded-2xl border border-indigo-100 bg-indigo-50/60 p-6 lg:h-fit">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Selected source</p>
             <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-950">所选 Source 原文</h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">复制下方原文中的连续片段到“精确原文摘录”，服务端会验证它确实来自当前 Source。</p>
-            {selectedSource ? (
+            {selectedSource && "contentText" in selectedSource ? (
               <div className="mt-5 min-w-0 max-w-full rounded-xl border border-indigo-100 bg-white p-4">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
                   <span className="rounded-full bg-indigo-100 px-2.5 py-1 font-semibold uppercase tracking-wide text-indigo-700">{selectedSource.kind}</span>
@@ -784,9 +809,13 @@ export function ProjectDetailClient({ username }: { username: string }) {
                 </div>
                 <pre className="mt-4 min-w-0 max-w-full max-h-[34rem] overflow-auto whitespace-pre-wrap border-t border-slate-100 pt-4 text-sm leading-6 text-slate-700 [overflow-wrap:anywhere]">{selectedSource.contentText}</pre>
               </div>
+            ) : selectedSource ? (
+              <div className="mt-5 rounded-xl border border-dashed border-indigo-200 bg-white/70 px-5 py-10 text-center text-sm leading-6 text-slate-500">
+                {isSourceDetailLoading ? "正在加载资料原文…" : "正在准备资料原文…"}
+              </div>
             ) : (
               <div className="mt-5 rounded-xl border border-dashed border-indigo-200 bg-white/70 px-5 py-10 text-center text-sm leading-6 text-slate-500">
-                {sources.length === 0 ? "请先在上方项目资料区域接入 Source。" : "请选择一条 Source 查看原文。"}
+                {sources.length === 0 ? "请先在上方项目资料区域接入 Source。" : "请选择一条 Source 查看完整内容。"}
               </div>
             )}
           </div>
@@ -855,7 +884,8 @@ function ItemCard({
   onAction: (item: ProjectItem, action: ItemAction) => void;
 }) {
   const isActionPending = itemActionId === item.id;
-  const actionsDisabled = Boolean(itemActionId) || isSavingItem || editingItemId !== null;
+  const actionsDisabled = isActionPending || isSavingItem || editingItemId === item.id;
+  const editDisabled = Boolean(itemActionId) || isSavingItem || editingItemId === item.id;
   const requiresAiWorkbench =
     item.aiCandidateClaim !== null || item.webAiCandidate?.reviewStatus === "candidate";
 
@@ -890,7 +920,7 @@ function ItemCard({
             <button
               type="button"
               onClick={() => void onEdit(item)}
-              disabled={actionsDisabled}
+              disabled={editDisabled}
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               编辑

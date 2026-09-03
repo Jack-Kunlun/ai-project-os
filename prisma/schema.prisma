@@ -290,6 +290,11 @@ enum AiProviderKind {
   glm
 }
 
+enum AiProviderScope {
+  platform
+  workspace
+}
+
 enum AiProviderProtocol {
   chatCompletions @map("chat_completions")
 }
@@ -299,6 +304,12 @@ enum AiProviderConnectionStatus {
   verified
   error
   disabled
+}
+
+enum AiBillingMode {
+  platform
+  byok
+  legacy
 }
 
 enum WebAiScopeKind {
@@ -755,6 +766,38 @@ enum AiSafeErrorCode {
   aiBudgetDenied             @map("AI_BUDGET_DENIED")
   aiInvalidProviderResponse  @map("AI_INVALID_PROVIDER_RESPONSE")
   sourceInUse                @map("SOURCE_IN_USE")
+}
+
+enum MembershipSubscriptionStatus {
+  active
+  revoked
+}
+
+enum PlatformTokenGrantKind {
+  signup
+  manual
+}
+
+enum PlatformTokenReservationStatus {
+  reserved
+  settled
+  released
+  held
+}
+
+enum PlatformTokenLedgerEntryKind {
+  grant
+  reserve
+  settle
+  release
+  hold
+  adjustment
+}
+
+enum MembershipAuditEventKind {
+  grant
+  extend
+  revoke
 }
 
 enum AiCandidateReviewStatus {
@@ -3603,6 +3646,133 @@ model AppUser {
   oidcIdentities               OidcIdentity[]
   githubIdentity               GitHubIdentity?
   githubOauthAttempts          GitHubOauthAttempt[]
+  membershipSubscription       MembershipSubscription?
+  grantedMemberships           MembershipSubscription[]       @relation("MembershipGrantedBy")
+  revokedMemberships           MembershipSubscription[]       @relation("MembershipRevokedBy")
+  membershipAuditEvents        MembershipSubscriptionAudit[]  @relation("MembershipAuditUser")
+  membershipAuditActors        MembershipSubscriptionAudit[]  @relation("MembershipAuditActor")
+  platformTokenGrants          PlatformTokenGrant[]
+  issuedPlatformTokenGrants    PlatformTokenGrant[]            @relation("PlatformTokenGrantIssuedBy")
+  platformTokenReservations    PlatformTokenReservation[]
+  platformTokenLedgerEntries   PlatformTokenLedgerEntry[]
+  ownedAiProviderConnections   AiProviderConnection[]          @relation("AiProviderConnectionOwner")
+  billedWebAiGrants             WebAiGrant[]                    @relation("WebAiGrantBillingUser")
+}
+
+model MembershipSubscription {
+  id          String                       @id @default(uuid()) @db.Uuid
+  userId      String                       @unique @db.Uuid
+  status      MembershipSubscriptionStatus @default(active)
+  startsAt    DateTime
+  expiresAt   DateTime
+  grantedById String?                      @db.Uuid
+  revokedById String?                      @db.Uuid
+  revokedAt   DateTime?
+  note        String?                      @db.VarChar(500)
+  version     Int                          @default(1)
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
+  user        AppUser                      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  grantedBy   AppUser?                     @relation("MembershipGrantedBy", fields: [grantedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  revokedBy   AppUser?                     @relation("MembershipRevokedBy", fields: [revokedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  auditEvents MembershipSubscriptionAudit[]
+
+  @@index([status, expiresAt])
+  @@index([grantedById, updatedAt])
+}
+
+model MembershipSubscriptionAudit {
+  id             String                    @id @default(uuid()) @db.Uuid
+  subscriptionId String                    @db.Uuid
+  userId         String                    @db.Uuid
+  actorId        String                    @db.Uuid
+  eventKind      MembershipAuditEventKind
+  startsAt       DateTime
+  expiresAt      DateTime
+  note           String?                   @db.VarChar(500)
+  createdAt      DateTime                  @default(now())
+  subscription   MembershipSubscription   @relation(fields: [subscriptionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  user           AppUser                  @relation("MembershipAuditUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor          AppUser                  @relation("MembershipAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([subscriptionId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model PlatformTokenGrant {
+  id              String                 @id @default(uuid()) @db.Uuid
+  userId          String                 @db.Uuid
+  kind            PlatformTokenGrantKind
+  amount          Int
+  remainingTokens Int
+  offerVersion    String                 @db.VarChar(64)
+  issuedById      String?                @db.Uuid
+  issuedAt        DateTime               @default(now())
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  user            AppUser                @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  issuedBy        AppUser?               @relation("PlatformTokenGrantIssuedBy", fields: [issuedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  reservations    PlatformTokenReservation[]
+  ledgerEntries   PlatformTokenLedgerEntry[]
+
+  @@unique([userId, kind])
+  @@index([userId, expiresAt, revokedAt])
+}
+
+model PlatformTokenReservation {
+  id                    String                         @id @default(uuid()) @db.Uuid
+  userId                String                         @db.Uuid
+  grantId               String                         @db.Uuid
+  jobId                 String?                        @db.Uuid
+  providerConnectionId  String?                        @db.Uuid
+  callKey               String                         @db.VarChar(128)
+  operation             AiOperation
+  modelId               String                         @db.VarChar(128)
+  status                PlatformTokenReservationStatus @default(reserved)
+  reservedTokens        Int
+  settledTokens         Int?
+  reconciliationRequired Boolean                       @default(false)
+  safeErrorCode         String?                         @db.VarChar(64)
+  expiresAt             DateTime
+  createdAt             DateTime                        @default(now())
+  settledAt             DateTime?
+  releasedAt            DateTime?
+  user                  AppUser                         @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  grant                 PlatformTokenGrant              @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection    AiProviderConnection?           @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  providerCallAudit      ProviderCallAudit?
+  ledgerEntries         PlatformTokenLedgerEntry[]
+
+  @@unique([userId, callKey])
+  @@index([userId, status, expiresAt])
+  @@index([jobId, createdAt])
+  @@index([providerConnectionId, createdAt])
+}
+
+model PlatformTokenLedgerEntry {
+  id            String                        @id @default(uuid()) @db.Uuid
+  userId        String                        @db.Uuid
+  grantId       String?                       @db.Uuid
+  reservationId String?                       @db.Uuid
+  entryKind     PlatformTokenLedgerEntryKind
+  amount        Int
+  usageTokens   Int?
+  reasonCode    String                        @db.VarChar(64)
+  callKey       String?                       @db.VarChar(128)
+  metadata      Json                          @default("{}") @db.JsonB
+  createdAt     DateTime                      @default(now())
+  user          AppUser                       @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  grant         PlatformTokenGrant?           @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  reservation   PlatformTokenReservation?     @relation(fields: [reservationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  idempotencyKey String                        @unique @db.VarChar(180)
+
+  @@index([userId, createdAt])
+  @@index([grantId, createdAt])
+  @@index([reservationId, createdAt])
+  @@index([userId, callKey])
 }
 
 model AppSession {
@@ -3634,6 +3804,7 @@ model Workspace {
   invitations   WorkspaceInvitation[]
   oidcProviders OidcProvider[]
   projectDeletionReceipts ProjectDeletionReceipt[]
+  aiProviderConnections AiProviderConnection[]
 
   @@index([createdById, createdAt])
 }
@@ -3965,10 +4136,13 @@ model AiProviderConnection {
   id                       String                      @id @default(uuid()) @db.Uuid
   name                     String                      @unique @db.VarChar(80)
   kind                     AiProviderKind
+  scope                    AiProviderScope              @default(platform)
+  workspaceId              String?                     @db.Uuid
+  ownerUserId              String?                     @db.Uuid
   protocol                 AiProviderProtocol          @default(chatCompletions)
   baseUrl                  String                      @db.VarChar(512)
   credentialId             String                      @unique @db.Uuid
-  defaultGenerationModelId String                      @db.VarChar(128)
+  defaultGenerationModelId String?                     @db.VarChar(128)
   defaultEmbeddingModelId  String?                     @db.VarChar(128)
   defaultVisionModelId     String?                     @db.VarChar(128)
   embeddingDimensions      Int?
@@ -3979,6 +4153,8 @@ model AiProviderConnection {
   createdAt                DateTime                    @default(now())
   updatedAt                DateTime                    @updatedAt
   credential               ExternalCredential          @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  workspace                Workspace?                  @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  ownerUser                AppUser?                    @relation("AiProviderConnectionOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   projectRoutes            ProjectAiRoute[]
   aiRouteRevisionsOld      ProjectAiRouteRevision[]    @relation("ProjectAiRouteRevisionOldProvider")
   aiRouteRevisionsNew      ProjectAiRouteRevision[]    @relation("ProjectAiRouteRevisionNewProvider")
@@ -3991,8 +4167,11 @@ model AiProviderConnection {
   projectAgentRuns         ProjectAgentRun[]
   assetExtractionRuns      ProjectAssetExtractionRun[]
   assetSegments            ProjectAssetSegment[]
+  tokenReservations         PlatformTokenReservation[]
 
   @@index([kind, status])
+  @@index([scope, workspaceId, status])
+  @@index([ownerUserId, updatedAt])
 }
 
 model ProjectAiRoute {
@@ -4053,16 +4232,22 @@ model WebAiGrant {
   modelId              String               @db.VarChar(128)
   consentVersion       String               @db.VarChar(128)
   issuedById           String               @db.Uuid
+  billingMode          AiBillingMode       @default(legacy)
+  billingUserId        String               @db.Uuid
+  callKey              String?              @db.VarChar(128)
   issuedAt             DateTime             @default(now())
   expiresAt            DateTime
   revokedAt            DateTime?
   project              Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
   providerConnection   AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   issuedBy             AppUser              @relation(fields: [issuedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  billingUser          AppUser              @relation("WebAiGrantBillingUser", fields: [billingUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   jobs                 BackgroundJob[]
 
   @@index([projectId, operation, expiresAt])
   @@index([providerConnectionId])
+  @@index([billingUserId, issuedAt])
+  @@index([callKey])
 }
 
 model BackgroundJob {
@@ -4917,20 +5102,30 @@ model WebAiCandidate {
 
 model ProviderCallAudit {
   id                   String               @id @default(uuid()) @db.Uuid
-  jobId                String               @db.Uuid
+  jobId                String?              @db.Uuid
   providerConnectionId String               @db.Uuid
   operation            AiOperation
   modelId              String               @db.VarChar(128)
+  billingMode          AiBillingMode        @default(legacy)
+  billingUserId        String               @db.Uuid
+  callKey              String               @db.VarChar(128)
+  reservationId        String?              @unique @db.Uuid
   status               String               @db.VarChar(32)
   safeErrorCode        String?              @db.VarChar(64)
   providerRequestId    String?              @db.VarChar(256)
   inputTokens          Int                  @default(0)
   outputTokens         Int                  @default(0)
+  usageKnown            Boolean              @default(false)
   createdAt            DateTime             @default(now())
   completedAt          DateTime?
-  job                  BackgroundJob        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job                  BackgroundJob?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
   providerConnection   AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  reservation          PlatformTokenReservation? @relation(fields: [reservationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
 
   @@index([jobId, createdAt])
   @@index([providerConnectionId, createdAt])
+  @@index([billingUserId, createdAt])
+  @@index([callKey])
+  @@index([reservationId])
+  @@unique([jobId, callKey])
 }

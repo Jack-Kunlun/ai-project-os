@@ -42,7 +42,7 @@ test("project overview and materials use separate routes with a compact navigati
   assert.match(overview, /项目当前状态/u);
   assert.match(overview, /\/api\/projects\/\$\{projectId\}\/world/u);
   assert.match(overview, /id="current-state"/u);
-  assert.match(overview, /项目工作区/u);
+  assert.doesNotMatch(overview, /项目工作区/u);
   assert.match(overview, /高级状态治理/u);
   assert.doesNotMatch(overview, /ProjectMaterialIntake/u);
 
@@ -56,8 +56,32 @@ test("project overview and materials use separate routes with a compact navigati
   assert.match(materials, /projectSection="materials"/u);
   assert.match(materials, /ProjectMaterialIntake/u);
   assert.match(materials, /ProjectMaterialReviewQueue/u);
+  assert.match(materials, /materials\/sources/u);
+  assert.doesNotMatch(materials, /<details|查看原文/u);
   assert.doesNotMatch(materials, /SnapshotPanel|AiCapabilityGuide|PlaceholderCard/u);
   assert.doesNotMatch(materials, /返回项目概览|打开 AI 工作台/u);
+});
+
+test("platform provider form keeps GLM embedding-only defaults optional", async () => {
+  const settings = await readFile("src/app/settings/settings-client.tsx", "utf8");
+
+  assert.match(settings, /const \[generationModelId, setGenerationModelId\] = useState\("deepseek-v4-flash"\)/u);
+  assert.match(settings, /setGenerationModelId\(nextKind === "glm" \? "" : next\.generationModelSuggestions\[0\] \?\? ""\)/u);
+  assert.match(settings, /setVisionModelId\(nextKind === "glm" \? "" : next\.visionModelSuggestions\[0\] \?\? ""\)/u);
+  assert.match(settings, /generationModelId: generationModelId \|\| null/u);
+  assert.match(settings, /visionModelId: definition\?\.supportsVision && visionModelId \? visionModelId : null/u);
+  assert.match(settings, /label="图片识别模型（可选）"/u);
+  assert.match(settings, /label="生成模型（可选）"/u);
+  assert.doesNotMatch(settings, /label="图片识别模型（可选）"><input[^>]*required/u);
+  assert.doesNotMatch(settings, /label="生成模型（可选）"><input[^>]*required/u);
+  assert.match(settings, /defaultGenerationModelId \?\? "未配置"/u);
+  assert.match(settings, /check\.generation !== null/u);
+  assert.match(settings, /check\.embeddingDimensions !== null/u);
+  assert.match(settings, /check\.vision !== null/u);
+  assert.match(settings, /生成连接通过/u);
+  assert.match(settings, /向量连接通过/u);
+  assert.match(settings, /图片识别连接通过/u);
+  assert.doesNotMatch(settings, /setMessage\(payload\.check\.(generation|vision)/u);
 });
 
 test("grounded extraction uses bounded scrolling and explicit batch operations", async () => {
@@ -108,4 +132,37 @@ test("AI workbench spacing and project management keep AI usage visible", async 
   assert.match(governance, /<details id="task-runs" open/u);
   assert.match(governance, /<details id="route-history" open/u);
   assert.doesNotMatch(governance, /待审核候选/u);
+});
+
+test("project source lists stay compact while detail and notification opens keep server boundaries", async () => {
+  const [sourceListRoute, sourceDetailRoute, sourceDetailPage, materials, notifications, bell, automation, openRoute, transport] = await Promise.all([
+    readFile("src/app/api/projects/[projectId]/sources/route.ts", "utf8"),
+    readFile("src/app/api/projects/[projectId]/sources/[sourceId]/route.ts", "utf8"),
+    readFile("src/app/projects/[projectId]/materials/sources/[sourceId]/source-detail-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/project-client.tsx", "utf8"),
+    readFile("src/app/notifications/notifications-client.tsx", "utf8"),
+    readFile("src/components/notification-bell.tsx", "utf8"),
+    readFile("src/lib/automation.ts", "utf8"),
+    readFile("src/app/api/notifications/[notificationId]/open/route.ts", "utf8"),
+    readFile("src/lib/ai-providers/transport.ts", "utf8"),
+  ]);
+
+  assert.match(sourceListRoute, /toSourceSummary/u);
+  assert.match(sourceListRoute, /preview/u);
+  assert.match(sourceDetailRoute, /contentText: true/u);
+  assert.match(sourceDetailPage, /ProjectMaterialsParentLink/u);
+  assert.match(sourceDetailPage, /api\/projects\/\$\{projectId\}\/sources\/\$\{sourceId\}/u);
+  assert.match(materials, /editingItemId === item\.id/u);
+  assert.match(materials, /scrollIntoView/u);
+  assert.match(materials, /放弃当前未保存内容/u);
+  assert.doesNotMatch(notifications, /标为已读|标为未读/u);
+  assert.match(notifications, /\/open/u);
+  assert.match(notifications, /dispatchEvent\(new CustomEvent\("ai-project-os:notifications-changed"\)/u);
+  assert.match(bell, /notifications-changed/u);
+  assert.match(automation, /where: \{ userId, readAt: null \}/u);
+  assert.match(automation, /COALESCE/u);
+  assert.match(openRoute, /export async function POST/u);
+  assert.match(openRoute, /assertSameOrigin\(request\)/u);
+  assert.match(transport, /input\.connection\.kind === "glm"/u);
+  assert.match(transport, /dimensions: input\.expectedDimensions/u);
 });

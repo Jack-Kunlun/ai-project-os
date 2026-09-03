@@ -35,8 +35,11 @@ type FakeProvider = {
   id: string;
   kind: "openai" | "qwen";
   status: "verified" | "error";
+  scope: "platform" | "workspace";
+  workspaceId: string | null;
   defaultEmbeddingModelId: string | null;
   defaultVisionModelId: string | null;
+  defaultGenerationModelId: string | null;
   embeddingDimensions: number | null;
 };
 
@@ -47,16 +50,22 @@ class FakeRouteDb {
       id: openAiConnectionId,
       kind: "openai",
       status: "verified",
+      scope: "platform",
+      workspaceId: null,
       defaultEmbeddingModelId: "text-embedding-3-small",
       defaultVisionModelId: "gpt-4.1-mini",
+      defaultGenerationModelId: "gpt-4.1-mini",
       embeddingDimensions: 1536,
     }],
     [qwenConnectionId, {
       id: qwenConnectionId,
       kind: "qwen",
       status: "verified",
+      scope: "platform",
+      workspaceId: null,
       defaultEmbeddingModelId: "text-embedding-v4",
       defaultVisionModelId: "qwen3-vl-plus",
+      defaultGenerationModelId: "qwen-plus",
       embeddingDimensions: 1024,
     }],
   ]);
@@ -65,12 +74,17 @@ class FakeRouteDb {
   private routeClock = 0;
 
   readonly project = {
-    findUnique: async () => ({ id: projectId }),
+    findUnique: async () => ({ id: projectId, workspaceId: null }),
   };
 
   readonly appUser = {
     findUnique: async ({ where }: { where: { id: string } }) =>
       where.id === actorId ? { id: actorId } : null,
+  };
+
+  readonly workspaceMembership = {
+    findUnique: async ({ where }: { where: { workspaceId_userId: { userId: string } } }) =>
+      where.workspaceId_userId.userId === actorId ? { role: "owner" as const } : null,
   };
 
   readonly aiProviderConnection = {

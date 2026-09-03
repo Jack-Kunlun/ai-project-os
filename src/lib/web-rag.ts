@@ -15,6 +15,7 @@ import {
   failWebAiJob,
   finishWebAiJob,
   manifestFingerprint,
+  stableAiCallKey,
   updateWebAiJobProgress,
   type RuntimeRoute,
 } from "@/lib/web-ai-governance";
@@ -297,6 +298,7 @@ export async function searchActiveMemoryForJob(input: Readonly<{
   route: RuntimeRoute;
   index: Awaited<ReturnType<typeof getActiveMemoryIndex>>;
   take?: number;
+  callKeyDiscriminator?: string;
 }>, db: PrismaClient): Promise<readonly WebSearchResult[]> {
   if (
     input.route.providerConnection.status !== "verified" ||
@@ -311,6 +313,9 @@ export async function searchActiveMemoryForJob(input: Readonly<{
     jobId: input.jobId,
     attempt: input.attempt,
     route: input.route,
+    callKey: stableAiCallKey(input.jobId, "semanticSearch", input.callKeyDiscriminator ?? "embedding"),
+    requestPayload: { question: input.question },
+    maxOutputTokens: 128,
     call: () => invokeEmbeddings({
       connection: input.route.providerConnection,
       modelId: input.route.modelId,
@@ -450,6 +455,9 @@ export async function runRagAnswerJob(input: Readonly<{
       jobId: granted.jobId,
       attempt: claim,
       route: generationRoute,
+      callKey: stableAiCallKey(granted.jobId, "generateWithContext", "rag"),
+      requestPayload: { question, contexts },
+      maxOutputTokens: generationRoute.maxOutputTokens,
       call: () => invokeChatCompletion({
         connection: generationRoute.providerConnection,
         operation: "generateWithContext",

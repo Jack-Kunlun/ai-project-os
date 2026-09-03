@@ -59,7 +59,7 @@ export const PROVIDER_DEFINITIONS: readonly ProviderDefinition[] = Object.freeze
     apiKeyLabel: "智谱 API Key",
     generationModelSuggestions: Object.freeze(["glm-4-flash", "glm-4-plus", "glm-4-air"]),
     embeddingModelSuggestions: Object.freeze([
-      Object.freeze({ id: "embedding-3", dimensions: 2048 }),
+      Object.freeze({ id: "embedding-3", dimensions: 1024 }),
       Object.freeze({ id: "embedding-2", dimensions: 1024 }),
     ]),
     visionModelSuggestions: Object.freeze(["glm-5v-turbo", "glm-4.5v"]),

@@ -17,6 +17,7 @@ import {
   failWebAiJob,
   finishWebAiJob,
   manifestFingerprint,
+  stableAiCallKey,
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
 
@@ -292,6 +293,9 @@ export async function runAutoExtractJob(input: Readonly<{
         jobId: granted.jobId,
         attempt: claim,
         route,
+        callKey: stableAiCallKey(granted.jobId, "autoExtract", source.id),
+        requestPayload: { sourceId: source.id, evidenceBlocks },
+        maxOutputTokens: route.maxOutputTokens,
         call: () => invokeChatCompletion({
           connection: route.providerConnection,
           operation: "autoExtract",

@@ -3,6 +3,12 @@ import { readCredentialSecret } from "@/lib/credential-vault";
 
 /** Upper bound used for one provider HTTP request when no earlier deadline applies. */
 export const PROVIDER_REQUEST_TIMEOUT_MS = 45_000;
+/**
+ * Interactive transaction budget for the manual provider connectivity test.
+ * It must outlive the single shared provider probe deadline by a bounded
+ * amount so the membership lock stays held through the final CAS write.
+ */
+export const PROVIDER_CONNECTION_TEST_TRANSACTION_TIMEOUT_MS = PROVIDER_REQUEST_TIMEOUT_MS + 10_000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_EMBEDDING_BATCH = 32;
 const MAX_EMBEDDING_INPUT_CHARS = 24_000;
@@ -39,6 +45,7 @@ export type ChatResult = Readonly<{
   content: string;
   inputTokens: number;
   outputTokens: number;
+  usageKnown: boolean;
   providerRequestId: string | null;
 }>;
 
@@ -46,6 +53,7 @@ export type EmbeddingResult = Readonly<{
   vectors: readonly (readonly number[])[];
   dimensions: number;
   inputTokens: number;
+  usageKnown: boolean;
   providerRequestId: string | null;
 }>;
 
@@ -98,7 +106,7 @@ async function providerPost(
     ? PROVIDER_REQUEST_TIMEOUT_MS
     : absoluteDeadlineAt.getTime() - Date.now();
   if (remaining <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
-  const apiKey = await readCredentialSecret(connection.credentialId, "aiProvider");
+  const apiKey = await readCredentialSecretWithDeadline(connection.credentialId, absoluteDeadlineAt);
   const remainingAfterCredential = absoluteDeadlineAt === undefined
     ? PROVIDER_REQUEST_TIMEOUT_MS
     : absoluteDeadlineAt.getTime() - Date.now();
@@ -121,7 +129,11 @@ async function providerPost(
     });
     const requestId = safeRequestId(response);
     if (!response.ok) return mapHttpError(response.status);
-    return Object.freeze({ payload: await readBoundedJson(response), requestId });
+    const payload = await readBoundedJson(response);
+    if (absoluteDeadlineAt !== undefined && absoluteDeadlineAt.getTime() <= Date.now()) {
+      return fail("AI_PROVIDER_TIMEOUT", 504);
+    }
+    return Object.freeze({ payload, requestId });
   } catch (error) {
     if (error instanceof ProviderTransportError) throw error;
     if (error instanceof DOMException && error.name === "AbortError") {
@@ -133,15 +145,36 @@ async function providerPost(
   }
 }
 
-function usageCounts(payload: Record<string, unknown>): Readonly<{ input: number; output: number }> {
+async function readCredentialSecretWithDeadline(
+  credentialId: string,
+  absoluteDeadlineAt: Date | undefined,
+): Promise<string> {
+  if (absoluteDeadlineAt === undefined) return readCredentialSecret(credentialId, "aiProvider");
+  const remaining = absoluteDeadlineAt.getTime() - Date.now();
+  if (remaining <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false)), remaining);
+  });
+  try {
+    return await Promise.race([readCredentialSecret(credentialId, "aiProvider"), deadline]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+function usageCounts(payload: Record<string, unknown>, outputRequired = true): Readonly<{ input: number; output: number; known: boolean }> {
   const usage = payload.usage;
-  if (typeof usage !== "object" || usage === null) return Object.freeze({ input: 0, output: 0 });
+  if (typeof usage !== "object" || usage === null) return Object.freeze({ input: 0, output: 0, known: false });
   const record = usage as Record<string, unknown>;
   const input = record.prompt_tokens ?? record.input_tokens;
   const output = record.completion_tokens ?? record.output_tokens;
+  const inputKnown = typeof input === "number" && Number.isSafeInteger(input) && input >= 0;
+  const outputKnown = typeof output === "number" && Number.isSafeInteger(output) && output >= 0;
   return Object.freeze({
-    input: typeof input === "number" && Number.isSafeInteger(input) && input >= 0 ? input : 0,
-    output: typeof output === "number" && Number.isSafeInteger(output) && output >= 0 ? output : 0,
+    input: inputKnown ? input : 0,
+    output: outputKnown ? output : 0,
+    known: inputKnown && (outputRequired ? outputKnown : true),
   });
 }
 
@@ -152,6 +185,7 @@ export async function invokeChatCompletion(input: Readonly<{
   messages: readonly ChatMessage[];
   maxOutputTokens: number;
   temperature?: number;
+  absoluteDeadlineAt?: Date;
 }>): Promise<ChatResult> {
   const { payload, requestId } = await providerPost(input.connection, "/chat/completions", {
     model: input.modelId,
@@ -159,7 +193,7 @@ export async function invokeChatCompletion(input: Readonly<{
     max_tokens: input.maxOutputTokens,
     temperature: input.temperature ?? 0,
     stream: false,
-  });
+  }, input.absoluteDeadlineAt);
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
   const record = payload as Record<string, unknown>;
   const choices = record.choices;
@@ -177,6 +211,7 @@ export async function invokeChatCompletion(input: Readonly<{
     content,
     inputTokens: usage.input,
     outputTokens: usage.output,
+    usageKnown: usage.known,
     providerRequestId: requestId,
   });
 }
@@ -206,6 +241,7 @@ export async function invokeVisionCompletion(input: Readonly<{
   mimeType: "image/png" | "image/jpeg" | "image/webp";
   prompt: string;
   maxOutputTokens: number;
+  absoluteDeadlineAt?: Date;
 }>): Promise<ChatResult> {
   if (input.image.length === 0 || input.image.length > 10 * 1024 * 1024 || input.prompt.length < 1 || input.prompt.length > 8_000) {
     return fail("AI_PROVIDER_REJECTED", 400);
@@ -225,7 +261,7 @@ export async function invokeVisionCompletion(input: Readonly<{
       }],
       max_output_tokens: input.maxOutputTokens,
       store: false,
-    });
+    }, input.absoluteDeadlineAt);
     if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
     const record = payload as Record<string, unknown>;
     const content = responseText(record);
@@ -235,6 +271,7 @@ export async function invokeVisionCompletion(input: Readonly<{
       content,
       inputTokens: usage.input,
       outputTokens: usage.output,
+      usageKnown: usage.known,
       providerRequestId: requestId,
     });
   }
@@ -250,7 +287,7 @@ export async function invokeVisionCompletion(input: Readonly<{
     max_tokens: input.maxOutputTokens,
     temperature: 0,
     stream: false,
-  });
+  }, input.absoluteDeadlineAt);
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
   const record = payload as Record<string, unknown>;
   const choices = record.choices;
@@ -268,6 +305,7 @@ export async function invokeVisionCompletion(input: Readonly<{
     content,
     inputTokens: usage.input,
     outputTokens: usage.output,
+    usageKnown: usage.known,
     providerRequestId: requestId,
   });
 }
@@ -290,7 +328,7 @@ export async function invokeEmbeddings(input: Readonly<{
   const { payload, requestId } = await providerPost(input.connection, "/embeddings", {
     model: input.modelId,
     input: input.texts,
-    ...(input.connection.kind === "openai" && input.expectedDimensions
+    ...((input.connection.kind === "openai" || input.connection.kind === "glm") && input.expectedDimensions
       ? { dimensions: input.expectedDimensions }
       : {}),
   }, input.absoluteDeadlineAt);
@@ -322,11 +360,12 @@ export async function invokeEmbeddings(input: Readonly<{
   ) {
     return fail("AI_PROVIDER_INVALID_RESPONSE");
   }
-  const usage = usageCounts(record);
+  const usage = usageCounts(record, false);
   return Object.freeze({
     vectors: Object.freeze(ordered.map((entry) => Object.freeze(entry.vector))),
     dimensions,
     inputTokens: usage.input,
+    usageKnown: usage.known,
     providerRequestId: requestId,
   });
 }

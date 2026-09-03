@@ -41,6 +41,9 @@ import { ActionResultIntakeError } from "@/lib/action-result-intake";
 import { McpCapabilityError } from "@/lib/mcp";
 import { ProjectPlanError } from "@/lib/project-plan";
 import { ProjectWorldError } from "@/lib/project-world";
+import { AiEntitlementError } from "@/lib/ai-entitlements";
+import { MembershipServiceError } from "@/lib/membership-service";
+import { WorkspaceProviderServiceError } from "@/lib/workspace-provider-service";
 
 export type ApiErrorBody = {
   error: {
@@ -463,6 +466,27 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_PROVIDER_IN_USE: [409, "供应商仍被项目路由或历史审计记录引用，无法停用或永久删除"],
       AI_PROVIDER_DELETE_REQUIRES_DISABLED: [409, "请先停用供应商连接，再执行永久删除"],
       AI_PROVIDER_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
+      AI_PROVIDER_CONNECTION_UNAVAILABLE: [409, "供应商连接尚未验证或已停用"],
+      AI_PROVIDER_CONFLICT: [409, "供应商连接已被其他操作更新，请刷新后重试"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof WorkspaceProviderServiceError) {
+    const mapping = {
+      AI_PROVIDER_INVALID_INPUT: [400, "供应商配置无效"],
+      AI_PROVIDER_NOT_FOUND: [404, "工作区模型连接不存在"],
+      AI_PROVIDER_NAME_CONFLICT: [409, "模型连接名称已存在"],
+      AI_PROVIDER_IN_USE: [409, "模型连接仍被项目路由或历史审计记录引用"],
+      AI_PROVIDER_DELETE_REQUIRES_DISABLED: [409, "请先停用模型连接，再执行永久删除"],
+      AI_PROVIDER_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
+      AI_PROVIDER_SCOPE_FORBIDDEN: [403, "模型连接不属于当前工作区"],
+      AI_PROVIDER_OWNER_REQUIRED: [403, "只有该连接所有者且为工作区 Owner/Admin 才能操作"],
+      AI_MEMBERSHIP_REQUIRED: [403, "配置工作区模型需要有效会员资格"],
+      AI_MEMBERSHIP_EXPIRED: [403, "会员资格已到期，不能继续配置模型"],
+      AI_PROVIDER_CONNECTION_UNAVAILABLE: [409, "模型连接尚未验证或已停用"],
+      AI_PROVIDER_CONFLICT: [409, "模型连接已被其他操作更新，请刷新后重试"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };
@@ -486,6 +510,37 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     };
   }
 
+  if (error instanceof AiEntitlementError) {
+    const mapping = {
+      AI_MEMBERSHIP_REQUIRED: [403, "该功能需要有效会员资格"],
+      AI_MEMBERSHIP_EXPIRED: [403, "会员资格已到期，请联系管理员"],
+      AI_PROVIDER_SCOPE_FORBIDDEN: [403, "模型连接不属于当前工作区"],
+      AI_PROVIDER_OWNER_REQUIRED: [403, "只有工作区 Owner 或 Admin 可以管理该模型连接"],
+      AI_ROUTE_CONFIGURATION_FORBIDDEN: [403, "当前模型路由配置不允许使用该连接"],
+      AI_PLATFORM_TOKEN_EXHAUSTED: [402, "平台 Token 额度不足"],
+      AI_PLATFORM_TOKEN_EXPIRED: [410, "平台 Token 已过期"],
+      AI_PLATFORM_CONCURRENCY_LIMIT: [429, "当前已有一个平台 AI 任务在运行"],
+      AI_MODEL_CAPABILITY_MISMATCH: [422, "模型与请求能力不匹配"],
+      AI_PROVIDER_CONNECTION_UNAVAILABLE: [409, "模型连接当前不可用，请先完成验证"],
+      AI_PROVIDER_CALL_RECONCILIATION_REQUIRED: [409, "上一次模型调用需要先完成账务核对"],
+      AI_PLATFORM_TOKEN_USAGE_UNVERIFIED: [409, "模型用量未能验证，需要完成账务核对"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof MembershipServiceError) {
+    const mapping = {
+      MEMBERSHIP_INVALID_INPUT: [400, "会员管理请求无效"],
+      MEMBERSHIP_USER_NOT_FOUND: [404, "目标用户不存在"],
+      MEMBERSHIP_NOT_FOUND: [404, "该用户没有会员记录"],
+      MEMBERSHIP_CONFLICT: [409, "会员状态已被其他管理员更新，请刷新后重试"],
+      MEMBERSHIP_ADMIN_REQUIRED: [403, "只有系统管理员可以管理会员"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof ProjectAiRouteError) {
     const mapping = {
       PROJECT_AI_ROUTE_INVALID_INPUT: [400, "项目模型路由配置无效"],
@@ -495,6 +550,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_PROVIDER_NOT_FOUND: [404, "模型供应商不存在"],
       AI_PROVIDER_NOT_VERIFIED: [409, "请先通过供应商连接测试"],
       AI_PROVIDER_CAPABILITY_MISMATCH: [422, "所选供应商或模型不支持该能力"],
+      AI_PROVIDER_SCOPE_FORBIDDEN: [403, "所选供应商不属于当前项目工作区"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

@@ -1,6 +1,6 @@
 # GitHub Actions 生产部署（未来能力，当前禁用）
 
-状态：`PLANNED`。AI Project OS 当前仍处于 `0.1.0-dev.1` 内部开发阶段，没有正式发布基线；首个正式公开版本计划为 `1.0.0`。在 `v1.0.0` 正式发布前，**Deploy production** 工作流的生产 job 通过静态 `if: ... && false` fail-closed，任何手动触发都不会执行检出、SSH、部署或健康检查。
+状态：`PLANNED`。AI Project OS 当前处于 `0.2.0-dev.1` 内部改造开发阶段，基于已发布 prerelease `v0.1.0-dev.1`，没有正式发布基线；首个正式公开版本计划为 `1.0.0`。0.2.x 的会员个人模型、Git/MCP 用户私有所有权和平台默认模型路由仍处于开发/计划阶段，不能视为本版本已交付能力。在 `v1.0.0` 正式发布前，**Deploy production** 工作流的生产 job 通过静态 `if: ... && false` fail-closed，任何手动触发都不会执行检出、SSH、部署或健康检查。
 
 未来启用后，AI Project OS 才会从 GitHub Actions 的 **Deploy production** 工作流手动部署已经正式发布并通过标签 CI 的版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 
@@ -71,7 +71,7 @@ sudo deploy/production/install-production-deploy.sh \
 
 ## 启用后的部署流程（未来计划）
 
-首个正式 `v1.0.0` 发布并完成独立发布验收前，不要配置或点击生产部署入口。`0.1.0-dev.1` 以及任何 `-dev`/候选版本都不能进入生产 tag 通道。
+首个正式 `v1.0.0` 发布并完成独立发布验收前，不要配置或点击生产部署入口。`0.2.0-dev.1`、`v0.1.0-dev.1` 以及任何 `-dev`/候选版本都不能进入生产 tag 通道。
 
 在未来启用后：
 

@@ -166,6 +166,7 @@ enum EmbeddingProvider {
 enum AppUserRole {
   admin
   member
+  user
 }
 
 enum WorkspaceMembershipRole {

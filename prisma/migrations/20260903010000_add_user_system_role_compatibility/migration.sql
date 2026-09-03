@@ -1,0 +1,1 @@
+ALTER TYPE "AppUserRole" ADD VALUE IF NOT EXISTS 'user';

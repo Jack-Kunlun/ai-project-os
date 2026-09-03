@@ -213,7 +213,19 @@ test(
     } finally {
       globalThis.fetch = previousFetch;
       await db.project.deleteMany({ where: { id: projectId } });
-      if (providerId !== null) await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
+      if (providerId !== null) {
+        const reservations = await db.platformTokenReservation.findMany({
+          where: { providerConnectionId: providerId },
+          select: { id: true },
+        });
+        await db.providerCallAudit.deleteMany({ where: { providerConnectionId: providerId } });
+        const reservationIds = reservations.map((reservation) => reservation.id);
+        if (reservationIds.length > 0) {
+          await db.platformTokenLedgerEntry.deleteMany({ where: { reservationId: { in: reservationIds } } });
+          await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
+        }
+        await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
+      }
       if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
       await unlink(masterKeyPath).catch(() => undefined);

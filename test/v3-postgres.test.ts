@@ -260,23 +260,36 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     await updateProjectLifecycle({ projectId: projectB, actorId: admin.id, action: "restore", expectedUpdatedAt: archived.project.updatedAt }, db);
     assert.equal(await db.automationRule.count({ where: { projectId: projectB, status: "active" } }), 0);
   } finally {
-    const pendingOidcCredentials = oidcProviderId === null
-      ? []
-      : (await db.oidcLoginAttempt.findMany({ where: { providerId: oidcProviderId }, select: { credentialId: true } })).map((attempt) => attempt.credentialId);
-    if (oidcProviderId !== null) await db.oidcProvider.deleteMany({ where: { id: oidcProviderId } });
-    if (oidcProviderCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: oidcProviderCredentialId } });
-    if (failedFlowCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: failedFlowCredentialId } });
-    if (disposableOidcProviderId !== null) await db.oidcProvider.deleteMany({ where: { id: disposableOidcProviderId } });
-    if (disposableOidcCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: disposableOidcCredentialId } });
-    if (pendingOidcCredentials.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: pendingOidcCredentials } } });
-    await db.project.deleteMany({ where: { id: { in: [projectA, projectB] } } });
-    if (oidcUserId !== null) await db.appUser.deleteMany({ where: { id: oidcUserId } });
-    if (collisionUserId !== null) await db.appUser.deleteMany({ where: { id: collisionUserId } });
-    await db.workspace.deleteMany({ where: { id: roleWorkspaceId } });
-    await db.appUser.deleteMany({ where: { id: memberId } });
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await unlink(masterKeyPath).catch(() => undefined);
-    if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
-    else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;
+    try {
+      const pendingOidcCredentials = oidcProviderId === null
+        ? []
+        : (await db.oidcLoginAttempt.findMany({ where: { providerId: oidcProviderId }, select: { credentialId: true } })).map((attempt) => attempt.credentialId);
+      if (oidcProviderId !== null) await db.oidcProvider.deleteMany({ where: { id: oidcProviderId } });
+      if (oidcProviderCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: oidcProviderCredentialId } });
+      if (failedFlowCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: failedFlowCredentialId } });
+      if (disposableOidcProviderId !== null) await db.oidcProvider.deleteMany({ where: { id: disposableOidcProviderId } });
+      if (disposableOidcCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: disposableOidcCredentialId } });
+      if (pendingOidcCredentials.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: pendingOidcCredentials } } });
+      await db.project.deleteMany({ where: { id: { in: [projectA, projectB] } } });
+      if (oidcUserId !== null) {
+        await db.platformTokenLedgerEntry.deleteMany({ where: { userId: oidcUserId } });
+        await db.platformTokenGrant.deleteMany({ where: { userId: oidcUserId } });
+        await db.appUser.deleteMany({ where: { id: oidcUserId } });
+      }
+      if (collisionUserId !== null) await db.appUser.deleteMany({ where: { id: collisionUserId } });
+      await db.workspace.deleteMany({ where: { id: roleWorkspaceId } });
+      await db.appUser.deleteMany({ where: { id: memberId } });
+    } finally {
+      await new Promise<void>((resolve) => {
+        if (!server.listening) {
+          resolve();
+          return;
+        }
+        server.close(() => resolve());
+      });
+      await unlink(masterKeyPath).catch(() => undefined);
+      if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+      else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;
+    }
   }
 });

@@ -223,7 +223,19 @@ test(
     } finally {
       globalThis.fetch = previousFetch;
       await db.project.deleteMany({ where: { id: projectId } });
-      if (providerIds.length > 0) await db.aiProviderConnection.deleteMany({ where: { id: { in: providerIds } } });
+      if (providerIds.length > 0) {
+        const reservations = await db.platformTokenReservation.findMany({
+          where: { providerConnectionId: { in: providerIds } },
+          select: { id: true },
+        });
+        await db.providerCallAudit.deleteMany({ where: { providerConnectionId: { in: providerIds } } });
+        const reservationIds = reservations.map((reservation) => reservation.id);
+        if (reservationIds.length > 0) {
+          await db.platformTokenLedgerEntry.deleteMany({ where: { reservationId: { in: reservationIds } } });
+          await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
+        }
+        await db.aiProviderConnection.deleteMany({ where: { id: { in: providerIds } } });
+      }
       if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
       await rm(assetRoot, { recursive: true, force: true });

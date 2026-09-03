@@ -333,10 +333,22 @@ export default defineConfig({
       globalThis.fetch = previousFetch;
       if (db !== null) {
         await db.project.deleteMany({ where: { id: projectId } });
-        if (providerId !== null) await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
-        if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
-        await db.aiProviderConnection.deleteMany({ where: { id: legacyProviderId } });
-        await db.externalCredential.deleteMany({ where: { id: legacyCredentialId } });
+        const providerIds = [legacyProviderId, providerId].filter((id): id is string => id !== null);
+        if (providerIds.length > 0) {
+          const reservations = await db.platformTokenReservation.findMany({
+            where: { providerConnectionId: { in: providerIds } },
+            select: { id: true },
+          });
+          await db.providerCallAudit.deleteMany({ where: { providerConnectionId: { in: providerIds } } });
+          const reservationIds = reservations.map((reservation) => reservation.id);
+          if (reservationIds.length > 0) {
+            await db.platformTokenLedgerEntry.deleteMany({ where: { reservationId: { in: reservationIds } } });
+            await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
+          }
+          await db.aiProviderConnection.deleteMany({ where: { id: { in: providerIds } } });
+        }
+        const credentialIds = [legacyCredentialId, credentialId].filter((id): id is string => id !== null);
+        if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
         await db.$disconnect();
       }
       if (rawConnected) await raw.end();

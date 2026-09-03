@@ -430,10 +430,22 @@ test(
       if (sameProjectGenerationId !== null) await db.memoryIndexGeneration.deleteMany({ where: { id: sameProjectGenerationId } });
       await db.project.deleteMany({ where: { id: projectId } });
       if (crossProjectId !== null) await db.project.deleteMany({ where: { id: crossProjectId } });
-      if (alternateProviderId !== null) await db.aiProviderConnection.deleteMany({ where: { id: alternateProviderId } });
-      if (alternateCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: alternateCredentialId } });
-      if (providerId !== null) await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
-      if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
+      const providerIds = [providerId, alternateProviderId].filter((id): id is string => id !== null);
+      if (providerIds.length > 0) {
+        const reservations = await db.platformTokenReservation.findMany({
+          where: { providerConnectionId: { in: providerIds } },
+          select: { id: true },
+        });
+        await db.providerCallAudit.deleteMany({ where: { providerConnectionId: { in: providerIds } } });
+        const reservationIds = reservations.map((reservation) => reservation.id);
+        if (reservationIds.length > 0) {
+          await db.platformTokenLedgerEntry.deleteMany({ where: { reservationId: { in: reservationIds } } });
+          await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
+        }
+        await db.aiProviderConnection.deleteMany({ where: { id: { in: providerIds } } });
+      }
+      const credentialIds = [credentialId, alternateCredentialId].filter((id): id is string => id !== null);
+      if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
       await unlink(masterKeyPath).catch(() => undefined);
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

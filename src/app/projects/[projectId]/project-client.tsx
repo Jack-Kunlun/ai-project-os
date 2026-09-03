@@ -693,7 +693,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
           <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status" aria-live="polite">{itemSuccess}</div>
         ) : null}
 
-        <div className="mt-8 grid min-w-0 items-start grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
+        <div className="mt-8 grid min-w-0 items-stretch grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
           <form id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full rounded-2xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-950/10" aria-labelledby="item-form-heading">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Manual item</p>
             <h3 id="item-form-heading" className="mt-3 text-xl font-semibold tracking-tight text-white">{isEditingItem ? "编辑项目条目" : "新增项目条目"}</h3>
@@ -797,7 +797,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
             </div>
           </form>
 
-          <div className="min-w-0 max-w-full self-start rounded-2xl border border-indigo-100 bg-indigo-50/60 p-6 lg:h-fit">
+          <div className="min-w-0 max-w-full rounded-2xl border border-indigo-100 bg-indigo-50/60 p-6">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Selected source</p>
             <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-950">所选 Source 原文</h3>
             <p className="mt-2 text-sm leading-6 text-slate-600">复制下方原文中的连续片段到“精确原文摘录”，服务端会验证它确实来自当前 Source。</p>

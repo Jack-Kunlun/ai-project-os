@@ -303,6 +303,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       GIT_CONNECTION_NAME_CONFLICT: [409, "Git 服务连接名称已存在"],
       GIT_CONNECTION_IN_USE: [409, "Git 服务仍被项目仓库关联或历史记录引用，无法停用或永久删除"],
       GIT_CONNECTION_DISABLED: [409, "Git 服务连接已停用"],
+      GIT_CONNECTION_NOT_VERIFIED: [409, "Git 服务连接尚未通过管理员验证"],
       GIT_CONNECTION_DELETE_REQUIRES_DISABLED: [409, "请先停用 Git 服务连接，再执行永久删除"],
       GIT_CONNECTION_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
       GIT_REPOSITORY_NOT_FOUND: [404, "Git 仓库或分支不存在"],

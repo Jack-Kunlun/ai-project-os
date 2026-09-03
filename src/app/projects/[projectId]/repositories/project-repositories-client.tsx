@@ -12,6 +12,13 @@ type Connection = {
   transport: string;
   baseUrl: string;
   status: "configured" | "verified" | "error" | "disabled";
+  disabledAt: string | null;
+};
+type RepositoryConnection = {
+  id: string;
+  name: string;
+  providerKind: string;
+  transport: string;
 };
 type Repository = {
   id: string;
@@ -28,7 +35,7 @@ type Repository = {
     repositoryPath: string;
     displayName: string;
     webUrl: string | null;
-    connection: Connection;
+    connection: RepositoryConnection;
   };
   snapshotPointer: null | {
     publishedAt: string;
@@ -55,7 +62,7 @@ function bytesLabel(value: number) {
   return `${(value / 1024 / 1024).toFixed(1)} MiB`;
 }
 
-export function ProjectRepositoriesClient({ username, projectId }: { username: string; projectId: string }) {
+export function ProjectRepositoriesClient({ username, projectId, isSystemAdmin = false }: { username: string; projectId: string; isSystemAdmin?: boolean }) {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [scanPolicy, setScanPolicy] = useState<ScanPolicy | null>(null);
@@ -66,14 +73,18 @@ export function ProjectRepositoriesClient({ username, projectId }: { username: s
     if (showLoading) setLoading(true);
     try {
       const [connectionResponse, repositoryResponse] = await Promise.all([
-        fetch("/api/settings/git-connections", { cache: "no-store" }),
+        isSystemAdmin ? fetch("/api/settings/git-connections", { cache: "no-store" }) : Promise.resolve(null),
         fetch(`/api/projects/${projectId}/git-repositories`, { cache: "no-store" }),
       ]);
-      if (!connectionResponse.ok) throw new Error(await responseError(connectionResponse, "Git 服务加载失败"));
+      if (isSystemAdmin) {
+        if (connectionResponse === null || !connectionResponse.ok) throw new Error(await responseError(connectionResponse ?? new Response(null, { status: 500 }), "Git 服务加载失败"));
+        const connectionPayload = await connectionResponse.json() as { connections: Connection[] };
+        setConnections(connectionPayload.connections.filter((connection) => connection.status === "verified" && connection.disabledAt === null));
+      } else {
+        setConnections([]);
+      }
       if (!repositoryResponse.ok) throw new Error(await responseError(repositoryResponse, "项目仓库加载失败"));
-      const connectionPayload = await connectionResponse.json() as { connections: Connection[] };
       const repositoryPayload = await repositoryResponse.json() as { repositories: Repository[]; scanPolicy?: ScanPolicy };
-      setConnections(connectionPayload.connections.filter((connection) => connection.status !== "disabled"));
       setRepositories(repositoryPayload.repositories);
       if (repositoryPayload.scanPolicy) setScanPolicy(repositoryPayload.scanPolicy);
       setError(null);
@@ -82,7 +93,7 @@ export function ProjectRepositoriesClient({ username, projectId }: { username: s
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [projectId]);
+  }, [isSystemAdmin, projectId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
@@ -101,7 +112,7 @@ export function ProjectRepositoriesClient({ username, projectId }: { username: s
         {scanPolicy ? <aside className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-900"><strong className="font-semibold">当前扫描限制：</strong>范围内最多 {scanPolicy.maxScannedFiles.toLocaleString("zh-CN")} 个文本文件，单文件最多 {bytesLabel(scanPolicy.maxFileBytes)}，候选文本合计最多 {bytesLabel(scanPolicy.maxTotalBytes)}。超出时请在“配置扫描范围”中缩小包含目录；依赖、构建产物和 vendor 目录会自动排除。</aside> : null}
         {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         <div className="mt-8 grid gap-7 xl:grid-cols-[.78fr_1.22fr]">
-          <RepositoryForm projectId={projectId} connections={connections} onCreated={(repository) => setRepositories((current) => [...current.filter((item) => item.id !== repository.id), repository])} />
+          {isSystemAdmin ? <RepositoryForm projectId={projectId} connections={connections} onCreated={(repository) => setRepositories((current) => [...current.filter((item) => item.id !== repository.id), repository])} /> : <section className="h-fit rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Repository access</p><h2 className="mt-2 text-2xl font-semibold">平台连接由管理员维护</h2><p className="mt-3 text-sm leading-7 text-slate-600">平台 Git 连接与首次仓库接入由系统管理员完成；你可以在此查看已关联仓库，并执行当前项目权限允许的既有扫描。</p></section>}
           <section>
             <div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Linked repositories</p><h2 className="mt-2 text-2xl font-semibold">仓库清单</h2></div><span className="text-xs text-slate-400">{loading ? "读取中…" : `${repositories.length} 个`}</span></div>
             <div className="space-y-4">{!loading && repositories.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">还没有关联仓库。先在左侧选择已配置的 Git 服务。</div> : repositories.map((repository) => <RepositoryCard key={repository.id} projectId={projectId} repository={repository} onReload={reload} />)}</div>
@@ -165,7 +176,7 @@ function RepositoryForm({ projectId, connections, onCreated }: { projectId: stri
   return (
     <form onSubmit={submit} className="h-fit rounded-3xl bg-slate-950 p-7 text-white shadow-xl shadow-slate-950/10">
       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Add repository</p><h2 className="mt-3 text-2xl font-semibold">关联代码仓库</h2>
-      {connections.length === 0 ? <p className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-xs leading-5 text-amber-100">请先到“连接器”页面添加 Git 服务。</p> : null}
+      {connections.length === 0 ? <p className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-xs leading-5 text-amber-100">当前没有可用的 Git 服务，请联系系统管理员添加并验证连接。</p> : null}
       <Field label="Git 服务"><select className="dark-field" value={selectedId} onChange={(event) => setGitConnectionId(event.target.value)} required>{connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name} · {connection.providerKind}</option>)}</select></Field>
       {selected ? <p className="mt-2 text-[11px] text-slate-400">{selected.transport.toUpperCase()} · {selected.baseUrl} · {selected.status === "verified" ? "地址已验证" : "关联时会执行验证"}</p> : null}
       <Field label="仓库路径"><input className="dark-field" value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder="team/service-api" required /></Field>

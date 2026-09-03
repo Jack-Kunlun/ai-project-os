@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { LogoutButton } from "@/app/logout-button";
 import { AppHeader } from "@/components/app-header";
 
@@ -50,12 +49,12 @@ const githubStatusMessages: Record<string, { tone: "success" | "error"; text: st
 
 export function ProfileClient({
   username: initialUsername,
-  canViewSystemOperations,
+  isSystemAdmin = false,
   githubLoginAvailable,
   githubStatus,
 }: {
   username: string;
-  canViewSystemOperations: boolean;
+  isSystemAdmin?: boolean;
   githubLoginAvailable: boolean;
   githubStatus?: string;
 }) {
@@ -87,12 +86,12 @@ export function ProfileClient({
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
-      <AppHeader username={headerUsername} active="profile" />
+      <AppHeader username={headerUsername} active="profile" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-5xl px-5 pb-16 pt-9 sm:px-8 lg:px-10">
         <section>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Account</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">个人中心</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500">查看身份来源、工作区角色和会话状态，维护个人资料与本地恢复凭据。</p>
+          <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">查看身份来源、工作区角色和会话状态，维护个人资料与本地恢复凭据。</p>
         </section>
 
         {error ? <div role="alert" className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline">重试</button></div> : null}
@@ -125,26 +124,23 @@ export function ProfileClient({
             </dl>
           )}
 
-          <details className="group border-t border-slate-100">
+          <details open className="group border-t border-slate-100">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-4 text-sm transition hover:bg-slate-50 sm:px-7">
               <span><span className="font-semibold text-slate-700">账户详情</span><span className="ml-2 text-slate-400">创建时间与最近会话有效期</span></span>
               <span aria-hidden="true" className="text-lg text-slate-400 transition group-open:rotate-180">⌄</span>
             </summary>
             {profile ? (
-              <div className="grid gap-4 border-t border-slate-100 bg-slate-50/70 px-6 py-5 text-sm sm:grid-cols-2 sm:px-7">
+              <dl className="grid gap-4 border-t border-slate-100 bg-slate-50/70 px-6 py-5 text-sm sm:grid-cols-2 sm:px-7">
                 <DetailItem label="创建时间" value={formatDate(profile.createdAt)} />
                 <DetailItem label="最近活动会话到期" value={formatDate(profile.sessionExpiresAt)} />
-              </div>
+              </dl>
             ) : null}
           </details>
         </section>
 
-        {profile ? <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><StatusItem label="可用平台 Token" value={profile.entitlements.availableTokens.toLocaleString("zh-CN")} /><StatusItem label="预留中 Token" value={profile.entitlements.reservedTokens.toLocaleString("zh-CN")} /><StatusItem label="赠送额度到期" value={formatDate(profile.entitlements.nextExpiryAt)} /><StatusItem label="会员状态" value={profile.entitlements.membership.status === "active" ? `有效至 ${formatDate(profile.entitlements.membership.expiresAt)}` : profile.entitlements.membership.status === "none" ? "非会员" : profile.entitlements.membership.status === "expired" ? "已到期" : "已撤销"} tone={profile.entitlements.membership.status === "active" ? "success" : "default"} /></section> : null}
+        {profile ? <dl className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><StatusItem label="可用平台 Token" value={profile.entitlements.availableTokens.toLocaleString("zh-CN")} /><StatusItem label="预留中 Token" value={profile.entitlements.reservedTokens.toLocaleString("zh-CN")} /><StatusItem label="赠送额度到期" value={formatDate(profile.entitlements.nextExpiryAt)} /><StatusItem label="会员状态" value={profile.entitlements.membership.status === "active" ? `有效至 ${formatDate(profile.entitlements.membership.expiresAt)}` : profile.entitlements.membership.status === "none" ? "非会员" : profile.entitlements.membership.status === "expired" ? "已到期" : "已撤销"} tone={profile.entitlements.membership.status === "active" ? "success" : "default"} /></dl> : null}
 
         {profile ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace roles</p><h2 className="mt-2 text-lg font-semibold">工作区身份</h2><div className="mt-4 space-y-2">{profile.workspaceMemberships.map((membership) => <div key={membership.workspace.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{membership.workspace.name}</span><span className="text-xs font-semibold text-indigo-700">{membership.role}</span></div>)}</div></div><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Sign-in methods</p><h2 className="mt-2 text-lg font-semibold">登录方式</h2><div className="mt-4 space-y-2"><div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">本地密码：{profile.hasLocalPassword ? "已配置" : "未配置"}</div>{profile.githubIdentity ? <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-white">GitHub · @{profile.githubIdentity.login}<span className="mt-1 block text-xs text-slate-300">{profile.githubIdentity.email}</span></div> : githubLoginAvailable ? <a href="/api/auth/github/start?intent=link&returnTo=%2Fprofile" className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50"><span>GitHub 尚未绑定</span><span className="text-indigo-600">立即绑定 →</span></a> : <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-400">GitHub 登录：当前部署未配置</div>}{profile.oidcIdentities.map((identity) => <div key={identity.provider.id} className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-700">{identity.provider.name}{identity.email ? ` · ${identity.email}` : ""}</div>)}</div></div></section> : null}
-
-        {profile?.role === "admin" ? <section className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-indigo-200 bg-indigo-50/60 p-6"><div><h2 className="text-lg font-semibold">系统管理员操作</h2><p className="mt-1 text-sm text-slate-600">人工授予、延期或撤销独立会员资格。</p></div><Link href="/system/memberships" className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">管理会员资格</Link></section> : null}
-        {canViewSystemOperations ? <section className="mt-6 flex flex-col gap-5 rounded-3xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-7"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Initial super administrator</p><h2 className="mt-2 text-xl font-semibold">系统运维</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">只读查看生产备份、COS 同步和校验历史。页面不会获得服务器控制权限或任何备份密钥。</p></div><Link href="/system/operations" className="flex min-h-11 shrink-0 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700">查看备份任务</Link></section> : null}
 
         <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm">
           <div className="px-6 py-6 sm:px-7">
@@ -156,16 +152,6 @@ export function ProfileClient({
           <PasswordForm hasLocalPassword={profile?.hasLocalPassword ?? true} />
         </section>
 
-        <section className="mt-5 flex flex-col gap-4 rounded-2xl border border-slate-200/80 bg-white/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-700">服务凭据分开管理</h2>
-            <p className="mt-1 text-xs leading-5 text-slate-400">个人中心不会展示或导出 API Key 与 GitHub PAT。</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <CredentialLink href="/settings">模型 API Key</CredentialLink>
-            <CredentialLink href="/connections">Git 与 MCP 服务凭据</CredentialLink>
-          </div>
-        </section>
       </div>
     </main>
   );
@@ -295,8 +281,4 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 
 function Message({ tone, text }: { tone: "success" | "error"; text: string }) {
   return <p role={tone === "error" ? "alert" : "status"} className={`mt-4 rounded-xl px-4 py-3 text-sm ${tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{text}</p>;
-}
-
-function CredentialLink({ href, children }: { href: string; children: ReactNode }) {
-  return <Link href={href} className="rounded-full border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700">{children} ↗</Link>;
 }

@@ -424,7 +424,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
   const reviewBusy = reviewingId !== null || batchReviewAction !== null;
 
   return (
-    <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+    <section id="auto-extract-review" className="mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
       <div className="border-b border-slate-100 pb-6">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Grounded extraction</p>
         <h2 className="mt-2 text-2xl font-semibold">自动抽取与人工审核</h2>

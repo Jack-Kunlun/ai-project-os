@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Prisma, type AppUser, type GitAuthKind, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { AccessControlError } from "@/lib/access-control";
 import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
@@ -52,6 +53,7 @@ export type GitServiceErrorCode =
   | "GIT_CONNECTION_NAME_CONFLICT"
   | "GIT_CONNECTION_IN_USE"
   | "GIT_CONNECTION_DISABLED"
+  | "GIT_CONNECTION_NOT_VERIFIED"
   | "GIT_CONNECTION_DELETE_REQUIRES_DISABLED"
   | "GIT_CONNECTION_CONFIRMATION_MISMATCH"
   | "GIT_REPOSITORY_NOT_FOUND"
@@ -197,6 +199,17 @@ const linkSelect = {
       failureCode: true,
       startedAt: true,
       completedAt: true,
+    },
+  },
+} satisfies Prisma.ProjectGitRepositoryLinkSelect;
+
+const projectRepositoryLinkSelect = {
+  ...linkSelect,
+  repository: {
+    ...linkSelect.repository,
+    select: {
+      ...linkSelect.repository.select,
+      connection: { select: { id: true, name: true, providerKind: true, transport: true } },
     },
   },
 } satisfies Prisma.ProjectGitRepositoryLinkSelect;
@@ -631,22 +644,28 @@ export async function listProjectGitRepositories(projectIdInput: unknown, db: Pr
   const projectId = uuid(projectIdInput);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (project === null) return fail("GIT_REPOSITORY_NOT_FOUND");
-  return db.projectGitRepositoryLink.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: linkSelect });
+  return db.projectGitRepositoryLink.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: projectRepositoryLinkSelect });
 }
 
 export async function connectProjectGitRepository(
   projectIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id">,
+  actor: Pick<AppUser, "id" | "role">,
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
+  if (actor.role !== "admin") throw new AccessControlError("ACCESS_FORBIDDEN");
   const parsed = linkSchema.parse(input);
   const repositoryPath = canonicalRepositoryPath(parsed.repositoryPath);
   const trackedRef = canonicalTrackedRef(parsed.trackedRef);
   const includeRoots = canonicalIncludeRoots(parsed.includeRoots);
   const softExcludePatterns = canonicalExcludePatterns(parsed.softExcludePatterns);
+  const connectionMetadata = await db.gitConnection.findUnique({ where: { id: parsed.gitConnectionId }, select: { id: true, status: true, disabledAt: true } });
+  if (connectionMetadata === null) return fail("GIT_CONNECTION_NOT_FOUND");
+  if (connectionMetadata.status === "disabled" || connectionMetadata.disabledAt !== null) return fail("GIT_CONNECTION_DISABLED");
+  if (connectionMetadata.status !== "verified") return fail("GIT_CONNECTION_NOT_VERIFIED");
   const connection = await loadConnection(parsed.gitConnectionId, db);
+  if (connection.status !== "verified" || connection.disabledAt !== null) return fail(connection.status === "disabled" || connection.disabledAt !== null ? "GIT_CONNECTION_DISABLED" : "GIT_CONNECTION_NOT_VERIFIED");
   const probe = await probeRepository(connection, repositoryPath, trackedRef, { pinExistingAddress: connection.resolvedAddressFingerprint !== null });
   const webUrl = canonicalWebUrl(parsed.webUrl, connection, repositoryPath);
   try {
@@ -692,10 +711,10 @@ export async function connectProjectGitRepository(
       if (existing === null) {
         return tx.projectGitRepositoryLink.create({
           data: { projectId, gitRepositoryId: repository.id, createdById: actor.id, ...data },
-          select: linkSelect,
+          select: projectRepositoryLinkSelect,
         });
       }
-      return tx.projectGitRepositoryLink.update({ where: { id: existing.id }, data, select: linkSelect });
+      return tx.projectGitRepositoryLink.update({ where: { id: existing.id }, data, select: projectRepositoryLinkSelect });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return fail("GIT_REPOSITORY_CONFLICT");
@@ -711,7 +730,7 @@ export async function disableProjectGitRepository(projectIdInput: unknown, linkI
     data: { status: "disabled", disabledAt: new Date() },
   });
   if (updated.count !== 1) return fail("GIT_REPOSITORY_LINK_NOT_FOUND");
-  return db.projectGitRepositoryLink.findUniqueOrThrow({ where: { id: linkId }, select: linkSelect });
+  return db.projectGitRepositoryLink.findUniqueOrThrow({ where: { id: linkId }, select: projectRepositoryLinkSelect });
 }
 
 export async function publishGitRepositorySnapshot(input: Readonly<{

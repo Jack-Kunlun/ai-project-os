@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { AppHeader } from "@/components/app-header";
+import { AdminShell } from "@/components/admin-shell";
 import { ConnectionTabs } from "@/components/connection-tabs";
 
 type ToolDefinition = {
@@ -64,7 +65,7 @@ function activeAttestation(tool: ToolDefinition) {
     : null;
 }
 
-export function McpConnectionsClient({ username }: { username: string }) {
+export function McpConnectionsClient({ username, adminMode = false }: { username: string; adminMode?: boolean }) {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +85,8 @@ export function McpConnectionsClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="connections" />
+      <AppHeader username={username} active="connections" isSystemAdmin={adminMode} />
+      {adminMode ? <AdminShell active="mcp" /> : null}
       <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
         <section className="grid gap-8 rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 lg:grid-cols-[1.2fr_.8fr] lg:px-10">
           <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Controlled capability connections</p><h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">MCP 只读工具连接</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">管理员在页面登记远程 Streamable HTTP 服务并发现工具。工具声明先固化为快照；只有明确声明只读且非破坏性，并由管理员认证精确定义、网络和凭据指纹的当前工具，才能由项目 Owner 授权。</p></div>

@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     const db = getDb();
     const projectWhere = { AND: [accessibleProjectWhere(user), { archivedAt: null }] };
 
-    const [projects, providers, activeJobCount, pendingAssetReviews, recentJobs] = await Promise.all([
+    const [projects, activeJobCount, pendingAssetReviews, recentJobs] = await Promise.all([
       db.project.findMany({
         where: projectWhere,
         orderBy: { updatedAt: "desc" },
@@ -69,14 +69,6 @@ export async function GET(request: Request) {
           },
         },
       }),
-      db.aiProviderConnection.findMany({
-        where: { disabledAt: null },
-        select: {
-          status: true,
-          defaultEmbeddingModelId: true,
-          embeddingDimensions: true,
-        },
-      }),
       db.backgroundJob.count({
         where: { status: { in: ["queued", "waitingConsent", "running"] }, project: { is: projectWhere } },
       }),
@@ -116,7 +108,6 @@ export async function GET(request: Request) {
       }),
     ]);
 
-    const verifiedProviders = providers.filter((provider) => provider.status === "verified");
     const projectOperations = await getProjectOperationsSummaries(projects.map((project) => project.id), 3, db);
     const projectWorlds = await getProjectWorldSummaries(projects.map((project) => project.id), db, projectOperations);
     const operations = projects.map((project) => ({ project: { id: project.id, name: project.name }, health: projectOperations.get(project.id)! }));
@@ -161,10 +152,6 @@ export async function GET(request: Request) {
           ...summary,
           activeJobs: activeJobCount,
           pendingAssetReviews,
-          generationProviders: verifiedProviders.length,
-          embeddingProviders: verifiedProviders.filter(
-            (provider) => provider.defaultEmbeddingModelId !== null && provider.embeddingDimensions !== null,
-          ).length,
           ...operationsSummary,
           ...worldSummary,
         },

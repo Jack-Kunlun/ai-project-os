@@ -15,8 +15,6 @@ const emptyPayload: DashboardPayload = {
     activeJobs: 0,
     assets: 0,
     pendingAssetReviews: 0,
-    generationProviders: 0,
-    embeddingProviders: 0,
     atRiskProjects: 0,
     overdueWorkItems: 0,
     blockedWorkItems: 0,
@@ -72,7 +70,7 @@ function jobHref(job: Pick<RecentJob, "kind" | "project">): string {
   return `/projects/${job.project.id}/memory`;
 }
 
-export function DashboardClient({ username }: { username: string }) {
+export function DashboardClient({ username, isSystemAdmin = false }: { username: string; isSystemAdmin?: boolean }) {
   const [payload, setPayload] = useState<DashboardPayload>(emptyPayload);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,9 +104,6 @@ export function DashboardClient({ username }: { username: string }) {
     if (atRisk) {
       return { label: `处理「${atRisk.project.name}」的计划风险`, detail: `当前有 ${atRisk.health.counts.overdue} 项逾期、${atRisk.health.counts.blocked} 项受阻。`, href: `/projects/${atRisk.project.id}/plan`, action: "打开项目计划" };
     }
-    if (summary.generationProviders === 0 || summary.embeddingProviders === 0) {
-      return { label: "先配置可用的生成与向量模型", detail: "完成连接测试后，项目才能建立记忆并运行智能体。", href: "/settings", action: "配置模型" };
-    }
     if (summary.projects === 0) {
       return { label: "创建第一个项目", detail: "项目会隔离资料、仓库、记忆和智能分析记录。", href: "/projects", action: "前往项目" };
     }
@@ -130,7 +125,7 @@ export function DashboardClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
-      <AppHeader username={username} active="dashboard" />
+      <AppHeader username={username} active="dashboard" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
         <section className="relative overflow-hidden rounded-[2rem] bg-slate-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10 lg:px-12">
           <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-indigo-500/30 blur-3xl" />
@@ -207,13 +202,12 @@ function WorldStatusPanel({ payload, loading }: { payload: DashboardPayload; loa
 
 function ReadinessPanel({ payload, loading }: { payload: DashboardPayload; loading: boolean }) {
   const steps = [
-    { label: "模型连接", detail: "生成与向量能力", done: payload.summary.generationProviders > 0 && payload.summary.embeddingProviders > 0, href: "/settings" },
     { label: "项目空间", detail: "至少创建一个项目", done: payload.summary.projects > 0, href: "/projects" },
     { label: "能力路由", detail: `${payload.summary.routedProjects}/${payload.summary.projects} 个项目完成`, done: payload.summary.projects > 0 && payload.summary.routedProjects === payload.summary.projects, href: payload.projects[0] ? `/projects/${payload.projects[0].id}/control` : "/projects" },
     { label: "智能记忆", detail: `${payload.summary.indexedProjects}/${payload.summary.projects} 个项目有索引`, done: payload.summary.projects > 0 && payload.summary.indexedProjects === payload.summary.projects, href: payload.projects[0] ? `/projects/${payload.projects[0].id}/memory` : "/projects" },
   ];
   const completed = steps.filter((step) => step.done).length;
-  return <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Setup progress</p><h2 className="mt-2 text-xl font-semibold">工作空间就绪度</h2></div><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600">{loading ? "…" : `${completed}/4`}</span></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all" style={{ width: `${completed * 25}%` }} /></div><div className="mt-5 space-y-2">{steps.map((step, index) => <Link key={step.label} href={step.href} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition hover:bg-slate-50"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-700">{step.label}</span><span className="block truncate text-xs text-slate-400">{step.detail}</span></span><span className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500">→</span></Link>)}</div></section>;
+  return <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Setup progress</p><h2 className="mt-2 text-xl font-semibold">项目就绪度</h2></div><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600">{loading ? "…" : `${completed}/3`}</span></div><div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all" style={{ width: `${completed / steps.length * 100}%` }} /></div><div className="mt-5 space-y-2">{steps.map((step, index) => <Link key={step.label} href={step.href} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition hover:bg-slate-50"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-700">{step.label}</span><span className="block truncate text-xs text-slate-400">{step.detail}</span></span><span className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500">→</span></Link>)}</div></section>;
 }
 
 function RecentJobs({ jobs, loading }: { jobs: RecentJob[]; loading: boolean }) {

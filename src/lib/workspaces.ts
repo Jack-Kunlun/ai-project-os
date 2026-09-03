@@ -39,7 +39,6 @@ const createMemberSchema = z.object({
 }).strict();
 const updateMemberSchema = z.object({
   workspaceRole: roleSchema.optional(),
-  disabled: z.boolean().optional(),
   projectGrants: z.array(projectGrantSchema).max(100).optional(),
 }).strict();
 const invitationSchema = z.object({
@@ -180,15 +179,7 @@ export async function updateWorkspaceMember(
       const owners = await tx.workspaceMembership.count({ where: { workspaceId, role: "owner", user: { disabledAt: null } } });
       if (owners <= 1) return fail("WORKSPACE_LAST_OWNER_REQUIRED");
     }
-    if (current.role === "owner" && parsed.disabled === true) {
-      const owners = await tx.workspaceMembership.count({ where: { workspaceId, role: "owner", user: { disabledAt: null } } });
-      if (owners <= 1) return fail("WORKSPACE_LAST_OWNER_REQUIRED");
-    }
     if (parsed.workspaceRole !== undefined) await tx.workspaceMembership.update({ where: { id: current.id }, data: { role: parsed.workspaceRole } });
-    if (parsed.disabled !== undefined) {
-      await tx.appUser.update({ where: { id: userId }, data: { disabledAt: parsed.disabled ? new Date() : null } });
-      if (parsed.disabled) await tx.appSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
-    }
     if (parsed.projectGrants !== undefined) {
       await tx.projectMembership.deleteMany({ where: { userId, project: { workspaceId } } });
       if (parsed.projectGrants.length > 0) await tx.projectMembership.createMany({ data: parsed.projectGrants.map((grant) => ({ userId, projectId: grant.projectId, role: grant.role })) });

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { AdminShell } from "@/components/admin-shell";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 
 type ProviderKind = "openai" | "deepseek" | "qwen" | "glm";
@@ -68,7 +69,7 @@ const statusLabel = {
   disabled: "已停用",
 } as const;
 
-export function SettingsClient({ username, canManageProviders, activeMembership, membershipStatus }: { username: string; canManageProviders: boolean; activeMembership: boolean; membershipStatus: "active" | "expired" | "revoked" | "none" }) {
+export function SettingsClient({ username, canManageProviders, activeMembership, membershipStatus, adminMode = false }: { username: string; canManageProviders: boolean; activeMembership: boolean; membershipStatus: "active" | "expired" | "revoked" | "none"; adminMode?: boolean }) {
   const [catalog, setCatalog] = useState<ProviderCatalogEntry[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(canManageProviders);
@@ -100,7 +101,8 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="settings" />
+      <AppHeader username={username} active="settings" isSystemAdmin={adminMode} />
+      {adminMode ? <AdminShell active="models" /> : null}
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <section className="pb-10 pt-12">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI connections</p>

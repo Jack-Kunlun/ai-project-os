@@ -80,8 +80,6 @@ export type DashboardPayload = {
     activeJobs: number;
     assets: number;
     pendingAssetReviews: number;
-    generationProviders: number;
-    embeddingProviders: number;
     atRiskProjects: number;
     overdueWorkItems: number;
     blockedWorkItems: number;

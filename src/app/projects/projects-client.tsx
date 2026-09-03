@@ -126,7 +126,7 @@ export function ProjectsClient({ username }: { username: string }) {
           ) : (
             <><div className="mt-5 grid gap-5 lg:grid-cols-2">
               {payload.projects.map((project) => <ProjectCard key={project.id} project={project} onLifecycle={(action) => { setMessage(null); setLifecycle({ project, action }); }} />)}
-            </div><ListPagination {...payload.pagination} onPageChange={setPage} disabled={loading} /></>
+            </div>{payload.pagination.totalPages > 1 ? <ListPagination {...payload.pagination} onPageChange={setPage} disabled={loading} /> : null}</>
           )}
         </section>
       </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { AdminShell } from "@/components/admin-shell";
 import { ConnectionTabs } from "@/components/connection-tabs";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 
@@ -44,7 +45,7 @@ const statusStyles = {
   disabled: "bg-slate-100 text-slate-500 ring-slate-200",
 } as const;
 
-export function ConnectionsClient({ username }: { username: string }) {
+export function ConnectionsClient({ username, adminMode = false }: { username: string; adminMode?: boolean }) {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +74,8 @@ export function ConnectionsClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="connections" />
+      <AppHeader username={username} active="connections" isSystemAdmin={adminMode} />
+      {adminMode ? <AdminShell active="git" /> : null}
       <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
         <section className="grid gap-8 rounded-[2rem] bg-slate-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 lg:grid-cols-[1.2fr_.8fr] lg:px-10">
           <div>

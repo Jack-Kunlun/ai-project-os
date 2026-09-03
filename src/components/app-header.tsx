@@ -2,15 +2,13 @@ import Link from "next/link";
 import { APP_VERSION } from "@/lib/version";
 import { NotificationBell } from "./notification-bell";
 
-type PrimarySection = "dashboard" | "projects" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide";
+type PrimarySection = "dashboard" | "projects" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide" | "admin";
 type ProjectSection = "overview" | "materials" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
 
 const primaryItems = [
-  { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid" },
-  { key: "projects", label: "项目", href: "/projects", icon: "folder" },
-  { key: "settings", label: "模型设置", href: "/settings", icon: "sliders" },
-  { key: "connections", label: "连接器", href: "/connections", icon: "link" },
-  { key: "team", label: "团队", href: "/team", icon: "users" },
+  { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid", adminOnly: false },
+  { key: "projects", label: "项目", href: "/projects", icon: "folder", adminOnly: false },
+  { key: "team", label: "团队", href: "/team", icon: "users", adminOnly: false },
 ] as const;
 
 const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources", "repositories"];
@@ -23,11 +21,13 @@ export function AppHeader({
   active,
   projectId,
   projectSection,
+  isSystemAdmin = false,
 }: {
   username: string;
   active: PrimarySection;
   projectId?: string;
   projectSection?: ProjectSection;
+  isSystemAdmin?: boolean;
 }) {
   const initial = username.slice(0, 1).toUpperCase();
   const guideActive = active === "guide";
@@ -48,7 +48,7 @@ export function AppHeader({
         </Link>
 
         <nav className="order-3 flex w-full flex-wrap items-center gap-1 rounded-2xl bg-slate-100/80 p-1 xl:order-2 xl:w-auto" aria-label="全局导航">
-          {primaryItems.map((item) => {
+          {primaryItems.filter((item) => !item.adminOnly || isSystemAdmin).map((item) => {
             const isActive = item.key === active;
             return (
               <Link
@@ -76,6 +76,7 @@ export function AppHeader({
             <NavIcon name="help" />
             <span className="hidden text-xs font-semibold lg:block">帮助</span>
           </Link>
+          {isSystemAdmin ? <Link href="/admin" className="hidden rounded-full border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 lg:block">管理工作台</Link> : null}
           <Link
             href="/profile"
             aria-label={`个人中心：${username}`}

@@ -11,7 +11,9 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 ## 从哪里开始
 
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
-- 完整手册：[docs/operation-manual.md](docs/operation-manual.md)。
+- 普通用户完整指南：[docs/user-operation-guide.md](docs/user-operation-guide.md)。
+- 系统管理员完整指南：[docs/admin-operation-guide.md](docs/admin-operation-guide.md)。
+- 兼容索引：[docs/operation-manual.md](docs/operation-manual.md)。
 - 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
 - GitHub Actions 生产部署（未来能力，当前禁用）：[docs/production-deployment.md](docs/production-deployment.md)。
 - 单节点主机迁移与恢复：[docs/production-host-migration.md](docs/production-host-migration.md)。
@@ -36,9 +38,9 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 推荐首次使用顺序：
 
 1. 启动 Docker Compose，初始化本地管理员。
-2. 在“模型设置”添加并测试 OpenAI、DeepSeek、Qwen 或 GLM。
-3. 在“连接器”配置需要使用的 Git 服务。
-4. 如需外部工具，在“连接器 → MCP 只读工具”验证服务并由管理员认证精确工具，再由项目 Owner 在“工具权限”逐项授权。
+2. 由系统管理员在“管理工作台 → 平台模型”（`/admin/models`）添加并测试 OpenAI、DeepSeek、Qwen 或 GLM。
+3. 由系统管理员在“管理工作台 → Git 连接”（`/admin/connectors/git`）配置需要使用的 Git 服务；首次项目仓库接入也由系统管理员完成。
+4. 如需外部工具，系统管理员在“管理工作台 → MCP 连接”（`/admin/connectors/mcp`）验证服务并认证精确工具，再由项目 Owner 在“工具权限”逐项授权。
 5. 创建项目，在项目“智能控制台”分配视觉、抽取、向量与生成模型。
 6. 上传文件，或添加网页、本地文件夹和一个或多个代码仓库。
 7. 审核 AI 候选并建立语义索引。
@@ -82,11 +84,13 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 配置入口
 
-业务配置均位于页面：
+平台配置仅由 system admin 在管理工作台维护；旧设置/连接器 URL 仅作服务端角色检查后的兼容跳转。业务配置均位于页面：
 
-- `/settings`：模型供应商与 API Key。
-- `/connections`：Git 服务与凭据。
-- `/connections/mcp`：远程 MCP 只读工具服务与 Bearer 凭据。
+- `/admin/models`：平台模型、能力、自定义模型 ID 与 API Key（system admin）。
+- `/admin/connectors/git`：Git 服务与凭据（system admin）。
+- `/admin/connectors/mcp`：远程 MCP 只读工具服务与 Bearer 凭据（system admin）。
+- `/admin/users/memberships`：用户会员资格（system admin）。
+- `/admin/operations/backups`：备份/运维状态（按初始超级管理员规则）。
 - `/team`：成员、邀请和 OIDC。
 - `/projects/:projectId/control`：项目级 AI 路由。
 - `/projects/:projectId/repositories`：项目多仓库关联与扫描。
@@ -216,9 +220,13 @@ pnpm exec prisma migrate status --config prisma.config.ts
 
 - `/dashboard`：跨项目概览、就绪度和最近任务。
 - `/projects`：项目管理。
-- `/settings`：模型连接。
-- `/connections`：Git 连接。
-- `/connections/mcp`：远程 MCP 只读工具连接。
+- `/admin`：system admin 管理工作台总览。
+- `/admin/models`：system admin 平台模型。
+- `/admin/connectors/git`：system admin Git 连接。
+- `/admin/connectors/mcp`：system admin MCP 连接。
+- `/admin/users/memberships`：system admin 用户与会员。
+- `/admin/operations/backups`：system admin 备份/运维状态。
+- `/settings`、`/connections`、`/connections/mcp`：兼容跳转，非 admin 返回用户工作台。
 - `/team`：成员、邀请和 OIDC。
 - `/notifications`：通知中心。
 - `/profile`：个人资料与登录安全。

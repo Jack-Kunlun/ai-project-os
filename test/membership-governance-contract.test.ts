@@ -15,6 +15,8 @@ import {
   MembershipGovernanceError,
   membershipFingerprint,
   membershipManifestFingerprint,
+  revokeProjectMembership,
+  revokeWorkspaceMembership,
 } from "../src/lib/membership-governance";
 import {
   MEMBERSHIP_GOVERNANCE_INVENTORY_REPORT_VERSION,
@@ -23,6 +25,7 @@ import {
 } from "../scripts/membership-governance-inventory";
 
 const migrationName = "20260904040000_add_membership_access_governance";
+const manifestEvidenceMigrationName = "20260904050000_add_membership_governance_manifest_evidence";
 const membershipId = "00000000-0000-4000-8000-000000000011";
 const workspaceId = "00000000-0000-4000-8000-000000000012";
 const projectId = "00000000-0000-4000-8000-000000000013";
@@ -71,7 +74,7 @@ test("membership governance migration is additive, quarantines without auto-conf
     .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
     .map((entry) => entry.name)
     .sort();
-  assert.equal(migrations.at(-1), migrationName);
+  assert.equal(migrations.at(-2), migrationName);
 
   const migration = await readFile(`prisma/migrations/${migrationName}/migration.sql`, "utf8");
   const executableSql = migration.replace(/--[^\n]*(?:\n|$)/gu, "");
@@ -102,6 +105,40 @@ test("membership governance migration is additive, quarantines without auto-conf
   assert.doesNotMatch(executableSql, /FOREIGN KEY\s*\([^)]*membershipId/iu);
 });
 
+test("manifest evidence migration keeps execution and pending transition guards isolated", async () => {
+  const entries = await readdir("prisma/migrations", { withFileTypes: true });
+  const migrations = entries
+    .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  assert.equal(migrations.at(-1), manifestEvidenceMigrationName);
+  const migration = await readFile(`prisma/migrations/${manifestEvidenceMigrationName}/migration.sql`, "utf8");
+  const executableSql = migration.replace(/--[^\n]*(?:\n|$)/gu, "");
+  assert.match(executableSql, /CREATE TABLE "MembershipGovernanceExecution"/u);
+  assert.match(executableSql, /CREATE TABLE "MembershipGovernanceApproval"/u);
+  assert.match(executableSql, /MembershipAccessState_pending_transition_evidence_guard/u);
+  assert.match(executableSql, /pending membership transition requires a same-transaction governance execution/u);
+  assert.match(executableSql, /MembershipGovernanceApproval_insert_guard/u);
+  assert.match(executableSql, /MembershipAccessAudit_manifest_evidence_guard/u);
+  assert.match(executableSql, /MembershipGovernanceExecution_validate_evidence/u);
+  assert.match(executableSql, /PERFORM "MembershipGovernanceExecution_validate_evidence"/u);
+  assert.match(executableSql, /MembershipGovernanceExecution_approval_integrity_guard/u);
+  assert.match(executableSql, /MembershipGovernanceExecution_membership_evidence_guard/u);
+  assert.match(executableSql, /DEFERRABLE INITIALLY DEFERRED/u);
+});
+
+test("manifest apply pins search_path before discovery and probe reads", async () => {
+  const source = await readFile("src/lib/membership-governance-manifest.ts", "utf8");
+  const sessionSearchPath = source.indexOf('await db.query("SET search_path = pg_catalog, public");');
+  const discoveryRead = source.indexOf("const discoveryRows = normalizedInventory(");
+  assert.ok(sessionSearchPath >= 0 && sessionSearchPath < discoveryRead);
+  const probeStart = source.indexOf("async function probeAppliedMembershipGovernanceManifest(");
+  const probeSearchPath = source.indexOf('await db.query("SET LOCAL search_path = pg_catalog, public");', probeStart);
+  const probeRead = source.indexOf('FROM "MembershipGovernanceExecution" WHERE "manifestFingerprint" = $1', probeStart);
+  assert.ok(probeStart >= 0 && probeSearchPath >= 0 && probeSearchPath < probeRead);
+  assert.match(source, /await db\.query\("RESET search_path"\)/u);
+});
+
 test("membership fingerprint and manifest stay deterministic and redacted", () => {
   const input = {
     membershipId,
@@ -130,6 +167,12 @@ test("membership fingerprint and manifest stay deterministic and redacted", () =
     () => membershipManifestFingerprint([{ membershipKind: "workspace", membershipId, membershipFingerprint: "bad" }]),
     (error: unknown) => error instanceof MembershipGovernanceError && error.code === "MEMBERSHIP_GOVERNANCE_INVALID_MANIFEST_ENTRY",
   );
+});
+
+test("membership inventory requires its dedicated database URL", async () => {
+  const source = await readFile("scripts/membership-governance-inventory.ts", "utf8");
+  assert.match(source, /process\.env\[MEMBERSHIP_GOVERNANCE_INVENTORY_DATABASE_URL_ENV\]/u);
+  assert.doesNotMatch(source, /process\.env\.DATABASE_URL/u);
 });
 
 test("only confirmed memberships are exposed by the pure effective filters", () => {
@@ -165,6 +208,58 @@ test("membership access state machine is fail-closed for revoked revival", () =>
     () => assertMembershipAccessTransition(MembershipAccessState.confirmed, MembershipAccessState.pending),
     (error: unknown) => error instanceof MembershipGovernanceError && error.code === "MEMBERSHIP_GOVERNANCE_INVALID_TRANSITION",
   );
+});
+
+test("ordinary revoke helpers reject pending memberships without a write", async () => {
+  const pendingWorkspace = {
+    id: membershipId,
+    workspaceId,
+    userId,
+    role: "owner",
+    accessState: MembershipAccessState.pending,
+    createdAt: new Date("2026-09-04T04:00:00.000Z"),
+    updatedAt: new Date("2026-09-04T04:00:00.000Z"),
+  };
+  const pendingProject = {
+    id: membershipId,
+    projectId,
+    userId,
+    role: "owner",
+    accessState: MembershipAccessState.pending,
+    createdAt: new Date("2026-09-04T04:00:00.000Z"),
+    updatedAt: new Date("2026-09-04T04:00:00.000Z"),
+    workspaceId,
+  };
+  let workspaceWrites = 0;
+  let projectWrites = 0;
+  const db = {
+    workspaceMembership: {
+      findMany: async () => [pendingWorkspace],
+      updateMany: async () => { workspaceWrites += 1; return { count: 1 }; },
+      findUnique: async () => pendingWorkspace,
+    },
+    projectMembership: {
+      findMany: async () => [pendingProject],
+      updateMany: async () => { projectWrites += 1; return { count: 1 }; },
+      findUnique: async () => pendingProject,
+    },
+    membershipAccessAudit: {
+      create: async () => { throw new Error("AUDIT_MUST_NOT_BE_WRITTEN"); },
+    },
+  };
+
+  await assert.rejects(
+    () => revokeWorkspaceMembership(db as never, workspaceId, userId, { reason: "ordinary revoke" }),
+    (error: unknown) => error instanceof MembershipGovernanceError
+      && error.code === "MEMBERSHIP_GOVERNANCE_PENDING_CONFIRMATION_REQUIRED",
+  );
+  await assert.rejects(
+    () => revokeProjectMembership(db as never, projectId, userId, workspaceId, { reason: "ordinary revoke" }),
+    (error: unknown) => error instanceof MembershipGovernanceError
+      && error.code === "MEMBERSHIP_GOVERNANCE_PENDING_CONFIRMATION_REQUIRED",
+  );
+  assert.equal(workspaceWrites, 0);
+  assert.equal(projectWrites, 0);
 });
 
 test("governance inventory uses repeatable-read read-only rollback and redacts identity fields", async () => {

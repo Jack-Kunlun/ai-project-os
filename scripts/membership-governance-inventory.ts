@@ -106,8 +106,8 @@ const SQL = Object.freeze({
       membership."userId"::text AS user_id,
       membership."role"::text AS role,
       membership."accessState"::text AS access_state,
-      membership."createdAt" AS created_at,
-      membership."updatedAt" AS updated_at
+      to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS') AS created_at,
+      to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS') AS updated_at
     FROM "WorkspaceMembership" AS membership
 
     UNION ALL
@@ -120,8 +120,8 @@ const SQL = Object.freeze({
       membership."userId"::text AS user_id,
       membership."role"::text AS role,
       membership."accessState"::text AS access_state,
-      membership."createdAt" AS created_at,
-      membership."updatedAt" AS updated_at
+      to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS') AS created_at,
+      to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS') AS updated_at
     FROM "ProjectMembership" AS membership
     JOIN "Project" AS project ON project."id" = membership."projectId"
 
@@ -258,8 +258,7 @@ export async function main(): Promise<void> {
   let client: Client | undefined;
   try {
     parseMembershipGovernanceInventoryArguments(readCliArguments());
-    const databaseUrl = process.env[MEMBERSHIP_GOVERNANCE_INVENTORY_DATABASE_URL_ENV]
-      ?? process.env.DATABASE_URL;
+    const databaseUrl = process.env[MEMBERSHIP_GOVERNANCE_INVENTORY_DATABASE_URL_ENV];
     if (typeof databaseUrl !== "string" || databaseUrl.length === 0) {
       throw new MembershipGovernanceInventoryError(
         "MEMBERSHIP_GOVERNANCE_INVENTORY_DATABASE_URL_REQUIRED",

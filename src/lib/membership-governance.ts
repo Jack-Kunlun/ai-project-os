@@ -489,6 +489,12 @@ async function revokeWorkspaceMembershipInTransaction(
   actorId: string | null,
   reason: string,
 ): Promise<CurrentWorkspaceMembership> {
+  if (current.accessState === MembershipAccessState.pending) {
+    throw new MembershipGovernanceError(
+      "MEMBERSHIP_GOVERNANCE_PENDING_CONFIRMATION_REQUIRED",
+      "pending membership requires explicit governance confirmation",
+    );
+  }
   if (current.accessState === MembershipAccessState.revoked) return current;
   const result = await db.workspaceMembership.updateMany({
     where: { id: current.id, accessState: current.accessState },
@@ -513,6 +519,12 @@ async function revokeProjectMembershipInTransaction(
   actorId: string | null,
   reason: string,
 ): Promise<CurrentProjectMembership> {
+  if (current.accessState === MembershipAccessState.pending) {
+    throw new MembershipGovernanceError(
+      "MEMBERSHIP_GOVERNANCE_PENDING_CONFIRMATION_REQUIRED",
+      "pending membership requires explicit governance confirmation",
+    );
+  }
   if (current.accessState === MembershipAccessState.revoked) return current;
   const result = await db.projectMembership.updateMany({
     where: { id: current.id, accessState: current.accessState },
@@ -536,7 +548,6 @@ export type WorkspaceMembershipGrantInput = Readonly<{
   role: "owner" | "admin" | "member" | "viewer";
   actorId?: string | null;
   reason: string;
-  allowPendingConfirmation?: boolean;
 }>;
 
 export type ProjectMembershipGrantInput = Readonly<{
@@ -546,14 +557,13 @@ export type ProjectMembershipGrantInput = Readonly<{
   role: "owner" | "editor" | "viewer";
   actorId?: string | null;
   reason: string;
-  allowPendingConfirmation?: boolean;
 }>;
 
 /**
- * Confirm or regrant a workspace membership. Existing pending rows may be
- * confirmed in place only when their role is unchanged. Any role replacement
- * or regrant after revocation gets a new membership id and an audit for both
- * the revocation and the new confirmed epoch.
+ * Grant or regrant a workspace membership. Existing confirmed rows with the
+ * same role are idempotent. Pending rows require the dedicated, double-signed
+ * governance manifest; a regrant after revocation gets a new membership id
+ * and an audit for both the revocation and the new confirmed epoch.
  *
  * The caller must already hold actor -> workspace -> membership locks.
  */
@@ -566,27 +576,11 @@ export async function grantWorkspaceMembership(
   if (current !== null && current.accessState === MembershipAccessState.confirmed && current.role === input.role) {
     return current;
   }
-  if (current !== null && current.accessState === MembershipAccessState.pending && !input.allowPendingConfirmation) {
+  if (current !== null && current.accessState === MembershipAccessState.pending) {
     throw new MembershipGovernanceError(
       "MEMBERSHIP_GOVERNANCE_PENDING_CONFIRMATION_REQUIRED",
       "pending membership requires explicit governance confirmation",
     );
-  }
-  if (current !== null && current.accessState === MembershipAccessState.pending && current.role === input.role) {
-    const result = await db.workspaceMembership.updateMany({
-      where: { id: current.id, accessState: MembershipAccessState.pending },
-      data: { accessState: MembershipAccessState.confirmed },
-    });
-    if (result.count !== 1) throw governanceWriteConflict(`workspace membership ${current.id} changed concurrently`);
-    const confirmed = await db.workspaceMembership.findUnique({ where: { id: current.id }, select: workspaceMembershipAuditSelect });
-    if (confirmed === null) throw governanceWriteConflict(`workspace membership ${current.id} disappeared`);
-    await appendWorkspaceMembershipAudit(db, confirmed, {
-      action: "confirmed",
-      previousState: MembershipAccessState.pending,
-      actorId,
-      reason: input.reason,
-    });
-    return confirmed;
   }
   if (current !== null) await revokeWorkspaceMembershipInTransaction(db, current, actorId, `${input.reason}:role_or_regrant_replacement`);
   let created: CurrentWorkspaceMembership;
@@ -629,8 +623,9 @@ export async function revokeWorkspaceMembership(
 }
 
 /**
- * Confirm or regrant a project membership with the same history semantics as
- * workspace memberships. The workspace id is supplied by the caller so the
+ * Grant or regrant a project membership with the same history semantics as
+ * workspace memberships. Pending rows require the dedicated, double-signed
+ * governance manifest. The workspace id is supplied by the caller so the
  * audit snapshot remains independent from later project deletion.
  */
 export async function grantProjectMembership(
@@ -642,27 +637,11 @@ export async function grantProjectMembership(
   if (current !== null && current.accessState === MembershipAccessState.confirmed && current.role === input.role) {
     return current;
   }
-  if (current !== null && current.accessState === MembershipAccessState.pending && !input.allowPendingConfirmation) {
+  if (current !== null && current.accessState === MembershipAccessState.pending) {
     throw new MembershipGovernanceError(
       "MEMBERSHIP_GOVERNANCE_PENDING_CONFIRMATION_REQUIRED",
       "pending membership requires explicit governance confirmation",
     );
-  }
-  if (current !== null && current.accessState === MembershipAccessState.pending && current.role === input.role) {
-    const result = await db.projectMembership.updateMany({
-      where: { id: current.id, accessState: MembershipAccessState.pending },
-      data: { accessState: MembershipAccessState.confirmed },
-    });
-    if (result.count !== 1) throw governanceWriteConflict(`project membership ${current.id} changed concurrently`);
-    const confirmed = await db.projectMembership.findUnique({ where: { id: current.id }, select: projectMembershipAuditSelect });
-    if (confirmed === null) throw governanceWriteConflict(`project membership ${current.id} disappeared`);
-    await appendProjectMembershipAudit(db, { ...confirmed, workspaceId: input.workspaceId }, {
-      action: "confirmed",
-      previousState: MembershipAccessState.pending,
-      actorId,
-      reason: input.reason,
-    });
-    return confirmed;
   }
   if (current !== null) await revokeProjectMembershipInTransaction(db, current, input.workspaceId, actorId, `${input.reason}:role_or_regrant_replacement`);
   let created: CurrentProjectMembership;
@@ -702,19 +681,5 @@ export async function revokeProjectMembership(
 ): Promise<CurrentProjectMembership | null> {
   const current = await findCurrentProjectMembership(db, projectId, userId);
   if (current === null) return null;
-  // The helper needs the project workspace for a complete immutable snapshot.
-  const revoked = await db.projectMembership.updateMany({
-    where: { id: current.id, accessState: current.accessState },
-    data: { accessState: MembershipAccessState.revoked },
-  });
-  if (revoked.count !== 1) throw governanceWriteConflict(`project membership ${current.id} changed concurrently`);
-  const row = await db.projectMembership.findUnique({ where: { id: current.id }, select: projectMembershipAuditSelect });
-  if (row === null) throw governanceWriteConflict(`project membership ${current.id} disappeared`);
-  await appendProjectMembershipAudit(db, { ...row, workspaceId }, {
-    action: "revoked",
-    previousState: current.accessState,
-    actorId: input.actorId ?? null,
-    reason: input.reason,
-  });
-  return row;
+  return revokeProjectMembershipInTransaction(db, current, workspaceId, input.actorId ?? null, input.reason);
 }

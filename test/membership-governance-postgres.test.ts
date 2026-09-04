@@ -380,15 +380,31 @@ test(
         (error: unknown) => errorCode(error) === "23514",
       );
       await client.query("ROLLBACK").catch(() => undefined);
-      await client.query("BEGIN");
-      await client.query(`UPDATE "WorkspaceMembership" SET "accessState" = 'revoked' WHERE "id" = $1 AND "accessState" = 'pending'`, [crossTransactionMembershipId]);
-      await insertWorkspaceAudit({ membershipId: crossTransactionMembershipId, action: "revoked", newState: "revoked", previousState: "pending", workspaceId: secondaryWorkspaceId, userId });
-      await client.query("COMMIT");
+      await assert.rejects(
+        async () => {
+          await client.query("BEGIN");
+          await client.query(`UPDATE "WorkspaceMembership" SET "accessState" = 'revoked' WHERE "id" = $1 AND "accessState" = 'pending'`, [crossTransactionMembershipId]);
+          await insertWorkspaceAudit({ membershipId: crossTransactionMembershipId, action: "revoked", newState: "revoked", previousState: "pending", workspaceId: secondaryWorkspaceId, userId });
+          await client.query("COMMIT");
+        },
+        (error: unknown) => errorCode(error) === "23514",
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+      const pendingAfterOrdinaryRevoke = await client.query<{ access_state: string }>(
+        `SELECT "accessState"::text AS access_state FROM "WorkspaceMembership" WHERE "id" = $1`,
+        [crossTransactionMembershipId],
+      );
+      assert.equal(pendingAfterOrdinaryRevoke.rows[0]?.access_state, "pending");
 
       // Concurrent regrant attempts may race in application code, but the
       // state-aware partial unique index must leave exactly one current row.
       const concurrentClients = [new Client({ connectionString: databaseUrl }), new Client({ connectionString: databaseUrl })];
       const concurrentMembershipIds = [randomUUID(), randomUUID()];
+      const concurrentUserId = randomUUID();
+      await client.query(`
+        INSERT INTO "AppUser" ("id", "username", "role", "updatedAt")
+        VALUES ($1, $2, 'user', CURRENT_TIMESTAMP)
+      `, [concurrentUserId, `mg_concurrent_${suffix}`]);
       await Promise.all(concurrentClients.map((connection) => connection.connect()));
       const concurrentAttempt = async (connection: Client, membershipId: string) => {
         try {
@@ -396,7 +412,7 @@ test(
           await connection.query(`
             INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
             VALUES ($1, $2, $3, 'viewer', 'confirmed', CURRENT_TIMESTAMP)
-          `, [membershipId, secondaryWorkspaceId, userId]);
+          `, [membershipId, secondaryWorkspaceId, concurrentUserId]);
           await connection.query(`
             INSERT INTO "MembershipAccessAudit" (
               "id", "membershipKind", "membershipId", "workspaceId", "userId", "action", "newState", "roleSnapshot", "reason", "membershipFingerprint"
@@ -421,7 +437,7 @@ test(
       const concurrentCurrent = await client.query<{ count: string }>(`
         SELECT COUNT(*)::text AS count FROM "WorkspaceMembership"
         WHERE "workspaceId" = $1 AND "userId" = $2 AND "accessState" <> 'revoked'
-      `, [secondaryWorkspaceId, userId]);
+      `, [secondaryWorkspaceId, concurrentUserId]);
       assert.equal(concurrentCurrent.rows[0]?.count, "1");
 
       // Workspace provider ownership is status/role sensitive and allows a

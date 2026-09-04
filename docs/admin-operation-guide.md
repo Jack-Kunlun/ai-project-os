@@ -75,7 +75,33 @@ GitHub Actions 在 push 和 pull request 上执行 Prisma/迁移校验、Lint、
 
 新用户领取的试用 Token、会员期限和自定义模型权限应以当前产品策略和服务端 entitlement 判断为准；页面不能因为用户可见就宣称任何未来免费模型供给已经上线。未定价的会员套餐先以内部成本模型评估，不能在页面硬编码未经批准的价格。
 
-### 3.2 GitHub 登录
+### 3.2 历史成员资格治理
+
+0.2.x 升级会保留既有工作区/项目成员行，并将无法证明来源的历史行置为 `pending`；`pending` 不参与任何运行时授权。系统管理员身份不会自动确认历史 Owner 或 Admin，也不会通过邀请、OIDC 或 OAuth 静默恢复被撤销的历史行。
+
+治理清单由只读盘点生成候选内容后离线编制，必须覆盖数据库当前全部 `pending` 行，每行明确 `confirm` 或 `revoke`，并绑定成员行指纹、身份、角色、工作区/项目和全量盘点指纹。清单使用 Ed25519，由两个不同的受信外部签名者批准；签名者公钥只能放在受控的 `MEMBERSHIP_GOVERNANCE_TRUSTED_SIGNERS_JSON` 注册表中，不能从清单或审批文件带入。审批文件不包含私钥。
+
+执行前应完成数据库备份和人工复核。先运行无写入的盘点/校验，再在隔离维护窗口显式添加 `--apply`：
+
+```bash
+MEMBERSHIP_GOVERNANCE_INVENTORY_DATABASE_URL='受保护的只读数据库地址' \
+  pnpm db:membership-governance-inventory > membership-inventory.json
+
+MEMBERSHIP_GOVERNANCE_TRUSTED_SIGNERS_JSON='{"signer_a":"受信Ed25519公钥PEM","signer_b":"受信Ed25519公钥PEM"}' \
+MEMBERSHIP_GOVERNANCE_APPLY_DATABASE_URL='受保护的治理数据库地址' \
+MEMBERSHIP_GOVERNANCE_EXECUTOR_LABEL='maintenance-window-20260904' \
+  pnpm db:membership-governance-apply -- \
+    --manifest membership-manifest.json \
+    --approval approval-a.json \
+    --approval approval-b.json \
+    --apply
+```
+
+盘点同样只接受 `MEMBERSHIP_GOVERNANCE_INVENTORY_DATABASE_URL`，不会回退到 `DATABASE_URL`。`MEMBERSHIP_GOVERNANCE_APPLY_DATABASE_URL` 是唯一允许执行写入的数据库变量；没有 `--apply` 时只做解析和双签校验。执行在单个 `SERIALIZABLE` 事务中完成，清单过期、数据库指纹变化、成员身份/角色漂移、漏项/多项、签名不满足双人要求或会移除最后一位 enabled confirmed Owner 时整批失败。成功执行会保存不可修改的清单、签名注册表指纹、签名/公钥证据和成员审计证据；相同清单重放只返回 `alreadyApplied`，不会重复成员变更或审计。
+
+数据库触发器和服务端守卫会拒绝缺失或不一致同事务证据的普通应用路径/直接 DML；拥有 governance execution、approval、audit 全表写权限的数据库凭据仍可能构造结构自洽的伪证据，数据库超级用户或能够执行任意进程代码的攻击者也可能停用触发器或篡改受信注册表环境变量，这些不属于本工具的防御边界。Ed25519 的密码学验签由本地执行器完成，PostgreSQL 只校验证据结构、指纹、事务和清单/审计绑定，不应被视为原生 Ed25519 验签器。生产环境应将常驻 app/worker 角色与仅维护窗口可用的离线 governance apply 角色隔离并最小授权；当前 Compose 复用 `POSTGRES_USER` 仅用于本地开发，不是生产权限基线。
+
+### 3.3 GitHub 登录
 
 在 GitHub OAuth App 登记当前站点的回调地址，例如本地：
 
@@ -87,7 +113,7 @@ http://127.0.0.1:3000/api/auth/github/callback
 
 用户首次使用 GitHub 登录且系统不存在同邮箱账户时，可按产品规则创建 `member` 并加入默认工作区；同邮箱已存在时不得静默合并，用户应先登录原账号，再走明确绑定流程。临时访问令牌验证后立即撤销，不作为长期 Git 凭据保存。
 
-### 3.3 企业 OIDC
+### 3.4 企业 OIDC
 
 在身份提供商登记：
 

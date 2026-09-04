@@ -1,4 +1,13 @@
-import { Prisma, type AiProviderConnection, type AiProviderConnectionStatus, type AiProviderKind, type AiProviderProtocol, type AiProviderScope, type PrismaClient } from "@prisma/client";
+import {
+  Prisma,
+  type AiProviderConnection,
+  type AiProviderConnectionStatus,
+  type AiProviderKind,
+  type AiProviderProtocol,
+  type AiProviderScope,
+  type PrismaClient,
+  type ProjectAiProviderDelegationStatus,
+} from "@prisma/client";
 import { z } from "zod";
 import { getMembershipStatus, lockMembershipUser } from "@/lib/ai-entitlements";
 import { createCredential, rotateCredential } from "@/lib/credential-vault";
@@ -97,9 +106,18 @@ const internalProviderSelect = {
   credentialId: true,
 } as const;
 
+const liveDelegationStatuses: ProjectAiProviderDelegationStatus[] = ["draft", "ownerConfirmed", "active"];
+
 const mutationProviderSelect = {
   ...internalProviderSelect,
-  _count: { select: { projectRoutes: true } },
+  _count: {
+    select: {
+      projectRoutes: true,
+      projectAiProviderDelegations: {
+        where: { status: { in: liveDelegationStatuses } },
+      },
+    },
+  },
 } as const;
 
 const deleteProviderSelect = {
@@ -122,6 +140,7 @@ const deleteProviderSelect = {
       platformDefaultAiRoutes: true,
       platformDefaultAiRouteAudits: true,
       ownershipAudits: true,
+      projectAiProviderDelegations: true,
     },
   },
 } as const;
@@ -439,8 +458,6 @@ export async function updatePersonalProviderConnection(
       // activate an otherwise stale model configuration.
       if (!maintenance) assertCapabilities(current.kind, nextGeneration, nextVision, nextEmbedding, nextDimensions);
 
-      if (parsed.enabled === false && current._count.projectRoutes > 0) return fail("AI_PROVIDER_IN_USE");
-
       const modelConfigurationChanged = parsed.apiKey !== undefined ||
         parsed.generationModelId !== undefined ||
         parsed.visionModelId !== undefined ||
@@ -453,6 +470,8 @@ export async function updatePersonalProviderConnection(
         (parsed.enabled !== undefined && parsed.enabled !== currentlyEnabled) ||
         disableStateIncomplete;
       const configurationChanged = modelConfigurationChanged || lifecycleChanged;
+      if (configurationChanged && current._count.projectAiProviderDelegations > 0) return fail("AI_PROVIDER_IN_USE");
+      if (parsed.enabled === false && current._count.projectRoutes > 0) return fail("AI_PROVIDER_IN_USE");
       if (parsed.apiKey !== undefined) await rotateCredential(current.credentialId, "aiProvider", parsed.apiKey, tx);
 
       const remainsDisabled = parsed.enabled === false || (parsed.enabled === undefined && !currentlyEnabled);

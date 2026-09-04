@@ -2,9 +2,23 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import type { Prisma, ProjectAiProviderDelegation } from "@prisma/client";
+import { Prisma, type ProjectAiProviderDelegation } from "@prisma/client";
 import { getDb } from "../src/lib/db";
-import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
+import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
+import { lockActorAccess } from "../src/lib/access-linearization";
+import {
+  confirmProjectAiProviderDelegationOwner,
+  confirmProjectAiProviderDelegationProject,
+  getProjectAiProviderDelegation,
+  listProjectAiProviderDelegations,
+  proposeProjectAiProviderDelegation,
+  putProjectAiEffectiveRouteSelection,
+  revokeProjectAiProviderDelegation,
+} from "../src/lib/project-ai-provider-delegation-service";
+import {
+  PersonalProviderServiceError,
+  updatePersonalProviderConnection,
+} from "../src/lib/personal-ai-provider-service";
 
 const shouldRun = process.env.PROJECT_AI_PROVIDER_DELEGATION_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_project_ai_provider_delegation_test";
@@ -212,6 +226,10 @@ test(
     const suffix = randomUUID().slice(0, 8);
     const connectionOwnerId = randomUUID();
     const projectOwnerId = randomUUID();
+    const nonOwnerEditorId = randomUUID();
+    const freeEditorId = randomUUID();
+    const expiredEditorId = randomUUID();
+    const adminEditorId = randomUUID();
     const projectId = randomUUID();
     const providerId = randomUUID();
     const credentialId = randomUUID();
@@ -227,6 +245,10 @@ test(
       data: [
         { id: connectionOwnerId, username: `delegation_owner_${suffix}`, role: "user" },
         { id: projectOwnerId, username: `delegation_project_owner_${suffix}`, role: "user" },
+        { id: nonOwnerEditorId, username: `delegation_other_editor_${suffix}`, role: "user" },
+        { id: freeEditorId, username: `delegation_free_editor_${suffix}`, role: "user" },
+        { id: expiredEditorId, username: `delegation_expired_editor_${suffix}`, role: "user" },
+        { id: adminEditorId, username: `delegation_admin_editor_${suffix}`, role: "admin" },
       ],
     });
     const ownerSubscription = await db.membershipSubscription.create({
@@ -235,6 +257,15 @@ test(
         status: "active",
         startsAt: new Date(now.getTime() - 60_000),
         expiresAt,
+        grantedById: seededAdminId,
+      },
+    });
+    const expiredSubscription = await db.membershipSubscription.create({
+      data: {
+        userId: expiredEditorId,
+        status: "active",
+        startsAt: new Date(now.getTime() - 120_000),
+        expiresAt: new Date(now.getTime() - 60_000),
         grantedById: seededAdminId,
       },
     });
@@ -270,6 +301,28 @@ test(
         actorId: seededAdminId,
         reason: "delegation_gate_project_owner",
       });
+      for (const [userId, reason] of [
+        [nonOwnerEditorId, "delegation_gate_other_editor"],
+        [freeEditorId, "delegation_gate_free_editor"],
+        [expiredEditorId, "delegation_gate_expired_editor"],
+        [adminEditorId, "delegation_gate_admin_editor"],
+      ] as const) {
+        await grantWorkspaceMembership(tx, {
+          workspaceId: defaultWorkspaceId,
+          userId,
+          role: "member",
+          actorId: seededAdminId,
+          reason,
+        });
+        await grantProjectMembership(tx, {
+          projectId,
+          workspaceId: defaultWorkspaceId,
+          userId,
+          role: "editor",
+          actorId: seededAdminId,
+          reason,
+        });
+      }
     });
     const ownerMembership = await db.projectMembership.findFirstOrThrow({
       where: { projectId, userId: connectionOwnerId },
@@ -333,6 +386,47 @@ test(
         lastTestedAt: now,
       },
     });
+
+    const proposalExpiresAt = new Date(Date.now() + 60 * 60 * 1_000).toISOString();
+    for (const providerConnectionId of [providerId, foreignProviderId, randomUUID()]) {
+      await assert.rejects(
+        () => proposeProjectAiProviderDelegation(
+          projectId,
+          { providerConnectionId, operation: "autoExtract", expiresAt: proposalExpiresAt },
+          { id: freeEditorId, role: "user" },
+          db,
+        ),
+        (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_MEMBERSHIP_REQUIRED"),
+      );
+      await assert.rejects(
+        () => proposeProjectAiProviderDelegation(
+          projectId,
+          { providerConnectionId, operation: "autoExtract", expiresAt: proposalExpiresAt },
+          { id: expiredEditorId, role: "user" },
+          db,
+        ),
+        (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_MEMBERSHIP_EXPIRED"),
+      );
+      await assert.rejects(
+        () => proposeProjectAiProviderDelegation(
+          projectId,
+          { providerConnectionId, operation: "autoExtract", expiresAt: proposalExpiresAt },
+          { id: adminEditorId, role: "admin" },
+          db,
+        ),
+        (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_MEMBERSHIP_REQUIRED"),
+      );
+    }
+    assert.equal(expiredSubscription.status, "active");
+    await assert.rejects(
+      () => proposeProjectAiProviderDelegation(
+        projectId,
+        { providerConnectionId: providerId, operation: "embedding", maxOutputTokens: 128, expiresAt: proposalExpiresAt },
+        { id: connectionOwnerId, role: "user" },
+        db,
+      ),
+      (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_INVALID_INPUT"),
+    );
 
     const createDraft = async (
       operation: AiOperation = "projectAnalysis",
@@ -1178,6 +1272,290 @@ test(
     await assert.rejects(
       () => db.projectAiProviderDelegationAudit.delete({ where: { id: existingAudit.id } }),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_AUDIT_IMMUTABLE"),
+    );
+
+    // Exercise the B2 control-plane service after the lower-level guard cases.
+    // Revoke the delegation after switching the selection explicitly so the
+    // project can still be deleted by the fixture below.
+    const serviceDraft = await proposeProjectAiProviderDelegation(
+      projectId,
+      { providerConnectionId: providerId, operation: "autoExtract", expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString() },
+      { id: connectionOwnerId, role: "user" },
+      db,
+    );
+    assert.equal(serviceDraft.status, "draft");
+    const serviceOwnerConfirmed = await confirmProjectAiProviderDelegationOwner(
+      projectId,
+      serviceDraft.id,
+      { expectedVersion: serviceDraft.version, acknowledgeProviderCharges: true },
+      { id: connectionOwnerId, role: "user" },
+      db,
+    );
+    assert.equal(serviceOwnerConfirmed.status, "ownerConfirmed");
+    const serviceActive = await confirmProjectAiProviderDelegationProject(
+      projectId,
+      serviceDraft.id,
+      { expectedVersion: serviceOwnerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
+      { id: projectOwnerId, role: "user" },
+      db,
+    );
+    assert.equal(serviceActive.status, "active");
+    const serviceSelection = await putProjectAiEffectiveRouteSelection(
+      projectId,
+      "autoExtract",
+      { source: "personalDelegation", delegationId: serviceDraft.id, expectedVersion: null },
+      { id: projectOwnerId, role: "user" },
+      db,
+    );
+    assert.equal(serviceSelection.source, "personalDelegation");
+    const serviceRevoked = await revokeProjectAiProviderDelegation(
+      projectId,
+      serviceDraft.id,
+      { expectedVersion: serviceActive.version, reason: "service gate cleanup", switchToPlatformDefault: true },
+      { id: projectOwnerId, role: "user" },
+      db,
+    );
+    assert.equal(serviceRevoked.status, "revoked");
+    assert.equal(
+      (await db.projectAiEffectiveRouteSelection.findUnique({ where: { projectId_operation: { projectId, operation: "autoExtract" } } }))?.source,
+      "platformDefault",
+    );
+
+    // A connection owner who is only an explicit project editor may perform
+    // the safety switch themselves.  The database guard requires the final
+    // revoked delegation and both same-transaction causal audits.
+    const ownerSwitchDraft = await proposeProjectAiProviderDelegation(
+      projectId,
+      { providerConnectionId: providerId, operation: "sourceSummary", expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString() },
+      { id: connectionOwnerId, role: "user" },
+      db,
+    );
+    const ownerSwitchConfirmed = await confirmProjectAiProviderDelegationOwner(
+      projectId,
+      ownerSwitchDraft.id,
+      { expectedVersion: ownerSwitchDraft.version, acknowledgeProviderCharges: true },
+      { id: connectionOwnerId, role: "user" },
+      db,
+    );
+    const ownerSwitchActive = await confirmProjectAiProviderDelegationProject(
+      projectId,
+      ownerSwitchDraft.id,
+      { expectedVersion: ownerSwitchConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
+      { id: projectOwnerId, role: "user" },
+      db,
+    );
+    const sourceSummarySelection = await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({
+      where: { projectId_operation: { projectId, operation: "sourceSummary" } },
+    });
+    const ownerSwitchSelection = await putProjectAiEffectiveRouteSelection(
+      projectId,
+      "sourceSummary",
+      { source: "personalDelegation", delegationId: ownerSwitchDraft.id, expectedVersion: sourceSummarySelection.version },
+      { id: projectOwnerId, role: "user" },
+      db,
+    );
+    assert.equal(ownerSwitchSelection.source, "personalDelegation");
+    await assert.rejects(
+      () => db.$transaction(async (tx) => {
+        await tx.$executeRaw(Prisma.sql`
+          UPDATE "ProjectAiEffectiveRouteSelection"
+          SET "version" = "version" + 1,
+              "source" = 'platform_default',
+              "delegationId" = NULL,
+              "selectedById" = ${connectionOwnerId}::uuid,
+              "selectedByProjectMembershipId" = ${ownerMembership.id}::uuid,
+              "selectedByMembershipCreatedAt" = ${ownerMembership.createdAt}
+          WHERE "id" = ${ownerSwitchSelection.id}::uuid
+        `);
+        await tx.$executeRaw(Prisma.sql`
+          INSERT INTO "ProjectAiProviderDelegationAudit" (
+            "id", "projectId", "operation", "entity", "action", "selectionId",
+            "selectionVersion", "selectionSource", "selectedDelegationId",
+            "selectedByProjectMembershipId", "selectedByMembershipCreatedAt",
+            "actorKind", "actorId", "actorProjectMembershipId",
+            "actorMembershipCreatedAt", "reason", "transitionAt"
+          )
+          SELECT
+            ${randomUUID()}::uuid, "projectId", "operation", 'selection', 'selection_updated',
+            "id", "version", "source", NULL,
+            "selectedByProjectMembershipId", "selectedByMembershipCreatedAt",
+            'user', "selectedById", "selectedByProjectMembershipId",
+            "selectedByMembershipCreatedAt",
+            'delegation_owner_revocation_explicit_platform_switch', "updatedAt"
+          FROM "ProjectAiEffectiveRouteSelection"
+          WHERE "id" = ${ownerSwitchSelection.id}::uuid
+        `);
+      }),
+      (error: unknown) => errorText(error).includes("PROJECT_AI_EFFECTIVE_ROUTE_SELECTION_OWNER_INVALID"),
+    );
+    const rawSwitchRollback = await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({ where: { id: ownerSwitchSelection.id } });
+    assert.equal(rawSwitchRollback.source, "personalDelegation");
+    assert.equal(rawSwitchRollback.delegationId, ownerSwitchDraft.id);
+    assert.equal(rawSwitchRollback.version, ownerSwitchSelection.version);
+    assert.equal((await db.projectAiProviderDelegation.findUniqueOrThrow({ where: { id: ownerSwitchDraft.id } })).status, "active");
+    await assert.rejects(
+      () => revokeProjectAiProviderDelegation(
+        projectId,
+        ownerSwitchDraft.id,
+        { expectedVersion: ownerSwitchActive.version, reason: "owner switch must be explicit" },
+        { id: connectionOwnerId, role: "user" },
+        db,
+      ),
+      (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_SELECTION_SWITCH_REQUIRED"),
+    );
+    const unchangedOwnerSwitch = await db.projectAiProviderDelegation.findUniqueOrThrow({ where: { id: ownerSwitchDraft.id } });
+    assert.equal(unchangedOwnerSwitch.status, "active");
+    assert.equal(
+      (await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({ where: { id: ownerSwitchSelection.id } })).source,
+      "personalDelegation",
+    );
+    await assert.rejects(
+      () => revokeProjectAiProviderDelegation(
+        projectId,
+        ownerSwitchDraft.id,
+        { expectedVersion: ownerSwitchActive.version, reason: "another editor cannot revoke", switchToPlatformDefault: true },
+        { id: nonOwnerEditorId, role: "user" },
+        db,
+      ),
+      (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_PROJECT_OWNER_REQUIRED"),
+    );
+    await assert.rejects(
+      () => updatePersonalProviderConnection(
+        providerId,
+        { enabled: false },
+        { id: connectionOwnerId, role: "user" },
+        db,
+      ),
+      (error: unknown) => error instanceof PersonalProviderServiceError && error.code === "AI_PROVIDER_IN_USE",
+    );
+    const ownerRevoked = await revokeProjectAiProviderDelegation(
+      projectId,
+      ownerSwitchDraft.id,
+      { expectedVersion: ownerSwitchActive.version, reason: "connection owner explicit safety switch", switchToPlatformDefault: true },
+      { id: connectionOwnerId, role: "user" },
+      db,
+    );
+    assert.equal(ownerRevoked.status, "revoked");
+    const switchedSourceSummary = await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({ where: { id: ownerSwitchSelection.id } });
+    assert.equal(switchedSourceSummary.source, "platformDefault");
+    assert.equal(switchedSourceSummary.delegationId, null);
+    const ownerSelectionAudit = await db.projectAiProviderDelegationAudit.findFirstOrThrow({
+      where: { selectionId: ownerSwitchSelection.id, selectionVersion: switchedSourceSummary.version },
+    });
+    const ownerDelegationAudit = await db.projectAiProviderDelegationAudit.findFirstOrThrow({
+      where: { delegationId: ownerSwitchDraft.id, delegationVersion: ownerRevoked.version },
+    });
+    assert.equal(ownerSelectionAudit.reason, "delegation_owner_revocation_explicit_platform_switch");
+    assert.equal(ownerSelectionAudit.actorId, connectionOwnerId);
+    assert.equal(ownerSelectionAudit.actorProjectMembershipId, ownerMembership.id);
+    assert.equal(ownerSelectionAudit.actorMembershipCreatedAt?.getTime(), ownerMembership.createdAt.getTime());
+    assert.equal(ownerDelegationAudit.actorId, connectionOwnerId);
+    assert.equal(ownerDelegationAudit.actorProjectMembershipId, ownerMembership.id);
+    assert.equal(ownerDelegationAudit.actorMembershipCreatedAt?.getTime(), ownerMembership.createdAt.getTime());
+    assert.equal(ownerSelectionAudit.transactionId, ownerDelegationAudit.transactionId);
+
+    const casBaseSelection = await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({ where: { id: switchedSourceSummary.id } });
+    const casResults = await Promise.allSettled([
+      putProjectAiEffectiveRouteSelection(
+        projectId,
+        "sourceSummary",
+        { source: "platformDefault", delegationId: null, expectedVersion: casBaseSelection.version },
+        { id: projectOwnerId, role: "user" },
+        db,
+      ),
+      putProjectAiEffectiveRouteSelection(
+        projectId,
+        "sourceSummary",
+        { source: "platformDefault", delegationId: null, expectedVersion: casBaseSelection.version },
+        { id: projectOwnerId, role: "user" },
+        db,
+      ),
+    ]);
+    assert.equal(casResults.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(casResults.filter((result) => result.status === "rejected").length, 1);
+    const casFinalSelection = await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({ where: { id: switchedSourceSummary.id } });
+    assert.equal(casFinalSelection.version, casBaseSelection.version + 1);
+
+    const sleep = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+    let releaseListRevoke!: () => void;
+    const listRevokeHold = new Promise<void>((resolve) => { releaseListRevoke = resolve; });
+    let listRevokeReady!: () => void;
+    const listRevokeReadyPromise = new Promise<void>((resolve) => { listRevokeReady = resolve; });
+    const listRevokeTransaction = db.$transaction(async (tx) => {
+      await lockActorAccess(tx, nonOwnerEditorId);
+      await revokeProjectMembership(tx, projectId, nonOwnerEditorId, defaultWorkspaceId, {
+        actorId: seededAdminId,
+        reason: "delegation_gate_read_barrier_list_revoke",
+      });
+      listRevokeReady();
+      await listRevokeHold;
+    });
+    await listRevokeReadyPromise;
+    let listSettled = false;
+    const gatedList = listProjectAiProviderDelegations(
+      projectId,
+      { id: nonOwnerEditorId, role: "user" },
+      db,
+    ).then((value) => {
+      listSettled = true;
+      return value;
+    }, (error: unknown) => {
+      listSettled = true;
+      throw error;
+    });
+    await sleep(150);
+    assert.equal(listSettled, false);
+    releaseListRevoke();
+    await listRevokeTransaction;
+    await assert.rejects(
+      () => gatedList,
+      (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_FORBIDDEN"),
+    );
+
+    await db.$transaction(async (tx) => {
+      await grantProjectMembership(tx, {
+        projectId,
+        workspaceId: defaultWorkspaceId,
+        userId: nonOwnerEditorId,
+        role: "editor",
+        actorId: seededAdminId,
+        reason: "delegation_gate_read_barrier_detail_regrant",
+      });
+    });
+    let releaseDetailRevoke!: () => void;
+    const detailRevokeHold = new Promise<void>((resolve) => { releaseDetailRevoke = resolve; });
+    let detailRevokeReady!: () => void;
+    const detailRevokeReadyPromise = new Promise<void>((resolve) => { detailRevokeReady = resolve; });
+    const detailRevokeTransaction = db.$transaction(async (tx) => {
+      await lockActorAccess(tx, nonOwnerEditorId);
+      await revokeProjectMembership(tx, projectId, nonOwnerEditorId, defaultWorkspaceId, {
+        actorId: seededAdminId,
+        reason: "delegation_gate_read_barrier_detail_revoke",
+      });
+      detailRevokeReady();
+      await detailRevokeHold;
+    });
+    await detailRevokeReadyPromise;
+    let detailSettled = false;
+    const gatedDetail = getProjectAiProviderDelegation(
+      projectId,
+      ownerSwitchDraft.id,
+      { id: nonOwnerEditorId, role: "user" },
+      db,
+    ).then((value) => {
+      detailSettled = true;
+      return value;
+    }, (error: unknown) => {
+      detailSettled = true;
+      throw error;
+    });
+    await sleep(150);
+    assert.equal(detailSettled, false);
+    releaseDetailRevoke();
+    await detailRevokeTransaction;
+    await assert.rejects(
+      () => gatedDetail,
+      (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_FORBIDDEN"),
     );
 
     const receiptId = randomUUID();

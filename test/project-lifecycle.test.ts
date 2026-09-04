@@ -59,6 +59,12 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/git-repositories/route.ts",
     "src/app/api/projects/[projectId]/git-repositories/[linkId]/route.ts",
     "src/app/api/projects/[projectId]/git-repositories/[linkId]/sync/route.ts",
+    "src/app/api/projects/[projectId]/ai-provider-delegations/route.ts",
+    "src/app/api/projects/[projectId]/ai-provider-delegations/[delegationId]/owner-confirmation/route.ts",
+    "src/app/api/projects/[projectId]/ai-provider-delegations/[delegationId]/project-confirmation/route.ts",
+    "src/app/api/projects/[projectId]/ai-provider-delegations/[delegationId]/rejection/route.ts",
+    "src/app/api/projects/[projectId]/ai-provider-delegations/[delegationId]/revocation/route.ts",
+    "src/app/api/projects/[projectId]/ai-effective-route-selections/[operation]/route.ts",
   ]);
   for (const entry of entries.filter((value) => value.endsWith("route.ts"))) {
     const path = `${root}/${entry}`;
@@ -67,7 +73,7 @@ test("all project mutation routes reject archived projects except bounded lifecy
     if (!/export async function (POST|PUT|PATCH|DELETE)/u.test(source)) continue;
     if (serviceLifecycleGuarded.has(path)) {
       assert.doesNotMatch(source, /assertProjectActive/u, `${path} delegates lifecycle checks`);
-      assert.match(source, /(?:requestedBy|actor):\s*user|,\s*user\)/u, `${path} passes the session actor`);
+      assert.match(source, /(?:requestedBy|actor):\s*user|,\s*(?:user|actor)\s*(?:,|\))/u, `${path} passes the session actor`);
       continue;
     }
     assert.match(source, /assertProjectActive/u, `${path} must reject archived project mutations`);

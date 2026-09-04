@@ -48,6 +48,7 @@ import { WorkspaceProviderServiceError } from "@/lib/workspace-provider-service"
 import { PlatformDefaultAiRouteError } from "@/lib/platform-default-ai-routes";
 import { EffectiveAiRouteError } from "@/lib/effective-ai-route";
 import { PersonalProviderServiceError } from "@/lib/personal-ai-provider-service";
+import { ProjectAiProviderDelegationServiceError } from "@/lib/project-ai-provider-delegation-service";
 
 export type ApiErrorBody = {
   error: {
@@ -505,6 +506,27 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_PROVIDER_CONFLICT: [409, "个人模型连接已被其他操作更新，请刷新后重试"],
       AI_MEMBERSHIP_REQUIRED: [403, "配置个人模型需要有效会员资格"],
       AI_MEMBERSHIP_EXPIRED: [403, "会员资格已到期，不能继续配置或测试个人模型"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof ProjectAiProviderDelegationServiceError) {
+    const mapping = {
+      PROJECT_AI_PROVIDER_DELEGATION_INVALID_INPUT: [400, "个人模型委托请求无效"],
+      PROJECT_AI_PROVIDER_DELEGATION_NOT_FOUND: [404, "个人模型委托不存在"],
+      PROJECT_AI_PROVIDER_DELEGATION_PERSONAL_PROVIDER_NOT_FOUND: [404, "个人模型连接不存在或不属于当前账户"],
+      PROJECT_AI_PROVIDER_DELEGATION_FORBIDDEN: [403, "无权操作该项目个人模型委托"],
+      PROJECT_AI_PROVIDER_DELEGATION_PROJECT_OWNER_REQUIRED: [403, "只有明确的项目 Owner 可以确认或选择个人模型"],
+      PROJECT_AI_PROVIDER_DELEGATION_MEMBERSHIP_REQUIRED: [403, "需要有效的项目成员资格"],
+      PROJECT_AI_PROVIDER_DELEGATION_MEMBERSHIP_EXPIRED: [403, "会员资格已到期，不能继续使用个人模型委托"],
+      PROJECT_AI_PROVIDER_DELEGATION_PROJECT_ARCHIVED: [409, "已归档项目不能修改个人模型委托"],
+      PROJECT_AI_PROVIDER_DELEGATION_CONNECTION_UNAVAILABLE: [409, "个人模型连接当前不可用，请重新检查配置"],
+      PROJECT_AI_PROVIDER_DELEGATION_STATE_CONFLICT: [409, "个人模型委托状态已变化，当前操作不能继续"],
+      PROJECT_AI_PROVIDER_DELEGATION_VERSION_CONFLICT: [409, "个人模型委托已被其他操作更新，请刷新后重试"],
+      PROJECT_AI_PROVIDER_DELEGATION_SELECTION_SWITCH_REQUIRED: [409, "撤销已选个人模型前必须显式切回平台默认模型"],
+      PROJECT_AI_PROVIDER_DELEGATION_CONFLICT: [409, "个人模型委托已被其他操作更新，请刷新后重试"],
+      PROJECT_AI_PROVIDER_DELEGATION_EXPIRED: [410, "个人模型委托已经过期，请重新创建"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

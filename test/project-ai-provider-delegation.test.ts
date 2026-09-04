@@ -8,6 +8,10 @@ const migration = readFileSync(
   "prisma/migrations/20260904090000_add_project_ai_provider_delegations/migration.sql",
   "utf8",
 );
+const safetySwitchMigration = readFileSync(
+  "prisma/migrations/20260904100000_allow_delegation_owner_safety_switch/migration.sql",
+  "utf8",
+);
 
 test("personal project model delegation has an independent schema surface", () => {
   assert.match(schema, /enum ProjectAiProviderDelegationStatus/u);
@@ -122,4 +126,18 @@ test("delegation gate is registered as a disposable migrated PostgreSQL gate", (
     seedAdmin: true,
     setup: "migrate",
   });
+});
+
+test("owner safety switch is a narrow audited forward migration", () => {
+  assert.match(safetySwitchMigration, /CREATE OR REPLACE FUNCTION "project_ai_effective_route_selection_integrity_guard"/u);
+  assert.match(safetySwitchMigration, /OLD\."source" = 'personal_delegation'/u);
+  assert.match(safetySwitchMigration, /OLD\."delegationId" IS NOT NULL/u);
+  assert.match(safetySwitchMigration, /NEW\."source" = 'platform_default'/u);
+  assert.match(safetySwitchMigration, /NEW\."delegationId" IS NULL/u);
+  assert.match(safetySwitchMigration, /delegation_owner_revocation_explicit_platform_switch/u);
+  assert.match(safetySwitchMigration, /delegation\."status" = 'revoked'/u);
+  assert.match(safetySwitchMigration, /selection_audit\."transactionId" = txid_current\(\)/u);
+  assert.match(safetySwitchMigration, /delegation_audit\."transactionId" = txid_current\(\)/u);
+  assert.match(safetySwitchMigration, /PROJECT_AI_EFFECTIVE_ROUTE_SELECTION_OWNER_INVALID/u);
+  assert.doesNotMatch(safetySwitchMigration, /CREATE TABLE/u);
 });

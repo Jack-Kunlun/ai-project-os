@@ -227,6 +227,7 @@ test("M300 migration occupies stable migration slot 57 and contains additive DDL
 test("personal provider ownership migration scopes names and freezes identity", async () => {
   const migrationName = "20260904080000_add_personal_ai_provider_ownership";
   const delegationMigrationName = "20260904090000_add_project_ai_provider_delegations";
+  const safetySwitchMigrationName = "20260904100000_allow_delegation_owner_safety_switch";
   const entries = await readdir("prisma/migrations", { withFileTypes: true });
   const migrations = entries
     .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
@@ -234,6 +235,7 @@ test("personal provider ownership migration scopes names and freezes identity", 
     .sort();
   assert.equal(migrations[64], migrationName);
   assert.equal(migrations[65], delegationMigrationName);
+  assert.equal(migrations[66], safetySwitchMigrationName);
 
   const schema = await readFile("prisma/schema.prisma", "utf8");
   const provider = readModel(schema, "AiProviderConnection");

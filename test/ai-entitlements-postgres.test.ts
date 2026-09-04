@@ -286,7 +286,7 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
     const reservation = await db.platformTokenReservation.create({ data: { userId: ownerId, grantId: grant.id, jobId: randomUUID(), callKey: `gate:${suffix}:retention`, operation: "autoExtract", modelId: "deepseek-v4-flash", reservedTokens: 10, expiresAt: new Date("2026-10-01T00:00:00.000Z") } });
     reservationIds.push(reservation.id);
     const ledger = await db.platformTokenLedgerEntry.create({ data: { userId: ownerId, grantId: grant.id, reservationId: reservation.id, entryKind: "reserve", amount: -10, reasonCode: "GATE", idempotencyKey: `gate:${suffix}:ledger` } });
-    const provider = await createProviderConnection({ name: `Retention DeepSeek ${suffix}`, kind: "deepseek", apiKey: "deepseek-retention-key", generationModelId: "deepseek-v4-flash", visionModelId: null, embeddingModelId: null, embeddingDimensions: null }, db);
+    const provider = await createProviderConnection({ name: `Retention DeepSeek ${suffix}`, kind: "deepseek", apiKey: "deepseek-retention-key", generationModelId: "deepseek-v4-flash", visionModelId: null, embeddingModelId: null, embeddingDimensions: null }, { id: adminId, role: "admin" }, db);
     createdProviderIds.push(provider.id);
     createdCredentialIds.push((await db.aiProviderConnection.findUniqueOrThrow({ where: { id: provider.id }, select: { credentialId: true } })).credentialId);
     const job = await db.backgroundJob.create({ data: { id: randomUUID(), projectId, kind: "autoExtract", idempotencyKey: "a".repeat(64), requestedById: ownerId, payload: {} } });

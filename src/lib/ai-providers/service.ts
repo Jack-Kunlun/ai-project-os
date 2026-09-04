@@ -10,6 +10,7 @@ import {
   isSafeModelId,
 } from "./registry";
 import {
+  PROVIDER_CONNECTION_TEST_TRANSACTION_TIMEOUT_MS,
   PROVIDER_REQUEST_TIMEOUT_MS,
   ProviderTransportError,
   invokeChatCompletion,
@@ -39,6 +40,13 @@ export class ProviderServiceError extends Error {
 }
 
 export type ProviderDb = PrismaClient | Prisma.TransactionClient;
+
+/**
+ * The platform provider control plane is a system-admin-only surface. Keep
+ * this actor contract separate from workspace actors so a workspace role can
+ * never accidentally authorize a platform-owned connection.
+ */
+export type PlatformProviderActor = Readonly<{ id: string; role: string }>;
 
 function isPrismaClient(db: ProviderDb): db is PrismaClient {
   return typeof (db as unknown as { $transaction?: unknown }).$transaction === "function";
@@ -200,17 +208,68 @@ export function providerCatalog() {
   }));
 }
 
-export async function listProviderConnections(db: PrismaClient = getDb()) {
+/**
+ * Authorize platform provider administration before parsing request input or
+ * touching any provider/credential row. The role carried by a session is only
+ * a hint for direct service callers; the current AppUser row is reloaded so a
+ * disabled or demoted administrator cannot keep using a stale actor object.
+ */
+export function assertPlatformProviderAdminHint(actor: unknown): PlatformProviderActor {
+  if (typeof actor !== "object" || actor === null) return fail("AI_PROVIDER_ADMIN_REQUIRED");
+  const candidate = actor as { id?: unknown; role?: unknown };
+  const parsedId = z.string().uuid().safeParse(candidate.id);
+  if (!parsedId.success || candidate.role !== "admin") return fail("AI_PROVIDER_ADMIN_REQUIRED");
+  return Object.freeze({ id: parsedId.data, role: "admin" });
+}
+
+async function assertPlatformProviderAdminRecord(
+  actor: PlatformProviderActor,
+  db: ProviderDb,
+): Promise<PlatformProviderActor> {
+  const current = await db.appUser.findUnique({
+    where: { id: actor.id },
+    select: { id: true, role: true, disabledAt: true },
+  });
+  if (current === null || current.role !== "admin" || current.disabledAt !== null) {
+    return fail("AI_PROVIDER_ADMIN_REQUIRED");
+  }
+  return Object.freeze({ id: current.id, role: "admin" });
+}
+
+/**
+ * Read-only callers can use this guard directly. Mutating and network paths
+ * must call the shape-only hint first and then re-check the row after taking
+ * the actor lock inside their transaction.
+ */
+export async function assertPlatformProviderAdmin(
+  actor: unknown,
+  db: ProviderDb,
+): Promise<PlatformProviderActor> {
+  return assertPlatformProviderAdminRecord(assertPlatformProviderAdminHint(actor), db);
+}
+
+export async function listProviderConnections(
+  actor: PlatformProviderActor,
+  db: PrismaClient = getDb(),
+) {
+  await assertPlatformProviderAdmin(actor, db);
   return db.aiProviderConnection.findMany({ where: { scope: "platform" }, orderBy: { createdAt: "asc" }, select: providerSelect });
 }
 
-export async function createProviderConnection(input: unknown, db: PrismaClient = getDb()) {
-  const parsed = createSchema.parse(input);
-  assertEmbeddingConfiguration(parsed.kind, parsed.embeddingModelId, parsed.embeddingDimensions);
-  assertVisionConfiguration(parsed.kind, parsed.visionModelId);
-  assertAtLeastOneCapability(parsed.generationModelId, parsed.visionModelId, parsed.embeddingModelId);
+export async function createProviderConnection(
+  input: unknown,
+  actor: PlatformProviderActor,
+  db: PrismaClient = getDb(),
+) {
+  const actorHint = assertPlatformProviderAdminHint(actor);
   try {
     return await db.$transaction(async (tx) => {
+      await lockMembershipUser(tx, actorHint.id);
+      await assertPlatformProviderAdminRecord(actorHint, tx);
+      const parsed = createSchema.parse(input);
+      assertEmbeddingConfiguration(parsed.kind, parsed.embeddingModelId, parsed.embeddingDimensions);
+      assertVisionConfiguration(parsed.kind, parsed.visionModelId);
+      assertAtLeastOneCapability(parsed.generationModelId, parsed.visionModelId, parsed.embeddingModelId);
       const credential = await createCredential("aiProvider", parsed.apiKey, tx);
       return tx.aiProviderConnection.create({
         data: {
@@ -241,11 +300,15 @@ export async function createProviderConnection(input: unknown, db: PrismaClient 
 export async function updateProviderConnection(
   providerId: string,
   input: unknown,
+  actor: PlatformProviderActor,
   db: PrismaClient = getDb(),
 ) {
-  const parsed = updateSchema.parse(input);
+  const actorHint = assertPlatformProviderAdminHint(actor);
   try {
     return await db.$transaction(async (tx) => {
+      await lockMembershipUser(tx, actorHint.id);
+      await assertPlatformProviderAdminRecord(actorHint, tx);
+      const parsed = updateSchema.parse(input);
       await lockProviderConfiguration(tx, providerId);
       const existing = await tx.aiProviderConnection.findFirst({ where: { id: providerId, scope: "platform" } });
       if (existing === null) return fail("AI_PROVIDER_NOT_FOUND");
@@ -318,9 +381,16 @@ export async function updateProviderConnection(
   }
 }
 
-export async function disableProviderConnection(providerId: string, db: PrismaClient = getDb()) {
+export async function disableProviderConnection(
+  providerId: string,
+  actor: PlatformProviderActor,
+  db: PrismaClient = getDb(),
+) {
+  const actorHint = assertPlatformProviderAdminHint(actor);
   try {
     return await db.$transaction(async (tx) => {
+      await lockMembershipUser(tx, actorHint.id);
+      await assertPlatformProviderAdminRecord(actorHint, tx);
       await lockProviderConfiguration(tx, providerId);
       const provider = await tx.aiProviderConnection.findFirst({
         where: { id: providerId, scope: "platform" },
@@ -354,11 +424,15 @@ export async function disableProviderConnection(providerId: string, db: PrismaCl
 export async function deleteProviderConnection(
   providerId: string,
   input: unknown,
+  actor: PlatformProviderActor,
   db: PrismaClient = getDb(),
 ) {
-  const parsed = deleteSchema.parse(input);
+  const actorHint = assertPlatformProviderAdminHint(actor);
   try {
     return await db.$transaction(async (tx) => {
+      await lockMembershipUser(tx, actorHint.id);
+      await assertPlatformProviderAdminRecord(actorHint, tx);
+      const parsed = deleteSchema.parse(input);
       await lockProviderConfiguration(tx, providerId);
       const provider = await tx.aiProviderConnection.findFirst({
         where: { id: providerId, scope: "platform" },
@@ -401,13 +475,7 @@ export async function deleteProviderConnection(
   }
 }
 
-export type ProviderOwnershipConfirmationActor = Readonly<{ id: string; role: string }>;
-
-function assertOwnershipConfirmationAdmin(actor: ProviderOwnershipConfirmationActor): void {
-  if (actor === null || actor === undefined || actor.role !== "admin" || typeof actor.id !== "string" || actor.id.length === 0) {
-    return fail("AI_PROVIDER_ADMIN_REQUIRED");
-  }
-}
+export type ProviderOwnershipConfirmationActor = PlatformProviderActor;
 
 /**
  * Confirm a legacy platform connection after an explicit administrator review.
@@ -420,13 +488,15 @@ export async function confirmPlatformProviderOwnership(
   actor: ProviderOwnershipConfirmationActor,
   db: PrismaClient = getDb(),
 ) {
-  assertOwnershipConfirmationAdmin(actor);
+  const actorHint = assertPlatformProviderAdminHint(actor);
   const parsedProviderId = z.string().uuid().safeParse(providerId);
   if (!parsedProviderId.success) return fail("AI_PROVIDER_INVALID_INPUT");
-  const parsed = ownershipConfirmationSchema.safeParse(input);
-  if (!parsed.success) return fail("AI_PROVIDER_INVALID_INPUT");
   try {
     return await withProviderSerializableRetry(() => db.$transaction(async (tx) => {
+      await lockMembershipUser(tx, actorHint.id);
+      await assertPlatformProviderAdminRecord(actorHint, tx);
+      const parsed = ownershipConfirmationSchema.safeParse(input);
+      if (!parsed.success) return fail("AI_PROVIDER_INVALID_INPUT");
       await lockProviderConfiguration(tx, parsedProviderId.data);
       const existing = await tx.aiProviderConnection.findUnique({
         where: { id: parsedProviderId.data },
@@ -583,7 +653,7 @@ async function markProviderTestError(
   return db.$transaction((tx) => markProviderTestErrorInTransaction(providerId, scope, startedUpdatedAt, code, tx, options));
 }
 
-export async function testProviderConnection(
+async function testProviderConnectionInScope(
   providerId: string,
   db: ProviderDb = getDb(),
   scope: AiProviderScope = "platform",
@@ -663,4 +733,49 @@ export async function testProviderConnection(
     if (!markedError) return fail("AI_PROVIDER_CONFLICT");
     throw error;
   }
+}
+
+/**
+ * Workspace-only raw probe used by the already-authorized workspace service.
+ * The literal scope parameter is intentionally required and restricted to
+ * "workspace"; this function is not a platform-provider authorization API.
+ */
+export async function testProviderConnection(
+  providerId: string,
+  db: ProviderDb,
+  scope: "workspace",
+  options: ProviderTestOptions = {},
+) {
+  if (scope !== "workspace") return fail("AI_PROVIDER_ADMIN_REQUIRED");
+  return testProviderConnectionInScope(providerId, db, scope, options);
+}
+
+/**
+ * Explicit platform probe entry point. Authorization is performed before the
+ * provider row, credential vault, or transport can be touched.
+ */
+export async function testPlatformProviderConnection(
+  providerId: string,
+  actor: PlatformProviderActor,
+  db: ProviderDb = getDb(),
+) {
+  const actorHint = assertPlatformProviderAdminHint(actor);
+  if (!isPrismaClient(db)) {
+    await lockMembershipUser(db, actorHint.id);
+    await assertPlatformProviderAdminRecord(actorHint, db);
+    await lockProviderConfiguration(db, providerId);
+    return testProviderConnectionInScope(providerId, db, "platform");
+  }
+  return db.$transaction(
+    async (tx) => {
+      await lockMembershipUser(tx, actorHint.id);
+      await assertPlatformProviderAdminRecord(actorHint, tx);
+      await lockProviderConfiguration(tx, providerId);
+      return testProviderConnectionInScope(providerId, tx, "platform");
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      timeout: PROVIDER_CONNECTION_TEST_TRANSACTION_TIMEOUT_MS,
+    },
+  );
 }

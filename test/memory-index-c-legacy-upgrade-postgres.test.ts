@@ -17,7 +17,12 @@ import {
   runProjectMemoryIndexJob,
 } from "../src/lib/web-memory-index";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
-import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
+import {
+  grantProjectMembership,
+  grantWorkspaceMembership,
+  revokeProjectMembership,
+  revokeWorkspaceMembership,
+} from "../src/lib/membership-governance";
 
 const repositoryRoot = process.cwd();
 const databaseName = "ai_project_os_memory_index_c_legacy_upgrade_test";
@@ -241,13 +246,24 @@ export default defineConfig({
       // retaining the generated workspace/project access records.
       await db.appUser.update({ where: { id: userId }, data: { role: "member" } });
       await db.$transaction(async (tx) => {
+        // The governance boundary deliberately forbids an ordinary grant from
+        // confirming a quarantined row. Retire the pending legacy epoch first,
+        // then create the explicit confirmed fixture epoch through the normal
+        // grant path.
+        await revokeWorkspaceMembership(tx, workspaceId, userId, {
+          actorId: userId,
+          reason: "legacy_upgrade_fixture_pending_retired",
+        });
         await grantWorkspaceMembership(tx, {
           workspaceId,
           userId,
           role: "owner",
           actorId: userId,
           reason: "legacy_upgrade_fixture_membership",
-          allowPendingConfirmation: true,
+        });
+        await revokeProjectMembership(tx, projectId, userId, workspaceId, {
+          actorId: userId,
+          reason: "legacy_upgrade_fixture_pending_project_retired",
         });
         await grantProjectMembership(tx, {
           projectId,
@@ -256,7 +272,6 @@ export default defineConfig({
           role: "owner",
           actorId: userId,
           reason: "legacy_upgrade_fixture_project_membership",
-          allowPendingConfirmation: true,
         });
       });
       const membershipNow = new Date();

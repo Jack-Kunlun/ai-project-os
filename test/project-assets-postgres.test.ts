@@ -39,6 +39,7 @@ test(
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
     let createdUserId: string | null = null;
+    let createdAdminId: string | null = null;
     let createdWorkspaceId: string | null = null;
     const providerIds: string[] = [];
     const credentialIds: string[] = [];
@@ -77,6 +78,10 @@ test(
         data: { id: randomUUID(), username: `asset_${suffix}`, role: "user" },
       });
       createdUserId = user.id;
+      const platformAdmin = await db.appUser.create({
+        data: { id: randomUUID(), username: `asset_platform_admin_${suffix}`, role: "admin" },
+      });
+      createdAdminId = platformAdmin.id;
       const workspaceId = randomUUID();
       await db.workspace.create({
         data: { id: workspaceId, name: `Asset workspace ${suffix}`, slug: `asset-workspace-${suffix}`, createdById: user.id },
@@ -229,7 +234,7 @@ test(
           visionModelId: adapter.model,
           embeddingModelId: null,
           embeddingDimensions: null,
-        }, db);
+        }, { id: platformAdmin.id, role: "admin" }, db);
         providerIds.push(connection.id);
         const row = await db.aiProviderConnection.findUniqueOrThrow({ where: { id: connection.id } });
         credentialIds.push(row.credentialId);
@@ -265,6 +270,7 @@ test(
         await db.workspace.deleteMany({ where: { id: createdWorkspaceId } });
       }
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
+      if (createdAdminId !== null) await db.appUser.deleteMany({ where: { id: createdAdminId } });
       await rm(assetRoot, { recursive: true, force: true });
       await unlink(masterKeyPath).catch(() => undefined);
       if (previousAssetRoot === undefined) delete process.env.AI_PROJECT_OS_ASSET_DIR;

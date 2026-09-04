@@ -50,19 +50,19 @@ test("unused model and Git connections can be permanently deleted while historic
       visionModelId: null,
       embeddingModelId: null,
       embeddingDimensions: null,
-    }, db);
+    }, { id: userId, role: "admin" }, db);
     providerId = provider.id;
     providerCredentialId = (await db.aiProviderConnection.findUniqueOrThrow({ where: { id: provider.id }, select: { credentialId: true } })).credentialId;
     await assert.rejects(
-      () => deleteProviderConnection(provider.id, { confirmationName: provider.name }, db),
+      () => deleteProviderConnection(provider.id, { confirmationName: provider.name }, { id: userId, role: "admin" }, db),
       (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_DELETE_REQUIRES_DISABLED",
     );
-    await updateProviderConnection(provider.id, { enabled: false }, db);
+    await updateProviderConnection(provider.id, { enabled: false }, { id: userId, role: "admin" }, db);
     await assert.rejects(
-      () => deleteProviderConnection(provider.id, { confirmationName: "wrong name" }, db),
+      () => deleteProviderConnection(provider.id, { confirmationName: "wrong name" }, { id: userId, role: "admin" }, db),
       (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_CONFIRMATION_MISMATCH",
     );
-    await deleteProviderConnection(provider.id, { confirmationName: provider.name }, db);
+    await deleteProviderConnection(provider.id, { confirmationName: provider.name }, { id: userId, role: "admin" }, db);
     assert.equal(await db.aiProviderConnection.count({ where: { id: provider.id } }), 0);
     assert.equal(await db.externalCredential.count({ where: { id: providerCredentialId } }), 0);
     providerId = null;

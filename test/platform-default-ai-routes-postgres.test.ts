@@ -299,7 +299,7 @@ test(
           db,
           configurationRaceVerified.updatedAt,
         ),
-        updateProviderConnection(configRaceProvider.id, { generationModelId: "gpt-4.1" }, db),
+        updateProviderConnection(configRaceProvider.id, { generationModelId: "gpt-4.1" }, { id: adminId, role: "admin" }, db),
       ]);
       const configurationActivation = configurationRaceResults[0];
       const configurationUpdate = configurationRaceResults[1];
@@ -351,7 +351,7 @@ test(
           db,
           disableRaceVerified.updatedAt,
         ),
-        updateProviderConnection(disableRaceProvider.id, { enabled: false }, db),
+        updateProviderConnection(disableRaceProvider.id, { enabled: false }, { id: adminId, role: "admin" }, db),
       ]);
       const disableActivation = disableRaceResults[0];
       const disableUpdate = disableRaceResults[1];
@@ -447,24 +447,24 @@ test(
         (error: unknown) => errorText(error).includes("AI provider ownership audit is immutable"),
       );
 
-      const renamed = await updateProviderConnection(provider.id, { name: `Renamed platform route provider ${suffix}` }, db);
+      const renamed = await updateProviderConnection(provider.id, { name: `Renamed platform route provider ${suffix}` }, { id: adminId, role: "admin" }, db);
       assert.equal(renamed.configurationVersion, 1);
-      const changed = await updateProviderConnection(provider.id, { generationModelId: "gpt-4.1-nano" }, db);
+      const changed = await updateProviderConnection(provider.id, { generationModelId: "gpt-4.1-nano" }, { id: adminId, role: "admin" }, db);
       assert.equal(changed.configurationVersion, 2);
       assert.equal(changed.status, "configured");
       const stale = await getPlatformDefaultAiRouteReadiness({ id: adminId, role: "admin" }, db);
       assert.equal(stale.operations.projectAnalysis.code, "configuration-changed");
 
       await assert.rejects(
-        () => updateProviderConnection(provider.id, { enabled: false }, db),
+        () => updateProviderConnection(provider.id, { enabled: false }, { id: adminId, role: "admin" }, db),
         (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_IN_USE",
       );
       await retirePlatformDefaultAiRoute(activeSecond.id, { id: adminId, role: "admin" }, "retire before disable", db, activeSecond.updatedAt);
-      const disabled = await updateProviderConnection(provider.id, { enabled: false }, db);
+      const disabled = await updateProviderConnection(provider.id, { enabled: false }, { id: adminId, role: "admin" }, db);
       assert.equal(disabled.status, "disabled");
       assert.equal(disabled.configurationVersion, 3);
       await assert.rejects(
-        () => deleteProviderConnection(provider.id, { confirmationName: disabled.name }, db),
+        () => deleteProviderConnection(provider.id, { confirmationName: disabled.name }, { id: adminId, role: "admin" }, db),
         (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_IN_USE",
       );
       const disabledReadiness = await getPlatformDefaultAiRouteReadiness({ id: adminId, role: "admin" }, db);

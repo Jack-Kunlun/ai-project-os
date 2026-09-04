@@ -20,10 +20,13 @@ import {
 } from "../src/lib/platform-default-ai-routes";
 import { mapApiError } from "../src/lib/api-errors";
 import {
+  createProviderConnection,
   deleteProviderConnection,
   confirmPlatformProviderOwnership,
   disableProviderConnection,
+  listProviderConnections,
   ProviderServiceError,
+  testPlatformProviderConnection,
   updateProviderConnection,
 } from "../src/lib/ai-providers";
 import { isSerializationConflict } from "../src/lib/project-snapshot-errors";
@@ -238,9 +241,22 @@ class FakeProviderLifecycleDb {
     _count: { projectRoutes: 0, platformDefaultAiRoutes: 0 },
   };
   activeDefaultRouteCount = 0;
+  readonly events: string[] = [];
+
+  readonly appUser = {
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      this.events.push("actor-read");
+      return where.id === admin.id
+        ? { id: admin.id, role: "admin" as const, disabledAt: null }
+        : null;
+    },
+  };
 
   readonly aiProviderConnection = {
-    findFirst: async () => this.provider,
+    findFirst: async () => {
+      this.events.push("provider-read");
+      return this.provider;
+    },
     findUnique: async () => ({ ...this.provider }),
     update: async ({ data }: { data: Record<string, unknown> }) => {
       for (const [key, value] of Object.entries(data)) {
@@ -268,11 +284,13 @@ class FakeProviderLifecycleDb {
 
   async $executeRaw(..._args: unknown[]): Promise<number> {
     void _args;
+    this.events.push("lock");
     return 0;
   }
 
   async $transaction<T>(callback: (tx: this) => Promise<T>, _options?: unknown): Promise<T> {
     void _options;
+    this.events.push("transaction");
     if (this.transactionError !== null) {
       const error = this.transactionError;
       this.transactionError = null;
@@ -282,7 +300,79 @@ class FakeProviderLifecycleDb {
   }
 }
 
+class CountingPlatformProviderGuardDb {
+  providerCalls = 0;
+  credentialCalls = 0;
+  transportCalls = 0;
+  readonly appUser = {
+    findUnique: async () => {
+      this.providerCalls += 1;
+      return { id: admin.id, role: "admin" as const, disabledAt: new Date("2026-09-04T00:00:00.000Z") };
+    },
+  };
+  readonly aiProviderConnection = new Proxy({}, {
+    get: () => {
+      this.providerCalls += 1;
+      throw new Error("provider access must be blocked");
+    },
+  });
+  readonly externalCredential = new Proxy({}, {
+    get: () => {
+      this.credentialCalls += 1;
+      throw new Error("credential access must be blocked");
+    },
+  });
+}
+
 const db = () => new FakePlatformRouteDb();
+
+test("platform provider services fail before provider or credential access for non-admin actors", async () => {
+  const fake = new CountingPlatformProviderGuardDb();
+  const operations = [
+    () => listProviderConnections(member, fake as unknown as PrismaClient),
+    () => createProviderConnection({}, member, fake as unknown as PrismaClient),
+    () => updateProviderConnection(providerId, {}, member, fake as unknown as PrismaClient),
+    () => disableProviderConnection(providerId, member, fake as unknown as PrismaClient),
+    () => deleteProviderConnection(providerId, {}, member, fake as unknown as PrismaClient),
+    () => testPlatformProviderConnection(providerId, member, fake as unknown as PrismaClient),
+  ];
+  for (const operation of operations) {
+    await assert.rejects(
+      operation,
+      (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_ADMIN_REQUIRED",
+    );
+  }
+  assert.equal(fake.providerCalls, 0);
+  assert.equal(fake.credentialCalls, 0);
+  assert.equal(fake.transportCalls, 0);
+});
+
+test("platform provider services reject a disabled admin before provider access", async () => {
+  const fake = new CountingPlatformProviderGuardDb();
+  await assert.rejects(
+    () => listProviderConnections(admin, fake as unknown as PrismaClient),
+    (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_ADMIN_REQUIRED",
+  );
+  assert.equal(fake.providerCalls, 1);
+  assert.equal(fake.credentialCalls, 0);
+});
+
+test("platform provider routes retain the authenticated actor through every mutation and probe", async () => {
+  const [collectionRoute, itemRoute, testRoute, ownershipRoute] = await Promise.all([
+    readFile("src/app/api/settings/providers/route.ts", "utf8"),
+    readFile("src/app/api/settings/providers/[providerId]/route.ts", "utf8"),
+    readFile("src/app/api/settings/providers/[providerId]/test/route.ts", "utf8"),
+    readFile("src/app/api/settings/providers/[providerId]/ownership/confirm/route.ts", "utf8"),
+  ]);
+  assert.equal(collectionRoute.match(/const actor = await requireApiSession\(request\)/gu)?.length, 2);
+  assert.match(collectionRoute, /listProviderConnections\(actor\)/u);
+  assert.match(collectionRoute, /createProviderConnection\(await readJsonBody\(request\), actor\)/u);
+  assert.equal(itemRoute.match(/const actor = await requireApiSession\(request\)/gu)?.length, 2);
+  assert.match(itemRoute, /await readJsonBody\(request\),\s*actor,/u);
+  assert.match(testRoute, /const actor = await requireApiSession\(request\)/u);
+  assert.match(testRoute, /testPlatformProviderConnection\(providerId, actor\)/u);
+  assert.match(ownershipRoute, /confirmPlatformProviderOwnership\(providerId, await readJsonBody\(request\), actor\)/u);
+});
 
 test("the platform route control plane keeps six exact, independent operations", () => {
   assert.deepEqual([...PLATFORM_DEFAULT_AI_OPERATIONS], ["embedding", "visionExtract", "autoExtract", "sourceSummary", "projectAnalysis", "generateWithContext"]);
@@ -433,28 +523,28 @@ test("provider configuration versions fence route readiness and lifecycle change
   const previousKeyFile = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
   process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
   try {
-    const renamed = await updateProviderConnection(fake.provider.id, { name: "Renamed platform provider" }, fake as unknown as PrismaClient);
+    const renamed = await updateProviderConnection(fake.provider.id, { name: "Renamed platform provider" }, admin, fake as unknown as PrismaClient);
     assert.equal(renamed.configurationVersion, 1);
 
-    const modelChanged = await updateProviderConnection(fake.provider.id, { generationModelId: "gpt-4.1" }, fake as unknown as PrismaClient);
+    const modelChanged = await updateProviderConnection(fake.provider.id, { generationModelId: "gpt-4.1" }, admin, fake as unknown as PrismaClient);
     assert.equal(modelChanged.configurationVersion, 2);
     assert.equal(modelChanged.status, "configured");
     assert.equal(modelChanged.lastTestedAt, null);
 
-    const keyChanged = await updateProviderConnection(fake.provider.id, { apiKey: "rotated-test-key" }, fake as unknown as PrismaClient);
+    const keyChanged = await updateProviderConnection(fake.provider.id, { apiKey: "rotated-test-key" }, admin, fake as unknown as PrismaClient);
     assert.equal(keyChanged.configurationVersion, 3);
     assert.equal(keyChanged.status, "configured");
 
     fake.activeDefaultRouteCount = 1;
     await assert.rejects(
-      () => updateProviderConnection(fake.provider.id, { enabled: false }, fake as unknown as PrismaClient),
+      () => updateProviderConnection(fake.provider.id, { enabled: false }, admin, fake as unknown as PrismaClient),
       (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_IN_USE",
     );
     fake.activeDefaultRouteCount = 0;
-    const disabled = await updateProviderConnection(fake.provider.id, { enabled: false }, fake as unknown as PrismaClient);
+    const disabled = await updateProviderConnection(fake.provider.id, { enabled: false }, admin, fake as unknown as PrismaClient);
     assert.equal(disabled.configurationVersion, 4);
     assert.equal(disabled.status, "disabled");
-    const enabled = await updateProviderConnection(fake.provider.id, { enabled: true }, fake as unknown as PrismaClient);
+    const enabled = await updateProviderConnection(fake.provider.id, { enabled: true }, admin, fake as unknown as PrismaClient);
     assert.equal(enabled.configurationVersion, 5);
     assert.equal(enabled.status, "configured");
   } finally {
@@ -462,6 +552,12 @@ test("provider configuration versions fence route readiness and lifecycle change
     else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyFile;
     await rm(keyDirectory, { recursive: true, force: true });
   }
+});
+
+test("platform provider mutations lock the actor before provider access", async () => {
+  const fake = new FakeProviderLifecycleDb();
+  await updateProviderConnection(fake.provider.id, { name: "Actor-fenced provider" }, admin, fake as unknown as PrismaClient);
+  assert.deepEqual(fake.events.slice(0, 5), ["transaction", "lock", "actor-read", "lock", "provider-read"]);
 });
 
 test("provider lifecycle serializable conflicts map to a stable provider conflict", async () => {
@@ -473,12 +569,12 @@ test("provider lifecycle serializable conflicts map to a stable provider conflic
 
   fake.transactionError = serializationFailure();
   await assert.rejects(
-    () => disableProviderConnection(fake.provider.id, fake as unknown as PrismaClient),
+    () => disableProviderConnection(fake.provider.id, admin, fake as unknown as PrismaClient),
     (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_CONFLICT",
   );
   fake.transactionError = serializationFailure();
   await assert.rejects(
-    () => deleteProviderConnection(fake.provider.id, { confirmationName: fake.provider.name }, fake as unknown as PrismaClient),
+    () => deleteProviderConnection(fake.provider.id, { confirmationName: fake.provider.name }, admin, fake as unknown as PrismaClient),
     (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_CONFLICT",
   );
   fake.transactionError = new Prisma.PrismaClientKnownRequestError("Raw query failed. Code: `40001`.", {
@@ -486,7 +582,7 @@ test("provider lifecycle serializable conflicts map to a stable provider conflic
     clientVersion: "7.10.0",
   });
   await assert.rejects(
-    () => updateProviderConnection(fake.provider.id, { generationModelId: "gpt-4.1" }, fake as unknown as PrismaClient),
+    () => updateProviderConnection(fake.provider.id, { generationModelId: "gpt-4.1" }, admin, fake as unknown as PrismaClient),
     (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_CONFLICT",
   );
 });

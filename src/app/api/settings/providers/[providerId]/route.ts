@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { deleteProviderConnection, updateProviderConnection } from "@/lib/ai-providers";
+import { assertPlatformProviderAdminHint, deleteProviderConnection, updateProviderConnection } from "@/lib/ai-providers";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +18,12 @@ export async function PATCH(
 ) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const actor = await requireApiSession(request);
+    assertPlatformProviderAdminHint(actor);
     const provider = await updateProviderConnection(
       await providerId(context.params),
       await readJsonBody(request),
+      actor,
     );
     return NextResponse.json({ provider });
   } catch (error) {
@@ -35,10 +37,12 @@ export async function DELETE(
 ) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const actor = await requireApiSession(request);
+    assertPlatformProviderAdminHint(actor);
     const deleted = await deleteProviderConnection(
       await providerId(context.params),
       await readJsonBody(request),
+      actor,
     );
     return NextResponse.json({ deleted });
   } catch (error) {

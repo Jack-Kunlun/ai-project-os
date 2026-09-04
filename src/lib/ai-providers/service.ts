@@ -16,14 +16,17 @@ import {
   invokeEmbeddings,
   invokeVisionCompletion,
 } from "./transport";
+import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 
 export type ProviderServiceErrorCode =
   | "AI_PROVIDER_INVALID_INPUT"
+  | "AI_PROVIDER_ADMIN_REQUIRED"
   | "AI_PROVIDER_NOT_FOUND"
   | "AI_PROVIDER_NAME_CONFLICT"
   | "AI_PROVIDER_IN_USE"
   | "AI_PROVIDER_DELETE_REQUIRES_DISABLED"
   | "AI_PROVIDER_CONFIRMATION_MISMATCH"
+  | "AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE"
   | "AI_PROVIDER_CONNECTION_UNAVAILABLE"
   | "AI_PROVIDER_CONFLICT";
 
@@ -70,6 +73,11 @@ const deleteSchema = z.object({
   confirmationName: z.string().min(1).max(80),
 }).strict();
 
+const ownershipConfirmationSchema = z.object({
+  confirmationName: z.string().trim().min(1).max(80),
+  reason: z.string().trim().min(1).max(500),
+}).strict();
+
 // A deterministic 1x1 PNG keeps the vision probe bounded and avoids sending
 // user/project content merely to establish that the configured capability is
 // reachable. A vision capability is not marked verified unless this probe
@@ -83,12 +91,15 @@ const providerSelect = {
   id: true,
   name: true,
   kind: true,
+  scope: true,
+  ownershipState: true,
   protocol: true,
   baseUrl: true,
   defaultGenerationModelId: true,
   defaultEmbeddingModelId: true,
   defaultVisionModelId: true,
   embeddingDimensions: true,
+  configurationVersion: true,
   status: true,
   lastTestedAt: true,
   lastErrorCode: true,
@@ -96,7 +107,12 @@ const providerSelect = {
   createdAt: true,
   updatedAt: true,
   credential: { select: { maskedSuffix: true, rotatedAt: true, updatedAt: true } },
-  _count: { select: { projectRoutes: true } },
+  _count: {
+    select: {
+      projectRoutes: true,
+      platformDefaultAiRoutes: { where: { status: "active" } },
+    },
+  },
 } as const;
 
 function fail(code: ProviderServiceErrorCode): never {
@@ -105,6 +121,28 @@ function fail(code: ProviderServiceErrorCode): never {
 
 function isKnown(error: unknown, code: string): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
+}
+
+const PROVIDER_SERIALIZABLE_RETRY_LIMIT = 3;
+
+async function withProviderSerializableRetry<T>(operation: () => Promise<T>): Promise<T> {
+  let attempt = 0;
+  while (attempt < PROVIDER_SERIALIZABLE_RETRY_LIMIT) {
+    try {
+      return await operation();
+    } catch (error) {
+      attempt += 1;
+      if (!isSerializationConflict(error) || attempt >= PROVIDER_SERIALIZABLE_RETRY_LIMIT) throw error;
+    }
+  }
+  throw new Error("AI_PROVIDER_SERIALIZABLE_RETRY_EXHAUSTED");
+}
+
+// Provider configuration writes and default-route lifecycle transitions share
+// this transaction-scoped advisory lock. That closes the check-then-write gap
+// between a route activation/readiness check and a provider lifecycle change.
+async function lockProviderConfiguration(db: ProviderDb, providerId: string): Promise<void> {
+  await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${providerId}, 40904005))`;
 }
 
 function assertEmbeddingConfiguration(
@@ -167,6 +205,9 @@ export async function createProviderConnection(input: unknown, db: PrismaClient 
           scope: "platform",
           workspaceId: null,
           ownerUserId: null,
+          // New platform connections are explicitly platform-owned. Existing
+          // legacy_pending rows remain unchanged until separately reviewed.
+          ownershipState: "confirmed",
           baseUrl: canonicalProviderBaseUrl(parsed.kind),
           credentialId: credential.id,
           defaultGenerationModelId: parsed.generationModelId ?? null,
@@ -189,28 +230,41 @@ export async function updateProviderConnection(
   db: PrismaClient = getDb(),
 ) {
   const parsed = updateSchema.parse(input);
-  const existing = await db.aiProviderConnection.findFirst({ where: { id: providerId, scope: "platform" } });
-  if (existing === null) return fail("AI_PROVIDER_NOT_FOUND");
-  if (parsed.enabled === false) {
-    const routeCount = await db.projectAiRoute.count({ where: { providerConnectionId: providerId } });
-    if (routeCount > 0) return fail("AI_PROVIDER_IN_USE");
-  }
-  const nextModel = parsed.embeddingModelId === undefined
-    ? existing.defaultEmbeddingModelId
-    : parsed.embeddingModelId;
-  const nextDimensions = parsed.embeddingDimensions === undefined
-    ? existing.embeddingDimensions
-    : parsed.embeddingDimensions;
-  assertEmbeddingConfiguration(existing.kind, nextModel, nextDimensions);
-  assertVisionConfiguration(
-    existing.kind,
-    parsed.visionModelId === undefined ? existing.defaultVisionModelId : parsed.visionModelId,
-  );
-  const nextGeneration = parsed.generationModelId === undefined ? existing.defaultGenerationModelId : parsed.generationModelId;
-  const nextVision = parsed.visionModelId === undefined ? existing.defaultVisionModelId : parsed.visionModelId;
-  assertAtLeastOneCapability(nextGeneration, nextVision, nextModel);
   try {
     return await db.$transaction(async (tx) => {
+      await lockProviderConfiguration(tx, providerId);
+      const existing = await tx.aiProviderConnection.findFirst({ where: { id: providerId, scope: "platform" } });
+      if (existing === null) return fail("AI_PROVIDER_NOT_FOUND");
+      if (parsed.enabled === false) {
+        const routeCount = await tx.projectAiRoute.count({ where: { providerConnectionId: providerId } });
+        const activeDefaultRouteCount = await tx.platformDefaultAiRoute.count({
+          where: { providerConnectionId: providerId, status: "active" },
+        });
+        if (routeCount > 0 || activeDefaultRouteCount > 0) return fail("AI_PROVIDER_IN_USE");
+      }
+      const nextModel = parsed.embeddingModelId === undefined
+        ? existing.defaultEmbeddingModelId
+        : parsed.embeddingModelId;
+      const nextDimensions = parsed.embeddingDimensions === undefined
+        ? existing.embeddingDimensions
+        : parsed.embeddingDimensions;
+      assertEmbeddingConfiguration(existing.kind, nextModel, nextDimensions);
+      assertVisionConfiguration(
+        existing.kind,
+        parsed.visionModelId === undefined ? existing.defaultVisionModelId : parsed.visionModelId,
+      );
+      const nextGeneration = parsed.generationModelId === undefined ? existing.defaultGenerationModelId : parsed.generationModelId;
+      const nextVision = parsed.visionModelId === undefined ? existing.defaultVisionModelId : parsed.visionModelId;
+      assertAtLeastOneCapability(nextGeneration, nextVision, nextModel);
+      const modelConfigurationChanged =
+        (parsed.generationModelId !== undefined && parsed.generationModelId !== existing.defaultGenerationModelId)
+        || (parsed.visionModelId !== undefined && parsed.visionModelId !== existing.defaultVisionModelId)
+        || (parsed.embeddingModelId !== undefined && parsed.embeddingModelId !== existing.defaultEmbeddingModelId)
+        || (parsed.embeddingDimensions !== undefined && parsed.embeddingDimensions !== existing.embeddingDimensions)
+        || parsed.apiKey !== undefined;
+      const currentlyEnabled = existing.status !== "disabled" && existing.disabledAt === null;
+      const lifecycleChanged = parsed.enabled !== undefined && parsed.enabled !== currentlyEnabled;
+      const configurationChanged = modelConfigurationChanged || lifecycleChanged;
       if (parsed.apiKey !== undefined) {
         await rotateCredential(existing.credentialId, "aiProvider", parsed.apiKey, tx);
       }
@@ -230,36 +284,57 @@ export async function updateProviderConnection(
           ...(parsed.embeddingDimensions !== undefined
             ? { embeddingDimensions: parsed.embeddingDimensions }
             : {}),
-          ...(parsed.enabled === undefined
-            ? {}
-            : parsed.enabled
-              ? { status: "configured", disabledAt: null, lastErrorCode: null }
-              : { status: "disabled", disabledAt: new Date() }),
-          ...(parsed.apiKey !== undefined
-            ? { status: "configured", lastErrorCode: null, lastTestedAt: null }
+          ...(configurationChanged
+            ? {
+                configurationVersion: { increment: 1 },
+                status: parsed.enabled === false ? "disabled" : "configured",
+                disabledAt: parsed.enabled === false ? new Date() : null,
+                lastErrorCode: null,
+                lastTestedAt: null,
+              }
             : {}),
         },
         select: providerSelect,
       });
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
   } catch (error) {
     if (isKnown(error, "P2002")) return fail("AI_PROVIDER_NAME_CONFLICT");
+    if (isSerializationConflict(error)) return fail("AI_PROVIDER_CONFLICT");
     throw error;
   }
 }
 
 export async function disableProviderConnection(providerId: string, db: PrismaClient = getDb()) {
-  const provider = await db.aiProviderConnection.findFirst({
-    where: { id: providerId, scope: "platform" },
-    select: { id: true, _count: { select: { projectRoutes: true } } },
-  });
-  if (provider === null) return fail("AI_PROVIDER_NOT_FOUND");
-  if (provider._count.projectRoutes > 0) return fail("AI_PROVIDER_IN_USE");
-  return db.aiProviderConnection.update({
-    where: { id: providerId },
-    data: { status: "disabled", disabledAt: new Date() },
-    select: providerSelect,
-  });
+  try {
+    return await db.$transaction(async (tx) => {
+      await lockProviderConfiguration(tx, providerId);
+      const provider = await tx.aiProviderConnection.findFirst({
+        where: { id: providerId, scope: "platform" },
+        select: {
+          id: true,
+          status: true,
+          disabledAt: true,
+          _count: { select: { projectRoutes: true } },
+        },
+      });
+      if (provider === null) return fail("AI_PROVIDER_NOT_FOUND");
+      const activeDefaultRouteCount = await tx.platformDefaultAiRoute.count({
+        where: { providerConnectionId: providerId, status: "active" },
+      });
+      if (provider._count.projectRoutes > 0 || activeDefaultRouteCount > 0) return fail("AI_PROVIDER_IN_USE");
+      if (provider.status === "disabled" && provider.disabledAt !== null) {
+        return tx.aiProviderConnection.findFirst({ where: { id: providerId, scope: "platform" }, select: providerSelect });
+      }
+      return tx.aiProviderConnection.update({
+        where: { id: providerId },
+        data: { status: "disabled", disabledAt: new Date(), configurationVersion: { increment: 1 } },
+        select: providerSelect,
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+  } catch (error) {
+    if (isSerializationConflict(error)) return fail("AI_PROVIDER_CONFLICT");
+    throw error;
+  }
 }
 
 export async function deleteProviderConnection(
@@ -270,6 +345,7 @@ export async function deleteProviderConnection(
   const parsed = deleteSchema.parse(input);
   try {
     return await db.$transaction(async (tx) => {
+      await lockProviderConfiguration(tx, providerId);
       const provider = await tx.aiProviderConnection.findFirst({
         where: { id: providerId, scope: "platform" },
         select: {
@@ -291,6 +367,7 @@ export async function deleteProviderConnection(
               projectAgentRuns: true,
               assetExtractionRuns: true,
               assetSegments: true,
+              platformDefaultAiRoutes: true,
             },
           },
         },
@@ -305,6 +382,87 @@ export async function deleteProviderConnection(
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
     if (isKnown(error, "P2003")) return fail("AI_PROVIDER_IN_USE");
+    if (isSerializationConflict(error)) return fail("AI_PROVIDER_CONFLICT");
+    throw error;
+  }
+}
+
+export type ProviderOwnershipConfirmationActor = Readonly<{ id: string; role: string }>;
+
+function assertOwnershipConfirmationAdmin(actor: ProviderOwnershipConfirmationActor): void {
+  if (actor === null || actor === undefined || actor.role !== "admin" || typeof actor.id !== "string" || actor.id.length === 0) {
+    return fail("AI_PROVIDER_ADMIN_REQUIRED");
+  }
+}
+
+/**
+ * Confirm a legacy platform connection after an explicit administrator review.
+ * This transition never assigns a workspace or user owner. The audit stores
+ * only safe before/after state facts and the administrator's reason.
+ */
+export async function confirmPlatformProviderOwnership(
+  providerId: string,
+  input: unknown,
+  actor: ProviderOwnershipConfirmationActor,
+  db: PrismaClient = getDb(),
+) {
+  assertOwnershipConfirmationAdmin(actor);
+  const parsedProviderId = z.string().uuid().safeParse(providerId);
+  if (!parsedProviderId.success) return fail("AI_PROVIDER_INVALID_INPUT");
+  const parsed = ownershipConfirmationSchema.safeParse(input);
+  if (!parsed.success) return fail("AI_PROVIDER_INVALID_INPUT");
+  try {
+    return await withProviderSerializableRetry(() => db.$transaction(async (tx) => {
+      await lockProviderConfiguration(tx, parsedProviderId.data);
+      const existing = await tx.aiProviderConnection.findUnique({
+        where: { id: parsedProviderId.data },
+        select: {
+          id: true,
+          name: true,
+          scope: true,
+          workspaceId: true,
+          ownerUserId: true,
+          ownershipState: true,
+        },
+      });
+      if (existing === null) return fail("AI_PROVIDER_NOT_FOUND");
+      if (existing.scope !== "platform" || existing.workspaceId !== null || existing.ownerUserId !== null) {
+        return fail("AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE");
+      }
+      if (existing.name !== parsed.data.confirmationName) {
+        return fail("AI_PROVIDER_CONFIRMATION_MISMATCH");
+      }
+      if (existing.ownershipState === "confirmed") {
+        return tx.aiProviderConnection.findUnique({ where: { id: parsedProviderId.data }, select: providerSelect });
+      }
+      if (existing.ownershipState !== "legacyPending") {
+        return fail("AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE");
+      }
+      const updated = await tx.aiProviderConnection.update({
+        where: { id: parsedProviderId.data },
+        data: { ownershipState: "confirmed" },
+        select: providerSelect,
+      });
+      await tx.aiProviderOwnershipAudit.create({
+        data: {
+          providerConnectionId: existing.id,
+          actorId: actor.id,
+          action: "legacyOwnershipConfirmed",
+          reason: parsed.data.reason,
+          oldScope: existing.scope,
+          newScope: existing.scope,
+          oldOwnershipState: existing.ownershipState,
+          newOwnershipState: updated.ownershipState,
+          oldWorkspacePresent: existing.workspaceId !== null,
+          newWorkspacePresent: false,
+          oldOwnerPresent: existing.ownerUserId !== null,
+          newOwnerPresent: false,
+        },
+      });
+      return updated;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
+  } catch (error) {
+    if (isSerializationConflict(error)) return fail("AI_PROVIDER_CONFLICT");
     throw error;
   }
 }

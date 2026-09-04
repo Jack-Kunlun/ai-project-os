@@ -794,6 +794,18 @@ enum PlatformDefaultAiRouteStatus {
   retired
 }
 
+enum PlatformDefaultAiRouteAuditAction {
+  draftCreated @map("draft_created")
+  draftUpdated @map("draft_updated")
+  validated    @map("validated")
+  activated    @map("activated")
+  retired      @map("retired")
+}
+
+enum AiProviderOwnershipAuditAction {
+  legacyOwnershipConfirmed @map("legacy_ownership_confirmed")
+}
+
 enum PlatformTokenGrantKind {
   signup
   manual
@@ -3692,6 +3704,8 @@ model AppUser {
   updatedPlatformGrantOfferPolicies PlatformGrantOfferPolicy[]  @relation("PlatformGrantOfferPolicyUpdatedBy")
   createdPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteCreatedBy")
   updatedPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteUpdatedBy")
+  platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[]    @relation("PlatformDefaultAiRouteAuditActor")
+  aiProviderOwnershipAudits    AiProviderOwnershipAudit[]       @relation("AiProviderOwnershipAuditActor")
   billedWebAiGrants             WebAiGrant[]                    @relation("WebAiGrantBillingUser")
 }
 
@@ -4192,6 +4206,7 @@ model AiProviderConnection {
   defaultEmbeddingModelId  String?                     @db.VarChar(128)
   defaultVisionModelId     String?                     @db.VarChar(128)
   embeddingDimensions      Int?
+  configurationVersion     Int                         @default(1)
   status                   AiProviderConnectionStatus  @default(configured)
   lastTestedAt             DateTime?
   lastErrorCode            String?                     @db.VarChar(64)
@@ -4215,6 +4230,8 @@ model AiProviderConnection {
   assetSegments            ProjectAssetSegment[]
   tokenReservations         PlatformTokenReservation[]
   platformDefaultAiRoutes  PlatformDefaultAiRoute[]    @relation("PlatformDefaultAiRouteProvider")
+  platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[] @relation("PlatformDefaultAiRouteAuditProvider")
+  ownershipAudits          AiProviderOwnershipAudit[]  @relation("AiProviderOwnershipAuditProvider")
 
   @@index([kind, status])
   @@index([scope, workspaceId, status])
@@ -4249,6 +4266,8 @@ model PlatformDefaultAiRoute {
   embeddingDimensions  Int?
   maxOutputTokens      Int?
   quotaMultiplierBps    Int                          @default(10000)
+  validatedProviderConfigurationVersion Int?
+  validatedAt           DateTime?
   createdById          String                       @db.Uuid
   updatedById          String                       @db.Uuid
   createdAt            DateTime                     @default(now())
@@ -4256,10 +4275,56 @@ model PlatformDefaultAiRoute {
   providerConnection   AiProviderConnection         @relation("PlatformDefaultAiRouteProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   createdBy            AppUser                      @relation("PlatformDefaultAiRouteCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   updatedBy            AppUser                      @relation("PlatformDefaultAiRouteUpdatedBy", fields: [updatedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audits               PlatformDefaultAiRouteAudit[]
 
   @@unique([operation, version])
   @@index([operation, status, updatedAt])
   @@index([providerConnectionId, status])
+}
+
+model PlatformDefaultAiRouteAudit {
+  id                           String                           @id @default(uuid()) @db.Uuid
+  action                       PlatformDefaultAiRouteAuditAction
+  routeId                      String                           @db.Uuid
+  operation                    AiOperation
+  routeVersion                 Int
+  providerConnectionId         String                           @db.Uuid
+  providerConfigurationVersion Int
+  actorId                      String                           @db.Uuid
+  reason                       String?                          @db.VarChar(500)
+  safeSnapshot                 Json                             @default("{}") @db.JsonB
+  createdAt                    DateTime                         @default(now())
+  route                        PlatformDefaultAiRoute            @relation(fields: [routeId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection           AiProviderConnection              @relation("PlatformDefaultAiRouteAuditProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                        AppUser                           @relation("PlatformDefaultAiRouteAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([routeId, createdAt])
+  @@index([operation, createdAt])
+  @@index([providerConnectionId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model AiProviderOwnershipAudit {
+  id                   String                         @id @default(uuid()) @db.Uuid
+  providerConnectionId String                         @db.Uuid
+  actorId              String                         @db.Uuid
+  action               AiProviderOwnershipAuditAction
+  reason               String                         @db.VarChar(500)
+  oldScope             AiProviderScope
+  newScope             AiProviderScope
+  oldOwnershipState    ResourceOwnershipState
+  newOwnershipState    ResourceOwnershipState
+  oldWorkspacePresent  Boolean
+  newWorkspacePresent  Boolean
+  oldOwnerPresent      Boolean
+  newOwnerPresent      Boolean
+  createdAt            DateTime                       @default(now())
+  providerConnection   AiProviderConnection           @relation("AiProviderOwnershipAuditProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                AppUser                       @relation("AiProviderOwnershipAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([providerConnectionId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
 }
 
 model ProjectAiRoute {

@@ -30,6 +30,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "project-intelligence", file: "test/project-intelligence-postgres.test.ts", database: "ai_project_os_project_intelligence_test", gateEnv: "PROJECT_INTELLIGENCE_POSTGRES_GATE", setup: "migrate" },
   { id: "phase-a-schema", file: "test/phase-a-schema-postgres.test.ts", database: "ai_project_os_phase_a_schema_test", gateEnv: "PHASE_A_SCHEMA_POSTGRES_GATE", setup: "migrate" },
   { id: "ownership-inventory", file: "test/0.2x-migration-inventory-postgres.test.ts", database: "ai_project_os_ownership_inventory_test", gateEnv: "OWNERSHIP_INVENTORY_POSTGRES_GATE", databaseUrlEnv: "OWNERSHIP_INVENTORY_TEST_DATABASE_URL", setup: "migrate" },
+  { id: "platform-default-ai-routes", file: "test/platform-default-ai-routes-postgres.test.ts", database: "ai_project_os_platform_default_routes_test", gateEnv: "PLATFORM_DEFAULT_AI_ROUTES_POSTGRES_GATE", setup: "migrate" },
   { id: "ai-entitlements", file: "test/ai-entitlements-postgres.test.ts", database: "ai_project_os_ai_entitlements_test", gateEnv: "AI_ENTITLEMENTS_POSTGRES_GATE", setup: "migrate" },
   { id: "project-lifecycle", file: "test/project-lifecycle-postgres.test.ts", database: "ai_project_os_project_lifecycle_test", gateEnv: "PROJECT_LIFECYCLE_POSTGRES_GATE", setup: "migrate" },
   { id: "configuration-deletion", file: "test/configuration-deletion-postgres.test.ts", database: "ai_project_os_configuration_deletion_test", gateEnv: "CONFIGURATION_DELETION_POSTGRES_GATE", setup: "migrate" },

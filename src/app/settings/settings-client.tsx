@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { AdminShell } from "@/components/admin-shell";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { PlatformDefaultRoutesPanel } from "./platform-default-routes-client";
 
 type ProviderKind = "openai" | "deepseek" | "qwen" | "glm";
 type ProviderCatalogEntry = {
@@ -26,11 +27,13 @@ type Provider = {
   defaultEmbeddingModelId: string | null;
   defaultVisionModelId: string | null;
   embeddingDimensions: number | null;
+  configurationVersion: number;
+  ownershipState: "legacyPending" | "ambiguous" | "confirmed";
   status: "configured" | "verified" | "error" | "disabled";
   lastTestedAt: string | null;
   lastErrorCode: string | null;
   credential: { maskedSuffix: string; rotatedAt: string | null; updatedAt: string };
-  _count: { projectRoutes: number };
+  _count: { projectRoutes: number; platformDefaultAiRoutes: number };
 };
 type ProviderCheck = Readonly<{
   generation: string | null;
@@ -74,6 +77,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(canManageProviders);
   const [error, setError] = useState<string | null>(null);
+  const [routeRefreshToken, setRouteRefreshToken] = useState(0);
 
   async function reload() {
     setLoading(true);
@@ -99,6 +103,25 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
     return () => window.clearTimeout(timer);
   }, [canManageProviders]);
 
+  function notifyProviderMutation() {
+    setRouteRefreshToken((current) => current + 1);
+  }
+
+  function handleProviderCreated(provider: Provider) {
+    setProviders((current) => [...current, provider]);
+    notifyProviderMutation();
+  }
+
+  function handleProviderChanged(next: Provider) {
+    setProviders((current) => current.map((entry) => entry.id === next.id ? next : entry));
+    notifyProviderMutation();
+  }
+
+  function handleProviderRemoved(providerId: string) {
+    setProviders((current) => current.filter((entry) => entry.id !== providerId));
+    notifyProviderMutation();
+  }
+
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="settings" isSystemAdmin={adminMode} />
@@ -118,7 +141,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
         {canManageProviders ? <ProviderCapabilityMatrix catalog={catalog} /> : null}
 
         {canManageProviders ? <section className="mt-8 grid gap-6 lg:grid-cols-[0.72fr_1.28fr]">
-          <ProviderCreateForm catalog={catalog} onCreated={(provider) => setProviders((current) => [...current, provider])} />
+          <ProviderCreateForm catalog={catalog} onCreated={handleProviderCreated} />
           <div className="space-y-4">
             <div className="flex items-end justify-between px-1">
               <div>
@@ -134,12 +157,13 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
                 key={provider.id}
                 provider={provider}
                 catalog={catalog.find((entry) => entry.kind === provider.kind)}
-                onChanged={(next) => setProviders((current) => current.map((entry) => entry.id === next.id ? next : entry))}
-                onRemoved={(providerId) => setProviders((current) => current.filter((entry) => entry.id !== providerId))}
+                onChanged={handleProviderChanged}
+                onRemoved={handleProviderRemoved}
               />
             ))}
           </div>
         </section> : null}
+        {adminMode ? <PlatformDefaultRoutesPanel refreshToken={routeRefreshToken} onRouteMutation={() => { void reload(); }} /> : null}
       </div>
     </main>
   );
@@ -284,6 +308,11 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved }: { provider: P
   const [embeddingDimensions, setEmbeddingDimensions] = useState(provider.embeddingDimensions ? String(provider.embeddingDimensions) : "");
   const [apiKey, setApiKey] = useState("");
   const { confirm, dialog } = useAppConfirmDialog();
+  const disableBlocked = provider.status !== "disabled" && (provider._count.projectRoutes > 0 || provider._count.platformDefaultAiRoutes > 0);
+  const disableBlockReasons = [
+    provider._count.projectRoutes > 0 ? "项目路由" : null,
+    provider._count.platformDefaultAiRoutes > 0 ? "活动默认路由" : null,
+  ].filter((reason): reason is string => reason !== null).join("、");
 
   async function testConnection() {
     setTesting(true);
@@ -349,6 +378,50 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved }: { provider: P
     }
   }
 
+  async function confirmLegacyOwnership() {
+    if (provider.ownershipState !== "legacyPending") return;
+    const nameConfirmation = await confirm({
+      eyebrow: "Platform provider ownership",
+      title: `确认历史平台归属「${provider.name}」？`,
+      description: "这是早期创建的历史平台托管连接。确认后它仍属于平台，不会转为你的个人连接；请先输入连接名称核对。",
+      inputLabel: `输入连接名称“${provider.name}”以确认`,
+      requiredValue: provider.name,
+      confirmLabel: "继续填写审计原因",
+      tone: "warning",
+      maxLength: 80,
+    });
+    if (!nameConfirmation.confirmed) return;
+    const reasonConfirmation = await confirm({
+      eyebrow: "Platform provider ownership",
+      title: "记录归属确认原因",
+      description: "原因会与管理员身份及安全的前后状态一起追加写入审计记录，不会保存 API Key。",
+      inputLabel: "确认原因（必填）",
+      inputPlaceholder: "例如：已核对该连接为平台托管配置",
+      inputOptional: false,
+      confirmLabel: "确认平台归属",
+      tone: "warning",
+      maxLength: 500,
+    });
+    if (!reasonConfirmation.confirmed) return;
+    setPending(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/settings/providers/${provider.id}/ownership/confirm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirmationName: nameConfirmation.value, reason: reasonConfirmation.value }),
+      });
+      if (!response.ok) throw new Error(await readError(response, "历史平台归属确认失败"));
+      const payload = await response.json() as { provider: Provider };
+      onChanged(payload.provider);
+      setMessage("已记录管理员确认；连接仍为平台托管，不会转为个人连接。 ");
+    } catch (ownershipError) {
+      setMessage(ownershipError instanceof Error ? ownershipError.message : "历史平台归属确认失败");
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function removeConnection() {
     const confirmation = await confirm({ eyebrow: "Model provider", title: `永久删除“${provider.name}”？`, description: "连接配置和加密凭据都会被删除，且不可恢复。有关联项目路由或审计记录时，服务端会拒绝操作。", inputLabel: `输入连接名称“${provider.name}”以确认`, requiredValue: provider.name, confirmLabel: "确认永久删除", tone: "danger", maxLength: 120 });
     if (!confirmation.confirmed) return;
@@ -375,12 +448,14 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved }: { provider: P
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-3"><h3 className="text-lg font-semibold">{provider.name}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${provider.status === "verified" ? "bg-emerald-50 text-emerald-700" : provider.status === "error" ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"}`}>{statusLabel[provider.status]}</span></div>
-          <p className="mt-2 text-xs text-slate-500">{catalog?.displayName ?? provider.kind} · Key 尾号 {provider.credential.maskedSuffix} · {dateLabel(provider.lastTestedAt)}</p>
+          <p className="mt-2 text-xs text-slate-500">{catalog?.displayName ?? provider.kind} · Key 尾号 {provider.credential.maskedSuffix} · 配置版本 {provider.configurationVersion} · 活动默认路由 {provider._count.platformDefaultAiRoutes} 条 · {dateLabel(provider.lastTestedAt)}</p>
         </div>
         <div className="flex gap-2"><button type="button" onClick={() => setEditing((value) => !value)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">{editing ? "收起" : "编辑"}</button><button type="button" onClick={() => void testConnection()} disabled={testing || provider.status === "disabled"} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{testing ? "测试中…" : "测试连接"}</button></div>
       </div>
       <dl className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">生成模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultGenerationModelId ?? "未配置"}</dd></div><div><dt className="text-slate-400">图片识别</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultVisionModelId ?? "未配置"}</dd></div><div><dt className="text-slate-400">向量模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} 维` : "未配置"}</dd></div></dl>
-      {editing ? <form onSubmit={save} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2"><EditField label="连接名称"><input value={name} onChange={(event) => setName(event.target.value)} required className="edit-field" /></EditField><EditField label="生成模型（可选）"><input value={generationModelId} onChange={(event) => setGenerationModelId(event.target.value)} className="edit-field" /></EditField>{catalog?.supportsVision ? <EditField label="图片识别模型（可选）"><input value={visionModelId} onChange={(event) => setVisionModelId(event.target.value)} className="edit-field" /></EditField> : null}{catalog?.supportsEmbeddings ? <><EditField label="向量模型（留空即关闭）"><input value={embeddingModelId} onChange={(event) => setEmbeddingModelId(event.target.value)} className="edit-field" /></EditField><EditField label="向量维度"><input type="number" value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} disabled={!embeddingModelId} className="edit-field" /></EditField></> : null}<EditField label="替换 API Key（可选）"><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" className="edit-field" /></EditField><div className="flex items-end gap-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">保存变更</button><button type="button" onClick={() => void toggleEnabled()} disabled={pending || (provider.status !== "disabled" && provider._count.projectRoutes > 0)} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-600 disabled:opacity-40">{provider.status === "disabled" ? "重新启用" : "停用连接"}</button></div><style jsx>{`.edit-field{margin-top:.4rem;width:100%;border-radius:.75rem;border:1px solid #e2e8f0;padding:.7rem .85rem;font-size:.8rem;outline:none}.edit-field:focus{border-color:#818cf8;box-shadow:0 0 0 2px #e0e7ff}`}</style></form> : null}
+      {provider.ownershipState === "legacyPending" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3"><p className="max-w-2xl text-xs leading-5 text-amber-800">这是历史平台托管连接，当前尚未完成归属确认。管理员确认只会记录平台归属，不会把它变成用户私有连接。</p><button type="button" onClick={() => void confirmLegacyOwnership()} disabled={pending} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">确认历史平台归属</button></div> : null}
+      {provider.ownershipState === "ambiguous" ? <p className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700">该平台连接归属信息存在歧义，需要人工处理；当前页面不会自动确认。</p> : null}
+      {editing ? <form onSubmit={save} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2"><EditField label="连接名称"><input value={name} onChange={(event) => setName(event.target.value)} required className="edit-field" /></EditField><EditField label="生成模型（可选）"><input value={generationModelId} onChange={(event) => setGenerationModelId(event.target.value)} className="edit-field" /></EditField>{catalog?.supportsVision ? <EditField label="图片识别模型（可选）"><input value={visionModelId} onChange={(event) => setVisionModelId(event.target.value)} className="edit-field" /></EditField> : null}{catalog?.supportsEmbeddings ? <><EditField label="向量模型（留空即关闭）"><input value={embeddingModelId} onChange={(event) => setEmbeddingModelId(event.target.value)} className="edit-field" /></EditField><EditField label="向量维度"><input type="number" value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} disabled={!embeddingModelId} className="edit-field" /></EditField></> : null}<EditField label="替换 API Key（可选）"><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" className="edit-field" /></EditField><div className="flex items-end gap-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">保存变更</button><button type="button" onClick={() => void toggleEnabled()} disabled={pending || disableBlocked} title={disableBlocked ? `无法停用：${disableBlockReasons}仍在使用该连接` : undefined} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-600 disabled:opacity-40">{provider.status === "disabled" ? "重新启用" : "停用连接"}</button></div>{disableBlocked ? <p className="text-xs leading-5 text-amber-700 sm:col-span-2">无法停用：{disableBlockReasons}仍在使用该连接。请先移除项目路由或退役活动默认路由。</p> : null}<style jsx>{`.edit-field{margin-top:.4rem;width:100%;border-radius:.75rem;border:1px solid #e2e8f0;padding:.7rem .85rem;font-size:.8rem;outline:none}.edit-field:focus{border-color:#818cf8;box-shadow:0 0 0 2px #e0e7ff}`}</style></form> : null}
       {provider.status === "disabled" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3"><p className="text-xs leading-5 text-rose-700">永久删除仅适用于没有项目路由或历史审计引用的连接，并会同时删除加密凭据。</p><button type="button" onClick={() => void removeConnection()} disabled={pending} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">永久删除</button></div> : null}
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}
       {provider.lastErrorCode ? <p className="mt-2 text-xs text-rose-600">安全错误码：{provider.lastErrorCode}</p> : null}

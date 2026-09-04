@@ -44,6 +44,7 @@ import { ProjectWorldError } from "@/lib/project-world";
 import { AiEntitlementError } from "@/lib/ai-entitlements";
 import { MembershipServiceError } from "@/lib/membership-service";
 import { WorkspaceProviderServiceError } from "@/lib/workspace-provider-service";
+import { PlatformDefaultAiRouteError } from "@/lib/platform-default-ai-routes";
 
 export type ApiErrorBody = {
   error: {
@@ -462,13 +463,35 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
   if (error instanceof ProviderServiceError) {
     const mapping = {
       AI_PROVIDER_INVALID_INPUT: [400, "供应商配置无效"],
+      AI_PROVIDER_ADMIN_REQUIRED: [403, "只有系统管理员可以确认平台供应商归属"],
       AI_PROVIDER_NOT_FOUND: [404, "供应商连接不存在"],
       AI_PROVIDER_NAME_CONFLICT: [409, "供应商连接名称已存在"],
       AI_PROVIDER_IN_USE: [409, "供应商仍被项目路由或历史审计记录引用，无法停用或永久删除"],
       AI_PROVIDER_DELETE_REQUIRES_DISABLED: [409, "请先停用供应商连接，再执行永久删除"],
       AI_PROVIDER_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
+      AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE: [409, "该连接当前不能确认历史平台归属"],
       AI_PROVIDER_CONNECTION_UNAVAILABLE: [409, "供应商连接尚未验证或已停用"],
       AI_PROVIDER_CONFLICT: [409, "供应商连接已被其他操作更新，请刷新后重试"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof PlatformDefaultAiRouteError) {
+    const mapping = {
+      PLATFORM_AI_ROUTE_INVALID_INPUT: [400, "平台默认路由请求无效"],
+      PLATFORM_AI_ROUTE_ADMIN_REQUIRED: [403, "只有系统管理员可以管理平台默认路由"],
+      PLATFORM_AI_ROUTE_NOT_FOUND: [404, "平台默认路由不存在"],
+      PLATFORM_AI_ROUTE_CONFLICT: [409, "平台默认路由已被其他操作更新，请刷新后重试"],
+      PLATFORM_AI_ROUTE_PROVIDER_NOT_FOUND: [404, "平台模型供应商不存在"],
+      PLATFORM_AI_ROUTE_PROVIDER_INVALID: [422, "所选供应商不是已确认的平台连接"],
+      PLATFORM_AI_ROUTE_PROVIDER_NOT_VERIFIED: [409, "请先完成平台供应商连接测试"],
+      PLATFORM_AI_ROUTE_PROVIDER_DISABLED: [409, "所选平台供应商已停用"],
+      PLATFORM_AI_ROUTE_CAPABILITY_MISMATCH: [422, "模型与平台默认路由能力不匹配"],
+      PLATFORM_AI_ROUTE_NOT_DRAFT: [409, "只有草稿路由可以编辑或验证"],
+      PLATFORM_AI_ROUTE_NOT_VALIDATED: [409, "平台默认路由尚未通过本地验证"],
+      PLATFORM_AI_ROUTE_CONFIGURATION_CHANGED: [409, "供应商配置已变化，请重新创建并验证路由草稿"],
+      PLATFORM_AI_ROUTE_REASON_REQUIRED: [400, "退役平台默认路由必须填写原因"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

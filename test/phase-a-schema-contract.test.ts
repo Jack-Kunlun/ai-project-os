@@ -6,6 +6,8 @@ const roleMigrationName = "20260903010000_add_user_system_role_compatibility";
 const providerScopeMigrationName = "20260903020000_add_user_ai_provider_scope";
 const platformPolicyMigrationName = "20260903030000_add_platform_policies_and_connection_ownership";
 const defaultAppUserRoleMigrationName = "20260904010000_default_new_app_users_to_user";
+const platformRouteControlPlaneMigrationName = "20260904020000_add_platform_default_route_control_plane";
+const providerOwnershipAuditMigrationName = "20260904030000_add_ai_provider_ownership_audit";
 
 async function readRoleEnum(): Promise<string> {
   const schema = await readFile("prisma/schema.prisma", "utf8");
@@ -220,4 +222,59 @@ test("M300 migration occupies stable migration slot 57 and contains additive DDL
   assert.match(schema, /model AiProviderConnection \{[\s\S]*?^\s*name\s+String\s+@unique/mu);
   assert.match(schema, /model AiProviderConnection \{[\s\S]*?^\s*credentialId\s+String\s+@unique/mu);
   assert.match(schema, /model PlatformTokenGrant \{[\s\S]*?@@unique\(\[userId, kind\]\)/mu);
+});
+
+test("platform default route control plane occupies stable migration slot 59", async () => {
+  const entries = await readdir("prisma/migrations", { withFileTypes: true });
+  const migrations = entries
+    .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  assert.equal(migrations.indexOf(platformRouteControlPlaneMigrationName), 58);
+
+  const schema = await readFile("prisma/schema.prisma", "utf8");
+  const migration = await readFile(`prisma/migrations/${platformRouteControlPlaneMigrationName}/migration.sql`, "utf8");
+  const provider = readModel(schema, "AiProviderConnection");
+  const defaultRoute = readModel(schema, "PlatformDefaultAiRoute");
+  const audit = readModel(schema, "PlatformDefaultAiRouteAudit");
+  assert.match(provider, /^\s*configurationVersion\s+Int\s+@default\(1\)\s*$/mu);
+  assert.match(defaultRoute, /^\s*validatedProviderConfigurationVersion\s+Int\?\s*$/mu);
+  assert.match(defaultRoute, /^\s*validatedAt\s+DateTime\?\s*$/mu);
+  assert.match(defaultRoute, /audits\s+PlatformDefaultAiRouteAudit\[\]/u);
+  assert.match(audit, /action\s+PlatformDefaultAiRouteAuditAction/u);
+  assert.match(audit, /safeSnapshot\s+Json\s+@default\("\{\}"\)\s+@db\.JsonB/u);
+  assert.match(migration, /ADD COLUMN "configurationVersion" INTEGER NOT NULL DEFAULT 1/u);
+  assert.match(migration, /CREATE TYPE "PlatformDefaultAiRouteAuditAction"/u);
+  assert.match(migration, /BEFORE UPDATE OR DELETE ON "PlatformDefaultAiRouteAudit"/u);
+  const executableSql = migration.replace(/--[^\n]*(?:\n|$)/gu, "");
+  assert.doesNotMatch(executableSql, /(?:^|;)\s*(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/imu);
+  assert.doesNotMatch(executableSql, /\bDROP\s+(?:TABLE|TYPE|INDEX)\b/iu);
+  assert.match(executableSql, /DROP CONSTRAINT "AiProviderConnection_scope_check"/u);
+});
+
+test("provider ownership confirmation audit occupies stable migration slot 60 and is append-only", async () => {
+  const entries = await readdir("prisma/migrations", { withFileTypes: true });
+  const migrations = entries
+    .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  assert.equal(migrations.indexOf(providerOwnershipAuditMigrationName), 59);
+
+  const schema = await readFile("prisma/schema.prisma", "utf8");
+  const migration = await readFile(`prisma/migrations/${providerOwnershipAuditMigrationName}/migration.sql`, "utf8");
+  const audit = readModel(schema, "AiProviderOwnershipAudit");
+  assert.match(schema, /enum AiProviderOwnershipAuditAction\s*\{[\s\S]*legacyOwnershipConfirmed\s+@map\("legacy_ownership_confirmed"\)/u);
+  assert.match(audit, /providerConnectionId\s+String\s+@db\.Uuid/u);
+  assert.match(audit, /actorId\s+String\s+@db\.Uuid/u);
+  assert.match(audit, /reason\s+String\s+@db\.VarChar\(500\)/u);
+  assert.match(audit, /oldOwnershipState\s+ResourceOwnershipState/u);
+  assert.match(audit, /newOwnershipState\s+ResourceOwnershipState/u);
+  assert.match(audit, /providerConnection\s+AiProviderConnection\s+@relation\("AiProviderOwnershipAuditProvider"/u);
+  assert.match(audit, /actor\s+AppUser\s+@relation\("AiProviderOwnershipAuditActor"/u);
+  assert.match(migration, /CREATE TYPE "AiProviderOwnershipAuditAction"/u);
+  assert.match(migration, /CREATE TABLE "AiProviderOwnershipAudit"/u);
+  assert.match(migration, /BEFORE UPDATE OR DELETE ON "AiProviderOwnershipAudit"/u);
+  const executableSql = migration.replace(/--[^\n]*(?:\n|$)/gu, "");
+  assert.doesNotMatch(executableSql, /(?:^|;)\s*(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/imu);
+  assert.doesNotMatch(executableSql, /\bDROP\s+(?:TABLE|TYPE|INDEX)\b/iu);
 });

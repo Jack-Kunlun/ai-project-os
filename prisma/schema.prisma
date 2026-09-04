@@ -169,6 +169,12 @@ enum AppUserRole {
   user
 }
 
+enum ResourceOwnershipState {
+  legacyPending @map("legacy_pending")
+  ambiguous
+  confirmed
+}
+
 enum WorkspaceMembershipRole {
   owner
   admin
@@ -775,6 +781,19 @@ enum MembershipSubscriptionStatus {
   revoked
 }
 
+enum PlatformGrantOfferPolicyStatus {
+  draft
+  active
+  retired
+}
+
+enum PlatformDefaultAiRouteStatus {
+  draft
+  verified
+  active
+  retired
+}
+
 enum PlatformTokenGrantKind {
   signup
   manual
@@ -1216,14 +1235,18 @@ model GitConnection {
   lastErrorCode              String?             @db.VarChar(64)
   disabledAt                 DateTime?
   createdById                String              @db.Uuid
+  ownerUserId                String?             @db.Uuid
+  ownershipState             ResourceOwnershipState @default(legacyPending)
   createdAt                  DateTime            @default(now())
   updatedAt                  DateTime            @updatedAt
   credential                 ExternalCredential? @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  createdBy                  AppUser             @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  createdBy                  AppUser             @relation("GitConnectionCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  ownerUser                  AppUser?            @relation("GitConnectionOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   repositories               GitRepository[]
 
   @@index([providerKind, status])
   @@index([createdById, createdAt])
+  @@index([ownerUserId, ownershipState, updatedAt])
 }
 
 model GitRepository {
@@ -3593,8 +3616,12 @@ model AppUser {
   passwordVersion              Int                               @default(1)
   role                         AppUserRole                       @default(member)
   disabledAt                   DateTime?
+  disabledReason               String?                           @db.VarChar(500)
+  disabledById                 String?                           @db.Uuid
   createdAt                    DateTime                          @default(now())
   updatedAt                    DateTime                          @updatedAt
+  disabledBy                   AppUser?                          @relation("AppUserDisabledBy", fields: [disabledById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  disabledUsers                AppUser[]                         @relation("AppUserDisabledBy")
   sessions                     AppSession[]
   webAiGrants                  WebAiGrant[]
   backgroundJobs               BackgroundJob[]
@@ -3609,9 +3636,11 @@ model AppUser {
   projectAssetUploadAdmissions ProjectAssetUploadAdmission[]
   projectAssetUploadReservations ProjectAssetUploadReservation[]
   reviewedProjectAssetSegments ProjectAssetSegment[]             @relation("ProjectAssetSegmentReviewedBy")
-  createdGitConnections        GitConnection[]
+  createdGitConnections        GitConnection[]                  @relation("GitConnectionCreatedBy")
+  ownedGitConnections          GitConnection[]                  @relation("GitConnectionOwner")
   createdGitRepositoryLinks    ProjectGitRepositoryLink[]
-  createdMcpConnections        McpConnection[]
+  createdMcpConnections        McpConnection[]                  @relation("McpConnectionCreatedBy")
+  ownedMcpConnections          McpConnection[]                  @relation("McpConnectionOwner")
   verifiedMcpToolAttestations  McpToolAttestation[]
   mcpToolAttestationAudits     McpToolAttestationAudit[]
   managedMcpToolGrants         ProjectMcpToolGrant[]             @relation("ProjectMcpToolGrantManagedBy")
@@ -3644,6 +3673,7 @@ model AppUser {
   projectMemberships           ProjectMembership[]
   sentWorkspaceInvitations     WorkspaceInvitation[]             @relation("WorkspaceInvitationInvitedBy")
   acceptedWorkspaceInvitations WorkspaceInvitation[]             @relation("WorkspaceInvitationAcceptedBy")
+  revokedWorkspaceInvitations  WorkspaceInvitation[]             @relation("WorkspaceInvitationRevokedBy")
   createdOidcProviders         OidcProvider[]
   oidcIdentities               OidcIdentity[]
   githubIdentity               GitHubIdentity?
@@ -3658,6 +3688,10 @@ model AppUser {
   platformTokenReservations    PlatformTokenReservation[]
   platformTokenLedgerEntries   PlatformTokenLedgerEntry[]
   ownedAiProviderConnections   AiProviderConnection[]          @relation("AiProviderConnectionOwner")
+  createdPlatformGrantOfferPolicies PlatformGrantOfferPolicy[]  @relation("PlatformGrantOfferPolicyCreatedBy")
+  updatedPlatformGrantOfferPolicies PlatformGrantOfferPolicy[]  @relation("PlatformGrantOfferPolicyUpdatedBy")
+  createdPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteCreatedBy")
+  updatedPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteUpdatedBy")
   billedWebAiGrants             WebAiGrant[]                    @relation("WebAiGrantBillingUser")
 }
 
@@ -3670,6 +3704,7 @@ model MembershipSubscription {
   grantedById String?                      @db.Uuid
   revokedById String?                      @db.Uuid
   revokedAt   DateTime?
+  revocationReason String?                 @db.VarChar(500)
   note        String?                      @db.VarChar(500)
   version     Int                          @default(1)
   createdAt   DateTime                     @default(now())
@@ -3852,11 +3887,15 @@ model WorkspaceInvitation {
   expiresAt     DateTime
   acceptedAt    DateTime?
   revokedAt     DateTime?
+  revokedById   String?                 @db.Uuid
+  revocationReason String?              @db.VarChar(500)
   createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
   workspace     Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   project       Project?                @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   invitedBy     AppUser                 @relation("WorkspaceInvitationInvitedBy", fields: [invitedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   acceptedBy    AppUser?                @relation("WorkspaceInvitationAcceptedBy", fields: [acceptedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  revokedBy     AppUser?                @relation("WorkspaceInvitationRevokedBy", fields: [revokedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
 
   @@index([workspaceId, expiresAt])
   @@index([email, expiresAt])
@@ -4011,15 +4050,19 @@ model McpConnection {
   lastErrorCode              String?             @db.VarChar(64)
   disabledAt                 DateTime?
   createdById                String              @db.Uuid
+  ownerUserId                String?             @db.Uuid
+  ownershipState             ResourceOwnershipState @default(legacyPending)
   createdAt                  DateTime            @default(now())
   updatedAt                  DateTime            @updatedAt
   credential                 ExternalCredential? @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  createdBy                  AppUser             @relation(fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  createdBy                  AppUser             @relation("McpConnectionCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  ownerUser                  AppUser?            @relation("McpConnectionOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   toolDefinitions            McpToolDefinition[]
   toolAttestations           McpToolAttestation[]
 
   @@index([status, updatedAt])
   @@index([createdById, createdAt])
+  @@index([ownerUserId, ownershipState, updatedAt])
 }
 
 model McpToolDefinition {
@@ -4141,6 +4184,7 @@ model AiProviderConnection {
   scope                    AiProviderScope              @default(platform)
   workspaceId              String?                     @db.Uuid
   ownerUserId              String?                     @db.Uuid
+  ownershipState           ResourceOwnershipState       @default(legacyPending)
   protocol                 AiProviderProtocol          @default(chatCompletions)
   baseUrl                  String                      @db.VarChar(512)
   credentialId             String                      @unique @db.Uuid
@@ -4170,10 +4214,52 @@ model AiProviderConnection {
   assetExtractionRuns      ProjectAssetExtractionRun[]
   assetSegments            ProjectAssetSegment[]
   tokenReservations         PlatformTokenReservation[]
+  platformDefaultAiRoutes  PlatformDefaultAiRoute[]    @relation("PlatformDefaultAiRouteProvider")
 
   @@index([kind, status])
   @@index([scope, workspaceId, status])
   @@index([ownerUserId, updatedAt])
+  @@index([ownerUserId, ownershipState, updatedAt])
+}
+
+model PlatformGrantOfferPolicy {
+  id          String                          @id @default(uuid()) @db.Uuid
+  offerVersion String                         @unique @db.VarChar(64)
+  status      PlatformGrantOfferPolicyStatus  @default(draft)
+  amount      Int
+  validForDays Int
+  eligibilityKey String                       @db.VarChar(64)
+  createdById String                          @db.Uuid
+  updatedById String                          @db.Uuid
+  createdAt   DateTime                        @default(now())
+  updatedAt   DateTime                        @updatedAt
+  createdBy   AppUser                         @relation("PlatformGrantOfferPolicyCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  updatedBy   AppUser                         @relation("PlatformGrantOfferPolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([status, updatedAt])
+}
+
+model PlatformDefaultAiRoute {
+  id                   String                       @id @default(uuid()) @db.Uuid
+  operation            AiOperation
+  version              Int
+  status               PlatformDefaultAiRouteStatus @default(draft)
+  providerConnectionId String                       @db.Uuid
+  modelId              String                       @db.VarChar(128)
+  embeddingDimensions  Int?
+  maxOutputTokens      Int?
+  quotaMultiplierBps    Int                          @default(10000)
+  createdById          String                       @db.Uuid
+  updatedById          String                       @db.Uuid
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  providerConnection   AiProviderConnection         @relation("PlatformDefaultAiRouteProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  createdBy            AppUser                      @relation("PlatformDefaultAiRouteCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  updatedBy            AppUser                      @relation("PlatformDefaultAiRouteUpdatedBy", fields: [updatedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([operation, version])
+  @@index([operation, status, updatedAt])
+  @@index([providerConnectionId, status])
 }
 
 model ProjectAiRoute {

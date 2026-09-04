@@ -12,12 +12,13 @@ type ProjectsView = "active" | "archived";
 type LifecycleAction = "archive" | "restore" | "delete";
 type ProjectsPayload = {
   view: ProjectsView;
+  canCreateProject: boolean;
   counts: { active: number; archived: number };
   pagination: ListPaginationState;
   projects: WorkspaceProject[];
 };
 
-const emptyPayload: ProjectsPayload = { view: "active", counts: { active: 0, archived: 0 }, pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 }, projects: [] };
+const emptyPayload: ProjectsPayload = { view: "active", canCreateProject: false, counts: { active: 0, archived: 0 }, pagination: { page: 1, pageSize: 20, total: 0, totalPages: 1 }, projects: [] };
 
 const jobLabels: Record<JobKind, string> = {
   assetExtract: "文件图片识别",
@@ -95,7 +96,7 @@ export function ProjectsClient({ username }: { username: string }) {
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">我的项目</h1>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">集中管理项目空间，并直接进入资料、智能控制台、记忆或智能体。</p>
           </div>
-          <button type="button" onClick={() => setCreateOpen(true)} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500">＋ 新建项目</button>
+          {payload.canCreateProject ? <button type="button" onClick={() => setCreateOpen(true)} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500">＋ 新建项目</button> : null}
         </section>
 
         {error ? <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline underline-offset-4">重试</button></div> : null}
@@ -119,9 +120,9 @@ export function ProjectsClient({ username }: { username: string }) {
             <div className="mt-5 grid gap-5 lg:grid-cols-2">{[1, 2].map((item) => <div key={item} className="h-64 animate-pulse rounded-3xl bg-slate-200" />)}</div>
           ) : payload.projects.length === 0 ? (
             <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
-              <p className="text-base font-semibold text-slate-800">{search.trim() ? "没有匹配的项目" : view === "active" ? "还没有进行中的项目" : "还没有归档项目"}</p>
-              <p className="mt-2 text-sm text-slate-500">{search.trim() ? "换一个项目名称、描述或 slug 关键词试试。" : view === "active" ? "创建项目后，就可以录入资料、连接仓库并建立智能记忆。" : "归档不会删除数据；归档项目会集中显示在这里并可随时恢复。"}</p>
-              {!search.trim() && view === "active" ? <button type="button" onClick={() => setCreateOpen(true)} className="mt-5 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white">创建第一个项目</button> : null}
+              <p className="text-base font-semibold text-slate-800">{search.trim() ? "没有匹配的项目" : view === "active" ? payload.canCreateProject ? "还没有进行中的项目" : "等待工作区授权" : "还没有归档项目"}</p>
+              <p className="mt-2 text-sm text-slate-500">{search.trim() ? "换一个项目名称、描述或 slug 关键词试试。" : view === "active" ? payload.canCreateProject ? "创建项目后，就可以录入资料、连接仓库并建立智能记忆。" : "请联系当前工作区 Owner/Admin 授予你创建项目或访问项目的权限。" : "归档不会删除数据；归档项目会集中显示在这里并可随时恢复。"}</p>
+              {!search.trim() && view === "active" && payload.canCreateProject ? <button type="button" onClick={() => setCreateOpen(true)} className="mt-5 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white">创建第一个项目</button> : null}
             </div>
           ) : (
             <><div className="mt-5 grid gap-5 lg:grid-cols-2">
@@ -131,7 +132,7 @@ export function ProjectsClient({ username }: { username: string }) {
         </section>
       </div>
 
-      {createOpen ? <CreateProjectDialog onClose={() => setCreateOpen(false)} onCreated={load} /> : null}
+      {createOpen && payload.canCreateProject ? <CreateProjectDialog onClose={() => setCreateOpen(false)} onCreated={load} /> : null}
       {lifecycle ? <LifecycleDialog value={lifecycle} onClose={() => setLifecycle(null)} onChanged={async (action, storageCleanupStatus) => { await load(); setMessage(action === "archive" ? "项目已归档，数据与审计记录均已保留。" : action === "restore" ? "项目已恢复，可以继续操作。" : storageCleanupStatus === "pending" ? "项目数据已永久删除；本地文件清理异常已记录，后台会继续重试。" : "项目及本地文件已永久删除；系统仅保留不含项目内容的最小删除回执。"); setLifecycle(null); }} /> : null}
     </main>
   );

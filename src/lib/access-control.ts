@@ -1,6 +1,7 @@
 import { Prisma, type AppUserRole, type PrismaClient, type ProjectMembershipRole, type WorkspaceMembershipRole } from "@prisma/client";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
+import { findConfirmedProjectMembership, findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 
 const PROJECT_ID_SCHEMA = z.string().uuid();
 const PROJECT_PATH_PATTERN = /^\/api\/projects\/([^/]+)(?:\/|$)/u;
@@ -58,30 +59,41 @@ function satisfies(actual: ProjectPermission, required: ProjectPermission): bool
 }
 
 export function accessibleProjectWhere(user: AccessUser): Prisma.ProjectWhereInput {
-  if (user.role === "admin") return {};
   return {
     OR: [
-      { workspace: { memberships: { some: { userId: user.id, role: { in: ["owner", "admin"] } } } } },
-      { memberships: { some: { userId: user.id } } },
+      {
+        membershipInheritanceMode: "workspaceInherited",
+        workspace: {
+          memberships: {
+            some: { userId: user.id, accessState: "confirmed", role: { in: ["owner", "admin"] } },
+          },
+        },
+      },
+      { memberships: { some: { userId: user.id, accessState: "confirmed" } } },
     ],
   };
 }
 
 export async function getProjectPermission(user: AccessUser, projectId: string, db: PrismaClient = getDb()): Promise<ProjectPermission | null> {
   const canonicalId = canonicalProjectId(projectId);
-  if (user.role === "admin") {
-    return (await db.project.count({ where: { id: canonicalId } })) === 1 ? "owner" : null;
-  }
   const project = await db.project.findUnique({
     where: { id: canonicalId },
     select: {
-      workspace: { select: { memberships: { where: { userId: user.id }, take: 1, select: { role: true } } } },
-      memberships: { where: { userId: user.id }, take: 1, select: { role: true } },
+      membershipInheritanceMode: true,
+      workspaceId: true,
     },
   });
   if (project === null) return null;
-  const workspacePermission = project.workspace.memberships[0] ? workspaceRolePermission(project.workspace.memberships[0].role) : null;
-  const projectPermission = project.memberships[0] ? projectRolePermission(project.memberships[0].role) : null;
+  const [workspaceMembership, projectMembership] = await Promise.all([
+    project.membershipInheritanceMode === "workspaceInherited"
+      ? findConfirmedWorkspaceMembership(db, project.workspaceId, user.id)
+      : Promise.resolve(null),
+    findConfirmedProjectMembership(db, canonicalId, user.id),
+  ]);
+  const workspacePermission = project.membershipInheritanceMode === "workspaceInherited" && workspaceMembership !== null
+    ? workspaceRolePermission(workspaceMembership.role)
+    : null;
+  const projectPermission = projectMembership !== null ? projectRolePermission(projectMembership.role) : null;
   if (workspacePermission === "owner" || projectPermission === "owner") return "owner";
   if (projectPermission === "edit") return "edit";
   return projectPermission;
@@ -99,12 +111,12 @@ export async function assertProjectAccess(user: AccessUser, projectId: string, r
   return permission;
 }
 
-export async function assertWorkspaceAdmin(user: AccessUser, workspaceId: string, db: PrismaClient = getDb()): Promise<WorkspaceMembershipRole> {
-  if (user.role === "admin") return "owner";
-  const membership = await db.workspaceMembership.findUnique({
-    where: { workspaceId_userId: { workspaceId, userId: user.id } },
-    select: { role: true },
-  });
+export async function assertWorkspaceAdmin(
+  user: AccessUser,
+  workspaceId: string,
+  db: PrismaClient | Prisma.TransactionClient = getDb(),
+): Promise<WorkspaceMembershipRole> {
+  const membership = await findConfirmedWorkspaceMembership(db, workspaceId, user.id);
   if (membership === null) {
     const exists = await db.workspace.count({ where: { id: workspaceId } });
     if (exists === 0) return fail("ACCESS_WORKSPACE_NOT_FOUND");
@@ -115,13 +127,8 @@ export async function assertWorkspaceAdmin(user: AccessUser, workspaceId: string
 }
 
 export async function resolveProjectCreationWorkspace(user: AccessUser, db: PrismaClient = getDb()): Promise<string> {
-  if (user.role === "admin") {
-    const workspace = await db.workspace.findFirst({ orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } });
-    if (workspace === null) return fail("ACCESS_WORKSPACE_NOT_FOUND");
-    return workspace.id;
-  }
   const membership = await db.workspaceMembership.findFirst({
-    where: { userId: user.id, role: { in: ["owner", "admin"] } },
+    where: { userId: user.id, accessState: "confirmed", role: { in: ["owner", "admin"] } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { workspaceId: true },
   });
@@ -149,5 +156,12 @@ export async function authorizeApiRequest(user: AccessUser, request: Request, db
     || /\/(?:lifecycle|export|action-policies|mcp-tool-grants)(?:\/|$)/u.test(path)
     || /\/actions\/[0-9a-f-]+\/decision(?:\/|$)/iu.test(path)
   );
-  await assertProjectAccess(user, canonicalProjectId(parsedProjectId.data), ownerOnly ? "owner" : write ? "edit" : "view", db);
+  try {
+    await assertProjectAccess(user, canonicalProjectId(parsedProjectId.data), ownerOnly ? "owner" : write ? "edit" : "view", db);
+  } catch (error) {
+    if (error instanceof AccessControlError && error.code === "ACCESS_PROJECT_NOT_FOUND") {
+      return fail("ACCESS_FORBIDDEN");
+    }
+    throw error;
+  }
 }

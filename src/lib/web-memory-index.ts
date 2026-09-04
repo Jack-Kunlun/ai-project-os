@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   Prisma,
-  type AppUser,
   type MemoryRecordScope,
   type PrismaClient,
 } from "@prisma/client";
@@ -9,14 +8,15 @@ import { invokeEmbeddings } from "@/lib/ai-providers";
 import { PROVIDER_REQUEST_TIMEOUT_MS } from "@/lib/ai-providers/transport";
 import { chunkSourceText } from "@/lib/ai-memory/chunking";
 import { getDb } from "@/lib/db";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { chunkRepositoryCode } from "@/lib/github";
 import {
-  getProjectJob as getWorkflowProjectJob,
+  getProjectJobInternal,
   isUncertainProviderDispatch,
   markProjectJobUnknown,
   ProjectWorkflowError,
   startProjectJobHeartbeat,
-  withProjectJobLock,
+  withProjectJobAccessTransaction,
   workflowSafeFailureCode,
 } from "@/lib/project-workflow";
 import {
@@ -392,7 +392,7 @@ export function toPublicMemoryIndexPlan(snapshot: MemoryIndexPlanSnapshot): Memo
   });
 }
 
-export async function collectProjectMemoryInputs(
+async function collectProjectMemoryInputsUnchecked(
   projectId: string,
   db: MemoryIndexDb = getDb(),
 ): Promise<readonly IndexInput[]> {
@@ -533,12 +533,23 @@ export async function collectProjectMemoryInputs(
   return Object.freeze(records);
 }
 
+export async function collectProjectMemoryInputs(
+  projectId: string,
+  actor: WebAiActor,
+  db: MemoryIndexDb = getDb(),
+): Promise<readonly IndexInput[]> {
+  await assertWebAiProjectAccess(actor, projectId, "view", db as PrismaClient);
+  return collectProjectMemoryInputsUnchecked(projectId, db);
+}
+
 export async function getProjectMemoryInputManifest(
   projectId: string,
+  actor: WebAiActor,
   db: MemoryIndexDb = getDb(),
 ): Promise<string | null> {
+  await assertWebAiProjectAccess(actor, projectId, "view", db as PrismaClient);
   try {
-    return inputManifest(await collectProjectMemoryInputs(projectId, db));
+    return inputManifest(await collectProjectMemoryInputsUnchecked(projectId, db));
   } catch (error) {
     if (
       error instanceof WebMemoryIndexError &&
@@ -567,7 +578,7 @@ async function buildMemoryIndexPlan(
   const route = await readEmbeddingRoute(projectId, db);
   const dimensions = route.embeddingDimensions;
   if (dimensions === null) return fail("MEMORY_INDEX_INPUT_INVALID");
-  const records = await collectProjectMemoryInputs(projectId, db);
+  const records = await collectProjectMemoryInputsUnchecked(projectId, db);
   const currentManifest = inputManifest(records);
   const currentInputFingerprints = records.map(memoryInputFingerprint);
   const currentFingerprints = new Set(currentInputFingerprints);
@@ -693,12 +704,15 @@ async function buildMemoryIndexPlan(
 export async function getProjectMemoryIndexPlan(
   projectId: string,
   mode: "full" | "incremental",
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
 ): Promise<MemoryIndexPlan> {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   return toPublicMemoryIndexPlan(await buildMemoryIndexPlan(projectId, mode, db));
 }
 
-export async function getProjectMemoryIndexStatus(projectId: string, db: PrismaClient = getDb()) {
+export async function getProjectMemoryIndexStatus(projectId: string, actor: WebAiActor, db: PrismaClient = getDb()) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   const [pointer, sourceCount, codePointer, materialPointerCount, route, currentManifest, latestJob] = await Promise.all([
     db.memoryIndexPointer.findUnique({
       where: { projectId },
@@ -737,7 +751,7 @@ export async function getProjectMemoryIndexStatus(projectId: string, db: PrismaC
         providerConnection: { select: { id: true, name: true, kind: true, status: true } },
       },
     }),
-    getProjectMemoryInputManifest(projectId, db),
+    getProjectMemoryInputManifest(projectId, actor, db),
     db.backgroundJob.findFirst({
       where: { projectId, kind: "memoryIndex" },
       orderBy: { createdAt: "desc" },
@@ -815,13 +829,14 @@ async function stopHeartbeat(
 
 export async function runProjectMemoryIndexJob(input: Readonly<{
   projectId: string;
-  requestedBy: Pick<AppUser, "id">;
+  requestedBy: WebAiActor;
   clientKey: unknown;
   consent: unknown;
   mode?: "full" | "incremental";
   planFingerprint?: string;
 }>, db: PrismaClient = getDb()) {
   assertWebAiConsent(input.consent);
+  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const mode = input.mode ?? "full";
   const initialPlan = await buildMemoryIndexPlan(input.projectId, mode, db);
   if (initialPlan.ineligibleCode !== null) return fail(initialPlan.ineligibleCode);
@@ -873,20 +888,29 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
     if (isKnown(error, "P2002")) return fail("MEMORY_INDEX_ALREADY_RUNNING");
     throw error;
   }
-  if (!granted.created) return getWorkflowProjectJob(input.projectId, granted.jobId, db);
+  if (!granted.created) return getProjectJobInternal(input.projectId, granted.jobId, db);
   const plan = plannedGeneration ?? initialPlan;
   const claim = await claimWebAiJob(granted.jobId, db);
-  if (!claim) return getWorkflowProjectJob(input.projectId, granted.jobId, db);
+  if (!claim) return getProjectJobInternal(input.projectId, granted.jobId, db);
 
   let heartbeat: ReturnType<typeof startProjectJobHeartbeat> | null = null;
   let heartbeatStopped = false;
   try {
-    heartbeat = startProjectJobHeartbeat({ jobId: granted.jobId, ...claim }, db);
-    const building = await db.memoryIndexGeneration.updateMany({
+    // The plan contains project source/repository content collected before
+    // admission. Re-admit after claim and atomically mark the generation as
+    // building before any plan record is consumed or sent to the provider.
+    const building = await withProjectJobAccessTransaction(db, {
+      actor: input.requestedBy,
+      projectId: input.projectId,
+      jobId: granted.jobId,
+      required: "edit",
+      attempt: { jobId: granted.jobId, ...claim },
+    }, async (tx) => tx.memoryIndexGeneration.updateMany({
       where: { projectId: input.projectId, id: generationId!, status: "staging" },
       data: { status: "building" },
-    });
+    }));
     if (building.count !== 1) return fail("MEMORY_INDEX_INPUT_INVALID");
+    heartbeat = startProjectJobHeartbeat({ jobId: granted.jobId, ...claim }, db);
 
     let generatedRecordCount = 0;
     let reusedRecordCount = 0;
@@ -897,6 +921,8 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
     const persistAvailableRecords = async (): Promise<void> => {
       const data: Prisma.MemoryRecordCreateManyInput[] = [];
       const dataFingerprints: string[] = [];
+      let generatedCountDelta = 0;
+      let reusedCountDelta = 0;
       for (const record of plan.records) {
         const currentInputFingerprint = memoryInputFingerprint(record);
         if (persistedInputFingerprints.has(currentInputFingerprint)) continue;
@@ -905,8 +931,8 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
         const embedding = reused?.embedding ?? embeddingByInputFingerprint.get(currentInputFingerprint);
         if (embedding === undefined) continue;
         if (embedding.length !== plan.dimensions || embedding.some((value) => !Number.isFinite(value))) return fail("MEMORY_INDEX_INPUT_INVALID");
-        if (reused === undefined) generatedRecordCount += 1;
-        else reusedRecordCount += 1;
+        if (reused === undefined) generatedCountDelta += 1;
+        else reusedCountDelta += 1;
         data.push({
           id: record.id,
           projectId: input.projectId,
@@ -929,13 +955,34 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
         dataFingerprints.push(currentInputFingerprint);
       }
       if (data.length === 0) return;
-      await db.memoryRecord.createMany({ data });
-      for (const fingerprint of dataFingerprints) persistedInputFingerprints.add(fingerprint);
-      const progress = await db.memoryIndexGeneration.updateMany({
-        where: { projectId: input.projectId, id: generationId!, status: "building" },
-        data: { recordCount: persistedInputFingerprints.size, generatedRecordCount, reusedRecordCount },
+      // Persisting a generated/reused record is the next durable job child
+      // after a provider response. Re-admit before taking the generation lock
+      // so a revoke that wins between batches cannot leave new project memory
+      // rows or progress markers behind.
+      await withProjectJobAccessTransaction(db, {
+        actor: input.requestedBy,
+        projectId: input.projectId,
+        jobId: granted.jobId,
+        required: "edit",
+        expectedRequestedById: input.requestedBy.id,
+        attempt: { jobId: granted.jobId, ...claim },
+      }, async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, ${MEMORY_INDEX_LOCK_NAMESPACE}))`;
+        await tx.memoryRecord.createMany({ data });
+        const nextRecordCount = persistedInputFingerprints.size + dataFingerprints.length;
+        const progress = await tx.memoryIndexGeneration.updateMany({
+          where: { projectId: input.projectId, id: generationId!, status: "building" },
+          data: {
+            recordCount: nextRecordCount,
+            generatedRecordCount: generatedRecordCount + generatedCountDelta,
+            reusedRecordCount: reusedRecordCount + reusedCountDelta,
+          },
+        });
+        if (progress.count !== 1) return fail("MEMORY_INDEX_INPUT_INVALID");
       });
-      if (progress.count !== 1) return fail("MEMORY_INDEX_INPUT_INVALID");
+      for (const fingerprint of dataFingerprints) persistedInputFingerprints.add(fingerprint);
+      generatedRecordCount += generatedCountDelta;
+      reusedRecordCount += reusedCountDelta;
     };
 
     for (let offset = 0; offset < generatedWorklist.length; offset += EMBEDDING_BATCH_SIZE) {
@@ -945,6 +992,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
       const embeddingResult = await auditedProviderCall({
         jobId: granted.jobId,
         attempt: claim,
+        actor: input.requestedBy,
         route: plan.route,
         callKey: stableAiCallKey(granted.jobId, "embedding", String(offset)),
         requestPayload: { texts: generatedBatch.map((record) => record.contentText) },
@@ -974,7 +1022,17 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
     await stopHeartbeat(heartbeat);
     heartbeatStopped = true;
 
-    await db.$transaction(async (tx) => {
+    // Publication is the job's next durable child step after the provider
+    // batches. Re-admit the actor first, then serialize the job and memory
+    // generation; a revoke/archive that wins first therefore cannot publish
+    // a local generation.
+    await withProjectJobAccessTransaction(db, {
+      actor: input.requestedBy,
+      projectId: input.projectId,
+      jobId: granted.jobId,
+      required: "edit",
+      attempt: { jobId: granted.jobId, ...claim },
+    }, async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, ${MEMORY_INDEX_LOCK_NAMESPACE}))`;
       const previous = await tx.memoryIndexPointer.findUnique({ where: { projectId: input.projectId }, select: { indexGenerationId: true } });
       const currentRoute = await tx.projectAiRoute.findUnique({
@@ -989,7 +1047,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
       });
       let currentManifest: string | null;
       try {
-        currentManifest = inputManifest(await collectProjectMemoryInputs(input.projectId, tx));
+        currentManifest = inputManifest(await collectProjectMemoryInputsUnchecked(input.projectId, tx));
       } catch (error) {
         if (error instanceof WebMemoryIndexError && (error.code === "MEMORY_INDEX_EMPTY" || error.code === "MEMORY_INDEX_TOO_LARGE")) currentManifest = null;
         else throw error;
@@ -1036,7 +1094,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
         });
         if (superseded.count !== 1) return fail("MEMORY_INDEX_PUBLICATION_CONFLICT");
       }
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    });
 
     return finishWebAiJob(granted.jobId, claim, {
       indexGenerationId: generationId,
@@ -1099,9 +1157,14 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
 export async function reconcileMemoryIndexJob(input: Readonly<{
   projectId: string;
   jobId: string;
-  requestedById: string;
+  actor: WebAiActor;
 }>, db: PrismaClient = getDb()) {
-  return withProjectJobLock(db, input.jobId, async (tx) => {
+  return withProjectJobAccessTransaction(db, {
+    actor: input.actor,
+    projectId: input.projectId,
+    jobId: input.jobId,
+  }, async (tx, admission) => {
+    const currentActor = admission.access.actor;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, ${MEMORY_INDEX_LOCK_NAMESPACE}))`;
     const job = await tx.backgroundJob.findUnique({
       where: { id: input.jobId },
@@ -1117,7 +1180,7 @@ export async function reconcileMemoryIndexJob(input: Readonly<{
       where: { projectId_indexGenerationId: { projectId: input.projectId, indexGenerationId: generation.id } },
       select: { id: true },
     });
-    if (existingReconciliation !== null) return getWorkflowProjectJob(input.projectId, input.jobId, tx);
+    if (existingReconciliation !== null) return getProjectJobInternal(input.projectId, input.jobId, tx);
 
     let currentJobStatus = job.status;
     let jobNeedsReconciliation = job.reconciliationRequired;
@@ -1184,7 +1247,7 @@ export async function reconcileMemoryIndexJob(input: Readonly<{
     }
 
     if (currentJobStatus !== "unknown" || !jobNeedsReconciliation) {
-      return getWorkflowProjectJob(input.projectId, input.jobId, tx);
+      return getProjectJobInternal(input.projectId, input.jobId, tx);
     }
     const pointer = await tx.memoryIndexPointer.findUnique({ where: { projectId: input.projectId }, select: { indexGenerationId: true } });
     const evidenceFingerprint = manifestFingerprint({
@@ -1209,7 +1272,7 @@ export async function reconcileMemoryIndexJob(input: Readonly<{
         data: {
           projectId: input.projectId,
           indexGenerationId: generation.id,
-          requestedById: input.requestedById,
+          requestedById: currentActor.id,
           resolution: "publishedLocally",
           evidenceFingerprint,
         },
@@ -1234,7 +1297,7 @@ export async function reconcileMemoryIndexJob(input: Readonly<{
           },
         },
       });
-      return getWorkflowProjectJob(input.projectId, input.jobId, tx);
+      return getProjectJobInternal(input.projectId, input.jobId, tx);
     }
 
     if (reconciliationOutcome !== "explicitAbandon") {
@@ -1244,7 +1307,7 @@ export async function reconcileMemoryIndexJob(input: Readonly<{
       data: {
         projectId: input.projectId,
         indexGenerationId: generation.id,
-        requestedById: input.requestedById,
+        requestedById: currentActor.id,
         resolution: "explicitAbandon",
         evidenceFingerprint,
       },
@@ -1270,12 +1333,21 @@ export async function reconcileMemoryIndexJob(input: Readonly<{
       },
     });
     if (releasedJob.count !== 1) return fail("MEMORY_INDEX_PUBLICATION_CONFLICT");
-    return getWorkflowProjectJob(input.projectId, input.jobId, tx);
+    return getProjectJobInternal(input.projectId, input.jobId, tx);
   });
 }
 
-export async function cancelMemoryIndexJob(projectId: string, jobId: string, db: PrismaClient = getDb()) {
-  return withProjectJobLock(db, jobId, async (tx) => {
+export async function cancelMemoryIndexJob(
+  projectId: string,
+  jobId: string,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  return withProjectJobAccessTransaction(db, {
+    actor,
+    projectId,
+    jobId,
+  }, async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${projectId}, ${MEMORY_INDEX_LOCK_NAMESPACE}))`;
     const job = await tx.backgroundJob.findUnique({ where: { id: jobId }, select: { id: true, projectId: true, kind: true, status: true } });
     if (job === null || job.projectId !== projectId || job.kind !== "memoryIndex") return fail("MEMORY_INDEX_INPUT_INVALID");
@@ -1286,6 +1358,6 @@ export async function cancelMemoryIndexJob(projectId: string, jobId: string, db:
       await tx.memoryIndexGeneration.updateMany({ where: { projectId, id: generation.id, status: generation.status }, data: { status: "failed", failureCode: "MEMORY_INDEX_CANCELLED", completedAt } });
     }
     await tx.backgroundJob.update({ where: { id: jobId }, data: { status: "cancelled", stage: "cancelled", completedAt } });
-    return getWorkflowProjectJob(projectId, jobId, tx);
+    return getProjectJobInternal(projectId, jobId, tx);
   });
 }

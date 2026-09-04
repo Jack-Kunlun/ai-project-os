@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import type { AppUser, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { invokeChatCompletion } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { createProjectRepositoryStatusService } from "@/lib/github/project-repository-status";
 import { requireProjectAiRoute } from "@/lib/project-ai-routes";
-import { getProjectJob } from "@/lib/project-workflow";
+import { getProjectJobInternal } from "@/lib/project-workflow";
 import { buildProjectWorldState } from "@/lib/project-world";
 import {
   auditedProviderCall,
@@ -444,26 +445,28 @@ function promptContexts(contexts: readonly EvidenceContext[]) {
 
 async function prepareRuntime(
   projectId: string,
+  actor: WebAiActor,
   db: PrismaClient,
 ) {
+  await assertWebAiProjectAccess(actor, projectId, "edit", db);
   const [state, generationRoute, embeddingRoute, index] = await Promise.all([
     loadProjectState(projectId, db),
     requireProjectAiRoute(projectId, "generateWithContext", db),
     requireProjectAiRoute(projectId, "embedding", db),
-    getActiveMemoryIndex(projectId, db),
+    getActiveMemoryIndex(projectId, actor, db),
   ]);
   return Object.freeze({ state, generationRoute, embeddingRoute, index });
 }
 
 export async function runProjectBriefJob(input: Readonly<{
   projectId: string;
-  requestedBy: Pick<AppUser, "id">;
+  requestedBy: WebAiActor;
   clientKey: unknown;
   consent: unknown;
 }>, db: PrismaClient = getDb()) {
   assertWebAiConsent(input.consent);
   const projectId = projectIdSchema.parse(input.projectId);
-  const runtime = await prepareRuntime(projectId, db);
+  const runtime = await prepareRuntime(projectId, input.requestedBy, db);
   const stateManifest = projectStateFingerprint(runtime.state);
   const manifest = manifestFingerprint({
     kind: "project-brief:v2",
@@ -482,13 +485,17 @@ export async function runProjectBriefJob(input: Readonly<{
     manifestFingerprint: manifest,
     payload: { reportVersion: "project-intelligence-report:v2", indexGenerationId: runtime.index.id, projectWorldStateFingerprint: runtime.state.world.snapshotFingerprint },
   }, db);
-  if (!granted.created) return getProjectJob(projectId, granted.jobId, db);
+  if (!granted.created) return getProjectJobInternal(projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
   if (!claim) {
-    return getProjectJob(projectId, granted.jobId, db);
+    return getProjectJobInternal(projectId, granted.jobId, db);
   }
 
   try {
+    // Runtime state and the active index are prepared before admission.
+    // Recheck after claim before creating the supplemental grant or reading
+    // project evidence for the provider request.
+    await assertWebAiProjectAccess(input.requestedBy, projectId, "edit", db);
     await createSupplementalWebAiGrant({
       projectId,
       jobId: granted.jobId,
@@ -504,6 +511,7 @@ export async function runProjectBriefJob(input: Readonly<{
       searchActiveMemoryForJob({
         projectId,
         jobId: granted.jobId,
+        actor: input.requestedBy,
         attempt: claim,
         question: REPORT_SEARCH_QUERY,
         route: runtime.embeddingRoute,
@@ -521,6 +529,7 @@ export async function runProjectBriefJob(input: Readonly<{
     const generated = await auditedProviderCall({
       jobId: granted.jobId,
       attempt: claim,
+      actor: input.requestedBy,
       route: runtime.generationRoute,
       operation: "projectAnalysis",
       callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "brief"),
@@ -587,6 +596,7 @@ export async function runProjectBriefJob(input: Readonly<{
 async function executeAgentPlan(input: Readonly<{
   projectId: string;
   jobId: string;
+  requestedBy: WebAiActor;
   attempt: JobAttemptClaim;
   plan: ProjectAgentPlan;
   state: ProjectState;
@@ -619,6 +629,7 @@ async function executeAgentPlan(input: Readonly<{
       const results = await searchActiveMemoryForJob({
         projectId: input.projectId,
         jobId: input.jobId,
+        actor: input.requestedBy,
         attempt: input.attempt,
         question: call.arguments.query,
         route: input.embeddingRoute,
@@ -641,7 +652,7 @@ async function executeAgentPlan(input: Readonly<{
 
 export async function runProjectAgentJob(input: Readonly<{
   projectId: string;
-  requestedBy: Pick<AppUser, "id">;
+  requestedBy: WebAiActor;
   clientKey: unknown;
   consent: unknown;
   question: unknown;
@@ -649,7 +660,7 @@ export async function runProjectAgentJob(input: Readonly<{
   assertWebAiConsent(input.consent);
   const projectId = projectIdSchema.parse(input.projectId);
   const question = questionSchema.parse(input.question);
-  const runtime = await prepareRuntime(projectId, db);
+  const runtime = await prepareRuntime(projectId, input.requestedBy, db);
   const stateManifest = projectStateFingerprint(runtime.state);
   const manifest = manifestFingerprint({
     kind: "project-agent:v2",
@@ -669,13 +680,17 @@ export async function runProjectAgentJob(input: Readonly<{
     manifestFingerprint: manifest,
     payload: { agentVersion: "read-only-project-intelligence-agent:v2", question, projectWorldStateFingerprint: runtime.state.world.snapshotFingerprint },
   }, db);
-  if (!granted.created) return getProjectJob(projectId, granted.jobId, db);
+  if (!granted.created) return getProjectJobInternal(projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
   if (!claim) {
-    return getProjectJob(projectId, granted.jobId, db);
+    return getProjectJobInternal(projectId, granted.jobId, db);
   }
 
   try {
+    // Runtime state and the active index are prepared before admission.
+    // Recheck after claim before creating the supplemental grant or reading
+    // project evidence for the provider request.
+    await assertWebAiProjectAccess(input.requestedBy, projectId, "edit", db);
     await createSupplementalWebAiGrant({
       projectId,
       jobId: granted.jobId,
@@ -689,6 +704,7 @@ export async function runProjectAgentJob(input: Readonly<{
     const planned = await auditedProviderCall({
       jobId: granted.jobId,
       attempt: claim,
+      actor: input.requestedBy,
       route: runtime.generationRoute,
       operation: "projectAnalysis",
       callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "agent-plan"),
@@ -725,6 +741,7 @@ export async function runProjectAgentJob(input: Readonly<{
     const execution = await executeAgentPlan({
       projectId,
       jobId: granted.jobId,
+      requestedBy: input.requestedBy,
       attempt: claim,
       plan,
       state: runtime.state,
@@ -735,6 +752,7 @@ export async function runProjectAgentJob(input: Readonly<{
     const generated = await auditedProviderCall({
       jobId: granted.jobId,
       attempt: claim,
+      actor: input.requestedBy,
       route: runtime.generationRoute,
       operation: "projectAnalysis",
       callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "agent-answer"),
@@ -802,8 +820,13 @@ export async function runProjectAgentJob(input: Readonly<{
   }
 }
 
-export async function listProjectIntelligence(projectIdValue: unknown, db: PrismaClient = getDb()) {
+export async function listProjectIntelligence(
+  projectIdValue: unknown,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
   const projectId = projectIdSchema.parse(projectIdValue);
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (project === null) return fail("PROJECT_INTELLIGENCE_INVALID_INPUT");
   const [reports, agentRuns, activeIndex, routes, currentManifest] = await Promise.all([
@@ -870,7 +893,7 @@ export async function listProjectIntelligence(projectIdValue: unknown, db: Prism
         providerConnection: { select: { id: true, name: true, kind: true, status: true } },
       },
     }),
-    getProjectMemoryInputManifest(projectId, db),
+    getProjectMemoryInputManifest(projectId, actor, db),
   ]);
   const embeddingRoute = routes.find((route) => route.operation === "embedding") ?? null;
   const generationRoute = routes.find((route) => route.operation === "generateWithContext") ?? null;

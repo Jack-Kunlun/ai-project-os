@@ -41,10 +41,10 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 1. 启动 Docker Compose，初始化本地管理员。
 2. 由系统管理员在“管理工作台 → 平台模型”（`/admin/models`）添加并测试 OpenAI、DeepSeek、Qwen 或 GLM。
-3. 由系统管理员在“管理工作台 → Git 连接”（`/admin/connectors/git`）配置需要使用的 Git 服务；首次项目仓库接入也由系统管理员完成。
+3. 由系统管理员在“管理工作台 → Git 连接”（`/admin/connectors/git`）配置平台 Git 服务；当前项目页不提供首次关联入口，个人 Git 连接与项目委托仍在改造中。已有仓库可在项目仓库页查看、同步和停用。
 4. 如需外部工具，系统管理员在“管理工作台 → MCP 连接”（`/admin/connectors/mcp`）验证服务并认证精确工具，再由项目 Owner 在“工具权限”逐项授权。
 5. 创建项目，在项目“智能控制台”分配视觉、抽取、向量与生成模型。
-6. 上传文件，或添加网页、本地文件夹和一个或多个代码仓库。
+6. 上传文件，或添加网页、本地文件夹；已关联的代码仓库可在项目仓库页查看、同步和停用。
 7. 审核 AI 候选并建立语义索引。
 8. 在“项目状态”核对当前事实，人工建立关系、替代链并固化状态快照。
 9. 使用语义搜索、引用式问答和只读项目智能体。
@@ -69,7 +69,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 | 外部资料 | 抓取公开网页或经明确授权的内网页面；浏览器选择本地文件夹后按文件批量导入；来源版本原子发布 |
 | 多 Git 连接 | GitHub、Gitee、GitLab、自建 GitLab、Gitea、Forgejo 和通用 Git；HTTPS Token/Basic 或 SSH Key；支持自定义 CA、known_hosts 与显式内网授权 |
 | 受控 MCP 连接与结果纳入 | 页面配置远程 Streamable HTTP 服务与加密 Bearer Token；固定 DNS，固化工具定义快照；远端 annotations 只作提示，必须由管理员对精确工具、网络和凭据指纹追加式认证后，项目 Owner 才能授权；成功结果可由 Editor 或 Owner 人工固化为未审核项目资料 |
-| 多仓库记忆 | 一个项目可关联多个 Git 服务上的多个仓库；按分支与目录冻结 commit，完整校验后原子发布代码快照 |
+| 多仓库记忆 | 已关联仓库可按分支与目录冻结 commit，完整校验后原子发布代码快照；新的个人 Git 连接与项目委托仍在改造 |
 | GitHub 扩展资料 | 既有 GitHub 专用连接继续支持 README、Markdown、Issue、PR 和 Release 的只读同步 |
 | 自动抽取与审核 | 从明确选择的资料抽取 decision、progress、issue、risk；结构与连续原文验证通过后进入人工审核 |
 | 时态项目世界模型 | 只用当前有效、已确认事实计算项目状态；支持版本绑定的支持/冲突/依赖/阻断/因果/解决/相关关系、同类型事实替代链、陈旧关系提示、不可变状态快照和追加式治理审计 |
@@ -95,7 +95,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - `/admin/operations/backups`：备份/运维状态（按初始超级管理员规则）。
 - `/team`：成员、邀请和 OIDC。
 - `/projects/:projectId/control`：项目级 AI 路由。
-- `/projects/:projectId/repositories`：项目多仓库关联与扫描。
+- `/projects/:projectId/repositories`：已关联项目仓库的查看、同步与停用。
 - `/projects/:projectId/world`：当前项目状态、事实关系、替代链、冲突、快照与审计。
 - `/projects/:projectId/external-sources`：网页与本地文件夹资料。
 - `/projects/:projectId/automations`：自动化规则与运行记录。
@@ -235,7 +235,7 @@ pnpm exec prisma migrate status --config prisma.config.ts
 - `/guide`：页面操作指南。
 - `/projects/:projectId/assets`：文件资料。
 - `/projects/:projectId/external-sources`：网页与本地文件夹。
-- `/projects/:projectId/repositories`：多 Git 仓库。
+- `/projects/:projectId/repositories`：已关联多 Git 仓库的查看、同步与停用。
 - `/projects/:projectId/world`：时态项目状态、事实关系、替代链、冲突、快照与审计。
 - `/projects/:projectId/automations`：自动化。
 - `/projects/:projectId/actions`：动作策略、审批和审计。

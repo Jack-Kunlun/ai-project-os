@@ -123,7 +123,7 @@ http://127.0.0.1:3000/api/auth/oidc/callback
 
 凭据使用最小只读权限。GitHub fine-grained PAT 只授权所需仓库的 Contents Read；不要使用个人主 SSH Key，建议单独创建只读 Deploy Key。保存时验证地址、凭据和远端可达性，固定解析地址并关闭交互、钩子、非目标协议和重定向。DNS 地址变化后必须重新验证。
 
-项目首次关联代码仓库只能由系统管理员完成。项目仓库页面只向系统管理员请求已验证的 `/api/settings/git-connections`，普通用户不请求全局连接列表；首次关联接口在加载凭据或远程 probe 前拒绝非 admin，并且只接受 `status=verified` 且 `disabledAt=null` 的连接。已关联项目成员可以查看安全仓库摘要和执行既有受控同步，响应不返回 `baseUrl`、凭据、错误连接详情或内部状态。
+平台 Git 连接仍由系统管理员在上述管理工作台配置和验证，但当前 legacy 项目仓库新增接口已冻结：项目仓库页面不再请求全局连接列表，也不提供管理员选择平台连接并首次关联仓库的入口。个人 Git 连接与项目委托是 planned 后续能力，尚未开放。已关联项目成员可以查看安全仓库摘要、执行既有受控同步和停用仓库，响应不返回 `baseUrl`、凭据、错误连接详情或内部状态。
 
 ### 5.2 MCP 只读工具
 
@@ -171,7 +171,7 @@ pg_restore -l ai-project-os.dump
 | 总览显示 Worker 异常 | 先看 `/api/health` 的 `worker.status`、心跳和安全错误码，再检查 worker 容器单行 JSON 日志与重启次数 |
 | 模型连接不能验证 | 检查内置 provider、能力字段、模型 ID、网络解析和凭据状态；不要放宽 Base URL 白名单 |
 | GLM 只做向量 | 保持 generation/vision 为 `null`，配置已验证 embedding 模型和维度；测试文案只列真实能力 |
-| Git 首次接入被拒绝 | 确认管理员角色、连接 `verified`、`disabledAt=null`、路径/分支和只读凭据；普通用户拒绝是预期安全边界 |
+| Git 仓库新增被拒绝 | 当前 legacy 项目仓库新增已冻结；个人 Git 连接与项目委托尚未开放。已关联仓库仍可查看、同步和停用；连接配置问题请在平台连接器中核对 |
 | Git 地址变化 | 重新执行连接验证，核对 DNS/CA/known_hosts，不要盲目接受新地址 |
 | MCP 工具不能授权 | 重新发现并核对只读/非破坏性声明、工具定义、网络和凭据指纹；项目 Owner 重新授权并创建动作 |
 | 迁移失败 | 保留数据库和日志现场，停止 app/worker；不要删卷、手工改账本或降级迁移 |

@@ -1,14 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Prisma, ProjectItemRevisionAction, type AppUser, type PrismaClient } from "@prisma/client";
+import { Prisma, ProjectItemRevisionAction, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { invokeChatCompletion } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
+import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import {
   appendProjectItemRevision,
   createPrimaryProjectItemEvidence,
 } from "@/lib/project-item-history";
 import { requireProjectAiRoute } from "@/lib/project-ai-routes";
-import { getProjectJob } from "@/lib/project-workflow";
+import { getProjectJobInternal, withProjectJobAccessTransaction } from "@/lib/project-workflow";
 import {
   assertWebAiConsent,
   auditedProviderCall,
@@ -41,6 +43,7 @@ const candidatePayloadSchema = z.object({
   sourceExcerpt: z.string().min(1).max(10_000).optional(),
 }).strict().refine((candidate) => candidate.evidenceId !== undefined || candidate.sourceExcerpt !== undefined);
 const responseSchema = z.object({ candidates: z.array(z.unknown()).max(20) }).strict();
+const WEB_AI_CANDIDATE_LOCK_NAMESPACE = 29082031;
 
 export type AutoExtractEvidenceBlock = Readonly<{ id: string; text: string }>;
 
@@ -214,7 +217,12 @@ function fingerprint(sourceId: string, sourceHash: string, candidate: z.infer<ty
     .digest("hex");
 }
 
-export async function listAutoExtractSources(projectId: string, db: PrismaClient = getDb()) {
+export async function listAutoExtractSources(
+  projectId: string,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   return db.projectSource.findMany({
     where: { projectId, retiredAt: null },
     orderBy: { ingestedAt: "desc" },
@@ -232,12 +240,13 @@ export async function listAutoExtractSources(projectId: string, db: PrismaClient
 
 export async function runAutoExtractJob(input: Readonly<{
   projectId: string;
-  requestedBy: Pick<AppUser, "id">;
+  requestedBy: WebAiActor;
   clientKey: unknown;
   consent: unknown;
   request: unknown;
 }>, db: PrismaClient = getDb()) {
   assertWebAiConsent(input.consent);
+  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const parsed = requestSchema.parse(input.request);
   const [route, sources] = await Promise.all([
     requireProjectAiRoute(input.projectId, "autoExtract", db),
@@ -274,9 +283,9 @@ export async function runAutoExtractJob(input: Readonly<{
     manifestFingerprint: manifest,
     payload: { sourceIds: sources.map((source) => source.id), manifest },
   }, db);
-  if (!granted.created) return getProjectJob(input.projectId, granted.jobId, db);
+  if (!granted.created) return getProjectJobInternal(input.projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
-  if (!claim) return getProjectJob(input.projectId, granted.jobId, db);
+  if (!claim) return getProjectJobInternal(input.projectId, granted.jobId, db);
 
   let createdCount = 0;
   let duplicateCount = 0;
@@ -285,6 +294,11 @@ export async function runAutoExtractJob(input: Readonly<{
   let recoveredExcerptCount = 0;
   let anchoredExcerptCount = 0;
   try {
+    // The source rows are loaded before admission so the grant can carry an
+    // immutable manifest. Recheck after claim before deriving evidence from
+    // their content, since the actor may have been disabled or removed from
+    // the project while the job was being admitted.
+    await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
     for (let index = 0; index < sources.length; index += 1) {
       const source = sources[index]!;
       const evidenceBlocks = buildAutoExtractEvidenceBlocks(source.contentText);
@@ -292,6 +306,7 @@ export async function runAutoExtractJob(input: Readonly<{
       const response = await auditedProviderCall({
         jobId: granted.jobId,
         attempt: claim,
+        actor: input.requestedBy,
         route,
         callKey: stableAiCallKey(granted.jobId, "autoExtract", source.id),
         requestPayload: { sourceId: source.id, evidenceBlocks },
@@ -333,7 +348,19 @@ export async function runAutoExtractJob(input: Readonly<{
       for (const candidate of parsedCandidates.candidates) {
         const candidateFingerprint = fingerprint(source.id, source.contentHash, candidate);
         try {
-          await db.$transaction(async (tx) => {
+          // Candidate persistence is the next durable child step after the
+          // provider response. Re-admit the actor before taking the job
+          // lock and writing the item/evidence/candidate tuple; a revoke that
+          // wins between provider acknowledgement and this write must leave
+          // no locally-created candidate behind.
+          await withProjectJobAccessTransaction(db, {
+            actor: input.requestedBy,
+            projectId: input.projectId,
+            jobId: granted.jobId,
+            required: "edit",
+            expectedRequestedById: input.requestedBy.id,
+            attempt: { jobId: granted.jobId, ...claim },
+          }, async (tx) => {
             const item = await tx.projectItem.create({
               data: {
                 id: randomUUID(),
@@ -379,7 +406,7 @@ export async function runAutoExtractJob(input: Readonly<{
                 candidateFingerprint,
               },
             });
-          }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+          });
           createdCount += 1;
         } catch (error) {
           if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -428,7 +455,12 @@ const candidateListSelect = {
   },
 } as const;
 
-export async function listWebAiCandidates(projectId: string, db: PrismaClient = getDb()) {
+export async function listWebAiCandidates(
+  projectId: string,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   return db.webAiCandidate.findMany({
     where: { projectId },
     orderBy: { createdAt: "desc" },
@@ -442,9 +474,19 @@ export async function reviewWebAiCandidate(input: Readonly<{
   candidateId: string;
   action: "accept" | "dismiss";
   expectedItemUpdatedAt: Date;
-  reviewedBy: string;
+  actor: WebAiActor;
 }>, db: PrismaClient = getDb()) {
-  return db.$transaction(async (tx) => {
+  await assertWebAiProjectAccess(input.actor, input.projectId, "edit", db);
+  return withWebAiProjectAccessTransaction(db, {
+    actor: input.actor,
+    projectId: input.projectId,
+    required: "edit",
+  }, async (tx, admission) => {
+    // Candidate state is serialized only after the shared access fence. This
+    // keeps review mutations from establishing a candidate -> project lock
+    // order that could deadlock with revocation/archive operations.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.candidateId}, ${WEB_AI_CANDIDATE_LOCK_NAMESPACE}))`;
+    const currentActor = admission.actor;
     const candidate = await tx.webAiCandidate.findFirst({
       where: { projectId: input.projectId, id: input.candidateId },
       include: { projectItem: true },
@@ -494,7 +536,7 @@ export async function reviewWebAiCandidate(input: Readonly<{
       data: {
         reviewStatus: input.action === "accept" ? "accepted" : "dismissed",
         reviewedAt: now,
-        reviewedBy: input.reviewedBy,
+        reviewedBy: currentActor.id,
       },
     });
     if (itemUpdate.count !== 1 || candidateUpdate.count !== 1) return fail("AUTO_EXTRACT_CANDIDATE_CONFLICT");
@@ -504,7 +546,7 @@ export async function reviewWebAiCandidate(input: Readonly<{
     await appendProjectItemRevision(tx, {
       item: updated,
       action: input.action === "accept" ? ProjectItemRevisionAction.confirmed : ProjectItemRevisionAction.dismissed,
-      actorId: input.reviewedBy,
+      actorId: currentActor.id,
       evidences: evidence,
       createdAt: now,
     });
@@ -512,5 +554,5 @@ export async function reviewWebAiCandidate(input: Readonly<{
       where: { id: candidate.id },
       select: candidateListSelect,
     });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
 }

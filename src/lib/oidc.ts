@@ -7,7 +7,15 @@ import { createSession, type CreatedSession } from "@/lib/auth";
 import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
-import { highestProjectRole, highestWorkspaceRole } from "@/lib/workspaces";
+import { lockActorsAccess, lockProjectAccess, lockWorkspaceAccess, lockWorkspaceInvitationAccess } from "@/lib/access-linearization";
+import {
+  findCurrentProjectMembership,
+  findCurrentWorkspaceMembership,
+  grantProjectMembership,
+  grantWorkspaceMembership,
+  hasRevokedProjectMembership,
+  hasRevokedWorkspaceMembership,
+} from "@/lib/membership-governance";
 import { resolveSecureEndpointFingerprint, securePinnedJsonRequest, WebSourceError } from "@/lib/web-sources";
 import { issueVerifiedSignupGrant } from "@/lib/ai-entitlements";
 
@@ -243,6 +251,9 @@ export async function createOidcProvider(workspaceIdInput: unknown, input: unkno
   assertTokenAuthSupported(discovered.discovery, parsed.tokenAuthMethod);
   try {
     return await db.$transaction(async (tx) => {
+      await lockActorsAccess(tx, [actor.id]);
+      await lockWorkspaceAccess(tx, workspaceId);
+      await assertWorkspaceAdmin(actor, workspaceId, tx);
       const credential = await createCredential("oidcClient", parsed.clientSecret, tx);
       return tx.oidcProvider.create({
         data: {
@@ -274,20 +285,28 @@ export async function updateOidcProvider(workspaceIdInput: unknown, providerIdIn
     ? await discoverProvider(current.issuerUrl, current.allowPrivateNetwork)
     : null;
   if (discovered !== null) assertTokenAuthSupported(discovered.discovery, parsed.tokenAuthMethod ?? current.tokenAuthMethod);
-  if (parsed.clientSecret !== undefined) await rotateCredential(current.credentialId, "oidcClient", parsed.clientSecret, db);
   try {
-    return await db.oidcProvider.update({
-      where: { id: providerId },
-      data: {
-        ...(parsed.name === undefined ? {} : { name: parsed.name }),
-        ...(parsed.tokenAuthMethod === undefined ? {} : { tokenAuthMethod: parsed.tokenAuthMethod }),
-        ...(parsed.autoProvision === undefined ? {} : { autoProvision: parsed.autoProvision }),
-        ...(parsed.defaultWorkspaceRole === undefined ? {} : { defaultWorkspaceRole: parsed.defaultWorkspaceRole }),
-        ...(parsed.allowedEmailDomains === undefined ? {} : { allowedEmailDomains: [...new Set(parsed.allowedEmailDomains)].sort() }),
-        ...(parsed.enabled === false ? { status: "disabled", disabledAt: new Date() } : parsed.enabled === true ? { status: "verified", disabledAt: null, lastErrorCode: null } : {}),
-        ...(discovered === null ? {} : { authorizationEndpoint: discovered.authorizationEndpoint, tokenEndpoint: discovered.tokenEndpoint, jwksUri: discovered.jwksUri, endSessionEndpoint: discovered.endSessionEndpoint, resolvedAddressFingerprint: discovered.fingerprint, tokenAddressFingerprint: discovered.tokenFingerprint, jwksAddressFingerprint: discovered.jwksFingerprint, status: "verified", lastTestedAt: new Date(), lastErrorCode: null, disabledAt: null }),
-      },
-      select: providerSelect,
+    return await db.$transaction(async (tx) => {
+      await lockActorsAccess(tx, [actor.id]);
+      await lockWorkspaceAccess(tx, workspaceId);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${providerId}::text, ${OIDC_ATTEMPT_LOCK_NAMESPACE}))`);
+      await assertWorkspaceAdmin(actor, workspaceId, tx);
+      const lockedCurrent = await tx.oidcProvider.findFirst({ where: { id: providerId, workspaceId } });
+      if (lockedCurrent === null) return fail("OIDC_PROVIDER_NOT_FOUND");
+      if (parsed.clientSecret !== undefined) await rotateCredential(lockedCurrent.credentialId, "oidcClient", parsed.clientSecret, tx);
+      return tx.oidcProvider.update({
+        where: { id: lockedCurrent.id },
+        data: {
+          ...(parsed.name === undefined ? {} : { name: parsed.name }),
+          ...(parsed.tokenAuthMethod === undefined ? {} : { tokenAuthMethod: parsed.tokenAuthMethod }),
+          ...(parsed.autoProvision === undefined ? {} : { autoProvision: parsed.autoProvision }),
+          ...(parsed.defaultWorkspaceRole === undefined ? {} : { defaultWorkspaceRole: parsed.defaultWorkspaceRole }),
+          ...(parsed.allowedEmailDomains === undefined ? {} : { allowedEmailDomains: [...new Set(parsed.allowedEmailDomains)].sort() }),
+          ...(parsed.enabled === false ? { status: "disabled", disabledAt: new Date() } : parsed.enabled === true ? { status: "verified", disabledAt: null, lastErrorCode: null } : {}),
+          ...(discovered === null ? {} : { authorizationEndpoint: discovered.authorizationEndpoint, tokenEndpoint: discovered.tokenEndpoint, jwksUri: discovered.jwksUri, endSessionEndpoint: discovered.endSessionEndpoint, resolvedAddressFingerprint: discovered.fingerprint, tokenAddressFingerprint: discovered.tokenFingerprint, jwksAddressFingerprint: discovered.jwksFingerprint, status: "verified", lastTestedAt: new Date(), lastErrorCode: null, disabledAt: null }),
+        },
+        select: providerSelect,
+      });
     });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return fail("OIDC_PROVIDER_CONFLICT");
@@ -302,7 +321,10 @@ export async function deleteOidcProvider(workspaceIdInput: unknown, providerIdIn
   const parsed = providerDeleteSchema.parse(input);
   try {
     return await db.$transaction(async (tx) => {
+      await lockActorsAccess(tx, [actor.id]);
+      await lockWorkspaceAccess(tx, workspaceId);
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${providerId}::text, ${OIDC_ATTEMPT_LOCK_NAMESPACE}))`);
+      await assertWorkspaceAdmin(actor, workspaceId, tx);
       const provider = await tx.oidcProvider.findFirst({
         where: { id: providerId, workspaceId },
         select: {
@@ -508,17 +530,36 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
   const preferredUsername = safeClaim(payload.preferred_username, 64) ?? claimedEmail?.split("@")[0] ?? subject;
 
   return db.$transaction(async (tx) => {
-    const provider = await tx.oidcProvider.findUniqueOrThrow({ where: { id: attempt.providerId } });
-    if (provider.status !== "verified" || provider.disabledAt !== null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
+    let provider = await tx.oidcProvider.findUnique({ where: { id: attempt.providerId } });
+    if (provider === null || provider.status !== "verified" || provider.disabledAt !== null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
     let identity = await tx.oidcIdentity.findUnique({ where: { providerId_subject: { providerId: provider.id, subject } }, include: { user: true } });
     let user = identity?.user ?? null;
-    const newlyCreated = user === null;
-    const invitation = claimedEmail === null ? null : await tx.workspaceInvitation.findFirst({ where: { workspaceId: provider.workspaceId, email: claimedEmail, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "asc" } });
+    const identityExistedBeforeLock = identity !== null;
+    const invitationCandidate = claimedEmail === null ? null : await tx.workspaceInvitation.findFirst({ where: { workspaceId: provider.workspaceId, email: claimedEmail, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "asc" } });
     const emailOwner = claimedEmail !== null && emailVerified ? await tx.appUser.findUnique({ where: { email: claimedEmail }, select: { id: true } }) : null;
     if (user === null && emailOwner !== null) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+    if (user !== null) await lockActorsAccess(tx, [user.id]);
+    await lockWorkspaceAccess(tx, provider.workspaceId);
+    if (invitationCandidate?.projectId !== null && invitationCandidate?.projectId !== undefined) await lockProjectAccess(tx, invitationCandidate.projectId);
+    if (invitationCandidate !== null) await lockWorkspaceInvitationAccess(tx, invitationCandidate.id);
+    // Provider state is checked after the actor/workspace/project fence.  This
+    // keeps membership revocation and callback admission on one lock order.
+    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${provider.id}::text, ${OIDC_ATTEMPT_LOCK_NAMESPACE}))`);
+    provider = await tx.oidcProvider.findUnique({ where: { id: attempt.providerId } });
+    if (provider === null || provider.status !== "verified" || provider.disabledAt !== null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
+    const lockedIdentity = await tx.oidcIdentity.findUnique({ where: { providerId_subject: { providerId: provider.id, subject } }, include: { user: true } });
+    if (identityExistedBeforeLock !== (lockedIdentity !== null)) return fail("OIDC_FLOW_INVALID");
+    identity = lockedIdentity;
+    user = identity?.user ?? null;
+    const invitation = invitationCandidate === null ? null : await tx.workspaceInvitation.findUnique({ where: { id: invitationCandidate.id } });
+    if (invitation !== null && (invitation.acceptedAt !== null || invitation.revokedAt !== null || invitation.expiresAt <= new Date())) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+    if (invitation !== null && invitation.workspaceId !== provider.workspaceId) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+    const lockedEmailOwner = claimedEmail !== null && emailVerified ? await tx.appUser.findUnique({ where: { email: claimedEmail }, select: { id: true } }) : null;
+    if (user === null && lockedEmailOwner !== null) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     const domains = provider.allowedEmailDomains as string[];
     const domainAllowed = claimedEmail !== null && emailVerified && (domains.length === 0 || (emailDomain(claimedEmail) !== null && domains.includes(emailDomain(claimedEmail)!)));
     if (user === null && invitation === null && !(provider.autoProvision && domainAllowed)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+    const newlyCreated = user === null;
     if (user === null) {
       user = await tx.appUser.create({ data: { username: await availableUsername(preferredUsername, tx), displayName, email: claimedEmail, role: "user", passwordHash: null, passwordSalt: null } });
       if (newlyCreated && invitation === null && emailVerified) {
@@ -527,13 +568,34 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     }
     if (user.disabledAt !== null) return fail("OIDC_ACCOUNT_DISABLED");
     const invitedWorkspaceRole = invitation?.workspaceRole ?? provider.defaultWorkspaceRole;
-    const currentWorkspaceMembership = await tx.workspaceMembership.findUnique({ where: { workspaceId_userId: { workspaceId: provider.workspaceId, userId: user.id } }, select: { role: true } });
-    const membershipRole = currentWorkspaceMembership === null ? invitedWorkspaceRole : highestWorkspaceRole(currentWorkspaceMembership.role, invitedWorkspaceRole);
-    await tx.workspaceMembership.upsert({ where: { workspaceId_userId: { workspaceId: provider.workspaceId, userId: user.id } }, create: { workspaceId: provider.workspaceId, userId: user.id, role: membershipRole }, update: { role: membershipRole } });
+    const currentWorkspaceMembership = await findCurrentWorkspaceMembership(tx, provider.workspaceId, user.id);
+    if (currentWorkspaceMembership !== null && currentWorkspaceMembership.accessState !== "confirmed") return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+    if (currentWorkspaceMembership === null) {
+      // A revoked history row is a deliberate denial, not an invitation to
+      // silently create a fresh authorization epoch from an OIDC callback.
+      if (await hasRevokedWorkspaceMembership(tx, provider.workspaceId, user.id)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+      await grantWorkspaceMembership(tx, {
+        workspaceId: provider.workspaceId,
+        userId: user.id,
+        role: invitedWorkspaceRole,
+        actorId: user.id,
+        reason: "oidc_membership_created",
+      });
+    }
     if (invitation?.projectId !== null && invitation?.projectId !== undefined && invitation.projectRole !== null) {
-      const currentProjectMembership = await tx.projectMembership.findUnique({ where: { projectId_userId: { projectId: invitation.projectId, userId: user.id } }, select: { role: true } });
-      const projectRole = currentProjectMembership === null ? invitation.projectRole : highestProjectRole(currentProjectMembership.role, invitation.projectRole);
-      await tx.projectMembership.upsert({ where: { projectId_userId: { projectId: invitation.projectId, userId: user.id } }, create: { projectId: invitation.projectId, userId: user.id, role: projectRole }, update: { role: projectRole } });
+      const currentProjectMembership = await findCurrentProjectMembership(tx, invitation.projectId, user.id);
+      if (currentProjectMembership !== null && currentProjectMembership.accessState !== "confirmed") return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+      if (currentProjectMembership === null) {
+        if (await hasRevokedProjectMembership(tx, invitation.projectId, user.id)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+        await grantProjectMembership(tx, {
+          projectId: invitation.projectId,
+          workspaceId: provider.workspaceId,
+          userId: user.id,
+          role: invitation.projectRole,
+          actorId: user.id,
+          reason: "oidc_project_grant_created",
+        });
+      }
     }
     if (invitation !== null) await tx.workspaceInvitation.update({ where: { id: invitation.id }, data: { acceptedById: user.id, acceptedAt: new Date() } });
     identity = await tx.oidcIdentity.upsert({ where: { providerId_subject: { providerId: provider.id, subject } }, create: { providerId: provider.id, userId: user.id, subject, email: claimedEmail, displayName, lastLoginAt: new Date() }, update: { email: claimedEmail, displayName, lastLoginAt: new Date() }, include: { user: true } });

@@ -9,11 +9,10 @@ const idSchema = z.string().uuid();
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const projectId = idSchema.parse((await context.params).projectId);
-    return NextResponse.json({ jobs: await listProjectJobs(projectId) });
+    return NextResponse.json({ jobs: await listProjectJobs(projectId, user) });
   } catch (error) {
     return handleApiError(error);
   }
 }
-

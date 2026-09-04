@@ -9,6 +9,7 @@ import test from "node:test";
 import { ActionEngineError, decideProjectAction, requestProjectAction, runProjectActionWorkerCycle, updateProjectActionPolicy } from "../src/lib/action-engine";
 import { ActionResultIntakeError, importProjectActionResult } from "../src/lib/action-result-intake";
 import { getDb } from "../src/lib/db";
+import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import {
   McpCapabilityError,
   attestMcpToolDefinition,
@@ -75,9 +76,12 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
     { id: editorId, username: `mcp_editor_${suffix}`, role: "member" },
   ] });
   await db.workspace.create({ data: { id: workspaceId, name: `MCP ${suffix}`, slug: `mcp-${suffix}`, createdById: adminId } });
-  await db.workspaceMembership.create({ data: { workspaceId, userId: adminId, role: "owner" } });
+  await db.$transaction((tx) => grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "mcp_capabilities_fixture" }));
   await db.project.create({ data: { id: projectId, workspaceId, name: `MCP project ${suffix}`, slug: `mcp-project-${suffix}` } });
-  await db.projectMembership.create({ data: { projectId, userId: editorId, role: "editor" } });
+  await db.$transaction(async (tx) => {
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "mcp_capabilities_fixture" });
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: adminId, reason: "mcp_capabilities_fixture" });
+  });
 
   try {
     const connection = await createMcpConnection({ name: `MCP ${suffix}`, endpointUrl: `http://127.0.0.1:${address.port}/mcp`, authKind: "bearer", bearerToken: token, allowPrivateNetwork: true }, admin, db);

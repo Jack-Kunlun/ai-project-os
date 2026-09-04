@@ -17,6 +17,7 @@ import {
   invokeVisionCompletion,
 } from "./transport";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
+import { findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 
 export type ProviderServiceErrorCode =
   | "AI_PROVIDER_INVALID_INPUT"
@@ -37,7 +38,7 @@ export class ProviderServiceError extends Error {
   }
 }
 
-type ProviderDb = PrismaClient | Prisma.TransactionClient;
+export type ProviderDb = PrismaClient | Prisma.TransactionClient;
 
 function isPrismaClient(db: ProviderDb): db is PrismaClient {
   return typeof (db as unknown as { $transaction?: unknown }).$transaction === "function";
@@ -141,8 +142,21 @@ async function withProviderSerializableRetry<T>(operation: () => Promise<T>): Pr
 // Provider configuration writes and default-route lifecycle transitions share
 // this transaction-scoped advisory lock. That closes the check-then-write gap
 // between a route activation/readiness check and a provider lifecycle change.
-async function lockProviderConfiguration(db: ProviderDb, providerId: string): Promise<void> {
+export async function lockProviderConfiguration(db: ProviderDb, providerId: string): Promise<void> {
   await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${providerId}, 40904005))`;
+}
+
+/**
+ * Reload a provider only after joining the control-plane configuration fence.
+ * Dispatch callers must use the returned row for capability/ownership checks;
+ * a provider object captured before this lock is only a routing hint.
+ */
+export async function reloadProviderConfiguration(
+  db: ProviderDb,
+  providerId: string,
+) {
+  await lockProviderConfiguration(db, providerId);
+  return db.aiProviderConnection.findUnique({ where: { id: providerId } });
 }
 
 function assertEmbeddingConfiguration(
@@ -498,10 +512,7 @@ async function commitVerifiedProviderInTransaction(
     // direct callers use the wrapper below, which acquires it for this short
     // final check.
     await lockMembershipUser(db, current.ownerUserId);
-    const ownerMembership = await db.workspaceMembership.findUnique({
-      where: { workspaceId_userId: { workspaceId: current.workspaceId, userId: current.ownerUserId } },
-      select: { role: true },
-    });
+    const ownerMembership = await findConfirmedWorkspaceMembership(db, current.workspaceId, current.ownerUserId);
     if (ownerMembership === null || (ownerMembership.role !== "owner" && ownerMembership.role !== "admin")) {
       return fail("AI_PROVIDER_CONFLICT");
     }
@@ -546,10 +557,7 @@ async function markProviderTestErrorInTransaction(
     // A failed probe must not overwrite the provider after a membership
     // revoke won the same owner lock. This mirrors the verified CAS path.
     await lockMembershipUser(db, current.ownerUserId);
-    const ownerMembership = await db.workspaceMembership.findUnique({
-      where: { workspaceId_userId: { workspaceId: current.workspaceId, userId: current.ownerUserId } },
-      select: { role: true },
-    });
+    const ownerMembership = await findConfirmedWorkspaceMembership(db, current.workspaceId, current.ownerUserId);
     if (ownerMembership === null || (ownerMembership.role !== "owner" && ownerMembership.role !== "admin")) return false;
     const membership = await getMembershipStatus(current.ownerUserId, db);
     if (membership.status !== "active") return false;

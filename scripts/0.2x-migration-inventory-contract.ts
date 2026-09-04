@@ -264,6 +264,7 @@ export type ProviderOwnershipBucket =
   | "platformLegacyPending"
   | "workspaceLegacyPending"
   | "workspaceAmbiguous"
+  | "workspaceConfirmed"
   | "userConfirmed"
   | "invalid";
 
@@ -283,6 +284,9 @@ export function classifyProviderResource(row: Readonly<{
   }
   if (row.scope === "workspace" && hasWorkspace && hasOwner && row.ownershipState === "ambiguous") {
     return "workspaceAmbiguous";
+  }
+  if (row.scope === "workspace" && hasWorkspace && hasOwner && row.ownershipState === "confirmed") {
+    return "workspaceConfirmed";
   }
   if (row.scope === "user" && !hasWorkspace && hasOwner && row.ownershipState === "confirmed") {
     return "userConfirmed";

@@ -6,6 +6,13 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
+import {
+  withWebAiProjectAccessTransaction,
+  type ProjectAccessAdmission,
+  type AccessLinearizationClient,
+} from "@/lib/access-linearization";
+import type { ProjectPermission } from "@/lib/access-control";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { projectJobFailurePresentation } from "@/lib/project-job-failure";
 
 const JOB_LOCK_NAMESPACE = 23082026;
@@ -464,7 +471,9 @@ export function genericReconciliationEvidenceFingerprint(projectId: string, jobI
 
 async function withJobLock<T>(db: WorkflowDb, jobId: string, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   if (!("$transaction" in db)) {
-    return operation(db);
+    const tx = db as Prisma.TransactionClient;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${jobId}, ${JOB_LOCK_NAMESPACE}))`;
+    return operation(tx);
   }
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${jobId}, ${JOB_LOCK_NAMESPACE}))`;
@@ -473,6 +482,134 @@ async function withJobLock<T>(db: WorkflowDb, jobId: string, operation: (tx: Pri
   // Committed lets the waiter observe the lock holder's committed status
   // instead of retaining a stale Serializable snapshot after the wait.
   }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+}
+
+export type ProjectJobAccessInput = Readonly<{
+  actor: WebAiActor;
+  projectId: string;
+  jobId: string;
+  required?: ProjectPermission;
+  additionalActorIds?: readonly string[];
+  allowArchived?: boolean;
+  expectedRequestedById?: string;
+  attempt?: Readonly<{ jobId: string; attemptId: string; claimToken: string; allowExpired?: boolean }>;
+  markDispatched?: boolean;
+}>;
+
+export type ProjectJobAccessAdmission = Readonly<{
+  access: ProjectAccessAdmission;
+  job: Readonly<{
+    id: string;
+    projectId: string | null;
+    requestedById: string;
+    kind: BackgroundJobKind;
+    status: PublicProjectJob["status"];
+    stage: string;
+  }>;
+  attempt: Readonly<{ id: string; jobId: string; attemptNumber: number; status: string; leaseExpiresAt: Date }> | null;
+  dispatchMarked: boolean;
+}>;
+
+async function lockJobInTransaction(tx: Prisma.TransactionClient, jobId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${jobId}, ${JOB_LOCK_NAMESPACE}))`;
+}
+
+/**
+ * Access-first job admission. The transaction acquires actor(s), workspace,
+ * and project locks before the per-job lock, then reloads the job and optional
+ * attempt lease tuple. If `markDispatched` is true, the attempt marker is
+ * committed together with the callback's database writes; callers must only
+ * start network/blob work after this function resolves.
+ */
+export async function withProjectJobAccessTransaction<T>(
+  db: AccessLinearizationClient,
+  input: ProjectJobAccessInput,
+  callback: (tx: Prisma.TransactionClient, admission: ProjectJobAccessAdmission) => Promise<T>,
+): Promise<T> {
+  assertProjectJobId(input.jobId);
+  if (input.attempt !== undefined && input.attempt.jobId !== input.jobId) {
+    return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
+  }
+  if (input.expectedRequestedById !== undefined && input.expectedRequestedById !== input.actor.id) {
+    return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
+  }
+  return withWebAiProjectAccessTransaction(
+    db,
+    {
+      actor: input.actor,
+      projectId: input.projectId,
+      required: input.required ?? "edit",
+      allowArchived: input.allowArchived,
+      additionalActorIds: input.additionalActorIds,
+    },
+    async (tx, access) => {
+      // This is deliberately after the shared access fence. Reconciliation,
+      // cancellation, and provider dispatch therefore cannot establish the
+      // reverse job -> actor/workspace/project lock order.
+      await lockJobInTransaction(tx, input.jobId);
+      const job = await tx.backgroundJob.findUnique({
+        where: { id: input.jobId },
+        select: { id: true, projectId: true, requestedById: true, kind: true, status: true, stage: true },
+      });
+      if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
+      if (job.projectId !== input.projectId) return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
+      if (input.expectedRequestedById !== undefined && job.requestedById !== input.expectedRequestedById) {
+        return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
+      }
+
+      let attempt: ProjectJobAccessAdmission["attempt"] = null;
+      if (input.attempt !== undefined) {
+        const verified = await verifyAttempt(tx, input.attempt, { allowExpired: input.attempt.allowExpired === true });
+        if (verified.job.projectId !== input.projectId) return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
+        if (input.expectedRequestedById !== undefined && verified.job.requestedById !== input.expectedRequestedById) {
+          return fail("PROJECT_WORKFLOW_PROJECT_MISMATCH");
+        }
+        attempt = verified.attempt;
+      }
+
+      let dispatchMarked = false;
+      if (input.markDispatched === true) {
+        if (input.attempt === undefined) return fail("PROJECT_WORKFLOW_ATTEMPT_NOT_FOUND");
+        const now = new Date();
+        const marked = await tx.backgroundJobAttempt.updateMany({
+          where: {
+            id: input.attempt.attemptId,
+            jobId: input.jobId,
+            status: "running",
+            dispatchState: { in: ["pending", "acknowledged"] },
+          },
+          data: {
+            dispatchState: "dispatched",
+            heartbeatAt: now,
+            leaseExpiresAt: new Date(now.getTime() + DEFAULT_JOB_LEASE_MS),
+          },
+        });
+        if (marked.count !== 1) return fail("PROJECT_WORKFLOW_STALE_ATTEMPT");
+        dispatchMarked = true;
+        attempt = Object.freeze({
+          ...attempt!,
+          // The marker is the durable admission evidence. Keep the public
+          // context truthful for callbacks that write the matching audit.
+          status: "running",
+          leaseExpiresAt: new Date(now.getTime() + DEFAULT_JOB_LEASE_MS),
+        });
+      }
+      return callback(tx, Object.freeze({
+        access,
+        job: Object.freeze({ ...job }),
+        attempt,
+        dispatchMarked,
+      }));
+    },
+  );
+}
+
+/** Convenience wrapper for provider/job callers that need a dispatch marker. */
+export async function admitProjectJobDispatch(
+  db: AccessLinearizationClient,
+  input: Omit<ProjectJobAccessInput, "markDispatched">,
+): Promise<ProjectJobAccessAdmission> {
+  return withProjectJobAccessTransaction(db, { ...input, markDispatched: true }, async (_tx, admission) => admission);
 }
 
 /**
@@ -921,27 +1058,53 @@ const jobDetailSelect = {
   },
 } as const;
 
-export async function getProjectJob(
+const projectJobIdSchema = z.string().uuid();
+
+function assertProjectJobId(jobId: string): void {
+  if (!projectJobIdSchema.safeParse(jobId).success) return fail("PROJECT_WORKFLOW_INVALID_INPUT");
+}
+
+/**
+ * Internal serializer for callers that already established authorization or
+ * are still inside a workflow transaction. Handler-facing code must use the
+ * actor-aware getProjectJob below.
+ */
+export async function getProjectJobInternal(
   projectId: string,
   jobId: string,
   db: WorkflowDb = getDb(),
 ) {
+  assertProjectJobId(jobId);
   const job = await db.backgroundJob.findFirst({ where: { id: jobId, projectId }, select: jobDetailSelect });
   if (job === null) return fail("PROJECT_WORKFLOW_JOB_NOT_FOUND");
   return toPublicProjectJob(job);
 }
 
+export async function getProjectJob(
+  projectId: string,
+  jobId: string,
+  actor: WebAiActor,
+  db: WorkflowDb = getDb(),
+) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db as PrismaClient);
+  return getProjectJobInternal(projectId, jobId, db);
+}
+
 export async function reconcileProjectJob(
   projectId: string,
   jobId: string,
-  requestedById: string,
+  actor: WebAiActor,
   db: WorkflowDb = getDb(),
 ) {
-  const uuid = z.string().uuid();
-  if (!uuid.safeParse(projectId).success || !uuid.safeParse(jobId).success || !uuid.safeParse(requestedById).success) {
-    return fail("PROJECT_WORKFLOW_INVALID_INPUT");
-  }
-  return withJobLock(db, jobId, async (tx) => {
+  assertProjectJobId(jobId);
+  await assertWebAiProjectAccess(actor, projectId, "edit", db as PrismaClient);
+  return withProjectJobAccessTransaction(db, {
+    actor,
+    projectId,
+    jobId,
+    expectedRequestedById: undefined,
+  }, async (tx, admission) => {
+    const currentActor = admission.access.actor;
     const job = await tx.backgroundJob.findUnique({
       where: { id: jobId },
       select: { id: true, projectId: true, kind: true, status: true, reconciliationRequired: true, failureCode: true },
@@ -988,9 +1151,7 @@ export async function reconcileProjectJob(
       where: { projectId_jobId: { projectId, jobId } },
       select: { id: true },
     });
-    const actor = await tx.appUser.findUnique({ where: { id: requestedById }, select: { id: true } });
-    if (actor === null) return fail("PROJECT_WORKFLOW_INVALID_INPUT");
-    if (existingReconciliation !== null && !currentReconciliationRequired) return getProjectJob(projectId, jobId, tx);
+    if (existingReconciliation !== null && !currentReconciliationRequired) return getProjectJobInternal(projectId, jobId, tx);
     if (!currentReconciliationRequired) return fail("PROJECT_WORKFLOW_INVALID_STATE");
 
     const completedAt = new Date();
@@ -1003,7 +1164,7 @@ export async function reconcileProjectJob(
         data: {
           projectId,
           jobId,
-          requestedById: actor.id,
+          requestedById: currentActor.id,
           resolution: "explicitAbandon",
           evidenceFingerprint: genericReconciliationEvidenceFingerprint(projectId, jobId),
         },
@@ -1020,16 +1181,23 @@ export async function reconcileProjectJob(
       },
     });
     if (updated.count !== 1) return fail("PROJECT_WORKFLOW_CLAIM_CONFLICT");
-    return getProjectJob(projectId, jobId, tx);
+    return getProjectJobInternal(projectId, jobId, tx);
   });
 }
 
 export async function cancelProjectJob(
   projectId: string,
   jobId: string,
+  actor: WebAiActor,
   db: WorkflowDb = getDb(),
 ) {
-  return withJobLock(db, jobId, async (tx) => {
+  assertProjectJobId(jobId);
+  await assertWebAiProjectAccess(actor, projectId, "edit", db as PrismaClient);
+  return withProjectJobAccessTransaction(db, {
+    actor,
+    projectId,
+    jobId,
+  }, async (tx) => {
     const job = await tx.backgroundJob.findUnique({
       where: { id: jobId },
       select: { id: true, projectId: true, kind: true, status: true },
@@ -1043,7 +1211,7 @@ export async function cancelProjectJob(
       where: { id: jobId },
       data: { status: "cancelled", stage: "cancelled", completedAt },
     });
-    return getProjectJob(projectId, jobId, tx);
+    return getProjectJobInternal(projectId, jobId, tx);
   });
 }
 

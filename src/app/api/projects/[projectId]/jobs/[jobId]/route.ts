@@ -11,7 +11,6 @@ import {
 } from "@/lib/project-workflow";
 import { cancelGitHubProjectSync, reconcileGitHubProjectSync } from "@/lib/github/project-sync-service";
 import { cancelMemoryIndexJob, reconcileMemoryIndexJob } from "@/lib/web-memory-index";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -24,11 +23,11 @@ type Context = { params: Promise<{ projectId: string; jobId: string }> };
 
 export async function GET(request: Request, context: Context) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const params = await context.params;
     const projectId = idSchema.parse(params.projectId);
     const jobId = idSchema.parse(params.jobId);
-    return NextResponse.json({ job: toPublicProjectJob(await getProjectJob(projectId, jobId)) }, {
+    return NextResponse.json({ job: toPublicProjectJob(await getProjectJob(projectId, jobId, user)) }, {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {
@@ -43,21 +42,20 @@ export async function POST(request: Request, context: Context) {
     const params = await context.params;
     const projectId = idSchema.parse(params.projectId);
     const jobId = idSchema.parse(params.jobId);
-    await assertProjectActive(projectId);
     const body = actionSchema.parse(await readJsonBody(request));
-    const existing = body.action === "reconcile" || body.action === "cancel" ? await getProjectJob(projectId, jobId) : null;
+    const existing = body.action === "reconcile" || body.action === "cancel" ? await getProjectJob(projectId, jobId, user) : null;
     const job = body.action === "reconcile" && existing?.kind === "githubProjectSync"
-      ? await reconcileGitHubProjectSync({ projectId, jobId, requestedById: user.id })
+      ? await reconcileGitHubProjectSync({ projectId, jobId, actor: user })
       : body.action === "reconcile" && existing?.kind === "memoryIndex"
-        ? await reconcileMemoryIndexJob({ projectId, jobId, requestedById: user.id })
+        ? await reconcileMemoryIndexJob({ projectId, jobId, actor: user })
       : body.action === "reconcile"
-        ? await reconcileProjectJob(projectId, jobId, user.id)
+        ? await reconcileProjectJob(projectId, jobId, user)
       : body.action === "cancel"
         ? existing?.kind === "githubProjectSync"
-          ? await cancelGitHubProjectSync({ projectId, jobId, requestedById: user.id })
+          ? await cancelGitHubProjectSync({ projectId, jobId, actor: user })
           : existing?.kind === "memoryIndex"
-            ? await cancelMemoryIndexJob(projectId, jobId)
-          : await cancelProjectJob(projectId, jobId)
+            ? await cancelMemoryIndexJob(projectId, jobId, user)
+          : await cancelProjectJob(projectId, jobId, user)
         : rejectProjectJobRetry();
     return NextResponse.json({ job: toPublicProjectJob(job) });
   } catch (error) {

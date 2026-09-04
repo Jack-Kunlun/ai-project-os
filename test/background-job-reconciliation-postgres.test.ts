@@ -96,6 +96,34 @@ function fixedKey(prefix: string): string {
   return `${prefix}${"0".repeat(64 - prefix.length)}`;
 }
 
+function createHistoricalSchemaCompatibilityClient(db: PrismaClient): PrismaClient {
+  // This self gate intentionally stops at D0 (20260829142000), before the
+  // later AppUser.disabledAt and Project.archivedAt columns. Keep the current
+  // actor-aware workflow and its RBAC/active checks under test by adapting
+  // only those absent, backwards-compatible nullable fields; the current
+  // schema authorization path is covered by the web-ai-access PostgreSQL gate.
+  return db.$extends({
+    query: {
+      $allModels: {
+        async $allOperations({ model, operation, args, query }) {
+          const selectedValue = (args as { select?: unknown }).select;
+          if (operation !== "findUnique" || (model !== "AppUser" && model !== "Project") ||
+            selectedValue === null || typeof selectedValue !== "object" || Array.isArray(selectedValue)) {
+            return query(args);
+          }
+          const selected = selectedValue as Record<string, boolean>;
+          const absentField = model === "AppUser" ? "disabledAt" : "archivedAt";
+          if (!(absentField in selected)) return query(args);
+          const select = { ...selected };
+          delete select[absentField];
+          const current = await query({ ...args, select: Object.keys(select).length > 0 ? select : { id: true } } as typeof args) as Record<string, unknown> | null;
+          return current === null ? null : { ...current, [absentField]: null };
+        },
+      },
+    },
+  }) as unknown as PrismaClient;
+}
+
 test(
   "background-job reconciliation upgrade gate is isolated and auditable",
   { skip: !shouldRun ? "BACKGROUND_JOB_RECONCILIATION_POSTGRES_GATE=1 is required" : false },
@@ -109,6 +137,7 @@ test(
     const otherProjectId = "22222222-2222-4222-8222-222222222222";
     const cascadeProjectId = "33333333-3333-4333-8333-333333333333";
     const userId = "44444444-4444-4444-8444-444444444444";
+    const actor = { id: userId, role: "admin" as const };
     const unknownJobId = "55555555-5555-4555-8555-555555555555";
     const crossProjectJobId = "66666666-6666-4666-8666-666666666666";
     const wrongActorJobId = "77777777-7777-4777-8777-777777777777";
@@ -182,13 +211,14 @@ export default defineConfig({
       assert.deepEqual(afterD0.rows[0], { status: "unknown", reconciliationRequired: true });
 
       db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+      const historicalDb = createHistoricalSchemaCompatibilityClient(db);
       await assert.rejects(
         () => db!.backgroundJob.update({ where: { id: unknownJobId }, data: { reconciliationRequired: false } }),
       );
       const unreleased = await db.backgroundJob.findUniqueOrThrow({ where: { id: unknownJobId } });
       assert.equal(unreleased.reconciliationRequired, true);
 
-      const reconciled = await reconcileProjectJob(projectId, unknownJobId, userId, db);
+      const reconciled = await reconcileProjectJob(projectId, unknownJobId, actor, historicalDb);
       assert.equal(reconciled.status, "unknown");
       assert.equal(reconciled.stage, "reconciled_unknown");
       assert.equal(reconciled.reconciliationRequired, false);
@@ -199,7 +229,7 @@ export default defineConfig({
       assert.equal(evidence.requestedById, userId);
       assert.equal(evidence.resolution, "explicitAbandon");
       assert.match(evidence.evidenceFingerprint, /^[0-9a-f]{64}$/u);
-      const replay = await reconcileProjectJob(projectId, unknownJobId, userId, db);
+      const replay = await reconcileProjectJob(projectId, unknownJobId, actor, historicalDb);
       assert.equal(replay.id, reconciled.id);
       assert.equal(await db.backgroundJobReconciliation.count({ where: { projectId, jobId: unknownJobId } }), 1);
       await assert.rejects(
@@ -228,7 +258,7 @@ export default defineConfig({
         },
       });
       await assert.rejects(
-        () => reconcileProjectJob(projectId, crossProjectJob.id, userId, db!),
+        () => reconcileProjectJob(projectId, crossProjectJob.id, actor, historicalDb),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_PROJECT_MISMATCH",
       );
       await assert.rejects(
@@ -328,15 +358,16 @@ export default defineConfig({
         ],
       });
       await assert.rejects(
-        () => reconcileProjectJob(projectId, wrongActorJobId, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", db!),
-        (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_INPUT",
+        () => reconcileProjectJob(projectId, wrongActorJobId, { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", role: "admin" }, historicalDb),
+        (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
+          (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
       );
       await assert.rejects(
-        () => reconcileProjectJob(projectId, memoryJobId, userId, db!),
+        () => reconcileProjectJob(projectId, memoryJobId, actor, historicalDb),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED",
       );
       await assert.rejects(
-        () => reconcileProjectJob(projectId, githubJobId, userId, db!),
+        () => reconcileProjectJob(projectId, githubJobId, actor, historicalDb),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED",
       );
       for (const specializedJobId of [memoryJobId, githubJobId, githubScanJobId, githubMaterialJobId]) {
@@ -466,7 +497,7 @@ export default defineConfig({
       assert.equal((await db.backgroundJob.findUniqueOrThrow({ where: { id: githubJobId } })).reconciliationRequired, false);
 
       await assert.rejects(
-        () => reconcileProjectJob(projectId, queuedJobId, userId, db!),
+        () => reconcileProjectJob(projectId, queuedJobId, actor, historicalDb),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_STATE",
       );
 
@@ -484,7 +515,7 @@ export default defineConfig({
           payload: {},
         },
       });
-      await reconcileProjectJob(cascadeProjectId, cascadeJob.id, userId, db);
+      await reconcileProjectJob(cascadeProjectId, cascadeJob.id, actor, historicalDb);
       // This gate intentionally stops before the later project-lifecycle
       // migrations. Use SQL that does not ask the current Prisma Client to
       // select fields (such as Project.archivedAt) that do not exist yet.
@@ -498,6 +529,7 @@ export default defineConfig({
         }
         await db.aiProviderConnection.deleteMany({ where: { id: memoryProviderId } });
         await db.externalCredential.deleteMany({ where: { id: memoryCredentialId } });
+        await db.appUser.deleteMany({ where: { id: userId } });
         await db.$disconnect();
       }
       if (rawConnected) await raw.end();

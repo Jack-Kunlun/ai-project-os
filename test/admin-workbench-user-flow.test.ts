@@ -3,7 +3,6 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
-import { AccessControlError } from "../src/lib/access-control";
 import { connectProjectGitRepository, GitServiceError } from "../src/lib/git";
 import { getSystemOverview } from "../src/lib/system-overview";
 import { updateWorkspaceMember } from "../src/lib/workspaces";
@@ -58,60 +57,75 @@ test("workspace member updates cannot mutate a global account", async () => {
   assert.doesNotMatch(team, /patch\(\{\s*disabled:/u);
 });
 
-test("ordinary project users are rejected before Git credentials, database writes, or remote probes", async () => {
-  let databaseCalls = 0;
+test("legacy project Git connect is frozen before project metadata for ordinary users", async () => {
+  let gitConnectionReads = 0;
+  let transactionOpened = false;
   const db = {
-    gitConnection: { findUnique: async () => { databaseCalls += 1; throw new Error("ordinary users must not load Git connections"); } },
-    $transaction: async () => { databaseCalls += 1; throw new Error("ordinary users must not open a write transaction"); },
+    appUser: { findUnique: async () => ({ id: actorId, role: "member" as const, disabledAt: null }) },
+    project: {
+      findUnique: async (input: { select?: { archivedAt?: boolean } }) => input.select?.archivedAt === true
+        ? { archivedAt: null }
+        : { workspace: { memberships: [] }, memberships: [{ role: "owner" as const }] },
+    },
+    gitConnection: { findUnique: async () => { gitConnectionReads += 1; throw new Error("ordinary users must not load Git connections"); } },
+    $transaction: async () => { transactionOpened = true; throw new Error("ordinary users must not open a write transaction"); },
   } as unknown as PrismaClient;
 
-  for (const projectRole of ["Viewer", "Editor"] as const) {
-    assert.ok(projectRole === "Viewer" || projectRole === "Editor");
-    await assert.rejects(
-      () => connectProjectGitRepository(projectId, null, { id: actorId, role: "member" }, db),
-      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
-    );
-  }
-  assert.equal(databaseCalls, 0);
+  await assert.rejects(
+    () => connectProjectGitRepository(projectId, null, { id: actorId, role: "member" }, db),
+    (error: unknown) => error instanceof GitServiceError && error.code === "GIT_LEGACY_PROJECT_CONNECT_FROZEN",
+  );
+  assert.equal(gitConnectionReads, 0);
+  assert.equal(transactionOpened, false);
 });
 
-test("Git first association checks verified and enabled metadata before loading credentials or probing", async () => {
-  for (const expected of [
-    { status: "configured", disabledAt: null, code: "GIT_CONNECTION_NOT_VERIFIED" },
-    { status: "verified", disabledAt: new Date("2026-09-03T00:00:00.000Z"), code: "GIT_CONNECTION_DISABLED" },
-  ] as const) {
+test("legacy project Git connect is frozen for system admins too", async () => {
+  for (const status of ["configured", "verified"] as const) {
     const calls: Array<Record<string, unknown>> = [];
     const db = {
+      appUser: { findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }) },
+      project: {
+        findUnique: async (input: { select?: { archivedAt?: boolean } }) => input.select?.archivedAt === true
+          ? { archivedAt: null }
+          : { workspace: { memberships: [] }, memberships: [{ role: "owner" as const }] },
+      },
       gitConnection: {
         findUnique: async (input: Record<string, unknown>) => {
           calls.push(input);
-          return { id: gitConnectionId, status: expected.status, disabledAt: expected.disabledAt };
+          return { id: gitConnectionId, status, disabledAt: null };
         },
       },
     } as unknown as PrismaClient;
 
     await assert.rejects(
       () => connectProjectGitRepository(projectId, repositoryLinkInput, { id: actorId, role: "admin" }, db),
-      (error: unknown) => error instanceof GitServiceError && error.code === expected.code,
+      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_LEGACY_PROJECT_CONNECT_FROZEN",
     );
-    assert.deepEqual(calls, [{ where: { id: gitConnectionId }, select: { id: true, status: true, disabledAt: true } }]);
+    assert.deepEqual(calls, []);
   }
 });
 
-test("Git project repository route has a stable server-side admin gate before project work or probing", async () => {
-  const [route, client, service] = await Promise.all([
+test("Git project repository routes pass the session actor to the service authorization gate", async () => {
+  const [route, deleteRoute, client, service] = await Promise.all([
     readFile("src/app/api/projects/[projectId]/git-repositories/route.ts", "utf8"),
+    readFile("src/app/api/projects/[projectId]/git-repositories/[linkId]/route.ts", "utf8"),
     readFile("src/app/projects/[projectId]/repositories/project-repositories-client.tsx", "utf8"),
     readFile("src/lib/git/service.ts", "utf8"),
   ]);
-  const roleGate = route.indexOf('user.role !== "admin"');
-  assert.notEqual(roleGate, -1);
-  assert.ok(roleGate < route.indexOf("await assertProjectActive"));
-  assert.match(route, /code: "ACCESS_FORBIDDEN"/u);
-  assert.match(route, /status: 403/u);
+  assert.doesNotMatch(route, /user\.role !== "admin"/u);
+  assert.doesNotMatch(route, /assertProjectActive/u);
+  assert.match(route, /listProjectGitRepositories\(id, user\)/u);
+  assert.match(route, /connectProjectGitRepository\(id, await readJsonBody\(request\), user\)/u);
+  assert.doesNotMatch(deleteRoute, /assertProjectActive/u);
+  assert.match(deleteRoute, /disableProjectGitRepository\(projectId, idSchema\.parse\(params\.linkId\), user\)/u);
   assert.doesNotMatch(client, /api\/projects\/\$\{projectId\}\/git-connections/u);
-  assert.match(client, /isSystemAdmin \? fetch\("\/api\/settings\/git-connections"/u);
-  assert.match(client, /status === "verified" && connection\.disabledAt === null/u);
+  assert.doesNotMatch(client, /api\/settings\/git-connections|isSystemAdmin|RepositoryForm|gitConnectionId/u);
+  assert.match(client, /个人 Git 与项目委托改造中/u);
+  assert.match(client, /api\/projects\/\$\{projectId\}\/git-repositories\/\$\{repository\.id\}\/sync/u);
+  assert.match(client, /api\/projects\/\$\{projectId\}\/git-repositories\/\$\{repository\.id\}/u);
+  assert.doesNotMatch(client, /git-repositories`,\s*\{\s*method:\s*"POST"/u);
+  assert.match(client, /async function sync\(\)/u);
+  assert.match(client, /async function disable\(\)/u);
   assert.doesNotMatch(client, /repository\.connection\.baseUrl/u);
   assert.match(service, /listProjectGitRepositories[\s\S]*select: projectRepositoryLinkSelect/u);
   assert.match(service, /connection: \{ select: \{ id: true, name: true, providerKind: true, transport: true \} \}/u);
@@ -198,7 +212,8 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(guide, /普通用户不需要也不能配置平台凭据/u);
   assert.match(userDocs, /项目概览/u);
   assert.match(userDocs, /项目六个一级入口/u);
-  assert.match(userDocs, /系统管理员或当前工作区 Owner\/Admin/u);
+  assert.match(userDocs, /只有当前工作区 Owner\/Admin 可以创建项目/u);
+  assert.match(userDocs, /个人 Git 连接与项目委托正在改造/u);
   assert.match(adminDocs, /管理工作台/u);
   assert.match(adminDocs, /管理员配置并验证后，可作为平台默认路由建议\/供项目选择/u);
   assert.match(adminDocs, /planned.*后续能力/u);
@@ -206,6 +221,10 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(adminDocs, /`\/system\/operations` 仅 initial super admin 可用[^。]*兼容跳转 `\/admin\/operations\/backups`/u);
   assert.match(adminDocs, /其他 system admin 按现有安全行为返回不可见页面/u);
   assert.doesNotMatch(adminDocs, /`\/system\/\*`[^。]*把系统管理员导向上述页面/u);
+  assert.match(adminDocs, /legacy 项目仓库新增接口已冻结/u);
+  assert.match(adminDocs, /个人 Git 连接与项目委托是 planned 后续能力/u);
+  assert.match(readme, /当前项目页不提供首次关联入口/u);
+  assert.match(readme, /已关联的代码仓库可在项目仓库页查看、同步和停用/u);
   assert.match(adminGuide, /管理员配置并验证后，可作为平台默认路由建议\/供项目选择/u);
   assert.match(adminGuide, /planned.*后续能力/u);
   assert.match(readme, /\/admin\/models/u);
@@ -216,10 +235,15 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(manual, /user-operation-guide\.md/u);
   assert.match(manual, /admin-operation-guide\.md/u);
   assert.doesNotMatch(repositories, /api\/projects\/\$\{projectId\}\/git-connections/u);
-  assert.match(repositories, /api\/settings\/git-connections/u);
-  assert.match(repositories, /isSystemAdmin/u);
-  assert.match(repositories, /平台连接由管理员维护/u);
-  assert.match(repositoriesPage, /user\.role === "admin"/u);
+  assert.doesNotMatch(repositories, /api\/settings\/git-connections|isSystemAdmin|RepositoryForm|gitConnectionId/u);
+  assert.match(repositories, /个人 Git 与项目委托改造中/u);
+  assert.match(guide, /个人 Git 连接与项目委托仍在改造中/u);
+  assert.match(guide, /已关联的代码仓库在仓库页查看/u);
+  assert.doesNotMatch(guide, /新增模型、Git 或 MCP 连接/u);
+  assert.match(repositories, /async function sync\(\)/u);
+  assert.match(repositories, /async function disable\(\)/u);
+  assert.doesNotMatch(repositoriesPage, /user\.role === "admin"/u);
+  assert.doesNotMatch(repositoriesPage, /isSystemAdmin/u);
   assert.doesNotMatch(tools, /href="\/connections\/mcp"/u);
   assert.match(projects, /payload\.pagination\.totalPages > 1 \?/u);
   assert.match(materials, /items-stretch/u);

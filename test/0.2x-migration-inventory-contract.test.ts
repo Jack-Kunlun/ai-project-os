@@ -374,6 +374,7 @@ test("inventory classification keeps owner inference and provider scope fail-clo
   assert.deepEqual(classifyOwnedResource({ ownershipState: "confirmed", ownerUserId: null, createdById: "c" }), { bucket: "invalid", candidateOnly: true });
   assert.equal(classifyProviderResource({ scope: "platform", workspaceId: null, ownerUserId: null, ownershipState: "legacy_pending" }), "platformLegacyPending");
   assert.equal(classifyProviderResource({ scope: "workspace", workspaceId: "w", ownerUserId: "u", ownershipState: "ambiguous" }), "workspaceAmbiguous");
+  assert.equal(classifyProviderResource({ scope: "workspace", workspaceId: "w", ownerUserId: "u", ownershipState: "confirmed" }), "workspaceConfirmed");
   assert.equal(classifyProviderResource({ scope: "user", workspaceId: null, ownerUserId: "u", ownershipState: "confirmed" }), "userConfirmed");
   assert.equal(classifyProviderResource({ scope: "future", workspaceId: null, ownerUserId: "u", ownershipState: "confirmed" }), "invalid");
 });

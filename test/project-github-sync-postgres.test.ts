@@ -8,6 +8,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import {
   PrismaClient,
   ProjectRepositoryRole,
+  type BackgroundJobKind,
 } from "@prisma/client";
 import { Client } from "pg";
 import {
@@ -28,6 +29,10 @@ import {
   hasBlockingUnknownProjectMaterialRun,
   hasBlockingUnknownProjectSyncRun,
 } from "../src/lib/github/project-sync-lock";
+import { runGitRepositorySyncJob } from "../src/lib/git";
+import { runGitHubCodeScanJob } from "../src/lib/background-jobs";
+import { lockActorWorkspaceProjectAccess } from "../src/lib/access-linearization";
+import { grantProjectMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -73,6 +78,77 @@ function preDispatchTimeoutClient(): WebGitHubCredentialClient {
     getPullRequest: beforeFetch,
     getPullRequestFilesPage: beforeFetch,
     getReleasesPage: beforeFetch,
+  } as unknown as WebGitHubCredentialClient;
+}
+
+function deferred(): Readonly<{ promise: Promise<void>; resolve: () => void }> {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return Object.freeze({ promise, resolve });
+}
+
+async function waitForClaimedJob(db: PrismaClient, projectId: string, kind: BackgroundJobKind) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const job = await db.backgroundJob.findFirst({
+      where: { projectId, kind },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { id: true },
+    });
+    if (job !== null) {
+      const claim = await db.backgroundJobAttempt.findFirst({
+        where: { jobId: job.id, status: "running" },
+        select: { id: true },
+      });
+      if (claim !== null) return job;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("POSTGRES_GATE_JOB_CLAIM_TIMEOUT");
+}
+
+function twoRepositoryCodeClient(
+  onLastBlob: () => Promise<void>,
+  onProviderCall: () => void = () => undefined,
+): WebGitHubCredentialClient {
+  const commit = "b".repeat(40);
+  const rootTree = "c".repeat(40);
+  const sourceTree = "d".repeat(40);
+  const blob = "e".repeat(40);
+  const content = "export const admissionGate = true;\n";
+  const repositories = new Map([
+    ["alpha", repositoryA],
+    ["beta", repositoryB],
+  ]);
+  return {
+    version: GITHUB_READ_ONLY_CLIENT_VERSION,
+    getRepository: async ({ repository }: { repository: string }) => {
+      onProviderCall();
+      return repositories.get(repository) ?? repositoryA;
+    },
+    getReference: async () => {
+      onProviderCall();
+      return { ref: "refs/heads/main", commitSha: commit };
+    },
+    getCommit: async () => {
+      onProviderCall();
+      return { commitSha: commit, treeSha: rootTree };
+    },
+    getTree: async ({ treeSha }: { treeSha: string }) => {
+      onProviderCall();
+      return treeSha === rootTree
+      ? { treeSha, truncated: false, entries: [{ path: "src", mode: "040000", type: "tree", sha: sourceTree, size: null }] }
+      : { treeSha, truncated: false, entries: [{ path: "admission.ts", mode: "100644", type: "blob", sha: blob, size: Buffer.byteLength(content) }] };
+    },
+    getBlob: async () => {
+      onProviderCall();
+      await onLastBlob();
+      return { blobSha: blob, size: Buffer.byteLength(content), encoding: "base64", content: Buffer.from(content).toString("base64") };
+    },
+    getIssuesPage: async () => ({ items: [], nextPage: null }),
+    getPullRequestsPage: async () => ({ items: [], nextPage: null }),
+    getPullRequest: async () => { throw new Error("PROJECT_SYNC_GATE_UNEXPECTED_PULL_REQUEST"); },
+    getPullRequestFilesPage: async () => ({ items: [], nextPage: null }),
+    getReleasesPage: async () => ({ items: [], nextPage: null }),
   } as unknown as WebGitHubCredentialClient;
 }
 
@@ -467,6 +543,7 @@ test(
       { cwd: repositoryRoot, env: { ...process.env, DATABASE_URL: url } },
     );
     const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+    const admissionDb = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
     const userId = randomUUID();
     const projectAId = randomUUID();
     const projectBId = randomUUID();
@@ -497,6 +574,19 @@ test(
           { id: rotationProjectId, name: "Credential rotation", slug: `sync-rotation-${randomUUID()}` },
         ],
       });
+      await db.$transaction(async (tx) => {
+        for (const projectId of [projectAId, projectBId, projectCId, runnerMaterialProjectId, runnerCodeProjectId, rotationProjectId]) {
+          const project = await tx.project.findUniqueOrThrow({ where: { id: projectId }, select: { workspaceId: true } });
+          await grantProjectMembership(tx, {
+            projectId,
+            workspaceId: project.workspaceId,
+            userId,
+            role: "owner",
+            actorId: userId,
+            reason: "project_sync_gate_fixture_membership",
+          });
+        }
+      });
       await createCredential(db, credentialId);
       await createCredential(db, rotatingCredentialId);
       const linkA = await createLink(db, projectAId, credentialId, repositoryA, true);
@@ -506,13 +596,183 @@ test(
       await createLink(db, runnerCodeProjectId, credentialId, repositoryB, true, true, false);
       await createLink(db, rotationProjectId, rotatingCredentialId, repositoryC, true, false, true);
 
+      // Two-session revoke-wins gates: hold the canonical access locks while
+      // the worker claims its job, revoke the project grant, then release the
+      // lock. The worker must fail at access admission without reading a
+      // credential or reaching the provider.
+      const revokeWins = async (
+        projectId: string,
+        kind: BackgroundJobKind,
+        run: () => Promise<unknown>,
+      ): Promise<unknown> => {
+        const project = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { workspaceId: true } });
+        const locksReady = deferred();
+        const claimReady = deferred();
+        const membershipUpdated = deferred();
+        const release = deferred();
+        const revoking = admissionDb.$transaction(async (tx) => {
+          await lockActorWorkspaceProjectAccess(tx, {
+            actorIds: [userId],
+            workspaceId: project.workspaceId,
+            projectId,
+          });
+          locksReady.resolve();
+          await claimReady.promise;
+          await revokeProjectMembership(tx, projectId, userId, project.workspaceId, {
+            actorId: userId,
+            reason: "project_sync_gate_revoke",
+          });
+          membershipUpdated.resolve();
+          await release.promise;
+        });
+        await locksReady.promise;
+        const running = run();
+        await waitForClaimedJob(db, projectId, kind);
+        claimReady.resolve();
+        await membershipUpdated.promise;
+        release.resolve();
+        await revoking;
+        return running;
+      };
+
+      let credentialReads = 0;
+      let providerFetches = 0;
+      const guardedDb = db.$extends({
+        query: {
+          externalCredential: {
+            async findUnique({ args, query }) {
+              credentialReads += 1;
+              return query(args);
+            },
+          },
+        },
+      }) as unknown as PrismaClient;
+      const previousFetch = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        providerFetches += 1;
+        throw new Error("PROJECT_SYNC_GATE_PROVIDER_MUST_NOT_RUN");
+      }) as typeof fetch;
+      try {
+        await assert.rejects(
+          () => revokeWins(
+            projectCId,
+            "gitRepositorySync",
+            () => runGitRepositorySyncJob({
+              projectId: projectCId,
+              linkId: randomUUID(),
+              requestedBy: { id: userId, role: "admin" },
+              clientKey: `revoke-git-${randomUUID()}`,
+            }, guardedDb),
+          ),
+          /ACCESS_FORBIDDEN/,
+        );
+        assert.equal(credentialReads, 0);
+        assert.equal(providerFetches, 0);
+        const projectC = await db.project.findUniqueOrThrow({ where: { id: projectCId }, select: { workspaceId: true } });
+        await db.$transaction((tx) => grantProjectMembership(tx, {
+          projectId: projectCId,
+          workspaceId: projectC.workspaceId,
+          userId,
+          role: "owner",
+          actorId: userId,
+          reason: "project_sync_gate_restore",
+        }));
+
+        credentialReads = 0;
+        await assert.rejects(
+          () => revokeWins(
+            projectCId,
+            "githubScan",
+            () => runGitHubCodeScanJob({
+              projectId: projectCId,
+              requestedBy: { id: userId, role: "admin" },
+              clientKey: `revoke-github-${randomUUID()}`,
+            }, guardedDb),
+          ),
+          /ACCESS_FORBIDDEN/,
+        );
+        assert.equal(credentialReads, 0);
+        assert.equal(providerFetches, 0);
+        await db.$transaction((tx) => grantProjectMembership(tx, {
+          projectId: projectCId,
+          workspaceId: projectC.workspaceId,
+          userId,
+          role: "owner",
+          actorId: userId,
+          reason: "project_sync_gate_restore",
+        }));
+      } finally {
+        globalThis.fetch = previousFetch;
+      }
+
+      // Root sync gate: the first code child is allowed to finish after its
+      // admission, then the second child must re-admit and observe the
+      // committed revoke. Only one client load and one child's provider calls
+      // are therefore permitted.
+      const raceClientKey = `revoke-between-children-${randomUUID()}`;
+      const preparedAfterRevoke = await prepareGitHubProjectSync({
+        projectId: projectAId,
+        requestedBy: { id: userId, role: "admin" },
+        clientKey: raceClientKey,
+      }, db);
+      const raceProject = await db.project.findUniqueOrThrow({ where: { id: projectAId }, select: { workspaceId: true } });
+      let clientLoads = 0;
+      let networkCalls = 0;
+      let networkCallsAtRevoke = 0;
+      let revoked = false;
+      const revokeDuringFirstChild = async () => {
+        if (revoked) return;
+        revoked = true;
+        await admissionDb.$transaction(async (tx) => {
+          await lockActorWorkspaceProjectAccess(tx, {
+            actorIds: [userId],
+            workspaceId: raceProject.workspaceId,
+            projectId: projectAId,
+          });
+          await revokeProjectMembership(tx, projectAId, userId, raceProject.workspaceId, {
+            actorId: userId,
+            reason: "project_sync_gate_race_revoke",
+          });
+        });
+        networkCallsAtRevoke = networkCalls;
+      };
+      const raceResult = await runGitHubProjectSyncJob({
+        projectId: projectAId,
+        requestedBy: { id: userId, role: "admin" },
+        clientKey: raceClientKey,
+      }, db, {
+        loadClientForCredential: async () => {
+          clientLoads += 1;
+          return twoRepositoryCodeClient(revokeDuringFirstChild, () => { networkCalls += 1; });
+        },
+      });
+      assert.ok(["failed", "partial"].includes(raceResult.status));
+      assert.equal(clientLoads, 1);
+      assert.ok(networkCallsAtRevoke > 0);
+      assert.equal(networkCalls, networkCallsAtRevoke);
+      const raceRoot = await db.projectGitHubSyncRun.findUniqueOrThrow({ where: { id: preparedAfterRevoke.syncRun.id } });
+      assert.ok(["failed", "partial"].includes(raceRoot.status));
+      const raceEntries = await db.projectGitHubSyncEntry.findMany({ where: { syncRunId: raceRoot.id }, select: { targetKind: true, status: true } });
+      assert.equal(raceEntries.filter((entry) => entry.targetKind === "code" && entry.status === "succeeded").length, 1);
+      assert.ok(raceEntries.some((entry) => entry.targetKind === "code" && entry.status === "skipped"));
+      const raceAttempt = await db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: preparedAfterRevoke.job.id } });
+      assert.equal(raceAttempt.dispatchState, "acknowledged");
+      await db.$transaction((tx) => grantProjectMembership(tx, {
+        projectId: projectAId,
+        workspaceId: raceProject.workspaceId,
+        userId,
+        role: "owner",
+        actorId: userId,
+        reason: "project_sync_gate_restore",
+      }));
+
       // Execute the real root runner with a frozen material target. The
       // client reports a deterministic pre-dispatch timeout on its first read;
       // the child must be cancelled (known incomplete), not failed/unknown.
       const materialRunnerClientKey = `runner-material-${randomUUID()}`;
       const preparedMaterialRunner = await prepareGitHubProjectSync({
         projectId: runnerMaterialProjectId,
-        requestedById: userId,
+        requestedBy: { id: userId, role: "admin" },
         clientKey: materialRunnerClientKey,
       }, db);
       await db.projectGitHubSyncRun.update({
@@ -523,7 +783,7 @@ test(
       const materialFetchCalls = 0;
       const materialRunnerResult = await runGitHubProjectSyncJob({
         projectId: runnerMaterialProjectId,
-        requestedBy: { id: userId },
+        requestedBy: { id: userId, role: "admin" },
         clientKey: materialRunnerClientKey,
       }, db, {
         loadClientForCredential: async () => {
@@ -556,7 +816,7 @@ test(
       const rotationClientKey = `credential-rotation-${randomUUID()}`;
       const preparedRotation = await prepareGitHubProjectSync({
         projectId: rotationProjectId,
-        requestedById: userId,
+        requestedBy: { id: userId, role: "admin" },
         clientKey: rotationClientKey,
       }, db);
       const frozenRotationEntry = await db.projectGitHubSyncEntry.findFirstOrThrow({ where: { syncRunId: preparedRotation.syncRun.id } });
@@ -567,7 +827,7 @@ test(
       });
       const rotationResult = await runGitHubProjectSyncJob({
         projectId: rotationProjectId,
-        requestedBy: { id: userId },
+        requestedBy: { id: userId, role: "admin" },
         clientKey: rotationClientKey,
       }, db);
       assert.equal(rotationResult.status, "failed");
@@ -588,12 +848,12 @@ test(
       const codeRunnerClientKey = `runner-code-${randomUUID()}`;
       const preparedCodeRunner = await prepareGitHubProjectSync({
         projectId: runnerCodeProjectId,
-        requestedById: userId,
+        requestedBy: { id: userId, role: "admin" },
         clientKey: codeRunnerClientKey,
       }, db);
       const codeRunnerResult = await runGitHubProjectSyncJob({
         projectId: runnerCodeProjectId,
-        requestedBy: { id: userId },
+        requestedBy: { id: userId, role: "admin" },
         clientKey: codeRunnerClientKey,
       }, db, {
         loadClientForCredential: async () => unknownClient(),
@@ -614,13 +874,13 @@ test(
       const codeRunnerAttempt = await db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: preparedCodeRunner.job.id } });
       assert.equal(codeRunnerAttempt.status, "unknown");
       assert.equal(codeRunnerAttempt.dispatchState, "dispatched");
-      const reconciledRunnerJob = await reconcileGitHubProjectSync({ projectId: runnerCodeProjectId, jobId: preparedCodeRunner.job.id, requestedById: userId }, db);
+      const reconciledRunnerJob = await reconcileGitHubProjectSync({ projectId: runnerCodeProjectId, jobId: preparedCodeRunner.job.id, actor: { id: userId, role: "admin" } }, db);
       assert.equal(reconciledRunnerJob.status, "unknown");
       assert.equal(reconciledRunnerJob.reconciliationRequired, false);
       assert.equal(await db.projectGitHubSyncReconciliation.count({ where: { syncRunId: codeRunnerRoot.id } }), 1);
-      const admissionAfterReconcile = await prepareGitHubProjectSync({ projectId: runnerCodeProjectId, requestedById: userId, clientKey: `runner-code-after-${randomUUID()}` }, db);
+      const admissionAfterReconcile = await prepareGitHubProjectSync({ projectId: runnerCodeProjectId, requestedBy: { id: userId, role: "admin" }, clientKey: `runner-code-after-${randomUUID()}` }, db);
       assert.equal(admissionAfterReconcile.job.status, "queued");
-      const cancelledRunnerJob = await cancelGitHubProjectSync({ projectId: runnerCodeProjectId, jobId: admissionAfterReconcile.job.id, requestedById: userId }, db);
+      const cancelledRunnerJob = await cancelGitHubProjectSync({ projectId: runnerCodeProjectId, jobId: admissionAfterReconcile.job.id, actor: { id: userId, role: "admin" } }, db);
       assert.equal(cancelledRunnerJob.status, "cancelled");
 
       // A successful root includes two repositories with the same path identity,
@@ -868,7 +1128,7 @@ test(
       const providerAuditCount = await db.providerCallAudit.count({ where: { jobId: unknownJob.id } });
       const grantCount = await db.webAiGrant.count({ where: { projectId: projectAId } });
       const reconciledJob = await reconcileGitHubProjectSync(
-        { projectId: projectAId, jobId: unknownJob.id, requestedById: userId },
+        { projectId: projectAId, jobId: unknownJob.id, actor: { id: userId, role: "admin" } },
         db,
       );
       assert.equal(reconciledJob.status, "unknown");
@@ -881,7 +1141,7 @@ test(
       assert.equal(reconciledRoot.reconciliationRequired, true);
       assert.equal(await db.projectGitHubSyncReconciliation.count({ where: { syncRunId: unknownRoot.id } }), 1);
       const replay = await reconcileGitHubProjectSync(
-        { projectId: projectAId, jobId: unknownJob.id, requestedById: userId },
+        { projectId: projectAId, jobId: unknownJob.id, actor: { id: userId, role: "admin" } },
         db,
       );
       assert.equal(replay.id, reconciledJob.id);
@@ -890,7 +1150,7 @@ test(
       assert.equal(await hasBlockingUnknownProjectCodeBatch(db, projectAId), false);
       assert.equal(await hasBlockingUnknownProjectMaterialRun(db, projectAId), false);
       const preparedAfterReconcile = await prepareGitHubProjectSync(
-        { projectId: projectAId, requestedById: userId, clientKey: `after-reconcile-${randomUUID()}` },
+        { projectId: projectAId, requestedBy: { id: userId, role: "admin" }, clientKey: `after-reconcile-${randomUUID()}` },
         db,
       );
       assert.equal(preparedAfterReconcile.job.status, "queued");
@@ -946,6 +1206,7 @@ test(
       // schema teardown. Project C has no child rows after the active-root checks.
       await assert.doesNotReject(() => db.project.delete({ where: { id: projectCId } }));
     } finally {
+      await admissionDb.$disconnect();
       await db.$disconnect();
       await raw.end();
       if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;

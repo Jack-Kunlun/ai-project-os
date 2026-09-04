@@ -9,7 +9,7 @@ import test from "node:test";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
-import { createProviderConnection } from "../src/lib/ai-providers/service";
+import { createWorkspaceProviderConnection } from "../src/lib/workspace-provider-service";
 import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
 import { getActiveMemoryIndex } from "../src/lib/web-rag";
 import {
@@ -17,6 +17,7 @@ import {
   runProjectMemoryIndexJob,
 } from "../src/lib/web-memory-index";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
+import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 
 const repositoryRoot = process.cwd();
 const databaseName = "ai_project_os_memory_index_c_legacy_upgrade_test";
@@ -123,6 +124,8 @@ test(
     const previousFetch = globalThis.fetch;
     const projectId = "11111111-1111-4111-8111-111111111111";
     const userId = "22222222-2222-4222-8222-222222222222";
+    const workspaceId = "00000000-0000-4000-8000-000000000001";
+    const actor = { id: userId, role: "member" as const };
     const sourceId = "33333333-3333-4333-8333-333333333333";
     const legacyCompleteId = "44444444-4444-4444-8444-444444444444";
     const legacyStagingAId = "55555555-5555-4555-8555-555555555555";
@@ -232,25 +235,59 @@ export default defineConfig({
       await deployStagedMigrations(tempRoot, url);
 
       db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+      // The workspace migration can only materialize its legacy admin
+      // membership before the AppUserRole.member enum value exists. Convert
+      // that fixture row to the ordinary legacy role after the upgrade, while
+      // retaining the generated workspace/project access records.
+      await db.appUser.update({ where: { id: userId }, data: { role: "member" } });
+      await db.$transaction(async (tx) => {
+        await grantWorkspaceMembership(tx, {
+          workspaceId,
+          userId,
+          role: "owner",
+          actorId: userId,
+          reason: "legacy_upgrade_fixture_membership",
+          allowPendingConfirmation: true,
+        });
+        await grantProjectMembership(tx, {
+          projectId,
+          workspaceId,
+          userId,
+          role: "owner",
+          actorId: userId,
+          reason: "legacy_upgrade_fixture_project_membership",
+          allowPendingConfirmation: true,
+        });
+      });
+      const membershipNow = new Date();
+      await db.membershipSubscription.create({
+        data: {
+          userId,
+          status: "active",
+          startsAt: new Date(membershipNow.getTime() - 60_000),
+          expiresAt: new Date(membershipNow.getTime() + 86_400_000),
+        },
+      });
       await upsertProjectAiRoute(projectId, {
         operation: "embedding",
         providerConnectionId: legacyProviderId,
         modelId: "embedding-legacy",
         embeddingDimensions: 8,
       }, db);
-      const before = await getProjectMemoryIndexStatus(projectId, db);
+      const before = await getProjectMemoryIndexStatus(projectId, actor, db);
       assert.equal(before.readiness, "legacyIndex");
       assert.equal(before.compatible, false);
-      await assert.rejects(() => getActiveMemoryIndex(projectId, db!), (error: unknown) => error instanceof Error && error.message === "SEMANTIC_INDEX_NOT_READY");
+      await assert.rejects(() => getActiveMemoryIndex(projectId, actor, db!), (error: unknown) => error instanceof Error && error.message === "SEMANTIC_INDEX_NOT_READY");
 
-      const provider = await createProviderConnection({
+      const provider = await createWorkspaceProviderConnection(workspaceId, {
         name: `Legacy upgrade provider ${projectId.slice(0, 8)}`,
-        kind: "openai",
+        kind: "glm",
         apiKey: "sk-memory-index-legacy-upgrade",
-        generationModelId: "generation-test",
-        embeddingModelId: "embedding-test",
+        generationModelId: "glm-4-flash",
+        embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
-      }, db);
+        visionModelId: null,
+      }, actor, db);
       providerId = provider.id;
       const verifiedProvider = await db.aiProviderConnection.update({
         where: { id: provider.id },
@@ -261,7 +298,7 @@ export default defineConfig({
       await upsertProjectAiRoute(projectId, {
         operation: "embedding",
         providerConnectionId: provider.id,
-        modelId: "embedding-test",
+        modelId: "embedding-3",
         embeddingDimensions: 8,
         acknowledgeIndexRebuild: true,
       }, db);
@@ -277,14 +314,14 @@ export default defineConfig({
       };
       const rebuilt = await runProjectMemoryIndexJob({
         projectId,
-        requestedBy: { id: userId },
+        requestedBy: actor,
         clientKey: `legacy-upgrade-${Date.now()}`,
         consent,
         mode: "full",
       }, db);
       assert.equal(rebuilt.status, "succeeded");
       assert.equal(fetchCalls, 1);
-      const after = await getProjectMemoryIndexStatus(projectId, db);
+      const after = await getProjectMemoryIndexStatus(projectId, actor, db);
       assert.equal(after.readiness, "ready");
       const pointer = await db.memoryIndexPointer.findUniqueOrThrow({ where: { projectId } });
       assert.notEqual(pointer.indexGenerationId, legacyCompleteId);
@@ -302,7 +339,7 @@ export default defineConfig({
           projectId,
           jobId: jobA.id,
           providerConnectionId: provider.id,
-          modelId: "embedding-test",
+          modelId: "embedding-3",
           dimensions: 8,
           status: "staging",
           buildMode: "full",
@@ -318,7 +355,7 @@ export default defineConfig({
           projectId,
           jobId: jobB.id,
           providerConnectionId: provider.id,
-          modelId: "embedding-test",
+          modelId: "embedding-3",
           dimensions: 8,
           status: "staging",
           buildMode: "full",
@@ -349,6 +386,9 @@ export default defineConfig({
         }
         const credentialIds = [legacyCredentialId, credentialId].filter((id): id is string => id !== null);
         if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
+        await db.membershipSubscription.deleteMany({ where: { userId } });
+        await db.workspace.updateMany({ where: { id: workspaceId, createdById: userId }, data: { createdById: null } });
+        await db.appUser.deleteMany({ where: { id: userId } });
         await db.$disconnect();
       }
       if (rawConnected) await raw.end();

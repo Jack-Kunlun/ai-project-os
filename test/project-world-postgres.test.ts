@@ -5,6 +5,7 @@ import test from "node:test";
 import { ProjectItemRevisionAction, type Prisma } from "@prisma/client";
 import { AccessControlError } from "../src/lib/access-control";
 import { getDb } from "../src/lib/db";
+import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { appendProjectItemRevision, createPrimaryProjectItemEvidence } from "../src/lib/project-item-history";
 import { ProjectWorldError, getProjectWorld, getProjectWorldSummaries, mutateProjectWorld } from "../src/lib/project-world";
 
@@ -34,15 +35,15 @@ test("project world persists version-bound relations, supersession and immutable
     { id: viewerId, username: viewer.username, role: "member" },
   ] });
   await db.workspace.create({ data: { id: workspaceId, name: `World ${suffix}`, slug: `world-${suffix}`, createdById: adminId } });
-  await db.workspaceMembership.create({ data: { workspaceId, userId: adminId, role: "owner" } });
+  await db.$transaction((tx) => grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "project_world_fixture" }));
   await db.project.createMany({ data: [
     { id: projectId, workspaceId, name: `World project ${suffix}`, slug: `world-project-${suffix}` },
     { id: otherProjectId, workspaceId, name: `Other project ${suffix}`, slug: `other-project-${suffix}` },
   ] });
-  await db.projectMembership.createMany({ data: [
-    { projectId, userId: editorId, role: "editor" },
-    { projectId, userId: viewerId, role: "viewer" },
-  ] });
+  await db.$transaction(async (tx) => {
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: adminId, reason: "project_world_fixture" });
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: adminId, reason: "project_world_fixture" });
+  });
 
   async function createFact(input: { projectId: string; type: "decision" | "progress"; title: string; advanceRevision?: boolean }) {
     const content = `${input.title} ${suffix}`;

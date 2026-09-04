@@ -10,6 +10,7 @@ import { ProjectLifecycleError } from "../src/lib/project-lifecycle";
 import { buildRepositoryImpactEvidence } from "../src/lib/project-operations";
 import { appendProjectItemRevision, createPrimaryProjectItemEvidence } from "../src/lib/project-item-history";
 import { ProjectPlanError, createProjectPlanEntry, getProjectPlan, updateProjectPlanEntry } from "../src/lib/project-plan";
+import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.PROJECT_PLAN_POSTGRES_GATE === "1";
 
@@ -33,12 +34,12 @@ test("project plan persists governed objectives, work items, dependencies and au
     { id: outsiderId, username: `plan_outsider_${suffix}`, role: "member" },
   ] });
   await db.workspace.create({ data: { id: workspaceId, name: `Plan ${suffix}`, slug: `plan-${suffix}`, createdById: adminId } });
-  await db.workspaceMembership.create({ data: { workspaceId, userId: adminId, role: "owner" } });
   await db.project.create({ data: { id: projectId, workspaceId, name: `Plan project ${suffix}`, slug: `plan-project-${suffix}` } });
-  await db.projectMembership.createMany({ data: [
-    { projectId, userId: editorId, role: "editor" },
-    { projectId, userId: viewerId, role: "viewer" },
-  ] });
+  await db.$transaction(async (tx) => {
+    await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "project_plan_gate_fixture_workspace" });
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: adminId, reason: "project_plan_gate_fixture_editor" });
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: adminId, reason: "project_plan_gate_fixture_viewer" });
+  });
 
   try {
     await assert.rejects(
@@ -135,7 +136,7 @@ test("project plan persists governed objectives, work items, dependencies and au
     const assignedSecondResult = await updateProjectPlanEntry(projectId, { entity: "workItem", id: second.id, expectedUpdatedAt: secondCurrentForAssignment.updatedAt.toISOString(), assigneeId: editorId, acceptanceCriteria: "完成仓库变化核对" }, editor, db);
     assert.ok("workItem" in assignedSecondResult && assignedSecondResult.workItem !== undefined);
     const revokedRule = await createProjectAutomationRule(projectId, { name: `Revoked plan health ${suffix}`, kind: "projectPlanHealth", intervalMinutes: 60, config: { dueSoonDays: 3, includeAssignees: true }, startAt: new Date().toISOString() }, editor, db);
-    await db.projectMembership.delete({ where: { projectId_userId: { projectId, userId: editorId } } });
+    await db.$transaction((tx) => revokeProjectMembership(tx, projectId, editorId, workspaceId, { actorId: adminId, reason: "project_plan_gate_revoke_editor" }));
     await assert.rejects(
       () => updateProjectPlanEntry(projectId, { entity: "workItem", id: second.id, expectedUpdatedAt: assignedSecondResult.workItem.updatedAt.toISOString(), status: "inProgress" }, admin, db),
       (error: unknown) => error instanceof ProjectPlanError && error.code === "PROJECT_PLAN_ASSIGNEE_NOT_ELIGIBLE",

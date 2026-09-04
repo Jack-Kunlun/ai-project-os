@@ -3,7 +3,6 @@ import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { listRagAnswers, runRagAnswerJob } from "@/lib/web-rag";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 
 export const dynamic = "force-dynamic";
@@ -17,9 +16,9 @@ const bodySchema = z.object({
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const projectId = idSchema.parse((await context.params).projectId);
-    return NextResponse.json({ answers: await listRagAnswers(projectId) });
+    return NextResponse.json({ answers: await listRagAnswers(projectId, user) });
   } catch (error) {
     return handleApiError(error);
   }
@@ -30,7 +29,6 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const projectId = idSchema.parse((await context.params).projectId);
-    await assertProjectActive(projectId);
     const body = bodySchema.parse(await readJsonBody(request));
     const job = await runRagAnswerJob({
       projectId,

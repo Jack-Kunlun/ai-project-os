@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 import { runProjectAssetVisionExtraction } from "@/lib/project-assets/vision";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +22,6 @@ export async function POST(
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const params = paramsSchema.parse(await context.params);
-    await assertProjectActive(params.projectId);
     const body = bodySchema.parse(await readJsonBody(request));
     const job = await runProjectAssetVisionExtraction({
       projectId: params.projectId,

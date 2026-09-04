@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
+import { grantWorkspaceMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.PHASE_A_SCHEMA_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_phase_a_schema_test";
@@ -86,7 +87,6 @@ test(
     const db = getDb();
     const userIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
     const suffix = randomUUID().slice(0, 8);
-    const createdMembershipIds: string[] = [];
     const createdMembershipSubscriptionIds: string[] = [];
     const createdInvitationIds: string[] = [];
     const createdGitConnectionIds: string[] = [];
@@ -250,10 +250,15 @@ test(
       const defaultUserId = userIds[3]!;
       const now = new Date("2026-09-03T00:00:00.000Z");
 
-      const workspaceMembership = await db.workspaceMembership.create({
-        data: { id: randomUUID(), workspaceId: defaultWorkspaceId, userId: ownerId, role: "owner" },
+      await db.$transaction(async (tx) => {
+        await grantWorkspaceMembership(tx, {
+          workspaceId: defaultWorkspaceId,
+          userId: ownerId,
+          role: "owner",
+          actorId: adminId,
+          reason: "phase_a_schema_gate_workspace_owner",
+        });
       });
-      createdMembershipIds.push(workspaceMembership.id);
 
       const legacyGit = await db.gitConnection.create({
         data: {
@@ -711,7 +716,6 @@ test(
         await db.mcpConnection.deleteMany({ where: { id: { in: createdMcpConnectionIds } } });
         await db.workspaceInvitation.deleteMany({ where: { id: { in: createdInvitationIds } } });
         await db.membershipSubscription.deleteMany({ where: { id: { in: createdMembershipSubscriptionIds } } });
-        await db.workspaceMembership.deleteMany({ where: { id: { in: createdMembershipIds } } });
         await db.externalCredential.deleteMany({ where: { id: { in: createdCredentialIds } } });
         await db.appUser.deleteMany({ where: { id: { in: userIds } } });
       } finally {

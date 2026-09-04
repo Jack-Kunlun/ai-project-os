@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { cp, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -46,6 +47,7 @@ const shouldRunPostgresGate = hasConfiguredTestUrl && postgresGate === "1";
 
 const projectAId = "11111111-1111-4111-8111-111111111111";
 const projectBId = "22222222-2222-4222-8222-222222222222";
+const candidateActorId = "91919191-9191-4919-8919-919191919191";
 const sourceAId = "33333333-3333-4333-8333-333333333333";
 const sourceA2Id = "66666666-6666-4666-8666-666666666666";
 const sourceBId = "44444444-4444-4444-8444-444444444444";
@@ -248,6 +250,14 @@ const memoryQualityMigrationPath = join(
   repositoryRoot,
   "prisma/migrations/20260829190000_add_memory_quality/migration.sql",
 );
+const webSourcesMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829200000_add_web_sources/migration.sql",
+);
+const workspaceRbacMigrationPath = join(
+  repositoryRoot,
+  "prisma/migrations/20260829210000_add_workspaces_rbac_oidc/migration.sql",
+);
 const currentSchemaThroughMemoryQualityMigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260829080000_add_web_control_plane/migration.sql"),
   join(repositoryRoot, "prisma/migrations/20260829090000_expand_web_ai_jobs/migration.sql"),
@@ -269,7 +279,43 @@ const currentSchemaThroughMemoryQualityMigrationPaths = [
 const v0MigrationPaths = [
   join(repositoryRoot, "prisma/migrations/20260826021100_init/migration.sql"),
   join(repositoryRoot, "prisma/migrations/20260826030732_integrity_boundaries/migration.sql"),
-];
+] as const;
+
+function migrationNameFromPath(path: string): string {
+  const name = basename(dirname(path));
+  if (!/^\d{14}_[a-z0-9_]+$/u.test(name)) {
+    throw new Error("AI_RUNTIME_POSTGRES_MIGRATION_PATH_INVALID");
+  }
+  return name;
+}
+
+const v0MigrationNames = v0MigrationPaths.map(migrationNameFromPath);
+const aiMigrationNames = [
+  aiRuntimeMigrationPath,
+  aiCandidateMigrationPath,
+  itemEvidenceHistoryMigrationPath,
+  sourceChunkMigrationPath,
+  indexGenerationMigrationPath,
+  candidateItemPublicationMigrationPath,
+  operationProfileMigrationPath,
+  ragSnapshotMigrationPath,
+  derivedArtifactMigrationPath,
+  githubRepositoryLedgerMigrationPath,
+  githubScanSecurityMigrationPath,
+  repositoryCodeIndexMigrationPath,
+  repositoryMaterialLedgerMigrationPath,
+  repositoryMaterialPolicyMigrationPath,
+  repositoryMaterialTerminalMigrationPath,
+  repositoryMaterialIndexMigrationPath,
+  repositoryRagSnapshotMigrationPath,
+  grantOperationProfileGuardMigrationPath,
+].map(migrationNameFromPath);
+const aiMigrationsBeforeCandidatePublicationNames = aiMigrationNames.slice(0, 5);
+const historicalBaseMigrationNames = [...v0MigrationNames, ...aiMigrationNames];
+const currentSchemaThroughMemoryQualityMigrationNames =
+  currentSchemaThroughMemoryQualityMigrationPaths.map(migrationNameFromPath);
+const webSourcesMigrationName = migrationNameFromPath(webSourcesMigrationPath);
+const workspaceRbacMigrationName = migrationNameFromPath(workspaceRbacMigrationPath);
 
 function rejectUrl(): never {
   throw new Error("AI_RUNTIME_TEST_DATABASE_URL_INVALID");
@@ -682,11 +728,14 @@ async function closeClient(client: Client): Promise<void> {
   }
 }
 
-async function runPrismaMigrateDeploy(url: string): Promise<void> {
+async function runPrismaMigrateDeploy(
+  url: string,
+  configPath = "prisma.config.ts",
+): Promise<void> {
   try {
     await execFile(
       "pnpm",
-      ["exec", "prisma", "migrate", "deploy", "--config", "prisma.config.ts"],
+      ["exec", "prisma", "migrate", "deploy", "--config", configPath],
       {
         cwd: repositoryRoot,
         env: { ...process.env, DATABASE_URL: url },
@@ -698,62 +747,75 @@ async function runPrismaMigrateDeploy(url: string): Promise<void> {
   }
 }
 
-async function loadSql(path: string): Promise<string> {
-  try {
-    return await readFile(path, "utf8");
-  } catch {
-    throw new Error("AI_RUNTIME_POSTGRES_MIGRATION_READ_FAILED");
+type StagedMigrationRunner = {
+  stage: (names: readonly string[]) => Promise<void>;
+  deploy: () => Promise<void>;
+  close: () => Promise<void>;
+};
+
+async function stageMigrations(tempRoot: string, names: readonly string[]): Promise<void> {
+  const migrationsRoot = join(tempRoot, "prisma", "migrations");
+  await mkdir(migrationsRoot, { recursive: true });
+  for (const name of names) {
+    if (!/^\d{14}_[a-z0-9_]+$/u.test(name)) {
+      throw new Error("AI_RUNTIME_POSTGRES_MIGRATION_NAME_INVALID");
+    }
+    try {
+      await cp(
+        join(repositoryRoot, "prisma/migrations", name),
+        join(migrationsRoot, name),
+        { recursive: true },
+      );
+    } catch {
+      throw new Error("AI_RUNTIME_POSTGRES_MIGRATION_STAGE_FAILED");
+    }
   }
 }
 
-async function applySqlMigration(client: Client, path: string): Promise<void> {
-  await safeQuery(client, await loadSql(path));
-}
+async function createStagedMigrationRunner(value: unknown): Promise<StagedMigrationRunner> {
+  const url = validateAiRuntimeTestDatabaseUrl(value);
+  let tempRoot: string | null = null;
+  try {
+    tempRoot = await mkdtemp(join(tmpdir(), "ai-project-os-ai-runtime-migrations-"));
+    await mkdir(join(tempRoot, "prisma"), { recursive: true });
+    await symlink(join(repositoryRoot, "node_modules"), join(tempRoot, "node_modules"), "dir");
+    await cp(
+      join(repositoryRoot, "prisma", "schema.prisma"),
+      join(tempRoot, "prisma", "schema.prisma"),
+    );
+    await writeFile(
+      join(tempRoot, "prisma.config.ts"),
+      `import "dotenv/config";
+import { defineConfig, env } from "prisma/config";
 
-async function applyAiMigrationInTransaction(client: Client): Promise<void> {
-  await transaction(client, [
-    { sql: await loadSql(aiRuntimeMigrationPath) },
-    { sql: await loadSql(aiCandidateMigrationPath) },
-    { sql: await loadSql(itemEvidenceHistoryMigrationPath) },
-    { sql: await loadSql(sourceChunkMigrationPath) },
-    { sql: await loadSql(indexGenerationMigrationPath) },
-    { sql: await loadSql(candidateItemPublicationMigrationPath) },
-    { sql: await loadSql(operationProfileMigrationPath) },
-    { sql: await loadSql(ragSnapshotMigrationPath) },
-    { sql: await loadSql(derivedArtifactMigrationPath) },
-    { sql: await loadSql(githubRepositoryLedgerMigrationPath) },
-    { sql: await loadSql(githubScanSecurityMigrationPath) },
-    { sql: await loadSql(repositoryCodeIndexMigrationPath) },
-    { sql: await loadSql(repositoryMaterialLedgerMigrationPath) },
-    { sql: await loadSql(repositoryMaterialPolicyMigrationPath) },
-    { sql: await loadSql(repositoryMaterialTerminalMigrationPath) },
-    { sql: await loadSql(repositoryMaterialIndexMigrationPath) },
-    { sql: await loadSql(repositoryRagSnapshotMigrationPath) },
-    { sql: await loadSql(grantOperationProfileGuardMigrationPath) },
-  ]);
-}
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: { path: "prisma/migrations" },
+  datasource: { url: env("DATABASE_URL") },
+});
+`,
+      "utf8",
+    );
+  } catch {
+    if (tempRoot !== null) {
+      try {
+        await rm(tempRoot, { recursive: true, force: true });
+      } catch {
+        // Preserve the stable setup error and never expose filesystem details.
+      }
+    }
+    throw new Error("AI_RUNTIME_POSTGRES_STAGED_MIGRATION_SETUP_FAILED");
+  }
 
-async function applyAiMigrationsBeforeCandidatePublication(
-  client: Client,
-): Promise<void> {
-  await transaction(client, [
-    { sql: await loadSql(aiRuntimeMigrationPath) },
-    { sql: await loadSql(aiCandidateMigrationPath) },
-    { sql: await loadSql(itemEvidenceHistoryMigrationPath) },
-    { sql: await loadSql(sourceChunkMigrationPath) },
-    { sql: await loadSql(indexGenerationMigrationPath) },
-  ]);
-}
-
-async function applyCurrentSchemaThroughMemoryQuality(client: Client): Promise<void> {
-  await transaction(
-    client,
-    await Promise.all(
-      currentSchemaThroughMemoryQualityMigrationPaths.map(async (path) => ({
-        sql: await loadSql(path),
-      })),
-    ),
-  );
+  if (tempRoot === null) {
+    throw new Error("AI_RUNTIME_POSTGRES_STAGED_MIGRATION_SETUP_FAILED");
+  }
+  const runnerRoot = tempRoot;
+  return {
+    stage: (names) => stageMigrations(runnerRoot, names),
+    deploy: () => runPrismaMigrateDeploy(url, join(runnerRoot, "prisma.config.ts")),
+    close: () => rm(runnerRoot, { recursive: true, force: true }),
+  };
 }
 
 async function migrationNamesFromDisk(): Promise<readonly string[]> {
@@ -1554,16 +1616,21 @@ async function runEmptyDatabasePath(client: Client, url: string): Promise<void> 
   await assertEmptyDatabaseCatalog(client);
 }
 
-async function runV0UpgradePath(client: Client): Promise<void> {
+async function runV0UpgradePath(client: Client, url: unknown = testDatabaseUrl): Promise<void> {
   await resetPublic(client);
-  for (const path of v0MigrationPaths) {
-    await applySqlMigration(client, path);
+  const migrations = await createStagedMigrationRunner(url);
+  try {
+    await migrations.stage(v0MigrationNames);
+    await migrations.deploy();
+    await seedV0Rows(client);
+    await assertV0RowsSurviveAiMigration(client);
+    await migrations.stage(aiMigrationNames);
+    await migrations.deploy();
+    await assertV0RowsSurviveAiMigration(client);
+    await assertV0ItemHistoryBackfill(client);
+  } finally {
+    await migrations.close();
   }
-  await seedV0Rows(client);
-  await assertV0RowsSurviveAiMigration(client);
-  await applyAiMigrationInTransaction(client);
-  await assertV0RowsSurviveAiMigration(client);
-  await assertV0ItemHistoryBackfill(client);
 }
 
 async function runPolicyAndGrantMatrix(client: Client): Promise<void> {
@@ -1748,8 +1815,8 @@ async function runPolicyAndGrantMatrix(client: Client): Promise<void> {
   );
 }
 
-async function setupFreshLiveGrant(client: Client): Promise<void> {
-  await runV0UpgradePath(client);
+async function setupFreshLiveGrant(client: Client, url: unknown = testDatabaseUrl): Promise<void> {
+  await runV0UpgradePath(client, url);
   await insertPolicyRevision(client, revisionAId, projectAId, 1, true, true);
   await insertPolicyPointer(client, projectAId, revisionAId);
   await insertDraftGrant(client, grantAId);
@@ -3979,28 +4046,78 @@ async function runAtomicRuntimeCandidateCompletion(
 }
 
 async function runCandidateMemoryMatrix(client: Client, url: string): Promise<void> {
-  await setupFreshLiveGrant(client);
-  // The candidate service uses the current ProjectItem model, which includes
-  // the memory-quality columns introduced after the AI runtime upgrade set.
-  // Keep this legacy-path fixture explicit instead of relying on the full
-  // deploy performed by the empty-database path.
-  await applyCurrentSchemaThroughMemoryQuality(client);
-  await insertPolicyRevision(
-    client,
-    revisionA2Id,
-    projectAId,
-    2,
-    true,
-    true,
-    true,
-  );
-  await safeQuery(
-    client,
-    `UPDATE "ProjectAiPolicy"
-        SET "currentRevisionId" = $2, "updatedAt" = CURRENT_TIMESTAMP
-      WHERE "projectId" = $1`,
-    [projectAId, revisionA2Id],
-  );
+  await setupFreshLiveGrant(client, url);
+  const migrations = await createStagedMigrationRunner(url);
+  try {
+    // The candidate service uses the current ProjectItem model, which includes
+    // the memory-quality columns introduced after the AI runtime upgrade set.
+    // Keep this legacy-path fixture explicit instead of relying on the full
+    // deploy performed by the empty-database path.
+    await migrations.stage([
+      ...historicalBaseMigrationNames,
+      ...currentSchemaThroughMemoryQualityMigrationNames,
+    ]);
+    await migrations.deploy();
+    await insertPolicyRevision(
+      client,
+      revisionA2Id,
+      projectAId,
+      2,
+      true,
+      true,
+      true,
+    );
+    await safeQuery(
+      client,
+      `UPDATE "ProjectAiPolicy"
+          SET "currentRevisionId" = $2, "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "projectId" = $1`,
+      [projectAId, revisionA2Id],
+    );
+
+    // Candidate review is an authenticated project operation. This historical
+    // fixture predates the RBAC migrations, so install only the schema and
+    // actor data required to exercise the current service contract.
+    await safeQuery(
+      client,
+      `INSERT INTO "AppUser"
+         ("id", "username", "passwordHash", "passwordSalt", "passwordVersion", "role", "updatedAt")
+       VALUES ($1, 'candidate-gate-admin', 'fixture-password-hash',
+               'fixture-password-salt', 1, 'admin', CURRENT_TIMESTAMP)`,
+      [candidateActorId],
+    );
+    await migrations.stage([webSourcesMigrationName, workspaceRbacMigrationName]);
+    await migrations.deploy();
+
+    // Keep the actor fixture valid independently of the RBAC migration's
+    // historical admin backfill. Candidate review now reloads this membership
+    // inside its write transaction, so the fixture must express the same
+    // tenant relationship that a real admin would have.
+    await safeQuery(
+      client,
+      `INSERT INTO "WorkspaceMembership"
+         ("id", "workspaceId", "userId", "role", "createdAt", "updatedAt")
+       SELECT '92929292-9292-4929-8929-929292929292'::uuid,
+              "workspaceId", $1, 'owner', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+         FROM "Project"
+        WHERE "id" = $2
+       ON CONFLICT ("id") DO UPDATE
+         SET "role" = 'owner', "updatedAt" = CURRENT_TIMESTAMP`,
+      [candidateActorId, projectAId],
+    );
+    await safeQuery(
+      client,
+      `INSERT INTO "ProjectMembership"
+         ("id", "projectId", "userId", "role", "createdAt", "updatedAt")
+       VALUES ('93939393-9393-4939-8939-939393939393'::uuid,
+               $1, $2, 'owner', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT ("id") DO UPDATE
+         SET "role" = 'owner', "updatedAt" = CURRENT_TIMESTAMP`,
+      [projectAId, candidateActorId],
+    );
+  } finally {
+    await migrations.close();
+  }
 
   const candidateGrantId = "12121212-1212-4212-8212-121212121212";
   const candidateGrantSourceId = "13131313-1313-4313-8313-131313131313";
@@ -4198,7 +4315,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
     const accepted = await service.acceptCandidate({
       projectId: projectAId,
       candidateId: decision.id,
-      reviewedBy: "local-user",
+      actor: { id: candidateActorId, role: "admin" },
       expectedItemUpdatedAt: decision.projectItem.updatedAt,
       item: {
         type: ProjectItemType.decision,
@@ -4210,7 +4327,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
     const dismissed = await service.dismissCandidate({
       projectId: projectAId,
       candidateId: risk.id,
-      reviewedBy: "local-user",
+      actor: { id: candidateActorId, role: "admin" },
       expectedItemUpdatedAt: risk.projectItem.updatedAt,
     });
     requireCondition(
@@ -4220,18 +4337,22 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
         accepted.projectItem.sourceExcerpt === sourceAContent &&
         dismissed.reviewStatus === "dismissed" &&
         dismissed.projectItem.reviewStatus === "dismissed" &&
-        dismissed.projectItemId === risk.projectItemId,
+        dismissed.projectItemId === risk.projectItemId &&
+        accepted.reviewedBy === candidateActorId &&
+        dismissed.reviewedBy === candidateActorId,
       "AI_CANDIDATE_POSTGRES_REVIEW_STATE_MISMATCH",
     );
 
     const acceptedHistory = await safeQuery<{
       actions: string[];
+      actor_ids: string[];
       evidences: string;
       revision_links: string;
     }>(
       client,
       `SELECT
          array_agg(r."action"::text ORDER BY r."revisionNumber") AS actions,
+         array_agg(r."actorId" ORDER BY r."revisionNumber") AS actor_ids,
          (SELECT COUNT(*)::text FROM "ProjectItemEvidence" e
            WHERE e."projectId" = $1 AND e."projectItemId" = $2) AS evidences,
          (SELECT COUNT(*)::text FROM "ProjectItemRevisionEvidence" re
@@ -4243,6 +4364,8 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
     requireCondition(
       JSON.stringify(acceptedHistory.rows[0]?.actions) ===
         JSON.stringify(["ai_created", "confirmed"]) &&
+        JSON.stringify(acceptedHistory.rows[0]?.actor_ids) ===
+          JSON.stringify(["ai:model", candidateActorId]) &&
         acceptedHistory.rows[0]?.evidences === "1" &&
         acceptedHistory.rows[0]?.revision_links === "2",
       "AI_CANDIDATE_POSTGRES_ITEM_HISTORY_MISMATCH",
@@ -4264,7 +4387,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
         await service.acceptCandidate({
           projectId: projectAId,
           candidateId: decision.id,
-          reviewedBy: "local-user",
+          actor: { id: candidateActorId, role: "admin" },
           expectedItemUpdatedAt: accepted.projectItem.updatedAt,
           item: {
             type: ProjectItemType.decision,
@@ -4279,7 +4402,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
       await service.dismissCandidate({
         projectId: projectAId,
         candidateId: decision.id,
-        reviewedBy: "local-user",
+        actor: { id: candidateActorId, role: "admin" },
         expectedItemUpdatedAt: accepted.projectItem.updatedAt,
       });
       throw new Error("AI_CANDIDATE_POSTGRES_TERMINAL_REVIEW_ACCEPTED");
@@ -4380,13 +4503,18 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
   );
 }
 
-async function runCandidatePublicationUpgradePath(client: Client): Promise<void> {
+async function runCandidatePublicationUpgradePath(
+  client: Client,
+  url: unknown = testDatabaseUrl,
+): Promise<void> {
   await resetPublic(client);
-  for (const path of v0MigrationPaths) {
-    await applySqlMigration(client, path);
-  }
-  await seedV0Rows(client);
-  await applyAiMigrationsBeforeCandidatePublication(client);
+  const migrations = await createStagedMigrationRunner(url);
+  try {
+    await migrations.stage(v0MigrationNames);
+    await migrations.deploy();
+    await seedV0Rows(client);
+    await migrations.stage(aiMigrationsBeforeCandidatePublicationNames);
+    await migrations.deploy();
 
   await insertPolicyRevision(
     client,
@@ -4614,7 +4742,8 @@ async function runCandidatePublicationUpgradePath(client: Client): Promise<void>
     },
   ]);
 
-  await applySqlMigration(client, candidateItemPublicationMigrationPath);
+  await migrations.stage([migrationNameFromPath(candidateItemPublicationMigrationPath)]);
+  await migrations.deploy();
   const rows = await safeQuery<{
     id: string;
     claim_status: string;
@@ -4673,7 +4802,8 @@ async function runCandidatePublicationUpgradePath(client: Client): Promise<void>
     "AI_CANDIDATE_POSTGRES_PUBLICATION_UPGRADE_MISMATCH",
   );
 
-  await applySqlMigration(client, operationProfileMigrationPath);
+  await migrations.stage([migrationNameFromPath(operationProfileMigrationPath)]);
+  await migrations.deploy();
   const profile = await safeQuery<{
     operation: string;
     profile_fingerprint: string;
@@ -4697,6 +4827,9 @@ async function runCandidatePublicationUpgradePath(client: Client): Promise<void>
       profile.rows[0].model_id === "synthetic-provider/model-v1",
     "AI_RUNTIME_POSTGRES_OPERATION_PROFILE_BACKFILL_MISMATCH",
   );
+  } finally {
+    await migrations.close();
+  }
 }
 
 async function assertProjectRootCascade(client: Client): Promise<void> {

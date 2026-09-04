@@ -38,7 +38,7 @@ export async function GET(request: Request) {
         where: { id: sessionUser.id },
         select: {
           id: true, username: true, displayName: true, email: true, role: true, passwordHash: true, createdAt: true, updatedAt: true,
-          workspaceMemberships: { select: { role: true, workspace: { select: { id: true, name: true } } } },
+          workspaceMemberships: { where: { accessState: "confirmed" }, select: { role: true, workspace: { select: { id: true, name: true } } } },
           oidcIdentities: { select: { email: true, lastLoginAt: true, provider: { select: { id: true, name: true } } } },
           githubIdentity: { select: { githubUserId: true, login: true, email: true, displayName: true, lastLoginAt: true } },
         },

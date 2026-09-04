@@ -42,11 +42,34 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/lifecycle/route.ts",
     "src/app/api/projects/[projectId]/export/route.ts",
   ]);
+  const serviceLifecycleGuarded = new Set([
+    "src/app/api/projects/[projectId]/memory/extract/route.ts",
+    "src/app/api/projects/[projectId]/memory/search/route.ts",
+    "src/app/api/projects/[projectId]/memory/index/route.ts",
+    "src/app/api/projects/[projectId]/memory/answers/route.ts",
+    "src/app/api/projects/[projectId]/intelligence/brief/route.ts",
+    "src/app/api/projects/[projectId]/intelligence/agent/route.ts",
+    "src/app/api/projects/[projectId]/assets/[assetId]/recognize/route.ts",
+    "src/app/api/projects/[projectId]/repositories/scan/route.ts",
+    "src/app/api/projects/[projectId]/repositories/materials/route.ts",
+    "src/app/api/projects/[projectId]/repositories/sync/route.ts",
+    "src/app/api/projects/[projectId]/jobs/[jobId]/route.ts",
+    "src/app/api/projects/[projectId]/memory/candidates/[candidateId]/route.ts",
+    "src/app/api/projects/[projectId]/ai-memory/candidates/[candidateId]/route.ts",
+    "src/app/api/projects/[projectId]/git-repositories/route.ts",
+    "src/app/api/projects/[projectId]/git-repositories/[linkId]/route.ts",
+    "src/app/api/projects/[projectId]/git-repositories/[linkId]/sync/route.ts",
+  ]);
   for (const entry of entries.filter((value) => value.endsWith("route.ts"))) {
     const path = `${root}/${entry}`;
     if (exempt.has(path)) continue;
     const source = await readFile(path, "utf8");
     if (!/export async function (POST|PUT|PATCH|DELETE)/u.test(source)) continue;
+    if (serviceLifecycleGuarded.has(path)) {
+      assert.doesNotMatch(source, /assertProjectActive/u, `${path} delegates lifecycle checks`);
+      assert.match(source, /(?:requestedBy|actor):\s*user|,\s*user\)/u, `${path} passes the session actor`);
+      continue;
+    }
     assert.match(source, /assertProjectActive/u, `${path} must reject archived project mutations`);
   }
 

@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   Prisma,
-  type AppUser,
   type PrismaClient,
   type ProjectGitHubSyncChangeType,
   type ProjectGitHubSyncEntryKind,
@@ -15,15 +14,15 @@ import {
   claimProjectJob,
   failProjectJob,
   finishProjectJob,
-  getProjectJob,
+  getProjectJobInternal,
   isLeaseExpired,
   isUncertainProviderDispatch,
   markProjectJobUnknown,
   markProviderAcknowledged,
-  markProviderDispatched,
   startProjectJobHeartbeat,
   toPublicProjectJob,
-  withProjectJobLock,
+  withProjectJobAccessTransaction,
+  type ProjectJobHeartbeat,
   type PublicProjectJob,
 } from "@/lib/project-workflow";
 import {
@@ -43,6 +42,7 @@ import {
   type WebGitHubCredentialClient,
 } from "@/lib/web-github";
 import { jsonValue } from "@/lib/web-github";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import {
   hasBlockingUnknownProjectCodeBatch,
   hasBlockingUnknownProjectMaterialRun,
@@ -493,13 +493,12 @@ function parseRunInput(value: unknown): Readonly<{ projectId: string; syncRunId:
   return Object.freeze({ projectId: canonicalUuid(value.projectId), syncRunId: canonicalUuid(value.syncRunId) });
 }
 
-function parseStartInput(value: unknown): Readonly<{ projectId: string; requestedById: string; clientKey: string }> {
-  if (!isRecord(value) || !exactKeys(value, ["clientKey", "projectId", "requestedById"])) return fail("PROJECT_GITHUB_SYNC_INVALID_INPUT");
+function parseStartInput(value: unknown): Readonly<{ projectId: string; clientKey: string }> {
+  if (!isRecord(value) || !exactKeys(value, ["clientKey", "projectId"])) return fail("PROJECT_GITHUB_SYNC_INVALID_INPUT");
   const parsed = clientKeySchema.safeParse(value.clientKey);
   if (!parsed.success) return fail("PROJECT_GITHUB_SYNC_INVALID_INPUT");
   return Object.freeze({
     projectId: canonicalUuid(value.projectId),
-    requestedById: canonicalUuid(value.requestedById),
     clientKey: parsed.data,
   });
 }
@@ -595,6 +594,14 @@ async function readSyncRun(
   ]);
   if (row === null) return fail("PROJECT_GITHUB_SYNC_RUN_NOT_FOUND");
   return toPublicProjectGitHubSyncRun(row as unknown as PublicRunRow, { ...page, total });
+}
+
+async function readProjectGitHubSyncInternal(
+  input: Readonly<{ projectId: string; syncRunId: string }>,
+  db: SyncDb,
+  page: Readonly<{ offset?: number; limit?: number }> = {},
+): Promise<PublicProjectGitHubSyncRun> {
+  return readSyncRun(db, input.projectId, input.syncRunId, page);
 }
 
 async function freezeScope(tx: Prisma.TransactionClient, projectId: string, now: Date): Promise<FrozenScope> {
@@ -844,6 +851,180 @@ async function updateEntry(
   if (input.childMaterialSyncRunId !== undefined) data.childMaterialSyncRunId = input.childMaterialSyncRunId;
   const updated = await db.projectGitHubSyncEntry.updateMany({ where: { projectId: input.projectId, id: input.entryId }, data });
   if (updated.count !== 1) return fail("PROJECT_GITHUB_SYNC_WRITE_CONFLICT");
+}
+
+/**
+ * Root authorization is only a short database admission.  It deliberately
+ * does not authorize the child repository targets: every child below takes a
+ * fresh admission immediately before credential/client/external work.
+ */
+async function admitProjectSyncRoot(
+  input: Readonly<{ projectId: string; jobId: string; actor: WebAiActor; claim: { attemptId: string; claimToken: string } }>,
+  db: PrismaClient,
+): Promise<void> {
+  await withProjectJobAccessTransaction(db, {
+    actor: input.actor,
+    projectId: input.projectId,
+    jobId: input.jobId,
+    expectedRequestedById: input.actor.id,
+    attempt: { jobId: input.jobId, ...input.claim },
+  }, async (_tx, admission) => {
+    if (admission.job.kind !== "githubProjectSync" || admission.job.requestedById !== input.actor.id) {
+      return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
+    }
+  });
+}
+
+/**
+ * Access-first admission for one concrete frozen target.  The callback only
+ * rechecks the current route/config/credential identity and records the
+ * attempt dispatch marker plus entry-running state.  The encrypted secret,
+ * client, and GitHub transport are all loaded after this transaction commits.
+ */
+async function admitProjectSyncChild(
+  input: Readonly<{
+    projectId: string;
+    jobId: string;
+    syncRunId: string;
+    actor: WebAiActor;
+    claim: { attemptId: string; claimToken: string };
+    entry: FrozenScopeEntry;
+  }>,
+  db: PrismaClient,
+) {
+  return withProjectJobAccessTransaction(db, {
+    actor: input.actor,
+    projectId: input.projectId,
+    jobId: input.jobId,
+    expectedRequestedById: input.actor.id,
+    attempt: { jobId: input.jobId, ...input.claim },
+    markDispatched: true,
+  }, async (tx, admission) => {
+    if (admission.job.kind !== "githubProjectSync" || admission.job.requestedById !== input.actor.id) {
+      return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
+    }
+    const row = await tx.projectGitHubSyncEntry.findUnique({
+      where: { projectId_id: { projectId: input.projectId, id: input.entry.id } },
+      select: {
+        id: true,
+        projectId: true,
+        syncRunId: true,
+        projectRepositoryLinkId: true,
+        githubConnectionId: true,
+        credentialId: true,
+        credentialSecretFingerprint: true,
+        targetKind: true,
+        status: true,
+        githubRepositoryId: true,
+        repositoryNodeId: true,
+        repositoryOwner: true,
+        repositoryName: true,
+        repositoryFullName: true,
+        configVersion: true,
+        effectivePolicyVersion: true,
+        trackedRef: true,
+        scanScopeFingerprint: true,
+        policyFingerprint: true,
+        beforeCodeGenerationId: true,
+        beforeMaterialGenerationId: true,
+      },
+    });
+    if (
+      row === null ||
+      row.projectId !== input.projectId ||
+      row.syncRunId !== input.syncRunId ||
+      row.projectRepositoryLinkId !== input.entry.projectRepositoryLinkId ||
+      row.targetKind !== input.entry.targetKind ||
+      !["pending", "running"].includes(row.status)
+    ) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
+
+    const route = await tx.projectRepositoryLink.findUnique({
+      where: { projectId_id: { projectId: input.projectId, id: input.entry.projectRepositoryLinkId } },
+      select: {
+        id: true,
+        projectId: true,
+        status: true,
+        effectivePolicyVersion: true,
+        githubConnectionId: true,
+        githubConnection: {
+          select: {
+            id: true,
+            status: true,
+            credentialId: true,
+            credential: { select: { id: true, kind: true, secretFingerprint: true } },
+          },
+        },
+        githubRepository: {
+          select: {
+            githubRepositoryId: true,
+            nodeId: true,
+            currentOwner: true,
+            currentName: true,
+            currentFullName: true,
+          },
+        },
+        configPointer: {
+          select: {
+            configVersion: true,
+            effectivePolicyVersion: true,
+            config: {
+              select: {
+                trackedRef: true,
+                effectivePolicyVersion: true,
+                scanScopeFingerprint: true,
+                policyFingerprint: true,
+              },
+            },
+          },
+        },
+        codeGenerationPointer: { select: { repositoryCodeGenerationId: true } },
+        materialGenerationPointer: { select: { repositoryMaterialGenerationId: true } },
+      },
+    });
+    if (route === null) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
+    const connection = route.githubConnection ?? null;
+    const credential = connection?.credential ?? null;
+    const configPointer = route.configPointer ?? null;
+    const config = configPointer?.config ?? null;
+    const repository = route.githubRepository;
+    const routeMatches =
+      route.projectId === input.projectId &&
+      route.status === "active" &&
+      route.effectivePolicyVersion === input.entry.effectivePolicyVersion &&
+      route.githubConnectionId === input.entry.githubConnectionId &&
+      connection !== null &&
+      connection.id === input.entry.githubConnectionId &&
+      connection.status === "verified" &&
+      connection.credentialId === input.entry.credentialId &&
+      credential !== null &&
+      credential.id === input.entry.credentialId &&
+      credential.kind === "github" &&
+      credential.secretFingerprint === input.entry.credentialSecretFingerprint &&
+      repository.githubRepositoryId.toString() === input.entry.githubRepositoryId.toString() &&
+      repository.nodeId === input.entry.repositoryNodeId &&
+      repository.currentOwner === input.entry.repositoryOwner &&
+      repository.currentName === input.entry.repositoryName &&
+      repository.currentFullName === input.entry.repositoryFullName &&
+      configPointer !== null &&
+      configPointer.configVersion === input.entry.configVersion &&
+      configPointer.effectivePolicyVersion === input.entry.effectivePolicyVersion &&
+      config !== null &&
+      config.effectivePolicyVersion === input.entry.effectivePolicyVersion &&
+      config.trackedRef === input.entry.trackedRef &&
+      config.scanScopeFingerprint === input.entry.scanScopeFingerprint &&
+      config.policyFingerprint === input.entry.policyFingerprint &&
+      (input.entry.targetKind === "code"
+        ? (route.codeGenerationPointer?.repositoryCodeGenerationId ?? null) === input.entry.beforeCodeGenerationId
+        : (route.materialGenerationPointer?.repositoryMaterialGenerationId ?? null) === input.entry.beforeMaterialGenerationId);
+    if (!routeMatches) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
+
+    const updated = await tx.projectGitHubSyncEntry.updateMany({
+      where: { projectId: input.projectId, syncRunId: input.syncRunId, id: input.entry.id, status: row.status },
+      data: { status: "running", startedAt: new Date() },
+    });
+    if (updated.count !== 1) return fail("PROJECT_GITHUB_SYNC_WRITE_CONFLICT");
+    return admission;
+  });
 }
 
 async function persistChanges(
@@ -1241,17 +1422,24 @@ async function closeProjectGitHubSyncRoot(
  * only then releases admission through the immutable reconciliation row.
  */
 export async function reconcileGitHubProjectSync(
-  input: Readonly<{ projectId: unknown; jobId: unknown; requestedById: unknown }>,
+  input: Readonly<{ projectId: unknown; jobId: unknown; actor: WebAiActor }>,
   db: PrismaClient = getDb(),
 ): Promise<PublicProjectJob> {
   const projectId = canonicalUuid(input.projectId);
   const jobId = canonicalUuid(input.jobId);
-  const requestedById = canonicalUuid(input.requestedById);
-  return withProjectJobLock(db, jobId, async (tx) => {
+  // Keep the fast rejection for ordinary requests; the locked recheck below
+  // is authoritative for every root/child/reconciliation transition.
+  await assertWebAiProjectAccess(input.actor, projectId, "edit", db);
+  return withProjectJobAccessTransaction(db, {
+    actor: input.actor,
+    projectId,
+    jobId,
+  }, async (tx, admission) => {
+    const currentActor = admission.access.actor;
     await lockGitHubProject(tx, projectId);
     const job = await tx.backgroundJob.findUnique({
       where: { id: jobId },
-      select: { id: true, projectId: true, kind: true, status: true, requestedById: true },
+      select: { id: true, projectId: true, kind: true, status: true },
     });
     if (job === null) return fail("PROJECT_GITHUB_SYNC_RUN_NOT_FOUND");
     if (job.projectId !== projectId) return fail("PROJECT_GITHUB_SYNC_RUN_NOT_FOUND");
@@ -1277,7 +1465,7 @@ export async function reconcileGitHubProjectSync(
       },
     });
     if (root === null || root.projectId !== projectId) return fail("PROJECT_GITHUB_SYNC_RUN_NOT_FOUND");
-    if (root.reconciliation !== null) return getProjectJob(projectId, jobId, tx);
+    if (root.reconciliation !== null) return getProjectJobInternal(projectId, jobId, tx);
     if (!["running", "unknown"].includes(job.status)) return fail("PROJECT_GITHUB_SYNC_RECONCILIATION_NOT_DUE");
     if (!["running", "unknown"].includes(root.status)) return fail("PROJECT_GITHUB_SYNC_RECONCILIATION_NOT_DUE");
 
@@ -1404,7 +1592,7 @@ export async function reconcileGitHubProjectSync(
         id: randomUUID(),
         projectId,
         syncRunId: root.id,
-        requestedById,
+        requestedById: currentActor.id,
         resolution: "explicitAbandon",
         childClassifications: jsonValue(classifications),
         evidenceFingerprint,
@@ -1421,28 +1609,31 @@ export async function reconcileGitHubProjectSync(
       },
     });
     if (updatedJob.count !== 1) return fail("PROJECT_GITHUB_SYNC_WRITE_CONFLICT");
-    return getProjectJob(projectId, jobId, tx);
+    return getProjectJobInternal(projectId, jobId, tx);
   });
 }
 
 /** Cancel a project sync before any child target is dispatched. */
 export async function cancelGitHubProjectSync(
-  input: Readonly<{ projectId: unknown; jobId: unknown; requestedById?: unknown }>,
+  input: Readonly<{ projectId: unknown; jobId: unknown; actor: WebAiActor }>,
   db: PrismaClient = getDb(),
 ): Promise<PublicProjectJob> {
   const projectId = canonicalUuid(input.projectId);
   const jobId = canonicalUuid(input.jobId);
-  const requestedById = input.requestedById === undefined ? null : canonicalUuid(input.requestedById);
-  return withProjectJobLock(db, jobId, async (tx) => {
+  // Keep the fast rejection for ordinary requests; the locked recheck below
+  // is authoritative before reading or mutating the job/root/entries.
+  await assertWebAiProjectAccess(input.actor, projectId, "edit", db);
+  return withProjectJobAccessTransaction(db, {
+    actor: input.actor,
+    projectId,
+    jobId,
+  }, async (tx) => {
     await lockGitHubProject(tx, projectId);
     const job = await tx.backgroundJob.findUnique({
       where: { id: jobId },
-      select: { id: true, projectId: true, kind: true, status: true, requestedById: true },
+      select: { id: true, projectId: true, kind: true, status: true },
     });
     if (job === null || job.projectId !== projectId || job.kind !== "githubProjectSync") {
-      return fail("PROJECT_GITHUB_SYNC_RUN_NOT_FOUND");
-    }
-    if (requestedById !== null && job.requestedById !== requestedById) {
       return fail("PROJECT_GITHUB_SYNC_RUN_NOT_FOUND");
     }
     if (job.status !== "queued" && job.status !== "waitingConsent") {
@@ -1487,24 +1678,25 @@ export async function cancelGitHubProjectSync(
       data: { status: "cancelled", stage: "cancelled", completedAt, reconciliationRequired: false },
     });
     if (updatedJob.count !== 1) return fail("PROJECT_GITHUB_SYNC_WRITE_CONFLICT");
-    return getProjectJob(projectId, jobId, tx);
+    return getProjectJobInternal(projectId, jobId, tx);
   });
 }
 
 export async function getProjectGitHubSync(
   input: unknown,
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
   page: Readonly<{ offset?: number; limit?: number }> = {},
 ): Promise<PublicProjectGitHubSyncRun> {
   const parsed = parseRunInput(input);
-  return readSyncRun(db, parsed.projectId, parsed.syncRunId, page);
+  await assertWebAiProjectAccess(actor, parsed.projectId, "view", db);
+  return readProjectGitHubSyncInternal(parsed, db, page);
 }
 
-export async function prepareGitHubProjectSync(
-  input: Readonly<{ projectId: unknown; requestedById: unknown; clientKey: unknown }>,
+async function prepareGitHubProjectSyncInternal(
+  parsed: Readonly<{ projectId: string; requestedById: string; clientKey: string }>,
   db: PrismaClient = getDb(),
 ): Promise<Readonly<{ job: PublicProjectJob; syncRun: PublicProjectGitHubSyncRun }>> {
-  const parsed = parseStartInput(input);
   const hash = idempotencyHash(parsed.projectId, parsed.clientKey);
   const prepared = await transactionRetry(db, async (tx) => {
     await lockGitHubProject(tx, parsed.projectId);
@@ -1596,16 +1788,25 @@ export async function prepareGitHubProjectSync(
   return prepared;
 }
 
+export async function prepareGitHubProjectSync(
+  input: Readonly<{ projectId: unknown; requestedBy: WebAiActor; clientKey: unknown }>,
+  db: PrismaClient = getDb(),
+): Promise<Readonly<{ job: PublicProjectJob; syncRun: PublicProjectGitHubSyncRun }>> {
+  const parsed = parseStartInput({ projectId: input.projectId, clientKey: input.clientKey });
+  const currentActor = await assertWebAiProjectAccess(input.requestedBy, parsed.projectId, "edit", db);
+  return prepareGitHubProjectSyncInternal({ ...parsed, requestedById: currentActor.id }, db);
+}
+
 export async function runGitHubProjectSyncJob(
-  input: Readonly<{ projectId: string; requestedBy: Pick<AppUser, "id">; clientKey: unknown }>,
+  input: Readonly<{ projectId: string; requestedBy: WebAiActor; clientKey: unknown }>,
   db: PrismaClient = getDb(),
   runtime: ProjectGitHubSyncRuntime = {},
 ): Promise<PublicProjectJob> {
-  const prepared = await prepareGitHubProjectSync({ projectId: input.projectId, requestedById: input.requestedBy.id, clientKey: input.clientKey }, db);
+  const prepared = await prepareGitHubProjectSync(input, db);
   if (prepared.job.status !== "queued") return prepared.job;
   const claim = await claimProjectJob(prepared.job.id, db, "githubProjectSync");
-  if (claim === false) return getProjectJob(input.projectId, prepared.job.id, db);
-  const heartbeat = startProjectJobHeartbeat({ jobId: prepared.job.id, ...claim }, db);
+  if (claim === false) return getProjectJobInternal(input.projectId, prepared.job.id, db);
+  let heartbeat: ProjectJobHeartbeat | null = null;
   const summary: RootExecutionSummary = { knownFailure: false, rateLimited: false, unknown: false, stopped: false, successfulCount: 0, warnings: [], changes: [] };
   let codeBatch: ProjectCodeScanBatchView | null = null;
   const codeServices = new Map<string, GitHubCodeScanService>();
@@ -1614,7 +1815,7 @@ export async function runGitHubProjectSyncJob(
   let frozenById = new Map<string, FrozenScopeEntry>();
   const deadline = new Date(prepared.syncRun.deadlineAt).getTime();
   const nowExpired = () => (runtime.now?.() ?? Date.now()) >= deadline;
-  const publicSummary = async () => getProjectGitHubSync({ projectId: input.projectId, syncRunId: prepared.syncRun.id }, db);
+  const publicSummary = async () => readProjectGitHubSyncInternal({ projectId: input.projectId, syncRunId: prepared.syncRun.id }, db);
   const setRoot = async (data: Prisma.ProjectGitHubSyncRunUpdateManyMutationInput) => {
     const updated = await db.projectGitHubSyncRun.updateMany({ where: { projectId: input.projectId, id: prepared.syncRun.id, status: "running" }, data });
     if (updated.count !== 1) return fail("PROJECT_GITHUB_SYNC_WRITE_CONFLICT");
@@ -1642,13 +1843,22 @@ export async function runGitHubProjectSyncJob(
     materialServices.set(cacheKey, service);
     return service;
   };
-  let parentWasDispatched = false;
   let providerDispatchPending = false;
   let rootTerminalized = false;
   let jobTerminalized = false;
   let completedRootStatus: ProjectGitHubSyncRunStatus | null = null;
   let caughtError: unknown = null;
   try {
+    // This root admission only proves that the claimed job may enter its
+    // database orchestration. It does not authorize any child target; each
+    // child obtains a fresh dispatch admission before credential/client work.
+    await admitProjectSyncRoot({
+      projectId: input.projectId,
+      jobId: prepared.job.id,
+      actor: input.requestedBy,
+      claim,
+    }, db);
+    heartbeat = startProjectJobHeartbeat({ jobId: prepared.job.id, ...claim }, db);
     const loadedEntries = await db.projectGitHubSyncEntry.findMany({
       where: { projectId: input.projectId, syncRunId: prepared.syncRun.id },
       orderBy: [{ ordinal: "asc" }],
@@ -1665,14 +1875,6 @@ export async function runGitHubProjectSyncJob(
     if (codeEntries.length > 0) {
       const first = frozenById.get(codeEntries[0]!.id);
       if (!first) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
-      const codeService = await serviceForCode(first.credentialId, first.credentialSecretFingerprint);
-      codeBatch = await codeService.prepareProjectScanFrozen({ projectId: input.projectId, targets: codeEntries.map((entry) => {
-        const frozen = frozenById.get(entry.id);
-        if (!frozen) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
-        return toCodeTarget(frozen);
-      }) });
-      for (const entry of codeEntries) await updateEntry(db, { projectId: input.projectId, entryId: entry.id, status: "pending", childCodeBatchId: codeBatch.id });
-      await setRoot({ stage: "code" });
       for (const entry of codeEntries) {
         const frozen = frozenById.get(entry.id);
         if (!frozen) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
@@ -1686,10 +1888,38 @@ export async function runGitHubProjectSyncJob(
           summary.changes.push(...await persistChanges(db, frozen, prepared.syncRun.id, after.items, false, after.withheld));
           continue;
         }
-        await updateEntry(db, { projectId: input.projectId, entryId: entry.id, status: "running" });
+        let childDispatchPending = false;
         let child: ProjectCodeScanBatchView;
         try {
+          // The first code target's admission also covers the database-only
+          // batch preparation. It is not reused to authorize later targets.
+          await admitProjectSyncChild({
+            projectId: input.projectId,
+            jobId: prepared.job.id,
+            syncRunId: prepared.syncRun.id,
+            actor: input.requestedBy,
+            claim,
+            entry: frozen,
+          }, db);
+          childDispatchPending = true;
+          providerDispatchPending = true;
           const childService = await serviceForCode(frozen.credentialId, frozen.credentialSecretFingerprint);
+          if (codeBatch === null) {
+            codeBatch = await childService.prepareProjectScanFrozen({ projectId: input.projectId, targets: codeEntries.map((candidate) => {
+              const target = frozenById.get(candidate.id);
+              if (!target) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
+              return toCodeTarget(target);
+            }) });
+            for (const candidate of codeEntries) {
+              await updateEntry(db, {
+                projectId: input.projectId,
+                entryId: candidate.id,
+                status: candidate.id === frozen.id ? "running" : "pending",
+                childCodeBatchId: codeBatch.id,
+              });
+            }
+            await setRoot({ stage: "code" });
+          }
           const childRun = codeBatch.runs.find((run) => run.projectRepositoryLinkId === entry.projectRepositoryLinkId);
           if (childRun === undefined) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
           if (nowExpired()) {
@@ -1702,15 +1932,13 @@ export async function runGitHubProjectSyncJob(
               status: "skipped",
               failureCode: "PROJECT_GITHUB_SYNC_DEADLINE_EXCEEDED",
             });
+            if (childDispatchPending) {
+              await markProviderAcknowledged({ jobId: prepared.job.id, ...claim }, db);
+              childDispatchPending = false;
+              providerDispatchPending = false;
+            }
             continue;
           }
-          // Only claim an uncertain provider dispatch after the read-only
-          // client and the frozen child identity have been prepared.  Client
-          // setup/validation failures are deterministic and must close the
-          // root as known failure rather than pretending a request happened.
-          await markProviderDispatched({ jobId: prepared.job.id, ...claim }, db);
-          parentWasDispatched = true;
-          providerDispatchPending = true;
           child = await childService.executeProjectScanRun({
             projectId: input.projectId,
             batchId: codeBatch.id,
@@ -1724,8 +1952,15 @@ export async function runGitHubProjectSyncJob(
             await updateEntry(db, { projectId: input.projectId, entryId: entry.id, status: "unknown", failureCode: "GITHUB_REQUEST_FAILED" });
             break;
           }
-          if (parentWasDispatched && providerDispatchPending) {
+          if (error instanceof Error && "code" in error &&
+            ["ACCESS_FORBIDDEN", "ACCOUNT_DISABLED"].includes(String((error as { code?: unknown }).code))) {
+            summary.stopped = true;
+            if (frozen.requiredForProjectSnapshot) summary.knownFailure = true;
+            break;
+          }
+          if (childDispatchPending) {
             await markProviderAcknowledged({ jobId: prepared.job.id, ...claim }, db);
+            childDispatchPending = false;
             providerDispatchPending = false;
           }
           summary.knownFailure = true;
@@ -1741,8 +1976,9 @@ export async function runGitHubProjectSyncJob(
           await updateEntry(db, { projectId: input.projectId, entryId: entry.id, status: "unknown", failureCode: "GITHUB_REQUEST_FAILED" });
           break;
         }
-        if (parentWasDispatched && providerDispatchPending) {
+        if (childDispatchPending) {
           await markProviderAcknowledged({ jobId: prepared.job.id, ...claim }, db);
+          childDispatchPending = false;
           providerDispatchPending = false;
         }
         if (outcome === "rateLimited") {
@@ -1775,7 +2011,7 @@ export async function runGitHubProjectSyncJob(
         summary.changes.push(...await persistChanges(db, frozen, prepared.syncRun.id, after.items, true, after.withheld, after.reliable));
       }
       if (summary.stopped) {
-        await markUnstartedCodeRuns(db, input.projectId, codeBatch.id);
+        if (codeBatch !== null) await markUnstartedCodeRuns(db, input.projectId, codeBatch.id);
         const skippedIds = await markPendingSyncEntriesSkipped(db, input.projectId, prepared.syncRun.id, "code");
         for (const entryId of skippedIds) {
           const frozen = frozenById.get(entryId);
@@ -1785,11 +2021,15 @@ export async function runGitHubProjectSyncJob(
           summary.changes.push(...await persistChanges(db, frozen, prepared.syncRun.id, after.items, false, after.withheld));
         }
       }
-      const finalizerEntry = frozenById.get(codeEntries[0]!.id);
-      if (!finalizerEntry) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
-      const finalizer = await serviceForCode(finalizerEntry.credentialId, finalizerEntry.credentialSecretFingerprint);
-      codeBatch = await finalizer.finalizeProjectScan({ projectId: input.projectId, batchId: codeBatch.id, allowQueued: true } as never);
-      if (codeBatch.status === "unknown") { summary.unknown = true; summary.stopped = true; }
+      if (codeBatch !== null) {
+        const finalizerEntry = frozenById.get(codeEntries[0]!.id);
+        if (!finalizerEntry) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
+        const finalizer = await serviceForCode(finalizerEntry.credentialId, finalizerEntry.credentialSecretFingerprint);
+        codeBatch = await finalizer.finalizeProjectScan({ projectId: input.projectId, batchId: codeBatch.id, allowQueued: true } as never);
+        if (codeBatch.status === "unknown") { summary.unknown = true; summary.stopped = true; }
+      } else if (!summary.stopped) {
+        return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
+      }
     }
     if (!summary.stopped && materialEntries.length > 0) await setRoot({ stage: "material" });
     for (const entry of materialEntries) {
@@ -1807,9 +2047,21 @@ export async function runGitHubProjectSyncJob(
         summary.changes.push(...await persistChanges(db, frozen, prepared.syncRun.id, after.items, false, after.withheld));
         continue;
       }
-      await updateEntry(db, { projectId: input.projectId, entryId: entry.id, status: "running" });
+      let childDispatchPending = false;
       let child: RepositoryMaterialSyncView;
       try {
+        // Preparation and the one material child are kept behind one
+        // admission. This marker is not reused for any later child.
+        await admitProjectSyncChild({
+          projectId: input.projectId,
+          jobId: prepared.job.id,
+          syncRunId: prepared.syncRun.id,
+          actor: input.requestedBy,
+          claim,
+          entry: frozen,
+        }, db);
+        childDispatchPending = true;
+        providerDispatchPending = true;
         const childService = await serviceForMaterial(frozen.credentialId, frozen.credentialSecretFingerprint);
         const preparedChild = await childService.prepareRepositorySyncFrozen({ projectId: input.projectId, target: toMaterialTarget(frozen) });
         await updateEntry(db, { projectId: input.projectId, entryId: entry.id, status: "running", childMaterialSyncRunId: preparedChild.id });
@@ -1825,14 +2077,13 @@ export async function runGitHubProjectSyncJob(
             childMaterialSyncRunId: preparedChild.id,
             failureCode: "PROJECT_GITHUB_SYNC_DEADLINE_EXCEEDED",
           });
+          if (childDispatchPending) {
+            await markProviderAcknowledged({ jobId: prepared.job.id, ...claim }, db);
+            childDispatchPending = false;
+            providerDispatchPending = false;
+          }
           continue;
         }
-        // The child preparation validates the frozen repository/config CAS.
-        // Mark the parent dispatch only once the request can actually be
-        // issued, so setup errors remain deterministic known failures.
-        await markProviderDispatched({ jobId: prepared.job.id, ...claim }, db);
-        parentWasDispatched = true;
-        providerDispatchPending = true;
         child = await childService.executeRepositorySync({
           projectId: input.projectId,
           runId: preparedChild.id,
@@ -1846,8 +2097,15 @@ export async function runGitHubProjectSyncJob(
           await updateEntry(db, { projectId: input.projectId, entryId: entry.id, status: "unknown", failureCode: "GITHUB_REQUEST_FAILED" });
           break;
         }
-        if (parentWasDispatched && providerDispatchPending) {
+        if (error instanceof Error && "code" in error &&
+          ["ACCESS_FORBIDDEN", "ACCOUNT_DISABLED"].includes(String((error as { code?: unknown }).code))) {
+          summary.stopped = true;
+          if (frozen.requiredForProjectSnapshot) summary.knownFailure = true;
+          break;
+        }
+        if (childDispatchPending) {
           await markProviderAcknowledged({ jobId: prepared.job.id, ...claim }, db);
+          childDispatchPending = false;
           providerDispatchPending = false;
         }
         if (frozen.requiredForProjectSnapshot) summary.knownFailure = true;
@@ -1865,8 +2123,11 @@ export async function runGitHubProjectSyncJob(
       }
       const outcome = materialOutcome(child.status);
       if (outcome === "unknown") { summary.unknown = true; summary.stopped = true; await updateEntry(db, { projectId: input.projectId, entryId: entry.id, status: "unknown", childMaterialSyncRunId: child.id, failureCode: "GITHUB_REQUEST_FAILED" }); break; }
-      await markProviderAcknowledged({ jobId: prepared.job.id, ...claim }, db);
-      providerDispatchPending = false;
+      if (childDispatchPending) {
+        await markProviderAcknowledged({ jobId: prepared.job.id, ...claim }, db);
+        childDispatchPending = false;
+        providerDispatchPending = false;
+      }
       if (child.status === "cancelled") {
         // A cancelled child from this path means the read-only client failed
         // before dispatch.  It is a known incomplete target, not an unknown
@@ -1969,6 +2230,7 @@ export async function runGitHubProjectSyncJob(
     // Stop the request-bound heartbeat before publishing terminal state.  A
     // heartbeat that failed concurrently means this executor can no longer
     // prove ownership of the lease, so fail closed as unknown.
+    if (heartbeat === null) return fail("PROJECT_GITHUB_SYNC_INTEGRITY_ERROR");
     await heartbeat.stop();
     if (heartbeat.failure !== null) {
       summary.unknown = true;
@@ -2001,29 +2263,29 @@ export async function runGitHubProjectSyncJob(
       await markProjectJobUnknown({ jobId: prepared.job.id, ...claim, error: { code: "RECONCILIATION_REQUIRED" }, result: await publicSummary() }, db);
       jobTerminalized = true;
     } else if (terminalStatus === "succeeded") {
-      if (parentWasDispatched && providerDispatchPending) {
+      if (providerDispatchPending) {
         await markProviderAcknowledged({ jobId: prepared.job.id, ...claim, allowExpired: true }, db);
         providerDispatchPending = false;
       }
       await finishProjectJob({ jobId: prepared.job.id, ...claim, result: await publicSummary(), allowExpired: true }, db);
       jobTerminalized = true;
     } else {
-      if (parentWasDispatched && providerDispatchPending) {
+      if (providerDispatchPending) {
         await markProviderAcknowledged({ jobId: prepared.job.id, ...claim, allowExpired: true }, db);
         providerDispatchPending = false;
       }
       await failProjectJob({ jobId: prepared.job.id, ...claim, error: { code: failureCode ?? "PROJECT_GITHUB_SYNC_INCOMPLETE" }, result: await publicSummary(), allowExpired: true }, db);
       jobTerminalized = true;
     }
-    return getProjectJob(input.projectId, prepared.job.id, db);
+    return getProjectJobInternal(input.projectId, prepared.job.id, db);
   } catch (error) {
     caughtError = error;
     throw error;
   } finally {
     // `stop` is idempotent and must complete before any recovery transition.
     // This prevents an in-flight heartbeat from racing a terminal update.
-    await heartbeat.stop();
-    const heartbeatFailure = heartbeat.failure;
+    if (heartbeat !== null) await heartbeat.stop();
+    const heartbeatFailure = heartbeat?.failure ?? null;
     if (!rootTerminalized) {
       const uncertain = summary.unknown || providerDispatchPending || heartbeatFailure !== null ||
         (caughtError !== null && isUncertainProviderDispatch(caughtError));
@@ -2049,13 +2311,13 @@ export async function runGitHubProjectSyncJob(
           result,
         }, db);
       } else if (completedRootStatus === "succeeded") {
-        if (parentWasDispatched && providerDispatchPending) {
+        if (providerDispatchPending) {
           await markProviderAcknowledged({ jobId: prepared.job.id, ...claim, allowExpired: true }, db);
           providerDispatchPending = false;
         }
         await finishProjectJob({ jobId: prepared.job.id, ...claim, result, allowExpired: true }, db);
       } else {
-        if (parentWasDispatched && providerDispatchPending) {
+        if (providerDispatchPending) {
           await markProviderAcknowledged({ jobId: prepared.job.id, ...claim, allowExpired: true }, db);
           providerDispatchPending = false;
         }

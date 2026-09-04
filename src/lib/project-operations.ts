@@ -334,22 +334,22 @@ export async function getProjectOperationsSummaries(projectIds: readonly string[
   if (projectIds.length === 0) return new Map<string, ProjectPlanHealth>();
   const where = { projectId: { in: [...projectIds] } };
   const [projects, workItems, dependencies, evidenceLinks, impacts, actions, projectMembers, workspaceMembers] = await Promise.all([
-    db.project.findMany({ where: { id: { in: [...projectIds] } }, select: { id: true, workspaceId: true } }),
+    db.project.findMany({ where: { id: { in: [...projectIds] } }, select: { id: true, workspaceId: true, membershipInheritanceMode: true } }),
     db.projectWorkItem.findMany({ where, select: { projectId: true, id: true, title: true, status: true, targetDate: true, assigneeId: true, acceptanceCriteria: true, origin: true } }),
     db.projectWorkItemDependency.findMany({ where: { ...where, removedAt: null }, select: { projectId: true, workItemId: true, dependsOnId: true } }),
     db.projectWorkItemEvidenceLink.findMany({ where: { ...where, removedAt: null }, select: { projectId: true, ...operationsEvidenceSelect } }),
     db.projectPlanImpactSuggestion.findMany({ where, select: { projectId: true, status: true } }),
     db.projectAction.findMany({ where: { ...where, status: "waitingApproval" }, select: { projectId: true, status: true } }),
-    db.projectMembership.findMany({ where: { ...where, role: { in: ["owner", "editor"] }, user: { disabledAt: null } }, select: { projectId: true, userId: true } }),
+    db.projectMembership.findMany({ where: { ...where, accessState: "confirmed", role: { in: ["owner", "editor"] }, user: { disabledAt: null } }, select: { projectId: true, userId: true } }),
     db.workspaceMembership.findMany({
-      where: { role: { in: ["owner", "admin"] }, user: { disabledAt: null }, workspace: { projects: { some: { id: { in: [...projectIds] } } } } },
+      where: { accessState: "confirmed", role: { in: ["owner", "admin"] }, user: { disabledAt: null }, workspace: { projects: { some: { id: { in: [...projectIds] } } } } },
       select: { workspaceId: true, userId: true },
     }),
   ]);
   const eligibleAssignees = new Set(projectMembers.map((membership) => `${membership.projectId}:${membership.userId}`));
   for (const project of projects) {
     for (const membership of workspaceMembers) {
-      if (project.workspaceId === membership.workspaceId) eligibleAssignees.add(`${project.id}:${membership.userId}`);
+      if (project.membershipInheritanceMode === "workspaceInherited" && project.workspaceId === membership.workspaceId) eligibleAssignees.add(`${project.id}:${membership.userId}`);
     }
   }
   const summaries = new Map<string, ProjectPlanHealth>();

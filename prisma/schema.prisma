@@ -175,6 +175,29 @@ enum ResourceOwnershipState {
   confirmed
 }
 
+enum MembershipAccessState {
+  pending
+  confirmed
+  revoked
+}
+
+enum ProjectMembershipInheritanceMode {
+  workspaceInherited @map("workspace_inherited")
+  projectOnly        @map("project_only")
+}
+
+enum MembershipAccessAuditMembershipKind {
+  workspace
+  project
+}
+
+enum MembershipAccessAuditAction {
+  migrationQuarantined @map("migration_quarantined")
+  confirmed
+  revoked
+  bootstrapConfirmed  @map("bootstrap_confirmed")
+}
+
 enum WorkspaceMembershipRole {
   owner
   admin
@@ -1001,6 +1024,7 @@ enum ProjectCodeSnapshotStatus {
 model Project {
   id                                   String                                @id @default(uuid()) @db.Uuid
   workspaceId                          String                                @default("00000000-0000-4000-8000-000000000001") @db.Uuid
+  membershipInheritanceMode            ProjectMembershipInheritanceMode     @default(projectOnly)
   name                                 String
   slug                                 String                                @unique
   description                          String?                               @db.Text
@@ -3865,13 +3889,17 @@ model WorkspaceMembership {
   workspaceId String                  @db.Uuid
   userId      String                  @db.Uuid
   role        WorkspaceMembershipRole
+  accessState MembershipAccessState   @default(pending)
   createdAt   DateTime                @default(now())
   updatedAt   DateTime                @updatedAt
   workspace   Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   user        AppUser                 @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-  @@unique([workspaceId, userId])
+  // Runtime uniqueness is state-aware: the migration installs a partial
+  // unique index for accessState <> revoked. Prisma's DMMF cannot represent
+  // that predicate, so application code must use the governance helpers.
   @@index([userId, role])
+  @@index([userId, workspaceId, accessState])
 }
 
 model ProjectMembership {
@@ -3879,13 +3907,43 @@ model ProjectMembership {
   projectId String                @db.Uuid
   userId    String                @db.Uuid
   role      ProjectMembershipRole
+  accessState MembershipAccessState @default(pending)
   createdAt DateTime              @default(now())
   updatedAt DateTime              @updatedAt
   project   Project               @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   user      AppUser               @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-  @@unique([projectId, userId])
+  // Runtime uniqueness is state-aware: the migration installs a partial
+  // unique index for accessState <> revoked. Prisma's DMMF cannot represent
+  // that predicate, so application code must use the governance helpers.
   @@index([userId, role])
+  @@index([userId, projectId, accessState])
+}
+
+model MembershipAccessAudit {
+  id                   String                              @id @default(uuid()) @db.Uuid
+  membershipKind       MembershipAccessAuditMembershipKind
+  membershipId         String                              @db.Uuid
+  workspaceId          String                              @db.Uuid
+  projectId            String?                             @db.Uuid
+  userId               String                              @db.Uuid
+  action               MembershipAccessAuditAction
+  previousState        MembershipAccessState?
+  newState             MembershipAccessState
+  roleSnapshot         String                              @db.VarChar(32)
+  actorId              String?                             @db.Uuid
+  reason               String                              @db.VarChar(500)
+  membershipFingerprint String                             @db.Char(64)
+  manifestFingerprint  String?                             @db.Char(64)
+  transactionId        BigInt                              @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt            DateTime                            @default(now())
+
+  @@unique([membershipKind, membershipId, action])
+  @@index([membershipKind, membershipId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([userId, createdAt])
+  @@index([membershipFingerprint])
 }
 
 model WorkspaceInvitation {

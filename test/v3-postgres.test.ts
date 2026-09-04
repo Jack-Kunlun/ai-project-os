@@ -7,7 +7,7 @@ import test from "node:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { ProjectItemRevisionAction } from "@prisma/client";
 import { AccessControlError, accessibleProjectWhere, authorizeApiRequest } from "../src/lib/access-control";
-import { createProjectAutomationRule, runAutomationWorkerCycle } from "../src/lib/automation";
+import { AutomationError, createProjectAutomationRule, listUserNotifications, openNotification, runAutomationWorkerCycle } from "../src/lib/automation";
 import { DEFAULT_WORKSPACE_ID } from "../src/lib/auth";
 import { getDb } from "../src/lib/db";
 import { analyzeProjectMemoryQuality, resolveMemoryQualityIssue, updateProjectItemMemoryMetadata } from "../src/lib/memory-quality";
@@ -16,6 +16,7 @@ import { appendProjectItemRevision, createPrimaryProjectItemEvidence } from "../
 import { updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { createProjectWebSource, syncProjectWebSource } from "../src/lib/web-sources";
 import { acceptWorkspaceInvitation, createWorkspaceInvitation, updateWorkspaceMember, WorkspaceError } from "../src/lib/workspaces";
+import { findConfirmedProjectMembership, findConfirmedWorkspaceMembership, grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership, revokeWorkspaceMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.V3_POSTGRES_GATE === "1";
 
@@ -27,6 +28,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   const projectA = randomUUID();
   const projectB = randomUUID();
   const memberId = randomUUID();
+  const outsiderAdminId = randomUUID();
   const roleWorkspaceId = randomUUID();
   const masterKeyPath = `/tmp/ai-project-os-v3-${process.pid}-${suffix}.key`;
   const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
@@ -85,17 +87,18 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     const admin = await db.appUser.findFirstOrThrow({ where: { role: "admin" } });
     const memberEmail = `v3-member-${suffix}@example.com`;
     await db.appUser.create({ data: { id: memberId, username: `v3_member_${suffix}`, email: memberEmail, role: "member", passwordHash: null, passwordSalt: null } });
+    await db.appUser.create({ data: { id: outsiderAdminId, username: `v3_outsider_admin_${suffix}`, role: "admin", passwordHash: null, passwordSalt: null } });
     await db.workspace.create({ data: { id: roleWorkspaceId, name: `Role safety ${suffix}`, slug: `role-safety-${suffix}`, createdById: admin.id } });
-    await db.workspaceMembership.create({ data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "member" } });
-    await db.workspaceMembership.create({ data: { workspaceId: roleWorkspaceId, userId: memberId, role: "owner" } });
     await db.project.createMany({ data: [
       { id: projectA, workspaceId: DEFAULT_WORKSPACE_ID, name: `V3 A ${suffix}`, slug: `v3-a-${suffix}` },
       { id: projectB, workspaceId: DEFAULT_WORKSPACE_ID, name: `V3 B ${suffix}`, slug: `v3-b-${suffix}` },
     ] });
-    await db.projectMembership.createMany({ data: [
-      { projectId: projectA, userId: memberId, role: "viewer" },
-      { projectId: projectB, userId: memberId, role: "editor" },
-    ] });
+    await db.$transaction(async (tx) => {
+      await grantWorkspaceMembership(tx, { workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "member", actorId: admin.id, reason: "v3_gate_fixture_default_workspace" });
+      await grantWorkspaceMembership(tx, { workspaceId: roleWorkspaceId, userId: memberId, role: "owner", actorId: admin.id, reason: "v3_gate_fixture_role_workspace" });
+      await grantProjectMembership(tx, { projectId: projectA, workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "viewer", actorId: admin.id, reason: "v3_gate_fixture_project_a" });
+      await grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "editor", actorId: admin.id, reason: "v3_gate_fixture_project_b" });
+    });
 
     const member = { id: memberId, role: "member" as const };
     const visible = await db.project.findMany({ where: accessibleProjectWhere(member), select: { id: true } });
@@ -106,11 +109,54 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     await assert.rejects(() => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectB}/lifecycle`, { method: "PATCH" }), db), (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN");
     await assert.rejects(() => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectB}`, { method: "DELETE" }), db), (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN");
     await assert.rejects(() => authorizeApiRequest(member, new Request("http://localhost/api/settings/providers", { method: "GET" }), db), (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN");
-    await assert.rejects(() => updateWorkspaceMember(roleWorkspaceId, memberId, { workspaceRole: "viewer" }, admin, db), (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_LAST_OWNER_REQUIRED");
+
+    const platformNotification = await db.notification.create({ data: {
+      userId: outsiderAdminId,
+      projectId: null,
+      kind: "system",
+      severity: "info",
+      title: "平台通知",
+      body: "平台维护窗口已安排。",
+      actionHref: null,
+      dedupeKey: digest(`v3-platform-notification-${suffix}`),
+    } });
+    const projectNotification = await db.notification.create({ data: {
+      userId: outsiderAdminId,
+      projectId: projectB,
+      kind: "consentRequired",
+      severity: "warning",
+      title: "项目需要确认",
+      body: "项目来源需要人工确认。",
+      actionHref: `/projects/${projectB}/automations`,
+      dedupeKey: digest(`v3-project-notification-${suffix}`),
+    } });
+    const withoutMembership = await listUserNotifications(outsiderAdminId, db);
+    assert.deepEqual(withoutMembership.notifications.map((notification) => notification.id), [platformNotification.id]);
+    await assert.rejects(
+      () => openNotification(outsiderAdminId, projectNotification.id, db),
+      (error: unknown) => error instanceof AutomationError && error.code === "NOTIFICATION_NOT_FOUND",
+    );
+    await db.$transaction((tx) => grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: outsiderAdminId, role: "viewer", actorId: admin.id, reason: "v3_gate_fixture_outsider_project" }));
+    assert.deepEqual((await listUserNotifications(outsiderAdminId, db)).notifications.map((notification) => notification.id).sort(), [platformNotification.id, projectNotification.id].sort());
+    await db.$transaction(async (tx) => {
+      await revokeProjectMembership(tx, projectB, outsiderAdminId, DEFAULT_WORKSPACE_ID, { actorId: admin.id, reason: "v3_gate_revoke_outsider_project" });
+      await grantWorkspaceMembership(tx, { workspaceId: DEFAULT_WORKSPACE_ID, userId: outsiderAdminId, role: "admin", actorId: admin.id, reason: "v3_gate_fixture_outsider_workspace" });
+    });
+    assert.deepEqual((await listUserNotifications(outsiderAdminId, db)).notifications.map((notification) => notification.id).sort(), [platformNotification.id, projectNotification.id].sort());
+    const openedProjectNotification = await openNotification(outsiderAdminId, projectNotification.id, db);
+    assert.equal(openedProjectNotification.id, projectNotification.id);
+    await db.$transaction((tx) => revokeWorkspaceMembership(tx, DEFAULT_WORKSPACE_ID, outsiderAdminId, { actorId: admin.id, reason: "v3_gate_revoke_outsider_workspace" }));
+    await db.notification.update({ where: { id: projectNotification.id }, data: { readAt: null } });
+    assert.deepEqual((await listUserNotifications(outsiderAdminId, db)).notifications.map((notification) => notification.id), [platformNotification.id]);
+    await assert.rejects(
+      () => openNotification(outsiderAdminId, projectNotification.id, db),
+      (error: unknown) => error instanceof AutomationError && error.code === "NOTIFICATION_NOT_FOUND",
+    );
+    await assert.rejects(() => updateWorkspaceMember(roleWorkspaceId, memberId, { workspaceRole: "viewer" }, member, db), (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_LAST_OWNER_REQUIRED");
     const invitation = await createWorkspaceInvitation(DEFAULT_WORKSPACE_ID, { email: memberEmail, workspaceRole: "viewer", projectId: projectB, projectRole: "viewer", expiresInDays: 7 }, admin, db);
     await acceptWorkspaceInvitation(invitation.token, { id: memberId, email: memberEmail }, "/dashboard", db);
-    assert.equal((await db.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId } } })).role, "member");
-    assert.equal((await db.projectMembership.findUniqueOrThrow({ where: { projectId_userId: { projectId: projectB, userId: memberId } } })).role, "editor");
+    assert.equal((await findConfirmedWorkspaceMembership(db, DEFAULT_WORKSPACE_ID, memberId))?.role, "member");
+    assert.equal((await findConfirmedProjectMembership(db, projectB, memberId))?.role, "editor");
 
     const sourceText = "数据库选择 PostgreSQL。自动同步已启用。风险需要复核。";
     const sourceHash = digest(sourceText);
@@ -188,7 +234,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     oidcUserId = oidcUser.id;
     assert.equal(oidcUser.role, "user");
     assert.equal(oidcUser.passwordHash, null);
-    assert.equal((await db.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: DEFAULT_WORKSPACE_ID, userId: oidcUser.id } } })).role, "viewer");
+    assert.equal((await findConfirmedWorkspaceMembership(db, DEFAULT_WORKSPACE_ID, oidcUser.id))?.role, "viewer");
     assert.equal(await db.appSession.count({ where: { userId: oidcUser.id, revokedAt: null } }), 1);
     await assert.rejects(() => completeOidcLogin({ code: "valid-code", state: flow.state, cookieState: flow.state }, db), (error: unknown) => error instanceof OidcError && error.code === "OIDC_FLOW_INVALID");
 
@@ -256,9 +302,9 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     disposableOidcCredentialId = null;
 
     const activeProject = await db.project.findUniqueOrThrow({ where: { id: projectB }, select: { updatedAt: true } });
-    const archived = await updateProjectLifecycle({ projectId: projectB, actorId: admin.id, action: "archive", expectedUpdatedAt: activeProject.updatedAt }, db);
+    const archived = await updateProjectLifecycle({ projectId: projectB, actor: admin, action: "archive", expectedUpdatedAt: activeProject.updatedAt }, db);
     assert.equal(await db.automationRule.count({ where: { projectId: projectB, status: "active" } }), 0);
-    await updateProjectLifecycle({ projectId: projectB, actorId: admin.id, action: "restore", expectedUpdatedAt: archived.project.updatedAt }, db);
+    await updateProjectLifecycle({ projectId: projectB, actor: admin, action: "restore", expectedUpdatedAt: archived.project.updatedAt }, db);
     assert.equal(await db.automationRule.count({ where: { projectId: projectB, status: "active" } }), 0);
   } finally {
     try {
@@ -280,6 +326,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       if (collisionUserId !== null) await db.appUser.deleteMany({ where: { id: collisionUserId } });
       await db.workspace.deleteMany({ where: { id: roleWorkspaceId } });
       await db.appUser.deleteMany({ where: { id: memberId } });
+      await db.appUser.deleteMany({ where: { id: outsiderAdminId } });
     } finally {
       await new Promise<void>((resolve) => {
         if (!server.listening) {

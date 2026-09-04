@@ -3,10 +3,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
-import { AccessControlError, authorizeApiRequest } from "../src/lib/access-control";
+import { mapApiError } from "../src/lib/api-errors";
+import { AccessControlError, accessibleProjectWhere, assertProjectAccess, authorizeApiRequest, getProjectPermission, resolveProjectCreationWorkspace } from "../src/lib/access-control";
 import { memoryTextSimilarity, normalizeMemoryText } from "../src/lib/memory-quality";
 import { canonicalIssuerUrl, OidcError } from "../src/lib/oidc";
 import { canonicalWebSourceUrl, extractWebDocument, WebSourceError } from "../src/lib/web-sources";
+import { getWorkspaceOverview, resolveUserWorkspace, WorkspaceError } from "../src/lib/workspaces";
 
 function errorCode(operation: () => unknown): string | null {
   try { operation(); return null; }
@@ -83,6 +85,12 @@ test("项目 API 授权对 UUID 大小写、编码路径和新版 UUID 使用同
       },
       count: async () => 1,
     },
+    projectMembership: {
+      findMany: async () => [{ role, accessState: "confirmed" }],
+    },
+    workspaceMembership: {
+      findMany: async () => [],
+    },
   } as unknown as PrismaClient;
   const member = { id: "22222222-2222-4222-8222-222222222222", role: "member" as const };
 
@@ -108,6 +116,181 @@ test("项目 API 授权对 UUID 大小写、编码路径和新版 UUID 使用同
   await authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectId}/items`, { method: "POST" }), db);
   await authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectId.toUpperCase()}/items`, { method: "POST" }), db);
   assert.deepEqual(seen, [projectId, projectId, projectId, projectIdV7, projectId, projectId]);
+});
+
+test("项目 API 预授权隐藏非成员项目是否存在，但直接权限校验保留 not found 语义", async () => {
+  const existingProjectId = "33333333-3333-4333-8333-333333333333";
+  const missingProjectId = "44444444-4444-4444-8444-444444444444";
+  const nonMember = { id: "55555555-5555-4555-8555-555555555555", role: "member" as const };
+  const authorized = { id: "66666666-6666-4666-8666-666666666666", role: "member" as const };
+  type ProjectLookupArgs = {
+    where: { id: string };
+    select?: { memberships?: { where?: { userId?: string } } };
+  };
+  const db = {
+    project: {
+      findUnique: async ({ where, select }: ProjectLookupArgs) => {
+        if (where.id !== existingProjectId) return null;
+        const requestedUserId = select?.memberships?.where?.userId;
+        return {
+          workspace: { memberships: [] },
+          memberships: requestedUserId === authorized.id ? [{ role: "viewer" }] : [],
+        };
+      },
+      count: async ({ where }: { where: { id: string } }) => (where.id === existingProjectId ? 1 : 0),
+    },
+    projectMembership: {
+      findMany: async ({ where }: { where: { projectId: string; userId: string } }) =>
+        where.projectId === existingProjectId && where.userId === authorized.id
+          ? [{ role: "viewer", accessState: "confirmed" }]
+          : [],
+    },
+    workspaceMembership: {
+      findMany: async () => [],
+    },
+  } as unknown as PrismaClient;
+  const captureAccessError = async (action: () => Promise<void>): Promise<AccessControlError> => {
+    try {
+      await action();
+    } catch (error) {
+      if (error instanceof AccessControlError) return error;
+      throw error;
+    }
+    throw new Error("ACCESS_CONTROL_EXPECTED_ERROR");
+  };
+
+  const existingError = await captureAccessError(() =>
+    authorizeApiRequest(
+      nonMember,
+      new Request(`http://localhost/api/projects/${existingProjectId}/items`, { method: "GET" }),
+      db,
+    ),
+  );
+  const missingError = await captureAccessError(() =>
+    authorizeApiRequest(
+      nonMember,
+      new Request(`http://localhost/api/projects/${missingProjectId}/items`, { method: "GET" }),
+      db,
+    ),
+  );
+  assert.equal(existingError.code, "ACCESS_FORBIDDEN");
+  assert.equal(missingError.code, "ACCESS_FORBIDDEN");
+  assert.equal(mapApiError(existingError).status, 403);
+  assert.equal(mapApiError(missingError).status, 403);
+
+  await authorizeApiRequest(
+    authorized,
+    new Request(`http://localhost/api/projects/${existingProjectId}/items`, { method: "GET" }),
+    db,
+  );
+  await assert.rejects(
+    () => assertProjectAccess(nonMember, missingProjectId, "view", db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_PROJECT_NOT_FOUND",
+  );
+});
+
+test("系统管理员的租户项目权限必须来自真实 workspace/project membership", async () => {
+  const projectId = "77777777-7777-4777-8777-777777777777";
+  const missingProjectId = "88888888-8888-4888-8888-888888888888";
+  const admin = { id: "99999999-9999-4999-8999-999999999999", role: "admin" as const };
+  let workspaceRole: "owner" | "admin" | "member" | null = null;
+  let projectRole: "owner" | "editor" | "viewer" | null = null;
+  let inheritanceMode: "workspaceInherited" | "projectOnly" = "workspaceInherited";
+  const db = {
+    project: {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        if (where.id !== projectId) return null;
+        return {
+          membershipInheritanceMode: inheritanceMode,
+          workspace: { memberships: workspaceRole === null ? [] : [{ role: workspaceRole, accessState: "confirmed" }] },
+          memberships: projectRole === null ? [] : [{ role: projectRole, accessState: "confirmed" }],
+        };
+      },
+      count: async ({ where }: { where: { id: string } }) => (where.id === projectId ? 1 : 0),
+    },
+    projectMembership: {
+      findMany: async () => projectRole === null ? [] : [{ role: projectRole, accessState: "confirmed" }],
+    },
+    workspaceMembership: {
+      findMany: async () => workspaceRole === null ? [] : [{ role: workspaceRole, accessState: "confirmed" }],
+    },
+  } as unknown as PrismaClient;
+
+  assert.deepEqual(accessibleProjectWhere(admin), {
+    OR: [
+      {
+        membershipInheritanceMode: "workspaceInherited",
+        workspace: { memberships: { some: { userId: admin.id, accessState: "confirmed", role: { in: ["owner", "admin"] } } } },
+      },
+      { memberships: { some: { userId: admin.id, accessState: "confirmed" } } },
+    ],
+  });
+  assert.equal(await getProjectPermission(admin, projectId, db), null);
+  await assert.rejects(
+    () => assertProjectAccess(admin, projectId, "view", db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+
+  workspaceRole = "admin";
+  assert.equal(await getProjectPermission(admin, projectId, db), "owner");
+  await assertProjectAccess(admin, projectId, "owner", db);
+
+  inheritanceMode = "projectOnly";
+  assert.equal(await getProjectPermission(admin, projectId, db), null);
+  await assert.rejects(
+    () => assertProjectAccess(admin, projectId, "view", db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+
+  inheritanceMode = "workspaceInherited";
+  workspaceRole = null;
+  projectRole = "editor";
+  assert.equal(await getProjectPermission(admin, projectId, db), "edit");
+  await assertProjectAccess(admin, projectId, "edit", db);
+  projectRole = "viewer";
+  assert.equal(await getProjectPermission(admin, projectId, db), "view");
+  await assert.rejects(
+    () => assertProjectAccess(admin, projectId, "edit", db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+
+  await assert.rejects(
+    () => assertProjectAccess(admin, missingProjectId, "view", db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_PROJECT_NOT_FOUND",
+  );
+});
+
+test("系统管理员不能凭全局角色自动解析租户工作区", async () => {
+  const workspaceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const admin = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", role: "admin" as const };
+  const workspace = { id: workspaceId, name: "租户工作区" };
+  let membership: { role: "owner" | "admin"; accessState: "confirmed" } | null = null;
+  const db = {
+    workspaceMembership: {
+      findFirst: async () => membership === null ? null : { workspaceId, workspace, role: membership.role },
+      findMany: async () => membership === null ? [] : [{ workspaceId, role: membership.role, accessState: membership.accessState }],
+      findUnique: async () => membership,
+    },
+    workspace: {
+      findUniqueOrThrow: async () => ({ _count: { memberships: 1, projects: 0, oidcProviders: 0 } }),
+    },
+  } as unknown as PrismaClient;
+
+  await assert.rejects(
+    () => resolveProjectCreationWorkspace(admin, db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+  await assert.rejects(
+    () => resolveUserWorkspace(admin, db),
+    (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_NOT_FOUND",
+  );
+
+  membership = { role: "admin", accessState: "confirmed" };
+  assert.equal(await resolveProjectCreationWorkspace(admin, db), workspaceId);
+  assert.deepEqual(await resolveUserWorkspace(admin, db), workspace);
+  const overview = await getWorkspaceOverview(admin, db);
+  assert.equal(overview.role, "admin");
+  assert.deepEqual(overview.counts, { memberships: 1, projects: 0, oidcProviders: 0 });
 });
 
 test("自动化 Worker 入口兼容容器内 CommonJS 转换", async () => {

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type AppUser, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { lockActorsAccess, lockProjectAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
 import { getProjectOperationsSummary } from "@/lib/project-operations";
@@ -121,10 +122,42 @@ async function createNotification(input: Readonly<{
   dedupeKey: string;
 }>, db: PrismaClient): Promise<void> {
   if (input.actionHref !== null && !SAFE_ACTION_HREF.test(input.actionHref)) return fail("AUTOMATION_INVALID_INPUT");
-  await db.notification.upsert({
-    where: { userId_dedupeKey: { userId: input.userId, dedupeKey: notificationKey(input.dedupeKey) } },
-    create: { ...input, dedupeKey: notificationKey(input.dedupeKey) },
-    update: { title: input.title, body: input.body, severity: input.severity, actionHref: input.actionHref, readAt: null },
+  const persist = async (tx: PrismaClient | Prisma.TransactionClient) => {
+    await tx.notification.upsert({
+      where: { userId_dedupeKey: { userId: input.userId, dedupeKey: notificationKey(input.dedupeKey) } },
+      create: { ...input, dedupeKey: notificationKey(input.dedupeKey) },
+      update: { title: input.title, body: input.body, severity: input.severity, actionHref: input.actionHref, readAt: null },
+    });
+  };
+  if (input.projectId === null) {
+    await persist(db);
+    return;
+  }
+
+  // Historical runs can outlive a membership revocation. Recheck the
+  // recipient under the same actor -> workspace -> project fence used by
+  // membership updates before creating a project notification.
+  const project = await db.project.findUnique({ where: { id: input.projectId }, select: { workspaceId: true } });
+  if (project === null) return;
+  await db.$transaction(async (tx) => {
+    await lockActorsAccess(tx, [input.userId]);
+    await lockWorkspaceAccess(tx, project.workspaceId);
+    await lockProjectAccess(tx, input.projectId!);
+    const visible = await tx.project.findFirst({
+      where: {
+        id: input.projectId!,
+        OR: [
+          { memberships: { some: { userId: input.userId, accessState: "confirmed", user: { disabledAt: null } } } },
+          {
+            membershipInheritanceMode: "workspaceInherited",
+            workspace: { memberships: { some: { userId: input.userId, accessState: "confirmed", role: { in: ["owner", "admin"] }, user: { disabledAt: null } } } },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+    if (visible === null) return;
+    await persist(tx);
   });
 }
 
@@ -271,6 +304,21 @@ async function claimDueRun(workerId: string, now: Date, db: PrismaClient): Promi
     const ruleId = rows[0]?.id;
     if (ruleId === undefined) return null;
     const rule = await tx.automationRule.findUniqueOrThrow({ where: { id: ruleId }, include: { createdBy: true } });
+    const project = await tx.project.findUnique({ where: { id: rule.projectId }, select: { workspaceId: true, membershipInheritanceMode: true } });
+    const creatorProjectMembership = project === null ? 0 : await tx.projectMembership.count({
+      where: { projectId: rule.projectId, userId: rule.createdById, accessState: "confirmed", role: { in: ["owner", "editor"] } },
+    });
+    const creatorWorkspaceMembership = project === null || project.membershipInheritanceMode !== "workspaceInherited" ? 0 : await tx.workspaceMembership.count({
+      where: { workspaceId: project.workspaceId, userId: rule.createdById, accessState: "confirmed", role: { in: ["owner", "admin"] } },
+    });
+    const creatorAllowed = project !== null && rule.createdBy.disabledAt === null && (creatorProjectMembership > 0 || creatorWorkspaceMembership > 0);
+    if (!creatorAllowed) {
+      // A rule owned by a revoked/pending/disabled account is no longer a
+      // valid runtime principal. Pause it so the worker cannot repeatedly
+      // perform work after access has been removed.
+      await tx.automationRule.update({ where: { id: rule.id }, data: { status: "paused" } });
+      return null;
+    }
     const scheduledFor = rule.nextRunAt;
     const nextBase = scheduledFor.getTime() < now.getTime() - rule.intervalMinutes * 60_000 ? now : scheduledFor;
     const nextRunAt = new Date(nextBase.getTime() + rule.intervalMinutes * 60_000);
@@ -382,8 +430,8 @@ async function executeProjectPlanHealth(run: ClaimedRun, db: PrismaClient) {
         id: { in: [...candidateIds] },
         disabledAt: null,
         OR: [
-          { projectMemberships: { some: { projectId: run.projectId } } },
-          { workspaceMemberships: { some: { workspace: { projects: { some: { id: run.projectId } } }, role: { in: ["owner", "admin"] } } } },
+          { projectMemberships: { some: { projectId: run.projectId, accessState: "confirmed" } } },
+          { workspaceMemberships: { some: { workspace: { projects: { some: { id: run.projectId, membershipInheritanceMode: "workspaceInherited" } } }, accessState: "confirmed", role: { in: ["owner", "admin"] } } } },
         ],
       },
       select: { id: true },
@@ -506,16 +554,17 @@ export async function runAutomationWorkerCycle(input: Readonly<{
 
 export async function listUserNotifications(userIdInput: unknown, db: PrismaClient = getDb()) {
   const userId = uuid(userIdInput);
+  const visibleWhere = notificationVisibilityWhere(userId);
   const [notifications, unreadCount] = await Promise.all([
     db.notification.findMany({
       // The inbox is intentionally an unread queue. Opening a notification
       // removes it from both this response and the bell count.
-      where: { userId, readAt: null },
+      where: { ...visibleWhere, readAt: null },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 100,
       select: { id: true, projectId: true, kind: true, severity: true, title: true, body: true, actionHref: true, readAt: true, createdAt: true },
     }),
-    db.notification.count({ where: { userId, readAt: null } }),
+    db.notification.count({ where: { ...visibleWhere, readAt: null } }),
   ]);
   return Object.freeze({
     notifications: notifications.map((notification) => ({
@@ -528,6 +577,23 @@ export async function listUserNotifications(userIdInput: unknown, db: PrismaClie
   });
 }
 
+function notificationVisibilityWhere(userId: string): Prisma.NotificationWhereInput {
+  return {
+    userId,
+    OR: [
+      { projectId: null },
+      {
+        project: {
+          OR: [
+            { memberships: { some: { userId, accessState: "confirmed", user: { disabledAt: null } } } },
+            { membershipInheritanceMode: "workspaceInherited", workspace: { memberships: { some: { userId, accessState: "confirmed", role: { in: ["owner", "admin"] }, user: { disabledAt: null } } } } },
+          ],
+        },
+      },
+    ],
+  };
+}
+
 export function safeNotificationActionHref(value: string | null): string | null {
   return value !== null && SAFE_ACTION_HREF.test(value) ? value : null;
 }
@@ -535,8 +601,9 @@ export function safeNotificationActionHref(value: string | null): string | null 
 export async function openNotification(userIdInput: unknown, notificationIdInput: unknown, db: PrismaClient = getDb()) {
   const userId = uuid(userIdInput);
   const notificationId = uuid(notificationIdInput);
+  const visibleWhere = notificationVisibilityWhere(userId);
   const current = await db.notification.findFirst({
-    where: { id: notificationId, userId },
+    where: { ...visibleWhere, id: notificationId },
     select: { id: true },
   });
   if (current === null) return fail("NOTIFICATION_NOT_FOUND");
@@ -544,12 +611,12 @@ export async function openNotification(userIdInput: unknown, notificationIdInput
   // The unread predicate is the Prisma equivalent of
   // readAt = COALESCE(readAt, now()) and makes repeated opens idempotent.
   await db.notification.updateMany({
-    where: { id: notificationId, userId, readAt: null },
+    where: { ...visibleWhere, id: notificationId, readAt: null },
     data: { readAt: new Date() },
   });
 
   const notification = await db.notification.findFirst({
-    where: { id: notificationId, userId },
+    where: { ...visibleWhere, id: notificationId },
     select: { id: true, projectId: true, kind: true, severity: true, title: true, body: true, actionHref: true, readAt: true, createdAt: true },
   });
   if (notification === null) return fail("NOTIFICATION_NOT_FOUND");
@@ -562,7 +629,13 @@ export async function openNotification(userIdInput: unknown, notificationIdInput
 export async function markNotificationRead(userIdInput: unknown, notificationIdInput: unknown, read: boolean, db: PrismaClient = getDb()) {
   const userId = uuid(userIdInput);
   const notificationId = uuid(notificationIdInput);
-  const updated = await db.notification.updateMany({ where: { id: notificationId, userId }, data: { readAt: read ? new Date() : null } });
+  const visibleWhere = notificationVisibilityWhere(userId);
+  const updated = await db.notification.updateMany({ where: { ...visibleWhere, id: notificationId }, data: { readAt: read ? new Date() : null } });
   if (updated.count !== 1) return fail("NOTIFICATION_NOT_FOUND");
-  return db.notification.findUniqueOrThrow({ where: { id: notificationId }, select: { id: true, readAt: true } });
+  const notification = await db.notification.findFirst({
+    where: { ...visibleWhere, id: notificationId },
+    select: { id: true, readAt: true },
+  });
+  if (notification === null) return fail("NOTIFICATION_NOT_FOUND");
+  return notification;
 }

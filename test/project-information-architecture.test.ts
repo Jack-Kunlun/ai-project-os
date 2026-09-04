@@ -159,7 +159,9 @@ test("project source lists stay compact while detail and notification opens keep
   assert.match(notifications, /\/open/u);
   assert.match(notifications, /dispatchEvent\(new CustomEvent\("ai-project-os:notifications-changed"\)/u);
   assert.match(bell, /notifications-changed/u);
-  assert.match(automation, /where: \{ userId, readAt: null \}/u);
+  assert.match(automation, /const visibleWhere = notificationVisibilityWhere\(userId\)/u);
+  assert.match(automation, /where: \{ \.\.\.visibleWhere, readAt: null \}/u);
+  assert.match(automation, /where: \{ \.\.\.visibleWhere, id: notificationId \}/u);
   assert.match(automation, /COALESCE/u);
   assert.match(openRoute, /export async function POST/u);
   assert.match(openRoute, /assertSameOrigin\(request\)/u);

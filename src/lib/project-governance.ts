@@ -1,6 +1,7 @@
 import { Prisma, type AiOperation, type BackgroundJobKind, type BackgroundJobStatus, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 import { getProjectMemoryIndexStatus } from "@/lib/web-memory-index";
 
@@ -259,7 +260,12 @@ async function projectExists(projectId: string, db: PrismaClient): Promise<boole
   return (await db.project.findUnique({ where: { id: projectId }, select: { id: true } })) !== null;
 }
 
-export async function getProjectGovernanceSummary(projectId: string, db: PrismaClient = getDb()) {
+export async function getProjectGovernanceSummary(
+  projectId: string,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, name: true } });
   if (project === null) return null;
   const [
@@ -285,7 +291,7 @@ export async function getProjectGovernanceSummary(projectId: string, db: PrismaC
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       select: { id: true, operation: true, createdAt: true },
     }),
-    getProjectMemoryIndexStatus(projectId, db),
+    getProjectMemoryIndexStatus(projectId, actor, db),
   ]);
   const indexRisk = memory.readiness === "ready" ? 0 : 1;
   return Object.freeze({
@@ -310,9 +316,11 @@ export async function getProjectGovernanceSummary(projectId: string, db: PrismaC
 
 export async function listGovernanceReviews(
   projectId: string,
+  actor: WebAiActor,
   input: Readonly<{ cursor?: string; limit?: number; search?: string; itemType?: "decision" | "progress" | "issue" | "risk" }> = {},
   db: PrismaClient = getDb(),
 ) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   if (!(await projectExists(projectId, db))) return null;
   const limit = input.limit ?? GOVERNANCE_DEFAULT_LIMIT;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > GOVERNANCE_MAX_LIMIT) throw new ProjectGovernanceError("GOVERNANCE_LIMIT_INVALID");
@@ -379,9 +387,11 @@ function sanitizeWarnings(value: Prisma.JsonValue): readonly string[] {
 
 export async function listGovernanceOperations(
   projectId: string,
+  actor: WebAiActor,
   input: Readonly<{ cursor?: string; limit?: number; search?: string; kind?: BackgroundJobKind; status?: BackgroundJobStatus }> = {},
   db: PrismaClient = getDb(),
 ) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   if (!(await projectExists(projectId, db))) return null;
   const limit = input.limit ?? GOVERNANCE_DEFAULT_LIMIT;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > GOVERNANCE_MAX_LIMIT) throw new ProjectGovernanceError("GOVERNANCE_LIMIT_INVALID");
@@ -466,9 +476,11 @@ export async function listGovernanceOperations(
 
 export async function listGovernanceRouteRevisions(
   projectId: string,
+  actor: WebAiActor,
   input: Readonly<{ cursor?: string; limit?: number; search?: string; operation?: AiOperation }> = {},
   db: PrismaClient = getDb(),
 ) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   if (!(await projectExists(projectId, db))) return null;
   const limit = input.limit ?? GOVERNANCE_DEFAULT_LIMIT;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > GOVERNANCE_MAX_LIMIT) throw new ProjectGovernanceError("GOVERNANCE_LIMIT_INVALID");

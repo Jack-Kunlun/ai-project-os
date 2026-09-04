@@ -98,8 +98,15 @@ class FakeRouteDb {
   };
 
   readonly workspaceMembership = {
-    findUnique: async ({ where }: { where: { workspaceId_userId: { userId: string } } }) =>
-      where.workspaceId_userId.userId === actorId ? { role: "owner" as const } : null,
+    findMany: async ({ where }: { where: { userId: string } }) =>
+      where.userId === actorId ? [{ role: "owner" as const, accessState: "confirmed" as const }] : [],
+  };
+
+  readonly projectMembership = {
+    findMany: async ({ where }: { where: { projectId: string; userId: string } }) =>
+      where.projectId === projectId && where.userId === actorId
+        ? [{ role: "owner" as const, accessState: "confirmed" as const }]
+        : [],
   };
 
   readonly aiProviderConnection = {

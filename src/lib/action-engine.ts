@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 import { assertProjectAccess, getProjectPermission, type AccessUser } from "@/lib/access-control";
+import { lockActorsAccess, lockProjectAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
 import { listPagination } from "@/lib/list-pagination";
@@ -241,19 +242,43 @@ async function createActionNotification(input: Readonly<{
 }>, db: PrismaClient): Promise<void> {
   const actionHref = `/projects/${input.projectId}/actions?action=${input.actionId}`;
   if (!SAFE_ACTION_HREF.test(actionHref)) return fail("ACTION_INVALID_INPUT");
-  await db.notification.upsert({
-    where: { userId_dedupeKey: { userId: input.userId, dedupeKey: notificationKey(`${input.actionId}:${input.dedupeSuffix}`) } },
-    create: {
-      userId: input.userId,
-      projectId: input.projectId,
-      kind: input.kind,
-      severity: input.severity,
-      title: input.title,
-      body: input.body,
-      actionHref,
-      dedupeKey: notificationKey(`${input.actionId}:${input.dedupeSuffix}`),
-    },
-    update: { title: input.title, body: input.body, severity: input.severity, actionHref, readAt: null },
+  // Notification producers run after the action transaction.  Recheck the
+  // recipient under the same actor -> workspace -> project access fence used
+  // by membership revocation so a pending/revoked recipient cannot receive a
+  // project notification after losing access.
+  const project = await db.project.findUnique({ where: { id: input.projectId }, select: { workspaceId: true } });
+  if (project === null) return;
+  await db.$transaction(async (tx) => {
+    await lockActorsAccess(tx, [input.userId]);
+    await lockWorkspaceAccess(tx, project.workspaceId);
+    await lockProjectAccess(tx, input.projectId);
+    const visibleProject = await tx.project.findUnique({
+      where: { id: input.projectId },
+      select: {
+        membershipInheritanceMode: true,
+        memberships: { where: { userId: input.userId, accessState: "confirmed", user: { disabledAt: null } }, select: { userId: true } },
+        workspace: { select: { memberships: { where: { userId: input.userId, accessState: "confirmed", role: { in: ["owner", "admin"] }, user: { disabledAt: null } }, select: { userId: true } } } },
+      },
+    });
+    if (visibleProject === null) return;
+    const canSeeProject = visibleProject.memberships.length > 0 || (
+      visibleProject.membershipInheritanceMode === "workspaceInherited" && visibleProject.workspace.memberships.length > 0
+    );
+    if (!canSeeProject) return;
+    await tx.notification.upsert({
+      where: { userId_dedupeKey: { userId: input.userId, dedupeKey: notificationKey(`${input.actionId}:${input.dedupeSuffix}`) } },
+      create: {
+        userId: input.userId,
+        projectId: input.projectId,
+        kind: input.kind,
+        severity: input.severity,
+        title: input.title,
+        body: input.body,
+        actionHref,
+        dedupeKey: notificationKey(`${input.actionId}:${input.dedupeSuffix}`),
+      },
+      update: { title: input.title, body: input.body, severity: input.severity, actionHref, readAt: null },
+    });
   });
 }
 
@@ -269,21 +294,18 @@ async function tryCreateActionNotification(
 }
 
 async function notifyProjectApprovers(projectId: string, actionId: string, requesterId: string, label: string, db: PrismaClient): Promise<void> {
-  const [project, globalAdmins] = await Promise.all([
-    db.project.findUnique({
-      where: { id: projectId },
-      select: {
-        workspace: { select: { memberships: { where: { role: { in: ["owner", "admin"] }, user: { disabledAt: null } }, select: { userId: true } } } },
-        memberships: { where: { role: "owner", user: { disabledAt: null } }, select: { userId: true } },
-      },
-    }),
-    db.appUser.findMany({ where: { role: "admin", disabledAt: null }, select: { id: true } }),
-  ]);
+  const project = await db.project.findUnique({
+    where: { id: projectId },
+    select: {
+      membershipInheritanceMode: true,
+      workspace: { select: { memberships: { where: { accessState: "confirmed", role: { in: ["owner", "admin"] }, user: { disabledAt: null } }, select: { userId: true } } } },
+      memberships: { where: { accessState: "confirmed", role: "owner", user: { disabledAt: null } }, select: { userId: true } },
+    },
+  });
   if (project === null) return;
   const userIds = new Set<string>([
-    ...project.workspace.memberships.map((entry) => entry.userId),
     ...project.memberships.map((entry) => entry.userId),
-    ...globalAdmins.map((entry) => entry.id),
+    ...(project.membershipInheritanceMode === "workspaceInherited" ? project.workspace.memberships.map((entry) => entry.userId) : []),
   ]);
   for (const userId of userIds) {
     await tryCreateActionNotification({

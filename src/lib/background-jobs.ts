@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AppUser, BackgroundJobKind, PrismaClient } from "@prisma/client";
+import type { BackgroundJobKind, PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { CredentialVaultError } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import {
   createGitHubCodeScanService,
   createGitHubMaterialSyncService,
@@ -11,15 +13,16 @@ import {
   claimProjectJob,
   failProjectJob,
   finishProjectJob,
-  getProjectJob,
+  getProjectJobInternal,
   isUncertainProviderDispatch,
   markProjectJobUnknown,
   markProviderAcknowledged,
-  markProviderDispatched,
+  markProviderNotDispatched,
   startProjectJobHeartbeat,
   toPublicProjectJob,
   type ProjectJobHeartbeat,
   type JobAttemptClaim,
+  withProjectJobAccessTransaction,
 } from "@/lib/project-workflow";
 
 export type BackgroundJobErrorCode =
@@ -176,21 +179,85 @@ async function settleGitHubResult(
       error: { code: outcome.failureCode ?? "RECONCILIATION_REQUIRED" },
       result,
     }, db);
-    return getProjectJob(projectId, jobId, db);
+    return getProjectJobInternal(projectId, jobId, db);
   }
   const error = { code: outcome.failureCode ?? "GITHUB_JOB_FAILED" };
   await failJob(jobId, claim, error, db, result);
-  return getProjectJob(projectId, jobId, db);
+  return getProjectJobInternal(projectId, jobId, db);
+}
+
+function isDefinitelyPreDispatchGitHubFailure(error: unknown): boolean {
+  if (error instanceof CredentialVaultError) return true;
+  if (typeof error !== "object" || error === null) return false;
+  if ("requestDispatched" in error && (error as { requestDispatched?: unknown }).requestDispatched === false) return true;
+  const code = nestedFailureCode(error, "");
+  return code.startsWith("GITHUB_WEB_");
+}
+
+/**
+ * Mark one direct GitHub request inside the canonical actor -> workspace ->
+ * project -> job admission transaction.  The transaction is deliberately
+ * database-only; callers must load the encrypted credential and construct the
+ * client only after this promise resolves.
+ */
+async function admitDirectGitHubDispatch(
+  input: Readonly<{ projectId: string; jobId: string; requestedBy: WebAiActor; claim: JobAttemptClaim; kind: "githubScan" | "githubMaterialSync"; linkId?: string }>,
+  db: PrismaClient,
+) {
+  return withProjectJobAccessTransaction(db, {
+    actor: input.requestedBy,
+    projectId: input.projectId,
+    jobId: input.jobId,
+    expectedRequestedById: input.requestedBy.id,
+    attempt: { jobId: input.jobId, ...input.claim },
+    markDispatched: true,
+  }, async (tx, admission) => {
+    if (admission.job.kind !== input.kind || admission.job.requestedById !== input.requestedBy.id) {
+      throw new BackgroundJobError("BACKGROUND_JOB_INVALID_STATE");
+    }
+    if (input.kind === "githubMaterialSync") {
+      const route = await tx.projectRepositoryLink.findUnique({
+        where: { projectId_id: { projectId: input.projectId, id: input.linkId! } },
+        select: {
+          status: true,
+          githubConnection: {
+            select: {
+              status: true,
+              credentialId: true,
+              credential: { select: { id: true, kind: true, secretFingerprint: true } },
+            },
+          },
+        },
+      });
+      const connection = route?.githubConnection ?? null;
+      const credential = connection?.credential ?? null;
+      if (
+        route === null ||
+        route.status !== "active" ||
+        connection === null ||
+        connection.status !== "verified" ||
+        connection.credentialId === null ||
+        credential === null ||
+        credential.id !== connection.credentialId ||
+        credential.kind !== "github" ||
+        !/^[0-9a-f]{64}$/u.test(credential.secretFingerprint)
+      ) {
+        throw new BackgroundJobError("BACKGROUND_JOB_INVALID_STATE");
+      }
+    }
+    return admission;
+  });
 }
 
 export async function runGitHubCodeScanJob(input: Readonly<{
   projectId: string;
-  requestedBy: Pick<AppUser, "id">;
+  requestedBy: WebAiActor;
   clientKey: unknown;
 }>, db: PrismaClient = getDb()) {
+  const currentActor = await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const job = await createQueuedJob({
     projectId: input.projectId,
-    requestedById: input.requestedBy.id,
+    requestedById: currentActor.id,
     kind: "githubScan",
     clientKey: input.clientKey,
   }, db);
@@ -199,7 +266,20 @@ export async function runGitHubCodeScanJob(input: Readonly<{
   if (!claim) return toPublicProjectJob(await db.backgroundJob.findUniqueOrThrow({ where: { id: job.id } }));
   let heartbeat: ProjectJobHeartbeat | null = null;
   try {
-    await markProviderDispatched({ jobId: job.id, ...claim }, db);
+    // Re-check the actor after the claim, inside the terminalizing try/catch.
+    // This closes the revoke/disable race before the shared dispatch admission
+    // can read any GitHub credential or start provider work.
+    await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
+    // The access admission and dispatch marker commit together.  No heartbeat,
+    // credential read, client construction, or provider call is allowed before
+    // that commit boundary.
+    await admitDirectGitHubDispatch({
+      projectId: input.projectId,
+      jobId: job.id,
+      requestedBy: input.requestedBy,
+      claim,
+      kind: "githubScan",
+    }, db);
     heartbeat = startProjectJobHeartbeat({ jobId: job.id, ...claim }, db);
     const client = await loadProjectGitHubClient(input.projectId, db);
     const result = await createGitHubCodeScanService({ db, client }).scanProject(input.projectId);
@@ -214,6 +294,12 @@ export async function runGitHubCodeScanJob(input: Readonly<{
     if (classifyGitHubJobError(error).status === "unknown") {
       await markProjectJobUnknown({ jobId: job.id, ...claim, error }, db);
     } else {
+      // Credential/client setup and explicit pre-dispatch transport failures
+      // cannot have reached GitHub. Undo the optimistic admission marker
+      // before closing the known-failed attempt.
+      if (isDefinitelyPreDispatchGitHubFailure(error)) {
+        await markProviderNotDispatched({ jobId: job.id, ...claim }, db).catch(() => undefined);
+      }
       await failJob(job.id, claim, error, db);
     }
     throw error;
@@ -223,13 +309,14 @@ export async function runGitHubCodeScanJob(input: Readonly<{
 export async function runGitHubMaterialSyncJob(input: Readonly<{
   projectId: string;
   linkId: unknown;
-  requestedBy: Pick<AppUser, "id">;
+  requestedBy: WebAiActor;
   clientKey: unknown;
 }>, db: PrismaClient = getDb()) {
   const linkId = linkIdSchema.parse(input.linkId);
+  const currentActor = await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const job = await createQueuedJob({
     projectId: input.projectId,
-    requestedById: input.requestedBy.id,
+    requestedById: currentActor.id,
     kind: "githubMaterialSync",
     clientKey: input.clientKey,
     payload: { linkId },
@@ -239,7 +326,21 @@ export async function runGitHubMaterialSyncJob(input: Readonly<{
   if (!claim) return toPublicProjectJob(await db.backgroundJob.findUniqueOrThrow({ where: { id: job.id } }));
   let heartbeat: ProjectJobHeartbeat | null = null;
   try {
-    await markProviderDispatched({ jobId: job.id, ...claim }, db);
+    // Re-check the actor after the claim, inside the terminalizing try/catch.
+    // This closes the revoke/disable race before the shared dispatch admission
+    // can read any GitHub credential or start provider work.
+    await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
+    // The access admission and dispatch marker commit together.  No heartbeat,
+    // credential read, client construction, or provider call is allowed before
+    // that commit boundary.
+    await admitDirectGitHubDispatch({
+      projectId: input.projectId,
+      jobId: job.id,
+      requestedBy: input.requestedBy,
+      claim,
+      kind: "githubMaterialSync",
+      linkId,
+    }, db);
     heartbeat = startProjectJobHeartbeat({ jobId: job.id, ...claim }, db);
     const client = await loadProjectGitHubClient(input.projectId, db);
     const result = await createGitHubMaterialSyncService({ db, client }).syncRepository({
@@ -257,6 +358,9 @@ export async function runGitHubMaterialSyncJob(input: Readonly<{
     if (classifyGitHubJobError(error).status === "unknown") {
       await markProjectJobUnknown({ jobId: job.id, ...claim, error }, db);
     } else {
+      if (isDefinitelyPreDispatchGitHubFailure(error)) {
+        await markProviderNotDispatched({ jobId: job.id, ...claim }, db).catch(() => undefined);
+      }
       await failJob(job.id, claim, error, db);
     }
     throw error;
@@ -265,7 +369,12 @@ export async function runGitHubMaterialSyncJob(input: Readonly<{
 
 export { runGitHubProjectSyncJob } from "@/lib/github";
 
-export async function listProjectJobs(projectId: string, db: PrismaClient = getDb()) {
+export async function listProjectJobs(
+  projectId: string,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   const jobs = await db.backgroundJob.findMany({
     where: { projectId },
     orderBy: { createdAt: "desc" },

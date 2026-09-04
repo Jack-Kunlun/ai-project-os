@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
@@ -9,6 +9,9 @@ import { createWithAvailableSlug, isUniqueConstraintError } from "@/lib/project-
 import { createProjectSchema, slugifyProjectName } from "@/lib/validation";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 import { accessibleProjectWhere, resolveProjectCreationWorkspace } from "@/lib/access-control";
+import { AccessControlError } from "@/lib/access-control";
+import { lockActorsAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
+import { appendProjectMembershipAudit, findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 import { DEFAULT_LIST_PAGE_SIZE, listPagination, MAX_LIST_PAGE_SIZE } from "@/lib/list-pagination";
 
 export const dynamic = "force-dynamic";
@@ -79,7 +82,7 @@ export async function GET(request: Request) {
         }] : []),
       ],
     };
-    const [projects, total, activeCount, archivedCount] = await Promise.all([
+    const [projects, total, activeCount, archivedCount, createMembershipCount] = await Promise.all([
       db.project.findMany({
         where,
         orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
@@ -90,10 +93,14 @@ export async function GET(request: Request) {
       db.project.count({ where }),
       db.project.count({ where: { AND: [accessWhere, { archivedAt: null }] } }),
       db.project.count({ where: { AND: [accessWhere, { archivedAt: { not: null } }] } }),
+      db.workspaceMembership.count({
+        where: { userId: user.id, accessState: "confirmed", role: { in: ["owner", "admin"] } },
+      }),
     ]);
 
     return NextResponse.json({
       view: query.view,
+      canCreateProject: createMembershipCount > 0,
       counts: { active: activeCount, archived: archivedCount },
       pagination: listPagination(query.page, query.pageSize, total),
       projects: projects.map((project) => ({
@@ -113,21 +120,33 @@ export async function POST(request: Request) {
     const db = getDb();
     const workspaceId = await resolveProjectCreationWorkspace(user, db);
     const input = createProjectSchema.parse(await readJsonBody(request));
-    const project = await createWithAvailableSlug({
-      requestedSlug: input.slug,
-      baseSlug: slugifyProjectName(input.name),
-      create: (slug) =>
-        db.project.create({
-          data: {
-            name: input.name,
-            slug,
-            description: input.description || null,
-            workspaceId,
-            memberships: { create: { userId: user.id, role: "owner" } },
-          },
-          select: projectSummarySelect,
-        }),
-    });
+    const project = await db.$transaction(async (tx) => {
+      await lockActorsAccess(tx, [user.id]);
+      await lockWorkspaceAccess(tx, workspaceId);
+      const currentMembership = await findConfirmedWorkspaceMembership(tx, workspaceId, user.id);
+      if (currentMembership === null || (currentMembership.role !== "owner" && currentMembership.role !== "admin")) {
+        throw new AccessControlError("ACCESS_FORBIDDEN");
+      }
+      return createWithAvailableSlug({
+        requestedSlug: input.slug,
+        baseSlug: slugifyProjectName(input.name),
+        create: async (slug) => {
+          const createdProject = await tx.project.create({
+            data: {
+              name: input.name,
+              slug,
+              description: input.description || null,
+              workspaceId,
+              membershipInheritanceMode: "workspaceInherited",
+            },
+            select: projectSummarySelect,
+          });
+          const ownerMembership = await tx.projectMembership.create({ data: { projectId: createdProject.id, userId: user.id, role: "owner", accessState: "confirmed" } });
+          await appendProjectMembershipAudit(tx, { ...ownerMembership, workspaceId }, { action: "confirmed", previousState: null, actorId: user.id, reason: "project_owner_created" });
+          return createdProject;
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     return NextResponse.json({
       project: {

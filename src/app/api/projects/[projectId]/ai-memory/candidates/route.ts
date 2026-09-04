@@ -38,20 +38,14 @@ export async function GET(
   context: { params: Promise<{ projectId: string }> },
 ) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const { projectId: rawProjectId } = await context.params;
     const projectId = projectIdSchema.parse(rawProjectId);
     const query = parseQuery(request);
     const db = getDb();
-    const project = await db.project.findUnique({
-      where: { id: projectId },
-      select: { id: true },
-    });
-    if (project === null) {
-      throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found");
-    }
     const candidates = await createAiCandidateService({ db }).listCandidates({
       projectId,
+      actor: user,
       reviewStatus: query.reviewStatus,
       take: query.take,
     });

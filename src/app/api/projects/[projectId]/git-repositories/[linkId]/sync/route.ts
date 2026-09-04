@@ -3,7 +3,6 @@ import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { runGitRepositorySyncJob } from "@/lib/git";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
@@ -14,7 +13,6 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const user = await requireApiSession(request);
     const params = await context.params;
     const projectId = idSchema.parse(params.projectId);
-    await assertProjectActive(projectId);
     const body = await readJsonBody(request) as { clientKey?: unknown };
     const job = await runGitRepositorySyncJob({
       projectId,

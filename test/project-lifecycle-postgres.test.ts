@@ -15,6 +15,7 @@ import {
 import { exportProjectData } from "../src/lib/project-export";
 import { getProjectUsageSummary } from "../src/lib/project-usage";
 import { hashSourceContent } from "../src/lib/source";
+import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.PROJECT_LIFECYCLE_POSTGRES_GATE === "1";
 
@@ -44,10 +45,27 @@ test(
       const created = await db.project.create({
         data: { id: projectId, name: `Lifecycle ${suffix}`, slug: `lifecycle-${suffix}` },
       });
+      await db.$transaction(async (tx) => {
+        await grantWorkspaceMembership(tx, {
+          workspaceId: created.workspaceId,
+          userId: user.id,
+          role: "owner",
+          actorId: user.id,
+          reason: "project_lifecycle_gate_workspace_owner",
+        });
+        await grantProjectMembership(tx, {
+          projectId,
+          workspaceId: created.workspaceId,
+          userId: user.id,
+          role: "owner",
+          actorId: user.id,
+          reason: "project_lifecycle_gate_project_owner",
+        });
+      });
       await assert.rejects(
         () => updateProjectLifecycle({
           projectId,
-          actorId: user!.id,
+          actor: user,
           action: "archive",
           expectedUpdatedAt: new Date(created.updatedAt.getTime() - 1),
         }, db),
@@ -64,7 +82,7 @@ test(
         },
       });
       await assert.rejects(
-        () => updateProjectLifecycle({ projectId, actorId: user!.id, action: "archive", expectedUpdatedAt: created.updatedAt }, db),
+        () => updateProjectLifecycle({ projectId, actor: user, action: "archive", expectedUpdatedAt: created.updatedAt }, db),
         (error: unknown) => error instanceof ProjectLifecycleError && error.code === "PROJECT_HAS_UNRESOLVED_JOBS",
       );
       await db.backgroundJob.update({
@@ -86,7 +104,7 @@ test(
 
       const archived = await updateProjectLifecycle({
         projectId,
-        actorId: user.id,
+        actor: user,
         action: "archive",
         expectedUpdatedAt: created.updatedAt,
       }, db);
@@ -137,7 +155,7 @@ test(
 
       const restored = await updateProjectLifecycle({
         projectId,
-        actorId: user.id,
+        actor: user,
         action: "restore",
         expectedUpdatedAt: archived.project.updatedAt,
       }, db);
@@ -152,14 +170,14 @@ test(
 
       const archivedAgain = await updateProjectLifecycle({
         projectId,
-        actorId: user.id,
+        actor: user,
         action: "archive",
         expectedUpdatedAt: restored.project.updatedAt,
       }, db);
       await assert.rejects(
         () => deleteArchivedProject({
           projectId,
-          actorId: user!.id,
+          actor: user,
           confirmationName: "wrong project",
           expectedUpdatedAt: archivedAgain.project.updatedAt,
         }, db),
@@ -179,7 +197,7 @@ test(
       await assert.rejects(
         () => deleteArchivedProject({
           projectId,
-          actorId: user!.id,
+          actor: user,
           confirmationName: created.name,
           expectedUpdatedAt: archivedAgain.project.updatedAt,
         }, db),
@@ -192,7 +210,7 @@ test(
       await writeFile(join(storedProjectDirectory, "deletion-proof.txt"), "delete only after database commit", "utf8");
       const deleted = await deleteArchivedProject({
         projectId,
-        actorId: user.id,
+        actor: user,
         confirmationName: created.name,
         expectedUpdatedAt: archivedAgain.project.updatedAt,
       }, db);

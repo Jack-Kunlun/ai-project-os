@@ -381,11 +381,13 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "ProjectMembership" AS project_membership
                   WHERE project_membership."projectId" = reference."projectId"
                     AND project_membership."userId" = git_connection."createdById"
+                    AND project_membership."accessState" = 'confirmed'
                )
                AND NOT EXISTS (
                  SELECT 1 FROM "WorkspaceMembership" AS workspace_membership
                   WHERE workspace_membership."workspaceId" = project."workspaceId"
                     AND workspace_membership."userId" = git_connection."createdById"
+                    AND workspace_membership."accessState" = 'confirmed'
                )
            ) AS connections_with_creator_outside_project_access,
            (SELECT COUNT(DISTINCT git_connection."id")::bigint
@@ -402,11 +404,13 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "ProjectMembership" AS project_membership
                   WHERE project_membership."projectId" = reference."projectId"
                     AND project_membership."userId" = git_connection."createdById"
+                    AND project_membership."accessState" = 'confirmed'
                )
                AND NOT EXISTS (
                  SELECT 1 FROM "WorkspaceMembership" AS workspace_membership
                   WHERE workspace_membership."workspaceId" = project."workspaceId"
                     AND workspace_membership."userId" = git_connection."createdById"
+                    AND workspace_membership."accessState" = 'confirmed'
                )
            ) AS active_connections_with_creator_outside_project_access,
            (SELECT COUNT(*)::bigint
@@ -570,11 +574,13 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "ProjectMembership" AS project_membership
                   WHERE project_membership."projectId" = reference."projectId"
                     AND project_membership."userId" = mcp_connection."createdById"
+                    AND project_membership."accessState" = 'confirmed'
                )
                AND NOT EXISTS (
                  SELECT 1 FROM "WorkspaceMembership" AS workspace_membership
                   WHERE workspace_membership."workspaceId" = project."workspaceId"
                     AND workspace_membership."userId" = mcp_connection."createdById"
+                    AND workspace_membership."accessState" = 'confirmed'
                )
            ) AS connections_with_creator_outside_project_access,
            (SELECT COUNT(DISTINCT mcp_connection."id")::bigint
@@ -589,11 +595,13 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "ProjectMembership" AS project_membership
                   WHERE project_membership."projectId" = reference."projectId"
                     AND project_membership."userId" = mcp_connection."createdById"
+                    AND project_membership."accessState" = 'confirmed'
                )
                AND NOT EXISTS (
                  SELECT 1 FROM "WorkspaceMembership" AS workspace_membership
                   WHERE workspace_membership."workspaceId" = project."workspaceId"
                     AND workspace_membership."userId" = mcp_connection."createdById"
+                    AND workspace_membership."accessState" = 'confirmed'
                )
            ) AS active_connections_with_creator_outside_project_access,
            (SELECT COUNT(*)::bigint
@@ -692,10 +700,14 @@ const SQL = Object.freeze({
            COUNT(*) FILTER (WHERE "scope" = 'workspace')::bigint AS workspace,
            COUNT(*) FILTER (WHERE "scope" = 'user')::bigint AS "user",
            COUNT(*) FILTER (
-             WHERE "scope" = 'user'
-               AND "workspaceId" IS NULL
-               AND "ownerUserId" IS NOT NULL
-               AND "ownershipState" = 'confirmed'
+             WHERE ("scope" = 'workspace'
+                    AND "workspaceId" IS NOT NULL
+                    AND "ownerUserId" IS NOT NULL
+                    AND "ownershipState" = 'confirmed')
+                OR ("scope" = 'user'
+                    AND "workspaceId" IS NULL
+                    AND "ownerUserId" IS NOT NULL
+                    AND "ownershipState" = 'confirmed')
            )::bigint AS confirmed,
            COUNT(*) FILTER (
              WHERE ("scope" = 'platform'
@@ -727,6 +739,10 @@ const SQL = Object.freeze({
                    AND "workspaceId" IS NOT NULL
                    AND "ownerUserId" IS NOT NULL
                    AND "ownershipState" = 'ambiguous')
+               OR ("scope" = 'workspace'
+                   AND "workspaceId" IS NOT NULL
+                   AND "ownerUserId" IS NOT NULL
+                   AND "ownershipState" = 'confirmed')
                OR ("scope" = 'user'
                    AND "workspaceId" IS NULL
                    AND "ownerUserId" IS NOT NULL
@@ -741,6 +757,7 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "WorkspaceMembership" AS membership
                   WHERE membership."workspaceId" = "AiProviderConnection"."workspaceId"
                     AND membership."userId" = "AiProviderConnection"."ownerUserId"
+                    AND membership."accessState" = 'confirmed'
                     AND membership."role" = 'owner'
                )
            )::bigint AS workspace_owner,
@@ -752,6 +769,7 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "WorkspaceMembership" AS membership
                   WHERE membership."workspaceId" = "AiProviderConnection"."workspaceId"
                     AND membership."userId" = "AiProviderConnection"."ownerUserId"
+                    AND membership."accessState" = 'confirmed'
                     AND membership."role" = 'admin'
                )
            )::bigint AS workspace_admin,
@@ -763,6 +781,7 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "WorkspaceMembership" AS membership
                   WHERE membership."workspaceId" = "AiProviderConnection"."workspaceId"
                     AND membership."userId" = "AiProviderConnection"."ownerUserId"
+                    AND membership."accessState" = 'confirmed'
                     AND membership."role" = 'member'
                )
            )::bigint AS workspace_member,
@@ -774,6 +793,7 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "WorkspaceMembership" AS membership
                   WHERE membership."workspaceId" = "AiProviderConnection"."workspaceId"
                     AND membership."userId" = "AiProviderConnection"."ownerUserId"
+                    AND membership."accessState" = 'confirmed'
                     AND membership."role" = 'viewer'
                )
            )::bigint AS workspace_viewer,
@@ -785,6 +805,7 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "WorkspaceMembership" AS membership
                   WHERE membership."workspaceId" = "AiProviderConnection"."workspaceId"
                     AND membership."userId" = "AiProviderConnection"."ownerUserId"
+                    AND membership."accessState" = 'confirmed'
                )
            )::bigint AS workspace_missing,
            COUNT(*) FILTER (
@@ -827,7 +848,7 @@ const SQL = Object.freeze({
                 OR ("scope" = 'workspace'
                     AND "workspaceId" IS NOT NULL
                     AND "ownerUserId" IS NOT NULL
-                    AND "ownershipState" IN ('legacy_pending', 'ambiguous'))
+                    AND "ownershipState" IN ('legacy_pending', 'ambiguous', 'confirmed'))
                 OR ("scope" = 'user'
                     AND "workspaceId" IS NULL
                     AND "ownerUserId" IS NOT NULL
@@ -842,7 +863,7 @@ const SQL = Object.freeze({
                 OR ("scope" = 'workspace'
                     AND "workspaceId" IS NOT NULL
                     AND "ownerUserId" IS NOT NULL
-                    AND "ownershipState" IN ('legacy_pending', 'ambiguous'))
+                    AND "ownershipState" IN ('legacy_pending', 'ambiguous', 'confirmed'))
                 OR ("scope" = 'user'
                     AND "workspaceId" IS NULL
                     AND "ownerUserId" IS NOT NULL
@@ -857,6 +878,7 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "WorkspaceMembership" AS membership
                   WHERE membership."workspaceId" = "AiProviderConnection"."workspaceId"
                     AND membership."userId" = "AiProviderConnection"."ownerUserId"
+                    AND membership."accessState" = 'confirmed'
                )
            )::bigint AS workspace_with_membership,
            COUNT(*) FILTER (
@@ -867,6 +889,7 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "WorkspaceMembership" AS membership
                   WHERE membership."workspaceId" = "AiProviderConnection"."workspaceId"
                     AND membership."userId" = "AiProviderConnection"."ownerUserId"
+                    AND membership."accessState" = 'confirmed'
                )
            )::bigint AS workspace_without_membership,
            (SELECT COUNT(*)::bigint

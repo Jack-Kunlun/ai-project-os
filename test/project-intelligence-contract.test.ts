@@ -125,7 +125,7 @@ test("project intelligence requires per-run consent before database or provider 
   await assert.rejects(
     () => runProjectBriefJob({
       projectId,
-      requestedBy: { id: projectId },
+      requestedBy: { id: projectId, role: "user" },
       clientKey: "brief-without-consent",
       consent: { acknowledged: false, version: "invalid" },
     }, unreachableDb),
@@ -134,7 +134,7 @@ test("project intelligence requires per-run consent before database or provider 
   await assert.rejects(
     () => runProjectAgentJob({
       projectId,
-      requestedBy: { id: projectId },
+      requestedBy: { id: projectId, role: "user" },
       clientKey: "agent-without-consent",
       consent: { acknowledged: false, version: "invalid" },
       question: "当前状态如何？",

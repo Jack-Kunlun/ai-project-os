@@ -21,7 +21,7 @@ export async function GET(
   context: { params: Promise<{ projectId: string }> },
 ) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const { projectId: rawProjectId } = await context.params;
     const projectId = idSchema.parse(rawProjectId);
     const searchParams = new URL(request.url).searchParams;
@@ -29,7 +29,7 @@ export async function GET(
       if (searchParams.getAll(key).length !== 1) throw new ApiError(400, "INVALID_QUERY", `Query parameter ${key} must be unique`);
     }
     const query = querySchema.parse(Object.fromEntries(searchParams));
-    const page = await listGovernanceOperations(projectId, query);
+    const page = await listGovernanceOperations(projectId, user, query);
     if (page === null) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found");
     return NextResponse.json(page, { headers: { "cache-control": "no-store" } });
   } catch (error) {

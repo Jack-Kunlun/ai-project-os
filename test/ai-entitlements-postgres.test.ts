@@ -25,6 +25,7 @@ import {
   WorkspaceProviderServiceError,
 } from "../src/lib/workspace-provider-service";
 import { revokeMembership } from "../src/lib/membership-service";
+import { grantWorkspaceMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.AI_ENTITLEMENTS_POSTGRES_GATE === "1";
 
@@ -58,11 +59,21 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
       ],
     });
     await db.workspace.create({ data: { id: workspaceId, name: `Entitlements ${suffix}`, slug: `entitlements-${suffix}`, createdById: adminId } });
-    await db.workspaceMembership.createMany({
-      data: [
-        { id: randomUUID(), workspaceId, userId: ownerId, role: "owner" },
-        { id: randomUUID(), workspaceId, userId: workspaceAdminId, role: "admin" },
-      ],
+    await db.$transaction(async (tx) => {
+      await grantWorkspaceMembership(tx, {
+        workspaceId,
+        userId: ownerId,
+        role: "owner",
+        actorId: adminId,
+        reason: "ai_entitlements_gate_workspace_owner",
+      });
+      await grantWorkspaceMembership(tx, {
+        workspaceId,
+        userId: workspaceAdminId,
+        role: "admin",
+        actorId: adminId,
+        reason: "ai_entitlements_gate_workspace_admin",
+      });
     });
     await db.membershipSubscription.create({
       data: {
@@ -301,7 +312,6 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
     if (createdCredentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: createdCredentialIds } } });
     await db.membershipSubscriptionAudit.deleteMany({ where: { userId: ownerId } });
     await db.membershipSubscription.deleteMany({ where: { userId: ownerId } });
-    await db.workspaceMembership.deleteMany({ where: { workspaceId } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });
     await db.appUser.deleteMany({ where: { id: { in: [adminId, ownerId, workspaceAdminId, outsiderId] } } });
     if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

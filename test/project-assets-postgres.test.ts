@@ -7,6 +7,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import { invokeVisionCompletion } from "../src/lib/ai-providers";
 import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
+import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
 import { exportProjectData } from "../src/lib/project-export";
 import {
@@ -20,6 +21,7 @@ import {
 import { runProjectAssetVisionExtraction } from "../src/lib/project-assets/vision";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { collectProjectMemoryInputs } from "../src/lib/web-memory-index";
+import { createWorkspaceProviderConnection } from "../src/lib/workspace-provider-service";
 
 const shouldRun = process.env.PROJECT_ASSET_POSTGRES_GATE === "1";
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
@@ -37,6 +39,7 @@ test(
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
     let createdUserId: string | null = null;
+    let createdWorkspaceId: string | null = null;
     const providerIds: string[] = [];
     const credentialIds: string[] = [];
     process.env.AI_PROJECT_OS_ASSET_DIR = assetRoot;
@@ -70,20 +73,40 @@ test(
     };
 
     try {
-      let user = await db.appUser.findFirst({ where: { role: "admin" } });
-      if (user === null) {
-        user = await db.appUser.create({
-          data: {
-            username: `asset_${suffix}`,
-            role: "admin",
-            passwordHash: "a".repeat(43),
-            passwordSalt: "b".repeat(22),
-            passwordVersion: 1,
-          },
-        });
-        createdUserId = user.id;
-      }
-      await db.project.create({ data: { id: projectId, name: `Asset ${suffix}`, slug: `asset-${suffix}` } });
+      const user = await db.appUser.create({
+        data: { id: randomUUID(), username: `asset_${suffix}`, role: "user" },
+      });
+      createdUserId = user.id;
+      const workspaceId = randomUUID();
+      await db.workspace.create({
+        data: { id: workspaceId, name: `Asset workspace ${suffix}`, slug: `asset-workspace-${suffix}`, createdById: user.id },
+      });
+      createdWorkspaceId = workspaceId;
+      await db.$transaction((tx) => grantWorkspaceMembership(tx, {
+        workspaceId,
+        userId: user.id,
+        role: "owner",
+        actorId: user.id,
+        reason: "project_assets_fixture",
+      }));
+      const membershipNow = new Date();
+      await db.membershipSubscription.create({
+        data: {
+          userId: user.id,
+          status: "active",
+          startsAt: new Date(membershipNow.getTime() - 60_000),
+          expiresAt: new Date(membershipNow.getTime() + 86_400_000),
+        },
+      });
+      await db.project.create({ data: { id: projectId, workspaceId, name: `Asset ${suffix}`, slug: `asset-${suffix}` } });
+      await db.$transaction((tx) => grantProjectMembership(tx, {
+        projectId,
+        workspaceId,
+        userId: user.id,
+        role: "owner",
+        actorId: user.id,
+        reason: "project_assets_fixture",
+      }));
 
       const text = await uploadProjectAsset({
         projectId,
@@ -112,15 +135,15 @@ test(
       assert.equal(image?.segments[0]?.requiresVision, true);
       assert.equal(await db.projectSource.count({ where: { projectId } }), 1);
 
-      const provider = await createProviderConnection({
+      const provider = await createWorkspaceProviderConnection(workspaceId, {
         name: `Asset mock ${suffix}`,
-        kind: "openai",
+        kind: "glm",
         apiKey: "sk-project-assets-test",
-        generationModelId: "gpt-4.1-mini",
-        visionModelId: "gpt-4.1-mini",
+        generationModelId: "glm-4-flash",
+        visionModelId: "glm-5v-turbo",
         embeddingModelId: null,
         embeddingDimensions: null,
-      }, db);
+      }, { id: user.id, role: user.role }, db);
       providerIds.push(provider.id);
       const providerRow = await db.aiProviderConnection.update({
         where: { id: provider.id },
@@ -130,7 +153,7 @@ test(
       await upsertProjectAiRoute(projectId, {
         operation: "visionExtract",
         providerConnectionId: provider.id,
-        modelId: "gpt-4.1-mini",
+        modelId: "glm-5v-turbo",
         maxOutputTokens: 1024,
       }, db);
 
@@ -158,7 +181,7 @@ test(
       assert.equal(recognized?.status, "ready");
       assert.ok(recognized?.segments[0]?.projectSourceId);
       assert.equal(await db.projectSource.count({ where: { projectId, retiredAt: null } }), 2);
-      const inputs = await collectProjectMemoryInputs(projectId, db);
+      const inputs = await collectProjectMemoryInputs(projectId, user, db);
       assert.equal(inputs.length, 2);
       assert.ok(inputs.some((entry) => entry.path === "原始图片"));
       assert.equal(await db.providerCallAudit.count({ where: { job: { projectId }, operation: "visionExtract", status: "succeeded" } }), 1);
@@ -167,7 +190,7 @@ test(
       await deleteProjectAsset(projectId, image!.id, db);
       assert.equal((await listProjectAssets(projectId, db)).length, 1);
       assert.equal(await db.projectSource.count({ where: { projectId, retiredAt: null } }), 1);
-      assert.equal((await collectProjectMemoryInputs(projectId, db)).length, 1);
+      assert.equal((await collectProjectMemoryInputs(projectId, user, db)).length, 1);
       const restored = await uploadProjectAsset({
         projectId,
         requestedBy: user,
@@ -237,6 +260,10 @@ test(
         await db.aiProviderConnection.deleteMany({ where: { id: { in: providerIds } } });
       }
       if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
+      if (createdWorkspaceId !== null) {
+        await db.membershipSubscription.deleteMany({ where: { userId: createdUserId! } });
+        await db.workspace.deleteMany({ where: { id: createdWorkspaceId } });
+      }
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
       await rm(assetRoot, { recursive: true, force: true });
       await unlink(masterKeyPath).catch(() => undefined);

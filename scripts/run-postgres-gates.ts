@@ -61,12 +61,27 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
       WHERE "id" = '00000000-0000-4000-8000-000000000001'
     `);
     await client.query(`
-      INSERT INTO "WorkspaceMembership"
-        ("id", "workspaceId", "userId", "role", "updatedAt")
-      VALUES
-        ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', 'owner', CURRENT_TIMESTAMP)
-      ON CONFLICT ("workspaceId", "userId") DO UPDATE
-      SET "role" = 'owner', "updatedAt" = CURRENT_TIMESTAMP
+      WITH inserted AS (
+        INSERT INTO "WorkspaceMembership"
+          ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
+        VALUES
+          ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', 'owner', 'confirmed', CURRENT_TIMESTAMP)
+        ON CONFLICT ("id") DO NOTHING
+        RETURNING "id", "workspaceId", "userId", "role", "accessState", "createdAt", "updatedAt"
+      )
+      INSERT INTO "MembershipAccessAudit"
+        ("id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId", "action", "previousState", "newState", "roleSnapshot", "actorId", "reason", "membershipFingerprint")
+      SELECT
+        gen_random_uuid(), 'workspace', inserted."id", inserted."workspaceId", NULL, inserted."userId",
+        'bootstrap_confirmed', NULL, 'confirmed', inserted."role", inserted."userId",
+        'postgres_gate_bootstrap_admin',
+        encode(digest(convert_to(concat_ws(
+          E'\\x1f', inserted."id"::text, inserted."workspaceId"::text, inserted."userId"::text,
+          inserted."role"::text,
+          to_char(inserted."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS'),
+          to_char(inserted."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS')
+        ), 'UTF8'), 'sha256'), 'hex')
+      FROM inserted
     `);
     await client.query("COMMIT");
   } catch (error) {

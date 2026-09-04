@@ -13,6 +13,7 @@ import {
   classifyProviderDispatchFailure,
   finishProjectJob,
   getProjectJob,
+  getProjectJobInternal,
   heartbeatProjectJob,
   isLeaseExpired,
   markProviderAcknowledged,
@@ -25,8 +26,10 @@ import {
   startProjectJobHeartbeat,
   toPublicProjectJob,
   updateProjectJobProgress,
+  withProjectJobAccessTransaction,
 } from "../src/lib/project-workflow";
 import { ProviderTransportError } from "../src/lib/ai-providers";
+import { WebAiAccessError } from "../src/lib/web-ai-access";
 import { serializeRagAnswer } from "../src/lib/web-rag";
 
 type JobStatus = "queued" | "waitingConsent" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
@@ -91,6 +94,13 @@ type FakeNotification = {
   readAt: Date | null;
 };
 
+type FakeActorState = {
+  role: "admin" | "member" | "user";
+  disabledAt: Date | null;
+};
+
+const fakeWorkspaceId = "55555555-5555-4555-8555-555555555555";
+
 class FakeWorkflowDb {
   readonly jobs = new Map<string, FakeJob>();
   readonly attempts = new Map<string, FakeAttempt>();
@@ -98,19 +108,29 @@ class FakeWorkflowDb {
   readonly reconciliations = new Map<string, FakeJobReconciliation>();
   readonly notifications = new Map<string, FakeNotification>();
   readonly users = new Set<string>();
+  readonly actorStates = new Map<string, readonly FakeActorState[]>();
+  readonly actorLookups = new Map<string, number>();
+  jobReads = 0;
+  jobWrites = 0;
 
   readonly backgroundJob = {
-    findUnique: async ({ where }: { where: { id: string } }) => this.jobs.get(where.id) ?? null,
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      this.jobReads += 1;
+      return this.jobs.get(where.id) ?? null;
+    },
     findFirst: async ({ where }: { where: { id: string; projectId: string } }) => {
+      this.jobReads += 1;
       const job = this.jobs.get(where.id);
       return job?.projectId === where.projectId ? this.publicJob(job) : null;
     },
     update: async ({ where, data }: { where: { id: string }; data: Partial<FakeJob> }) => {
+      this.jobWrites += 1;
       const job = this.requireJob(where.id);
       Object.assign(job, data);
       return job;
     },
     updateMany: async ({ where, data }: { where: { id: string; status?: JobStatus }; data: Partial<FakeJob> }) => {
+      this.jobWrites += 1;
       const job = this.jobs.get(where.id);
       if (!job || (where.status !== undefined && job.status !== where.status)) return { count: 0 };
       Object.assign(job, data);
@@ -180,7 +200,49 @@ class FakeWorkflowDb {
   };
 
   readonly appUser = {
-    findUnique: async ({ where }: { where: { id: string } }) => this.users.has(where.id) ? { id: where.id } : null,
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      const sequence = this.actorStates.get(where.id);
+      if (sequence !== undefined) {
+        const lookup = this.actorLookups.get(where.id) ?? 0;
+        this.actorLookups.set(where.id, lookup + 1);
+        const state = sequence[Math.min(lookup, sequence.length - 1)];
+        return state === undefined ? null : { id: where.id, ...state };
+      }
+      return this.users.has(where.id)
+        ? { id: where.id, role: "admin" as const, disabledAt: null }
+        : null;
+    },
+  };
+
+  readonly project = {
+    count: async () => 1,
+    findUnique: async ({ where, select }: { where?: { id?: string }; select?: { id?: boolean; workspaceId?: boolean; membershipInheritanceMode?: boolean; archivedAt?: boolean; workspace?: unknown; memberships?: { where?: { userId?: string } } } }) => {
+      if (select?.archivedAt === true && select.id !== true) return { archivedAt: null };
+      if (select?.id === true && select.workspaceId === true && select.membershipInheritanceMode !== true) {
+        return { id: where?.id ?? randomUUID(), workspaceId: fakeWorkspaceId };
+      }
+      if (select?.membershipInheritanceMode === true && select.workspace === undefined && select.memberships === undefined) {
+        return { id: where?.id ?? randomUUID(), workspaceId: fakeWorkspaceId, archivedAt: null, membershipInheritanceMode: "projectOnly" as const };
+      }
+      const userId = select?.memberships?.where?.userId;
+      return userId !== undefined && this.users.has(userId)
+        ? { membershipInheritanceMode: "projectOnly" as const, workspace: { memberships: [] }, memberships: [{ role: "owner" as const, accessState: "confirmed" as const }] }
+        : null;
+    },
+  };
+
+  readonly workspaceMembership = {
+    findMany: async ({ where }: { where: { userId: string } }) =>
+      this.users.has(where.userId)
+        ? [{ role: "owner" as const, accessState: "confirmed" as const }]
+        : [],
+  };
+
+  readonly projectMembership = {
+    findMany: async ({ where }: { where: { userId: string } }) =>
+      this.users.has(where.userId)
+        ? [{ role: "owner" as const, accessState: "confirmed" as const }]
+        : [],
   };
 
   readonly notification = {
@@ -268,6 +330,7 @@ class FakeWorkflowDb {
 }
 
 const db = () => new FakeWorkflowDb();
+const workflowActor = (id: string) => ({ id, role: "admin" as const });
 
 test("attempt claim, heartbeat and dispatch state are token-bound", async () => {
   const fake = db();
@@ -302,6 +365,40 @@ test("attempt claim, heartbeat and dispatch state are token-bound", async () => 
   assert.match(notification?.title ?? "", /项目简报.*完成/u);
 });
 
+test("job admission locks access before the job and atomically records dispatch", async () => {
+  const fake = db();
+  const projectId = randomUUID();
+  const actorId = randomUUID();
+  const actor = workflowActor(actorId);
+  fake.users.add(actorId);
+  const job = fake.addJob("queued", projectId);
+  job.requestedById = actorId;
+  const claim = await claimProjectJob(job.id, fake as never);
+  assert.notEqual(claim, false);
+  if (claim === false) return;
+
+  let callbackCalled = false;
+  const admission = await withProjectJobAccessTransaction(fake as never, {
+    actor,
+    projectId,
+    jobId: job.id,
+    expectedRequestedById: actorId,
+    attempt: { jobId: job.id, ...claim },
+    markDispatched: true,
+  }, async (_tx, current) => {
+    callbackCalled = true;
+    assert.equal(current.access.actor.id, actorId);
+    assert.equal(current.job.projectId, projectId);
+    assert.equal(current.attempt?.id, claim.attemptId);
+    assert.equal(current.dispatchMarked, true);
+    return current;
+  });
+
+  assert.equal(callbackCalled, true);
+  assert.equal(admission.dispatchMarked, true);
+  assert.equal(fake.attempts.get(claim.attemptId)?.dispatchState, "dispatched");
+});
+
 test("expired running lease reconciles to unknown without provider retry", async () => {
   const fake = db();
   const projectId = randomUUID();
@@ -315,7 +412,7 @@ test("expired running lease reconciles to unknown without provider retry", async
   const requestedById = randomUUID();
   fake.users.add(requestedById);
   assert.equal(isLeaseExpired(attempt.leaseExpiresAt), true);
-  const reconciled = await reconcileProjectJob(projectId, job.id, requestedById, fake as never);
+  const reconciled = await reconcileProjectJob(projectId, job.id, workflowActor(requestedById), fake as never);
   assert.equal(reconciled.status, "unknown");
   assert.equal(reconciled.reconciliationRequired, false);
   assert.equal(reconciled.stage, "reconciled_unknown");
@@ -324,13 +421,40 @@ test("expired running lease reconciles to unknown without provider retry", async
   assert.equal(fake.audits.get(audit.id)?.status, "unknown");
   assert.equal(fake.audits.get(audit.id)?.safeErrorCode, "RECONCILIATION_REQUIRED");
   assert.notEqual(fake.audits.get(audit.id)?.completedAt, null);
-  const again = await reconcileProjectJob(projectId, job.id, requestedById, fake as never);
+  const again = await reconcileProjectJob(projectId, job.id, workflowActor(requestedById), fake as never);
   assert.equal(again.status, "unknown");
   assert.equal(fake.reconciliations.size, 1);
   await assert.rejects(
     () => finishProjectJob({ jobId: job.id, ...claim, result: { stale: true } }, fake as never),
     (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_STALE_ATTEMPT",
   );
+});
+
+test("reconcile and cancel recheck the actor inside the job lock before state reads or writes", async () => {
+  for (const operation of ["reconcile", "cancel"] as const) {
+    const fake = db();
+    const projectId = randomUUID();
+    const actorId = randomUUID();
+    fake.users.add(actorId);
+    fake.actorStates.set(actorId, [
+      { role: "admin", disabledAt: null },
+      { role: "admin", disabledAt: new Date("2026-09-04T00:00:00.000Z") },
+    ]);
+    const job = fake.addJob(operation === "reconcile" ? "unknown" : "queued", projectId);
+    job.reconciliationRequired = operation === "reconcile";
+
+    await assert.rejects(
+      () => operation === "reconcile"
+        ? reconcileProjectJob(projectId, job.id, workflowActor(actorId), fake as never)
+        : cancelProjectJob(projectId, job.id, workflowActor(actorId), fake as never),
+      (error: unknown) => error instanceof WebAiAccessError && error.code === "ACCOUNT_DISABLED",
+      operation,
+    );
+    assert.equal(fake.jobReads, 0, `${operation} must guard before reading the job`);
+    assert.equal(fake.jobWrites, 0, `${operation} must guard before writing the job`);
+    assert.equal(fake.attempts.size, 0);
+    assert.equal(fake.reconciliations.size, 0);
+  }
 });
 
 test("generic reconciliation rejects specialized, non-unknown, and unknown actors", async () => {
@@ -341,7 +465,7 @@ test("generic reconciliation rejects specialized, non-unknown, and unknown actor
 
   const queued = fake.addJob("queued", projectId);
   await assert.rejects(
-    () => reconcileProjectJob(projectId, queued.id, actorId, fake as never),
+    () => reconcileProjectJob(projectId, queued.id, workflowActor(actorId), fake as never),
     (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_STATE",
   );
 
@@ -349,7 +473,7 @@ test("generic reconciliation rejects specialized, non-unknown, and unknown actor
   specialized.kind = "memoryIndex";
   specialized.reconciliationRequired = true;
   await assert.rejects(
-    () => reconcileProjectJob(projectId, specialized.id, actorId, fake as never),
+    () => reconcileProjectJob(projectId, specialized.id, workflowActor(actorId), fake as never),
     (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED",
   );
 
@@ -358,7 +482,7 @@ test("generic reconciliation rejects specialized, non-unknown, and unknown actor
     childRun.kind = kind;
     childRun.reconciliationRequired = true;
     await assert.rejects(
-      () => reconcileProjectJob(projectId, childRun.id, actorId, fake as never),
+      () => reconcileProjectJob(projectId, childRun.id, workflowActor(actorId), fake as never),
       (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED",
     );
   }
@@ -366,8 +490,9 @@ test("generic reconciliation rejects specialized, non-unknown, and unknown actor
   const unknown = fake.addJob("unknown", projectId);
   unknown.reconciliationRequired = true;
   await assert.rejects(
-    () => reconcileProjectJob(projectId, unknown.id, randomUUID(), fake as never),
-    (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_INPUT",
+    () => reconcileProjectJob(projectId, unknown.id, workflowActor(randomUUID()), fake as never),
+    (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
+      (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
   );
   assert.equal(fake.reconciliations.size, 0);
 });
@@ -375,23 +500,73 @@ test("generic reconciliation rejects specialized, non-unknown, and unknown actor
 test("cancel is limited to queued or waiting-consent jobs and details omit lease secrets", async () => {
   const fake = db();
   const projectId = randomUUID();
+  const actor = workflowActor(randomUUID());
   const queued = fake.addJob("queued", projectId);
-  const cancelled = await cancelProjectJob(projectId, queued.id, fake as never);
+  fake.users.add(actor.id);
+  const cancelled = await cancelProjectJob(projectId, queued.id, actor, fake as never);
   assert.equal(cancelled.status, "cancelled");
 
   const running = fake.addJob("running", projectId);
   await assert.rejects(
-    () => cancelProjectJob(projectId, running.id, fake as never),
+    () => cancelProjectJob(projectId, running.id, actor, fake as never),
     (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED",
   );
   const queuedAgain = fake.addJob("queued", projectId);
   const claim = await claimProjectJob(queuedAgain.id, fake as never);
   assert.notEqual(claim, false);
   if (claim === false) return;
-  const detail = await getProjectJob(projectId, queuedAgain.id, fake as never);
+  const detail = await getProjectJobInternal(projectId, queuedAgain.id, fake as never);
   const serialized = JSON.stringify(detail);
   assert.doesNotMatch(serialized, /leaseTokenHash|claimToken|[a-f0-9]{64}/u);
-  await assert.rejects(() => getProjectJob(randomUUID(), queuedAgain.id, fake as never), /PROJECT_WORKFLOW_JOB_NOT_FOUND/);
+  await assert.rejects(() => getProjectJobInternal(randomUUID(), queuedAgain.id, fake as never), /PROJECT_WORKFLOW_JOB_NOT_FOUND/);
+});
+
+test("handler-facing job details require an actor with project access", async () => {
+  const fake = db();
+  const projectId = randomUUID();
+  const job = fake.addJob("queued", projectId);
+  const actorId = randomUUID();
+  const actor = { id: actorId, role: "user" as const };
+  fake.users.add(actorId);
+  const guarded = Object.assign(fake, {
+    appUser: {
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        where.id === actorId ? { id: actorId, role: "user" as const, disabledAt: null } : null,
+    },
+    project: {
+      count: async () => 1,
+      findUnique: async () => ({ workspace: { memberships: [] }, memberships: [{ role: "editor" as const }] }),
+    },
+  });
+  const detail = await getProjectJob(projectId, job.id, actor, guarded as never);
+  assert.equal(detail.id, job.id);
+  await assert.rejects(
+    () => getProjectJob(projectId, job.id, { id: randomUUID(), role: "user" }, guarded as never),
+    (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
+      (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
+  );
+});
+
+test("malformed job IDs fail consistently before workflow reads or writes", async () => {
+  const fake = db();
+  const projectId = randomUUID();
+  const actor = workflowActor(randomUUID());
+  fake.users.add(actor.id);
+  const invalidJobId = "not-a-uuid";
+  const calls = [
+    () => getProjectJobInternal(projectId, invalidJobId, fake as never),
+    () => getProjectJob(projectId, invalidJobId, actor, fake as never),
+    () => reconcileProjectJob(projectId, invalidJobId, actor, fake as never),
+    () => cancelProjectJob(projectId, invalidJobId, actor, fake as never),
+  ];
+  for (const call of calls) {
+    await assert.rejects(
+      call,
+      (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_INPUT",
+    );
+  }
+  assert.equal(fake.jobReads, 0);
+  assert.equal(fake.jobWrites, 0);
 });
 
 test("provider uncertainty and workflow API mappings stay stable", () => {
@@ -453,6 +628,8 @@ test("GitHub nested outcomes preserve success, warning, known failure and unknow
   });
   assert.equal(classifyGitHubJobError({ code: "GITHUB_CODE_SCAN_RECONCILIATION_REQUIRED" }).status, "unknown");
   assert.equal(classifyGitHubJobError({ code: "GITHUB_ACCESS_UNKNOWN" }).status, "failed");
+  assert.equal(classifyGitHubJobError({ code: "ACCESS_FORBIDDEN" }).status, "failed");
+  assert.equal(classifyGitHubJobError({ code: "ACCOUNT_DISABLED" }).status, "failed");
 
   const source = readFileSync(join(process.cwd(), "src/lib/background-jobs.ts"), "utf8");
   for (const [functionName, kind] of [
@@ -462,6 +639,17 @@ test("GitHub nested outcomes preserve success, warning, known failure and unknow
     const start = source.indexOf(`export async function ${functionName}`);
     const end = source.indexOf("\nexport async function", start + 1);
     const wrapper = source.slice(start, end === -1 ? undefined : end);
+    const tryStart = wrapper.indexOf("  try {");
+    const secondGuard = wrapper.lastIndexOf('await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);');
+    const dispatch = wrapper.indexOf("await admitDirectGitHubDispatch");
+    const heartbeat = wrapper.indexOf("startProjectJobHeartbeat");
+    const catchStart = wrapper.indexOf("  } catch (error) {");
+    assert.ok(tryStart >= 0);
+    assert.ok(secondGuard > tryStart, `${functionName} must re-check access inside try/catch`);
+    assert.ok(secondGuard < dispatch, `${functionName} must re-check access before provider dispatch`);
+    assert.ok(secondGuard < heartbeat, `${functionName} must re-check access before heartbeat/client work`);
+    assert.ok(catchStart > secondGuard, `${functionName} must catch a revoked actor after claim`);
+    assert.match(wrapper.slice(catchStart), /if \(classifyGitHubJobError\(error\)\.status === "unknown"\)[\s\S]*else \{[\s\S]*await failJob\(job\.id, claim, error, db\)/u);
     assert.match(wrapper, new RegExp(`const outcome = classifyGitHubJobResult\\(result, "${kind}"\\)`));
     assert.match(wrapper, /if \(outcome\.status !== "unknown"\)[\s\S]*markProviderAcknowledged/u);
     assert.ok(wrapper.indexOf("const outcome = classifyGitHubJobResult") < wrapper.indexOf("markProviderAcknowledged"));

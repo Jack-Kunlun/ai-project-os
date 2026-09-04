@@ -19,13 +19,14 @@ import {
   appendProjectItemRevision,
   createPrimaryProjectItemEvidence,
 } from "@/lib/project-item-history";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
+import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { AiCandidateError, throwAiCandidateError } from "./candidate-errors";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 const PROVIDER_RESPONSE_ID_PATTERN = /^resp_[A-Za-z0-9_-]{1,240}$/;
-const REVIEWER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$/;
 const UNSAFE_MODEL_ID_PATTERN =
   /(https?:\/\/|api[-_]?key|bearer|password|secret|token|sk-|(^|[\/:@_-])latest($|[\/:@_-]))/i;
@@ -33,6 +34,7 @@ const UNSAFE_TEXT_CONTROL_PATTERN =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
 const MAX_CANDIDATE_COUNT = 100;
 const DEFAULT_TRANSACTION_RETRY_LIMIT = 3;
+const CANDIDATE_LOCK_NAMESPACE = 29082031;
 
 const candidateClaimSelect = {
   id: true,
@@ -107,6 +109,7 @@ export interface PersistedAiCandidateBatch {
 
 export interface ListAiCandidatesRequest {
   projectId: string;
+  actor: WebAiActor;
   reviewStatus?: AiCandidateReviewStatus;
   take?: number;
 }
@@ -114,7 +117,7 @@ export interface ListAiCandidatesRequest {
 export interface AcceptAiCandidateRequest {
   projectId: string;
   candidateId: string;
-  reviewedBy: string;
+  actor: WebAiActor;
   expectedItemUpdatedAt: Date;
   item: {
     type: ProjectItemType;
@@ -127,7 +130,7 @@ export interface AcceptAiCandidateRequest {
 export interface DismissAiCandidateRequest {
   projectId: string;
   candidateId: string;
-  reviewedBy: string;
+  actor: WebAiActor;
   expectedItemUpdatedAt: Date;
 }
 
@@ -465,13 +468,6 @@ function isPrismaCode(error: unknown, code: string): boolean {
   }
 }
 
-function validateReviewer(value: unknown): string {
-  if (typeof value !== "string" || !REVIEWER_PATTERN.test(value)) {
-    return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
-  }
-  return value;
-}
-
 function validateDate(value: unknown): Date {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
     return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
@@ -544,6 +540,38 @@ class AiCandidateServiceImpl {
         if (retryable && attempt + 1 < this.transactionRetryLimit) continue;
         if (error instanceof AiCandidateError) throw error;
         if (retryable) return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
+        throw error;
+      }
+    }
+    return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
+  }
+
+  private async accessFirstCandidateTransaction<T>(
+    projectId: string,
+    candidateId: string,
+    actor: WebAiActor,
+    operation: (tx: Prisma.TransactionClient, actor: WebAiActor) => Promise<T>,
+  ): Promise<T> {
+    // Keep malformed/unauthorized review requests cheap at the API boundary,
+    // while the transaction below remains authoritative and repeats the same
+    // access check after the actor/workspace/project locks.
+    await assertWebAiProjectAccess(actor, projectId, "edit", this.db);
+    for (let attempt = 0; attempt < this.transactionRetryLimit; attempt += 1) {
+      try {
+        return await withWebAiProjectAccessTransaction(this.db, {
+          actor,
+          projectId,
+          required: "edit",
+        }, async (tx, admission) => {
+          // Candidate state is the first resource lock after the shared
+          // access fence; no candidate/resource lock may precede access.
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${candidateId}, ${CANDIDATE_LOCK_NAMESPACE}))`;
+          return operation(tx, admission.actor);
+        });
+      } catch (error) {
+        if (isPrismaCode(error, "P2034") && attempt + 1 < this.transactionRetryLimit) continue;
+        if (error instanceof AiCandidateError) throw error;
+        if (isPrismaCode(error, "P2034")) return throwAiCandidateError("AI_CANDIDATE_WRITE_CONFLICT");
         throw error;
       }
     }
@@ -790,6 +818,7 @@ class AiCandidateServiceImpl {
     ) {
       return throwAiCandidateError("AI_CANDIDATE_INVALID_INPUT");
     }
+    await assertWebAiProjectAccess(request.actor, projectId, "view", this.db);
     const claims = await this.db.aiCandidateClaim.findMany({
       where: {
         projectId,
@@ -809,11 +838,9 @@ class AiCandidateServiceImpl {
   ): Promise<AiCandidateClaimView> {
     const projectId = validateUuid(request.projectId);
     const candidateId = validateUuid(request.candidateId);
-    const reviewedBy = validateReviewer(request.reviewedBy);
     const expectedItemUpdatedAt = validateDate(request.expectedItemUpdatedAt);
     const itemInput = normalizeItemInput(request.item);
-
-    return this.serializable(async (tx) => {
+    return this.accessFirstCandidateTransaction(projectId, candidateId, request.actor, async (tx, currentActor) => {
       const claim = await tx.aiCandidateClaim.findUnique({
         where: { projectId_id: { projectId, id: candidateId } },
         select: {
@@ -896,7 +923,7 @@ class AiCandidateServiceImpl {
       await appendProjectItemRevision(tx, {
         item: confirmedItem,
         action: ProjectItemRevisionAction.confirmed,
-        actorId: reviewedBy,
+        actorId: currentActor.id,
         evidences: [evidence],
         createdAt: reviewedAt,
       });
@@ -909,7 +936,7 @@ class AiCandidateServiceImpl {
         data: {
           reviewStatus: AiCandidateReviewStatus.accepted,
           reviewedAt,
-          reviewedBy,
+          reviewedBy: currentActor.id,
         },
       });
       if (updated.count !== 1) {
@@ -929,10 +956,8 @@ class AiCandidateServiceImpl {
   ): Promise<AiCandidateClaimView> {
     const projectId = validateUuid(request.projectId);
     const candidateId = validateUuid(request.candidateId);
-    const reviewedBy = validateReviewer(request.reviewedBy);
     const expectedItemUpdatedAt = validateDate(request.expectedItemUpdatedAt);
-
-    return this.serializable(async (tx) => {
+    return this.accessFirstCandidateTransaction(projectId, candidateId, request.actor, async (tx, currentActor) => {
       const existing = await tx.aiCandidateClaim.findUnique({
         where: { projectId_id: { projectId, id: candidateId } },
         select: {
@@ -1007,7 +1032,7 @@ class AiCandidateServiceImpl {
       await appendProjectItemRevision(tx, {
         item: dismissedItem,
         action: ProjectItemRevisionAction.dismissed,
-        actorId: reviewedBy,
+        actorId: currentActor.id,
         evidences: [evidence],
         createdAt: reviewedAt,
       });
@@ -1020,7 +1045,7 @@ class AiCandidateServiceImpl {
         data: {
           reviewStatus: AiCandidateReviewStatus.dismissed,
           reviewedAt,
-          reviewedBy,
+          reviewedBy: currentActor.id,
         },
       });
       if (updated.count !== 1) {

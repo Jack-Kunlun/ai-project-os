@@ -18,7 +18,7 @@ export async function GET(
   context: { params: Promise<{ projectId: string; syncRunId: string }> },
 ) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const params = await context.params;
     const projectId = idSchema.parse(params.projectId);
     const syncRunId = idSchema.parse(params.syncRunId);
@@ -27,7 +27,7 @@ export async function GET(
       offset: url.searchParams.get("offset") ?? undefined,
       limit: url.searchParams.get("limit") ?? undefined,
     });
-    return NextResponse.json(await getProjectGitHubSync({ projectId, syncRunId }, undefined, page), {
+    return NextResponse.json(await getProjectGitHubSync({ projectId, syncRunId }, user, undefined, page), {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {

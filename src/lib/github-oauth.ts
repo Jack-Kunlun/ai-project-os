@@ -5,6 +5,13 @@ import { createSession, DEFAULT_WORKSPACE_ID, type CreatedSession } from "@/lib/
 import { createCredential, readCredentialSecret } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
+import { lockActorAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
+import {
+  appendWorkspaceMembershipAudit,
+  findCurrentWorkspaceMembership,
+  hasRevokedWorkspaceMembership,
+  grantWorkspaceMembership,
+} from "@/lib/membership-governance";
 import { issueVerifiedSignupGrant } from "@/lib/ai-entitlements";
 
 export const GITHUB_OAUTH_STATE_COOKIE_NAME = "ai_project_os_github_oauth_state" as const;
@@ -37,6 +44,7 @@ export type GitHubOAuthErrorCode =
   | "GITHUB_OAUTH_TOKEN_REVOCATION_FAILED"
   | "GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED"
   | "GITHUB_OAUTH_IDENTITY_CONFLICT"
+  | "GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED"
   | "GITHUB_OAUTH_ACCOUNT_DISABLED";
 
 export class GitHubOAuthError extends Error {
@@ -154,6 +162,7 @@ export async function beginGitHubOAuth(
   const expiresAt = new Date(Date.now() + ATTEMPT_LIFETIME_MS);
 
   await db.$transaction(async (tx) => {
+    if (linkUserId !== null) await lockActorAccess(tx, linkUserId);
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${ATTEMPT_LOCK_ID})`);
     const now = new Date();
     if (linkUserId !== null) {
@@ -356,6 +365,10 @@ export async function completeGitHubOAuth(
 
   return db.$transaction(async (tx) => {
     const now = new Date();
+    let existingIdentity = await tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId }, include: { user: true } });
+    const actorId = attempt.intent === "link" ? attempt.linkUserId : existingIdentity?.userId;
+    if (actorId !== null && actorId !== undefined) await lockActorAccess(tx, actorId);
+    if (attempt.intent === "login") await lockWorkspaceAccess(tx, DEFAULT_WORKSPACE_ID);
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${profile.githubUserId.toString()}::text, ${ATTEMPT_LOCK_ID}))`);
     if (attempt.intent === "link") {
       const user = await tx.appUser.findUnique({ where: { id: attempt.linkUserId! } });
@@ -377,7 +390,8 @@ export async function completeGitHubOAuth(
       return Object.freeze({ session: null, returnTo: "/profile?github=linked", intent: attempt.intent, remember: attempt.remember });
     }
 
-    let identity = await tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId }, include: { user: true } });
+    existingIdentity = await tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId }, include: { user: true } });
+    let identity = existingIdentity;
     if (identity === null) {
       const emailOwner = await tx.appUser.findUnique({ where: { email: profile.email }, select: { id: true } });
       if (emailOwner !== null) return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
@@ -391,9 +405,10 @@ export async function completeGitHubOAuth(
           passwordSalt: null,
         },
       });
-      await tx.workspaceMembership.create({
-        data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "member" },
+      const workspaceMembership = await tx.workspaceMembership.create({
+        data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "member", accessState: "confirmed" },
       });
+      await appendWorkspaceMembershipAudit(tx, workspaceMembership, { action: "confirmed", previousState: null, actorId: user.id, reason: "github_oauth_membership_created" });
       await issueVerifiedSignupGrant(user.id, { issuedById: null, now }, tx);
       identity = await tx.gitHubIdentity.create({
         data: { userId: user.id, ...profile, lastLoginAt: now },
@@ -401,6 +416,18 @@ export async function completeGitHubOAuth(
       });
     } else {
       if (identity.user.disabledAt !== null) return fail("GITHUB_OAUTH_ACCOUNT_DISABLED");
+      const currentMembership = await findCurrentWorkspaceMembership(tx, DEFAULT_WORKSPACE_ID, identity.user.id);
+      if (currentMembership !== null && currentMembership.accessState !== "confirmed") return fail("GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED");
+      if (currentMembership === null) {
+        if (await hasRevokedWorkspaceMembership(tx, DEFAULT_WORKSPACE_ID, identity.user.id)) return fail("GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED");
+        await grantWorkspaceMembership(tx, {
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          userId: identity.user.id,
+          role: "member",
+          actorId: identity.user.id,
+          reason: "github_oauth_membership_created",
+        });
+      }
       identity = await tx.gitHubIdentity.update({
         where: { id: identity.id },
         data: { login: profile.login, email: profile.email, displayName: profile.displayName, lastLoginAt: now },

@@ -113,10 +113,10 @@ test(
         () => db.backgroundJob.update({ where: { id: unknownGenericJob.id }, data: { reconciliationRequired: false } }),
       );
       await assert.rejects(
-        () => reconcileProjectJob(otherProjectId, unknownGenericJob.id, user.id, db),
+        () => reconcileProjectJob(otherProjectId, unknownGenericJob.id, user, db),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_PROJECT_MISMATCH",
       );
-      const reconciledGeneric = await reconcileProjectJob(projectId, unknownGenericJob.id, user.id, db);
+      const reconciledGeneric = await reconcileProjectJob(projectId, unknownGenericJob.id, user, db);
       assert.equal(reconciledGeneric.status, "unknown");
       assert.equal(reconciledGeneric.stage, "reconciled_unknown");
       assert.equal(reconciledGeneric.reconciliationRequired, false);
@@ -126,7 +126,7 @@ test(
       assert.equal(genericEvidence.requestedById, user.id);
       assert.equal(genericEvidence.resolution, "explicitAbandon");
       assert.equal(genericEvidence.evidenceFingerprint.length, 64);
-      const replayedGeneric = await reconcileProjectJob(projectId, unknownGenericJob.id, user.id, db);
+      const replayedGeneric = await reconcileProjectJob(projectId, unknownGenericJob.id, user, db);
       assert.equal(replayedGeneric.id, reconciledGeneric.id);
       assert.equal(await db.backgroundJobReconciliation.count({ where: { projectId, jobId: unknownGenericJob.id } }), 1);
       await assert.rejects(
@@ -181,8 +181,9 @@ test(
         },
       });
       await assert.rejects(
-        () => reconcileProjectJob(projectId, wrongActorJob.id, randomUUID(), db),
-        (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_INPUT",
+        () => reconcileProjectJob(projectId, wrongActorJob.id, { id: randomUUID(), role: "admin" }, db),
+        (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
+          (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
       );
 
       const specializedJob = await db.backgroundJob.create({
@@ -200,14 +201,14 @@ test(
         },
       });
       await assert.rejects(
-        () => reconcileProjectJob(projectId, specializedJob.id, user.id, db),
+        () => reconcileProjectJob(projectId, specializedJob.id, user, db),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED",
       );
       await assert.rejects(
         () => db.backgroundJob.update({ where: { id: specializedJob.id }, data: { reconciliationRequired: false } }),
       );
       await assert.rejects(
-        () => reconcileProjectJob(projectId, queuedJobId, user.id, db),
+        () => reconcileProjectJob(projectId, queuedJobId, user, db),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_STATE",
       );
 
@@ -218,14 +219,14 @@ test(
         where: { id: interruptedClaim.attemptId },
         data: { leaseExpiresAt: new Date(Date.now() - 1) },
       });
-      const reconciled = await reconcileProjectJob(projectId, interruptedJobId, user.id, db);
+      const reconciled = await reconcileProjectJob(projectId, interruptedJobId, user, db);
       assert.equal(reconciled.status, "unknown");
       assert.equal(reconciled.reconciliationRequired, false);
       assert.equal(reconciled.stage, "reconciled_unknown");
       assert.equal(await db.backgroundJobReconciliation.count({ where: { projectId, jobId: interruptedJobId } }), 1);
       assert.equal((await db.backgroundJobAttempt.findUniqueOrThrow({ where: { id: interruptedClaim.attemptId } })).status, "unknown");
       await assert.rejects(
-        () => cancelProjectJob(projectId, interruptedJobId, db),
+        () => cancelProjectJob(projectId, interruptedJobId, user, db),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_CANCEL_NOT_ALLOWED",
       );
       await assert.rejects(
@@ -233,13 +234,13 @@ test(
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_STALE_ATTEMPT",
       );
 
-      const cancelled = await cancelProjectJob(projectId, queuedJobId, db);
+      const cancelled = await cancelProjectJob(projectId, queuedJobId, user, db);
       assert.equal(cancelled.status, "cancelled");
       await assert.rejects(
-        () => cancelProjectJob(otherProjectId, queuedJobId, db),
+        () => cancelProjectJob(otherProjectId, queuedJobId, user, db),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_PROJECT_MISMATCH",
       );
-      const detail = await (await import("../src/lib/project-workflow")).getProjectJob(projectId, jobId, db);
+      const detail = await (await import("../src/lib/project-workflow")).getProjectJob(projectId, jobId, user, db);
       const serialized = JSON.stringify(detail);
       assert.doesNotMatch(serialized, /leaseTokenHash|claimToken/u);
     } finally {

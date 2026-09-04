@@ -4,8 +4,8 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import test from "node:test";
 import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
-import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
+import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
 import { appendProjectItemRevision, createPrimaryProjectItemEvidence } from "../src/lib/project-item-history";
 import { createProjectPlanEntry, getProjectPlan } from "../src/lib/project-plan";
@@ -19,6 +19,7 @@ import {
   runProjectAgentJob,
   runProjectBriefJob,
 } from "../src/lib/web-project-intelligence";
+import { createWorkspaceProviderConnection } from "../src/lib/workspace-provider-service";
 
 const shouldRun = process.env.PROJECT_INTELLIGENCE_POSTGRES_GATE === "1";
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
@@ -39,6 +40,7 @@ test(
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
     let createdUserId: string | null = null;
+    let createdWorkspaceId: string | null = null;
     let providerId: string | null = null;
     let credentialId: string | null = null;
     let alternateProviderId: string | null = null;
@@ -111,23 +113,43 @@ test(
     };
 
     try {
-      let user = await db.appUser.findFirst({ where: { role: "admin" } });
-      if (user === null) {
-        user = await db.appUser.create({
-          data: {
-            username: `v2_1_test_${suffix}`,
-            role: "admin",
-            passwordHash: "a".repeat(43),
-            passwordSalt: "b".repeat(22),
-            passwordVersion: 1,
-          },
-        });
-        createdUserId = user.id;
-      }
+      const user = await db.appUser.create({
+        data: { id: randomUUID(), username: `v2_1_test_${suffix}`, role: "user" },
+      });
+      createdUserId = user.id;
+      const workspaceId = randomUUID();
+      await db.workspace.create({
+        data: { id: workspaceId, name: `Intelligence workspace ${suffix}`, slug: `intelligence-workspace-${suffix}`, createdById: user.id },
+      });
+      createdWorkspaceId = workspaceId;
+      await db.$transaction((tx) => grantWorkspaceMembership(tx, {
+        workspaceId,
+        userId: user.id,
+        role: "owner",
+        actorId: user.id,
+        reason: "project_intelligence_fixture",
+      }));
+      const membershipNow = new Date();
+      await db.membershipSubscription.create({
+        data: {
+          userId: user.id,
+          status: "active",
+          startsAt: new Date(membershipNow.getTime() - 60_000),
+          expiresAt: new Date(membershipNow.getTime() + 86_400_000),
+        },
+      });
 
       await db.project.create({
-        data: { id: projectId, name: `Intelligence ${suffix}`, slug: `intelligence-${suffix}` },
+        data: { id: projectId, workspaceId, name: `Intelligence ${suffix}`, slug: `intelligence-${suffix}` },
       });
+      await db.$transaction((tx) => grantProjectMembership(tx, {
+        projectId,
+        workspaceId,
+        userId: user.id,
+        role: "owner",
+        actorId: user.id,
+        reason: "project_intelligence_fixture",
+      }));
       const sourceText = "会议结论：项目决定采用统一记忆索引。所有回答必须保留证据引用。";
       const sourceHash = hashSourceContent(sourceText);
       const source = await db.projectSource.create({
@@ -185,14 +207,15 @@ test(
         });
       });
 
-      const provider = await createProviderConnection({
+      const provider = await createWorkspaceProviderConnection(workspaceId, {
         name: `V2.1 mock ${suffix}`,
-        kind: "openai",
+        kind: "glm",
         apiKey: "sk-v2-1-intelligence-secret",
-        generationModelId: "generation-test",
-        embeddingModelId: "embedding-test",
+        generationModelId: "glm-4-flash",
+        embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
-      }, db);
+        visionModelId: null,
+      }, { id: user.id, role: user.role }, db);
       providerId = provider.id;
       const providerRow = await db.aiProviderConnection.update({
         where: { id: provider.id },
@@ -203,19 +226,19 @@ test(
       await upsertProjectAiRoute(projectId, {
         operation: "embedding",
         providerConnectionId: provider.id,
-        modelId: "embedding-test",
+        modelId: "embedding-3",
         embeddingDimensions: 8,
         maxOutputTokens: 128,
       }, db);
       await upsertProjectAiRoute(projectId, {
         operation: "generateWithContext",
         providerConnectionId: provider.id,
-        modelId: "generation-test",
+        modelId: "glm-4-flash",
         embeddingDimensions: null,
         maxOutputTokens: 2_048,
       }, db);
 
-      const beforeIndex = await listProjectIntelligence(projectId, db);
+      const beforeIndex = await listProjectIntelligence(projectId, user, db);
       assert.equal(beforeIndex.readiness.ready, false);
       assert.equal(beforeIndex.readiness.activeIndex, false);
 
@@ -236,6 +259,7 @@ test(
       await db.project.create({
         data: {
           id: crossProjectId,
+          workspaceId,
           name: `Intelligence cross project ${suffix}`,
           slug: `intelligence-cross-${suffix}`,
         },
@@ -245,7 +269,7 @@ test(
           data: {
             projectId: crossProjectId!,
             providerConnectionId: provider.id,
-            modelId: "embedding-test",
+            modelId: "embedding-3",
             dimensions: 8,
             inputManifestFingerprint: "e".repeat(64),
             expectedActiveIndexGenerationId: indexedPointer!.generation.id,
@@ -257,7 +281,7 @@ test(
         data: {
           projectId,
           providerConnectionId: provider.id,
-          modelId: "embedding-test",
+          modelId: "embedding-3",
           dimensions: 8,
           inputManifestFingerprint: "f".repeat(64),
           expectedActiveIndexGenerationId: indexedPointer!.generation.id,
@@ -312,7 +336,7 @@ test(
       assert.equal((await getProjectPlan(projectId, user, db)).availableRecommendations.length, 0);
       await assert.rejects(() => db.projectWorkItem.update({ where: { id: promotedWorkItem.id }, data: { evidenceFingerprint: "e".repeat(64) } }));
 
-      const status = await listProjectIntelligence(projectId, db);
+      const status = await listProjectIntelligence(projectId, user, db);
       assert.equal(status.readiness.ready, true);
       assert.equal(status.reports.length, 1);
       assert.equal(status.agentRuns.length, 1);
@@ -333,14 +357,15 @@ test(
         select: { id: true, status: true, stage: true, failureCode: true, result: true, completedAt: true },
       });
 
-      const alternateProvider = await createProviderConnection({
+      const alternateProvider = await createWorkspaceProviderConnection(workspaceId, {
         name: `V2.1 alternate ${suffix}`,
-        kind: "openai",
+        kind: "glm",
         apiKey: "sk-v2-1-intelligence-secret",
-        generationModelId: "generation-test",
-        embeddingModelId: "embedding-test",
+        generationModelId: "glm-4-air",
+        embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
-      }, db);
+        visionModelId: null,
+      }, { id: user.id, role: user.role }, db);
       alternateProviderId = alternateProvider.id;
       const alternateProviderRow = await db.aiProviderConnection.update({
         where: { id: alternateProvider.id },
@@ -355,7 +380,7 @@ test(
       await upsertProjectAiRoute(projectId, {
         operation: "embedding",
         providerConnectionId: alternateProvider.id,
-        modelId: "embedding-test",
+        modelId: "embedding-3",
         embeddingDimensions: 8,
         maxOutputTokens: 128,
         acknowledgeIndexRebuild: true,
@@ -366,7 +391,7 @@ test(
       });
       assert.equal(pointerAfterRouteChange?.indexGenerationId, pointerBeforeRouteChange?.indexGenerationId);
       assert.equal(pointerAfterRouteChange?.generation.status, "complete");
-      const incompatible = await listProjectIntelligence(projectId, db);
+      const incompatible = await listProjectIntelligence(projectId, user, db);
       assert.equal(incompatible.readiness.activeIndex, true);
       assert.equal(incompatible.readiness.indexCompatible, false);
       assert.equal(incompatible.readiness.ready, false);
@@ -409,7 +434,7 @@ test(
           jobId: interruptedWorkflowJob.id,
           providerConnectionId: provider.id,
           operation: "projectAnalysis",
-          modelId: "generation-test",
+          modelId: "glm-4-flash",
           billingUserId: user.id,
           callKey: `test-audit-${suffix}`,
           status: "running",
@@ -419,7 +444,7 @@ test(
         where: { id: interruptedWorkflowClaim.attemptId },
         data: { leaseExpiresAt: new Date(Date.now() - 1) },
       });
-      const reconciledWorkflowJob = await reconcileProjectJob(projectId, interruptedWorkflowJob.id, user.id, db);
+      const reconciledWorkflowJob = await reconcileProjectJob(projectId, interruptedWorkflowJob.id, user, db);
       assert.equal(reconciledWorkflowJob.status, "unknown");
       const reconciledAudit = await db.providerCallAudit.findUniqueOrThrow({ where: { id: runningAudit.id } });
       assert.equal(reconciledAudit.status, "unknown");
@@ -446,6 +471,10 @@ test(
       }
       const credentialIds = [credentialId, alternateCredentialId].filter((id): id is string => id !== null);
       if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
+      if (createdWorkspaceId !== null) {
+        await db.membershipSubscription.deleteMany({ where: { userId: createdUserId! } });
+        await db.workspace.deleteMany({ where: { id: createdWorkspaceId } });
+      }
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
       await unlink(masterKeyPath).catch(() => undefined);
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

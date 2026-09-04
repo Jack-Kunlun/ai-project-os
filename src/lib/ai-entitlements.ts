@@ -9,6 +9,7 @@ import {
   type ProjectAiRoute,
 } from "@prisma/client";
 import { getDb } from "@/lib/db";
+import { findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 
 /** The signup offer is a product constant, not a value supplied by a client. */
 export const SIGNUP_TOKEN_AMOUNT = 500_000;
@@ -105,8 +106,9 @@ export async function assertActiveMembership(
 
 /**
  * Issue the verified-identity signup grant from inside the identity creation
- * transaction. The compound unique key makes retries and concurrent callbacks
- * idempotent; no caller should invoke this for invitations or local members.
+ * transaction. The user/kind ledger key makes retries and concurrent
+ * callbacks idempotent; no caller should invoke this for invitations or local
+ * members.
  */
 async function issueVerifiedSignupGrantInTransaction(
   userId: string,
@@ -630,11 +632,16 @@ export async function assertAiOutboundEntitlement(input: Readonly<{
   }
   if (provider.workspaceId === null || provider.workspaceId !== project.workspaceId) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
   if (provider.ownerUserId === null) return fail("AI_PROVIDER_OWNER_REQUIRED");
-  const ownerMembership = await db.workspaceMembership.findUnique({
-    where: { workspaceId_userId: { workspaceId: provider.workspaceId, userId: provider.ownerUserId } },
-    select: { role: true },
-  });
-  if (ownerMembership === null || (ownerMembership.role !== "owner" && ownerMembership.role !== "admin")) return fail("AI_PROVIDER_OWNER_REQUIRED");
+  const [ownerMembership, ownerUser] = await Promise.all([
+    findConfirmedWorkspaceMembership(db, provider.workspaceId, provider.ownerUserId),
+    db.appUser.findUnique({ where: { id: provider.ownerUserId }, select: { disabledAt: true } }),
+  ]);
+  if (
+    ownerMembership === null
+    || ownerUser === null
+    || ownerUser.disabledAt !== null
+    || (ownerMembership.role !== "owner" && ownerMembership.role !== "admin")
+  ) return fail("AI_PROVIDER_OWNER_REQUIRED");
   await assertActiveMembership(provider.ownerUserId, db, now);
   if (operation === "embedding" && (provider.defaultEmbeddingModelId !== input.route.modelId || provider.embeddingDimensions !== input.route.embeddingDimensions)) return fail("AI_MODEL_CAPABILITY_MISMATCH");
   if (operation === "visionExtract" && provider.defaultVisionModelId !== input.route.modelId) return fail("AI_MODEL_CAPABILITY_MISMATCH");

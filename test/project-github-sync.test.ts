@@ -166,19 +166,86 @@ test("root finalization stops heartbeat before CAS terminal publication and clos
   assert.doesNotMatch(source, /__all_previous__/);
 });
 
+test("project-sync runner rechecks actor after claim before heartbeat or frozen-entry work", () => {
+  const source = readFileSync(join(process.cwd(), "src/lib/github/project-sync-service.ts"), "utf8");
+  const start = source.indexOf("export async function runGitHubProjectSyncJob");
+  const end = source.indexOf("\nexport async function", start + 1);
+  const runner = source.slice(start, end === -1 ? undefined : end);
+  const claim = runner.indexOf("const claim = await claimProjectJob");
+  const tryStart = runner.indexOf("  try {");
+  const secondGuard = runner.indexOf("await admitProjectSyncRoot({", tryStart);
+  const heartbeat = runner.indexOf("startProjectJobHeartbeat");
+  const entryRead = runner.indexOf("projectGitHubSyncEntry.findMany");
+  const finallyStart = runner.indexOf("  } finally {");
+  assert.ok(claim >= 0);
+  assert.ok(secondGuard > claim, "root access must be admitted after claim");
+  assert.ok(secondGuard > tryStart, "root access admission must be inside try/catch");
+  assert.ok(secondGuard < heartbeat, "actor must be rechecked before heartbeat");
+  assert.ok(secondGuard < entryRead, "actor must be rechecked before post-claim entry reads");
+  assert.ok(finallyStart > secondGuard);
+  assert.match(runner.slice(finallyStart), /closeProjectGitHubSyncRoot[\s\S]*failProjectJob/u);
+});
+
+test("project-sync child admission precedes every client/service acquisition", () => {
+  const source = readFileSync(join(process.cwd(), "src/lib/github/project-sync-service.ts"), "utf8");
+  const start = source.indexOf("export async function runGitHubProjectSyncJob");
+  const runner = source.slice(start);
+  const firstCodeAdmission = runner.indexOf("await admitProjectSyncChild({");
+  const firstCodeService = runner.indexOf("const childService = await serviceForCode");
+  const materialAdmission = runner.indexOf("await admitProjectSyncChild({", firstCodeAdmission + 1);
+  const materialService = runner.indexOf("const childService = await serviceForMaterial");
+  assert.ok(firstCodeAdmission >= 0);
+  assert.ok(firstCodeAdmission < firstCodeService);
+  assert.ok(materialAdmission >= 0);
+  assert.ok(materialAdmission < materialService);
+  assert.doesNotMatch(runner, /markProviderDispatched/u);
+});
+
 test("explicit project-sync reconciliation is lock-scoped and has no provider call", () => {
   const service = readFileSync(join(process.cwd(), "src/lib/github/project-sync-service.ts"), "utf8");
   const route = readFileSync(join(process.cwd(), "src/app/api/projects/[projectId]/jobs/[jobId]/route.ts"), "utf8");
   assert.match(service, /export async function reconcileGitHubProjectSync/);
   assert.match(service, /export async function cancelGitHubProjectSync/);
-  assert.match(service, /withProjectJobLock\(db, jobId/);
+  assert.match(service, /withProjectJobAccessTransaction\(db, \{/);
   assert.match(service, /projectGitHubSyncReconciliation\.create/);
   assert.match(service, /resolution: "explicitAbandon"/);
-  assert.match(route, /requestedById: user\.id/);
+  assert.match(route, /actor: user/);
   assert.match(route, /cancelGitHubProjectSync/);
   const reconcileStart = service.indexOf("export async function reconcileGitHubProjectSync");
   const reconcileEnd = service.indexOf("export async function getProjectGitHubSync", reconcileStart);
   assert.doesNotMatch(service.slice(reconcileStart, reconcileEnd), /loadGitHubClientForCredential|createGitHubReadOnlyClient/);
+});
+
+test("reconcile and cancel recheck access inside the lock before state reads", () => {
+  const sources = [
+    {
+      file: "src/lib/github/project-sync-service.ts",
+      functions: ["reconcileGitHubProjectSync", "cancelGitHubProjectSync"],
+    },
+    {
+      file: "src/lib/web-memory-index.ts",
+      functions: ["reconcileMemoryIndexJob", "cancelMemoryIndexJob"],
+    },
+  ] as const;
+
+  for (const { file, functions } of sources) {
+    const source = readFileSync(join(process.cwd(), file), "utf8");
+    for (const name of functions) {
+      const start = source.indexOf(`export async function ${name}`);
+      const end = source.indexOf("\nexport async function", start + 1);
+      const implementation = source.slice(start, end === -1 ? undefined : end);
+      const lock = implementation.indexOf("return withProjectJobAccessTransaction");
+      const innerGuard = implementation.indexOf(
+        file === "src/lib/github/project-sync-service.ts" ? "lockGitHubProject" : "MEMORY_INDEX_LOCK_NAMESPACE",
+        lock,
+      );
+      const firstJobRead = implementation.indexOf("backgroundJob.findUnique", lock);
+      assert.ok(start >= 0, `${file} should export ${name}`);
+      assert.ok(lock >= 0, `${name} should use the access-first project job admission`);
+      assert.ok(innerGuard > lock, `${name} should take the GitHub resource lock after access admission`);
+      assert.ok(firstJobRead > innerGuard, `${name} should read the job after authorization and resource locking`);
+    }
+  }
 });
 
 test("GitHub network uncertainty is represented as unknown by both direct services", () => {

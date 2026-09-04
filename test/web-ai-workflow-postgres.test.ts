@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import test from "node:test";
-import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
+import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
+import { createWorkspaceProviderConnection } from "../src/lib/workspace-provider-service";
 import { reviewWebAiCandidate, runAutoExtractJob } from "../src/lib/web-auto-extract";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
@@ -31,6 +32,7 @@ test(
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
     let createdUserId: string | null = null;
+    let createdWorkspaceId: string | null = null;
     let providerId: string | null = null;
     let credentialId: string | null = null;
 
@@ -74,23 +76,43 @@ test(
     };
 
     try {
-      let user = await db.appUser.findFirst({ where: { role: "admin" } });
-      if (user === null) {
-        user = await db.appUser.create({
-          data: {
-            username: `v2_test_${suffix}`,
-            role: "admin",
-            passwordHash: "a".repeat(43),
-            passwordSalt: "b".repeat(22),
-            passwordVersion: 1,
-          },
-        });
-        createdUserId = user.id;
-      }
+      const user = await db.appUser.create({
+        data: { id: randomUUID(), username: `v2_test_${suffix}`, role: "user" },
+      });
+      createdUserId = user.id;
+      const workspaceId = randomUUID();
+      await db.workspace.create({
+        data: { id: workspaceId, name: `V2 workflow workspace ${suffix}`, slug: `v2-workflow-workspace-${suffix}`, createdById: user.id },
+      });
+      createdWorkspaceId = workspaceId;
+      await db.$transaction((tx) => grantWorkspaceMembership(tx, {
+        workspaceId,
+        userId: user.id,
+        role: "owner",
+        actorId: user.id,
+        reason: "web_ai_workflow_fixture",
+      }));
+      const membershipNow = new Date();
+      await db.membershipSubscription.create({
+        data: {
+          userId: user.id,
+          status: "active",
+          startsAt: new Date(membershipNow.getTime() - 60_000),
+          expiresAt: new Date(membershipNow.getTime() + 86_400_000),
+        },
+      });
 
       await db.project.create({
-        data: { id: projectId, name: `V2 workflow ${suffix}`, slug: `v2-workflow-${suffix}` },
+        data: { id: projectId, workspaceId, name: `V2 workflow ${suffix}`, slug: `v2-workflow-${suffix}` },
       });
+      await db.$transaction((tx) => grantProjectMembership(tx, {
+        projectId,
+        workspaceId,
+        userId: user.id,
+        role: "owner",
+        actorId: user.id,
+        reason: "web_ai_workflow_fixture",
+      }));
       const sourceText = "会议结论：项目决定采用统一记忆索引。所有回答必须保留证据引用。";
       const sourceHash = hashSourceContent(sourceText);
       const source = await db.projectSource.create({
@@ -103,14 +125,15 @@ test(
           manualContentDedupeKey: sourceHash,
         },
       });
-      const provider = await createProviderConnection({
+      const provider = await createWorkspaceProviderConnection(workspaceId, {
         name: `V2 mock ${suffix}`,
-        kind: "openai",
+        kind: "glm",
         apiKey: "sk-v2-workflow-secret",
-        generationModelId: "generation-test",
-        embeddingModelId: "embedding-test",
+        generationModelId: "glm-4-flash",
+        embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
-      }, db);
+        visionModelId: null,
+      }, { id: user.id, role: user.role }, db);
       providerId = provider.id;
       const providerRow = await db.aiProviderConnection.update({
         where: { id: provider.id },
@@ -121,21 +144,21 @@ test(
       await upsertProjectAiRoute(projectId, {
         operation: "embedding",
         providerConnectionId: provider.id,
-        modelId: "embedding-test",
+        modelId: "embedding-3",
         embeddingDimensions: 8,
         maxOutputTokens: 128,
       }, db);
       await upsertProjectAiRoute(projectId, {
         operation: "autoExtract",
         providerConnectionId: provider.id,
-        modelId: "generation-test",
+        modelId: "glm-4-flash",
         embeddingDimensions: null,
         maxOutputTokens: 1024,
       }, db);
       await upsertProjectAiRoute(projectId, {
         operation: "generateWithContext",
         providerConnectionId: provider.id,
-        modelId: "generation-test",
+        modelId: "glm-4-flash",
         embeddingDimensions: null,
         maxOutputTokens: 1024,
       }, db);
@@ -173,10 +196,21 @@ test(
         candidateId: candidate.id,
         action: "accept",
         expectedItemUpdatedAt: candidate.projectItem.updatedAt,
-        reviewedBy: "local:v2-test",
+        actor: user,
       }, db);
       assert.equal(reviewed.reviewStatus, "accepted");
       assert.equal(reviewed.projectItem.reviewStatus, "confirmed");
+      const reviewRevision = await db.projectItemRevision.findFirstOrThrow({
+        where: { projectId, projectItemId: candidate.projectItemId },
+        orderBy: [{ revisionNumber: "desc" }, { createdAt: "desc" }],
+        select: { actorId: true },
+      });
+      const reviewedRow = await db.webAiCandidate.findUniqueOrThrow({
+        where: { id: candidate.id },
+        select: { reviewedBy: true },
+      });
+      assert.equal(reviewedRow.reviewedBy, user.id);
+      assert.equal(reviewRevision.actorId, user.id);
 
       const searchJob = await runSemanticSearchJob({
         projectId,
@@ -227,6 +261,10 @@ test(
         await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
       }
       if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
+      if (createdWorkspaceId !== null) {
+        await db.membershipSubscription.deleteMany({ where: { userId: createdUserId! } });
+        await db.workspace.deleteMany({ where: { id: createdWorkspaceId } });
+      }
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
       await unlink(masterKeyPath).catch(() => undefined);
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

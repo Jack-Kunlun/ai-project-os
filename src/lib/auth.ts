@@ -4,6 +4,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { authorizeApiRequest } from "@/lib/access-control";
+import { lockWorkspaceAccess } from "@/lib/access-linearization";
+import { appendWorkspaceMembershipAudit } from "@/lib/membership-governance";
 import { toSystemRole, type SystemRole } from "@/lib/system-role";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
@@ -178,14 +180,30 @@ export async function initializeAdmin(
   const password = await createPasswordRecord(input.password);
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(781452903)`;
+    await lockWorkspaceAccess(tx, DEFAULT_WORKSPACE_ID);
     if ((await tx.appUser.count({ where: { role: "admin" } })) > 0) {
       return fail("AUTH_ALREADY_INITIALIZED");
     }
+    const [workspaceMembershipCount, projectMembershipCount] = await Promise.all([
+      // Bootstrap is only safe while the database has no membership facts at
+      // all.  Checking just the default workspace would let a partially
+      // migrated/pending membership in another workspace be bypassed by a
+      // second self-bootstrap.
+      tx.workspaceMembership.count(),
+      tx.projectMembership.count(),
+    ]);
+    if (workspaceMembershipCount > 0 || projectMembershipCount > 0) return fail("AUTH_ALREADY_INITIALIZED");
     const user = await tx.appUser.create({
       data: { username, role: "admin", ...password },
     });
     await tx.workspace.update({ where: { id: DEFAULT_WORKSPACE_ID }, data: { createdById: user.id } });
-    await tx.workspaceMembership.create({ data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "owner" } });
+    const membership = await tx.workspaceMembership.create({ data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "owner", accessState: "confirmed" } });
+    await appendWorkspaceMembershipAudit(tx, membership, {
+      action: "bootstrapConfirmed",
+      previousState: null,
+      actorId: user.id,
+      reason: "fresh_application_bootstrap",
+    });
     return createSession(tx, user);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

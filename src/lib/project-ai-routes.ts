@@ -3,6 +3,10 @@ import { z } from "zod";
 import { type AccessUser } from "@/lib/access-control";
 import { getProviderDefinition, isSafeModelId } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
+import {
+  findConfirmedProjectMembership,
+  findConfirmedWorkspaceMembership,
+} from "@/lib/membership-governance";
 
 export const SUPPORTED_OPERATIONS = ["embedding", "visionExtract", "autoExtract", "generateWithContext"] as const;
 type SupportedOperation = typeof SUPPORTED_OPERATIONS[number];
@@ -40,9 +44,9 @@ export class ProjectAiRouteError extends Error {
   }
 }
 
-/** Route changes can select a workspace BYOK credential, so project-edit
- * permission alone is insufficient; the current workspace Owner/Admin must
- * explicitly approve the change. */
+/** Route changes are project-governed.  A confirmed project Owner is required
+ * for every route, and a workspace BYOK target additionally requires a
+ * confirmed workspace Owner/Admin. */
 export async function assertProjectAiRouteManager(
   projectId: string,
   actor: AccessUser,
@@ -50,12 +54,19 @@ export async function assertProjectAiRouteManager(
 ): Promise<void> {
   const project = await db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
   if (project === null) return fail("PROJECT_NOT_FOUND");
-  const membership = await db.workspaceMembership.findUnique({
-    where: { workspaceId_userId: { workspaceId: project.workspaceId, userId: actor.id } },
-    select: { role: true },
-  });
-  // Project route writes can select workspace BYOK credentials. A global
-  // system-admin role does not grant access to an unrelated workspace.
+  const projectMembership = await findConfirmedProjectMembership(db, projectId, actor.id);
+  if (projectMembership === null || projectMembership.role !== "owner") {
+    return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
+  }
+  return;
+}
+
+async function assertWorkspaceProviderManager(
+  workspaceId: string,
+  actorId: string,
+  db: RouteDb,
+): Promise<void> {
+  const membership = await findConfirmedWorkspaceMembership(db, workspaceId, actorId);
   if (membership === null || (membership.role !== "owner" && membership.role !== "admin")) {
     return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
   }
@@ -320,10 +331,9 @@ export async function previewProjectAiRouteChange(
 export async function getProjectAiRoutes(projectId: string, actor: AccessUser, db: PrismaClient = getDb()) {
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true } });
   if (project === null) return fail("PROJECT_NOT_FOUND");
-  const canViewWorkspaceProviders = await db.workspaceMembership.findUnique({
-    where: { workspaceId_userId: { workspaceId: project.workspaceId, userId: actor.id } },
-    select: { userId: true },
-  }) !== null;
+  const canViewWorkspaceProviders = await findConfirmedWorkspaceMembership(db, project.workspaceId, actor.id);
+  const canViewWorkspaceProviderConnections = canViewWorkspaceProviders !== null
+    && (canViewWorkspaceProviders.role === "owner" || canViewWorkspaceProviders.role === "admin");
   const [routes, providers] = await Promise.all([
     db.projectAiRoute.findMany({
       where: { projectId, operation: { in: [...SUPPORTED_OPERATIONS] } },
@@ -333,7 +343,7 @@ export async function getProjectAiRoutes(projectId: string, actor: AccessUser, d
     db.aiProviderConnection.findMany({
       where: { status: { not: "disabled" }, OR: [
         { scope: "platform" },
-        ...(canViewWorkspaceProviders ? [{ scope: "workspace" as const, workspaceId: project.workspaceId }] : []),
+        ...(canViewWorkspaceProviderConnections ? [{ scope: "workspace" as const, workspaceId: project.workspaceId }] : []),
       ] },
       orderBy: { name: "asc" },
       select: {
@@ -374,13 +384,11 @@ export async function upsertProjectAiRoute(
       if (actorId !== undefined) {
         const actor = await tx.appUser.findUnique({ where: { id: actorId }, select: { id: true } });
         if (actor === null) return fail("PROJECT_AI_ROUTE_INVALID_INPUT");
-        const membership = await tx.workspaceMembership.findUnique({
-          where: { workspaceId_userId: { workspaceId: state.project.workspaceId, userId: actorId } },
-          select: { role: true },
-        });
-        if (membership === null || (membership.role !== "owner" && membership.role !== "admin")) {
+        const projectMembership = await findConfirmedProjectMembership(tx, projectId, actorId);
+        if (projectMembership === null || projectMembership.role !== "owner") {
           return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
         }
+        if (state.provider?.scope === "workspace") await assertWorkspaceProviderManager(state.project.workspaceId, actorId, tx);
       }
 
       if (expectedUpdatedAt !== undefined) {

@@ -73,7 +73,15 @@ function fakeDb() {
   const attempts = new Map<string, Attempt>();
   const identities = new Map<string, { id: string; userId: string; githubUserId: bigint; login: string; email: string; displayName: string | null; lastLoginAt: Date }>();
   const users = new Map<string, { id: string; username: string; role: "admin" | "member" | "user"; displayName?: string | null; email?: string | null; disabledAt: Date | null }>();
-  const memberships: Array<{ workspaceId: string; userId: string; role: "member" }> = [];
+  const memberships: Array<{
+    id: string;
+    workspaceId: string;
+    userId: string;
+    role: "member";
+    accessState: "confirmed";
+    createdAt: Date;
+    updatedAt: Date;
+  }> = [];
   const platformTokenGrants = new Map<string, PlatformTokenGrantRecord>();
   const platformTokenLedgerEntries = new Map<string, PlatformTokenLedgerEntryRecord>();
   let sequence = 0;
@@ -94,7 +102,17 @@ function fakeDb() {
       },
     },
     workspaceMembership: {
-      create: async ({ data }: { data: { workspaceId: string; userId: string; role: "member" } }) => { memberships.push(data); return data; },
+      create: async ({ data }: { data: { workspaceId: string; userId: string; role: "member"; accessState: "confirmed" } }) => {
+        const now = new Date();
+        const created = { id: `66666666-6666-4666-8666-${String(++sequence).padStart(12, "0")}`, ...data, createdAt: now, updatedAt: now };
+        memberships.push(created);
+        return created;
+      },
+      findMany: async ({ where }: { where: { workspaceId: string; userId: string; accessState: "confirmed" | { not: "revoked" } } }) =>
+        memberships.filter((membership) => membership.workspaceId === where.workspaceId && membership.userId === where.userId && membership.accessState === "confirmed"),
+    },
+    membershipAccessAudit: {
+      create: async () => ({}),
     },
     platformTokenGrant: {
       findUnique: async ({ where }: { where: { userId_kind: { userId: string; kind: PlatformTokenGrantRecord["kind"] } } }) => [...platformTokenGrants.values()].find((grant) => grant.userId === where.userId_kind.userId && grant.kind === where.userId_kind.kind) ?? null,

@@ -4,6 +4,7 @@ import {
   type PrismaClient,
   type ProjectObjectiveStatus,
   type ProjectWorkItemStatus,
+  type WorkspaceMembershipRole,
 } from "@prisma/client";
 import { z } from "zod";
 import { assertProjectAccess, type AccessUser } from "@/lib/access-control";
@@ -254,7 +255,7 @@ export async function getProjectPlan(projectIdInput: unknown, actor: AccessUser,
   if (!parsedProjectId.success) return fail("PROJECT_PLAN_INVALID_INPUT");
   const projectId = parsedProjectId.data;
   const permission = await assertProjectAccess(actor, projectId, "view", db);
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, name: true, archivedAt: true, workspaceId: true } });
+  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, name: true, archivedAt: true, workspaceId: true, membershipInheritanceMode: true } });
   if (project === null) return fail("PROJECT_PLAN_PROJECT_NOT_FOUND");
   const [objectives, workItems, dependencies, audits, runs, evidenceLinks, impactSuggestions, members, evidenceItems, evidenceSources, pendingActions] = await Promise.all([
     db.projectObjective.findMany({ where: { projectId }, orderBy: [{ status: "asc" }, { updatedAt: "desc" }], select: objectiveSelect }),
@@ -268,8 +269,10 @@ export async function getProjectPlan(projectIdInput: unknown, actor: AccessUser,
       where: {
         disabledAt: null,
         OR: [
-          { projectMemberships: { some: { projectId, role: { in: ["owner", "editor"] } } } },
-          { workspaceMemberships: { some: { workspaceId: project.workspaceId, role: { in: ["owner", "admin"] } } } },
+          { projectMemberships: { some: { projectId, accessState: "confirmed", role: { in: ["owner", "editor"] } } } },
+          ...(project.membershipInheritanceMode === "workspaceInherited"
+            ? [{ workspaceMemberships: { some: { workspaceId: project.workspaceId, accessState: "confirmed" as const, role: { in: ["owner", "admin"] as WorkspaceMembershipRole[] } } } }]
+            : []),
         ],
       },
       orderBy: [{ displayName: "asc" }, { username: "asc" }],
@@ -279,13 +282,17 @@ export async function getProjectPlan(projectIdInput: unknown, actor: AccessUser,
     db.projectSource.findMany({ where: { projectId, retiredAt: null }, orderBy: [{ ingestedAt: "desc" }, { id: "desc" }], take: 100, select: { id: true, kind: true, externalRef: true, contentText: true, contentHash: true, ingestedAt: true } }),
     db.projectAction.findMany({ where: { projectId, status: "waitingApproval" }, select: { status: true } }),
   ]);
+  const eligibleMemberIds = new Set(members.map((member) => member.id));
+  const visibleWorkItems = workItems.map((item) => item.assigneeId === null || eligibleMemberIds.has(item.assigneeId)
+    ? item
+    : { ...item, assigneeId: null, assignee: null });
   const promoted = new Set(workItems.flatMap((item) => item.agentRunId === null || item.recommendationIndex === null ? [] : [`${item.agentRunId}:${item.recommendationIndex}`]));
   const publicEvidenceLinks = evidenceLinks.map(({ evidenceSnapshot: _snapshot, projectItem, projectSource, repositorySyncRun, ...link }) => ({
     ...link,
     stale: isProjectPlanEvidenceStale({ ...link, evidenceSnapshot: _snapshot, projectItem, projectSource, repositorySyncRun }),
   }));
   const health = buildProjectPlanHealth({
-    workItems: workItems.map((item) => ({ ...item, assigneeId: item.assigneeId !== null && members.some((member) => member.id === item.assigneeId) ? item.assigneeId : null })),
+    workItems: visibleWorkItems.map((item) => ({ ...item, assigneeId: item.assigneeId !== null && members.some((member) => member.id === item.assigneeId) ? item.assigneeId : null })),
     dependencies,
     evidenceLinks: publicEvidenceLinks.map((link) => ({ workItemId: link.workItemId, stale: link.stale })),
     impacts: impactSuggestions,
@@ -294,7 +301,7 @@ export async function getProjectPlan(projectIdInput: unknown, actor: AccessUser,
   return Object.freeze({
     project: { id: project.id, name: project.name, archivedAt: project.archivedAt },
     objectives,
-    workItems,
+    workItems: visibleWorkItems,
     dependencies,
     evidenceLinks: publicEvidenceLinks,
     impactSuggestions,
@@ -317,15 +324,17 @@ export async function getProjectPlan(projectIdInput: unknown, actor: AccessUser,
 
 async function assertEligibleAssignee(projectId: string, assigneeId: string | null | undefined, db: Prisma.TransactionClient): Promise<void> {
   if (assigneeId === undefined || assigneeId === null) return;
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true } });
+  const project = await db.project.findUnique({ where: { id: projectId }, select: { workspaceId: true, membershipInheritanceMode: true } });
   if (project === null) return fail("PROJECT_PLAN_PROJECT_NOT_FOUND");
   const eligible = await db.appUser.count({
     where: {
       id: assigneeId,
       disabledAt: null,
       OR: [
-        { projectMemberships: { some: { projectId, role: { in: ["owner", "editor"] } } } },
-        { workspaceMemberships: { some: { workspaceId: project.workspaceId, role: { in: ["owner", "admin"] } } } },
+        { projectMemberships: { some: { projectId, accessState: "confirmed", role: { in: ["owner", "editor"] } } } },
+        ...(project.membershipInheritanceMode === "workspaceInherited"
+          ? [{ workspaceMemberships: { some: { workspaceId: project.workspaceId, accessState: "confirmed" as const, role: { in: ["owner", "admin"] as WorkspaceMembershipRole[] } } } }]
+          : []),
       ],
     },
   });

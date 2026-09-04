@@ -33,6 +33,7 @@ import { AutomationError } from "@/lib/automation";
 import { MemoryQualityError } from "@/lib/memory-quality";
 import { WebSourceError } from "@/lib/web-sources";
 import { AccessControlError } from "@/lib/access-control";
+import { WebAiAccessError } from "@/lib/web-ai-access";
 import { WorkspaceError } from "@/lib/workspaces";
 import { OidcError } from "@/lib/oidc";
 import { GitHubOAuthError } from "@/lib/github-oauth";
@@ -186,6 +187,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       WORKSPACE_NOT_FOUND: [404, "工作区不存在"],
       WORKSPACE_MEMBER_NOT_FOUND: [404, "成员不存在"],
       WORKSPACE_MEMBER_CONFLICT: [409, "用户名或邮箱已经存在"],
+      MEMBERSHIP_REVIEW_REQUIRED: [409, "该成员关系尚未完成治理确认，请先完成审核"],
       WORKSPACE_INVITATION_NOT_FOUND: [404, "邀请不存在或已使用"],
       WORKSPACE_INVITATION_EXPIRED: [410, "邀请已经过期"],
       WORKSPACE_INVITATION_EMAIL_MISMATCH: [403, "当前账户邮箱与邀请对象不一致"],
@@ -232,6 +234,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       GITHUB_OAUTH_TOKEN_REVOCATION_FAILED: [502, "GitHub 临时访问令牌撤销失败，本次登录已中止"],
       GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED: [403, "系统中已有使用该邮箱的账号，请先使用原账号登录并在个人中心绑定 GitHub"],
       GITHUB_OAUTH_IDENTITY_CONFLICT: [409, "该 GitHub 身份已绑定其他账户，或当前账户已绑定其他 GitHub 身份"],
+      GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED: [409, "该账户的工作区成员关系尚未完成治理确认，请先完成审核"],
       GITHUB_OAUTH_ACCOUNT_DISABLED: [403, "账户已停用"],
     };
     const [status, message] = mapping[error.code] ?? [500, "GitHub 登录失败"];
@@ -244,6 +247,15 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       ACCESS_PROJECT_NOT_FOUND: [404, "项目不存在"],
       ACCESS_WORKSPACE_NOT_FOUND: [404, "工作区不存在"],
       ACCESS_LAST_OWNER_REQUIRED: [409, "工作区必须至少保留一位所有者"],
+    };
+    const [status, message] = mapping[error.code] ?? [403, "访问被拒绝"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof WebAiAccessError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      ACCESS_FORBIDDEN: [403, "你没有执行此操作所需的权限"],
+      ACCOUNT_DISABLED: [403, "账户已停用"],
     };
     const [status, message] = mapping[error.code] ?? [403, "访问被拒绝"];
     return { status, body: { error: { code: error.code, message } } };
@@ -305,6 +317,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       GIT_CONNECTION_IN_USE: [409, "Git 服务仍被项目仓库关联或历史记录引用，无法停用或永久删除"],
       GIT_CONNECTION_DISABLED: [409, "Git 服务连接已停用"],
       GIT_CONNECTION_NOT_VERIFIED: [409, "Git 服务连接尚未通过管理员验证"],
+      GIT_LEGACY_PROJECT_CONNECT_FROZEN: [409, "个人 Git 与项目委托正在改造，当前不可新增项目仓库连接；既有只读连接不受影响"],
       GIT_CONNECTION_DELETE_REQUIRES_DISABLED: [409, "请先停用 Git 服务连接，再执行永久删除"],
       GIT_CONNECTION_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
       GIT_REPOSITORY_NOT_FOUND: [404, "Git 仓库或分支不存在"],

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient, type ProjectDeletionReceipt } from "@prisma/client";
+import { type AccessUser } from "@/lib/access-control";
+import { admitWebAiProjectAccess } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import {
   ProjectAssetStorageError,
@@ -103,7 +105,7 @@ export async function assertProjectActive(projectId: string, db: PrismaClient = 
 export async function updateProjectLifecycle(
   input: Readonly<{
     projectId: string;
-    actorId: string;
+    actor: AccessUser;
     action: "archive" | "restore";
     expectedUpdatedAt: Date;
   }>,
@@ -112,11 +114,17 @@ export async function updateProjectLifecycle(
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       return await db.$transaction(async (tx) => {
+        const admission = await admitWebAiProjectAccess(tx, {
+          actor: input.actor,
+          projectId: input.projectId,
+          required: "owner",
+          allowArchived: input.action === "restore",
+        });
         await tx.$executeRaw(Prisma.sql`
-          SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}::text, 23082915))
+          SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082915))
         `);
         const current = await tx.project.findUnique({
-          where: { id: input.projectId },
+          where: { id: admission.project.id },
           select: { ...lifecycleProjectSelect, archivedAt: true },
         });
         if (current === null) throw new ProjectLifecycleError("PROJECT_NOT_FOUND");
@@ -127,16 +135,16 @@ export async function updateProjectLifecycle(
         if (input.action === "archive") {
           if (current.archivedAt !== null) throw new ProjectLifecycleError("PROJECT_ARCHIVED");
           const unresolvedJobs = await tx.backgroundJob.count({
-            where: {
-              projectId: input.projectId,
+              where: {
+                projectId: admission.project.id,
               OR: [
                 { status: { in: ["queued", "waitingConsent", "running"] } },
                 { reconciliationRequired: true },
               ],
             },
           });
-          const runningAutomations = await tx.automationRun.count({ where: { projectId: input.projectId, status: "running" } });
-          const runningActions = await tx.projectAction.count({ where: { projectId: input.projectId, status: "running" } });
+          const runningAutomations = await tx.automationRun.count({ where: { projectId: admission.project.id, status: "running" } });
+          const runningActions = await tx.projectAction.count({ where: { projectId: admission.project.id, status: "running" } });
           if (unresolvedJobs > 0 || runningAutomations > 0 || runningActions > 0) throw new ProjectLifecycleError("PROJECT_HAS_UNRESOLVED_JOBS");
         } else if (current.archivedAt === null) {
           throw new ProjectLifecycleError("PROJECT_ALREADY_ACTIVE");
@@ -145,32 +153,32 @@ export async function updateProjectLifecycle(
         const changedAt = new Date();
         const archivedAt = input.action === "archive" ? changedAt : null;
         const project = await tx.project.update({
-          where: { id: input.projectId },
+          where: { id: admission.project.id },
           data: { archivedAt, updatedAt: changedAt },
           select: lifecycleProjectSelect,
         });
         if (input.action === "archive") {
-          await tx.automationRule.updateMany({ where: { projectId: input.projectId, status: "active" }, data: { status: "paused" } });
-          const pendingActions = await tx.projectAction.findMany({ where: { projectId: input.projectId, status: { in: ["waitingApproval", "queued"] } }, select: { id: true, status: true } });
+          await tx.automationRule.updateMany({ where: { projectId: admission.project.id, status: "active" }, data: { status: "paused" } });
+          const pendingActions = await tx.projectAction.findMany({ where: { projectId: admission.project.id, status: { in: ["waitingApproval", "queued"] } }, select: { id: true, status: true } });
           for (const action of pendingActions) {
             const cancelled = await tx.projectAction.updateMany({
               where: { id: action.id, status: action.status },
               data: { status: "cancelled", completedAt: changedAt, updatedAt: changedAt },
             });
             if (cancelled.count === 1) await tx.projectActionAudit.create({ data: {
-              projectId: input.projectId,
+              projectId: admission.project.id,
               actionId: action.id,
               event: "cancelled",
-              actorId: input.actorId,
+              actorId: admission.actor.id,
               details: { previousStatus: action.status, reason: "PROJECT_ARCHIVED" },
             } });
           }
         }
         const revision = await tx.projectLifecycleRevision.create({
           data: {
-            projectId: input.projectId,
+            projectId: admission.project.id,
             action: input.action === "archive" ? "archived" : "restored",
-            actorId: input.actorId,
+            actorId: admission.actor.id,
             previousArchivedAt: current.archivedAt,
             currentArchivedAt: archivedAt,
             projectUpdatedAt: project.updatedAt,
@@ -191,7 +199,7 @@ export async function updateProjectLifecycle(
 export async function deleteArchivedProject(
   input: Readonly<{
     projectId: string;
-    actorId: string;
+    actor: AccessUser;
     confirmationName: string;
     expectedUpdatedAt: Date;
   }>,
@@ -201,11 +209,17 @@ export async function deleteArchivedProject(
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
       receipt = await db.$transaction(async (tx) => {
+        const admission = await admitWebAiProjectAccess(tx, {
+          actor: input.actor,
+          projectId: input.projectId,
+          required: "owner",
+          allowArchived: true,
+        });
         await tx.$executeRaw(Prisma.sql`
-          SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}::text, 23082916))
+          SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082916))
         `);
         const project = await tx.project.findUnique({
-          where: { id: input.projectId },
+          where: { id: admission.project.id },
           select: { id: true, workspaceId: true, name: true, slug: true, archivedAt: true, updatedAt: true },
         });
         if (project === null) throw new ProjectLifecycleError("PROJECT_NOT_FOUND");
@@ -216,9 +230,9 @@ export async function deleteArchivedProject(
         if (project.name !== input.confirmationName) {
           throw new ProjectLifecycleError("PROJECT_DELETE_CONFIRMATION_MISMATCH");
         }
-        await assertProjectReadyForDeletion(tx, input.projectId, new Date());
+        await assertProjectReadyForDeletion(tx, admission.project.id, new Date());
         const fingerprint = deletionFingerprint(project);
-        const existing = await tx.projectDeletionReceipt.findUnique({ where: { deletedProjectId: input.projectId } });
+        const existing = await tx.projectDeletionReceipt.findUnique({ where: { deletedProjectId: admission.project.id } });
         if (existing !== null) {
           if (existing.status !== "pending" || existing.projectFingerprint !== fingerprint || existing.expectedUpdatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
             throw new ProjectLifecycleError("PROJECT_DELETE_CONFLICT");
@@ -229,7 +243,7 @@ export async function deleteArchivedProject(
           data: {
             deletedProjectId: project.id,
             workspaceId: project.workspaceId,
-            requestedById: input.actorId,
+            requestedById: admission.actor.id,
             projectFingerprint: fingerprint,
             expectedUpdatedAt: input.expectedUpdatedAt,
           },
@@ -248,14 +262,25 @@ export async function deleteArchivedProject(
   for (let attempt = 1; attempt <= 3 && databaseDeletedAt === null; attempt += 1) {
     let storageStagedThisAttempt = false;
     try {
-      const committed = await db.$transaction(async (tx) => {
+      // Preflight is deliberately a short database transaction.  It checks
+      // the receipt/project tuple under the common access locks, then releases
+      // those locks before touching the filesystem.  The final transaction
+      // below repeats the complete admission and fingerprint checks before
+      // deleting anything, so archive/restore/revocation can win the gap.
+      const prepared = await db.$transaction(async (tx) => {
+        const admission = await admitWebAiProjectAccess(tx, {
+          actor: input.actor,
+          projectId: input.projectId,
+          required: "owner",
+          allowArchived: true,
+        });
         await tx.$executeRaw(Prisma.sql`
-          SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}::text, 23082916))
+          SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082916))
         `);
         const currentReceipt = await tx.projectDeletionReceipt.findUniqueOrThrow({ where: { id: receipt.id } });
-        if (currentReceipt.status !== "pending") return currentReceipt;
+        if (currentReceipt.status !== "pending") return Object.freeze({ receipt: currentReceipt, projectId: admission.project.id, shouldStage: false });
         const project = await tx.project.findUnique({
-          where: { id: input.projectId },
+          where: { id: admission.project.id },
           select: { id: true, workspaceId: true, name: true, slug: true, archivedAt: true, updatedAt: true },
         });
         if (project === null || deletionFingerprint(project) !== currentReceipt.projectFingerprint) {
@@ -265,19 +290,51 @@ export async function deleteArchivedProject(
         if (project.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
           throw new ProjectLifecycleError("PROJECT_LIFECYCLE_STALE");
         }
-        await assertProjectReadyForDeletion(tx, input.projectId, new Date());
-        const storedVersionCount = await tx.projectAssetVersion.count({ where: { projectId: input.projectId } });
-        storageStagedThisAttempt = await stageProjectAssetStorageForDeletion(input.projectId, receipt.id);
-        if (storedVersionCount > 0 && !storageStagedThisAttempt) {
-          throw new ProjectAssetStorageError("ASSET_STORAGE_UNAVAILABLE");
+        await assertProjectReadyForDeletion(tx, admission.project.id, new Date());
+        const storedVersionCount = await tx.projectAssetVersion.count({ where: { projectId: admission.project.id } });
+        return Object.freeze({ receipt: currentReceipt, projectId: admission.project.id, shouldStage: storedVersionCount > 0 });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      if (prepared.receipt.status !== "pending") {
+        databaseDeletedAt = prepared.receipt.databaseDeletedAt;
+        break;
+      }
+
+      storageStagedThisAttempt = await stageProjectAssetStorageForDeletion(prepared.projectId, prepared.receipt.id);
+      if (prepared.shouldStage && !storageStagedThisAttempt) {
+        throw new ProjectAssetStorageError("ASSET_STORAGE_UNAVAILABLE");
+      }
+
+      const committed = await db.$transaction(async (tx) => {
+        const admission = await admitWebAiProjectAccess(tx, {
+          actor: input.actor,
+          projectId: input.projectId,
+          required: "owner",
+          allowArchived: true,
+        });
+        await tx.$executeRaw(Prisma.sql`
+          SELECT pg_advisory_xact_lock(hashtextextended(${admission.project.id}::text, 23082916))
+        `);
+        const currentReceipt = await tx.projectDeletionReceipt.findUniqueOrThrow({ where: { id: receipt.id } });
+        if (currentReceipt.status !== "pending") return currentReceipt;
+        const project = await tx.project.findUnique({
+          where: { id: admission.project.id },
+          select: { id: true, workspaceId: true, name: true, slug: true, archivedAt: true, updatedAt: true },
+        });
+        if (project === null || deletionFingerprint(project) !== currentReceipt.projectFingerprint) {
+          throw new ProjectLifecycleError("PROJECT_DELETE_CONFLICT");
         }
+        if (project.archivedAt === null) throw new ProjectLifecycleError("PROJECT_DELETE_REQUIRES_ARCHIVED");
+        if (project.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
+          throw new ProjectLifecycleError("PROJECT_LIFECYCLE_STALE");
+        }
+        await assertProjectReadyForDeletion(tx, admission.project.id, new Date());
         const credentialRows = await Promise.all([
-          tx.gitHubConnection.findMany({ where: { projectId: input.projectId, credentialId: { not: null } }, select: { credentialId: true } }),
-          tx.projectGitHubSyncEntry.findMany({ where: { projectId: input.projectId }, select: { credentialId: true } }),
+          tx.gitHubConnection.findMany({ where: { projectId: admission.project.id, credentialId: { not: null } }, select: { credentialId: true } }),
+          tx.projectGitHubSyncEntry.findMany({ where: { projectId: admission.project.id }, select: { credentialId: true } }),
         ]);
         const credentialIds = [...new Set(credentialRows.flat().flatMap((entry) => entry.credentialId ? [entry.credentialId] : []))];
-        await tx.projectAssetUploadReservation.deleteMany({ where: { projectId: input.projectId } });
-        await tx.project.delete({ where: { id: input.projectId } });
+        await tx.projectAssetUploadReservation.deleteMany({ where: { projectId: admission.project.id } });
+        await tx.project.delete({ where: { id: admission.project.id } });
         if (credentialIds.length > 0) {
           await tx.externalCredential.deleteMany({
             where: {
@@ -305,7 +362,7 @@ export async function deleteArchivedProject(
       databaseDeletedAt = committed.databaseDeletedAt;
     } catch (error) {
       if (storageStagedThisAttempt) {
-        await restoreStagedProjectAssetStorage(input.projectId, receipt.id);
+        await restoreStagedProjectAssetStorage(receipt.deletedProjectId, receipt.id);
       }
       if (isSerializationConflict(error) && attempt < 3) continue;
       if (isSerializationConflict(error) || isForeignKeyConflict(error)) {

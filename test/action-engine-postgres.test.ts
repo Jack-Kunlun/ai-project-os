@@ -12,6 +12,7 @@ import {
   updateProjectActionPolicy,
 } from "../src/lib/action-engine";
 import { getDb } from "../src/lib/db";
+import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { updateProjectLifecycle } from "../src/lib/project-lifecycle";
 
 const shouldRun = process.env.ACTION_ENGINE_POSTGRES_GATE === "1";
@@ -20,6 +21,7 @@ test("Action Engine persists policy, approval, execution, recovery and archive b
   const db = getDb();
   const suffix = randomUUID().slice(0, 8);
   const adminId = randomUUID();
+  const outsiderAdminId = randomUUID();
   const editorId = randomUUID();
   const viewerId = randomUUID();
   const workspaceId = randomUUID();
@@ -30,20 +32,22 @@ test("Action Engine persists policy, approval, execution, recovery and archive b
 
   await db.appUser.createMany({ data: [
     { id: adminId, username: `action_admin_${suffix}`, role: "admin" },
+    { id: outsiderAdminId, username: `action_outsider_admin_${suffix}`, role: "admin" },
     { id: editorId, username: `action_editor_${suffix}`, role: "member" },
     { id: viewerId, username: `action_viewer_${suffix}`, role: "member" },
   ] });
   await db.workspace.create({ data: { id: workspaceId, name: `Action ${suffix}`, slug: `action-${suffix}`, createdById: adminId } });
-  await db.workspaceMembership.createMany({ data: [
-    { workspaceId, userId: adminId, role: "owner" },
-    { workspaceId, userId: editorId, role: "member" },
-    { workspaceId, userId: viewerId, role: "viewer" },
-  ] });
+  await db.$transaction(async (tx) => {
+    await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "action_engine_fixture" });
+    await grantWorkspaceMembership(tx, { workspaceId, userId: editorId, role: "member", actorId: adminId, reason: "action_engine_fixture" });
+    await grantWorkspaceMembership(tx, { workspaceId, userId: viewerId, role: "viewer", actorId: adminId, reason: "action_engine_fixture" });
+  });
   await db.project.create({ data: { id: projectId, workspaceId, name: `Action project ${suffix}`, slug: `action-project-${suffix}` } });
-  await db.projectMembership.createMany({ data: [
-    { projectId, userId: editorId, role: "editor" },
-    { projectId, userId: viewerId, role: "viewer" },
-  ] });
+  await db.$transaction(async (tx) => {
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "action_engine_fixture" });
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: adminId, reason: "action_engine_fixture" });
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: adminId, reason: "action_engine_fixture" });
+  });
 
   try {
     await assert.rejects(
@@ -69,6 +73,8 @@ test("Action Engine persists policy, approval, execution, recovery and archive b
     assert.equal(policy.mode, "approvalRequired");
     const waiting = await requestProjectAction(projectId, { capability: "project.memory-quality.scan", input: {}, clientRequestId: randomUUID() }, editor, db);
     assert.equal(waiting.status, "waitingApproval");
+    assert.equal(await db.notification.count({ where: { userId: outsiderAdminId, projectId, kind: "actionApprovalRequired" } }), 0);
+    assert.equal(await db.notification.count({ where: { userId: adminId, projectId, kind: "actionApprovalRequired" } }), 1);
     await assert.rejects(
       () => decideProjectAction(projectId, waiting.id, { decision: "approved", expectedUpdatedAt: waiting.updatedAt.toISOString(), expectedFingerprint: waiting.inputFingerprint, note: null }, editor, db),
       (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
@@ -115,7 +121,7 @@ test("Action Engine persists policy, approval, execution, recovery and archive b
 
     const archivePending = await requestProjectAction(projectId, { capability: "project.memory-quality.scan", input: {}, clientRequestId: randomUUID() }, editor, db);
     const project = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { updatedAt: true } });
-    await updateProjectLifecycle({ projectId, actorId: adminId, action: "archive", expectedUpdatedAt: project.updatedAt }, db);
+    await updateProjectLifecycle({ projectId, actor: admin, action: "archive", expectedUpdatedAt: project.updatedAt }, db);
     assert.equal((await db.projectAction.findUniqueOrThrow({ where: { id: archivePending.id } })).status, "cancelled");
     assert.equal(await db.projectActionPolicyRevision.count({ where: { projectId } }), 5);
 
@@ -126,6 +132,6 @@ test("Action Engine persists policy, approval, execution, recovery and archive b
   } finally {
     await db.project.deleteMany({ where: { id: projectId } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });
-    await db.appUser.deleteMany({ where: { id: { in: [adminId, editorId, viewerId] } } });
+    await db.appUser.deleteMany({ where: { id: { in: [adminId, outsiderAdminId, editorId, viewerId] } } });
   }
 });

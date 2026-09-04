@@ -1,14 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
+import { type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { invokeVisionCompletion, ProviderTransportError } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
+import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { requireProjectAiRoute } from "@/lib/project-ai-routes";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 import { renderPdfPageForVision } from "@/lib/project-assets/parser";
 import { ProjectAssetError } from "@/lib/project-assets/service";
 import { readAssetBlob } from "@/lib/project-assets/storage";
-import { getProjectJob, isUncertainProviderDispatch } from "@/lib/project-workflow";
+import { getProjectJobInternal, isUncertainProviderDispatch } from "@/lib/project-workflow";
 import {
   assertWebAiConsent,
   auditedProviderCall,
@@ -81,12 +82,12 @@ function promptFor(locatorLabel: string): string {
 export async function runProjectAssetVisionExtraction(input: Readonly<{
   projectId: string;
   assetId: unknown;
-  requestedBy: Pick<AppUser, "id">;
+  requestedBy: WebAiActor;
   clientKey: unknown;
   consent: unknown;
 }>, db: PrismaClient = getDb()) {
   assertWebAiConsent(input.consent);
-  await assertProjectActive(input.projectId, db);
+  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const assetId = assetIdSchema.parse(input.assetId);
   const [route, asset] = await Promise.all([
     requireProjectAiRoute(input.projectId, "visionExtract", db),
@@ -135,11 +136,11 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
     manifestFingerprint: manifest,
     payload: { assetId, versionId: version.id, segmentIds: segments.map((segment) => segment.id), manifest },
     afterCreate: async (tx, jobId) => {
-      const current = await tx.projectAssetVersion.findUnique({
+      const currentVersion = await tx.projectAssetVersion.findUnique({
         where: { projectId_id: { projectId: input.projectId, id: version.id } },
         select: { status: true, asset: { select: { status: true } } },
       });
-      if (current?.status !== "waitingVision" || current.asset.status !== "waitingVision") {
+      if (currentVersion?.status !== "waitingVision" || currentVersion.asset.status !== "waitingVision") {
         throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
       }
       await tx.projectAssetExtractionRun.create({
@@ -159,12 +160,19 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
       });
     },
   }, db);
-  if (!granted.created) return getProjectJob(input.projectId, granted.jobId, db);
+  if (!granted.created) return getProjectJobInternal(input.projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
-  if (!claim) return getProjectJob(input.projectId, granted.jobId, db);
+  if (!claim) return getProjectJobInternal(input.projectId, granted.jobId, db);
 
   try {
-    await db.$transaction(async (tx) => {
+    // The run/resource transition is also ordered after the project access
+    // fence. This keeps the asset lock from establishing a reverse
+    // resource -> actor/workspace/project order with revocation/archive.
+    const blob = await withWebAiProjectAccessTransaction(db, {
+      actor: input.requestedBy,
+      projectId: input.projectId,
+      required: "edit",
+    }, async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${input.projectId}:${assetId}`}, 29082026))`;
       const current = await tx.projectAsset.findUnique({
         where: { projectId_id: { projectId: input.projectId, id: assetId } },
@@ -173,10 +181,29 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
       if (current?.status !== "waitingVision") throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
       await tx.projectAssetExtractionRun.update({
         where: { id: runId },
+        // `running` + `startedAt` is the durable in-flight marker for the
+        // admitted blob read; the job attempt remains pending until a
+        // provider segment gets its own audited dispatch admission.
         data: { status: "running", startedAt: new Date(), failureCode: null },
       });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    const buffer = await readAssetBlob(version.storageKey, version.sizeBytes);
+      const currentVersion = await tx.projectAssetVersion.findUnique({
+        where: { projectId_id: { projectId: input.projectId, id: version.id } },
+        select: {
+          status: true,
+          storageKey: true,
+          sizeBytes: true,
+          asset: { select: { status: true } },
+        },
+      });
+      if (currentVersion?.status !== "waitingVision" || currentVersion.asset.status !== "waitingVision") {
+        throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
+      }
+      return Object.freeze({ storageKey: currentVersion.storageKey, sizeBytes: currentVersion.sizeBytes });
+    });
+    // The blob is the first sensitive asset read after claim. The admission
+    // above commits before storage I/O; provider calls below perform fresh
+    // admission for every segment.
+    const buffer = await readAssetBlob(blob.storageKey, blob.sizeBytes);
     for (let index = 0; index < segments.length; index += 1) {
       const segment = segments[index]!;
       await updateWebAiJobProgress(granted.jobId, claim, "recognizing", index, segments.length, db);
@@ -197,6 +224,7 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
       const response = await auditedProviderCall({
         jobId: granted.jobId,
         attempt: claim,
+        actor: input.requestedBy,
         route,
         operation: "visionExtract",
         callKey: stableAiCallKey(granted.jobId, "visionExtract", segment.id),

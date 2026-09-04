@@ -2,6 +2,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
+import { unlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import test from "node:test";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -15,7 +16,8 @@ import {
   type GitHubReadOnlyClient,
   type VerifiedGitHubRepository,
 } from "../src/lib/github";
-import { createProviderConnection } from "../src/lib/ai-providers/service";
+import { createWorkspaceProviderConnection } from "../src/lib/workspace-provider-service";
+import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import {
@@ -207,7 +209,7 @@ async function createStagingGeneration(
       projectId: input.projectId,
       jobId: input.jobId,
       providerConnectionId: input.providerConnectionId,
-      modelId: "embedding-test",
+      modelId: "embedding-3",
       dimensions: 8,
       status: "staging",
       buildMode: "incremental",
@@ -242,6 +244,8 @@ test(
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
     const userId = randomUUID();
+    const actor = { id: userId, role: "user" as const };
+    const workspaceId = randomUUID();
     const projectId = randomUUID();
     const otherProjectId = randomUUID();
     const concurrentProjectId = randomUUID();
@@ -291,24 +295,56 @@ test(
           username: `memory_index_c_${randomUUID().slice(0, 8)}`,
           passwordHash: "a".repeat(43),
           passwordSalt: "b".repeat(22),
-          role: "admin",
+          role: "user",
+        },
+      });
+      await db.workspace.create({
+        data: { id: workspaceId, name: `Memory index C workspace ${randomUUID().slice(0, 8)}`, slug: `memory-index-c-workspace-${randomUUID()}`, createdById: userId },
+      });
+      await db.$transaction((tx) => grantWorkspaceMembership(tx, {
+        workspaceId,
+        userId,
+        role: "owner",
+        actorId: userId,
+        reason: "memory_index_c_fixture",
+      }));
+      const membershipNow = new Date();
+      await db.membershipSubscription.create({
+        data: {
+          userId,
+          status: "active",
+          startsAt: new Date(membershipNow.getTime() - 60_000),
+          expiresAt: new Date(membershipNow.getTime() + 86_400_000),
         },
       });
       await db.project.createMany({
         data: [
-          { id: projectId, name: "Memory index C", slug: `memory-index-c-${randomUUID()}` },
-          { id: otherProjectId, name: "Memory index C other", slug: `memory-index-c-other-${randomUUID()}` },
-          { id: concurrentProjectId, name: "Memory index C concurrent", slug: `memory-index-c-concurrent-${randomUUID()}` },
+          { id: projectId, workspaceId, name: "Memory index C", slug: `memory-index-c-${randomUUID()}` },
+          { id: otherProjectId, workspaceId, name: "Memory index C other", slug: `memory-index-c-other-${randomUUID()}` },
+          { id: concurrentProjectId, workspaceId, name: "Memory index C concurrent", slug: `memory-index-c-concurrent-${randomUUID()}` },
         ],
       });
-      const provider = await createProviderConnection({
+      await db.$transaction(async (tx) => {
+        for (const projectIdToGrant of [projectId, otherProjectId, concurrentProjectId]) {
+          await grantProjectMembership(tx, {
+            projectId: projectIdToGrant,
+            workspaceId,
+            userId,
+            role: "owner",
+            actorId: userId,
+            reason: "memory_index_c_fixture",
+          });
+        }
+      });
+      const provider = await createWorkspaceProviderConnection(workspaceId, {
         name: `Memory index C provider ${randomUUID().slice(0, 8)}`,
-        kind: "openai",
+        kind: "glm",
         apiKey: "sk-memory-index-c-secret",
-        generationModelId: "generation-test",
-        embeddingModelId: "embedding-test",
+        generationModelId: "glm-4-flash",
+        embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
-      }, db);
+        visionModelId: null,
+      }, actor, db);
       providerId = provider.id;
       const providerRow = await db.aiProviderConnection.update({
         where: { id: provider.id },
@@ -318,7 +354,7 @@ test(
       await upsertProjectAiRoute(projectId, {
         operation: "embedding",
         providerConnectionId: provider.id,
-        modelId: "embedding-test",
+        modelId: "embedding-3",
         embeddingDimensions: 8,
       }, db);
       const originalText = "原始事实：项目使用可追溯的长期记忆。";
@@ -338,7 +374,7 @@ test(
 
       const fullJob = await runProjectMemoryIndexJob({
         projectId,
-        requestedBy: { id: userId },
+        requestedBy: actor,
         clientKey: `full-${randomUUID()}`,
         consent,
         mode: "full",
@@ -372,7 +408,7 @@ test(
       embeddingInputs.length = 0;
       const incrementalJob = await runProjectMemoryIndexJob({
         projectId,
-        requestedBy: { id: userId },
+        requestedBy: actor,
         clientKey: `incremental-${randomUUID()}`,
         consent,
         mode: "incremental",
@@ -415,7 +451,7 @@ test(
       await assert.rejects(
         () => runProjectMemoryIndexJob({
           projectId,
-          requestedBy: { id: userId },
+          requestedBy: actor,
           clientKey: `unknown-${randomUUID()}`,
           consent,
           mode: "incremental",
@@ -445,7 +481,7 @@ test(
         data: { reconciliationRequired: false },
       }));
 
-      const reconciled = await reconcileMemoryIndexJob({ projectId, jobId: unknownJob.id, requestedById: userId }, db);
+      const reconciled = await reconcileMemoryIndexJob({ projectId, jobId: unknownJob.id, actor }, db);
       assert.equal(reconciled.status, "unknown");
       assert.equal(reconciled.reconciliationRequired, false);
       assert.equal((reconciled.result as { reconciliation?: string }).reconciliation, "explicitAbandon");
@@ -461,7 +497,7 @@ test(
       fetchMode = "success";
       const resumedJob = await runProjectMemoryIndexJob({
         projectId,
-        requestedBy: { id: userId },
+        requestedBy: actor,
         clientKey: `resumed-${randomUUID()}`,
         consent,
         mode: "incremental",
@@ -480,10 +516,22 @@ test(
       // revision in place.
       await db.project.createMany({
         data: [
-          { id: pointerProjectId, name: "Memory index C repository pointer", slug: `memory-index-c-pointer-${randomUUID()}` },
-          { id: publishedLocallyProjectId, name: "Memory index C local reconciliation", slug: `memory-index-c-local-${randomUUID()}` },
-          { id: deadlineProjectId, name: "Memory index C deadline", slug: `memory-index-c-deadline-${randomUUID()}` },
+          { id: pointerProjectId, workspaceId, name: "Memory index C repository pointer", slug: `memory-index-c-pointer-${randomUUID()}` },
+          { id: publishedLocallyProjectId, workspaceId, name: "Memory index C local reconciliation", slug: `memory-index-c-local-${randomUUID()}` },
+          { id: deadlineProjectId, workspaceId, name: "Memory index C deadline", slug: `memory-index-c-deadline-${randomUUID()}` },
         ],
+      });
+      await db.$transaction(async (tx) => {
+        for (const projectIdToGrant of [pointerProjectId, publishedLocallyProjectId, deadlineProjectId]) {
+          await grantProjectMembership(tx, {
+            projectId: projectIdToGrant,
+            workspaceId,
+            userId,
+            role: "owner",
+            actorId: userId,
+            reason: "memory_index_c_fixture_repository_projects",
+          });
+        }
       });
       const codeState = { version: 0 as CodePointerVersion };
       const repositoryClient = createChangingCodeClient(codeState);
@@ -508,12 +556,12 @@ test(
       await upsertProjectAiRoute(pointerProjectId, {
         operation: "embedding",
         providerConnectionId: provider.id,
-        modelId: "embedding-test",
+        modelId: "embedding-3",
         embeddingDimensions: 8,
       }, db);
       const pointerFullJob = await runProjectMemoryIndexJob({
         projectId: pointerProjectId,
-        requestedBy: { id: userId },
+        requestedBy: actor,
         clientKey: `pointer-full-${randomUUID()}`,
         consent,
         mode: "full",
@@ -523,7 +571,7 @@ test(
       codeState.version = 1;
       const sparseScan = await codeScanner.scanProject(pointerProjectId);
       assert.equal(sparseScan.status, "succeeded");
-      const sparsePlan = await getProjectMemoryIndexPlan(pointerProjectId, "incremental", db);
+      const sparsePlan = await getProjectMemoryIndexPlan(pointerProjectId, "incremental", actor, db);
       assert.equal(sparsePlan.expectedInputCount, 34);
       assert.equal(sparsePlan.reuseCount, 17);
       assert.equal(sparsePlan.generateCount, 17);
@@ -533,7 +581,7 @@ test(
       const sparseCallsBefore = fetchCalls;
       const sparseJob = await runProjectMemoryIndexJob({
         projectId: pointerProjectId,
-        requestedBy: { id: userId },
+        requestedBy: actor,
         clientKey: `pointer-sparse-${randomUUID()}`,
         consent,
         mode: "incremental",
@@ -547,14 +595,14 @@ test(
       codeState.version = 2;
       const deleteScan = await codeScanner.scanProject(pointerProjectId);
       assert.equal(deleteScan.status, "succeeded");
-      const deletePlan = await getProjectMemoryIndexPlan(pointerProjectId, "incremental", db);
+      const deletePlan = await getProjectMemoryIndexPlan(pointerProjectId, "incremental", actor, db);
       assert.equal(deletePlan.expectedInputCount, 33);
       assert.ok(deletePlan.deleteCount >= 1);
       assert.equal(deletePlan.generateCount, 0);
       const deleteCallsBefore = fetchCalls;
       const deleteJob = await runProjectMemoryIndexJob({
         projectId: pointerProjectId,
-        requestedBy: { id: userId },
+        requestedBy: actor,
         clientKey: `pointer-delete-${randomUUID()}`,
         consent,
         mode: "incremental",
@@ -598,7 +646,7 @@ test(
           projectId: publishedLocallyProjectId,
           jobId: localJobId,
           providerConnectionId: provider.id,
-          modelId: "embedding-test",
+          modelId: "embedding-3",
           dimensions: 8,
           status: "complete",
           buildMode: "full",
@@ -621,7 +669,7 @@ test(
       const localReconciled = await reconcileMemoryIndexJob({
         projectId: publishedLocallyProjectId,
         jobId: localJobId,
-        requestedById: userId,
+        actor,
       }, db);
       assert.equal(localReconciled.status, "succeeded");
       assert.equal(localReconciled.reconciliationRequired, false);
@@ -654,14 +702,14 @@ test(
       await upsertProjectAiRoute(deadlineProjectId, {
         operation: "embedding",
         providerConnectionId: provider.id,
-        modelId: "embedding-test",
+        modelId: "embedding-3",
         embeddingDimensions: 8,
       }, db);
       const deadlineFetchCalls = fetchCalls;
       await assert.rejects(
         () => runProjectMemoryIndexJob({
           projectId: deadlineProjectId,
-          requestedBy: { id: userId },
+          requestedBy: actor,
           clientKey: `deadline-${randomUUID()}`,
           consent,
           mode: "full",
@@ -733,6 +781,10 @@ test(
           await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
         }
         if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
+        await db.membershipSubscription.deleteMany({ where: { userId } });
+        await db.workspace.update({ where: { id: workspaceId }, data: { createdById: null } });
+        await db.workspace.delete({ where: { id: workspaceId } });
+        await db.appUser.deleteMany({ where: { id: userId } });
         await db.$disconnect();
       }
       if (rawConnected) await raw.end();
@@ -740,6 +792,7 @@ test(
       else process.env.DATABASE_URL = previousDatabaseUrl;
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
       else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;
+      await unlink(masterKeyPath).catch(() => undefined);
     }
   },
 );

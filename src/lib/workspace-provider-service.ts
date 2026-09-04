@@ -7,6 +7,7 @@ import { getDb } from "@/lib/db";
 import { getProviderDefinition, isSafeModelId } from "@/lib/ai-providers";
 import { testProviderConnection } from "@/lib/ai-providers/service";
 import { PROVIDER_CONNECTION_TEST_TRANSACTION_TIMEOUT_MS } from "@/lib/ai-providers/transport";
+import { findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 
 export type WorkspaceProviderServiceErrorCode =
   | "AI_PROVIDER_INVALID_INPUT"
@@ -102,10 +103,7 @@ async function assertWorkspaceMember(
   workspaceId: string,
   db: WorkspaceProviderDb,
 ): Promise<"owner" | "admin" | "member" | "viewer"> {
-  const membership = await db.workspaceMembership.findUnique({
-    where: { workspaceId_userId: { workspaceId, userId: actor.id } },
-    select: { role: true },
-  });
+  const membership = await findConfirmedWorkspaceMembership(db, workspaceId, actor.id);
   if (membership === null) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
   return membership.role;
 }
@@ -205,6 +203,10 @@ export async function createWorkspaceProviderConnection(
           scope: "workspace",
           workspaceId,
           ownerUserId: actor.id,
+          // A newly created connection is explicitly owned by the already
+          // confirmed workspace member who created it. Legacy rows retain
+          // legacyPending until an explicit migration review.
+          ownershipState: "confirmed",
           baseUrl: getProviderDefinition(parsed.kind).baseUrl,
           credentialId: credential.id,
           defaultGenerationModelId: parsed.generationModelId ?? null,
@@ -369,10 +371,7 @@ export async function assertWorkspaceProviderOutbound(
   await assertWorkspaceMember(actor, workspaceId, db);
   if (provider.status !== "verified") return fail("AI_PROVIDER_CONNECTION_UNAVAILABLE");
   if (provider.ownerUserId === null) return fail("AI_PROVIDER_OWNER_REQUIRED");
-  const ownerMembership = await db.workspaceMembership.findUnique({
-    where: { workspaceId_userId: { workspaceId, userId: provider.ownerUserId } },
-    select: { role: true },
-  });
+  const ownerMembership = await findConfirmedWorkspaceMembership(db, workspaceId, provider.ownerUserId);
   if (ownerMembership === null || (ownerMembership.role !== "owner" && ownerMembership.role !== "admin")) {
     return fail("AI_PROVIDER_OWNER_REQUIRED");
   }

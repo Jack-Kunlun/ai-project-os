@@ -72,7 +72,7 @@ export default async function ProjectGitHubSyncPage({
   const fromNotifications = queryValue(query.from) === "notifications";
   const backHref = fromNotifications ? "/notifications" : `/projects/${projectId}/repositories`;
   const notificationContext = fromNotifications ? "&from=notifications" : "";
-  const sync = await getProjectGitHubSync({ projectId, syncRunId }, undefined, page);
+  const sync = await getProjectGitHubSync({ projectId, syncRunId }, user, undefined, page);
   const repositoryByTargetKey = new Map(sync.entries.map((entry) => [entry.targetKey, entry.repositoryFullName]));
   const previousOffset = Math.max(0, sync.changeOffset - sync.changeLimit);
   const nextOffset = sync.changeOffset + sync.changes.length;

@@ -44,6 +44,23 @@ test("high-growth project lists use server pagination with search and filters", 
   assert.match(reviewQueue, /搜索待审核候选/u);
 });
 
+test("project creation capability follows workspace membership in the API and UI", async () => {
+  const [route, client, guide] = await Promise.all([
+    readFile("src/app/api/projects/route.ts", "utf8"),
+    readFile("src/app/projects/projects-client.tsx", "utf8"),
+    readFile("src/app/guide/page.tsx", "utf8"),
+  ]);
+  assert.match(route, /workspaceMembership\.count\(\{[\s\S]*role: \{ in: \["owner", "admin"\] \}/u);
+  assert.match(route, /canCreateProject: createMembershipCount > 0/u);
+  assert.match(client, /payload\.canCreateProject \? <button/u);
+  assert.match(client, /payload\.canCreateProject \? "还没有进行中的项目" : "等待工作区授权"/u);
+  assert.match(client, /createOpen && payload\.canCreateProject/u);
+  assert.match(client, /请联系当前工作区 Owner\/Admin 授予你创建项目或访问项目的权限/u);
+  assert.match(guide, /只有当前工作区 Owner\/Admin 可以创建项目/u);
+  assert.match(guide, /系统管理员角色不会自动获得工作区权限/u);
+  assert.doesNotMatch(guide, /系统管理员或当前工作区 Owner\/Admin 可以创建项目/u);
+});
+
 test("destructive and approval flows use the shared app dialog instead of browser dialogs", async () => {
   const paths = [
     "src/app/settings/settings-client.tsx",

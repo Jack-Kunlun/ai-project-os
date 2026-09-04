@@ -3,7 +3,6 @@ import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { getProjectMemoryIndexPlan, runProjectMemoryIndexJob } from "@/lib/web-memory-index";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 
 export const dynamic = "force-dynamic";
@@ -19,10 +18,10 @@ const bodySchema = z.object({
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const projectId = idSchema.parse((await context.params).projectId);
     const mode = modeSchema.parse(new URL(request.url).searchParams.get("mode"));
-    const plan = await getProjectMemoryIndexPlan(projectId, mode);
+    const plan = await getProjectMemoryIndexPlan(projectId, mode, user);
     return NextResponse.json({ plan }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
@@ -34,7 +33,6 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const projectId = idSchema.parse((await context.params).projectId);
-    await assertProjectActive(projectId);
     const body = bodySchema.parse(await readJsonBody(request));
     const job = await runProjectMemoryIndexJob({
       projectId,

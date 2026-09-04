@@ -214,11 +214,21 @@ test(
         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
       `, [workspaceId, `Inventory ${suffix}`, `inventory-${suffix}`, userOwnerId]);
       await admin.query(`
-        INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "updatedAt") VALUES
-          (gen_random_uuid(), $1, $2, 'owner', CURRENT_TIMESTAMP),
-          (gen_random_uuid(), $1, $3, 'admin', CURRENT_TIMESTAMP),
-          (gen_random_uuid(), $1, $4, 'member', CURRENT_TIMESTAMP),
-          (gen_random_uuid(), $1, $5, 'viewer', CURRENT_TIMESTAMP)
+        WITH memberships AS (
+          INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "updatedAt") VALUES
+            (gen_random_uuid(), $1, $2, 'owner', 'confirmed', CURRENT_TIMESTAMP),
+            (gen_random_uuid(), $1, $3, 'admin', 'confirmed', CURRENT_TIMESTAMP),
+            (gen_random_uuid(), $1, $4, 'member', 'confirmed', CURRENT_TIMESTAMP),
+            (gen_random_uuid(), $1, $5, 'viewer', 'confirmed', CURRENT_TIMESTAMP)
+          RETURNING "id", "workspaceId", "userId", "role", "accessState", "createdAt", "updatedAt"
+        )
+        INSERT INTO "MembershipAccessAudit"
+          ("id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId", "action", "previousState", "newState", "roleSnapshot", "actorId", "reason", "membershipFingerprint")
+        SELECT gen_random_uuid(), 'workspace', membership."id", membership."workspaceId", NULL, membership."userId",
+               'confirmed', NULL, membership."accessState", membership."role", NULL,
+               'ownership inventory confirmed workspace membership',
+               encode(digest(convert_to(concat_ws(E'\\x1f', membership."id"::text, membership."workspaceId"::text, membership."userId"::text, membership."role"::text, to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS'), to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS')), 'UTF8'), 'sha256'), 'hex')
+          FROM memberships
       `, [workspaceId, userOwnerId, userAdminId, userMemberId, userViewerId]);
       await admin.query(`
         INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt")
@@ -300,8 +310,8 @@ test(
           ($1, $2, 'deepseek', 'platform', NULL, NULL, 'legacy_pending', 'https://sentinel-provider.invalid', $3, 'verified', CURRENT_TIMESTAMP),
           ($4, $5, 'deepseek', 'workspace', $6, $7, 'legacy_pending', 'https://sentinel-provider.invalid', $8, 'verified', CURRENT_TIMESTAMP),
           ($9, $10, 'deepseek', 'workspace', $6, $11, 'legacy_pending', 'https://sentinel-provider.invalid', $12, 'verified', CURRENT_TIMESTAMP),
-          ($13, $14, 'deepseek', 'workspace', $6, $15, 'ambiguous', 'https://sentinel-provider.invalid', $16, 'verified', CURRENT_TIMESTAMP),
-          ($17, $18, 'deepseek', 'workspace', $6, $19, 'ambiguous', 'https://sentinel-provider.invalid', $20, 'verified', CURRENT_TIMESTAMP),
+          ($13, $14, 'deepseek', 'workspace', $6, $15, 'ambiguous', 'https://sentinel-provider.invalid', $16, 'disabled', CURRENT_TIMESTAMP),
+          ($17, $18, 'deepseek', 'workspace', $6, $19, 'ambiguous', 'https://sentinel-provider.invalid', $20, 'disabled', CURRENT_TIMESTAMP),
           ($21, $22, 'deepseek', 'user', NULL, $23, 'confirmed', 'https://sentinel-provider.invalid', $24, 'verified', CURRENT_TIMESTAMP)
       `, [
         platformProviderId, `inventory_provider_platform_${suffix}`, routeProviderCredentialId,

@@ -18,7 +18,7 @@ export async function POST(
     const input = updateProjectLifecycleSchema.parse(await readJsonBody(request));
     const result = await updateProjectLifecycle({
       projectId,
-      actorId: user.id,
+      actor: user,
       action: input.action,
       expectedUpdatedAt: new Date(input.expectedUpdatedAt),
     });

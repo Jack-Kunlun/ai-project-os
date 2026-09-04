@@ -211,7 +211,10 @@ class FakeEntitlementDb {
   };
 
   readonly appUser = {
-    findUnique: async ({ where }: { where: { id: string } }) => this.users.get(where.id) ?? null,
+    findUnique: async ({ where }: { where: { id: string } }) => {
+      const user = this.users.get(where.id);
+      return user === undefined ? null : { ...user, disabledAt: null };
+    },
   };
 
   readonly project = {
@@ -219,9 +222,9 @@ class FakeEntitlementDb {
   };
 
   readonly workspaceMembership = {
-    findUnique: async ({ where }: { where: { workspaceId_userId: { workspaceId: string; userId: string } } }) => {
-      const role = this.workspaceMembers.get(`${where.workspaceId_userId.workspaceId}:${where.workspaceId_userId.userId}`);
-      return role === undefined ? null : { role };
+    findMany: async ({ where }: { where: { workspaceId: string; userId: string } }) => {
+      const role = this.workspaceMembers.get(`${where.workspaceId}:${where.userId}`);
+      return role === undefined ? [] : [{ role, accessState: "confirmed" as const }];
     },
   };
 

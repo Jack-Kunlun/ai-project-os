@@ -3,16 +3,19 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { Prisma, type AppUser, type GitAuthKind, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { AccessControlError } from "@/lib/access-control";
-import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
+import { CredentialVaultError, createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import {
   claimProjectJob,
   failProjectJob,
   finishProjectJob,
+  markProviderAcknowledged,
+  markProviderNotDispatched,
   startProjectJobHeartbeat,
   toPublicProjectJob,
+  withProjectJobAccessTransaction,
 } from "@/lib/project-workflow";
 import { decodeGitCredential, encodeGitCredential, type GitCredentialPayload } from "./credentials";
 import { gitRemoteUrl, GitRunnerError, withGitRunner } from "./runner";
@@ -54,6 +57,7 @@ export type GitServiceErrorCode =
   | "GIT_CONNECTION_IN_USE"
   | "GIT_CONNECTION_DISABLED"
   | "GIT_CONNECTION_NOT_VERIFIED"
+  | "GIT_LEGACY_PROJECT_CONNECT_FROZEN"
   | "GIT_CONNECTION_DELETE_REQUIRES_DISABLED"
   | "GIT_CONNECTION_CONFIRMATION_MISMATCH"
   | "GIT_REPOSITORY_NOT_FOUND"
@@ -70,6 +74,28 @@ export class GitServiceError extends Error {
     super(code);
     this.name = "GitServiceError";
   }
+}
+
+// A GitRunnerError can be raised while creating the temporary workspace or
+// configuring the local repository, before the fetch process is started. Keep
+// that distinction out of the public error shape while allowing the caller to
+// undo the optimistic dispatch marker for deterministic pre-fetch failures.
+const preDispatchGitErrors = new WeakSet<object>();
+
+function markPreDispatchGitError(error: unknown): unknown {
+  if (typeof error === "object" && error !== null) preDispatchGitErrors.add(error);
+  return error;
+}
+
+function isDefinitelyPreDispatchGitSyncFailure(error: unknown): boolean {
+  if (error instanceof CredentialVaultError) return true;
+  if (typeof error === "object" && error !== null && preDispatchGitErrors.has(error)) return true;
+  if (error instanceof GitSafetyError) return error.code !== "GIT_NETWORK_CHANGED";
+  return error instanceof GitServiceError && [
+    "GIT_CONNECTION_INVALID_INPUT",
+    "GIT_REPOSITORY_LINK_NOT_FOUND",
+    "GIT_REPOSITORY_LINK_DISABLED",
+  ].includes(error.code);
 }
 
 const providerKindSchema = z.enum(["github", "gitee", "gitlab", "gitea", "forgejo", "generic"]);
@@ -105,18 +131,6 @@ const deleteConnectionSchema = z.object({
 const repositoryProbeSchema = z.object({
   repositoryPath: z.string().min(1).max(768),
   trackedRef: z.string().min(1).max(255),
-}).strict();
-
-const linkSchema = repositoryProbeSchema.extend({
-  gitConnectionId: z.string().uuid(),
-  displayName: z.string().trim().min(1).max(256).optional(),
-  webUrl: z.string().url().max(1024).nullable().optional(),
-  role: z.enum(["primary", "application", "infrastructure", "library", "documentation", "other"]),
-  requiredForProjectSnapshot: z.boolean().default(true),
-  codeEnabled: z.boolean().default(true),
-  metadataEnabled: z.boolean().default(true),
-  includeRoots: z.array(z.string()).min(1).max(32).default(["."]),
-  softExcludePatterns: z.array(z.string()).max(64).default([]),
 }).strict();
 
 const syncSchema = z.object({
@@ -412,7 +426,9 @@ async function readRepositoryFiles(input: Readonly<{
   const credential = await loadCredential(input.connection);
   const remote = gitRemoteUrl(input.connection.baseUrl, input.repositoryPath);
   const endpointUrl = new URL(input.connection.baseUrl);
-  return withGitRunner({
+  let fetchStarted = false;
+  try {
+    return await withGitRunner({
     transport: input.connection.transport,
     authKind: input.connection.authKind,
     username: defaultUsername(input.connection),
@@ -425,6 +441,9 @@ async function readRepositoryFiles(input: Readonly<{
     await mkdir(repositoryDir, { mode: 0o700 });
     await runner.runText(["init", "--bare", repositoryDir], { maxOutputBytes: 64 * 1024 });
     await runner.runText(["-C", repositoryDir, "remote", "add", "origin", remote], { maxOutputBytes: 64 * 1024 });
+    // From this point Git may contact the configured remote. Any later
+    // runner error therefore keeps the dispatch marker for reconciliation.
+    fetchStarted = true;
     await runner.runText(["-C", repositoryDir, "fetch", "--depth=1", "--no-tags", "origin", `refs/heads/${input.trackedRef}`], { timeoutMs: 180_000, maxOutputBytes: 256 * 1024 });
     const commitSha = (await runner.runText(["-C", repositoryDir, "rev-parse", "FETCH_HEAD"], { maxOutputBytes: 64 * 1024 })).trim();
     if (!/^[0-9a-f]{40,64}$/u.test(commitSha)) return fail("GIT_REPOSITORY_EMPTY");
@@ -457,7 +476,11 @@ async function readRepositoryFiles(input: Readonly<{
     }
     if (files.length === 0) return fail("GIT_REPOSITORY_BINARY_ONLY");
     return Object.freeze({ commitSha, addressFingerprint: resolution.fingerprint, files: Object.freeze(files) });
-  });
+    });
+  } catch (error) {
+    if (!fetchStarted) throw markPreDispatchGitError(error);
+    throw error;
+  }
 }
 
 export function gitConnectionCatalog() {
@@ -640,97 +663,47 @@ export async function testGitConnection(connectionIdInput: unknown, input: unkno
   }
 }
 
-export async function listProjectGitRepositories(projectIdInput: unknown, db: PrismaClient = getDb()) {
+export async function listProjectGitRepositories(projectIdInput: unknown, actor: WebAiActor, db: PrismaClient = getDb()) {
   const projectId = uuid(projectIdInput);
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
-  if (project === null) return fail("GIT_REPOSITORY_NOT_FOUND");
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   return db.projectGitRepositoryLink.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: projectRepositoryLinkSelect });
 }
 
 export async function connectProjectGitRepository(
   projectIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id" | "role">,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  // Project-level Git PAT creation is frozen while Git ownership is being
+  // moved to user-private configuration. Keep this boundary deterministic and
+  // side-effect free: no project or connection metadata, credentials, probe,
+  // or write transaction may be opened for this legacy endpoint.
+  void projectIdInput;
+  void input;
+  void actor;
+  void db;
+  return fail("GIT_LEGACY_PROJECT_CONNECT_FROZEN");
+}
+
+export async function disableProjectGitRepository(
+  projectIdInput: unknown,
+  linkIdInput: unknown,
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
-  if (actor.role !== "admin") throw new AccessControlError("ACCESS_FORBIDDEN");
-  const parsed = linkSchema.parse(input);
-  const repositoryPath = canonicalRepositoryPath(parsed.repositoryPath);
-  const trackedRef = canonicalTrackedRef(parsed.trackedRef);
-  const includeRoots = canonicalIncludeRoots(parsed.includeRoots);
-  const softExcludePatterns = canonicalExcludePatterns(parsed.softExcludePatterns);
-  const connectionMetadata = await db.gitConnection.findUnique({ where: { id: parsed.gitConnectionId }, select: { id: true, status: true, disabledAt: true } });
-  if (connectionMetadata === null) return fail("GIT_CONNECTION_NOT_FOUND");
-  if (connectionMetadata.status === "disabled" || connectionMetadata.disabledAt !== null) return fail("GIT_CONNECTION_DISABLED");
-  if (connectionMetadata.status !== "verified") return fail("GIT_CONNECTION_NOT_VERIFIED");
-  const connection = await loadConnection(parsed.gitConnectionId, db);
-  if (connection.status !== "verified" || connection.disabledAt !== null) return fail(connection.status === "disabled" || connection.disabledAt !== null ? "GIT_CONNECTION_DISABLED" : "GIT_CONNECTION_NOT_VERIFIED");
-  const probe = await probeRepository(connection, repositoryPath, trackedRef, { pinExistingAddress: connection.resolvedAddressFingerprint !== null });
-  const webUrl = canonicalWebUrl(parsed.webUrl, connection, repositoryPath);
-  try {
-    return await db.$transaction(async (tx) => {
-      await tx.gitConnection.update({
-        where: { id: connection.id },
-        data: { status: "verified", resolvedAddressFingerprint: probe.addressFingerprint, lastTestedAt: new Date(), lastErrorCode: null },
-      });
-      const repository = await tx.gitRepository.upsert({
-        where: { gitConnectionId_repositoryPath: { gitConnectionId: connection.id, repositoryPath } },
-        create: {
-          gitConnectionId: connection.id,
-          repositoryPath,
-          displayName: parsed.displayName ?? repositoryPath.split("/").at(-1)!,
-          webUrl,
-          defaultBranch: trackedRef,
-          remoteIdentifier: probe.commitSha,
-          lastVerifiedAt: new Date(),
-        },
-        update: {
-          displayName: parsed.displayName ?? repositoryPath.split("/").at(-1)!,
-          webUrl,
-          defaultBranch: trackedRef,
-          remoteIdentifier: probe.commitSha,
-          lastVerifiedAt: new Date(),
-        },
-      });
-      const existing = await tx.projectGitRepositoryLink.findUnique({
-        where: { projectId_gitRepositoryId: { projectId, gitRepositoryId: repository.id } },
-        select: { id: true },
-      });
-      const data = {
-        role: parsed.role,
-        trackedRef,
-        requiredForProjectSnapshot: parsed.requiredForProjectSnapshot,
-        codeEnabled: parsed.codeEnabled,
-        metadataEnabled: parsed.metadataEnabled,
-        includeRoots: [...includeRoots],
-        softExcludePatterns: [...softExcludePatterns],
-        status: "active" as const,
-        disabledAt: null,
-      };
-      if (existing === null) {
-        return tx.projectGitRepositoryLink.create({
-          data: { projectId, gitRepositoryId: repository.id, createdById: actor.id, ...data },
-          select: projectRepositoryLinkSelect,
-        });
-      }
-      return tx.projectGitRepositoryLink.update({ where: { id: existing.id }, data, select: projectRepositoryLinkSelect });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  } catch (error) {
-    if (isPrismaCode(error, "P2002")) return fail("GIT_REPOSITORY_CONFLICT");
-    throw error;
-  }
-}
-
-export async function disableProjectGitRepository(projectIdInput: unknown, linkIdInput: unknown, db: PrismaClient = getDb()) {
-  const projectId = uuid(projectIdInput);
   const linkId = uuid(linkIdInput);
-  const updated = await db.projectGitRepositoryLink.updateMany({
-    where: { id: linkId, projectId, status: "active" },
-    data: { status: "disabled", disabledAt: new Date() },
+  await assertWebAiProjectAccess(actor, projectId, "edit", db);
+  return db.$transaction(async (tx) => {
+    await assertWebAiProjectAccess(actor, projectId, "edit", tx as PrismaClient);
+    const updated = await tx.projectGitRepositoryLink.updateMany({
+      where: { id: linkId, projectId, status: "active" },
+      data: { status: "disabled", disabledAt: new Date() },
+    });
+    if (updated.count !== 1) return fail("GIT_REPOSITORY_LINK_NOT_FOUND");
+    return tx.projectGitRepositoryLink.findUniqueOrThrow({ where: { id: linkId }, select: projectRepositoryLinkSelect });
   });
-  if (updated.count !== 1) return fail("GIT_REPOSITORY_LINK_NOT_FOUND");
-  return db.projectGitRepositoryLink.findUniqueOrThrow({ where: { id: linkId }, select: projectRepositoryLinkSelect });
 }
 
 export async function publishGitRepositorySnapshot(input: Readonly<{
@@ -870,22 +843,23 @@ async function syncRepository(projectId: string, linkId: string, jobId: string, 
 export async function runGitRepositorySyncJob(input: Readonly<{
   projectId: unknown;
   linkId: unknown;
-  requestedBy: Pick<AppUser, "id">;
+  requestedBy: WebAiActor;
   clientKey: unknown;
 }>, db: PrismaClient = getDb()) {
   const projectId = uuid(input.projectId);
   const linkId = uuid(input.linkId);
   const parsed = syncSchema.parse({ clientKey: input.clientKey });
+  const currentActor = await assertWebAiProjectAccess(input.requestedBy, projectId, "edit", db);
   const idempotencyKey = createHash("sha256").update(`gitRepositorySync:${projectId}:${linkId}:${parsed.clientKey}`, "utf8").digest("hex");
   const existing = await db.backgroundJob.findUnique({
-    where: { requestedById_idempotencyKey: { requestedById: input.requestedBy.id, idempotencyKey } },
+    where: { requestedById_idempotencyKey: { requestedById: currentActor.id, idempotencyKey } },
   });
   const job = existing ?? await db.backgroundJob.create({
     data: {
       id: randomUUID(),
       projectId,
       kind: "gitRepositorySync",
-      requestedById: input.requestedBy.id,
+      requestedById: currentActor.id,
       idempotencyKey,
       payload: { linkId },
     },
@@ -893,11 +867,47 @@ export async function runGitRepositorySyncJob(input: Readonly<{
   if (job.status !== "queued") return toPublicProjectJob(job);
   const claim = await claimProjectJob(job.id, db, "gitRepositorySync");
   if (!claim) return toPublicProjectJob(await db.backgroundJob.findUniqueOrThrow({ where: { id: job.id } }));
-  const heartbeat = startProjectJobHeartbeat({ jobId: job.id, ...claim }, db);
+  let heartbeat: ReturnType<typeof startProjectJobHeartbeat> | null = null;
   try {
+    // The access admission and dispatch marker commit together.  The callback
+    // only validates the job/link routing tuple; credential loading and the
+    // first Git transport happen after this transaction resolves.
+    await withProjectJobAccessTransaction(db, {
+      actor: input.requestedBy,
+      projectId,
+      jobId: job.id,
+      expectedRequestedById: currentActor.id,
+      attempt: { jobId: job.id, ...claim },
+      markDispatched: true,
+    }, async (tx, admission) => {
+      if (admission.job.kind !== "gitRepositorySync" || admission.job.requestedById !== currentActor.id) {
+        return fail("GIT_CONNECTION_INVALID_INPUT");
+      }
+      const route = await tx.projectGitRepositoryLink.findFirst({
+        where: { id: linkId, projectId },
+        select: {
+          id: true,
+          projectId: true,
+          status: true,
+          codeEnabled: true,
+          repository: { select: { connection: { select: { status: true, resolvedAddressFingerprint: true } } } },
+        },
+      });
+      if (route === null) return fail("GIT_REPOSITORY_LINK_NOT_FOUND");
+      if (route.status !== "active" || !route.codeEnabled) return fail("GIT_REPOSITORY_LINK_DISABLED");
+      if (route.repository.connection.status !== "verified" || route.repository.connection.resolvedAddressFingerprint === null) {
+        return fail("GIT_CONNECTION_INVALID_INPUT");
+      }
+      return route;
+    });
+    heartbeat = startProjectJobHeartbeat({ jobId: job.id, ...claim }, db);
     const link = await syncRepository(projectId, linkId, job.id, db);
     await heartbeat.stop();
     if (heartbeat.failure !== null) throw heartbeat.failure;
+    // A completed Git transport is a known provider response. Close the
+    // dispatch marker before publishing the terminal job state so a finished
+    // attempt never remains indistinguishable from an in-flight request.
+    await markProviderAcknowledged({ jobId: job.id, ...claim }, db);
     return toPublicProjectJob(await finishProjectJob({
       jobId: job.id,
       ...claim,
@@ -909,7 +919,14 @@ export async function runGitRepositorySyncJob(input: Readonly<{
       },
     }, db));
   } catch (error) {
-    await heartbeat.stop();
+    if (heartbeat !== null) await heartbeat.stop();
+    // Link/configuration, endpoint-safety, and credential-vault failures are
+    // known to occur before the Git transport starts. Roll back the optimistic
+    // admission marker so reconciliation is not required for a request that
+    // never reached the remote.
+    if (isDefinitelyPreDispatchGitSyncFailure(error)) {
+      await markProviderNotDispatched({ jobId: job.id, ...claim }, db).catch(() => undefined);
+    }
     await failProjectJob({ jobId: job.id, ...claim, error }, db).catch(() => undefined);
     throw error;
   }

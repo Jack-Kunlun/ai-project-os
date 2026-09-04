@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
+import { AccessControlError } from "../src/lib/access-control";
 import { createSession } from "../src/lib/auth";
 import { listMemberships } from "../src/lib/membership-service";
 import { createLocalWorkspaceMember, listWorkspaceMembers, updateWorkspaceMember } from "../src/lib/workspaces";
@@ -12,9 +13,13 @@ const memberId = "22222222-2222-4222-8222-222222222222";
 const workspaceId = "33333333-3333-4333-8333-333333333333";
 
 const safeMember = {
+  id: "55555555-5555-4555-8555-555555555555",
+  workspaceId,
   userId: memberId,
   role: "member" as const,
+  accessState: "confirmed" as const,
   createdAt: new Date("2026-09-04T00:00:00.000Z"),
+  updatedAt: new Date("2026-09-04T00:00:00.000Z"),
   user: {
     id: memberId,
     username: "member",
@@ -75,7 +80,8 @@ test("workspace member list/create/update use a minimal DTO without system crede
   let listSelect: Record<string, unknown> | undefined;
   const listDb = {
     workspaceMembership: {
-      findMany: async ({ select }: { select: Record<string, unknown> }) => {
+      findMany: async ({ where, select }: { where?: { userId?: string }; select?: Record<string, unknown> }) => {
+        if (where?.userId === adminId) return [{ role: "admin" as const, accessState: "confirmed" as const }];
         listSelect = select;
         return [safeMember];
       },
@@ -89,22 +95,36 @@ test("workspace member list/create/update use a minimal DTO without system crede
   const userSelect = (listSelect?.user as { select: Record<string, unknown> }).select;
   assert.deepEqual(Object.keys(userSelect), ["id", "username", "displayName", "email", "disabledAt", "createdAt", "oidcIdentities"]);
 
+  const noMembershipDb = {
+    workspace: { count: async () => 1 },
+    workspaceMembership: { findMany: async () => [] },
+  } as unknown as PrismaClient;
+  await assert.rejects(
+    () => listWorkspaceMembers(workspaceId, { id: adminId, role: "admin" }, noMembershipDb),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+
   let createdData: Record<string, unknown> | undefined;
   const createTx = {
     appUser: {
+      findUnique: async () => ({ id: adminId, disabledAt: null }),
       create: async ({ data }: { data: Record<string, unknown> }) => {
         createdData = data;
-        return { id: memberId, ...data };
+        return { ...data, id: memberId };
       },
     },
     workspaceMembership: {
-      create: async () => ({ id: "membership", ...safeMember }),
+      findMany: async ({ where }: { where?: { userId?: string } }) => where?.userId === adminId ? [{ role: "admin" as const, accessState: "confirmed" as const }] : [],
+      create: async () => ({ ...safeMember, id: "55555555-5555-4555-8555-555555555556" }),
       findUniqueOrThrow: async () => safeMember,
     },
     projectMembership: { createMany: async () => ({ count: 0 }) },
+    membershipAccessAudit: { create: async () => ({}) },
+    $executeRaw: async () => 0,
   };
   const createDb = {
     project: { count: async () => 0 },
+    workspaceMembership: { findMany: async () => [{ role: "admin" as const, accessState: "confirmed" as const }] },
     $transaction: async (callback: (tx: typeof createTx) => unknown) => callback(createTx),
   } as unknown as PrismaClient;
   const created = await createLocalWorkspaceMember(
@@ -118,25 +138,49 @@ test("workspace member list/create/update use a minimal DTO without system crede
   assert.equal("passwordSalt" in created.user, false);
   assert.equal("role" in created.user, false);
 
+  let targetRole: "member" | "viewer" = "member";
+  let targetAccessState: "confirmed" | "revoked" = "confirmed";
   const updateTx = {
     workspaceMembership: {
-      findUnique: async () => ({ id: "membership", role: "member" as const }),
-      update: async () => safeMember,
+      findMany: async ({ where }: { where?: { userId?: string } }) =>
+        where?.userId === adminId
+          ? [{ role: "admin" as const, accessState: "confirmed" as const }]
+          : [{ ...safeMember, role: targetRole, accessState: targetAccessState }],
+      updateMany: async ({ data }: { data: { accessState?: "confirmed" | "revoked" } }) => {
+        if (data.accessState !== undefined) targetAccessState = data.accessState;
+        return { count: 1 };
+      },
+      create: async ({ data }: { data: { id: string; role: "member" | "viewer"; accessState: "confirmed" } }) => {
+        targetRole = data.role;
+        targetAccessState = data.accessState;
+        return { ...safeMember, ...data };
+      },
+      findUnique: async () => ({ ...safeMember, role: targetRole, accessState: targetAccessState }),
       findUniqueOrThrow: async () => safeMember,
     },
     projectMembership: { findMany: async () => [] },
+    membershipAccessAudit: { create: async () => ({}) },
+    appUser: { findUnique: async () => ({ id: adminId, disabledAt: null }) },
+    $executeRaw: async () => 0,
   };
   const updateDb = {
+    workspaceMembership: { findMany: async () => [{ role: "admin" as const, accessState: "confirmed" as const }] },
     $transaction: async (callback: (tx: typeof updateTx) => unknown) => callback(updateTx),
   } as unknown as PrismaClient;
   const updated = await updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "viewer" }, { id: adminId, role: "admin" }, updateDb);
   assert.equal("passwordHash" in updated.user, false);
   assert.equal("passwordSalt" in updated.user, false);
   assert.equal("role" in updated.user, false);
+  await assert.rejects(
+    () => updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "owner" }, { id: adminId, role: "admin" }, updateDb),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
 
   const source = await readFile("src/lib/workspaces.ts", "utf8");
   assert.doesNotMatch(source, /include:\s*\{\s*user:\s*true\s*\}/u);
   assert.doesNotMatch(source, /user:\s*\{[^}]*password(?:Hash|Salt)/u);
+  assert.doesNotMatch(source, /user\.role\s*===\s*["']admin["']/u);
+  assert.doesNotMatch(source, /actor\.role\s*===\s*["']admin["']/u);
 });
 
 test("system-role mapper is fail-closed and canonical for legacy and current storage values", () => {

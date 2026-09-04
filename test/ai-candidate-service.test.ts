@@ -17,6 +17,9 @@ import {
 const projectId = "11111111-1111-4111-8111-111111111111";
 const runId = "22222222-2222-4222-8222-222222222222";
 const sourceId = "33333333-3333-4333-8333-333333333333";
+const actorId = "44444444-4444-4444-8444-444444444444";
+const workspaceId = "55555555-5555-4555-8555-555555555555";
+const actor = { id: actorId, role: "user" } as const;
 const operationKey = "a".repeat(64);
 const fingerprint = "b".repeat(64);
 const modelId = "gpt-test-model-2026-08-27";
@@ -94,6 +97,82 @@ function serviceWithTransactionTrap(): {
   };
 }
 
+function serviceWithCandidateAccessFixture(options: Readonly<{
+  storedRole: "admin" | "user";
+  disabledAt?: Date | null;
+  accessible?: boolean;
+  projectRole?: "owner" | "editor" | "viewer";
+}>): {
+  service: ReturnType<typeof createAiCandidateService>;
+  candidateReads: () => number;
+  transactionCalls: () => number;
+} {
+  let candidateReads = 0;
+  let transactionCalls = 0;
+  const db = {
+    appUser: {
+      findUnique: async () => ({
+        id: actorId,
+        role: options.storedRole,
+        disabledAt: options.disabledAt ?? null,
+      }),
+    },
+    project: {
+      count: async () => 1,
+      findUnique: async (query: { select?: { id?: boolean; workspaceId?: boolean; membershipInheritanceMode?: boolean; archivedAt?: boolean; workspace?: unknown; memberships?: unknown } }) => {
+        if (query.select?.archivedAt === true && query.select?.id !== true) return { archivedAt: null };
+        if (query.select?.id === true && query.select?.workspaceId === true && query.select?.membershipInheritanceMode !== true) {
+          return { id: projectId, workspaceId };
+        }
+        if (query.select?.membershipInheritanceMode === true && query.select.workspace === undefined && query.select.memberships === undefined) {
+          return { id: projectId, workspaceId, archivedAt: null, membershipInheritanceMode: "projectOnly" as const };
+        }
+        return {
+          membershipInheritanceMode: "projectOnly" as const,
+          workspace: { memberships: [] },
+          memberships: options.accessible
+            ? [{ role: options.projectRole ?? "viewer", accessState: "confirmed" as const }]
+            : [],
+        };
+      },
+    },
+    workspaceMembership: {
+      findUnique: async () => null,
+      findMany: async () => [],
+    },
+    projectMembership: {
+      findUnique: async () => options.accessible
+        ? { role: options.projectRole ?? "viewer", accessState: "confirmed" as const }
+        : null,
+      findMany: async () => options.accessible
+        ? [{ role: options.projectRole ?? "viewer", accessState: "confirmed" as const }]
+        : [],
+    },
+    aiCandidateClaim: {
+      findMany: async () => {
+        candidateReads += 1;
+        return [];
+      },
+    },
+    $transaction: async (callback: (value: unknown) => Promise<unknown>) => {
+      transactionCalls += 1;
+      return callback({
+        appUser: db.appUser,
+        project: db.project,
+        workspaceMembership: db.workspaceMembership,
+        projectMembership: db.projectMembership,
+        aiCandidateClaim: db.aiCandidateClaim,
+        $executeRaw: async () => 0,
+      });
+    },
+  } as unknown as PrismaClient;
+  return {
+    service: createAiCandidateService({ db }),
+    candidateReads: () => candidateReads,
+    transactionCalls: () => transactionCalls,
+  };
+}
+
 async function assertInvalidWithoutTransaction(response: unknown): Promise<void> {
   const { service, transactionCalls } = serviceWithTransactionTrap();
   await assert.rejects(
@@ -155,20 +234,132 @@ test("candidate completion can reuse the caller transaction without nesting one"
   assert.equal(transactionCalls(), 0);
 });
 
-test("candidate review rejects unsafe reviewer identity before opening a transaction", async () => {
+test("candidate review rejects malformed actor identity before opening a transaction", async () => {
   const { service, transactionCalls } = serviceWithTransactionTrap();
   await assert.rejects(
     service.dismissCandidate({
       projectId,
       candidateId: sourceId,
-      reviewedBy: "Bearer secret",
+      actor: { id: "not-a-uuid", role: "user" },
       expectedItemUpdatedAt: new Date(0),
     }),
     (error: unknown) =>
-      error instanceof AiCandidateError &&
-      error.code === "AI_CANDIDATE_INVALID_INPUT",
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
   );
   assert.equal(transactionCalls(), 0);
+});
+
+test("candidate listing authorizes the current actor before reading claims", async () => {
+  const scenarios = [
+    {
+      name: "viewer",
+      actor,
+      options: { storedRole: "user" as const, accessible: true, projectRole: "viewer" as const },
+      expected: "allowed",
+    },
+    {
+      name: "non-member",
+      actor,
+      options: { storedRole: "user" as const },
+      expected: "ACCESS_FORBIDDEN",
+    },
+    {
+      name: "disabled",
+      actor,
+      options: { storedRole: "user" as const, disabledAt: new Date("2026-09-04T00:00:00.000Z") },
+      expected: "ACCOUNT_DISABLED",
+    },
+    {
+      name: "forged-admin-role",
+      actor: { id: actorId, role: "admin" } as const,
+      options: { storedRole: "user" as const },
+      expected: "ACCESS_FORBIDDEN",
+    },
+    {
+      name: "cross-project",
+      actor,
+      options: { storedRole: "user" as const, accessible: false },
+      expected: "ACCESS_FORBIDDEN",
+    },
+  ] as const;
+  for (const scenario of scenarios) {
+    const fixture = serviceWithCandidateAccessFixture(scenario.options);
+    if (scenario.expected === "allowed") {
+      assert.deepEqual(
+        await fixture.service.listCandidates({ projectId, actor: scenario.actor }),
+        [],
+        scenario.name,
+      );
+      assert.equal(fixture.candidateReads(), 1, scenario.name);
+      continue;
+    }
+    await assert.rejects(
+      () => fixture.service.listCandidates({ projectId, actor: scenario.actor }),
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === scenario.expected,
+      scenario.name,
+    );
+    assert.equal(fixture.candidateReads(), 0, `${scenario.name} read claims`);
+  }
+});
+
+test("candidate review authorizes edit access before opening the write transaction", async () => {
+  const scenarios = [
+    {
+      name: "viewer",
+      actor,
+      options: { storedRole: "user" as const, accessible: true, projectRole: "viewer" as const },
+      expected: "ACCESS_FORBIDDEN",
+    },
+    {
+      name: "non-member",
+      actor,
+      options: { storedRole: "user" as const },
+      expected: "ACCESS_FORBIDDEN",
+    },
+    {
+      name: "disabled",
+      actor,
+      options: { storedRole: "user" as const, disabledAt: new Date("2026-09-04T00:00:00.000Z") },
+      expected: "ACCOUNT_DISABLED",
+    },
+    {
+      name: "forged-admin-role",
+      actor: { id: actorId, role: "admin" } as const,
+      options: { storedRole: "user" as const },
+      expected: "ACCESS_FORBIDDEN",
+    },
+    {
+      name: "cross-project",
+      actor,
+      options: { storedRole: "user" as const, accessible: false },
+      expected: "ACCESS_FORBIDDEN",
+    },
+  ] as const;
+  for (const scenario of scenarios) {
+    const fixture = serviceWithCandidateAccessFixture(scenario.options);
+    await assert.rejects(
+      () => fixture.service.dismissCandidate({
+        projectId,
+        candidateId: sourceId,
+        actor: scenario.actor,
+        expectedItemUpdatedAt: new Date("2026-09-04T00:00:00.000Z"),
+      }),
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === scenario.expected,
+      scenario.name,
+    );
+    assert.equal(fixture.transactionCalls(), 0, `${scenario.name} opened a write transaction`);
+  }
 });
 
 test("candidate review rejects a missing item version before opening a transaction", async () => {
@@ -177,7 +368,7 @@ test("candidate review rejects a missing item version before opening a transacti
     service.acceptCandidate({
       projectId,
       candidateId: sourceId,
-      reviewedBy: "local:user",
+      actor,
       expectedItemUpdatedAt: null as unknown as Date,
       item: {
         type: "decision",
@@ -196,6 +387,27 @@ test("candidate review rejects a missing item version before opening a transacti
 test("candidate review reports stale visible item state before any mutation", async () => {
   let itemWrites = 0;
   const tx = {
+    appUser: {
+      findUnique: async () => ({ id: actorId, role: "user", disabledAt: null }),
+    },
+    project: {
+      findUnique: async (query: { select?: { id?: boolean; workspaceId?: boolean; membershipInheritanceMode?: boolean; archivedAt?: boolean; workspace?: unknown; memberships?: unknown } }) => {
+        if (query.select?.archivedAt === true && query.select?.id !== true) return { archivedAt: null };
+        if (query.select?.id === true && query.select?.workspaceId === true && query.select?.membershipInheritanceMode !== true) {
+          return { id: projectId, workspaceId };
+        }
+        if (query.select?.membershipInheritanceMode === true && query.select.workspace === undefined && query.select.memberships === undefined) {
+          return { id: projectId, workspaceId, archivedAt: null, membershipInheritanceMode: "projectOnly" as const };
+        }
+        return { membershipInheritanceMode: "projectOnly" as const, workspace: { memberships: [] }, memberships: [{ role: "editor", accessState: "confirmed" as const }] };
+      },
+      count: async () => 1,
+    },
+    workspaceMembership: { findUnique: async () => null, findMany: async () => [] },
+    projectMembership: {
+      findUnique: async () => ({ role: "editor" as const, accessState: "confirmed" as const }),
+      findMany: async () => [{ role: "editor" as const, accessState: "confirmed" as const }],
+    },
     aiCandidateClaim: {
       findUnique: async () => ({
         id: sourceId,
@@ -215,8 +427,31 @@ test("candidate review reports stale visible item state before any mutation", as
         return { count: 1 };
       },
     },
+    $executeRaw: async () => 0,
   };
   const db = {
+    appUser: {
+      findUnique: async () => ({ id: actorId, role: "user", disabledAt: null }),
+    },
+    project: {
+      findUnique: async (query: { select?: { id?: boolean; workspaceId?: boolean; membershipInheritanceMode?: boolean; archivedAt?: boolean; workspace?: unknown; memberships?: unknown } }) => {
+        if (query.select?.archivedAt === true && query.select?.id !== true) return { archivedAt: null };
+        if (query.select?.id === true && query.select?.workspaceId === true && query.select?.membershipInheritanceMode !== true) {
+          return { id: projectId, workspaceId };
+        }
+        if (query.select?.membershipInheritanceMode === true && query.select.workspace === undefined && query.select.memberships === undefined) {
+          return { id: projectId, workspaceId, archivedAt: null, membershipInheritanceMode: "projectOnly" as const };
+        }
+        return { membershipInheritanceMode: "projectOnly" as const, workspace: { memberships: [] }, memberships: [{ role: "editor", accessState: "confirmed" as const }] };
+      },
+      count: async () => 1,
+    },
+    workspaceMembership: { findUnique: async () => null, findMany: async () => [] },
+    projectMembership: {
+      findUnique: async () => ({ role: "editor" as const, accessState: "confirmed" as const }),
+      findMany: async () => [{ role: "editor" as const, accessState: "confirmed" as const }],
+    },
+    $executeRaw: async () => 0,
     $transaction: async (callback: (value: typeof tx) => Promise<unknown>) =>
       callback(tx),
   } as unknown as PrismaClient;
@@ -225,7 +460,7 @@ test("candidate review reports stale visible item state before any mutation", as
     service.dismissCandidate({
       projectId,
       candidateId: sourceId,
-      reviewedBy: "local:user",
+      actor,
       expectedItemUpdatedAt: new Date("2026-08-28T10:00:00.000Z"),
     }),
     (error: unknown) =>
@@ -233,4 +468,117 @@ test("candidate review reports stale visible item state before any mutation", as
       error.code === "AI_CANDIDATE_VERSION_CONFLICT",
   );
   assert.equal(itemWrites, 0);
+});
+
+test("candidate review repeats actor and membership authorization inside the write transaction", async () => {
+  for (const operation of ["accept", "dismiss"] as const) {
+    let actorLookups = 0;
+    let membershipLookups = 0;
+    let candidateReads = 0;
+    let itemWrites = 0;
+    let claimWrites = 0;
+    let revisionWrites = 0;
+    const appUser = {
+      findUnique: async () => {
+        actorLookups += 1;
+        return { id: actorId, role: "user", disabledAt: null };
+      },
+    };
+    const project = {
+      findUnique: async (query: { select?: { id?: boolean; workspaceId?: boolean; membershipInheritanceMode?: boolean; archivedAt?: boolean; workspace?: unknown; memberships?: unknown } }) => {
+        if (query.select?.archivedAt === true && query.select?.id !== true) return { archivedAt: null };
+        if (query.select?.id === true && query.select?.workspaceId === true && query.select?.membershipInheritanceMode !== true) {
+          return { id: projectId, workspaceId };
+        }
+        if (query.select?.membershipInheritanceMode === true && query.select.workspace === undefined && query.select.memberships === undefined) {
+          return { id: projectId, workspaceId, archivedAt: null, membershipInheritanceMode: "projectOnly" as const };
+        }
+        return { membershipInheritanceMode: "projectOnly" as const, workspace: { memberships: [] }, memberships: [{ role: "editor", accessState: "confirmed" as const }] };
+      },
+      count: async () => 1,
+    };
+    const workspaceMembership = { findUnique: async () => null, findMany: async () => [] };
+    const projectMembership = {
+      findUnique: async () => ({ role: "editor" as const, accessState: "confirmed" as const }),
+      findMany: async () => [{ role: "editor" as const, accessState: "confirmed" as const }],
+    };
+    const txProjectMembership = {
+      findUnique: async () => {
+        membershipLookups += 1;
+        return null;
+      },
+      findMany: async () => {
+        membershipLookups += 1;
+        return [];
+      },
+    };
+    const tx = {
+      appUser,
+      project,
+      workspaceMembership,
+      projectMembership: txProjectMembership,
+      $executeRaw: async () => 0,
+      aiCandidateClaim: {
+        findUnique: async () => {
+          candidateReads += 1;
+          return null;
+        },
+        updateMany: async () => {
+          claimWrites += 1;
+          return { count: 1 };
+        },
+      },
+      projectItem: {
+        updateMany: async () => {
+          itemWrites += 1;
+          return { count: 1 };
+        },
+      },
+      projectItemEvidence: { findFirst: async () => null },
+      projectItemRevision: {
+        findFirst: async () => null,
+        create: async () => {
+          revisionWrites += 1;
+          return { id: sourceId, revisionNumber: 1 };
+        },
+      },
+      projectItemRevisionEvidence: { createMany: async () => ({ count: 0 }) },
+    };
+    const db = {
+      appUser,
+      project,
+      workspaceMembership,
+      projectMembership,
+      $transaction: async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx),
+    } as unknown as PrismaClient;
+    const service = createAiCandidateService({ db });
+    await assert.rejects(
+      () => operation === "accept"
+        ? service.acceptCandidate({
+            projectId,
+            candidateId: sourceId,
+            actor,
+            expectedItemUpdatedAt: new Date("2026-09-04T00:00:00.000Z"),
+            item: { type: "decision", title: "Candidate title", content: "Candidate content", occurredAt: null },
+          })
+        : service.dismissCandidate({
+            projectId,
+            candidateId: sourceId,
+            actor,
+            expectedItemUpdatedAt: new Date("2026-09-04T00:00:00.000Z"),
+          }),
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
+      operation,
+    );
+    assert.equal(actorLookups, 2, `${operation} reloads actor inside transaction`);
+    assert.equal(membershipLookups, 1, `${operation} reloads membership inside transaction`);
+    assert.equal(candidateReads, 0, `${operation} reads no candidate after revoke`);
+    assert.equal(itemWrites, 0, `${operation} writes no item after revoke`);
+    assert.equal(claimWrites, 0, `${operation} writes no claim after revoke`);
+    assert.equal(revisionWrites, 0, `${operation} writes no revision after revoke`);
+  }
 });

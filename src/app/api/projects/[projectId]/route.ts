@@ -100,7 +100,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ proj
     const input = deleteProjectSchema.parse(await readJsonBody(request));
     const deleted = await deleteArchivedProject({
       projectId,
-      actorId: user.id,
+      actor: user,
       confirmationName: input.confirmationName,
       expectedUpdatedAt: new Date(input.expectedUpdatedAt),
     });

@@ -3,7 +3,6 @@ import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { connectProjectGitRepository, gitRepositoryScanPolicy, listProjectGitRepositories } from "@/lib/git";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
@@ -14,9 +13,10 @@ async function projectId(params: Promise<{ projectId: string }>) {
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
+    const id = await projectId(context.params);
     return NextResponse.json({
-      repositories: await listProjectGitRepositories(await projectId(context.params)),
+      repositories: await listProjectGitRepositories(id, user),
       scanPolicy: gitRepositoryScanPolicy(),
     });
   } catch (error) {
@@ -28,9 +28,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
   try {
     assertSameOrigin(request);
     const user = await requireApiSession(request);
-    if (user.role !== "admin") return NextResponse.json({ error: { code: "ACCESS_FORBIDDEN", message: "只有系统管理员可以首次接入 Git 仓库" } }, { status: 403 });
     const id = await projectId(context.params);
-    await assertProjectActive(id);
     const repository = await connectProjectGitRepository(id, await readJsonBody(request), user);
     return NextResponse.json({ repository }, { status: 201 });
   } catch (error) {

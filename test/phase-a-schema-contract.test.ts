@@ -219,9 +219,33 @@ test("M300 migration occupies stable migration slot 57 and contains additive DDL
   assert.match(schema, /model GitConnection \{[\s\S]*?^\s*credentialId\s+String\?/mu);
   assert.match(schema, /model McpConnection \{[\s\S]*?^\s*name\s+String\s+@unique/mu);
   assert.match(schema, /model McpConnection \{[\s\S]*?^\s*credentialId\s+String\?\s+@unique/mu);
-  assert.match(schema, /model AiProviderConnection \{[\s\S]*?^\s*name\s+String\s+@unique/mu);
+  assert.doesNotMatch(schema, /model AiProviderConnection \{[\s\S]*?^\s*name\s+String\s+@unique/mu);
   assert.match(schema, /model AiProviderConnection \{[\s\S]*?^\s*credentialId\s+String\s+@unique/mu);
   assert.match(schema, /model PlatformTokenGrant \{[\s\S]*?@@unique\(\[userId, kind\]\)/mu);
+});
+
+test("personal provider ownership migration scopes names and freezes identity", async () => {
+  const migrationName = "20260904080000_add_personal_ai_provider_ownership";
+  const entries = await readdir("prisma/migrations", { withFileTypes: true });
+  const migrations = entries
+    .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  assert.equal(migrations.indexOf(migrationName), migrations.length - 1);
+
+  const schema = await readFile("prisma/schema.prisma", "utf8");
+  const provider = readModel(schema, "AiProviderConnection");
+  assert.match(provider, /^\s*name\s+String\s+@db\.VarChar\(80\)\s*$/mu);
+  assert.match(provider, /@@index\(\[scope, name\]\)/u);
+  assert.match(provider, /@@index\(\[ownerUserId, name\]\)/u);
+
+  const migration = await readFile(`prisma/migrations/${migrationName}/migration.sql`, "utf8");
+  assert.match(migration, /DROP INDEX IF EXISTS "AiProviderConnection_name_key"/u);
+  assert.match(migration, /AiProviderConnection_legacy_scope_name_key[\s\S]*WHERE "scope" IN \('platform', 'workspace'\)/u);
+  assert.match(migration, /AiProviderConnection_user_name_key[\s\S]*WHERE "scope" = 'user'/u);
+  assert.match(migration, /ai_provider_connection_identity_guard/u);
+  assert.match(migration, /OLD\."credentialId" IS DISTINCT FROM NEW\."credentialId"/u);
+  assert.match(migration, /CREATE TRIGGER "AiProviderConnection_identity_guard"/u);
 });
 
 test("platform default route control plane occupies stable migration slot 59", async () => {

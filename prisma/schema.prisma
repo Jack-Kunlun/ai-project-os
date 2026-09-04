@@ -4310,7 +4310,7 @@ model ProjectMcpToolGrantAudit {
 
 model AiProviderConnection {
   id                       String                      @id @default(uuid()) @db.Uuid
-  name                     String                      @unique @db.VarChar(80)
+  name                     String                      @db.VarChar(80)
   kind                     AiProviderKind
   scope                    AiProviderScope              @default(platform)
   workspaceId              String?                     @db.Uuid
@@ -4352,7 +4352,9 @@ model AiProviderConnection {
 
   @@index([kind, status])
   @@index([scope, workspaceId, status])
+  @@index([scope, name])
   @@index([ownerUserId, updatedAt])
+  @@index([ownerUserId, name])
   @@index([ownerUserId, ownershipState, updatedAt])
 }
 

@@ -47,6 +47,7 @@ import { MembershipServiceError } from "@/lib/membership-service";
 import { WorkspaceProviderServiceError } from "@/lib/workspace-provider-service";
 import { PlatformDefaultAiRouteError } from "@/lib/platform-default-ai-routes";
 import { EffectiveAiRouteError } from "@/lib/effective-ai-route";
+import { PersonalProviderServiceError } from "@/lib/personal-ai-provider-service";
 
 export type ApiErrorBody = {
   error: {
@@ -486,6 +487,24 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE: [409, "该连接当前不能确认历史平台归属"],
       AI_PROVIDER_CONNECTION_UNAVAILABLE: [409, "供应商连接尚未验证或已停用"],
       AI_PROVIDER_CONFLICT: [409, "供应商连接已被其他操作更新，请刷新后重试"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof PersonalProviderServiceError) {
+    const mapping = {
+      AI_PROVIDER_INVALID_INPUT: [400, "个人模型配置无效"],
+      AI_PROVIDER_FORBIDDEN: [403, "无权操作个人模型连接"],
+      AI_PROVIDER_NOT_FOUND: [404, "个人模型连接不存在"],
+      AI_PROVIDER_NAME_CONFLICT: [409, "你已有同名个人模型连接"],
+      AI_PROVIDER_IN_USE: [409, "个人模型连接仍被项目或历史记录引用，无法停用或删除"],
+      AI_PROVIDER_DELETE_REQUIRES_DISABLED: [409, "请先停用个人模型连接，再执行永久删除"],
+      AI_PROVIDER_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
+      AI_PROVIDER_CONNECTION_UNAVAILABLE: [409, "个人模型连接尚未验证或已停用"],
+      AI_PROVIDER_CONFLICT: [409, "个人模型连接已被其他操作更新，请刷新后重试"],
+      AI_MEMBERSHIP_REQUIRED: [403, "配置个人模型需要有效会员资格"],
+      AI_MEMBERSHIP_EXPIRED: [403, "会员资格已到期，不能继续配置或测试个人模型"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

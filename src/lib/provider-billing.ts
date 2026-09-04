@@ -64,6 +64,23 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   }
 }
 
+function isAllowedProjectProviderScope(
+  scope: unknown,
+  providerWorkspaceId: unknown,
+  providerOwnerUserId: unknown,
+  projectWorkspaceId: unknown,
+): boolean {
+  if (scope === "platform") return providerWorkspaceId === null && providerOwnerUserId === null;
+  if (scope === "workspace") {
+    return typeof providerWorkspaceId === "string" &&
+      typeof projectWorkspaceId === "string" &&
+      providerWorkspaceId === projectWorkspaceId &&
+      typeof providerOwnerUserId === "string" &&
+      providerOwnerUserId.length > 0;
+  }
+  return false;
+}
+
 export async function readProviderBalance(
   projectId: string,
   providerConnectionId: string,
@@ -77,16 +94,33 @@ export async function readProviderBalance(
   const route = await db.projectAiRoute.findFirst({
     where: { projectId, providerConnectionId },
     select: {
+      project: { select: { workspaceId: true } },
       providerConnection: {
-        select: { id: true, name: true, kind: true, status: true, credentialId: true },
+        select: {
+          id: true,
+          name: true,
+          kind: true,
+          scope: true,
+          workspaceId: true,
+          ownerUserId: true,
+          status: true,
+          disabledAt: true,
+          credentialId: true,
+        },
       },
     },
   });
   if (route === null) return fail("PROVIDER_BILLING_CONNECTION_NOT_ROUTED");
 
   const connection = route.providerConnection;
+  if (
+    connection === null ||
+    connection === undefined ||
+    route.project?.workspaceId === undefined ||
+    !isAllowedProjectProviderScope(connection.scope, connection.workspaceId, connection.ownerUserId, route.project.workspaceId)
+  ) return fail("PROVIDER_BILLING_CONNECTION_NOT_ROUTED");
   if (connection.kind !== "deepseek") return fail("PROVIDER_BILLING_UNSUPPORTED");
-  if (connection.status === "disabled") return fail("PROVIDER_BILLING_UNAVAILABLE");
+  if (connection.status !== "verified" || connection.disabledAt !== null) return fail("PROVIDER_BILLING_UNAVAILABLE");
 
   const readSecret = dependencies.readSecret
     ?? ((credentialId: string) => readCredentialSecret(credentialId, "aiProvider", db));

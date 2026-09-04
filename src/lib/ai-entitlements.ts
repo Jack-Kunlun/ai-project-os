@@ -569,7 +569,6 @@ export async function assertPlatformConcurrency(
   user: Readonly<{ id: string; role: AppUserRole }>,
   db: EntitlementDb = getDb(),
 ): Promise<void> {
-  if (user.role === "admin") return;
   await lockUser(db, user.id);
   const count = await db.backgroundJob.count({
     where: { requestedById: user.id, status: { in: ["queued", "waitingConsent", "running", "unknown"] } },
@@ -623,12 +622,11 @@ export async function assertAiOutboundEntitlement(input: Readonly<{
   if (provider.scope === "platform") {
     const user = await db.appUser.findUnique({ where: { id: input.requestedById }, select: { id: true, role: true } });
     if (user === null) return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
-    // Existing system-admin platform work must remain operational after the
-    // entitlement rollout. Ordinary users are limited to the no-cost routes
-    // below; admin work is still audited but does not consume a grant.
-    if (user.role !== "admin" && !platformModelAllowed(input.route, operation)) return fail("AI_MODEL_CAPABILITY_MISMATCH");
+    // System-admin governance permissions do not grant a model or billing
+    // exception when the admin is also the caller of a platform AI operation.
+    if (!platformModelAllowed(input.route, operation)) return fail("AI_MODEL_CAPABILITY_MISMATCH");
     if (input.enforceConcurrency !== false) await assertPlatformConcurrency(user, db);
-    return Object.freeze({ billingMode: "platform", billingUserId: user.id, reservationRequired: user.role !== "admin" });
+    return Object.freeze({ billingMode: "platform", billingUserId: user.id, reservationRequired: true });
   }
   if (provider.workspaceId === null || provider.workspaceId !== project.workspaceId) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
   if (provider.ownerUserId === null) return fail("AI_PROVIDER_OWNER_REQUIRED");

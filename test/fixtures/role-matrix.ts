@@ -6,7 +6,16 @@ export type SystemRole = (typeof SYSTEM_ROLES)[number];
 export const LEGACY_STORED_ROLES = ["admin", "member"] as const;
 export type LegacyStoredRole = (typeof LEGACY_STORED_ROLES)[number];
 
-/** The database-compatible mapping used while the semantic role vocabulary changes. */
+/** Current persistence vocabulary for all new system-role writes. */
+export const CURRENT_STORED_ROLES = ["admin", "user"] as const;
+export type CurrentStoredRole = (typeof CURRENT_STORED_ROLES)[number];
+
+export const CURRENT_STORED_ROLE_BY_SYSTEM_ROLE = {
+  admin: "admin",
+  user: "user",
+} as const satisfies Record<SystemRole, CurrentStoredRole>;
+
+/** Read-compatibility mapping only; new writes must use CURRENT_STORED_ROLE_BY_SYSTEM_ROLE. */
 export const LEGACY_STORED_ROLE_BY_SYSTEM_ROLE = {
   admin: "admin",
   user: "member",

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { AppUserRole } from "@prisma/client";
+import { toSystemRole } from "../src/lib/system-role";
 import {
   ACCOUNT_STATES,
   COMMERCIAL_TIERS,
+  CURRENT_STORED_ROLE_BY_SYSTEM_ROLE,
+  CURRENT_STORED_ROLES,
   LEGACY_STORED_ROLE_BY_SYSTEM_ROLE,
   LEGACY_STORED_ROLES,
   MEMBERSHIP_STATES,
@@ -24,6 +28,21 @@ function scenario(id: RoleMatrixScenario["id"]): RoleMatrixScenario {
   assert.ok(value, `missing role matrix scenario: ${id}`);
   return value;
 }
+
+test("stored system roles expose the canonical public role", () => {
+  const storedRoles: Array<[AppUserRole, "admin" | "user"]> = [
+    ["admin", "admin"],
+    ["member", "user"],
+    ["user", "user"],
+  ];
+  for (const [storedRole, publicRole] of storedRoles) assert.equal(toSystemRole(storedRole), publicRole);
+  assert.deepEqual(CURRENT_STORED_ROLES, ["admin", "user"]);
+  assert.deepEqual(CURRENT_STORED_ROLE_BY_SYSTEM_ROLE, { admin: "admin", user: "user" });
+  for (const systemRole of SYSTEM_ROLES) {
+    assert.equal(toSystemRole(CURRENT_STORED_ROLE_BY_SYSTEM_ROLE[systemRole]), systemRole);
+  }
+  assert.equal(toSystemRole("member"), SYSTEM_ROLE_BY_LEGACY_STORED_ROLE.member);
+});
 
 test("role matrix declares every independent role, membership, collaboration, and account dimension", () => {
   assert.deepEqual(SYSTEM_ROLES, ["admin", "user"]);

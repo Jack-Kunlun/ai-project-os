@@ -520,7 +520,7 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     const domainAllowed = claimedEmail !== null && emailVerified && (domains.length === 0 || (emailDomain(claimedEmail) !== null && domains.includes(emailDomain(claimedEmail)!)));
     if (user === null && invitation === null && !(provider.autoProvision && domainAllowed)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     if (user === null) {
-      user = await tx.appUser.create({ data: { username: await availableUsername(preferredUsername, tx), displayName, email: claimedEmail, role: "member", passwordHash: null, passwordSalt: null } });
+      user = await tx.appUser.create({ data: { username: await availableUsername(preferredUsername, tx), displayName, email: claimedEmail, role: "user", passwordHash: null, passwordSalt: null } });
       if (newlyCreated && invitation === null && emailVerified) {
         await issueVerifiedSignupGrant(user.id, { issuedById: null, now: new Date() }, tx);
       }

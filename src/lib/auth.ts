@@ -1,9 +1,10 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
-import { Prisma, type AppUser, type AppUserRole, type PrismaClient } from "@prisma/client";
+import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { authorizeApiRequest } from "@/lib/access-control";
+import { toSystemRole, type SystemRole } from "@/lib/system-role";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
 export const SESSION_LIFETIME_DAYS = 14 as const;
@@ -42,7 +43,7 @@ export class AuthError extends Error {
 export type SafeSessionUser = Readonly<{
   id: string;
   username: string;
-  role: AppUserRole;
+  role: SystemRole;
 }>;
 
 export type CreatedSession = Readonly<{
@@ -144,7 +145,7 @@ export async function verifyPasswordRecord(
 }
 
 function safeUser(user: Pick<AppUser, "id" | "username" | "role">): SafeSessionUser {
-  return Object.freeze({ id: user.id, username: user.username, role: user.role });
+  return Object.freeze({ id: user.id, username: user.username, role: toSystemRole(user.role) });
 }
 
 export async function createSession(

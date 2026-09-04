@@ -386,7 +386,7 @@ export async function completeGitHubOAuth(
           username: await availableGitHubUsername(profile.login, tx),
           displayName: profile.displayName,
           email: profile.email,
-          role: "member",
+          role: "user",
           passwordHash: null,
           passwordSalt: null,
         },

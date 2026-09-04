@@ -72,7 +72,7 @@ function fakeDb() {
   const credentials = new Map<string, ExternalCredential>();
   const attempts = new Map<string, Attempt>();
   const identities = new Map<string, { id: string; userId: string; githubUserId: bigint; login: string; email: string; displayName: string | null; lastLoginAt: Date }>();
-  const users = new Map<string, { id: string; username: string; role: "admin" | "member"; displayName?: string | null; email?: string | null; disabledAt: Date | null }>();
+  const users = new Map<string, { id: string; username: string; role: "admin" | "member" | "user"; displayName?: string | null; email?: string | null; disabledAt: Date | null }>();
   const memberships: Array<{ workspaceId: string; userId: string; role: "member" }> = [];
   const platformTokenGrants = new Map<string, PlatformTokenGrantRecord>();
   const platformTokenLedgerEntries = new Map<string, PlatformTokenLedgerEntryRecord>();
@@ -87,7 +87,7 @@ function fakeDb() {
         ? users.get(where.id) ?? null
         : [...users.values()].find((item) => item.email === where.email) ?? null,
       count: async ({ where }: { where: { username: string } }) => [...users.values()].filter((item) => item.username === where.username).length,
-      create: async ({ data }: { data: { username: string; displayName: string | null; email: string; role: "member" } }) => {
+      create: async ({ data }: { data: { username: string; displayName: string | null; email: string; role: "user" } }) => {
         const created = { id: `55555555-5555-4555-8555-${String(++sequence).padStart(12, "0")}`, ...data, disabledAt: null };
         users.set(created.id, created);
         return created;
@@ -266,9 +266,10 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
       remember: true,
     }, registrationStore.db);
     const registered = await completeGitHubOAuth({ code: "github-register-code", state: registration.state, cookieState: registration.state }, registrationStore.db);
-    assert.equal(registered.session?.user.role, "member");
+    assert.equal(registered.session?.user.role, "user");
     assert.equal(registered.session?.user.username, "octocat");
     assert.equal(registrationStore.users.size, 2);
+    assert.equal([...registrationStore.users.values()].find((item) => item.username === "octocat")?.role, "user");
     assert.deepEqual(registrationStore.memberships.map((membership) => membership.role), ["member"]);
     assert.equal(registrationStore.identities.size, 1);
     assert.equal(registrationStore.platformTokenGrants.size, 1);

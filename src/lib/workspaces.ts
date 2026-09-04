@@ -49,6 +49,24 @@ const invitationSchema = z.object({
   expiresInDays: z.number().int().min(1).max(30).default(7),
 }).strict();
 
+const workspaceMemberSelect = {
+  role: true,
+  createdAt: true,
+  user: {
+    select: {
+      id: true,
+      username: true,
+      displayName: true,
+      email: true,
+      disabledAt: true,
+      createdAt: true,
+      oidcIdentities: { select: { provider: { select: { id: true, name: true } }, lastLoginAt: true } },
+    },
+  },
+  workspace: { select: { projects: { orderBy: { name: "asc" }, select: { id: true, name: true } } } },
+  userId: true,
+} satisfies Prisma.WorkspaceMembershipSelect;
+
 const workspaceRoleRank: Record<WorkspaceMembershipRole, number> = { viewer: 1, member: 2, admin: 3, owner: 4 };
 const projectRoleRank: Record<ProjectMembershipRole, number> = { viewer: 1, editor: 2, owner: 3 };
 
@@ -123,16 +141,10 @@ export async function listWorkspaceMembers(workspaceIdInput: unknown, actor: Acc
   return db.workspaceMembership.findMany({
     where: { workspaceId },
     orderBy: [{ role: "asc" }, { createdAt: "asc" }],
-    select: {
-      role: true,
-      createdAt: true,
-      user: { select: { id: true, username: true, displayName: true, email: true, role: true, disabledAt: true, createdAt: true, oidcIdentities: { select: { provider: { select: { id: true, name: true } }, lastLoginAt: true } } } },
-      workspace: { select: { projects: { orderBy: { name: "asc" }, select: { id: true, name: true } } } },
-      userId: true,
-    },
+    select: workspaceMemberSelect,
   }).then(async (memberships) => {
     const grants = await db.projectMembership.findMany({ where: { project: { workspaceId }, userId: { in: memberships.map((entry) => entry.userId) } }, select: { userId: true, projectId: true, role: true } });
-    return memberships.map((membership) => ({ ...membership, projectGrants: grants.filter((grant) => grant.userId === membership.userId) }));
+    return memberships.map((membership) => ({ ...membership, projectGrants: grants.filter((grant) => grant.userId === membership.userId).map(({ projectId, role }) => ({ projectId, role })) }));
   });
 }
 
@@ -145,10 +157,11 @@ export async function createLocalWorkspaceMember(workspaceIdInput: unknown, inpu
   await assertProjectsInWorkspace(workspaceId, parsed.projectGrants, db);
   try {
     return await db.$transaction(async (tx) => {
-      const user = await tx.appUser.create({ data: { username: parsed.username, displayName: parsed.displayName ?? null, email: normalizedEmail, role: "member", ...password } });
+      const user = await tx.appUser.create({ data: { username: parsed.username, displayName: parsed.displayName ?? null, email: normalizedEmail, role: "user", ...password } });
       await tx.workspaceMembership.create({ data: { workspaceId, userId: user.id, role: parsed.workspaceRole } });
       if (parsed.projectGrants.length > 0) await tx.projectMembership.createMany({ data: parsed.projectGrants.map((grant) => ({ projectId: grant.projectId, userId: user.id, role: grant.role })) });
-      return user;
+      const membership = await tx.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId, userId: user.id } }, select: workspaceMemberSelect });
+      return { ...membership, projectGrants: parsed.projectGrants };
     });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return fail("WORKSPACE_MEMBER_CONFLICT");
@@ -184,7 +197,9 @@ export async function updateWorkspaceMember(
       await tx.projectMembership.deleteMany({ where: { userId, project: { workspaceId } } });
       if (parsed.projectGrants.length > 0) await tx.projectMembership.createMany({ data: parsed.projectGrants.map((grant) => ({ userId, projectId: grant.projectId, role: grant.role })) });
     }
-    return tx.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId, userId } }, include: { user: true } });
+    const membership = await tx.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId, userId } }, select: workspaceMemberSelect });
+    const projectGrants = await tx.projectMembership.findMany({ where: { project: { workspaceId }, userId }, select: { projectId: true, role: true } });
+    return { ...membership, projectGrants };
   });
 }
 

@@ -5,6 +5,7 @@ import test from "node:test";
 const roleMigrationName = "20260903010000_add_user_system_role_compatibility";
 const providerScopeMigrationName = "20260903020000_add_user_ai_provider_scope";
 const platformPolicyMigrationName = "20260903030000_add_platform_policies_and_connection_ownership";
+const defaultAppUserRoleMigrationName = "20260904010000_default_new_app_users_to_user";
 
 async function readRoleEnum(): Promise<string> {
   const schema = await readFile("prisma/schema.prisma", "utf8");
@@ -19,7 +20,7 @@ function readModel(schema: string, modelName: string): string {
   return model;
 }
 
-test("AppUserRole keeps legacy values and adds the semantic user value", async () => {
+test("AppUserRole keeps legacy values and AppUser defaults to the semantic user value", async () => {
   const roleEnum = await readRoleEnum();
   const values = roleEnum
     .split(/\r?\n/u)
@@ -30,7 +31,7 @@ test("AppUserRole keeps legacy values and adds the semantic user value", async (
   const schema = await readFile("prisma/schema.prisma", "utf8");
   const appUserModel = schema.match(/^model AppUser \{([\s\S]*?)^\}/mu)?.[1];
   assert.ok(appUserModel, "AppUser model is missing");
-  assert.match(appUserModel, /^\s*role\s+AppUserRole\s+@default\(member\)\s*$/mu);
+  assert.match(appUserModel, /^\s*role\s+AppUserRole\s+@default\(user\)\s*$/mu);
 });
 
 test("the compatibility migration is a standalone additive enum change", async () => {
@@ -81,6 +82,22 @@ test("the AI provider scope migration occupies stable migration slot 56", async 
     .sort();
   assert.equal(migrations.indexOf(roleMigrationName), 54);
   assert.equal(migrations.indexOf(providerScopeMigrationName), 55);
+});
+
+test("M400 default-role migration occupies stable migration slot 58 and changes only the default", async () => {
+  const entries = await readdir("prisma/migrations", { withFileTypes: true });
+  const migrations = entries
+    .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  assert.equal(migrations.indexOf(defaultAppUserRoleMigrationName), 57);
+
+  const migration = await readFile(`prisma/migrations/${defaultAppUserRoleMigrationName}/migration.sql`, "utf8");
+  const executableSql = migration.replace(/--[^\n]*(?:\n|$)/gu, "").trim();
+  assert.equal(executableSql, 'ALTER TABLE "AppUser" ALTER COLUMN "role" SET DEFAULT \'user\';');
+  assert.doesNotMatch(executableSql, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP|CREATE)\b/iu);
+  assert.doesNotMatch(executableSql, /\bALTER\s+TYPE\b/iu);
+  assert.doesNotMatch(executableSql, /\b(?:admin|member)\b/iu);
 });
 
 test("M300 schema declares additive ownership, audit, and empty policy carriers", async () => {

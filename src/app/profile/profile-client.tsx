@@ -10,7 +10,7 @@ type Profile = {
   username: string;
   displayName: string | null;
   email: string | null;
-  role: "admin" | "member";
+  role: "admin" | "user";
   hasLocalPassword: boolean;
   workspaceMemberships: Array<{ role: "owner" | "admin" | "member" | "viewer"; workspace: { id: string; name: string } }>;
   oidcIdentities: Array<{ email: string | null; lastLoginAt: string; provider: { id: string; name: string } }>;
@@ -104,7 +104,7 @@ export function ProfileClient({
               <div className="min-w-0">
                 <h2 className="truncate text-xl font-semibold tracking-[-0.02em]">{profile?.displayName || headerUsername}</h2>
                 <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="rounded-full bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-700">{profile?.role === "admin" ? "系统管理员" : "工作区成员"}</span>
+                  <span className="rounded-full bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-700">{profile?.role === "admin" ? "系统管理员" : "普通用户"}</span>
                   <span className="text-slate-400">@{headerUsername}</span>
                 </div>
               </div>

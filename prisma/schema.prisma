@@ -3614,7 +3614,7 @@ model AppUser {
   passwordHash                 String?                           @db.VarChar(128)
   passwordSalt                 String?                           @db.VarChar(128)
   passwordVersion              Int                               @default(1)
-  role                         AppUserRole                       @default(member)
+  role                         AppUserRole                       @default(user)
   disabledAt                   DateTime?
   disabledReason               String?                           @db.VarChar(500)
   disabledById                 String?                           @db.Uuid

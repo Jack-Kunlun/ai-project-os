@@ -186,6 +186,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     assert.equal(completed.returnTo, "/dashboard");
     const oidcUser = await db.appUser.findUniqueOrThrow({ where: { email: `oidc-${suffix}@example.com` } });
     oidcUserId = oidcUser.id;
+    assert.equal(oidcUser.role, "user");
     assert.equal(oidcUser.passwordHash, null);
     assert.equal((await db.workspaceMembership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId: DEFAULT_WORKSPACE_ID, userId: oidcUser.id } } })).role, "viewer");
     assert.equal(await db.appSession.count({ where: { userId: oidcUser.id, revokedAt: null } }), 1);

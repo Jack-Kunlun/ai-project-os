@@ -9,6 +9,7 @@ const testDatabaseName = "ai_project_os_phase_a_schema_test";
 const compatibilityMigrationName = "20260903010000_add_user_system_role_compatibility";
 const providerScopeMigrationName = "20260903020000_add_user_ai_provider_scope";
 const platformPolicyMigrationName = "20260903030000_add_platform_policies_and_connection_ownership";
+const defaultAppUserRoleMigrationName = "20260904010000_default_new_app_users_to_user";
 const defaultWorkspaceId = "00000000-0000-4000-8000-000000000001";
 
 function errorText(error: unknown): string {
@@ -105,6 +106,7 @@ test(
       assert.equal(migrations.findIndex((migration) => migration.migration_name === compatibilityMigrationName), 54);
       assert.equal(migrations.findIndex((migration) => migration.migration_name === providerScopeMigrationName), 55);
       assert.equal(migrations.findIndex((migration) => migration.migration_name === platformPolicyMigrationName), 56);
+      assert.equal(migrations.findIndex((migration) => migration.migration_name === defaultAppUserRoleMigrationName), 57);
 
       const enumValues = await db.$queryRaw<Array<{ value: string }>>`
         SELECT value::text
@@ -177,6 +179,15 @@ test(
         ],
       );
 
+      const appUserRoleDefault = await db.$queryRaw<Array<{ column_default: string | null }>>`
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'AppUser'
+          AND column_name = 'role'
+      `;
+      assert.deepEqual(appUserRoleDefault, [{ column_default: `'user'::"AppUserRole"` }]);
+
       const invitationUpdatedAtDefault = await db.$queryRaw<Array<{ column_default: string | null }>>`
         SELECT column_default
         FROM information_schema.columns
@@ -223,7 +234,7 @@ test(
       const defaultUser = await db.appUser.create({
         data: { id: userIds[3]!, username: `phase-a-default-${suffix}` },
       });
-      assert.equal(defaultUser.role, "member");
+      assert.equal(defaultUser.role, "user");
 
       const persisted = await db.appUser.findMany({
         where: { id: { in: userIds } },
@@ -231,7 +242,7 @@ test(
       });
       const persistedRoles = new Map(persisted.map((row) => [row.id, row.role]));
       for (const roleRow of roleRows) assert.equal(persistedRoles.get(roleRow.id), roleRow.role);
-      assert.equal(persistedRoles.get(defaultUser.id), "member");
+      assert.equal(persistedRoles.get(defaultUser.id), "user");
 
       const adminId = userIds[0]!;
       const ownerId = userIds[1]!;

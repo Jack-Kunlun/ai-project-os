@@ -1,0 +1,147 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import type { PrismaClient } from "@prisma/client";
+import { createSession } from "../src/lib/auth";
+import { listMemberships } from "../src/lib/membership-service";
+import { createLocalWorkspaceMember, listWorkspaceMembers, updateWorkspaceMember } from "../src/lib/workspaces";
+import { toSystemRole } from "../src/lib/system-role";
+
+const adminId = "11111111-1111-4111-8111-111111111111";
+const memberId = "22222222-2222-4222-8222-222222222222";
+const workspaceId = "33333333-3333-4333-8333-333333333333";
+
+const safeMember = {
+  userId: memberId,
+  role: "member" as const,
+  createdAt: new Date("2026-09-04T00:00:00.000Z"),
+  user: {
+    id: memberId,
+    username: "member",
+    displayName: null,
+    email: null,
+    disabledAt: null,
+    createdAt: new Date("2026-09-04T00:00:00.000Z"),
+    oidcIdentities: [],
+  },
+  workspace: { projects: [] },
+};
+
+test("session, profile, and admin membership boundaries expose canonical system roles", async () => {
+  let sessionCreateInput: Record<string, unknown> | undefined;
+  const sessionDb = {
+    appSession: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        sessionCreateInput = data;
+        return data;
+      },
+    },
+  } as unknown as PrismaClient;
+  const legacySession = await createSession(sessionDb, { id: memberId, username: "legacy-member", role: "member" });
+  const currentSession = await createSession(sessionDb, { id: memberId, username: "current-user", role: "user" });
+  const adminSession = await createSession(sessionDb, { id: adminId, username: "admin", role: "admin" });
+  assert.equal(legacySession.user.role, "user");
+  assert.equal(currentSession.user.role, "user");
+  assert.equal(adminSession.user.role, "admin");
+  assert.equal(sessionCreateInput?.userId, adminId);
+
+  const selectedUserFields: string[][] = [];
+  const membershipDb = {
+    appUser: {
+      findUnique: async () => ({ role: "admin" as const, disabledAt: null }),
+      findMany: async ({ select }: { select: Record<string, unknown> }) => {
+        selectedUserFields.push(Object.keys(select));
+        return [
+          { id: memberId, username: "legacy-member", displayName: null, email: null, role: "member" as const, disabledAt: null, membershipSubscription: null },
+          { id: adminId, username: "admin", displayName: null, email: null, role: "admin" as const, disabledAt: null, membershipSubscription: null },
+        ];
+      },
+    },
+  } as unknown as PrismaClient;
+  const membershipResult = await listMemberships({ adminUserId: adminId }, membershipDb);
+  assert.deepEqual(membershipResult.items.map((item) => item.role), ["user", "admin"]);
+  assert.deepEqual(selectedUserFields, [["id", "username", "displayName", "email", "role", "disabledAt", "membershipSubscription"]]);
+  assert.doesNotMatch(JSON.stringify(membershipResult), /passwordHash|passwordSalt/u);
+
+  const [profileRoute, authSource] = await Promise.all([
+    readFile("src/app/api/profile/route.ts", "utf8"),
+    readFile("src/lib/auth.ts", "utf8"),
+  ]);
+  assert.match(profileRoute, /toSystemRole\(role\)/u);
+  assert.match(authSource, /role:\s*toSystemRole\(user\.role\)/u);
+});
+
+test("workspace member list/create/update use a minimal DTO without system credentials", async () => {
+  let listSelect: Record<string, unknown> | undefined;
+  const listDb = {
+    workspaceMembership: {
+      findMany: async ({ select }: { select: Record<string, unknown> }) => {
+        listSelect = select;
+        return [safeMember];
+      },
+    },
+    projectMembership: { findMany: async () => [] },
+  } as unknown as PrismaClient;
+  const listed = await listWorkspaceMembers(workspaceId, { id: adminId, role: "admin" }, listDb);
+  assert.equal("role" in listed[0]!.user, false);
+  assert.equal("passwordHash" in listed[0]!.user, false);
+  assert.equal("passwordSalt" in listed[0]!.user, false);
+  const userSelect = (listSelect?.user as { select: Record<string, unknown> }).select;
+  assert.deepEqual(Object.keys(userSelect), ["id", "username", "displayName", "email", "disabledAt", "createdAt", "oidcIdentities"]);
+
+  let createdData: Record<string, unknown> | undefined;
+  const createTx = {
+    appUser: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        createdData = data;
+        return { id: memberId, ...data };
+      },
+    },
+    workspaceMembership: {
+      create: async () => ({ id: "membership", ...safeMember }),
+      findUniqueOrThrow: async () => safeMember,
+    },
+    projectMembership: { createMany: async () => ({ count: 0 }) },
+  };
+  const createDb = {
+    project: { count: async () => 0 },
+    $transaction: async (callback: (tx: typeof createTx) => unknown) => callback(createTx),
+  } as unknown as PrismaClient;
+  const created = await createLocalWorkspaceMember(
+    workspaceId,
+    { username: "new-member", password: "ValidPassword123", displayName: null, email: null },
+    { id: adminId, role: "admin" },
+    createDb,
+  );
+  assert.equal(createdData?.role, "user");
+  assert.equal("passwordHash" in created.user, false);
+  assert.equal("passwordSalt" in created.user, false);
+  assert.equal("role" in created.user, false);
+
+  const updateTx = {
+    workspaceMembership: {
+      findUnique: async () => ({ id: "membership", role: "member" as const }),
+      update: async () => safeMember,
+      findUniqueOrThrow: async () => safeMember,
+    },
+    projectMembership: { findMany: async () => [] },
+  };
+  const updateDb = {
+    $transaction: async (callback: (tx: typeof updateTx) => unknown) => callback(updateTx),
+  } as unknown as PrismaClient;
+  const updated = await updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "viewer" }, { id: adminId, role: "admin" }, updateDb);
+  assert.equal("passwordHash" in updated.user, false);
+  assert.equal("passwordSalt" in updated.user, false);
+  assert.equal("role" in updated.user, false);
+
+  const source = await readFile("src/lib/workspaces.ts", "utf8");
+  assert.doesNotMatch(source, /include:\s*\{\s*user:\s*true\s*\}/u);
+  assert.doesNotMatch(source, /user:\s*\{[^}]*password(?:Hash|Salt)/u);
+});
+
+test("system-role mapper is fail-closed and canonical for legacy and current storage values", () => {
+  assert.equal(toSystemRole("admin"), "admin");
+  assert.equal(toSystemRole("member"), "user");
+  assert.equal(toSystemRole("user"), "user");
+  assert.throws(() => toSystemRole("future" as never), /UNSUPPORTED_APP_USER_ROLE/u);
+});

@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { lockMembershipUser } from "@/lib/ai-entitlements";
 import { getDb } from "@/lib/db";
+import { toSystemRole } from "@/lib/system-role";
 
 export type MembershipServiceErrorCode =
   | "MEMBERSHIP_INVALID_INPUT"
@@ -85,7 +86,8 @@ export async function listMemberships(input: Readonly<{
     },
   });
   const hasNextPage = users.length > pageSize;
-  return Object.freeze({ items: users.slice(0, pageSize), page, pageSize, hasNextPage });
+  const items = users.slice(0, pageSize).map((user) => ({ ...user, role: toSystemRole(user.role) }));
+  return Object.freeze({ items, page, pageSize, hasNextPage });
 }
 
 export async function grantOrExtendMembership(input: Readonly<{

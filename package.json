@@ -43,6 +43,7 @@
     "db:validate": "prisma validate --config prisma.config.ts && pnpm db:migrations:validate",
     "db:migrations:validate": "tsx scripts/validate-migrations.ts",
     "db:generate": "prisma generate --config prisma.config.ts",
+    "db:ownership-inventory": "tsx scripts/0.2x-migration-inventory.ts",
     "db:migrate": "prisma migrate dev --config prisma.config.ts",
     "db:studio": "prisma studio --config prisma.config.ts"
   },

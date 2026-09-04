@@ -98,11 +98,16 @@ test("public memory index plan mapper is a strict runtime boundary", () => {
     "mode",
     "modelId",
     "planFingerprint",
+    "providerConfigurationVersion",
     "providerConnectionId",
     "providerKind",
     "providerName",
     "reuseCount",
+    "routeFenceFingerprint",
+    "routeId",
+    "routeSource",
     "routeUpdatedAt",
+    "routeVersion",
   ]);
   const serialized = JSON.stringify(publicPlan);
   for (const forbiddenKey of ["contentText", "embedding", "credentialId", "baseUrl", "records", "route", "baselineRecords", "reuseByInputFingerprint"]) {
@@ -195,8 +200,29 @@ test("publication CAS includes route updatedAt when supplied", () => {
   const common = {
     expectedActiveIndexGenerationId: "generation",
     currentActiveIndexGenerationId: "generation",
-    expectedRoute: { providerConnectionId: "provider", modelId: "embedding-v1", embeddingDimensions: 8, updatedAt: "2026-08-28T00:00:00.000Z" },
-    currentRoute: { providerConnectionId: "provider", modelId: "embedding-v1", embeddingDimensions: 8, providerVerified: true, updatedAt: "2026-08-28T00:00:00.000Z" },
+    expectedRoute: {
+      providerConnectionId: "provider",
+      modelId: "embedding-v1",
+      embeddingDimensions: 8,
+      updatedAt: "2026-08-28T00:00:00.000Z",
+      source: "platform_default",
+      routeId: "00000000-0000-4000-8000-000000000010",
+      routeVersion: 1,
+      providerConfigurationVersion: 1,
+      routeFenceFingerprint: "f".repeat(64),
+    },
+    currentRoute: {
+      providerConnectionId: "provider",
+      modelId: "embedding-v1",
+      embeddingDimensions: 8,
+      providerVerified: true,
+      updatedAt: "2026-08-28T00:00:00.000Z",
+      source: "platform_default",
+      routeId: "00000000-0000-4000-8000-000000000010",
+      routeVersion: 1,
+      providerConfigurationVersion: 1,
+      routeFenceFingerprint: "f".repeat(64),
+    },
     expectedInputManifestFingerprint: "a".repeat(64),
     currentInputManifestFingerprint: "a".repeat(64),
   };
@@ -266,6 +292,7 @@ test("embedding deadline is deterministic before credential/fetch dispatch", asy
 test("memory index schema and API contracts expose candidate guards and explicit mode", () => {
   const schema = readFileSync(join(root, "prisma/schema.prisma"), "utf8");
   const migration = readFileSync(join(root, "prisma/migrations/20260829141000_add_memory_index_candidates/migration.sql"), "utf8");
+  const routeSnapshotMigration = readFileSync(join(root, "prisma/migrations/20260904060000_add_runtime_ai_route_snapshots/migration.sql"), "utf8");
   const route = readFileSync(join(root, "src/app/api/projects/[projectId]/memory/index/route.ts"), "utf8");
   const client = readFileSync(join(root, "src/app/projects/[projectId]/memory/project-memory-client.tsx"), "utf8");
   const rag = readFileSync(join(root, "src/lib/web-rag.ts"), "utf8");
@@ -279,6 +306,10 @@ test("memory index schema and API contracts expose candidate guards and explicit
   assert.match(migration, /CREATE UNIQUE INDEX "MemoryIndexGeneration_active_candidate_key"[\s\S]*WHERE "jobId" IS NOT NULL/u);
   assert.match(migration, /OLD\."status" = 'complete'[\s\S]*NOT EXISTS \([\s\S]*"MemoryIndexPointer"/u);
   assert.match(migration, /OLD\."status" = 'unknown'[\s\S]*EXISTS \([\s\S]*"MemoryIndexReconciliation"/u);
+  assert.match(routeSnapshotMigration, /ADD CONSTRAINT "MemoryIndexGeneration_embedding_route_snapshot_check"[\s\S]*"expectedEmbeddingRouteSource" IS NULL[\s\S]*"expectedEmbeddingRouteFenceFingerprint" IS NULL[\s\S]*"jobId" IS NOT NULL[\s\S]*"expectedEmbeddingRouteSource" IS NOT NULL/u);
+  assert.match(routeSnapshotMigration, /requires_complete_snapshot[\s\S]*new job-backed memory index generation requires a complete route snapshot/u);
+  assert.match(routeSnapshotMigration, /OLD\."jobId" IS DISTINCT FROM NEW\."jobId"[\s\S]*memory index generation job binding is immutable/u);
+  assert.match(routeSnapshotMigration, /OLD\."expectedEmbeddingRouteFenceFingerprint" IS DISTINCT FROM NEW\."expectedEmbeddingRouteFenceFingerprint"[\s\S]*memory index route snapshot is immutable/u);
   assert.match(migration, /CREATE TRIGGER "MemoryIndexPointer_guard"/);
   assert.match(migration, /CREATE TRIGGER "MemoryRecord_candidate_guard"/);
   assert.match(migration, /IF TG_OP = 'DELETE'[\s\S]*RETURN OLD;/u);

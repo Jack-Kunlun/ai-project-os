@@ -7,8 +7,13 @@ import { createCanvas } from "@napi-rs/canvas";
 import { invokeVisionCompletion } from "../src/lib/ai-providers";
 import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
+import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
-import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
+import {
+  activatePlatformDefaultAiRoute,
+  createPlatformDefaultAiRoute,
+  validatePlatformDefaultAiRoute,
+} from "../src/lib/platform-default-ai-routes";
 import { exportProjectData } from "../src/lib/project-export";
 import {
   deleteProjectAsset,
@@ -21,10 +26,24 @@ import {
 import { runProjectAssetVisionExtraction } from "../src/lib/project-assets/vision";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { collectProjectMemoryInputs } from "../src/lib/web-memory-index";
-import { createWorkspaceProviderConnection } from "../src/lib/workspace-provider-service";
 
 const shouldRun = process.env.PROJECT_ASSET_POSTGRES_GATE === "1";
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
+
+async function activateDefaultVisionRoute(
+  db: ReturnType<typeof getDb>,
+  actor: Readonly<{ id: string; role: string }>,
+  providerConnectionId: string,
+) {
+  const draft = await createPlatformDefaultAiRoute({
+    operation: "visionExtract",
+    providerConnectionId,
+    modelId: "glm-5v-turbo",
+    maxOutputTokens: 1024,
+  }, actor, db);
+  const verified = await validatePlatformDefaultAiRoute(draft.id, actor, db, draft.updatedAt);
+  return activatePlatformDefaultAiRoute(verified.id, actor, db, verified.updatedAt);
+}
 
 test(
   "project files persist, require reviewed vision output, publish traceable sources and retire safely",
@@ -38,11 +57,6 @@ test(
     const previousAssetRoot = process.env.AI_PROJECT_OS_ASSET_DIR;
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
-    let createdUserId: string | null = null;
-    let createdAdminId: string | null = null;
-    let createdWorkspaceId: string | null = null;
-    const providerIds: string[] = [];
-    const credentialIds: string[] = [];
     process.env.AI_PROJECT_OS_ASSET_DIR = assetRoot;
     process.env.AI_PROJECT_OS_MASTER_KEY_FILE = masterKeyPath;
     await rm(assetRoot, { recursive: true, force: true });
@@ -77,16 +91,13 @@ test(
       const user = await db.appUser.create({
         data: { id: randomUUID(), username: `asset_${suffix}`, role: "user" },
       });
-      createdUserId = user.id;
       const platformAdmin = await db.appUser.create({
         data: { id: randomUUID(), username: `asset_platform_admin_${suffix}`, role: "admin" },
       });
-      createdAdminId = platformAdmin.id;
       const workspaceId = randomUUID();
       await db.workspace.create({
         data: { id: workspaceId, name: `Asset workspace ${suffix}`, slug: `asset-workspace-${suffix}`, createdById: user.id },
       });
-      createdWorkspaceId = workspaceId;
       await db.$transaction((tx) => grantWorkspaceMembership(tx, {
         workspaceId,
         userId: user.id,
@@ -103,6 +114,7 @@ test(
           expiresAt: new Date(membershipNow.getTime() + 86_400_000),
         },
       });
+      await issueVerifiedSignupGrant(user.id, { issuedById: platformAdmin.id }, db);
       await db.project.create({ data: { id: projectId, workspaceId, name: `Asset ${suffix}`, slug: `asset-${suffix}` } });
       await db.$transaction((tx) => grantProjectMembership(tx, {
         projectId,
@@ -140,7 +152,7 @@ test(
       assert.equal(image?.segments[0]?.requiresVision, true);
       assert.equal(await db.projectSource.count({ where: { projectId } }), 1);
 
-      const provider = await createWorkspaceProviderConnection(workspaceId, {
+      const provider = await createProviderConnection({
         name: `Asset mock ${suffix}`,
         kind: "glm",
         apiKey: "sk-project-assets-test",
@@ -148,19 +160,13 @@ test(
         visionModelId: "glm-5v-turbo",
         embeddingModelId: null,
         embeddingDimensions: null,
-      }, { id: user.id, role: user.role }, db);
-      providerIds.push(provider.id);
-      const providerRow = await db.aiProviderConnection.update({
+      }, { id: platformAdmin.id, role: platformAdmin.role }, db);
+      await db.aiProviderConnection.update({
         where: { id: provider.id },
         data: { status: "verified", lastTestedAt: new Date() },
       });
-      credentialIds.push(providerRow.credentialId);
-      await upsertProjectAiRoute(projectId, {
-        operation: "visionExtract",
-        providerConnectionId: provider.id,
-        modelId: "glm-5v-turbo",
-        maxOutputTokens: 1024,
-      }, db);
+      const defaultRoute = await activateDefaultVisionRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, provider.id);
+      assert.equal(defaultRoute.status, "active");
 
       const job = await runProjectAssetVisionExtraction({
         projectId,
@@ -235,9 +241,7 @@ test(
           embeddingModelId: null,
           embeddingDimensions: null,
         }, { id: platformAdmin.id, role: "admin" }, db);
-        providerIds.push(connection.id);
         const row = await db.aiProviderConnection.findUniqueOrThrow({ where: { id: connection.id } });
-        credentialIds.push(row.credentialId);
         const response = await invokeVisionCompletion({
           connection: row,
           modelId: adapter.model,
@@ -250,27 +254,10 @@ test(
       }
     } finally {
       globalThis.fetch = previousFetch;
-      await db.project.deleteMany({ where: { id: projectId } });
-      if (providerIds.length > 0) {
-        const reservations = await db.platformTokenReservation.findMany({
-          where: { providerConnectionId: { in: providerIds } },
-          select: { id: true },
-        });
-        await db.providerCallAudit.deleteMany({ where: { providerConnectionId: { in: providerIds } } });
-        const reservationIds = reservations.map((reservation) => reservation.id);
-        if (reservationIds.length > 0) {
-          await db.platformTokenLedgerEntry.deleteMany({ where: { reservationId: { in: reservationIds } } });
-          await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
-        }
-        await db.aiProviderConnection.deleteMany({ where: { id: { in: providerIds } } });
-      }
-      if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
-      if (createdWorkspaceId !== null) {
-        await db.membershipSubscription.deleteMany({ where: { userId: createdUserId! } });
-        await db.workspace.deleteMany({ where: { id: createdWorkspaceId } });
-      }
-      if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
-      if (createdAdminId !== null) await db.appUser.deleteMany({ where: { id: createdAdminId } });
+      // This gate creates immutable platform-route audit evidence. The
+      // disposable gate runner drops the whole database after the test;
+      // attempting row-level cleanup would violate the audit immutability
+      // contract and can leave dangling evidence behind.
       await rm(assetRoot, { recursive: true, force: true });
       await unlink(masterKeyPath).catch(() => undefined);
       if (previousAssetRoot === undefined) delete process.env.AI_PROJECT_OS_ASSET_DIR;

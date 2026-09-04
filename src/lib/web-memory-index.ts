@@ -4,11 +4,12 @@ import {
   type MemoryRecordScope,
   type PrismaClient,
 } from "@prisma/client";
-import { invokeEmbeddings } from "@/lib/ai-providers";
+import { invokeEmbeddings, reloadProviderConfiguration } from "@/lib/ai-providers";
 import { PROVIDER_REQUEST_TIMEOUT_MS } from "@/lib/ai-providers/transport";
 import { chunkSourceText } from "@/lib/ai-memory/chunking";
 import { getDb } from "@/lib/db";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
+import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
 import { chunkRepositoryCode } from "@/lib/github";
 import {
   getProjectJobInternal,
@@ -29,8 +30,8 @@ import {
   manifestFingerprint,
   stableAiCallKey,
   updateWebAiJobProgress,
-  type RuntimeRoute,
 } from "@/lib/web-ai-governance";
+import type { EffectiveAiRoute } from "@/lib/effective-ai-route";
 
 type MemoryIndexDb = PrismaClient | Prisma.TransactionClient;
 
@@ -98,6 +99,12 @@ export function resolveMemoryIndexReadiness(input: Readonly<{
     modelId: string;
     embeddingDimensions: number | null;
     providerVerified: boolean;
+    routeSource?: string;
+    routeId?: string | null;
+    routeVersion?: number | null;
+    routeUpdatedAt?: Date | string | null;
+    providerConfigurationVersion?: number;
+    routeFenceFingerprint?: string;
   }> | null;
   activeIndex: Readonly<{
     providerConnectionId: string;
@@ -106,6 +113,12 @@ export function resolveMemoryIndexReadiness(input: Readonly<{
     inputManifestFingerprint: string;
     legacy?: boolean;
     status?: "staging" | "building" | "complete" | "failed" | "unknown" | "superseded";
+    routeSource?: string | null;
+    routeId?: string | null;
+    routeVersion?: number | null;
+    routeUpdatedAt?: Date | string | null;
+    providerConfigurationVersion?: number | null;
+    routeFenceFingerprint?: string | null;
   }> | null;
   currentInputManifestFingerprint: string | null;
   generationProviderVerified?: boolean;
@@ -114,11 +127,36 @@ export function resolveMemoryIndexReadiness(input: Readonly<{
   const providerAvailable = routeAvailable && input.embeddingRoute.providerVerified;
   const indexAvailable = input.activeIndex !== null &&
     (input.activeIndex.status === undefined || input.activeIndex.status === "complete");
-  const legacyIndex = indexAvailable && input.activeIndex?.legacy === true;
+  const legacyIndex = indexAvailable && (
+    input.activeIndex?.legacy === true
+    || !routeSnapshotComplete({
+      source: input.activeIndex?.routeSource,
+      routeId: input.activeIndex?.routeId,
+      routeVersion: input.activeIndex?.routeVersion,
+      routeUpdatedAt: input.activeIndex?.routeUpdatedAt,
+      providerConfigurationVersion: input.activeIndex?.providerConfigurationVersion,
+      routeFenceFingerprint: input.activeIndex?.routeFenceFingerprint,
+    })
+  );
+  const routeFenceComplete = routeAvailable && routeSnapshotComplete({
+    source: input.embeddingRoute?.routeSource,
+    routeId: input.embeddingRoute?.routeId,
+    routeVersion: input.embeddingRoute?.routeVersion,
+    routeUpdatedAt: input.embeddingRoute?.routeUpdatedAt,
+    providerConfigurationVersion: input.embeddingRoute?.providerConfigurationVersion,
+    routeFenceFingerprint: input.embeddingRoute?.routeFenceFingerprint,
+  });
   const routeCompatible = routeAvailable && indexAvailable && providerAvailable &&
+    routeFenceComplete && !legacyIndex &&
     input.embeddingRoute.providerConnectionId === input.activeIndex?.providerConnectionId &&
     input.embeddingRoute.modelId === input.activeIndex?.modelId &&
-    input.embeddingRoute.embeddingDimensions === input.activeIndex?.dimensions;
+    input.embeddingRoute.embeddingDimensions === input.activeIndex?.dimensions &&
+    input.embeddingRoute.routeSource === input.activeIndex?.routeSource &&
+    input.embeddingRoute.routeId === input.activeIndex?.routeId &&
+    input.embeddingRoute.routeVersion === input.activeIndex?.routeVersion &&
+    datesEqual(input.embeddingRoute.routeUpdatedAt, input.activeIndex?.routeUpdatedAt) &&
+    input.embeddingRoute.providerConfigurationVersion === input.activeIndex?.providerConfigurationVersion &&
+    input.embeddingRoute.routeFenceFingerprint === input.activeIndex?.routeFenceFingerprint;
   const inputManifestCurrent = indexAvailable && input.currentInputManifestFingerprint !== null &&
     input.currentInputManifestFingerprint === input.activeIndex?.inputManifestFingerprint;
   const baseState: MemoryIndexReadinessState = !routeAvailable
@@ -153,6 +191,11 @@ export type MemoryIndexPublicationSnapshot = Readonly<{
     modelId: string;
     embeddingDimensions: number | null;
     updatedAt?: Date | string | null;
+    source?: string;
+    routeId?: string | null;
+    routeVersion?: number | null;
+    providerConfigurationVersion?: number;
+    routeFenceFingerprint?: string;
   }>;
   currentRoute: Readonly<{
     providerConnectionId: string;
@@ -160,6 +203,11 @@ export type MemoryIndexPublicationSnapshot = Readonly<{
     embeddingDimensions: number | null;
     providerVerified: boolean;
     updatedAt?: Date | string | null;
+    source?: string;
+    routeId?: string | null;
+    routeVersion?: number | null;
+    providerConfigurationVersion?: number;
+    routeFenceFingerprint?: string;
   }> | null;
   expectedInputManifestFingerprint: string;
   currentInputManifestFingerprint: string | null;
@@ -168,6 +216,30 @@ export type MemoryIndexPublicationSnapshot = Readonly<{
 function datesEqual(left: Date | string | null | undefined, right: Date | string | null | undefined): boolean {
   if (left === undefined || left === null || right === undefined || right === null) return left === right;
   return new Date(left).getTime() === new Date(right).getTime();
+}
+
+function routeSnapshotComplete(input: Readonly<{
+  source?: string | null;
+  routeId?: string | null;
+  routeVersion?: number | null;
+  routeUpdatedAt?: Date | string | null;
+  providerConfigurationVersion?: number | null;
+  routeFenceFingerprint?: string | null;
+}>): boolean {
+  const updatedAt = input.routeUpdatedAt === null || input.routeUpdatedAt === undefined
+    ? Number.NaN
+    : new Date(input.routeUpdatedAt).getTime();
+  const common = (input.source === "project_override" || input.source === "platform_default")
+    && Number.isFinite(updatedAt)
+    && Number.isSafeInteger(input.providerConfigurationVersion)
+    && (input.providerConfigurationVersion ?? 0) > 0
+    && typeof input.routeFenceFingerprint === "string"
+    && /^[0-9a-f]{64}$/u.test(input.routeFenceFingerprint);
+  if (!common) return false;
+  return input.source === "platform_default"
+    ? typeof input.routeId === "string" && input.routeId.length > 0
+      && Number.isSafeInteger(input.routeVersion) && (input.routeVersion ?? 0) > 0
+    : input.routeId === null && input.routeVersion === null;
 }
 
 export function isMemoryIndexPublicationCurrent(input: MemoryIndexPublicationSnapshot): boolean {
@@ -179,7 +251,33 @@ export function isMemoryIndexPublicationCurrent(input: MemoryIndexPublicationSna
     input.currentRoute.providerConnectionId === input.expectedRoute.providerConnectionId &&
     input.currentRoute.modelId === input.expectedRoute.modelId &&
     input.currentRoute.embeddingDimensions === input.expectedRoute.embeddingDimensions &&
-    (expectedUpdatedAt === undefined || datesEqual(expectedUpdatedAt, currentUpdatedAt)) &&
+    routeSnapshotComplete({
+      source: input.expectedRoute.source,
+      routeId: input.expectedRoute.routeId,
+      routeVersion: input.expectedRoute.routeVersion,
+      routeUpdatedAt: input.expectedRoute.updatedAt,
+      providerConfigurationVersion: input.expectedRoute.providerConfigurationVersion,
+      routeFenceFingerprint: input.expectedRoute.routeFenceFingerprint,
+    }) &&
+    routeSnapshotComplete({
+      source: input.currentRoute.source,
+      routeId: input.currentRoute.routeId,
+      routeVersion: input.currentRoute.routeVersion,
+      routeUpdatedAt: input.currentRoute.updatedAt,
+      providerConfigurationVersion: input.currentRoute.providerConfigurationVersion,
+      routeFenceFingerprint: input.currentRoute.routeFenceFingerprint,
+    }) &&
+    expectedUpdatedAt !== undefined &&
+    datesEqual(expectedUpdatedAt, currentUpdatedAt) &&
+    input.currentRoute.source === input.expectedRoute.source &&
+    input.currentRoute.routeId === input.expectedRoute.routeId &&
+    input.currentRoute.routeVersion === input.expectedRoute.routeVersion &&
+    input.currentRoute.providerConfigurationVersion !== undefined &&
+    input.expectedRoute.providerConfigurationVersion !== undefined &&
+    input.currentRoute.providerConfigurationVersion === input.expectedRoute.providerConfigurationVersion &&
+    input.currentRoute.routeFenceFingerprint !== undefined &&
+    input.expectedRoute.routeFenceFingerprint !== undefined &&
+    input.currentRoute.routeFenceFingerprint === input.expectedRoute.routeFenceFingerprint &&
     input.currentInputManifestFingerprint === input.expectedInputManifestFingerprint;
 }
 
@@ -273,6 +371,11 @@ export function planFingerprint(input: Readonly<{
   mode: "full" | "incremental";
   route: Readonly<{ providerConnectionId: string; modelId: string; embeddingDimensions: number }>;
   routeUpdatedAt: Date | string;
+  routeSource?: string;
+  routeId?: string | null;
+  routeVersion?: number | null;
+  providerConfigurationVersion?: number;
+  routeFenceFingerprint?: string;
   inputManifestFingerprint: string;
   expectedInputCount: number;
   generateCount: number;
@@ -290,6 +393,11 @@ export function planFingerprint(input: Readonly<{
       modelId: input.route.modelId,
       dimensions: input.route.embeddingDimensions,
       updatedAt: new Date(input.routeUpdatedAt).toISOString(),
+      source: input.routeSource ?? null,
+      routeId: input.routeId ?? null,
+      routeVersion: input.routeVersion ?? null,
+      providerConfigurationVersion: input.providerConfigurationVersion ?? null,
+      routeFenceFingerprint: input.routeFenceFingerprint ?? null,
     },
     inputManifestFingerprint: input.inputManifestFingerprint,
     expectedInputCount: input.expectedInputCount,
@@ -311,6 +419,11 @@ export type MemoryIndexPlan = Readonly<{
   modelId: string;
   dimensions: number;
   routeUpdatedAt: string;
+  routeSource: string;
+  routeId: string | null;
+  routeVersion: number | null;
+  providerConfigurationVersion: number;
+  routeFenceFingerprint: string;
   currentInputManifestFingerprint: string;
   expectedInputCount: number;
   reuseCount: number;
@@ -356,7 +469,7 @@ type BaselineRecord = Readonly<{
 }>;
 
 type MemoryIndexPlanSnapshot = MemoryIndexPlan & Readonly<{
-  route: RuntimeRoute;
+  route: EffectiveAiRoute;
   records: readonly IndexInput[];
   baselineRecords: readonly BaselineRecord[];
   reuseByInputFingerprint: ReadonlyMap<string, BaselineRecord>;
@@ -378,6 +491,11 @@ export function toPublicMemoryIndexPlan(snapshot: MemoryIndexPlanSnapshot): Memo
     modelId: snapshot.modelId,
     dimensions: snapshot.dimensions,
     routeUpdatedAt: snapshot.routeUpdatedAt,
+    routeSource: snapshot.route.source,
+    routeId: snapshot.route.routeId,
+    routeVersion: snapshot.route.routeVersion,
+    providerConfigurationVersion: snapshot.route.providerConfigurationVersion,
+    routeFenceFingerprint: snapshot.route.routeFenceFingerprint,
     currentInputManifestFingerprint: snapshot.currentInputManifestFingerprint,
     expectedInputCount: snapshot.expectedInputCount,
     reuseCount: snapshot.reuseCount,
@@ -559,13 +677,19 @@ export async function getProjectMemoryInputManifest(
   }
 }
 
-async function readEmbeddingRoute(projectId: string, db: MemoryIndexDb): Promise<RuntimeRoute> {
-  const route = await db.projectAiRoute.findUnique({
-    where: { projectId_operation: { projectId, operation: "embedding" } },
-    include: { providerConnection: true },
-  });
-  if (route === null) return fail("MEMORY_INDEX_ROUTE_MISSING");
-  if (route.providerConnection.status !== "verified") return fail("MEMORY_INDEX_PROVIDER_UNAVAILABLE");
+async function readEmbeddingRoute(projectId: string, db: MemoryIndexDb): Promise<EffectiveAiRoute> {
+  let route: EffectiveAiRoute;
+  try {
+    route = await resolveEffectiveAiRoute(projectId, "embedding", db);
+  } catch (error) {
+    if (error instanceof Error && "code" in error) {
+      const code = (error as { code?: unknown }).code;
+      if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID") return fail("MEMORY_INDEX_ROUTE_MISSING");
+      if (code === "AI_PROVIDER_CONFIGURATION_DRIFT") return fail("MEMORY_INDEX_PROVIDER_UNAVAILABLE");
+    }
+    throw error;
+  }
+  if (route.providerConnection.status !== "verified" || route.providerConnection.disabledAt !== null) return fail("MEMORY_INDEX_PROVIDER_UNAVAILABLE");
   if (route.embeddingDimensions === null) return fail("MEMORY_INDEX_INPUT_INVALID");
   return route;
 }
@@ -596,6 +720,11 @@ async function buildMemoryIndexPlan(
           dimensions: true,
           inputManifestFingerprint: true,
           expectedEmbeddingRouteUpdatedAt: true,
+          expectedEmbeddingRouteSource: true,
+          expectedEmbeddingRouteId: true,
+          expectedEmbeddingRouteVersion: true,
+          expectedEmbeddingProviderConfigurationVersion: true,
+          expectedEmbeddingRouteFenceFingerprint: true,
           records: {
             select: { id: true, inputFingerprint: true, embeddingFingerprint: true, embedding: true },
           },
@@ -608,6 +737,12 @@ async function buildMemoryIndexPlan(
   const baselineCompatible = baseline !== null &&
     baseline.expectedEmbeddingRouteUpdatedAt !== null &&
     baseline.expectedEmbeddingRouteUpdatedAt.getTime() === route.updatedAt.getTime() &&
+    baseline.expectedEmbeddingRouteSource !== null &&
+    baseline.expectedEmbeddingRouteSource === route.source &&
+    baseline.expectedEmbeddingRouteId === route.routeId &&
+    baseline.expectedEmbeddingRouteVersion === route.routeVersion &&
+    baseline.expectedEmbeddingProviderConfigurationVersion === route.providerConfigurationVersion &&
+    baseline.expectedEmbeddingRouteFenceFingerprint === route.routeFenceFingerprint &&
     baseline.providerConnectionId === route.providerConnectionId &&
     baseline.modelId === route.modelId &&
     baseline.dimensions === dimensions &&
@@ -664,6 +799,11 @@ async function buildMemoryIndexPlan(
       embeddingDimensions: dimensions,
     },
     routeUpdatedAt: route.updatedAt,
+    routeSource: route.source,
+    routeId: route.routeId,
+    routeVersion: route.routeVersion,
+    providerConfigurationVersion: route.providerConfigurationVersion,
+    routeFenceFingerprint: route.routeFenceFingerprint,
     inputManifestFingerprint: currentManifest,
     expectedInputCount: records.length,
     generateCount,
@@ -682,6 +822,11 @@ async function buildMemoryIndexPlan(
     modelId: route.modelId,
     dimensions,
     routeUpdatedAt: route.updatedAt.toISOString(),
+    routeSource: route.source,
+    routeId: route.routeId,
+    routeVersion: route.routeVersion,
+    providerConfigurationVersion: route.providerConfigurationVersion,
+    routeFenceFingerprint: route.routeFenceFingerprint,
     currentInputManifestFingerprint: currentManifest,
     expectedInputCount: records.length,
     reuseCount,
@@ -732,6 +877,11 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
             reusedRecordCount: true,
             inputManifestFingerprint: true,
             expectedEmbeddingRouteUpdatedAt: true,
+            expectedEmbeddingRouteSource: true,
+            expectedEmbeddingRouteId: true,
+            expectedEmbeddingRouteVersion: true,
+            expectedEmbeddingProviderConfigurationVersion: true,
+            expectedEmbeddingRouteFenceFingerprint: true,
             completedAt: true,
             providerConnection: { select: { id: true, name: true, kind: true, status: true } },
           },
@@ -741,15 +891,29 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
     db.projectSource.count({ where: { projectId, originScope: "project", retiredAt: null } }),
     db.projectCodeSnapshotPointer.findUnique({ where: { projectId }, select: { projectCodeSnapshotId: true } }),
     db.repositoryMaterialGenerationPointer.count({ where: { projectId } }),
-    db.projectAiRoute.findUnique({
-      where: { projectId_operation: { projectId, operation: "embedding" } },
-      select: {
-        providerConnectionId: true,
-        modelId: true,
-        embeddingDimensions: true,
-        updatedAt: true,
-        providerConnection: { select: { id: true, name: true, kind: true, status: true } },
-      },
+    resolveEffectiveAiRoute(projectId, "embedding", db).then((effective) => Object.freeze({
+      source: effective.source,
+      routeId: effective.routeId,
+      routeVersion: effective.routeVersion,
+      providerConfigurationVersion: effective.providerConfigurationVersion,
+      routeFenceFingerprint: effective.routeFenceFingerprint,
+      routeUpdatedAt: effective.routeUpdatedAt,
+      providerConnectionId: effective.providerConnectionId,
+      modelId: effective.modelId,
+      embeddingDimensions: effective.embeddingDimensions,
+      updatedAt: effective.updatedAt,
+      providerConnection: Object.freeze({
+        id: effective.providerConnection.id,
+        name: effective.providerConnection.name,
+        kind: effective.providerConnection.kind,
+        status: effective.providerConnection.status,
+      }),
+    })).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error) {
+        const code = (error as { code?: unknown }).code;
+        if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID" || code === "AI_PROVIDER_CONFIGURATION_DRIFT") return null;
+      }
+      throw error;
     }),
     getProjectMemoryInputManifest(projectId, actor, db),
     db.backgroundJob.findFirst({
@@ -764,12 +928,24 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
       modelId: route.modelId,
       embeddingDimensions: route.embeddingDimensions,
       providerVerified: route.providerConnection.status === "verified",
+      routeSource: route.source,
+      routeId: route.routeId,
+      routeVersion: route.routeVersion,
+      routeUpdatedAt: route.routeUpdatedAt,
+      providerConfigurationVersion: route.providerConfigurationVersion,
+      routeFenceFingerprint: route.routeFenceFingerprint,
     },
     activeIndex: pointer === null ? null : {
       providerConnectionId: pointer.generation.providerConnectionId,
       modelId: pointer.generation.modelId,
       dimensions: pointer.generation.dimensions,
       inputManifestFingerprint: pointer.generation.inputManifestFingerprint,
+      routeSource: pointer.generation.expectedEmbeddingRouteSource,
+      routeId: pointer.generation.expectedEmbeddingRouteId,
+      routeVersion: pointer.generation.expectedEmbeddingRouteVersion,
+      routeUpdatedAt: pointer.generation.expectedEmbeddingRouteUpdatedAt,
+      providerConfigurationVersion: pointer.generation.expectedEmbeddingProviderConfigurationVersion,
+      routeFenceFingerprint: pointer.generation.expectedEmbeddingRouteFenceFingerprint,
       legacy: pointer.generation.jobId === null,
       status: pointer.generation.status,
     },
@@ -805,6 +981,11 @@ function safePlanPayload(plan: MemoryIndexPlanSnapshot): Record<string, unknown>
     providerKind: plan.providerKind,
     modelId: plan.modelId,
     dimensions: plan.dimensions,
+    routeSource: plan.routeSource,
+    routeId: plan.routeId,
+    routeVersion: plan.routeVersion,
+    providerConfigurationVersion: plan.providerConfigurationVersion,
+    routeFenceFingerprint: plan.routeFenceFingerprint,
     inputManifestFingerprint: plan.currentInputManifestFingerprint,
     expectedInputCount: plan.expectedInputCount,
     reuseCount: plan.reuseCount,
@@ -843,7 +1024,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
   const expectedPlanFingerprint = input.planFingerprint ?? initialPlan.planFingerprint;
   let generationId: string | null = null;
   let plannedGeneration: MemoryIndexPlanSnapshot | null = null;
-  let granted: Readonly<{ jobId: string; created: boolean }>;
+  let granted: Readonly<{ jobId: string; grantId: string; created: boolean }>;
   try {
     granted = await createGrantedWebAiJob({
       projectId: input.projectId,
@@ -873,6 +1054,11 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
             inputManifestFingerprint: lockedPlan.currentInputManifestFingerprint,
             expectedActiveIndexGenerationId: lockedPlan.baselineGenerationId,
             expectedEmbeddingRouteUpdatedAt: new Date(lockedPlan.routeUpdatedAt),
+            expectedEmbeddingRouteSource: lockedPlan.routeSource,
+            expectedEmbeddingRouteId: lockedPlan.routeId,
+            expectedEmbeddingRouteVersion: lockedPlan.routeVersion,
+            expectedEmbeddingProviderConfigurationVersion: lockedPlan.providerConfigurationVersion,
+            expectedEmbeddingRouteFenceFingerprint: lockedPlan.routeFenceFingerprint,
             expectedInputCount: lockedPlan.expectedInputCount,
             generatedRecordCount: 0,
             reusedRecordCount: 0,
@@ -994,12 +1180,13 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
         attempt: claim,
         actor: input.requestedBy,
         route: plan.route,
+        grantId: granted.grantId,
         callKey: stableAiCallKey(granted.jobId, "embedding", String(offset)),
         requestPayload: { texts: generatedBatch.map((record) => record.contentText) },
         maxOutputTokens: 128,
-        call: () => invokeEmbeddings({
-          connection: plan.route.providerConnection,
-          modelId: plan.route.modelId,
+        call: (dispatch) => invokeEmbeddings({
+          connection: dispatch.connection,
+          modelId: dispatch.modelId,
           texts: generatedBatch.map((record) => record.contentText),
           expectedDimensions: plan.dimensions,
           absoluteDeadlineAt: plan.deadlineAtDate,
@@ -1033,18 +1220,20 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
       required: "edit",
       attempt: { jobId: granted.jobId, ...claim },
     }, async (tx) => {
+      const currentRoute = await resolveEffectiveAiRoute(input.projectId, "embedding", tx, { lock: true })
+        .then(async (resolved) => {
+          const provider = await reloadProviderConfiguration(tx, resolved.providerConnectionId);
+          if (
+            provider === null
+            || provider.configurationVersion !== resolved.providerConfigurationVersion
+            || provider.status !== "verified"
+            || provider.disabledAt !== null
+          ) return null;
+          return Object.freeze({ ...resolved, providerConnection: Object.freeze(provider) });
+        })
+        .catch(() => null);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, ${MEMORY_INDEX_LOCK_NAMESPACE}))`;
       const previous = await tx.memoryIndexPointer.findUnique({ where: { projectId: input.projectId }, select: { indexGenerationId: true } });
-      const currentRoute = await tx.projectAiRoute.findUnique({
-        where: { projectId_operation: { projectId: input.projectId, operation: "embedding" } },
-        select: {
-          providerConnectionId: true,
-          modelId: true,
-          embeddingDimensions: true,
-          updatedAt: true,
-          providerConnection: { select: { status: true } },
-        },
-      });
       let currentManifest: string | null;
       try {
         currentManifest = inputManifest(await collectProjectMemoryInputsUnchecked(input.projectId, tx));
@@ -1060,13 +1249,23 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
           modelId: plan.modelId,
           embeddingDimensions: plan.dimensions,
           updatedAt: plan.routeUpdatedAt,
+          source: plan.routeSource,
+          routeId: plan.routeId,
+          routeVersion: plan.routeVersion,
+          providerConfigurationVersion: plan.providerConfigurationVersion,
+          routeFenceFingerprint: plan.routeFenceFingerprint,
         },
         currentRoute: currentRoute === null ? null : {
           providerConnectionId: currentRoute.providerConnectionId,
           modelId: currentRoute.modelId,
           embeddingDimensions: currentRoute.embeddingDimensions,
           providerVerified: currentRoute.providerConnection.status === "verified",
-          updatedAt: currentRoute.updatedAt,
+          updatedAt: currentRoute.routeUpdatedAt,
+          source: currentRoute.source,
+          routeId: currentRoute.routeId,
+          routeVersion: currentRoute.routeVersion,
+          providerConfigurationVersion: currentRoute.providerConfigurationVersion,
+          routeFenceFingerprint: currentRoute.routeFenceFingerprint,
         },
         expectedInputManifestFingerprint: plan.currentInputManifestFingerprint,
         currentInputManifestFingerprint: currentManifest,

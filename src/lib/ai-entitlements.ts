@@ -2,14 +2,12 @@ import { randomUUID } from "node:crypto";
 import {
   Prisma,
   type AiOperation,
-  type AiProviderConnection,
   type AppUserRole,
   type PlatformTokenReservationStatus,
   type PrismaClient,
-  type ProjectAiRoute,
 } from "@prisma/client";
 import { getDb } from "@/lib/db";
-import { findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
+import type { EffectiveAiRoute } from "@/lib/effective-ai-route";
 
 /** The signup offer is a product constant, not a value supplied by a client. */
 export const SIGNUP_TOKEN_AMOUNT = 500_000;
@@ -19,6 +17,10 @@ export const SIGNUP_OFFER_VERSION = "signup-500k-v1";
 const LEDGER_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
 const RESERVATION_TTL_MS = 60 * 60 * 1_000;
 const CONCURRENCY_LOCK_NAMESPACE = 29082027;
+export const PLATFORM_QUOTA_BPS_MIN = 1;
+export const PLATFORM_QUOTA_BPS_MAX = 100_000;
+export const PLATFORM_RAW_TOKEN_LIMIT = 10_000_000;
+export const PLATFORM_CHARGED_TOKEN_LIMIT = 1_000_000_000;
 
 export type AiEntitlementErrorCode =
   | "AI_MEMBERSHIP_REQUIRED"
@@ -48,10 +50,64 @@ function fail(code: AiEntitlementErrorCode): never {
 }
 
 function assertPositiveTokens(value: number): number {
-  if (!Number.isSafeInteger(value) || value <= 0 || value > 10_000_000) {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > PLATFORM_RAW_TOKEN_LIMIT) {
     return fail("AI_PLATFORM_TOKEN_EXHAUSTED");
   }
   return value;
+}
+
+function assertRawUsageTokens(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > PLATFORM_RAW_TOKEN_LIMIT) {
+    return fail("AI_PLATFORM_TOKEN_USAGE_UNVERIFIED");
+  }
+  return value;
+}
+
+function assertQuotaMultiplierBps(value: number): number {
+  if (!Number.isSafeInteger(value) || value < PLATFORM_QUOTA_BPS_MIN || value > PLATFORM_QUOTA_BPS_MAX) {
+    return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  }
+  return value;
+}
+
+/**
+ * Convert raw provider tokens to platform quota units without floating point
+ * rounding or an overflowing JavaScript number.  The database stores the
+ * resulting charged amount; provider usage remains raw.
+ */
+export function calculateChargedPlatformTokens(rawTokens: number, quotaMultiplierBps: number): number {
+  const raw = assertRawUsageTokens(rawTokens);
+  const bps = assertQuotaMultiplierBps(quotaMultiplierBps);
+  const charged = (BigInt(raw) * BigInt(bps) + BigInt(9_999)) / BigInt(10_000);
+  if (charged < BigInt(0) || charged > BigInt(PLATFORM_CHARGED_TOKEN_LIMIT)) {
+    return fail("AI_PLATFORM_TOKEN_EXHAUSTED");
+  }
+  return Number(charged);
+}
+
+type RouteSnapshotInput = Readonly<Pick<EffectiveAiRoute, "source" | "routeId" | "routeVersion" | "routeUpdatedAt" | "providerConfigurationVersion" | "quotaMultiplierBps" | "routeFenceFingerprint">>;
+
+function routeSnapshotInput(route: RouteSnapshotInput | undefined) {
+  if (route === undefined) {
+    return {
+      routeSource: null,
+      routeId: null,
+      routeVersion: null,
+      routeUpdatedAt: null,
+      providerConfigurationVersion: null,
+      quotaMultiplierBps: 10_000,
+      routeFenceFingerprint: null,
+    } as const;
+  }
+  return {
+    routeSource: route.source,
+    routeId: route.routeId,
+    routeVersion: route.routeVersion,
+    routeUpdatedAt: route.routeUpdatedAt,
+    providerConfigurationVersion: route.providerConfigurationVersion,
+    quotaMultiplierBps: assertQuotaMultiplierBps(route.quotaMultiplierBps),
+    routeFenceFingerprint: route.routeFenceFingerprint,
+  } as const;
 }
 
 function assertLedgerKey(value: string): string {
@@ -179,6 +235,11 @@ export type PlatformTokenReservationResult = Readonly<{
   status: PlatformTokenReservationStatus;
   reservedTokens: number;
   settledTokens: number | null;
+  rawEstimatedTokens?: number;
+  rawSettledTokens?: number | null;
+  quotaMultiplierBps?: number;
+  webAiGrantId?: string | null;
+  routeFenceFingerprint?: string | null;
   billingMode: "platform";
   created: boolean;
 }>;
@@ -187,6 +248,8 @@ export type PlatformTokenDispatchFenceResult = Readonly<{
   reservationId: string;
   status: PlatformTokenReservationStatus;
   reservedTokens: number;
+  webAiGrantId?: string | null;
+  routeFenceFingerprint?: string | null;
   expiresAt: Date;
   allowed: boolean;
 }>;
@@ -318,13 +381,21 @@ export async function reservePlatformTokens(input: Readonly<{
   userId: string;
   jobId?: string | null;
   providerConnectionId?: string | null;
+  webAiGrantId?: string | null;
+  webAiGrantProjectId?: string | null;
   callKey: string;
   operation: AiOperation;
   modelId: string;
-  estimatedTokens: number;
+  /** Raw provider-token estimate. `estimatedTokens` remains a compatibility
+   * alias for non-runtime accounting callers and uses a 1x multiplier. */
+  rawEstimatedTokens?: number;
+  estimatedTokens?: number;
+  routeSnapshot?: RouteSnapshotInput;
   now?: Date;
 }>, db: EntitlementDb = getDb()): Promise<PlatformTokenReservationResult> {
-  const estimatedTokens = assertPositiveTokens(input.estimatedTokens);
+  const rawEstimatedTokens = assertPositiveTokens(input.rawEstimatedTokens ?? input.estimatedTokens ?? 0);
+  const snapshot = routeSnapshotInput(input.routeSnapshot);
+  const reservedTokens = calculateChargedPlatformTokens(rawEstimatedTokens, snapshot.quotaMultiplierBps);
   const callKey = assertLedgerKey(input.callKey);
   const now = input.now ?? new Date();
   return serializable(db, async (tx) => {
@@ -332,10 +403,59 @@ export async function reservePlatformTokens(input: Readonly<{
     await recoverExpiredPlatformTokenReservationsInTransaction(input.userId, now, 100, tx);
     const existing = await tx.platformTokenReservation.findUnique({
       where: { userId_callKey: { userId: input.userId, callKey } },
-      select: { id: true, status: true, reservedTokens: true, settledTokens: true },
+      select: {
+        id: true,
+        status: true,
+        reservedTokens: true,
+        settledTokens: true,
+        rawEstimatedTokens: true,
+        rawSettledTokens: true,
+        quotaMultiplierBps: true,
+        webAiGrantId: true,
+        routeSource: true,
+        routeId: true,
+        routeVersion: true,
+        routeUpdatedAt: true,
+        providerConfigurationVersion: true,
+        routeFenceFingerprint: true,
+        jobId: true,
+        providerConnectionId: true,
+        operation: true,
+        modelId: true,
+      },
     });
     if (existing !== null) {
-      return Object.freeze({ reservationId: existing.id, status: existing.status, reservedTokens: existing.reservedTokens, settledTokens: existing.settledTokens, billingMode: "platform" as const, created: false });
+      const existingRawEstimatedTokens = existing.rawEstimatedTokens ?? existing.reservedTokens;
+      const existingQuotaMultiplierBps = existing.quotaMultiplierBps ?? 10_000;
+      if (
+        (existing.jobId ?? null) !== (input.jobId ?? null)
+        || (existing.providerConnectionId ?? null) !== (input.providerConnectionId ?? null)
+        || (existing.webAiGrantId ?? null) !== (input.webAiGrantId ?? null)
+        || existing.operation !== input.operation
+        || existing.modelId !== input.modelId
+        || existingRawEstimatedTokens !== rawEstimatedTokens
+        || existing.reservedTokens !== reservedTokens
+        || existingQuotaMultiplierBps !== snapshot.quotaMultiplierBps
+        || (existing.routeSource ?? null) !== snapshot.routeSource
+        || (existing.routeId ?? null) !== snapshot.routeId
+        || (existing.routeVersion ?? null) !== snapshot.routeVersion
+        || (existing.routeUpdatedAt?.getTime() ?? null) !== (snapshot.routeUpdatedAt?.getTime() ?? null)
+        || (existing.providerConfigurationVersion ?? null) !== snapshot.providerConfigurationVersion
+        || (existing.routeFenceFingerprint ?? null) !== snapshot.routeFenceFingerprint
+      ) return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+      return Object.freeze({
+        reservationId: existing.id,
+        status: existing.status,
+        reservedTokens: existing.reservedTokens,
+        settledTokens: existing.settledTokens,
+        rawEstimatedTokens: existingRawEstimatedTokens,
+        rawSettledTokens: existing.rawSettledTokens ?? null,
+        quotaMultiplierBps: existingQuotaMultiplierBps,
+        webAiGrantId: existing.webAiGrantId ?? null,
+        routeFenceFingerprint: existing.routeFenceFingerprint ?? null,
+        billingMode: "platform" as const,
+        created: false,
+      });
     }
 
     const grants = await tx.platformTokenGrant.findMany({
@@ -349,11 +469,11 @@ export async function reservePlatformTokens(input: Readonly<{
       const expiredGrantCount = await tx.platformTokenGrant.count({ where: { userId: input.userId, expiresAt: { lte: now } } });
       return fail(expiredGrantCount > 0 ? "AI_PLATFORM_TOKEN_EXPIRED" : "AI_PLATFORM_TOKEN_EXHAUSTED");
     }
-    const grant = grants.find((candidate) => candidate.remainingTokens >= estimatedTokens);
+    const grant = grants.find((candidate) => candidate.remainingTokens >= reservedTokens);
     if (grant === undefined) return fail("AI_PLATFORM_TOKEN_EXHAUSTED");
     const updated = await tx.platformTokenGrant.updateMany({
-      where: { id: grant.id, remainingTokens: { gte: estimatedTokens }, revokedAt: null, expiresAt: { gt: now } },
-      data: { remainingTokens: { decrement: estimatedTokens } },
+      where: { id: grant.id, remainingTokens: { gte: reservedTokens }, revokedAt: null, expiresAt: { gt: now } },
+      data: { remainingTokens: { decrement: reservedTokens } },
     });
     if (updated.count !== 1) return fail("AI_PLATFORM_TOKEN_EXHAUSTED");
     const reservationId = randomUUID();
@@ -362,12 +482,23 @@ export async function reservePlatformTokens(input: Readonly<{
         id: reservationId,
         userId: input.userId,
         grantId: grant.id,
+        webAiGrantId: input.webAiGrantId ?? null,
+        webAiGrantReferenceId: input.webAiGrantId ?? null,
+        webAiGrantProjectId: input.webAiGrantProjectId ?? null,
         jobId: input.jobId ?? null,
         providerConnectionId: input.providerConnectionId ?? null,
         callKey,
         operation: input.operation,
         modelId: input.modelId,
-        reservedTokens: estimatedTokens,
+        reservedTokens,
+        rawEstimatedTokens,
+        quotaMultiplierBps: snapshot.quotaMultiplierBps,
+        routeSource: snapshot.routeSource,
+        routeId: snapshot.routeId,
+        routeVersion: snapshot.routeVersion,
+        routeUpdatedAt: snapshot.routeUpdatedAt,
+        providerConfigurationVersion: snapshot.providerConfigurationVersion,
+        routeFenceFingerprint: snapshot.routeFenceFingerprint,
         expiresAt: new Date(Math.min(grant.expiresAt.getTime(), now.getTime() + RESERVATION_TTL_MS)),
         createdAt: now,
         ledgerEntries: {
@@ -376,18 +507,46 @@ export async function reservePlatformTokens(input: Readonly<{
             userId: input.userId,
             grantId: grant.id,
             entryKind: "reserve",
-            amount: -estimatedTokens,
+            amount: -reservedTokens,
             reasonCode: "AI_PLATFORM_TOKEN_RESERVED",
             callKey,
             idempotencyKey: `reserve:${input.userId}:${callKey}`,
-            metadata: { operation: input.operation, modelId: input.modelId },
+            metadata: {
+              operation: input.operation,
+              modelId: input.modelId,
+              rawEstimatedTokens,
+              quotaMultiplierBps: snapshot.quotaMultiplierBps,
+              routeFenceFingerprint: snapshot.routeFenceFingerprint,
+            },
             createdAt: now,
           },
         },
       },
-      select: { id: true, status: true, reservedTokens: true, settledTokens: true },
+      select: {
+        id: true,
+        status: true,
+        reservedTokens: true,
+        settledTokens: true,
+        rawEstimatedTokens: true,
+        rawSettledTokens: true,
+        quotaMultiplierBps: true,
+        webAiGrantId: true,
+        routeFenceFingerprint: true,
+      },
     });
-    return Object.freeze({ reservationId: reservation.id, status: reservation.status, reservedTokens: reservation.reservedTokens, settledTokens: reservation.settledTokens, billingMode: "platform" as const, created: true });
+    return Object.freeze({
+      reservationId: reservation.id,
+      status: reservation.status,
+      reservedTokens: reservation.reservedTokens,
+      settledTokens: reservation.settledTokens,
+      rawEstimatedTokens: reservation.rawEstimatedTokens,
+      rawSettledTokens: reservation.rawSettledTokens,
+      quotaMultiplierBps: reservation.quotaMultiplierBps,
+      webAiGrantId: reservation.webAiGrantId,
+      routeFenceFingerprint: reservation.routeFenceFingerprint,
+      billingMode: "platform" as const,
+      created: true,
+    });
   });
 }
 
@@ -401,6 +560,12 @@ export async function reservePlatformTokens(input: Readonly<{
 export async function acquirePlatformTokenDispatchFence(input: Readonly<{
   userId: string;
   callKey: string;
+  jobId?: string | null;
+  operation?: AiOperation;
+  modelId?: string;
+  webAiGrantId?: string | null;
+  routeFenceFingerprint?: string | null;
+  quotaMultiplierBps?: number;
   now?: Date;
 }>, db: EntitlementDb = getDb()): Promise<PlatformTokenDispatchFenceResult | null> {
   const now = input.now ?? new Date();
@@ -412,10 +577,20 @@ export async function acquirePlatformTokenDispatchFence(input: Readonly<{
     await recoverExpiredPlatformTokenReservationsInTransaction(input.userId, now, 100, tx);
     const reservation = await reservationForCall(tx, input.userId, input.callKey);
     if (reservation === null) return null;
+    if (
+      (input.jobId !== undefined && reservation.jobId !== input.jobId)
+      || (input.operation !== undefined && reservation.operation !== input.operation)
+      || (input.modelId !== undefined && reservation.modelId !== input.modelId)
+      || (input.webAiGrantId !== undefined && reservation.webAiGrantId !== input.webAiGrantId)
+      || (input.routeFenceFingerprint !== undefined && reservation.routeFenceFingerprint !== input.routeFenceFingerprint)
+      || (input.quotaMultiplierBps !== undefined && reservation.quotaMultiplierBps !== input.quotaMultiplierBps)
+    ) return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
     return Object.freeze({
       reservationId: reservation.id,
       status: reservation.status,
       reservedTokens: reservation.reservedTokens,
+      webAiGrantId: reservation.webAiGrantId,
+      routeFenceFingerprint: reservation.routeFenceFingerprint,
       expiresAt: reservation.expiresAt,
       allowed: reservation.status === "reserved" && reservation.expiresAt > now,
     });
@@ -446,14 +621,37 @@ export async function settlePlatformTokenReservation(input: Readonly<{
     const reservation = await reservationForCall(tx, input.userId, input.callKey);
     if (reservation === null) return fail("AI_PROVIDER_CALL_RECONCILIATION_REQUIRED");
     if (reservation.status !== "reserved") {
-      return Object.freeze({ reservationId: reservation.id, status: reservation.status, reservedTokens: reservation.reservedTokens, settledTokens: reservation.settledTokens, billingMode: "platform" as const, created: false });
+      return Object.freeze({
+        reservationId: reservation.id,
+        status: reservation.status,
+        reservedTokens: reservation.reservedTokens,
+        settledTokens: reservation.settledTokens,
+        rawEstimatedTokens: reservation.rawEstimatedTokens,
+        rawSettledTokens: reservation.rawSettledTokens,
+        quotaMultiplierBps: reservation.quotaMultiplierBps,
+        webAiGrantId: reservation.webAiGrantId,
+        routeFenceFingerprint: reservation.routeFenceFingerprint,
+        billingMode: "platform" as const,
+        created: false,
+      });
     }
+    const quotaMultiplierBps = reservation.quotaMultiplierBps ?? 10_000;
     const actual = input.actualTokens;
     if (!input.usageKnown || typeof actual !== "number" || !Number.isSafeInteger(actual) || actual < 0) {
       const held = await tx.platformTokenReservation.update({
         where: { id: reservation.id },
         data: { status: "held", reconciliationRequired: true, safeErrorCode: "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED" },
-        select: { id: true, status: true, reservedTokens: true, settledTokens: true },
+        select: {
+          id: true,
+          status: true,
+          reservedTokens: true,
+          settledTokens: true,
+          rawEstimatedTokens: true,
+          rawSettledTokens: true,
+          quotaMultiplierBps: true,
+          webAiGrantId: true,
+          routeFenceFingerprint: true,
+        },
       });
       await tx.platformTokenLedgerEntry.create({
         data: {
@@ -462,24 +660,65 @@ export async function settlePlatformTokenReservation(input: Readonly<{
           callKey: input.callKey, idempotencyKey: `hold:${input.userId}:${input.callKey}`, metadata: {}, createdAt: now,
         },
       });
-      return Object.freeze({ reservationId: held.id, status: held.status, reservedTokens: held.reservedTokens, settledTokens: held.settledTokens, billingMode: "platform" as const, created: false });
+      return Object.freeze({
+        reservationId: held.id,
+        status: held.status,
+        reservedTokens: held.reservedTokens,
+        settledTokens: held.settledTokens,
+        rawEstimatedTokens: held.rawEstimatedTokens,
+        rawSettledTokens: held.rawSettledTokens,
+        quotaMultiplierBps: held.quotaMultiplierBps,
+        webAiGrantId: held.webAiGrantId,
+        routeFenceFingerprint: held.routeFenceFingerprint,
+        billingMode: "platform" as const,
+        created: false,
+      });
     }
-    if (actual > reservation.reservedTokens) {
+    let chargedActual: number;
+    try {
+      chargedActual = calculateChargedPlatformTokens(actual, quotaMultiplierBps);
+    } catch {
+      chargedActual = Number.POSITIVE_INFINITY;
+    }
+    if (!Number.isSafeInteger(chargedActual) || chargedActual > reservation.reservedTokens) {
+      const safeUsageTokens = Number.isSafeInteger(actual) && actual >= 0 && actual <= PLATFORM_RAW_TOKEN_LIMIT ? actual : null;
       const held = await tx.platformTokenReservation.update({
         where: { id: reservation.id },
         data: { status: "held", reconciliationRequired: true, safeErrorCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED" },
-        select: { id: true, status: true, reservedTokens: true, settledTokens: true },
+        select: {
+          id: true,
+          status: true,
+          reservedTokens: true,
+          settledTokens: true,
+          rawEstimatedTokens: true,
+          rawSettledTokens: true,
+          quotaMultiplierBps: true,
+          webAiGrantId: true,
+          routeFenceFingerprint: true,
+        },
       });
       await tx.platformTokenLedgerEntry.create({
         data: {
           id: randomUUID(), userId: input.userId, grantId: reservation.grantId, reservationId: reservation.id,
-          entryKind: "hold", amount: 0, usageTokens: actual, reasonCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED",
+          entryKind: "hold", amount: 0, usageTokens: safeUsageTokens, reasonCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED",
           callKey: input.callKey, idempotencyKey: `hold:${input.userId}:${input.callKey}`, metadata: {}, createdAt: now,
         },
       });
-      return Object.freeze({ reservationId: held.id, status: held.status, reservedTokens: held.reservedTokens, settledTokens: held.settledTokens, billingMode: "platform" as const, created: false });
+      return Object.freeze({
+        reservationId: held.id,
+        status: held.status,
+        reservedTokens: held.reservedTokens,
+        settledTokens: held.settledTokens,
+        rawEstimatedTokens: held.rawEstimatedTokens,
+        rawSettledTokens: held.rawSettledTokens,
+        quotaMultiplierBps: held.quotaMultiplierBps,
+        webAiGrantId: held.webAiGrantId,
+        routeFenceFingerprint: held.routeFenceFingerprint,
+        billingMode: "platform" as const,
+        created: false,
+      });
     }
-    const release = reservation.reservedTokens - actual;
+    const release = reservation.reservedTokens - chargedActual;
     if (release > 0) {
       await tx.platformTokenGrant.update({ where: { id: reservation.grantId }, data: { remainingTokens: { increment: release } } });
       await tx.platformTokenLedgerEntry.create({
@@ -492,8 +731,25 @@ export async function settlePlatformTokenReservation(input: Readonly<{
     }
     const settled = await tx.platformTokenReservation.update({
       where: { id: reservation.id },
-      data: { status: "settled", settledTokens: actual, settledAt: now, reconciliationRequired: false, safeErrorCode: null },
-      select: { id: true, status: true, reservedTokens: true, settledTokens: true },
+      data: {
+        status: "settled",
+        settledTokens: chargedActual,
+        rawSettledTokens: actual,
+        settledAt: now,
+        reconciliationRequired: false,
+        safeErrorCode: null,
+      },
+      select: {
+        id: true,
+        status: true,
+        reservedTokens: true,
+        settledTokens: true,
+        rawEstimatedTokens: true,
+        rawSettledTokens: true,
+        quotaMultiplierBps: true,
+        webAiGrantId: true,
+        routeFenceFingerprint: true,
+      },
     });
     await tx.platformTokenLedgerEntry.create({
       data: {
@@ -502,7 +758,19 @@ export async function settlePlatformTokenReservation(input: Readonly<{
         callKey: input.callKey, idempotencyKey: `settle:${input.userId}:${input.callKey}`, metadata: {}, createdAt: now,
       },
     });
-    return Object.freeze({ reservationId: settled.id, status: settled.status, reservedTokens: settled.reservedTokens, settledTokens: settled.settledTokens, billingMode: "platform" as const, created: false });
+    return Object.freeze({
+      reservationId: settled.id,
+      status: settled.status,
+      reservedTokens: settled.reservedTokens,
+      settledTokens: settled.settledTokens,
+      rawEstimatedTokens: settled.rawEstimatedTokens,
+      rawSettledTokens: settled.rawSettledTokens,
+      quotaMultiplierBps: settled.quotaMultiplierBps,
+      webAiGrantId: settled.webAiGrantId,
+      routeFenceFingerprint: settled.routeFenceFingerprint,
+      billingMode: "platform" as const,
+      created: false,
+    });
   });
 }
 
@@ -517,13 +785,35 @@ export async function releasePlatformTokenReservation(input: Readonly<{
     const reservation = await reservationForCall(tx, input.userId, input.callKey);
     if (reservation === null) return null;
     if (reservation.status !== "reserved") {
-      return Object.freeze({ reservationId: reservation.id, status: reservation.status, reservedTokens: reservation.reservedTokens, settledTokens: reservation.settledTokens, billingMode: "platform" as const, created: false });
+      return Object.freeze({
+        reservationId: reservation.id,
+        status: reservation.status,
+        reservedTokens: reservation.reservedTokens,
+        settledTokens: reservation.settledTokens,
+        rawEstimatedTokens: reservation.rawEstimatedTokens,
+        rawSettledTokens: reservation.rawSettledTokens,
+        quotaMultiplierBps: reservation.quotaMultiplierBps,
+        webAiGrantId: reservation.webAiGrantId,
+        routeFenceFingerprint: reservation.routeFenceFingerprint,
+        billingMode: "platform" as const,
+        created: false,
+      });
     }
     await tx.platformTokenGrant.update({ where: { id: reservation.grantId }, data: { remainingTokens: { increment: reservation.reservedTokens } } });
     const released = await tx.platformTokenReservation.update({
       where: { id: reservation.id },
       data: { status: "released", releasedAt: now, safeErrorCode: null },
-      select: { id: true, status: true, reservedTokens: true, settledTokens: true },
+      select: {
+        id: true,
+        status: true,
+        reservedTokens: true,
+        settledTokens: true,
+        rawEstimatedTokens: true,
+        rawSettledTokens: true,
+        quotaMultiplierBps: true,
+        webAiGrantId: true,
+        routeFenceFingerprint: true,
+      },
     });
     await tx.platformTokenLedgerEntry.create({
       data: {
@@ -532,7 +822,19 @@ export async function releasePlatformTokenReservation(input: Readonly<{
         callKey: input.callKey, idempotencyKey: `release:${input.userId}:${input.callKey}`, metadata: {}, createdAt: now,
       },
     });
-    return Object.freeze({ reservationId: released.id, status: released.status, reservedTokens: released.reservedTokens, settledTokens: released.settledTokens, billingMode: "platform" as const, created: false });
+    return Object.freeze({
+      reservationId: released.id,
+      status: released.status,
+      reservedTokens: released.reservedTokens,
+      settledTokens: released.settledTokens,
+      rawEstimatedTokens: released.rawEstimatedTokens,
+      rawSettledTokens: released.rawSettledTokens,
+      quotaMultiplierBps: released.quotaMultiplierBps,
+      webAiGrantId: released.webAiGrantId,
+      routeFenceFingerprint: released.routeFenceFingerprint,
+      billingMode: "platform" as const,
+      created: false,
+    });
   });
 }
 
@@ -546,7 +848,19 @@ export async function holdPlatformTokenReservation(
     const reservation = await reservationForCall(tx, input.userId, input.callKey);
     if (reservation === null) return null;
     if (reservation.status !== "reserved") {
-      return Object.freeze({ reservationId: reservation.id, status: reservation.status, reservedTokens: reservation.reservedTokens, settledTokens: reservation.settledTokens, billingMode: "platform" as const, created: false });
+      return Object.freeze({
+        reservationId: reservation.id,
+        status: reservation.status,
+        reservedTokens: reservation.reservedTokens,
+        settledTokens: reservation.settledTokens,
+        rawEstimatedTokens: reservation.rawEstimatedTokens,
+        rawSettledTokens: reservation.rawSettledTokens,
+        quotaMultiplierBps: reservation.quotaMultiplierBps,
+        webAiGrantId: reservation.webAiGrantId,
+        routeFenceFingerprint: reservation.routeFenceFingerprint,
+        billingMode: "platform" as const,
+        created: false,
+      });
     }
     const safeErrorCode = input.errorCode === "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED"
       ? input.errorCode
@@ -554,7 +868,17 @@ export async function holdPlatformTokenReservation(
     const held = await tx.platformTokenReservation.update({
       where: { id: reservation.id },
       data: { status: "held", reconciliationRequired: true, safeErrorCode },
-      select: { id: true, status: true, reservedTokens: true, settledTokens: true },
+      select: {
+        id: true,
+        status: true,
+        reservedTokens: true,
+        settledTokens: true,
+        rawEstimatedTokens: true,
+        rawSettledTokens: true,
+        quotaMultiplierBps: true,
+        webAiGrantId: true,
+        routeFenceFingerprint: true,
+      },
     });
     await tx.platformTokenLedgerEntry.create({
       data: {
@@ -563,7 +887,19 @@ export async function holdPlatformTokenReservation(
         callKey: input.callKey, idempotencyKey: `hold:${input.userId}:${input.callKey}`, metadata: {}, createdAt: now,
       },
     });
-    return Object.freeze({ reservationId: held.id, status: held.status, reservedTokens: held.reservedTokens, settledTokens: held.settledTokens, billingMode: "platform" as const, created: false });
+    return Object.freeze({
+      reservationId: held.id,
+      status: held.status,
+      reservedTokens: held.reservedTokens,
+      settledTokens: held.settledTokens,
+      rawEstimatedTokens: held.rawEstimatedTokens,
+      rawSettledTokens: held.rawSettledTokens,
+      quotaMultiplierBps: held.quotaMultiplierBps,
+      webAiGrantId: held.webAiGrantId,
+      routeFenceFingerprint: held.routeFenceFingerprint,
+      billingMode: "platform" as const,
+      created: false,
+    });
   });
 }
 
@@ -573,7 +909,13 @@ export async function assertPlatformConcurrency(
 ): Promise<void> {
   await lockUser(db, user.id);
   const count = await db.backgroundJob.count({
-    where: { requestedById: user.id, status: { in: ["queued", "waitingConsent", "running", "unknown"] } },
+    where: {
+      requestedById: user.id,
+      OR: [
+        { status: { in: ["queued", "waitingConsent", "running"] } },
+        { status: "unknown", reconciliationRequired: true },
+      ],
+    },
   });
   if (count > 0) return fail("AI_PLATFORM_CONCURRENCY_LIMIT");
 }
@@ -587,16 +929,25 @@ export function estimatePlatformTokens(input: unknown, maxOutputTokens: number):
   return assertPositiveTokens(Math.max(1, inputBytes + 64 + maxOutputTokens));
 }
 
-type RuntimeRoute = ProjectAiRoute & { providerConnection: AiProviderConnection };
+type RuntimeRoute = EffectiveAiRoute;
 
 function platformModelAllowed(route: RuntimeRoute, operation: AiOperation): boolean {
   const provider = route.providerConnection;
   if (provider.scope !== "platform") return false;
   if (operation === "embedding") {
-    return provider.kind === "glm" && provider.defaultEmbeddingModelId === "embedding-3" && provider.embeddingDimensions === 1024 && route.modelId === "embedding-3" && route.embeddingDimensions === 1024;
+    return provider.defaultEmbeddingModelId !== null &&
+      provider.embeddingDimensions !== null &&
+      route.modelId === provider.defaultEmbeddingModelId &&
+      route.embeddingDimensions === provider.embeddingDimensions;
   }
-  if (operation === "visionExtract") return false;
-  return provider.kind === "deepseek" && provider.defaultGenerationModelId === "deepseek-v4-flash" && route.modelId === "deepseek-v4-flash";
+  if (operation === "visionExtract") {
+    return provider.defaultVisionModelId !== null &&
+      route.modelId === provider.defaultVisionModelId &&
+      route.embeddingDimensions === null;
+  }
+  return provider.defaultGenerationModelId !== null &&
+    route.modelId === provider.defaultGenerationModelId &&
+    route.embeddingDimensions === null;
 }
 
 export type AiOutboundEntitlement = Readonly<{
@@ -615,38 +966,34 @@ export async function assertAiOutboundEntitlement(input: Readonly<{
   enforceConcurrency?: boolean;
 }>): Promise<AiOutboundEntitlement> {
   const db = input.db ?? getDb();
-  const now = input.now ?? new Date();
+  if (input.operation !== undefined && input.operation !== input.route.operation) {
+    return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  }
   const operation = input.operation ?? input.route.operation;
   const project = await db.project.findUnique({ where: { id: input.projectId }, select: { workspaceId: true } });
   if (project === null) return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
   const provider = input.route.providerConnection;
   if (provider.status !== "verified" || provider.disabledAt !== null) return fail("AI_PROVIDER_CONNECTION_UNAVAILABLE");
-  if (provider.scope === "platform") {
-    const user = await db.appUser.findUnique({ where: { id: input.requestedById }, select: { id: true, role: true } });
-    if (user === null) return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
-    // System-admin governance permissions do not grant a model or billing
-    // exception when the admin is also the caller of a platform AI operation.
-    if (!platformModelAllowed(input.route, operation)) return fail("AI_MODEL_CAPABILITY_MISMATCH");
-    if (input.enforceConcurrency !== false) await assertPlatformConcurrency(user, db);
-    return Object.freeze({ billingMode: "platform", billingUserId: user.id, reservationRequired: true });
-  }
-  if (provider.workspaceId === null || provider.workspaceId !== project.workspaceId) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
-  if (provider.ownerUserId === null) return fail("AI_PROVIDER_OWNER_REQUIRED");
-  const [ownerMembership, ownerUser] = await Promise.all([
-    findConfirmedWorkspaceMembership(db, provider.workspaceId, provider.ownerUserId),
-    db.appUser.findUnique({ where: { id: provider.ownerUserId }, select: { disabledAt: true } }),
-  ]);
+  // Workspace connections remain configurable for the future paid-member
+  // surface, but they are deliberately unreachable from this runtime
+  // admission boundary until that entitlement is implemented.  In
+  // particular, a free user (or a system admin) cannot turn a legacy
+  // workspace BYOK row into an outbound platform call.
   if (
-    ownerMembership === null
-    || ownerUser === null
-    || ownerUser.disabledAt !== null
-    || (ownerMembership.role !== "owner" && ownerMembership.role !== "admin")
-  ) return fail("AI_PROVIDER_OWNER_REQUIRED");
-  await assertActiveMembership(provider.ownerUserId, db, now);
-  if (operation === "embedding" && (provider.defaultEmbeddingModelId !== input.route.modelId || provider.embeddingDimensions !== input.route.embeddingDimensions)) return fail("AI_MODEL_CAPABILITY_MISMATCH");
-  if (operation === "visionExtract" && provider.defaultVisionModelId !== input.route.modelId) return fail("AI_MODEL_CAPABILITY_MISMATCH");
-  if (operation !== "embedding" && operation !== "visionExtract" && provider.defaultGenerationModelId !== input.route.modelId) return fail("AI_MODEL_CAPABILITY_MISMATCH");
-  return Object.freeze({ billingMode: "byok", billingUserId: provider.ownerUserId, reservationRequired: false });
+    provider.scope !== "platform"
+    || provider.ownershipState !== "confirmed"
+    || provider.workspaceId !== null
+    || provider.ownerUserId !== null
+  ) {
+    return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
+  }
+  const user = await db.appUser.findUnique({ where: { id: input.requestedById }, select: { id: true, role: true } });
+  if (user === null) return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  // System-admin governance permissions do not grant a model or billing
+  // exception when the admin is also the caller of a platform AI operation.
+  if (!platformModelAllowed(input.route, operation)) return fail("AI_MODEL_CAPABILITY_MISMATCH");
+  if (input.enforceConcurrency !== false) await assertPlatformConcurrency(user, db);
+  return Object.freeze({ billingMode: "platform", billingUserId: user.id, reservationRequired: true });
 }
 
 export async function getPlatformTokenSummary(userId: string, db: EntitlementDb = getDb(), now = new Date()) {

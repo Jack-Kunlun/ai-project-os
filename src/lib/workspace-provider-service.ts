@@ -5,7 +5,7 @@ import { assertActiveMembership, getMembershipStatus, lockMembershipUser } from 
 import { createCredential, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { getProviderDefinition, isSafeModelId } from "@/lib/ai-providers";
-import { testProviderConnection } from "@/lib/ai-providers/service";
+import { lockProviderConfiguration, testProviderConnection } from "@/lib/ai-providers/service";
 import { PROVIDER_CONNECTION_TEST_TRANSACTION_TIMEOUT_MS } from "@/lib/ai-providers/transport";
 import { findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 
@@ -84,6 +84,7 @@ const providerSelect = {
   lastTestedAt: true,
   lastErrorCode: true,
   disabledAt: true,
+  configurationVersion: true,
   createdAt: true,
   updatedAt: true,
   credential: { select: { maskedSuffix: true, rotatedAt: true, updatedAt: true } },
@@ -239,6 +240,7 @@ export async function updateWorkspaceProviderConnection(
       // one user-serialized transaction. Membership revoke therefore cannot
       // pass the preflight and then be bypassed by this write.
       await lockMembershipUser(tx, actor.id);
+      await lockProviderConfiguration(tx, providerId);
       const current = await providerForWorkspace(workspaceId, providerId, tx);
       // Only an explicit, metadata-only disable may use the expired-owner
       // cleanup exception. Any name, key, model, or dimension field remains a
@@ -258,6 +260,8 @@ export async function updateWorkspaceProviderConnection(
         parsed.visionModelId !== undefined ||
         parsed.embeddingModelId !== undefined ||
         parsed.embeddingDimensions !== undefined;
+      const currentlyEnabled = current.status !== "disabled" && current.disabledAt === null;
+      const lifecycleChanged = parsed.enabled !== undefined && parsed.enabled !== currentlyEnabled;
       if (parsed.apiKey !== undefined) await rotateCredential(current.credentialId, "aiProvider", parsed.apiKey, tx);
       const data = {
         ...(parsed.name === undefined ? {} : { name: parsed.name }),
@@ -273,7 +277,12 @@ export async function updateWorkspaceProviderConnection(
       };
       const updated = await tx.aiProviderConnection.updateMany({
         where: { id: current.id, scope: "workspace", workspaceId, updatedAt: current.updatedAt },
-        data,
+        data: {
+          ...data,
+          ...(configurationChanged || lifecycleChanged
+            ? { configurationVersion: { increment: 1 } }
+            : {}),
+        },
       });
       if (updated.count !== 1) return fail("AI_PROVIDER_CONFLICT");
       return tx.aiProviderConnection.findFirstOrThrow({ where: { id: current.id, scope: "workspace", workspaceId }, select: providerSelect });
@@ -298,6 +307,7 @@ export async function testWorkspaceProviderConnection(
       // HTTP; a test that wins first keeps revoke from committing until the
       // probe and final CAS write have completed.
       await lockMembershipUser(tx, actor.id);
+      await lockProviderConfiguration(tx, providerId);
       const provider = await providerForWorkspace(workspaceId, providerId, tx);
       await assertManager(actor, workspaceId, tx, { action: "test", connectionOwnerId: provider.ownerUserId });
       if (provider.status === "disabled" || provider.disabledAt !== null) return fail("AI_PROVIDER_CONNECTION_UNAVAILABLE");
@@ -338,6 +348,7 @@ export async function deleteWorkspaceProviderConnection(
   try {
     return await db.$transaction(async (tx) => {
       await lockMembershipUser(tx, actor.id);
+      await lockProviderConfiguration(tx, providerId);
       const current = await providerForWorkspace(workspaceId, providerId, tx);
       await assertManager(actor, workspaceId, tx, { action: "delete", connectionOwnerId: current.ownerUserId });
       if (expected !== undefined && current.updatedAt.getTime() !== expected.getTime()) return fail("AI_PROVIDER_CONFLICT");

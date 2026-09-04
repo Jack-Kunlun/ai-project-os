@@ -74,7 +74,9 @@ test("membership governance migration is additive, quarantines without auto-conf
     .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
     .map((entry) => entry.name)
     .sort();
-  assert.equal(migrations.at(-2), migrationName);
+  const migrationIndex = migrations.indexOf(migrationName);
+  assert.ok(migrationIndex >= 0);
+  assert.equal(migrations[migrationIndex + 1], manifestEvidenceMigrationName);
 
   const migration = await readFile(`prisma/migrations/${migrationName}/migration.sql`, "utf8");
   const executableSql = migration.replace(/--[^\n]*(?:\n|$)/gu, "");
@@ -111,7 +113,9 @@ test("manifest evidence migration keeps execution and pending transition guards 
     .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
     .map((entry) => entry.name)
     .sort();
-  assert.equal(migrations.at(-1), manifestEvidenceMigrationName);
+  const migrationIndex = migrations.indexOf(manifestEvidenceMigrationName);
+  assert.ok(migrationIndex > 0);
+  assert.equal(migrations[migrationIndex - 1], migrationName);
   const migration = await readFile(`prisma/migrations/${manifestEvidenceMigrationName}/migration.sql`, "utf8");
   const executableSql = migration.replace(/--[^\n]*(?:\n|$)/gu, "");
   assert.match(executableSql, /CREATE TABLE "MembershipGovernanceExecution"/u);

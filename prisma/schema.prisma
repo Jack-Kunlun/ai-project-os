@@ -3801,6 +3801,10 @@ model PlatformTokenReservation {
   id                    String                         @id @default(uuid()) @db.Uuid
   userId                String                         @db.Uuid
   grantId               String                         @db.Uuid
+  webAiGrantId          String?                        @db.Uuid
+  /// Stable non-FK evidence identity retained when the project grant is cascaded.
+  webAiGrantReferenceId String?                        @db.Uuid
+  webAiGrantProjectId   String?                        @db.Uuid
   jobId                 String?                        @db.Uuid
   providerConnectionId  String?                        @db.Uuid
   callKey               String                         @db.VarChar(128)
@@ -3808,6 +3812,15 @@ model PlatformTokenReservation {
   modelId               String                         @db.VarChar(128)
   status                PlatformTokenReservationStatus @default(reserved)
   reservedTokens        Int
+  rawEstimatedTokens    Int
+  quotaMultiplierBps    Int
+  routeSource           String?                        @db.VarChar(32)
+  routeId               String?                        @db.Uuid
+  routeVersion          Int?
+  routeUpdatedAt        DateTime?
+  providerConfigurationVersion Int?
+  routeFenceFingerprint String?                        @db.Char(64)
+  rawSettledTokens      Int?
   settledTokens         Int?
   reconciliationRequired Boolean                       @default(false)
   safeErrorCode         String?                         @db.VarChar(64)
@@ -3817,6 +3830,7 @@ model PlatformTokenReservation {
   releasedAt            DateTime?
   user                  AppUser                         @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   grant                 PlatformTokenGrant              @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  webAiGrant            WebAiGrant?                     @relation("WebAiGrantReservations", fields: [webAiGrantId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   providerConnection    AiProviderConnection?           @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   providerCallAudit      ProviderCallAudit?
   ledgerEntries         PlatformTokenLedgerEntry[]
@@ -3824,6 +3838,8 @@ model PlatformTokenReservation {
   @@unique([userId, callKey])
   @@index([userId, status, expiresAt])
   @@index([jobId, createdAt])
+  @@index([webAiGrantId, createdAt])
+  @@index([webAiGrantReferenceId, createdAt])
   @@index([providerConnectionId, createdAt])
 }
 
@@ -4489,6 +4505,14 @@ model WebAiGrant {
   billingMode          AiBillingMode       @default(legacy)
   billingUserId        String               @db.Uuid
   callKey              String?              @db.VarChar(128)
+  boundJobId           String?              @db.Uuid
+  routeSource          String?              @db.VarChar(32)
+  routeId              String?              @db.Uuid
+  routeVersion         Int?
+  routeUpdatedAt       DateTime?
+  providerConfigurationVersion Int?
+  quotaMultiplierBps    Int?
+  routeFenceFingerprint String?             @db.Char(64)
   issuedAt             DateTime             @default(now())
   expiresAt            DateTime
   revokedAt            DateTime?
@@ -4496,9 +4520,14 @@ model WebAiGrant {
   providerConnection   AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   issuedBy             AppUser              @relation(fields: [issuedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   billingUser          AppUser              @relation("WebAiGrantBillingUser", fields: [billingUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  jobs                 BackgroundJob[]
+  primaryJobs          BackgroundJob[]      @relation("WebAiGrantPrimaryJob")
+  boundJob             BackgroundJob?      @relation("WebAiGrantBoundJob", fields: [boundJobId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  reservations         PlatformTokenReservation[] @relation("WebAiGrantReservations")
+  providerCallAudits   ProviderCallAudit[]  @relation("WebAiGrantProviderCalls")
 
   @@index([projectId, operation, expiresAt])
+  @@unique([boundJobId, operation], map: "WebAiGrant_boundJobId_operation_key")
+  @@index([projectId, operation, routeSource, routeVersion, routeUpdatedAt])
   @@index([providerConnectionId])
   @@index([billingUserId, issuedAt])
   @@index([callKey])
@@ -4524,7 +4553,8 @@ model BackgroundJob {
   completedAt            DateTime?
   project                Project?                     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   requestedBy            AppUser                      @relation(fields: [requestedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  webAiGrant             WebAiGrant?                  @relation(fields: [webAiGrantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  webAiGrant             WebAiGrant?                  @relation("WebAiGrantPrimaryJob", fields: [webAiGrantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  boundWebAiGrants       WebAiGrant[]                 @relation("WebAiGrantBoundJob")
   webAiCandidates        WebAiCandidate[]
   ragAnswer              RagAnswer?
   intelligenceReport     ProjectIntelligenceReport?
@@ -5017,6 +5047,11 @@ model MemoryIndexGeneration {
   inputManifestFingerprint        String                      @db.Char(64)
   expectedActiveIndexGenerationId String?                     @db.Uuid
   expectedEmbeddingRouteUpdatedAt DateTime?
+  expectedEmbeddingRouteSource String?                         @db.VarChar(32)
+  expectedEmbeddingRouteId String?                             @db.Uuid
+  expectedEmbeddingRouteVersion Int?
+  expectedEmbeddingProviderConfigurationVersion Int?
+  expectedEmbeddingRouteFenceFingerprint String?                @db.Char(64)
   expectedInputCount              Int                         @default(0)
   generatedRecordCount            Int                         @default(0)
   reusedRecordCount               Int                         @default(0)
@@ -5045,6 +5080,7 @@ model MemoryIndexGeneration {
   @@index([projectId, status, createdAt])
   @@index([projectId, expectedActiveIndexGenerationId])
   @@index([projectId, jobId])
+  @@index([projectId, expectedEmbeddingRouteSource, expectedEmbeddingRouteVersion])
 }
 
 model MemoryIndexPointer {
@@ -5357,6 +5393,10 @@ model WebAiCandidate {
 model ProviderCallAudit {
   id                   String               @id @default(uuid()) @db.Uuid
   jobId                String?              @db.Uuid
+  webAiGrantId         String?              @db.Uuid
+  /// Stable non-FK evidence identity retained when the project grant is cascaded.
+  webAiGrantReferenceId String?             @db.Uuid
+  webAiGrantProjectId   String?             @db.Uuid
   providerConnectionId String               @db.Uuid
   operation            AiOperation
   modelId              String               @db.VarChar(128)
@@ -5364,6 +5404,14 @@ model ProviderCallAudit {
   billingUserId        String               @db.Uuid
   callKey              String               @db.VarChar(128)
   reservationId        String?              @unique @db.Uuid
+  routeSource          String?              @db.VarChar(32)
+  routeId              String?              @db.Uuid
+  routeVersion         Int?
+  routeUpdatedAt       DateTime?
+  providerConfigurationVersion Int?
+  quotaMultiplierBps   Int?
+  routeFenceFingerprint String?             @db.Char(64)
+  credentialSecretFingerprint String?       @db.Char(64)
   status               String               @db.VarChar(32)
   safeErrorCode        String?              @db.VarChar(64)
   providerRequestId    String?              @db.VarChar(256)
@@ -5373,10 +5421,13 @@ model ProviderCallAudit {
   createdAt            DateTime             @default(now())
   completedAt          DateTime?
   job                  BackgroundJob?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  webAiGrant           WebAiGrant?          @relation("WebAiGrantProviderCalls", fields: [webAiGrantId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   providerConnection   AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   reservation          PlatformTokenReservation? @relation(fields: [reservationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
 
   @@index([jobId, createdAt])
+  @@index([webAiGrantId, createdAt])
+  @@index([webAiGrantReferenceId, createdAt])
   @@index([providerConnectionId, createdAt])
   @@index([billingUserId, createdAt])
   @@index([callKey])

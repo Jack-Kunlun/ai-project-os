@@ -5,7 +5,7 @@ import { invokeChatCompletion } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { createProjectRepositoryStatusService } from "@/lib/github/project-repository-status";
-import { requireProjectAiRoute } from "@/lib/project-ai-routes";
+import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
 import { getProjectJobInternal } from "@/lib/project-workflow";
 import { buildProjectWorldState } from "@/lib/project-world";
 import {
@@ -451,8 +451,8 @@ async function prepareRuntime(
   await assertWebAiProjectAccess(actor, projectId, "edit", db);
   const [state, generationRoute, embeddingRoute, index] = await Promise.all([
     loadProjectState(projectId, db),
-    requireProjectAiRoute(projectId, "generateWithContext", db),
-    requireProjectAiRoute(projectId, "embedding", db),
+    resolveEffectiveAiRoute(projectId, "projectAnalysis", db),
+    resolveEffectiveAiRoute(projectId, "embedding", db),
     getActiveMemoryIndex(projectId, actor, db),
   ]);
   return Object.freeze({ state, generationRoute, embeddingRoute, index });
@@ -496,7 +496,7 @@ export async function runProjectBriefJob(input: Readonly<{
     // Recheck after claim before creating the supplemental grant or reading
     // project evidence for the provider request.
     await assertWebAiProjectAccess(input.requestedBy, projectId, "edit", db);
-    await createSupplementalWebAiGrant({
+    const embeddingGrant = await createSupplementalWebAiGrant({
       projectId,
       jobId: granted.jobId,
       route: runtime.embeddingRoute,
@@ -515,6 +515,7 @@ export async function runProjectBriefJob(input: Readonly<{
         attempt: claim,
         question: REPORT_SEARCH_QUERY,
         route: runtime.embeddingRoute,
+        grantId: embeddingGrant.grantId,
         index: runtime.index,
         take: 10,
       }, db),
@@ -531,15 +532,16 @@ export async function runProjectBriefJob(input: Readonly<{
       attempt: claim,
       actor: input.requestedBy,
       route: runtime.generationRoute,
+      grantId: granted.grantId,
       operation: "projectAnalysis",
       callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "brief"),
       requestPayload: { projectName: runtime.state.project.name, contexts: promptContexts(contexts) },
       maxOutputTokens: runtime.generationRoute.maxOutputTokens,
-      call: () => invokeChatCompletion({
-        connection: runtime.generationRoute.providerConnection,
+      call: (dispatch) => invokeChatCompletion({
+        connection: dispatch.connection,
         operation: "projectAnalysis",
-        modelId: runtime.generationRoute.modelId,
-        maxOutputTokens: runtime.generationRoute.maxOutputTokens,
+        modelId: dispatch.modelId,
+        maxOutputTokens: dispatch.maxOutputTokens,
         temperature: 0,
         messages: [
           {
@@ -596,11 +598,12 @@ export async function runProjectBriefJob(input: Readonly<{
 async function executeAgentPlan(input: Readonly<{
   projectId: string;
   jobId: string;
+  grantId: string;
   requestedBy: WebAiActor;
   attempt: JobAttemptClaim;
   plan: ProjectAgentPlan;
   state: ProjectState;
-  embeddingRoute: Awaited<ReturnType<typeof requireProjectAiRoute>>;
+  embeddingRoute: Awaited<ReturnType<typeof resolveEffectiveAiRoute>>;
   index: Awaited<ReturnType<typeof getActiveMemoryIndex>>;
 }>, db: PrismaClient) {
   const contexts: EvidenceContext[] = [];
@@ -629,6 +632,7 @@ async function executeAgentPlan(input: Readonly<{
       const results = await searchActiveMemoryForJob({
         projectId: input.projectId,
         jobId: input.jobId,
+        grantId: input.grantId,
         actor: input.requestedBy,
         attempt: input.attempt,
         question: call.arguments.query,
@@ -691,7 +695,7 @@ export async function runProjectAgentJob(input: Readonly<{
     // Recheck after claim before creating the supplemental grant or reading
     // project evidence for the provider request.
     await assertWebAiProjectAccess(input.requestedBy, projectId, "edit", db);
-    await createSupplementalWebAiGrant({
+    const embeddingGrant = await createSupplementalWebAiGrant({
       projectId,
       jobId: granted.jobId,
       route: runtime.embeddingRoute,
@@ -706,15 +710,16 @@ export async function runProjectAgentJob(input: Readonly<{
       attempt: claim,
       actor: input.requestedBy,
       route: runtime.generationRoute,
+      grantId: granted.grantId,
       operation: "projectAnalysis",
       callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "agent-plan"),
       requestPayload: { question, projectName: runtime.state.project.name },
       maxOutputTokens: Math.min(runtime.generationRoute.maxOutputTokens, 2_048),
-      call: () => invokeChatCompletion({
-        connection: runtime.generationRoute.providerConnection,
+      call: (dispatch) => invokeChatCompletion({
+        connection: dispatch.connection,
         operation: "projectAnalysis",
-        modelId: runtime.generationRoute.modelId,
-        maxOutputTokens: Math.min(runtime.generationRoute.maxOutputTokens, 2_048),
+        modelId: dispatch.modelId,
+        maxOutputTokens: dispatch.maxOutputTokens,
         temperature: 0,
         messages: [
           {
@@ -743,6 +748,7 @@ export async function runProjectAgentJob(input: Readonly<{
       jobId: granted.jobId,
       requestedBy: input.requestedBy,
       attempt: claim,
+      grantId: embeddingGrant.grantId,
       plan,
       state: runtime.state,
       embeddingRoute: runtime.embeddingRoute,
@@ -754,15 +760,16 @@ export async function runProjectAgentJob(input: Readonly<{
       attempt: claim,
       actor: input.requestedBy,
       route: runtime.generationRoute,
+      grantId: granted.grantId,
       operation: "projectAnalysis",
       callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "agent-answer"),
       requestPayload: { question, objective: plan.objective, toolTrace: execution.trace, contexts: promptContexts(execution.contexts) },
       maxOutputTokens: runtime.generationRoute.maxOutputTokens,
-      call: () => invokeChatCompletion({
-        connection: runtime.generationRoute.providerConnection,
+      call: (dispatch) => invokeChatCompletion({
+        connection: dispatch.connection,
         operation: "projectAnalysis",
-        modelId: runtime.generationRoute.modelId,
-        maxOutputTokens: runtime.generationRoute.maxOutputTokens,
+        modelId: dispatch.modelId,
+        maxOutputTokens: dispatch.maxOutputTokens,
         temperature: 0,
         messages: [
           {
@@ -880,35 +887,72 @@ export async function listProjectIntelligence(
             modelId: true,
             dimensions: true,
             inputManifestFingerprint: true,
+            expectedEmbeddingRouteSource: true,
+            expectedEmbeddingRouteId: true,
+            expectedEmbeddingRouteVersion: true,
+            expectedEmbeddingRouteUpdatedAt: true,
+            expectedEmbeddingProviderConfigurationVersion: true,
+            expectedEmbeddingRouteFenceFingerprint: true,
           },
         },
       },
     }),
-    db.projectAiRoute.findMany({
-      where: { projectId, operation: { in: ["embedding", "generateWithContext"] } },
-      select: {
-        operation: true,
-        modelId: true,
-        embeddingDimensions: true,
-        providerConnection: { select: { id: true, name: true, kind: true, status: true } },
-      },
-    }),
+    Promise.all(["embedding", "projectAnalysis"] as const).then(async (operations) => Promise.all(operations.map(async (operation) => {
+      try {
+        const route = await resolveEffectiveAiRoute(projectId, operation, db);
+        return Object.freeze({
+          operation: route.operation,
+          modelId: route.modelId,
+          embeddingDimensions: route.embeddingDimensions,
+          source: route.source,
+          routeId: route.routeId,
+          routeVersion: route.routeVersion,
+          routeUpdatedAt: route.routeUpdatedAt,
+          providerConfigurationVersion: route.providerConfigurationVersion,
+          routeFenceFingerprint: route.routeFenceFingerprint,
+          providerConnection: Object.freeze({
+            id: route.providerConnection.id,
+            name: route.providerConnection.name,
+            kind: route.providerConnection.kind,
+            status: route.providerConnection.status,
+          }),
+        });
+      } catch (error) {
+        if (error instanceof Error && "code" in error) {
+          const code = (error as { code?: unknown }).code;
+          if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID" || code === "AI_PROVIDER_CONFIGURATION_DRIFT") return null;
+        }
+        throw error;
+      }
+    }))).then((routes) => routes.filter((route): route is NonNullable<typeof route> => route !== null)),
     getProjectMemoryInputManifest(projectId, actor, db),
   ]);
   const embeddingRoute = routes.find((route) => route.operation === "embedding") ?? null;
-  const generationRoute = routes.find((route) => route.operation === "generateWithContext") ?? null;
+  const generationRoute = routes.find((route) => route.operation === "projectAnalysis") ?? null;
   const readinessState = resolveMemoryIndexReadiness({
     embeddingRoute: embeddingRoute === null ? null : {
       providerConnectionId: embeddingRoute.providerConnection.id,
       modelId: embeddingRoute.modelId,
       embeddingDimensions: embeddingRoute.embeddingDimensions,
       providerVerified: embeddingRoute.providerConnection.status === "verified",
+      routeSource: embeddingRoute.source,
+      routeId: embeddingRoute.routeId,
+      routeVersion: embeddingRoute.routeVersion,
+      routeUpdatedAt: embeddingRoute.routeUpdatedAt,
+      providerConfigurationVersion: embeddingRoute.providerConfigurationVersion,
+      routeFenceFingerprint: embeddingRoute.routeFenceFingerprint,
     },
     activeIndex: activeIndex === null ? null : {
       providerConnectionId: activeIndex.generation.providerConnectionId,
       modelId: activeIndex.generation.modelId,
       dimensions: activeIndex.generation.dimensions,
       inputManifestFingerprint: activeIndex.generation.inputManifestFingerprint,
+      routeSource: activeIndex.generation.expectedEmbeddingRouteSource,
+      routeId: activeIndex.generation.expectedEmbeddingRouteId,
+      routeVersion: activeIndex.generation.expectedEmbeddingRouteVersion,
+      routeUpdatedAt: activeIndex.generation.expectedEmbeddingRouteUpdatedAt,
+      providerConfigurationVersion: activeIndex.generation.expectedEmbeddingProviderConfigurationVersion,
+      routeFenceFingerprint: activeIndex.generation.expectedEmbeddingRouteFenceFingerprint,
       legacy: activeIndex.generation.jobId === null,
       status: activeIndex.generation.status,
     },

@@ -9,7 +9,7 @@ import {
   appendProjectItemRevision,
   createPrimaryProjectItemEvidence,
 } from "@/lib/project-item-history";
-import { requireProjectAiRoute } from "@/lib/project-ai-routes";
+import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
 import { getProjectJobInternal, withProjectJobAccessTransaction } from "@/lib/project-workflow";
 import {
   assertWebAiConsent,
@@ -249,7 +249,7 @@ export async function runAutoExtractJob(input: Readonly<{
   await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const parsed = requestSchema.parse(input.request);
   const [route, sources] = await Promise.all([
-    requireProjectAiRoute(input.projectId, "autoExtract", db),
+    resolveEffectiveAiRoute(input.projectId, "autoExtract", db),
     db.projectSource.findMany({
       where: { projectId: input.projectId, id: { in: parsed.sourceIds }, retiredAt: null },
       orderBy: { id: "asc" },
@@ -308,14 +308,15 @@ export async function runAutoExtractJob(input: Readonly<{
         attempt: claim,
         actor: input.requestedBy,
         route,
+        grantId: granted.grantId,
         callKey: stableAiCallKey(granted.jobId, "autoExtract", source.id),
         requestPayload: { sourceId: source.id, evidenceBlocks },
         maxOutputTokens: route.maxOutputTokens,
-        call: () => invokeChatCompletion({
-          connection: route.providerConnection,
+        call: (dispatch) => invokeChatCompletion({
+          connection: dispatch.connection,
           operation: "autoExtract",
-          modelId: route.modelId,
-          maxOutputTokens: route.maxOutputTokens,
+          modelId: dispatch.modelId,
+          maxOutputTokens: dispatch.maxOutputTokens,
           temperature: 0,
           messages: [
             {

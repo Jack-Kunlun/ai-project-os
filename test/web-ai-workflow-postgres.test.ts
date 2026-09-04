@@ -3,10 +3,15 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import test from "node:test";
+import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
+import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
-import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
-import { createWorkspaceProviderConnection } from "../src/lib/workspace-provider-service";
+import {
+  activatePlatformDefaultAiRoute,
+  createPlatformDefaultAiRoute,
+  validatePlatformDefaultAiRoute,
+} from "../src/lib/platform-default-ai-routes";
 import { reviewWebAiCandidate, runAutoExtractJob } from "../src/lib/web-auto-extract";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
@@ -15,6 +20,22 @@ import { runRagAnswerJob, runSemanticSearchJob } from "../src/lib/web-rag";
 
 const shouldRun = process.env.WEB_AI_POSTGRES_GATE === "1";
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
+
+async function activateDefaultRoute(
+  db: ReturnType<typeof getDb>,
+  actor: Readonly<{ id: string; role: string }>,
+  input: Readonly<{
+    operation: "embedding" | "autoExtract" | "generateWithContext";
+    providerConnectionId: string;
+    modelId: string;
+    embeddingDimensions?: number;
+    maxOutputTokens?: number;
+  }>,
+) {
+  const draft = await createPlatformDefaultAiRoute(input, actor, db);
+  const verified = await validatePlatformDefaultAiRoute(draft.id, actor, db, draft.updatedAt);
+  return activatePlatformDefaultAiRoute(verified.id, actor, db, verified.updatedAt);
+}
 
 function vector(text: string): number[] {
   const seed = [...text].reduce((sum, character) => sum + character.codePointAt(0)!, 0);
@@ -31,10 +52,6 @@ test(
     const masterKeyPath = `/tmp/ai-project-os-v2-workflow-${process.pid}.key`;
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
-    let createdUserId: string | null = null;
-    let createdWorkspaceId: string | null = null;
-    let providerId: string | null = null;
-    let credentialId: string | null = null;
 
     await unlink(masterKeyPath).catch(() => undefined);
     process.env.AI_PROJECT_OS_MASTER_KEY_FILE = masterKeyPath;
@@ -79,12 +96,13 @@ test(
       const user = await db.appUser.create({
         data: { id: randomUUID(), username: `v2_test_${suffix}`, role: "user" },
       });
-      createdUserId = user.id;
+      const platformAdmin = await db.appUser.create({
+        data: { id: randomUUID(), username: `v2_platform_admin_${suffix}`, role: "admin" },
+      });
       const workspaceId = randomUUID();
       await db.workspace.create({
         data: { id: workspaceId, name: `V2 workflow workspace ${suffix}`, slug: `v2-workflow-workspace-${suffix}`, createdById: user.id },
       });
-      createdWorkspaceId = workspaceId;
       await db.$transaction((tx) => grantWorkspaceMembership(tx, {
         workspaceId,
         userId: user.id,
@@ -101,6 +119,7 @@ test(
           expiresAt: new Date(membershipNow.getTime() + 86_400_000),
         },
       });
+      await issueVerifiedSignupGrant(user.id, { issuedById: platformAdmin.id }, db);
 
       await db.project.create({
         data: { id: projectId, workspaceId, name: `V2 workflow ${suffix}`, slug: `v2-workflow-${suffix}` },
@@ -125,7 +144,7 @@ test(
           manualContentDedupeKey: sourceHash,
         },
       });
-      const provider = await createWorkspaceProviderConnection(workspaceId, {
+      const provider = await createProviderConnection({
         name: `V2 mock ${suffix}`,
         kind: "glm",
         apiKey: "sk-v2-workflow-secret",
@@ -133,35 +152,33 @@ test(
         embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
         visionModelId: null,
-      }, { id: user.id, role: user.role }, db);
-      providerId = provider.id;
-      const providerRow = await db.aiProviderConnection.update({
+      }, { id: platformAdmin.id, role: platformAdmin.role }, db);
+      await db.aiProviderConnection.update({
         where: { id: provider.id },
         data: { status: "verified", lastTestedAt: new Date() },
       });
-      credentialId = providerRow.credentialId;
 
-      await upsertProjectAiRoute(projectId, {
+      const defaultEmbeddingRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
         operation: "embedding",
         providerConnectionId: provider.id,
         modelId: "embedding-3",
         embeddingDimensions: 8,
-        maxOutputTokens: 128,
-      }, db);
-      await upsertProjectAiRoute(projectId, {
+      });
+      assert.equal(defaultEmbeddingRoute.status, "active");
+      const defaultAutoExtractRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
         operation: "autoExtract",
         providerConnectionId: provider.id,
         modelId: "glm-4-flash",
-        embeddingDimensions: null,
         maxOutputTokens: 1024,
-      }, db);
-      await upsertProjectAiRoute(projectId, {
+      });
+      assert.equal(defaultAutoExtractRoute.status, "active");
+      const defaultGenerationRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
         operation: "generateWithContext",
         providerConnectionId: provider.id,
         modelId: "glm-4-flash",
-        embeddingDimensions: null,
         maxOutputTokens: 1024,
-      }, db);
+      });
+      assert.equal(defaultGenerationRoute.status, "active");
 
       const indexJob = await runProjectMemoryIndexJob({
         projectId,
@@ -246,26 +263,9 @@ test(
       assert.equal(await db.webAiGrant.count({ where: { projectId } }) >= 4, true);
     } finally {
       globalThis.fetch = previousFetch;
-      await db.project.deleteMany({ where: { id: projectId } });
-      if (providerId !== null) {
-        const reservations = await db.platformTokenReservation.findMany({
-          where: { providerConnectionId: providerId },
-          select: { id: true },
-        });
-        await db.providerCallAudit.deleteMany({ where: { providerConnectionId: providerId } });
-        const reservationIds = reservations.map((reservation) => reservation.id);
-        if (reservationIds.length > 0) {
-          await db.platformTokenLedgerEntry.deleteMany({ where: { reservationId: { in: reservationIds } } });
-          await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
-        }
-        await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
-      }
-      if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
-      if (createdWorkspaceId !== null) {
-        await db.membershipSubscription.deleteMany({ where: { userId: createdUserId! } });
-        await db.workspace.deleteMany({ where: { id: createdWorkspaceId } });
-      }
-      if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
+      // Platform default route/audit rows are immutable evidence. The
+      // disposable gate runner drops this database after the test, so row
+      // deletion here would violate the audit contract.
       await unlink(masterKeyPath).catch(() => undefined);
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
       else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;

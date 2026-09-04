@@ -25,6 +25,9 @@ const openAiConnectionId = "33333333-3333-4333-8333-333333333333";
 const qwenConnectionId = "44444444-4444-4444-8444-444444444444";
 const userConnectionId = "66666666-6666-4666-8666-666666666666";
 const generationId = "55555555-5555-4555-8555-555555555555";
+const defaultRouteId = "77777777-7777-4777-8777-777777777777";
+const routeUpdatedAt = new Date("2026-09-01T00:00:00.000Z");
+const routeFenceFingerprint = "a".repeat(64);
 
 type FakeRoute = {
   operation: "embedding" | "visionExtract" | "autoExtract" | "generateWithContext";
@@ -384,12 +387,24 @@ test("memory index publication guard rejects pointer, route, provider, or input 
       providerConnectionId: openAiConnectionId,
       modelId: "text-embedding-3-small",
       embeddingDimensions: 1536,
+      updatedAt: routeUpdatedAt,
+      source: "platform_default",
+      routeId: defaultRouteId,
+      routeVersion: 1,
+      providerConfigurationVersion: 1,
+      routeFenceFingerprint,
     },
     currentRoute: {
       providerConnectionId: openAiConnectionId,
       modelId: "text-embedding-3-small",
       embeddingDimensions: 1536,
       providerVerified: true,
+      updatedAt: routeUpdatedAt,
+      source: "platform_default",
+      routeId: defaultRouteId,
+      routeVersion: 1,
+      providerConfigurationVersion: 1,
+      routeFenceFingerprint,
     },
     expectedInputManifestFingerprint: "manifest-a",
     currentInputManifestFingerprint: "manifest-a",
@@ -421,12 +436,24 @@ test("readiness uses one precedence order and keeps generation provider failure 
       modelId: "text-embedding-3-small",
       embeddingDimensions: 1536,
       providerVerified: true,
+      routeSource: "platform_default",
+      routeId: defaultRouteId,
+      routeVersion: 1,
+      routeUpdatedAt,
+      providerConfigurationVersion: 1,
+      routeFenceFingerprint,
     },
     activeIndex: {
       providerConnectionId: openAiConnectionId,
       modelId: "text-embedding-3-small",
       dimensions: 1536,
       inputManifestFingerprint: "manifest-a",
+      routeSource: "platform_default",
+      routeId: defaultRouteId,
+      routeVersion: 1,
+      routeUpdatedAt,
+      providerConfigurationVersion: 1,
+      routeFenceFingerprint,
     },
     currentInputManifestFingerprint: "manifest-a",
   } as const;

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { createProviderConnection } from "../src/lib/ai-providers";
 import {
+  AiEntitlementError,
   holdPlatformTokenReservation,
   issueVerifiedSignupGrant,
   recoverExpiredPlatformTokenReservations,
@@ -101,8 +102,12 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
     const settledReservation = await reservePlatformTokens({ userId: ownerId, callKey: settledKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 100, now: entitlementNow }, db);
     assert.equal(settledReservation.created, true);
     reservationIds.push(settledReservation.reservationId);
-    const settledReplay = await reservePlatformTokens({ userId: ownerId, callKey: settledKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 1, now: entitlementNow }, db);
+    const settledReplay = await reservePlatformTokens({ userId: ownerId, callKey: settledKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 100, now: entitlementNow }, db);
     assert.equal(settledReplay.created, false);
+    await assert.rejects(
+      () => reservePlatformTokens({ userId: ownerId, callKey: settledKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 1, now: entitlementNow }, db),
+      (error: unknown) => error instanceof AiEntitlementError && error.code === "AI_ROUTE_CONFIGURATION_FORBIDDEN",
+    );
     const settledResult = await settlePlatformTokenReservation({ userId: ownerId, callKey: settledKey, actualTokens: 40, usageKnown: true, now: entitlementNow }, db);
     assert.equal(settledResult.status, "settled");
     const settledGrant = await db.platformTokenGrant.findUniqueOrThrow({ where: { id: signupGrant.id }, select: { remainingTokens: true } });
@@ -283,7 +288,7 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
     await db.project.create({ data: { id: projectId, name: `Entitlement project ${suffix}`, slug: `entitlement-project-${suffix}`, workspaceId } });
     const grant = await db.platformTokenGrant.create({ data: { userId: ownerId, kind: "manual", amount: 100, remainingTokens: 100, offerVersion: "gate", expiresAt: new Date("2026-10-01T00:00:00.000Z") } });
     grantIds.push(grant.id);
-    const reservation = await db.platformTokenReservation.create({ data: { userId: ownerId, grantId: grant.id, jobId: randomUUID(), callKey: `gate:${suffix}:retention`, operation: "autoExtract", modelId: "deepseek-v4-flash", reservedTokens: 10, expiresAt: new Date("2026-10-01T00:00:00.000Z") } });
+    const reservation = await db.platformTokenReservation.create({ data: { userId: ownerId, grantId: grant.id, jobId: randomUUID(), callKey: `gate:${suffix}:retention`, operation: "autoExtract", modelId: "deepseek-v4-flash", reservedTokens: 10, rawEstimatedTokens: 10, quotaMultiplierBps: 10_000, expiresAt: new Date("2026-10-01T00:00:00.000Z") } });
     reservationIds.push(reservation.id);
     const ledger = await db.platformTokenLedgerEntry.create({ data: { userId: ownerId, grantId: grant.id, reservationId: reservation.id, entryKind: "reserve", amount: -10, reasonCode: "GATE", idempotencyKey: `gate:${suffix}:ledger` } });
     const provider = await createProviderConnection({ name: `Retention DeepSeek ${suffix}`, kind: "deepseek", apiKey: "deepseek-retention-key", generationModelId: "deepseek-v4-flash", visionModelId: null, embeddingModelId: null, embeddingDimensions: null }, { id: adminId, role: "admin" }, db);

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { invokeChatCompletion, invokeEmbeddings } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
-import { requireProjectAiRoute } from "@/lib/project-ai-routes";
+import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
 import { getProjectJobInternal } from "@/lib/project-workflow";
 import { getProjectMemoryInputManifest } from "@/lib/web-memory-index";
 import {
@@ -244,6 +244,12 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
             modelId: true,
             dimensions: true,
             inputManifestFingerprint: true,
+            expectedEmbeddingRouteUpdatedAt: true,
+            expectedEmbeddingRouteSource: true,
+            expectedEmbeddingRouteId: true,
+            expectedEmbeddingRouteVersion: true,
+            expectedEmbeddingProviderConfigurationVersion: true,
+            expectedEmbeddingRouteFenceFingerprint: true,
             records: {
               orderBy: { id: "asc" },
               select: {
@@ -265,14 +271,9 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
         },
       },
     }),
-    db.projectAiRoute.findUnique({
-      where: { projectId_operation: { projectId, operation: "embedding" } },
-      select: {
-        providerConnectionId: true,
-        modelId: true,
-        embeddingDimensions: true,
-        providerConnection: { select: { status: true } },
-      },
+    resolveEffectiveAiRoute(projectId, "embedding", db).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && (error as { code?: unknown }).code === "PLATFORM_ROUTE_UNAVAILABLE") return null;
+      throw error;
     }),
     getProjectMemoryInputManifest(projectId, actor, db),
   ]);
@@ -286,6 +287,14 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
     route.providerConnectionId !== pointer.generation.providerConnectionId ||
     route.modelId !== pointer.generation.modelId ||
     route.embeddingDimensions !== pointer.generation.dimensions ||
+    pointer.generation.expectedEmbeddingRouteSource === null ||
+    pointer.generation.expectedEmbeddingRouteUpdatedAt === null ||
+    pointer.generation.expectedEmbeddingRouteSource !== route.source ||
+    pointer.generation.expectedEmbeddingRouteId !== route.routeId ||
+    pointer.generation.expectedEmbeddingRouteVersion !== route.routeVersion ||
+    pointer.generation.expectedEmbeddingRouteUpdatedAt.getTime() !== route.routeUpdatedAt.getTime() ||
+    pointer.generation.expectedEmbeddingProviderConfigurationVersion !== route.providerConfigurationVersion ||
+    pointer.generation.expectedEmbeddingRouteFenceFingerprint !== route.routeFenceFingerprint ||
     currentManifest === null ||
     currentManifest !== pointer.generation.inputManifestFingerprint
   ) return fail("SEMANTIC_INDEX_NOT_READY");
@@ -295,6 +304,7 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
 export async function searchActiveMemoryForJob(input: Readonly<{
   projectId: string;
   jobId: string;
+  grantId: string;
   actor: WebAiActor;
   attempt: import("@/lib/project-workflow").JobAttemptClaim;
   question: string;
@@ -309,6 +319,14 @@ export async function searchActiveMemoryForJob(input: Readonly<{
     input.route.providerConnectionId !== input.index.providerConnectionId ||
     input.route.embeddingDimensions !== input.index.dimensions ||
     input.route.modelId !== input.index.modelId
+    || input.index.expectedEmbeddingRouteSource === null
+    || input.index.expectedEmbeddingRouteUpdatedAt === null
+    || input.index.expectedEmbeddingRouteSource !== input.route.source
+    || input.index.expectedEmbeddingRouteId !== input.route.routeId
+    || input.index.expectedEmbeddingRouteVersion !== input.route.routeVersion
+    || input.index.expectedEmbeddingRouteUpdatedAt.getTime() !== input.route.routeUpdatedAt.getTime()
+    || input.index.expectedEmbeddingProviderConfigurationVersion !== input.route.providerConfigurationVersion
+    || input.index.expectedEmbeddingRouteFenceFingerprint !== input.route.routeFenceFingerprint
   ) {
     return fail("SEMANTIC_INDEX_NOT_READY");
   }
@@ -318,12 +336,13 @@ export async function searchActiveMemoryForJob(input: Readonly<{
     attempt: input.attempt,
     actor: input.actor,
     route: input.route,
+    grantId: input.grantId,
     callKey: stableAiCallKey(input.jobId, "semanticSearch", input.callKeyDiscriminator ?? "embedding"),
     requestPayload: { question: input.question },
     maxOutputTokens: 128,
-    call: () => invokeEmbeddings({
-      connection: input.route.providerConnection,
-      modelId: input.route.modelId,
+    call: (dispatch) => invokeEmbeddings({
+      connection: dispatch.connection,
+      modelId: dispatch.modelId,
       texts: [input.question],
       expectedDimensions: input.index.dimensions,
     }),
@@ -344,7 +363,7 @@ export async function runSemanticSearchJob(input: Readonly<{
   await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const question = questionSchema.parse(input.question);
   const [route, index] = await Promise.all([
-    requireProjectAiRoute(input.projectId, "embedding", db),
+    resolveEffectiveAiRoute(input.projectId, "embedding", db),
     getActiveMemoryIndex(input.projectId, input.requestedBy, db),
   ]);
   const manifest = manifestFingerprint({
@@ -370,7 +389,7 @@ export async function runSemanticSearchJob(input: Readonly<{
     // The active index snapshot is loaded before admission. Recheck after
     // claim before using its project content or invoking the embedding model.
     await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
-    const results = await searchActiveMemoryForJob({ projectId: input.projectId, jobId: granted.jobId, actor: input.requestedBy, attempt: claim, question, route, index }, db);
+    const results = await searchActiveMemoryForJob({ projectId: input.projectId, jobId: granted.jobId, grantId: granted.grantId, actor: input.requestedBy, attempt: claim, question, route, index }, db);
     return finishWebAiJob(granted.jobId, claim, { question, indexGenerationId: index.id, results }, db);
   } catch (error) {
     await failWebAiJob(granted.jobId, claim, error, db);
@@ -417,8 +436,8 @@ export async function runRagAnswerJob(input: Readonly<{
   await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const question = questionSchema.parse(input.question);
   const [embeddingRoute, generationRoute, index] = await Promise.all([
-    requireProjectAiRoute(input.projectId, "embedding", db),
-    requireProjectAiRoute(input.projectId, "generateWithContext", db),
+    resolveEffectiveAiRoute(input.projectId, "embedding", db),
+    resolveEffectiveAiRoute(input.projectId, "generateWithContext", db),
     getActiveMemoryIndex(input.projectId, input.requestedBy, db),
   ]);
   const manifest = manifestFingerprint({
@@ -444,7 +463,7 @@ export async function runRagAnswerJob(input: Readonly<{
     // The active index snapshot is loaded before admission. Recheck after
     // claim before issuing the supplemental grant or reading its contents.
     await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
-    await createSupplementalWebAiGrant({
+    const embeddingGrant = await createSupplementalWebAiGrant({
       projectId: input.projectId,
       jobId: granted.jobId,
       route: embeddingRoute,
@@ -456,6 +475,7 @@ export async function runRagAnswerJob(input: Readonly<{
     const ranked = await searchActiveMemoryForJob({
       projectId: input.projectId,
       jobId: granted.jobId,
+      grantId: embeddingGrant.grantId,
       actor: input.requestedBy,
       attempt: claim,
       question,
@@ -470,14 +490,15 @@ export async function runRagAnswerJob(input: Readonly<{
       attempt: claim,
       actor: input.requestedBy,
       route: generationRoute,
+      grantId: granted.grantId,
       callKey: stableAiCallKey(granted.jobId, "generateWithContext", "rag"),
       requestPayload: { question, contexts },
       maxOutputTokens: generationRoute.maxOutputTokens,
-      call: () => invokeChatCompletion({
-        connection: generationRoute.providerConnection,
+      call: (dispatch) => invokeChatCompletion({
+        connection: dispatch.connection,
         operation: "generateWithContext",
-        modelId: generationRoute.modelId,
-        maxOutputTokens: generationRoute.maxOutputTokens,
+        modelId: dispatch.modelId,
+        maxOutputTokens: dispatch.maxOutputTokens,
         temperature: 0,
         messages: [
           {

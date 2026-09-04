@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
-import { lockMembershipUser } from "../src/lib/ai-entitlements";
+import { invokeChatCompletion, ProviderTransportError } from "../src/lib/ai-providers";
+import { issueVerifiedSignupGrant, lockMembershipUser } from "../src/lib/ai-entitlements";
+import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
+import { deleteArchivedProject, updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { claimProjectJob } from "../src/lib/project-workflow";
-import { stableAiCallKey, auditedProviderCall, WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-governance";
+import { createGrantedWebAiJob, finishWebAiJob, stableAiCallKey, auditedProviderCall } from "../src/lib/web-ai-governance";
 import { WebAiAccessError, type WebAiActor } from "../src/lib/web-ai-access";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 
@@ -30,26 +33,20 @@ async function createDispatchFixture() {
   const projectId = randomUUID();
   const providerId = randomUUID();
   const credentialId = randomUUID();
-  const grantId = randomUUID();
-  const jobId = randomUUID();
   const actor: WebAiActor = { id: userId, role: "user" };
   const now = new Date();
 
   await db.appUser.create({ data: { id: userId, username: `dispatch_${suffix}`, role: "user" } });
+  const platformAdmin = await db.appUser.create({
+    data: { id: randomUUID(), username: `dispatch_admin_${suffix}`, role: "admin" },
+  });
   await db.workspace.create({ data: { id: workspaceId, name: `Dispatch ${suffix}`, slug: `dispatch-${suffix}`, createdById: userId } });
   await db.project.create({ data: { id: projectId, workspaceId, name: `Dispatch project ${suffix}`, slug: `dispatch-project-${suffix}` } });
   await db.$transaction(async (tx) => {
     await grantWorkspaceMembership(tx, { workspaceId, userId, role: "owner", actorId: userId, reason: "web_ai_governance_fixture_workspace" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId, role: "owner", actorId: userId, reason: "web_ai_governance_fixture_project" });
   });
-  await db.membershipSubscription.create({
-    data: {
-      userId,
-      status: "active",
-      startsAt: new Date(now.getTime() - 60_000),
-      expiresAt: new Date(now.getTime() + 86_400_000),
-    },
-  });
+  const platformGrant = await issueVerifiedSignupGrant(userId, { issuedById: platformAdmin.id, now }, db);
   await db.externalCredential.create({
     data: {
       id: credentialId,
@@ -66,9 +63,9 @@ async function createDispatchFixture() {
       id: providerId,
       name: `Dispatch provider ${suffix}`,
       kind: "glm",
-      scope: "workspace",
-      workspaceId,
-      ownerUserId: userId,
+      scope: "platform",
+      workspaceId: null,
+      ownerUserId: null,
       ownershipState: "confirmed",
       baseUrl: "https://open.bigmodel.cn/api/paas/v4",
       credentialId,
@@ -77,62 +74,77 @@ async function createDispatchFixture() {
       lastTestedAt: now,
     },
   });
-  const route = await db.projectAiRoute.create({
+  const activeRoute = await db.platformDefaultAiRoute.findFirst({
+    where: { operation: "autoExtract", status: "active" },
+    orderBy: [{ version: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  if (activeRoute !== null) {
+    await db.platformDefaultAiRoute.update({
+      where: { id: activeRoute.id },
+      data: { status: "retired", updatedById: platformAdmin.id },
+    });
+  }
+  const latestRoute = await db.platformDefaultAiRoute.findFirst({
+    where: { operation: "autoExtract" },
+    orderBy: { version: "desc" },
+    select: { version: true },
+  });
+  const defaultRoute = await db.platformDefaultAiRoute.create({
     data: {
-      projectId,
       operation: "autoExtract",
+      version: (latestRoute?.version ?? 0) + 1,
+      status: "active",
       providerConnectionId: provider.id,
       modelId: "glm-4-flash",
+      embeddingDimensions: null,
       maxOutputTokens: 64,
-    },
-    include: { providerConnection: true },
-  });
-  const grant = await db.webAiGrant.create({
-    data: {
-      id: grantId,
-      projectId,
-      operation: "autoExtract",
-      scopeKind: "projectSources",
-      scopeIds: {},
-      manifestFingerprint: "e".repeat(64),
-      providerConnectionId: provider.id,
-      modelId: route.modelId,
-      consentVersion: WEB_AI_TRANSFER_CONSENT_VERSION,
-      issuedById: userId,
-      billingMode: "byok",
-      billingUserId: userId,
-      expiresAt: new Date(now.getTime() + 86_400_000),
+      quotaMultiplierBps: 10_000,
+      validatedProviderConfigurationVersion: provider.configurationVersion,
+      validatedAt: now,
+      createdById: platformAdmin.id,
+      updatedById: platformAdmin.id,
     },
   });
-  const job = await db.backgroundJob.create({
-    data: {
-      id: jobId,
-      projectId,
-      kind: "autoExtract",
-      requestedById: userId,
-      webAiGrantId: grant.id,
-      idempotencyKey: "f".repeat(64),
-      payload: {},
-    },
-  });
-  const claim = await claimProjectJob(job.id, db);
+  const route = await resolveEffectiveAiRoute(projectId, "autoExtract", db);
+  const created = await createGrantedWebAiJob({
+    projectId,
+    kind: "autoExtract",
+    route,
+    requestedBy: actor,
+    clientKey: `dispatch-${suffix}`,
+    scopeKind: "projectSources",
+    scopeIds: {},
+    manifestFingerprint: "e".repeat(64),
+    payload: {},
+  }, db);
+  const claim = await claimProjectJob(created.jobId, db);
   assert.notEqual(claim, false);
   if (claim === false) throw new Error("dispatch fixture claim failed");
-  return Object.freeze({ db, actor, projectId, workspaceId, userId, providerId, credentialId, jobId, route, claim });
+  return Object.freeze({
+    db,
+    actor,
+    projectId,
+    workspaceId,
+    userId,
+    platformAdminId: platformAdmin.id,
+    providerId,
+    credentialId,
+    platformGrantId: platformGrant.id,
+    defaultRouteId: defaultRoute.id,
+    jobId: created.jobId,
+    grantId: created.grantId,
+    route,
+    claim,
+  });
 }
 
 async function cleanupDispatchFixture(fixture: Awaited<ReturnType<typeof createDispatchFixture>>): Promise<void> {
-  const { db, projectId, workspaceId, userId, providerId, credentialId, jobId } = fixture;
-  await db.providerCallAudit.deleteMany({ where: { jobId } });
-  await db.backgroundJob.deleteMany({ where: { id: jobId } });
-  await db.webAiGrant.deleteMany({ where: { projectId } });
-  await db.projectAiRoute.deleteMany({ where: { projectId } });
-  await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
-  await db.externalCredential.deleteMany({ where: { id: credentialId } });
-  await db.membershipSubscription.deleteMany({ where: { userId } });
-  await db.project.deleteMany({ where: { id: projectId } });
-  await db.workspace.deleteMany({ where: { id: workspaceId } });
-  await db.appUser.deleteMany({ where: { id: userId } });
+  void fixture;
+  // This gate runs against a disposable database. Evidence rows, including
+  // platform-route audits and project-deletion receipts, are immutable and
+  // must remain available for inspection; the gate runner drops the database
+  // after the test instead of attempting row-level cleanup.
 }
 
 test(
@@ -158,7 +170,8 @@ test(
         jobId: revokeFixture.jobId,
         attempt: revokeFixture.claim,
         actor: revokeFixture.actor,
-        route: revokeFixture.route,
+        route: revokeFixture.route as never,
+        grantId: revokeFixture.grantId,
         callKey: stableAiCallKey(revokeFixture.jobId, "autoExtract", "revoke-wins"),
         call: async () => {
           networkCalls += 1;
@@ -185,7 +198,8 @@ test(
         jobId: admissionFixture.jobId,
         attempt: admissionFixture.claim,
         actor: admissionFixture.actor,
-        route: admissionFixture.route,
+        route: admissionFixture.route as never,
+        grantId: admissionFixture.grantId,
         callKey: stableAiCallKey(admissionFixture.jobId, "autoExtract", "admission-wins"),
         call: async () => {
           networkCalls += 1;
@@ -212,6 +226,119 @@ test(
       assert.equal(acknowledged.dispatchState, "acknowledged");
     } finally {
       await cleanupDispatchFixture(admissionFixture);
+    }
+  },
+);
+
+test(
+  "project deletion keeps immutable platform billing and provider-call evidence without dangling Web AI grants",
+  { skip: !shouldRun ? "WEB_AI_GOVERNANCE_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const fixture = await createDispatchFixture();
+    try {
+      const callKey = stableAiCallKey(fixture.jobId, "autoExtract", "project-delete-evidence");
+      const result = await auditedProviderCall({
+        jobId: fixture.jobId,
+        attempt: fixture.claim,
+        actor: fixture.actor,
+        route: fixture.route,
+        grantId: fixture.grantId,
+        callKey,
+        call: async (dispatch) => {
+          assert.equal(dispatch.webAiGrantId, fixture.grantId);
+          assert.equal(dispatch.routeFenceFingerprint, fixture.route.routeFenceFingerprint);
+          return { inputTokens: 2, outputTokens: 3, providerRequestId: "project-delete-evidence", usageKnown: true };
+        },
+      }, fixture.db);
+      await finishWebAiJob(fixture.jobId, fixture.claim, { ok: true }, fixture.db);
+
+      const auditBefore = await fixture.db.providerCallAudit.findUniqueOrThrow({
+        where: { id: result.providerCallAuditId },
+      });
+      const reservationBefore = await fixture.db.platformTokenReservation.findFirstOrThrow({
+        where: { jobId: fixture.jobId, callKey },
+      });
+      assert.equal(auditBefore.webAiGrantId, fixture.grantId);
+      assert.equal(reservationBefore.webAiGrantId, fixture.grantId);
+
+      const currentProject = await fixture.db.project.findUniqueOrThrow({ where: { id: fixture.projectId } });
+      const archived = await updateProjectLifecycle({
+        projectId: fixture.projectId,
+        actor: fixture.actor,
+        action: "archive",
+        expectedUpdatedAt: currentProject.updatedAt,
+      }, fixture.db);
+      await deleteArchivedProject({
+        projectId: fixture.projectId,
+        actor: fixture.actor,
+        confirmationName: currentProject.name,
+        expectedUpdatedAt: archived.project.updatedAt,
+      }, fixture.db);
+
+      assert.equal(await fixture.db.project.findUnique({ where: { id: fixture.projectId } }), null);
+      assert.equal(await fixture.db.backgroundJob.findUnique({ where: { id: fixture.jobId } }), null);
+      assert.equal(await fixture.db.webAiGrant.findUnique({ where: { id: fixture.grantId } }), null);
+      const auditAfter = await fixture.db.providerCallAudit.findUniqueOrThrow({ where: { id: auditBefore.id } });
+      const reservationAfter = await fixture.db.platformTokenReservation.findUniqueOrThrow({ where: { id: reservationBefore.id } });
+      assert.equal(auditAfter.jobId, null);
+      assert.equal(auditAfter.webAiGrantId, null);
+      assert.equal(auditAfter.webAiGrantProjectId, fixture.projectId);
+      assert.equal(auditAfter.reservationId, reservationBefore.id);
+      assert.equal(reservationAfter.webAiGrantId, null);
+      assert.equal(reservationAfter.webAiGrantProjectId, fixture.projectId);
+      assert.equal(reservationAfter.grantId, fixture.platformGrantId);
+      assert.equal(reservationAfter.routeFenceFingerprint, fixture.route.routeFenceFingerprint);
+    } finally {
+      await cleanupDispatchFixture(fixture);
+    }
+  },
+);
+
+test(
+  "credential rotation after admission fails before governed transport fetch",
+  { skip: !shouldRun ? "WEB_AI_GOVERNANCE_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const fixture = await createDispatchFixture();
+    const previousFetch = globalThis.fetch;
+    let networkCalls = 0;
+    globalThis.fetch = async () => {
+      networkCalls += 1;
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    try {
+      await assert.rejects(
+        () => auditedProviderCall({
+          jobId: fixture.jobId,
+          attempt: fixture.claim,
+          actor: fixture.actor,
+          route: fixture.route,
+          grantId: fixture.grantId,
+          callKey: stableAiCallKey(fixture.jobId, "autoExtract", "credential-rotation"),
+          call: async (dispatch) => {
+            assert.equal(dispatch.connection.credentialSecretFingerprint, "d".repeat(64));
+            await fixture.db.externalCredential.update({
+              where: { id: fixture.credentialId },
+              data: { secretFingerprint: "e".repeat(64) },
+            });
+            return invokeChatCompletion({
+              connection: dispatch.connection,
+              operation: "autoExtract",
+              modelId: dispatch.modelId,
+              messages: [{ role: "user", content: "probe" }],
+              maxOutputTokens: dispatch.maxOutputTokens,
+            });
+          },
+        }, fixture.db),
+        (error: unknown) => error instanceof ProviderTransportError && error.code === "AI_PROVIDER_UNAVAILABLE",
+      );
+      assert.equal(networkCalls, 0);
+      const audit = await fixture.db.providerCallAudit.findFirstOrThrow({
+        where: { jobId: fixture.jobId, callKey: stableAiCallKey(fixture.jobId, "autoExtract", "credential-rotation") },
+      });
+      assert.equal(audit.credentialSecretFingerprint, "d".repeat(64));
+      assert.equal(audit.status, "failed");
+    } finally {
+      globalThis.fetch = previousFetch;
     }
   },
 );

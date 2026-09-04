@@ -5,7 +5,7 @@ import { invokeVisionCompletion, ProviderTransportError } from "@/lib/ai-provide
 import { getDb } from "@/lib/db";
 import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
-import { requireProjectAiRoute } from "@/lib/project-ai-routes";
+import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
 import { renderPdfPageForVision } from "@/lib/project-assets/parser";
 import { ProjectAssetError } from "@/lib/project-assets/service";
 import { readAssetBlob } from "@/lib/project-assets/storage";
@@ -90,7 +90,7 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
   await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const assetId = assetIdSchema.parse(input.assetId);
   const [route, asset] = await Promise.all([
-    requireProjectAiRoute(input.projectId, "visionExtract", db),
+    resolveEffectiveAiRoute(input.projectId, "visionExtract", db),
     db.projectAsset.findUnique({
       where: { projectId_id: { projectId: input.projectId, id: assetId } },
       include: {
@@ -226,18 +226,19 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
         attempt: claim,
         actor: input.requestedBy,
         route,
+        grantId: granted.grantId,
         operation: "visionExtract",
         callKey: stableAiCallKey(granted.jobId, "visionExtract", segment.id),
         requestPayload: { segmentId: segment.id, prompt: promptFor(segment.locatorLabel), imageBytes: image.length },
         maxOutputTokens: route.maxOutputTokens,
-        call: async () => {
+        call: async (dispatch) => {
           const providerResult = await invokeVisionCompletion({
-            connection: route.providerConnection,
-            modelId: route.modelId,
+            connection: dispatch.connection,
+            modelId: dispatch.modelId,
             image,
             mimeType,
             prompt: promptFor(segment.locatorLabel),
-            maxOutputTokens: route.maxOutputTokens,
+            maxOutputTokens: dispatch.maxOutputTokens,
           });
           return Object.freeze({ ...providerResult, extracted: parseVisionResponse(providerResult.content) });
         },

@@ -1,5 +1,5 @@
 import type { AiOperation, AiProviderConnection } from "@prisma/client";
-import { readCredentialSecret } from "@/lib/credential-vault";
+import { CredentialVaultError, readCredentialSecret } from "@/lib/credential-vault";
 
 /** Upper bound used for one provider HTTP request when no earlier deadline applies. */
 export const PROVIDER_REQUEST_TIMEOUT_MS = 45_000;
@@ -60,7 +60,10 @@ export type EmbeddingResult = Readonly<{
 type RuntimeConnection = Pick<
   AiProviderConnection,
   "id" | "kind" | "baseUrl" | "credentialId" | "status"
->;
+> & Readonly<{
+  /** Present only for a governed dispatch admitted against an exact secret. */
+  credentialSecretFingerprint?: string;
+}>;
 
 function fail(code: ProviderTransportErrorCode, status = 502): never {
   throw new ProviderTransportError(code, status);
@@ -106,7 +109,22 @@ async function providerPost(
     ? PROVIDER_REQUEST_TIMEOUT_MS
     : absoluteDeadlineAt.getTime() - Date.now();
   if (remaining <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
-  const apiKey = await readCredentialSecretWithDeadline(connection.credentialId, absoluteDeadlineAt);
+  let apiKey: string;
+  try {
+    apiKey = await readCredentialSecretWithDeadline(
+      connection.credentialId,
+      absoluteDeadlineAt,
+      connection.credentialSecretFingerprint,
+    );
+  } catch (error) {
+    // Credential rotation is a pre-dispatch fence. Do not let a vault error
+    // fall through to the generic transport handler, which would otherwise
+    // conservatively classify the request as network-uncertain.
+    if (error instanceof CredentialVaultError) {
+      throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+    }
+    throw error;
+  }
   const remainingAfterCredential = absoluteDeadlineAt === undefined
     ? PROVIDER_REQUEST_TIMEOUT_MS
     : absoluteDeadlineAt.getTime() - Date.now();
@@ -148,8 +166,10 @@ async function providerPost(
 async function readCredentialSecretWithDeadline(
   credentialId: string,
   absoluteDeadlineAt: Date | undefined,
+  expectedSecretFingerprint?: string,
 ): Promise<string> {
-  if (absoluteDeadlineAt === undefined) return readCredentialSecret(credentialId, "aiProvider");
+  const options = expectedSecretFingerprint === undefined ? {} : { expectedSecretFingerprint };
+  if (absoluteDeadlineAt === undefined) return readCredentialSecret(credentialId, "aiProvider", undefined, options);
   const remaining = absoluteDeadlineAt.getTime() - Date.now();
   if (remaining <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -157,7 +177,7 @@ async function readCredentialSecretWithDeadline(
     timeout = setTimeout(() => reject(new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false)), remaining);
   });
   try {
-    return await Promise.race([readCredentialSecret(credentialId, "aiProvider"), deadline]);
+    return await Promise.race([readCredentialSecret(credentialId, "aiProvider", undefined, options), deadline]);
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }

@@ -7,6 +7,8 @@ import {
   acquirePlatformTokenDispatchFence,
   assertActiveMembership,
   assertAiOutboundEntitlement,
+  assertPlatformConcurrency,
+  calculateChargedPlatformTokens,
   estimatePlatformTokens,
   holdPlatformTokenReservation,
   issueVerifiedSignupGrant,
@@ -27,6 +29,14 @@ test("platform token estimates are conservative UTF-8 byte upper bounds", () => 
   const serializedBytes = Buffer.byteLength(JSON.stringify(input), "utf8");
   assert.ok(estimate >= serializedBytes + 64 + 128);
   assert.ok(estimate > 128);
+});
+
+test("platform quota charging is integer ceil arithmetic with bounded multipliers", () => {
+  assert.equal(calculateChargedPlatformTokens(1, 10_001), 2);
+  assert.equal(calculateChargedPlatformTokens(10_000, 12_500), 12_500);
+  assert.equal(calculateChargedPlatformTokens(10_001, 12_500), 12_502);
+  assert.throws(() => calculateChargedPlatformTokens(1, 0), entitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN"));
+  assert.throws(() => calculateChargedPlatformTokens(1, 100_001), entitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN"));
 });
 
 test("web AI call keys are deterministic and job-scoped", () => {
@@ -52,6 +62,18 @@ test("migration preserves project deletion while retaining billing history", () 
   assert.match(migration, /ProviderCallAudit_reservationId_fkey" FOREIGN KEY \("reservationId"\).*PlatformTokenReservation/u);
   assert.match(migration, /ProviderCallAudit_jobId_callKey_key/u);
   assert.match(migration, /PlatformTokenLedgerEntry_idempotencyKey_key/u);
+  const runtimeMigration = readFileSync("prisma/migrations/20260904070000_add_runtime_ai_grant_billing_fences/migration.sql", "utf8");
+  assert.match(runtimeMigration, /PlatformTokenReservation_webAiGrantId_fkey[\s\S]*ON DELETE SET NULL/u);
+  assert.match(runtimeMigration, /ProviderCallAudit_webAiGrantId_fkey[\s\S]*ON DELETE SET NULL/u);
+  assert.match(runtimeMigration, /webAiGrantReferenceId/u);
+  assert.match(runtimeMigration, /credentialSecretFingerprint/u);
+  assert.match(runtimeMigration, /runtime_ai_evidence_consistency_guard/u);
+  assert.match(runtimeMigration, /runtime_ai_evidence_identity_guard/u);
+  assert.match(runtimeMigration, /rawEstimatedTokens" = "reservedTokens"[\s\S]*OR \(/u);
+  assert.match(runtimeMigration, /PlatformDefaultAiRoute_quota_multiplier_guard/u);
+  assert.match(runtimeMigration, /OLD\."quotaMultiplierBps" IS DISTINCT FROM NEW\."quotaMultiplierBps"/u);
+  assert.match(runtimeMigration, /PlatformTokenLedgerEntry_usage_tokens_guard/u);
+  assert.match(runtimeMigration, /OLD\."usageTokens" IS DISTINCT FROM NEW\."usageTokens"/u);
 });
 
 type FakeGrant = {
@@ -75,6 +97,7 @@ type FakeReservation = {
   grantId: string;
   jobId: string | null;
   providerConnectionId: string | null;
+  webAiGrantId?: string | null;
   callKey: string;
   operation: string;
   modelId: string;
@@ -87,6 +110,15 @@ type FakeReservation = {
   createdAt: Date;
   settledAt: Date | null;
   releasedAt: Date | null;
+  rawEstimatedTokens?: number;
+  rawSettledTokens?: number | null;
+  quotaMultiplierBps?: number;
+  routeSource?: string | null;
+  routeId?: string | null;
+  routeVersion?: number | null;
+  routeUpdatedAt?: Date | null;
+  providerConfigurationVersion?: number | null;
+  routeFenceFingerprint?: string | null;
 };
 
 class FakeEntitlementDb {
@@ -96,7 +128,7 @@ class FakeEntitlementDb {
   readonly subscriptions = new Map<string, { status: "active" | "revoked"; startsAt: Date; expiresAt: Date; version: number }>();
   readonly users = new Map<string, { id: string; role: "admin" | "member" | "user" }>();
   readonly workspaceMembers = new Map<string, "owner" | "admin" | "member" | "viewer">();
-  readonly jobs: Array<{ requestedById: string; status: string }> = [];
+  readonly jobs: Array<{ requestedById: string; status: string; reconciliationRequired?: boolean }> = [];
   readonly providerAudits = new Set<string>();
   readonly dispatchedJobs = new Set<string>();
   readonly projectWorkspaceId = randomUUID();
@@ -229,7 +261,12 @@ class FakeEntitlementDb {
   };
 
   readonly backgroundJob = {
-    count: async ({ where }: { where: { requestedById: string; status: { in: string[] } } }) => this.jobs.filter((job) => job.requestedById === where.requestedById && where.status.in.includes(job.status)).length,
+    count: async ({ where }: { where: { requestedById: string; OR: Array<{ status: { in: string[] } } | { status: string; reconciliationRequired: boolean }> } }) => this.jobs.filter((job) => {
+      if (job.requestedById !== where.requestedById) return false;
+      return where.OR.some((condition) => "reconciliationRequired" in condition
+        ? job.status === condition.status && job.reconciliationRequired === condition.reconciliationRequired
+        : condition.status.in.includes(job.status));
+    }).length,
   };
 
   readonly backgroundJobAttempt = {
@@ -277,7 +314,11 @@ test("reservation settles known usage, refunds the difference, and is idempotent
   const grant = fake.addGrant(userId, 250, new Date("2026-10-01T00:00:00.000Z"));
   const callKey = stableAiCallKey("job-reserve", "autoExtract", "source");
   const reserved = await reservePlatformTokens({ userId, callKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 100 }, fake as never);
-  const replay = await reservePlatformTokens({ userId, callKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 1 }, fake as never);
+  await assert.rejects(
+    () => reservePlatformTokens({ userId, callKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 1 }, fake as never),
+    entitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN"),
+  );
+  const replay = await reservePlatformTokens({ userId, callKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 100 }, fake as never);
   assert.equal(reserved.created, true);
   assert.equal(replay.created, false);
   assert.equal(fake.grants.get(grant.id)?.remainingTokens, 150);
@@ -289,6 +330,64 @@ test("reservation settles known usage, refunds the difference, and is idempotent
   const replayedSettlement = await settlePlatformTokenReservation({ userId, callKey, actualTokens: 30, usageKnown: true }, fake as never);
   assert.equal(replayedSettlement.status, "settled");
   assert.equal(fake.ledgerEntries.size, ledgerCount);
+});
+
+test("reservation idempotency rejects raw, charged, and complete route snapshot drift", async () => {
+  const fake = new FakeEntitlementDb();
+  const userId = randomUUID();
+  fake.addGrant(userId, 10_000, new Date("2026-10-01T00:00:00.000Z"));
+  const callKey = stableAiCallKey("job-reservation-fence", "autoExtract", "source");
+  const routeSnapshot = {
+    source: "platform_default" as const,
+    routeId: randomUUID(),
+    routeVersion: 4,
+    routeUpdatedAt: new Date("2026-09-02T00:00:00.000Z"),
+    providerConfigurationVersion: 3,
+    quotaMultiplierBps: 12_500,
+    routeFenceFingerprint: "b".repeat(64),
+  };
+  const first = await reservePlatformTokens({
+    userId,
+    callKey,
+    operation: "autoExtract",
+    modelId: "deepseek-v4-flash",
+    rawEstimatedTokens: 9,
+    routeSnapshot,
+  }, fake as never);
+  assert.equal(first.reservedTokens, 12);
+
+  await assert.rejects(
+    () => reservePlatformTokens({
+      userId,
+      callKey,
+      operation: "autoExtract",
+      modelId: "deepseek-v4-flash",
+      rawEstimatedTokens: 10,
+      routeSnapshot,
+    }, fake as never),
+    entitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN"),
+  );
+  await assert.rejects(
+    () => reservePlatformTokens({
+      userId,
+      callKey,
+      operation: "autoExtract",
+      modelId: "deepseek-v4-flash",
+      rawEstimatedTokens: 9,
+      routeSnapshot: { ...routeSnapshot, routeVersion: 5 },
+    }, fake as never),
+    entitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN"),
+  );
+  const replay = await reservePlatformTokens({
+    userId,
+    callKey,
+    operation: "autoExtract",
+    modelId: "deepseek-v4-flash",
+    rawEstimatedTokens: 9,
+    routeSnapshot,
+  }, fake as never);
+  assert.equal(replay.created, false);
+  assert.equal(replay.reservedTokens, 12);
 });
 
 test("pre-dispatch release restores the reservation and unknown usage is held", async () => {
@@ -307,7 +406,7 @@ test("pre-dispatch release restores the reservation and unknown usage is held", 
   const held = await settlePlatformTokenReservation({ userId, callKey: heldKey, usageKnown: false }, fake as never);
   assert.equal(held.status, "held");
   assert.equal((await holdPlatformTokenReservation({ userId, callKey: heldKey }, fake as never))?.status, "held");
-  assert.equal((await reservePlatformTokens({ userId, callKey: heldKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 1 }, fake as never)).created, false);
+  assert.equal((await reservePlatformTokens({ userId, callKey: heldKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 90 }, fake as never)).created, false);
 
   const overflowKey = stableAiCallKey("job-overflow", "autoExtract", "source");
   await reservePlatformTokens({ userId, callKey: overflowKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 20 }, fake as never);
@@ -335,7 +434,7 @@ test("expired reservations release only when no provider-touch evidence exists",
   const heldRecovery = await recoverExpiredPlatformTokenReservations({ userId, now: new Date("2026-09-02T02:00:00.000Z") }, fake as never);
   assert.deepEqual(heldRecovery, { inspected: 1, released: 0, held: 1 });
   assert.equal(fake.grants.get(grant.id)?.remainingTokens, 420);
-  assert.equal((await reservePlatformTokens({ userId, jobId: "job-with-audit", callKey: heldKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 1, now: new Date("2026-09-02T03:00:00.000Z") }, fake as never)).status, "held");
+  assert.equal((await reservePlatformTokens({ userId, jobId: "job-with-audit", callKey: heldKey, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 80, now: new Date("2026-09-02T03:00:00.000Z") }, fake as never)).status, "held");
 });
 
 test("dispatch fence serializes expired recovery before a provider call", async () => {
@@ -384,7 +483,22 @@ test("insufficient or expired grants fail before creating a reservation", async 
   assert.equal(fake.reservations.size, 0);
 });
 
-test("membership expiry blocks workspace BYOK while platform admins follow platform entitlement gates", async () => {
+test("reconciled unknown jobs release the concurrency slot while open reconciliation still blocks", async () => {
+  const fake = new FakeEntitlementDb();
+  const userId = randomUUID();
+  const user = { id: userId, role: "user" as const };
+
+  fake.jobs.push({ requestedById: userId, status: "unknown", reconciliationRequired: false });
+  await assertPlatformConcurrency(user, fake as never);
+
+  fake.jobs.push({ requestedById: userId, status: "unknown", reconciliationRequired: true });
+  await assert.rejects(
+    () => assertPlatformConcurrency(user, fake as never),
+    entitlementError("AI_PLATFORM_CONCURRENCY_LIMIT"),
+  );
+});
+
+test("workspace BYOK is unreachable while platform admins follow platform entitlement gates", async () => {
   const fake = new FakeEntitlementDb();
   const ownerId = randomUUID();
   const workspaceId = fake.projectWorkspaceId;
@@ -396,19 +510,21 @@ test("membership expiry blocks workspace BYOK while platform admins follow platf
   const workspaceRoute = {
     projectId: workspaceProjectId, operation: "autoExtract", providerConnectionId, modelId: "custom-deepseek-model", embeddingDimensions: null, maxOutputTokens: 256,
     providerConnection: { id: providerConnectionId, kind: "deepseek", status: "verified", disabledAt: null, scope: "workspace", workspaceId, ownerUserId: ownerId, defaultGenerationModelId: "custom-deepseek-model", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
-  } as never;
-  const byok = await assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: ownerId, route: workspaceRoute, db: fake as never, now: new Date("2026-09-02T00:00:00.000Z"), enforceConcurrency: false });
-  assert.deepEqual(byok, { billingMode: "byok", billingUserId: ownerId, reservationRequired: false });
+  };
+  await assert.rejects(
+    () => assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: ownerId, route: workspaceRoute as never, db: fake as never, now: new Date("2026-09-02T00:00:00.000Z"), enforceConcurrency: false }),
+    entitlementError("AI_PROVIDER_SCOPE_FORBIDDEN"),
+  );
   fake.subscriptions.get(ownerId)!.expiresAt = new Date("2026-08-02T00:00:00.000Z");
   await assert.rejects(() => assertActiveMembership(ownerId, fake as never, new Date("2026-09-02T00:00:00.000Z")), entitlementError("AI_MEMBERSHIP_EXPIRED"));
-  await assert.rejects(() => assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: ownerId, route: workspaceRoute, db: fake as never, now: new Date("2026-09-02T00:00:00.000Z"), enforceConcurrency: false }), entitlementError("AI_MEMBERSHIP_EXPIRED"));
+  await assert.rejects(() => assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: ownerId, route: workspaceRoute as never, db: fake as never, now: new Date("2026-09-02T00:00:00.000Z"), enforceConcurrency: false }), entitlementError("AI_PROVIDER_SCOPE_FORBIDDEN"));
 
   const adminId = randomUUID();
   fake.users.set(adminId, { id: adminId, role: "admin" });
   const platformProviderId = randomUUID();
   const platformRoute = {
     projectId: workspaceProjectId, operation: "autoExtract", providerConnectionId: platformProviderId, modelId: "deepseek-v4-flash", embeddingDimensions: null, maxOutputTokens: 256,
-    providerConnection: { id: platformProviderId, kind: "deepseek", status: "verified", disabledAt: null, scope: "platform", workspaceId: null, ownerUserId: null, defaultGenerationModelId: "deepseek-v4-flash", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
+    providerConnection: { id: platformProviderId, kind: "deepseek", status: "verified", disabledAt: null, scope: "platform", ownershipState: "confirmed", workspaceId: null, ownerUserId: null, defaultGenerationModelId: "deepseek-v4-flash", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
   } as never;
   const adminWithoutGrant = await assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: adminId, route: platformRoute, db: fake as never, enforceConcurrency: false });
   assert.deepEqual(adminWithoutGrant, { billingMode: "platform", billingUserId: adminId, reservationRequired: true });
@@ -423,7 +539,7 @@ test("membership expiry blocks workspace BYOK while platform admins follow platf
       requestedById: adminId,
       route: {
         projectId: workspaceProjectId, operation: "autoExtract", providerConnectionId: platformProviderId, modelId: "admin-custom-model", embeddingDimensions: null, maxOutputTokens: 256,
-        providerConnection: { id: platformProviderId, kind: "deepseek", status: "verified", disabledAt: null, scope: "platform", workspaceId: null, ownerUserId: null, defaultGenerationModelId: "admin-custom-model", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
+        providerConnection: { id: platformProviderId, kind: "deepseek", status: "verified", disabledAt: null, scope: "platform", ownershipState: "confirmed", workspaceId: null, ownerUserId: null, defaultGenerationModelId: "deepseek-v4-flash", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
       } as never,
       db: fake as never,
       enforceConcurrency: false,
@@ -449,4 +565,76 @@ test("membership expiry blocks workspace BYOK while platform admins follow platf
     const userEntitlement = await assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: userId, route: platformRoute, db: fake as never, enforceConcurrency: false });
     assert.deepEqual(userEntitlement, { billingMode: "platform", billingUserId: userId, reservationRequired: true });
   }
+});
+
+test("effective platform routes use the configured model for every supported operation", async () => {
+  const fake = new FakeEntitlementDb();
+  const userId = randomUUID();
+  fake.users.set(userId, { id: userId, role: "user" });
+  const providerId = randomUUID();
+  const snapshot = {
+    source: "platform_default" as const,
+    routeId: randomUUID(),
+    routeVersion: 2,
+    routeUpdatedAt: new Date("2026-09-02T00:00:00.000Z"),
+    providerConfigurationVersion: 1,
+    quotaMultiplierBps: 10_000,
+    routeFenceFingerprint: "a".repeat(64),
+  };
+  const embeddingRoute = {
+    projectId: randomUUID(),
+    operation: "embedding" as const,
+    providerConnectionId: providerId,
+    modelId: "text-embedding-3-small",
+    embeddingDimensions: 1536,
+    maxOutputTokens: 128,
+    ...snapshot,
+    providerConnection: {
+      id: providerId,
+      kind: "openai",
+      status: "verified",
+      disabledAt: null,
+      scope: "platform",
+      ownershipState: "confirmed",
+      workspaceId: null,
+      ownerUserId: null,
+      defaultGenerationModelId: "gpt-4.1-mini",
+      defaultEmbeddingModelId: "text-embedding-3-small",
+      defaultVisionModelId: "gpt-4o-mini",
+      embeddingDimensions: 1536,
+    },
+  };
+  const embedding = await assertAiOutboundEntitlement({
+    projectId: embeddingRoute.projectId,
+    requestedById: userId,
+    route: embeddingRoute as never,
+    db: fake as never,
+    enforceConcurrency: false,
+  });
+  assert.deepEqual(embedding, { billingMode: "platform", billingUserId: userId, reservationRequired: true });
+
+  const vision = await assertAiOutboundEntitlement({
+    projectId: embeddingRoute.projectId,
+    requestedById: userId,
+    route: {
+      ...embeddingRoute,
+      operation: "visionExtract",
+      modelId: "gpt-4o-mini",
+      embeddingDimensions: null,
+    } as never,
+    db: fake as never,
+    enforceConcurrency: false,
+  });
+  assert.deepEqual(vision, { billingMode: "platform", billingUserId: userId, reservationRequired: true });
+
+  await assert.rejects(
+    () => assertAiOutboundEntitlement({
+      projectId: embeddingRoute.projectId,
+      requestedById: userId,
+      route: { ...embeddingRoute, modelId: "admin-selected-model" } as never,
+      db: fake as never,
+      enforceConcurrency: false,
+    }),
+    entitlementError("AI_MODEL_CAPABILITY_MISMATCH"),
+  );
 });

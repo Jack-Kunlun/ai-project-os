@@ -16,9 +16,15 @@ import {
   type GitHubReadOnlyClient,
   type VerifiedGitHubRepository,
 } from "../src/lib/github";
-import { createWorkspaceProviderConnection } from "../src/lib/workspace-provider-service";
+import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
+import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
-import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
+import {
+  activatePlatformDefaultAiRoute,
+  createPlatformDefaultAiRoute,
+  validatePlatformDefaultAiRoute,
+} from "../src/lib/platform-default-ai-routes";
+import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import {
   getProjectMemoryIndexPlan,
@@ -39,6 +45,21 @@ const configuredUrl = process.env.MEMORY_INDEX_C_TEST_DATABASE_URL ??
 const hasUrl = typeof configuredUrl === "string" && configuredUrl.length > 0;
 const shouldRun = gate === "1";
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
+
+async function activateDefaultEmbeddingRoute(
+  db: PrismaClient,
+  actor: Readonly<{ id: string; role: string }>,
+  providerConnectionId: string,
+) {
+  const draft = await createPlatformDefaultAiRoute({
+    operation: "embedding",
+    providerConnectionId,
+    modelId: "embedding-3",
+    embeddingDimensions: 8,
+  }, actor, db);
+  const verified = await validatePlatformDefaultAiRoute(draft.id, actor, db, draft.updatedAt);
+  return activatePlatformDefaultAiRoute(verified.id, actor, db, verified.updatedAt);
+}
 
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -203,19 +224,26 @@ async function createStagingGeneration(
   db: PrismaClient,
   input: Readonly<{ projectId: string; jobId: string; providerConnectionId: string; expectedActiveIndexGenerationId?: string | null }>,
 ) {
+  const route = await resolveEffectiveAiRoute(input.projectId, "embedding", db);
+  assert.equal(route.providerConnectionId, input.providerConnectionId);
   return db.memoryIndexGeneration.create({
     data: {
       id: randomUUID(),
       projectId: input.projectId,
       jobId: input.jobId,
-      providerConnectionId: input.providerConnectionId,
-      modelId: "embedding-3",
-      dimensions: 8,
+      providerConnectionId: route.providerConnectionId,
+      modelId: route.modelId,
+      dimensions: route.embeddingDimensions ?? 0,
       status: "staging",
       buildMode: "incremental",
       inputManifestFingerprint: digest(`manifest:${input.jobId}`),
       expectedActiveIndexGenerationId: input.expectedActiveIndexGenerationId ?? null,
-      expectedEmbeddingRouteUpdatedAt: new Date(),
+      expectedEmbeddingRouteSource: route.source,
+      expectedEmbeddingRouteId: route.routeId,
+      expectedEmbeddingRouteVersion: route.routeVersion,
+      expectedEmbeddingRouteUpdatedAt: route.routeUpdatedAt,
+      expectedEmbeddingProviderConfigurationVersion: route.providerConfigurationVersion,
+      expectedEmbeddingRouteFenceFingerprint: route.routeFenceFingerprint,
       expectedInputCount: 0,
       generatedRecordCount: 0,
       reusedRecordCount: 0,
@@ -245,6 +273,7 @@ test(
     const previousFetch = globalThis.fetch;
     const userId = randomUUID();
     const actor = { id: userId, role: "user" as const };
+    const adminId = randomUUID();
     const workspaceId = randomUUID();
     const projectId = randomUUID();
     const otherProjectId = randomUUID();
@@ -255,8 +284,6 @@ test(
     const sourceId = randomUUID();
     const changedSourceId = randomUUID();
     const uncertainSourceId = randomUUID();
-    let providerId: string | null = null;
-    let credentialId: string | null = null;
     let db: PrismaClient | null = null;
     let rawConnected = false;
     let fetchMode: "success" | "unknown" = "success";
@@ -298,6 +325,13 @@ test(
           role: "user",
         },
       });
+      await db.appUser.create({
+        data: {
+          id: adminId,
+          username: `memory_index_c_admin_${randomUUID().slice(0, 8)}`,
+          role: "admin",
+        },
+      });
       await db.workspace.create({
         data: { id: workspaceId, name: `Memory index C workspace ${randomUUID().slice(0, 8)}`, slug: `memory-index-c-workspace-${randomUUID()}`, createdById: userId },
       });
@@ -317,6 +351,7 @@ test(
           expiresAt: new Date(membershipNow.getTime() + 86_400_000),
         },
       });
+      await issueVerifiedSignupGrant(userId, { issuedById: adminId }, db);
       await db.project.createMany({
         data: [
           { id: projectId, workspaceId, name: "Memory index C", slug: `memory-index-c-${randomUUID()}` },
@@ -336,7 +371,7 @@ test(
           });
         }
       });
-      const provider = await createWorkspaceProviderConnection(workspaceId, {
+      const provider = await createProviderConnection({
         name: `Memory index C provider ${randomUUID().slice(0, 8)}`,
         kind: "glm",
         apiKey: "sk-memory-index-c-secret",
@@ -344,19 +379,13 @@ test(
         embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
         visionModelId: null,
-      }, actor, db);
-      providerId = provider.id;
-      const providerRow = await db.aiProviderConnection.update({
+      }, { id: adminId, role: "admin" }, db);
+      await db.aiProviderConnection.update({
         where: { id: provider.id },
         data: { status: "verified", lastTestedAt: new Date() },
       });
-      credentialId = providerRow.credentialId;
-      await upsertProjectAiRoute(projectId, {
-        operation: "embedding",
-        providerConnectionId: provider.id,
-        modelId: "embedding-3",
-        embeddingDimensions: 8,
-      }, db);
+      const defaultEmbeddingRoute = await activateDefaultEmbeddingRoute(db, { id: adminId, role: "admin" }, provider.id);
+      assert.equal(defaultEmbeddingRoute.status, "active");
       const originalText = "原始事实：项目使用可追溯的长期记忆。";
       const originalHash = digest(originalText);
       await db.projectSource.create({
@@ -490,6 +519,10 @@ test(
       const releasedGeneration = await db.memoryIndexGeneration.findUniqueOrThrow({ where: { projectId_id: { projectId, id: unknownGeneration.id } } });
       assert.equal(releasedGeneration.status, "unknown");
       assert.equal(releasedGeneration.reconciliationRequired, false);
+      await assert.rejects(() => db!.memoryIndexGeneration.update({
+        where: { projectId_id: { projectId, id: unknownGeneration.id } },
+        data: { expectedEmbeddingRouteFenceFingerprint: "0".repeat(64) },
+      }));
 
       // The admission is released only after that explicit local action; a
       // fresh client key can now start a new candidate and the old pointer is
@@ -553,12 +586,6 @@ test(
       const codeScanner = createGitHubCodeScanService({ db, client: repositoryClient });
       const initialScan = await codeScanner.scanProject(pointerProjectId);
       assert.equal(initialScan.status, "succeeded");
-      await upsertProjectAiRoute(pointerProjectId, {
-        operation: "embedding",
-        providerConnectionId: provider.id,
-        modelId: "embedding-3",
-        embeddingDimensions: 8,
-      }, db);
       const pointerFullJob = await runProjectMemoryIndexJob({
         projectId: pointerProjectId,
         requestedBy: actor,
@@ -624,6 +651,7 @@ test(
       const localGenerationId = randomUUID();
       const localManifest = digest("published-locally-manifest");
       const localNow = new Date();
+      const localEmbeddingRoute = await resolveEffectiveAiRoute(publishedLocallyProjectId, "embedding", db);
       await db.backgroundJob.create({
         data: {
           id: localJobId,
@@ -645,9 +673,9 @@ test(
           id: localGenerationId,
           projectId: publishedLocallyProjectId,
           jobId: localJobId,
-          providerConnectionId: provider.id,
-          modelId: "embedding-3",
-          dimensions: 8,
+          providerConnectionId: localEmbeddingRoute.providerConnectionId,
+          modelId: localEmbeddingRoute.modelId,
+          dimensions: localEmbeddingRoute.embeddingDimensions ?? 0,
           status: "complete",
           buildMode: "full",
           inputManifestFingerprint: localManifest,
@@ -655,6 +683,12 @@ test(
           generatedRecordCount: 0,
           reusedRecordCount: 0,
           recordCount: 0,
+          expectedEmbeddingRouteSource: localEmbeddingRoute.source,
+          expectedEmbeddingRouteId: localEmbeddingRoute.routeId,
+          expectedEmbeddingRouteVersion: localEmbeddingRoute.routeVersion,
+          expectedEmbeddingRouteUpdatedAt: localEmbeddingRoute.routeUpdatedAt,
+          expectedEmbeddingProviderConfigurationVersion: localEmbeddingRoute.providerConfigurationVersion,
+          expectedEmbeddingRouteFenceFingerprint: localEmbeddingRoute.routeFenceFingerprint,
           completedAt: localNow,
         },
       });
@@ -699,12 +733,6 @@ test(
       const deadlineScanner = createGitHubCodeScanService({ db, client: deadlineClient });
       const deadlineScan = await deadlineScanner.scanProject(deadlineProjectId);
       assert.equal(deadlineScan.status, "succeeded");
-      await upsertProjectAiRoute(deadlineProjectId, {
-        operation: "embedding",
-        providerConnectionId: provider.id,
-        modelId: "embedding-3",
-        embeddingDimensions: 8,
-      }, db);
       const deadlineFetchCalls = fetchCalls;
       await assert.rejects(
         () => runProjectMemoryIndexJob({
@@ -720,6 +748,30 @@ test(
       assert.equal(fetchCalls, deadlineFetchCalls);
       assert.equal(await db.backgroundJob.count({ where: { projectId: deadlineProjectId, kind: "memoryIndex" } }), 0);
 
+      // A new job-backed generation cannot borrow the pre-0600 partial shape;
+      // use the isolated deadline project so the rejection cannot be confused
+      // with the active-candidate uniqueness guard below.
+      const incompleteGenerationJob = await createMemoryJob(db, deadlineProjectId, userId, `incomplete-${randomUUID()}`);
+      await assert.rejects(
+        () => db!.memoryIndexGeneration.create({
+          data: {
+            projectId: deadlineProjectId,
+            jobId: incompleteGenerationJob.id,
+            providerConnectionId: provider.id,
+            modelId: "embedding-3",
+            dimensions: 8,
+            status: "staging",
+            buildMode: "full",
+            inputManifestFingerprint: digest("incomplete-route-snapshot"),
+            expectedInputCount: 0,
+            generatedRecordCount: 0,
+            reusedRecordCount: 0,
+            recordCount: 0,
+          },
+        }),
+        (error: unknown) => error instanceof Error && error.message.includes("new job-backed memory index generation requires a complete route snapshot"),
+      );
+
       // Database guards and project-scoped composite FKs reject an invalid
       // staging pointer and cross-project baseline/reuse references.
       const otherJob = await createMemoryJob(db, otherProjectId, userId, `other-${randomUUID()}`);
@@ -728,6 +780,39 @@ test(
         jobId: otherJob.id,
         providerConnectionId: provider.id,
       });
+      // A job-backed generation owns its effective route fence from INSERT;
+      // changing it during staging or building must fail before publication.
+      await assert.rejects(() => db!.$executeRaw`
+        UPDATE "MemoryIndexGeneration"
+           SET "expectedEmbeddingRouteFenceFingerprint" = ${"0".repeat(64)}
+         WHERE "id" = ${otherGeneration.id}
+      `);
+      await assert.rejects(
+        () => db!.$executeRaw`
+          UPDATE "MemoryIndexGeneration"
+             SET "jobId" = NULL
+           WHERE "id" = ${otherGeneration.id}
+        `,
+        (error: unknown) => error instanceof Error && error.message.includes("memory index generation job binding is immutable"),
+      );
+      await db.memoryIndexGeneration.update({
+        where: { projectId_id: { projectId: otherProjectId, id: otherGeneration.id } },
+        data: { status: "building" },
+      });
+      const replacementJob = await createMemoryJob(db, otherProjectId, userId, `replacement-${randomUUID()}`);
+      await assert.rejects(
+        () => db!.$executeRaw`
+          UPDATE "MemoryIndexGeneration"
+             SET "jobId" = ${replacementJob.id}
+           WHERE "id" = ${otherGeneration.id}
+        `,
+        (error: unknown) => error instanceof Error && error.message.includes("memory index generation job binding is immutable"),
+      );
+      await assert.rejects(() => db!.$executeRaw`
+        UPDATE "MemoryIndexGeneration"
+           SET "expectedEmbeddingRouteVersion" = ${otherGeneration.expectedEmbeddingRouteVersion! + 1}
+         WHERE "id" = ${otherGeneration.id}
+      `);
       await assert.rejects(() => db!.memoryIndexPointer.create({
         data: { projectId: otherProjectId, indexGenerationId: otherGeneration.id },
       }));
@@ -766,25 +851,9 @@ test(
     } finally {
       globalThis.fetch = previousFetch;
       if (db !== null) {
-        await db.project.deleteMany({ where: { id: { in: [projectId, otherProjectId, concurrentProjectId, pointerProjectId, publishedLocallyProjectId, deadlineProjectId] } } });
-        if (providerId !== null) {
-          const reservations = await db.platformTokenReservation.findMany({
-            where: { providerConnectionId: providerId },
-            select: { id: true },
-          });
-          await db.providerCallAudit.deleteMany({ where: { providerConnectionId: providerId } });
-          const reservationIds = reservations.map((reservation) => reservation.id);
-          if (reservationIds.length > 0) {
-            await db.platformTokenLedgerEntry.deleteMany({ where: { reservationId: { in: reservationIds } } });
-            await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
-          }
-          await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
-        }
-        if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
-        await db.membershipSubscription.deleteMany({ where: { userId } });
-        await db.workspace.update({ where: { id: workspaceId }, data: { createdById: null } });
-        await db.workspace.delete({ where: { id: workspaceId } });
-        await db.appUser.deleteMany({ where: { id: userId } });
+        // Platform default route/audit rows are immutable evidence. The
+        // disposable gate runner drops this database after the test, so row
+        // deletion here would violate the audit contract.
         await db.$disconnect();
       }
       if (rawConnected) await raw.end();

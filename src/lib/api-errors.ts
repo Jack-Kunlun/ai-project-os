@@ -46,6 +46,7 @@ import { AiEntitlementError } from "@/lib/ai-entitlements";
 import { MembershipServiceError } from "@/lib/membership-service";
 import { WorkspaceProviderServiceError } from "@/lib/workspace-provider-service";
 import { PlatformDefaultAiRouteError } from "@/lib/platform-default-ai-routes";
+import { EffectiveAiRouteError } from "@/lib/effective-ai-route";
 
 export type ApiErrorBody = {
   error: {
@@ -505,6 +506,17 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PLATFORM_AI_ROUTE_NOT_VALIDATED: [409, "平台默认路由尚未通过本地验证"],
       PLATFORM_AI_ROUTE_CONFIGURATION_CHANGED: [409, "供应商配置已变化，请重新创建并验证路由草稿"],
       PLATFORM_AI_ROUTE_REASON_REQUIRED: [400, "退役平台默认路由必须填写原因"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof EffectiveAiRouteError) {
+    const mapping = {
+      PROJECT_NOT_FOUND: [404, "项目不存在"],
+      PROJECT_ROUTE_INVALID: [409, "项目模型路由当前不可用，请重新验证配置"],
+      PLATFORM_ROUTE_UNAVAILABLE: [409, "平台默认模型路由当前不可用，请联系管理员"],
+      AI_PROVIDER_CONFIGURATION_DRIFT: [409, "模型供应商配置已变化，请重新验证平台默认路由"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

@@ -5,7 +5,6 @@ import {
   type AiProviderConnection,
   type BackgroundJobKind,
   type PrismaClient,
-  type ProjectAiRoute,
   type WebAiScopeKind,
 } from "@prisma/client";
 import { z } from "zod";
@@ -19,13 +18,18 @@ import {
   releasePlatformTokenReservation,
   reservePlatformTokens,
   settlePlatformTokenReservation,
-  lockMembershipUser,
 } from "@/lib/ai-entitlements";
 import { reloadProviderConfiguration } from "@/lib/ai-providers/service";
 import { getDb } from "@/lib/db";
 import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { jsonValue } from "@/lib/web-github";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
+import {
+  effectiveAiRouteSnapshot,
+  resolveEffectiveAiRoute,
+  routeSnapshotsEqual,
+  type EffectiveAiRoute,
+} from "@/lib/effective-ai-route";
 import { assertWebAiProjectAccess, WebAiAccessError, type WebAiActor } from "@/lib/web-ai-access";
 import {
   claimProjectJob,
@@ -57,9 +61,37 @@ export class WebAiGovernanceError extends Error {
   }
 }
 
-export type RuntimeRoute = ProjectAiRoute & { providerConnection: AiProviderConnection };
+export type RuntimeRoute = EffectiveAiRoute;
 
-type DispatchRoute = RuntimeRoute & { providerConnection: AiProviderConnection };
+type DispatchRoute = RuntimeRoute;
+
+function hasCompleteRouteSnapshot(route: RuntimeRoute): boolean {
+  return (route.source === "project_override" || route.source === "platform_default")
+    && route.routeUpdatedAt instanceof Date
+    && Number.isFinite(route.routeUpdatedAt.getTime())
+    && Number.isSafeInteger(route.providerConfigurationVersion)
+    && route.providerConfigurationVersion > 0
+    && Number.isSafeInteger(route.quotaMultiplierBps)
+    && route.quotaMultiplierBps >= 1
+    && route.quotaMultiplierBps <= 100_000
+    && typeof route.routeFenceFingerprint === "string"
+    && /^[0-9a-f]{64}$/u.test(route.routeFenceFingerprint)
+    && (route.source === "platform_default"
+      ? typeof route.routeId === "string" && route.routeId.length > 0 && Number.isSafeInteger(route.routeVersion) && (route.routeVersion ?? 0) > 0
+      : route.routeId === null && route.routeVersion === null);
+}
+
+function assertRuntimeRoute(route: RuntimeRoute): void {
+  if (
+    !hasCompleteRouteSnapshot(route)
+    || route.providerConnection.scope !== "platform"
+    || route.providerConnection.ownershipState !== "confirmed"
+    || route.providerConnection.workspaceId !== null
+    || route.providerConnection.ownerUserId !== null
+  ) {
+    throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  }
+}
 
 function routeTupleMatches(left: RuntimeRoute, right: RuntimeRoute): boolean {
   return left.projectId === right.projectId
@@ -67,18 +99,32 @@ function routeTupleMatches(left: RuntimeRoute, right: RuntimeRoute): boolean {
     && left.providerConnectionId === right.providerConnectionId
     && left.modelId === right.modelId
     && left.embeddingDimensions === right.embeddingDimensions
-    && left.maxOutputTokens === right.maxOutputTokens;
+    && left.maxOutputTokens === right.maxOutputTokens
+    && hasCompleteRouteSnapshot(left)
+    && hasCompleteRouteSnapshot(right)
+    && routeSnapshotsEqual(left, right);
+}
+
+function routeSnapshotData(route: RuntimeRoute) {
+  const snapshot = effectiveAiRouteSnapshot(route as EffectiveAiRoute);
+  return {
+    routeSource: snapshot.routeSource,
+    routeId: snapshot.routeId,
+    routeVersion: snapshot.routeVersion,
+    routeUpdatedAt: snapshot.routeUpdatedAt,
+    providerConfigurationVersion: snapshot.providerConfigurationVersion,
+    quotaMultiplierBps: snapshot.quotaMultiplierBps,
+    routeFenceFingerprint: snapshot.routeFenceFingerprint,
+  };
 }
 
 async function reloadDispatchRoute(
   tx: Prisma.TransactionClient,
   input: Readonly<{ projectId: string; route: RuntimeRoute }>,
 ): Promise<DispatchRoute> {
-  const route = await tx.projectAiRoute.findUnique({
-    where: { projectId_operation: { projectId: input.projectId, operation: input.route.operation } },
-    include: { providerConnection: true },
-  });
-  if (route === null || !routeTupleMatches(input.route, route)) {
+  assertRuntimeRoute(input.route);
+  const route = await resolveEffectiveAiRoute(input.projectId, input.route.operation, tx, { lock: true });
+  if (!routeTupleMatches(input.route, route)) {
     throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
   }
   return route;
@@ -107,7 +153,7 @@ async function reloadRuntimeRoute(
   ) {
     throw new AiEntitlementError("AI_PROVIDER_CONNECTION_UNAVAILABLE");
   }
-  return Object.freeze({ ...route, providerConnection: provider });
+  return Object.freeze({ ...route, providerConnection: Object.freeze(provider) });
 }
 
 async function reloadDispatchProvider(
@@ -173,6 +219,83 @@ function idempotencyKey(
     .digest("hex");
 }
 
+type RuntimeGrantTuple = Readonly<{
+  id: string;
+  projectId: string;
+  operation: AiOperation;
+  providerConnectionId: string;
+  modelId: string;
+  consentVersion: string;
+  billingMode: "platform" | "byok" | "legacy";
+  billingUserId: string;
+  boundJobId: string | null;
+  routeSource: string | null;
+  routeId: string | null;
+  routeVersion: number | null;
+  routeUpdatedAt: Date | null;
+  providerConfigurationVersion: number | null;
+  quotaMultiplierBps: number | null;
+  routeFenceFingerprint: string | null;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  scopeKind?: WebAiScopeKind;
+  scopeIds?: unknown;
+  manifestFingerprint?: string;
+}>;
+
+function grantMatchesRuntimeTuple(
+  grant: RuntimeGrantTuple,
+  input: Readonly<{ projectId: string; jobId: string; route: RuntimeRoute; billingUserId: string; billingMode: string; scopeKind?: WebAiScopeKind; scopeIds?: unknown; manifestFingerprint?: string }>,
+): boolean {
+  return grant.projectId === input.projectId
+    && grant.operation === input.route.operation
+    && grant.providerConnectionId === input.route.providerConnectionId
+    && grant.modelId === input.route.modelId
+    && grant.consentVersion === WEB_AI_TRANSFER_CONSENT_VERSION
+    && grant.billingUserId === input.billingUserId
+    && grant.billingMode === input.billingMode
+    && grant.boundJobId === input.jobId
+    && grant.revokedAt === null
+    && grant.expiresAt > new Date()
+    && grant.routeSource === input.route.source
+    && grant.routeId === input.route.routeId
+    && grant.routeVersion === input.route.routeVersion
+    && grant.routeUpdatedAt !== null
+    && grant.routeUpdatedAt.getTime() === input.route.routeUpdatedAt.getTime()
+    && grant.providerConfigurationVersion === input.route.providerConfigurationVersion
+    && grant.quotaMultiplierBps === input.route.quotaMultiplierBps
+    && grant.routeFenceFingerprint === input.route.routeFenceFingerprint
+    && (input.scopeKind === undefined || grant.scopeKind === input.scopeKind)
+    && (input.scopeIds === undefined || JSON.stringify(grant.scopeIds) === JSON.stringify(input.scopeIds))
+    && (input.manifestFingerprint === undefined || grant.manifestFingerprint === input.manifestFingerprint);
+}
+
+function runtimeGrantSelect() {
+  return {
+    id: true,
+    projectId: true,
+    operation: true,
+    providerConnectionId: true,
+    modelId: true,
+    consentVersion: true,
+    billingMode: true,
+    billingUserId: true,
+    boundJobId: true,
+    routeSource: true,
+    routeId: true,
+    routeVersion: true,
+    routeUpdatedAt: true,
+    providerConfigurationVersion: true,
+    quotaMultiplierBps: true,
+    routeFenceFingerprint: true,
+    expiresAt: true,
+    revokedAt: true,
+    scopeKind: true,
+    scopeIds: true,
+    manifestFingerprint: true,
+  } as const;
+}
+
 export async function createGrantedWebAiJob(input: Readonly<{
   projectId: string;
   kind: BackgroundJobKind;
@@ -189,7 +312,8 @@ export async function createGrantedWebAiJob(input: Readonly<{
    * admission lock and create their generation atomically with the job.
    */
   afterCreate?: (tx: Prisma.TransactionClient, jobId: string) => Promise<void>;
-}>, db: PrismaClient = getDb()): Promise<Readonly<{ jobId: string; created: boolean }>> {
+}>, db: PrismaClient = getDb()): Promise<Readonly<{ jobId: string; grantId: string; created: boolean }>> {
+  assertRuntimeRoute(input.route);
   return withWebAiProjectAccessTransaction(db, {
     actor: input.requestedBy,
     projectId: input.projectId,
@@ -200,9 +324,33 @@ export async function createGrantedWebAiJob(input: Readonly<{
     const key = idempotencyKey(input.kind, input.projectId, transactionActor.id, input.clientKey);
     const existing = await tx.backgroundJob.findUnique({
       where: { requestedById_idempotencyKey: { requestedById: transactionActor.id, idempotencyKey: key } },
-      select: { id: true },
+      select: {
+        id: true,
+        projectId: true,
+        kind: true,
+        requestedById: true,
+        webAiGrant: { select: runtimeGrantSelect() },
+      },
     });
-    if (existing !== null) return Object.freeze({ jobId: existing.id, created: false });
+    if (existing !== null) {
+      if (
+        existing.projectId !== input.projectId
+        || existing.kind !== input.kind
+        || existing.requestedById !== transactionActor.id
+        || existing.webAiGrant === null
+        || !grantMatchesRuntimeTuple(existing.webAiGrant, {
+          projectId: input.projectId,
+          jobId: existing.id,
+          route: input.route,
+          billingUserId: transactionActor.id,
+          billingMode: "platform",
+          scopeKind: input.scopeKind,
+          scopeIds: input.scopeIds,
+          manifestFingerprint: input.manifestFingerprint,
+        })
+      ) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+      return Object.freeze({ jobId: existing.id, grantId: existing.webAiGrant.id, created: false });
+    }
     const billing = await assertAiOutboundEntitlement({
       projectId: input.projectId,
       requestedById: transactionActor.id,
@@ -211,8 +359,20 @@ export async function createGrantedWebAiJob(input: Readonly<{
       enforceConcurrency: true,
     });
     const jobId = randomUUID();
+    const job = await tx.backgroundJob.create({
+      data: {
+        id: jobId,
+        projectId: input.projectId,
+        kind: input.kind,
+        requestedById: transactionActor.id,
+        webAiGrantId: null,
+        idempotencyKey: key,
+        payload: jsonValue(input.payload),
+      },
+    });
     const grant = await tx.webAiGrant.create({
       data: {
+        id: randomUUID(),
         projectId: input.projectId,
         operation: route.operation,
         scopeKind: input.scopeKind,
@@ -225,22 +385,14 @@ export async function createGrantedWebAiJob(input: Readonly<{
         billingMode: billing.billingMode,
         billingUserId: billing.billingUserId,
         callKey: stableAiCallKey(jobId, route.operation, "grant"),
+        boundJobId: job.id,
+        ...routeSnapshotData(route),
         expiresAt: new Date(Date.now() + GRANT_LIFETIME_MS),
       },
     });
-    const job = await tx.backgroundJob.create({
-      data: {
-        id: jobId,
-        projectId: input.projectId,
-        kind: input.kind,
-        requestedById: transactionActor.id,
-        webAiGrantId: grant.id,
-        idempotencyKey: key,
-        payload: jsonValue(input.payload),
-      },
-    });
+    await tx.backgroundJob.update({ where: { id: job.id }, data: { webAiGrantId: grant.id } });
     if (input.afterCreate !== undefined) await input.afterCreate(tx, job.id);
-    return Object.freeze({ jobId: job.id, created: true });
+    return Object.freeze({ jobId: job.id, grantId: grant.id, created: true });
   });
 }
 
@@ -253,6 +405,7 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
   scopeIds: unknown;
   manifestFingerprint: string;
 }>, db: PrismaClient = getDb()) {
+  assertRuntimeRoute(input.route);
   const additionalActorIds = typeof input.route.providerConnection.ownerUserId !== "string"
     ? []
     : [input.route.providerConnection.ownerUserId];
@@ -265,7 +418,7 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
     const currentActor = admission.actor;
     const job = await tx.backgroundJob.findUnique({
       where: { id: input.jobId },
-      select: { id: true, projectId: true, requestedById: true },
+      select: { id: true, projectId: true, requestedById: true, kind: true },
     });
     if (job === null || job.projectId !== input.projectId || job.requestedById !== currentActor.id) {
       return fail("WEB_AI_JOB_NOT_FOUND");
@@ -278,12 +431,31 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
       db: tx,
       enforceConcurrency: false,
     });
-    return tx.webAiGrant.create({
+    const supplementalScopeIds = { jobId: input.jobId, scope: input.scopeIds };
+    const existing = await tx.webAiGrant.findUnique({
+      where: { boundJobId_operation: { boundJobId: input.jobId, operation: route.operation } },
+      select: runtimeGrantSelect(),
+    });
+    if (existing !== null) {
+      if (!grantMatchesRuntimeTuple(existing, {
+        projectId: input.projectId,
+        jobId: input.jobId,
+        route,
+        billingUserId: billing.billingUserId,
+        billingMode: billing.billingMode,
+        scopeKind: input.scopeKind,
+        scopeIds: supplementalScopeIds,
+        manifestFingerprint: input.manifestFingerprint,
+      })) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+      return Object.freeze({ grantId: existing.id, created: false });
+    }
+    const grant = await tx.webAiGrant.create({
       data: {
+        id: randomUUID(),
         projectId: input.projectId,
         operation: route.operation,
         scopeKind: input.scopeKind,
-        scopeIds: jsonValue({ jobId: input.jobId, scope: input.scopeIds }),
+        scopeIds: jsonValue(supplementalScopeIds),
         manifestFingerprint: input.manifestFingerprint,
         providerConnectionId: route.providerConnectionId,
         modelId: route.modelId,
@@ -292,9 +464,12 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
         billingMode: billing.billingMode,
         billingUserId: billing.billingUserId,
         callKey: stableAiCallKey(input.jobId, route.operation, "supplemental"),
+        boundJobId: input.jobId,
+        ...routeSnapshotData(route),
         expiresAt: new Date(Date.now() + GRANT_LIFETIME_MS),
       },
     });
+    return Object.freeze({ grantId: grant.id, created: true });
   });
 }
 
@@ -341,16 +516,32 @@ export async function updateWebAiJobProgress(
   await updateProjectJobProgress({ jobId, ...claim, stage, current, total }, db);
 }
 
+/** The only provider input exposed after final admission. */
+export type ProviderDispatchContext = Readonly<{
+  connection: Readonly<AiProviderConnection & {
+    /** Non-secret credential fence; transport rechecks it before fetch. */
+    credentialSecretFingerprint: string;
+  }>;
+  operation: AiOperation;
+  modelId: string;
+  maxOutputTokens: number;
+  providerCallAuditId: string;
+  webAiGrantId: string;
+  reservationId: string | null;
+  routeFenceFingerprint: string;
+}>;
+
 export async function auditedProviderCall<T>(input: Readonly<{
   jobId: string;
   attempt: JobAttemptClaim;
   actor: WebAiActor;
   route: RuntimeRoute;
+  grantId: string;
   operation?: AiOperation;
   callKey: string;
   requestPayload?: unknown;
   maxOutputTokens?: number;
-  call: () => Promise<Readonly<T & {
+  call: (dispatch: ProviderDispatchContext) => Promise<Readonly<T & {
     inputTokens: number;
     providerRequestId: string | null;
     outputTokens?: number;
@@ -361,8 +552,18 @@ export async function auditedProviderCall<T>(input: Readonly<{
   providerRequestId: string | null;
   outputTokens?: number;
   usageKnown?: boolean;
+  providerCallAuditId: string;
+  webAiGrantId: string;
+  routeFenceFingerprint: string;
   }> {
-  const operation = input.operation ?? input.route.operation;
+  assertRuntimeRoute(input.route);
+  if (!/^[0-9a-f-]{36}$/u.test(input.grantId)) {
+    throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  }
+  if (input.operation !== undefined && input.operation !== input.route.operation) {
+    throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  }
+  const operation = input.route.operation;
   const currentActor = await assertWebAiProjectAccess(input.actor, input.route.projectId, "edit", db);
   // Bind the caller's route to the job before touching provider or token
   // state. This is only an early rejection; the final access-first admission
@@ -387,6 +588,10 @@ export async function auditedProviderCall<T>(input: Readonly<{
     enforceConcurrency: false,
   });
   const billingUserId = billing.billingUserId;
+  const requestedMaxOutputTokens = input.maxOutputTokens ?? input.route.maxOutputTokens;
+  if (!Number.isSafeInteger(requestedMaxOutputTokens) || requestedMaxOutputTokens < 1 || requestedMaxOutputTokens > input.route.maxOutputTokens) {
+    throw new AiEntitlementError("AI_MODEL_CAPABILITY_MISMATCH");
+  }
   let reservation: Awaited<ReturnType<typeof reservePlatformTokens>> | null = null;
   let auditId: string | null = null;
   let networkStarted = false;
@@ -401,7 +606,10 @@ export async function auditedProviderCall<T>(input: Readonly<{
           callKey: input.callKey,
           operation,
           modelId: input.route.modelId,
-          estimatedTokens: estimatePlatformTokens(input.requestPayload ?? { operation, modelId: input.route.modelId }, input.maxOutputTokens ?? input.route.maxOutputTokens),
+          rawEstimatedTokens: estimatePlatformTokens(input.requestPayload ?? { operation, modelId: input.route.modelId }, requestedMaxOutputTokens),
+          webAiGrantId: input.grantId,
+          webAiGrantProjectId: input.route.projectId,
+          routeSnapshot: input.route,
         }, db)
       : null;
     if (reservation !== null && reservation.status !== "reserved") {
@@ -432,10 +640,22 @@ export async function auditedProviderCall<T>(input: Readonly<{
         route: input.route,
       });
       const provider = await reloadDispatchProvider(tx, persistedRoute, input.route);
-      const dispatchRoute: DispatchRoute = { ...persistedRoute, providerConnection: provider };
-      if (provider.scope === "workspace" && provider.ownerUserId !== null) {
-        await lockMembershipUser(tx, provider.ownerUserId);
+      const credential = await tx.externalCredential.findUnique({
+        where: { id: provider.credentialId },
+        select: { kind: true, secretFingerprint: true },
+      });
+      if (
+        credential === null
+        || credential.kind !== "aiProvider"
+        || !/^[0-9a-f]{64}$/u.test(credential.secretFingerprint)
+      ) {
+        throw new AiEntitlementError("AI_PROVIDER_CONNECTION_UNAVAILABLE");
       }
+      const dispatchProvider = Object.freeze({
+        ...provider,
+        credentialSecretFingerprint: credential.secretFingerprint,
+      });
+      const dispatchRoute: DispatchRoute = { ...persistedRoute, providerConnection: dispatchProvider };
       const finalBilling = await assertAiOutboundEntitlement({
         projectId: input.route.projectId,
         requestedById: accessAdmission.access.actor.id,
@@ -444,44 +664,22 @@ export async function auditedProviderCall<T>(input: Readonly<{
         db: tx,
         enforceConcurrency: false,
       });
-      // A BackgroundJob is the durable owner of the grant used to create it.
-      // Rebind that grant under the same job lock so a stale worker cannot
-      // dispatch with a route/provider tuple that was never granted to this
-      // job (or with an expired/revoked grant).
-      const grantBinding = await tx.backgroundJob.findUnique({
-        where: { id: input.jobId },
-        select: {
-          projectId: true,
-          requestedById: true,
-          webAiGrant: {
-            select: {
-              projectId: true,
-              operation: true,
-              providerConnectionId: true,
-              modelId: true,
-              consentVersion: true,
-              billingMode: true,
-              billingUserId: true,
-              expiresAt: true,
-              revokedAt: true,
-            },
-          },
-        },
+      // The grant id is explicit at the call boundary. A job's primary grant
+      // relation is not a valid substitute because RAG/brief/agent calls also
+      // use operation-specific supplemental grants.
+      const grant = await tx.webAiGrant.findUnique({
+        where: { id: input.grantId },
+        select: runtimeGrantSelect(),
       });
-      const grant = grantBinding?.webAiGrant;
       if (
-        grantBinding === null
-        || grant === undefined
-        || grant === null
-        || grantBinding.projectId !== input.route.projectId
-        || grantBinding.requestedById !== accessAdmission.access.actor.id
-        || grant.projectId !== input.route.projectId
-        || grant.operation !== input.route.operation
-        || grant.providerConnectionId !== input.route.providerConnectionId
-        || grant.modelId !== input.route.modelId
-        || grant.consentVersion !== WEB_AI_TRANSFER_CONSENT_VERSION
-        || grant.revokedAt !== null
-        || grant.expiresAt <= new Date()
+        grant === null
+        || !grantMatchesRuntimeTuple(grant, {
+          projectId: input.route.projectId,
+          jobId: input.jobId,
+          route: dispatchRoute,
+          billingUserId: accessAdmission.access.actor.id,
+          billingMode: finalBilling.billingMode,
+        })
       ) {
         throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
       }
@@ -498,6 +696,12 @@ export async function auditedProviderCall<T>(input: Readonly<{
         const fence = await acquirePlatformTokenDispatchFence({
           userId: finalBilling.billingUserId,
           callKey: input.callKey,
+          jobId: input.jobId,
+          operation,
+          modelId: dispatchRoute.modelId,
+          webAiGrantId: grant.id,
+          routeFenceFingerprint: dispatchRoute.routeFenceFingerprint,
+          quotaMultiplierBps: dispatchRoute.quotaMultiplierBps,
           now: new Date(),
         }, tx);
         if (fence === null || !fence.allowed || fence.status !== "reserved") {
@@ -509,6 +713,9 @@ export async function auditedProviderCall<T>(input: Readonly<{
         audit = await tx.providerCallAudit.create({
           data: {
             jobId: input.jobId,
+            webAiGrantId: grant.id,
+            webAiGrantReferenceId: grant.id,
+            webAiGrantProjectId: input.route.projectId,
             providerConnectionId: provider.id,
             operation,
             modelId: persistedRoute.modelId,
@@ -516,6 +723,14 @@ export async function auditedProviderCall<T>(input: Readonly<{
             billingUserId: finalBilling.billingUserId,
             callKey: input.callKey,
             reservationId: reservation?.reservationId ?? null,
+            routeSource: dispatchRoute.source,
+            routeId: dispatchRoute.routeId,
+            routeVersion: dispatchRoute.routeVersion,
+            routeUpdatedAt: dispatchRoute.routeUpdatedAt,
+            providerConfigurationVersion: dispatchRoute.providerConfigurationVersion,
+            quotaMultiplierBps: dispatchRoute.quotaMultiplierBps,
+            routeFenceFingerprint: dispatchRoute.routeFenceFingerprint,
+            credentialSecretFingerprint: credential.secretFingerprint,
             status: "running",
           },
         });
@@ -528,16 +743,26 @@ export async function auditedProviderCall<T>(input: Readonly<{
         }
         throw error;
       }
-      return Object.freeze({ auditId: audit.id, billing: finalBilling, dispatchMarked: accessAdmission.dispatchMarked });
+      const dispatch: ProviderDispatchContext = Object.freeze({
+        connection: dispatchProvider,
+        operation,
+        modelId: dispatchRoute.modelId,
+        maxOutputTokens: requestedMaxOutputTokens,
+        providerCallAuditId: audit.id,
+        webAiGrantId: grant.id,
+        reservationId: reservation?.reservationId ?? null,
+        routeFenceFingerprint: dispatchRoute.routeFenceFingerprint,
+      });
+      return Object.freeze({ auditId: audit.id, grantId: grant.id, billing: finalBilling, dispatch, dispatchMarked: accessAdmission.dispatchMarked });
     });
     auditId = admitted.auditId;
     dispatchMarked = admitted.dispatchMarked;
     networkStarted = true;
-    const result = await input.call();
+    const result = await input.call(admitted.dispatch);
     await markProviderAcknowledged({ jobId: input.jobId, ...input.attempt }, db);
     if (reservation !== null && reservation.created) {
       const settled = await settlePlatformTokenReservation({
-        userId: billingUserId,
+        userId: admitted.billing.billingUserId,
         callKey: input.callKey,
         actualTokens: result.inputTokens + (result.outputTokens ?? 0),
         usageKnown: result.usageKnown === true,
@@ -563,7 +788,12 @@ export async function auditedProviderCall<T>(input: Readonly<{
         completedAt: new Date(),
       },
     });
-    return result;
+    return Object.freeze({
+      ...result,
+      providerCallAuditId: admitted.auditId,
+      webAiGrantId: admitted.grantId,
+      routeFenceFingerprint: admitted.dispatch.routeFenceFingerprint,
+    });
   } catch (error) {
     const uncertain = networkStarted && isUncertainProviderDispatch(error);
     // Transport errors that do not carry the optional marker are conservative:

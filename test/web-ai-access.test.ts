@@ -264,6 +264,7 @@ test("active memory job search authorizes before progress, audit, or reservation
     () => searchActiveMemoryForJob({
       projectId: PROJECT_ID,
       jobId: PROJECT_ID,
+      grantId: PROJECT_ID,
       actor,
       attempt: {} as never,
       question: "状态",
@@ -542,9 +543,33 @@ test("governance transport binds the current actor to the same project job", asy
     await assert.rejects(
       () => auditedProviderCall({
         jobId: PROJECT_ID,
+        grantId: PROJECT_ID,
         attempt: {} as never,
         actor,
-        route: { projectId: PROJECT_ID, operation: "autoExtract" } as never,
+        route: {
+          projectId: PROJECT_ID,
+          operation: "autoExtract",
+          providerConnectionId: "55555555-5555-4555-8555-555555555555",
+          modelId: "deepseek-v4-flash",
+          embeddingDimensions: null,
+          maxOutputTokens: 256,
+          createdAt: new Date("2026-09-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-09-01T00:00:00.000Z"),
+          source: "platform_default",
+          routeId: "66666666-6666-4666-8666-666666666666",
+          routeVersion: 1,
+          routeUpdatedAt: new Date("2026-09-01T00:00:00.000Z"),
+          providerConfigurationVersion: 1,
+          quotaMultiplierBps: 10_000,
+          routeFenceFingerprint: "a".repeat(64),
+          providerConnection: {
+            id: "55555555-5555-4555-8555-555555555555",
+            scope: "platform",
+            ownershipState: "confirmed",
+            workspaceId: null,
+            ownerUserId: null,
+          },
+        } as never,
         callKey: "governance-mismatch-call",
         call: async () => {
           providerCalls += 1;

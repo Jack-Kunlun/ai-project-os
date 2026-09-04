@@ -1,5 +1,6 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { cp, mkdir, mkdtemp, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,20 +10,19 @@ import test from "node:test";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
-import { createWorkspaceProviderConnection } from "../src/lib/workspace-provider-service";
-import { upsertProjectAiRoute } from "../src/lib/project-ai-routes";
+import { createProviderConnection } from "../src/lib/ai-providers/service";
+import {
+  activatePlatformDefaultAiRoute,
+  createPlatformDefaultAiRoute,
+  validatePlatformDefaultAiRoute,
+} from "../src/lib/platform-default-ai-routes";
+import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
 import { getActiveMemoryIndex } from "../src/lib/web-rag";
 import {
   getProjectMemoryIndexStatus,
   runProjectMemoryIndexJob,
 } from "../src/lib/web-memory-index";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
-import {
-  grantProjectMembership,
-  grantWorkspaceMembership,
-  revokeProjectMembership,
-  revokeWorkspaceMembership,
-} from "../src/lib/membership-governance";
 
 const repositoryRoot = process.cwd();
 const databaseName = "ai_project_os_memory_index_c_legacy_upgrade_test";
@@ -61,6 +61,11 @@ const migrationNames = [
   "20260829131000_add_project_github_sync_runs",
 ] as const;
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) return `${error.name} ${error.message}`;
+  return String(error);
+}
 
 function validateUrl(value: unknown): string {
   if (typeof value !== "string" || value.length === 0) throw new Error("MEMORY_INDEX_C_LEGACY_TEST_DATABASE_URL_INVALID");
@@ -135,12 +140,23 @@ test(
     const legacyCompleteId = "44444444-4444-4444-8444-444444444444";
     const legacyStagingAId = "55555555-5555-4555-8555-555555555555";
     const legacyStagingBId = "66666666-6666-4666-8666-666666666666";
+    const legacyJobBackedId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const legacyJobBackedGenerationId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const legacyNullTimestampJobId = "abababab-abab-4aba-8aba-abababababab";
+    const legacyNullTimestampGenerationId = "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd";
+    const incompleteSnapshotProjectId = "13131313-1313-4131-8131-131313131313";
     const legacyProviderId = "77777777-7777-4777-8777-777777777777";
     const legacyCredentialId = "88888888-8888-4888-8888-888888888888";
+    const legacyTokenGrantId = "99999999-9999-4999-8999-999999999999";
+    const legacyReservationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const legacyRouteId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const legacyLedgerId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const postRuntimeRouteId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const postRuntimeOutlierRouteId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const postRuntimeLedgerId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const postRuntimeOutlierLedgerId = "12121212-1212-4121-8121-121212121212";
     let db: PrismaClient | null = null;
     let rawConnected = false;
-    let providerId: string | null = null;
-    let credentialId: string | null = null;
 
     try {
       await raw.connect();
@@ -217,6 +233,12 @@ export default defineConfig({
         [projectId],
       );
       assert.equal(legacyRows.rows.filter((row) => row.jobId === null && row.status === "staging").length, 2);
+      await raw.query(
+        `UPDATE "MemoryIndexGeneration"
+            SET "expectedEmbeddingRouteUpdatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = $1`,
+        [legacyStagingAId],
+      );
 
       // The legacy schema has AppUser but no displayName. Seed the fixture with
       // raw SQL and do not let the current Prisma Client inspect that schema.
@@ -227,53 +249,365 @@ export default defineConfig({
         [userId, `memory_index_legacy_${projectId.slice(0, 8)}`, "a".repeat(43), "b".repeat(22)],
       );
 
+      // Before the route-snapshot migration, job-backed generations carried
+      // only the original route-updated timestamp. Keep one such terminal row
+      // in the upgrade fixture so 0600 proves it remains migratable and its
+      // historical lifecycle remains usable without making it runtime-ready.
+      await raw.query(
+        `INSERT INTO "BackgroundJob"
+          ("id", "projectId", "kind", "status", "stage", "payload", "idempotencyKey", "requestedById", "completedAt")
+         VALUES ($1, $2, 'memory_index', 'succeeded', 'complete', '{}', $3, $4, CURRENT_TIMESTAMP)`,
+        [legacyJobBackedId, projectId, "e".repeat(64), userId],
+      );
+      await raw.query(
+        `INSERT INTO "MemoryIndexGeneration"
+          ("id", "projectId", "jobId", "providerConnectionId", "modelId", "dimensions", "status",
+           "buildMode", "inputManifestFingerprint", "expectedEmbeddingRouteUpdatedAt", "recordCount", "completedAt")
+         VALUES ($1, $2, $3, $4, 'embedding-legacy', 8, 'complete', 'full', $5,
+                 CURRENT_TIMESTAMP - INTERVAL '1 minute', 0, CURRENT_TIMESTAMP)`,
+        [legacyJobBackedGenerationId, projectId, legacyJobBackedId, legacyProviderId, "c".repeat(64)],
+      );
+      await raw.query(
+        `INSERT INTO "BackgroundJob"
+          ("id", "projectId", "kind", "status", "stage", "payload", "idempotencyKey", "requestedById", "completedAt")
+         VALUES ($1, $2, 'memory_index', 'succeeded', 'complete', '{}', $3, $4, CURRENT_TIMESTAMP)`,
+        [legacyNullTimestampJobId, projectId, "f".repeat(64), userId],
+      );
+      await raw.query(
+        `INSERT INTO "MemoryIndexGeneration"
+          ("id", "projectId", "jobId", "providerConnectionId", "modelId", "dimensions", "status",
+           "buildMode", "inputManifestFingerprint", "expectedEmbeddingRouteUpdatedAt", "recordCount", "completedAt")
+         VALUES ($1, $2, $3, $4, 'embedding-legacy', 8, 'complete', 'full', $5,
+                 NULL, 0, CURRENT_TIMESTAMP)`,
+        [legacyNullTimestampGenerationId, projectId, legacyNullTimestampJobId, legacyProviderId, "d".repeat(64)],
+      );
+
       const currentMigrationNames = await migrationNamesFromDisk();
       const legacyMigrationNames = new Set<string>(migrationNames);
       const candidateMigrationNames = new Set([
         "20260829140000_add_memory_index_build_modes",
         "20260829141000_add_memory_index_candidates",
       ]);
+      const membershipEvidenceMigration = "20260904050000_add_membership_governance_manifest_evidence";
+      const runtimeBillingMigration = "20260904070000_add_runtime_ai_grant_billing_fences";
+      const remainingMigrationNames = currentMigrationNames.filter(
+        (name) => !legacyMigrationNames.has(name) && !candidateMigrationNames.has(name),
+      );
       await stageMigrations(
         tempRoot,
-        currentMigrationNames.filter((name) => !legacyMigrationNames.has(name) && !candidateMigrationNames.has(name)),
+        remainingMigrationNames.filter((name) => name < membershipEvidenceMigration),
       );
       await deployStagedMigrations(tempRoot, url);
 
-      db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
-      // The workspace migration can only materialize its legacy admin
-      // membership before the AppUserRole.member enum value exists. Convert
-      // that fixture row to the ordinary legacy role after the upgrade, while
-      // retaining the generated workspace/project access records.
-      await db.appUser.update({ where: { id: userId }, data: { role: "member" } });
-      await db.$transaction(async (tx) => {
-        // The governance boundary deliberately forbids an ordinary grant from
-        // confirming a quarantined row. Retire the pending legacy epoch first,
-        // then create the explicit confirmed fixture epoch through the normal
-        // grant path.
-        await revokeWorkspaceMembership(tx, workspaceId, userId, {
-          actorId: userId,
-          reason: "legacy_upgrade_fixture_pending_retired",
-        });
-        await grantWorkspaceMembership(tx, {
-          workspaceId,
-          userId,
-          role: "owner",
-          actorId: userId,
-          reason: "legacy_upgrade_fixture_membership",
-        });
-        await revokeProjectMembership(tx, projectId, userId, workspaceId, {
-          actorId: userId,
-          reason: "legacy_upgrade_fixture_pending_project_retired",
-        });
-        await grantProjectMembership(tx, {
-          projectId,
-          workspaceId,
-          userId,
-          role: "owner",
-          actorId: userId,
-          reason: "legacy_upgrade_fixture_project_membership",
-        });
+      // This route was valid under the pre-0700 positive-only multiplier
+      // constraint. It is deliberately an outlier so the later migration
+      // must preserve it without silently clipping or deleting the value.
+      // The route table itself is introduced by the pre-0500 migration batch.
+      await raw.query(
+        `INSERT INTO "PlatformDefaultAiRoute"
+          ("id", "operation", "version", "status", "providerConnectionId", "modelId",
+           "embeddingDimensions", "maxOutputTokens", "quotaMultiplierBps", "createdById", "updatedById",
+           "createdAt", "updatedAt")
+         VALUES ($1, 'embedding', 1, 'draft', $2, 'embedding-legacy', 8, NULL, 250000,
+                 $3, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [legacyRouteId, legacyProviderId, userId],
+      );
+
+      // The pre-manifest schema permits the migration fixture to establish a
+      // confirmed membership with its ordinary same-transaction audit.  Do
+      // that before installing the later double-signature transition guard;
+      // the runtime test must never use a legacy pending row or a plain
+      // application revoke as a governance bypass.
+      await raw.query("BEGIN");
+      try {
+        const workspaceMembership = await raw.query<{ id: string }>(
+          `SELECT "id" FROM "WorkspaceMembership"
+           WHERE "workspaceId" = $1 AND "userId" = $2 AND "accessState" = 'pending'`,
+          [workspaceId, userId],
+        );
+        const projectMembership = await raw.query<{ id: string }>(
+          `SELECT "id" FROM "ProjectMembership"
+           WHERE "projectId" = $1 AND "userId" = $2 AND "accessState" = 'pending'`,
+          [projectId, userId],
+        );
+        assert.equal(workspaceMembership.rows.length, 1);
+        assert.equal(projectMembership.rows.length, 1);
+        const workspaceMembershipId = workspaceMembership.rows[0]!.id;
+        const projectMembershipId = projectMembership.rows[0]!.id;
+
+        await raw.query(
+          `UPDATE "WorkspaceMembership"
+              SET "accessState" = 'confirmed', "updatedAt" = CURRENT_TIMESTAMP
+            WHERE "id" = $1`,
+          [workspaceMembershipId],
+        );
+        await raw.query(
+          `INSERT INTO "MembershipAccessAudit"
+            ("id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId",
+             "action", "previousState", "newState", "roleSnapshot", "actorId", "reason",
+             "membershipFingerprint", "transactionId")
+           SELECT gen_random_uuid(), 'workspace', membership."id", membership."workspaceId", NULL,
+                  membership."userId", 'confirmed', 'pending', 'confirmed', membership."role"::text,
+                  membership."userId", 'legacy upgrade fixture confirmed before manifest boundary',
+                  encode(digest(convert_to(concat_ws(
+                    E'\\x1f', membership."id"::text, membership."workspaceId"::text,
+                    membership."userId"::text, membership."role"::text,
+                    to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS'),
+                    to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS')
+                  ), 'UTF8'), 'sha256'), 'hex'), txid_current()
+             FROM "WorkspaceMembership" AS membership
+            WHERE membership."id" = $1`,
+          [workspaceMembershipId],
+        );
+        await raw.query(
+          `UPDATE "ProjectMembership"
+              SET "accessState" = 'confirmed', "updatedAt" = CURRENT_TIMESTAMP
+            WHERE "id" = $1`,
+          [projectMembershipId],
+        );
+        await raw.query(
+          `INSERT INTO "MembershipAccessAudit"
+            ("id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId",
+             "action", "previousState", "newState", "roleSnapshot", "actorId", "reason",
+             "membershipFingerprint", "transactionId")
+           SELECT gen_random_uuid(), 'project', membership."id", project."workspaceId", membership."projectId",
+                  membership."userId", 'confirmed', 'pending', 'confirmed', membership."role"::text,
+                  membership."userId", 'legacy upgrade fixture confirmed before manifest boundary',
+                  encode(digest(convert_to(concat_ws(
+                    E'\\x1f', membership."id"::text, membership."projectId"::text,
+                    membership."userId"::text, membership."role"::text,
+                    to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS'),
+                    to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS')
+                  ), 'UTF8'), 'sha256'), 'hex'), txid_current()
+             FROM "ProjectMembership" AS membership
+             JOIN "Project" AS project ON project."id" = membership."projectId"
+            WHERE membership."id" = $1`,
+          [projectMembershipId],
+        );
+        await raw.query("COMMIT");
+      } catch (error) {
+        await raw.query("ROLLBACK");
+        throw error;
+      }
+
+      await stageMigrations(tempRoot, [
+        membershipEvidenceMigration,
+        ...remainingMigrationNames.filter((name) => name > membershipEvidenceMigration && name < runtimeBillingMigration),
+      ]);
+      await deployStagedMigrations(tempRoot, url);
+
+      const preservedLegacyJobBackedGeneration = await raw.query<{
+        jobId: string | null;
+        status: string;
+        expectedEmbeddingRouteUpdatedAt: Date | null;
+        expectedEmbeddingRouteSource: string | null;
+        expectedEmbeddingRouteId: string | null;
+        expectedEmbeddingRouteVersion: number | null;
+        expectedEmbeddingProviderConfigurationVersion: number | null;
+        expectedEmbeddingRouteFenceFingerprint: string | null;
+      }>(
+        `SELECT "jobId", "status", "expectedEmbeddingRouteUpdatedAt",
+                "expectedEmbeddingRouteSource", "expectedEmbeddingRouteId",
+                "expectedEmbeddingRouteVersion", "expectedEmbeddingProviderConfigurationVersion",
+                "expectedEmbeddingRouteFenceFingerprint"
+           FROM "MemoryIndexGeneration" WHERE "id" = $1`,
+        [legacyJobBackedGenerationId],
+      );
+      assert.equal(preservedLegacyJobBackedGeneration.rows.length, 1);
+      assert.equal(preservedLegacyJobBackedGeneration.rows[0]!.jobId, legacyJobBackedId);
+      assert.equal(preservedLegacyJobBackedGeneration.rows[0]!.status, "complete");
+      assert.notEqual(preservedLegacyJobBackedGeneration.rows[0]!.expectedEmbeddingRouteUpdatedAt, null);
+      assert.equal(preservedLegacyJobBackedGeneration.rows[0]!.expectedEmbeddingRouteSource, null);
+      assert.equal(preservedLegacyJobBackedGeneration.rows[0]!.expectedEmbeddingRouteId, null);
+      assert.equal(preservedLegacyJobBackedGeneration.rows[0]!.expectedEmbeddingRouteVersion, null);
+      assert.equal(preservedLegacyJobBackedGeneration.rows[0]!.expectedEmbeddingProviderConfigurationVersion, null);
+      assert.equal(preservedLegacyJobBackedGeneration.rows[0]!.expectedEmbeddingRouteFenceFingerprint, null);
+      const preservedLegacyNullTimestampGeneration = await raw.query<{
+        jobId: string | null;
+        status: string;
+        expectedEmbeddingRouteUpdatedAt: Date | null;
+        expectedEmbeddingRouteSource: string | null;
+        expectedEmbeddingRouteId: string | null;
+        expectedEmbeddingRouteVersion: number | null;
+        expectedEmbeddingProviderConfigurationVersion: number | null;
+        expectedEmbeddingRouteFenceFingerprint: string | null;
+      }>(
+        `SELECT "jobId", "status", "expectedEmbeddingRouteUpdatedAt",
+                "expectedEmbeddingRouteSource", "expectedEmbeddingRouteId",
+                "expectedEmbeddingRouteVersion", "expectedEmbeddingProviderConfigurationVersion",
+                "expectedEmbeddingRouteFenceFingerprint"
+           FROM "MemoryIndexGeneration" WHERE "id" = $1`,
+        [legacyNullTimestampGenerationId],
+      );
+      assert.equal(preservedLegacyNullTimestampGeneration.rows.length, 1);
+      assert.equal(preservedLegacyNullTimestampGeneration.rows[0]!.jobId, legacyNullTimestampJobId);
+      assert.equal(preservedLegacyNullTimestampGeneration.rows[0]!.status, "complete");
+      assert.equal(preservedLegacyNullTimestampGeneration.rows[0]!.expectedEmbeddingRouteUpdatedAt, null);
+      assert.equal(preservedLegacyNullTimestampGeneration.rows[0]!.expectedEmbeddingRouteSource, null);
+      assert.equal(preservedLegacyNullTimestampGeneration.rows[0]!.expectedEmbeddingRouteId, null);
+      assert.equal(preservedLegacyNullTimestampGeneration.rows[0]!.expectedEmbeddingRouteVersion, null);
+      assert.equal(preservedLegacyNullTimestampGeneration.rows[0]!.expectedEmbeddingProviderConfigurationVersion, null);
+      assert.equal(preservedLegacyNullTimestampGeneration.rows[0]!.expectedEmbeddingRouteFenceFingerprint, null);
+      const preservedLegacyNoJobTimestamp = await raw.query<{
+        jobId: string | null;
+        expectedEmbeddingRouteUpdatedAt: Date | null;
+      }>(
+        `SELECT "jobId", "expectedEmbeddingRouteUpdatedAt"
+           FROM "MemoryIndexGeneration" WHERE "id" = $1`,
+        [legacyStagingAId],
+      );
+      assert.equal(preservedLegacyNoJobTimestamp.rows[0]!.jobId, null);
+      assert.notEqual(preservedLegacyNoJobTimestamp.rows[0]!.expectedEmbeddingRouteUpdatedAt, null);
+
+      // The pre-0600 terminal transitions remain valid when the historical
+      // partial snapshots are unchanged; runtime still rejects both as
+      // incomplete route fences and must rebuild instead of reusing them.
+      await raw.query(
+        `UPDATE "MemoryIndexGeneration"
+            SET "status" = 'superseded', "supersededAt" = CURRENT_TIMESTAMP
+          WHERE "id" = $1`,
+        [legacyJobBackedGenerationId],
+      );
+      await raw.query(
+        `UPDATE "MemoryIndexGeneration"
+            SET "status" = 'superseded', "supersededAt" = CURRENT_TIMESTAMP
+          WHERE "id" = $1`,
+        [legacyNullTimestampGenerationId],
+      );
+      const supersededLegacyJobBackedGeneration = await raw.query<{ status: string }>(
+        `SELECT "status" FROM "MemoryIndexGeneration" WHERE "id" = $1`,
+        [legacyJobBackedGenerationId],
+      );
+      assert.equal(supersededLegacyJobBackedGeneration.rows[0]!.status, "superseded");
+      const supersededLegacyNullTimestampGeneration = await raw.query<{ status: string }>(
+        `SELECT "status" FROM "MemoryIndexGeneration" WHERE "id" = $1`,
+        [legacyNullTimestampGenerationId],
+      );
+      assert.equal(supersededLegacyNullTimestampGeneration.rows[0]!.status, "superseded");
+
+      // Seed a reservation that was valid under the pre-0700 integer domain
+      // but is larger than the new runtime raw-token cap. The upgrade must
+      // preserve it byte-for-byte rather than retroactively rejecting or
+      // rewriting historical billing evidence.
+      await raw.query(
+        `INSERT INTO "PlatformTokenGrant"
+          ("id", "userId", "kind", "amount", "remainingTokens", "offerVersion", "issuedAt", "expiresAt", "createdAt", "updatedAt")
+         VALUES ($1, $2, 'signup', 20000001, 20000001, 'legacy-upgrade-fixture', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [legacyTokenGrantId, userId],
+      );
+      await raw.query(
+        `INSERT INTO "PlatformTokenReservation"
+          ("id", "userId", "grantId", "jobId", "providerConnectionId", "callKey", "operation", "modelId", "status", "reservedTokens", "expiresAt", "createdAt")
+         VALUES ($1, $2, $3, NULL, $4, 'legacy-upgrade-reservation', 'embedding', 'embedding-legacy', 'reserved', 20000001, CURRENT_TIMESTAMP + INTERVAL '1 hour', CURRENT_TIMESTAMP)`,
+        [legacyReservationId, userId, legacyTokenGrantId, legacyProviderId],
+      );
+      await raw.query(
+        `INSERT INTO "PlatformTokenLedgerEntry"
+          ("id", "userId", "grantId", "reservationId", "entryKind", "amount", "usageTokens",
+           "reasonCode", "idempotencyKey", "metadata", "createdAt")
+         VALUES ($1, $2, $3, $4, 'settle', 0, 10000001,
+                 'legacy-upgrade-usage-outlier', 'legacy-upgrade-usage-outlier', '{}'::jsonb, CURRENT_TIMESTAMP)`,
+        [legacyLedgerId, userId, legacyTokenGrantId, legacyReservationId],
+      );
+
+      await stageMigrations(tempRoot, [runtimeBillingMigration, ...remainingMigrationNames.filter((name) => name > runtimeBillingMigration)]);
+      await deployStagedMigrations(tempRoot, url);
+      const preservedRoute = await raw.query<{ quotaMultiplierBps: number }>(
+        `SELECT "quotaMultiplierBps" FROM "PlatformDefaultAiRoute" WHERE "id" = $1`,
+        [legacyRouteId],
+      );
+      assert.deepEqual(preservedRoute.rows[0], { quotaMultiplierBps: 250000 });
+      const preservedReservation = await raw.query<{ reservedTokens: number; rawEstimatedTokens: number; quotaMultiplierBps: number; routeSource: string | null }>(
+        `SELECT "reservedTokens", "rawEstimatedTokens", "quotaMultiplierBps", "routeSource"
+         FROM "PlatformTokenReservation" WHERE "id" = $1`,
+        [legacyReservationId],
+      );
+      assert.deepEqual(preservedReservation.rows[0], {
+        reservedTokens: 20000001,
+        rawEstimatedTokens: 20000001,
+        quotaMultiplierBps: 10000,
+        routeSource: null,
       });
+      const preservedLedger = await raw.query<{ usageTokens: number }>(
+        `SELECT "usageTokens" FROM "PlatformTokenLedgerEntry" WHERE "id" = $1`,
+        [legacyLedgerId],
+      );
+      assert.deepEqual(preservedLedger.rows[0], { usageTokens: 10000001 });
+
+      // A bounded row remains writable after the migration, but neither a
+      // fresh outlier nor an update from the bounded domain may create a new
+      // oversized runtime value.
+      await raw.query(
+        `INSERT INTO "PlatformDefaultAiRoute"
+          ("id", "operation", "version", "status", "providerConnectionId", "modelId",
+           "embeddingDimensions", "maxOutputTokens", "quotaMultiplierBps", "createdById", "updatedById",
+           "createdAt", "updatedAt")
+         VALUES ($1, 'projectAnalysis', 1, 'draft', $2, 'generation-legacy', NULL, 2048, 10000,
+                 $3, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [postRuntimeRouteId, legacyProviderId, userId],
+      );
+      await assert.rejects(
+        () => raw.query(
+          `INSERT INTO "PlatformDefaultAiRoute"
+            ("id", "operation", "version", "status", "providerConnectionId", "modelId",
+             "embeddingDimensions", "maxOutputTokens", "quotaMultiplierBps", "createdById", "updatedById",
+             "createdAt", "updatedAt")
+           VALUES ($1, 'sourceSummary', 1, 'draft', $2, 'generation-legacy', NULL, 2048, 100001,
+                   $3, $3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [postRuntimeOutlierRouteId, legacyProviderId, userId],
+        ),
+        (error: unknown) => errorText(error).includes("platform default AI route quota multiplier exceeds runtime limit"),
+      );
+      await assert.rejects(
+        () => raw.query(
+          `UPDATE "PlatformDefaultAiRoute"
+              SET "quotaMultiplierBps" = 100001
+            WHERE "id" = $1`,
+          [postRuntimeRouteId],
+        ),
+        (error: unknown) => errorText(error).includes("platform default AI route quota multiplier exceeds runtime limit"),
+      );
+      const boundedRoute = await raw.query<{ quotaMultiplierBps: number }>(
+        `SELECT "quotaMultiplierBps" FROM "PlatformDefaultAiRoute" WHERE "id" = $1`,
+        [postRuntimeRouteId],
+      );
+      assert.deepEqual(boundedRoute.rows[0], { quotaMultiplierBps: 10000 });
+
+      await raw.query(
+        `INSERT INTO "PlatformTokenLedgerEntry"
+          ("id", "userId", "grantId", "reservationId", "entryKind", "amount", "usageTokens",
+           "reasonCode", "idempotencyKey", "metadata", "createdAt")
+         VALUES ($1, $2, $3, $4, 'hold', 0, 1,
+                 'post-runtime-bounded-usage', 'post-runtime-bounded-usage', '{}'::jsonb, CURRENT_TIMESTAMP)`,
+        [postRuntimeLedgerId, userId, legacyTokenGrantId, legacyReservationId],
+      );
+      await assert.rejects(
+        () => raw.query(
+          `INSERT INTO "PlatformTokenLedgerEntry"
+            ("id", "userId", "grantId", "reservationId", "entryKind", "amount", "usageTokens",
+             "reasonCode", "idempotencyKey", "metadata", "createdAt")
+           VALUES ($1, $2, $3, $4, 'hold', 0, 10000001,
+                   'post-runtime-usage-outlier', 'post-runtime-usage-outlier', '{}'::jsonb, CURRENT_TIMESTAMP)`,
+          [postRuntimeOutlierLedgerId, userId, legacyTokenGrantId, legacyReservationId],
+        ),
+        (error: unknown) => errorText(error).includes("platform token ledger usageTokens exceeds runtime limit"),
+      );
+      await assert.rejects(
+        () => raw.query(
+          `UPDATE "PlatformTokenLedgerEntry"
+              SET "usageTokens" = 10000001
+            WHERE "id" = $1`,
+          [postRuntimeLedgerId],
+        ),
+        (error: unknown) => errorText(error).includes("platform token ledger usageTokens exceeds runtime limit"),
+      );
+      const boundedLedger = await raw.query<{ usageTokens: number }>(
+        `SELECT "usageTokens" FROM "PlatformTokenLedgerEntry" WHERE "id" = $1`,
+        [postRuntimeLedgerId],
+      );
+      assert.deepEqual(boundedLedger.rows[0], { usageTokens: 1 });
+
+      db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
       const membershipNow = new Date();
       await db.membershipSubscription.create({
         data: {
@@ -283,40 +617,48 @@ export default defineConfig({
           expiresAt: new Date(membershipNow.getTime() + 86_400_000),
         },
       });
-      await upsertProjectAiRoute(projectId, {
-        operation: "embedding",
-        providerConnectionId: legacyProviderId,
-        modelId: "embedding-legacy",
-        embeddingDimensions: 8,
-      }, db);
-      const before = await getProjectMemoryIndexStatus(projectId, actor, db);
-      assert.equal(before.readiness, "legacyIndex");
-      assert.equal(before.compatible, false);
-      await assert.rejects(() => getActiveMemoryIndex(projectId, actor, db!), (error: unknown) => error instanceof Error && error.message === "SEMANTIC_INDEX_NOT_READY");
 
-      const provider = await createWorkspaceProviderConnection(workspaceId, {
-        name: `Legacy upgrade provider ${projectId.slice(0, 8)}`,
+      // Runtime routes are platform-owned.  The old provider remains only as
+      // historical billing evidence; it is never used as a workspace or
+      // project runtime route in this upgrade test.
+      const platformActor = { id: userId, role: "admin" as const };
+      const provider = await createProviderConnection({
+        name: `Legacy upgrade platform provider ${projectId.slice(0, 8)}`,
         kind: "glm",
         apiKey: "sk-memory-index-legacy-upgrade",
         generationModelId: "glm-4-flash",
         embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
         visionModelId: null,
-      }, actor, db);
-      providerId = provider.id;
-      const verifiedProvider = await db.aiProviderConnection.update({
+      }, platformActor, db);
+      await db.aiProviderConnection.update({
         where: { id: provider.id },
         data: { status: "verified", lastTestedAt: new Date() },
-        select: { id: true, credentialId: true },
       });
-      credentialId = verifiedProvider.credentialId;
-      await upsertProjectAiRoute(projectId, {
+      const defaultEmbeddingDraft = await createPlatformDefaultAiRoute({
         operation: "embedding",
         providerConnectionId: provider.id,
         modelId: "embedding-3",
         embeddingDimensions: 8,
-        acknowledgeIndexRebuild: true,
-      }, db);
+      }, platformActor, db);
+      const defaultEmbeddingVerified = await validatePlatformDefaultAiRoute(
+        defaultEmbeddingDraft.id,
+        platformActor,
+        db,
+        defaultEmbeddingDraft.updatedAt,
+      );
+      await activatePlatformDefaultAiRoute(
+        defaultEmbeddingVerified.id,
+        platformActor,
+        db,
+        defaultEmbeddingVerified.updatedAt,
+      );
+      await db.appUser.update({ where: { id: userId }, data: { role: "member" } });
+      const before = await getProjectMemoryIndexStatus(projectId, actor, db);
+      assert.equal(before.readiness, "legacyIndex");
+      assert.equal(before.compatible, false);
+      await assert.rejects(() => getActiveMemoryIndex(projectId, actor, db!), (error: unknown) => error instanceof Error && error.message === "SEMANTIC_INDEX_NOT_READY");
+
       let fetchCalls = 0;
       globalThis.fetch = async (_input, init) => {
         fetchCalls += 1;
@@ -343,11 +685,83 @@ export default defineConfig({
       const current = await db.memoryIndexGeneration.findUniqueOrThrow({ where: { projectId_id: { projectId, id: pointer.indexGenerationId } } });
       assert.notEqual(current.jobId, null);
 
+      const embeddingRoute = await resolveEffectiveAiRoute(projectId, "embedding", db);
+      await db.project.create({
+        data: {
+          id: incompleteSnapshotProjectId,
+          workspaceId,
+          name: "Legacy upgrade route snapshot validation",
+          slug: `legacy-upgrade-route-snapshot-${incompleteSnapshotProjectId.slice(0, 8)}`,
+        },
+      });
+      const isolatedEmbeddingRoute = await resolveEffectiveAiRoute(incompleteSnapshotProjectId, "embedding", db);
+      const terminatedJob = await db.backgroundJob.create({
+        data: {
+          id: randomUUID(),
+          projectId: incompleteSnapshotProjectId,
+          kind: "memoryIndex",
+          requestedById: userId,
+          idempotencyKey: "g".repeat(64),
+          payload: {},
+        },
+      });
+      await db.memoryIndexGeneration.create({
+        data: {
+          id: randomUUID(),
+          projectId: incompleteSnapshotProjectId,
+          jobId: terminatedJob.id,
+          providerConnectionId: isolatedEmbeddingRoute.providerConnectionId,
+          modelId: isolatedEmbeddingRoute.modelId,
+          dimensions: isolatedEmbeddingRoute.embeddingDimensions ?? 0,
+          status: "failed",
+          buildMode: "full",
+          inputManifestFingerprint: "e".repeat(64),
+          expectedEmbeddingRouteSource: isolatedEmbeddingRoute.source,
+          expectedEmbeddingRouteId: isolatedEmbeddingRoute.routeId,
+          expectedEmbeddingRouteVersion: isolatedEmbeddingRoute.routeVersion,
+          expectedEmbeddingRouteUpdatedAt: isolatedEmbeddingRoute.routeUpdatedAt,
+          expectedEmbeddingProviderConfigurationVersion: isolatedEmbeddingRoute.providerConfigurationVersion,
+          expectedEmbeddingRouteFenceFingerprint: isolatedEmbeddingRoute.routeFenceFingerprint,
+          expectedInputCount: 0,
+          generatedRecordCount: 0,
+          reusedRecordCount: 0,
+          recordCount: 0,
+          failureCode: "TEST_TERMINATED",
+          completedAt: new Date(),
+        },
+      });
+      const incompleteSnapshotJob = await db.backgroundJob.create({
+        data: {
+          id: randomUUID(),
+          projectId: incompleteSnapshotProjectId,
+          kind: "memoryIndex",
+          requestedById: userId,
+          idempotencyKey: "h".repeat(64),
+          payload: {},
+        },
+      });
+      await assert.rejects(
+        () => db!.memoryIndexGeneration.create({
+          data: {
+            id: randomUUID(),
+            projectId: incompleteSnapshotProjectId,
+            jobId: incompleteSnapshotJob.id,
+            providerConnectionId: isolatedEmbeddingRoute.providerConnectionId,
+            modelId: isolatedEmbeddingRoute.modelId,
+            dimensions: isolatedEmbeddingRoute.embeddingDimensions ?? 0,
+            status: "staging",
+            buildMode: "full",
+            inputManifestFingerprint: "f".repeat(64),
+            expectedInputCount: 0,
+            generatedRecordCount: 0,
+            reusedRecordCount: 0,
+            recordCount: 0,
+          },
+        }),
+        (error: unknown) => error instanceof Error && error.message.includes("new job-backed memory index generation requires a complete route snapshot"),
+      );
       const jobA = await db.backgroundJob.create({
         data: { projectId, kind: "memoryIndex", requestedById: userId, idempotencyKey: "a".repeat(64), payload: {} },
-      });
-      const jobB = await db.backgroundJob.create({
-        data: { projectId, kind: "memoryIndex", requestedById: userId, idempotencyKey: "b".repeat(64), payload: {} },
       });
       await db.memoryIndexGeneration.create({
         data: {
@@ -359,52 +773,31 @@ export default defineConfig({
           status: "staging",
           buildMode: "full",
           inputManifestFingerprint: "c".repeat(64),
+          expectedEmbeddingRouteSource: embeddingRoute.source,
+          expectedEmbeddingRouteId: embeddingRoute.routeId,
+          expectedEmbeddingRouteVersion: embeddingRoute.routeVersion,
+          expectedEmbeddingRouteUpdatedAt: embeddingRoute.routeUpdatedAt,
+          expectedEmbeddingProviderConfigurationVersion: embeddingRoute.providerConfigurationVersion,
+          expectedEmbeddingRouteFenceFingerprint: embeddingRoute.routeFenceFingerprint,
           expectedInputCount: 0,
           generatedRecordCount: 0,
           reusedRecordCount: 0,
           recordCount: 0,
         },
       });
-      await assert.rejects(() => db!.memoryIndexGeneration.create({
-        data: {
-          projectId,
-          jobId: jobB.id,
-          providerConnectionId: provider.id,
-          modelId: "embedding-3",
-          dimensions: 8,
-          status: "staging",
-          buildMode: "full",
-          inputManifestFingerprint: "d".repeat(64),
-          expectedInputCount: 0,
-          generatedRecordCount: 0,
-          reusedRecordCount: 0,
-          recordCount: 0,
-        },
-      }));
     } finally {
       globalThis.fetch = previousFetch;
       if (db !== null) {
-        await db.project.deleteMany({ where: { id: projectId } });
-        const providerIds = [legacyProviderId, providerId].filter((id): id is string => id !== null);
-        if (providerIds.length > 0) {
-          const reservations = await db.platformTokenReservation.findMany({
-            where: { providerConnectionId: { in: providerIds } },
-            select: { id: true },
-          });
-          await db.providerCallAudit.deleteMany({ where: { providerConnectionId: { in: providerIds } } });
-          const reservationIds = reservations.map((reservation) => reservation.id);
-          if (reservationIds.length > 0) {
-            await db.platformTokenLedgerEntry.deleteMany({ where: { reservationId: { in: reservationIds } } });
-            await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
-          }
-          await db.aiProviderConnection.deleteMany({ where: { id: { in: providerIds } } });
+        try {
+          // This is an isolated upgrade database and the gate runner drops it
+          // after the test. Do not delete the project before its runtime
+          // evidence: the production evidence guard intentionally requires a
+          // deletion receipt for the grant-FK SET NULL cascade. Keeping the
+          // disposable rows also avoids a cleanup error masking the assertion
+          // that caused the test to fail.
+        } finally {
+          await db.$disconnect();
         }
-        const credentialIds = [legacyCredentialId, credentialId].filter((id): id is string => id !== null);
-        if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
-        await db.membershipSubscription.deleteMany({ where: { userId } });
-        await db.workspace.updateMany({ where: { id: workspaceId, createdById: userId }, data: { createdById: null } });
-        await db.appUser.deleteMany({ where: { id: userId } });
-        await db.$disconnect();
       }
       if (rawConnected) await raw.end();
       if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;

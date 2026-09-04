@@ -26,7 +26,7 @@ test("PostgreSQL gate manifest covers every opt-in postgres test exactly once", 
   assert.equal(new Set(POSTGRES_GATES.map((gate) => gate.id)).size, POSTGRES_GATES.length);
   assert.deepEqual(
     POSTGRES_GATES.filter((gate) => gate.seedAdmin === true).map((gate) => gate.id),
-    ["v3", "membership-governance-manifest"],
+    ["v3", "membership-governance-manifest", "project-ai-provider-delegation"],
   );
 });
 

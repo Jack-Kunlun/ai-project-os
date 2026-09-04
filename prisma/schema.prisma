@@ -724,6 +724,42 @@ enum AiOperation {
   generateWithContext
 }
 
+enum ProjectAiProviderDelegationStatus {
+  draft
+  ownerConfirmed @map("owner_confirmed")
+  active
+  rejected
+  revoked
+  expired
+}
+
+enum ProjectAiEffectiveRouteSelectionSource {
+  platformDefault   @map("platform_default")
+  personalDelegation @map("personal_delegation")
+}
+
+enum ProjectAiProviderDelegationAuditEntity {
+  delegation
+  selection
+}
+
+enum ProjectAiProviderDelegationAuditAction {
+  proposed
+  ownerConfirmed          @map("owner_confirmed")
+  activated
+  rejected
+  revoked
+  expired
+  platformSelected       @map("platform_selected")
+  personalSelected       @map("personal_selected")
+  selectionUpdated       @map("selection_updated")
+}
+
+enum ProjectAiProviderDelegationActorKind {
+  user
+  systemExpiry @map("system_expiry")
+}
+
 enum AiRunStatus {
   queued
   running
@@ -1115,6 +1151,8 @@ model Project {
   codeSnapshotPointer                  ProjectCodeSnapshotPointer?
   webAiRoutes                          ProjectAiRoute[]
   aiRouteRevisions                     ProjectAiRouteRevision[]
+  aiProviderDelegations                 ProjectAiProviderDelegation[]
+  aiEffectiveRouteSelections            ProjectAiEffectiveRouteSelection[]
   webAiGrants                          WebAiGrant[]
   backgroundJobs                       BackgroundJob[]
   automationRules                      AutomationRule[]
@@ -3730,6 +3768,11 @@ model AppUser {
   updatedPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteUpdatedBy")
   platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[]    @relation("PlatformDefaultAiRouteAuditActor")
   aiProviderOwnershipAudits    AiProviderOwnershipAudit[]       @relation("AiProviderOwnershipAuditActor")
+  projectAiProviderDelegationConnectionOwners ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationConnectionOwner")
+  projectAiProviderDelegationProposers        ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProposer")
+  projectAiProviderDelegationOwnerConfirmations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationOwnerConfirmer")
+  projectAiProviderDelegationProjectConfirmations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProjectConfirmer")
+  projectAiEffectiveRouteSelections            ProjectAiEffectiveRouteSelection[] @relation("ProjectAiEffectiveRouteSelectionSelectedBy")
   billedWebAiGrants             WebAiGrant[]                    @relation("WebAiGrantBillingUser")
 }
 
@@ -4349,6 +4392,7 @@ model AiProviderConnection {
   platformDefaultAiRoutes  PlatformDefaultAiRoute[]    @relation("PlatformDefaultAiRouteProvider")
   platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[] @relation("PlatformDefaultAiRouteAuditProvider")
   ownershipAudits          AiProviderOwnershipAudit[]  @relation("AiProviderOwnershipAuditProvider")
+  projectAiProviderDelegations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProvider")
 
   @@index([kind, status])
   @@index([scope, workspaceId, status])
@@ -4460,6 +4504,138 @@ model ProjectAiRoute {
 
   @@id([projectId, operation])
   @@index([providerConnectionId])
+}
+
+// Personal model use is represented by an explicit, two-step project
+// delegation.  This database foundation is intentionally separate from the
+// legacy ProjectAiRoute and WebAiGrant runtime paths; runtime adoption is a
+// later, independently gated change.
+model ProjectAiProviderDelegation {
+  id                         String                              @id @default(uuid()) @db.Uuid
+  projectId                  String                              @db.Uuid
+  operation                 AiOperation
+  version                   Int                                 @default(1)
+  status                    ProjectAiProviderDelegationStatus   @default(draft)
+  providerConnectionId      String                              @db.Uuid
+  connectionOwnerId         String                              @db.Uuid
+  ownerProjectMembershipId  String                              @db.Uuid
+  ownerMembershipCreatedAt  DateTime
+  projectConfirmedProjectMembershipId String?                    @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime?
+  connectionOwnerSubscriptionId String                            @db.Uuid
+  connectionOwnerSubscriptionVersion Int
+  connectionOwnerSubscriptionStartsAt DateTime
+  connectionOwnerSubscriptionExpiresAt DateTime
+  modelId                   String                              @db.VarChar(128)
+  embeddingDimensions       Int?
+  maxOutputTokens           Int?
+  providerConfigurationVersion Int
+  credentialFingerprint     String                              @db.Char(64)
+  delegationFingerprint     String                              @db.Char(64)
+  expiresAt                 DateTime
+  proposedById              String                              @db.Uuid
+  proposedAt                DateTime                            @default(now())
+  ownerConfirmedById        String?                             @db.Uuid
+  ownerConfirmedAt          DateTime?
+  projectConfirmedById      String?                             @db.Uuid
+  projectConfirmedAt        DateTime?
+  activatedAt               DateTime?
+  rejectedAt                DateTime?
+  revokedAt                 DateTime?
+  expiredAt                 DateTime?
+  terminalActorKind         ProjectAiProviderDelegationActorKind?
+  terminalActorId           String?                             @db.Uuid
+  terminalActorProjectMembershipId String?                      @db.Uuid
+  terminalActorMembershipCreatedAt DateTime?
+  terminalReason            String?                             @db.VarChar(500)
+  createdAt                 DateTime                            @default(now())
+  updatedAt                 DateTime                            @updatedAt
+  project                   Project                             @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  providerConnection        AiProviderConnection                @relation("ProjectAiProviderDelegationProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  connectionOwner           AppUser                             @relation("ProjectAiProviderDelegationConnectionOwner", fields: [connectionOwnerId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  proposer                  AppUser                             @relation("ProjectAiProviderDelegationProposer", fields: [proposedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  ownerConfirmer            AppUser?                            @relation("ProjectAiProviderDelegationOwnerConfirmer", fields: [ownerConfirmedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  projectConfirmer          AppUser?                            @relation("ProjectAiProviderDelegationProjectConfirmer", fields: [projectConfirmedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  effectiveRouteSelections  ProjectAiEffectiveRouteSelection[]
+
+  @@index([projectId, operation, status, expiresAt])
+  @@index([providerConnectionId, status])
+  @@index([connectionOwnerId, status])
+}
+
+model ProjectAiEffectiveRouteSelection {
+  id                 String                              @id @default(uuid()) @db.Uuid
+  projectId          String                              @db.Uuid
+  operation          AiOperation
+  source             ProjectAiEffectiveRouteSelectionSource
+  delegationId       String?                             @db.Uuid
+  selectedById       String                              @db.Uuid
+  selectedByProjectMembershipId String                     @db.Uuid
+  selectedByMembershipCreatedAt DateTime
+  version            Int                                 @default(1)
+  createdAt          DateTime                            @default(now())
+  updatedAt          DateTime                            @updatedAt
+  project            Project                             @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  delegation         ProjectAiProviderDelegation?        @relation(fields: [delegationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  selectedBy         AppUser                             @relation("ProjectAiEffectiveRouteSelectionSelectedBy", fields: [selectedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([projectId, operation])
+  @@index([delegationId, source])
+  @@index([selectedById, updatedAt])
+}
+
+// This is an append-only scalar snapshot.  It intentionally has no foreign
+// keys to projects, providers, or users so project deletion can retain the
+// evidence and correlate it by projectId with ProjectDeletionReceipt.
+model ProjectAiProviderDelegationAudit {
+  id                         String                              @id @default(uuid()) @db.Uuid
+  projectId                  String                              @db.Uuid
+  operation                 AiOperation
+  entity                     ProjectAiProviderDelegationAuditEntity
+  action                    ProjectAiProviderDelegationAuditAction
+  delegationId              String?                             @db.Uuid
+  selectionId               String?                             @db.Uuid
+  delegationVersion         Int?
+  selectionVersion          Int?
+  statusBefore              ProjectAiProviderDelegationStatus?
+  statusAfter               ProjectAiProviderDelegationStatus?
+  selectionSource           ProjectAiEffectiveRouteSelectionSource?
+  selectedDelegationId      String?                             @db.Uuid
+  selectedByProjectMembershipId String?                          @db.Uuid
+  selectedByMembershipCreatedAt DateTime?
+  providerConnectionId      String?                             @db.Uuid
+  connectionOwnerId         String?                             @db.Uuid
+  ownerProjectMembershipId  String?                             @db.Uuid
+  projectConfirmedProjectMembershipId String?                    @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime?
+  connectionOwnerSubscriptionId String?                          @db.Uuid
+  connectionOwnerSubscriptionVersion Int?
+  connectionOwnerSubscriptionStartsAt DateTime?
+  connectionOwnerSubscriptionExpiresAt DateTime?
+  modelId                   String?                             @db.VarChar(128)
+  embeddingDimensions       Int?
+  maxOutputTokens           Int?
+  providerConfigurationVersion Int?
+  credentialFingerprint     String?                             @db.Char(64)
+  delegationFingerprint     String?                             @db.Char(64)
+  terminalActorKind         ProjectAiProviderDelegationActorKind?
+  terminalActorId           String?                             @db.Uuid
+  terminalActorProjectMembershipId String?                      @db.Uuid
+  terminalActorMembershipCreatedAt DateTime?
+  terminalReason            String?                             @db.VarChar(500)
+  actorKind                 ProjectAiProviderDelegationActorKind @default(user)
+  actorId                   String?                             @db.Uuid
+  actorProjectMembershipId  String?                             @db.Uuid
+  actorMembershipCreatedAt DateTime?
+  reason                    String                              @db.VarChar(500)
+  transitionAt              DateTime
+  transactionId             BigInt                              @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt                 DateTime                            @default(now())
+
+  @@index([projectId, operation, createdAt])
+  @@index([delegationId, delegationVersion, createdAt])
+  @@index([selectionId, selectionVersion, createdAt])
+  @@index([transactionId, createdAt])
 }
 
 model ProjectAiRouteRevision {

@@ -3,11 +3,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
+import type { AccessUser } from "../src/lib/access-control";
 import { isSafeModelId } from "../src/lib/ai-providers";
 import { mapApiError } from "../src/lib/api-errors";
 import {
   ProjectAiRouteError,
+  getProjectAiRoutes,
   previewProjectAiRouteChange,
+  requireProjectAiRoute,
   upsertProjectAiRoute,
 } from "../src/lib/project-ai-routes";
 import {
@@ -20,6 +23,7 @@ const projectId = "11111111-1111-4111-8111-111111111111";
 const actorId = "22222222-2222-4222-8222-222222222222";
 const openAiConnectionId = "33333333-3333-4333-8333-333333333333";
 const qwenConnectionId = "44444444-4444-4444-8444-444444444444";
+const userConnectionId = "66666666-6666-4666-8666-666666666666";
 const generationId = "55555555-5555-4555-8555-555555555555";
 
 type FakeRoute = {
@@ -35,7 +39,7 @@ type FakeProvider = {
   id: string;
   kind: "openai" | "qwen";
   status: "verified" | "error";
-  scope: "platform" | "workspace";
+  scope: "platform" | "workspace" | "user";
   workspaceId: string | null;
   defaultEmbeddingModelId: string | null;
   defaultVisionModelId: string | null;
@@ -68,6 +72,17 @@ class FakeRouteDb {
       defaultGenerationModelId: "qwen-plus",
       embeddingDimensions: 1024,
     }],
+    [userConnectionId, {
+      id: userConnectionId,
+      kind: "openai",
+      status: "verified",
+      scope: "user",
+      workspaceId: null,
+      defaultEmbeddingModelId: "text-embedding-3-small",
+      defaultVisionModelId: "gpt-4.1-mini",
+      defaultGenerationModelId: "gpt-4.1-mini",
+      embeddingDimensions: 1536,
+    }],
   ]);
   readonly revisions: Array<Record<string, unknown>> = [];
   activeIndex: unknown = null;
@@ -90,11 +105,37 @@ class FakeRouteDb {
   readonly aiProviderConnection = {
     findUnique: async ({ where }: { where: { id: string } }) =>
       this.providers.get(where.id) ?? null,
+    findMany: async ({
+      where,
+    }: {
+      where: {
+        status: { not: string };
+        OR: Array<{ scope: "platform" | "workspace"; workspaceId?: string | null }>;
+      };
+    }) => Array.from(this.providers.values())
+      .filter((provider) => provider.status !== where.status.not)
+      .filter((provider) => where.OR.some((candidate) =>
+        candidate.scope === "platform"
+          ? provider.scope === "platform"
+          : provider.scope === "workspace" && candidate.workspaceId !== undefined && provider.workspaceId === candidate.workspaceId,
+      ))
+      .map((provider) => ({ ...provider, name: provider.id })),
   };
 
   readonly projectAiRoute = {
-    findUnique: async ({ where }: { where: { projectId_operation: { projectId: string; operation: FakeRoute["operation"] } } }) =>
-      this.routes.get(this.routeKey(where.projectId_operation.projectId, where.projectId_operation.operation)) ?? null,
+    findUnique: async ({
+      where,
+      include,
+    }: {
+      where: { projectId_operation: { projectId: string; operation: FakeRoute["operation"] } };
+      include?: { providerConnection?: true };
+    }) => {
+      const route = this.routes.get(this.routeKey(where.projectId_operation.projectId, where.projectId_operation.operation));
+      if (route === undefined || include?.providerConnection !== true) return route ?? null;
+      const provider = this.providers.get(route.providerConnectionId);
+      return provider === undefined ? null : { ...route, providerConnection: provider };
+    },
+    findMany: async () => Array.from(this.routes.values()),
     create: async ({ data }: { data: Omit<FakeRoute, "updatedAt"> & { projectId: string } }) => {
       const route: FakeRoute = {
         operation: data.operation,
@@ -219,6 +260,45 @@ test("vision route accepts only the provider's configured vision model and stays
     }, db as unknown as PrismaClient),
     (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_CAPABILITY_MISMATCH",
   );
+});
+
+test("legacy project routes fail closed for user-scoped providers", async () => {
+  const input = {
+    operation: "autoExtract" as const,
+    providerConnectionId: userConnectionId,
+    modelId: "gpt-4.1-mini",
+    maxOutputTokens: 2048,
+  };
+  const db = new FakeRouteDb();
+
+  await assert.rejects(
+    () => previewProjectAiRouteChange(projectId, input, db as unknown as PrismaClient),
+    (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
+  );
+  await assert.rejects(
+    () => upsertProjectAiRoute(projectId, input, db as unknown as PrismaClient),
+    (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
+  );
+
+  db.routes.set(`${projectId}:autoExtract`, {
+    operation: "autoExtract",
+    providerConnectionId: userConnectionId,
+    modelId: "gpt-4.1-mini",
+    embeddingDimensions: null,
+    maxOutputTokens: 2048,
+    updatedAt: new Date("2026-08-28T00:00:00.000Z"),
+  });
+  await assert.rejects(
+    () => requireProjectAiRoute(projectId, "autoExtract", db as unknown as PrismaClient),
+    (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
+  );
+
+  const listed = await getProjectAiRoutes(
+    projectId,
+    { id: actorId, role: "member" } satisfies AccessUser,
+    db as unknown as PrismaClient,
+  );
+  assert.equal(listed.providers.some((provider) => provider.id === userConnectionId), false);
 });
 
 test("embedding changes require acknowledgement, record provenance, and reject stale CAS writes", async () => {

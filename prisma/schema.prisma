@@ -294,6 +294,7 @@ enum AiProviderKind {
 enum AiProviderScope {
   platform
   workspace
+  user
 }
 
 enum AiProviderProtocol {

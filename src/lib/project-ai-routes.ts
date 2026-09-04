@@ -1,4 +1,4 @@
-import { Prisma, type AiOperation, type PrismaClient } from "@prisma/client";
+import { Prisma, type AiOperation, type AiProviderScope, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { type AccessUser } from "@/lib/access-control";
 import { getProviderDefinition, isSafeModelId } from "@/lib/ai-providers";
@@ -117,6 +117,10 @@ function embeddingMatchesIndex(
     index.dimensions === next.embeddingDimensions;
 }
 
+function isLegacyProjectProviderScope(scope: AiProviderScope): scope is "platform" | "workspace" {
+  return scope === "platform" || scope === "workspace";
+}
+
 function validateTarget(
   input: ParsedRouteInput,
   provider: Readonly<{
@@ -127,13 +131,14 @@ function validateTarget(
     defaultVisionModelId: string | null;
     defaultGenerationModelId: string | null;
     embeddingDimensions: number | null;
-    scope: "platform" | "workspace";
+    scope: AiProviderScope;
     workspaceId: string | null;
   }> | null,
   projectWorkspaceId?: string,
 ): void {
   if (provider === null) return fail("AI_PROVIDER_NOT_FOUND");
   if (provider.status !== "verified") return fail("AI_PROVIDER_NOT_VERIFIED");
+  if (!isLegacyProjectProviderScope(provider.scope)) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
   if (provider.scope === "platform" && (provider.workspaceId !== null)) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
   if (provider.scope === "workspace" && (projectWorkspaceId === undefined || provider.workspaceId !== projectWorkspaceId)) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
 
@@ -476,6 +481,7 @@ export async function requireProjectAiRoute(
   if (project === null) return fail("PROJECT_NOT_FOUND");
   if (route === null) return fail("PROJECT_AI_ROUTE_INVALID_INPUT");
   if (route.providerConnection.status !== "verified") return fail("AI_PROVIDER_NOT_VERIFIED");
+  if (!isLegacyProjectProviderScope(route.providerConnection.scope)) return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
   if (
     (route.providerConnection.scope === "platform" && route.providerConnection.workspaceId !== null) ||
     (route.providerConnection.scope === "workspace" && route.providerConnection.workspaceId !== project.workspaceId)

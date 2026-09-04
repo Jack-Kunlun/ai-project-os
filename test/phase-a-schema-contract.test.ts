@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
-const migrationName = "20260903010000_add_user_system_role_compatibility";
+const roleMigrationName = "20260903010000_add_user_system_role_compatibility";
+const providerScopeMigrationName = "20260903020000_add_user_ai_provider_scope";
 
 async function readRoleEnum(): Promise<string> {
   const schema = await readFile("prisma/schema.prisma", "utf8");
@@ -26,7 +27,7 @@ test("AppUserRole keeps legacy values and adds the semantic user value", async (
 });
 
 test("the compatibility migration is a standalone additive enum change", async () => {
-  const migration = await readFile(`prisma/migrations/${migrationName}/migration.sql`, "utf8");
+  const migration = await readFile(`prisma/migrations/${roleMigrationName}/migration.sql`, "utf8");
   const executableSql = migration.replace(/--[^\n]*(?:\n|$)/gu, "").trim();
   assert.equal(executableSql, 'ALTER TYPE "AppUserRole" ADD VALUE IF NOT EXISTS \'user\';');
   assert.doesNotMatch(migration, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP|CREATE)\b/iu);
@@ -41,5 +42,36 @@ test("the compatibility migration occupies stable migration slot 55", async () =
     .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
     .map((entry) => entry.name)
     .sort();
-  assert.equal(migrations.indexOf(migrationName), 54);
+  assert.equal(migrations.indexOf(roleMigrationName), 54);
+});
+
+test("AiProviderScope preserves existing values and adds the user value", async () => {
+  const schema = await readFile("prisma/schema.prisma", "utf8");
+  const scopeEnum = schema.match(/^enum AiProviderScope \{([\s\S]*?)^\}/mu)?.[1];
+  assert.ok(scopeEnum, "AiProviderScope enum is missing");
+  const values = scopeEnum
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => /^[a-z]+$/u.test(line));
+  assert.deepEqual(values, ["platform", "workspace", "user"]);
+});
+
+test("the AI provider scope migration is a standalone additive enum change", async () => {
+  const migration = await readFile(`prisma/migrations/${providerScopeMigrationName}/migration.sql`, "utf8");
+  const executableSql = migration.replace(/--[^\n]*(?:\n|$)/gu, "").trim();
+  assert.equal(executableSql, 'ALTER TYPE "AiProviderScope" ADD VALUE IF NOT EXISTS \'user\';');
+  assert.doesNotMatch(migration, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP|CREATE)\b/iu);
+  assert.doesNotMatch(migration, /\bALTER\s+TABLE\b/iu);
+  assert.doesNotMatch(migration, /\b(?:SET\s+DEFAULT|DEFAULT\s+)\b/iu);
+  assert.doesNotMatch(migration, /\bCHECK\b/iu);
+});
+
+test("the AI provider scope migration occupies stable migration slot 56", async () => {
+  const entries = await readdir("prisma/migrations", { withFileTypes: true });
+  const migrations = entries
+    .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  assert.equal(migrations.indexOf(roleMigrationName), 54);
+  assert.equal(migrations.indexOf(providerScopeMigrationName), 55);
 });

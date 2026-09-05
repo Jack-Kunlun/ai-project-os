@@ -68,7 +68,6 @@ test("destructive and approval flows use the shared app dialog instead of browse
     "src/app/connections/mcp/mcp-connections-client.tsx",
     "src/app/projects/[projectId]/project-client.tsx",
     "src/app/projects/[projectId]/assets/project-assets-client.tsx",
-    "src/app/projects/[projectId]/tools/project-tools-client.tsx",
     "src/app/projects/[projectId]/actions/project-actions-client.tsx",
     "src/app/team/team-client.tsx",
   ];

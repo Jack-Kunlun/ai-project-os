@@ -16,7 +16,6 @@ const backgroundReloadClients = [
   ["src/app/projects/[projectId]/intelligence/project-intelligence-client.tsx", "reload"],
   ["src/app/projects/[projectId]/memory-quality/project-memory-quality-client.tsx", "reload"],
   ["src/app/projects/[projectId]/memory/project-memory-client.tsx", "reload"],
-  ["src/app/projects/[projectId]/repositories/project-repositories-client.tsx", "reload"],
   ["src/app/projects/[projectId]/world/project-world-client.tsx", "reload"],
 ] as const;
 
@@ -31,6 +30,19 @@ test("mutation-triggered data reloads keep mounted UI after the initial page loa
       new RegExp(`${functionName}\\(\\{ showLoading: true \\}\\)`, "u"),
       `${path} must still show loading UI on first entry`,
     );
+  }
+});
+
+test("frozen project Git and MCP pages expose links without remote mutations", () => {
+  const pages = [
+    ["src/app/projects/[projectId]/repositories/project-repositories-client.tsx", "/profile/connections/git"],
+    ["src/app/projects/[projectId]/tools/project-tools-client.tsx", "/profile/connections/mcp"],
+  ] as const;
+  for (const [path, personalPath] of pages) {
+    const source = readFileSync(join(root, path), "utf8");
+    assert.match(source, new RegExp(personalPath.replaceAll("/", "\\/"), "u"), `${path} must link to personal configuration`);
+    assert.match(source, /未开放/u, `${path} must describe the frozen capability`);
+    assert.doesNotMatch(source, /fetch\(|method:\s*"(?:POST|PATCH|DELETE)"/u, `${path} must not trigger frozen remote mutations`);
   }
 });
 

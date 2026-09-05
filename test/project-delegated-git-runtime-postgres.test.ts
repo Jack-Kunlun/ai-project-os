@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createHash, randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { getDb } from "../src/lib/db";
-import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
+import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 import {
   confirmProjectGitRepositoryDelegationOwner,
   confirmProjectGitRepositoryDelegationProject,
@@ -44,7 +44,8 @@ test("manual delegated Git runtime migration installs independent guarded tables
           'ProjectGitRepositoryManualRun',
           'ProjectGitRepositoryManualRunEntry',
           'ProjectGitRepositoryManualPointer',
-          'ProjectGitRepositoryManualRunAudit'
+          'ProjectGitRepositoryManualRunAudit',
+          'ProjectGitRepositoryManualRunReconciliation'
         )
       ORDER BY table_name
     `);
@@ -53,6 +54,7 @@ test("manual delegated Git runtime migration installs independent guarded tables
       "ProjectGitRepositoryManualRun",
       "ProjectGitRepositoryManualRunAudit",
       "ProjectGitRepositoryManualRunEntry",
+      "ProjectGitRepositoryManualRunReconciliation",
     ]);
 
     const indexes = await client.query<{ indexname: string }>(`
@@ -110,6 +112,8 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
   const suffix = randomUUID().slice(0, 8);
   const connectionOwnerId = randomUUID();
   const projectOwnerId = randomUUID();
+  const viewerId = randomUUID();
+  const revokedActorId = randomUUID();
   const projectId = randomUUID();
   const connectionId = randomUUID();
   const credentialId = randomUUID();
@@ -215,14 +219,20 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
       data: [
         { id: connectionOwnerId, username: `manual_runtime_owner_${suffix}`, role: "user" },
         { id: projectOwnerId, username: `manual_runtime_project_owner_${suffix}`, role: "user" },
+        { id: viewerId, username: `manual_runtime_viewer_${suffix}`, role: "user" },
+        { id: revokedActorId, username: `manual_runtime_revoked_${suffix}`, role: "user" },
       ],
     });
     await db.project.create({ data: { id: projectId, workspaceId, name: `Manual runtime ${suffix}`, slug: `manual-runtime-${suffix}` } });
     await db.$transaction(async (tx) => {
       await grantWorkspaceMembership(tx, { workspaceId, userId: connectionOwnerId, role: "member", actorId: seededAdminId, reason: "manual_runtime_gate_owner" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: projectOwnerId, role: "member", actorId: seededAdminId, reason: "manual_runtime_gate_project_owner" });
+      await grantWorkspaceMembership(tx, { workspaceId, userId: viewerId, role: "member", actorId: seededAdminId, reason: "manual_runtime_gate_viewer" });
+      await grantWorkspaceMembership(tx, { workspaceId, userId: revokedActorId, role: "admin", actorId: seededAdminId, reason: "manual_runtime_gate_revoked_actor" });
       await grantProjectMembership(tx, { projectId, workspaceId, userId: connectionOwnerId, role: "editor", actorId: seededAdminId, reason: "manual_runtime_gate_connection_owner" });
       await grantProjectMembership(tx, { projectId, workspaceId, userId: projectOwnerId, role: "owner", actorId: seededAdminId, reason: "manual_runtime_gate_project_owner" });
+      await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: seededAdminId, reason: "manual_runtime_gate_viewer" });
+      await grantProjectMembership(tx, { projectId, workspaceId, userId: revokedActorId, role: "viewer", actorId: seededAdminId, reason: "manual_runtime_gate_revoked_actor" });
     });
     const ownerMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: connectionOwnerId }, select: { id: true, createdAt: true } });
     const projectOwnerMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: projectOwnerId }, select: { id: true, createdAt: true } });
@@ -504,7 +514,29 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     assert.equal(staleTiming.rowCount, 1);
     assert.equal(staleTiming.rows[0]!.stale, true);
 
-    const { runProjectDelegatedGitManualSync } = await import("../src/lib/project-delegated-git-runtime-service");
+    const { acknowledgeProjectDelegatedGitManualRun, getProjectDelegatedGitManualRunDetail, listProjectDelegatedGitManualRuns, runProjectDelegatedGitManualSync } = await import("../src/lib/project-delegated-git-runtime-service");
+    const ownerHistory = await listProjectDelegatedGitManualRuns(projectId, delegation.id, { limit: 20 }, { id: connectionOwnerId, role: "user" }, db);
+    assert.equal(ownerHistory.capabilities.canAcknowledge, true);
+    assert.equal(ownerHistory.runs[0]?.id, staleRunId);
+    const firstPage = await listProjectDelegatedGitManualRuns(projectId, delegation.id, { limit: 1 }, { id: connectionOwnerId, role: "user" }, db);
+    assert.equal(firstPage.runs[0]?.id, staleRunId);
+    assert.ok(firstPage.nextCursor !== null);
+    const secondPage = await listProjectDelegatedGitManualRuns(projectId, delegation.id, { limit: 1, cursor: firstPage.nextCursor! }, { id: connectionOwnerId, role: "user" }, db);
+    assert.equal(secondPage.runs[0]?.id, runId);
+    assert.notEqual(firstPage.runs[0]?.id, secondPage.runs[0]?.id);
+    const ownerDetail = await getProjectDelegatedGitManualRunDetail(projectId, delegation.id, runId, { id: connectionOwnerId, role: "user" }, db);
+    assert.equal(ownerDetail.capabilities.canAcknowledge, true);
+    assert.equal(ownerDetail.entries[0]?.projectSourceId, sourceId);
+    const viewerHistory = await listProjectDelegatedGitManualRuns(projectId, delegation.id, { limit: 20 }, { id: viewerId, role: "user" }, db);
+    assert.equal(viewerHistory.capabilities.canAcknowledge, false);
+    const viewerDetail = await getProjectDelegatedGitManualRunDetail(projectId, delegation.id, runId, { id: viewerId, role: "user" }, db);
+    assert.equal(viewerDetail.capabilities.canAcknowledge, false);
+    await db.$transaction(async (tx) => {
+      await revokeProjectMembership(tx, projectId, revokedActorId, workspaceId, { actorId: seededAdminId, reason: "manual_runtime_gate_revoke_actor" });
+    });
+    await db.project.update({ where: { id: projectId }, data: { membershipInheritanceMode: "workspaceInherited" } });
+    const revokedHistory = await listProjectDelegatedGitManualRuns(projectId, delegation.id, { limit: 20 }, { id: revokedActorId, role: "admin" }, db);
+    assert.equal(revokedHistory.capabilities.canAcknowledge, false);
     const stale = await runProjectDelegatedGitManualSync({
       projectId,
       delegationId: delegation.id,
@@ -531,6 +563,57 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
       (error: unknown) => error instanceof Error && error.message === "PROJECT_GIT_MANUAL_FORBIDDEN",
     );
     assert.equal(await db.projectGitRepositoryManualRunAudit.count({ where: { runId: staleRunId, action: "unknown" } }), 1);
+    await assert.rejects(
+      () => acknowledgeProjectDelegatedGitManualRun(
+        projectId,
+        delegation.id,
+        staleRunId,
+        {},
+        { id: viewerId, role: "user" },
+        db,
+      ),
+      /ACCESS_FORBIDDEN/u,
+    );
+
+    const runBeforeAcknowledgement = await db.projectGitRepositoryManualRun.findUniqueOrThrow({ where: { id: staleRunId }, select: { status: true, completedAt: true } });
+    const auditBeforeAcknowledgement = await db.projectGitRepositoryManualRunAudit.count({ where: { runId: staleRunId } });
+    const acknowledgement = await acknowledgeProjectDelegatedGitManualRun(
+      projectId,
+      delegation.id,
+      staleRunId,
+      {},
+      { id: connectionOwnerId, role: "user" },
+      db,
+    );
+    const repeatedAcknowledgement = await acknowledgeProjectDelegatedGitManualRun(
+      projectId,
+      delegation.id,
+      staleRunId,
+      {},
+      { id: connectionOwnerId, role: "user" },
+      db,
+    );
+    assert.equal(repeatedAcknowledgement.runId, acknowledgement.runId);
+    assert.equal(repeatedAcknowledgement.acknowledgedAt.toISOString(), acknowledgement.acknowledgedAt.toISOString());
+    assert.deepEqual(await db.projectGitRepositoryManualRun.findUniqueOrThrow({ where: { id: staleRunId }, select: { status: true, completedAt: true } }), runBeforeAcknowledgement);
+    assert.equal(await db.projectGitRepositoryManualRunAudit.count({ where: { runId: staleRunId } }), auditBeforeAcknowledgement);
+    const storedAcknowledgement = await db.projectGitRepositoryManualRunReconciliation.findUniqueOrThrow({ where: { runId: staleRunId } });
+    assert.equal(storedAcknowledgement.actorId, connectionOwnerId);
+    assert.equal(storedAcknowledgement.actorProjectMembershipId, ownerMembership.id);
+    let acknowledgementUpdateError: unknown;
+    try {
+      await client.query(`UPDATE "ProjectGitRepositoryManualRunReconciliation" SET "actorId" = $2::uuid WHERE "runId" = $1::uuid`, [staleRunId, projectOwnerId]);
+    } catch (error) {
+      acknowledgementUpdateError = error;
+    }
+    assert.match(String(acknowledgementUpdateError), /PROJECT_GIT_MANUAL_RECONCILIATION_IMMUTABLE/u);
+    let acknowledgementDeleteError: unknown;
+    try {
+      await client.query(`DELETE FROM "ProjectGitRepositoryManualRunReconciliation" WHERE "runId" = $1::uuid`, [staleRunId]);
+    } catch (error) {
+      acknowledgementDeleteError = error;
+    }
+    assert.match(String(acknowledgementDeleteError), /PROJECT_GIT_MANUAL_RECONCILIATION_IMMUTABLE/u);
 
     const guardRunId = randomUUID();
     await createRun(guardRunId, randomUUID(), "database-current");
@@ -632,6 +715,8 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
       expectedUpdatedAt: beforeTerminalArchive.updatedAt,
     }, db);
     assert.ok(archivedAfterTerminal.project.archivedAt instanceof Date);
+    const archivedHistory = await listProjectDelegatedGitManualRuns(projectId, delegation.id, { limit: 20 }, { id: projectOwnerId, role: "user" }, db);
+    assert.equal(archivedHistory.capabilities.canAcknowledge, false);
 
     const delegationAuditCount = await db.projectGitRepositoryDelegationAudit.count({ where: { delegationId: delegation.id } });
     await client.query(`DELETE FROM "Project" WHERE "id" = $1::uuid`, [projectId]);
@@ -645,6 +730,7 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     );
     assert.deepEqual(cascaded.rows[0], { runs: "0", entries: "0", pointers: "0", sources: "0" });
     assert.equal(await db.projectGitRepositoryDelegationAudit.count({ where: { delegationId: delegation.id } }), delegationAuditCount);
+    assert.ok(await db.projectGitRepositoryManualRunReconciliation.findUnique({ where: { id: storedAcknowledgement.id } }));
   } finally {
     await client.end();
   }

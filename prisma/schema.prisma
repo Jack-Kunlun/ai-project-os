@@ -1457,6 +1457,9 @@ model ProjectGitRepositoryDelegation {
   requiredForProjectSnapshot          Boolean                             @default(true)
   codeEnabled                         Boolean                             @default(true)
   metadataEnabled                     Boolean                             @default(true)
+  // PGRD_manual_read_only_check in the forward migration keeps this control
+  // plane strictly one-shot manual read-only; the fields remain explicit for
+  // the generated Prisma shape and public safety projections.
   manualSyncAllowed                   Boolean                             @default(true)
   automationAllowed                   Boolean                             @default(false)
   expiresAt                           DateTime
@@ -1603,6 +1606,7 @@ model ProjectGitRepositoryManualRun {
   @@unique([delegationId, clientRequestKey])
   @@unique([projectId, id])
   @@index([delegationId, status, createdAt])
+  @@index([projectId, delegationId, createdAt, id])
   @@index([projectId, createdAt])
   @@index([requestedById, createdAt])
 }
@@ -1688,6 +1692,26 @@ model ProjectGitRepositoryManualRunAudit {
   @@index([runId, createdAt])
   @@index([delegationId, createdAt])
   @@index([projectId, createdAt])
+}
+
+// Append-only manual review evidence for an unknown run.  This deliberately
+// keeps scalar IDs instead of foreign keys so project deletion can retain the
+// acknowledgement history without preserving a live runtime relation.
+model ProjectGitRepositoryManualRunReconciliation {
+  id                         String   @id @default(uuid()) @db.Uuid
+  runId                      String   @db.Uuid
+  projectId                  String   @db.Uuid
+  delegationId               String   @db.Uuid
+  actorId                    String   @db.Uuid
+  actorProjectMembershipId   String   @db.Uuid
+  actorMembershipCreatedAt   DateTime
+  acknowledgedAt             DateTime @default(now()) @db.Timestamptz(3)
+  transactionId              BigInt   @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt                  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([runId])
+  @@index([projectId, acknowledgedAt])
+  @@index([delegationId, acknowledgedAt])
 }
 
 model GitRepositorySnapshot {

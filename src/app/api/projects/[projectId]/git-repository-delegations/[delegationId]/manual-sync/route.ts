@@ -7,6 +7,11 @@ import { runProjectDelegatedGitManualSync } from "@/lib/project-delegated-git-ru
 export const dynamic = "force-dynamic";
 const uuidSchema = z.string().uuid();
 
+function noStore(response: NextResponse): NextResponse {
+  response.headers.set("cache-control", "no-store");
+  return response;
+}
+
 export async function POST(request: Request, context: { params: Promise<{ projectId: string; delegationId: string }> }) {
   try {
     assertSameOrigin(request);
@@ -20,6 +25,6 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     });
     return NextResponse.json(result, { status: result.status === "succeeded" ? 200 : 202, headers: { "cache-control": "no-store" } });
   } catch (error) {
-    return handleApiError(error);
+    return noStore(handleApiError(error));
   }
 }

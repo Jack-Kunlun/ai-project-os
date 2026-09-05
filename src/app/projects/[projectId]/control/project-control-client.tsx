@@ -125,12 +125,12 @@ export function ProjectControlClient({ username }: { username: string }) {
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="control" />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div>
-        <section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Control plane</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">选择每项 AI 能力使用的供应商。项目级 GitHub 连接和同步暂时冻结，待个人连接与项目双重授权上线后恢复。</p></section>
+        <section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Control plane</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">选择每项 AI 能力使用的供应商。旧项目级 GitHub 连接和自动同步继续冻结；一次性手动只读委托已迁移到<Link href={`/projects/${projectId}/repositories`} className="font-semibold text-indigo-700 underline">项目 Git 页面</Link>，需要个人连接与项目双重授权。</p></section>
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {loading ? <div className="h-40 animate-pulse rounded-3xl bg-slate-200" /> : (
           <>
             <AiRouteSection projectId={projectId} providers={providers} routes={routes} onChanged={setRoutes} />
-            <FrozenRepositorySection />
+            <FrozenRepositorySection projectId={projectId} />
             <JobSection projectId={projectId} jobs={jobs} onReload={reload} />
           </>
         )}
@@ -272,12 +272,12 @@ function RouteCard({ operation, projectId, providers, current, onSaved }: { oper
   return <article className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><h3 className="font-semibold">{operationInfo[operation].title}</h3><p className="mt-2 min-h-12 text-xs leading-5 text-slate-500">{operationInfo[operation].description}</p><select value={providerId} onChange={(event) => setProviderId(event.target.value)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"><option value="">选择已验证供应商</option>{eligible.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {operation === "embedding" ? entry.defaultEmbeddingModelId : operation === "visionExtract" ? entry.defaultVisionModelId : entry.defaultGenerationModelId}</option>)}</select>{operation === "embedding" && deepSeekConfigured ? <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-5 text-amber-800">DeepSeek 不会出现在这里：当前仅用于自动抽取和问答，不提供项目语义向量。请选 OpenAI、Qwen 或 GLM 的向量模型。</p> : null}{previewPending ? <p className="mt-3 text-xs text-slate-400">正在检查切换影响…</p> : null}{previewError ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{previewError}</p> : null}{activePreview?.impact.onlyFutureRuns ? <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">只影响后续任务；历史结果和向量索引保留。</p> : null}{activePreview?.impact.indexInvalidated ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900"><p>当前索引将变为不兼容，语义搜索、RAG 和项目智能体会暂停。</p>{activePreview.impact.activeIndex ? <p className="mt-1 text-amber-800">旧索引：{activePreview.impact.activeIndex.providerName} · {activePreview.impact.activeIndex.modelId} · {activePreview.impact.activeIndex.dimensions} 维</p> : null}<p className="mt-1 text-amber-800">新配置：{provider?.name ?? "所选供应商"} · {target?.modelId ?? "所选模型"} · {target?.embeddingDimensions ?? "未知"} 维</p><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={acknowledgeIndexRebuild} onChange={(event) => setAcknowledgeIndexRebuild(event.target.checked)} className="mt-1" /><span>我确认保存后前往智能记忆重建索引</span></label></div> : null}<button type="button" onClick={() => void save()} disabled={pending || previewPending || !activePreview || Boolean(previewError) || Boolean(activePreview?.impact.requiresIndexRebuildAcknowledgement && !acknowledgeIndexRebuild)} className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : current ? "更新路由" : "保存路由"}</button>{message ? <p role="status" className="mt-2 text-xs text-slate-500">{message}</p> : null}</article>;
 }
 
-function FrozenRepositorySection() {
+function FrozenRepositorySection({ projectId }: { projectId: string }) {
   return <section className="mt-8 rounded-3xl border border-amber-200 bg-amber-50 p-7 shadow-sm sm:p-8">
     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">GitHub connector</p>
-    <h2 className="mt-2 text-2xl font-semibold text-slate-950">项目仓库连接暂时冻结</h2>
+    <h2 className="mt-2 text-2xl font-semibold text-slate-950">旧项目仓库自动化已冻结</h2>
     <p className="mt-3 max-w-3xl text-sm leading-6 text-amber-900">
-      项目级 PAT 连接、项目仓库同步和历史 GitHub 外发正在迁移到个人连接与项目双重授权模型。当前页面不会接收或发送 PAT，也不会启动仓库同步；待个人连接和项目授权能力上线后再开放。
+      旧项目级 PAT 连接、自动同步和历史 GitHub 外发仍冻结，当前页面不会接收或发送 PAT，也不会启动仓库同步。一次性手动只读读取请前往<Link href={`/projects/${projectId}/repositories`} className="font-semibold underline">项目 Git 委托</Link>；自动化、写入/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准。
     </p>
   </section>;
 }

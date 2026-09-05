@@ -151,7 +151,7 @@ export function ProfileClient({
           </section>
           <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Personal connections</p><h2 className="mt-1.5 text-lg font-semibold">我的连接</h2><p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">Git 与 MCP 连接属于你的个人配置，所有登录用户都可管理；当前版本不会将连接用于项目或自动化。</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Personal connections</p><h2 className="mt-1.5 text-lg font-semibold">我的连接</h2><p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">Git 与 MCP 连接属于你的个人配置。Git 完成连接所有者与项目 Owner 双确认后，可发起一次性手动只读读取；MCP 的项目授权和自动化仍保持关闭。</p></div>
               <span className="text-xs text-slate-400">凭据仅显示掩码</span>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">

@@ -17,11 +17,13 @@ import {
   GitRunnerError,
   GitSafetyError,
   GitServiceError,
+  isDefinitelyPreDispatchGitSyncFailure,
   readGitRepositoryFilesForDelegation,
   type GitConnectionWithSecret,
   type GitScannedFile,
 } from "@/lib/git";
 import { getDb } from "@/lib/db";
+import { withWebAiProjectAccessTransaction, type ProjectAccessAdmission } from "@/lib/access-linearization";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 
 const UUID = z.string().uuid();
@@ -29,6 +31,7 @@ const requestSchema = z.object({ clientRequestKey: UUID }).strict();
 const GLOBAL_LOCK_SQL = "ai-project-git-repository-delegation-global";
 export const PROJECT_GIT_MANUAL_STALE_AFTER_MS = 5 * 60 * 1000;
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+type DelegationDb = PrismaClient | Prisma.TransactionClient;
 
 export type ProjectDelegatedGitRuntimeErrorCode =
   | "PROJECT_GIT_MANUAL_INVALID_INPUT"
@@ -40,6 +43,9 @@ export type ProjectDelegatedGitRuntimeErrorCode =
   | "PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE"
   | "PROJECT_GIT_MANUAL_NETWORK_CHANGED"
   | "PROJECT_GIT_MANUAL_CONFLICT"
+  | "PROJECT_GIT_MANUAL_CURSOR_INVALID"
+  | "PROJECT_GIT_MANUAL_RECONCILIATION_STATE_CONFLICT"
+  | "PROJECT_GIT_MANUAL_RECONCILIATION_CONFLICT"
   | "PROJECT_GIT_MANUAL_RUN_FAILED"
   | "PROJECT_GIT_MANUAL_RUN_UNKNOWN";
 
@@ -90,6 +96,29 @@ function publicFailureCode(code: string | null): string | null {
   return /^[A-Z0-9_]{1,64}$/u.test(code) ? code : "PROJECT_GIT_MANUAL_RUN_FAILED";
 }
 
+async function runRead<T>(
+  db: PrismaClient,
+  actor: WebAiActor,
+  projectId: string,
+  operation: (tx: Prisma.TransactionClient, admission: ProjectAccessAdmission) => Promise<T>,
+): Promise<T> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await withWebAiProjectAccessTransaction(db, {
+        actor,
+        projectId,
+        required: "view",
+        allowArchived: true,
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+      }, operation);
+    } catch (error) {
+      if (isSerializationConflict(error) && attempt < 3) continue;
+      throw error;
+    }
+  }
+  return fail("PROJECT_GIT_MANUAL_CONFLICT");
+}
+
 const runSelect = {
   id: true,
   projectId: true,
@@ -138,22 +167,105 @@ function publicRun(row: RunRow) {
     id: row.id,
     projectId: row.projectId,
     delegationId: row.delegationId,
-    requestedById: row.requestedById,
-    clientRequestKey: row.clientRequestKey,
     status: row.status,
     stage: row.stage,
     dispatchState: row.dispatchState,
     failureCode: publicFailureCode(row.failureCode),
     delegationVersion: row.delegationVersion,
-    manualSyncAllowed: row.manualSyncAllowed,
     frozenCommitSha: row.frozenCommitSha,
-    manifestFingerprint: row.manifestFingerprint,
     fileCount: row.fileCount,
     decodedTextBytes: row.decodedTextBytes,
     createdAt: row.createdAt,
     startedAt: row.startedAt,
     completedAt: row.completedAt,
   });
+}
+
+const manualRunHistorySelect = {
+  id: true,
+  projectId: true,
+  delegationId: true,
+  status: true,
+  stage: true,
+  dispatchState: true,
+  failureCode: true,
+  delegationVersion: true,
+  frozenCommitSha: true,
+  fileCount: true,
+  decodedTextBytes: true,
+  createdAt: true,
+  startedAt: true,
+  completedAt: true,
+} satisfies Prisma.ProjectGitRepositoryManualRunSelect;
+
+type ManualRunHistoryRow = Prisma.ProjectGitRepositoryManualRunGetPayload<{ select: typeof manualRunHistorySelect }>;
+
+function publicManualRunHistory(row: ManualRunHistoryRow, acknowledged: boolean) {
+  return Object.freeze({
+    id: row.id,
+    projectId: row.projectId,
+    delegationId: row.delegationId,
+    status: row.status,
+    stage: row.stage,
+    dispatchState: row.dispatchState,
+    failureCode: publicFailureCode(row.failureCode),
+    delegationVersion: row.delegationVersion,
+    frozenCommitSha: row.frozenCommitSha,
+    fileCount: row.fileCount,
+    decodedTextBytes: row.decodedTextBytes,
+    createdAt: row.createdAt,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    acknowledged,
+  });
+}
+
+const manualRunQuerySchema = z.object({
+  cursor: z.string().trim().min(1).max(1024).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+}).strict();
+
+type ManualRunCursor = Readonly<{ projectId: string; delegationId: string; createdAt: string; id: string }>;
+
+function encodeManualRunCursor(cursor: ManualRunCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeManualRunCursor(value: string, projectId: string, delegationId: string): ManualRunCursor {
+  try {
+    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<ManualRunCursor>;
+    if (decoded.projectId !== projectId || decoded.delegationId !== delegationId
+      || typeof decoded.createdAt !== "string" || Number.isNaN(new Date(decoded.createdAt).getTime())
+      || typeof decoded.id !== "string" || !UUID.safeParse(decoded.id).success) {
+      return fail("PROJECT_GIT_MANUAL_CURSOR_INVALID");
+    }
+    return { projectId, delegationId, createdAt: decoded.createdAt, id: decoded.id };
+  } catch {
+    return fail("PROJECT_GIT_MANUAL_CURSOR_INVALID");
+  }
+}
+
+async function loadManualRunAcknowledgements(
+  db: DelegationDb,
+  runIds: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (runIds.length === 0) return new Set();
+  const rows = await db.projectGitRepositoryManualRunReconciliation.findMany({ where: { runId: { in: [...runIds] } }, select: { runId: true } });
+  return new Set(rows.map((row) => row.runId));
+}
+
+async function canAcknowledgeManualRun(
+  db: Prisma.TransactionClient,
+  projectId: string,
+  actorId: string,
+  projectArchivedAt: Date | null,
+): Promise<boolean> {
+  if (projectArchivedAt !== null) return false;
+  const membership = await db.projectMembership.findFirst({
+    where: { projectId, userId: actorId, accessState: "confirmed", role: { in: ["owner", "editor"] } },
+    select: { id: true },
+  });
+  return membership !== null;
 }
 
 type AdmissionConnection = Readonly<{
@@ -925,7 +1037,13 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
       onDispatchStart: () => { dispatched = true; },
     });
   } catch (error) {
-    const terminal = await terminalizeRun(admitted.id, snapshot, dispatched && !(error instanceof GitSafetyError || error instanceof GitRunnerError || error instanceof GitServiceError) ? "unknown" : "failed", safeFailureCode(error), db);
+    const terminal = await terminalizeRun(
+      admitted.id,
+      snapshot,
+      dispatched && !isDefinitelyPreDispatchGitSyncFailure(error) ? "unknown" : "failed",
+      safeFailureCode(error),
+      db,
+    );
     if (terminal !== null) return publicRun(terminal);
     throw error;
   }
@@ -940,14 +1058,14 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
       return publicRun(terminal ?? await db.projectGitRepositoryManualRun.findUniqueOrThrow({ where: { id: admitted.id }, select: runSelect }));
     }
   } catch (error) {
-    const terminal = await terminalizeRun(admitted.id, snapshot, "failed", error instanceof GitSafetyError ? error.code : "PROJECT_GIT_MANUAL_NETWORK_CHANGED", db);
+    const terminal = await terminalizeRun(admitted.id, snapshot, "unknown", safeFailureCode(error), db);
     return publicRun(terminal ?? await db.projectGitRepositoryManualRun.findUniqueOrThrow({ where: { id: admitted.id }, select: runSelect }));
   }
   let currentConnection: GitConnectionWithSecret;
   try {
     currentConnection = await loadFreshConnection(snapshot, db);
   } catch (error) {
-    const terminal = await terminalizeRun(admitted.id, snapshot, "failed", safeFailureCode(error), db);
+    const terminal = await terminalizeRun(admitted.id, snapshot, "unknown", safeFailureCode(error), db);
     if (terminal !== null) return publicRun(terminal);
     return publicRun(await db.projectGitRepositoryManualRun.findUniqueOrThrow({ where: { id: admitted.id }, select: runSelect }));
   }
@@ -955,15 +1073,150 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
   try {
     published = await publishResult(admitted.id, snapshot, currentConnection, result, db);
   } catch (error) {
-    const terminal = await terminalizeRun(admitted.id, snapshot, "failed", safeFailureCode(error), db);
+    const terminal = await terminalizeRun(admitted.id, snapshot, "unknown", safeFailureCode(error), db);
     if (terminal !== null) return publicRun(terminal);
     return publicRun(await db.projectGitRepositoryManualRun.findUniqueOrThrow({ where: { id: admitted.id }, select: runSelect }));
   }
   if (published === null) {
-    const terminal = await terminalizeRun(admitted.id, snapshot, "failed", "PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE", db);
+    const terminal = await terminalizeRun(admitted.id, snapshot, "unknown", "PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE", db);
     return terminal === null ? publicRun(await db.projectGitRepositoryManualRun.findUniqueOrThrow({ where: { id: admitted.id }, select: runSelect })) : publicRun(terminal);
   }
   return publicRun(published);
+}
+
+export async function listProjectDelegatedGitManualRuns(
+  projectIdInput: unknown,
+  delegationIdInput: unknown,
+  input: unknown,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  const projectId = uuid(projectIdInput);
+  const delegationId = uuid(delegationIdInput);
+  const query = manualRunQuerySchema.safeParse(input);
+  if (!query.success) return fail("PROJECT_GIT_MANUAL_INVALID_INPUT");
+  const cursor = query.data.cursor === undefined ? null : decodeManualRunCursor(query.data.cursor, projectId, delegationId);
+  return runRead(db, actor, projectId, async (tx, admission) => {
+    const delegation = await tx.projectGitRepositoryDelegation.findFirst({ where: { id: delegationId, projectId }, select: { id: true } });
+    if (delegation === null) return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
+    const rows = await tx.projectGitRepositoryManualRun.findMany({
+      where: {
+        projectId,
+        delegationId,
+        ...(cursor === null ? {} : {
+          OR: [
+            { createdAt: { lt: new Date(cursor.createdAt) } },
+            { createdAt: new Date(cursor.createdAt), id: { lt: cursor.id } },
+          ],
+        }),
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: query.data.limit + 1,
+      select: manualRunHistorySelect,
+    });
+    const page = rows.slice(0, query.data.limit);
+    const acknowledged = await loadManualRunAcknowledgements(tx, page.map((row) => row.id));
+    const canAcknowledge = await canAcknowledgeManualRun(tx, projectId, actor.id, admission.project.archivedAt);
+    const last = page.at(-1);
+    return Object.freeze({
+      runs: page.map((row) => publicManualRunHistory(row, acknowledged.has(row.id))),
+      nextCursor: rows.length > query.data.limit && last !== undefined
+        ? encodeManualRunCursor({ projectId, delegationId, createdAt: last.createdAt.toISOString(), id: last.id })
+        : null,
+      capabilities: Object.freeze({ canView: admission.permission === "view" || admission.permission === "edit" || admission.permission === "owner", canAcknowledge }),
+    });
+  });
+}
+
+export async function getProjectDelegatedGitManualRunDetail(
+  projectIdInput: unknown,
+  delegationIdInput: unknown,
+  runIdInput: unknown,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  const projectId = uuid(projectIdInput);
+  const delegationId = uuid(delegationIdInput);
+  const runId = uuid(runIdInput);
+  return runRead(db, actor, projectId, async (tx, admission) => {
+    const row = await tx.projectGitRepositoryManualRun.findFirst({ where: { id: runId, projectId, delegationId }, select: manualRunHistorySelect });
+    if (row === null) return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
+    const acknowledgement = await tx.projectGitRepositoryManualRunReconciliation.findUnique({ where: { runId }, select: { id: true, acknowledgedAt: true } });
+    const canAcknowledge = await canAcknowledgeManualRun(tx, projectId, actor.id, admission.project.archivedAt);
+    const entries = row.status === "succeeded"
+      ? await tx.projectGitRepositoryManualRunEntry.findMany({
+        where: { projectId, runId },
+        orderBy: [{ ordinal: "asc" }],
+        select: { ordinal: true, normalizedPath: true, contentBytes: true, lineCount: true, projectSourceId: true },
+      })
+      : [];
+    return Object.freeze({
+      run: publicManualRunHistory(row, acknowledgement !== null),
+      acknowledgement: acknowledgement === null ? null : Object.freeze({ acknowledgedAt: acknowledgement.acknowledgedAt }),
+      entries,
+      capabilities: Object.freeze({ canAcknowledge }),
+    });
+  });
+}
+
+export async function acknowledgeProjectDelegatedGitManualRun(
+  projectIdInput: unknown,
+  delegationIdInput: unknown,
+  runIdInput: unknown,
+  input: unknown,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  const projectId = uuid(projectIdInput);
+  const delegationId = uuid(delegationIdInput);
+  const runId = uuid(runIdInput);
+  if (!z.object({}).strict().safeParse(input).success) return fail("PROJECT_GIT_MANUAL_INVALID_INPUT");
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await withWebAiProjectAccessTransaction(db, {
+        actor,
+        projectId,
+        required: "edit",
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      }, async (tx, admission) => {
+        if (admission.project.archivedAt !== null) return fail("PROJECT_GIT_MANUAL_PROJECT_ARCHIVED");
+        await tx.$queryRaw`SELECT "id" FROM "ProjectGitRepositoryManualRun" WHERE "id" = ${runId}::uuid FOR UPDATE`;
+        const run = await tx.projectGitRepositoryManualRun.findFirst({ where: { id: runId, projectId, delegationId }, select: { id: true, projectId: true, delegationId: true, status: true } });
+        if (run === null) return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
+        if (run.status !== "unknown") return fail("PROJECT_GIT_MANUAL_RECONCILIATION_STATE_CONFLICT");
+        const membership = await tx.projectMembership.findFirst({
+          where: { projectId, userId: admission.actor.id, accessState: "confirmed", role: { in: ["owner", "editor"] } },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          select: { id: true, createdAt: true },
+        });
+        if (membership === null) return fail("PROJECT_GIT_MANUAL_FORBIDDEN");
+        const existing = await tx.projectGitRepositoryManualRunReconciliation.findUnique({ where: { runId }, select: { id: true, runId: true, acknowledgedAt: true } });
+        if (existing !== null) return Object.freeze({ runId: existing.runId, acknowledged: true, acknowledgedAt: existing.acknowledgedAt });
+        await tx.$executeRaw`SELECT set_config('ai.project_git_manual_run_reconciliation', '1', true)`;
+        const acknowledgement = await tx.projectGitRepositoryManualRunReconciliation.create({
+          data: {
+            runId,
+            projectId,
+            delegationId,
+            actorId: admission.actor.id,
+            actorProjectMembershipId: membership.id,
+            actorMembershipCreatedAt: membership.createdAt,
+          },
+          select: { runId: true, acknowledgedAt: true },
+        });
+        return Object.freeze({ runId: acknowledgement.runId, acknowledged: true, acknowledgedAt: acknowledgement.acknowledgedAt });
+      });
+    } catch (error) {
+      if (isPrismaCode(error, "P2002")) {
+        if (attempt < 3) continue;
+        return fail("PROJECT_GIT_MANUAL_RECONCILIATION_CONFLICT");
+      }
+      if (isSerializationConflict(error) && attempt < 3) continue;
+      if (isSerializationConflict(error)) return fail("PROJECT_GIT_MANUAL_RECONCILIATION_CONFLICT");
+      throw error;
+    }
+  }
+  return fail("PROJECT_GIT_MANUAL_RECONCILIATION_CONFLICT");
 }
 
 export async function getProjectDelegatedGitManualRun(

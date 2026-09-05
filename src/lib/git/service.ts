@@ -97,7 +97,7 @@ function markPreDispatchGitError(error: unknown): unknown {
   return error;
 }
 
-function isDefinitelyPreDispatchGitSyncFailure(error: unknown): boolean {
+export function isDefinitelyPreDispatchGitSyncFailure(error: unknown): boolean {
   if (error instanceof CredentialVaultError) return true;
   if (typeof error === "object" && error !== null && preDispatchGitErrors.has(error)) return true;
   if (error instanceof GitSafetyError) return error.code !== "GIT_NETWORK_CHANGED";

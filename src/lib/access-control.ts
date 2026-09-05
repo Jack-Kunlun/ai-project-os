@@ -5,6 +5,10 @@ import { findConfirmedProjectMembership, findConfirmedWorkspaceMembership } from
 
 const PROJECT_ID_SCHEMA = z.string().uuid();
 const PROJECT_PATH_PATTERN = /^\/api\/projects\/([^/]+)(?:\/|$)/u;
+// Keep the narrow terminal bypass limited to Zod UUIDs with a non-NIL value:
+// versions 1-8 and RFC 4122 variant 8/9/a/b, for both dynamic path segments.
+const UUID_PATH_SEGMENT = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}";
+const GIT_DELEGATION_TERMINAL_PATH_PATTERN = new RegExp(`^/api/projects/${UUID_PATH_SEGMENT}/git-repository-delegations/${UUID_PATH_SEGMENT}/(?:rejection|revocation)/?$`, "u");
 
 function canonicalProjectId(projectId: string): string {
   return PROJECT_ID_SCHEMA.safeParse(projectId).success ? projectId.toLowerCase() : projectId;
@@ -137,6 +141,7 @@ export async function resolveProjectCreationWorkspace(user: AccessUser, db: Pris
 }
 
 export async function authorizeApiRequest(user: AccessUser, request: Request, db: PrismaClient = getDb()): Promise<void> {
+  const rawPath = new URL(request.url).pathname;
   const path = decodedApiPath(request);
   if (path.startsWith("/api/system/")) {
     if (user.role !== "admin") return fail("ACCESS_FORBIDDEN");
@@ -149,6 +154,12 @@ export async function authorizeApiRequest(user: AccessUser, request: Request, db
   const projectIdCandidate = path.match(PROJECT_PATH_PATTERN)?.[1];
   if (projectIdCandidate === undefined) return;
   const parsedProjectId = PROJECT_ID_SCHEMA.safeParse(projectIdCandidate);
+  // A personal Git connection owner may need to reject/revoke their own
+  // delegation after losing project access.  Keep this bypass exact to the
+  // two terminal routes; their service-layer predicate remains authoritative.
+  // Match the raw path too, so percent-encoded or malformed paths do not gain
+  // a broader bypass than the concrete Next route.
+  if (parsedProjectId.success && rawPath === path && request.method.toUpperCase() === "POST" && GIT_DELEGATION_TERMINAL_PATH_PATTERN.test(path)) return;
   if (!parsedProjectId.success) return;
   const write = !["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase());
   const ownerOnly = write && (

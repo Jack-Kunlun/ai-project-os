@@ -28,6 +28,17 @@ import {
 } from "./git-connections-state";
 
 type PagePayload = Readonly<{ connections: GitConnection[]; catalog: GitCatalogEntry[] }>;
+type OwnerDelegation = Readonly<{
+  id: string;
+  project: Readonly<{ id: string; name: string; archivedAt: string | null }>;
+  connection: Readonly<{ id: string; name: string; providerKind: string; transport: string; status: string; ownershipState: string }>;
+  scope: Readonly<{ repositoryPath: string; trackedRef: string; manualSyncAllowed: boolean; automationAllowed: boolean }>;
+  status: "draft" | "ownerConfirmed" | "active";
+  version: number;
+  expiresAt: string;
+  capabilities: Readonly<{ canReject: boolean; canRevoke: boolean }>;
+}>;
+type OwnerDelegationPayload = Readonly<{ delegations: readonly OwnerDelegation[] }>;
 
 const statusStyles: Record<GitConnection["status"], string> = {
   configured: "bg-amber-50 text-amber-700 ring-amber-200",
@@ -39,8 +50,11 @@ const statusStyles: Record<GitConnection["status"], string> = {
 export function GitConnectionsClient() {
   const [connections, setConnections] = useState<GitConnection[]>([]);
   const [catalog, setCatalog] = useState<GitCatalogEntry[]>([]);
+  const [ownerDelegations, setOwnerDelegations] = useState<readonly OwnerDelegation[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [ownerDelegationsLoading, setOwnerDelegationsLoading] = useState(true);
+  const [ownerDelegationsError, setOwnerDelegationsError] = useState<string | null>(null);
   const [message, setMessage] = useState<ConnectionMessage | null>(null);
 
   const load = useCallback(async () => {
@@ -59,10 +73,23 @@ export function GitConnectionsClient() {
     }
   }, []);
 
+  const loadOwnerDelegations = useCallback(async () => {
+    setOwnerDelegationsLoading(true);
+    try {
+      const response = await fetch("/api/me/git-delegations", { cache: "no-store" });
+      if (!response.ok) throw await readConnectionError(response, "项目委托安全记录加载失败");
+      const payload = await response.json() as OwnerDelegationPayload;
+      setOwnerDelegations(payload.delegations);
+      setOwnerDelegationsError(null);
+    } catch (error) {
+      setOwnerDelegationsError(connectionErrorText(error, "项目委托安全记录加载失败"));
+    } finally { setOwnerDelegationsLoading(false); }
+  }, []);
+
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
+    const timer = window.setTimeout(() => { void load(); void loadOwnerDelegations(); }, 0);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [load, loadOwnerDelegations]);
 
   return (
     <div className="mx-auto max-w-6xl px-5 pb-16 pt-7 sm:px-8 lg:px-10">
@@ -76,17 +103,23 @@ export function GitConnectionsClient() {
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">My Git connections</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em]">我的 Git 连接</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">连接只属于当前账户，凭据会在服务端加密保存。你可以在这里测试自己有权限访问的仓库，但不会把连接自动共享给任何项目。</p>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">连接只属于当前账户，凭据会在服务端加密保存。你可以在这里验证自己有权限访问的仓库；项目使用仍需在项目页按范围完成双确认。</p>
           </div>
           <div className="rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-900 lg:max-w-xs">
             <p className="font-semibold">当前使用边界</p>
-            <p className="mt-1 text-xs leading-5">项目委托开发中，当前连接不能用于项目/自动化。请不要在项目页寻找或复制这条连接。</p>
+            <p className="mt-1 text-xs leading-5">项目页已支持一次性手动只读委托；自动化、写入/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准。</p>
           </div>
         </div>
       </section>
 
       {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-5 rounded-2xl px-4 py-3 text-sm ${message.tone === "error" ? "bg-rose-50 text-rose-700" : message.tone === "success" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700"}`}>{message.text}</p> : null}
       {loadError ? <div role="alert" className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700"><span>{loadError}</span><button type="button" onClick={() => void load()} className="min-h-10 font-semibold underline">重试</button></div> : null}
+
+      <section className="mt-6 rounded-3xl border border-amber-200/80 bg-amber-50/50 p-5 shadow-sm sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Delegation safety</p><h2 className="mt-2 text-xl font-semibold text-slate-900">项目委托安全管理</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">这里列出你作为连接所有者的未终态委托。即使你已失去项目访问，或项目已归档，仍可撤销后续使用或拒绝尚未生效的委托。</p></div><span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-amber-800">{ownerDelegationsLoading ? "读取中…" : `${ownerDelegations.length} 条`}</span></div>
+        {ownerDelegationsError ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-xs text-rose-700"><span>{ownerDelegationsError}</span><button type="button" onClick={() => void loadOwnerDelegations()} className="font-semibold underline">重试</button></div> : null}
+        {ownerDelegationsLoading ? <div className="mt-4 h-24 animate-pulse rounded-2xl bg-white/70" aria-label="正在加载项目委托安全记录" /> : ownerDelegations.length === 0 && ownerDelegationsError === null ? <div className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-white/60 px-5 py-7 text-center text-xs text-slate-600">当前没有需要你处理的项目委托安全记录。</div> : <div className="mt-4 grid gap-3 lg:grid-cols-2">{ownerDelegations.map((delegation) => <OwnerDelegationCard key={delegation.id} delegation={delegation} onReload={loadOwnerDelegations} onMessage={setMessage} />)}</div>}
+      </section>
 
       <div className="mt-6 grid min-w-0 gap-6 lg:grid-cols-[minmax(280px,.78fr)_minmax(0,1.22fr)]">
         <GitCreateForm catalog={catalog} onCreated={(connection) => { setConnections((current) => [...current, connection]); setMessage({ tone: "success", text: "Git 连接已保存。请在连接卡片中填写仓库路径并测试。" }); }} />
@@ -100,6 +133,43 @@ export function GitConnectionsClient() {
       </div>
     </div>
   );
+}
+
+function OwnerDelegationCard({ delegation, onReload, onMessage }: { delegation: OwnerDelegation; onReload: () => Promise<void>; onMessage: (message: ConnectionMessage) => void }) {
+  const { confirm, dialog } = useAppConfirmDialog();
+  const [pending, setPending] = useState<"rejection" | "revocation" | null>(null);
+  const statusLabel = delegation.status === "draft" ? "待确认" : delegation.status === "ownerConfirmed" ? "待项目 Owner 确认" : "已启用手动读取";
+
+  async function terminal(action: "rejection" | "revocation") {
+    const result = await confirm({
+      eyebrow: action === "rejection" ? "拒绝项目委托" : "撤销项目委托",
+      title: action === "rejection" ? "拒绝这项委托？" : "撤销这项委托？",
+      description: action === "rejection" ? "拒绝会阻止这项尚未完成的委托继续确认。请填写原因。" : "撤销会停止后续手动读取；已经发出的外部读取不能撤回。请填写原因。",
+      confirmLabel: action === "rejection" ? "确认拒绝" : "确认撤销",
+      cancelLabel: "返回",
+      tone: "danger",
+      inputLabel: "原因",
+      inputPlaceholder: "例如：仓库范围需要调整",
+      inputOptional: false,
+      maxLength: 500,
+    });
+    if (!result.confirmed) return;
+    setPending(action);
+    try {
+      const response = await fetch(`/api/projects/${delegation.project.id}/git-repository-delegations/${delegation.id}/${action}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expectedVersion: delegation.version, reason: result.value.trim() }),
+      });
+      if (!response.ok) throw await readConnectionError(response, action === "rejection" ? "拒绝委托失败" : "撤销委托失败");
+      onMessage({ tone: "success", text: action === "rejection" ? "项目委托已拒绝。" : "项目委托已撤销。" });
+      await onReload();
+    } catch (error) {
+      onMessage({ tone: "error", text: connectionErrorText(error, action === "rejection" ? "拒绝委托失败" : "撤销委托失败") });
+    } finally { setPending(null); }
+  }
+
+  return <article className="min-w-0 rounded-2xl border border-amber-200 bg-white p-4">{dialog}<div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-sm font-semibold text-slate-900">{delegation.project.name}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">{statusLabel}</span>{delegation.project.archivedAt ? <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-800">项目已归档</span> : null}</div><p className="mt-2 break-all text-xs text-slate-500">{delegation.connection.name} · {delegation.connection.providerKind} · {delegation.connection.transport.toUpperCase()}</p><p className="mt-1 break-all text-xs text-slate-500">{delegation.scope.repositoryPath} · {delegation.scope.trackedRef}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p>版本 {delegation.version}</p><p className="mt-1">有效至 {formatConnectionDate(delegation.expiresAt)}</p></div></div><div className="mt-3 flex flex-wrap gap-2 text-[11px] text-slate-500"><span>{delegation.scope.manualSyncAllowed && !delegation.scope.automationAllowed ? "一次性手动只读" : "受限范围"}</span><span aria-hidden="true">·</span><span>{delegation.scope.automationAllowed ? "自动化范围需单独开放" : "自动化关闭"}</span></div><div className="mt-4 flex flex-wrap gap-2">{delegation.capabilities.canReject ? <button type="button" onClick={() => void terminal("rejection")} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "rejection" ? "处理中…" : "拒绝委托"}</button> : null}{delegation.capabilities.canRevoke ? <button type="button" onClick={() => void terminal("revocation")} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "revocation" ? "处理中…" : "撤销委托"}</button> : null}</div></article>;
 }
 
 function GitCreateForm({ catalog, onCreated }: { catalog: readonly GitCatalogEntry[]; onCreated: (connection: GitConnection) => void }) {
@@ -192,7 +262,7 @@ function GitConnectionCard({ connection, onChanged, onRemoved, onReload }: { con
     finally { setPending(null); }
   }
 
-  async function toggle() { await update({ enabled: connection.status === "disabled" }, "toggle", connection.status === "disabled" ? "连接已重新启用，请重新测试。" : "连接已停用；当前版本不会用于项目或自动化。",); }
+  async function toggle() { await update({ enabled: connection.status === "disabled" }, "toggle", connection.status === "disabled" ? "连接已重新启用，请重新测试。" : "连接已停用；后续项目手动读取将停止，自动化仍保持关闭。",); }
 
   async function remove() {
     let current = connection;
@@ -212,7 +282,7 @@ function GitConnectionCard({ connection, onChanged, onRemoved, onReload }: { con
     finally { setPending(null); }
   }
 
-  return <article className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">{dialog}<div className="flex min-w-0 flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><h3 className="max-w-full break-words text-base font-semibold text-slate-900">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{gitStatusLabels[connection.status]}</span></div><p className="mt-2 break-all text-xs text-slate-500">{gitProviderLabels[connection.providerKind]} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p>{connection.authKind === "none" ? "无凭据" : `${connection.authKind} ${gitCredentialLabel(connection)}`}</p><p className="mt-1">更新于 {formatConnectionDate(connection.updatedAt)}</p></div></div>{connection.lastErrorCode ? <p role="status" className="mt-3 break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">最近错误：{connection.lastErrorCode}。修改安全配置或凭据后请重新测试。</p> : null}<dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><dt className="text-slate-400">最近测试</dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastTestedAt)}</dd></div><div><dt className="text-slate-400">已关联仓库</dt><dd className="mt-1 font-medium">{connection._count.repositories} 个（当前不开放项目委托）</dd></div><div><dt className="text-slate-400">内网访问</dt><dd className="mt-1 font-medium">{connection.allowPrivateNetwork ? "已显式允许" : "禁止"}</dd></div></dl>{editing ? <form onSubmit={saveEdit} className="mt-4 grid gap-3 rounded-xl border border-indigo-100 bg-white p-4 sm:grid-cols-2"><Field label="连接名称"><input className={connectionFieldClass} value={draft.name} onChange={(event) => setEditValue("name", event.target.value)} required maxLength={80} /></Field><Field label="用户名（可选）"><input className={connectionFieldClass} value={draft.username} onChange={(event) => setEditValue("username", event.target.value)} maxLength={128} /></Field><Field label="轮换凭据（可选）"><input type="password" autoComplete="new-password" className={connectionFieldClass} value={draft.secret} onChange={(event) => setEditValue("secret", event.target.value)} minLength={1} maxLength={24000} placeholder="留空表示不修改" /></Field><label className="mt-1 flex items-start gap-3 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900"><input type="checkbox" checked={draft.allowPrivateNetwork} onChange={(event) => setEditValue("allowPrivateNetwork", event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><span><strong className="block">允许受信内网地址</strong><span>变更后需要重新测试。</span></span></label>{connection.transport === "https" ? <Field label="替换自定义 CA（可选）"><textarea className={`${connectionFieldClass} min-h-24 font-mono text-xs`} value={draft.tlsCaCertificate} onChange={(event) => setEditValue("tlsCaCertificate", event.target.value)} placeholder="留空表示清除自定义 CA" /></Field> : <Field label="替换 SSH known_hosts"><input className={`${connectionFieldClass} font-mono text-xs`} value={draft.sshKnownHost} onChange={(event) => setEditValue("sshKnownHost", event.target.value)} placeholder="留空表示清除记录" /></Field>}<div className="flex flex-wrap gap-2 sm:col-span-2"><button type="submit" disabled={pending !== null} className={`${connectionButtonClass} bg-indigo-600 text-white hover:bg-indigo-500`}>{pending === "edit" ? "保存中…" : "保存修改"}</button><button type="button" onClick={resetEdit} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}>取消</button></div></form> : null}<form onSubmit={testConnection} className="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"><Field label="只读测试仓库路径"><input className={connectionFieldClass} value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder="owner/repository" required disabled={connection.status === "disabled" || pending !== null} /></Field><Field label="分支 / ref"><input className={connectionFieldClass} value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" required disabled={connection.status === "disabled" || pending !== null} /></Field><button type="submit" disabled={pending !== null || connection.status === "disabled"} className={`${connectionButtonClass} min-h-11 bg-indigo-600 px-4 text-white hover:bg-indigo-500`}>{pending === "test" ? "测试中…" : "测试只读连接"}</button></form>{message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-3 text-xs leading-5 ${message.tone === "error" ? "text-rose-700" : message.tone === "success" ? "text-emerald-700" : "text-slate-600"}`}>{message.text}</p> : null}<div className="mt-4 flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => { setDraft(createGitEditDraft(connection)); setEditing((current) => !current); }} disabled={pending !== null} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>{editing ? "关闭编辑" : "编辑配置"}</button></div><div className="flex flex-wrap gap-2">{connection.status === "disabled" ? <button type="button" onClick={() => void toggle()} disabled={pending !== null} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>{pending === "toggle" ? "处理中…" : "重新启用"}</button> : <button type="button" onClick={() => void toggle()} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "toggle" ? "处理中…" : "停用"}</button>}<button type="button" onClick={() => void remove()} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "delete" ? "删除中…" : "删除"}</button></div></div>{connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">连接已停用；重新启用后必须重新测试。删除需要保持停用并输入准确名称。</p> : null}</article>;
+  return <article className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5">{dialog}<div className="flex min-w-0 flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><h3 className="max-w-full break-words text-base font-semibold text-slate-900">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{gitStatusLabels[connection.status]}</span></div><p className="mt-2 break-all text-xs text-slate-500">{gitProviderLabels[connection.providerKind]} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p>{connection.authKind === "none" ? "无凭据" : `${connection.authKind} ${gitCredentialLabel(connection)}`}</p><p className="mt-1">更新于 {formatConnectionDate(connection.updatedAt)}</p></div></div>{connection.lastErrorCode ? <p role="status" className="mt-3 break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">最近错误：{connection.lastErrorCode}。修改安全配置或凭据后请重新测试。</p> : null}<dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><dt className="text-slate-400">最近测试</dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastTestedAt)}</dd></div><div><dt className="text-slate-400">已关联仓库</dt><dd className="mt-1 font-medium">{connection._count.repositories} 个（项目页可按双确认发起一次性手动只读读取）</dd></div><div><dt className="text-slate-400">内网访问</dt><dd className="mt-1 font-medium">{connection.allowPrivateNetwork ? "已显式允许" : "禁止"}</dd></div></dl>{editing ? <form onSubmit={saveEdit} className="mt-4 grid gap-3 rounded-xl border border-indigo-100 bg-white p-4 sm:grid-cols-2"><Field label="连接名称"><input className={connectionFieldClass} value={draft.name} onChange={(event) => setEditValue("name", event.target.value)} required maxLength={80} /></Field><Field label="用户名（可选）"><input className={connectionFieldClass} value={draft.username} onChange={(event) => setEditValue("username", event.target.value)} maxLength={128} /></Field><Field label="轮换凭据（可选）"><input type="password" autoComplete="new-password" className={connectionFieldClass} value={draft.secret} onChange={(event) => setEditValue("secret", event.target.value)} minLength={1} maxLength={24000} placeholder="留空表示不修改" /></Field><label className="mt-1 flex items-start gap-3 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900"><input type="checkbox" checked={draft.allowPrivateNetwork} onChange={(event) => setEditValue("allowPrivateNetwork", event.target.checked)} className="mt-1 h-4 w-4 shrink-0" /><span><strong className="block">允许受信内网地址</strong><span>变更后需要重新测试。</span></span></label>{connection.transport === "https" ? <Field label="替换自定义 CA（可选）"><textarea className={`${connectionFieldClass} min-h-24 font-mono text-xs`} value={draft.tlsCaCertificate} onChange={(event) => setEditValue("tlsCaCertificate", event.target.value)} placeholder="留空表示清除自定义 CA" /></Field> : <Field label="替换 SSH known_hosts"><input className={`${connectionFieldClass} font-mono text-xs`} value={draft.sshKnownHost} onChange={(event) => setEditValue("sshKnownHost", event.target.value)} placeholder="留空表示清除记录" /></Field>}<div className="flex flex-wrap gap-2 sm:col-span-2"><button type="submit" disabled={pending !== null} className={`${connectionButtonClass} bg-indigo-600 text-white hover:bg-indigo-500`}>{pending === "edit" ? "保存中…" : "保存修改"}</button><button type="button" onClick={resetEdit} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}>取消</button></div></form> : null}<form onSubmit={testConnection} className="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"><Field label="只读测试仓库路径"><input className={connectionFieldClass} value={repositoryPath} onChange={(event) => setRepositoryPath(event.target.value)} placeholder="owner/repository" required disabled={connection.status === "disabled" || pending !== null} /></Field><Field label="分支 / ref"><input className={connectionFieldClass} value={trackedRef} onChange={(event) => setTrackedRef(event.target.value)} placeholder="main" required disabled={connection.status === "disabled" || pending !== null} /></Field><button type="submit" disabled={pending !== null || connection.status === "disabled"} className={`${connectionButtonClass} min-h-11 bg-indigo-600 px-4 text-white hover:bg-indigo-500`}>{pending === "test" ? "测试中…" : "测试只读连接"}</button></form>{message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-3 text-xs leading-5 ${message.tone === "error" ? "text-rose-700" : message.tone === "success" ? "text-emerald-700" : "text-slate-600"}`}>{message.text}</p> : null}<div className="mt-4 flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap gap-2"><button type="button" onClick={() => { setDraft(createGitEditDraft(connection)); setEditing((current) => !current); }} disabled={pending !== null} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>{editing ? "关闭编辑" : "编辑配置"}</button></div><div className="flex flex-wrap gap-2">{connection.status === "disabled" ? <button type="button" onClick={() => void toggle()} disabled={pending !== null} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>{pending === "toggle" ? "处理中…" : "重新启用"}</button> : <button type="button" onClick={() => void toggle()} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "toggle" ? "处理中…" : "停用"}</button>}<button type="button" onClick={() => void remove()} disabled={pending !== null} className={`${connectionButtonClass} text-rose-700 hover:bg-rose-50`}>{pending === "delete" ? "删除中…" : "删除"}</button></div></div>{connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">连接已停用；重新启用后必须重新测试。删除需要保持停用并输入准确名称。</p> : null}</article>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

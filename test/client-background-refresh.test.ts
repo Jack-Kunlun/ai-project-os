@@ -33,17 +33,25 @@ test("mutation-triggered data reloads keep mounted UI after the initial page loa
   }
 });
 
-test("frozen project Git and MCP pages expose links without remote mutations", () => {
-  const pages = [
-    ["src/app/projects/[projectId]/repositories/project-repositories-client.tsx", "/profile/connections/git"],
-    ["src/app/projects/[projectId]/tools/project-tools-client.tsx", "/profile/connections/mcp"],
-  ] as const;
-  for (const [path, personalPath] of pages) {
-    const source = readFileSync(join(root, path), "utf8");
-    assert.match(source, new RegExp(personalPath.replaceAll("/", "\\/"), "u"), `${path} must link to personal configuration`);
-    assert.match(source, /未开放/u, `${path} must describe the frozen capability`);
-    assert.doesNotMatch(source, /fetch\(|method:\s*"(?:POST|PATCH|DELETE)"/u, `${path} must not trigger frozen remote mutations`);
-  }
+test("project Git page uses bounded manual delegation while remote writes stay frozen", () => {
+  const path = "src/app/projects/[projectId]/repositories/project-repositories-client.tsx";
+  const source = readFileSync(join(root, path), "utf8");
+  assert.match(source, /\/profile\/connections\/git/u, `${path} must link to personal configuration`);
+  assert.match(source, /git-repository-delegations/u, `${path} must use the delegated project API`);
+  assert.match(source, /manual-sync/u, `${path} must expose the bounded manual read action`);
+  assert.match(source, /manualSyncAllowed:\s*true/u);
+  assert.match(source, /automationAllowed:\s*false/u);
+  assert.match(source, /自动化、写入\/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准/u);
+  assert.doesNotMatch(source, /api\/settings\/git-connections|api\/projects\/\$\{projectId\}\/git-connections/u);
+  assert.doesNotMatch(source, /\/git-(?:push|commit)|\/pull-requests?/u, `${path} must not expose Git write operations`);
+});
+
+test("frozen project MCP page links to personal configuration without remote mutations", () => {
+  const path = "src/app/projects/[projectId]/tools/project-tools-client.tsx";
+  const source = readFileSync(join(root, path), "utf8");
+  assert.match(source, /\/profile\/connections\/mcp/u, `${path} must link to personal configuration`);
+  assert.match(source, /未开放/u, `${path} must describe the frozen capability`);
+  assert.doesNotMatch(source, /fetch\(|method:\s*"(?:POST|PATCH|DELETE)"/u, `${path} must not trigger frozen remote mutations`);
 });
 
 test("profile updates its username locally without refreshing the current route", () => {

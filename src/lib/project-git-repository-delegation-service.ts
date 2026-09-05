@@ -46,8 +46,8 @@ const proposalSchema = z.object({
   requiredForProjectSnapshot: z.boolean().default(true),
   codeEnabled: z.boolean().default(true),
   metadataEnabled: z.boolean().default(true),
-  manualSyncAllowed: z.boolean().default(true),
-  automationAllowed: z.boolean().default(false),
+  manualSyncAllowed: z.literal(true).default(true),
+  automationAllowed: z.literal(false).default(false),
   expiresAt: utcDateSchema,
 }).strict();
 
@@ -133,10 +133,10 @@ const delegationSelect = {
   terminalReason: true,
   createdAt: true,
   updatedAt: true,
-  connectionOwner: { select: { id: true, username: true, displayName: true } },
-  ownerConfirmedBy: { select: { id: true, username: true, displayName: true } },
-  projectConfirmedBy: { select: { id: true, username: true, displayName: true } },
-  terminalActor: { select: { id: true, username: true, displayName: true } },
+  connectionOwner: { select: { displayName: true } },
+  ownerConfirmedBy: { select: { displayName: true } },
+  projectConfirmedBy: { select: { displayName: true } },
+  terminalActor: { select: { displayName: true } },
   gitConnection: {
     select: {
       id: true,
@@ -148,7 +148,7 @@ const delegationSelect = {
       ownerUserId: true,
       configurationVersion: true,
       resolvedAddressFingerprint: true,
-      credential: { select: { secretFingerprint: true } },
+      credential: { select: { kind: true, secretFingerprint: true } },
     },
   },
 } as const;
@@ -447,11 +447,123 @@ function canonicalFingerprint(input: Readonly<{
   }), "utf8").digest("hex");
 }
 
-function publicIdentity(user: { id: string; username: string; displayName: string | null } | null) {
-  return user === null ? null : { id: user.id, displayName: user.displayName ?? user.username };
+function publicIdentity(user: { displayName: string | null } | null) {
+  return user === null ? null : { displayName: user.displayName?.trim() || "项目成员" };
 }
 
-function delegationView(row: DelegationRow, actorId: string, explicitProjectOwner: boolean) {
+export type ProjectGitRepositoryDelegationCapabilities = Readonly<{
+  canOwnerConfirm: boolean;
+  canProjectConfirm: boolean;
+  canReject: boolean;
+  canRevoke: boolean;
+  canManualSync: boolean;
+}>;
+
+const noDelegationCapabilities: ProjectGitRepositoryDelegationCapabilities = Object.freeze({
+  canOwnerConfirm: false,
+  canProjectConfirm: false,
+  canReject: false,
+  canRevoke: false,
+  canManualSync: false,
+});
+
+type CapabilityContext = Readonly<{
+  actorId: string;
+  projectArchivedAt: Date | null;
+  now: Date;
+  explicitMembership: { id: string; createdAt: Date; role: "owner" | "editor" } | null;
+  membershipEvidence: ReadonlyMap<string, { id: string; userId: string; createdAt: Date; role: "owner" | "editor"; accessState: string }>;
+  userEvidence: ReadonlyMap<string, { id: string; disabledAt: Date | null }>;
+}>;
+
+function currentConnectionEvidence(row: DelegationRow): boolean {
+  const connection = row.gitConnection;
+  return connection.ownerUserId === row.connectionOwnerId
+    && connection.ownershipState === "confirmed"
+    && connection.status === "verified"
+    && connection.configurationVersion === row.connectionConfigurationVersion
+    && connection.resolvedAddressFingerprint === row.resolvedAddressFingerprint
+    && connection.credential?.kind === "git"
+    && connection.credential?.secretFingerprint === row.credentialFingerprint;
+}
+
+function delegationCapabilities(row: DelegationRow, context: CapabilityContext): ProjectGitRepositoryDelegationCapabilities {
+  const membership = context.explicitMembership;
+  const explicitEditor = membership !== null;
+  const explicitProjectOwner = membership?.role === "owner";
+  const ownerMembership = context.membershipEvidence.get(row.ownerProjectMembershipId);
+  const currentOwnerMembership = ownerMembership !== undefined
+    && ownerMembership.userId === row.connectionOwnerId
+    && ownerMembership.accessState === "confirmed"
+    && ownerMembership.createdAt.getTime() === row.ownerMembershipCreatedAt.getTime();
+  const ownerActorActive = context.userEvidence.get(row.connectionOwnerId)?.disabledAt === null;
+  const projectOwnerMembership = row.projectConfirmedProjectMembershipId === null
+    ? undefined
+    : context.membershipEvidence.get(row.projectConfirmedProjectMembershipId);
+  const currentProjectOwnerMembership = row.projectConfirmedById !== null
+    && projectOwnerMembership !== undefined
+    && projectOwnerMembership.userId === row.projectConfirmedById
+    && projectOwnerMembership.role === "owner"
+    && projectOwnerMembership.accessState === "confirmed"
+    && projectOwnerMembership.createdAt.getTime() === row.projectConfirmedMembershipCreatedAt?.getTime();
+  const projectConfirmerActive = row.projectConfirmedById !== null
+    && context.userEvidence.get(row.projectConfirmedById)?.disabledAt === null;
+  const currentProjectOwner = explicitProjectOwner && context.userEvidence.get(context.actorId)?.disabledAt === null;
+  const projectActive = context.projectArchivedAt === null;
+  const unexpired = row.expiresAt.getTime() > context.now.getTime();
+  const evidenceCurrent = currentConnectionEvidence(row);
+  return Object.freeze({
+    canOwnerConfirm: projectActive && unexpired && evidenceCurrent && currentOwnerMembership && ownerActorActive && row.connectionOwnerId === context.actorId && row.status === "draft",
+    canProjectConfirm: projectActive && unexpired && evidenceCurrent && currentOwnerMembership && ownerActorActive && currentProjectOwner && row.status === "ownerConfirmed",
+    canReject: projectActive && ((currentOwnerMembership && ownerActorActive && row.connectionOwnerId === context.actorId) || currentProjectOwner) && (row.status === "draft" || row.status === "ownerConfirmed"),
+    canRevoke: projectActive && ((currentOwnerMembership && ownerActorActive && row.connectionOwnerId === context.actorId) || currentProjectOwner) && row.status === "active",
+    canManualSync: projectActive && unexpired && evidenceCurrent && explicitEditor && row.status === "active" && row.manualSyncAllowed
+      && currentOwnerMembership && ownerActorActive && currentProjectOwnerMembership && projectConfirmerActive,
+  });
+}
+
+async function loadCapabilityContext(
+  db: DelegationDb,
+  projectId: string,
+  actorId: string,
+  projectArchivedAt: Date | null,
+  rows: readonly DelegationRow[],
+): Promise<CapabilityContext> {
+  const membershipIds = [...new Set(rows.flatMap((row) => [row.ownerProjectMembershipId, row.projectConfirmedProjectMembershipId].filter((value): value is string => value !== null)))];
+  const userIds = [...new Set(rows.flatMap((row) => [row.connectionOwnerId, row.projectConfirmedById].filter((value): value is string => value !== null)).concat(actorId))];
+  const [membership, nowRows, membershipRows, userRows] = await Promise.all([
+    db.projectMembership.findFirst({
+      where: { projectId, userId: actorId, accessState: "confirmed", role: { in: ["owner", "editor"] } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, createdAt: true, role: true },
+    }),
+    db.$queryRaw<Array<{ now: Date | string }>>(Prisma.sql`SELECT clock_timestamp() AS "now"`),
+    membershipIds.length === 0
+      ? Promise.resolve([])
+      : db.projectMembership.findMany({ where: { projectId, id: { in: membershipIds } }, select: { id: true, userId: true, createdAt: true, role: true, accessState: true } }),
+    userIds.length === 0
+      ? Promise.resolve([])
+      : db.appUser.findMany({ where: { id: { in: userIds } }, select: { id: true, disabledAt: true } }),
+  ]);
+  const value = nowRows[0]?.now;
+  const now = value instanceof Date ? value : new Date(value ?? "");
+  if (!Number.isFinite(now.getTime())) return fail("PROJECT_GIT_REPOSITORY_DELEGATION_CONFLICT");
+  return Object.freeze({
+    actorId,
+    projectArchivedAt,
+    now,
+    explicitMembership: membership === null ? null : membership as { id: string; createdAt: Date; role: "owner" | "editor" },
+    membershipEvidence: new Map(membershipRows.map((row) => [row.id, row as { id: string; userId: string; createdAt: Date; role: "owner" | "editor"; accessState: string }])),
+    userEvidence: new Map(userRows.map((row) => [row.id, row])),
+  });
+}
+
+function delegationView(
+  row: DelegationRow,
+  actorId: string,
+  explicitProjectOwner: boolean,
+  capabilities: ProjectGitRepositoryDelegationCapabilities = noDelegationCapabilities,
+) {
   const privileged = actorId === row.connectionOwnerId || explicitProjectOwner;
   return Object.freeze({
     id: row.id,
@@ -487,15 +599,8 @@ function delegationView(row: DelegationRow, actorId: string, explicitProjectOwne
     ownerConfirmedBy: publicIdentity(row.ownerConfirmedBy),
     projectConfirmedBy: publicIdentity(row.projectConfirmedBy),
     terminalReason: privileged ? row.terminalReason : null,
+    capabilities,
   });
-}
-
-async function readProjectOwnerFlag(db: DelegationDb, projectId: string, actorId: string): Promise<boolean> {
-  const row = await db.projectMembership.findFirst({
-    where: { projectId, userId: actorId, role: "owner", accessState: "confirmed" },
-    select: { id: true },
-  });
-  return row !== null;
 }
 
 async function appendAudit(
@@ -573,11 +678,21 @@ export async function listProjectGitRepositoryDelegations(
 ) {
   const projectId = parseUuid(projectIdInput);
   return runRead(db, actor, projectId, async (tx, admission) => {
-    const [rows, explicitProjectOwner] = await Promise.all([
+    const [rows, connections] = await Promise.all([
       tx.projectGitRepositoryDelegation.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: delegationSelect }),
-      readProjectOwnerFlag(tx, projectId, admission.actor.id),
+      tx.gitConnection.findMany({
+        where: { ownerUserId: admission.actor.id, ownershipState: "confirmed", status: "verified" },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: { id: true, name: true, providerKind: true, transport: true, status: true, ownershipState: true },
+      }),
     ]);
-    return Object.freeze({ delegations: rows.map((row) => delegationView(row, admission.actor.id, explicitProjectOwner)) });
+    const capabilityContext = await loadCapabilityContext(tx, projectId, admission.actor.id, admission.project.archivedAt, rows);
+    const explicitProjectOwner = capabilityContext.explicitMembership?.role === "owner";
+    return Object.freeze({
+      capabilities: Object.freeze({ canPropose: capabilityContext.projectArchivedAt === null && capabilityContext.explicitMembership !== null }),
+      connections: connections.map((connection) => Object.freeze(connection)),
+      delegations: rows.map((row) => delegationView(row, admission.actor.id, explicitProjectOwner, delegationCapabilities(row, capabilityContext))),
+    });
   });
 }
 
@@ -592,8 +707,69 @@ export async function getProjectGitRepositoryDelegation(
   return runRead(db, actor, projectId, async (tx, admission) => {
     const row = await loadDelegation(tx, projectId, delegationId);
     if (row === null) return fail("PROJECT_GIT_REPOSITORY_DELEGATION_NOT_FOUND");
-    return delegationView(row, admission.actor.id, await readProjectOwnerFlag(tx, projectId, admission.actor.id));
+    const capabilityContext = await loadCapabilityContext(tx, projectId, admission.actor.id, admission.project.archivedAt, [row]);
+    return delegationView(row, admission.actor.id, capabilityContext.explicitMembership?.role === "owner", delegationCapabilities(row, capabilityContext));
   });
+}
+
+const connectionOwnerDelegationSelect = {
+  id: true,
+  projectId: true,
+  repositoryPath: true,
+  trackedRef: true,
+  manualSyncAllowed: true,
+  automationAllowed: true,
+  expiresAt: true,
+  version: true,
+  status: true,
+  connectionOwnerId: true,
+  ownerProjectMembershipId: true,
+  ownerMembershipCreatedAt: true,
+  project: { select: { id: true, name: true, archivedAt: true } },
+  gitConnection: { select: { id: true, name: true, providerKind: true, transport: true, status: true, ownershipState: true, ownerUserId: true } },
+  ownerProjectMembership: { select: { userId: true, createdAt: true } },
+} as const;
+
+export async function listConnectionOwnerProjectGitRepositoryDelegations(
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  const currentActor = await db.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
+  if (currentActor === null || currentActor.disabledAt !== null) return fail("PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN");
+  const rows = await db.projectGitRepositoryDelegation.findMany({
+    where: {
+      connectionOwnerId: actor.id,
+      status: { in: ["draft", "ownerConfirmed", "active"] },
+      gitConnection: { ownerUserId: actor.id, ownershipState: "confirmed" },
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    select: connectionOwnerDelegationSelect,
+  });
+  return Object.freeze(rows.flatMap((row) => {
+    const ownerEpochMatches = row.connectionOwnerId === actor.id
+      && row.gitConnection.ownerUserId === actor.id
+      && row.ownerProjectMembership.userId === actor.id
+      && row.ownerProjectMembership.createdAt.getTime() === row.ownerMembershipCreatedAt.getTime();
+    if (!ownerEpochMatches) return [];
+    return [Object.freeze({
+      id: row.id,
+      project: Object.freeze({ id: row.project.id, name: row.project.name, archivedAt: row.project.archivedAt?.toISOString() ?? null }),
+      connection: Object.freeze({ id: row.gitConnection.id, name: row.gitConnection.name, providerKind: row.gitConnection.providerKind, transport: row.gitConnection.transport, status: row.gitConnection.status, ownershipState: row.gitConnection.ownershipState }),
+      scope: Object.freeze({
+        repositoryPath: row.repositoryPath,
+        trackedRef: row.trackedRef,
+        manualSyncAllowed: row.manualSyncAllowed,
+        automationAllowed: row.automationAllowed,
+      }),
+      status: row.status,
+      version: row.version,
+      expiresAt: row.expiresAt.toISOString(),
+      capabilities: Object.freeze({
+        canReject: row.status === "draft" || row.status === "ownerConfirmed",
+        canRevoke: row.status === "active",
+      }),
+    })];
+  }));
 }
 
 export async function proposeProjectGitRepositoryDelegation(

@@ -2,14 +2,29 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { POSTGRES_GATES } from "../scripts/postgres-gate-contract";
+import {
+  ProjectGitRepositoryDelegationServiceError,
+  proposeProjectGitRepositoryDelegation,
+} from "../src/lib/project-git-repository-delegation-service";
+import { GitRunnerError, GitServiceError, isDefinitelyPreDispatchGitSyncFailure } from "../src/lib/git";
 
 const schema = readFileSync("prisma/schema.prisma", "utf8");
 const migration = readFileSync(
   "prisma/migrations/20260904150000_add_project_git_repository_delegations/migration.sql",
   "utf8",
 );
+const runtimeMigration = readFileSync(
+  "prisma/migrations/20260904170000_add_project_git_manual_run_reconciliation/migration.sql",
+  "utf8",
+);
 const service = readFileSync("src/lib/project-git-repository-delegation-service.ts", "utf8");
 const gitService = readFileSync("src/lib/git/service.ts", "utf8");
+const runtimeService = readFileSync("src/lib/project-delegated-git-runtime-service.ts", "utf8");
+const repositoriesClient = readFileSync("src/app/projects/[projectId]/repositories/project-repositories-client.tsx", "utf8");
+const personalGitClient = readFileSync("src/app/profile/connections/git/git-connections-client.tsx", "utf8");
+const accessControl = readFileSync("src/lib/access-control.ts", "utf8");
+const projectControlClient = readFileSync("src/app/projects/[projectId]/control/project-control-client.tsx", "utf8");
+const guidePage = readFileSync("src/app/guide/page.tsx", "utf8");
 
 test("Git repository delegation has an independent typed two-party schema", () => {
   assert.match(schema, /enum ProjectGitRepositoryDelegationStatus/u);
@@ -17,6 +32,8 @@ test("Git repository delegation has an independent typed two-party schema", () =
   assert.match(schema, /enum ProjectGitRepositoryDelegationAuditAction/u);
   assert.match(schema, /model ProjectGitRepositoryDelegation \{/u);
   assert.match(schema, /model ProjectGitRepositoryDelegationAudit \{/u);
+  assert.match(schema, /manualSyncAllowed\s+Boolean\s+@default\(true\)/u);
+  assert.match(schema, /automationAllowed\s+Boolean\s+@default\(false\)/u);
   assert.match(schema, /configurationVersion\s+Int\s+@default\(1\)/u);
   assert.match(schema, /ownerProjectMembershipId\s+String\s+@db\.Uuid/u);
   assert.match(schema, /projectConfirmedProjectMembershipId\s+String\?\s+@db\.Uuid/u);
@@ -57,6 +74,36 @@ test("Git delegation migration is additive, append-only, and remains runtime-fro
   assert.doesNotMatch(migration, /UPDATE\s+"ProjectGitRepositoryLink"/u);
   const tableDefinitions = migration.slice(0, migration.indexOf("CREATE UNIQUE INDEX"));
   assert.doesNotMatch(tableDefinitions, /baseUrl|username|tlsCaCertificate|sshKnownHost|maskedSuffix|credentialId/u);
+  assert.match(runtimeMigration, /PGRD_MANUAL_READ_ONLY_PREFLIGHT_FAILED[\s\S]*manual remediation/u);
+  assert.match(runtimeMigration, /ADD CONSTRAINT "PGRD_manual_read_only_check"[\s\S]*CHECK \("manualSyncAllowed" = true AND "automationAllowed" = false\)/u);
+});
+
+test("Git delegation proposals accept only the canonical one-shot read-only scope", async () => {
+  const baseInput = {
+    gitConnectionId: "55555555-5555-4555-8555-555555555555",
+    repositoryPath: "org/repo",
+    trackedRef: "main",
+    includeRoots: ["."],
+    softExcludePatterns: [],
+    role: "primary",
+    expiresAt: "2026-09-06T12:00:00.000Z",
+  };
+  const actor = { id: "33333333-3333-4333-8333-333333333333", role: "user" as const };
+  for (const input of [
+    { ...baseInput, automationAllowed: true },
+    { ...baseInput, manualSyncAllowed: false },
+  ]) {
+    await assert.rejects(
+      () => proposeProjectGitRepositoryDelegation(
+        "44444444-4444-4444-8444-444444444444",
+        input,
+        actor,
+        {} as never,
+      ),
+      (error: unknown) => error instanceof ProjectGitRepositoryDelegationServiceError
+        && error.code === "PROJECT_GIT_REPOSITORY_DELEGATION_INVALID_INPUT",
+    );
+  }
 });
 
 test("service keeps ownership, membership epochs, CAS, and secret-free projection explicit", () => {
@@ -72,8 +119,12 @@ test("service keeps ownership, membership epochs, CAS, and secret-free projectio
   assert.match(service, /requireProjectMembershipEpoch/u);
   assert.doesNotMatch(service, /projectPersonalDelegationEnabled/u);
   assert.doesNotMatch(service, /readCredentialSecret|withGitRunner|resolveGitEndpoint/u);
-  const publicProjection = service.slice(service.indexOf("function delegationView"), service.indexOf("async function readProjectOwnerFlag"));
-  assert.doesNotMatch(publicProjection, /baseUrl|username|tlsCaCertificate|sshKnownHost|maskedSuffix|credentialId|Fingerprint/u);
+  const delegationSelection = service.slice(0, service.indexOf("type DelegationRow"));
+  assert.doesNotMatch(delegationSelection, /connectionOwner: \{ select: \{[^}]*username|ownerConfirmedBy: \{ select: \{[^}]*username|projectConfirmedBy: \{ select: \{[^}]*username/u);
+  const publicIdentitySource = service.slice(service.indexOf("function publicIdentity"), service.indexOf("export type ProjectGitRepositoryDelegationCapabilities"));
+  assert.doesNotMatch(publicIdentitySource, /username/u);
+  assert.match(publicIdentitySource, /displayName\?\.trim\(\) \|\| "项目成员"/u);
+  assert.doesNotMatch(service.slice(service.indexOf("function delegationView"), service.indexOf("async function appendAudit")), /baseUrl|username|tlsCaCertificate|sshKnownHost|maskedSuffix|credentialId|Fingerprint/u);
 });
 
 test("delegation mutations re-admit the project and archived projects before connection reads", () => {
@@ -117,6 +168,7 @@ test("Git connection updates leave version ownership to the database guard", () 
   assert.match(gitService, /ai-project-git-repository-delegation-global/u);
   assert.match(gitService, /status: \{ in: \["draft", "ownerConfirmed", "active"\] \}/u);
   assert.match(gitService, /securityChanged && current\.status !== "disabled"/u);
+  assert.match(gitService, /export function isDefinitelyPreDispatchGitSyncFailure/u);
   assert.doesNotMatch(gitService, /configurationVersion:\s*\{\s*increment/u);
 
   for (const [mutation, nextMutation] of [
@@ -133,9 +185,12 @@ test("Git connection updates leave version ownership to the database guard", () 
 
 test("Git delegation API uses same-origin writes and no external runtime dispatch", () => {
   const route = readFileSync("src/app/api/projects/[projectId]/git-repository-delegations/route.ts", "utf8");
+  const manualSyncRoute = readFileSync("src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/manual-sync/route.ts", "utf8");
   assert.match(route, /assertSameOrigin/u);
   assert.match(route, /listProjectGitRepositoryDelegations/u);
   assert.match(route, /proposeProjectGitRepositoryDelegation/u);
+  assert.match(manualSyncRoute, /headers: \{ "cache-control": "no-store" \}/u);
+  assert.match(manualSyncRoute, /noStore\(handleApiError\(error\)\)/u);
   for (const file of [
     "owner-confirmation/route.ts",
     "project-confirmation/route.ts",
@@ -144,6 +199,80 @@ test("Git delegation API uses same-origin writes and no external runtime dispatc
   ]) {
     const source = readFileSync(`src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/${file}`, "utf8");
     assert.match(source, /assertSameOrigin/u);
+  }
+});
+
+test("Git delegation workbench exposes server capabilities and safe run projections", () => {
+  assert.match(service, /canOwnerConfirm/u);
+  assert.match(service, /canProjectConfirm/u);
+  assert.match(service, /canReject/u);
+  assert.match(service, /canRevoke/u);
+  assert.match(service, /canManualSync/u);
+  assert.match(service, /canProjectConfirm:[\s\S]*currentOwnerMembership && ownerActorActive/u);
+  assert.match(service, /credential\?\.kind === "git"/u);
+  const connectionsProjection = service.slice(service.indexOf("connections:"), service.indexOf("delegations:"));
+  assert.doesNotMatch(connectionsProjection, /baseUrl|username|credential|fingerprint|tlsCa|knownHost/u);
+  const historyProjection = runtimeService.slice(runtimeService.indexOf("const manualRunHistorySelect"), runtimeService.indexOf("function encodeManualRunCursor"));
+  assert.doesNotMatch(historyProjection, /clientRequestKey|requestedById|Membership|Fingerprint|credential|baseUrl|username/u);
+  const manualSyncProjection = runtimeService.slice(runtimeService.indexOf("function publicRun"), runtimeService.indexOf("const manualRunHistorySelect"));
+  assert.doesNotMatch(manualSyncProjection, /clientRequestKey|requestedById|Membership|Fingerprint|credential|baseUrl|username/u);
+  assert.match(runtimeService, /acknowledgeProjectDelegatedGitManualRun/u);
+  assert.match(runtimeService, /dispatched && !isDefinitelyPreDispatchGitSyncFailure\(error\)[\s\S]*?"unknown"[\s\S]*?"failed"/u);
+  assert.match(runtimeService, /terminalizeRun\(admitted\.id, snapshot, "unknown", safeFailureCode\(error\), db\)/u);
+  assert.match(runtimeService, /capabilities: Object\.freeze\(\{ canAcknowledge \}\)/u);
+  assert.match(runtimeService, /orderBy: \[\{ createdAt: "desc" \}, \{ id: "desc" \}\]/u);
+  assert.match(repositoriesClient, /crypto\.randomUUID/u);
+  assert.match(repositoriesClient, /getTimezoneOffset\(\)/u);
+  assert.match(repositoriesClient, /localDateTimeValue\(new Date\(Date\.now\(\) \+ 24 \* 60 \* 60 \* 1000\)\)/u);
+  assert.match(repositoriesClient, /canAcknowledge && run\.status === "unknown"/u);
+  assert.match(repositoriesClient, /人工核对未知运行/u);
+  assert.match(repositoriesClient, /await loadRuns\(\)/u);
+  assert.doesNotMatch(repositoriesClient, /window\.(?:alert|confirm)/u);
+  assert.doesNotMatch(repositoriesClient, /manual-runs[^`]*clientRequestKey/u);
+  assert.match(projectControlClient, /一次性手动只读委托/u);
+  assert.match(guidePage, /一次性手动只读读取/u);
+  for (const file of [
+    "manual-runs/route.ts",
+    "manual-runs/[runId]/route.ts",
+    "manual-runs/[runId]/reconciliation/route.ts",
+  ]) {
+    const source = readFileSync(`src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/${file}`, "utf8");
+    assert.match(source, /cache-control.*no-store/u);
+  }
+});
+
+test("delegated Git runtime treats post-dispatch failures as unknown", () => {
+  assert.equal(isDefinitelyPreDispatchGitSyncFailure(new GitRunnerError("GIT_OPERATION_TIMEOUT")), false);
+  assert.equal(isDefinitelyPreDispatchGitSyncFailure(new GitRunnerError("GIT_REMOTE_UNAVAILABLE")), false);
+  assert.equal(isDefinitelyPreDispatchGitSyncFailure(new GitServiceError("GIT_REPOSITORY_EMPTY")), false);
+  assert.equal(isDefinitelyPreDispatchGitSyncFailure(new GitServiceError("GIT_CONNECTION_INVALID_INPUT")), true);
+  assert.match(runtimeService, /onDispatchStart/u);
+  assert.match(runtimeService, /dispatched && !isDefinitelyPreDispatchGitSyncFailure\(error\)/u);
+  assert.match(repositoriesClient, /结果未知；外部读取可能已发出，系统不会自动重试/u);
+});
+
+test("connection owners retain a secret-free safety surface after project access changes", () => {
+  const ownerRoute = readFileSync("src/app/api/me/git-delegations/route.ts", "utf8");
+  assert.match(ownerRoute, /listConnectionOwnerProjectGitRepositoryDelegations/u);
+  assert.match(ownerRoute, /no-store/u);
+  assert.match(service, /listConnectionOwnerProjectGitRepositoryDelegations/u);
+  const ownerProjection = service.slice(service.indexOf("const connectionOwnerDelegationSelect"), service.indexOf("export async function proposeProjectGitRepositoryDelegation"));
+  assert.match(ownerProjection, /ownerMembershipCreatedAt/u);
+  assert.match(ownerProjection, /row\.ownerProjectMembership\.createdAt\.getTime\(\) === row\.ownerMembershipCreatedAt\.getTime\(\)/u);
+  assert.doesNotMatch(ownerProjection, /includeRoots|softExcludePatterns|codeEnabled|metadataEnabled/u);
+  assert.doesNotMatch(ownerProjection, /baseUrl|username|credential|Fingerprint|membershipId/u);
+  assert.match(personalGitClient, /项目委托安全管理/u);
+  assert.match(personalGitClient, /\/api\/me\/git-delegations/u);
+  assert.match(personalGitClient, /拒绝委托|撤销委托/u);
+});
+
+test("terminal Git delegation routes narrowly bypass generic project edit admission", () => {
+  assert.match(accessControl, /GIT_DELEGATION_TERMINAL_PATH_PATTERN/u);
+  assert.match(accessControl, /request\.method\.toUpperCase\(\) === "POST" && GIT_DELEGATION_TERMINAL_PATH_PATTERN\.test\(path\)/u);
+  for (const file of ["rejection/route.ts", "revocation/route.ts"]) {
+    const route = readFileSync(`src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/${file}`, "utf8");
+    assert.match(route, /requireApiSession/u);
+    assert.match(route, /assertSameOrigin/u);
   }
 });
 

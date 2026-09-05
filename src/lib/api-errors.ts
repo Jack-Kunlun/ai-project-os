@@ -568,6 +568,9 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE: [409, "个人 Git 连接当前不可用或证据已变化"],
       PROJECT_GIT_MANUAL_NETWORK_CHANGED: [409, "Git 服务解析地址已变化，请重新确认连接"],
       PROJECT_GIT_MANUAL_CONFLICT: [409, "项目 Git 手动读取正在被其他操作更新，请稍后重试"],
+      PROJECT_GIT_MANUAL_CURSOR_INVALID: [400, "项目 Git 手动读取分页游标无效"],
+      PROJECT_GIT_MANUAL_RECONCILIATION_STATE_CONFLICT: [409, "只有待核对的未知运行可以标记为已人工核对"],
+      PROJECT_GIT_MANUAL_RECONCILIATION_CONFLICT: [409, "项目 Git 手动读取核对正在被其他操作更新，请稍后重试"],
       PROJECT_GIT_MANUAL_RUN_FAILED: [502, "Git 手动读取失败"],
       PROJECT_GIT_MANUAL_RUN_UNKNOWN: [503, "Git 手动读取结果待核对，不能自动重试"],
     };

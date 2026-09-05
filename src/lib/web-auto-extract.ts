@@ -6,6 +6,12 @@ import { getDb } from "@/lib/db";
 import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import {
+  loadProjectAiPublicVisibility,
+  projectAiModelProjection,
+  projectAiProviderProjection,
+  type ProjectAiPublicVisibility,
+} from "@/lib/project-ai-public-projection";
+import {
   appendProjectItemRevision,
   createPrimaryProjectItemEvidence,
 } from "@/lib/project-item-history";
@@ -439,7 +445,7 @@ const candidateListSelect = {
   reviewStatus: true,
   modelId: true,
   createdAt: true,
-  providerConnection: { select: { name: true, kind: true } },
+  providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
   source: { select: { id: true, kind: true, externalRef: true, contentHash: true } },
   projectItem: {
     select: {
@@ -456,18 +462,35 @@ const candidateListSelect = {
   },
 } as const;
 
+function publicWebAiCandidate(
+  row: Prisma.WebAiCandidateGetPayload<{ select: typeof candidateListSelect }>,
+  visibility: ProjectAiPublicVisibility,
+) {
+  return Object.freeze({
+    id: row.id,
+    reviewStatus: row.reviewStatus,
+    modelId: projectAiModelProjection(row.modelId, row.providerConnection, visibility),
+    createdAt: row.createdAt,
+    providerConnection: projectAiProviderProjection(row.providerConnection, visibility),
+    source: row.source,
+    projectItem: row.projectItem,
+  });
+}
+
 export async function listWebAiCandidates(
   projectId: string,
   actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
   await assertWebAiProjectAccess(actor, projectId, "view", db);
-  return db.webAiCandidate.findMany({
+  const visibility = await loadProjectAiPublicVisibility(db, projectId, actor.id);
+  const rows = await db.webAiCandidate.findMany({
     where: { projectId },
     orderBy: { createdAt: "desc" },
     take: 100,
     select: candidateListSelect,
   });
+  return rows.map((row) => publicWebAiCandidate(row, visibility));
 }
 
 export async function reviewWebAiCandidate(input: Readonly<{
@@ -551,9 +574,11 @@ export async function reviewWebAiCandidate(input: Readonly<{
       evidences: evidence,
       createdAt: now,
     });
-    return tx.webAiCandidate.findUniqueOrThrow({
+    const updatedCandidate = await tx.webAiCandidate.findUniqueOrThrow({
       where: { id: candidate.id },
       select: candidateListSelect,
     });
+    const visibility = await loadProjectAiPublicVisibility(tx, input.projectId, currentActor.id);
+    return publicWebAiCandidate(updatedCandidate, visibility);
   });
 }

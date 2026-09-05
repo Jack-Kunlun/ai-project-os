@@ -10,6 +10,13 @@ import { chunkSourceText } from "@/lib/ai-memory/chunking";
 import { getDb } from "@/lib/db";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
+import {
+  isProjectAiPlatformProvider,
+  loadProjectAiPublicVisibility,
+  projectAiModelProjection,
+  projectAiProviderProjection,
+  type ProjectAiPublicVisibility,
+} from "@/lib/project-ai-public-projection";
 import { chunkRepositoryCode } from "@/lib/github";
 import {
   getProjectJobInternal,
@@ -27,6 +34,7 @@ import {
   createGrantedWebAiJob,
   failWebAiJob,
   finishWebAiJob,
+  isPersonalMemoryGenerationLive,
   manifestFingerprint,
   stableAiCallKey,
   updateWebAiJobProgress,
@@ -119,9 +127,11 @@ export function resolveMemoryIndexReadiness(input: Readonly<{
     routeUpdatedAt?: Date | string | null;
     providerConfigurationVersion?: number | null;
     routeFenceFingerprint?: string | null;
+    embeddingWebAiGrantId?: string | null;
   }> | null;
   currentInputManifestFingerprint: string | null;
   generationProviderVerified?: boolean;
+  personalEvidenceLive?: boolean;
 }>): MemoryIndexReadiness {
   const routeAvailable = input.embeddingRoute !== null;
   const providerAvailable = routeAvailable && input.embeddingRoute.providerVerified;
@@ -146,8 +156,16 @@ export function resolveMemoryIndexReadiness(input: Readonly<{
     providerConfigurationVersion: input.embeddingRoute?.providerConfigurationVersion,
     routeFenceFingerprint: input.embeddingRoute?.routeFenceFingerprint,
   });
+  const grantEvidenceComplete = input.embeddingRoute?.routeSource === "personal_delegation"
+    ? typeof input.activeIndex?.embeddingWebAiGrantId === "string"
+    : input.activeIndex?.embeddingWebAiGrantId === undefined || input.activeIndex.embeddingWebAiGrantId === null;
+  const personalEvidenceLive = input.embeddingRoute?.routeSource !== "personal_delegation"
+    ? true
+    : input.personalEvidenceLive === true;
   const routeCompatible = routeAvailable && indexAvailable && providerAvailable &&
     routeFenceComplete && !legacyIndex &&
+    grantEvidenceComplete &&
+    personalEvidenceLive &&
     input.embeddingRoute.providerConnectionId === input.activeIndex?.providerConnectionId &&
     input.embeddingRoute.modelId === input.activeIndex?.modelId &&
     input.embeddingRoute.embeddingDimensions === input.activeIndex?.dimensions &&
@@ -229,13 +247,17 @@ function routeSnapshotComplete(input: Readonly<{
   const updatedAt = input.routeUpdatedAt === null || input.routeUpdatedAt === undefined
     ? Number.NaN
     : new Date(input.routeUpdatedAt).getTime();
-  const common = (input.source === "project_override" || input.source === "platform_default")
+  const common = (input.source === "project_override" || input.source === "platform_default" || input.source === "personal_delegation")
     && Number.isFinite(updatedAt)
     && Number.isSafeInteger(input.providerConfigurationVersion)
     && (input.providerConfigurationVersion ?? 0) > 0
     && typeof input.routeFenceFingerprint === "string"
     && /^[0-9a-f]{64}$/u.test(input.routeFenceFingerprint);
   if (!common) return false;
+  if (input.source === "personal_delegation") {
+    return typeof input.routeId === "string" && input.routeId.length > 0
+      && Number.isSafeInteger(input.routeVersion) && (input.routeVersion ?? 0) > 0;
+  }
   return input.source === "platform_default"
     ? typeof input.routeId === "string" && input.routeId.length > 0
       && Number.isSafeInteger(input.routeVersion) && (input.routeVersion ?? 0) > 0
@@ -437,6 +459,22 @@ export type MemoryIndexPlan = Readonly<{
   ineligibleCode: "MEMORY_INDEX_INCREMENTAL_BASELINE_REQUIRED" | "MEMORY_INDEX_DEADLINE_EXCEEDED" | null;
 }>;
 
+export type PublicMemoryIndexPlan = Readonly<Omit<MemoryIndexPlan, "providerConnectionId" | "providerName" | "providerKind" | "modelId" | "dimensions" | "routeUpdatedAt" | "routeId" | "routeVersion" | "providerConfigurationVersion" | "routeFenceFingerprint" | "currentInputManifestFingerprint" | "baselineGenerationId" | "baselineManifestFingerprint"> & {
+  providerName: string | null;
+  providerKind: string | null;
+  modelId: string | null;
+  providerStatus: string | null;
+  dimensions: number | null;
+  currentInputManifestFingerprint: string | null;
+  baselineGenerationId: string | null;
+  baselineManifestFingerprint: string | null;
+  routeUpdatedAt?: string;
+  routeId?: string | null;
+  routeVersion?: number | null;
+  providerConfigurationVersion?: number;
+  routeFenceFingerprint?: string;
+}>;
+
 export type MemoryIndexReconciliationOutcome = "publishedLocally" | "explicitAbandon";
 
 export function resolveMemoryIndexReconciliationOutcome(input: Readonly<{
@@ -481,28 +519,36 @@ type MemoryIndexPlanSnapshot = MemoryIndexPlan & Readonly<{
  * plan API boundary. The runtime snapshot deliberately contains source text,
  * vectors, the selected route, and a reuse Map; none of those belong in JSON.
  */
-export function toPublicMemoryIndexPlan(snapshot: MemoryIndexPlanSnapshot): MemoryIndexPlan {
+export function toPublicMemoryIndexPlan(
+  snapshot: MemoryIndexPlanSnapshot,
+  visibility: ProjectAiPublicVisibility = { actorId: "", projectOwner: false },
+): PublicMemoryIndexPlan {
+  const provider = projectAiProviderProjection(snapshot.route.providerConnection, visibility);
+  const modelId = projectAiModelProjection(snapshot.modelId, snapshot.route.providerConnection, visibility);
+  const platform = isProjectAiPlatformProvider(snapshot.route.providerConnection);
   return Object.freeze({
     planFingerprint: snapshot.planFingerprint,
     mode: snapshot.mode,
-    providerConnectionId: snapshot.providerConnectionId,
-    providerName: snapshot.providerName,
-    providerKind: snapshot.providerKind,
-    modelId: snapshot.modelId,
-    dimensions: snapshot.dimensions,
-    routeUpdatedAt: snapshot.routeUpdatedAt,
+    providerName: provider?.name ?? null,
+    providerKind: provider?.kind ?? null,
+    modelId,
+    providerStatus: provider?.status ?? null,
+    dimensions: platform || modelId !== null ? snapshot.dimensions : null,
     routeSource: snapshot.route.source,
-    routeId: snapshot.route.routeId,
-    routeVersion: snapshot.route.routeVersion,
-    providerConfigurationVersion: snapshot.route.providerConfigurationVersion,
-    routeFenceFingerprint: snapshot.route.routeFenceFingerprint,
-    currentInputManifestFingerprint: snapshot.currentInputManifestFingerprint,
+    ...(platform ? {
+      routeUpdatedAt: snapshot.routeUpdatedAt,
+      routeId: snapshot.route.routeId,
+      routeVersion: snapshot.route.routeVersion,
+      providerConfigurationVersion: snapshot.route.providerConfigurationVersion,
+      routeFenceFingerprint: snapshot.route.routeFenceFingerprint,
+    } : {}),
+    currentInputManifestFingerprint: platform ? snapshot.currentInputManifestFingerprint : null,
     expectedInputCount: snapshot.expectedInputCount,
     reuseCount: snapshot.reuseCount,
     generateCount: snapshot.generateCount,
     deleteCount: snapshot.deleteCount,
-    baselineGenerationId: snapshot.baselineGenerationId,
-    baselineManifestFingerprint: snapshot.baselineManifestFingerprint,
+    baselineGenerationId: platform ? snapshot.baselineGenerationId : null,
+    baselineManifestFingerprint: platform ? snapshot.baselineManifestFingerprint : null,
     estimatedProviderCalls: snapshot.estimatedProviderCalls,
     deadlineAt: snapshot.deadlineAt,
     deadlineEligible: snapshot.deadlineEligible,
@@ -689,7 +735,6 @@ async function readEmbeddingRoute(projectId: string, db: MemoryIndexDb): Promise
     }
     throw error;
   }
-  if (route.source === "personal_delegation") return fail("MEMORY_INDEX_ROUTE_MISSING");
   if (route.providerConnection.status !== "verified" || route.providerConnection.disabledAt !== null) return fail("MEMORY_INDEX_PROVIDER_UNAVAILABLE");
   if (route.embeddingDimensions === null) return fail("MEMORY_INDEX_INPUT_INVALID");
   return route;
@@ -726,6 +771,7 @@ async function buildMemoryIndexPlan(
           expectedEmbeddingRouteVersion: true,
           expectedEmbeddingProviderConfigurationVersion: true,
           expectedEmbeddingRouteFenceFingerprint: true,
+          embeddingWebAiGrantId: true,
           records: {
             select: { id: true, inputFingerprint: true, embeddingFingerprint: true, embedding: true },
           },
@@ -735,7 +781,13 @@ async function buildMemoryIndexPlan(
   });
   const baseline = pointer?.generation.status === "complete" ? pointer.generation : null;
   const baselineRecords = baseline?.records ?? [];
+  const baselineGrantCompatible = baseline !== null && (
+    route.source === "personal_delegation"
+      ? false
+      : baseline.embeddingWebAiGrantId === null
+  );
   const baselineCompatible = baseline !== null &&
+    baselineGrantCompatible &&
     baseline.expectedEmbeddingRouteUpdatedAt !== null &&
     baseline.expectedEmbeddingRouteUpdatedAt.getTime() === route.updatedAt.getTime() &&
     baseline.expectedEmbeddingRouteSource !== null &&
@@ -852,14 +904,16 @@ export async function getProjectMemoryIndexPlan(
   mode: "full" | "incremental",
   actor: WebAiActor,
   db: PrismaClient = getDb(),
-): Promise<MemoryIndexPlan> {
-  await assertWebAiProjectAccess(actor, projectId, "view", db);
-  return toPublicMemoryIndexPlan(await buildMemoryIndexPlan(projectId, mode, db));
+): Promise<PublicMemoryIndexPlan> {
+  const currentActor = await assertWebAiProjectAccess(actor, projectId, "view", db);
+  const visibility = await loadProjectAiPublicVisibility(db, projectId, currentActor.id);
+  return toPublicMemoryIndexPlan(await buildMemoryIndexPlan(projectId, mode, db), visibility);
 }
 
 export async function getProjectMemoryIndexStatus(projectId: string, actor: WebAiActor, db: PrismaClient = getDb()) {
-  await assertWebAiProjectAccess(actor, projectId, "view", db);
-  const [pointer, sourceCount, codePointer, materialPointerCount, route, currentManifest, latestJob] = await Promise.all([
+  const currentActor = await assertWebAiProjectAccess(actor, projectId, "view", db);
+  const [visibility, pointer, sourceCount, codePointer, materialPointerCount, route, currentManifest, latestJob] = await Promise.all([
+    loadProjectAiPublicVisibility(db, projectId, currentActor.id),
     db.memoryIndexPointer.findUnique({
       where: { projectId },
       select: {
@@ -883,8 +937,9 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
             expectedEmbeddingRouteVersion: true,
             expectedEmbeddingProviderConfigurationVersion: true,
             expectedEmbeddingRouteFenceFingerprint: true,
+            embeddingWebAiGrantId: true,
             completedAt: true,
-            providerConnection: { select: { id: true, name: true, kind: true, status: true } },
+            providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
           },
         },
       },
@@ -904,6 +959,10 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
       embeddingDimensions: effective.embeddingDimensions,
       updatedAt: effective.updatedAt,
       providerConnection: Object.freeze({
+        scope: effective.providerConnection.scope,
+        workspaceId: effective.providerConnection.workspaceId,
+        ownershipState: effective.providerConnection.ownershipState,
+        ownerUserId: effective.providerConnection.ownerUserId,
         id: effective.providerConnection.id,
         name: effective.providerConnection.name,
         kind: effective.providerConnection.kind,
@@ -923,6 +982,9 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
       select: { id: true, status: true, stage: true, failureCode: true, reconciliationRequired: true, createdAt: true, completedAt: true },
     }),
   ]);
+  const personalEvidenceLive = route?.source === "personal_delegation" && pointer !== null
+    ? await isPersonalMemoryGenerationLive(pointer.generation.id, db)
+    : true;
   const readiness = resolveMemoryIndexReadiness({
     embeddingRoute: route === null ? null : {
       providerConnectionId: route.providerConnectionId,
@@ -947,19 +1009,71 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
       routeUpdatedAt: pointer.generation.expectedEmbeddingRouteUpdatedAt,
       providerConfigurationVersion: pointer.generation.expectedEmbeddingProviderConfigurationVersion,
       routeFenceFingerprint: pointer.generation.expectedEmbeddingRouteFenceFingerprint,
+      embeddingWebAiGrantId: pointer.generation.embeddingWebAiGrantId,
       legacy: pointer.generation.jobId === null,
       status: pointer.generation.status,
     },
     currentInputManifestFingerprint: currentManifest,
+    personalEvidenceLive,
   });
+  const publicActiveIndex = pointer === null ? null : (() => {
+    const generation = pointer.generation;
+    const generationProvider = projectAiProviderProjection(
+      generation.providerConnection,
+      visibility,
+    );
+    const generationModelId = projectAiModelProjection(
+      generation.modelId,
+      generation.providerConnection,
+      visibility,
+    );
+    const platform = isProjectAiPlatformProvider(generation.providerConnection);
+    const publicGeneration = {
+      id: generation.id,
+      status: generation.status,
+      buildMode: generation.buildMode,
+      modelId: generationModelId,
+      dimensions: platform || generationModelId !== null ? generation.dimensions : null,
+      recordCount: generation.recordCount,
+      generatedRecordCount: generation.generatedRecordCount,
+      reusedRecordCount: generation.reusedRecordCount,
+      inputManifestFingerprint: platform ? generation.inputManifestFingerprint : null,
+      completedAt: generation.completedAt,
+      providerConnection: generationProvider,
+      legacy: generation.jobId === null,
+      ...(platform ? {
+        jobId: generation.jobId,
+        expectedEmbeddingRouteUpdatedAt: generation.expectedEmbeddingRouteUpdatedAt,
+        expectedEmbeddingRouteSource: generation.expectedEmbeddingRouteSource,
+        expectedEmbeddingRouteVersion: generation.expectedEmbeddingRouteVersion,
+        expectedEmbeddingProviderConfigurationVersion: generation.expectedEmbeddingProviderConfigurationVersion,
+        expectedEmbeddingRouteFenceFingerprint: generation.expectedEmbeddingRouteFenceFingerprint,
+      } : {}),
+    };
+    return {
+      publishedAt: pointer.publishedAt,
+      generation: publicGeneration,
+    };
+  })();
+  const publicRoute = route === null ? null : (() => {
+    const platform = isProjectAiPlatformProvider(route.providerConnection);
+    const modelId = projectAiModelProjection(route.modelId, route.providerConnection, visibility);
+    return Object.freeze({
+      source: route.source,
+      modelId,
+      embeddingDimensions: modelId === null ? null : route.embeddingDimensions,
+      providerConnection: projectAiProviderProjection(route.providerConnection, visibility),
+      ...(platform ? {
+        routeId: route.routeId,
+        routeVersion: route.routeVersion,
+        providerConfigurationVersion: route.providerConfigurationVersion,
+        routeFenceFingerprint: route.routeFenceFingerprint,
+        routeUpdatedAt: route.routeUpdatedAt,
+      } : {}),
+    });
+  })();
   return Object.freeze({
-    activeIndex: pointer === null ? null : {
-      ...pointer,
-      generation: {
-        ...pointer.generation,
-        legacy: pointer.generation.jobId === null,
-      },
-    },
+    activeIndex: publicActiveIndex,
     compatible: readiness.indexCompatible,
     readiness: readiness.state,
     latestJob,
@@ -969,7 +1083,7 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
       repositoryMaterialGenerationCount: materialPointerCount,
       manifestFingerprint: currentManifest,
     },
-    route,
+    route: publicRoute,
   });
 }
 
@@ -1037,7 +1151,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
       scopeIds: safePlanPayload(initialPlan),
       manifestFingerprint: initialPlan.currentInputManifestFingerprint,
       payload: safePlanPayload(initialPlan),
-      afterCreate: async (tx, jobId) => {
+      afterCreate: async (tx, jobId, grantId) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, ${MEMORY_INDEX_LOCK_NAMESPACE}))`;
         const lockedPlan = await buildMemoryIndexPlan(input.projectId, mode, tx);
         if (lockedPlan.planFingerprint !== expectedPlanFingerprint) return fail("MEMORY_INDEX_PLAN_STALE");
@@ -1060,6 +1174,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
             expectedEmbeddingRouteVersion: lockedPlan.routeVersion,
             expectedEmbeddingProviderConfigurationVersion: lockedPlan.providerConfigurationVersion,
             expectedEmbeddingRouteFenceFingerprint: lockedPlan.routeFenceFingerprint,
+            embeddingWebAiGrantId: lockedPlan.routeSource === "personal_delegation" ? grantId : null,
             expectedInputCount: lockedPlan.expectedInputCount,
             generatedRecordCount: 0,
             reusedRecordCount: 0,
@@ -1182,6 +1297,9 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
         actor: input.requestedBy,
         route: plan.route,
         grantId: granted.grantId,
+        personalMemoryGeneration: plan.route.source === "personal_delegation"
+          ? { generationId: generationId!, mode: "build" }
+          : undefined,
         callKey: stableAiCallKey(granted.jobId, "embedding", String(offset)),
         requestPayload: { texts: generatedBatch.map((record) => record.contentText) },
         maxOutputTokens: 128,

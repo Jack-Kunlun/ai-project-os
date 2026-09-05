@@ -4,6 +4,12 @@ import { getDb } from "@/lib/db";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 import { getProjectMemoryIndexStatus } from "@/lib/web-memory-index";
+import {
+  loadProjectAiPublicVisibility,
+  projectAiModelProjection,
+  projectAiProviderProjection,
+  type ProjectAiPublicVisibility,
+} from "@/lib/project-ai-public-projection";
 
 export const GOVERNANCE_DEFAULT_LIMIT = 20;
 export const GOVERNANCE_MAX_LIMIT = 50;
@@ -50,7 +56,7 @@ export type GovernanceReview = Readonly<{
   model: Readonly<{
     providerName: string | null;
     providerKind: string | null;
-    modelId: string;
+    modelId: string | null;
   }>;
   evidence: Readonly<{
     sourceId: string;
@@ -177,7 +183,15 @@ type WebReviewRow = Readonly<{
   id: string;
   modelId: string;
   createdAt: Date;
-  providerConnection: Readonly<{ name: string; kind: string }>;
+  providerConnection: Readonly<{
+    name: string;
+    kind: string;
+    scope?: string | null;
+    workspaceId?: string | null;
+    ownershipState?: string | null;
+    ownerUserId?: string | null;
+    status?: string;
+  }>;
   source: Readonly<{ id: string; kind: string; contentHash: string }>;
   projectItem: Readonly<{
     id: string;
@@ -206,15 +220,34 @@ type VerifiedReviewRow = Readonly<{
   }>;
 }>;
 
-export function toGovernanceWebReview(row: WebReviewRow): GovernanceReview {
+const REDACTED_PROJECT_AI_VISIBILITY: ProjectAiPublicVisibility = Object.freeze({ actorId: "", projectOwner: false });
+
+function isConfirmedPlatformProvider(provider: Readonly<{
+  scope?: string | null;
+  workspaceId?: string | null;
+  ownerUserId?: string | null;
+  ownershipState?: string | null;
+}> | null): boolean {
+  return provider?.scope === "platform"
+    && provider.workspaceId === null
+    && provider.ownerUserId === null
+    && provider.ownershipState === "confirmed";
+}
+
+export function toGovernanceWebReview(
+  row: WebReviewRow,
+  visibility: ProjectAiPublicVisibility = REDACTED_PROJECT_AI_VISIBILITY,
+): GovernanceReview {
+  const providerSnapshot = { ...row.providerConnection, ownerUserId: row.providerConnection.ownerUserId ?? null };
+  const provider = projectAiProviderProjection(providerSnapshot, visibility);
   return Object.freeze({
     source: "web",
     id: row.id,
     createdAt: row.createdAt.toISOString(),
     model: Object.freeze({
-      providerName: row.providerConnection.name,
-      providerKind: row.providerConnection.kind,
-      modelId: row.modelId,
+      providerName: provider?.name ?? null,
+      providerKind: provider?.kind ?? null,
+      modelId: projectAiModelProjection(row.modelId, providerSnapshot, visibility),
     }),
     evidence: Object.freeze({
       sourceId: row.source.id,
@@ -345,7 +378,7 @@ export async function listGovernanceReviews(
         id: true,
         modelId: true,
         createdAt: true,
-        providerConnection: { select: { name: true, kind: true } },
+        providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
         source: { select: { id: true, kind: true, contentHash: true } },
         projectItem: {
           select: { id: true, type: true, title: true, content: true, sourceExcerpt: true, occurredAt: true, updatedAt: true },
@@ -366,8 +399,9 @@ export async function listGovernanceReviews(
       },
     }),
   ]);
+  const visibility = await loadProjectAiPublicVisibility(db, projectId, actor.id);
   const merged = [
-    ...webRows.map((row) => toGovernanceWebReview(row)),
+    ...webRows.map((row) => toGovernanceWebReview(row, visibility)),
     ...verifiedRows.map((row) => toGovernanceVerifiedReview({ ...row, modelId: row.batch.aiRun.modelId })),
   ].sort(compareGovernanceReviews);
   const items = merged.slice(0, limit);
@@ -516,35 +550,54 @@ export async function listGovernanceRouteRevisions(
       indexInvalidated: true,
       activeIndexGenerationId: true,
       createdAt: true,
-      oldProviderConnection: { select: { name: true, kind: true } },
-      newProviderConnection: { select: { name: true, kind: true } },
+      oldProviderConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+      newProviderConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
       actor: { select: { username: true } },
     },
   });
+  const visibility = await loadProjectAiPublicVisibility(db, projectId, actor.id);
   const pageRows = rows.slice(0, limit);
-  const items = pageRows.map((row) => Object.freeze({
-    id: row.id,
-    operation: row.operation,
-    previous: row.oldModelId === null ? null : Object.freeze({
-      providerName: row.oldProviderConnection?.name ?? null,
-      providerKind: row.oldProviderConnection?.kind ?? null,
-      modelId: row.oldModelId,
-      embeddingDimensions: row.oldEmbeddingDimensions,
-      maxOutputTokens: row.oldMaxOutputTokens,
-    }),
-    current: Object.freeze({
-      providerName: row.newProviderConnection.name,
-      providerKind: row.newProviderConnection.kind,
-      modelId: row.newModelId,
-      embeddingDimensions: row.newEmbeddingDimensions,
-      maxOutputTokens: row.newMaxOutputTokens,
-    }),
-    onlyFutureRuns: row.onlyFutureRuns,
-    indexInvalidated: row.indexInvalidated,
-    activeIndexGenerationId: row.activeIndexGenerationId,
-    actor: row.actor?.username ?? "system",
-    createdAt: row.createdAt.toISOString(),
-  }));
+  const items = pageRows.map((row) => {
+    const previousProvider = row.oldProviderConnection === null
+      ? null
+      : projectAiProviderProjection(row.oldProviderConnection, visibility);
+    const currentProvider = projectAiProviderProjection(row.newProviderConnection, visibility);
+    const previousModelId = row.oldModelId === null || row.oldProviderConnection === null
+      ? null
+      : projectAiModelProjection(row.oldModelId, row.oldProviderConnection, visibility);
+    const currentModelId = projectAiModelProjection(row.newModelId, row.newProviderConnection, visibility);
+    return Object.freeze({
+      id: row.id,
+      operation: row.operation,
+      previous: row.oldModelId === null ? null : Object.freeze({
+        providerName: previousProvider?.name ?? null,
+        providerKind: previousProvider?.kind ?? null,
+        modelId: previousModelId,
+        embeddingDimensions: previousModelId !== null && isConfirmedPlatformProvider(row.oldProviderConnection)
+          ? row.oldEmbeddingDimensions
+          : null,
+        maxOutputTokens: previousModelId !== null && isConfirmedPlatformProvider(row.oldProviderConnection)
+          ? row.oldMaxOutputTokens
+          : null,
+      }),
+      current: Object.freeze({
+        providerName: currentProvider?.name ?? null,
+        providerKind: currentProvider?.kind ?? null,
+        modelId: currentModelId,
+        embeddingDimensions: currentModelId !== null && isConfirmedPlatformProvider(row.newProviderConnection)
+          ? row.newEmbeddingDimensions
+          : null,
+        maxOutputTokens: currentModelId !== null && isConfirmedPlatformProvider(row.newProviderConnection)
+          ? row.newMaxOutputTokens
+          : null,
+      }),
+      onlyFutureRuns: row.onlyFutureRuns,
+      indexInvalidated: row.indexInvalidated,
+      activeIndexGenerationId: row.activeIndexGenerationId,
+      actor: row.actor?.username ?? "system",
+      createdAt: row.createdAt.toISOString(),
+    });
+  });
   const last = pageRows.at(-1);
   return Object.freeze({
     items: Object.freeze(items),

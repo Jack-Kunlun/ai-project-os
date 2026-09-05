@@ -840,6 +840,20 @@ test("job result serializers keep search and answer payloads explicit", () => {
   assert.equal("secret" in (persistedAnswer ?? {}), false);
   assert.equal("secret" in (persistedAnswer?.providerConnection ?? {}), false);
   assert.equal("secret" in (persistedAnswer?.citations[0] ?? {}), false);
+  const personalProjection = serializeRagAnswer(
+    validPersistedAnswerInput,
+    null,
+    null,
+  );
+  assert.equal(personalProjection?.providerConnection, null);
+  assert.equal(personalProjection?.modelId, null);
+  const ownerProjection = serializeRagAnswer(
+    validPersistedAnswerInput,
+    { kind: "qwen" },
+    "qwen-plus-latest",
+  );
+  assert.deepEqual(ownerProjection?.providerConnection, { kind: "qwen" });
+  assert.equal(ownerProjection?.modelId, "qwen-plus-latest");
   assert.equal(serializeRagAnswer({ ...validPersistedAnswerInput, citations: [] }), null);
   assert.equal(serializeRagAnswer({ ...validPersistedAnswerInput, citations: "not-an-array" }), null);
   assert.equal(serializeRagAnswer({

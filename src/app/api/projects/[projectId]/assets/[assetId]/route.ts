@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { handleApiError } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
+import { getDb } from "@/lib/db";
 import { assertProjectActive } from "@/lib/project-lifecycle";
 import { deleteProjectAsset, getProjectAsset } from "@/lib/project-assets/service";
+import { loadProjectAiPublicVisibility } from "@/lib/project-ai-public-projection";
 
 export const dynamic = "force-dynamic";
 
@@ -15,9 +17,10 @@ async function params(value: Promise<{ projectId: string; assetId: string }>) {
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string; assetId: string }> }) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const parsed = await params(context.params);
-    return NextResponse.json({ asset: await getProjectAsset(parsed.projectId, parsed.assetId) });
+    const visibility = await loadProjectAiPublicVisibility(getDb(), parsed.projectId, user.id);
+    return NextResponse.json({ asset: await getProjectAsset(parsed.projectId, parsed.assetId, getDb(), visibility) }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

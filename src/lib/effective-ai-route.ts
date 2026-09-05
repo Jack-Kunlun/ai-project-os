@@ -166,6 +166,7 @@ function assertProviderScope(
 
 type PersonalProviderRow = {
   id: string;
+  name: string;
   kind: AiProviderConnection["kind"];
   scope: AiProviderConnection["scope"];
   ownerUserId: string | null;
@@ -410,6 +411,7 @@ async function resolvePersonalRoute(
       providerConnection: {
         select: {
           id: true,
+          name: true,
           kind: true,
           scope: true,
           workspaceId: true,

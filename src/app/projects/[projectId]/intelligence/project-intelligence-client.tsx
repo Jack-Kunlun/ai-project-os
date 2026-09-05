@@ -34,12 +34,12 @@ type Report = {
   id: string;
   report: ReportBody;
   citations: Citation[];
-  modelId: string;
+  modelId: string | null;
   inputTokens: number;
   outputTokens: number;
   inputManifestFingerprint: string;
   createdAt: string;
-  providerConnection: { name: string; kind: string };
+  providerConnection: { name?: string; kind?: string } | null;
 };
 type ToolTrace = {
   tool: "project_overview" | "confirmed_items" | "memory_search" | "repository_status";
@@ -56,18 +56,18 @@ type AgentRun = {
   citations: Citation[];
   plan: { objective: string; calls: Array<{ tool: ToolTrace["tool"]; arguments: Record<string, unknown> }> };
   trace: ToolTrace[];
-  modelId: string;
+  modelId: string | null;
   inputTokens: number;
   outputTokens: number;
   inputManifestFingerprint: string;
   createdAt: string;
-  providerConnection: { name: string; kind: string };
+  providerConnection: { name?: string; kind?: string } | null;
 };
 type ProviderRoute = null | {
   operation: "embedding" | "generateWithContext";
-  modelId: string;
+  modelId: string | null;
   embeddingDimensions?: number | null;
-  providerConnection: { id: string; name: string; kind: string; status: string };
+  providerConnection: { name?: string; kind?: string; status?: string } | null;
 };
 type Readiness = {
   activeIndex: boolean;
@@ -190,8 +190,8 @@ function CapabilityOverview({ projectId }: { projectId: string }) {
 
 function ReadinessPanel({ readiness }: { readiness: Readiness }) {
   const checks = [
-    { label: "生成模型路由", ready: readiness.generationRoute, detail: readiness.routes.generation ? `${readiness.routes.generation.providerConnection.name} · ${readiness.routes.generation.modelId}` : "尚未配置" },
-    { label: "向量模型路由", ready: readiness.embeddingRoute, detail: readiness.routes.embedding ? `${readiness.routes.embedding.providerConnection.name} · ${readiness.routes.embedding.modelId}` : "尚未配置" },
+    { label: "生成模型路由", ready: readiness.generationRoute, detail: readiness.routes.generation ? `${readiness.routes.generation.providerConnection?.name ?? readiness.routes.generation.providerConnection?.kind ?? "个人连接"} · ${readiness.routes.generation.modelId ?? "模型信息受限"}` : "尚未配置" },
+    { label: "向量模型路由", ready: readiness.embeddingRoute, detail: readiness.routes.embedding ? `${readiness.routes.embedding.providerConnection?.name ?? readiness.routes.embedding.providerConnection?.kind ?? "个人连接"} · ${readiness.routes.embedding.modelId ?? "模型信息受限"}` : "尚未配置" },
     { label: "兼容的记忆索引", ready: readiness.indexCompatible, detail: readiness.indexCompatible ? `索引 ${shortHash(readiness.indexGenerationId ?? "")}` : readiness.state === "legacyIndex" ? "旧版索引，升级后需首次全量重建" : readiness.activeIndex ? "当前向量路由已变化，请重建索引" : "尚未建立" },
   ];
   return <section className={`rounded-3xl border p-6 shadow-sm ${readiness.ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Runtime readiness</p><h2 className="mt-2 text-xl font-semibold">{readiness.ready ? "项目智能体已就绪" : "完成配置后即可运行"}</h2></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${readiness.ready ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{readiness.ready ? "READY" : "SETUP REQUIRED"}</span></div><div className="mt-5 grid gap-3 md:grid-cols-3">{checks.map((check) => <div key={check.label} className="rounded-2xl border border-white/80 bg-white/80 p-4"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${check.ready ? "bg-emerald-500" : "bg-amber-400"}`} /><p className="text-sm font-semibold">{check.label}</p></div><p className="mt-2 truncate text-xs text-slate-500" title={check.detail}>{check.detail}</p></div>)}</div>{!readiness.ready ? <p className="mt-4 text-xs leading-5 text-amber-900">请在“智能控制台”配置并验证生成、向量路由，再到“智能记忆”建立当前索引。项目内容只有在你勾选本次确认并主动运行后才会发送给供应商。</p> : null}</section>;
@@ -231,7 +231,7 @@ function ReportView({ report }: { report: Report }) {
   const citationNumbers = useMemo(() => new Map(report.citations.map((citation, index) => [citation.id, index + 1])), [report.citations]);
   const statusStyle = { on_track: "bg-emerald-100 text-emerald-700", needs_attention: "bg-amber-100 text-amber-800", at_risk: "bg-rose-100 text-rose-700", insufficient_data: "bg-slate-100 text-slate-600", unknown: "bg-slate-100 text-slate-600" }[report.report.status];
   const statusLabel = { on_track: "进展正常", needs_attention: "需要关注", at_risk: "存在风险", insufficient_data: "资料不足", unknown: "证据不足" }[report.report.status];
-  return <div className="mt-7"><div className="rounded-2xl bg-slate-950 p-6 text-white"><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle}`}>{statusLabel}</span><span className="text-xs text-slate-400">{formatDate(report.createdAt)} · {report.providerConnection.name} / {report.modelId}</span></div><h3 className="mt-5 text-2xl font-semibold">{report.report.headline}</h3><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{report.report.summary}</p><CitationChips ids={report.report.citations} numbers={citationNumbers} /></div><div className="mt-6 grid gap-4 lg:grid-cols-2">{reportSections.map((section) => <ObservationSection key={section.key} title={section.label} observations={report.report[section.key]} numbers={citationNumbers} />)}</div><EvidenceList citations={report.citations} /><RunMeta inputTokens={report.inputTokens} outputTokens={report.outputTokens} fingerprint={report.inputManifestFingerprint} /></div>;
+  return <div className="mt-7"><div className="rounded-2xl bg-slate-950 p-6 text-white"><div className="flex flex-wrap items-center justify-between gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyle}`}>{statusLabel}</span><span className="text-xs text-slate-400">{formatDate(report.createdAt)} · {report.providerConnection?.name ?? report.providerConnection?.kind ?? "个人连接"} / {report.modelId ?? "模型信息受限"}</span></div><h3 className="mt-5 text-2xl font-semibold">{report.report.headline}</h3><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-300">{report.report.summary}</p><CitationChips ids={report.report.citations} numbers={citationNumbers} /></div><div className="mt-6 grid gap-4 lg:grid-cols-2">{reportSections.map((section) => <ObservationSection key={section.key} title={section.label} observations={report.report[section.key]} numbers={citationNumbers} />)}</div><EvidenceList citations={report.citations} /><RunMeta inputTokens={report.inputTokens} outputTokens={report.outputTokens} fingerprint={report.inputManifestFingerprint} /></div>;
 }
 
 function AgentPanel({ projectId, runs, tools, ready, onReload }: { projectId: string; runs: AgentRun[]; tools: ToolTrace["tool"][]; ready: boolean; onReload: () => Promise<void> }) {
@@ -265,7 +265,7 @@ function AgentPanel({ projectId, runs, tools, ready, onReload }: { projectId: st
 
 function AgentRunView({ run }: { run: AgentRun }) {
   const citationNumbers = useMemo(() => new Map(run.citations.map((citation, index) => [citation.id, index + 1])), [run.citations]);
-  return <article className="mt-7"><div className="rounded-2xl border border-slate-200 bg-slate-50 p-6"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Question</p><h3 className="mt-2 text-lg font-semibold">{run.question}</h3><p className="mt-2 text-xs text-slate-500">{formatDate(run.createdAt)} · {run.providerConnection.name} / {run.modelId}</p></div><div className="mt-4 rounded-2xl bg-slate-950 p-6 text-white"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">Grounded answer</p><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-200">{run.answer}</p><CitationChips ids={run.citations.map((citation) => citation.id)} numbers={citationNumbers} /></div>{run.recommendations.length > 0 ? <ObservationSection title="建议" observations={run.recommendations} numbers={citationNumbers} /> : null}{run.uncertainties.length > 0 ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5"><h4 className="text-sm font-semibold text-amber-900">证据不足与不确定性</h4><ul className="mt-3 space-y-2 text-sm leading-6 text-amber-900">{run.uncertainties.map((item, index) => <li key={`${index}-${item}`}>• {item}</li>)}</ul></div> : null}<ToolTraceView objective={run.plan.objective} trace={run.trace} /><EvidenceList citations={run.citations} /><RunMeta inputTokens={run.inputTokens} outputTokens={run.outputTokens} fingerprint={run.inputManifestFingerprint} /></article>;
+  return <article className="mt-7"><div className="rounded-2xl border border-slate-200 bg-slate-50 p-6"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Question</p><h3 className="mt-2 text-lg font-semibold">{run.question}</h3><p className="mt-2 text-xs text-slate-500">{formatDate(run.createdAt)} · {run.providerConnection?.name ?? run.providerConnection?.kind ?? "个人连接"} / {run.modelId ?? "模型信息受限"}</p></div><div className="mt-4 rounded-2xl bg-slate-950 p-6 text-white"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">Grounded answer</p><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-200">{run.answer}</p><CitationChips ids={run.citations.map((citation) => citation.id)} numbers={citationNumbers} /></div>{run.recommendations.length > 0 ? <ObservationSection title="建议" observations={run.recommendations} numbers={citationNumbers} /> : null}{run.uncertainties.length > 0 ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5"><h4 className="text-sm font-semibold text-amber-900">证据不足与不确定性</h4><ul className="mt-3 space-y-2 text-sm leading-6 text-amber-900">{run.uncertainties.map((item, index) => <li key={`${index}-${item}`}>• {item}</li>)}</ul></div> : null}<ToolTraceView objective={run.plan.objective} trace={run.trace} /><EvidenceList citations={run.citations} /><RunMeta inputTokens={run.inputTokens} outputTokens={run.outputTokens} fingerprint={run.inputManifestFingerprint} /></article>;
 }
 
 function ObservationSection({ title, observations, numbers }: { title: string; observations: Observation[]; numbers: ReadonlyMap<string, number> }) {

@@ -3,11 +3,13 @@ import { z } from "zod";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readRequestBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
+import { getDb } from "@/lib/db";
 import { assertProjectActive } from "@/lib/project-lifecycle";
 import { acquireUploadAdmission, countActiveUploadAdmissions, releaseUploadAdmission } from "@/lib/project-assets/admission";
 import { getProjectAssetUploadUsage, publicProjectAssetUploadUsage } from "@/lib/project-assets/quota";
 import { getUploadPolicy, publicUploadPolicy } from "@/lib/project-assets/policy";
 import { listProjectAssetsPage, uploadProjectAsset } from "@/lib/project-assets/service";
+import { loadProjectAiPublicVisibility } from "@/lib/project-ai-public-projection";
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/list-pagination";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +32,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
   try {
     const user = await requireApiSession(request);
     const id = await projectId(context.params);
+    const visibility = await loadProjectAiPublicVisibility(getDb(), id, user.id);
     const policy = getUploadPolicy();
     const searchParams = new URL(request.url).searchParams;
     for (const key of new Set(searchParams.keys())) {
@@ -42,7 +45,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
       search: query.search,
       ...(query.kind === "all" ? {} : { kind: query.kind }),
       ...(query.status === "all" ? {} : { status: query.status }),
-    });
+    }, getDb(), visibility);
     const usage = await getProjectAssetUploadUsage(id);
     return NextResponse.json({
       assets: page.items,
@@ -63,6 +66,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const id = await projectId(context.params);
+    const visibility = await loadProjectAiPublicVisibility(getDb(), id, user.id);
     const policy = getUploadPolicy();
     const admissionId = await acquireUploadAdmission({ projectId: id, userId: user.id });
     let response: NextResponse | undefined;
@@ -108,6 +112,7 @@ export async function POST(request: Request, context: { params: Promise<{ projec
         requestedBy: user,
         fileName: file.name,
         buffer: Buffer.from(await file.arrayBuffer()),
+        visibility,
       });
       response = NextResponse.json({ assets: [asset], asset }, { status: 201 });
     } finally {

@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { getDb } from "@/lib/db";
 import { isSafeExternalRef } from "@/lib/source";
+import {
+  loadProjectAiPublicVisibility,
+  projectAiModelProjection,
+  projectAiProviderProjection,
+  type ProjectAiPublicVisibility,
+} from "@/lib/project-ai-public-projection";
 
 export const PROJECT_EXPORT_SCHEMA_VERSION = "ai-project-os.project-export.v3";
 export const PROJECT_EXPORT_MAX_BYTES = 20 * 1024 * 1024;
@@ -27,6 +33,78 @@ function iso(value: Date | null): string | null {
   return value?.toISOString() ?? null;
 }
 
+function isConfirmedPlatformProvider(provider: Readonly<{
+  scope?: string | null;
+  workspaceId?: string | null;
+  ownerUserId?: string | null;
+  ownershipState?: string | null;
+}> | null): boolean {
+  return provider?.scope === "platform"
+    && provider.workspaceId === null
+    && provider.ownerUserId === null
+    && provider.ownershipState === "confirmed";
+}
+
+const PRIVATE_EXPORT_METADATA_KEYS = new Set([
+  "providerconnectionid",
+  "credentialid",
+  "delegationid",
+  "grantid",
+  "secretfingerprint",
+  "credentialsecretfingerprint",
+  "routefencefingerprint",
+  "ciphertext",
+  "nonce",
+  "authtag",
+  "apikey",
+  "secret",
+  "providerrequestid",
+  "idempotencykey",
+  "leasetoken",
+  "leasetokenhash",
+]);
+
+export function sanitizeProjectExportMetadata(value: Prisma.JsonValue): Prisma.JsonValue {
+  if (Array.isArray(value)) return value.map((entry) => sanitizeProjectExportMetadata(entry));
+  if (value !== null && typeof value === "object") {
+    const result: Prisma.JsonObject = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (PRIVATE_EXPORT_METADATA_KEYS.has(key.toLowerCase())) continue;
+      result[key] = sanitizeProjectExportMetadata(entry as Prisma.JsonValue);
+    }
+    return result;
+  }
+  return value;
+}
+
+function publicRouteConfig(
+  provider: Readonly<{
+    scope?: string | null;
+    workspaceId?: string | null;
+    ownerUserId: string | null;
+    ownershipState?: string | null;
+    name: string;
+    kind: string;
+    status?: string;
+  }> | null,
+  modelId: string,
+  embeddingDimensions: number | null,
+  maxOutputTokens: number | null,
+  visibility: ProjectAiPublicVisibility,
+) {
+  const projectedModelId = provider === null ? null : projectAiModelProjection(modelId, provider, visibility);
+  const projectedProvider = provider === null ? null : projectAiProviderProjection(provider, visibility);
+  const exposeConfig = projectedModelId !== null && isConfirmedPlatformProvider(provider);
+  return Object.freeze({
+    providerName: projectedProvider?.name ?? null,
+    providerKind: projectedProvider?.kind ?? null,
+    providerStatus: projectedProvider?.status ?? null,
+    modelId: projectedModelId,
+    embeddingDimensions: exposeConfig ? embeddingDimensions : null,
+    maxOutputTokens: exposeConfig ? maxOutputTokens : null,
+  });
+}
+
 export async function exportProjectData(
   input: Readonly<{ projectId: string; requestedById: string; expectedUpdatedAt: Date }>,
   db: PrismaClient = getDb(),
@@ -41,6 +119,7 @@ export async function exportProjectData(
       if (project.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
         throw new ProjectExportError("PROJECT_EXPORT_STALE");
       }
+      const visibility = await loadProjectAiPublicVisibility(tx, input.projectId, input.requestedById);
 
       const [sources, assets, items, repositories, routes, routeRevisions, lifecycle, jobs, answers, reports, agentRuns, actionResultImports, objectives, workItems, dependencies, planAudits] = await Promise.all([
         tx.projectSource.findMany({
@@ -107,7 +186,7 @@ export async function exportProjectData(
                     reviewedAt: true,
                     modelId: true,
                     projectSourceId: true,
-                    providerConnection: { select: { name: true, kind: true } },
+                    providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
                     reviewedBy: { select: { username: true } },
                   },
                 },
@@ -213,7 +292,7 @@ export async function exportProjectData(
             maxOutputTokens: true,
             createdAt: true,
             updatedAt: true,
-            providerConnection: { select: { name: true, kind: true, status: true } },
+            providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
           },
         }),
         tx.projectAiRouteRevision.findMany({
@@ -232,8 +311,8 @@ export async function exportProjectData(
             indexInvalidated: true,
             activeIndexGenerationId: true,
             createdAt: true,
-            oldProviderConnection: { select: { name: true, kind: true } },
-            newProviderConnection: { select: { name: true, kind: true } },
+            oldProviderConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+            newProviderConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
             actor: { select: { username: true } },
           },
         }),
@@ -271,12 +350,31 @@ export async function exportProjectData(
         tx.ragAnswer.findMany({
           where: { projectId: input.projectId },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-          select: { id: true, modelId: true, question: true, answer: true, citations: true, inputTokens: true, outputTokens: true, createdAt: true },
+          select: {
+            id: true,
+            modelId: true,
+            question: true,
+            answer: true,
+            citations: true,
+            inputTokens: true,
+            outputTokens: true,
+            createdAt: true,
+            providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+          },
         }),
         tx.projectIntelligenceReport.findMany({
           where: { projectId: input.projectId },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-          select: { id: true, modelId: true, report: true, citations: true, inputTokens: true, outputTokens: true, createdAt: true },
+          select: {
+            id: true,
+            modelId: true,
+            report: true,
+            citations: true,
+            inputTokens: true,
+            outputTokens: true,
+            createdAt: true,
+            providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+          },
         }),
         tx.projectAgentRun.findMany({
           where: { projectId: input.projectId },
@@ -294,6 +392,7 @@ export async function exportProjectData(
             inputTokens: true,
             outputTokens: true,
             createdAt: true,
+            providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
           },
         }),
         tx.projectActionResultImport.findMany({
@@ -351,14 +450,22 @@ export async function exportProjectData(
             processingStartedAt: iso(version.processingStartedAt),
             completedAt: iso(version.completedAt),
             createdAt: version.createdAt.toISOString(),
-            segments: version.segments.map((segment) => ({
-              ...segment,
-              reviewedAt: iso(segment.reviewedAt),
-            })),
+            segments: version.segments.map((segment) => {
+              const provider = segment.providerConnection;
+              return {
+                ...segment,
+                modelId: provider === null || segment.modelId === null
+                  ? null
+                  : projectAiModelProjection(segment.modelId, provider, visibility),
+                providerConnection: provider === null ? null : projectAiProviderProjection(provider, visibility),
+                reviewedAt: iso(segment.reviewedAt),
+              };
+            }),
           })),
         })),
         items: items.map((item) => ({
           ...item,
+          metadata: sanitizeProjectExportMetadata(item.metadata),
           occurredAt: iso(item.occurredAt),
           confirmedAt: iso(item.confirmedAt),
           createdAt: item.createdAt.toISOString(),
@@ -371,6 +478,7 @@ export async function exportProjectData(
           })),
           revisions: item.revisions.map((revision) => ({
             ...revision,
+            metadata: sanitizeProjectExportMetadata(revision.metadata),
             occurredAt: iso(revision.occurredAt),
             confirmedAt: iso(revision.confirmedAt),
             createdAt: revision.createdAt.toISOString(),
@@ -388,8 +496,63 @@ export async function exportProjectData(
             lastVerifiedAt: link.githubRepository.lastVerifiedAt.toISOString(),
           },
         })),
-        aiRoutes: routes.map((route) => ({ ...route, createdAt: route.createdAt.toISOString(), updatedAt: route.updatedAt.toISOString() })),
-        aiRouteRevisions: routeRevisions.map((revision) => ({ ...revision, createdAt: revision.createdAt.toISOString() })),
+        aiRoutes: routes.map((route) => {
+          const config = publicRouteConfig(
+            route.providerConnection,
+            route.modelId,
+            route.embeddingDimensions,
+            route.maxOutputTokens,
+            visibility,
+          );
+          return {
+            operation: route.operation,
+            modelId: config.modelId,
+            embeddingDimensions: config.embeddingDimensions,
+            maxOutputTokens: config.maxOutputTokens,
+            createdAt: route.createdAt.toISOString(),
+            updatedAt: route.updatedAt.toISOString(),
+            providerConnection: route.providerConnection === null
+              ? null
+              : projectAiProviderProjection(route.providerConnection, visibility),
+          };
+        }),
+        aiRouteRevisions: routeRevisions.map((revision) => {
+          const oldConfig = revision.oldProviderConnection === null || revision.oldModelId === null
+            ? null
+            : publicRouteConfig(
+              revision.oldProviderConnection,
+              revision.oldModelId,
+              revision.oldEmbeddingDimensions,
+              revision.oldMaxOutputTokens,
+              visibility,
+            );
+          const newConfig = publicRouteConfig(
+            revision.newProviderConnection,
+            revision.newModelId,
+            revision.newEmbeddingDimensions,
+            revision.newMaxOutputTokens,
+            visibility,
+          );
+          return {
+            id: revision.id,
+            operation: revision.operation,
+            oldModelId: oldConfig?.modelId ?? null,
+            newModelId: newConfig.modelId,
+            oldEmbeddingDimensions: oldConfig?.embeddingDimensions ?? null,
+            newEmbeddingDimensions: newConfig.embeddingDimensions,
+            oldMaxOutputTokens: oldConfig?.maxOutputTokens ?? null,
+            newMaxOutputTokens: newConfig.maxOutputTokens,
+            onlyFutureRuns: revision.onlyFutureRuns,
+            indexInvalidated: revision.indexInvalidated,
+            activeIndexGenerationId: revision.activeIndexGenerationId,
+            createdAt: revision.createdAt.toISOString(),
+            oldProviderConnection: revision.oldProviderConnection === null
+              ? null
+              : projectAiProviderProjection(revision.oldProviderConnection, visibility),
+            newProviderConnection: projectAiProviderProjection(revision.newProviderConnection, visibility),
+            actor: revision.actor,
+          };
+        }),
         lifecycle: lifecycle.map((revision) => ({
           ...revision,
           previousArchivedAt: iso(revision.previousArchivedAt),
@@ -403,15 +566,45 @@ export async function exportProjectData(
           startedAt: iso(job.startedAt),
           completedAt: iso(job.completedAt),
         })),
-        ragAnswers: answers.map((answer) => ({ ...answer, createdAt: answer.createdAt.toISOString() })),
-        intelligenceReports: reports.map((report) => ({ ...report, createdAt: report.createdAt.toISOString() })),
-        agentRuns: agentRuns.map((run) => ({ ...run, createdAt: run.createdAt.toISOString() })),
+        ragAnswers: answers.map((answer) => ({
+          ...answer,
+          modelId: projectAiModelProjection(answer.modelId, answer.providerConnection, visibility),
+          providerConnection: projectAiProviderProjection(answer.providerConnection, visibility),
+          citations: sanitizeProjectExportMetadata(answer.citations),
+          createdAt: answer.createdAt.toISOString(),
+        })),
+        intelligenceReports: reports.map((report) => ({
+          ...report,
+          modelId: projectAiModelProjection(report.modelId, report.providerConnection, visibility),
+          providerConnection: projectAiProviderProjection(report.providerConnection, visibility),
+          report: sanitizeProjectExportMetadata(report.report),
+          citations: sanitizeProjectExportMetadata(report.citations),
+          createdAt: report.createdAt.toISOString(),
+        })),
+        agentRuns: agentRuns.map((run) => ({
+          ...run,
+          modelId: projectAiModelProjection(run.modelId, run.providerConnection, visibility),
+          providerConnection: projectAiProviderProjection(run.providerConnection, visibility),
+          plan: sanitizeProjectExportMetadata(run.plan),
+          trace: sanitizeProjectExportMetadata(run.trace),
+          recommendations: sanitizeProjectExportMetadata(run.recommendations),
+          uncertainties: sanitizeProjectExportMetadata(run.uncertainties),
+          citations: sanitizeProjectExportMetadata(run.citations),
+          createdAt: run.createdAt.toISOString(),
+        })),
         actionResultImports: actionResultImports.map((entry) => ({ ...entry, createdAt: entry.createdAt.toISOString() })),
         projectPlan: {
           objectives: objectives.map((objective) => ({ ...objective, targetDate: iso(objective.targetDate), createdAt: objective.createdAt.toISOString(), updatedAt: objective.updatedAt.toISOString(), completedAt: iso(objective.completedAt) })),
-          workItems: workItems.map((workItem) => ({ ...workItem, targetDate: iso(workItem.targetDate), createdAt: workItem.createdAt.toISOString(), updatedAt: workItem.updatedAt.toISOString(), completedAt: iso(workItem.completedAt) })),
+          workItems: workItems.map((workItem) => ({
+            ...workItem,
+            evidenceSnapshot: sanitizeProjectExportMetadata(workItem.evidenceSnapshot),
+            targetDate: iso(workItem.targetDate),
+            createdAt: workItem.createdAt.toISOString(),
+            updatedAt: workItem.updatedAt.toISOString(),
+            completedAt: iso(workItem.completedAt),
+          })),
           dependencies: dependencies.map((dependency) => ({ ...dependency, createdAt: dependency.createdAt.toISOString(), removedAt: iso(dependency.removedAt) })),
-          audits: planAudits.map((audit) => ({ ...audit, createdAt: audit.createdAt.toISOString() })),
+          audits: planAudits.map((audit) => ({ ...audit, details: sanitizeProjectExportMetadata(audit.details), createdAt: audit.createdAt.toISOString() })),
         },
         exclusions: [
           "系统凭据库中的 API Key、GitHub PAT 及加密密钥材料",

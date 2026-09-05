@@ -594,7 +594,7 @@ test("all Web AI provider transports carry a request actor and vision guards bef
   );
   assert.match(
     governanceSource,
-    /createSupplementalWebAiGrant[\s\S]+withWebAiProjectAccessTransaction[\s\S]+const currentActor = admission\.actor[\s\S]+backgroundJob\.findUnique[\s\S]+const billing = await assertAiOutboundEntitlement/u,
+    /createSupplementalWebAiGrant[\s\S]+withWebAiProjectAccessTransaction[\s\S]+const currentActor = admission\.actor[\s\S]+backgroundJob\.findUnique[\s\S]+const billing = await (?:assertAiOutboundEntitlement|assertRuntimeBilling)/u,
   );
   assert.match(governanceSource, /const currentActor = await assertWebAiProjectAccess\(input\.actor, input\.route\.projectId, "edit", db\)/u);
   assert.match(

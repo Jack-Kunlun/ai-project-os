@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { mapApiError } from "../src/lib/api-errors";
 import { ProjectAiProviderDelegationServiceError } from "../src/lib/project-ai-provider-delegation-service";
+import { getProjectAiOperationCapability } from "../src/lib/project-ai-runtime-capabilities";
 
 const root = process.cwd();
 const service = readFileSync(join(root, "src/lib/project-ai-provider-delegation-service.ts"), "utf8");
@@ -13,7 +14,7 @@ function routeSource(relativePath: string): string {
   return readFileSync(join(root, relativePath), "utf8");
 }
 
-test("delegation service is a control-plane-only, access-fenced surface", () => {
+test("delegation service is an access-fenced surface with per-operation capability truth", () => {
   assert.match(service, /withWebAiProjectAccessTransaction/u);
   assert.match(service, /isolationLevel: Prisma\.TransactionIsolationLevel\.Serializable/u);
   assert.match(service, /allowArchived: true/u);
@@ -21,8 +22,10 @@ test("delegation service is a control-plane-only, access-fenced surface", () => 
   assert.match(service, /if \(admission\.project\.archivedAt !== null\)/u);
   assert.match(service, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/u);
   assert.doesNotMatch(service, /(?:effective-ai-route|web-ai-governance|ai-entitlements|WebAiGrant|ProviderCallAudit|transport)/u);
-  assert.match(service, /executionReady: false/u);
-  assert.match(service, /controlPlaneOnly: true/u);
+  assert.match(service, /getProjectAiOperationCapability/u);
+  assert.match(service, /\.\.\.getProjectAiOperationCapability/u);
+  assert.doesNotMatch(service, /executionReady:\s*false/u);
+  assert.doesNotMatch(service, /controlPlaneOnly:\s*true/u);
   assert.match(service, /async function runRead<T>/u);
   assert.match(service, /required: "view"/u);
   assert.doesNotMatch(service, /assertWebAiProjectAccess/u);
@@ -33,6 +36,17 @@ test("delegation service is a control-plane-only, access-fenced surface", () => 
   assert.match(mutation, /isolationLevel: Prisma\.TransactionIsolationLevel\.Serializable/u);
   assert.match(read, /isolationLevel: Prisma\.TransactionIsolationLevel\.ReadCommitted/u);
   assert.doesNotMatch(read, /isolationLevel: Prisma\.TransactionIsolationLevel\.Serializable/u);
+});
+
+test("runtime capability is reported per operation", () => {
+  assert.deepEqual(getProjectAiOperationCapability("embedding"), {
+    operationExecutionAvailable: true,
+    controlPlaneOnly: false,
+  });
+  assert.deepEqual(getProjectAiOperationCapability("sourceSummary"), {
+    operationExecutionAvailable: false,
+    controlPlaneOnly: true,
+  });
 });
 
 test("delegation inputs derive private provider snapshots and require explicit consent", () => {

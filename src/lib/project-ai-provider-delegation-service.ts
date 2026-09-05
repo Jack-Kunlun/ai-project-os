@@ -27,6 +27,7 @@ import {
   getProviderDefinition,
   isSafeModelId,
 } from "@/lib/ai-providers/registry";
+import { getProjectAiOperationCapability } from "@/lib/project-ai-runtime-capabilities";
 
 const MAX_REASON_LENGTH = 500;
 const DEFAULT_MAX_OUTPUT_TOKENS = 2048;
@@ -627,6 +628,7 @@ function delegationView(
   const projectOwnerProvider = explicitProjectOwner
     ? { kind: row.providerConnection.kind, modelId: row.modelId }
     : null;
+  const capability = getProjectAiOperationCapability(row.operation);
   return Object.freeze({
     id: row.id,
     operation: row.operation,
@@ -643,8 +645,7 @@ function delegationView(
       ? { id: row.projectConfirmer.id, displayName: row.projectConfirmer.displayName ?? row.projectConfirmer.username }
       : null,
     terminalReason: privileged ? row.terminalReason : null,
-    executionReady: false,
-    controlPlaneOnly: true,
+    ...capability,
   });
 }
 
@@ -711,10 +712,8 @@ export async function listProjectAiProviderDelegations(
         selected: selection.source === "personalDelegation",
         version: selection.version,
         updatedAt: selection.updatedAt.toISOString(),
-        controlPlaneOnly: true,
+        ...getProjectAiOperationCapability(selection.operation),
       })),
-      executionReady: false,
-      controlPlaneOnly: true,
     });
   });
 }
@@ -1052,8 +1051,7 @@ export async function putProjectAiEffectiveRouteSelection(
       source: row.source,
       version: row.version,
       selected: true,
-      controlPlaneOnly: true,
-      executionReady: false,
+      ...getProjectAiOperationCapability(row.operation),
       updatedAt: row.updatedAt.toISOString(),
     });
   });

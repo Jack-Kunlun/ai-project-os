@@ -17,6 +17,7 @@ import {
 const projectId = "11111111-1111-4111-8111-111111111111";
 const candidateId = "22222222-2222-4222-8222-222222222222";
 const otherCandidateId = "33333333-3333-4333-8333-333333333333";
+const viewerId = "00000000-0000-4000-8000-000000000002";
 const createdAt = new Date("2026-08-29T01:02:03.000Z");
 
 test("governance cursors are typed, canonical, and route-bound", () => {
@@ -110,6 +111,39 @@ test("review DTOs contain review evidence but no source body or runtime secrets"
   assert.equal(verified.evidence.excerpt, "已验证摘录");
   const serialized = JSON.stringify([web, verified]);
   assert.doesNotMatch(serialized, /contentText|externalRef|payload|idempotencyKey|leaseToken|providerRequest|credential|embedding/u);
+});
+
+test("governance web reviews redact personal provider metadata by visibility", () => {
+  const row = {
+    id: candidateId,
+    modelId: "private-model",
+    createdAt,
+    providerConnection: {
+      name: "私有连接名称",
+      kind: "openai",
+      scope: "user",
+      workspaceId: null,
+      ownerUserId: "00000000-0000-4000-8000-000000000001",
+      ownershipState: "confirmed",
+      status: "verified",
+    },
+    source: { id: projectId, kind: "manual", contentHash: "b".repeat(64) },
+    projectItem: {
+      id: otherCandidateId,
+      type: "risk" as const,
+      title: "风险",
+      content: "需要复核",
+      sourceExcerpt: "精确摘录",
+      occurredAt: null,
+      updatedAt: createdAt,
+    },
+  };
+  const viewer = toGovernanceWebReview(row, { actorId: viewerId, projectOwner: false });
+  assert.deepEqual(viewer.model, { providerName: null, providerKind: null, modelId: null });
+  const projectOwner = toGovernanceWebReview(row, { actorId: viewerId, projectOwner: true });
+  assert.deepEqual(projectOwner.model, { providerName: null, providerKind: "openai", modelId: "private-model" });
+  const connectionOwner = toGovernanceWebReview(row, { actorId: "00000000-0000-4000-8000-000000000001", projectOwner: false });
+  assert.deepEqual(connectionOwner.model, { providerName: "私有连接名称", providerKind: "openai", modelId: "private-model" });
 });
 
 test("job capabilities preserve specialized reconciliation and terminal semantics", () => {

@@ -44,6 +44,7 @@ import {
   type JobAttemptClaim,
   updateProjectJobProgress,
 } from "@/lib/project-workflow";
+import { isProjectAiRuntimeOperation } from "@/lib/project-ai-runtime-capabilities";
 
 export { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 const GRANT_LIFETIME_MS = 24 * 60 * 60 * 1_000;
@@ -65,9 +66,121 @@ export type RuntimeRoute = EffectiveAiRoute;
 
 type DispatchRoute = RuntimeRoute;
 
+type RuntimeDatabase = PrismaClient | Prisma.TransactionClient;
+
+function isFiniteDate(value: Date): boolean {
+  return value instanceof Date && Number.isFinite(value.getTime());
+}
+
+function isPersonalRuntimeRoute(route: RuntimeRoute): route is RuntimeRoute & {
+  source: "personal_delegation";
+  personalEvidence: NonNullable<RuntimeRoute["personalEvidence"]>;
+} {
+  return route.source === "personal_delegation" && route.personalEvidence !== null;
+}
+
+/**
+ * The 1200 migration owns the complete personal-memory evidence predicate.
+ * Keep the application check as a parameterized call to that predicate rather
+ * than copying its joins into TypeScript, so reads and dispatch share the same
+ * fail-closed definition after an upstream revoke, expiry, or drift.
+ */
+export async function isPersonalMemoryGenerationLive(
+  generationId: string,
+  db: RuntimeDatabase,
+  requireComplete = true,
+): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/u.test(generationId)) return false;
+  try {
+    const rows = await db.$queryRaw<Array<{ live: boolean }>>`
+      SELECT "personal_memory_frozen_evidence_valid"(${generationId}::uuid, ${requireComplete}) AS live
+    `;
+    return rows[0]?.live === true;
+  } catch {
+    // A missing/unavailable authority function must never make an index look
+    // live. Callers turn false into their stable not-ready/denied result.
+    return false;
+  }
+}
+
+export type PersonalMemoryDispatchEvidence = Readonly<{
+  generationId: string;
+  mode: "build" | "consume";
+}>;
+
+async function isPersonalMemoryDispatchAdmissible(
+  evidence: PersonalMemoryDispatchEvidence,
+  input: Readonly<{ projectId: string; jobId: string; grantId: string }>,
+  db: RuntimeDatabase,
+): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/u.test(evidence.generationId)) return false;
+  try {
+    const rows = await db.$queryRaw<Array<{ valid: boolean }>>`
+      SELECT "personal_memory_dispatch_evidence_valid"(
+        ${evidence.generationId}::uuid,
+        ${input.projectId}::uuid,
+        ${input.jobId}::uuid,
+        ${input.grantId}::uuid,
+        ${evidence.mode}
+      ) AS valid
+    `;
+    return rows[0]?.valid === true;
+  } catch {
+    return false;
+  }
+}
+
+function hasCompletePersonalEvidence(route: RuntimeRoute): boolean {
+  const evidence = route.personalEvidence;
+  if (evidence === null || !isProjectAiRuntimeOperation(route.operation)) return false;
+  const identifiers = [
+    evidence.personalDelegationId,
+    evidence.effectiveRouteSelectionId,
+    evidence.payerProviderConnectionId,
+    evidence.connectionOwnerId,
+    evidence.billingUserId,
+    evidence.ownerProjectMembershipId,
+    evidence.ownerSubscriptionId,
+    evidence.projectConfirmedById,
+    evidence.projectConfirmedProjectMembershipId,
+    evidence.selectedById,
+    evidence.selectedByProjectMembershipId,
+  ];
+  if (identifiers.some((value) => typeof value !== "string" || value.length === 0)) return false;
+  if (
+    evidence.payerKind !== "personal_connection_owner"
+    || evidence.personalDelegationVersion < 1
+    || evidence.effectiveRouteSelectionVersion < 1
+    || evidence.ownerSubscriptionVersion < 1
+    || !isFiniteDate(evidence.effectiveRouteSelectionUpdatedAt)
+    || !isFiniteDate(evidence.ownerMembershipCreatedAt)
+    || !isFiniteDate(evidence.ownerSubscriptionStartsAt)
+    || !isFiniteDate(evidence.ownerSubscriptionExpiresAt)
+    || !isFiniteDate(evidence.projectConfirmedMembershipCreatedAt)
+    || !isFiniteDate(evidence.selectedByMembershipCreatedAt)
+    || !/^[0-9a-f]{64}$/u.test(evidence.personalDelegationFingerprint)
+    || !/^[0-9a-f]{64}$/u.test(evidence.credentialSecretFingerprint)
+    || evidence.connectionOwnerId !== evidence.billingUserId
+    || evidence.payerProviderConnectionId.length === 0
+  ) return false;
+  if (route.operation === "embedding") {
+    return evidence.embeddingDimensions !== null
+      && Number.isSafeInteger(evidence.embeddingDimensions)
+      && evidence.embeddingDimensions >= 8
+      && evidence.embeddingDimensions <= 8192
+      && evidence.maxOutputTokens === null
+      && route.maxOutputTokens === 128;
+  }
+  return evidence.embeddingDimensions === null
+    && typeof evidence.maxOutputTokens === "number"
+    && Number.isSafeInteger(evidence.maxOutputTokens)
+    && evidence.maxOutputTokens >= 1
+    && evidence.maxOutputTokens <= 65_536
+    && route.maxOutputTokens === evidence.maxOutputTokens;
+}
+
 function hasCompleteRouteSnapshot(route: RuntimeRoute): boolean {
-  return (route.source === "project_override" || route.source === "platform_default")
-    && route.routeUpdatedAt instanceof Date
+  const common = route.routeUpdatedAt instanceof Date
     && Number.isFinite(route.routeUpdatedAt.getTime())
     && Number.isSafeInteger(route.providerConfigurationVersion)
     && route.providerConfigurationVersion > 0
@@ -77,22 +190,65 @@ function hasCompleteRouteSnapshot(route: RuntimeRoute): boolean {
     && typeof route.credentialSecretFingerprint === "string"
     && /^[0-9a-f]{64}$/u.test(route.credentialSecretFingerprint)
     && typeof route.routeFenceFingerprint === "string"
-    && /^[0-9a-f]{64}$/u.test(route.routeFenceFingerprint)
+    && /^[0-9a-f]{64}$/u.test(route.routeFenceFingerprint);
+  if (!common) return false;
+  if (isPersonalRuntimeRoute(route)) {
+    return typeof route.routeId === "string"
+      && route.routeId.length > 0
+      && Number.isSafeInteger(route.routeVersion)
+      && (route.routeVersion ?? 0) > 0
+      && route.quotaMultiplierBps === 10_000
+      && hasCompletePersonalEvidence(route);
+  }
+  return (route.source === "project_override" || route.source === "platform_default")
     && (route.source === "platform_default"
       ? typeof route.routeId === "string" && route.routeId.length > 0 && Number.isSafeInteger(route.routeVersion) && (route.routeVersion ?? 0) > 0
       : route.routeId === null && route.routeVersion === null);
 }
 
 function assertRuntimeRoute(route: RuntimeRoute): void {
+  if (!hasCompleteRouteSnapshot(route)) {
+    throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  }
+  if (isPersonalRuntimeRoute(route)) {
+    if (
+      route.providerConnection.scope !== "user"
+      || route.providerConnection.ownershipState !== "confirmed"
+      || route.providerConnection.workspaceId !== null
+      || route.providerConnection.ownerUserId !== route.personalEvidence.connectionOwnerId
+      || route.personalEvidence.payerProviderConnectionId !== route.providerConnectionId
+    ) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+    return;
+  }
   if (
-    !hasCompleteRouteSnapshot(route)
-    || route.providerConnection.scope !== "platform"
+    route.providerConnection.scope !== "platform"
     || route.providerConnection.ownershipState !== "confirmed"
     || route.providerConnection.workspaceId !== null
     || route.providerConnection.ownerUserId !== null
-  ) {
-    throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
-  }
+  ) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+}
+
+function personalEvidenceMatches(
+  left: NonNullable<RuntimeRoute["personalEvidence"]>,
+  right: NonNullable<RuntimeRoute["personalEvidence"]>,
+): boolean {
+  return JSON.stringify({
+    ...left,
+    effectiveRouteSelectionUpdatedAt: left.effectiveRouteSelectionUpdatedAt.toISOString(),
+    ownerMembershipCreatedAt: left.ownerMembershipCreatedAt.toISOString(),
+    ownerSubscriptionStartsAt: left.ownerSubscriptionStartsAt.toISOString(),
+    ownerSubscriptionExpiresAt: left.ownerSubscriptionExpiresAt.toISOString(),
+    projectConfirmedMembershipCreatedAt: left.projectConfirmedMembershipCreatedAt.toISOString(),
+    selectedByMembershipCreatedAt: left.selectedByMembershipCreatedAt.toISOString(),
+  }) === JSON.stringify({
+    ...right,
+    effectiveRouteSelectionUpdatedAt: right.effectiveRouteSelectionUpdatedAt.toISOString(),
+    ownerMembershipCreatedAt: right.ownerMembershipCreatedAt.toISOString(),
+    ownerSubscriptionStartsAt: right.ownerSubscriptionStartsAt.toISOString(),
+    ownerSubscriptionExpiresAt: right.ownerSubscriptionExpiresAt.toISOString(),
+    projectConfirmedMembershipCreatedAt: right.projectConfirmedMembershipCreatedAt.toISOString(),
+    selectedByMembershipCreatedAt: right.selectedByMembershipCreatedAt.toISOString(),
+  });
 }
 
 function routeTupleMatches(left: RuntimeRoute, right: RuntimeRoute): boolean {
@@ -105,10 +261,53 @@ function routeTupleMatches(left: RuntimeRoute, right: RuntimeRoute): boolean {
     && left.credentialSecretFingerprint === right.credentialSecretFingerprint
     && hasCompleteRouteSnapshot(left)
     && hasCompleteRouteSnapshot(right)
-    && routeSnapshotsEqual(left, right);
+    && routeSnapshotsEqual(left, right)
+    && (left.personalEvidence === null
+      ? right.personalEvidence === null
+      : right.personalEvidence !== null && personalEvidenceMatches(left.personalEvidence, right.personalEvidence));
 }
 
-function routeSnapshotData(route: RuntimeRoute) {
+function personalRouteSnapshotData(route: RuntimeRoute & {
+  source: "personal_delegation";
+  personalEvidence: NonNullable<RuntimeRoute["personalEvidence"]>;
+}) {
+  const snapshot = effectiveAiRouteSnapshot(route as EffectiveAiRoute);
+  const evidence = route.personalEvidence;
+  return {
+    routeSource: snapshot.routeSource,
+    routeId: snapshot.routeId,
+    routeVersion: snapshot.routeVersion,
+    routeUpdatedAt: snapshot.routeUpdatedAt,
+    providerConfigurationVersion: snapshot.providerConfigurationVersion,
+    quotaMultiplierBps: snapshot.quotaMultiplierBps,
+    routeFenceFingerprint: snapshot.routeFenceFingerprint,
+    credentialSecretFingerprint: evidence.credentialSecretFingerprint,
+    personalDelegationId: evidence.personalDelegationId,
+    personalDelegationVersion: evidence.personalDelegationVersion,
+    personalDelegationFingerprint: evidence.personalDelegationFingerprint,
+    effectiveRouteSelectionId: evidence.effectiveRouteSelectionId,
+    effectiveRouteSelectionVersion: evidence.effectiveRouteSelectionVersion,
+    effectiveRouteSelectionUpdatedAt: evidence.effectiveRouteSelectionUpdatedAt,
+    payerKind: "personalConnectionOwner" as const,
+    payerProviderConnectionId: evidence.payerProviderConnectionId,
+    ownerProjectMembershipId: evidence.ownerProjectMembershipId,
+    ownerMembershipCreatedAt: evidence.ownerMembershipCreatedAt,
+    ownerSubscriptionId: evidence.ownerSubscriptionId,
+    ownerSubscriptionVersion: evidence.ownerSubscriptionVersion,
+    ownerSubscriptionStartsAt: evidence.ownerSubscriptionStartsAt,
+    ownerSubscriptionExpiresAt: evidence.ownerSubscriptionExpiresAt,
+    projectConfirmedById: evidence.projectConfirmedById,
+    projectConfirmedProjectMembershipId: evidence.projectConfirmedProjectMembershipId,
+    projectConfirmedMembershipCreatedAt: evidence.projectConfirmedMembershipCreatedAt,
+    selectedById: evidence.selectedById,
+    selectedByProjectMembershipId: evidence.selectedByProjectMembershipId,
+    selectedByMembershipCreatedAt: evidence.selectedByMembershipCreatedAt,
+    embeddingDimensions: evidence.embeddingDimensions,
+    maxOutputTokens: evidence.maxOutputTokens,
+  };
+}
+
+function platformRouteSnapshotData(route: RuntimeRoute) {
   const snapshot = effectiveAiRouteSnapshot(route as EffectiveAiRoute);
   return {
     routeSource: snapshot.routeSource,
@@ -124,6 +323,54 @@ function routeSnapshotData(route: RuntimeRoute) {
     embeddingDimensions: route.embeddingDimensions,
     maxOutputTokens: route.maxOutputTokens,
   };
+}
+
+function routeSnapshotData(route: RuntimeRoute) {
+  return isPersonalRuntimeRoute(route)
+    ? personalRouteSnapshotData(route)
+    : platformRouteSnapshotData(route);
+}
+
+type RuntimeBilling = Readonly<{
+  billingMode: "platform" | "byok";
+  billingUserId: string;
+  reservationRequired: boolean;
+}>;
+
+async function assertRuntimeBilling(input: Readonly<{
+  projectId: string;
+  requestedById: string;
+  route: RuntimeRoute;
+  operation?: AiOperation;
+  db: PrismaClient | Prisma.TransactionClient;
+  enforceConcurrency?: boolean;
+}>): Promise<RuntimeBilling> {
+  if (isPersonalRuntimeRoute(input.route)) {
+    if (input.operation !== undefined && input.operation !== input.route.operation) {
+      throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+    }
+    return Object.freeze({
+      billingMode: "byok",
+      billingUserId: input.route.personalEvidence.billingUserId,
+      reservationRequired: false,
+    });
+  }
+  return assertAiOutboundEntitlement(input);
+}
+
+async function personalGrantExpiresAt(
+  tx: Prisma.TransactionClient,
+  route: RuntimeRoute,
+): Promise<Date> {
+  if (!isPersonalRuntimeRoute(route)) return new Date(Date.now() + GRANT_LIFETIME_MS);
+  const delegation = await tx.projectAiProviderDelegation.findUnique({
+    where: { id: route.personalEvidence.personalDelegationId },
+    select: { expiresAt: true },
+  });
+  if (delegation === null || delegation.expiresAt <= new Date()) {
+    throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  }
+  return new Date(Math.min(Date.now() + GRANT_LIFETIME_MS, delegation.expiresAt.getTime()));
 }
 
 async function reloadDispatchRoute(
@@ -263,6 +510,24 @@ type RuntimeGrantTuple = Readonly<{
   credentialSecretFingerprint: string | null;
   payerKind: string | null;
   payerProviderConnectionId: string | null;
+  personalDelegationId: string | null;
+  personalDelegationVersion: number | null;
+  personalDelegationFingerprint: string | null;
+  effectiveRouteSelectionId: string | null;
+  effectiveRouteSelectionVersion: number | null;
+  effectiveRouteSelectionUpdatedAt: Date | null;
+  ownerProjectMembershipId: string | null;
+  ownerMembershipCreatedAt: Date | null;
+  ownerSubscriptionId: string | null;
+  ownerSubscriptionVersion: number | null;
+  ownerSubscriptionStartsAt: Date | null;
+  ownerSubscriptionExpiresAt: Date | null;
+  projectConfirmedById: string | null;
+  projectConfirmedProjectMembershipId: string | null;
+  projectConfirmedMembershipCreatedAt: Date | null;
+  selectedById: string | null;
+  selectedByProjectMembershipId: string | null;
+  selectedByMembershipCreatedAt: Date | null;
   embeddingDimensions: number | null;
   maxOutputTokens: number | null;
   expiresAt: Date;
@@ -276,7 +541,7 @@ function grantMatchesRuntimeTuple(
   grant: RuntimeGrantTuple,
   input: Readonly<{ projectId: string; jobId: string; route: RuntimeRoute; billingUserId: string; billingMode: string; scopeKind?: WebAiScopeKind; scopeIds?: unknown; manifestFingerprint?: string }>,
 ): boolean {
-  return grant.projectId === input.projectId
+  const common = grant.projectId === input.projectId
     && grant.operation === input.route.operation
     && grant.providerConnectionId === input.route.providerConnectionId
     && grant.modelId === input.route.modelId
@@ -295,13 +560,60 @@ function grantMatchesRuntimeTuple(
     && grant.quotaMultiplierBps === input.route.quotaMultiplierBps
     && grant.routeFenceFingerprint === input.route.routeFenceFingerprint
     && grant.credentialSecretFingerprint === input.route.credentialSecretFingerprint
-    && grant.payerKind === "platformCaller"
-    && grant.payerProviderConnectionId === input.route.providerConnectionId
-    && grant.embeddingDimensions === input.route.embeddingDimensions
-    && grant.maxOutputTokens === input.route.maxOutputTokens
     && (input.scopeKind === undefined || grant.scopeKind === input.scopeKind)
     && (input.scopeIds === undefined || JSON.stringify(grant.scopeIds) === JSON.stringify(input.scopeIds))
     && (input.manifestFingerprint === undefined || grant.manifestFingerprint === input.manifestFingerprint);
+  if (!common) return false;
+  if (!isPersonalRuntimeRoute(input.route)) {
+    return grant.payerKind === "platformCaller"
+      && grant.payerProviderConnectionId === input.route.providerConnectionId
+      && [
+        grant.personalDelegationId,
+        grant.personalDelegationVersion,
+        grant.personalDelegationFingerprint,
+        grant.effectiveRouteSelectionId,
+        grant.effectiveRouteSelectionVersion,
+        grant.effectiveRouteSelectionUpdatedAt,
+        grant.ownerProjectMembershipId,
+        grant.ownerMembershipCreatedAt,
+        grant.ownerSubscriptionId,
+        grant.ownerSubscriptionVersion,
+        grant.ownerSubscriptionStartsAt,
+        grant.ownerSubscriptionExpiresAt,
+        grant.projectConfirmedById,
+        grant.projectConfirmedProjectMembershipId,
+        grant.projectConfirmedMembershipCreatedAt,
+        grant.selectedById,
+        grant.selectedByProjectMembershipId,
+        grant.selectedByMembershipCreatedAt,
+      ].every((value) => value === null)
+      && grant.embeddingDimensions === input.route.embeddingDimensions
+      && grant.maxOutputTokens === input.route.maxOutputTokens;
+  }
+  const evidence = input.route.personalEvidence;
+  const sameDate = (left: Date | null, right: Date): boolean => left !== null && left.getTime() === right.getTime();
+  return grant.payerKind === "personalConnectionOwner"
+    && grant.payerProviderConnectionId === evidence.payerProviderConnectionId
+    && grant.personalDelegationId === evidence.personalDelegationId
+    && grant.personalDelegationVersion === evidence.personalDelegationVersion
+    && grant.personalDelegationFingerprint === evidence.personalDelegationFingerprint
+    && grant.effectiveRouteSelectionId === evidence.effectiveRouteSelectionId
+    && grant.effectiveRouteSelectionVersion === evidence.effectiveRouteSelectionVersion
+    && sameDate(grant.effectiveRouteSelectionUpdatedAt, evidence.effectiveRouteSelectionUpdatedAt)
+    && grant.ownerProjectMembershipId === evidence.ownerProjectMembershipId
+    && sameDate(grant.ownerMembershipCreatedAt, evidence.ownerMembershipCreatedAt)
+    && grant.ownerSubscriptionId === evidence.ownerSubscriptionId
+    && grant.ownerSubscriptionVersion === evidence.ownerSubscriptionVersion
+    && sameDate(grant.ownerSubscriptionStartsAt, evidence.ownerSubscriptionStartsAt)
+    && sameDate(grant.ownerSubscriptionExpiresAt, evidence.ownerSubscriptionExpiresAt)
+    && grant.projectConfirmedById === evidence.projectConfirmedById
+    && grant.projectConfirmedProjectMembershipId === evidence.projectConfirmedProjectMembershipId
+    && sameDate(grant.projectConfirmedMembershipCreatedAt, evidence.projectConfirmedMembershipCreatedAt)
+    && grant.selectedById === evidence.selectedById
+    && grant.selectedByProjectMembershipId === evidence.selectedByProjectMembershipId
+    && sameDate(grant.selectedByMembershipCreatedAt, evidence.selectedByMembershipCreatedAt)
+    && grant.embeddingDimensions === evidence.embeddingDimensions
+    && grant.maxOutputTokens === evidence.maxOutputTokens;
 }
 
 function runtimeGrantSelect() {
@@ -325,6 +637,24 @@ function runtimeGrantSelect() {
     credentialSecretFingerprint: true,
     payerKind: true,
     payerProviderConnectionId: true,
+    personalDelegationId: true,
+    personalDelegationVersion: true,
+    personalDelegationFingerprint: true,
+    effectiveRouteSelectionId: true,
+    effectiveRouteSelectionVersion: true,
+    effectiveRouteSelectionUpdatedAt: true,
+    ownerProjectMembershipId: true,
+    ownerMembershipCreatedAt: true,
+    ownerSubscriptionId: true,
+    ownerSubscriptionVersion: true,
+    ownerSubscriptionStartsAt: true,
+    ownerSubscriptionExpiresAt: true,
+    projectConfirmedById: true,
+    projectConfirmedProjectMembershipId: true,
+    projectConfirmedMembershipCreatedAt: true,
+    selectedById: true,
+    selectedByProjectMembershipId: true,
+    selectedByMembershipCreatedAt: true,
     embeddingDimensions: true,
     maxOutputTokens: true,
     expiresAt: true,
@@ -350,17 +680,21 @@ export async function createGrantedWebAiJob(input: Readonly<{
    * is still open. Memory index candidates use this seam to hold the project
    * admission lock and create their generation atomically with the job.
    */
-  afterCreate?: (tx: Prisma.TransactionClient, jobId: string) => Promise<void>;
+  afterCreate?: (tx: Prisma.TransactionClient, jobId: string, grantId: string) => Promise<void>;
 }>, db: PrismaClient = getDb()): Promise<Readonly<{ jobId: string; grantId: string; created: boolean }>> {
   assertRuntimeRoute(input.route);
   return withWebAiProjectAccessTransaction(db, {
     actor: input.requestedBy,
     projectId: input.projectId,
     required: "edit",
+    additionalActorIds: typeof input.route.providerConnection.ownerUserId === "string"
+      ? [input.route.providerConnection.ownerUserId]
+      : [],
   }, async (tx, admission) => {
     const transactionActor = admission.actor;
     const route = await reloadRuntimeRoute(tx, { projectId: input.projectId, route: input.route });
     const key = idempotencyKey(input.kind, input.projectId, transactionActor.id, input.clientKey);
+    const personal = isPersonalRuntimeRoute(route);
     const existing = await tx.backgroundJob.findUnique({
       where: { requestedById_idempotencyKey: { requestedById: transactionActor.id, idempotencyKey: key } },
       select: {
@@ -380,9 +714,9 @@ export async function createGrantedWebAiJob(input: Readonly<{
         || !grantMatchesRuntimeTuple(existing.webAiGrant, {
           projectId: input.projectId,
           jobId: existing.id,
-          route: input.route,
-          billingUserId: transactionActor.id,
-          billingMode: "platform",
+          route,
+          billingUserId: personal ? route.personalEvidence.billingUserId : transactionActor.id,
+          billingMode: personal ? "byok" : "platform",
           scopeKind: input.scopeKind,
           scopeIds: input.scopeIds,
           manifestFingerprint: input.manifestFingerprint,
@@ -390,7 +724,7 @@ export async function createGrantedWebAiJob(input: Readonly<{
       ) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
       return Object.freeze({ jobId: existing.id, grantId: existing.webAiGrant.id, created: false });
     }
-    const billing = await assertAiOutboundEntitlement({
+    const billing = await assertRuntimeBilling({
       projectId: input.projectId,
       requestedById: transactionActor.id,
       route,
@@ -426,11 +760,11 @@ export async function createGrantedWebAiJob(input: Readonly<{
         callKey: stableAiCallKey(jobId, route.operation, "grant"),
         boundJobId: job.id,
         ...routeSnapshotData(route),
-        expiresAt: new Date(Date.now() + GRANT_LIFETIME_MS),
+        expiresAt: await personalGrantExpiresAt(tx, route),
       },
     });
     await tx.backgroundJob.update({ where: { id: job.id }, data: { webAiGrantId: grant.id } });
-    if (input.afterCreate !== undefined) await input.afterCreate(tx, job.id);
+    if (input.afterCreate !== undefined) await input.afterCreate(tx, job.id, grant.id);
     return Object.freeze({ jobId: job.id, grantId: grant.id, created: true });
   });
 }
@@ -463,7 +797,7 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
       return fail("WEB_AI_JOB_NOT_FOUND");
     }
     const route = await reloadRuntimeRoute(tx, { projectId: input.projectId, route: input.route });
-    const billing = await assertAiOutboundEntitlement({
+    const billing = await assertRuntimeBilling({
       projectId: input.projectId,
       requestedById: currentActor.id,
       route,
@@ -505,7 +839,7 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
         callKey: stableAiCallKey(input.jobId, route.operation, "supplemental"),
         boundJobId: input.jobId,
         ...routeSnapshotData(route),
-        expiresAt: new Date(Date.now() + GRANT_LIFETIME_MS),
+        expiresAt: await personalGrantExpiresAt(tx, route),
       },
     });
     return Object.freeze({ grantId: grant.id, created: true });
@@ -568,6 +902,10 @@ export type ProviderDispatchContext = Readonly<{
   webAiGrantId: string;
   reservationId: string | null;
   routeFenceFingerprint: string;
+  billingMode: "platform" | "byok";
+  billingUserId: string;
+  payerKind: "platformCaller" | "personalConnectionOwner";
+  payerProviderConnectionId: string;
 }>;
 
 export async function auditedProviderCall<T>(input: Readonly<{
@@ -580,6 +918,8 @@ export async function auditedProviderCall<T>(input: Readonly<{
   callKey: string;
   requestPayload?: unknown;
   maxOutputTokens?: number;
+  /** Optional exact memory-generation evidence for build or index consumption. */
+  personalMemoryGeneration?: PersonalMemoryDispatchEvidence;
   call: (dispatch: ProviderDispatchContext) => Promise<Readonly<T & {
     inputTokens: number;
     providerRequestId: string | null;
@@ -618,7 +958,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
   ) {
     throw new WebAiAccessError("ACCESS_FORBIDDEN");
   }
-  const billing = await assertAiOutboundEntitlement({
+  const billing = await assertRuntimeBilling({
     projectId: input.route.projectId,
     requestedById: currentActor.id,
     route: input.route,
@@ -696,7 +1036,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
         credentialSecretFingerprint: credential.secretFingerprint,
       });
       const dispatchRoute: DispatchRoute = { ...persistedRoute, providerConnection: dispatchProvider };
-      const finalBilling = await assertAiOutboundEntitlement({
+      const finalBilling = await assertRuntimeBilling({
         projectId: input.route.projectId,
         requestedById: accessAdmission.access.actor.id,
         route: dispatchRoute,
@@ -717,7 +1057,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
           projectId: input.route.projectId,
           jobId: input.jobId,
           route: dispatchRoute,
-          billingUserId: accessAdmission.access.actor.id,
+          billingUserId: finalBilling.billingUserId,
           billingMode: finalBilling.billingMode,
         })
       ) {
@@ -748,6 +1088,24 @@ export async function auditedProviderCall<T>(input: Readonly<{
           throw new AiEntitlementError(fence?.status === "held" ? "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED" : "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED");
         }
       }
+      if (
+        dispatchRoute.source === "personal_delegation"
+        && dispatchRoute.operation === "embedding"
+        && input.personalMemoryGeneration === undefined
+      ) {
+        throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+      }
+      if (
+        input.personalMemoryGeneration !== undefined
+        && !(await isPersonalMemoryDispatchAdmissible(input.personalMemoryGeneration, {
+          projectId: input.route.projectId,
+          jobId: input.jobId,
+          grantId: grant.id,
+        }, tx))
+      ) {
+        throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+      }
+      const personalEvidence = isPersonalRuntimeRoute(dispatchRoute) ? dispatchRoute.personalEvidence : null;
       let audit;
       try {
         audit = await tx.providerCallAudit.create({
@@ -771,10 +1129,28 @@ export async function auditedProviderCall<T>(input: Readonly<{
             quotaMultiplierBps: dispatchRoute.quotaMultiplierBps,
             routeFenceFingerprint: dispatchRoute.routeFenceFingerprint,
             credentialSecretFingerprint: credential.secretFingerprint,
-            payerKind: "platformCaller",
-            payerProviderConnectionId: dispatchRoute.providerConnectionId,
-            embeddingDimensions: dispatchRoute.embeddingDimensions,
-            maxOutputTokens: dispatchRoute.maxOutputTokens,
+            payerKind: personalEvidence === null ? "platformCaller" : "personalConnectionOwner",
+            payerProviderConnectionId: personalEvidence?.payerProviderConnectionId ?? dispatchRoute.providerConnectionId,
+            personalDelegationId: personalEvidence?.personalDelegationId ?? null,
+            personalDelegationVersion: personalEvidence?.personalDelegationVersion ?? null,
+            personalDelegationFingerprint: personalEvidence?.personalDelegationFingerprint ?? null,
+            effectiveRouteSelectionId: personalEvidence?.effectiveRouteSelectionId ?? null,
+            effectiveRouteSelectionVersion: personalEvidence?.effectiveRouteSelectionVersion ?? null,
+            effectiveRouteSelectionUpdatedAt: personalEvidence?.effectiveRouteSelectionUpdatedAt ?? null,
+            ownerProjectMembershipId: personalEvidence?.ownerProjectMembershipId ?? null,
+            ownerMembershipCreatedAt: personalEvidence?.ownerMembershipCreatedAt ?? null,
+            ownerSubscriptionId: personalEvidence?.ownerSubscriptionId ?? null,
+            ownerSubscriptionVersion: personalEvidence?.ownerSubscriptionVersion ?? null,
+            ownerSubscriptionStartsAt: personalEvidence?.ownerSubscriptionStartsAt ?? null,
+            ownerSubscriptionExpiresAt: personalEvidence?.ownerSubscriptionExpiresAt ?? null,
+            projectConfirmedById: personalEvidence?.projectConfirmedById ?? null,
+            projectConfirmedProjectMembershipId: personalEvidence?.projectConfirmedProjectMembershipId ?? null,
+            projectConfirmedMembershipCreatedAt: personalEvidence?.projectConfirmedMembershipCreatedAt ?? null,
+            selectedById: personalEvidence?.selectedById ?? null,
+            selectedByProjectMembershipId: personalEvidence?.selectedByProjectMembershipId ?? null,
+            selectedByMembershipCreatedAt: personalEvidence?.selectedByMembershipCreatedAt ?? null,
+            embeddingDimensions: personalEvidence?.embeddingDimensions ?? dispatchRoute.embeddingDimensions,
+            maxOutputTokens: personalEvidence?.maxOutputTokens ?? (personalEvidence === null ? dispatchRoute.maxOutputTokens : null),
             status: "running",
           },
         });
@@ -796,6 +1172,10 @@ export async function auditedProviderCall<T>(input: Readonly<{
         webAiGrantId: grant.id,
         reservationId: reservation?.reservationId ?? null,
         routeFenceFingerprint: dispatchRoute.routeFenceFingerprint,
+        billingMode: finalBilling.billingMode,
+        billingUserId: finalBilling.billingUserId,
+        payerKind: personalEvidence === null ? "platformCaller" : "personalConnectionOwner",
+        payerProviderConnectionId: personalEvidence?.payerProviderConnectionId ?? dispatchRoute.providerConnectionId,
       });
       return Object.freeze({ auditId: audit.id, grantId: grant.id, billing: finalBilling, dispatch, dispatchMarked: accessAdmission.dispatchMarked });
     });

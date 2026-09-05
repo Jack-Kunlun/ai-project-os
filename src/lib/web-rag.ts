@@ -8,6 +8,11 @@ import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
 import { getProjectJobInternal } from "@/lib/project-workflow";
 import { getProjectMemoryInputManifest } from "@/lib/web-memory-index";
 import {
+  loadProjectAiPublicVisibility,
+  projectAiModelProjection,
+  projectAiProviderProjection,
+} from "@/lib/project-ai-public-projection";
+import {
   assertWebAiConsent,
   auditedProviderCall,
   claimWebAiJob,
@@ -15,6 +20,7 @@ import {
   createSupplementalWebAiGrant,
   failWebAiJob,
   finishWebAiJob,
+  isPersonalMemoryGenerationLive,
   manifestFingerprint,
   stableAiCallKey,
   updateWebAiJobProgress,
@@ -83,11 +89,11 @@ type PublicRagAnswer = Readonly<{
   question: string;
   answer: string;
   citations: readonly PublicRagCitation[];
-  modelId: string;
+  modelId: string | null;
   inputTokens: number;
   outputTokens: number;
   createdAt: Date;
-  providerConnection: { name: string; kind: string };
+  providerConnection: { name?: string; kind?: string } | null;
 }>;
 
 function fail(code: WebRagErrorCode): never {
@@ -135,7 +141,11 @@ function safeCitation(value: unknown): PublicRagCitation | null {
 }
 
 /** Serialize persisted RAG history without forwarding arbitrary JSON citations. */
-export function serializeRagAnswer(value: unknown): PublicRagAnswer | null {
+export function serializeRagAnswer(
+  value: unknown,
+  projectedProvider?: { name?: string; kind?: string } | null,
+  projectedModelId?: string | null,
+): PublicRagAnswer | null {
   if (!isRecord(value) || !isRecord(value.providerConnection)) return null;
   const id = safeUuid(value.id);
   const question = safeText(value.question, 2_000);
@@ -150,16 +160,17 @@ export function serializeRagAnswer(value: unknown): PublicRagAnswer | null {
   const citations = value.citations.map(safeCitation);
   if (!citations.every((citation): citation is PublicRagCitation => citation !== null)) return null;
   if (id === null || question === null || answer === null || modelId === null || inputTokens === null || outputTokens === null || providerName === null || providerKind === null || createdAt === null) return null;
+  const publicProvider = projectedProvider === undefined ? { name: providerName, kind: providerKind } : projectedProvider;
   return Object.freeze({
     id,
     question,
     answer,
     citations: Object.freeze(citations),
-    modelId,
+    modelId: projectedModelId === undefined ? modelId : projectedModelId,
     inputTokens,
     outputTokens,
     createdAt,
-    providerConnection: Object.freeze({ name: providerName, kind: providerKind }),
+    providerConnection: publicProvider === null ? null : Object.freeze(publicProvider),
   });
 }
 
@@ -250,6 +261,7 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
             expectedEmbeddingRouteVersion: true,
             expectedEmbeddingProviderConfigurationVersion: true,
             expectedEmbeddingRouteFenceFingerprint: true,
+            embeddingWebAiGrantId: true,
             records: {
               orderBy: { id: "asc" },
               select: {
@@ -283,7 +295,6 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
     pointer.generation.status !== "complete" ||
     pointer.generation.records.length === 0 ||
     route === null ||
-    route.source === "personal_delegation" ||
     route.providerConnection.status !== "verified" ||
     route.providerConnectionId !== pointer.generation.providerConnectionId ||
     route.modelId !== pointer.generation.modelId ||
@@ -296,8 +307,15 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
     pointer.generation.expectedEmbeddingRouteUpdatedAt.getTime() !== route.routeUpdatedAt.getTime() ||
     pointer.generation.expectedEmbeddingProviderConfigurationVersion !== route.providerConfigurationVersion ||
     pointer.generation.expectedEmbeddingRouteFenceFingerprint !== route.routeFenceFingerprint ||
+    (route.source === "personal_delegation"
+      ? pointer.generation.embeddingWebAiGrantId === null
+      : pointer.generation.embeddingWebAiGrantId !== null) ||
     currentManifest === null ||
     currentManifest !== pointer.generation.inputManifestFingerprint
+  ) return fail("SEMANTIC_INDEX_NOT_READY");
+  if (
+    route.source === "personal_delegation"
+    && !(await isPersonalMemoryGenerationLive(pointer.generation.id, db))
   ) return fail("SEMANTIC_INDEX_NOT_READY");
   return pointer.generation;
 }
@@ -328,6 +346,9 @@ export async function searchActiveMemoryForJob(input: Readonly<{
     || input.index.expectedEmbeddingRouteUpdatedAt.getTime() !== input.route.routeUpdatedAt.getTime()
     || input.index.expectedEmbeddingProviderConfigurationVersion !== input.route.providerConfigurationVersion
     || input.index.expectedEmbeddingRouteFenceFingerprint !== input.route.routeFenceFingerprint
+    || (input.route.source === "personal_delegation"
+      ? input.index.embeddingWebAiGrantId === null
+      : input.index.embeddingWebAiGrantId !== null)
   ) {
     return fail("SEMANTIC_INDEX_NOT_READY");
   }
@@ -338,6 +359,9 @@ export async function searchActiveMemoryForJob(input: Readonly<{
     actor: input.actor,
     route: input.route,
     grantId: input.grantId,
+    personalMemoryGeneration: input.index.embeddingWebAiGrantId === null
+      ? undefined
+      : { generationId: input.index.id, mode: "consume" },
     callKey: stableAiCallKey(input.jobId, "semanticSearch", input.callKeyDiscriminator ?? "embedding"),
     requestPayload: { question: input.question },
     maxOutputTokens: 128,
@@ -367,7 +391,6 @@ export async function runSemanticSearchJob(input: Readonly<{
     resolveEffectiveAiRoute(input.projectId, "embedding", db),
     getActiveMemoryIndex(input.projectId, input.requestedBy, db),
   ]);
-  if (route.source === "personal_delegation") return fail("SEMANTIC_INDEX_NOT_READY");
   const manifest = manifestFingerprint({
     questionHash: sha256(question),
     indexGenerationId: index.id,
@@ -442,9 +465,6 @@ export async function runRagAnswerJob(input: Readonly<{
     resolveEffectiveAiRoute(input.projectId, "generateWithContext", db),
     getActiveMemoryIndex(input.projectId, input.requestedBy, db),
   ]);
-  if (embeddingRoute.source === "personal_delegation" || generationRoute.source === "personal_delegation") {
-    return fail("SEMANTIC_INDEX_NOT_READY");
-  }
   const manifest = manifestFingerprint({
     questionHash: sha256(question),
     indexGenerationId: index.id,
@@ -496,6 +516,9 @@ export async function runRagAnswerJob(input: Readonly<{
       actor: input.requestedBy,
       route: generationRoute,
       grantId: granted.grantId,
+      personalMemoryGeneration: index.embeddingWebAiGrantId === null
+        ? undefined
+        : { generationId: index.id, mode: "consume" },
       callKey: stableAiCallKey(granted.jobId, "generateWithContext", "rag"),
       requestPayload: { question, contexts },
       maxOutputTokens: generationRoute.maxOutputTokens,
@@ -571,7 +594,8 @@ export async function runRagAnswerJob(input: Readonly<{
 }
 
 export async function listRagAnswers(projectId: string, actor: WebAiActor, db: PrismaClient = getDb()) {
-  await assertWebAiProjectAccess(actor, projectId, "view", db);
+  const currentActor = await assertWebAiProjectAccess(actor, projectId, "view", db);
+  const visibility = await loadProjectAiPublicVisibility(db, projectId, currentActor.id);
   const answers = await db.ragAnswer.findMany({
     where: { projectId },
     orderBy: { createdAt: "desc" },
@@ -585,8 +609,12 @@ export async function listRagAnswers(projectId: string, actor: WebAiActor, db: P
       inputTokens: true,
       outputTokens: true,
       createdAt: true,
-      providerConnection: { select: { name: true, kind: true } },
+      providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
     },
   });
-  return answers.map(serializeRagAnswer).filter((answer) => answer !== null);
+  return answers.map((answer) => {
+    const provider = projectAiProviderProjection(answer.providerConnection, visibility);
+    const modelId = projectAiModelProjection(answer.modelId, answer.providerConnection, visibility);
+    return serializeRagAnswer(answer, provider, modelId);
+  }).filter((answer) => answer !== null);
 }

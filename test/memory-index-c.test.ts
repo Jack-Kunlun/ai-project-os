@@ -76,7 +76,20 @@ test("public memory index plan mapper is a strict runtime boundary", () => {
     deadlineAt: "2026-08-28T00:04:00.000Z",
     deadlineEligible: true,
     ineligibleCode: null,
-    route: { providerConnectionId: "provider-id", credentialId: "secret-id", baseUrl: "https://secret.invalid" },
+    route: {
+      providerConnection: {
+        scope: "platform",
+        workspaceId: null,
+        ownershipState: "confirmed",
+        ownerUserId: null,
+        name: "OpenAI",
+        kind: "openai",
+        status: "verified",
+      },
+      providerConnectionId: "provider-id",
+      credentialId: "secret-id",
+      baseUrl: "https://secret.invalid",
+    },
     records: [{ contentText: "do not serialize source" }],
     baselineRecords: [{ embedding: [0.1, 0.2] }],
     reuseByInputFingerprint: new Map([["input", { embedding: [0.1, 0.2] }]]),
@@ -99,9 +112,9 @@ test("public memory index plan mapper is a strict runtime boundary", () => {
     "modelId",
     "planFingerprint",
     "providerConfigurationVersion",
-    "providerConnectionId",
     "providerKind",
     "providerName",
+    "providerStatus",
     "reuseCount",
     "routeFenceFingerprint",
     "routeId",
@@ -113,7 +126,7 @@ test("public memory index plan mapper is a strict runtime boundary", () => {
   for (const forbiddenKey of ["contentText", "embedding", "credentialId", "baseUrl", "records", "route", "baselineRecords", "reuseByInputFingerprint"]) {
     assert.equal(Object.hasOwn(publicPlan, forbiddenKey), false, forbiddenKey);
   }
-  assert.doesNotMatch(serialized, /do not serialize source|secret-id|secret\.invalid/);
+  assert.doesNotMatch(serialized, /do not serialize source|secret-id|secret\.invalid|provider-id/);
 });
 
 test("memory index deadline budgets the transport timeout, not a nominal call estimate", () => {

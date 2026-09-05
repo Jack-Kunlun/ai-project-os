@@ -17,6 +17,11 @@ import { getUploadPolicy } from "@/lib/project-assets/policy";
 import { isSerializableTransactionConflict, withSerializableRetry } from "@/lib/prisma-transaction";
 import { listPagination } from "@/lib/list-pagination";
 import {
+  projectAiModelProjection,
+  projectAiProviderProjection,
+  type ProjectAiPublicVisibility,
+} from "@/lib/project-ai-public-projection";
+import {
   assetBlobStorageKey,
   assetContentHash,
   detectAssetFile,
@@ -77,7 +82,12 @@ function locatorFragment(segment: Readonly<{
   return `segment=${segment.ordinal + 1}`;
 }
 
-function publicAsset(asset: Awaited<ReturnType<typeof readAssetRecord>>) {
+const REDACTED_PROJECT_AI_VISIBILITY: ProjectAiPublicVisibility = Object.freeze({ actorId: "", projectOwner: false });
+
+function publicAsset(
+  asset: Awaited<ReturnType<typeof readAssetRecord>>,
+  visibility: ProjectAiPublicVisibility = REDACTED_PROJECT_AI_VISIBILITY,
+) {
   if (asset === null) return null;
   const version = asset.versions[0];
   return Object.freeze({
@@ -117,11 +127,31 @@ function publicAsset(asset: Awaited<ReturnType<typeof readAssetRecord>>) {
       reviewedText: segment.reviewedText,
       reviewStatus: segment.reviewStatus,
       reviewedAt: segment.reviewedAt,
-      modelId: segment.modelId,
+      modelId: segment.providerConnection === null || segment.modelId === null
+        ? null
+        : projectAiModelProjection(segment.modelId, segment.providerConnection, visibility),
       projectSourceId: segment.projectSourceId,
-      providerConnection: segment.providerConnection,
+      providerConnection: segment.providerConnection === null
+        ? null
+        : projectAiProviderProjection(segment.providerConnection, visibility),
     })) ?? [],
-    latestRun: version?.extractionRuns[0] ?? null,
+    latestRun: version?.extractionRuns[0] === undefined ? null : (() => {
+      const run = version.extractionRuns[0];
+      const provider = run.providerConnection;
+      return Object.freeze({
+        id: run.id,
+        status: run.status,
+        modelId: provider === null || run.modelId === null
+          ? null
+          : projectAiModelProjection(run.modelId, provider, visibility),
+        providerConnection: provider === null ? null : projectAiProviderProjection(provider, visibility),
+        localSegmentCount: run.localSegmentCount,
+        visionSegmentCount: run.visionSegmentCount,
+        failureCode: run.failureCode,
+        createdAt: run.createdAt,
+        completedAt: run.completedAt,
+      });
+    })(),
   });
 }
 
@@ -135,7 +165,19 @@ function readAssetRecord(projectId: string, assetId: string, db: PrismaClient) {
         include: {
           segments: {
             orderBy: { ordinal: "asc" },
-            include: { providerConnection: { select: { id: true, name: true, kind: true } } },
+            include: {
+              providerConnection: {
+                select: {
+                  name: true,
+                  kind: true,
+                  scope: true,
+                  workspaceId: true,
+                  ownershipState: true,
+                  ownerUserId: true,
+                  status: true,
+                },
+              },
+            },
           },
           extractionRuns: {
             orderBy: { createdAt: "desc" },
@@ -143,13 +185,23 @@ function readAssetRecord(projectId: string, assetId: string, db: PrismaClient) {
             select: {
               id: true,
               status: true,
-              providerConnectionId: true,
               modelId: true,
               localSegmentCount: true,
               visionSegmentCount: true,
               failureCode: true,
               createdAt: true,
               completedAt: true,
+              providerConnection: {
+                select: {
+                  name: true,
+                  kind: true,
+                  scope: true,
+                  workspaceId: true,
+                  ownershipState: true,
+                  ownerUserId: true,
+                  status: true,
+                },
+              },
             },
           },
         },
@@ -158,14 +210,23 @@ function readAssetRecord(projectId: string, assetId: string, db: PrismaClient) {
   });
 }
 
-export async function getProjectAsset(projectId: string, assetIdInput: unknown, db: PrismaClient = getDb()) {
+export async function getProjectAsset(
+  projectId: string,
+  assetIdInput: unknown,
+  db: PrismaClient = getDb(),
+  visibility: ProjectAiPublicVisibility = REDACTED_PROJECT_AI_VISIBILITY,
+) {
   const assetId = assetIdSchema.parse(assetIdInput);
   const asset = await readAssetRecord(projectId, assetId, db);
   if (asset === null || asset.status === "deleted") return fail("PROJECT_ASSET_NOT_FOUND");
-  return publicAsset(asset);
+  return publicAsset(asset, visibility);
 }
 
-export async function listProjectAssets(projectId: string, db: PrismaClient = getDb()) {
+export async function listProjectAssets(
+  projectId: string,
+  db: PrismaClient = getDb(),
+  visibility: ProjectAiPublicVisibility = REDACTED_PROJECT_AI_VISIBILITY,
+) {
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (project === null) return fail("PROJECT_ASSET_NOT_FOUND");
   const assets = await db.projectAsset.findMany({
@@ -173,7 +234,7 @@ export async function listProjectAssets(projectId: string, db: PrismaClient = ge
     orderBy: { createdAt: "desc" },
     select: { id: true },
   });
-  return Object.freeze(await Promise.all(assets.map(async ({ id }) => publicAsset(await readAssetRecord(projectId, id, db)))));
+  return Object.freeze(await Promise.all(assets.map(async ({ id }) => publicAsset(await readAssetRecord(projectId, id, db), visibility))));
 }
 
 export async function listProjectAssetsPage(
@@ -186,6 +247,7 @@ export async function listProjectAssetsPage(
     status?: "uploaded" | "parsing" | "waitingVision" | "awaitingReview" | "ready" | "failed";
   }>,
   db: PrismaClient = getDb(),
+  visibility: ProjectAiPublicVisibility = REDACTED_PROJECT_AI_VISIBILITY,
 ) {
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (project === null) return fail("PROJECT_ASSET_NOT_FOUND");
@@ -205,7 +267,7 @@ export async function listProjectAssetsPage(
     }),
     db.projectAsset.count({ where }),
   ]);
-  const items = await Promise.all(assets.map(async ({ id }) => publicAsset(await readAssetRecord(projectId, id, db))));
+  const items = await Promise.all(assets.map(async ({ id }) => publicAsset(await readAssetRecord(projectId, id, db), visibility)));
   return Object.freeze({
     items: Object.freeze(items),
     pagination: listPagination(input.page, input.pageSize, total),
@@ -237,6 +299,7 @@ export async function uploadProjectAsset(input: Readonly<{
   requestedBy: Pick<AppUser, "id">;
   fileName: string;
   buffer: Buffer;
+  visibility?: ProjectAiPublicVisibility;
 }>, db: PrismaClient = getDb()) {
   await assertProjectActive(input.projectId, db);
   const fileName = sanitizeAssetFileName(input.fileName);
@@ -262,7 +325,7 @@ export async function uploadProjectAsset(input: Readonly<{
     // Content identity is the upload idempotency boundary. Returning the
     // existing active asset lets a client safely retry after an uncertain HTTP
     // response without creating a second blob or receiving a misleading 409.
-    if (duplicate.asset.status !== "deleted") return getProjectAsset(input.projectId, duplicate.projectAssetId, db);
+    if (duplicate.asset.status !== "deleted") return getProjectAsset(input.projectId, duplicate.projectAssetId, db, input.visibility);
     const restoredStatus = {
       staged: "uploaded",
       processing: "parsing",
@@ -289,7 +352,7 @@ export async function uploadProjectAsset(input: Readonly<{
       }
       await tx.project.update({ where: { id: input.projectId }, data: { updatedAt: new Date() } });
     });
-    return getProjectAsset(input.projectId, duplicate.projectAssetId, db);
+    return getProjectAsset(input.projectId, duplicate.projectAssetId, db, input.visibility);
   }
 
   const assetId = randomUUID();
@@ -423,7 +486,7 @@ export async function uploadProjectAsset(input: Readonly<{
       // database release cannot prove safe settlement.
       console.error("Upload reservation retained because failed upload cleanup did not complete");
     }
-    if (committedAssetId !== null) return getProjectAsset(input.projectId, committedAssetId, db);
+    if (committedAssetId !== null) return getProjectAsset(input.projectId, committedAssetId, db, input.visibility);
     if (isKnown(error, "P2002")) return fail("PROJECT_ASSET_DUPLICATE");
     if (isSerializableTransactionConflict(error)) throw error;
     throw error;
@@ -437,7 +500,7 @@ export async function uploadProjectAsset(input: Readonly<{
       // temporary blob cleanup or release is not fully confirmed.
       console.error("Duplicate upload reservation retained because blob cleanup failed");
     }
-    return getProjectAsset(input.projectId, stored.assetId, db);
+    return getProjectAsset(input.projectId, stored.assetId, db, input.visibility);
   }
 
   if (stored.runId !== null) {
@@ -446,7 +509,7 @@ export async function uploadProjectAsset(input: Readonly<{
     // this process exits or the local parser fails.
     await processProjectAssetLocalExtractionRun(stored.runId, db).catch(() => undefined);
   }
-  return getProjectAsset(input.projectId, assetId, db);
+  return getProjectAsset(input.projectId, assetId, db, input.visibility);
 }
 
 async function materializeSource(
@@ -797,6 +860,7 @@ export async function retryProjectAssetLocalExtraction(
   projectId: string,
   assetIdInput: unknown,
   db: PrismaClient = getDb(),
+  visibility: ProjectAiPublicVisibility = REDACTED_PROJECT_AI_VISIBILITY,
 ) {
   const assetId = assetIdSchema.parse(assetIdInput);
   await assertProjectActive(projectId, db);
@@ -850,7 +914,7 @@ export async function retryProjectAssetLocalExtraction(
     return createdRunId;
   });
   await processProjectAssetLocalExtractionRun(runId, db).catch(() => undefined);
-  return getProjectAsset(projectId, assetId, db);
+  return getProjectAsset(projectId, assetId, db, visibility);
 }
 
 export async function reviewProjectAssetSegment(input: Readonly<{
@@ -859,7 +923,7 @@ export async function reviewProjectAssetSegment(input: Readonly<{
   segmentId: unknown;
   requestedBy: Pick<AppUser, "id">;
   review: unknown;
-}>, db: PrismaClient = getDb()) {
+}>, db: PrismaClient = getDb(), visibility: ProjectAiPublicVisibility = REDACTED_PROJECT_AI_VISIBILITY) {
   const assetId = assetIdSchema.parse(input.assetId);
   const segmentId = segmentIdSchema.parse(input.segmentId);
   const review = reviewSchema.parse(input.review);
@@ -920,7 +984,7 @@ export async function reviewProjectAssetSegment(input: Readonly<{
       data: { status: "succeeded", completedAt: new Date() },
     });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  return getProjectAsset(input.projectId, assetId, db);
+  return getProjectAsset(input.projectId, assetId, db, visibility);
 }
 
 export async function getProjectAssetBlob(projectId: string, assetIdInput: unknown, db: PrismaClient = getDb()) {

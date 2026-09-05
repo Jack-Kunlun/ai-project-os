@@ -16,6 +16,7 @@ import {
   createSupplementalWebAiGrant,
   failWebAiJob,
   finishWebAiJob,
+  isPersonalMemoryGenerationLive,
   manifestFingerprint,
   stableAiCallKey,
   updateWebAiJobProgress,
@@ -29,6 +30,12 @@ import {
   getProjectMemoryInputManifest,
   resolveMemoryIndexReadiness,
 } from "@/lib/web-memory-index";
+import {
+  isProjectAiPlatformProvider,
+  loadProjectAiPublicVisibility,
+  projectAiModelProjection,
+  projectAiProviderProjection,
+} from "@/lib/project-ai-public-projection";
 import { jsonValue } from "@/lib/web-github";
 import type { JobAttemptClaim } from "@/lib/project-workflow";
 
@@ -534,6 +541,9 @@ export async function runProjectBriefJob(input: Readonly<{
       route: runtime.generationRoute,
       grantId: granted.grantId,
       operation: "projectAnalysis",
+      personalMemoryGeneration: runtime.index.embeddingWebAiGrantId === null
+        ? undefined
+        : { generationId: runtime.index.id, mode: "consume" },
       callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "brief"),
       requestPayload: { projectName: runtime.state.project.name, contexts: promptContexts(contexts) },
       maxOutputTokens: runtime.generationRoute.maxOutputTokens,
@@ -712,6 +722,9 @@ export async function runProjectAgentJob(input: Readonly<{
       route: runtime.generationRoute,
       grantId: granted.grantId,
       operation: "projectAnalysis",
+      personalMemoryGeneration: runtime.index.embeddingWebAiGrantId === null
+        ? undefined
+        : { generationId: runtime.index.id, mode: "consume" },
       callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "agent-plan"),
       requestPayload: { question, projectName: runtime.state.project.name },
       maxOutputTokens: Math.min(runtime.generationRoute.maxOutputTokens, 2_048),
@@ -762,6 +775,9 @@ export async function runProjectAgentJob(input: Readonly<{
       route: runtime.generationRoute,
       grantId: granted.grantId,
       operation: "projectAnalysis",
+      personalMemoryGeneration: runtime.index.embeddingWebAiGrantId === null
+        ? undefined
+        : { generationId: runtime.index.id, mode: "consume" },
       callKey: stableAiCallKey(granted.jobId, "projectAnalysis", "agent-answer"),
       requestPayload: { question, objective: plan.objective, toolTrace: execution.trace, contexts: promptContexts(execution.contexts) },
       maxOutputTokens: runtime.generationRoute.maxOutputTokens,
@@ -833,10 +849,11 @@ export async function listProjectIntelligence(
   db: PrismaClient = getDb(),
 ) {
   const projectId = projectIdSchema.parse(projectIdValue);
-  await assertWebAiProjectAccess(actor, projectId, "view", db);
+  const currentActor = await assertWebAiProjectAccess(actor, projectId, "view", db);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (project === null) return fail("PROJECT_INTELLIGENCE_INVALID_INPUT");
-  const [reports, agentRuns, activeIndex, routes, currentManifest] = await Promise.all([
+  const [visibility, reports, agentRuns, activeIndex, routes, currentManifest] = await Promise.all([
+    loadProjectAiPublicVisibility(db, projectId, currentActor.id),
     db.projectIntelligenceReport.findMany({
       where: { projectId },
       orderBy: { createdAt: "desc" },
@@ -850,7 +867,7 @@ export async function listProjectIntelligence(
         outputTokens: true,
         inputManifestFingerprint: true,
         createdAt: true,
-        providerConnection: { select: { name: true, kind: true } },
+        providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
       },
     }),
     db.projectAgentRun.findMany({
@@ -871,7 +888,7 @@ export async function listProjectIntelligence(
         outputTokens: true,
         inputManifestFingerprint: true,
         createdAt: true,
-        providerConnection: { select: { name: true, kind: true } },
+        providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
       },
     }),
     db.memoryIndexPointer.findUnique({
@@ -881,6 +898,7 @@ export async function listProjectIntelligence(
         publishedAt: true,
         generation: {
           select: {
+            id: true,
             jobId: true,
             status: true,
             providerConnectionId: true,
@@ -893,6 +911,8 @@ export async function listProjectIntelligence(
             expectedEmbeddingRouteUpdatedAt: true,
             expectedEmbeddingProviderConfigurationVersion: true,
             expectedEmbeddingRouteFenceFingerprint: true,
+            embeddingWebAiGrantId: true,
+            providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
           },
         },
       },
@@ -912,6 +932,10 @@ export async function listProjectIntelligence(
           routeFenceFingerprint: route.routeFenceFingerprint,
           providerConnection: Object.freeze({
             id: route.providerConnection.id,
+            scope: route.providerConnection.scope,
+            workspaceId: route.providerConnection.workspaceId,
+            ownershipState: route.providerConnection.ownershipState,
+            ownerUserId: route.providerConnection.ownerUserId,
             name: route.providerConnection.name,
             kind: route.providerConnection.kind,
             status: route.providerConnection.status,
@@ -929,6 +953,22 @@ export async function listProjectIntelligence(
   ]);
   const embeddingRoute = routes.find((route) => route.operation === "embedding") ?? null;
   const generationRoute = routes.find((route) => route.operation === "projectAnalysis") ?? null;
+  const publicReports = reports.map((report) => {
+    const providerConnection = projectAiProviderProjection(report.providerConnection, visibility);
+    return Object.freeze({
+      ...report,
+      modelId: projectAiModelProjection(report.modelId, report.providerConnection, visibility),
+      providerConnection,
+    });
+  });
+  const publicAgentRuns = agentRuns.map((run) => Object.freeze({
+    ...run,
+    modelId: projectAiModelProjection(run.modelId, run.providerConnection, visibility),
+    providerConnection: projectAiProviderProjection(run.providerConnection, visibility),
+  }));
+  const personalEvidenceLive = embeddingRoute?.source === "personal_delegation" && activeIndex !== null
+    ? await isPersonalMemoryGenerationLive(activeIndex.generation.id, db)
+    : true;
   const readinessState = resolveMemoryIndexReadiness({
     embeddingRoute: embeddingRoute === null ? null : {
       providerConnectionId: embeddingRoute.providerConnection.id,
@@ -953,10 +993,12 @@ export async function listProjectIntelligence(
       routeUpdatedAt: activeIndex.generation.expectedEmbeddingRouteUpdatedAt,
       providerConfigurationVersion: activeIndex.generation.expectedEmbeddingProviderConfigurationVersion,
       routeFenceFingerprint: activeIndex.generation.expectedEmbeddingRouteFenceFingerprint,
+      embeddingWebAiGrantId: activeIndex.generation.embeddingWebAiGrantId,
       legacy: activeIndex.generation.jobId === null,
       status: activeIndex.generation.status,
     },
     currentInputManifestFingerprint: currentManifest,
+    personalEvidenceLive,
     generationProviderVerified: generationRoute?.providerConnection.status === "verified",
   });
   const readiness = Object.freeze({
@@ -967,7 +1009,36 @@ export async function listProjectIntelligence(
     generationRoute: generationRoute?.providerConnection.status === "verified",
     ready: readinessState.ready,
     indexGenerationId: activeIndex?.indexGenerationId ?? null,
-    routes: Object.freeze({ embedding: embeddingRoute, generation: generationRoute }),
+    routes: Object.freeze({
+      embedding: embeddingRoute === null ? null : Object.freeze({
+        modelId: projectAiModelProjection(embeddingRoute.modelId, embeddingRoute.providerConnection, visibility),
+        embeddingDimensions: projectAiModelProjection(embeddingRoute.modelId, embeddingRoute.providerConnection, visibility) === null ? null : embeddingRoute.embeddingDimensions,
+        providerConnection: projectAiProviderProjection(embeddingRoute.providerConnection, visibility),
+        operation: embeddingRoute.operation,
+        source: embeddingRoute.source,
+        ...(isProjectAiPlatformProvider(embeddingRoute.providerConnection) ? {
+          routeId: embeddingRoute.routeId,
+          routeVersion: embeddingRoute.routeVersion,
+          routeUpdatedAt: embeddingRoute.routeUpdatedAt,
+          providerConfigurationVersion: embeddingRoute.providerConfigurationVersion,
+          routeFenceFingerprint: embeddingRoute.routeFenceFingerprint,
+        } : {}),
+      }),
+      generation: generationRoute === null ? null : Object.freeze({
+        modelId: projectAiModelProjection(generationRoute.modelId, generationRoute.providerConnection, visibility),
+        embeddingDimensions: projectAiModelProjection(generationRoute.modelId, generationRoute.providerConnection, visibility) === null ? null : generationRoute.embeddingDimensions,
+        providerConnection: projectAiProviderProjection(generationRoute.providerConnection, visibility),
+        operation: generationRoute.operation,
+        source: generationRoute.source,
+        ...(isProjectAiPlatformProvider(generationRoute.providerConnection) ? {
+          routeId: generationRoute.routeId,
+          routeVersion: generationRoute.routeVersion,
+          routeUpdatedAt: generationRoute.routeUpdatedAt,
+          providerConfigurationVersion: generationRoute.providerConfigurationVersion,
+          routeFenceFingerprint: generationRoute.routeFenceFingerprint,
+        } : {}),
+      }),
+    }),
   });
-  return Object.freeze({ reports, agentRuns, tools: PROJECT_AGENT_TOOLS, readiness });
+  return Object.freeze({ reports: publicReports, agentRuns: publicAgentRuns, tools: PROJECT_AGENT_TOOLS, readiness });
 }

@@ -52,6 +52,68 @@ function publicUsage(value: UsageAccumulator) {
   return Object.freeze({ ...value, totalTokens: value.inputTokens + value.outputTokens });
 }
 
+type ProviderUsageSnapshot = Readonly<{
+  id?: string;
+  name: string;
+  kind: string;
+  scope: string;
+  workspaceId: string | null;
+  ownerUserId: string | null;
+  ownershipState?: string | null;
+  status?: string;
+}>;
+
+type PublicUsageProvider = Readonly<{
+  key: string;
+  providerName: string | null;
+  providerKind: string | null;
+  providerStatus: string | null;
+  modelId: string | null;
+  balanceAvailable: boolean;
+}>;
+
+function usageProvider(
+  provider: ProviderUsageSnapshot | null,
+  modelId: string,
+): PublicUsageProvider {
+  const isPlatform = provider !== null
+    && provider.scope === "platform"
+    && provider.workspaceId === null
+    && provider.ownerUserId === null
+    && provider.ownershipState === "confirmed";
+  if (isPlatform) {
+    return Object.freeze({
+      key: JSON.stringify(["platform", provider.name, provider.kind, modelId]),
+      providerName: provider.name,
+      providerKind: provider.kind,
+      providerStatus: provider.status ?? null,
+      modelId,
+      balanceAvailable: provider.kind === "deepseek",
+    });
+  }
+  if (provider?.scope === "user" && provider.workspaceId === null && provider.ownerUserId !== null && provider.ownershipState === "confirmed") {
+    // Usage has no actor context. Redact the complete personal-provider
+    // identity and aggregate it under a stable non-provider key instead of
+    // correlating rows through a raw connection UUID.
+    return Object.freeze({
+      key: "personal",
+      providerName: null,
+      providerKind: null,
+      providerStatus: null,
+      modelId: null,
+      balanceAvailable: false,
+    });
+  }
+  return Object.freeze({
+    key: provider === null ? "removed" : "hidden",
+    providerName: null,
+    providerKind: null,
+    providerStatus: null,
+    modelId: null,
+    balanceAvailable: false,
+  });
+}
+
 export async function getProjectUsageSummary(
   projectId: string,
   days: ProjectUsagePeriod,
@@ -85,21 +147,22 @@ export async function getProjectUsageSummary(
         operation: true,
         providerConnectionId: true,
         modelId: true,
-        providerConnection: { select: { name: true, kind: true, status: true } },
+        providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownerUserId: true, ownershipState: true, status: true } },
       },
     }),
   ]);
   const providerIds = [...new Set(webRows.map((row) => row.providerConnectionId))];
   const providers = providerIds.length === 0 ? [] : await db.aiProviderConnection.findMany({
     where: { id: { in: providerIds } },
-    select: { id: true, name: true, kind: true },
+    select: { id: true, name: true, kind: true, scope: true, workspaceId: true, ownerUserId: true, ownershipState: true, status: true },
   });
   const providersById = new Map(providers.map((provider) => [provider.id, provider]));
   const totals = emptyUsage();
   const providerUsage = new Map<string, UsageAccumulator & {
-    providerName: string;
-    providerKind: string;
-    modelId: string;
+    providerName: string | null;
+    providerKind: string | null;
+    providerStatus: string | null;
+    modelId: string | null;
     source: "current" | "legacy";
   }>();
   const operationUsage = new Map<string, UsageAccumulator>();
@@ -113,16 +176,16 @@ export async function getProjectUsageSummary(
       status: row.status,
     };
     addUsage(totals, usage);
-    const provider = providersById.get(row.providerConnectionId);
-    const providerKey = `current:${row.providerConnectionId}:${row.modelId}`;
-    const providerEntry = providerUsage.get(providerKey) ?? Object.assign(emptyUsage(), {
-      providerName: provider?.name ?? "已移除供应商",
-      providerKind: provider?.kind ?? "unknown",
-      modelId: row.modelId,
+    const display = usageProvider(providersById.get(row.providerConnectionId) ?? null, row.modelId);
+    const providerEntry = providerUsage.get(display.key) ?? Object.assign(emptyUsage(), {
+      providerName: display.providerName,
+      providerKind: display.providerKind,
+      providerStatus: display.providerStatus,
+      modelId: display.modelId,
       source: "current" as const,
     });
     addUsage(providerEntry, usage);
-    providerUsage.set(providerKey, providerEntry);
+    providerUsage.set(display.key, providerEntry);
     const operationEntry = operationUsage.get(row.operation) ?? emptyUsage();
     addUsage(operationEntry, usage);
     operationUsage.set(row.operation, operationEntry);
@@ -142,6 +205,7 @@ export async function getProjectUsageSummary(
     const providerEntry = providerUsage.get(providerKey) ?? Object.assign(emptyUsage(), {
       providerName: "旧运行台账",
       providerKind: "legacy",
+      providerStatus: null,
       modelId: row.modelId,
       source: "legacy" as const,
     });
@@ -160,7 +224,7 @@ export async function getProjectUsageSummary(
       source: entry.source,
       ...publicUsage(entry),
     }))
-    .sort((left, right) => right.totalTokens - left.totalTokens || right.requestCount - left.requestCount || left.modelId.localeCompare(right.modelId));
+    .sort((left, right) => right.totalTokens - left.totalTokens || right.requestCount - left.requestCount || (left.modelId ?? "").localeCompare(right.modelId ?? ""));
   const byOperation = [...operationUsage.entries()]
     .map(([operation, entry]) => Object.freeze({ operation, ...publicUsage(entry) }))
     .sort((left, right) => right.totalTokens - left.totalTokens || right.requestCount - left.requestCount || left.operation.localeCompare(right.operation));
@@ -169,15 +233,17 @@ export async function getProjectUsageSummary(
     project: Object.freeze({ ...project, archivedAt: project.archivedAt?.toISOString() ?? null }),
     period: Object.freeze({ days, start: periodStart.toISOString(), end: periodEnd.toISOString() }),
     totals: publicUsage(totals),
-    routes: Object.freeze(routeRows.map((route) => Object.freeze({
-      operation: route.operation,
-      providerConnectionId: route.providerConnectionId,
-      providerName: route.providerConnection.name,
-      providerKind: route.providerConnection.kind,
-      providerStatus: route.providerConnection.status,
-      modelId: route.modelId,
-      balanceAvailable: route.providerConnection.kind === "deepseek",
-    }))),
+    routes: Object.freeze(routeRows.map((route) => {
+      const display = usageProvider(route.providerConnection, route.modelId);
+      return Object.freeze({
+        operation: route.operation,
+        providerName: display.providerName,
+        providerKind: display.providerKind,
+        providerStatus: display.providerStatus,
+        modelId: display.modelId,
+        balanceAvailable: display.balanceAvailable,
+      });
+    })),
     byProvider: Object.freeze(byProvider),
     byOperation: Object.freeze(byOperation),
     pricing: Object.freeze({ available: false, reason: "未保存逐次价格、缓存命中和峰谷时段快照，因此不估算金额" }),

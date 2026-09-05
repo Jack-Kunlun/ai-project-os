@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { getProjectUsageSummary } from "../src/lib/project-usage";
+import { sanitizeProjectExportMetadata } from "../src/lib/project-export";
 import { createProjectExportSchema } from "../src/lib/validation";
 
 test("usage summary combines independent current and legacy ledgers without counting run rows as requests", async () => {
@@ -33,11 +34,28 @@ test("usage summary combines independent current and legacy ledgers without coun
         operation: "autoExtract",
         providerConnectionId: "22222222-2222-4222-8222-222222222222",
         modelId: "qwen-plus",
-        providerConnection: { name: "Qwen", kind: "qwen", status: "verified" },
+        providerConnection: {
+          name: "Qwen",
+          kind: "qwen",
+          scope: "platform",
+          workspaceId: null,
+          ownerUserId: null,
+          ownershipState: "confirmed",
+          status: "verified",
+        },
       }],
     },
     aiProviderConnection: {
-      findMany: async () => [{ id: "22222222-2222-4222-8222-222222222222", name: "Qwen", kind: "qwen" }],
+      findMany: async () => [{
+        id: "22222222-2222-4222-8222-222222222222",
+        name: "Qwen",
+        kind: "qwen",
+        scope: "platform",
+        workspaceId: null,
+        ownerUserId: null,
+        ownershipState: "confirmed",
+        status: "verified",
+      }],
     },
   };
   const usage = await getProjectUsageSummary("11111111-1111-4111-8111-111111111111", 30, db as never);
@@ -50,7 +68,6 @@ test("usage summary combines independent current and legacy ledgers without coun
   assert.equal(usage.byProvider.find((entry) => entry.source === "legacy")?.requestCount, 4);
   assert.deepEqual(usage.routes, [{
     operation: "autoExtract",
-    providerConnectionId: "22222222-2222-4222-8222-222222222222",
     providerName: "Qwen",
     providerKind: "qwen",
     providerStatus: "verified",
@@ -61,10 +78,79 @@ test("usage summary combines independent current and legacy ledgers without coun
   assert.match(usage.pricing.reason, /缓存命中和峰谷时段/u);
 });
 
+test("usage summary aggregates personal providers without exposing identity or model keys", async () => {
+  const firstProviderId = "22222222-2222-4222-8222-222222222222";
+  const secondProviderId = "33333333-3333-4333-8333-333333333333";
+  const db = {
+    project: { findUnique: async () => ({ id: "11111111-1111-4111-8111-111111111111", name: "Usage", archivedAt: null }) },
+    providerCallAudit: {
+      groupBy: async () => [
+        { providerConnectionId: firstProviderId, operation: "autoExtract", modelId: "private-a", status: "succeeded", _count: { _all: 1 }, _sum: { inputTokens: 10, outputTokens: 2 } },
+        { providerConnectionId: secondProviderId, operation: "autoExtract", modelId: "private-b", status: "succeeded", _count: { _all: 1 }, _sum: { inputTokens: 20, outputTokens: 3 } },
+      ],
+    },
+    aiRun: { groupBy: async () => [] },
+    projectAiRoute: {
+      findMany: async () => [
+        { operation: "autoExtract", providerConnectionId: firstProviderId, modelId: "private-a", providerConnection: { name: "Private A", kind: "openai", scope: "user", workspaceId: null, ownerUserId: "44444444-4444-4444-8444-444444444444", ownershipState: "confirmed", status: "verified" } },
+        { operation: "embedding", providerConnectionId: secondProviderId, modelId: "private-b", providerConnection: { name: "Private B", kind: "qwen", scope: "user", workspaceId: null, ownerUserId: "55555555-5555-4555-8555-555555555555", ownershipState: "confirmed", status: "verified" } },
+      ],
+    },
+    aiProviderConnection: {
+      findMany: async () => [
+        { id: firstProviderId, name: "Private A", kind: "openai", scope: "user", workspaceId: null, ownerUserId: "44444444-4444-4444-8444-444444444444", ownershipState: "confirmed", status: "verified" },
+        { id: secondProviderId, name: "Private B", kind: "qwen", scope: "user", workspaceId: null, ownerUserId: "55555555-5555-4555-8555-555555555555", ownershipState: "confirmed", status: "verified" },
+      ],
+    },
+  };
+  const usage = await getProjectUsageSummary("11111111-1111-4111-8111-111111111111", 30, db as never);
+  assert.ok(usage);
+  assert.equal(usage.byProvider.length, 1);
+  assert.deepEqual(usage.byProvider[0], {
+    providerName: null,
+    providerKind: null,
+    providerStatus: null,
+    modelId: null,
+    source: "current",
+    recordCount: 2,
+    requestCount: 2,
+    inputTokens: 30,
+    outputTokens: 5,
+    succeededRequests: 2,
+    failedRequests: 0,
+    unknownRequests: 0,
+    runningRequests: 0,
+    totalTokens: 35,
+  });
+  assert.deepEqual(usage.routes.map(({ operation, providerName, providerKind, providerStatus, modelId, balanceAvailable }) => ({
+    operation,
+    providerName,
+    providerKind,
+    providerStatus,
+    modelId,
+    balanceAvailable,
+  })), [
+    { operation: "autoExtract", providerName: null, providerKind: null, providerStatus: null, modelId: null, balanceAvailable: false },
+    { operation: "embedding", providerName: null, providerKind: null, providerStatus: null, modelId: null, balanceAvailable: false },
+  ]);
+  assert.doesNotMatch(JSON.stringify(usage), /Private A|Private B|private-a|private-b|22222222|33333333/u);
+});
+
 test("safe export request is optimistic and strict", () => {
   const expectedUpdatedAt = "2026-08-29T08:00:00.000Z";
   assert.deepEqual(createProjectExportSchema.parse({ expectedUpdatedAt }), { expectedUpdatedAt });
   assert.equal(createProjectExportSchema.safeParse({ expectedUpdatedAt, includeCredentials: true }).success, false);
+});
+
+test("export metadata removes private provider handles without deleting evidence fingerprints", () => {
+  assert.deepEqual(sanitizeProjectExportMetadata({
+    providerConnectionId: "private-provider",
+    statementFingerprint: "statement-evidence",
+    nested: { secretFingerprint: "private-secret", contentFingerprint: "content-evidence" },
+  }), {
+    statementFingerprint: "statement-evidence",
+    nested: { contentFingerprint: "content-evidence" },
+  });
 });
 
 test("export uses an authenticated POST, bounded attachment headers, and an explicit field whitelist", async () => {

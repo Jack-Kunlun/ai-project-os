@@ -1301,7 +1301,7 @@ model GitHubRepository {
 
 model GitConnection {
   id                         String              @id @default(uuid()) @db.Uuid
-  name                       String              @unique @db.VarChar(80)
+  name                       String              @db.VarChar(80)
   providerKind               GitProviderKind
   transport                  GitTransport
   baseUrl                    String              @db.VarChar(1024)
@@ -1329,6 +1329,7 @@ model GitConnection {
   @@index([providerKind, status])
   @@index([createdById, createdAt])
   @@index([ownerUserId, ownershipState, updatedAt])
+  @@unique([ownerUserId, name])
 }
 
 model GitRepository {
@@ -4219,7 +4220,7 @@ model ExternalCredential {
 
 model McpConnection {
   id                         String              @id @default(uuid()) @db.Uuid
-  name                       String              @unique @db.VarChar(80)
+  name                       String              @db.VarChar(80)
   endpointUrl                String              @db.VarChar(1024)
   authKind                   McpAuthKind
   credentialId               String?             @unique @db.Uuid
@@ -4245,6 +4246,7 @@ model McpConnection {
   @@index([status, updatedAt])
   @@index([createdById, createdAt])
   @@index([ownerUserId, ownershipState, updatedAt])
+  @@unique([ownerUserId, name])
 }
 
 model McpToolDefinition {

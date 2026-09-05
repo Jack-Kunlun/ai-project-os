@@ -6,27 +6,22 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ActionEngineError, decideProjectAction, requestProjectAction, runProjectActionWorkerCycle, updateProjectActionPolicy } from "../src/lib/action-engine";
-import { ActionResultIntakeError, importProjectActionResult } from "../src/lib/action-result-intake";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import {
   McpCapabilityError,
-  attestMcpToolDefinition,
   buildMcpActionSnapshot,
   createMcpConnection,
-  deleteMcpConnection,
   discoverMcpConnectionTools,
   executeMcpActionSnapshot,
+  getProjectMcpToolCenter,
   grantProjectMcpTool,
-  revokeMcpToolAttestation,
-  revokeProjectMcpToolGrant,
   updateMcpConnection,
 } from "../src/lib/mcp";
 
 const shouldRun = process.env.MCP_CAPABILITIES_POSTGRES_GATE === "1";
 
-test("MCP capabilities persist discovery, grants, approval, execution and drift closure", { skip: !shouldRun ? "MCP_CAPABILITIES_POSTGRES_GATE=1 is required" : false }, async () => {
+test("MCP personal discovery remains available while project runtime is fail-closed", { skip: !shouldRun ? "MCP_CAPABILITIES_POSTGRES_GATE=1 is required" : false }, async () => {
   const db = getDb();
   const suffix = randomUUID().slice(0, 8);
   const adminId = randomUUID();
@@ -34,9 +29,8 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
   const workspaceId = randomUUID();
   const projectId = randomUUID();
   const admin = { id: adminId, role: "admin" as const };
-  const editor = { id: editorId, role: "member" as const };
   const token = `mcp-test-token-${suffix}`;
-  let definitionRevision = 1;
+  const definitionRevision = 1;
   const requests: string[] = [];
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -63,13 +57,12 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address && typeof address === "object");
+  const serverPort = address.port;
   const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-mcp-test-"));
   const previousKeyFile = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
   process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
   let connectionId: string | null = null;
   let credentialId: string | null = null;
-  let disposableConnectionId: string | null = null;
-  let disposableCredentialId: string | null = null;
 
   await db.appUser.createMany({ data: [
     { id: adminId, username: `mcp_admin_${suffix}`, role: "admin" },
@@ -84,179 +77,60 @@ test("MCP capabilities persist discovery, grants, approval, execution and drift 
   });
 
   try {
-    const connection = await createMcpConnection({ name: `MCP ${suffix}`, endpointUrl: `http://127.0.0.1:${address.port}/mcp`, authKind: "bearer", bearerToken: token, allowPrivateNetwork: true }, admin, db);
+    const connection = await createMcpConnection({ name: `MCP ${suffix}`, endpointUrl: `http://127.0.0.1:${serverPort}/mcp`, authKind: "bearer", bearerToken: token, allowPrivateNetwork: true }, admin, db);
     connectionId = connection.id;
     credentialId = (await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id }, select: { credentialId: true } })).credentialId;
     await assert.rejects(
-      () => updateMcpConnection(connection.id, { enabled: true, expectedUpdatedAt: new Date(0).toISOString() }, db),
+      () => updateMcpConnection(connection.id, { enabled: true, expectedUpdatedAt: new Date(0).toISOString() }, admin, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_CONFLICT",
     );
-    const disabled = await updateMcpConnection(connection.id, { bearerToken: token, enabled: false, expectedUpdatedAt: connection.updatedAt.toISOString() }, db);
+    const disabled = await updateMcpConnection(connection.id, { bearerToken: token, enabled: false, expectedUpdatedAt: connection.updatedAt.toISOString() }, admin, db);
     assert.equal(disabled.status, "disabled");
-    const enabled = await updateMcpConnection(connection.id, { enabled: true, expectedUpdatedAt: disabled.updatedAt.toISOString() }, db);
+    const disabledWithImplicitSecret = await updateMcpConnection(connection.id, { bearerToken: token, expectedUpdatedAt: disabled.updatedAt.toISOString() }, admin, db);
+    assert.equal(disabledWithImplicitSecret.status, "disabled");
+    const enabled = await updateMcpConnection(connection.id, { enabled: true, expectedUpdatedAt: disabledWithImplicitSecret.updatedAt.toISOString() }, admin, db);
     assert.equal(enabled.status, "configured");
-    const discovery = await discoverMcpConnectionTools(connection.id, db);
+    await assert.rejects(
+      () => discoverMcpConnectionTools(connection.id, { expectedUpdatedAt: new Date(0).toISOString() }, admin, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_CONFLICT",
+    );
+    assert.deepEqual(requests, []);
+    const discovery = await discoverMcpConnectionTools(connection.id, { expectedUpdatedAt: enabled.updatedAt.toISOString() }, admin, db);
     assert.equal(discovery.discoveredCount, 1);
     assert.equal(discovery.eligibleCount, 1);
     const definition = await db.mcpToolDefinition.findFirstOrThrow({ where: { connectionId: connection.id, current: true } });
+    const center = await getProjectMcpToolCenter(projectId, admin, db);
+    assert.deepEqual(center.definitions, []);
+    assert.deepEqual(center.grants, []);
+    assert.equal(center.canManage, false);
+    assert.equal(center.canInvoke, false);
     await assert.rejects(
       () => grantProjectMcpTool(projectId, { toolDefinitionId: definition.id, acknowledgeReadOnly: true, expectedUpdatedAt: null }, admin, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
-    );
-    const attestation = await attestMcpToolDefinition(definition.id, { note: "核对只读工具", evidence: { test: true } }, admin, db);
-    assert.equal(attestation.toolDefinitionId, definition.id);
-    assert.equal(attestation.audits.filter((audit) => audit.event === "attested").length, 1);
-    const grant = await grantProjectMcpTool(projectId, { toolDefinitionId: definition.id, acknowledgeReadOnly: true, expectedUpdatedAt: null }, admin, db);
-    assert.equal(grant.status, "active");
-    const connectionBeforeDrift = await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id }, select: { resolvedAddressFingerprint: true } });
-    assert.ok(connectionBeforeDrift.resolvedAddressFingerprint);
-    await db.mcpConnection.update({ where: { id: connection.id }, data: { resolvedAddressFingerprint: "a".repeat(64) } });
-    await assert.rejects(
-      () => buildMcpActionSnapshot(projectId, { grantId: grant.id, arguments: { query: "release", revision: 1 } }, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
-    );
-    await db.mcpConnection.update({ where: { id: connection.id }, data: { resolvedAddressFingerprint: connectionBeforeDrift.resolvedAddressFingerprint } });
-    const executableSnapshot = await buildMcpActionSnapshot(projectId, { grantId: grant.id, arguments: { query: "release", revision: 1 } }, db);
-    await db.mcpConnection.update({ where: { id: connection.id }, data: { resolvedAddressFingerprint: "c".repeat(64) } });
-    await assert.rejects(
-      () => executeMcpActionSnapshot(projectId, executableSnapshot, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_NETWORK_CHANGED",
-    );
-    await db.mcpConnection.update({ where: { id: connection.id }, data: { resolvedAddressFingerprint: connectionBeforeDrift.resolvedAddressFingerprint } });
-    const credentialBeforeDrift = await db.externalCredential.findUniqueOrThrow({ where: { id: credentialId! }, select: { secretFingerprint: true } });
-    await db.externalCredential.update({ where: { id: credentialId! }, data: { secretFingerprint: "b".repeat(64) } });
-    await assert.rejects(
-      () => buildMcpActionSnapshot(projectId, { grantId: grant.id, arguments: { query: "release", revision: 1 } }, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",
     );
     await assert.rejects(
-      () => executeMcpActionSnapshot(projectId, executableSnapshot, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_DEFINITION_STALE",
-    );
-    await db.externalCredential.update({ where: { id: credentialId! }, data: { secretFingerprint: credentialBeforeDrift.secretFingerprint } });
-    await assert.rejects(
-      () => updateProjectActionPolicy(projectId, "project.mcp.read-tool.invoke", { mode: "automatic", expectedUpdatedAt: null }, admin, db),
-      (error: unknown) => error instanceof ActionEngineError && error.code === "ACTION_INVALID_INPUT",
-    );
-
-    const waiting = await requestProjectAction(projectId, { capability: "project.mcp.read-tool.invoke", input: { grantId: grant.id, arguments: { query: "release", revision: 1 } }, clientRequestId: randomUUID() }, editor, db);
-    assert.equal(waiting.status, "waitingApproval");
-    const approved = await decideProjectAction(projectId, waiting.id, { decision: "approved", expectedUpdatedAt: waiting.updatedAt.toISOString(), expectedFingerprint: waiting.inputFingerprint, note: "已核对只读参数" }, admin, db);
-    assert.equal(approved.status, "queued");
-    assert.equal((await runProjectActionWorkerCycle({ workerId: `mcp-test:${suffix}`, maximumActions: 1 }, db)).succeeded, 1);
-    const succeeded = await db.projectAction.findUniqueOrThrow({ where: { id: waiting.id } });
-    assert.equal(succeeded.status, "succeeded");
-    assert.equal((succeeded.result as { toolName?: string }).toolName, "project.lookup");
-    const succeededFingerprint = (succeeded.result as { resultFingerprint?: string }).resultFingerprint;
-    assert.match(succeededFingerprint ?? "", /^[0-9a-f]{64}$/u);
-    const resultImport = await importProjectActionResult(projectId, succeeded.id, {
-      expectedUpdatedAt: succeeded.updatedAt.toISOString(),
-      expectedInputFingerprint: succeeded.inputFingerprint,
-      expectedResultFingerprint: succeededFingerprint,
-    }, editor, db);
-    assert.equal(resultImport.projectSource.kind, "mcp");
-    assert.equal(resultImport.contentFingerprint, resultImport.projectSource.contentHash);
-    const importedSource = await db.projectSource.findUniqueOrThrow({ where: { id: resultImport.projectSource.id } });
-    assert.equal(importedSource.sourceIdentity, succeeded.id);
-    assert.equal(importedSource.revisionKey, succeeded.id);
-    assert.equal((JSON.parse(importedSource.contentText) as { result: { text: string } }).result.text, "found");
-    assert.equal((await importProjectActionResult(projectId, succeeded.id, {
-      expectedUpdatedAt: succeeded.updatedAt.toISOString(),
-      expectedInputFingerprint: succeeded.inputFingerprint,
-      expectedResultFingerprint: succeededFingerprint,
-    }, editor, db)).id, resultImport.id);
-    await assert.rejects(() => db.projectActionResultImport.update({ where: { id: resultImport.id }, data: { contentFingerprint: "d".repeat(64) } }));
-
-    const staleWaiting = await requestProjectAction(projectId, { capability: "project.mcp.read-tool.invoke", input: { grantId: grant.id, arguments: { query: "release", revision: 1 } }, clientRequestId: randomUUID() }, editor, db);
-    await decideProjectAction(projectId, staleWaiting.id, { decision: "approved", expectedUpdatedAt: staleWaiting.updatedAt.toISOString(), expectedFingerprint: staleWaiting.inputFingerprint, note: null }, admin, db);
-    definitionRevision = 2;
-    await discoverMcpConnectionTools(connection.id, db);
-    const driftCycle = await runProjectActionWorkerCycle({ workerId: `mcp-test:${suffix}`, maximumActions: 1 }, db);
-    assert.equal(driftCycle.failed, 1);
-    const failed = await db.projectAction.findUniqueOrThrow({ where: { id: staleWaiting.id } });
-    assert.equal(failed.status, "failed");
-    assert.equal(failed.failureCode, "MCP_TOOL_DEFINITION_STALE");
-    await assert.rejects(
-      () => importProjectActionResult(projectId, failed.id, {
-        expectedUpdatedAt: failed.updatedAt.toISOString(),
-        expectedInputFingerprint: failed.inputFingerprint,
-        expectedResultFingerprint: "e".repeat(64),
-      }, editor, db),
-      (error: unknown) => error instanceof ActionResultIntakeError && error.code === "ACTION_RESULT_INTAKE_NOT_IMPORTABLE",
-    );
-
-    await assert.rejects(
-      () => requestProjectAction(projectId, { capability: "project.mcp.read-tool.invoke", input: { grantId: grant.id, arguments: { query: "release", revision: 1 } }, clientRequestId: randomUUID() }, editor, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_DEFINITION_STALE",
-    );
-    const current = await db.mcpToolDefinition.findFirstOrThrow({ where: { connectionId: connection.id, current: true } });
-    const currentAttestation = await attestMcpToolDefinition(current.id, { note: "重新核对新定义", evidence: { test: true } }, admin, db);
-    const refreshed = await grantProjectMcpTool(projectId, { toolDefinitionId: current.id, acknowledgeReadOnly: true, expectedUpdatedAt: (await db.projectMcpToolGrant.findUniqueOrThrow({ where: { id: grant.id } })).updatedAt.toISOString() }, admin, db);
-    assert.equal(refreshed.toolDefinitionId, current.id);
-    const refreshedSnapshot = await buildMcpActionSnapshot(projectId, { grantId: refreshed.id, arguments: { query: "release", revision: 2 } }, db);
-    const revokedAttestation = await revokeMcpToolAttestation(currentAttestation.id, { expectedAttestedAt: currentAttestation.attestedAt.toISOString(), note: "撤销测试" }, admin, db);
-    assert.equal(revokedAttestation.audits.filter((audit) => audit.event === "revoked").length, 1);
-    await assert.rejects(
-      () => buildMcpActionSnapshot(projectId, { grantId: refreshed.id, arguments: { query: "release", revision: 2 } }, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
+      () => buildMcpActionSnapshot(projectId, { grantId: randomUUID(), arguments: { query: "release", revision: 1 } }, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",
     );
     await assert.rejects(
-      () => executeMcpActionSnapshot(projectId, refreshedSnapshot, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_NOT_ATTESTED",
-    );
-    const revoked = await revokeProjectMcpToolGrant(projectId, refreshed.id, { expectedUpdatedAt: refreshed.updatedAt.toISOString() }, admin, db);
-    assert.equal(revoked.status, "revoked");
-    const audit = await db.projectMcpToolGrantAudit.findFirstOrThrow({ where: { grantId: grant.id } });
-    await assert.rejects(() => db.projectMcpToolGrantAudit.update({ where: { id: audit.id }, data: { details: { changed: true } } }));
-
-    const currentConnection = await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id } });
-    const disabledInUse = await updateMcpConnection(connection.id, {
-      enabled: false,
-      expectedUpdatedAt: currentConnection.updatedAt.toISOString(),
-    }, db);
-    await assert.rejects(
-      () => deleteMcpConnection(connection.id, {
-        confirmationName: connection.name,
-        expectedUpdatedAt: disabledInUse.updatedAt.toISOString(),
+      () => executeMcpActionSnapshot(projectId, {
+        grantId: randomUUID(),
+        connectionId: connection.id,
+        toolName: "project.lookup",
+        toolDefinitionId: definition.id,
+        attestationId: randomUUID(),
+        toolDefinitionFingerprint: "a".repeat(64),
+        networkFingerprint: "b".repeat(64),
+        credentialFingerprint: "c".repeat(64),
+        arguments: { query: "release", revision: 1 },
       }, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_IN_USE",
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",
     );
-
-    const disposable = await createMcpConnection({
-      name: `Disposable MCP ${suffix}`,
-      endpointUrl: `http://127.0.0.1:${address.port}/unused`,
-      authKind: "bearer",
-      bearerToken: `${token}-unused`,
-      allowPrivateNetwork: true,
-    }, admin, db);
-    disposableConnectionId = disposable.id;
-    disposableCredentialId = (await db.mcpConnection.findUniqueOrThrow({ where: { id: disposable.id }, select: { credentialId: true } })).credentialId;
-    const disposableDisabled = await updateMcpConnection(disposable.id, {
-      enabled: false,
-      expectedUpdatedAt: disposable.updatedAt.toISOString(),
-    }, db);
-    await assert.rejects(
-      () => deleteMcpConnection(disposable.id, {
-        confirmationName: "wrong name",
-        expectedUpdatedAt: disposableDisabled.updatedAt.toISOString(),
-      }, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_CONFIRMATION_MISMATCH",
-    );
-    await deleteMcpConnection(disposable.id, {
-      confirmationName: disposable.name,
-      expectedUpdatedAt: disposableDisabled.updatedAt.toISOString(),
-    }, db);
-    assert.equal(await db.mcpConnection.count({ where: { id: disposable.id } }), 0);
-    assert.equal(await db.externalCredential.count({ where: { id: disposableCredentialId! } }), 0);
-    disposableConnectionId = null;
-    disposableCredentialId = null;
-    assert.deepEqual(requests, ["tools/list", "tools/call", "tools/list"]);
+    assert.deepEqual(requests, ["tools/list"]);
   } finally {
     await db.project.deleteMany({ where: { id: projectId } });
     if (connectionId !== null) await db.mcpConnection.deleteMany({ where: { id: connectionId } });
     if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
-    if (disposableConnectionId !== null) await db.mcpConnection.deleteMany({ where: { id: disposableConnectionId } });
-    if (disposableCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: disposableCredentialId } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });
     await db.appUser.deleteMany({ where: { id: { in: [adminId, editorId] } } });
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

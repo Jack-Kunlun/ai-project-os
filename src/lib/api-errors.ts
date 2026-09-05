@@ -133,7 +133,8 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MCP_INVALID_INPUT: [400, "MCP 配置或请求无效"],
       MCP_CONNECTION_NOT_FOUND: [404, "MCP 连接不存在"],
       MCP_CONNECTION_NAME_CONFLICT: [409, "MCP 连接名称已存在"],
-      MCP_CONNECTION_CONFLICT: [409, "MCP 连接已被其他管理员更新，请刷新后重试"],
+      MCP_LEGACY_CONNECTION_API_FROZEN: [409, "旧版 MCP 连接接口已冻结，请使用个人连接设置"],
+      MCP_CONNECTION_CONFLICT: [409, "MCP 连接已被其他操作更新，请刷新后重试"],
       MCP_CONNECTION_DISABLED: [409, "MCP 连接已停用"],
       MCP_CONNECTION_NOT_VERIFIED: [409, "MCP 连接尚未成功发现工具"],
       MCP_CONNECTION_IN_USE: [409, "MCP 连接仍被项目工具授权或历史审计引用，无法永久删除"],
@@ -150,6 +151,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MCP_TOOL_NOT_READ_ONLY: [403, "该工具未明确声明只读和非破坏性，不能授权"],
       MCP_ADMIN_REQUIRED: [403, "只有系统管理员可以认证或撤销 MCP 工具"],
       MCP_TOOL_NOT_ATTESTED: [403, "该工具尚未完成管理员认证，不能授权或调用"],
+      MCP_LEGACY_PROJECT_RUNTIME_FROZEN: [409, "MCP 项目委托尚未完成，当前不能向项目外发个人连接"],
       MCP_ATTESTATION_NOT_FOUND: [404, "MCP 工具管理员认证不存在或已撤销"],
       MCP_ATTESTATION_CONFLICT: [409, "MCP 工具管理员认证已被其他管理员更新，请刷新后重试"],
       MCP_TOOL_DEFINITION_STALE: [409, "MCP 工具、凭据或授权快照已变化，请重新授权并创建动作"],
@@ -317,10 +319,12 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       GIT_CONNECTION_INVALID_INPUT: [400, "Git 服务配置无效"],
       GIT_CONNECTION_NOT_FOUND: [404, "Git 服务连接不存在"],
       GIT_CONNECTION_NAME_CONFLICT: [409, "Git 服务连接名称已存在"],
+      GIT_CONNECTION_CONFLICT: [409, "Git 服务连接已被其他操作更新，请刷新后重试"],
       GIT_CONNECTION_IN_USE: [409, "Git 服务仍被项目仓库关联或历史记录引用，无法停用或永久删除"],
       GIT_CONNECTION_DISABLED: [409, "Git 服务连接已停用"],
       GIT_CONNECTION_NOT_VERIFIED: [409, "Git 服务连接尚未通过管理员验证"],
-      GIT_LEGACY_PROJECT_CONNECT_FROZEN: [409, "个人 Git 与项目委托正在改造，当前不可新增项目仓库连接；既有只读连接不受影响"],
+      GIT_LEGACY_PROJECT_CONNECT_FROZEN: [409, "个人 Git 与项目委托正在改造，项目仓库连接与同步暂时冻结"],
+      GIT_LEGACY_CONNECTION_API_FROZEN: [409, "旧版 Git 连接接口已冻结，请使用个人连接设置"],
       GIT_CONNECTION_DELETE_REQUIRES_DISABLED: [409, "请先停用 Git 服务连接，再执行永久删除"],
       GIT_CONNECTION_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
       GIT_REPOSITORY_NOT_FOUND: [404, "Git 仓库或分支不存在"],
@@ -653,6 +657,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       GITHUB_WEB_INVALID_INPUT: [400, "GitHub 项目配置无效"],
       GITHUB_WEB_CREDENTIAL_REQUIRED: [409, "请先提供 GitHub fine-grained PAT"],
       GITHUB_WEB_CREDENTIAL_CONFLICT: [409, "项目存在多个不一致的 GitHub 凭据"],
+      GITHUB_WEB_PROJECT_CONNECT_FROZEN: [409, "项目级 GitHub PAT 连接已冻结，请先使用个人连接配置并等待项目委托"],
       PROJECT_NOT_FOUND: [404, "项目不存在"],
     } as const;
     const [status, message] = mapping[error.code];
@@ -749,7 +754,8 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     const notFound = error.code.includes("NOT_FOUND") || error.code.includes("PROJECT_NOT_FOUND");
     const conflict = error.code.includes("CONFLICT") || error.code.includes("ALREADY_RUNNING") ||
       error.code.includes("DIRECT_OPERATION_ACTIVE") || error.code.includes("RECONCILIATION_REQUIRED") ||
-      error.code.includes("RECONCILIATION_NOT_DUE") || error.code.includes("CANCEL_NOT_ALLOWED");
+      error.code.includes("RECONCILIATION_NOT_DUE") || error.code.includes("CANCEL_NOT_ALLOWED") ||
+      error.code === "PROJECT_GITHUB_SYNC_PROJECT_CONNECT_FROZEN";
     return {
       status: notFound ? 404 : conflict ? 409 : 422,
       body: {
@@ -758,6 +764,8 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
           message: error instanceof ProjectGitHubSyncError
             ? error.code === "PROJECT_GITHUB_SYNC_NO_ENABLED_TARGETS"
               ? "当前项目没有可同步的已启用 GitHub 内容"
+              : error.code === "PROJECT_GITHUB_SYNC_PROJECT_CONNECT_FROZEN"
+                ? "项目级 GitHub 连接已冻结，请等待个人连接与项目授权能力上线"
               : "GitHub 项目同步未能完成，请检查配置与任务状态"
             : "GitHub 仓库任务未能完成，请检查配置与任务状态",
         },

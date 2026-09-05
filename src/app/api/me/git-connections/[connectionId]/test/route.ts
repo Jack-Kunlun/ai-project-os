@@ -1,18 +1,19 @@
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { GitServiceError } from "@/lib/git";
+import { testGitConnection } from "@/lib/git";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
+const noStore = { "cache-control": "no-store" } as const;
 
 export async function POST(request: Request, context: { params: Promise<{ connectionId: string }> }) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
-    idSchema.parse((await context.params).connectionId);
-    await readJsonBody(request);
-    throw new GitServiceError("GIT_LEGACY_CONNECTION_API_FROZEN");
+    const actor = await requireApiSession(request);
+    const id = idSchema.parse((await context.params).connectionId);
+    return NextResponse.json(await testGitConnection(id, await readJsonBody(request), actor), { headers: noStore });
   } catch (error) {
     return handleApiError(error);
   }

@@ -74,12 +74,17 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const clientKeySchema = z.string().min(8).max(200).regex(/^[A-Za-z0-9._:-]+$/);
 const TRANSACTION_RETRY_LIMIT = 3;
 
+function projectGitHubDelegationEnabled(): boolean {
+  return false;
+}
+
 export type ProjectGitHubSyncErrorCode =
   | "PROJECT_GITHUB_SYNC_INVALID_INPUT"
   | "PROJECT_GITHUB_SYNC_PROJECT_NOT_FOUND"
   | "PROJECT_GITHUB_SYNC_RUN_NOT_FOUND"
   | "PROJECT_GITHUB_SYNC_ALREADY_RUNNING"
   | "PROJECT_GITHUB_SYNC_DIRECT_OPERATION_ACTIVE"
+  | "PROJECT_GITHUB_SYNC_PROJECT_CONNECT_FROZEN"
   | "PROJECT_GITHUB_SYNC_NO_ENABLED_TARGETS"
   | "PROJECT_GITHUB_SYNC_SCOPE_CONFLICT"
   | "PROJECT_GITHUB_SYNC_DEADLINE_EXCEEDED"
@@ -1794,6 +1799,7 @@ export async function prepareGitHubProjectSync(
 ): Promise<Readonly<{ job: PublicProjectJob; syncRun: PublicProjectGitHubSyncRun }>> {
   const parsed = parseStartInput({ projectId: input.projectId, clientKey: input.clientKey });
   const currentActor = await assertWebAiProjectAccess(input.requestedBy, parsed.projectId, "edit", db);
+  if (!projectGitHubDelegationEnabled()) return fail("PROJECT_GITHUB_SYNC_PROJECT_CONNECT_FROZEN");
   return prepareGitHubProjectSyncInternal({ ...parsed, requestedById: currentActor.id }, db);
 }
 

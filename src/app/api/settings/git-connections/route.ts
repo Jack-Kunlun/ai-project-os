@@ -1,14 +1,13 @@
-import { NextResponse } from "next/server";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { createGitConnection, gitConnectionCatalog, listGitConnections } from "@/lib/git";
+import { GitServiceError } from "@/lib/git";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
     await requireApiSession(request);
-    return NextResponse.json({ connections: await listGitConnections(), catalog: gitConnectionCatalog() });
+    throw new GitServiceError("GIT_LEGACY_CONNECTION_API_FROZEN");
   } catch (error) {
     return handleApiError(error);
   }
@@ -17,9 +16,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const user = await requireApiSession(request);
-    const connection = await createGitConnection(await readJsonBody(request), user);
-    return NextResponse.json({ connection }, { status: 201 });
+    await requireApiSession(request);
+    await readJsonBody(request);
+    throw new GitServiceError("GIT_LEGACY_CONNECTION_API_FROZEN");
   } catch (error) {
     return handleApiError(error);
   }

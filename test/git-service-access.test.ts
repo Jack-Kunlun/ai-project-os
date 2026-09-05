@@ -121,6 +121,10 @@ function hasCode(code: string) {
     error instanceof WebAiAccessError && error.code === code;
 }
 
+function hasGitCode(code: string) {
+  return (error: unknown): boolean => error instanceof GitServiceError && error.code === code;
+}
+
 function repositorySyncFixture() {
   let actorLookups = 0;
   let linkReads = 0;
@@ -271,7 +275,7 @@ function repositorySyncFixture() {
 test("Git repository list enforces current view access before link reads", async () => {
   const viewer = fakeDb({ projectRole: "viewer" });
   assert.deepEqual(await listProjectGitRepositories(PROJECT_ID, actor(), viewer.db), []);
-  assert.equal(viewer.linkReads, 1);
+  assert.equal(viewer.linkReads, 0);
 
   const noMembershipAdmin = fakeDb({ storedRole: "admin" });
   await assert.rejects(
@@ -321,7 +325,27 @@ test("legacy project Git connect is frozen before metadata for every actor", asy
   }
   const mapped = mapApiError(new GitServiceError("GIT_LEGACY_PROJECT_CONNECT_FROZEN"));
   assert.equal(mapped.status, 409);
-  assert.match(mapped.body.error.message, /当前不可新增项目仓库连接/u);
+  assert.match(mapped.body.error.message, /项目仓库连接与同步暂时冻结/u);
+});
+
+test("legacy Web GitHub HTTP routes freeze before project or request-body access", async () => {
+  const listRoute = await readFile("src/app/api/projects/[projectId]/repositories/route.ts", "utf8");
+  const deleteRoute = await readFile("src/app/api/projects/[projectId]/repositories/[linkId]/route.ts", "utf8");
+  for (const route of [listRoute, deleteRoute]) {
+    assert.match(route, /requireApiSession\(request\)/u);
+    assert.match(route, /GITHUB_WEB_PROJECT_CONNECT_FROZEN/u);
+    assert.doesNotMatch(route, /readJsonBody|assertProjectActive|connectWebGitHubRepository|getWebGitHubStatus|disableWebGitHubRepository/u);
+  }
+
+  const service = await readFile("src/lib/web-github.ts", "utf8");
+  const statusStart = service.indexOf("export async function getWebGitHubStatus");
+  const statusEnd = service.indexOf("\nexport async function connectWebGitHubRepository", statusStart);
+  const disableStart = service.indexOf("export async function disableWebGitHubRepository");
+  assert.ok(statusStart >= 0 && statusEnd > statusStart && disableStart >= 0);
+  const status = service.slice(statusStart, statusEnd);
+  const disable = service.slice(disableStart);
+  assert.match(status, /assertWebAiProjectAccess\(actor, projectId, "view"/u);
+  assert.match(disable, /assertWebAiProjectAccess\(actor, projectId, "edit"/u);
 });
 
 test("Git repository list fails closed for disabled and cross-project actors", async () => {
@@ -362,7 +386,7 @@ test("Git connect remains a side-effect-free frozen boundary", async () => {
   assert.doesNotMatch(connect, /assertWebAiProjectAccess|gitConnection\.findUnique|loadConnection|probeRepository|\$transaction/u);
 });
 
-test("generic Git sync closes a claimed job when post-claim access is revoked", async () => {
+test("generic Git sync is frozen before project credential admission", async () => {
   const fixture = repositorySyncFixture();
   await assert.rejects(
     () => runGitRepositorySyncJob({
@@ -371,17 +395,16 @@ test("generic Git sync closes a claimed job when post-claim access is revoked", 
       requestedBy: actor(),
       clientKey: "git-sync-revoke-test",
     }, fixture.db),
-    hasCode("ACCOUNT_DISABLED"),
+    hasGitCode("GIT_LEGACY_PROJECT_CONNECT_FROZEN"),
   );
-  assert.equal(fixture.job.status, "failed");
-  assert.equal(fixture.attempt?.status, "failed");
-  assert.equal(fixture.attempt?.dispatchState, "pending");
+  assert.equal(fixture.job.status, "queued");
+  assert.equal(fixture.attempt, null);
   assert.equal(fixture.linkReads, 0);
   assert.equal(fixture.snapshotCreates, 0);
   assert.equal(fixture.credentialReads, 0);
   assert.equal(fixture.networkCalls, 0);
   assert.equal(fixture.heartbeatWrites, 0);
-  assert.equal(fixture.jobWrites > 0, true);
+  assert.equal(fixture.jobWrites, 0);
 });
 
 test("generic Git sync admits before heartbeat/credential/remote and acknowledges known success", async () => {

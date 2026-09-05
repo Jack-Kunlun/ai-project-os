@@ -40,6 +40,10 @@ export class BackgroundJobError extends Error {
 const clientKeySchema = z.string().min(8).max(200).regex(/^[A-Za-z0-9._:-]+$/);
 const linkIdSchema = z.string().uuid();
 
+function projectGitHubDelegationEnabled(): boolean {
+  return false;
+}
+
 function idempotencyHash(kind: BackgroundJobKind, projectId: string, clientKey: string): string {
   return createHash("sha256").update(`${kind}:${projectId}:${clientKey}`, "utf8").digest("hex");
 }
@@ -255,6 +259,7 @@ export async function runGitHubCodeScanJob(input: Readonly<{
   clientKey: unknown;
 }>, db: PrismaClient = getDb()) {
   const currentActor = await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
+  if (!projectGitHubDelegationEnabled()) throw new BackgroundJobError("BACKGROUND_JOB_INVALID_STATE");
   const job = await createQueuedJob({
     projectId: input.projectId,
     requestedById: currentActor.id,
@@ -314,6 +319,7 @@ export async function runGitHubMaterialSyncJob(input: Readonly<{
 }>, db: PrismaClient = getDb()) {
   const linkId = linkIdSchema.parse(input.linkId);
   const currentActor = await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
+  if (!projectGitHubDelegationEnabled()) throw new BackgroundJobError("BACKGROUND_JOB_INVALID_STATE");
   const job = await createQueuedJob({
     projectId: input.projectId,
     requestedById: currentActor.id,

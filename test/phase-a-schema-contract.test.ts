@@ -8,6 +8,7 @@ const platformPolicyMigrationName = "20260903030000_add_platform_policies_and_co
 const defaultAppUserRoleMigrationName = "20260904010000_default_new_app_users_to_user";
 const platformRouteControlPlaneMigrationName = "20260904020000_add_platform_default_route_control_plane";
 const providerOwnershipAuditMigrationName = "20260904030000_add_ai_provider_ownership_audit";
+const personalGitMcpOwnershipMigrationName = "20260904140000_scope_personal_git_mcp_connections";
 
 async function readRoleEnum(): Promise<string> {
   const schema = await readFile("prisma/schema.prisma", "utf8");
@@ -168,10 +169,12 @@ test("M300 schema declares additive ownership, audit, and empty policy carriers"
   assert.match(defaultRoute, /@@index\(\[providerConnectionId, status\]\)/u);
 
   for (const uniqueField of [
-    /model GitConnection \{[\s\S]*?^\s*name\s+String\s+@unique/mu,
+    /model GitConnection \{[\s\S]*?^\s*name\s+String\s+@db\.VarChar\(80\)/mu,
     /model GitConnection \{[\s\S]*?^\s*credentialId\s+String\?\s+@db\.Uuid/mu,
-    /model McpConnection \{[\s\S]*?^\s*name\s+String\s+@unique/mu,
+    /model McpConnection \{[\s\S]*?^\s*name\s+String\s+@db\.VarChar\(80\)/mu,
     /model McpConnection \{[\s\S]*?^\s*credentialId\s+String\?\s+@unique\s+@db\.Uuid/mu,
+    /model GitConnection \{[\s\S]*?^\s*@@unique\(\[ownerUserId, name\]\)/mu,
+    /model McpConnection \{[\s\S]*?^\s*@@unique\(\[ownerUserId, name\]\)/mu,
   ]) assert.match(schema, uniqueField);
 });
 
@@ -215,9 +218,11 @@ test("M300 migration occupies stable migration slot 57 and contains additive DDL
   assert.match(executableSql, /FOREIGN KEY \("createdById"\)[\s\S]*PlatformGrantOfferPolicy/u);
   assert.match(executableSql, /FOREIGN KEY \("updatedById"\)[\s\S]*PlatformDefaultAiRoute/u);
 
-  assert.match(schema, /model GitConnection \{[\s\S]*?^\s*name\s+String\s+@unique/mu);
+  assert.match(schema, /model GitConnection \{[\s\S]*?^\s*name\s+String\s+@db\.VarChar\(80\)/mu);
+  assert.match(schema, /model GitConnection \{[\s\S]*?^\s*@@unique\(\[ownerUserId, name\]\)/mu);
   assert.match(schema, /model GitConnection \{[\s\S]*?^\s*credentialId\s+String\?/mu);
-  assert.match(schema, /model McpConnection \{[\s\S]*?^\s*name\s+String\s+@unique/mu);
+  assert.match(schema, /model McpConnection \{[\s\S]*?^\s*name\s+String\s+@db\.VarChar\(80\)/mu);
+  assert.match(schema, /model McpConnection \{[\s\S]*?^\s*@@unique\(\[ownerUserId, name\]\)/mu);
   assert.match(schema, /model McpConnection \{[\s\S]*?^\s*credentialId\s+String\?\s+@unique/mu);
   assert.doesNotMatch(schema, /model AiProviderConnection \{[\s\S]*?^\s*name\s+String\s+@unique/mu);
   assert.match(schema, /model AiProviderConnection \{[\s\S]*?^\s*credentialId\s+String\s+@unique/mu);
@@ -250,6 +255,15 @@ test("personal provider ownership migration scopes names and freezes identity", 
   assert.match(migration, /ai_provider_connection_identity_guard/u);
   assert.match(migration, /OLD\."credentialId" IS DISTINCT FROM NEW\."credentialId"/u);
   assert.match(migration, /CREATE TRIGGER "AiProviderConnection_identity_guard"/u);
+});
+
+test("personal Git and MCP ownership migration replaces global name indexes", async () => {
+  const migration = await readFile(`prisma/migrations/${personalGitMcpOwnershipMigrationName}/migration.sql`, "utf8");
+  assert.match(migration, /DROP INDEX "GitConnection_name_key"/u);
+  assert.match(migration, /DROP INDEX "McpConnection_name_key"/u);
+  assert.match(migration, /CREATE UNIQUE INDEX "GitConnection_ownerUserId_name_key"[\s\S]*\("ownerUserId", "name"\)/u);
+  assert.match(migration, /CREATE UNIQUE INDEX "McpConnection_ownerUserId_name_key"[\s\S]*\("ownerUserId", "name"\)/u);
+  assert.doesNotMatch(migration, /DROP CONSTRAINT/u);
 });
 
 test("platform default route control plane occupies stable migration slot 59", async () => {

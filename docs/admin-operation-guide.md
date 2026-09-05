@@ -1,6 +1,6 @@
 # 管理员操作指南
 
-本指南面向 `AppUser.role=admin` 的系统管理员。管理工作台位于 `/admin`，工作区 Owner/Admin 不能替代系统管理员访问平台模型、连接器、用户会员和运维页面。所有平台接口都在服务端再次检查角色；页面隐藏不是权限边界。
+本指南面向 `AppUser.role=admin` 的系统管理员。管理工作台位于 `/admin`，工作区 Owner/Admin 不能替代系统管理员访问平台模型、连接器迁移说明、用户会员和运维页面。所有平台接口都在服务端再次检查角色；页面隐藏不是权限边界。
 
 ## 1. 管理工作台与权限边界
 
@@ -10,8 +10,8 @@
 | --- | --- | --- |
 | `/admin` | 应用服务状态、数据库/Worker 检查和安全聚合 | 系统管理员 |
 | `/admin/models` | 平台模型、能力和自定义模型 ID | 系统管理员 |
-| `/admin/connectors/git` | Git 服务登记、验证和凭据轮换 | 系统管理员 |
-| `/admin/connectors/mcp` | MCP 发现、管理员认证和撤销 | 系统管理员 |
+| `/admin/connectors/git` | Git 连接迁移/冻结说明，不接收用户凭据 | 系统管理员 |
+| `/admin/connectors/mcp` | MCP 连接迁移/冻结说明，不接收用户凭据 | 系统管理员 |
 | `/admin/users/memberships` | 用户会员资格的发放、延期和撤销 | 系统管理员 |
 | `/admin/operations/backups` | 备份/运维状态 | 初始超级管理员按更严格规则读取 |
 | `/admin/guide` | 管理员流程、安全和验收 | 系统管理员 |
@@ -145,17 +145,17 @@ http://127.0.0.1:3000/api/auth/oidc/callback
 
 ### 5.1 Git 连接
 
-在 `/admin/connectors/git` 新建 Git 服务并选择 GitHub、Gitee、GitLab、Gitea、Forgejo 或受约束的通用 Git。公网默认 HTTPS；HTTPS 可用无认证、Token 或 Basic，SSH 只接受私钥和精确 known_hosts。自签 HTTPS 需要受信任 CA，公司内网必须显式开启允许私网。
+当前 `/admin/connectors/git` 仅展示迁移说明，旧版 Git 服务登记、验证和凭据轮换入口已冻结，不会读取或提交 Token、密码、私钥、CA 或 known_hosts。个人 Git 连接和项目委托属于 planned 能力，尚未开放。
 
-凭据使用最小只读权限。GitHub fine-grained PAT 只授权所需仓库的 Contents Read；不要使用个人主 SSH Key，建议单独创建只读 Deploy Key。保存时验证地址、凭据和远端可达性，固定解析地址并关闭交互、钩子、非目标协议和重定向。DNS 地址变化后必须重新验证。
+个人 Git 连接开放后，凭据应使用最小只读权限。GitHub fine-grained PAT 只授权所需仓库的 Contents Read；不要使用个人主 SSH Key，建议单独创建只读 Deploy Key。当前冻结页面不会保存、验证或轮换任何凭据。
 
-平台 Git 连接仍由系统管理员在上述管理工作台配置和验证，但当前 legacy 项目仓库新增接口已冻结：项目仓库页面不再请求全局连接列表，也不提供管理员选择平台连接并首次关联仓库的入口。个人 Git 连接与项目委托是 planned 后续能力，尚未开放。已关联项目成员可以查看安全仓库摘要、执行既有受控同步和停用仓库，响应不返回 `baseUrl`、凭据、错误连接详情或内部状态。
+平台 Git 连接的旧管理员配置和 legacy 项目仓库新增接口均已冻结：项目仓库页面不再请求全局连接列表，也不提供管理员选择平台连接并首次关联仓库的入口。个人 Git 连接与项目委托是 planned 后续能力，尚未开放；已关联项目资料不代表当前仍可执行外发同步。
 
 ### 5.2 MCP 只读工具
 
-在 `/admin/connectors/mcp` 添加远程 Streamable HTTP 端点，使用无认证或 Bearer Token。公网端点必须 HTTPS，内网需显式授权，云元数据地址不可放行。当前版本禁止 stdio、本地子进程、旧式 HTTP+SSE、执行中交互输入、自动执行和写操作。
+当前 `/admin/connectors/mcp` 仅展示迁移说明，旧版 MCP 端点添加、发现、认证、撤销和 attestation 入口已冻结，不会读取或提交 Bearer Token。个人连接所有权、管理员安全审查和项目授权属于 planned 能力。
 
-保存后执行工具发现并固化目录。系统限制总数、Schema 深度和响应大小；有效定义保存输入/输出 Schema、annotations 和 SHA-256 指纹。只有明确 `readOnlyHint=true` 且 `destructiveHint=false` 的定义才可申请管理员认证；annotations 属于不可信提示，不能替代管理员认证。
+个人 MCP 连接开放后，系统才会执行工具发现并固化目录。届时系统限制总数、Schema 深度和响应大小；有效定义保存输入/输出 Schema、annotations 和 SHA-256 指纹。只有明确 `readOnlyHint=true` 且 `destructiveHint=false` 的定义才可申请管理员认证；annotations 属于不可信提示，不能替代管理员认证。
 
 管理员对精确工具、当前网络解析和凭据指纹执行“管理员认证”，认证/撤销写入追加式审计。工具定义、DNS、凭据或连接状态变化会使旧认证失效，需重新发现和认证。项目 Owner 再逐项授权，Editor/Owner 创建调用动作，每次由 Owner 审批。执行前重新核对所有指纹；漂移、撤销或过期都失败关闭。
 

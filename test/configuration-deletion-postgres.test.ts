@@ -15,9 +15,21 @@ import { getDb } from "../src/lib/db";
 import {
   createGitConnection,
   deleteGitConnection,
+  getGitConnection,
   GitServiceError,
+  listGitConnections,
+  testGitConnection,
   updateGitConnection,
 } from "../src/lib/git";
+import {
+  createMcpConnection,
+  deleteMcpConnection,
+  discoverMcpConnectionTools,
+  getMcpConnection,
+  listMcpConnections,
+  McpCapabilityError,
+  updateMcpConnection,
+} from "../src/lib/mcp";
 
 const shouldRun = process.env.CONFIGURATION_DELETION_POSTGRES_GATE === "1";
 
@@ -27,6 +39,7 @@ test("unused model and Git connections can be permanently deleted while historic
   const db = getDb();
   const suffix = randomUUID().slice(0, 8);
   const userId = randomUUID();
+  const otherUserId = randomUUID();
   const projectId = randomUUID();
   const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-configuration-delete-"));
   const previousKeyFile = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
@@ -37,8 +50,13 @@ test("unused model and Git connections can be permanently deleted while historic
   let gitCredentialId: string | null = null;
   let historicalConnectionId: string | null = null;
   let historicalCredentialId: string | null = null;
+  let mcpConnectionId: string | null = null;
+  let mcpCredentialId: string | null = null;
 
-  await db.appUser.create({ data: { id: userId, username: `configuration_delete_${suffix}`, role: "admin" } });
+  await db.appUser.createMany({ data: [
+    { id: userId, username: `configuration_delete_${suffix}`, role: "admin" },
+    { id: otherUserId, username: `configuration_delete_other_${suffix}`, role: "member" },
+  ] });
   await db.project.create({ data: { id: projectId, name: `Configuration deletion ${suffix}`, slug: `configuration-deletion-${suffix}` } });
 
   try {
@@ -79,16 +97,42 @@ test("unused model and Git connections can be permanently deleted while historic
     }, { id: userId }, db);
     gitConnectionId = gitConnection.id;
     gitCredentialId = (await db.gitConnection.findUniqueOrThrow({ where: { id: gitConnection.id }, select: { credentialId: true } })).credentialId;
+    const gitActor = { id: userId };
+    const otherActor = { id: otherUserId };
+    assert.deepEqual(await listGitConnections(otherActor, db), []);
     await assert.rejects(
-      () => deleteGitConnection(gitConnection.id, { confirmationName: gitConnection.name }, db),
+      () => getGitConnection(gitConnection.id, otherActor, db),
+      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_FOUND",
+    );
+    await assert.rejects(
+      () => updateGitConnection(gitConnection.id, { secret: `cross-owner-${suffix}`, expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, otherActor, db),
+      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_FOUND",
+    );
+    await assert.rejects(
+      () => deleteGitConnection(gitConnection.id, { confirmationName: gitConnection.name, expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, otherActor, db),
+      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_FOUND",
+    );
+    await assert.rejects(
+      () => testGitConnection(gitConnection.id, { repositoryPath: "owner/private", trackedRef: "main", expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, otherActor, db),
+      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_FOUND",
+    );
+    await assert.rejects(
+      () => deleteGitConnection(gitConnection.id, { confirmationName: gitConnection.name, expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, gitActor, db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_DELETE_REQUIRES_DISABLED",
     );
-    await updateGitConnection(gitConnection.id, { enabled: false }, db);
+    const disabledGit = await updateGitConnection(gitConnection.id, { enabled: false, expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, gitActor, db);
+    const disabledWithExplicitSecret = await updateGitConnection(gitConnection.id, { secret: `github-explicit-disabled-${suffix}`, enabled: false, expectedUpdatedAt: disabledGit.updatedAt.toISOString() }, gitActor, db);
+    assert.equal(disabledWithExplicitSecret.status, "disabled");
+    const disabledWithImplicitSecret = await updateGitConnection(gitConnection.id, { secret: `github-implicit-disabled-${suffix}`, expectedUpdatedAt: disabledWithExplicitSecret.updatedAt.toISOString() }, gitActor, db);
+    assert.equal(disabledWithImplicitSecret.status, "disabled");
+    const reenabledGit = await updateGitConnection(gitConnection.id, { enabled: true, expectedUpdatedAt: disabledWithImplicitSecret.updatedAt.toISOString() }, gitActor, db);
+    assert.equal(reenabledGit.status, "configured");
+    const disabledForConfirmation = await updateGitConnection(gitConnection.id, { enabled: false, expectedUpdatedAt: reenabledGit.updatedAt.toISOString() }, gitActor, db);
     await assert.rejects(
-      () => deleteGitConnection(gitConnection.id, { confirmationName: "wrong name" }, db),
+      () => deleteGitConnection(gitConnection.id, { confirmationName: "wrong name", expectedUpdatedAt: disabledForConfirmation.updatedAt.toISOString() }, gitActor, db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_CONFIRMATION_MISMATCH",
     );
-    await deleteGitConnection(gitConnection.id, { confirmationName: gitConnection.name }, db);
+    await deleteGitConnection(gitConnection.id, { confirmationName: gitConnection.name, expectedUpdatedAt: disabledForConfirmation.updatedAt.toISOString() }, gitActor, db);
     assert.equal(await db.gitConnection.count({ where: { id: gitConnection.id } }), 0);
     assert.equal(await db.externalCredential.count({ where: { id: gitCredentialId! } }), 0);
     gitConnectionId = null;
@@ -126,10 +170,37 @@ test("unused model and Git connections can be permanently deleted while historic
       where: { id: link.id },
       data: { status: "disabled", disabledAt: new Date() },
     });
-    await updateGitConnection(historicalConnection.id, { enabled: false }, db);
+    const disabledHistorical = await updateGitConnection(historicalConnection.id, { enabled: false, expectedUpdatedAt: historicalConnection.updatedAt.toISOString() }, gitActor, db);
     await assert.rejects(
-      () => deleteGitConnection(historicalConnection.id, { confirmationName: historicalConnection.name }, db),
+      () => deleteGitConnection(historicalConnection.id, { confirmationName: historicalConnection.name, expectedUpdatedAt: disabledHistorical.updatedAt.toISOString() }, gitActor, db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_IN_USE",
+    );
+
+    const mcpConnection = await createMcpConnection({
+      name: `Private MCP ${suffix}`,
+      endpointUrl: "http://127.0.0.1:9/mcp",
+      authKind: "bearer",
+      bearerToken: `mcp-test-token-${suffix}`,
+      allowPrivateNetwork: true,
+    }, gitActor, db);
+    mcpConnectionId = mcpConnection.id;
+    mcpCredentialId = (await db.mcpConnection.findUniqueOrThrow({ where: { id: mcpConnection.id }, select: { credentialId: true } })).credentialId;
+    assert.deepEqual(await listMcpConnections(otherActor, db), []);
+    await assert.rejects(
+      () => getMcpConnection(mcpConnection.id, otherActor, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_FOUND",
+    );
+    await assert.rejects(
+      () => updateMcpConnection(mcpConnection.id, { bearerToken: `cross-owner-${suffix}`, expectedUpdatedAt: mcpConnection.updatedAt.toISOString() }, otherActor, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_FOUND",
+    );
+    await assert.rejects(
+      () => deleteMcpConnection(mcpConnection.id, { confirmationName: mcpConnection.name, expectedUpdatedAt: mcpConnection.updatedAt.toISOString() }, otherActor, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_FOUND",
+    );
+    await assert.rejects(
+      () => discoverMcpConnectionTools(mcpConnection.id, { expectedUpdatedAt: mcpConnection.updatedAt.toISOString() }, otherActor, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_FOUND",
     );
   } finally {
     await db.project.deleteMany({ where: { id: projectId } });
@@ -139,9 +210,10 @@ test("unused model and Git connections can be permanently deleted while historic
       await db.gitRepository.deleteMany({ where: { gitConnectionId: historicalConnectionId } });
       await db.gitConnection.deleteMany({ where: { id: historicalConnectionId } });
     }
-    const credentialIds = [providerCredentialId, gitCredentialId, historicalCredentialId].filter((id): id is string => id !== null);
+    if (mcpConnectionId !== null) await db.mcpConnection.deleteMany({ where: { id: mcpConnectionId } });
+    const credentialIds = [providerCredentialId, gitCredentialId, historicalCredentialId, mcpCredentialId].filter((id): id is string => id !== null);
     if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
-    await db.appUser.deleteMany({ where: { id: userId } });
+    await db.appUser.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
     if (previousKeyFile === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyFile;
     await rm(keyDirectory, { recursive: true, force: true });

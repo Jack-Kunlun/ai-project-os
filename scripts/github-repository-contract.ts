@@ -5,11 +5,16 @@ const UUID_PATTERN =
 const REPOSITORY_PATTERN =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9_.-]{1,100}$/;
 
-export class GitHubRepositoryCliError extends Error {
-  readonly code = "GITHUB_REPOSITORY_CLI_INVALID_ARGUMENTS" as const;
+export type GitHubRepositoryCliErrorCode =
+  | "GITHUB_REPOSITORY_CLI_INVALID_ARGUMENTS"
+  | "GITHUB_PROJECT_CONNECT_FROZEN";
 
-  constructor() {
-    super("GitHub 仓库命令参数无效");
+export class GitHubRepositoryCliError extends Error {
+  readonly code: GitHubRepositoryCliErrorCode;
+
+  constructor(code: GitHubRepositoryCliErrorCode = "GITHUB_REPOSITORY_CLI_INVALID_ARGUMENTS") {
+    super(code === "GITHUB_PROJECT_CONNECT_FROZEN" ? "项目级 GitHub 操作已冻结" : "GitHub 仓库命令参数无效");
+    this.code = code;
     this.name = "GitHubRepositoryCliError";
   }
 }

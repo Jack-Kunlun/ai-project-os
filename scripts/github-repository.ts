@@ -23,6 +23,7 @@ import { readCliArguments } from "./cli-arguments";
 const MAX_CONFIG_FILE_BYTES = 64_000;
 const ERROR_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
   GITHUB_REPOSITORY_CLI_INVALID_ARGUMENTS: "GitHub 仓库命令参数无效",
+  GITHUB_PROJECT_CONNECT_FROZEN: "项目级 GitHub 操作已冻结，请先使用个人连接配置并等待项目委托",
   GITHUB_DISABLED: "GitHub 连接器未启用",
   GITHUB_CREDENTIAL_UNAVAILABLE: "GitHub 凭据不可用",
   GITHUB_INVALID_REQUEST: "GitHub 请求参数无效",
@@ -56,6 +57,12 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
     Object.getPrototypeOf(value) === Object.prototype;
 }
 
+// Project-level GitHub credentials and repository operations remain frozen
+// until personal connection ownership and project delegation are complete.
+function projectGitHubDelegationEnabled(): boolean {
+  return false;
+}
+
 async function readConfig(path: string): Promise<Record<string, unknown>> {
   const file = await stat(path);
   if (!file.isFile() || file.size < 2 || file.size > MAX_CONFIG_FILE_BYTES) {
@@ -81,6 +88,7 @@ async function main(): Promise<void> {
   let db: ReturnType<typeof getDb> | undefined;
   try {
     const command = parseGitHubRepositoryArgs(readCliArguments());
+    if (!projectGitHubDelegationEnabled()) throw new GitHubRepositoryCliError("GITHUB_PROJECT_CONNECT_FROZEN");
     db = getDb();
     const ledger = createGitHubRepositoryLedgerService({ db });
     let result: unknown;

@@ -12,6 +12,7 @@ import {
   createGitHubReadOnlyClient,
   type GitHubMaterialReadOnlyClient,
 } from "@/lib/github/read-only-client";
+import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 
 export type WebGitHubCredentialClient = GitHubMaterialReadOnlyClient;
 
@@ -19,6 +20,7 @@ export type WebGitHubErrorCode =
   | "GITHUB_WEB_INVALID_INPUT"
   | "GITHUB_WEB_CREDENTIAL_REQUIRED"
   | "GITHUB_WEB_CREDENTIAL_CONFLICT"
+  | "GITHUB_WEB_PROJECT_CONNECT_FROZEN"
   | "PROJECT_NOT_FOUND";
 
 export class WebGitHubError extends Error {
@@ -62,6 +64,10 @@ function fail(code: WebGitHubErrorCode): never {
   throw new WebGitHubError(code);
 }
 
+function projectGitHubDelegationEnabled(): boolean {
+  return false;
+}
+
 async function currentCredential(projectId: string, db: PrismaClient): Promise<Readonly<{
   id: string;
   maskedSuffix: string;
@@ -76,7 +82,12 @@ async function currentCredential(projectId: string, db: PrismaClient): Promise<R
   return credentials[0] ?? null;
 }
 
-export async function getWebGitHubStatus(projectId: string, db: PrismaClient = getDb()) {
+export async function getWebGitHubStatus(
+  projectId: string,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  await assertWebAiProjectAccess(actor, projectId, "view", db);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (project === null) return fail("PROJECT_NOT_FOUND");
   const [repositories, credential] = await Promise.all([
@@ -98,6 +109,7 @@ export async function connectWebGitHubRepository(
   input: unknown,
   db: PrismaClient = getDb(),
 ) {
+  if (!projectGitHubDelegationEnabled()) return fail("GITHUB_WEB_PROJECT_CONNECT_FROZEN");
   const parsed = connectSchema.parse(input);
   const current = await currentCredential(projectId, db);
   let credentialId = current?.id ?? null;
@@ -164,6 +176,7 @@ export async function loadProjectGitHubClient(
   projectId: string,
   db: PrismaClient = getDb(),
 ): Promise<GitHubMaterialReadOnlyClient> {
+  if (!projectGitHubDelegationEnabled()) return fail("GITHUB_WEB_PROJECT_CONNECT_FROZEN");
   const links = await db.projectRepositoryLink.findMany({
     where: { projectId, status: "active" },
     select: { githubConnection: { select: { credentialId: true } } },
@@ -182,6 +195,7 @@ export async function loadGitHubClientForCredential(
   db: PrismaClient = getDb(),
   options: Readonly<{ absoluteDeadlineAt?: Date | number | null; expectedSecretFingerprint?: string }> = {},
 ): Promise<WebGitHubCredentialClient> {
+  if (!projectGitHubDelegationEnabled()) return fail("GITHUB_WEB_PROJECT_CONNECT_FROZEN");
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(credentialId)) {
     return fail("GITHUB_WEB_INVALID_INPUT");
   }
@@ -208,8 +222,10 @@ export async function loadGitHubClientForCredential(
 export async function disableWebGitHubRepository(
   projectId: string,
   linkId: string,
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
+  await assertWebAiProjectAccess(actor, projectId, "edit", db);
   return createGitHubRepositoryLedgerService({ db }).disable({ projectId, linkId });
 }
 

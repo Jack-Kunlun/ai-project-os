@@ -50,6 +50,7 @@ import { EffectiveAiRouteError } from "@/lib/effective-ai-route";
 import { PersonalProviderServiceError } from "@/lib/personal-ai-provider-service";
 import { ProjectAiProviderDelegationServiceError } from "@/lib/project-ai-provider-delegation-service";
 import { ProjectGitRepositoryDelegationServiceError } from "@/lib/project-git-repository-delegation-service";
+import { ProjectMcpConnectionDelegationServiceError } from "@/lib/project-mcp-connection-delegation-service";
 import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-runtime-service";
 
 export type ApiErrorBody = {
@@ -140,6 +141,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MCP_CONNECTION_DISABLED: [409, "MCP 连接已停用"],
       MCP_CONNECTION_NOT_VERIFIED: [409, "MCP 连接尚未成功发现工具"],
       MCP_CONNECTION_IN_USE: [409, "MCP 连接仍被项目工具授权或历史审计引用，无法永久删除"],
+      MCP_CONNECTION_LIVE_DELEGATION_DELETE_FORBIDDEN: [409, "MCP 连接仍有活动项目委托，请先结束委托"],
       MCP_CONNECTION_DELETE_REQUIRES_DISABLED: [409, "请先停用 MCP 连接，再执行永久删除"],
       MCP_CONNECTION_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
       MCP_NETWORK_BLOCKED: [403, "MCP 地址位于未授权的内网或保留网络"],
@@ -554,6 +556,26 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_GIT_REPOSITORY_DELEGATION_EXPIRED: [410, "项目 Git 委托已经过期，请重新创建"],
     };
     const [status, message] = mapping[error.code] ?? [500, "项目 Git 委托处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof ProjectMcpConnectionDelegationServiceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PROJECT_MCP_CONNECTION_DELEGATION_INVALID_INPUT: [400, "项目 MCP 连接委托请求无效"],
+      PROJECT_MCP_CONNECTION_DELEGATION_NOT_FOUND: [404, "项目 MCP 连接委托不存在"],
+      PROJECT_MCP_CONNECTION_DELEGATION_CONNECTION_NOT_FOUND: [404, "个人 MCP 连接不存在或不属于当前账户"],
+      PROJECT_MCP_CONNECTION_DELEGATION_FORBIDDEN: [403, "无权操作该项目 MCP 连接委托"],
+      PROJECT_MCP_CONNECTION_DELEGATION_MEMBERSHIP_REQUIRED: [403, "需要有效的明确项目成员资格"],
+      PROJECT_MCP_CONNECTION_DELEGATION_PROJECT_OWNER_REQUIRED: [403, "只有明确的项目 Owner 可以确认项目 MCP 连接委托"],
+      PROJECT_MCP_CONNECTION_DELEGATION_PROJECT_ARCHIVED: [409, "已归档项目不能修改项目 MCP 连接委托"],
+      PROJECT_MCP_CONNECTION_DELEGATION_CONNECTION_UNAVAILABLE: [409, "个人 MCP 连接当前不可用或证据已变化"],
+      PROJECT_MCP_CONNECTION_DELEGATION_STATE_CONFLICT: [409, "项目 MCP 连接委托状态已变化，当前操作不能继续"],
+      PROJECT_MCP_CONNECTION_DELEGATION_VERSION_CONFLICT: [409, "项目 MCP 连接委托已被其他操作更新，请刷新后重试"],
+      PROJECT_MCP_CONNECTION_DELEGATION_CONFLICT: [409, "项目 MCP 连接委托正在被其他操作更新，请稍后重试"],
+      PROJECT_MCP_CONNECTION_DELEGATION_EXPIRED: [410, "项目 MCP 连接委托已经过期，请重新创建"],
+      PROJECT_MCP_CONNECTION_DELEGATION_ACCOUNT_DISABLED: [403, "账户已停用"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "项目 MCP 连接委托处理失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

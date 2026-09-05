@@ -9,6 +9,19 @@ import { promisify } from "node:util";
 import { Client } from "pg";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
+import {
+  ProjectMcpConnectionDelegationServiceError,
+  confirmProjectMcpConnectionDelegationOwner,
+  confirmProjectMcpConnectionDelegationProject,
+  getProjectMcpConnectionDelegation,
+  listConnectionOwnerProjectMcpConnectionDelegations,
+  listProjectMcpConnectionDelegations,
+  proposeProjectMcpConnectionDelegation,
+  rejectProjectMcpConnectionDelegation,
+  revokeProjectMcpConnectionDelegation,
+} from "../src/lib/project-mcp-connection-delegation-service";
+import { McpCapabilityError } from "../src/lib/mcp/errors";
+import { deleteMcpConnection } from "../src/lib/mcp/service";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.PROJECT_MCP_DELEGATION_POSTGRES_GATE === "1";
@@ -311,6 +324,13 @@ async function insertDelegationAudit(client: Client, delegation: Record<string, 
       delegation.resolvedAddressFingerprint, delegation.credentialFingerprint, delegation.delegationFingerprint, reason,
       delegation.transitionAt ?? delegation.proposedAt,
     ],
+  );
+}
+
+async function assertDelegationServiceError(action: () => Promise<unknown>, code: string): Promise<void> {
+  await assert.rejects(
+    action,
+    (error: unknown) => error instanceof ProjectMcpConnectionDelegationServiceError && error.code === code,
   );
 }
 
@@ -871,6 +891,428 @@ test(
       await client.query(`DELETE FROM "Project" WHERE "id" = $1::uuid`, [projectId]).catch(() => undefined);
       await client.query(`DELETE FROM "Workspace" WHERE "id" = $1::uuid`, [workspaceId]).catch(() => undefined);
       await client.query(`DELETE FROM "AppUser" WHERE "id" = ANY($1::uuid[])`, [[ownerId, projectOwnerId, workspaceOnlyId]]).catch(() => undefined);
+    }
+  },
+);
+
+test(
+  "MCP Package B PostgreSQL service enforces lifecycle admission, frozen epochs, expiry and connection deletion",
+  { skip: !shouldRun ? "PROJECT_MCP_DELEGATION_POSTGRES_GATE=1 is required" : false },
+  async (context) => {
+    assertDisposableGateDatabase();
+    const databaseUrl = process.env.DATABASE_URL!;
+    const client = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
+    await client.connect();
+    context.after(() => client.end());
+
+    const db = getDb();
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+    const ownerId = id();
+    const projectOwnerId = id();
+    const viewerId = id();
+    const workspaceAdminId = id();
+    const foreignOwnerId = id();
+    const workspaceId = id();
+    const projectId = id();
+    const ownerConnectionId = id();
+    const ownerConnectionTwoId = id();
+    const dueConnectionId = id();
+    const deleteGuardConnectionId = id();
+    const foreignConnectionId = id();
+    const adminConnectionId = id();
+    let ownerMembership: { id: string; createdAt: Date } | null = null;
+    const ownerActor = { id: ownerId, role: "user" as const };
+    const projectOwnerActor = { id: projectOwnerId, role: "user" as const };
+    const viewerActor = { id: viewerId, role: "user" as const };
+    const workspaceAdminActor = { id: workspaceAdminId, role: "admin" as const };
+    const foreignOwnerActor = { id: foreignOwnerId, role: "user" as const };
+    type DelegationViewLike = Readonly<{
+      id: string;
+      recordStatus: string;
+      version: number;
+      connection: { id: string; name: string } | null;
+      effectiveEligibility: { reason: string | null };
+      capabilities: { canReject: boolean };
+    }>;
+    const view = (value: unknown): DelegationViewLike => value as DelegationViewLike;
+
+    const futureExpiry = (): string => new Date(Date.now() + 60 * 60 * 1_000).toISOString();
+    const proposalInput = (mcpConnectionId: string) => ({ mcpConnectionId, expiresAt: futureExpiry() });
+
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO "AppUser" ("id", "username", "role", "updatedAt") VALUES
+           ($1::uuid, $2, 'user', CURRENT_TIMESTAMP),
+           ($3::uuid, $4, 'user', CURRENT_TIMESTAMP),
+           ($5::uuid, $6, 'user', CURRENT_TIMESTAMP),
+           ($7::uuid, $8, 'admin', CURRENT_TIMESTAMP),
+           ($9::uuid, $10, 'user', CURRENT_TIMESTAMP)`,
+        [
+          ownerId, `mcp_b_owner_${suffix}`,
+          projectOwnerId, `mcp_b_project_owner_${suffix}`,
+          viewerId, `mcp_b_viewer_${suffix}`,
+          workspaceAdminId, `mcp_b_workspace_admin_${suffix}`,
+          foreignOwnerId, `mcp_b_foreign_owner_${suffix}`,
+        ],
+      );
+      await client.query(
+        `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, $4::uuid, CURRENT_TIMESTAMP)`,
+        [workspaceId, `MCP Package B ${suffix}`, `mcp-package-b-${suffix}`, ownerId],
+      );
+      await client.query(
+        `INSERT INTO "Project" ("id", "workspaceId", "membershipInheritanceMode", "name", "slug", "updatedAt") VALUES ($1::uuid, $2::uuid, 'workspace_inherited', $3, $4, CURRENT_TIMESTAMP)`,
+        [projectId, workspaceId, `MCP Package B project ${suffix}`, `mcp-package-b-project-${suffix}`],
+      );
+      for (const [connectionId, name, owner] of [
+        [ownerConnectionId, "same-name", ownerId],
+        [ownerConnectionTwoId, `owner-second-${suffix}`, ownerId],
+        [dueConnectionId, `due-${suffix}`, ownerId],
+        [deleteGuardConnectionId, `delete-guard-${suffix}`, ownerId],
+        [foreignConnectionId, "same-name", foreignOwnerId],
+        [adminConnectionId, `admin-${suffix}`, workspaceAdminId],
+      ] as const) {
+        await client.query(
+          `INSERT INTO "McpConnection" (
+             "id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint",
+             "status", "createdById", "ownerUserId", "ownershipState", "updatedAt"
+           ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 'confirmed', CURRENT_TIMESTAMP)`,
+          [connectionId, name, `https://mcp.example.test/package-b/${connectionId}`, fingerprintB, owner],
+        );
+      }
+      await client.query("COMMIT");
+
+      const memberships = await db.$transaction(async (tx) => {
+        await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "MCP Package B owner fixture" });
+        await grantWorkspaceMembership(tx, { workspaceId, userId: projectOwnerId, role: "owner", actorId: ownerId, reason: "MCP Package B project owner fixture" });
+        await grantWorkspaceMembership(tx, { workspaceId, userId: viewerId, role: "member", actorId: ownerId, reason: "MCP Package B viewer fixture" });
+        await grantWorkspaceMembership(tx, { workspaceId, userId: workspaceAdminId, role: "admin", actorId: ownerId, reason: "MCP Package B workspace admin fixture" });
+        const owner = await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "MCP Package B owner fixture" });
+        const projectOwner = await grantProjectMembership(tx, { projectId, workspaceId, userId: projectOwnerId, role: "owner", actorId: ownerId, reason: "MCP Package B project owner fixture" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: ownerId, reason: "MCP Package B viewer fixture" });
+        return { owner, projectOwner };
+      });
+      ownerMembership = memberships.owner;
+
+      const ownerListing = await listProjectMcpConnectionDelegations(projectId, ownerActor, db);
+      assert.ok(ownerListing.connections.some((connection) => connection.id === ownerConnectionId));
+      assert.ok(!ownerListing.connections.some((connection) => connection.id === foreignConnectionId));
+      assert.ok(!ownerListing.connections.some((connection) => connection.id === adminConnectionId));
+
+      await assertDelegationServiceError(
+        () => proposeProjectMcpConnectionDelegation(projectId, proposalInput(foreignConnectionId), ownerActor, db),
+        "PROJECT_MCP_CONNECTION_DELEGATION_CONNECTION_NOT_FOUND",
+      );
+      await assertDelegationServiceError(
+        () => proposeProjectMcpConnectionDelegation(projectId, proposalInput(adminConnectionId), workspaceAdminActor, db),
+        "PROJECT_MCP_CONNECTION_DELEGATION_MEMBERSHIP_REQUIRED",
+      );
+
+      const proposed = view(await proposeProjectMcpConnectionDelegation(projectId, proposalInput(ownerConnectionId), ownerActor, db));
+      assert.equal(proposed.recordStatus, "draft");
+      assert.equal(proposed.version, 1);
+      assert.equal(proposed.connection?.id, ownerConnectionId);
+
+      const ownerConfirmed = view(await confirmProjectMcpConnectionDelegationOwner(
+        projectId,
+        proposed.id,
+        { expectedVersion: 1, acknowledgeCredentialUse: true },
+        ownerActor,
+        db,
+      ));
+      assert.equal(ownerConfirmed.recordStatus, "ownerConfirmed");
+      assert.equal(ownerConfirmed.version, 2);
+      const auditCountAfterOwnerConfirm = await client.query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM "ProjectMcpConnectionDelegationAudit" WHERE "delegationId" = $1::uuid`,
+        [proposed.id],
+      );
+      const ownerReplay = view(await confirmProjectMcpConnectionDelegationOwner(
+        projectId,
+        proposed.id,
+        { expectedVersion: 1, acknowledgeCredentialUse: true },
+        ownerActor,
+        db,
+      ));
+      assert.equal(ownerReplay.version, 2);
+      const auditCountAfterOwnerReplay = await client.query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM "ProjectMcpConnectionDelegationAudit" WHERE "delegationId" = $1::uuid`,
+        [proposed.id],
+      );
+      assert.equal(auditCountAfterOwnerReplay.rows[0]?.count, auditCountAfterOwnerConfirm.rows[0]?.count);
+
+      await assertDelegationServiceError(
+        () => confirmProjectMcpConnectionDelegationProject(
+          projectId,
+          proposed.id,
+          { expectedVersion: 1, acknowledgeProjectScope: true, acknowledgeDataEgress: true },
+          projectOwnerActor,
+          db,
+        ),
+        "PROJECT_MCP_CONNECTION_DELEGATION_VERSION_CONFLICT",
+      );
+      const activated = view(await confirmProjectMcpConnectionDelegationProject(
+        projectId,
+        proposed.id,
+        { expectedVersion: 2, acknowledgeProjectScope: true, acknowledgeDataEgress: true },
+        projectOwnerActor,
+        db,
+      ));
+      assert.equal(activated.recordStatus, "active");
+      assert.equal(activated.version, 3);
+      const projectReplay = view(await confirmProjectMcpConnectionDelegationProject(
+        projectId,
+        proposed.id,
+        { expectedVersion: 2, acknowledgeProjectScope: true, acknowledgeDataEgress: true },
+        projectOwnerActor,
+        db,
+      ));
+      assert.equal(projectReplay.version, 3);
+      const activeAuditCount = await client.query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM "ProjectMcpConnectionDelegationAudit" WHERE "delegationId" = $1::uuid`,
+        [proposed.id],
+      );
+      assert.equal(activeAuditCount.rows[0]?.count, 3);
+
+      const projectView = await getProjectMcpConnectionDelegation(projectId, proposed.id, projectOwnerActor, db);
+      assert.equal(projectView.connection, null);
+      assert.equal(projectView.effectiveEligibility.reason, null);
+      assert.equal("endpointUrl" in projectView, false);
+      assert.equal("credentialFingerprint" in projectView, false);
+      await client.query(
+        `UPDATE "McpConnection" SET "protocolVersion" = '2026-07-28' WHERE "id" = $1::uuid`,
+        [ownerConnectionId],
+      );
+      const driftedView = await getProjectMcpConnectionDelegation(projectId, proposed.id, projectOwnerActor, db);
+      assert.equal(driftedView.effectiveEligibility.reason, "CONNECTION_EVIDENCE_DRIFT");
+
+      const secondDraft = view(await proposeProjectMcpConnectionDelegation(projectId, proposalInput(ownerConnectionTwoId), ownerActor, db));
+      assert.equal(secondDraft.recordStatus, "draft");
+      await client.query(`UPDATE "McpConnection" SET "status" = 'disabled', "disabledAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [ownerConnectionTwoId]);
+      await assertDelegationServiceError(
+        () => confirmProjectMcpConnectionDelegationOwner(
+          projectId,
+          secondDraft.id,
+          { expectedVersion: 1, acknowledgeCredentialUse: true },
+          ownerActor,
+          db,
+        ),
+        "PROJECT_MCP_CONNECTION_DELEGATION_CONNECTION_UNAVAILABLE",
+      );
+      await client.query(`UPDATE "McpConnection" SET "status" = 'verified', "disabledAt" = NULL WHERE "id" = $1::uuid`, [ownerConnectionTwoId]);
+      const oldOwnerMembership = ownerMembership;
+      await db.$transaction(async (tx) => {
+        await revokeProjectMembership(tx, projectId, ownerId, workspaceId, { actorId: projectOwnerId, reason: "MCP Package B owner epoch revoked" });
+      });
+      const readdedMembership = await db.$transaction(async (tx) => grantProjectMembership(
+        tx,
+        { projectId, workspaceId, userId: ownerId, role: "editor", actorId: projectOwnerId, reason: "MCP Package B owner re-added as editor" },
+      ));
+      assert.notEqual(readdedMembership.id, oldOwnerMembership?.id);
+
+      await assertDelegationServiceError(
+        () => confirmProjectMcpConnectionDelegationOwner(
+          projectId,
+          secondDraft.id,
+          { expectedVersion: 1, acknowledgeCredentialUse: true },
+          ownerActor,
+          db,
+        ),
+        "PROJECT_MCP_CONNECTION_DELEGATION_MEMBERSHIP_REQUIRED",
+      );
+
+      await client.query(`UPDATE "Project" SET "archivedAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [projectId]);
+      const archivedOwnerListing = await listConnectionOwnerProjectMcpConnectionDelegations(ownerActor, db);
+      const archivedDraft = archivedOwnerListing.find((delegation) => delegation.id === secondDraft.id);
+      assert.ok(archivedDraft);
+      assert.equal(archivedDraft.capabilities.canReject, true);
+      await rejectProjectMcpConnectionDelegation(
+        projectId,
+        secondDraft.id,
+        { expectedVersion: 1, reason: "former owner archived rejection" },
+        ownerActor,
+        db,
+      );
+      await revokeProjectMcpConnectionDelegation(
+        projectId,
+        proposed.id,
+        { expectedVersion: 3, reason: "former owner archived revoke" },
+        ownerActor,
+        db,
+      );
+
+      await client.query(`UPDATE "Project" SET "archivedAt" = NULL WHERE "id" = $1::uuid`, [projectId]);
+      // A real due row cannot be produced through the public proposal schema
+      // (it intentionally enforces a ten-minute minimum). Seed only this
+      // isolated historical fixture with replication-role bypass, preserving
+      // the normal expiry/authorization guards for the service mutation.
+      const dueDraftId = id();
+      const dueProposedAt = new Date(Date.now() - 2 * 60 * 1_000);
+      const dueExpiresAt = new Date(Date.now() - 60 * 1_000);
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = 'replica'");
+      await client.query(
+        `INSERT INTO "ProjectMcpConnectionDelegation" (
+           "id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionConfigurationRevision",
+           "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "expiresAt", "version", "status",
+           "ownerProjectMembershipId", "ownerMembershipCreatedAt", "proposedById", "proposedAt", "createdAt", "updatedAt"
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, $7, $8::timestamp, 1, 'draft', $9::uuid, $10::timestamp, $4::uuid, $11::timestamp, $11::timestamp, $11::timestamp)`,
+        [dueDraftId, projectId, dueConnectionId, ownerId, fingerprintB, sentinel, fingerprintD, dueExpiresAt.toISOString(), readdedMembership.id, readdedMembership.createdAt.toISOString(), dueProposedAt.toISOString()],
+      );
+      const seededDueDraft = (await client.query(`SELECT * FROM "ProjectMcpConnectionDelegation" WHERE "id" = $1::uuid`, [dueDraftId])).rows[0] as Record<string, unknown>;
+      Object.assign(seededDueDraft, { statusBefore: null, transitionAt: dueProposedAt });
+      await insertDelegationAudit(client, seededDueDraft, "proposed", "proposal_created", ownerId, readdedMembership.id, readdedMembership.createdAt);
+      await client.query("COMMIT");
+      const dueDraft = view({ id: dueDraftId, recordStatus: "draft", version: 1, connection: null, effectiveEligibility: { reason: "EXPIRED" }, capabilities: { canReject: true } });
+      await db.$transaction(async (tx) => {
+        await revokeProjectMembership(tx, projectId, ownerId, workspaceId, { actorId: projectOwnerId, reason: "MCP Package B due epoch revoked" });
+      });
+
+      const dueOwnerListing = await listConnectionOwnerProjectMcpConnectionDelegations(ownerActor, db);
+      const dueProjection = dueOwnerListing.find((delegation) => delegation.id === dueDraft.id);
+      assert.ok(dueProjection);
+      assert.equal(dueProjection.recordStatus, "draft");
+      assert.equal(dueProjection.effectiveEligibility.reason, "EXPIRED");
+      assert.equal(dueProjection.capabilities.canReject, true);
+      const dueBeforeUnauthorized = await client.query<{ status: string; version: number }>(
+        `SELECT "status", "version" FROM "ProjectMcpConnectionDelegation" WHERE "id" = $1::uuid`,
+        [dueDraft.id],
+      );
+      const dueAuditBeforeUnauthorized = await client.query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM "ProjectMcpConnectionDelegationAudit" WHERE "delegationId" = $1::uuid`,
+        [dueDraft.id],
+      );
+      await assertDelegationServiceError(
+        () => rejectProjectMcpConnectionDelegation(
+          projectId,
+          dueDraft.id,
+          { expectedVersion: 1, reason: "unauthorized expiry probe" },
+          foreignOwnerActor,
+          db,
+        ),
+        "PROJECT_MCP_CONNECTION_DELEGATION_FORBIDDEN",
+      );
+      await assertDelegationServiceError(
+        () => rejectProjectMcpConnectionDelegation(
+          projectId,
+          id(),
+          { expectedVersion: 1, reason: "unauthorized missing-row probe" },
+          foreignOwnerActor,
+          db,
+        ),
+        "PROJECT_MCP_CONNECTION_DELEGATION_FORBIDDEN",
+      );
+      await assertDelegationServiceError(
+        () => rejectProjectMcpConnectionDelegation(
+          projectId,
+          dueDraft.id,
+          { expectedVersion: 1, reason: "viewer expiry probe" },
+          viewerActor,
+          db,
+        ),
+        "PROJECT_MCP_CONNECTION_DELEGATION_PROJECT_OWNER_REQUIRED",
+      );
+      const dueAfterUnauthorized = await client.query<{ status: string; version: number }>(
+        `SELECT "status", "version" FROM "ProjectMcpConnectionDelegation" WHERE "id" = $1::uuid`,
+        [dueDraft.id],
+      );
+      const dueAuditAfterUnauthorized = await client.query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count FROM "ProjectMcpConnectionDelegationAudit" WHERE "delegationId" = $1::uuid`,
+        [dueDraft.id],
+      );
+      assert.deepEqual(dueAfterUnauthorized.rows, dueBeforeUnauthorized.rows);
+      assert.deepEqual(dueAuditAfterUnauthorized.rows, dueAuditBeforeUnauthorized.rows);
+
+      await assertDelegationServiceError(
+        () => rejectProjectMcpConnectionDelegation(
+          projectId,
+          dueDraft.id,
+          { expectedVersion: 1, reason: "authorized expiry" },
+          ownerActor,
+          db,
+        ),
+        "PROJECT_MCP_CONNECTION_DELEGATION_EXPIRED",
+      );
+      const expiredState = await client.query<{ status: string; version: number }>(
+        `SELECT "status", "version" FROM "ProjectMcpConnectionDelegation" WHERE "id" = $1::uuid`,
+        [dueDraft.id],
+      );
+      assert.deepEqual(expiredState.rows[0], { status: "expired", version: 2 });
+      const expiredAudit = await client.query<{ action: string; actorKind: string; reason: string }>(
+        `SELECT "action", "actorKind", "reason" FROM "ProjectMcpConnectionDelegationAudit" WHERE "delegationId" = $1::uuid ORDER BY "delegationVersion"`,
+        [dueDraft.id],
+      );
+      assert.deepEqual(expiredAudit.rows.map((row) => [row.action, row.actorKind, row.reason]), [
+        ["proposed", "user", "proposal_created"],
+        ["expired", "system_expiry", "system_expiry"],
+      ]);
+
+      const postExpiryMembership = await db.$transaction(async (tx) => grantProjectMembership(
+        tx,
+        { projectId, workspaceId, userId: ownerId, role: "owner", actorId: projectOwnerId, reason: "MCP Package B expiry recovery" },
+      ));
+      assert.notEqual(postExpiryMembership.id, readdedMembership.id);
+      const replacement = view(await proposeProjectMcpConnectionDelegation(projectId, proposalInput(dueConnectionId), ownerActor, db));
+      await rejectProjectMcpConnectionDelegation(
+        projectId,
+        replacement.id,
+        { expectedVersion: 1, reason: "replacement closed" },
+        ownerActor,
+        db,
+      );
+
+      const dueConnectionBeforeDelete = await db.mcpConnection.findUniqueOrThrow({ where: { id: dueConnectionId }, select: { name: true, updatedAt: true } });
+      await assert.rejects(
+        () => deleteMcpConnection(
+          dueConnectionId,
+          { expectedUpdatedAt: dueConnectionBeforeDelete.updatedAt.toISOString(), confirmationName: dueConnectionBeforeDelete.name },
+          ownerActor,
+          db,
+        ),
+        (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_DELETE_REQUIRES_DISABLED",
+      );
+      await client.query(`UPDATE "McpConnection" SET "status" = 'disabled', "disabledAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [dueConnectionId]);
+      const disabledDueConnection = await db.mcpConnection.findUniqueOrThrow({ where: { id: dueConnectionId }, select: { name: true, updatedAt: true } });
+      const deletedDueConnection = await deleteMcpConnection(
+        dueConnectionId,
+        { expectedUpdatedAt: disabledDueConnection.updatedAt.toISOString(), confirmationName: disabledDueConnection.name },
+        ownerActor,
+        db,
+      );
+      assert.equal(deletedDueConnection.id, dueConnectionId);
+
+      const deleteGuardDraft = view(await proposeProjectMcpConnectionDelegation(projectId, proposalInput(deleteGuardConnectionId), ownerActor, db));
+      await client.query(`UPDATE "McpConnection" SET "status" = 'disabled', "disabledAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [deleteGuardConnectionId]);
+      const deleteGuardConnection = await db.mcpConnection.findUniqueOrThrow({ where: { id: deleteGuardConnectionId }, select: { name: true, updatedAt: true } });
+      await assert.rejects(
+        () => deleteMcpConnection(
+          deleteGuardConnectionId,
+          { expectedUpdatedAt: deleteGuardConnection.updatedAt.toISOString(), confirmationName: deleteGuardConnection.name },
+          ownerActor,
+          db,
+        ),
+        (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_LIVE_DELEGATION_DELETE_FORBIDDEN",
+      );
+      await rejectProjectMcpConnectionDelegation(
+        projectId,
+        deleteGuardDraft.id,
+        { expectedVersion: 1, reason: "close delete guard draft" },
+        ownerActor,
+        db,
+      );
+      const deletedGuardConnection = await deleteMcpConnection(
+        deleteGuardConnectionId,
+        { expectedUpdatedAt: deleteGuardConnection.updatedAt.toISOString(), confirmationName: deleteGuardConnection.name },
+        ownerActor,
+        db,
+      );
+      assert.equal(deletedGuardConnection.id, deleteGuardConnectionId);
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.query(`DELETE FROM "ProjectMcpConnectionDelegationAudit" WHERE "projectId" = $1::uuid`, [projectId]).catch(() => undefined);
+      await client.query(`DELETE FROM "Project" WHERE "id" = $1::uuid`, [projectId]).catch(() => undefined);
+      await client.query(`DELETE FROM "McpConnection" WHERE "id" = ANY($1::uuid[])`, [[ownerConnectionId, ownerConnectionTwoId, dueConnectionId, deleteGuardConnectionId, foreignConnectionId, adminConnectionId]]).catch(() => undefined);
+      await client.query(`DELETE FROM "Workspace" WHERE "id" = $1::uuid`, [workspaceId]).catch(() => undefined);
+      await client.query(`DELETE FROM "AppUser" WHERE "id" = ANY($1::uuid[])`, [[ownerId, projectOwnerId, viewerId, workspaceAdminId, foreignOwnerId]]).catch(() => undefined);
     }
   },
 );

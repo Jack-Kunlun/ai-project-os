@@ -453,7 +453,7 @@ export async function deleteMcpConnection(
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
   try {
     return await db.$transaction(async (tx) => {
-      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010005))`);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010000))`);
       const connection = await tx.mcpConnection.findFirst({
         where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
         select: { id: true, name: true, status: true, credentialId: true, updatedAt: true },
@@ -473,6 +473,9 @@ export async function deleteMcpConnection(
       return Object.freeze({ id: connection.id });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
+    if (error instanceof Error && error.message.includes("MCP_CONNECTION_LIVE_DELEGATION_DELETE_FORBIDDEN")) {
+      return failMcp("MCP_CONNECTION_LIVE_DELEGATION_DELETE_FORBIDDEN");
+    }
     if (isPrismaCode(error, "P2003")) return failMcp("MCP_CONNECTION_IN_USE");
     throw error;
   }
@@ -515,6 +518,7 @@ export async function discoverMcpConnectionTools(
     });
     const now = new Date();
     const stored = await db.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010000))`);
       await tx.$queryRaw`SELECT "id" FROM "McpConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
       const currentConnection = await tx.mcpConnection.findFirst({
         where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
@@ -564,6 +568,7 @@ export async function discoverMcpConnectionTools(
     }
     const code = error instanceof McpCapabilityError ? error.code : "MCP_TRANSPORT_FAILED";
     const marked = await db.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010000))`);
       await tx.$queryRaw`SELECT "id" FROM "McpConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
       const current = await tx.mcpConnection.findFirst({
         where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },

@@ -118,7 +118,7 @@ test("项目 API 授权对 UUID 大小写、编码路径和新版 UUID 使用同
   assert.deepEqual(seen, [projectId, projectId, projectId, projectIdV7, projectId, projectId]);
 });
 
-test("个人 Git 终止旁路只匹配原始精确 POST 路径", async () => {
+test("个人 Git/MCP 终止旁路只匹配原始精确 POST 路径", async () => {
   const projectId = "12121212-1212-4121-8121-121212121212";
   const delegationId = "14141414-1414-4141-8141-141414141414";
   const projectIdV7 = "0198f1a0-7b2c-7def-8abc-1234567890ab";
@@ -136,47 +136,53 @@ test("个人 Git 终止旁路只匹配原始精确 POST 路径", async () => {
     projectMembership: { findMany: async () => [] },
     workspaceMembership: { findMany: async () => [] },
   } as unknown as PrismaClient;
-  const exact = `http://localhost/api/projects/${projectId}/git-repository-delegations/${delegationId}/rejection`;
-  const exactRevocation = `http://localhost/api/projects/${projectId}/git-repository-delegations/${delegationId}/revocation`;
+  for (const resource of ["git-repository-delegations", "mcp-connection-delegations"] as const) {
+    const exact = `http://localhost/api/projects/${projectId}/${resource}/${delegationId}/rejection`;
+    const exactRevocation = `http://localhost/api/projects/${projectId}/${resource}/${delegationId}/revocation`;
 
-  await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(exact, { method: "POST" }), {} as PrismaClient));
-  await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`${exact}/`, { method: "POST" }), {} as PrismaClient));
-  await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(exactRevocation, { method: "POST" }), {} as PrismaClient));
-  await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`${exactRevocation}/`, { method: "POST" }), {} as PrismaClient));
-  await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectIdV7}/git-repository-delegations/${delegationIdV8}/rejection`, { method: "POST" }), {} as PrismaClient));
-  await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId.toUpperCase()}/git-repository-delegations/${delegationId.toUpperCase()}/revocation`, { method: "POST" }), {} as PrismaClient));
-  await assert.rejects(
-    () => authorizeApiRequest(actor, new Request(exact, { method: "GET" }), denyDb),
-    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
-  );
-  await assert.rejects(
-    () => authorizeApiRequest(actor, new Request(`${exact}/extra`, { method: "POST" }), denyDb),
-    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
-  );
-  await assert.rejects(
-    () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId}/git-repository-delegations-legacy/${delegationId}/rejection`, { method: "POST" }), denyDb),
-    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
-  );
-  await assert.rejects(
-    () => authorizeApiRequest(actor, new Request(`http://localhost/api/%70rojects/${projectId}/git-repository-delegations/${delegationId}/rejection`, { method: "POST" }), denyDb),
-    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
-  );
-  await assert.rejects(
-    () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId}/git-repository-delegations/${invalidDelegationId}/rejection`, { method: "POST" }), denyDb),
-    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
-  );
-  await assert.rejects(
-    () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId}/git-repository-delegations/${zodRejectedDelegationId}/revocation`, { method: "POST" }), denyDb),
-    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
-  );
-  await assert.rejects(
-    () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${nilProjectId}/git-repository-delegations/${delegationId}/rejection`, { method: "POST" }), denyDb),
-    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
-  );
-  await assert.rejects(
-    () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId}/git-repository-delegations/${nilDelegationId}/revocation`, { method: "POST" }), denyDb),
-    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
-  );
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(exact, { method: "POST" }), {} as PrismaClient));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`${exact}/`, { method: "POST" }), {} as PrismaClient));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(exactRevocation, { method: "POST" }), {} as PrismaClient));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`${exactRevocation}/`, { method: "POST" }), {} as PrismaClient));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectIdV7}/${resource}/${delegationIdV8}/rejection`, { method: "POST" }), {} as PrismaClient));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId.toUpperCase()}/${resource}/${delegationId.toUpperCase()}/revocation`, { method: "POST" }), {} as PrismaClient));
+    await assert.rejects(
+      () => authorizeApiRequest(actor, new Request(exact, { method: "GET" }), denyDb),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+    await assert.rejects(
+      () => authorizeApiRequest(actor, new Request(exact, { method: "PUT" }), denyDb),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+    await assert.rejects(
+      () => authorizeApiRequest(actor, new Request(`${exact}/extra`, { method: "POST" }), denyDb),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+    await assert.rejects(
+      () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId}/${resource}-legacy/${delegationId}/rejection`, { method: "POST" }), denyDb),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+    await assert.rejects(
+      () => authorizeApiRequest(actor, new Request(`http://localhost/api/%70rojects/${projectId}/${resource}/${delegationId}/rejection`, { method: "POST" }), denyDb),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+    await assert.rejects(
+      () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId}/${resource}/${invalidDelegationId}/rejection`, { method: "POST" }), denyDb),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+    await assert.rejects(
+      () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId}/${resource}/${zodRejectedDelegationId}/revocation`, { method: "POST" }), denyDb),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+    await assert.rejects(
+      () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${nilProjectId}/${resource}/${delegationId}/rejection`, { method: "POST" }), denyDb),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+    await assert.rejects(
+      () => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId}/${resource}/${nilDelegationId}/revocation`, { method: "POST" }), denyDb),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+  }
 });
 
 test("项目 API 预授权隐藏非成员项目是否存在，但直接权限校验保留 not found 语义", async () => {

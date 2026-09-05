@@ -920,7 +920,7 @@ export async function listProjectIntelligence(
       } catch (error) {
         if (error instanceof Error && "code" in error) {
           const code = (error as { code?: unknown }).code;
-          if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID" || code === "AI_PROVIDER_CONFIGURATION_DRIFT") return null;
+          if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID" || code === "PERSONAL_ROUTE_UNAVAILABLE" || code === "AI_PROVIDER_CONFIGURATION_DRIFT" || code === "AI_ROUTE_LOCK_BUSY") return null;
         }
         throw error;
       }

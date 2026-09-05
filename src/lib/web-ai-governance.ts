@@ -74,6 +74,8 @@ function hasCompleteRouteSnapshot(route: RuntimeRoute): boolean {
     && Number.isSafeInteger(route.quotaMultiplierBps)
     && route.quotaMultiplierBps >= 1
     && route.quotaMultiplierBps <= 100_000
+    && typeof route.credentialSecretFingerprint === "string"
+    && /^[0-9a-f]{64}$/u.test(route.credentialSecretFingerprint)
     && typeof route.routeFenceFingerprint === "string"
     && /^[0-9a-f]{64}$/u.test(route.routeFenceFingerprint)
     && (route.source === "platform_default"
@@ -100,6 +102,7 @@ function routeTupleMatches(left: RuntimeRoute, right: RuntimeRoute): boolean {
     && left.modelId === right.modelId
     && left.embeddingDimensions === right.embeddingDimensions
     && left.maxOutputTokens === right.maxOutputTokens
+    && left.credentialSecretFingerprint === right.credentialSecretFingerprint
     && hasCompleteRouteSnapshot(left)
     && hasCompleteRouteSnapshot(right)
     && routeSnapshotsEqual(left, right);
@@ -115,6 +118,11 @@ function routeSnapshotData(route: RuntimeRoute) {
     providerConfigurationVersion: snapshot.providerConfigurationVersion,
     quotaMultiplierBps: snapshot.quotaMultiplierBps,
     routeFenceFingerprint: snapshot.routeFenceFingerprint,
+    credentialSecretFingerprint: snapshot.credentialSecretFingerprint,
+    payerKind: "platformCaller" as const,
+    payerProviderConnectionId: route.providerConnectionId,
+    embeddingDimensions: route.embeddingDimensions,
+    maxOutputTokens: route.maxOutputTokens,
   };
 }
 
@@ -153,7 +161,23 @@ async function reloadRuntimeRoute(
   ) {
     throw new AiEntitlementError("AI_PROVIDER_CONNECTION_UNAVAILABLE");
   }
-  return Object.freeze({ ...route, providerConnection: Object.freeze(provider) });
+  const credential = await tx.externalCredential.findUnique({
+    where: { id: provider.credentialId },
+    select: { kind: true, secretFingerprint: true },
+  });
+  if (
+    credential === null
+    || credential.kind !== "aiProvider"
+    || !/^[0-9a-f]{64}$/u.test(credential.secretFingerprint)
+    || credential.secretFingerprint !== route.credentialSecretFingerprint
+  ) {
+    throw new AiEntitlementError("AI_PROVIDER_CONNECTION_UNAVAILABLE");
+  }
+  return Object.freeze({
+    ...route,
+    credentialSecretFingerprint: credential.secretFingerprint,
+    providerConnection: Object.freeze({ ...provider, credentialSecretFingerprint: credential.secretFingerprint }),
+  });
 }
 
 async function reloadDispatchProvider(
@@ -236,6 +260,11 @@ type RuntimeGrantTuple = Readonly<{
   providerConfigurationVersion: number | null;
   quotaMultiplierBps: number | null;
   routeFenceFingerprint: string | null;
+  credentialSecretFingerprint: string | null;
+  payerKind: string | null;
+  payerProviderConnectionId: string | null;
+  embeddingDimensions: number | null;
+  maxOutputTokens: number | null;
   expiresAt: Date;
   revokedAt: Date | null;
   scopeKind?: WebAiScopeKind;
@@ -265,6 +294,11 @@ function grantMatchesRuntimeTuple(
     && grant.providerConfigurationVersion === input.route.providerConfigurationVersion
     && grant.quotaMultiplierBps === input.route.quotaMultiplierBps
     && grant.routeFenceFingerprint === input.route.routeFenceFingerprint
+    && grant.credentialSecretFingerprint === input.route.credentialSecretFingerprint
+    && grant.payerKind === "platformCaller"
+    && grant.payerProviderConnectionId === input.route.providerConnectionId
+    && grant.embeddingDimensions === input.route.embeddingDimensions
+    && grant.maxOutputTokens === input.route.maxOutputTokens
     && (input.scopeKind === undefined || grant.scopeKind === input.scopeKind)
     && (input.scopeIds === undefined || JSON.stringify(grant.scopeIds) === JSON.stringify(input.scopeIds))
     && (input.manifestFingerprint === undefined || grant.manifestFingerprint === input.manifestFingerprint);
@@ -288,6 +322,11 @@ function runtimeGrantSelect() {
     providerConfigurationVersion: true,
     quotaMultiplierBps: true,
     routeFenceFingerprint: true,
+    credentialSecretFingerprint: true,
+    payerKind: true,
+    payerProviderConnectionId: true,
+    embeddingDimensions: true,
+    maxOutputTokens: true,
     expiresAt: true,
     revokedAt: true,
     scopeKind: true,
@@ -648,6 +687,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
         credential === null
         || credential.kind !== "aiProvider"
         || !/^[0-9a-f]{64}$/u.test(credential.secretFingerprint)
+        || credential.secretFingerprint !== persistedRoute.credentialSecretFingerprint
       ) {
         throw new AiEntitlementError("AI_PROVIDER_CONNECTION_UNAVAILABLE");
       }
@@ -731,6 +771,10 @@ export async function auditedProviderCall<T>(input: Readonly<{
             quotaMultiplierBps: dispatchRoute.quotaMultiplierBps,
             routeFenceFingerprint: dispatchRoute.routeFenceFingerprint,
             credentialSecretFingerprint: credential.secretFingerprint,
+            payerKind: "platformCaller",
+            payerProviderConnectionId: dispatchRoute.providerConnectionId,
+            embeddingDimensions: dispatchRoute.embeddingDimensions,
+            maxOutputTokens: dispatchRoute.maxOutputTokens,
             status: "running",
           },
         });

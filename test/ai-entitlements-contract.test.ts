@@ -638,3 +638,26 @@ test("effective platform routes use the configured model for every supported ope
     entitlementError("AI_MODEL_CAPABILITY_MISMATCH"),
   );
 });
+
+test("personal control-plane routes fail before platform quota or database admission", async () => {
+  let databaseReads = 0;
+  const db = {
+    membershipSubscription: {
+      findUnique: async () => {
+        databaseReads += 1;
+        return null;
+      },
+    },
+  };
+  await assert.rejects(
+    () => assertAiOutboundEntitlement({
+      projectId: randomUUID(),
+      requestedById: randomUUID(),
+      route: { source: "personal_delegation" } as never,
+      db: db as never,
+      enforceConcurrency: false,
+    }),
+    entitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN"),
+  );
+  assert.equal(databaseReads, 0);
+});

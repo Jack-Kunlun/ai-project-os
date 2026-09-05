@@ -972,21 +972,29 @@ test(
       return activeRow;
     });
 
+    let signalInvalidationLock!: () => void;
+    const invalidationLockAcquired = new Promise<void>((resolve) => {
+      signalInvalidationLock = resolve;
+    });
+    let continueInvalidation!: () => void;
+    const invalidationMayContinue = new Promise<void>((resolve) => {
+      continueInvalidation = resolve;
+    });
     const invalidationPromise = db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended('ai-project-provider-delegation-global', 0))",
+      );
+      signalInvalidationLock();
+      await invalidationMayContinue;
       await tx.aiProviderConnection.update({
         where: { id: providerId },
         data: { configurationVersion: 2 },
       });
-      await tx.$executeRawUnsafe("SELECT pg_sleep(0.2)");
     });
-    // Give the invalidation statement time to acquire the serialization-domain
-    // lock before deliberately exercising the fail-fast activation path.
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const firstActivationPromise = activateConcurrentDraft();
-    const [invalidationResult, firstActivationResult] = await Promise.allSettled([
-      invalidationPromise,
-      firstActivationPromise,
-    ]);
+    await invalidationLockAcquired;
+    const [firstActivationResult] = await Promise.allSettled([activateConcurrentDraft()]);
+    continueInvalidation();
+    const [invalidationResult] = await Promise.allSettled([invalidationPromise]);
     assert.equal(invalidationResult.status, "rejected");
     assert.match(errorText(invalidationResult.reason), /PROJECT_AI_PROVIDER_DELEGATION_UPSTREAM_INVALIDATION_REQUIRED/u);
     assert.equal(firstActivationResult.status, "rejected");

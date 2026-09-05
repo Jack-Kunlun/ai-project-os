@@ -560,6 +560,7 @@ test("governance transport binds the current actor to the same project job", asy
           routeVersion: 1,
           routeUpdatedAt: new Date("2026-09-01T00:00:00.000Z"),
           providerConfigurationVersion: 1,
+          credentialSecretFingerprint: "b".repeat(64),
           quotaMultiplierBps: 10_000,
           routeFenceFingerprint: "a".repeat(64),
           providerConnection: {

@@ -99,6 +99,7 @@ function routeSnapshotInput(route: RouteSnapshotInput | undefined) {
       routeFenceFingerprint: null,
     } as const;
   }
+  if (route.source === "personal_delegation") return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
   return {
     routeSource: route.source,
     routeId: route.routeId,
@@ -966,6 +967,10 @@ export async function assertAiOutboundEntitlement(input: Readonly<{
   enforceConcurrency?: boolean;
 }>): Promise<AiOutboundEntitlement> {
   const db = input.db ?? getDb();
+  // Personal control-plane routes can be resolved for evidence construction,
+  // but the platform reservation/ledger path remains platform-only until the
+  // separately gated BYOK dispatcher is delivered.
+  if (input.route.source === "personal_delegation") return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
   if (input.operation !== undefined && input.operation !== input.route.operation) {
     return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
   }

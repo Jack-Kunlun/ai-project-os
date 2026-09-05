@@ -151,6 +151,15 @@ test(
     const legacyReservationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const legacyRouteId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const legacyLedgerId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const legacyGrantId = "10101010-1010-4010-8010-101010101010";
+    const legacyGrantJobId = "20202020-2020-4020-8020-202020202020";
+    const legacyPlatformGrantId = "31313131-3131-4131-8131-313131313131";
+    const legacyPlatformGrantJobId = "32323232-3232-4232-8232-323232323232";
+    const legacyPlatformTokenGrantId = "34343434-3434-4434-8434-343434343434";
+    const legacyPlatformReservationId = "35353535-3535-4535-8535-353535353535";
+    const legacyPlatformAuditId = "36363636-3636-4636-8636-363636363636";
+    const legacyPlatformNegativeReservationId = "37373737-3737-4737-8737-373737373737";
+    const legacyPlatformNegativeAuditId = "38383838-3838-4838-8838-383838383838";
     const postRuntimeRouteId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
     const postRuntimeOutlierRouteId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     const postRuntimeLedgerId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
@@ -290,6 +299,7 @@ export default defineConfig({
       ]);
       const membershipEvidenceMigration = "20260904050000_add_membership_governance_manifest_evidence";
       const runtimeBillingMigration = "20260904070000_add_runtime_ai_grant_billing_fences";
+      const personalRuntimeEvidenceMigration = "20260904110000_add_personal_ai_runtime_evidence";
       const remainingMigrationNames = currentMigrationNames.filter(
         (name) => !legacyMigrationNames.has(name) && !candidateMigrationNames.has(name),
       );
@@ -298,6 +308,12 @@ export default defineConfig({
         remainingMigrationNames.filter((name) => name < membershipEvidenceMigration),
       );
       await deployStagedMigrations(tempRoot, url);
+      await raw.query(
+        `UPDATE "AiProviderConnection"
+            SET "ownershipState" = 'confirmed', "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = $1`,
+        [legacyProviderId],
+      );
 
       // This route was valid under the pre-0700 positive-only multiplier
       // constraint. It is deliberately an outlier so the later migration
@@ -510,8 +526,171 @@ export default defineConfig({
         [legacyLedgerId, userId, legacyTokenGrantId, legacyReservationId],
       );
 
-      await stageMigrations(tempRoot, [runtimeBillingMigration, ...remainingMigrationNames.filter((name) => name > runtimeBillingMigration)]);
+      await stageMigrations(tempRoot, [
+        runtimeBillingMigration,
+        ...remainingMigrationNames.filter((name) => name > runtimeBillingMigration && name < personalRuntimeEvidenceMigration),
+      ]);
       await deployStagedMigrations(tempRoot, url);
+
+      // Seed a pre-1100 platform runtime bundle. The provider and
+      // credential are intentionally rotated below before 1100 is installed;
+      // the migration must preserve this historical evidence rather than
+      // replacing it with today's dimensions or fingerprint.
+      await raw.query(
+        `INSERT INTO "BackgroundJob"
+          ("id", "projectId", "kind", "status", "stage", "payload", "idempotencyKey", "requestedById", "completedAt")
+         VALUES ($1, $2, 'project_brief', 'running', 'dispatch', '{}'::jsonb, $3, $4, NULL)`,
+        [legacyPlatformGrantJobId, projectId, "legacy-platform-grant-job-idempotency", userId],
+      );
+      await raw.query(
+        `INSERT INTO "PlatformTokenGrant"
+          ("id", "userId", "kind", "amount", "remainingTokens", "offerVersion", "issuedById", "issuedAt", "expiresAt", "createdAt", "updatedAt")
+         VALUES ($1, $2, 'manual', 1000, 1000, 'legacy-platform-runtime', $2,
+                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [legacyPlatformTokenGrantId, userId],
+      );
+      await raw.query(
+        `INSERT INTO "WebAiGrant"
+          ("id", "projectId", "operation", "scopeKind", "scopeIds", "manifestFingerprint",
+           "providerConnectionId", "modelId", "consentVersion", "issuedById", "billingMode",
+           "billingUserId", "callKey", "boundJobId", "routeSource", "routeId", "routeVersion",
+           "routeUpdatedAt", "providerConfigurationVersion", "quotaMultiplierBps", "routeFenceFingerprint",
+           "issuedAt", "expiresAt")
+         VALUES ($1, $2, 'embedding', 'query', $3::jsonb, $4, $5, 'embedding-legacy', $6,
+                 $7, 'platform', $7, $8, $9, 'platform_default', $10, 1,
+                 CURRENT_TIMESTAMP, 1, 10000, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 day')`,
+        [
+          legacyPlatformGrantId,
+          projectId,
+          JSON.stringify({ projectId }),
+          "5".repeat(64),
+          legacyProviderId,
+          "legacy-platform-consent",
+          userId,
+          "legacy-platform-grant-call-key",
+          legacyPlatformGrantJobId,
+          legacyRouteId,
+          "6".repeat(64),
+        ],
+      );
+      await raw.query(
+        `INSERT INTO "PlatformTokenReservation"
+          ("id", "userId", "grantId", "webAiGrantId", "webAiGrantReferenceId", "webAiGrantProjectId",
+           "jobId", "providerConnectionId", "callKey", "operation", "modelId", "status",
+           "reservedTokens", "rawEstimatedTokens", "quotaMultiplierBps", "routeSource", "routeId",
+           "routeVersion", "routeUpdatedAt", "providerConfigurationVersion", "routeFenceFingerprint",
+           "expiresAt", "createdAt")
+         VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, 'embedding', 'embedding-legacy', 'reserved',
+                 2, 2, 10000, 'platform_default', $9, 1,
+                 (SELECT "routeUpdatedAt" FROM "WebAiGrant" WHERE "id" = $4), 1, $10,
+                 CURRENT_TIMESTAMP + INTERVAL '1 hour', CURRENT_TIMESTAMP)`,
+        [
+          legacyPlatformReservationId,
+          userId,
+          legacyPlatformTokenGrantId,
+          legacyPlatformGrantId,
+          projectId,
+          legacyPlatformGrantJobId,
+          legacyProviderId,
+          "legacy-platform-reservation-call-key",
+          legacyRouteId,
+          "6".repeat(64),
+        ],
+      );
+      await raw.query(
+        `INSERT INTO "ProviderCallAudit"
+          ("id", "jobId", "webAiGrantId", "webAiGrantReferenceId", "webAiGrantProjectId",
+           "providerConnectionId", "operation", "modelId", "billingMode", "billingUserId", "callKey",
+           "reservationId", "routeSource", "routeId", "routeVersion", "routeUpdatedAt",
+           "providerConfigurationVersion", "quotaMultiplierBps", "routeFenceFingerprint",
+           "credentialSecretFingerprint", "status", "inputTokens", "outputTokens", "usageKnown", "createdAt")
+         VALUES ($1, $2, $3, $3, $4, $5, 'embedding', 'embedding-legacy', 'platform', $6, $7,
+                 $8, 'platform_default', $9, 1,
+                 (SELECT "routeUpdatedAt" FROM "WebAiGrant" WHERE "id" = $3), 1, 10000, $10, $11,
+                 'running', 0, 0, false, CURRENT_TIMESTAMP)`,
+        [
+          legacyPlatformAuditId,
+          legacyPlatformGrantJobId,
+          legacyPlatformGrantId,
+          projectId,
+          legacyProviderId,
+          userId,
+          "legacy-platform-audit-call-key",
+          legacyPlatformReservationId,
+          legacyRouteId,
+          "6".repeat(64),
+          "a".repeat(64),
+        ],
+      );
+      await raw.query(
+        `INSERT INTO "PlatformTokenReservation"
+          ("id", "userId", "grantId", "webAiGrantId", "webAiGrantReferenceId", "webAiGrantProjectId",
+           "jobId", "providerConnectionId", "callKey", "operation", "modelId", "status",
+           "reservedTokens", "rawEstimatedTokens", "quotaMultiplierBps", "routeSource", "routeId",
+           "routeVersion", "routeUpdatedAt", "providerConfigurationVersion", "routeFenceFingerprint",
+           "expiresAt", "createdAt")
+         VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, 'embedding', 'embedding-legacy', 'reserved',
+                 2, 2, 10000, 'platform_default', $9, 1,
+                 (SELECT "routeUpdatedAt" FROM "WebAiGrant" WHERE "id" = $4), 1, $10,
+                 CURRENT_TIMESTAMP + INTERVAL '1 hour', CURRENT_TIMESTAMP)`,
+        [
+          legacyPlatformNegativeReservationId,
+          userId,
+          legacyPlatformTokenGrantId,
+          legacyPlatformGrantId,
+          projectId,
+          legacyPlatformGrantJobId,
+          legacyProviderId,
+          "legacy-platform-negative-reservation-call-key",
+          legacyRouteId,
+          "6".repeat(64),
+        ],
+      );
+      await raw.query(
+        `UPDATE "ExternalCredential"
+            SET "secretFingerprint" = $2, "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = $1`,
+        [legacyCredentialId, "b".repeat(64)],
+      );
+      await raw.query(
+        `UPDATE "AiProviderConnection"
+            SET "embeddingDimensions" = 16, "configurationVersion" = 2, "updatedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = $1`,
+        [legacyProviderId],
+      );
+
+      // This route-bound BYOK grant is valid under the pre-1100 schema. It
+      // must survive as a read-only legacy row; 1100 must not backfill it into
+      // the platform/personal runtime evidence shapes.
+      await raw.query(
+        `INSERT INTO "BackgroundJob"
+          ("id", "projectId", "kind", "status", "stage", "payload", "idempotencyKey", "requestedById", "completedAt")
+         VALUES ($1, $2, 'project_brief', 'succeeded', 'complete', '{}'::jsonb, $3, $4, CURRENT_TIMESTAMP)`,
+        [legacyGrantJobId, projectId, "legacy-grant-job-idempotency", userId],
+      );
+      await raw.query(
+        `INSERT INTO "WebAiGrant"
+          ("id", "projectId", "operation", "scopeKind", "scopeIds", "manifestFingerprint",
+           "providerConnectionId", "modelId", "consentVersion", "issuedById", "billingMode",
+           "billingUserId", "callKey", "boundJobId", "routeSource", "routeUpdatedAt",
+           "providerConfigurationVersion", "quotaMultiplierBps", "routeFenceFingerprint", "issuedAt", "expiresAt")
+         VALUES ($1, $2, 'autoExtract', 'query', $3::jsonb, $4, $5, 'generation-legacy', $6,
+                 $7, 'byok', $7, $8, $9, 'project_override', CURRENT_TIMESTAMP, 1, 10000, $10,
+                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 day')`,
+        [
+          legacyGrantId,
+          projectId,
+          JSON.stringify({ projectId }),
+          "1".repeat(64),
+          legacyProviderId,
+          "legacy-consent",
+          userId,
+          "legacy-grant-call-key",
+          legacyGrantJobId,
+          "2".repeat(64),
+        ],
+      );
+
       const preservedRoute = await raw.query<{ quotaMultiplierBps: number }>(
         `SELECT "quotaMultiplierBps" FROM "PlatformDefaultAiRoute" WHERE "id" = $1`,
         [legacyRouteId],
@@ -533,6 +712,225 @@ export default defineConfig({
         [legacyLedgerId],
       );
       assert.deepEqual(preservedLedger.rows[0], { usageTokens: 10000001 });
+
+      await stageMigrations(tempRoot, [
+        personalRuntimeEvidenceMigration,
+        ...remainingMigrationNames.filter((name) => name > personalRuntimeEvidenceMigration),
+      ]);
+      await deployStagedMigrations(tempRoot, url);
+      const preservedHistoricalPlatformEvidence = await raw.query<{
+        payerKind: string | null;
+        credentialSecretFingerprint: string | null;
+        embeddingDimensions: number | null;
+        maxOutputTokens: number | null;
+        routeFenceFingerprint: string | null;
+        providerConfigurationVersion: number | null;
+      }>(
+        `SELECT "payerKind", "credentialSecretFingerprint", "embeddingDimensions", "maxOutputTokens",
+                "routeFenceFingerprint", "providerConfigurationVersion"
+           FROM "WebAiGrant" WHERE "id" = $1`,
+        [legacyPlatformGrantId],
+      );
+      assert.deepEqual(preservedHistoricalPlatformEvidence.rows[0], {
+        payerKind: null,
+        credentialSecretFingerprint: null,
+        embeddingDimensions: null,
+        maxOutputTokens: null,
+        routeFenceFingerprint: "6".repeat(64),
+        providerConfigurationVersion: 1,
+      });
+      const preservedHistoricalPlatformAudit = await raw.query<{
+        payerKind: string | null;
+        credentialSecretFingerprint: string | null;
+        embeddingDimensions: number | null;
+        maxOutputTokens: number | null;
+      }>(
+        `SELECT "payerKind", "credentialSecretFingerprint", "embeddingDimensions", "maxOutputTokens"
+           FROM "ProviderCallAudit" WHERE "id" = $1`,
+        [legacyPlatformAuditId],
+      );
+      assert.deepEqual(preservedHistoricalPlatformAudit.rows[0], {
+        payerKind: null,
+        credentialSecretFingerprint: "a".repeat(64),
+        embeddingDimensions: null,
+        maxOutputTokens: null,
+      });
+      await raw.query(
+        `UPDATE "ProviderCallAudit"
+            SET "status" = 'succeeded', "providerRequestId" = 'legacy-terminalized',
+                "completedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = $1`,
+        [legacyPlatformAuditId],
+      );
+      await raw.query(
+        `UPDATE "BackgroundJob"
+            SET "status" = 'succeeded', "stage" = 'complete', "completedAt" = CURRENT_TIMESTAMP
+          WHERE "id" = $1`,
+        [legacyPlatformGrantJobId],
+      );
+      const terminalizedHistoricalPlatformAudit = await raw.query<{ status: string; credentialSecretFingerprint: string }>(
+        `SELECT "status", "credentialSecretFingerprint"
+           FROM "ProviderCallAudit" WHERE "id" = $1`,
+        [legacyPlatformAuditId],
+      );
+      assert.deepEqual(terminalizedHistoricalPlatformAudit.rows[0], {
+        status: "succeeded",
+        credentialSecretFingerprint: "a".repeat(64),
+      });
+
+      const preservedLegacyGrant = await raw.query<{
+        billingMode: string;
+        routeSource: string | null;
+        routeUpdatedAt: Date | null;
+        providerConfigurationVersion: number | null;
+        quotaMultiplierBps: number | null;
+        routeFenceFingerprint: string | null;
+        payerKind: string | null;
+        credentialSecretFingerprint: string | null;
+        embeddingDimensions: number | null;
+        maxOutputTokens: number | null;
+      }>(
+        `SELECT "billingMode", "routeSource", "routeUpdatedAt", "providerConfigurationVersion",
+                "quotaMultiplierBps", "routeFenceFingerprint", "payerKind",
+                "credentialSecretFingerprint", "embeddingDimensions", "maxOutputTokens"
+           FROM "WebAiGrant" WHERE "id" = $1`,
+        [legacyGrantId],
+      );
+      assert.equal(preservedLegacyGrant.rows.length, 1);
+      assert.equal(preservedLegacyGrant.rows[0]!.billingMode, "byok");
+      assert.equal(preservedLegacyGrant.rows[0]!.routeSource, "project_override");
+      assert.notEqual(preservedLegacyGrant.rows[0]!.routeUpdatedAt, null);
+      assert.equal(preservedLegacyGrant.rows[0]!.providerConfigurationVersion, 1);
+      assert.equal(preservedLegacyGrant.rows[0]!.quotaMultiplierBps, 10000);
+      assert.equal(preservedLegacyGrant.rows[0]!.routeFenceFingerprint, "2".repeat(64));
+      assert.equal(preservedLegacyGrant.rows[0]!.payerKind, null);
+      assert.equal(preservedLegacyGrant.rows[0]!.credentialSecretFingerprint, null);
+      assert.equal(preservedLegacyGrant.rows[0]!.embeddingDimensions, null);
+      assert.equal(preservedLegacyGrant.rows[0]!.maxOutputTokens, null);
+
+      const newLegacyShapeJobId = "30303030-3030-4030-8030-303030303030";
+      await raw.query(
+        `INSERT INTO "BackgroundJob"
+          ("id", "projectId", "kind", "status", "stage", "payload", "idempotencyKey", "requestedById", "completedAt")
+         VALUES ($1, $2, 'project_brief', 'succeeded', 'complete', '{}'::jsonb, $3, $4, CURRENT_TIMESTAMP)`,
+        [newLegacyShapeJobId, projectId, "new-legacy-shape-idempotency", userId],
+      );
+      await assert.rejects(
+        () => raw.query(
+          `INSERT INTO "WebAiGrant"
+            ("id", "projectId", "operation", "scopeKind", "scopeIds", "manifestFingerprint",
+             "providerConnectionId", "modelId", "consentVersion", "issuedById", "billingMode",
+             "billingUserId", "callKey", "boundJobId", "routeSource", "routeUpdatedAt",
+             "providerConfigurationVersion", "quotaMultiplierBps", "routeFenceFingerprint", "issuedAt", "expiresAt")
+           VALUES ($1, $2, 'autoExtract', 'query', $3::jsonb, $4, $5, 'generation-legacy', $6,
+                   $7, 'byok', $7, $8, $9, 'project_override', CURRENT_TIMESTAMP, 1, 10000, $10,
+                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 day')`,
+          [
+            randomUUID(),
+            projectId,
+            JSON.stringify({ projectId }),
+            "3".repeat(64),
+            legacyProviderId,
+            "legacy-consent",
+            userId,
+            "new-legacy-shape-call-key",
+            newLegacyShapeJobId,
+            "4".repeat(64),
+          ],
+        ),
+        (error: unknown) => errorText(error).includes("new platform grant requires credential fingerprint evidence"),
+        "new legacy/byok route grant shape is rejected",
+      );
+
+      const incompletePlatformGrantJobId = randomUUID();
+      await raw.query(
+        `INSERT INTO "BackgroundJob"
+          ("id", "projectId", "kind", "status", "stage", "payload", "idempotencyKey", "requestedById", "completedAt")
+         VALUES ($1, $2, 'project_brief', 'succeeded', 'complete', '{}'::jsonb, $3, $4, CURRENT_TIMESTAMP)`,
+        [incompletePlatformGrantJobId, projectId, `incomplete-platform-${randomUUID()}`.slice(0, 64), userId],
+      );
+      await assert.rejects(
+        () => raw.query(
+          `INSERT INTO "WebAiGrant"
+            ("id", "projectId", "operation", "scopeKind", "scopeIds", "manifestFingerprint",
+             "providerConnectionId", "modelId", "consentVersion", "issuedById", "billingMode",
+             "billingUserId", "callKey", "boundJobId", "routeSource", "routeId", "routeVersion",
+             "routeUpdatedAt", "providerConfigurationVersion", "quotaMultiplierBps", "routeFenceFingerprint",
+             "issuedAt", "expiresAt")
+           VALUES ($1, $2, 'embedding', 'query', $3::jsonb, $4, $5, 'embedding-legacy', $6,
+                   $7, 'platform', $7, $8, $9, 'platform_default', $10, 1,
+                   CURRENT_TIMESTAMP, 1, 10000, $11, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 day')`,
+          [
+            randomUUID(),
+            projectId,
+            JSON.stringify({ projectId }),
+            "7".repeat(64),
+            legacyProviderId,
+            "legacy-consent",
+            userId,
+            `incomplete-platform-call-${randomUUID()}`.slice(0, 64),
+            incompletePlatformGrantJobId,
+            legacyRouteId,
+            "8".repeat(64),
+          ],
+        ),
+        (error: unknown) => errorText(error).includes("new platform grant requires credential fingerprint evidence"),
+        "new incomplete platform grant shape is rejected",
+      );
+      await assert.rejects(
+        () => raw.query(
+          `INSERT INTO "ProviderCallAudit"
+            ("id", "jobId", "webAiGrantId", "webAiGrantReferenceId", "webAiGrantProjectId",
+             "providerConnectionId", "operation", "modelId", "billingMode", "billingUserId", "callKey",
+             "routeSource", "routeId", "routeVersion", "routeUpdatedAt", "providerConfigurationVersion",
+             "quotaMultiplierBps", "routeFenceFingerprint", "status", "inputTokens", "outputTokens", "usageKnown", "createdAt")
+           VALUES ($1, $2, $3, $3, $4, $5, 'embedding', 'embedding-legacy', 'platform', $6, $7,
+                   'platform_default', $8, 1, CURRENT_TIMESTAMP, 1, 10000, $9,
+                   'running', 0, 0, false, CURRENT_TIMESTAMP)`,
+          [
+            randomUUID(),
+            legacyPlatformGrantJobId,
+            legacyPlatformGrantId,
+            projectId,
+            legacyProviderId,
+            userId,
+            `incomplete-platform-audit-${randomUUID()}`.slice(0, 128),
+            legacyRouteId,
+            "9".repeat(64),
+          ],
+        ),
+        (error: unknown) => errorText(error).includes("provider-call audit grant tuple mismatch"),
+        "new audit inserts cannot use the historical platform grant carve-out",
+      );
+      await assert.rejects(
+        () => raw.query(
+          `INSERT INTO "ProviderCallAudit"
+            ("id", "jobId", "webAiGrantId", "webAiGrantReferenceId", "webAiGrantProjectId",
+             "providerConnectionId", "operation", "modelId", "billingMode", "billingUserId", "callKey",
+             "reservationId", "routeSource", "routeId", "routeVersion", "routeUpdatedAt",
+             "providerConfigurationVersion", "quotaMultiplierBps", "routeFenceFingerprint",
+             "credentialSecretFingerprint", "payerKind", "payerProviderConnectionId",
+             "embeddingDimensions", "maxOutputTokens", "status", "inputTokens", "outputTokens", "usageKnown", "createdAt")
+           VALUES ($1, $2, $3, $3, $4, $5, 'embedding', 'embedding-legacy', 'platform', $6, $7,
+                   $8, 'platform_default', $9, 1, CURRENT_TIMESTAMP, 1, 10000, $10, $11,
+                   'platform_caller', $5, 16, 128, 'running', 0, 0, false, CURRENT_TIMESTAMP)`,
+          [
+            legacyPlatformNegativeAuditId,
+            legacyPlatformGrantJobId,
+            legacyPlatformGrantId,
+            projectId,
+            legacyProviderId,
+            userId,
+            `complete-historical-audit-${randomUUID()}`.slice(0, 128),
+            legacyPlatformNegativeReservationId,
+            legacyRouteId,
+            "6".repeat(64),
+            "b".repeat(64),
+          ],
+        ),
+        (error: unknown) => errorText(error).includes("provider-call audit grant tuple mismatch"),
+        "complete new audit evidence cannot target a historical grant",
+      );
 
       // A bounded row remains writable after the migration, but neither a
       // fresh outlier nor an update from the bounded domain may create a new

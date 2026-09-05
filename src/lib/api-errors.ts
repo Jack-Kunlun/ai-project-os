@@ -558,6 +558,8 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_ROUTE_INVALID: [409, "项目模型路由当前不可用，请重新验证配置"],
       PLATFORM_ROUTE_UNAVAILABLE: [409, "平台默认模型路由当前不可用，请联系管理员"],
       AI_PROVIDER_CONFIGURATION_DRIFT: [409, "模型供应商配置已变化，请重新验证平台默认路由"],
+      PERSONAL_ROUTE_UNAVAILABLE: [409, "个人模型路由当前不可用，请重新确认委托配置"],
+      AI_ROUTE_LOCK_BUSY: [409, "模型路由正在变更，请稍后重试"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

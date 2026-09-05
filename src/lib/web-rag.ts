@@ -272,7 +272,7 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
       },
     }),
     resolveEffectiveAiRoute(projectId, "embedding", db).catch((error: unknown) => {
-      if (error instanceof Error && "code" in error && (error as { code?: unknown }).code === "PLATFORM_ROUTE_UNAVAILABLE") return null;
+      if (error instanceof Error && "code" in error && ["PLATFORM_ROUTE_UNAVAILABLE", "PROJECT_ROUTE_INVALID", "PERSONAL_ROUTE_UNAVAILABLE", "AI_PROVIDER_CONFIGURATION_DRIFT", "AI_ROUTE_LOCK_BUSY"].includes((error as { code?: unknown }).code as string)) return null;
       throw error;
     }),
     getProjectMemoryInputManifest(projectId, actor, db),
@@ -283,6 +283,7 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
     pointer.generation.status !== "complete" ||
     pointer.generation.records.length === 0 ||
     route === null ||
+    route.source === "personal_delegation" ||
     route.providerConnection.status !== "verified" ||
     route.providerConnectionId !== pointer.generation.providerConnectionId ||
     route.modelId !== pointer.generation.modelId ||
@@ -366,6 +367,7 @@ export async function runSemanticSearchJob(input: Readonly<{
     resolveEffectiveAiRoute(input.projectId, "embedding", db),
     getActiveMemoryIndex(input.projectId, input.requestedBy, db),
   ]);
+  if (route.source === "personal_delegation") return fail("SEMANTIC_INDEX_NOT_READY");
   const manifest = manifestFingerprint({
     questionHash: sha256(question),
     indexGenerationId: index.id,
@@ -440,6 +442,9 @@ export async function runRagAnswerJob(input: Readonly<{
     resolveEffectiveAiRoute(input.projectId, "generateWithContext", db),
     getActiveMemoryIndex(input.projectId, input.requestedBy, db),
   ]);
+  if (embeddingRoute.source === "personal_delegation" || generationRoute.source === "personal_delegation") {
+    return fail("SEMANTIC_INDEX_NOT_READY");
+  }
   const manifest = manifestFingerprint({
     questionHash: sha256(question),
     indexGenerationId: index.id,

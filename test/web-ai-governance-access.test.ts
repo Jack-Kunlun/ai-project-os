@@ -148,6 +148,7 @@ test("auditedProviderCall releases a reservation when the actor is revoked befor
     providerConfigurationVersion: 1,
     quotaMultiplierBps: 10_000,
     routeFenceFingerprint: "a".repeat(64),
+    credentialSecretFingerprint: "b".repeat(64),
     providerConnection: {
       id: PROVIDER_ID,
       status: "verified",

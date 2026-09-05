@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
 import { invokeChatCompletion, ProviderTransportError } from "../src/lib/ai-providers";
-import { issueVerifiedSignupGrant, lockMembershipUser } from "../src/lib/ai-entitlements";
+import { issueVerifiedSignupGrant, lockMembershipUser, reservePlatformTokens } from "../src/lib/ai-entitlements";
 import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
 import { deleteArchivedProject, updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { claimProjectJob } from "../src/lib/project-workflow";
@@ -339,6 +339,84 @@ test(
       assert.equal(audit.status, "failed");
     } finally {
       globalThis.fetch = previousFetch;
+    }
+  },
+);
+
+test(
+  "platform provider-call evidence rejects model, dimensions, and max-output drift",
+  { skip: !shouldRun ? "WEB_AI_GOVERNANCE_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const cases = [
+      { label: "model", override: { modelId: "gpt-4.1-mini" }, immediate: false },
+      { label: "dimensions", override: { embeddingDimensions: 1536 }, immediate: true },
+      { label: "max-output", override: { maxOutputTokens: 63 }, immediate: true },
+    ] as const;
+
+    for (const currentCase of cases) {
+      const fixture = await createDispatchFixture();
+      try {
+        const callKey = stableAiCallKey(fixture.jobId, "autoExtract", `audit-drift-${currentCase.label}`);
+        const reservation = await reservePlatformTokens({
+          userId: fixture.userId,
+          jobId: fixture.jobId,
+          providerConnectionId: fixture.providerId,
+          webAiGrantId: fixture.grantId,
+          webAiGrantProjectId: fixture.projectId,
+          callKey,
+          operation: "autoExtract",
+          modelId: fixture.route.modelId,
+          rawEstimatedTokens: 1,
+          routeSnapshot: fixture.route,
+        }, fixture.db);
+        const grant = await fixture.db.webAiGrant.findUniqueOrThrow({ where: { id: fixture.grantId } });
+        const auditData = {
+          id: randomUUID(),
+          jobId: fixture.jobId,
+          webAiGrantId: grant.id,
+          webAiGrantReferenceId: grant.id,
+          webAiGrantProjectId: grant.projectId,
+          providerConnectionId: grant.providerConnectionId,
+          operation: grant.operation,
+          modelId: grant.modelId,
+          billingMode: grant.billingMode,
+          billingUserId: grant.billingUserId,
+          callKey,
+          reservationId: reservation.reservationId,
+          routeSource: grant.routeSource,
+          routeId: grant.routeId,
+          routeVersion: grant.routeVersion,
+          routeUpdatedAt: grant.routeUpdatedAt,
+          providerConfigurationVersion: grant.providerConfigurationVersion,
+          quotaMultiplierBps: grant.quotaMultiplierBps,
+          routeFenceFingerprint: grant.routeFenceFingerprint,
+          credentialSecretFingerprint: grant.credentialSecretFingerprint,
+          payerKind: grant.payerKind,
+          payerProviderConnectionId: grant.payerProviderConnectionId,
+          embeddingDimensions: grant.embeddingDimensions,
+          maxOutputTokens: grant.maxOutputTokens,
+          status: "running",
+          ...currentCase.override,
+        };
+        await assert.rejects(
+          () => fixture.db.$transaction(async (tx) => {
+            await tx.providerCallAudit.create({ data: auditData });
+            if (currentCase.immediate) {
+              await tx.$executeRawUnsafe('SET CONSTRAINTS "ProviderCallAudit_runtime_evidence_guard" IMMEDIATE');
+            }
+          }),
+          (error: unknown) => {
+            const text = error instanceof Error ? error.message : String(error);
+            return text.includes("provider-call audit grant tuple mismatch")
+              || text.includes("new platform audit requires credential fingerprint evidence")
+              || text.includes("ProviderCallAudit_runtime_binding_check")
+              || text.includes("ProviderCallAudit_runtime_evidence_guard");
+          },
+          `platform audit ${currentCase.label} drift`,
+        );
+      } finally {
+        await cleanupDispatchFixture(fixture);
+      }
     }
   },
 );

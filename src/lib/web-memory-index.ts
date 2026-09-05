@@ -684,11 +684,12 @@ async function readEmbeddingRoute(projectId: string, db: MemoryIndexDb): Promise
   } catch (error) {
     if (error instanceof Error && "code" in error) {
       const code = (error as { code?: unknown }).code;
-      if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID") return fail("MEMORY_INDEX_ROUTE_MISSING");
+      if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID" || code === "PERSONAL_ROUTE_UNAVAILABLE" || code === "AI_ROUTE_LOCK_BUSY") return fail("MEMORY_INDEX_ROUTE_MISSING");
       if (code === "AI_PROVIDER_CONFIGURATION_DRIFT") return fail("MEMORY_INDEX_PROVIDER_UNAVAILABLE");
     }
     throw error;
   }
+  if (route.source === "personal_delegation") return fail("MEMORY_INDEX_ROUTE_MISSING");
   if (route.providerConnection.status !== "verified" || route.providerConnection.disabledAt !== null) return fail("MEMORY_INDEX_PROVIDER_UNAVAILABLE");
   if (route.embeddingDimensions === null) return fail("MEMORY_INDEX_INPUT_INVALID");
   return route;
@@ -911,7 +912,7 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
     })).catch((error: unknown) => {
       if (error instanceof Error && "code" in error) {
         const code = (error as { code?: unknown }).code;
-        if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID" || code === "AI_PROVIDER_CONFIGURATION_DRIFT") return null;
+        if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID" || code === "PERSONAL_ROUTE_UNAVAILABLE" || code === "AI_PROVIDER_CONFIGURATION_DRIFT" || code === "AI_ROUTE_LOCK_BUSY") return null;
       }
       throw error;
     }),

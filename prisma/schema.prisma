@@ -343,6 +343,14 @@ enum AiBillingMode {
   legacy
 }
 
+// Runtime payer evidence is intentionally separate from the billing mode.
+// Legacy rows keep this nullable; new platform and personal runtime evidence
+// must use one of these two explicit values.
+enum AiRuntimePayerKind {
+  platformCaller           @map("platform_caller")
+  personalConnectionOwner @map("personal_connection_owner")
+}
+
 enum WebAiScopeKind {
   projectSources      @map("project_sources")
   projectAssets       @map("project_assets")
@@ -4691,6 +4699,29 @@ model WebAiGrant {
   providerConfigurationVersion Int?
   quotaMultiplierBps    Int?
   routeFenceFingerprint String?             @db.Char(64)
+  personalDelegationId  String?             @db.Uuid
+  personalDelegationVersion Int?
+  personalDelegationFingerprint String?     @db.Char(64)
+  effectiveRouteSelectionId String?         @db.Uuid
+  effectiveRouteSelectionVersion Int?
+  effectiveRouteSelectionUpdatedAt DateTime?
+  payerKind             AiRuntimePayerKind?
+  payerProviderConnectionId String?         @db.Uuid
+  ownerProjectMembershipId String?           @db.Uuid
+  ownerMembershipCreatedAt DateTime?
+  ownerSubscriptionId   String?             @db.Uuid
+  ownerSubscriptionVersion Int?
+  ownerSubscriptionStartsAt DateTime?
+  ownerSubscriptionExpiresAt DateTime?
+  projectConfirmedById String?               @db.Uuid
+  projectConfirmedProjectMembershipId String? @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime?
+  selectedById          String?               @db.Uuid
+  selectedByProjectMembershipId String?       @db.Uuid
+  selectedByMembershipCreatedAt DateTime?
+  credentialSecretFingerprint String?        @db.Char(64)
+  embeddingDimensions   Int?
+  maxOutputTokens       Int?
   issuedAt             DateTime             @default(now())
   expiresAt            DateTime
   revokedAt            DateTime?
@@ -4709,6 +4740,7 @@ model WebAiGrant {
   @@index([providerConnectionId])
   @@index([billingUserId, issuedAt])
   @@index([callKey])
+  @@index([projectId, operation, personalDelegationId, effectiveRouteSelectionId], map: "WebAiGrant_personal_runtime_evidence_idx")
 }
 
 model BackgroundJob {
@@ -5230,6 +5262,7 @@ model MemoryIndexGeneration {
   expectedEmbeddingRouteVersion Int?
   expectedEmbeddingProviderConfigurationVersion Int?
   expectedEmbeddingRouteFenceFingerprint String?                @db.Char(64)
+  embeddingWebAiGrantId           String?                       @db.Uuid
   expectedInputCount              Int                         @default(0)
   generatedRecordCount            Int                         @default(0)
   reusedRecordCount               Int                         @default(0)
@@ -5259,6 +5292,7 @@ model MemoryIndexGeneration {
   @@index([projectId, expectedActiveIndexGenerationId])
   @@index([projectId, jobId])
   @@index([projectId, expectedEmbeddingRouteSource, expectedEmbeddingRouteVersion])
+  @@index([embeddingWebAiGrantId], map: "MemoryIndexGeneration_embeddingWebAiGrantId_idx")
 }
 
 model MemoryIndexPointer {
@@ -5590,6 +5624,28 @@ model ProviderCallAudit {
   quotaMultiplierBps   Int?
   routeFenceFingerprint String?             @db.Char(64)
   credentialSecretFingerprint String?       @db.Char(64)
+  personalDelegationId  String?             @db.Uuid
+  personalDelegationVersion Int?
+  personalDelegationFingerprint String?     @db.Char(64)
+  effectiveRouteSelectionId String?         @db.Uuid
+  effectiveRouteSelectionVersion Int?
+  effectiveRouteSelectionUpdatedAt DateTime?
+  payerKind             AiRuntimePayerKind?
+  payerProviderConnectionId String?         @db.Uuid
+  ownerProjectMembershipId String?           @db.Uuid
+  ownerMembershipCreatedAt DateTime?
+  ownerSubscriptionId   String?             @db.Uuid
+  ownerSubscriptionVersion Int?
+  ownerSubscriptionStartsAt DateTime?
+  ownerSubscriptionExpiresAt DateTime?
+  projectConfirmedById String?               @db.Uuid
+  projectConfirmedProjectMembershipId String? @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime?
+  selectedById          String?               @db.Uuid
+  selectedByProjectMembershipId String?       @db.Uuid
+  selectedByMembershipCreatedAt DateTime?
+  embeddingDimensions   Int?
+  maxOutputTokens       Int?
   status               String               @db.VarChar(32)
   safeErrorCode        String?              @db.VarChar(64)
   providerRequestId    String?              @db.VarChar(256)
@@ -5610,5 +5666,6 @@ model ProviderCallAudit {
   @@index([billingUserId, createdAt])
   @@index([callKey])
   @@index([reservationId])
+  @@index([webAiGrantReferenceId, personalDelegationId, effectiveRouteSelectionId], map: "ProviderCallAudit_personal_runtime_evidence_idx")
   @@unique([jobId, callKey])
 }

@@ -12,6 +12,10 @@ const safetySwitchMigration = readFileSync(
   "prisma/migrations/20260904100000_allow_delegation_owner_safety_switch/migration.sql",
   "utf8",
 );
+const personalMemoryInvalidationMigration = readFileSync(
+  "prisma/migrations/20260904120000_harden_personal_memory_runtime_invalidation/migration.sql",
+  "utf8",
+);
 
 test("personal project model delegation has an independent schema surface", () => {
   assert.match(schema, /enum ProjectAiProviderDelegationStatus/u);
@@ -140,4 +144,22 @@ test("owner safety switch is a narrow audited forward migration", () => {
   assert.match(safetySwitchMigration, /delegation_audit\."transactionId" = txid_current\(\)/u);
   assert.match(safetySwitchMigration, /PROJECT_AI_EFFECTIVE_ROUTE_SELECTION_OWNER_INVALID/u);
   assert.doesNotMatch(safetySwitchMigration, /CREATE TABLE/u);
+});
+
+test("latest selection guard preserves the owner switch while adding archive handling", () => {
+  const selectionGuard = personalMemoryInvalidationMigration.match(
+    /CREATE OR REPLACE FUNCTION "project_ai_effective_route_selection_integrity_guard"\(\)[\s\S]*?\n\$\$;/u,
+  )?.[0];
+  assert.ok(selectionGuard);
+  assert.match(selectionGuard, /owner_switch_valid boolean := FALSE/u);
+  assert.match(selectionGuard, /OLD\."source" = 'personal_delegation'/u);
+  assert.match(selectionGuard, /NEW\."source" = 'platform_default'/u);
+  assert.match(selectionGuard, /delegation\."status" = 'revoked'/u);
+  assert.match(selectionGuard, /delegation_owner_revocation_explicit_platform_switch/u);
+  assert.match(selectionGuard, /selection_audit\."transactionId" = txid_current\(\)/u);
+  assert.match(selectionGuard, /delegation_audit\."transactionId" = txid_current\(\)/u);
+  assert.match(selectionGuard, /project_row\."archivedAt" IS NULL/u);
+  assert.match(selectionGuard, /ProjectLifecycleRevision/u);
+  assert.match(selectionGuard, /IF NOT owner_valid AND NOT owner_switch_valid THEN/u);
+  assert.match(selectionGuard, /NEW\."source" = 'platform_default'[\s\S]*?currentArchivedAt/u);
 });

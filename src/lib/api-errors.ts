@@ -50,6 +50,7 @@ import { EffectiveAiRouteError } from "@/lib/effective-ai-route";
 import { PersonalProviderServiceError } from "@/lib/personal-ai-provider-service";
 import { ProjectAiProviderDelegationServiceError } from "@/lib/project-ai-provider-delegation-service";
 import { ProjectGitRepositoryDelegationServiceError } from "@/lib/project-git-repository-delegation-service";
+import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-runtime-service";
 
 export type ApiErrorBody = {
   error: {
@@ -553,6 +554,24 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_GIT_REPOSITORY_DELEGATION_EXPIRED: [410, "项目 Git 委托已经过期，请重新创建"],
     };
     const [status, message] = mapping[error.code] ?? [500, "项目 Git 委托处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof ProjectDelegatedGitRuntimeError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PROJECT_GIT_MANUAL_INVALID_INPUT: [400, "手动 Git 读取请求无效"],
+      PROJECT_GIT_MANUAL_NOT_FOUND: [404, "项目 Git 手动读取记录不存在"],
+      PROJECT_GIT_MANUAL_FORBIDDEN: [403, "无权执行该项目 Git 手动读取"],
+      PROJECT_GIT_MANUAL_MEMBERSHIP_REQUIRED: [403, "需要明确的项目编辑成员资格"],
+      PROJECT_GIT_MANUAL_PROJECT_ARCHIVED: [409, "已归档项目不能执行 Git 手动读取"],
+      PROJECT_GIT_MANUAL_INELIGIBLE: [409, "项目 Git 委托当前不可用于手动读取"],
+      PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE: [409, "个人 Git 连接当前不可用或证据已变化"],
+      PROJECT_GIT_MANUAL_NETWORK_CHANGED: [409, "Git 服务解析地址已变化，请重新确认连接"],
+      PROJECT_GIT_MANUAL_CONFLICT: [409, "项目 Git 手动读取正在被其他操作更新，请稍后重试"],
+      PROJECT_GIT_MANUAL_RUN_FAILED: [502, "Git 手动读取失败"],
+      PROJECT_GIT_MANUAL_RUN_UNKNOWN: [503, "Git 手动读取结果待核对，不能自动重试"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "项目 Git 手动读取失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

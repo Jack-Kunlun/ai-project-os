@@ -791,6 +791,41 @@ enum ProjectGitRepositoryDelegationAuditAction {
   expired
 }
 
+// The manual runtime has an independent lifecycle.  It must not reuse the
+// legacy BackgroundJob/Git snapshot path, which remains frozen.
+enum ProjectGitRepositoryManualRunStatus {
+  queued
+  running
+  succeeded
+  failed
+  unknown
+}
+
+enum ProjectGitRepositoryManualRunStage {
+  queued
+  admitted
+  fetching
+  validating
+  publishing
+  terminal
+}
+
+enum ProjectGitRepositoryManualRunDispatchState {
+  pending
+  dispatched
+  acknowledged
+}
+
+enum ProjectGitRepositoryManualRunAuditAction {
+  requested
+  admitted
+  dispatched
+  succeeded
+  failed
+  unknown
+  conflict
+}
+
 enum AiRunStatus {
   queued
   running
@@ -1517,6 +1552,142 @@ model ProjectGitRepositoryDelegationAudit {
   @@index([projectId, createdAt])
   @@index([delegationId, createdAt])
   @@index([transactionId, createdAt])
+}
+
+// One-shot, manually requested read-only execution.  Foreign-key evidence is
+// installed by the forward migration; the scalar-only Prisma shape is
+// deliberate so deleting a connection cannot erase this historical run/audit
+// record or force the runtime to depend on a legacy relation.
+model ProjectGitRepositoryManualRun {
+  id                                  String                                      @id @default(uuid()) @db.Uuid
+  projectId                           String                                      @db.Uuid
+  delegationId                        String                                      @db.Uuid
+  requestedById                       String                                      @db.Uuid
+  requestedByProjectMembershipId     String                                      @db.Uuid
+  requestedByMembershipCreatedAt      DateTime
+  clientRequestKey                    String                                      @db.Uuid
+  status                              ProjectGitRepositoryManualRunStatus        @default(queued)
+  stage                               ProjectGitRepositoryManualRunStage         @default(queued)
+  dispatchState                       ProjectGitRepositoryManualRunDispatchState  @default(pending)
+  failureCode                         String?                                     @db.VarChar(64)
+  result                              Json?                                       @db.JsonB
+  delegationVersion                   Int
+  delegationFingerprint               String                                      @db.Char(64)
+  connectionOwnerId                   String                                      @db.Uuid
+  ownerProjectMembershipId            String                                      @db.Uuid
+  ownerMembershipCreatedAt            DateTime
+  projectConfirmedById                String                                      @db.Uuid
+  projectConfirmedProjectMembershipId String                                      @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime
+  connectionConfigurationVersion      Int
+  resolvedAddressFingerprint          String                                      @db.Char(64)
+  credentialFingerprint               String                                      @db.Char(64)
+  repositoryPath                      String                                      @db.VarChar(768)
+  trackedRef                          String                                      @db.VarChar(255)
+  includeRoots                        Json                                        @db.JsonB
+  softExcludePatterns                 Json                                        @db.JsonB
+  role                                ProjectRepositoryRole
+  requiredForProjectSnapshot          Boolean
+  codeEnabled                         Boolean
+  metadataEnabled                     Boolean
+  manualSyncAllowed                   Boolean
+  automationAllowed                   Boolean
+  frozenCommitSha                     String?                                     @db.Char(64)
+  manifestFingerprint                 String?                                     @db.Char(64)
+  fileCount                           Int                                         @default(0)
+  decodedTextBytes                    Int                                         @default(0)
+  createdAt                           DateTime                                    @default(now()) @db.Timestamptz(3)
+  startedAt                           DateTime?                                   @db.Timestamptz(3)
+  completedAt                         DateTime?                                   @db.Timestamptz(3)
+
+  @@unique([delegationId, clientRequestKey])
+  @@unique([projectId, id])
+  @@index([delegationId, status, createdAt])
+  @@index([projectId, createdAt])
+  @@index([requestedById, createdAt])
+}
+
+model ProjectGitRepositoryManualRunEntry {
+  id                    String   @id @default(uuid()) @db.Uuid
+  projectId             String   @db.Uuid
+  runId                 String   @db.Uuid
+  delegationId          String   @db.Uuid
+  delegationVersion     Int
+  delegationFingerprint String   @db.Char(64)
+  projectSourceId       String   @db.Uuid
+  ordinal               Int
+  normalizedPath        String   @db.VarChar(1024)
+  blobOid               String   @db.VarChar(128)
+  contentHash           String   @db.Char(64)
+  contentBytes          Int
+  lineCount             Int
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+
+  @@unique([projectId, id])
+  @@unique([runId, normalizedPath])
+  @@unique([runId, ordinal])
+  @@index([projectId, projectSourceId])
+  @@index([delegationId, createdAt])
+}
+
+model ProjectGitRepositoryManualPointer {
+  projectId             String   @db.Uuid
+  delegationId          String   @db.Uuid
+  runId                 String   @db.Uuid
+  delegationVersion     Int
+  delegationFingerprint String   @db.Char(64)
+  frozenCommitSha       String   @db.Char(64)
+  manifestFingerprint   String   @db.Char(64)
+  publishedAt           DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+
+  @@id([projectId, delegationId])
+  @@unique([projectId, runId])
+  @@index([delegationId, publishedAt])
+}
+
+// This is append-only scalar evidence.  It deliberately has no foreign keys
+// so a later connection deletion cannot erase the execution audit.
+model ProjectGitRepositoryManualRunAudit {
+  id                                  String                                      @id @default(uuid()) @db.Uuid
+  runId                               String                                      @db.Uuid
+  projectId                           String                                      @db.Uuid
+  delegationId                        String                                      @db.Uuid
+  action                              ProjectGitRepositoryManualRunAuditAction
+  statusBefore                       ProjectGitRepositoryManualRunStatus?
+  statusAfter                        ProjectGitRepositoryManualRunStatus
+  dispatchState                       ProjectGitRepositoryManualRunDispatchState
+  actorId                             String?                                     @db.Uuid
+  requestedById                       String                                      @db.Uuid
+  requestedByProjectMembershipId       String                                      @db.Uuid
+  requestedByMembershipCreatedAt      DateTime
+  connectionOwnerId                   String                                      @db.Uuid
+  ownerProjectMembershipId            String                                      @db.Uuid
+  ownerMembershipCreatedAt            DateTime
+  projectConfirmedById                String                                      @db.Uuid
+  projectConfirmedProjectMembershipId String                                      @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime
+  reason                              String                                      @db.VarChar(500)
+  delegationVersion                   Int
+  delegationFingerprint               String                                      @db.Char(64)
+  connectionConfigurationVersion      Int
+  resolvedAddressFingerprint          String                                      @db.Char(64)
+  credentialFingerprint               String                                      @db.Char(64)
+  role                                ProjectRepositoryRole
+  requiredForProjectSnapshot          Boolean
+  codeEnabled                         Boolean
+  metadataEnabled                     Boolean
+  manualSyncAllowed                   Boolean
+  automationAllowed                   Boolean
+  commitSha                           String?                                     @db.Char(64)
+  manifestFingerprint                 String?                                     @db.Char(64)
+  transitionAt                        DateTime                                    @default(now()) @db.Timestamptz(3)
+  transactionId                       BigInt                                      @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt                           DateTime                                    @default(now()) @db.Timestamptz(3)
+
+  @@index([runId, createdAt])
+  @@index([delegationId, createdAt])
+  @@index([projectId, createdAt])
 }
 
 model GitRepositorySnapshot {

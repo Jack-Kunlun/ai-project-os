@@ -72,7 +72,7 @@ async function assertProjectReadyForDeletion(
   projectId: string,
   now: Date,
 ): Promise<void> {
-  const [jobs, automationRuns, actions, extractionRuns, uploadReservations, uploadAdmissions] = await Promise.all([
+  const [jobs, automationRuns, actions, extractionRuns, manualRuns, uploadReservations, uploadAdmissions] = await Promise.all([
     tx.backgroundJob.count({
       where: {
         projectId,
@@ -85,10 +85,11 @@ async function assertProjectReadyForDeletion(
     tx.automationRun.count({ where: { projectId, status: { in: ["queued", "running", "waitingConsent"] } } }),
     tx.projectAction.count({ where: { projectId, status: { in: ["waitingApproval", "queued", "running"] } } }),
     tx.projectAssetExtractionRun.count({ where: { projectId, status: { in: ["queued", "running", "unknown"] } } }),
+    tx.projectGitRepositoryManualRun.count({ where: { projectId, status: { in: ["queued", "running"] } } }),
     tx.projectAssetUploadReservation.count({ where: { projectId, leaseExpiresAt: { gt: now } } }),
     tx.projectAssetUploadAdmission.count({ where: { projectId, releasedAt: null, leaseExpiresAt: { gt: now } } }),
   ]);
-  if (jobs > 0 || automationRuns > 0 || actions > 0 || extractionRuns > 0) {
+  if (jobs > 0 || automationRuns > 0 || actions > 0 || extractionRuns > 0 || manualRuns > 0) {
     throw new ProjectLifecycleError("PROJECT_HAS_UNRESOLVED_JOBS");
   }
   if (uploadReservations > 0 || uploadAdmissions > 0) {
@@ -143,9 +144,12 @@ export async function updateProjectLifecycle(
               ],
             },
           });
+          const unresolvedManualRuns = await tx.projectGitRepositoryManualRun.count({
+            where: { projectId: admission.project.id, status: { in: ["queued", "running"] } },
+          });
           const runningAutomations = await tx.automationRun.count({ where: { projectId: admission.project.id, status: "running" } });
           const runningActions = await tx.projectAction.count({ where: { projectId: admission.project.id, status: "running" } });
-          if (unresolvedJobs > 0 || runningAutomations > 0 || runningActions > 0) throw new ProjectLifecycleError("PROJECT_HAS_UNRESOLVED_JOBS");
+          if (unresolvedJobs > 0 || unresolvedManualRuns > 0 || runningAutomations > 0 || runningActions > 0) throw new ProjectLifecycleError("PROJECT_HAS_UNRESOLVED_JOBS");
         } else if (current.archivedAt === null) {
           throw new ProjectLifecycleError("PROJECT_ALREADY_ACTIVE");
         }

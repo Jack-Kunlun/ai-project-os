@@ -34,6 +34,30 @@ test("lifecycle and export audit tables are constrained and immutable", async ()
   assert.doesNotMatch(deletionMigration, /projectName|contentText|storageKey/u);
 });
 
+test("project lifecycle blocks live delegated Git manual runs", async () => {
+  const source = await readFile("src/lib/project-lifecycle.ts", "utf8");
+  assert.match(source, /projectGitRepositoryManualRun\.count/u);
+  assert.match(source, /status:\s*\{\s*in:\s*\["queued",\s*"running"\]/u);
+  assert.match(source, /PROJECT_HAS_UNRESOLVED_JOBS/u);
+});
+
+test("delegated Git runtime keeps connection infrastructure out of project projections", async () => {
+  const source = await readFile("src/lib/project-delegated-git-runtime-service.ts", "utf8");
+  const migration = await readFile("prisma/migrations/20260904160000_add_project_git_manual_runtime/migration.sql", "utf8");
+  const projection = source.slice(source.indexOf("function publicRun"), source.indexOf("type AdmissionConnection"));
+  assert.doesNotMatch(projection, /baseUrl|username|tlsCaCertificate|sshKnownHost|externalRef/u);
+  assert.match(source, /externalRef: null/u);
+  const admitRun = source.slice(source.indexOf("async function admitRun"), source.indexOf("async function loadFreshConnection"));
+  assert.match(admitRun, /replayExistingRunInTransaction/u);
+  assert.doesNotMatch(admitRun, /if \(existing !== null\) return \{ run: existing, claimed: false \}/u);
+  assert.match(admitRun, /isPrismaCode\(error, "P2002"\)[\s\S]*replayExistingRun/u);
+  const successGuard = migration.slice(
+    migration.indexOf('CREATE OR REPLACE FUNCTION "project_git_manual_runtime_success_guard"'),
+    migration.indexOf('CREATE CONSTRAINT TRIGGER "ProjectGitRepositoryManualRun_success_guard"'),
+  );
+  assert.match(successGuard, /pg_advisory_xact_lock\(hashtextextended\('ai-project-git-repository-delegation-global', 0\)\)/u);
+});
+
 test("all project mutation routes reject archived projects except bounded lifecycle and export", async () => {
   const root = "src/app/api/projects/[projectId]";
   const entries = await readdir(root, { recursive: true });
@@ -73,6 +97,7 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/project-confirmation/route.ts",
     "src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/rejection/route.ts",
     "src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/revocation/route.ts",
+    "src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/manual-sync/route.ts",
     "src/app/api/projects/[projectId]/ai-effective-route-selections/[operation]/route.ts",
   ]);
   for (const entry of entries.filter((value) => value.endsWith("route.ts"))) {

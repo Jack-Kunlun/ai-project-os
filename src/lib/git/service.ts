@@ -30,6 +30,7 @@ import {
   canonicalSshKnownHost,
   canonicalTlsCaCertificate,
   canonicalTrackedRef,
+  type GitEndpointResolution,
   GitSafetyError,
   resolveGitEndpoint,
 } from "./safety";
@@ -242,18 +243,18 @@ const projectRepositoryLinkSelect = {
   },
 } satisfies Prisma.ProjectGitRepositoryLinkSelect;
 
-type ConnectionWithSecret = Prisma.GitConnectionGetPayload<{
+export type GitConnectionWithSecret = Prisma.GitConnectionGetPayload<{
   include: { credential: true };
 }>;
 
-type ScannedFile = Readonly<{
+export type GitScannedFile = Readonly<{
   path: string;
   blobOid: string;
   contentText: string;
   contentHash: string;
   contentBytes: number;
   lineCount: number;
-  externalRef: string;
+  externalRef: string | null;
 }>;
 
 function fail(code: GitServiceErrorCode): never {
@@ -289,7 +290,7 @@ function credentialAuthKind(value: GitAuthKind): Exclude<GitAuthKind, "none"> {
 }
 
 async function loadCredential(
-  connection: ConnectionWithSecret,
+  connection: GitConnectionWithSecret,
   db: PrismaClient,
   expectedSecretFingerprint?: string,
 ): Promise<GitCredentialPayload | null> {
@@ -301,7 +302,7 @@ async function loadCredential(
   );
 }
 
-function defaultUsername(connection: Pick<ConnectionWithSecret, "providerKind" | "authKind" | "username">): string | null {
+function defaultUsername(connection: Pick<GitConnectionWithSecret, "providerKind" | "authKind" | "username">): string | null {
   if (connection.username !== null) return connection.username;
   if (connection.authKind === "token") {
     if (connection.providerKind === "github") return "x-access-token";
@@ -310,7 +311,7 @@ function defaultUsername(connection: Pick<ConnectionWithSecret, "providerKind" |
   return connection.authKind === "none" ? null : "git";
 }
 
-async function loadOwnedConnection(connectionId: string, actor: Pick<AppUser, "id">, db: PrismaClient): Promise<ConnectionWithSecret> {
+async function loadOwnedConnection(connectionId: string, actor: Pick<AppUser, "id">, db: PrismaClient): Promise<GitConnectionWithSecret> {
   const connection = await db.gitConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
     include: { credential: true },
@@ -321,7 +322,7 @@ async function loadOwnedConnection(connectionId: string, actor: Pick<AppUser, "i
 }
 
 async function probeRepository(
-  connection: ConnectionWithSecret,
+  connection: GitConnectionWithSecret,
   repositoryPath: string,
   trackedRef: string,
   options: Readonly<{ pinExistingAddress: boolean; db: PrismaClient }>,
@@ -353,7 +354,7 @@ async function probeRepository(
   return Object.freeze({ commitSha, addressFingerprint: resolution.fingerprint });
 }
 
-function canonicalWebUrl(value: string | null | undefined, connection: ConnectionWithSecret, repositoryPath: string): string {
+function canonicalWebUrl(value: string | null | undefined, connection: GitConnectionWithSecret, repositoryPath: string): string {
   const candidate = value ?? (() => {
     const base = new URL(connection.baseUrl);
     return `https://${base.hostname}${base.pathname.replace(/\/$/u, "")}/${repositoryPath}`;
@@ -401,7 +402,7 @@ function isIncludedPath(path: string, roots: readonly string[], excludes: readon
   return !excludes.some((pattern) => pattern.test(path));
 }
 
-function sourceReference(webUrl: string, providerKind: ConnectionWithSecret["providerKind"], commitSha: string, path: string): string {
+function sourceReference(webUrl: string, providerKind: GitConnectionWithSecret["providerKind"], commitSha: string, path: string): string {
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
   const encodedCommit = encodeURIComponent(commitSha);
   if (providerKind === "gitlab") return `${webUrl}/-/blob/${encodedCommit}/${encodedPath}`;
@@ -437,15 +438,17 @@ function parseTree(output: string): readonly { path: string; blobOid: string; by
 }
 
 async function readRepositoryFiles(input: Readonly<{
-  connection: ConnectionWithSecret;
+  connection: GitConnectionWithSecret;
   repositoryPath: string;
   trackedRef: string;
-  webUrl: string;
+  webUrl?: string;
   includeRoots: readonly string[];
   softExcludePatterns: readonly string[];
   db: PrismaClient;
-}>): Promise<Readonly<{ commitSha: string; addressFingerprint: string; files: readonly ScannedFile[] }>> {
-  const resolution = await assertPinnedGitEndpoint({
+  pinnedResolution?: GitEndpointResolution;
+  onDispatchStart?: () => void;
+}>): Promise<Readonly<{ commitSha: string; addressFingerprint: string; files: readonly GitScannedFile[] }>> {
+  const resolution = input.pinnedResolution ?? await assertPinnedGitEndpoint({
     baseUrl: input.connection.baseUrl,
     allowPrivateNetwork: input.connection.allowPrivateNetwork,
     expectedFingerprint: input.connection.resolvedAddressFingerprint,
@@ -471,6 +474,7 @@ async function readRepositoryFiles(input: Readonly<{
     // From this point Git may contact the configured remote. Any later
     // runner error therefore keeps the dispatch marker for reconciliation.
     fetchStarted = true;
+    input.onDispatchStart?.();
     await runner.runText(["-C", repositoryDir, "fetch", "--depth=1", "--no-tags", "origin", `refs/heads/${input.trackedRef}`], { timeoutMs: 180_000, maxOutputBytes: 256 * 1024 });
     const commitSha = (await runner.runText(["-C", repositoryDir, "rev-parse", "FETCH_HEAD"], { maxOutputBytes: 64 * 1024 })).trim();
     if (!/^[0-9a-f]{40,64}$/u.test(commitSha)) return fail("GIT_REPOSITORY_EMPTY");
@@ -483,11 +487,13 @@ async function readRepositoryFiles(input: Readonly<{
     if (candidates.length > MAX_SCANNED_FILES) return fail("GIT_REPOSITORY_TOO_LARGE");
     if (candidates.reduce((sum, entry) => sum + entry.bytes, 0) > MAX_TOTAL_BYTES) return fail("GIT_REPOSITORY_TOO_LARGE");
 
-    const files: ScannedFile[] = [];
+    const files: GitScannedFile[] = [];
     for (const entry of candidates) {
       const body = normalizeText(await runner.runBytes(["-C", repositoryDir, "cat-file", "blob", entry.blobOid], { maxOutputBytes: MAX_FILE_BYTES + 1024 }));
       if (body === null) continue;
-      const externalRef = sourceReference(input.webUrl, input.connection.providerKind, commitSha, entry.path);
+      const externalRef = input.webUrl === undefined
+        ? null
+        : sourceReference(input.webUrl, input.connection.providerKind, commitSha, entry.path);
       const prefix = `Repository: ${input.repositoryPath}\nRevision: ${commitSha}\nPath: ${entry.path}\n\n`;
       const contentText = `${prefix}${body}`.slice(0, MAX_SOURCE_CONTENT_LENGTH);
       const contentBytes = Buffer.byteLength(contentText, "utf8");
@@ -508,6 +514,24 @@ async function readRepositoryFiles(input: Readonly<{
     if (!fetchStarted) throw markPreDispatchGitError(error);
     throw error;
   }
+}
+
+/**
+ * The project-delegated runtime supplies the DNS-pinned endpoint obtained
+ * during Admission A.  Keeping this wrapper narrow prevents the runtime from
+ * accidentally reaching the legacy project snapshot path.
+ */
+export async function readGitRepositoryFilesForDelegation(input: Readonly<{
+  connection: GitConnectionWithSecret;
+  repositoryPath: string;
+  trackedRef: string;
+  includeRoots: readonly string[];
+  softExcludePatterns: readonly string[];
+  db: PrismaClient;
+  pinnedResolution: GitEndpointResolution;
+  onDispatchStart?: () => void;
+}>): Promise<Readonly<{ commitSha: string; addressFingerprint: string; files: readonly GitScannedFile[] }>> {
+  return readRepositoryFiles(input);
 }
 
 export function gitConnectionCatalog() {
@@ -861,7 +885,7 @@ export async function publishGitRepositorySnapshot(input: Readonly<{
   linkId: string;
   snapshotId: string;
   commitSha: string;
-  files: readonly ScannedFile[];
+  files: readonly GitScannedFile[];
 }>, db: PrismaClient = getDb()) {
   const manifestFingerprint = createHash("sha256").update(JSON.stringify(input.files.map((file) => [file.path, file.blobOid, file.contentHash])), "utf8").digest("hex");
   const completedAt = new Date();

@@ -80,7 +80,21 @@ test("first-run administrator can reach protected pages with production security
   await page.goto("/profile");
   await expect(page.getByText("账户详情", { exact: true })).toBeVisible();
   await expect(page.locator("details[open]").filter({ hasText: "账户详情" })).toHaveCount(1);
+  await expect(page.getByRole("link", { name: "我的 Git 连接", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "我的 MCP 连接", exact: true })).toBeVisible();
   await expectNoAccessibilityViolations(page, "profile");
+
+  await page.getByRole("link", { name: "我的 Git 连接", exact: true }).click();
+  await expect(page).toHaveURL(/\/profile\/connections\/git$/u);
+  await expect(page.getByRole("heading", { name: "我的 Git 连接", exact: true })).toBeVisible();
+  await expect(page.getByText(/当前连接不能用于项目\/自动化/u)).toBeVisible();
+  await expectNoAccessibilityViolations(page, "personal Git connections");
+
+  await page.goto("/profile/connections/mcp");
+  await expect(page.getByRole("heading", { name: "我的 MCP 连接", exact: true })).toBeVisible();
+  await expect(page.getByText(/当前连接不能用于项目\/自动化/u)).toBeVisible();
+  await expectNoAccessibilityViolations(page, "personal MCP connections");
+  await page.goto("/profile");
 
   const membershipGrant = await page.evaluate(async () => {
     const listResponse = await fetch("/api/system/memberships?search=browser_admin", { cache: "no-store" });

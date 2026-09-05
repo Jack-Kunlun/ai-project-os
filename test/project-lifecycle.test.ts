@@ -42,6 +42,10 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/lifecycle/route.ts",
     "src/app/api/projects/[projectId]/export/route.ts",
   ]);
+  const frozenLegacyRoutes = new Set([
+    "src/app/api/projects/[projectId]/repositories/route.ts",
+    "src/app/api/projects/[projectId]/repositories/[linkId]/route.ts",
+  ]);
   const serviceLifecycleGuarded = new Set([
     "src/app/api/projects/[projectId]/memory/extract/route.ts",
     "src/app/api/projects/[projectId]/memory/search/route.ts",
@@ -70,6 +74,19 @@ test("all project mutation routes reject archived projects except bounded lifecy
     const path = `${root}/${entry}`;
     if (exempt.has(path)) continue;
     const source = await readFile(path, "utf8");
+    if (frozenLegacyRoutes.has(path)) {
+      assert.match(
+        source,
+        /GITHUB_WEB_PROJECT_CONNECT_FROZEN/u,
+        `${path} must fail closed before legacy project access`,
+      );
+      assert.doesNotMatch(
+        source,
+        /assertProjectActive|readJsonBody/u,
+        `${path} must not read legacy project state or body`,
+      );
+      continue;
+    }
     if (!/export async function (POST|PUT|PATCH|DELETE)/u.test(source)) continue;
     if (serviceLifecycleGuarded.has(path)) {
       assert.doesNotMatch(source, /assertProjectActive/u, `${path} delegates lifecycle checks`);

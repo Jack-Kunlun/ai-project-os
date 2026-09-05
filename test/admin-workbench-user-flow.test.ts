@@ -132,7 +132,7 @@ test("Git project repository routes pass the session actor to the service author
 });
 
 test("admin workbench and overview are server protected and dashboard has no global provider count", async () => {
-  const [layout, page, overviewRoute, overviewService, shell, header, profile, dashboardRoute, settings, connections, memberships, operations] = await Promise.all([
+  const [layout, page, overviewRoute, overviewService, shell, header, profile, dashboardRoute, settings, connections, connectionsMcp, memberships, operations] = await Promise.all([
     readFile("src/app/admin/layout.tsx", "utf8"),
     readFile("src/app/admin/page.tsx", "utf8"),
     readFile("src/app/api/system/overview/route.ts", "utf8"),
@@ -143,6 +143,7 @@ test("admin workbench and overview are server protected and dashboard has no glo
     readFile("src/app/api/dashboard/route.ts", "utf8"),
     readFile("src/app/settings/page.tsx", "utf8"),
     readFile("src/app/connections/page.tsx", "utf8"),
+    readFile("src/app/connections/mcp/page.tsx", "utf8"),
     readFile("src/app/system/memberships/page.tsx", "utf8"),
     readFile("src/app/system/operations/page.tsx", "utf8"),
   ]);
@@ -166,7 +167,10 @@ test("admin workbench and overview are server protected and dashboard has no glo
   assert.doesNotMatch(profile, /系统管理员操作|系统运维|平台模型|Git \/ MCP 连接/u);
   assert.doesNotMatch(dashboardRoute, /aiProviderConnection/u);
   assert.match(settings, /redirect\(user\.role === "admin" \? "\/admin\/models" : "\/dashboard"\)/u);
-  assert.match(connections, /redirect\(user\.role === "admin" \? "\/admin\/connectors\/git" : "\/dashboard"\)/u);
+  assert.match(connections, /await requirePageSession\(\);\s*redirect\("\/profile\/connections\/git"\)/u);
+  assert.doesNotMatch(connections, /user\.role/u);
+  assert.match(connectionsMcp, /await requirePageSession\(\);\s*redirect\("\/profile\/connections\/mcp"\)/u);
+  assert.doesNotMatch(connectionsMcp, /user\.role/u);
   assert.match(memberships, /redirect\(user\.role === "admin" \? "\/admin\/users\/memberships" : "\/dashboard"\)/u);
   assert.match(operations, /if \(user\.role !== "admin"\) redirect\("\/dashboard"\)/u);
 });
@@ -209,7 +213,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   ]);
 
   assert.match(guide, /普通用户操作指南/u);
-  assert.match(guide, /普通用户不需要也不能配置平台凭据/u);
+  assert.match(guide, /个人 Git 与 MCP 连接可以在个人中心配置/u);
   assert.match(userDocs, /项目概览/u);
   assert.match(userDocs, /项目六个一级入口/u);
   assert.match(userDocs, /只有当前工作区 Owner\/Admin 可以创建项目/u);
@@ -221,10 +225,10 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(adminDocs, /`\/system\/operations` 仅 initial super admin 可用[^。]*兼容跳转 `\/admin\/operations\/backups`/u);
   assert.match(adminDocs, /其他 system admin 按现有安全行为返回不可见页面/u);
   assert.doesNotMatch(adminDocs, /`\/system\/\*`[^。]*把系统管理员导向上述页面/u);
-  assert.match(adminDocs, /legacy 项目仓库新增接口已冻结/u);
+  assert.match(adminDocs, /legacy 项目仓库新增接口(?:均)?已冻结/u);
   assert.match(adminDocs, /个人 Git 连接与项目委托是 planned 后续能力/u);
-  assert.match(readme, /当前项目页不提供首次关联入口/u);
-  assert.match(readme, /已关联的代码仓库可在项目仓库页查看、同步和停用/u);
+  assert.match(readme, /旧版项目 Git 连接、首次关联和同步入口已冻结/u);
+  assert.match(readme, /进入项目仓库页查看已有安全摘要/u);
   assert.match(adminGuide, /管理员配置并验证后，可作为平台默认路由建议\/供项目选择/u);
   assert.match(adminGuide, /planned.*后续能力/u);
   assert.match(readme, /\/admin\/models/u);
@@ -237,7 +241,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.doesNotMatch(repositories, /api\/projects\/\$\{projectId\}\/git-connections/u);
   assert.doesNotMatch(repositories, /api\/settings\/git-connections|isSystemAdmin|RepositoryForm|gitConnectionId/u);
   assert.match(repositories, /个人 Git 与项目委托改造中/u);
-  assert.match(guide, /个人 Git 连接与项目委托仍在改造中/u);
+  assert.match(guide, /个人 Git 与 MCP 连接可以在个人中心配置/u);
   assert.match(guide, /已关联的代码仓库在仓库页查看/u);
   assert.doesNotMatch(guide, /新增模型、Git 或 MCP 连接/u);
   assert.match(repositories, /async function sync\(\)/u);

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { LogoutButton } from "@/app/logout-button";
@@ -138,7 +139,17 @@ export function ProfileClient({
           </details>
         </section>
 
-        {profile ? <dl className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><StatusItem label="可用平台 Token" value={profile.entitlements.availableTokens.toLocaleString("zh-CN")} /><StatusItem label="预留中 Token" value={profile.entitlements.reservedTokens.toLocaleString("zh-CN")} /><StatusItem label="赠送额度到期" value={formatDate(profile.entitlements.nextExpiryAt)} /><StatusItem label="会员状态" value={profile.entitlements.membership.status === "active" ? `有效至 ${formatDate(profile.entitlements.membership.expiresAt)}` : profile.entitlements.membership.status === "none" ? "非会员" : profile.entitlements.membership.status === "expired" ? "已到期" : "已撤销"} tone={profile.entitlements.membership.status === "active" ? "success" : "default"} /></dl> : null}
+        {profile ? <>
+          <dl className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><StatusItem label="可用平台 Token" value={profile.entitlements.availableTokens.toLocaleString("zh-CN")} /><StatusItem label="预留中 Token" value={profile.entitlements.reservedTokens.toLocaleString("zh-CN")} /><StatusItem label="赠送额度到期" value={formatDate(profile.entitlements.nextExpiryAt)} /><StatusItem label="会员状态" value={profile.entitlements.membership.status === "active" ? `有效至 ${formatDate(profile.entitlements.membership.expiresAt)}` : profile.entitlements.membership.status === "none" ? "非会员" : profile.entitlements.membership.status === "expired" ? "已到期" : "已撤销"} tone={profile.entitlements.membership.status === "active" ? "success" : "default"} /></dl>
+          <section className="mt-6 flex flex-col gap-4 rounded-3xl border border-indigo-100 bg-indigo-50/50 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Personal models</p>
+              <h2 className="mt-1.5 text-lg font-semibold text-slate-900">我的模型</h2>
+              <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">{profile.entitlements.membership.status === "active" ? "会员可配置、测试和维护自己的模型连接。" : profile.entitlements.membership.status === "none" ? "普通用户使用平台赠送额度；如需配置个人模型，请联系管理员开通会员。" : "会员资格已失效，不能测试、启用或调用；仍可安全清理已有连接。"}</p>
+            </div>
+            <Link href="/profile/models" className="inline-flex shrink-0 items-center justify-center rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100">{profile.entitlements.membership.status === "active" ? "管理我的模型" : "查看我的模型"} <span aria-hidden="true" className="ml-1">→</span></Link>
+          </section>
+        </> : null}
 
         {profile ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace roles</p><h2 className="mt-2 text-lg font-semibold">工作区身份</h2><div className="mt-4 space-y-2">{profile.workspaceMemberships.map((membership) => <div key={membership.workspace.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{membership.workspace.name}</span><span className="text-xs font-semibold text-indigo-700">{membership.role}</span></div>)}</div></div><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Sign-in methods</p><h2 className="mt-2 text-lg font-semibold">登录方式</h2><div className="mt-4 space-y-2"><div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">本地密码：{profile.hasLocalPassword ? "已配置" : "未配置"}</div>{profile.githubIdentity ? <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-white">GitHub · @{profile.githubIdentity.login}<span className="mt-1 block text-xs text-slate-300">{profile.githubIdentity.email}</span></div> : githubLoginAvailable ? <a href="/api/auth/github/start?intent=link&returnTo=%2Fprofile" className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50"><span>GitHub 尚未绑定</span><span className="text-indigo-600">立即绑定 →</span></a> : <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-400">GitHub 登录：当前部署未配置</div>}{profile.oidcIdentities.map((identity) => <div key={identity.provider.id} className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-700">{identity.provider.name}{identity.email ? ` · ${identity.email}` : ""}</div>)}</div></div></section> : null}
 

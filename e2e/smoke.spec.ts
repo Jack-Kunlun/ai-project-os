@@ -82,6 +82,63 @@ test("first-run administrator can reach protected pages with production security
   await expect(page.locator("details[open]").filter({ hasText: "账户详情" })).toHaveCount(1);
   await expectNoAccessibilityViolations(page, "profile");
 
+  const membershipGrant = await page.evaluate(async () => {
+    const listResponse = await fetch("/api/system/memberships?search=browser_admin", { cache: "no-store" });
+    if (!listResponse.ok) throw new Error(`membership list failed: ${listResponse.status}`);
+    const list = await listResponse.json() as { items: Array<{ id: string; username: string }> };
+    const currentUser = list.items.find((item) => item.username === "browser_admin");
+    if (currentUser === undefined) throw new Error("browser_admin membership row missing");
+    const response = await fetch(`/api/system/memberships/${currentUser.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", origin: window.location.origin },
+      body: JSON.stringify({ action: "grant", days: 1, note: "browser smoke disposable" }),
+    });
+    return { status: response.status, body: await response.json() as { subscription?: { status?: string } } };
+  });
+  expect(membershipGrant.status).toBe(200);
+  expect(membershipGrant.body.subscription?.status).toBe("active");
+
+  await page.reload();
+  await expect(page.getByRole("link", { name: "管理我的模型", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "管理我的模型", exact: true }).click();
+  await expect(page).toHaveURL(/\/profile\/models$/u);
+  await expect(page.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
+  await expect(page.getByText("会员有效", { exact: true })).toBeVisible();
+  await expect(page.getByText(/固定官方端点不可修改/u)).toBeVisible();
+  await expect(page.getByText("生成模型或向量模型至少配置一项。", { exact: true })).toBeVisible();
+
+  const smokeConnectionName = "Browser smoke personal model";
+  const smokeConnectionNameUpdated = "Browser smoke personal model updated";
+  const smokeKey = "smoke-local-key-2026";
+  await page.getByLabel("连接名称", { exact: true }).fill(smokeConnectionName);
+  const createKeyInput = page.getByLabel("OpenAI API Key", { exact: true });
+  await createKeyInput.fill(smokeKey);
+  await page.getByRole("button", { name: "保存个人连接", exact: true }).click();
+  await expect(createKeyInput).toHaveValue("");
+  await expect(page.getByRole("heading", { name: smokeConnectionName, exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "编辑配置", exact: true }).click();
+  await expect(page.getByLabel("新的 API Key", { exact: true })).toHaveCount(0);
+  await page.getByLabel("连接名称", { exact: true }).last().fill(smokeConnectionNameUpdated);
+  await page.getByLabel("生成模型（可选）", { exact: true }).last().fill("gpt-4.1");
+  await page.getByRole("button", { name: "保存配置", exact: true }).click();
+  await expect(page.getByRole("heading", { name: smokeConnectionNameUpdated, exact: true })).toBeVisible();
+
+  const personalModelCard = page.locator("article").filter({ has: page.getByRole("heading", { name: smokeConnectionNameUpdated, exact: true }) });
+  await personalModelCard.getByRole("button", { name: "停用", exact: true }).click();
+  await expect(personalModelCard.getByText("已停用", { exact: true })).toBeVisible();
+  await personalModelCard.getByRole("button", { name: "删除", exact: true }).click();
+  const deleteDialog = page.getByRole("dialog");
+  await deleteDialog.getByRole("textbox").fill(smokeConnectionNameUpdated);
+  await deleteDialog.getByRole("button", { name: "确认删除", exact: true }).click();
+  await expect(page.getByRole("heading", { name: smokeConnectionNameUpdated, exact: true })).toHaveCount(0);
+
+  const originalViewport = page.viewportSize();
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth && document.body.scrollWidth <= window.innerWidth)).toBe(true);
+  await expectNoAccessibilityViolations(page, "personal models mobile");
+  if (originalViewport !== null) await page.setViewportSize(originalViewport);
+
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "管理员总览" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "管理工作台导航" })).toBeVisible();

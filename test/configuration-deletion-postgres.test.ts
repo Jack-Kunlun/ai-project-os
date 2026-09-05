@@ -86,7 +86,7 @@ test("unused model and Git connections can be permanently deleted while historic
     providerId = null;
     providerCredentialId = null;
 
-    const gitConnection = await createGitConnection({
+    let gitConnection = await createGitConnection({
       name: `Disposable Git ${suffix}`,
       providerKind: "github",
       transport: "https",
@@ -97,6 +97,23 @@ test("unused model and Git connections can be permanently deleted while historic
     }, { id: userId }, db);
     gitConnectionId = gitConnection.id;
     gitCredentialId = (await db.gitConnection.findUniqueOrThrow({ where: { id: gitConnection.id }, select: { credentialId: true } })).credentialId;
+    const verifiedGit = await db.gitConnection.update({
+      where: { id: gitConnection.id },
+      data: { status: "verified", resolvedAddressFingerprint: "d".repeat(64), lastTestedAt: new Date(), lastErrorCode: null },
+    });
+    const usernameChangedGit = await updateGitConnection(gitConnection.id, {
+      username: `git-user-${suffix}`,
+      expectedUpdatedAt: verifiedGit.updatedAt.toISOString(),
+    }, { id: userId }, db);
+    const usernameChangedDetails = await db.gitConnection.findUniqueOrThrow({
+      where: { id: gitConnection.id },
+      select: { status: true, configurationVersion: true, resolvedAddressFingerprint: true },
+    });
+    assert.equal(usernameChangedGit.status, "configured");
+    assert.equal(usernameChangedDetails.status, "configured");
+    assert.equal(usernameChangedDetails.configurationVersion, verifiedGit.configurationVersion + 1);
+    assert.equal(usernameChangedDetails.resolvedAddressFingerprint, null);
+    gitConnection = usernameChangedGit;
     const gitActor = { id: userId };
     const otherActor = { id: otherUserId };
     assert.deepEqual(await listGitConnections(otherActor, db), []);
@@ -125,14 +142,26 @@ test("unused model and Git connections can be permanently deleted while historic
     assert.equal(disabledWithExplicitSecret.status, "disabled");
     const disabledWithImplicitSecret = await updateGitConnection(gitConnection.id, { secret: `github-implicit-disabled-${suffix}`, expectedUpdatedAt: disabledWithExplicitSecret.updatedAt.toISOString() }, gitActor, db);
     assert.equal(disabledWithImplicitSecret.status, "disabled");
-    const reenabledGit = await updateGitConnection(gitConnection.id, { enabled: true, expectedUpdatedAt: disabledWithImplicitSecret.updatedAt.toISOString() }, gitActor, db);
+    assert.equal(disabledWithImplicitSecret.configurationVersion, disabledWithExplicitSecret.configurationVersion);
+    const renamedDisabled = await updateGitConnection(gitConnection.id, { name: `Renamed Git ${suffix}`, expectedUpdatedAt: disabledWithImplicitSecret.updatedAt.toISOString() }, gitActor, db);
+    assert.equal(renamedDisabled.status, "disabled");
+    assert.equal(renamedDisabled.configurationVersion, disabledWithImplicitSecret.configurationVersion);
+    const disabledNoOp = await updateGitConnection(gitConnection.id, { allowPrivateNetwork: false, expectedUpdatedAt: renamedDisabled.updatedAt.toISOString() }, gitActor, db);
+    assert.equal(disabledNoOp.configurationVersion, renamedDisabled.configurationVersion);
+    const disabledConfigurationChange = await updateGitConnection(gitConnection.id, { allowPrivateNetwork: true, expectedUpdatedAt: disabledNoOp.updatedAt.toISOString() }, gitActor, db);
+    assert.equal(disabledConfigurationChange.configurationVersion, disabledNoOp.configurationVersion + 1);
+    const reenabledGit = await updateGitConnection(gitConnection.id, { enabled: true, expectedUpdatedAt: disabledConfigurationChange.updatedAt.toISOString() }, gitActor, db);
     assert.equal(reenabledGit.status, "configured");
     const disabledForConfirmation = await updateGitConnection(gitConnection.id, { enabled: false, expectedUpdatedAt: reenabledGit.updatedAt.toISOString() }, gitActor, db);
+    await assert.rejects(
+      () => deleteGitConnection(gitConnection.id, { confirmationName: disabledForConfirmation.name, expectedUpdatedAt: new Date(0).toISOString() }, gitActor, db),
+      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_CONFLICT",
+    );
     await assert.rejects(
       () => deleteGitConnection(gitConnection.id, { confirmationName: "wrong name", expectedUpdatedAt: disabledForConfirmation.updatedAt.toISOString() }, gitActor, db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_CONFIRMATION_MISMATCH",
     );
-    await deleteGitConnection(gitConnection.id, { confirmationName: gitConnection.name, expectedUpdatedAt: disabledForConfirmation.updatedAt.toISOString() }, gitActor, db);
+    await deleteGitConnection(gitConnection.id, { confirmationName: disabledForConfirmation.name, expectedUpdatedAt: disabledForConfirmation.updatedAt.toISOString() }, gitActor, db);
     assert.equal(await db.gitConnection.count({ where: { id: gitConnection.id } }), 0);
     assert.equal(await db.externalCredential.count({ where: { id: gitCredentialId! } }), 0);
     gitConnectionId = null;

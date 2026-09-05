@@ -768,6 +768,29 @@ enum ProjectAiProviderDelegationActorKind {
   systemExpiry @map("system_expiry")
 }
 
+enum ProjectGitRepositoryDelegationStatus {
+  draft
+  ownerConfirmed @map("owner_confirmed")
+  active
+  rejected
+  revoked
+  expired
+}
+
+enum ProjectGitRepositoryDelegationActorKind {
+  user
+  systemExpiry @map("system_expiry")
+}
+
+enum ProjectGitRepositoryDelegationAuditAction {
+  proposed
+  ownerConfirmed @map("owner_confirmed")
+  activated
+  rejected
+  revoked
+  expired
+}
+
 enum AiRunStatus {
   queued
   running
@@ -1160,6 +1183,7 @@ model Project {
   webAiRoutes                          ProjectAiRoute[]
   aiRouteRevisions                     ProjectAiRouteRevision[]
   aiProviderDelegations                 ProjectAiProviderDelegation[]
+  gitRepositoryDelegations              ProjectGitRepositoryDelegation[]
   aiEffectiveRouteSelections            ProjectAiEffectiveRouteSelection[]
   webAiGrants                          WebAiGrant[]
   backgroundJobs                       BackgroundJob[]
@@ -1313,6 +1337,7 @@ model GitConnection {
   sshKnownHost               String?             @db.Text
   resolvedAddressFingerprint String?             @db.Char(64)
   status                     GitConnectionStatus @default(configured)
+  configurationVersion       Int                 @default(1)
   lastTestedAt               DateTime?
   lastErrorCode              String?             @db.VarChar(64)
   disabledAt                 DateTime?
@@ -1325,6 +1350,7 @@ model GitConnection {
   createdBy                  AppUser             @relation("GitConnectionCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   ownerUser                  AppUser?            @relation("GitConnectionOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   repositories               GitRepository[]
+  projectGitRepositoryDelegations ProjectGitRepositoryDelegation[]
 
   @@index([providerKind, status])
   @@index([createdById, createdAt])
@@ -1378,6 +1404,119 @@ model ProjectGitRepositoryLink {
   @@unique([projectId, gitRepositoryId])
   @@index([projectId, status, updatedAt])
   @@index([gitRepositoryId])
+}
+
+// A typed, two-party consent record for a private Git connection.  This is a
+// control-plane surface only; legacy ProjectGitRepositoryLink/runtime paths
+// remain frozen until a later package consumes live eligibility.
+model ProjectGitRepositoryDelegation {
+  id                                  String                              @id @default(uuid()) @db.Uuid
+  projectId                           String                              @db.Uuid
+  gitConnectionId                     String                              @db.Uuid
+  connectionOwnerId                   String                              @db.Uuid
+  repositoryPath                      String                              @db.VarChar(768)
+  trackedRef                          String                              @db.VarChar(255)
+  includeRoots                        Json                                @db.JsonB
+  softExcludePatterns                 Json                                @db.JsonB
+  role                                ProjectRepositoryRole
+  requiredForProjectSnapshot          Boolean                             @default(true)
+  codeEnabled                         Boolean                             @default(true)
+  metadataEnabled                     Boolean                             @default(true)
+  manualSyncAllowed                   Boolean                             @default(true)
+  automationAllowed                   Boolean                             @default(false)
+  expiresAt                           DateTime
+  connectionConfigurationVersion      Int
+  resolvedAddressFingerprint          String                              @db.Char(64)
+  credentialFingerprint               String                              @db.Char(64)
+  delegationFingerprint               String                              @db.Char(64)
+  version                             Int                                 @default(1)
+  status                              ProjectGitRepositoryDelegationStatus @default(draft)
+  ownerProjectMembershipId            String                              @db.Uuid
+  ownerMembershipCreatedAt            DateTime
+  projectConfirmedProjectMembershipId String?                             @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime?
+  proposedById                        String                              @db.Uuid
+  proposedAt                          DateTime                            @default(now())
+  ownerConfirmedById                  String?                             @db.Uuid
+  ownerConfirmedAt                    DateTime?
+  projectConfirmedById                String?                             @db.Uuid
+  projectConfirmedAt                  DateTime?
+  activatedAt                         DateTime?
+  rejectedAt                          DateTime?
+  revokedAt                           DateTime?
+  expiredAt                           DateTime?
+  terminalActorKind                   ProjectGitRepositoryDelegationActorKind?
+  terminalActorId                     String?                             @db.Uuid
+  terminalActorProjectMembershipId    String?                             @db.Uuid
+  terminalActorMembershipCreatedAt    DateTime?
+  terminalReason                      String?                             @db.VarChar(500)
+  createdAt                           DateTime                            @default(now())
+  updatedAt                           DateTime                            @updatedAt
+  project                             Project                             @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  gitConnection                       GitConnection                       @relation(fields: [gitConnectionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  connectionOwner                     AppUser                             @relation("ProjectGitRepositoryDelegationConnectionOwner", fields: [connectionOwnerId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  ownerProjectMembership              ProjectMembership                    @relation("ProjectGitRepositoryDelegationOwnerMembership", fields: [ownerProjectMembershipId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  projectConfirmedProjectMembership   ProjectMembership?                   @relation("ProjectGitRepositoryDelegationProjectMembership", fields: [projectConfirmedProjectMembershipId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  proposedBy                          AppUser                             @relation("ProjectGitRepositoryDelegationProposer", fields: [proposedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  ownerConfirmedBy                    AppUser?                            @relation("ProjectGitRepositoryDelegationOwnerConfirmer", fields: [ownerConfirmedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  projectConfirmedBy                  AppUser?                            @relation("ProjectGitRepositoryDelegationProjectConfirmer", fields: [projectConfirmedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  terminalActor                       AppUser?                            @relation("ProjectGitRepositoryDelegationTerminalActor", fields: [terminalActorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([projectId, status, expiresAt])
+  @@index([gitConnectionId, status])
+  @@index([connectionOwnerId, status])
+}
+
+// Append-only scalar evidence.  It intentionally has no foreign keys so
+// project deletion can retain the audit trail without copying any secret or
+// infrastructure value.
+model ProjectGitRepositoryDelegationAudit {
+  id                                  String                              @id @default(uuid()) @db.Uuid
+  projectId                           String                              @db.Uuid
+  gitConnectionId                     String                              @db.Uuid
+  delegationId                       String                              @db.Uuid
+  connectionOwnerId                   String                              @db.Uuid
+  action                              ProjectGitRepositoryDelegationAuditAction
+  delegationVersion                  Int
+  statusBefore                       ProjectGitRepositoryDelegationStatus?
+  statusAfter                        ProjectGitRepositoryDelegationStatus
+  actorKind                           ProjectGitRepositoryDelegationActorKind @default(user)
+  actorId                             String?                             @db.Uuid
+  actorProjectMembershipId            String?                             @db.Uuid
+  actorMembershipCreatedAt            DateTime?
+  terminalActorKind                   ProjectGitRepositoryDelegationActorKind?
+  terminalActorId                     String?                             @db.Uuid
+  terminalActorProjectMembershipId    String?                             @db.Uuid
+  terminalActorMembershipCreatedAt    DateTime?
+  terminalReason                      String?                             @db.VarChar(500)
+  ownerProjectMembershipId            String                              @db.Uuid
+  ownerMembershipCreatedAt            DateTime
+  projectConfirmedProjectMembershipId String?                             @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime?
+  repositoryPath                      String                              @db.VarChar(768)
+  trackedRef                          String                              @db.VarChar(255)
+  includeRoots                        Json                                @db.JsonB
+  softExcludePatterns                 Json                                @db.JsonB
+  role                                ProjectRepositoryRole
+  requiredForProjectSnapshot          Boolean
+  codeEnabled                         Boolean
+  metadataEnabled                     Boolean
+  manualSyncAllowed                   Boolean
+  automationAllowed                   Boolean
+  expiresAt                           DateTime
+  connectionConfigurationVersion      Int
+  resolvedAddressFingerprint          String                              @db.Char(64)
+  credentialFingerprint               String                              @db.Char(64)
+  delegationFingerprint               String                              @db.Char(64)
+  reason                              String                              @db.VarChar(500)
+  transitionAt                       DateTime
+  transactionId                       BigInt                              @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt                           DateTime                            @default(now())
+
+  @@unique([delegationId, delegationVersion])
+  @@index([projectId, createdAt])
+  @@index([delegationId, createdAt])
+  @@index([transactionId, createdAt])
 }
 
 model GitRepositorySnapshot {
@@ -3722,6 +3861,11 @@ model AppUser {
   createdGitConnections        GitConnection[]                  @relation("GitConnectionCreatedBy")
   ownedGitConnections          GitConnection[]                  @relation("GitConnectionOwner")
   createdGitRepositoryLinks    ProjectGitRepositoryLink[]
+  projectGitRepositoryDelegationConnectionOwners ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationConnectionOwner")
+  projectGitRepositoryDelegationProposers       ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationProposer")
+  projectGitRepositoryDelegationOwnerConfirmations ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationOwnerConfirmer")
+  projectGitRepositoryDelegationProjectConfirmations ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationProjectConfirmer")
+  projectGitRepositoryDelegationTerminalActors  ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationTerminalActor")
   createdMcpConnections        McpConnection[]                  @relation("McpConnectionCreatedBy")
   ownedMcpConnections          McpConnection[]                  @relation("McpConnectionOwner")
   verifiedMcpToolAttestations  McpToolAttestation[]
@@ -3980,6 +4124,8 @@ model ProjectMembership {
   updatedAt DateTime              @updatedAt
   project   Project               @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   user      AppUser               @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  gitRepositoryDelegationOwnerMemberships ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationOwnerMembership")
+  gitRepositoryDelegationProjectConfirmations ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationProjectMembership")
 
   // Runtime uniqueness is state-aware: the migration installs a partial
   // unique index for accessState <> revoked. Prisma's DMMF cannot represent

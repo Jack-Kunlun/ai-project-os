@@ -5,6 +5,7 @@ import { Prisma, type AppUser, type GitAuthKind, type PrismaClient } from "@pris
 import { z } from "zod";
 import { CredentialVaultError, createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
+import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import {
@@ -160,6 +161,7 @@ const connectionSelect = {
   tlsCaCertificate: true,
   sshKnownHost: true,
   status: true,
+  configurationVersion: true,
   ownershipState: true,
   lastTestedAt: true,
   lastErrorCode: true,
@@ -601,6 +603,7 @@ export async function updateGitConnection(
     : existing.transport === "ssh" ? canonicalSshKnownHost(parsed.sshKnownHost) : null;
   try {
     return await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))`;
       await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
       const current = await tx.gitConnection.findFirst({
         where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
@@ -611,11 +614,19 @@ export async function updateGitConnection(
         if (current.credentialId === null || current.authKind === "none") return fail("GIT_CONNECTION_INVALID_INPUT");
         await rotateCredential(current.credentialId, "git", encodeGitCredential(credentialAuthKind(current.authKind), parsed.secret), tx);
       }
-      const securityChanged = parsed.secret !== undefined || parsed.allowPrivateNetwork !== undefined || tlsCaCertificate !== undefined || sshKnownHost !== undefined;
+      const securityChanged = parsed.secret !== undefined
+        || (parsed.username !== undefined && parsed.username !== current.username)
+        || (parsed.allowPrivateNetwork !== undefined && parsed.allowPrivateNetwork !== current.allowPrivateNetwork)
+        || (tlsCaCertificate !== undefined && tlsCaCertificate !== current.tlsCaCertificate)
+        || (sshKnownHost !== undefined && sshKnownHost !== current.sshKnownHost);
       const statusData = parsed.enabled === false
-        ? { status: "disabled" as const, disabledAt: new Date() }
+        ? current.status === "disabled" && current.disabledAt !== null
+          ? {}
+          : { status: "disabled" as const, disabledAt: current.disabledAt ?? new Date() }
         : parsed.enabled === true
-          ? { status: "configured" as const, disabledAt: null }
+          ? current.status === "configured" && current.disabledAt === null
+            ? {}
+            : { status: "configured" as const, disabledAt: null }
           : securityChanged && current.status !== "disabled"
             ? { status: "configured" as const, disabledAt: null }
             : {};
@@ -628,7 +639,7 @@ export async function updateGitConnection(
           ...(tlsCaCertificate === undefined ? {} : { tlsCaCertificate }),
           ...(sshKnownHost === undefined ? {} : { sshKnownHost }),
           ...statusData,
-          ...(securityChanged
+          ...(securityChanged && current.resolvedAddressFingerprint !== null
             ? { resolvedAddressFingerprint: null, lastTestedAt: null, lastErrorCode: null }
             : {}),
         },
@@ -672,43 +683,65 @@ export async function deleteGitConnection(
 ) {
   const connectionId = uuid(connectionIdInput);
   const parsed = deleteConnectionSchema.parse(input);
-  try {
-    return await db.$transaction(async (tx) => {
-      const connection = await tx.gitConnection.findFirst({
-        where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
-        select: {
-          id: true,
-          name: true,
-          status: true,
-          credentialId: true,
-          ownerUserId: true,
-          ownershipState: true,
-          updatedAt: true,
-          repositories: {
-            select: { projectLinks: { select: { id: true }, take: 1 } },
+  const ownedConnection = await db.gitConnection.findFirst({
+    where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
+    select: { id: true },
+  });
+  if (ownedConnection === null) return fail("GIT_CONNECTION_NOT_FOUND");
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await db.$transaction(async (tx) => {
+        // Match delegation writes: take the shared fence before the connection
+        // row lock, then repeat the owner/state admission under both locks.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))`;
+        await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
+        const connection = await tx.gitConnection.findFirst({
+          where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            credentialId: true,
+            ownerUserId: true,
+            ownershipState: true,
+            updatedAt: true,
+            repositories: {
+              select: { projectLinks: { select: { id: true }, take: 1 } },
+            },
           },
-        },
-      });
-      if (connection === null) {
-        return fail("GIT_CONNECTION_NOT_FOUND");
-      }
-      if (connection.updatedAt.getTime() !== timestamp(parsed.expectedUpdatedAt).getTime()) return fail("GIT_CONNECTION_CONFLICT");
-      if (connection.status !== "disabled") return fail("GIT_CONNECTION_DELETE_REQUIRES_DISABLED");
-      if (connection.name !== parsed.confirmationName) return fail("GIT_CONNECTION_CONFIRMATION_MISMATCH");
-      if (connection.repositories.some((repository) => repository.projectLinks.length > 0)) {
-        return fail("GIT_CONNECTION_IN_USE");
-      }
-      await tx.gitRepository.deleteMany({ where: { gitConnectionId: connection.id } });
-      await tx.gitConnection.delete({ where: { id: connection.id } });
-      if (connection.credentialId !== null) {
-        await tx.externalCredential.delete({ where: { id: connection.credentialId } });
-      }
-      return Object.freeze({ id: connection.id });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  } catch (error) {
-    if (isPrismaCode(error, "P2003")) return fail("GIT_CONNECTION_IN_USE");
-    throw error;
+        });
+        if (connection === null) {
+          return fail("GIT_CONNECTION_NOT_FOUND");
+        }
+        if (connection.updatedAt.getTime() !== timestamp(parsed.expectedUpdatedAt).getTime()) return fail("GIT_CONNECTION_CONFLICT");
+        if (connection.status !== "disabled") return fail("GIT_CONNECTION_DELETE_REQUIRES_DISABLED");
+        if (connection.name !== parsed.confirmationName) return fail("GIT_CONNECTION_CONFIRMATION_MISMATCH");
+        if (connection.repositories.some((repository) => repository.projectLinks.length > 0)) {
+          return fail("GIT_CONNECTION_IN_USE");
+        }
+        const liveDelegation = await tx.projectGitRepositoryDelegation.findFirst({
+          where: {
+            gitConnectionId: connection.id,
+            status: { in: ["draft", "ownerConfirmed", "active"] },
+          },
+          select: { id: true },
+        });
+        if (liveDelegation !== null) return fail("GIT_CONNECTION_IN_USE");
+        await tx.gitRepository.deleteMany({ where: { gitConnectionId: connection.id } });
+        await tx.gitConnection.delete({ where: { id: connection.id } });
+        if (connection.credentialId !== null) {
+          await tx.externalCredential.delete({ where: { id: connection.credentialId } });
+        }
+        return Object.freeze({ id: connection.id });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (isSerializationConflict(error) && attempt < 3) continue;
+      if (isSerializationConflict(error)) return fail("GIT_CONNECTION_CONFLICT");
+      if (isPrismaCode(error, "P2003")) return fail("GIT_CONNECTION_IN_USE");
+      throw error;
+    }
   }
+  return fail("GIT_CONNECTION_CONFLICT");
 }
 
 export async function testGitConnection(

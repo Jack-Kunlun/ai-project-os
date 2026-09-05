@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
@@ -95,6 +96,50 @@ test("MCP 数据库迁移固定逐次审批、当前定义唯一和追加式审�
   assert.match(migration, /MCP tool definitions are append-only/u);
   assert.match(migration, /project MCP tool grant audit is immutable/u);
   assert.doesNotMatch(migration, /stdio|shell\.execute|code\.write|deploy\.execute/u);
+});
+
+test("MCP Package A keeps delegation control-plane data isolated and project runtime frozen", async () => {
+  const [schema, migration] = await Promise.all([
+    readFile("prisma/schema.prisma", "utf8"),
+    readFile("prisma/migrations/20260904180000_add_project_mcp_connection_delegations/migration.sql", "utf8"),
+  ]);
+  const sentinel = createHash("sha256").update("mcp:no-credential:v1").digest("hex");
+  const schemaSentinel = schema.match(/credentialFingerprint\s+String\s+@default\("([0-9a-f]{64})"\)\s+@db\.Char\(64\)/u)?.[1];
+  assert.equal(schemaSentinel, sentinel);
+  const migrationSentinels = migration.match(/d2ab[0-9a-f]{60}/gu) ?? [];
+  assert.ok(migrationSentinels.length >= 3);
+  assert.ok(migrationSentinels.every((value) => value === sentinel));
+  assert.match(schema, /configurationRevision\s+Int\s+@default\(1\)/u);
+  assert.match(schema, /transactionId\s+BigInt\?\s+@db\.BigInt/u);
+  assert.match(schema, /model ProjectMcpConnectionDelegation \{/u);
+  assert.match(schema, /model ProjectMcpConnectionDelegationAudit \{/u);
+  assert.match(schema, /delegationId\s+String\?\s+@db\.Uuid/u);
+  assert.match(migration, /LOCK TABLE "McpConnection", "ProjectMcpToolGrant", "ProjectMcpToolGrantAudit", "ProjectAction", "ExternalCredential"/u);
+  assert.match(migration, /McpConnection_disabled_state_check/u);
+  assert.match(migration, /PMCD_CONNECTION_EVIDENCE_PREFLIGHT_FAILED/u);
+  assert.match(migration, /PMCD_NONTERMINAL_MCP_ACTION_PREFLIGHT_FAILED/u);
+  assert.match(migration, /MCP_CONNECTION_CREDENTIAL_MIRROR_INVALID/u);
+  assert.match(migration, /MCP_CONNECTION_CONFIGURATION_REVISION_INVALID/u);
+  assert.match(migration, /ALTER CONSTRAINT "McpConnection_credentialId_fkey" DEFERRABLE INITIALLY DEFERRED/u);
+  assert.match(migration, /FOREIGN KEY \("delegationId", "projectId", "connectionId"\)[\s\S]*?ON DELETE NO ACTION ON UPDATE NO ACTION/u);
+  assert.match(migration, /PMCD_live_project_connection_key/u);
+  assert.match(migration, /PMCD_audit_immutable_guard/u);
+  assert.match(migration, /ProjectMcpToolGrant_revoke_audit_guard/u);
+  assert.match(migration, /PROJECT_MCP_TOOL_GRANT_REVOKE_AUDIT_REQUIRED/u);
+  assert.match(migration, /PROJECT_MCP_TOOL_GRANT_DELETE_FORBIDDEN/u);
+  assert.match(migration, /NEW\."transactionId" := txid_current\(\)/u);
+  assert.match(migration, /grant_source\.xmin::text::bigint AS row_xmin/u);
+  assert.match(migration, /mod\(txid_current\(\), 4294967296::bigint\)/u);
+  assert.match(migration, /existing\."transactionId" = txid_current\(\)/u);
+  assert.match(migration, /PROJECT_MCP_TOOL_GRANT_INSERT_FROZEN/u);
+  assert.match(migration, /PROJECT_MCP_ACTION_INSERT_FROZEN/u);
+  assert.doesNotMatch(migration, /INSERT\s+INTO\s+"ProjectMcpToolGrant"/u);
+  assert.doesNotMatch(migration, /INSERT\s+INTO\s+"ProjectAction"/u);
+  const tableDefinitions = migration.slice(
+    migration.indexOf('CREATE TABLE "ProjectMcpConnectionDelegation"'),
+    migration.indexOf("CREATE UNIQUE INDEX"),
+  );
+  assert.doesNotMatch(tableDefinitions, /endpointUrl|credentialId|maskedSuffix|ciphertext|nonce|authTag/u);
 });
 
 test("MCP 页面指南要求管理员认证后才能进入项目授权", async () => {

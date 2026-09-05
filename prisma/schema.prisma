@@ -278,6 +278,29 @@ enum ProjectMcpToolGrantAuditEvent {
   revoked
 }
 
+enum ProjectMcpConnectionDelegationStatus {
+  draft
+  ownerConfirmed @map("owner_confirmed")
+  active
+  rejected
+  revoked
+  expired
+}
+
+enum ProjectMcpConnectionDelegationActorKind {
+  user
+  systemExpiry @map("system_expiry")
+}
+
+enum ProjectMcpConnectionDelegationAuditAction {
+  proposed
+  ownerConfirmed @map("owner_confirmed")
+  activated
+  rejected
+  revoked
+  expired
+}
+
 enum GitProviderKind {
   github
   gitee
@@ -1244,6 +1267,7 @@ model Project {
   projectWorkItemEvidenceLinks         ProjectWorkItemEvidenceLink[]
   projectPlanImpactSuggestions         ProjectPlanImpactSuggestion[]
   projectPlanAudits                    ProjectPlanAudit[]
+  mcpConnectionDelegations             ProjectMcpConnectionDelegation[]
   factRelations                        ProjectFactRelation[]
   worldSnapshots                       ProjectWorldSnapshot[]
   worldAudits                          ProjectWorldAudit[]
@@ -4061,6 +4085,11 @@ model AppUser {
   projectGitRepositoryDelegationOwnerConfirmations ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationOwnerConfirmer")
   projectGitRepositoryDelegationProjectConfirmations ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationProjectConfirmer")
   projectGitRepositoryDelegationTerminalActors  ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationTerminalActor")
+  projectMcpConnectionDelegationConnectionOwners ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationConnectionOwner")
+  projectMcpConnectionDelegationProposers       ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationProposer")
+  projectMcpConnectionDelegationOwnerConfirmations ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationOwnerConfirmer")
+  projectMcpConnectionDelegationProjectConfirmations ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationProjectConfirmer")
+  projectMcpConnectionDelegationTerminalActors  ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationTerminalActor")
   createdMcpConnections        McpConnection[]                  @relation("McpConnectionCreatedBy")
   ownedMcpConnections          McpConnection[]                  @relation("McpConnectionOwner")
   verifiedMcpToolAttestations  McpToolAttestation[]
@@ -4321,6 +4350,8 @@ model ProjectMembership {
   user      AppUser               @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   gitRepositoryDelegationOwnerMemberships ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationOwnerMembership")
   gitRepositoryDelegationProjectConfirmations ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationProjectMembership")
+  mcpConnectionDelegationOwnerMemberships ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationOwnerMembership")
+  mcpConnectionDelegationProjectConfirmations ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationProjectMembership")
 
   // Runtime uniqueness is state-aware: the migration installs a partial
   // unique index for accessState <> revoked. Prisma's DMMF cannot represent
@@ -4569,6 +4600,8 @@ model McpConnection {
   resolvedAddressFingerprint String?             @db.Char(64)
   protocolVersion            String?             @db.VarChar(16)
   catalogFingerprint         String?             @db.Char(64)
+  credentialFingerprint      String              @default("d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b") @db.Char(64)
+  configurationRevision      Int                 @default(1)
   status                     McpConnectionStatus @default(configured)
   lastDiscoveredAt           DateTime?
   lastErrorCode              String?             @db.VarChar(64)
@@ -4583,6 +4616,7 @@ model McpConnection {
   ownerUser                  AppUser?            @relation("McpConnectionOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   toolDefinitions            McpToolDefinition[]
   toolAttestations           McpToolAttestation[]
+  projectDelegations         ProjectMcpConnectionDelegation[]
 
   @@index([status, updatedAt])
   @@index([createdById, createdAt])
@@ -4617,6 +4651,7 @@ model ProjectMcpToolGrant {
   id                String                    @id @default(uuid()) @db.Uuid
   projectId         String                    @db.Uuid
   connectionId      String                    @db.Uuid
+  delegationId      String?                   @db.Uuid
   toolName          String                    @db.VarChar(128)
   toolDefinitionId  String                    @db.Uuid
   attestationId     String?                   @db.Uuid
@@ -4631,6 +4666,7 @@ model ProjectMcpToolGrant {
   updatedAt         DateTime                  @updatedAt
   project           Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   toolDefinition    McpToolDefinition         @relation(fields: [toolDefinitionId, connectionId, toolName], references: [id, connectionId, name], onDelete: NoAction, onUpdate: Cascade)
+  delegation        ProjectMcpConnectionDelegation? @relation(fields: [delegationId, projectId, connectionId], references: [id, projectId, mcpConnectionId], onDelete: NoAction, onUpdate: NoAction)
   managedBy         AppUser                   @relation("ProjectMcpToolGrantManagedBy", fields: [managedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   audits            ProjectMcpToolGrantAudit[]
   attestation       McpToolAttestation?       @relation(fields: [attestationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
@@ -4639,7 +4675,101 @@ model ProjectMcpToolGrant {
   @@unique([projectId, id])
   @@index([projectId, status, updatedAt])
   @@index([toolDefinitionId])
+  @@index([delegationId])
   @@index([managedById, updatedAt])
+}
+
+// Project MCP access is a two-party, explicit delegation record. It is a
+// control-plane-only model in 0.2.x; runtime consumers remain fail-closed.
+model ProjectMcpConnectionDelegation {
+  id                                  String                                      @id @default(uuid()) @db.Uuid
+  projectId                           String                                      @db.Uuid
+  mcpConnectionId                     String                                      @db.Uuid
+  connectionOwnerId                   String                                      @db.Uuid
+  connectionConfigurationRevision     Int
+  resolvedAddressFingerprint          String                                      @db.Char(64)
+  credentialFingerprint               String                                      @db.Char(64)
+  delegationFingerprint               String                                      @db.Char(64)
+  expiresAt                           DateTime
+  version                             Int                                         @default(1)
+  status                              ProjectMcpConnectionDelegationStatus       @default(draft)
+  ownerProjectMembershipId            String                                      @db.Uuid
+  ownerMembershipCreatedAt            DateTime
+  projectConfirmedProjectMembershipId String?                                     @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime?
+  proposedById                        String                                      @db.Uuid
+  proposedAt                          DateTime                                    @default(now())
+  ownerConfirmedById                  String?                                     @db.Uuid
+  ownerConfirmedAt                    DateTime?
+  projectConfirmedById                String?                                     @db.Uuid
+  projectConfirmedAt                  DateTime?
+  activatedAt                         DateTime?
+  rejectedAt                          DateTime?
+  revokedAt                           DateTime?
+  expiredAt                           DateTime?
+  terminalActorKind                   ProjectMcpConnectionDelegationActorKind?
+  terminalActorId                     String?                                     @db.Uuid
+  terminalActorProjectMembershipId    String?                                     @db.Uuid
+  terminalActorMembershipCreatedAt    DateTime?
+  terminalReason                      String?                                     @db.VarChar(500)
+  createdAt                           DateTime                                    @default(now())
+  updatedAt                           DateTime                                    @updatedAt
+  project                             Project                                     @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  mcpConnection                       McpConnection                               @relation(fields: [mcpConnectionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  connectionOwner                     AppUser                                     @relation("ProjectMcpConnectionDelegationConnectionOwner", fields: [connectionOwnerId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  ownerProjectMembership              ProjectMembership                            @relation("ProjectMcpConnectionDelegationOwnerMembership", fields: [ownerProjectMembershipId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  projectConfirmedProjectMembership   ProjectMembership?                           @relation("ProjectMcpConnectionDelegationProjectMembership", fields: [projectConfirmedProjectMembershipId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  proposedBy                          AppUser                                     @relation("ProjectMcpConnectionDelegationProposer", fields: [proposedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  ownerConfirmedBy                    AppUser?                                    @relation("ProjectMcpConnectionDelegationOwnerConfirmer", fields: [ownerConfirmedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  projectConfirmedBy                  AppUser?                                    @relation("ProjectMcpConnectionDelegationProjectConfirmer", fields: [projectConfirmedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  terminalActor                       AppUser?                                    @relation("ProjectMcpConnectionDelegationTerminalActor", fields: [terminalActorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  toolGrants                          ProjectMcpToolGrant[]
+
+  @@unique([id, projectId, mcpConnectionId])
+  @@index([projectId, status])
+  @@index([mcpConnectionId, status])
+  @@index([connectionOwnerId, status])
+}
+
+// Append-only scalar evidence. It intentionally has no foreign keys so
+// project/connection deletion does not erase the audit trail.
+model ProjectMcpConnectionDelegationAudit {
+  id                                  String                                      @id @default(uuid()) @db.Uuid
+  projectId                           String                                      @db.Uuid
+  mcpConnectionId                     String                                      @db.Uuid
+  delegationId                        String                                      @db.Uuid
+  connectionOwnerId                   String                                      @db.Uuid
+  action                              ProjectMcpConnectionDelegationAuditAction
+  delegationVersion                   Int
+  statusBefore                        ProjectMcpConnectionDelegationStatus?
+  statusAfter                         ProjectMcpConnectionDelegationStatus
+  actorKind                           ProjectMcpConnectionDelegationActorKind     @default(user)
+  actorId                             String?                                     @db.Uuid
+  actorProjectMembershipId            String?                                     @db.Uuid
+  actorMembershipCreatedAt            DateTime?
+  terminalActorKind                   ProjectMcpConnectionDelegationActorKind?
+  terminalActorId                     String?                                     @db.Uuid
+  terminalActorProjectMembershipId    String?                                     @db.Uuid
+  terminalActorMembershipCreatedAt    DateTime?
+  terminalReason                      String?                                     @db.VarChar(500)
+  ownerProjectMembershipId            String                                      @db.Uuid
+  ownerMembershipCreatedAt            DateTime
+  projectConfirmedProjectMembershipId String?                                     @db.Uuid
+  projectConfirmedMembershipCreatedAt DateTime?
+  expiresAt                           DateTime
+  connectionConfigurationRevision     Int
+  resolvedAddressFingerprint          String                                      @db.Char(64)
+  credentialFingerprint               String                                      @db.Char(64)
+  delegationFingerprint               String                                      @db.Char(64)
+  reason                              String                                      @db.VarChar(500)
+  transitionAt                        DateTime
+  transactionId                       BigInt                                      @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt                           DateTime                                    @default(now())
+
+  @@unique([delegationId, delegationVersion])
+  @@index([projectId, createdAt])
+  @@index([delegationId, createdAt])
+  @@index([transactionId, createdAt])
 }
 
 model McpToolAttestation {
@@ -4694,12 +4824,14 @@ model ProjectMcpToolGrantAudit {
   actorId               String                            @db.Uuid
   definitionFingerprint String                            @db.Char(64)
   details               Json                              @default("{}") @db.JsonB
+  transactionId         BigInt?                           @db.BigInt
   createdAt             DateTime                          @default(now())
   grant                 ProjectMcpToolGrant               @relation(fields: [projectId, grantId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
   actor                 AppUser                           @relation(fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
 
   @@index([projectId, grantId, createdAt])
   @@index([actorId, createdAt])
+  @@index([transactionId, createdAt])
 }
 
 model AiProviderConnection {

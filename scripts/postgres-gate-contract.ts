@@ -47,6 +47,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "configuration-deletion", file: "test/configuration-deletion-postgres.test.ts", database: "ai_project_os_configuration_deletion_test", gateEnv: "CONFIGURATION_DELETION_POSTGRES_GATE", setup: "migrate" },
   { id: "action-engine", file: "test/action-engine-postgres.test.ts", database: "ai_project_os_action_engine_test", gateEnv: "ACTION_ENGINE_POSTGRES_GATE", setup: "migrate" },
   { id: "mcp-capabilities", file: "test/mcp-capabilities-postgres.test.ts", database: "ai_project_os_mcp_capabilities_test", gateEnv: "MCP_CAPABILITIES_POSTGRES_GATE", setup: "migrate" },
+  { id: "mcp-attestation-control-plane", file: "test/mcp-attestation-control-plane-postgres.test.ts", database: "ai_project_os_mcp_attestation_control_plane_test", gateEnv: "MCP_ATTESTATION_CONTROL_PLANE_POSTGRES_GATE", setup: "migrate" },
   { id: "project-mcp-delegation", file: "test/project-mcp-delegation-postgres.test.ts", database: "ai_project_os_project_mcp_delegation_test", gateEnv: "PROJECT_MCP_DELEGATION_POSTGRES_GATE", setup: "migrate" },
   { id: "project-plan", file: "test/project-plan-postgres.test.ts", database: "ai_project_os_project_plan_test", gateEnv: "PROJECT_PLAN_POSTGRES_GATE", setup: "migrate" },
   { id: "project-world", file: "test/project-world-postgres.test.ts", database: "ai_project_os_v5_gate_world", gateEnv: "PROJECT_WORLD_POSTGRES_GATE", setup: "migrate" },

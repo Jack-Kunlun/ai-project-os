@@ -476,6 +476,9 @@ export async function deleteMcpConnection(
     if (error instanceof Error && error.message.includes("MCP_CONNECTION_LIVE_DELEGATION_DELETE_FORBIDDEN")) {
       return failMcp("MCP_CONNECTION_LIVE_DELEGATION_DELETE_FORBIDDEN");
     }
+    if (error instanceof Error && error.message.includes("MCP_CONNECTION_V2_ATTESTATION_DELETE_FORBIDDEN")) {
+      return failMcp("MCP_CONNECTION_V2_ATTESTATION_DELETE_FORBIDDEN");
+    }
     if (isPrismaCode(error, "P2003")) return failMcp("MCP_CONNECTION_IN_USE");
     throw error;
   }

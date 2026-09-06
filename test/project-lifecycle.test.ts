@@ -48,10 +48,12 @@ test("project deletion keeps V2 MCP grant lifecycle evidence durable", async () 
     readFile("src/lib/project-lifecycle.ts", "utf8"),
     readFile("src/lib/api-errors.ts", "utf8"),
   ]);
-  const ledgerModel = schema.slice(schema.indexOf("model ProjectMcpToolGrantLedger {"), schema.indexOf("// Project MCP access"));
+  const ledgerModel = schema.slice(schema.indexOf("model ProjectMcpToolGrantLedger {"), schema.indexOf("model ProjectMcpAction {"));
+  const actionLedgerModel = schema.slice(schema.indexOf("model ProjectMcpActionLedger {"), schema.indexOf("// Project MCP access"));
   assert.match(schema, /creationTransactionId\s+BigInt\?/u);
   assert.match(schema, /enum ProjectMcpToolGrantLedgerEvent/u);
   assert.doesNotMatch(ledgerModel, /@relation|REFERENCES/u);
+  assert.doesNotMatch(actionLedgerModel, /@relation|REFERENCES/u);
   assert.match(migration, /PROJECT_MCP_GRANT_LEDGER_UPGRADE_PREFLIGHT_FAILED/u);
   assert.match(migration, /ProjectMcpToolGrantLedger_shape_check/u);
   assert.match(migration, /ProjectMcpToolGrantLedger_grantId_grantVersion_key/u);
@@ -106,6 +108,9 @@ test("all project mutation routes reject archived projects except bounded lifecy
   ]);
   const serviceLifecycleGuarded = new Set([
     "src/app/api/projects/[projectId]/mcp-tool-grants/route.ts",
+    "src/app/api/projects/[projectId]/mcp-actions/route.ts",
+    "src/app/api/projects/[projectId]/mcp-actions/[actionId]/decision/route.ts",
+    "src/app/api/projects/[projectId]/mcp-actions/[actionId]/cancel/route.ts",
     "src/app/api/projects/[projectId]/memory/extract/route.ts",
     "src/app/api/projects/[projectId]/memory/search/route.ts",
     "src/app/api/projects/[projectId]/memory/index/route.ts",

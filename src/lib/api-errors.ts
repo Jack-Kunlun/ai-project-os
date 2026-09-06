@@ -52,6 +52,7 @@ import { ProjectAiProviderDelegationServiceError } from "@/lib/project-ai-provid
 import { ProjectGitRepositoryDelegationServiceError } from "@/lib/project-git-repository-delegation-service";
 import { ProjectMcpConnectionDelegationServiceError } from "@/lib/project-mcp-connection-delegation-service";
 import { ProjectMcpToolGrantServiceError } from "@/lib/project-mcp-tool-grant-service";
+import { ProjectMcpActionServiceError } from "@/lib/project-mcp-action-service";
 import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-runtime-service";
 
 export type ApiErrorBody = {
@@ -185,6 +186,25 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_MCP_TOOL_GRANT_CONFLICT: [409, "项目 MCP 工具授权已被其他用户更新，请刷新后重试"],
     };
     const [status, message] = mapping[error.code] ?? [500, "项目 MCP 工具授权处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof ProjectMcpActionServiceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PROJECT_MCP_ACTION_INVALID_INPUT: [400, "项目 MCP 动作请求无效"],
+      PROJECT_MCP_ACTION_FORBIDDEN: [403, "无权管理该项目 MCP 动作"],
+      PROJECT_MCP_ACTION_PROJECT_OWNER_REQUIRED: [403, "只有当前项目 Owner 可以管理 MCP 动作"],
+      PROJECT_MCP_ACTION_ACCOUNT_DISABLED: [403, "当前账户已停用"],
+      PROJECT_MCP_ACTION_NOT_FOUND: [404, "项目 MCP 动作不存在"],
+      PROJECT_MCP_ACTION_PROJECT_ARCHIVED: [409, "已归档项目不能新增或审批 MCP 动作"],
+      PROJECT_MCP_ACTION_STALE: [409, "MCP 授权、工具或认证快照已变化，请重新提议动作"],
+      PROJECT_MCP_ACTION_CONFLICT: [409, "项目 MCP 动作已被其他请求更新，请刷新后重试"],
+      PROJECT_MCP_ACTION_IDEMPOTENCY_CONFLICT: [409, "同一请求标识已经用于另一项 MCP 动作"],
+      PROJECT_MCP_ACTION_DECISION_CONFLICT: [409, "MCP 动作内容或状态已变化，请刷新后重试"],
+      PROJECT_MCP_ACTION_INPUT_INVALID: [400, "MCP 工具参数不符合已固化的输入 Schema"],
+      PROJECT_MCP_ACTION_APPROVAL_EXPIRED: [410, "MCP 动作审批已经过期，请重新提议"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "项目 MCP 动作处理失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 
@@ -795,6 +815,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_DELETE_ACTIVE_UPLOAD: { status: 409, message: "项目仍有上传请求或文件解析租约，请稍后再删除" },
       PROJECT_DELETE_CONFLICT: { status: 409, message: "项目删除依赖正在变化或仍有受保护引用，请刷新后重试" },
       PROJECT_MCP_GRANT_RETENTION_REQUIRED: { status: 409, message: "项目仍有未完成的 MCP 授权留痕，请先撤销授权并完成审计记录" },
+      PROJECT_MCP_ACTION_PENDING: { status: 409, message: "项目仍有待审批或已批准的 MCP 动作，请先取消或完成处理" },
     } as const;
     const mapped = errors[error.code];
     return { status: mapped.status, body: { error: { code: error.code, message: mapped.message } } };

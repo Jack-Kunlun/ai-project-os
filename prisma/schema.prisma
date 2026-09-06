@@ -288,6 +288,38 @@ enum ProjectMcpToolGrantLedgerEvent {
   revoked
 }
 
+enum ProjectMcpActionStatus {
+  waitingApproval @map("waiting_approval")
+  approved
+  rejected
+  cancelled
+  dispatchReserved @map("dispatch_reserved")
+  succeeded
+  failed
+  unknown
+  expired
+  invalidated
+}
+
+enum ProjectMcpActionDecisionKind {
+  approved
+  rejected
+}
+
+enum ProjectMcpActionLedgerEvent {
+  proposed
+  approved
+  rejected
+  cancelled
+}
+
+enum ProjectMcpActionRejectReason {
+  unsafeArguments @map("unsafe_arguments")
+  staleSnapshot @map("stale_snapshot")
+  notNeeded @map("not_needed")
+  policyDenied @map("policy_denied")
+}
+
 enum ProjectMcpConnectionDelegationStatus {
   draft
   ownerConfirmed @map("owner_confirmed")
@@ -1263,6 +1295,7 @@ model Project {
   actions                              ProjectAction[]
   actionResultImports                  ProjectActionResultImport[]
   mcpToolGrants                        ProjectMcpToolGrant[]
+  mcpActions                           ProjectMcpAction[]
   memoryIndexGenerations               MemoryIndexGeneration[]
   memoryIndexPointer                   MemoryIndexPointer?
   memoryRecords                        MemoryRecord[]
@@ -4747,6 +4780,122 @@ model ProjectMcpToolGrantLedger {
   @@unique([grantId, grantVersion])
   @@index([projectId, createdAt])
   @@index([grantId, createdAt])
+  @@index([transactionId, createdAt])
+}
+
+// Isolated, single-use MCP action approval record.  Snapshot identifiers and
+// fingerprints are deliberately scalar evidence: the action must remain
+// inspectable while its source rows are later revoked or rotated, and the
+// append-only ledger below must survive project deletion.
+model ProjectMcpAction {
+  id                              String                   @id @default(uuid()) @db.Uuid
+  projectId                       String                   @db.Uuid
+  clientRequestId                 String                   @db.Uuid
+  grantId                         String                   @db.Uuid
+  delegationId                    String                   @db.Uuid
+  toolDefinitionId                String                   @db.Uuid
+  attestationId                   String                   @db.Uuid
+  connectionId                    String                   @db.Uuid
+  toolName                        String                   @db.VarChar(128)
+  inputSchema                     Json                     @db.JsonB
+  canonicalArguments              Json                     @db.JsonB
+  canonicalArgumentsHash          String                   @db.Char(64)
+  actionFingerprint               String                   @db.Char(64)
+  status                          ProjectMcpActionStatus   @default(waitingApproval)
+  stateVersion                    Int                      @default(1)
+  proposerProjectMembershipId     String                   @db.Uuid
+  proposerMembershipCreatedAt     DateTime
+  lastActorId                     String                   @db.Uuid
+  lastActorProjectMembershipId    String                   @db.Uuid
+  lastActorMembershipCreatedAt    DateTime
+  grantVersion                    Int
+  delegationVersion               Int
+  attestationVersion              Int
+  delegationFingerprint           String                   @db.Char(64)
+  definitionFingerprint            String                   @db.Char(64)
+  networkFingerprint               String                   @db.Char(64)
+  credentialFingerprint            String                   @db.Char(64)
+  connectionConfigurationRevision  Int
+  connectionOwnerId               String                   @db.Uuid
+  connectionOwnershipState        ResourceOwnershipState
+  connectionAllowPrivateNetwork   Boolean
+  connectionUpdatedAt             DateTime
+  credentialUpdatedAt             DateTime?
+  createdAt                       DateTime                 @default(now())
+  transitionAt                    DateTime                 @default(now())
+  approvedAt                      DateTime?
+  approvalExpiresAt               DateTime?
+  rejectedAt                      DateTime?
+  cancelledAt                     DateTime?
+  creationTransactionId           BigInt                   @default(dbgenerated("txid_current()")) @db.BigInt
+  transitionTransactionId         BigInt                   @default(dbgenerated("txid_current()")) @db.BigInt
+  project                         Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, clientRequestId])
+  @@index([projectId, status, createdAt])
+  @@index([projectId, createdAt])
+  @@index([grantId, status])
+}
+
+model ProjectMcpActionDecision {
+  id                          String                    @id @default(uuid()) @db.Uuid
+  projectId                   String                    @db.Uuid
+  actionId                   String                    @db.Uuid
+  decision                    ProjectMcpActionDecisionKind
+  expectedStateVersion        Int
+  expectedActionFingerprint   String                    @db.Char(64)
+  actorId                     String                    @db.Uuid
+  actorProjectMembershipId    String                    @db.Uuid
+  actorMembershipCreatedAt    DateTime
+  reasonCode                  ProjectMcpActionRejectReason?
+  acknowledgedSingleUse       Boolean
+  transactionId               BigInt                    @default(dbgenerated("txid_current()")) @db.BigInt
+  decidedAt                   DateTime                  @default(now())
+  createdAt                   DateTime                  @default(now())
+
+  @@unique([projectId, actionId])
+  @@index([actorId, createdAt])
+  @@index([projectId, createdAt])
+}
+
+// No foreign keys by design.  A project/action/source may be removed after
+// terminal cleanup, but the scalar lifecycle evidence must remain queryable.
+model ProjectMcpActionLedger {
+  id                              String                    @id @default(uuid()) @db.Uuid
+  projectId                       String                    @db.Uuid
+  actionId                       String                    @db.Uuid
+  clientRequestId                 String                    @db.Uuid
+  grantId                         String                    @db.Uuid
+  delegationId                    String                    @db.Uuid
+  toolDefinitionId                String                    @db.Uuid
+  attestationId                   String                    @db.Uuid
+  connectionId                    String                    @db.Uuid
+  toolName                        String                    @db.VarChar(128)
+  event                           ProjectMcpActionLedgerEvent
+  statusBefore                    ProjectMcpActionStatus?
+  statusAfter                     ProjectMcpActionStatus
+  stateVersion                    Int
+  actorId                         String                    @db.Uuid
+  actorProjectMembershipId        String                    @db.Uuid
+  actorMembershipCreatedAt        DateTime
+  grantVersion                    Int
+  delegationVersion               Int
+  attestationVersion              Int
+  delegationFingerprint           String                    @db.Char(64)
+  definitionFingerprint            String                    @db.Char(64)
+  networkFingerprint               String                    @db.Char(64)
+  credentialFingerprint            String                    @db.Char(64)
+  connectionConfigurationRevision  Int
+  canonicalArgumentsHash          String                    @db.Char(64)
+  actionFingerprint               String                    @db.Char(64)
+  transactionId                   BigInt                    @default(dbgenerated("txid_current()")) @db.BigInt
+  transitionAt                    DateTime                  @default(now())
+  createdAt                       DateTime                  @default(now())
+
+  @@unique([actionId, stateVersion])
+  @@index([projectId, createdAt])
+  @@index([actionId, createdAt])
   @@index([transactionId, createdAt])
 }
 

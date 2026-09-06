@@ -283,6 +283,11 @@ enum ProjectMcpToolGrantAuditEvent {
   revoked
 }
 
+enum ProjectMcpToolGrantLedgerEvent {
+  granted
+  revoked
+}
+
 enum ProjectMcpConnectionDelegationStatus {
   draft
   ownerConfirmed @map("owner_confirmed")
@@ -4681,6 +4686,7 @@ model ProjectMcpToolGrant {
   revokedById       String?                   @db.Uuid
   revokerProjectMembershipId String?          @db.Uuid
   revokerMembershipCreatedAt DateTime?
+  creationTransactionId BigInt?               @db.BigInt
   revocationTransactionId BigInt?             @db.BigInt
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
@@ -4701,6 +4707,47 @@ model ProjectMcpToolGrant {
   @@index([toolDefinitionId])
   @@index([delegationId])
   @@index([managedById, updatedAt])
+}
+
+// Append-only scalar evidence for each V2 grant version.  This model has no
+// relations by design: deleting a project, connection, user, or grant must
+// not erase the durable lifecycle ledger.
+model ProjectMcpToolGrantLedger {
+  id                              String                           @id @default(uuid()) @db.Uuid
+  projectId                       String                           @db.Uuid
+  grantId                         String                           @db.Uuid
+  connectionId                    String                           @db.Uuid
+  delegationId                    String                           @db.Uuid
+  toolDefinitionId                String                           @db.Uuid
+  attestationId                   String                           @db.Uuid
+  toolName                        String                           @db.VarChar(128)
+  controlPlaneVersion             Int
+  grantVersion                    Int
+  event                           ProjectMcpToolGrantLedgerEvent
+  statusBefore                    ProjectMcpToolGrantStatus?
+  statusAfter                     ProjectMcpToolGrantStatus
+  actorId                         String                           @db.Uuid
+  actorProjectMembershipId        String                           @db.Uuid
+  actorMembershipCreatedAt        DateTime
+  delegationVersion               Int
+  delegationFingerprint           String                           @db.Char(64)
+  connectionConfigurationRevision Int
+  grantorProjectMembershipId      String                           @db.Uuid
+  grantorMembershipCreatedAt      DateTime
+  revokerProjectMembershipId      String?                          @db.Uuid
+  revokerMembershipCreatedAt      DateTime?
+  definitionFingerprint           String                           @db.Char(64)
+  networkFingerprint              String                           @db.Char(64)
+  credentialFingerprint           String                           @db.Char(64)
+  acknowledgedAt                  DateTime
+  transactionId                   BigInt                           @db.BigInt
+  transitionAt                    DateTime
+  createdAt                       DateTime                         @default(now())
+
+  @@unique([grantId, grantVersion])
+  @@index([projectId, createdAt])
+  @@index([grantId, createdAt])
+  @@index([transactionId, createdAt])
 }
 
 // Project MCP access is a two-party, explicit delegation record. It is a

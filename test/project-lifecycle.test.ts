@@ -41,6 +41,32 @@ test("project lifecycle blocks live delegated Git manual runs", async () => {
   assert.match(source, /PROJECT_HAS_UNRESOLVED_JOBS/u);
 });
 
+test("project deletion keeps V2 MCP grant lifecycle evidence durable", async () => {
+  const [schema, migration, lifecycle, apiErrors] = await Promise.all([
+    readFile("prisma/schema.prisma", "utf8"),
+    readFile("prisma/migrations/20260904200000_add_project_mcp_grant_retention_ledger/migration.sql", "utf8"),
+    readFile("src/lib/project-lifecycle.ts", "utf8"),
+    readFile("src/lib/api-errors.ts", "utf8"),
+  ]);
+  const ledgerModel = schema.slice(schema.indexOf("model ProjectMcpToolGrantLedger {"), schema.indexOf("// Project MCP access"));
+  assert.match(schema, /creationTransactionId\s+BigInt\?/u);
+  assert.match(schema, /enum ProjectMcpToolGrantLedgerEvent/u);
+  assert.doesNotMatch(ledgerModel, /@relation|REFERENCES/u);
+  assert.match(migration, /PROJECT_MCP_GRANT_LEDGER_UPGRADE_PREFLIGHT_FAILED/u);
+  assert.match(migration, /ProjectMcpToolGrantLedger_shape_check/u);
+  assert.match(migration, /ProjectMcpToolGrantLedger_grantId_grantVersion_key/u);
+  assert.match(migration, /project_mcp_tool_grant_create_evidence_guard/u);
+  assert.match(migration, /project_mcp_tool_grant_v2_retention_complete/u);
+  assert.match(migration, /Project_mcp_grant_project_delete_guard/u);
+  assert.match(migration, /PROJECT_MCP_GRANT_RETENTION_REQUIRED/u);
+  assert.match(migration, /PROJECT_MCP_TOOL_GRANT_LEDGER_IMMUTABLE/u);
+  assert.match(migration, /NEW\."creationTransactionId" := txid_current\(\)/u);
+  assert.doesNotMatch(migration, /pg_advisory_xact_lock/u);
+  assert.equal((lifecycle.match(/assertProjectMcpGrantRetentionReady\(tx, admission\.project\.id\)/gu) ?? []).length, 3);
+  assert.match(lifecycle, /project_mcp_tool_grant_v2_retention_complete/u);
+  assert.match(apiErrors, /PROJECT_MCP_GRANT_RETENTION_REQUIRED: \{ status: 409/u);
+});
+
 test("delegated Git runtime keeps connection infrastructure out of project projections", async () => {
   const source = await readFile("src/lib/project-delegated-git-runtime-service.ts", "utf8");
   const migration = await readFile("prisma/migrations/20260904160000_add_project_git_manual_runtime/migration.sql", "utf8");
@@ -70,6 +96,10 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/repositories/route.ts",
     "src/app/api/projects/[projectId]/repositories/[linkId]/route.ts",
   ]);
+  const archivedTerminalCleanupRoutes = new Set([
+    "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/rejection/route.ts",
+    "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/revocation/route.ts",
+  ]);
   const serviceLifecycleGuarded = new Set([
     "src/app/api/projects/[projectId]/memory/extract/route.ts",
     "src/app/api/projects/[projectId]/memory/search/route.ts",
@@ -92,6 +122,8 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/ai-provider-delegations/[delegationId]/project-confirmation/route.ts",
     "src/app/api/projects/[projectId]/ai-provider-delegations/[delegationId]/rejection/route.ts",
     "src/app/api/projects/[projectId]/ai-provider-delegations/[delegationId]/revocation/route.ts",
+    "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/owner-confirmation/route.ts",
+    "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/project-confirmation/route.ts",
     "src/app/api/projects/[projectId]/git-repository-delegations/route.ts",
     "src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/owner-confirmation/route.ts",
     "src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/project-confirmation/route.ts",
@@ -116,6 +148,17 @@ test("all project mutation routes reject archived projects except bounded lifecy
         /assertProjectActive|readJsonBody/u,
         `${path} must not read legacy project state or body`,
       );
+      continue;
+    }
+    if (archivedTerminalCleanupRoutes.has(path)) {
+      assert.doesNotMatch(source, /assertProjectActive/u, `${path} must remain an archived terminal cleanup route`);
+      assert.match(source, /assertSameOrigin\(request\)/u, `${path} must enforce same-origin writes`);
+      assert.match(source, /requireApiSession\(request\)/u, `${path} must authenticate the actor`);
+      if (path.endsWith("/rejection/route.ts")) {
+        assert.match(source, /rejectProjectMcpConnectionDelegation/u, `${path} must call the rejection service`);
+      } else {
+        assert.match(source, /revokeProjectMcpConnectionDelegation/u, `${path} must call the revocation service`);
+      }
       continue;
     }
     if (!/export async function (POST|PUT|PATCH|DELETE)/u.test(source)) continue;

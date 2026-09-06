@@ -1006,10 +1006,34 @@ test(
              "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
              "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
              "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
-             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "createdAt", "updatedAt"
+             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "creationTransactionId", "createdAt", "updatedAt"
            ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, $5, $6::uuid, $7::uuid, $8, $9, $10,
-             3, $11, 1, $12::uuid, $13::timestamp, 'active', $14::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+             3, $11, 1, $12::uuid, $13::timestamp, 'active', $14::uuid, CURRENT_TIMESTAMP, txid_current(), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
           [grantIdValue, projectId, grantConnectionId, delegationId, toolName, definitionValue, attestationValue, definitionFingerprint, fingerprintB, sentinel, fingerprintC, ownerMembership.id, sqlTimestamp(ownerMembership.createdAt), ownerId],
+        );
+        await client.query(
+          `INSERT INTO "ProjectMcpToolGrantAudit" (
+             "id", "projectId", "grantId", "event", "actorId", "controlPlaneVersion", "grantVersion", "statusBefore", "statusAfter",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
+             "definitionFingerprint", "details", "transactionId"
+           ) SELECT $2::uuid, "projectId", "id", 'granted', "managedById", 2, 1, NULL, 'active', "delegationVersion", "delegationFingerprint",
+             "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint", '{}'::jsonb, "creationTransactionId"
+           FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
+          [grantIdValue, id()],
+        );
+        await client.query(
+          `INSERT INTO "ProjectMcpToolGrantLedger" (
+             "id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+             "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "actorProjectMembershipId",
+             "actorMembershipCreatedAt", "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision",
+             "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint", "networkFingerprint",
+             "credentialFingerprint", "acknowledgedAt", "transactionId"
+           ) SELECT $2::uuid, "projectId", "id", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+             2, 1, 'granted', NULL, 'active', "managedById", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "delegationVersion",
+             "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint",
+             "networkFingerprint", "credentialFingerprint", "acknowledgedAt", "creationTransactionId"
+           FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
+          [grantIdValue, id()],
         );
       }
       await client.query("COMMIT");
@@ -1034,7 +1058,7 @@ test(
              3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
           [nullVersionGrantId, projectId, grantConnectionId, delegationId, secondGrantDefinitionId, secondGrantAttestationId, fingerprintA, fingerprintB, sentinel, fingerprintC, ownerMembership!.id, sqlTimestamp(ownerMembership!.createdAt), ownerId],
         ),
-        /ProjectMcpToolGrant_v2_shape_check/u,
+        /ProjectMcpToolGrant_v2_creation_transaction_check/u,
       );
       await client.query("ROLLBACK").catch(() => undefined);
       assert.equal((await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [nullVersionGrantId])).rows[0]?.count, 0);
@@ -1107,8 +1131,8 @@ test(
              "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
              "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
              "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
-             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "createdAt", "updatedAt"
-           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9, 3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "creationTransactionId", "createdAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9, 3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, txid_current(), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
           [duplicateActiveGrantId, projectId, grantConnectionId, delegationId, grantDefinitionId, grantAttestationId, fingerprintD, fingerprintB, sentinel, fingerprintC, ownerMembership!.id, sqlTimestamp(ownerMembership!.createdAt), ownerId],
         ),
         /ProjectMcpToolGrant_active_project_connection_tool_key/u,
@@ -1118,12 +1142,9 @@ test(
       await assert.rejects(
         () => client.query(
           `INSERT INTO "ProjectMcpToolGrant" (
-             "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
-             "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
-             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "updatedAt"
-           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9, 3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-          [id(), projectId, grantConnectionId, delegationId, grantDefinitionId, grantAttestationId, fingerprintD, fingerprintB, sentinel, fingerprintC, ownerMembership!.id, ownerMembership!.createdAt, ownerId],
+             "id", "projectId", "connectionId", "toolName", "toolDefinitionId", "status", "managedById", "acknowledgedAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'legacy.lookup', $4::uuid, 'active', $5::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [id(), projectId, grantConnectionId, grantDefinitionId, ownerId],
         ),
         /PROJECT_MCP_TOOL_GRANT_INSERT_FROZEN/u,
       );
@@ -1188,6 +1209,20 @@ test(
          ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'revoked', $4::uuid, 2, 2, 'active', 'revoked', 3, $5, 1, $6::uuid, $7::timestamp, $8::uuid, $9::timestamp, $10, '{}'::jsonb)`,
         [id(), projectId, grantId, projectOwnerId, fingerprintC, ownerMembership.id, sqlTimestamp(ownerMembership.createdAt), projectOwnerMembership.id, sqlTimestamp(projectOwnerMembership.createdAt), fingerprintD],
       );
+      await client.query(
+        `INSERT INTO "ProjectMcpToolGrantLedger" (
+           "id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+           "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "actorProjectMembershipId",
+           "actorMembershipCreatedAt", "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision",
+           "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId", "revokerMembershipCreatedAt",
+           "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "acknowledgedAt"
+         ) SELECT $2::uuid, "projectId", "id", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+           2, 2, 'revoked', 'active', 'revoked', "revokedById", "revokerProjectMembershipId", "revokerMembershipCreatedAt", "delegationVersion",
+           "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId",
+           "revokerMembershipCreatedAt", "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "acknowledgedAt"
+         FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
+        [grantId, id()],
+      );
       await client.query("COMMIT");
       const durableGrant = await client.query<{ status: string; grantVersion: number; managedById: string; revokedById: string | null; revocationTransactionId: string | null }>(
         `SELECT "status", "grantVersion", "managedById", "revokedById", "revocationTransactionId" FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [grantId],
@@ -1201,12 +1236,12 @@ test(
       await client.query("BEGIN");
       await client.query("SET LOCAL session_replication_role = 'replica'");
       await client.query(
-        `INSERT INTO "ProjectMcpToolGrant" (
-           "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
-           "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
-           "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "createdAt", "updatedAt"
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9, 3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          `INSERT INTO "ProjectMcpToolGrant" (
+             "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
+             "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
+             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "creationTransactionId", "createdAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9, 3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, txid_current(), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [replacementGrantId, projectId, grantConnectionId, delegationId, grantDefinitionId, grantAttestationId, fingerprintD, fingerprintB, sentinel, fingerprintC, ownerMembership!.id, sqlTimestamp(ownerMembership!.createdAt), ownerId],
       );
       await client.query("COMMIT");
@@ -1215,7 +1250,7 @@ test(
         [projectId, grantConnectionId],
       );
       assert.deepEqual(grantRows.rows.map((row) => row.status).sort(), ["active", "revoked"]);
-      assert.equal((await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrantAudit" WHERE "grantId" = $1::uuid`, [grantId])).rows[0]?.count, 1);
+      assert.equal((await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrantAudit" WHERE "grantId" = $1::uuid`, [grantId])).rows[0]?.count, 2);
 
       await assert.rejects(
         () => client.query(`UPDATE "ProjectMcpToolGrant" SET "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [grantId]),
@@ -1244,6 +1279,7 @@ test(
       await client.query("ROLLBACK").catch(() => undefined);
       await client.query("BEGIN").catch(() => undefined);
       await client.query("SET LOCAL session_replication_role = 'replica'").catch(() => undefined);
+      await client.query(`DELETE FROM "ProjectMcpToolGrantLedger" WHERE "grantId" = ANY($1::uuid[])`, [[grantId, healthyGrantId, replacementGrantId, missingAuditGrantId, nullVersionGrantId]]).catch(() => undefined);
       await client.query(`DELETE FROM "McpToolAttestationAudit" WHERE "attestationId" = ANY($1::uuid[])`, [[attestationId, replacementAttestationId, grantAttestationId, secondGrantAttestationId, missingAuditAttestationId, nullVersionAttestationId]]).catch(() => undefined);
       await client.query(`DELETE FROM "McpToolAttestation" WHERE "id" = ANY($1::uuid[])`, [[attestationId, replacementAttestationId, grantAttestationId, secondGrantAttestationId, missingAuditAttestationId, nullVersionAttestationId]]).catch(() => undefined);
       await client.query(`DELETE FROM "ProjectMcpToolGrantAudit" WHERE "grantId" = ANY($1::uuid[])`, [[grantId, healthyGrantId, replacementGrantId, missingAuditGrantId, nullVersionGrantId]]).catch(() => undefined);
@@ -1542,7 +1578,8 @@ test(
       version: number;
       connection: { id: string; name: string } | null;
       effectiveEligibility: { reason: string | null };
-      capabilities: { canReject: boolean };
+      terminalReason: string | null;
+      capabilities: { canReject: boolean; canRevoke: boolean };
     }>;
     const view = (value: unknown): DelegationViewLike => value as DelegationViewLike;
 
@@ -1730,25 +1767,104 @@ test(
         "PROJECT_MCP_CONNECTION_DELEGATION_MEMBERSHIP_REQUIRED",
       );
 
+      const projectOwnerTerminalDraft = view(await proposeProjectMcpConnectionDelegation(projectId, proposalInput(dueConnectionId), ownerActor, db));
+      assert.equal(projectOwnerTerminalDraft.recordStatus, "draft");
+      const projectOwnerTerminalConfirmed = view(await confirmProjectMcpConnectionDelegationOwner(
+        projectId,
+        projectOwnerTerminalDraft.id,
+        { expectedVersion: 1, acknowledgeCredentialUse: true },
+        ownerActor,
+        db,
+      ));
+      assert.equal(projectOwnerTerminalConfirmed.recordStatus, "ownerConfirmed");
+      assert.equal(projectOwnerTerminalConfirmed.version, 2);
+
       await client.query(`UPDATE "Project" SET "archivedAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [projectId]);
       const archivedOwnerListing = await listConnectionOwnerProjectMcpConnectionDelegations(ownerActor, db);
       const archivedDraft = archivedOwnerListing.find((delegation) => delegation.id === secondDraft.id);
       assert.ok(archivedDraft);
       assert.equal(archivedDraft.capabilities.canReject, true);
-      await rejectProjectMcpConnectionDelegation(
+      const archivedProjectOwnerDraft = await getProjectMcpConnectionDelegation(projectId, secondDraft.id, projectOwnerActor, db);
+      assert.equal(archivedProjectOwnerDraft.capabilities.canReject, true);
+      const archivedProjectOwnerActive = await getProjectMcpConnectionDelegation(projectId, proposed.id, projectOwnerActor, db);
+      assert.equal(archivedProjectOwnerActive.capabilities.canRevoke, true);
+
+      const archivedTerminalIds = [secondDraft.id, projectOwnerTerminalDraft.id, proposed.id];
+      const archivedStateBeforeTerminal = await client.query<{ id: string; status: string; version: number }>(
+        `SELECT "id", "status", "version" FROM "ProjectMcpConnectionDelegation" WHERE "id" = ANY($1::uuid[]) ORDER BY "id"`,
+        [archivedTerminalIds],
+      );
+      const archivedAuditBeforeTerminal = await client.query<{ delegationId: string; count: number }>(
+        `SELECT "delegationId", COUNT(*)::int AS count FROM "ProjectMcpConnectionDelegationAudit" WHERE "delegationId" = ANY($1::uuid[]) GROUP BY "delegationId" ORDER BY "delegationId"`,
+        [archivedTerminalIds],
+      );
+      await assertDelegationServiceError(
+        () => proposeProjectMcpConnectionDelegation(projectId, proposalInput(ownerConnectionTwoId), ownerActor, db),
+        "PROJECT_MCP_CONNECTION_DELEGATION_PROJECT_ARCHIVED",
+      );
+      await assertDelegationServiceError(
+        () => confirmProjectMcpConnectionDelegationOwner(
+          projectId,
+          secondDraft.id,
+          { expectedVersion: 1, acknowledgeCredentialUse: true },
+          ownerActor,
+          db,
+        ),
+        "PROJECT_MCP_CONNECTION_DELEGATION_PROJECT_ARCHIVED",
+      );
+      await assertDelegationServiceError(
+        () => confirmProjectMcpConnectionDelegationProject(
+          projectId,
+          proposed.id,
+          { expectedVersion: 3, acknowledgeProjectScope: true, acknowledgeDataEgress: true },
+          projectOwnerActor,
+          db,
+        ),
+        "PROJECT_MCP_CONNECTION_DELEGATION_PROJECT_ARCHIVED",
+      );
+      const archivedStateAfterPreTerminal = await client.query<{ id: string; status: string; version: number }>(
+        `SELECT "id", "status", "version" FROM "ProjectMcpConnectionDelegation" WHERE "id" = ANY($1::uuid[]) ORDER BY "id"`,
+        [archivedTerminalIds],
+      );
+      const archivedAuditAfterPreTerminal = await client.query<{ delegationId: string; count: number }>(
+        `SELECT "delegationId", COUNT(*)::int AS count FROM "ProjectMcpConnectionDelegationAudit" WHERE "delegationId" = ANY($1::uuid[]) GROUP BY "delegationId" ORDER BY "delegationId"`,
+        [archivedTerminalIds],
+      );
+      assert.deepEqual(archivedStateAfterPreTerminal.rows, archivedStateBeforeTerminal.rows);
+      assert.deepEqual(archivedAuditAfterPreTerminal.rows, archivedAuditBeforeTerminal.rows);
+
+      const projectOwnerDraftRejection = view(await rejectProjectMcpConnectionDelegation(
         projectId,
         secondDraft.id,
-        { expectedVersion: 1, reason: "former owner archived rejection" },
-        ownerActor,
+        { expectedVersion: 1, reason: "project owner archived rejection" },
+        projectOwnerActor,
         db,
-      );
-      await revokeProjectMcpConnectionDelegation(
+      ));
+      assert.equal(projectOwnerDraftRejection.recordStatus, "rejected");
+      assert.equal(projectOwnerDraftRejection.version, 2);
+      const projectOwnerConfirmedRejection = view(await rejectProjectMcpConnectionDelegation(
+        projectId,
+        projectOwnerTerminalDraft.id,
+        { expectedVersion: 2, reason: "project owner archived owner-confirmed rejection" },
+        projectOwnerActor,
+        db,
+      ));
+      assert.equal(projectOwnerConfirmedRejection.recordStatus, "rejected");
+      assert.equal(projectOwnerConfirmedRejection.version, 3);
+      const projectOwnerActiveRevoke = view(await revokeProjectMcpConnectionDelegation(
         projectId,
         proposed.id,
-        { expectedVersion: 3, reason: "former owner archived revoke" },
-        ownerActor,
+        { expectedVersion: 3, reason: "project owner archived revoke" },
+        projectOwnerActor,
         db,
+      ));
+      assert.equal(projectOwnerActiveRevoke.recordStatus, "revoked");
+      assert.equal(projectOwnerActiveRevoke.version, 4);
+      const terminalAuditCounts = await client.query<{ delegationId: string; count: number }>(
+        `SELECT "delegationId", COUNT(*)::int AS count FROM "ProjectMcpConnectionDelegationAudit" WHERE "delegationId" = ANY($1::uuid[]) AND "action" IN ('rejected', 'revoked') GROUP BY "delegationId" ORDER BY "delegationId"`,
+        [archivedTerminalIds],
       );
+      assert.deepEqual(terminalAuditCounts.rows.map((row) => row.count), [1, 1, 1]);
 
       await client.query(`UPDATE "Project" SET "archivedAt" = NULL WHERE "id" = $1::uuid`, [projectId]);
       // A real due row cannot be produced through the public proposal schema

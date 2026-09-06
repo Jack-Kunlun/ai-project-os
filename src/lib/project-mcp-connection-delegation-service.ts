@@ -383,7 +383,6 @@ function capabilities(row: DelegationRow, actorId: string, directProjectOwner: b
     && ownerActive
     && row.status !== "expired";
   const projectTerminalSafe = directProjectOwner
-    && row.project.archivedAt === null
     && row.status !== "expired";
   return Object.freeze({
     canOwnerConfirm: ownerActor && actorMembership && row.project.archivedAt === null && row.expiresAt > now && connectionEvidenceCurrent(row) && row.status === "draft",
@@ -729,7 +728,6 @@ async function mutateDelegation(
         // first prove ordinary project visibility; otherwise a guessed UUID
         // must not reveal whether a delegation exists or is expired.
         await admitWebAiProjectAccess(tx, { actor, projectId, required: "view", allowArchived: true });
-        if (project.archivedAt !== null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_PROJECT_ARCHIVED");
         await currentDirectProjectOwner(tx, projectId, actor.id);
       }
     }

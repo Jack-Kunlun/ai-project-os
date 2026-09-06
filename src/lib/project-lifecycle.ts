@@ -20,7 +20,8 @@ export type ProjectLifecycleErrorCode =
   | "PROJECT_DELETE_REQUIRES_ARCHIVED"
   | "PROJECT_DELETE_CONFIRMATION_MISMATCH"
   | "PROJECT_DELETE_ACTIVE_UPLOAD"
-  | "PROJECT_DELETE_CONFLICT";
+  | "PROJECT_DELETE_CONFLICT"
+  | "PROJECT_MCP_GRANT_RETENTION_REQUIRED";
 
 export class ProjectLifecycleError extends Error {
   constructor(readonly code: ProjectLifecycleErrorCode) {
@@ -45,6 +46,12 @@ function isSerializationConflict(error: unknown): boolean {
 
 function isForeignKeyConflict(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003";
+}
+
+function isMcpGrantRetentionConflict(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError
+    && (error.message.includes("PROJECT_MCP_GRANT_RETENTION_REQUIRED")
+      || JSON.stringify(error.meta ?? {}).includes("PROJECT_MCP_GRANT_RETENTION_REQUIRED"));
 }
 
 type DeletionProject = Readonly<{
@@ -94,6 +101,56 @@ async function assertProjectReadyForDeletion(
   }
   if (uploadReservations > 0 || uploadAdmissions > 0) {
     throw new ProjectLifecycleError("PROJECT_DELETE_ACTIVE_UPLOAD");
+  }
+}
+
+async function assertProjectMcpGrantRetentionReady(
+  tx: Prisma.TransactionClient,
+  projectId: string,
+): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ blocked: boolean }>>(Prisma.sql`
+    SELECT (
+      EXISTS (
+        SELECT 1
+        FROM "ProjectMcpToolGrant" AS grant_row
+        WHERE grant_row."projectId" = ${projectId}::uuid
+          AND grant_row."controlPlaneVersion" = 2
+          AND (
+            grant_row."status" = 'active'
+            OR NOT "project_mcp_tool_grant_v2_retention_complete"(grant_row)
+          )
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM "ProjectMcpToolGrantLedger" AS ledger
+        WHERE ledger."projectId" = ${projectId}::uuid
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "ProjectMcpToolGrant" AS grant_row
+            WHERE grant_row."projectId" = ledger."projectId"
+              AND grant_row."id" = ledger."grantId"
+              AND grant_row."controlPlaneVersion" = 2
+              AND "project_mcp_tool_grant_v2_retention_complete"(grant_row)
+          )
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM "ProjectMcpToolGrantAudit" AS audit
+        WHERE audit."projectId" = ${projectId}::uuid
+          AND audit."controlPlaneVersion" = 2
+          AND NOT EXISTS (
+            SELECT 1
+            FROM "ProjectMcpToolGrant" AS grant_row
+            WHERE grant_row."projectId" = audit."projectId"
+              AND grant_row."id" = audit."grantId"
+              AND grant_row."controlPlaneVersion" = 2
+              AND "project_mcp_tool_grant_v2_retention_complete"(grant_row)
+          )
+      )
+    ) AS blocked
+  `);
+  if (rows[0]?.blocked === true) {
+    throw new ProjectLifecycleError("PROJECT_MCP_GRANT_RETENTION_REQUIRED");
   }
 }
 
@@ -235,6 +292,7 @@ export async function deleteArchivedProject(
           throw new ProjectLifecycleError("PROJECT_DELETE_CONFIRMATION_MISMATCH");
         }
         await assertProjectReadyForDeletion(tx, admission.project.id, new Date());
+        await assertProjectMcpGrantRetentionReady(tx, admission.project.id);
         const fingerprint = deletionFingerprint(project);
         const existing = await tx.projectDeletionReceipt.findUnique({ where: { deletedProjectId: admission.project.id } });
         if (existing !== null) {
@@ -255,6 +313,9 @@ export async function deleteArchivedProject(
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       break;
     } catch (error) {
+      if (isMcpGrantRetentionConflict(error)) {
+        throw new ProjectLifecycleError("PROJECT_MCP_GRANT_RETENTION_REQUIRED");
+      }
       if (isSerializationConflict(error) && attempt < 3) continue;
       if (isSerializationConflict(error)) throw new ProjectLifecycleError("PROJECT_DELETE_CONFLICT");
       throw error;
@@ -295,6 +356,7 @@ export async function deleteArchivedProject(
           throw new ProjectLifecycleError("PROJECT_LIFECYCLE_STALE");
         }
         await assertProjectReadyForDeletion(tx, admission.project.id, new Date());
+        await assertProjectMcpGrantRetentionReady(tx, admission.project.id);
         const storedVersionCount = await tx.projectAssetVersion.count({ where: { projectId: admission.project.id } });
         return Object.freeze({ receipt: currentReceipt, projectId: admission.project.id, shouldStage: storedVersionCount > 0 });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -332,6 +394,7 @@ export async function deleteArchivedProject(
           throw new ProjectLifecycleError("PROJECT_LIFECYCLE_STALE");
         }
         await assertProjectReadyForDeletion(tx, admission.project.id, new Date());
+        await assertProjectMcpGrantRetentionReady(tx, admission.project.id);
         const credentialRows = await Promise.all([
           tx.gitHubConnection.findMany({ where: { projectId: admission.project.id, credentialId: { not: null } }, select: { credentialId: true } }),
           tx.projectGitHubSyncEntry.findMany({ where: { projectId: admission.project.id }, select: { credentialId: true } }),
@@ -367,6 +430,9 @@ export async function deleteArchivedProject(
     } catch (error) {
       if (storageStagedThisAttempt) {
         await restoreStagedProjectAssetStorage(receipt.deletedProjectId, receipt.id);
+      }
+      if (isMcpGrantRetentionConflict(error)) {
+        throw new ProjectLifecycleError("PROJECT_MCP_GRANT_RETENTION_REQUIRED");
       }
       if (isSerializationConflict(error) && attempt < 3) continue;
       if (isSerializationConflict(error) || isForeignKeyConflict(error)) {

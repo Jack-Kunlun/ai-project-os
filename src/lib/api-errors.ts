@@ -778,6 +778,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_DELETE_CONFIRMATION_MISMATCH: { status: 400, message: "项目名称确认不一致，未执行删除" },
       PROJECT_DELETE_ACTIVE_UPLOAD: { status: 409, message: "项目仍有上传请求或文件解析租约，请稍后再删除" },
       PROJECT_DELETE_CONFLICT: { status: 409, message: "项目删除依赖正在变化或仍有受保护引用，请刷新后重试" },
+      PROJECT_MCP_GRANT_RETENTION_REQUIRED: { status: 409, message: "项目仍有未完成的 MCP 授权留痕，请先撤销授权并完成审计记录" },
     } as const;
     const mapped = errors[error.code];
     return { status: mapped.status, body: { error: { code: error.code, message: mapped.message } } };

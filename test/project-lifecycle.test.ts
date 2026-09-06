@@ -96,11 +96,16 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/repositories/route.ts",
     "src/app/api/projects/[projectId]/repositories/[linkId]/route.ts",
   ]);
+  const frozenMcpGrantRoutes = new Set([
+    "src/app/api/projects/[projectId]/mcp-tool-grants/[grantId]/route.ts",
+  ]);
   const archivedTerminalCleanupRoutes = new Set([
     "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/rejection/route.ts",
     "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/revocation/route.ts",
+    "src/app/api/projects/[projectId]/mcp-tool-grants/[grantId]/revocation/route.ts",
   ]);
   const serviceLifecycleGuarded = new Set([
+    "src/app/api/projects/[projectId]/mcp-tool-grants/route.ts",
     "src/app/api/projects/[projectId]/memory/extract/route.ts",
     "src/app/api/projects/[projectId]/memory/search/route.ts",
     "src/app/api/projects/[projectId]/memory/index/route.ts",
@@ -150,11 +155,19 @@ test("all project mutation routes reject archived projects except bounded lifecy
       );
       continue;
     }
+    if (frozenMcpGrantRoutes.has(path)) {
+      assert.doesNotMatch(source, /assertProjectActive/u, `${path} must remain frozen before project lifecycle lookup`);
+      assert.match(source, /MCP_LEGACY_PROJECT_RUNTIME_FROZEN/u, `${path} must return the fixed legacy freeze error`);
+      assert.doesNotMatch(source, /readJsonBody|revokeProjectMcpToolGrant/u, `${path} must not parse or invoke legacy mutation`);
+      continue;
+    }
     if (archivedTerminalCleanupRoutes.has(path)) {
       assert.doesNotMatch(source, /assertProjectActive/u, `${path} must remain an archived terminal cleanup route`);
       assert.match(source, /assertSameOrigin\(request\)/u, `${path} must enforce same-origin writes`);
       assert.match(source, /requireApiSession\(request\)/u, `${path} must authenticate the actor`);
-      if (path.endsWith("/rejection/route.ts")) {
+      if (path.endsWith("/mcp-tool-grants/[grantId]/revocation/route.ts")) {
+        assert.match(source, /revokeProjectMcpToolGrantV2/u, `${path} must call the V2 grant revocation service`);
+      } else if (path.endsWith("/rejection/route.ts")) {
         assert.match(source, /rejectProjectMcpConnectionDelegation/u, `${path} must call the rejection service`);
       } else {
         assert.match(source, /revokeProjectMcpConnectionDelegation/u, `${path} must call the revocation service`);

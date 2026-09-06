@@ -51,6 +51,7 @@ import { PersonalProviderServiceError } from "@/lib/personal-ai-provider-service
 import { ProjectAiProviderDelegationServiceError } from "@/lib/project-ai-provider-delegation-service";
 import { ProjectGitRepositoryDelegationServiceError } from "@/lib/project-git-repository-delegation-service";
 import { ProjectMcpConnectionDelegationServiceError } from "@/lib/project-mcp-connection-delegation-service";
+import { ProjectMcpToolGrantServiceError } from "@/lib/project-mcp-tool-grant-service";
 import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-runtime-service";
 
 export type ApiErrorBody = {
@@ -169,6 +170,21 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MCP_TOOL_CALL_FAILED: [502, "MCP 工具调用失败"],
     };
     const [status, message] = mapping[error.code] ?? [500, "MCP 能力处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof ProjectMcpToolGrantServiceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PROJECT_MCP_TOOL_GRANT_INVALID_INPUT: [400, "项目 MCP 工具授权请求无效"],
+      PROJECT_MCP_TOOL_GRANT_FORBIDDEN: [403, "无权管理该项目 MCP 工具授权"],
+      PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED: [403, "只有当前项目 Owner 可以管理 MCP 工具授权"],
+      PROJECT_MCP_TOOL_GRANT_ACCOUNT_DISABLED: [403, "当前账户已停用"],
+      PROJECT_MCP_TOOL_GRANT_NOT_FOUND: [404, "项目 MCP 工具授权不存在"],
+      PROJECT_MCP_TOOL_GRANT_PROJECT_ARCHIVED: [409, "已归档项目不能新增 MCP 工具授权"],
+      PROJECT_MCP_TOOL_GRANT_STALE: [409, "MCP 委托、工具或认证快照已变化，请刷新后重试"],
+      PROJECT_MCP_TOOL_GRANT_CONFLICT: [409, "项目 MCP 工具授权已被其他用户更新，请刷新后重试"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "项目 MCP 工具授权处理失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

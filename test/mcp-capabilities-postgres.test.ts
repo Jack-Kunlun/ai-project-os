@@ -99,11 +99,10 @@ test("MCP personal discovery remains available while project runtime is fail-clo
     assert.equal(discovery.discoveredCount, 1);
     assert.equal(discovery.eligibleCount, 1);
     const definition = await db.mcpToolDefinition.findFirstOrThrow({ where: { connectionId: connection.id, current: true } });
-    const center = await getProjectMcpToolCenter(projectId, admin, db);
-    assert.deepEqual(center.definitions, []);
-    assert.deepEqual(center.grants, []);
-    assert.equal(center.canManage, false);
-    assert.equal(center.canInvoke, false);
+    await assert.rejects(
+      () => getProjectMcpToolCenter(projectId, admin, db),
+      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",
+    );
     await assert.rejects(
       () => grantProjectMcpTool(projectId, { toolDefinitionId: definition.id, acknowledgeReadOnly: true, expectedUpdatedAt: null }, admin, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",

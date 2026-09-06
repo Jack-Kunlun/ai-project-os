@@ -618,6 +618,7 @@ const grantSelect = {
 
 export async function getProjectMcpToolCenter(projectIdInput: unknown, actor: AccessUser, db: PrismaClient = getDb()) {
   const projectId = uuid(projectIdInput);
+  if (!projectMcpDelegationEnabled()) return failMcp("MCP_LEGACY_PROJECT_RUNTIME_FROZEN");
   await assertProjectAccess(actor, projectId, "view", db);
   const permission = await getProjectPermission(actor, projectId, db);
   if (permission === null) return failMcp("MCP_GRANT_NOT_FOUND");
@@ -668,9 +669,9 @@ export async function grantProjectMcpTool(projectIdInput: unknown, input: unknow
   const projectId = uuid(projectIdInput);
   const parsed = grantSchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
+  if (!projectMcpDelegationEnabled()) return failMcp("MCP_LEGACY_PROJECT_RUNTIME_FROZEN");
   await assertProjectActive(projectId, db);
   await assertProjectAccess(actor, projectId, "owner", db);
-  if (!projectMcpDelegationEnabled()) return failMcp("MCP_LEGACY_PROJECT_RUNTIME_FROZEN");
   return db.$transaction(async (tx) => {
     const definition = await tx.mcpToolDefinition.findUnique({
       where: { id: parsed.data.toolDefinitionId },
@@ -719,6 +720,7 @@ export async function revokeProjectMcpToolGrant(projectIdInput: unknown, grantId
   const grantId = uuid(grantIdInput);
   const parsed = revokeSchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
+  if (!projectMcpDelegationEnabled()) return failMcp("MCP_LEGACY_PROJECT_RUNTIME_FROZEN");
   await assertProjectActive(projectId, db);
   await assertProjectAccess(actor, projectId, "owner", db);
   return db.$transaction(async (tx) => {

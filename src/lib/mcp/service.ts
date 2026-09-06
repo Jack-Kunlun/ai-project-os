@@ -686,7 +686,10 @@ export async function grantProjectMcpTool(projectIdInput: unknown, input: unknow
     });
     if (attestation === null) return failMcp("MCP_TOOL_NOT_ATTESTED");
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:${definition.connectionId}:${definition.name}`}::text, 32010001))`);
-    const existing = await tx.projectMcpToolGrant.findUnique({ where: { projectId_connectionId_toolName: { projectId, connectionId: definition.connectionId, toolName: definition.name } } });
+    const existing = await tx.projectMcpToolGrant.findFirst({
+      where: { projectId, connectionId: definition.connectionId, toolName: definition.name, status: "active" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
     const expected = parsed.data.expectedUpdatedAt === null ? null : timestamp(parsed.data.expectedUpdatedAt);
     if ((existing === null) !== (expected === null) || (existing !== null && expected !== null && existing.updatedAt.getTime() !== expected.getTime())) return failMcp("MCP_GRANT_CONFLICT");
     if (

@@ -267,6 +267,11 @@ enum McpToolAttestationAuditEvent {
   revoked
 }
 
+enum McpToolAttestationStatus {
+  active
+  revoked
+}
+
 enum ProjectMcpToolGrantStatus {
   active
   revoked
@@ -4093,8 +4098,10 @@ model AppUser {
   createdMcpConnections        McpConnection[]                  @relation("McpConnectionCreatedBy")
   ownedMcpConnections          McpConnection[]                  @relation("McpConnectionOwner")
   verifiedMcpToolAttestations  McpToolAttestation[]
+  revokedMcpToolAttestations    McpToolAttestation[]             @relation("McpToolAttestationRevokedBy")
   mcpToolAttestationAudits     McpToolAttestationAudit[]
   managedMcpToolGrants         ProjectMcpToolGrant[]             @relation("ProjectMcpToolGrantManagedBy")
+  revokedMcpToolGrants          ProjectMcpToolGrant[]             @relation("ProjectMcpToolGrantRevokedBy")
   mcpToolGrantAuditEvents      ProjectMcpToolGrantAudit[]
   automationRules              AutomationRule[]
   notifications                Notification[]
@@ -4352,6 +4359,8 @@ model ProjectMembership {
   gitRepositoryDelegationProjectConfirmations ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationProjectMembership")
   mcpConnectionDelegationOwnerMemberships ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationOwnerMembership")
   mcpConnectionDelegationProjectConfirmations ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationProjectMembership")
+  mcpToolGrantGrantors ProjectMcpToolGrant[] @relation("ProjectMcpToolGrantGrantorMembership")
+  mcpToolGrantRevokers ProjectMcpToolGrant[] @relation("ProjectMcpToolGrantRevokerMembership")
 
   // Runtime uniqueness is state-aware: the migration installs a partial
   // unique index for accessState <> revoked. Prisma's DMMF cannot represent
@@ -4652,26 +4661,41 @@ model ProjectMcpToolGrant {
   projectId         String                    @db.Uuid
   connectionId      String                    @db.Uuid
   delegationId      String?                   @db.Uuid
+  controlPlaneVersion Int?
+  grantVersion      Int?
   toolName          String                    @db.VarChar(128)
   toolDefinitionId  String                    @db.Uuid
   attestationId     String?                   @db.Uuid
   definitionFingerprint String?               @db.Char(64)
   networkFingerprint    String?               @db.Char(64)
   credentialFingerprint String?               @db.Char(64)
+  delegationVersion Int?
+  delegationFingerprint String?               @db.Char(64)
+  connectionConfigurationRevision Int?
+  grantorProjectMembershipId String?          @db.Uuid
+  grantorMembershipCreatedAt DateTime?
   status            ProjectMcpToolGrantStatus @default(active)
   managedById       String                    @db.Uuid
   acknowledgedAt    DateTime
   revokedAt         DateTime?
+  revokedById       String?                   @db.Uuid
+  revokerProjectMembershipId String?          @db.Uuid
+  revokerMembershipCreatedAt DateTime?
+  revocationTransactionId BigInt?             @db.BigInt
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
   project           Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   toolDefinition    McpToolDefinition         @relation(fields: [toolDefinitionId, connectionId, toolName], references: [id, connectionId, name], onDelete: NoAction, onUpdate: Cascade)
   delegation        ProjectMcpConnectionDelegation? @relation(fields: [delegationId, projectId, connectionId], references: [id, projectId, mcpConnectionId], onDelete: NoAction, onUpdate: NoAction)
   managedBy         AppUser                   @relation("ProjectMcpToolGrantManagedBy", fields: [managedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  revokedBy         AppUser?                  @relation("ProjectMcpToolGrantRevokedBy", fields: [revokedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  grantorProjectMembership ProjectMembership? @relation("ProjectMcpToolGrantGrantorMembership", fields: [grantorProjectMembershipId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  revokerProjectMembership ProjectMembership? @relation("ProjectMcpToolGrantRevokerMembership", fields: [revokerProjectMembershipId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   audits            ProjectMcpToolGrantAudit[]
   attestation       McpToolAttestation?       @relation(fields: [attestationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
 
-  @@unique([projectId, connectionId, toolName])
+  // Active-row uniqueness is enforced by a migration-managed partial index;
+  // revoked history must remain available for a later re-grant.
   @@unique([projectId, id])
   @@index([projectId, status, updatedAt])
   @@index([toolDefinitionId])
@@ -4774,20 +4798,31 @@ model ProjectMcpConnectionDelegationAudit {
 
 model McpToolAttestation {
   id                    String                    @id @default(uuid()) @db.Uuid
+  controlPlaneVersion   Int?
+  status                McpToolAttestationStatus?
+  version               Int?
   connectionId          String                    @db.Uuid
   toolDefinitionId      String                    @db.Uuid
   toolName              String                    @db.VarChar(128)
   definitionFingerprint String                    @db.Char(64)
   networkFingerprint    String                    @db.Char(64)
   credentialFingerprint String                    @db.Char(64)
+  conclusion             String?                   @db.VarChar(32)
+  riskLevel              String?                   @db.VarChar(16)
+  evidenceNote           String?                   @db.VarChar(500)
+  connectionConfigurationRevision Int?
   verifiedById          String                    @db.Uuid
   note                  String?                   @db.Text
   evidence              Json                      @default("{}") @db.JsonB
+  revokedById           String?                   @db.Uuid
+  revokedAt             DateTime?
+  revocationTransactionId BigInt?                 @db.BigInt
   attestedAt            DateTime                  @default(now())
   createdAt             DateTime                  @default(now())
   connection            McpConnection             @relation(fields: [connectionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   toolDefinition        McpToolDefinition         @relation(fields: [toolDefinitionId, connectionId, toolName], references: [id, connectionId, name], onDelete: NoAction, onUpdate: Cascade)
   verifiedBy            AppUser                   @relation(fields: [verifiedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  revokedBy             AppUser?                  @relation("McpToolAttestationRevokedBy", fields: [revokedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   grants                ProjectMcpToolGrant[]
   audits                McpToolAttestationAudit[]
 
@@ -4803,10 +4838,16 @@ model McpToolAttestationAudit {
   toolDefinitionId      String                      @db.Uuid
   event                 McpToolAttestationAuditEvent
   actorId               String                      @db.Uuid
+  controlPlaneVersion   Int?
+  attestationVersion    Int?
+  statusBefore          McpToolAttestationStatus?
+  statusAfter           McpToolAttestationStatus?
+  connectionConfigurationRevision Int?
   definitionFingerprint String                      @db.Char(64)
   networkFingerprint    String                      @db.Char(64)
   credentialFingerprint String                      @db.Char(64)
   details               Json                        @default("{}") @db.JsonB
+  transactionId         BigInt?                     @db.BigInt
   createdAt             DateTime                    @default(now())
   attestation           McpToolAttestation           @relation(fields: [attestationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   actor                 AppUser                     @relation(fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
@@ -4822,6 +4863,17 @@ model ProjectMcpToolGrantAudit {
   grantId               String                            @db.Uuid
   event                 ProjectMcpToolGrantAuditEvent
   actorId               String                            @db.Uuid
+  controlPlaneVersion   Int?
+  grantVersion          Int?
+  statusBefore          ProjectMcpToolGrantStatus?
+  statusAfter           ProjectMcpToolGrantStatus?
+  delegationVersion     Int?
+  delegationFingerprint String?                           @db.Char(64)
+  connectionConfigurationRevision Int?
+  grantorProjectMembershipId String?                       @db.Uuid
+  grantorMembershipCreatedAt DateTime?
+  revokerProjectMembershipId String?                       @db.Uuid
+  revokerMembershipCreatedAt DateTime?
   definitionFingerprint String                            @db.Char(64)
   details               Json                              @default("{}") @db.JsonB
   transactionId         BigInt?                           @db.BigInt

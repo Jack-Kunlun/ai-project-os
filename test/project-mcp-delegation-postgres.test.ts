@@ -650,6 +650,616 @@ test("MCP Package A PostgreSQL control plane enforces ownership, epochs, fingerp
 });
 
 test(
+  "MCP Package C1 PostgreSQL control plane enforces V2 attestation and durable grant revocation",
+  { skip: !shouldRun ? "PROJECT_MCP_DELEGATION_POSTGRES_GATE=1 is required" : false },
+  async (context) => {
+    assertDisposableGateDatabase();
+    const databaseUrl = process.env.DATABASE_URL!;
+    const client = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
+    await client.connect();
+    context.after(() => client.end());
+
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
+    const ownerId = id();
+    const projectOwnerId = id();
+    const verifierId = id();
+    const revokerId = id();
+    const regularUserId = id();
+    const workspaceId = id();
+    const projectId = id();
+    const attestationConnectionId = id();
+    const grantConnectionId = id();
+    const attestationDefinitionId = id();
+    const grantDefinitionId = id();
+    const secondGrantDefinitionId = id();
+    const missingAuditDefinitionId = id();
+    const attestationId = id();
+    const grantAttestationId = id();
+    const secondGrantAttestationId = id();
+    const missingAuditAttestationId = id();
+    const replacementAttestationId = id();
+    const delegationId = id();
+    const grantId = id();
+    const healthyGrantId = id();
+    const duplicateActiveGrantId = id();
+    const replacementGrantId = id();
+    const missingAuditGrantId = id();
+    const nullVersionGrantId = id();
+    const nullVersionAttestationId = id();
+    const now = new Date();
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1_000);
+    let ownerMembership: { id: string; createdAt: Date } | null = null;
+    let projectOwnerMembership: { id: string; createdAt: Date } | null = null;
+
+    const insertAttestationRow = async (input: {
+      attestationId: string;
+      connectionId: string;
+      definitionId: string;
+      toolName: string;
+      verifiedById: string;
+      connectionConfigurationRevision?: number;
+      definitionFingerprint?: string;
+      conclusion?: string;
+      riskLevel?: string;
+      evidenceNote?: string;
+      note?: string | null;
+      evidence?: string;
+    }): Promise<void> => {
+      await client.query(
+        `INSERT INTO "McpToolAttestation" (
+           "id", "controlPlaneVersion", "status", "version", "connectionId", "toolDefinitionId", "toolName",
+           "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "conclusion", "riskLevel",
+           "evidenceNote", "note", "connectionConfigurationRevision", "verifiedById", "evidence", "attestedAt", "createdAt"
+         ) VALUES ($1::uuid, 2, 'active', 1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid, $14::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [
+          input.attestationId,
+          input.connectionId,
+          input.definitionId,
+          input.toolName,
+          input.definitionFingerprint ?? fingerprintD,
+          fingerprintB,
+          sentinel,
+          input.conclusion ?? "read_only_verified",
+          input.riskLevel ?? "medium",
+          input.evidenceNote ?? "manual_read_only_review",
+          input.note ?? null,
+          input.connectionConfigurationRevision ?? 1,
+          input.verifiedById,
+          input.evidence ?? "{}",
+        ],
+      );
+    };
+
+    const insertAttestationAudit = async (input: {
+      attestationId: string;
+      connectionId: string;
+      definitionId: string;
+      event: "attested" | "revoked";
+      actorId: string;
+      version: number;
+      statusBefore: "active" | null;
+      statusAfter: "active" | "revoked";
+      connectionConfigurationRevision: number;
+      definitionFingerprint?: string;
+    }): Promise<void> => {
+      await client.query(
+        `INSERT INTO "McpToolAttestationAudit" (
+           "id", "attestationId", "connectionId", "toolDefinitionId", "event", "actorId", "controlPlaneVersion",
+           "attestationVersion", "statusBefore", "statusAfter", "connectionConfigurationRevision",
+           "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "details", "createdAt"
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"McpToolAttestationAuditEvent", $6::uuid, 2,
+           $7, $8::"McpToolAttestationStatus", $9::"McpToolAttestationStatus", $10,
+           $11, $12, $13, '{}'::jsonb, CURRENT_TIMESTAMP)`,
+        [
+          id(),
+          input.attestationId,
+          input.connectionId,
+          input.definitionId,
+          input.event,
+          input.actorId,
+          input.version,
+          input.statusBefore,
+          input.statusAfter,
+          input.connectionConfigurationRevision,
+          input.definitionFingerprint ?? fingerprintD,
+          fingerprintB,
+          sentinel,
+        ],
+      );
+    };
+
+    const createAttestation = async (input: {
+      attestationId: string;
+      connectionId: string;
+      definitionId: string;
+      toolName: string;
+      verifiedById: string;
+      definitionFingerprint?: string;
+    }): Promise<void> => {
+      await client.query("BEGIN");
+      try {
+        await insertAttestationRow(input);
+        await insertAttestationAudit({
+          attestationId: input.attestationId,
+          connectionId: input.connectionId,
+          definitionId: input.definitionId,
+          event: "attested",
+          actorId: input.verifiedById,
+          version: 1,
+          statusBefore: null,
+          statusAfter: "active",
+          connectionConfigurationRevision: 1,
+          definitionFingerprint: input.definitionFingerprint,
+        });
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      }
+    };
+
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO "AppUser" ("id", "username", "role", "updatedAt") VALUES
+           ($1::uuid, $2, 'user', CURRENT_TIMESTAMP),
+           ($3::uuid, $4, 'user', CURRENT_TIMESTAMP),
+           ($5::uuid, $6, 'admin', CURRENT_TIMESTAMP),
+           ($7::uuid, $8, 'admin', CURRENT_TIMESTAMP),
+           ($9::uuid, $10, 'user', CURRENT_TIMESTAMP)`,
+        [
+          ownerId, `mcp_c1_owner_${suffix}`,
+          projectOwnerId, `mcp_c1_project_owner_${suffix}`,
+          verifierId, `mcp_c1_verifier_${suffix}`,
+          revokerId, `mcp_c1_revoker_${suffix}`,
+          regularUserId, `mcp_c1_user_${suffix}`,
+        ],
+      );
+      await client.query(
+        `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, $4::uuid, CURRENT_TIMESTAMP)`,
+        [workspaceId, `MCP C1 ${suffix}`, `mcp-c1-${suffix}`, ownerId],
+      );
+      await client.query(
+        `INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt") VALUES ($1::uuid, $2::uuid, $3, $4, CURRENT_TIMESTAMP)`,
+        [projectId, workspaceId, `MCP C1 project ${suffix}`, `mcp-c1-project-${suffix}`],
+      );
+      await client.query("COMMIT");
+
+      const db = getDb();
+      const memberships = await db.$transaction(async (tx) => {
+        await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "MCP C1 owner fixture" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "MCP C1 owner fixture" });
+        const projectOwner = await grantProjectMembership(tx, { projectId, workspaceId, userId: projectOwnerId, role: "owner", actorId: ownerId, reason: "MCP C1 project owner fixture" });
+        return { owner: await tx.projectMembership.findFirstOrThrow({ where: { projectId, userId: ownerId, accessState: "confirmed" }, select: { id: true, createdAt: true } }), projectOwner };
+      });
+      ownerMembership = memberships.owner;
+      projectOwnerMembership = memberships.projectOwner;
+
+      for (const [connectionId, name] of [[attestationConnectionId, "attestation"], [grantConnectionId, "grant"]] as const) {
+        await client.query(
+          `INSERT INTO "McpConnection" (
+             "id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint",
+             "status", "createdById", "ownerUserId", "ownershipState", "updatedAt"
+           ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 'confirmed', CURRENT_TIMESTAMP)`,
+          [connectionId, `MCP C1 ${name} ${suffix}`, `https://mcp.example.test/c1/${name}/${suffix}`, fingerprintB, ownerId],
+        );
+      }
+      await client.query(
+        `INSERT INTO "McpToolDefinition" ("id", "connectionId", "name", "inputSchema", "readOnlyEligible", "definitionFingerprint", "discoveredAt") VALUES
+           ($1::uuid, $2::uuid, 'control.lookup', '{}'::jsonb, true, $3, CURRENT_TIMESTAMP),
+           ($4::uuid, $5::uuid, 'project.lookup', '{}'::jsonb, true, $3, CURRENT_TIMESTAMP),
+           ($6::uuid, $5::uuid, 'project.lookup.two', '{}'::jsonb, true, $7, CURRENT_TIMESTAMP),
+           ($8::uuid, $5::uuid, 'project.lookup.three', '{}'::jsonb, true, $9, CURRENT_TIMESTAMP)`,
+        [attestationDefinitionId, attestationConnectionId, fingerprintD, grantDefinitionId, grantConnectionId, secondGrantDefinitionId, fingerprintA, missingAuditDefinitionId, fingerprintC],
+      );
+
+      await createAttestation({ attestationId, connectionId: attestationConnectionId, definitionId: attestationDefinitionId, toolName: "control.lookup", verifiedById: verifierId });
+      await createAttestation({ attestationId: grantAttestationId, connectionId: grantConnectionId, definitionId: grantDefinitionId, toolName: "project.lookup", verifiedById: verifierId, definitionFingerprint: fingerprintD });
+      await createAttestation({ attestationId: secondGrantAttestationId, connectionId: grantConnectionId, definitionId: secondGrantDefinitionId, toolName: "project.lookup.two", verifiedById: verifierId, definitionFingerprint: fingerprintA });
+
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationRow({ attestationId: id(), connectionId: attestationConnectionId, definitionId: attestationDefinitionId, toolName: "control.lookup", verifiedById: regularUserId }),
+        /MCP_TOOL_ATTESTATION_TUPLE_INVALID/u,
+      );
+      await client.query("ROLLBACK");
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationRow({ attestationId: id(), connectionId: attestationConnectionId, definitionId: attestationDefinitionId, toolName: "control.lookup", verifiedById: verifierId, connectionConfigurationRevision: 2 }),
+        /MCP_TOOL_ATTESTATION_TUPLE_INVALID/u,
+      );
+      await client.query("ROLLBACK");
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationRow({ attestationId: id(), connectionId: attestationConnectionId, definitionId: attestationDefinitionId, toolName: "control.lookup", verifiedById: verifierId, evidence: '{"authorization":"Bearer token"}' }),
+        /MCP_TOOL_ATTESTATION_TUPLE_INVALID/u,
+      );
+      await client.query("ROLLBACK");
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationRow({ attestationId: id(), connectionId: attestationConnectionId, definitionId: attestationDefinitionId, toolName: "control.lookup", verifiedById: verifierId, note: "Bearer token" }),
+        /MCP_TOOL_ATTESTATION_TUPLE_INVALID/u,
+      );
+      await client.query("ROLLBACK");
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationRow({ attestationId: id(), connectionId: attestationConnectionId, definitionId: attestationDefinitionId, toolName: "control.lookup", verifiedById: verifierId, evidenceNote: "ciphertext" }),
+        /MCP_TOOL_ATTESTATION_TUPLE_INVALID/u,
+      );
+      await client.query("ROLLBACK");
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationRow({ attestationId: id(), connectionId: attestationConnectionId, definitionId: attestationDefinitionId, toolName: "control.lookup", verifiedById: verifierId, riskLevel: "critical" }),
+        /MCP_TOOL_ATTESTATION_TUPLE_INVALID/u,
+      );
+      await client.query("ROLLBACK");
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationRow({ attestationId: id(), connectionId: attestationConnectionId, definitionId: attestationDefinitionId, toolName: "control.lookup", verifiedById: verifierId }),
+        /McpToolAttestation_v2_active_tuple_key/u,
+      );
+      await client.query("ROLLBACK");
+
+      await client.query("BEGIN");
+      await insertAttestationRow({ attestationId: id(), connectionId: grantConnectionId, definitionId: missingAuditDefinitionId, toolName: "project.lookup.three", verifiedById: revokerId, definitionFingerprint: fingerprintC });
+      await assert.rejects(
+        () => client.query("COMMIT"),
+        /MCP_TOOL_ATTESTATION_AUDIT_REQUIRED/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+      await createAttestation({ attestationId: missingAuditAttestationId, connectionId: grantConnectionId, definitionId: missingAuditDefinitionId, toolName: "project.lookup.three", verifiedById: verifierId, definitionFingerprint: fingerprintC });
+
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationAudit({
+          attestationId: grantAttestationId,
+          connectionId: grantConnectionId,
+          definitionId: grantDefinitionId,
+          event: "attested",
+          actorId: regularUserId,
+          version: 1,
+          statusBefore: null,
+          statusAfter: "active",
+          connectionConfigurationRevision: 1,
+          definitionFingerprint: fingerprintD,
+        }),
+        /MCP_TOOL_ATTESTATION_AUDIT_SNAPSHOT_INVALID/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationAudit({
+          attestationId: grantAttestationId,
+          connectionId: grantConnectionId,
+          definitionId: grantDefinitionId,
+          event: "attested",
+          actorId: verifierId,
+          version: 1,
+          statusBefore: null,
+          statusAfter: "active",
+          connectionConfigurationRevision: 1,
+          definitionFingerprint: fingerprintD,
+        }),
+        /MCP_TOOL_ATTESTATION_AUDIT_DUPLICATE/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE "McpToolAttestation" SET "status" = 'revoked', "version" = 2, "revokedById" = $2::uuid WHERE "id" = $1::uuid`,
+        [attestationId, revokerId],
+      );
+      await insertAttestationAudit({
+        attestationId,
+        connectionId: attestationConnectionId,
+        definitionId: attestationDefinitionId,
+        event: "revoked",
+        actorId: revokerId,
+        version: 2,
+        statusBefore: "active",
+        statusAfter: "revoked",
+        connectionConfigurationRevision: 1,
+      });
+      await client.query("COMMIT");
+      await createAttestation({ attestationId: replacementAttestationId, connectionId: attestationConnectionId, definitionId: attestationDefinitionId, toolName: "control.lookup", verifiedById: verifierId });
+
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE "McpToolAttestation" SET "status" = 'revoked', "version" = 2, "revokedById" = $2::uuid WHERE "id" = $1::uuid`,
+        [grantAttestationId, revokerId],
+      );
+      await insertAttestationAudit({
+        attestationId: grantAttestationId,
+        connectionId: grantConnectionId,
+        definitionId: grantDefinitionId,
+        event: "revoked",
+        actorId: revokerId,
+        version: 2,
+        statusBefore: "active",
+        statusAfter: "revoked",
+        connectionConfigurationRevision: 1,
+        definitionFingerprint: fingerprintD,
+      });
+      await client.query("COMMIT");
+
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = 'replica'");
+      await client.query(
+        `INSERT INTO "ProjectMcpConnectionDelegation" (
+           "id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionConfigurationRevision",
+           "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "expiresAt", "version", "status",
+           "ownerProjectMembershipId", "ownerMembershipCreatedAt", "projectConfirmedProjectMembershipId", "projectConfirmedMembershipCreatedAt",
+           "proposedById", "proposedAt", "ownerConfirmedById", "ownerConfirmedAt", "projectConfirmedById", "projectConfirmedAt", "activatedAt", "createdAt", "updatedAt"
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, $7, $8::timestamp, 3, 'active',
+           $9::uuid, $10::timestamp, $11::uuid, $12::timestamp, $4::uuid, $13::timestamp, $4::uuid, $13::timestamp,
+           $14::uuid, $15::timestamp, $15::timestamp, $13::timestamp, $13::timestamp)`,
+        [delegationId, projectId, grantConnectionId, ownerId, fingerprintB, sentinel, fingerprintC, sqlTimestamp(expiresAt), ownerMembership.id, sqlTimestamp(ownerMembership.createdAt), projectOwnerMembership.id, sqlTimestamp(projectOwnerMembership.createdAt), sqlTimestamp(now), projectOwnerId, sqlTimestamp(now)],
+      );
+      for (const [grantIdValue, attestationValue, definitionValue, toolName, definitionFingerprint] of [
+        [grantId, grantAttestationId, grantDefinitionId, "project.lookup", fingerprintD],
+        [missingAuditGrantId, missingAuditAttestationId, missingAuditDefinitionId, "project.lookup.three", fingerprintC],
+        [healthyGrantId, secondGrantAttestationId, secondGrantDefinitionId, "project.lookup.two", fingerprintA],
+      ] as const) {
+        await client.query(
+          `INSERT INTO "ProjectMcpToolGrant" (
+             "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
+             "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
+             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "createdAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, $5, $6::uuid, $7::uuid, $8, $9, $10,
+             3, $11, 1, $12::uuid, $13::timestamp, 'active', $14::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [grantIdValue, projectId, grantConnectionId, delegationId, toolName, definitionValue, attestationValue, definitionFingerprint, fingerprintB, sentinel, fingerprintC, ownerMembership.id, sqlTimestamp(ownerMembership.createdAt), ownerId],
+        );
+      }
+      await client.query("COMMIT");
+
+      const healthyTuple = await client.query<{ valid: boolean }>(
+        `SELECT "project_mcp_tool_grant_v2_tuple_valid"("ProjectMcpToolGrant") AS valid
+         FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
+        [healthyGrantId],
+      );
+      assert.equal(healthyTuple.rows[0]?.valid, true);
+
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = 'replica'");
+      await assert.rejects(
+        () => client.query(
+          `INSERT INTO "ProjectMcpToolGrant" (
+             "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
+             "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
+             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "createdAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, NULL, 'project.lookup.null-version', $5::uuid, $6::uuid, $7, $8, $9,
+             3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [nullVersionGrantId, projectId, grantConnectionId, delegationId, secondGrantDefinitionId, secondGrantAttestationId, fingerprintA, fingerprintB, sentinel, fingerprintC, ownerMembership!.id, sqlTimestamp(ownerMembership!.createdAt), ownerId],
+        ),
+        /ProjectMcpToolGrant_v2_shape_check/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+      assert.equal((await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [nullVersionGrantId])).rows[0]?.count, 0);
+
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = 'replica'");
+      await assert.rejects(
+        () => client.query(
+          `INSERT INTO "McpToolAttestation" (
+             "id", "controlPlaneVersion", "status", "version", "connectionId", "toolDefinitionId", "toolName",
+             "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "conclusion", "riskLevel",
+             "evidenceNote", "connectionConfigurationRevision", "verifiedById", "evidence", "attestedAt", "createdAt"
+           ) VALUES ($1::uuid, 2, 'active', NULL, $2::uuid, $3::uuid, 'project.lookup.two', $4, $5, $6,
+             'read_only_verified', 'medium', 'manual_read_only_review', 1, $7::uuid, '{}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [nullVersionAttestationId, grantConnectionId, secondGrantDefinitionId, fingerprintC, fingerprintB, sentinel, verifierId],
+        ),
+        /McpToolAttestation_v2_shape_check/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+      assert.equal((await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "McpToolAttestation" WHERE "id" = $1::uuid`, [nullVersionAttestationId])).rows[0]?.count, 0);
+
+      await client.query(`UPDATE "AppUser" SET "disabledAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [verifierId]);
+      await client.query(`UPDATE "McpConnection" SET "status" = 'disabled', "disabledAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [attestationConnectionId]);
+      await client.query(`UPDATE "McpToolDefinition" SET "current" = false, "supersededAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [attestationDefinitionId]);
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE "McpToolAttestation" SET "status" = 'revoked', "version" = 2, "revokedById" = $2::uuid WHERE "id" = $1::uuid`,
+        [replacementAttestationId, revokerId],
+      );
+      await insertAttestationAudit({
+        attestationId: replacementAttestationId,
+        connectionId: attestationConnectionId,
+        definitionId: attestationDefinitionId,
+        event: "revoked",
+        actorId: revokerId,
+        version: 2,
+        statusBefore: "active",
+        statusAfter: "revoked",
+        connectionConfigurationRevision: 1,
+      });
+      await client.query("COMMIT");
+      const revokedAttestation = await client.query<{ status: string; version: number; revocationTransactionId: string | null }>(
+        `SELECT "status", "version", "revocationTransactionId" FROM "McpToolAttestation" WHERE "id" = $1::uuid`, [replacementAttestationId],
+      );
+      assert.equal(revokedAttestation.rows[0]?.status, "revoked");
+      assert.equal(revokedAttestation.rows[0]?.version, 2);
+      assert.match(revokedAttestation.rows[0]?.revocationTransactionId ?? "", /^\d+$/u);
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => insertAttestationAudit({
+          attestationId: replacementAttestationId,
+          connectionId: attestationConnectionId,
+          definitionId: attestationDefinitionId,
+          event: "revoked",
+          actorId: revokerId,
+          version: 2,
+          statusBefore: "active",
+          statusAfter: "revoked",
+          connectionConfigurationRevision: 1,
+        }),
+        /MCP_TOOL_ATTESTATION_AUDIT_STATE_INVALID/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = 'replica'");
+      await assert.rejects(
+        () => client.query(
+          `INSERT INTO "ProjectMcpToolGrant" (
+             "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
+             "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
+             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "createdAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9, 3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [duplicateActiveGrantId, projectId, grantConnectionId, delegationId, grantDefinitionId, grantAttestationId, fingerprintD, fingerprintB, sentinel, fingerprintC, ownerMembership!.id, sqlTimestamp(ownerMembership!.createdAt), ownerId],
+        ),
+        /ProjectMcpToolGrant_active_project_connection_tool_key/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+
+      await assert.rejects(
+        () => client.query(
+          `INSERT INTO "ProjectMcpToolGrant" (
+             "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
+             "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
+             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9, 3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [id(), projectId, grantConnectionId, delegationId, grantDefinitionId, grantAttestationId, fingerprintD, fingerprintB, sentinel, fingerprintC, ownerMembership!.id, ownerMembership!.createdAt, ownerId],
+        ),
+        /PROJECT_MCP_TOOL_GRANT_INSERT_FROZEN/u,
+      );
+
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => client.query(
+          `UPDATE "ProjectMcpToolGrant" SET "status" = 'revoked', "grantVersion" = 2, "revokedById" = $2::uuid, "revokerProjectMembershipId" = $3::uuid, "revokerMembershipCreatedAt" = $4::timestamp WHERE "id" = $1::uuid`,
+          [grantId, regularUserId, projectOwnerMembership!.id, sqlTimestamp(projectOwnerMembership!.createdAt)],
+        ),
+        /PROJECT_MCP_TOOL_GRANT_V2_REVOKER_INVALID/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => client.query(
+          `UPDATE "ProjectMcpToolGrant" SET "status" = 'revoked', "grantVersion" = 2, "revokedById" = $2::uuid, "revokerProjectMembershipId" = $3::uuid, "revokerMembershipCreatedAt" = $4::timestamp WHERE "id" = $1::uuid`,
+          [grantId, projectOwnerId, projectOwnerMembership!.id, sqlTimestamp(new Date(0))],
+        ),
+        /PROJECT_MCP_TOOL_GRANT_V2_REVOKER_INVALID/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+      const activeBeforeDrift = await client.query<{ status: string; revokedById: string | null; revocationTransactionId: string | null }>(
+        `SELECT "status", "revokedById", "revocationTransactionId" FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [grantId],
+      );
+      assert.equal(activeBeforeDrift.rows[0]?.status, "active");
+      assert.equal(activeBeforeDrift.rows[0]?.revokedById, null);
+      assert.equal(activeBeforeDrift.rows[0]?.revocationTransactionId, null);
+
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = 'replica'");
+      await client.query(
+        `UPDATE "ProjectMcpConnectionDelegation" SET "status" = 'revoked', "version" = 4, "delegationFingerprint" = $2, "connectionConfigurationRevision" = 2 WHERE "id" = $1::uuid`,
+        [delegationId, fingerprintA],
+      );
+      await client.query(
+        `UPDATE "McpConnection" SET "status" = 'disabled', "disabledAt" = CURRENT_TIMESTAMP, "configurationRevision" = 2, "resolvedAddressFingerprint" = $2 WHERE "id" = $1::uuid`,
+        [grantConnectionId, fingerprintA],
+      );
+      await client.query(`UPDATE "McpToolDefinition" SET "current" = false, "supersededAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [grantDefinitionId]);
+      await client.query(`UPDATE "AppUser" SET "disabledAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [verifierId]);
+      await client.query(`UPDATE "ProjectMembership" SET "accessState" = 'revoked' WHERE "id" = $1::uuid`, [ownerMembership.id]);
+      await client.query("COMMIT");
+
+      const driftedTuple = await client.query<{ valid: boolean }>(
+        `SELECT "project_mcp_tool_grant_v2_tuple_valid"("ProjectMcpToolGrant") AS valid
+         FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
+        [healthyGrantId],
+      );
+      assert.equal(driftedTuple.rows[0]?.valid, false);
+
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE "ProjectMcpToolGrant" SET "status" = 'revoked', "grantVersion" = 2, "revokedById" = $2::uuid, "revokerProjectMembershipId" = $3::uuid, "revokerMembershipCreatedAt" = $4::timestamp WHERE "id" = $1::uuid`,
+        [grantId, projectOwnerId, projectOwnerMembership.id, sqlTimestamp(projectOwnerMembership.createdAt)],
+      );
+      await client.query(
+        `INSERT INTO "ProjectMcpToolGrantAudit" (
+           "id", "projectId", "grantId", "event", "actorId", "controlPlaneVersion", "grantVersion", "statusBefore", "statusAfter",
+           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
+           "revokerProjectMembershipId", "revokerMembershipCreatedAt", "definitionFingerprint", "details"
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'revoked', $4::uuid, 2, 2, 'active', 'revoked', 3, $5, 1, $6::uuid, $7::timestamp, $8::uuid, $9::timestamp, $10, '{}'::jsonb)`,
+        [id(), projectId, grantId, projectOwnerId, fingerprintC, ownerMembership.id, sqlTimestamp(ownerMembership.createdAt), projectOwnerMembership.id, sqlTimestamp(projectOwnerMembership.createdAt), fingerprintD],
+      );
+      await client.query("COMMIT");
+      const durableGrant = await client.query<{ status: string; grantVersion: number; managedById: string; revokedById: string | null; revocationTransactionId: string | null }>(
+        `SELECT "status", "grantVersion", "managedById", "revokedById", "revocationTransactionId" FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [grantId],
+      );
+      assert.equal(durableGrant.rows[0]?.status, "revoked");
+      assert.equal(durableGrant.rows[0]?.grantVersion, 2);
+      assert.equal(durableGrant.rows[0]?.managedById, ownerId);
+      assert.equal(durableGrant.rows[0]?.revokedById, projectOwnerId);
+      assert.match(durableGrant.rows[0]?.revocationTransactionId ?? "", /^\d+$/u);
+
+      await client.query("BEGIN");
+      await client.query("SET LOCAL session_replication_role = 'replica'");
+      await client.query(
+        `INSERT INTO "ProjectMcpToolGrant" (
+           "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
+           "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
+           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
+           "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "createdAt", "updatedAt"
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9, 3, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [replacementGrantId, projectId, grantConnectionId, delegationId, grantDefinitionId, grantAttestationId, fingerprintD, fingerprintB, sentinel, fingerprintC, ownerMembership!.id, sqlTimestamp(ownerMembership!.createdAt), ownerId],
+      );
+      await client.query("COMMIT");
+      const grantRows = await client.query<{ id: string; status: string }>(
+        `SELECT "id", "status" FROM "ProjectMcpToolGrant" WHERE "projectId" = $1::uuid AND "connectionId" = $2::uuid AND "toolName" = 'project.lookup' ORDER BY "createdAt", "id"`,
+        [projectId, grantConnectionId],
+      );
+      assert.deepEqual(grantRows.rows.map((row) => row.status).sort(), ["active", "revoked"]);
+      assert.equal((await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrantAudit" WHERE "grantId" = $1::uuid`, [grantId])).rows[0]?.count, 1);
+
+      await assert.rejects(
+        () => client.query(`UPDATE "ProjectMcpToolGrant" SET "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [grantId]),
+        /PROJECT_MCP_TOOL_GRANT_REVOKED_IMMUTABLE/u,
+      );
+
+      await client.query("BEGIN");
+      await client.query(
+        `UPDATE "ProjectMcpToolGrant" SET "status" = 'revoked', "grantVersion" = 2, "revokedById" = $2::uuid, "revokerProjectMembershipId" = $3::uuid, "revokerMembershipCreatedAt" = $4::timestamp WHERE "id" = $1::uuid`,
+        [missingAuditGrantId, projectOwnerId, projectOwnerMembership.id, sqlTimestamp(projectOwnerMembership.createdAt)],
+      );
+      await assert.rejects(() => client.query("COMMIT"), /PROJECT_MCP_TOOL_GRANT_REVOKE_AUDIT_REQUIRED/u);
+      await client.query("ROLLBACK").catch(() => undefined);
+      assert.equal((await client.query<{ status: string; revocationTransactionId: string | null }>(`SELECT "status", "revocationTransactionId" FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [missingAuditGrantId])).rows[0]?.status, "active");
+      assert.equal((await client.query<{ revocationTransactionId: string | null }>(`SELECT "revocationTransactionId" FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [missingAuditGrantId])).rows[0]?.revocationTransactionId, null);
+
+      await client.query("BEGIN");
+      await assert.rejects(
+        () => client.query(`DELETE FROM "McpConnection" WHERE "id" = $1::uuid`, [attestationConnectionId]),
+        /MCP_CONNECTION_V2_ATTESTATION_DELETE_FORBIDDEN/u,
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
+      assert.equal((await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "McpToolAttestationAudit" WHERE "attestationId" = $1::uuid`, [replacementAttestationId])).rows[0]?.count, 2);
+      assert.equal((await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "McpToolAttestation" WHERE "id" = $1::uuid`, [replacementAttestationId])).rows[0]?.count, 1);
+    } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.query("BEGIN").catch(() => undefined);
+      await client.query("SET LOCAL session_replication_role = 'replica'").catch(() => undefined);
+      await client.query(`DELETE FROM "McpToolAttestationAudit" WHERE "attestationId" = ANY($1::uuid[])`, [[attestationId, replacementAttestationId, grantAttestationId, secondGrantAttestationId, missingAuditAttestationId, nullVersionAttestationId]]).catch(() => undefined);
+      await client.query(`DELETE FROM "McpToolAttestation" WHERE "id" = ANY($1::uuid[])`, [[attestationId, replacementAttestationId, grantAttestationId, secondGrantAttestationId, missingAuditAttestationId, nullVersionAttestationId]]).catch(() => undefined);
+      await client.query(`DELETE FROM "ProjectMcpToolGrantAudit" WHERE "grantId" = ANY($1::uuid[])`, [[grantId, healthyGrantId, replacementGrantId, missingAuditGrantId, nullVersionGrantId]]).catch(() => undefined);
+      await client.query(`DELETE FROM "ProjectMcpToolGrant" WHERE "id" = ANY($1::uuid[])`, [[grantId, healthyGrantId, replacementGrantId, missingAuditGrantId, nullVersionGrantId]]).catch(() => undefined);
+      await client.query(`DELETE FROM "ProjectMcpConnectionDelegation" WHERE "id" = $1::uuid`, [delegationId]).catch(() => undefined);
+      await client.query(`DELETE FROM "Project" WHERE "id" = $1::uuid`, [projectId]).catch(() => undefined);
+      await client.query(`DELETE FROM "McpToolDefinition" WHERE "id" = ANY($1::uuid[])`, [[attestationDefinitionId, grantDefinitionId, secondGrantDefinitionId, missingAuditDefinitionId]]).catch(() => undefined);
+      await client.query(`DELETE FROM "McpConnection" WHERE "id" = ANY($1::uuid[])`, [[attestationConnectionId, grantConnectionId]]).catch(() => undefined);
+      await client.query(`DELETE FROM "Workspace" WHERE "id" = $1::uuid`, [workspaceId]).catch(() => undefined);
+      await client.query(`DELETE FROM "AppUser" WHERE "id" = ANY($1::uuid[])`, [[ownerId, projectOwnerId, verifierId, revokerId, regularUserId]]).catch(() => undefined);
+      await client.query("COMMIT").catch(() => undefined);
+    }
+  },
+);
+
+test(
   "MCP delegation terminal safety survives owner membership revocation",
   { skip: !shouldRun ? "PROJECT_MCP_DELEGATION_POSTGRES_GATE=1 is required" : false },
   async (context) => {

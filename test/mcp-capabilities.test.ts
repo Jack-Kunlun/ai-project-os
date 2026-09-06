@@ -98,10 +98,11 @@ test("MCP 数据库迁移固定逐次审批、当前定义唯一和追加式审�
   assert.doesNotMatch(migration, /stdio|shell\.execute|code\.write|deploy\.execute/u);
 });
 
-test("MCP Package A keeps delegation control-plane data isolated and project runtime frozen", async () => {
-  const [schema, migration] = await Promise.all([
+test("MCP Package A/C1 keeps delegation control-plane data isolated and project runtime frozen", async () => {
+  const [schema, migration, v2Migration] = await Promise.all([
     readFile("prisma/schema.prisma", "utf8"),
     readFile("prisma/migrations/20260904180000_add_project_mcp_connection_delegations/migration.sql", "utf8"),
+    readFile("prisma/migrations/20260904190000_add_mcp_control_plane_v2/migration.sql", "utf8"),
   ]);
   const sentinel = createHash("sha256").update("mcp:no-credential:v1").digest("hex");
   const schemaSentinel = schema.match(/credentialFingerprint\s+String\s+@default\("([0-9a-f]{64})"\)\s+@db\.Char\(64\)/u)?.[1];
@@ -111,6 +112,12 @@ test("MCP Package A keeps delegation control-plane data isolated and project run
   assert.ok(migrationSentinels.every((value) => value === sentinel));
   assert.match(schema, /configurationRevision\s+Int\s+@default\(1\)/u);
   assert.match(schema, /transactionId\s+BigInt\?\s+@db\.BigInt/u);
+  assert.match(schema, /revocationTransactionId\s+BigInt\?\s+@db\.BigInt/u);
+  assert.match(schema, /controlPlaneVersion\s+Int\?/u);
+  assert.match(schema, /grantVersion\s+Int\?/u);
+  assert.match(schema, /grantorProjectMembershipId\s+String\?/u);
+  assert.match(schema, /revokerProjectMembershipId\s+String\?/u);
+  assert.match(schema, /McpToolAttestationStatus/u);
   assert.match(schema, /model ProjectMcpConnectionDelegation \{/u);
   assert.match(schema, /model ProjectMcpConnectionDelegationAudit \{/u);
   assert.match(schema, /delegationId\s+String\?\s+@db\.Uuid/u);
@@ -135,6 +142,39 @@ test("MCP Package A keeps delegation control-plane data isolated and project run
   assert.match(migration, /PROJECT_MCP_ACTION_INSERT_FROZEN/u);
   assert.doesNotMatch(migration, /INSERT\s+INTO\s+"ProjectMcpToolGrant"/u);
   assert.doesNotMatch(migration, /INSERT\s+INTO\s+"ProjectAction"/u);
+  assert.match(v2Migration, /ProjectMcpToolGrant_v2_shape_check/u);
+  assert.match(v2Migration, /McpToolAttestation_v2_shape_check/u);
+  assert.match(v2Migration, /revocationTransactionId/u);
+  assert.match(v2Migration, /NEW\."revocationTransactionId" := txid_current\(\)/u);
+  assert.match(v2Migration, /MCP_TOOL_ATTESTATION_AUDIT_REQUIRED/u);
+  assert.match(v2Migration, /PROJECT_MCP_TOOL_GRANT_REVOKE_AUDIT_REQUIRED/u);
+  assert.match(v2Migration, /MCP_CONNECTION_V2_ATTESTATION_DELETE_FORBIDDEN/u);
+  assert.match(v2Migration, /"conclusion" = 'read_only_verified'/u);
+  assert.match(v2Migration, /"riskLevel" IN \('low', 'medium', 'high'\)/u);
+  assert.match(v2Migration, /"evidenceNote" = 'manual_read_only_review'/u);
+  assert.match(v2Migration, /"note" IS NULL/u);
+  assert.match(v2Migration, /"evidence" = '\{\}'::jsonb/u);
+  assert.match(v2Migration, /CREATE UNIQUE INDEX "McpToolAttestation_v2_active_tuple_key"/u);
+  assert.match(v2Migration, /CREATE UNIQUE INDEX "McpToolAttestationAudit_v2_event_key"/u);
+  assert.match(v2Migration, /CREATE UNIQUE INDEX "ProjectMcpToolGrant_active_project_connection_tool_key"/u);
+  assert.match(v2Migration, /DROP INDEX "ProjectMcpToolGrant_projectId_connectionId_toolName_key"/u);
+  assert.match(v2Migration, /project_mcp_tool_grant_v2_history_valid/u);
+  assert.match(v2Migration, /OLD\."managedById" IS DISTINCT FROM NEW\."managedById"/u);
+  assert.match(v2Migration, /NEW\."revokedById"/u);
+  assert.match(v2Migration, /grant_row\."controlPlaneVersion" IS DISTINCT FROM 2 AND NOT EXISTS/u);
+  assert.match(v2Migration, /WHERE "controlPlaneVersion" = 2 AND "status" = 'active'/u);
+  assert.doesNotMatch(v2Migration, /\bxmin\b/u);
+  assert.match(v2Migration, /expiresAt" > clock_timestamp\(\)/u);
+  assert.match(v2Migration, /project_row\."archivedAt" IS NULL/u);
+  assert.match(v2Migration, /connection\."ownershipState" = 'confirmed'/u);
+  assert.match(v2Migration, /connection\."credentialId" IS NULL/u);
+  assert.match(v2Migration, /credential\."kind" = 'mcp'/u);
+  assert.match(v2Migration, /credential\."secretFingerprint" = connection\."credentialFingerprint"/u);
+  assert.match(v2Migration, /owner_membership\."role" IN \('owner', 'editor'\)/u);
+  assert.match(v2Migration, /project_owner_membership\."role" = 'owner'/u);
+  assert.match(v2Migration, /grant_row\."grantVersion" IS NOT NULL/u);
+  assert.match(v2Migration, /COALESCE\(\(/u);
+  assert.doesNotMatch(v2Migration, /ciphertext|nonce|authTag|maskedSuffix|\bsecret\b|authorization\b|Bearer\s+[^'"]+/u);
   const tableDefinitions = migration.slice(
     migration.indexOf('CREATE TABLE "ProjectMcpConnectionDelegation"'),
     migration.indexOf("CREATE UNIQUE INDEX"),

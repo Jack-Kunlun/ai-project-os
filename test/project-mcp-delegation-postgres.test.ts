@@ -30,6 +30,8 @@ const repositoryRoot = process.cwd();
 const execFile = promisify(execFileCallback);
 const previousMigration = "20260904170000_add_project_git_manual_run_reconciliation";
 const projectMcpDelegationMigration = "20260904180000_add_project_mcp_connection_delegations";
+const mcpControlPlaneV2Migration = "20260904190000_add_mcp_control_plane_v2";
+const projectMcpGrantRetentionMigration = "20260904200000_add_project_mcp_grant_retention_ledger";
 const sentinel = createHash("sha256").update("mcp:no-credential:v1").digest("hex");
 const fingerprintA = "a".repeat(64);
 const fingerprintB = "b".repeat(64);
@@ -2283,6 +2285,198 @@ test(
       await runUpgradeCase("invalid-action");
       await runUpgradeCase("legacy-active-with-revoked-audit");
       await runUpgradeCase("compliant");
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+      await admin.end().catch(() => undefined);
+    }
+  },
+);
+
+test(
+  "migration 77 upgrades a clean V2 database and rejects preexisting grants before DDL",
+  { skip: !shouldRun ? "PROJECT_MCP_DELEGATION_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    assertDisposableGateDatabase();
+    const configuredUrl = process.env.DATABASE_URL;
+    if (typeof configuredUrl !== "string" || configuredUrl.length === 0) {
+      throw new Error("PROJECT_MCP_GRANT_RETENTION_UPGRADE_DATABASE_URL_REQUIRED");
+    }
+    const baseDatabaseUrl = configuredUrl;
+    const migrations = await migrationNamesFromDisk();
+    const delegationIndex = migrations.indexOf(projectMcpDelegationMigration);
+    const retentionIndex = migrations.indexOf(projectMcpGrantRetentionMigration);
+    if (delegationIndex < 0 || migrations[delegationIndex + 1] !== mcpControlPlaneV2Migration || retentionIndex !== delegationIndex + 2) {
+      throw new Error("PROJECT_MCP_GRANT_RETENTION_UPGRADE_MIGRATION_ORDER_INVALID");
+    }
+    const beforeRetentionMigrations = migrations.slice(0, retentionIndex);
+    const configuredTarget = new URL(configuredUrl);
+    const ownerRole = decodeURIComponent(configuredTarget.username);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(ownerRole)) {
+      throw new Error("PROJECT_MCP_GRANT_RETENTION_UPGRADE_DATABASE_OWNER_INVALID");
+    }
+    const admin = new Client({ connectionString: assertUpgradeAdminUrl(), connectionTimeoutMillis: 5_000 });
+    const tempRoot = await prepareStagedMigrationRoot();
+
+    async function retentionObjects(client: Client) {
+      const result = await client.query<{
+        creationColumnCount: number;
+        creationConstraintCount: number;
+        ledgerTable: string | null;
+        ledgerTypeCount: number;
+        retentionFunctionCount: number;
+        ledgerIndexCount: number;
+        auditIndexCount: number;
+        ledgerTriggerCount: number;
+        projectDeleteTriggerCount: number;
+      }>(`
+        SELECT
+          (SELECT COUNT(*)::int FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ProjectMcpToolGrant' AND column_name = 'creationTransactionId') AS "creationColumnCount",
+          (SELECT COUNT(*)::int FROM pg_constraint WHERE conname = 'ProjectMcpToolGrant_v2_creation_transaction_check') AS "creationConstraintCount",
+          to_regclass('public."ProjectMcpToolGrantLedger"') AS "ledgerTable",
+          (SELECT COUNT(*)::int FROM pg_type WHERE typnamespace = 'public'::regnamespace AND typname = 'ProjectMcpToolGrantLedgerEvent') AS "ledgerTypeCount",
+          (SELECT COUNT(*)::int FROM pg_proc WHERE pronamespace = 'public'::regnamespace AND proname = 'project_mcp_tool_grant_v2_retention_complete') AS "retentionFunctionCount",
+          (SELECT COUNT(*)::int FROM pg_class AS relation JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = 'public' AND relation.relname = 'ProjectMcpToolGrantLedger_grantId_grantVersion_key') AS "ledgerIndexCount",
+          (SELECT COUNT(*)::int FROM pg_class AS relation JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = 'public' AND relation.relname = 'ProjectMcpToolGrantAudit_v2_event_key') AS "auditIndexCount",
+          (SELECT COUNT(*)::int FROM pg_trigger AS trigger_row JOIN pg_class AS relation ON relation.oid = trigger_row.tgrelid JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = 'public' AND relation.relname = 'ProjectMcpToolGrantLedger' AND trigger_row.tgname = 'ProjectMcpToolGrantLedger_guard') AS "ledgerTriggerCount",
+          (SELECT COUNT(*)::int FROM pg_trigger AS trigger_row JOIN pg_class AS relation ON relation.oid = trigger_row.tgrelid JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = 'public' AND relation.relname = 'Project' AND trigger_row.tgname = 'Project_mcp_grant_project_delete_guard') AS "projectDeleteTriggerCount"
+      `);
+      return result.rows[0]!;
+    }
+
+    async function seedPreexistingV2Grant(client: Client): Promise<{ grantId: string; projectId: string }> {
+      const ownerId = id();
+      const workspaceId = id();
+      const projectId = id();
+      const grantId = id();
+      const connectionId = id();
+      const delegationId = id();
+      const definitionId = id();
+      const attestationId = id();
+      const membershipId = id();
+      const membershipCreatedAt = new Date("2026-09-01T00:00:00.000Z");
+      await client.query("BEGIN");
+      try {
+        // This is an intentionally broken pre-77 historical fixture.  Replica
+        // mode is used only to model a V2 row that existed before the ledger
+        // migration; it is never used for a current positive path.
+        await client.query("SET LOCAL session_replication_role = 'replica'");
+        await client.query(
+          `INSERT INTO "AppUser" ("id", "username", "role", "updatedAt") VALUES ($1::uuid, $2, 'user', CURRENT_TIMESTAMP)`,
+          [ownerId, `mcp_retention_upgrade_${grantId.slice(0, 8)}`],
+        );
+        await client.query(
+          `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, $4::uuid, CURRENT_TIMESTAMP)`,
+          [workspaceId, `MCP retention upgrade ${grantId.slice(0, 8)}`, `mcp-retention-upgrade-${grantId.slice(0, 8)}`, ownerId],
+        );
+        await client.query(
+          `INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt") VALUES ($1::uuid, $2::uuid, $3, $4, CURRENT_TIMESTAMP)`,
+          [projectId, workspaceId, `MCP retention upgrade ${grantId.slice(0, 8)}`, `mcp-retention-upgrade-project-${grantId.slice(0, 8)}`],
+        );
+        await client.query(
+          `INSERT INTO "ProjectMcpToolGrant" (
+             "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
+             "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
+             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'upgrade.lookup', $5::uuid, $6::uuid, $7, $8, $9,
+             1, $10, 1, $11::uuid, $12::timestamp, 'active', $13::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [grantId, projectId, connectionId, delegationId, definitionId, attestationId, fingerprintA, fingerprintB, fingerprintC, fingerprintD, membershipId, membershipCreatedAt, ownerId],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      }
+      return { grantId, projectId };
+    }
+
+    async function runUpgradeCase(seedGrant: boolean): Promise<void> {
+      const databaseName = upgradeDatabaseName(randomUUID().slice(0, 12));
+      const targetUrl = new URL(baseDatabaseUrl);
+      targetUrl.pathname = `/${databaseName}`;
+      targetUrl.search = "";
+      targetUrl.hash = "";
+      let databaseCreated = false;
+      let client: Client | undefined;
+      let seededGrantId: string | undefined;
+      try {
+        await admin.query(`CREATE DATABASE "${databaseName}" OWNER "${ownerRole}"`);
+        databaseCreated = true;
+        await rm(join(tempRoot, "prisma", "migrations"), { recursive: true, force: true });
+        await stageMigrations(tempRoot, beforeRetentionMigrations);
+        await deployStagedMigrations(tempRoot, targetUrl.toString());
+        client = new Client({ connectionString: targetUrl.toString(), connectionTimeoutMillis: 5_000 });
+        await client.connect();
+        const priorMigration = await client.query<{ finishedAt: Date | null }>(
+          `SELECT "finished_at" AS "finishedAt" FROM "_prisma_migrations" WHERE "migration_name" = $1`,
+          [mcpControlPlaneV2Migration],
+        );
+        assert.ok(priorMigration.rows[0]?.finishedAt);
+        if (seedGrant) {
+          const seeded = await seedPreexistingV2Grant(client);
+          seededGrantId = seeded.grantId;
+          const beforeGrant = await client.query<{ id: string; controlPlaneVersion: number }>(
+            `SELECT "id", "controlPlaneVersion" FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [seeded.grantId],
+          );
+          assert.deepEqual(beforeGrant.rows, [{ id: seeded.grantId, controlPlaneVersion: 2 }]);
+        }
+
+        await stageMigrations(tempRoot, [projectMcpGrantRetentionMigration]);
+        if (seedGrant) {
+          const preexistingGrantId = seededGrantId;
+          assert.ok(preexistingGrantId);
+          await assert.rejects(
+            () => deployStagedMigrations(tempRoot, targetUrl.toString()),
+            /PROJECT_MCP_GRANT_LEDGER_UPGRADE_PREFLIGHT_FAILED/u,
+          );
+          const failedMigration = await client.query<{ finishedAt: Date | null; rolledBackAt: Date | null }>(
+            `SELECT "finished_at" AS "finishedAt", "rolled_back_at" AS "rolledBackAt" FROM "_prisma_migrations" WHERE "migration_name" = $1`,
+            [projectMcpGrantRetentionMigration],
+          );
+          assert.ok(failedMigration.rows.length === 0 || failedMigration.rows[0]?.finishedAt === null);
+          const objects = await retentionObjects(client);
+          assert.equal(objects.creationColumnCount, 0);
+          assert.equal(objects.creationConstraintCount, 0);
+          assert.equal(objects.ledgerTable, null);
+          assert.equal(objects.ledgerTypeCount, 0);
+          assert.equal(objects.retentionFunctionCount, 0);
+          assert.equal(objects.ledgerIndexCount, 0);
+          assert.equal(objects.auditIndexCount, 0);
+          assert.equal(objects.ledgerTriggerCount, 0);
+          assert.equal(objects.projectDeleteTriggerCount, 0);
+          const afterGrant = await client.query<{ id: string; controlPlaneVersion: number }>(
+            `SELECT "id", "controlPlaneVersion" FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [preexistingGrantId],
+          );
+          assert.deepEqual(afterGrant.rows, [{ id: preexistingGrantId, controlPlaneVersion: 2 }]);
+        } else {
+          await deployStagedMigrations(tempRoot, targetUrl.toString());
+          const completedMigration = await client.query<{ finishedAt: Date | null; rolledBackAt: Date | null }>(
+            `SELECT "finished_at" AS "finishedAt", "rolled_back_at" AS "rolledBackAt" FROM "_prisma_migrations" WHERE "migration_name" = $1`,
+            [projectMcpGrantRetentionMigration],
+          );
+          assert.ok(completedMigration.rows[0]?.finishedAt);
+          assert.equal(completedMigration.rows[0]?.rolledBackAt, null);
+          const objects = await retentionObjects(client);
+          assert.equal(objects.creationColumnCount, 1);
+          assert.equal(objects.creationConstraintCount, 1);
+          assert.notEqual(objects.ledgerTable, null);
+          assert.equal(objects.ledgerTypeCount, 1);
+          assert.equal(objects.retentionFunctionCount, 1);
+          assert.equal(objects.ledgerIndexCount, 1);
+          assert.equal(objects.auditIndexCount, 1);
+          assert.equal(objects.ledgerTriggerCount, 1);
+          assert.equal(objects.projectDeleteTriggerCount, 1);
+        }
+      } finally {
+        await client?.end().catch(() => undefined);
+        if (databaseCreated) await admin.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`).catch(() => undefined);
+      }
+    }
+
+    try {
+      await admin.connect();
+      await runUpgradeCase(false);
+      await runUpgradeCase(true);
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
       await admin.end().catch(() => undefined);

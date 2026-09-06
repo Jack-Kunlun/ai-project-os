@@ -110,55 +110,126 @@ test(
       const membership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: adminId, role: "owner", accessState: "confirmed" }, orderBy: { createdAt: "asc" } });
       const createdAtBefore = new Date("2000-01-01T00:00:00.000Z");
 
+      const insertGrantRow = async (candidateGrantId: string): Promise<void> => {
+        await client.query(
+          `INSERT INTO "ProjectMcpToolGrant" (
+             "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
+             "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
+             "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "creationTransactionId", "createdAt", "updatedAt"
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9,
+             $10, $11, 1, $12::uuid, $13::timestamp, 'active', $14::uuid, $15::timestamp, 0, $15::timestamp, $15::timestamp)`,
+          [candidateGrantId, projectId, connectionId, activeRow.id, definitionId, attestation.id, definitionFingerprint, networkFingerprint, NO_CREDENTIAL_FINGERPRINT, activeRow.version, activeRow.delegationFingerprint, membership.id, sqlTimestamp(membership.createdAt), adminId, sqlTimestamp(createdAtBefore)],
+        );
+      };
+      const insertCreatedAudit = async (candidateGrantId: string): Promise<void> => {
+        await client.query(
+          `INSERT INTO "ProjectMcpToolGrantAudit" (
+             "id", "projectId", "grantId", "event", "actorId", "controlPlaneVersion", "grantVersion", "statusBefore", "statusAfter",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
+             "definitionFingerprint", "details", "transactionId", "createdAt"
+           ) SELECT $2::uuid, "projectId", "id", 'granted', "managedById", 2, 1, NULL, 'active', "delegationVersion", "delegationFingerprint",
+             "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint", '{}'::jsonb, 0, $3::timestamp
+           FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
+          [candidateGrantId, randomUUID(), sqlTimestamp(createdAtBefore)],
+        );
+      };
+      const insertCreatedLedger = async (candidateGrantId: string): Promise<void> => {
+        await client.query(
+          `INSERT INTO "ProjectMcpToolGrantLedger" (
+             "id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+             "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "actorProjectMembershipId",
+             "actorMembershipCreatedAt", "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision",
+             "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
+             "acknowledgedAt", "transactionId", "transitionAt", "createdAt"
+           ) SELECT $2::uuid, "projectId", "id", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+             2, 1, 'granted', NULL, 'active', "managedById", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "delegationVersion",
+             "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint",
+             "networkFingerprint", "credentialFingerprint", "acknowledgedAt", 0, $3::timestamp, $3::timestamp
+           FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
+          [candidateGrantId, randomUUID(), sqlTimestamp(createdAtBefore)],
+        );
+      };
+      const assertCreateEvidenceRollback = async (candidateGrantId: string, includeAudit: boolean, includeLedger: boolean): Promise<void> => {
+        await client.query("BEGIN");
+        await insertGrantRow(candidateGrantId);
+        if (includeAudit) await insertCreatedAudit(candidateGrantId);
+        if (includeLedger) await insertCreatedLedger(candidateGrantId);
+        await assert.rejects(() => client.query("COMMIT"), /PROJECT_MCP_TOOL_GRANT_CREATE_EVIDENCE_REQUIRED/u);
+        await client.query("ROLLBACK").catch(() => undefined);
+        const rolledBackGrant = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [candidateGrantId]);
+        const rolledBackAudit = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrantAudit" WHERE "grantId" = $1::uuid`, [candidateGrantId]);
+        const rolledBackLedger = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrantLedger" WHERE "grantId" = $1::uuid`, [candidateGrantId]);
+        assert.equal(rolledBackGrant.rows[0]?.count, 0);
+        assert.equal(rolledBackAudit.rows[0]?.count, 0);
+        assert.equal(rolledBackLedger.rows[0]?.count, 0);
+      };
+      const updateGrantForRevoke = async (candidateGrantId: string): Promise<void> => {
+        await client.query(
+          `UPDATE "ProjectMcpToolGrant" SET "status" = 'revoked', "grantVersion" = 2, "revokedById" = $2::uuid,
+             "revokerProjectMembershipId" = $3::uuid, "revokerMembershipCreatedAt" = $4::timestamp,
+             "revokedAt" = $5::timestamp, "revocationTransactionId" = 0 WHERE "id" = $1::uuid`,
+          [candidateGrantId, adminId, membership.id, sqlTimestamp(membership.createdAt), sqlTimestamp(createdAtBefore)],
+        );
+      };
+      const insertRevokedAudit = async (candidateGrantId: string): Promise<void> => {
+        await client.query(
+          `INSERT INTO "ProjectMcpToolGrantAudit" (
+             "id", "projectId", "grantId", "event", "actorId", "controlPlaneVersion", "grantVersion", "statusBefore", "statusAfter",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
+             "revokerProjectMembershipId", "revokerMembershipCreatedAt", "definitionFingerprint", "details", "transactionId", "createdAt"
+           ) SELECT $2::uuid, "projectId", "id", 'revoked', "revokedById", 2, 2, 'active', 'revoked', "delegationVersion", "delegationFingerprint",
+             "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId", "revokerMembershipCreatedAt",
+             "definitionFingerprint", '{}'::jsonb, 0, $3::timestamp FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
+          [candidateGrantId, randomUUID(), sqlTimestamp(createdAtBefore)],
+        );
+      };
+      const insertRevokedLedger = async (candidateGrantId: string): Promise<void> => {
+        await client.query(
+          `INSERT INTO "ProjectMcpToolGrantLedger" (
+             "id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+             "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "actorProjectMembershipId",
+             "actorMembershipCreatedAt", "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision",
+             "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId", "revokerMembershipCreatedAt",
+             "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "acknowledgedAt", "transactionId", "transitionAt", "createdAt"
+           ) SELECT $2::uuid, "projectId", "id", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+             2, 2, 'revoked', 'active', 'revoked', "revokedById", "revokerProjectMembershipId", "revokerMembershipCreatedAt", "delegationVersion",
+             "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId",
+             "revokerMembershipCreatedAt", "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "acknowledgedAt", 0, $3::timestamp, $3::timestamp
+           FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
+          [candidateGrantId, randomUUID(), sqlTimestamp(createdAtBefore)],
+        );
+      };
+      const assertRevokeEvidenceRollback = async (includeAudit: boolean, includeLedger: boolean): Promise<void> => {
+        await client.query("BEGIN");
+        await updateGrantForRevoke(grantId);
+        if (includeAudit) await insertRevokedAudit(grantId);
+        if (includeLedger) await insertRevokedLedger(grantId);
+        const expectedError = includeAudit ? "PROJECT_MCP_TOOL_GRANT_REVOKE_EVIDENCE_REQUIRED" : "PROJECT_MCP_TOOL_GRANT_REVOKE_AUDIT_REQUIRED";
+        await assert.rejects(() => client.query("COMMIT"), new RegExp(expectedError, "u"));
+        await client.query("ROLLBACK").catch(() => undefined);
+        const rolledBackGrant = await client.query<{ status: string; grantVersion: number; revokedById: string | null; revocationTransactionId: string | null }>(
+          `SELECT "status", "grantVersion", "revokedById", "revocationTransactionId" FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [grantId],
+        );
+        assert.deepEqual(rolledBackGrant.rows[0], { status: "active", grantVersion: 1, revokedById: null, revocationTransactionId: null });
+        const rolledBackAudit = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrantAudit" WHERE "grantId" = $1::uuid AND "event" = 'revoked'`, [grantId]);
+        const rolledBackLedger = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "ProjectMcpToolGrantLedger" WHERE "grantId" = $1::uuid AND "event" = 'revoked'`, [grantId]);
+        assert.equal(rolledBackAudit.rows[0]?.count, 0);
+        assert.equal(rolledBackLedger.rows[0]?.count, 0);
+      };
+
       await client.query("BEGIN");
-      await client.query(
-        `INSERT INTO "ProjectMcpToolGrant" (
-           "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
-           "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
-           "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "createdAt", "updatedAt"
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9,
-           $10, $11, 1, $12::uuid, $13::timestamp, 'active', $14::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        [randomUUID(), projectId, connectionId, activeRow.id, definitionId, attestation.id, definitionFingerprint, networkFingerprint, NO_CREDENTIAL_FINGERPRINT, activeRow.version, activeRow.delegationFingerprint, membership.id, sqlTimestamp(membership.createdAt), adminId],
-      );
+      await insertGrantRow(randomUUID());
       await assert.rejects(() => client.query("COMMIT"), /PROJECT_MCP_TOOL_GRANT_CREATE_EVIDENCE_REQUIRED/u);
       await client.query("ROLLBACK").catch(() => undefined);
 
+      await assertCreateEvidenceRollback(randomUUID(), true, false);
+      await assertCreateEvidenceRollback(randomUUID(), false, true);
+
       await client.query("BEGIN");
-      await client.query(
-        `INSERT INTO "ProjectMcpToolGrant" (
-           "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
-           "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
-           "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "creationTransactionId", "createdAt", "updatedAt"
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, 'project.lookup', $5::uuid, $6::uuid, $7, $8, $9,
-           $10, $11, 1, $12::uuid, $13::timestamp, 'active', $14::uuid, $15::timestamp, 0, $15::timestamp, $15::timestamp)`,
-        [grantId, projectId, connectionId, activeRow.id, definitionId, attestation.id, definitionFingerprint, networkFingerprint, NO_CREDENTIAL_FINGERPRINT, activeRow.version, activeRow.delegationFingerprint, membership.id, sqlTimestamp(membership.createdAt), adminId, sqlTimestamp(createdAtBefore)],
-      );
-      await client.query(
-        `INSERT INTO "ProjectMcpToolGrantAudit" (
-           "id", "projectId", "grantId", "event", "actorId", "controlPlaneVersion", "grantVersion", "statusBefore", "statusAfter",
-           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
-           "definitionFingerprint", "details", "transactionId", "createdAt"
-         ) SELECT $2::uuid, "projectId", "id", 'granted', "managedById", 2, 1, NULL, 'active', "delegationVersion", "delegationFingerprint",
-           "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint", '{}'::jsonb, 0, $3::timestamp
-         FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
-        [grantId, randomUUID(), sqlTimestamp(createdAtBefore)],
-      );
-      await client.query(
-        `INSERT INTO "ProjectMcpToolGrantLedger" (
-           "id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
-           "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "actorProjectMembershipId",
-           "actorMembershipCreatedAt", "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision",
-           "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-           "acknowledgedAt", "transactionId", "transitionAt", "createdAt"
-         ) SELECT $2::uuid, "projectId", "id", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
-           2, 1, 'granted', NULL, 'active', "managedById", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "delegationVersion",
-           "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint",
-           "networkFingerprint", "credentialFingerprint", "acknowledgedAt", 0, $3::timestamp, $3::timestamp
-         FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
-        [grantId, randomUUID(), sqlTimestamp(createdAtBefore)],
-      );
+      await insertGrantRow(grantId);
+      await insertCreatedAudit(grantId);
+      await insertCreatedLedger(grantId);
       await client.query("COMMIT");
 
       const created = (await client.query<{ acknowledgedAt: Date; createdAt: Date; updatedAt: Date; creationTransactionId: string }>(
@@ -169,6 +240,29 @@ test(
       assert.ok(created.acknowledgedAt > createdAtBefore);
       assert.ok(created.createdAt > createdAtBefore);
       assert.ok(created.updatedAt > createdAtBefore);
+      const createdEvidence = (await client.query<{
+        creationTransactionId: string;
+        auditTransactionId: string;
+        ledgerTransactionId: string;
+        auditCreatedAt: Date;
+        ledgerTransitionAt: Date;
+        ledgerCreatedAt: Date;
+      }>(
+        `SELECT grant_row."creationTransactionId", audit."transactionId" AS "auditTransactionId", ledger."transactionId" AS "ledgerTransactionId",
+                audit."createdAt" AS "auditCreatedAt", ledger."transitionAt" AS "ledgerTransitionAt", ledger."createdAt" AS "ledgerCreatedAt"
+         FROM "ProjectMcpToolGrant" AS grant_row
+         JOIN "ProjectMcpToolGrantAudit" AS audit ON audit."grantId" = grant_row."id" AND audit."event" = 'granted'
+         JOIN "ProjectMcpToolGrantLedger" AS ledger ON ledger."grantId" = grant_row."id" AND ledger."event" = 'granted'
+         WHERE grant_row."id" = $1::uuid`, [grantId],
+      )).rows[0];
+      assert.ok(createdEvidence);
+      assert.notEqual(createdEvidence.auditTransactionId, "0");
+      assert.notEqual(createdEvidence.ledgerTransactionId, "0");
+      assert.equal(createdEvidence.auditTransactionId, createdEvidence.creationTransactionId);
+      assert.equal(createdEvidence.ledgerTransactionId, createdEvidence.creationTransactionId);
+      assert.ok(createdEvidence.auditCreatedAt > createdAtBefore);
+      assert.ok(createdEvidence.ledgerTransitionAt > createdAtBefore);
+      assert.ok(createdEvidence.ledgerCreatedAt > createdAtBefore);
       const tuple = await client.query<{ valid: boolean }>(`SELECT "project_mcp_tool_grant_v2_tuple_valid"("ProjectMcpToolGrant") AS valid FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [grantId]);
       assert.equal(tuple.rows[0]?.valid, true);
 
@@ -182,36 +276,13 @@ test(
         (error: unknown) => error instanceof ProjectLifecycleError && error.code === "PROJECT_MCP_GRANT_RETENTION_REQUIRED",
       );
 
+      await assertRevokeEvidenceRollback(true, false);
+      await assertRevokeEvidenceRollback(false, true);
+
       await client.query("BEGIN");
-      await client.query(
-        `UPDATE "ProjectMcpToolGrant" SET "status" = 'revoked', "grantVersion" = 2, "revokedById" = $2::uuid,
-           "revokerProjectMembershipId" = $3::uuid, "revokerMembershipCreatedAt" = $4::timestamp WHERE "id" = $1::uuid`,
-        [grantId, adminId, membership.id, sqlTimestamp(membership.createdAt)],
-      );
-      await client.query(
-        `INSERT INTO "ProjectMcpToolGrantAudit" (
-           "id", "projectId", "grantId", "event", "actorId", "controlPlaneVersion", "grantVersion", "statusBefore", "statusAfter",
-           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
-           "revokerProjectMembershipId", "revokerMembershipCreatedAt", "definitionFingerprint", "details", "transactionId", "createdAt"
-         ) SELECT $2::uuid, "projectId", "id", 'revoked', "revokedById", 2, 2, 'active', 'revoked', "delegationVersion", "delegationFingerprint",
-           "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId", "revokerMembershipCreatedAt",
-           "definitionFingerprint", '{}'::jsonb, 0, $3::timestamp FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
-        [grantId, randomUUID(), sqlTimestamp(createdAtBefore)],
-      );
-      await client.query(
-        `INSERT INTO "ProjectMcpToolGrantLedger" (
-           "id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
-           "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "actorProjectMembershipId",
-           "actorMembershipCreatedAt", "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision",
-           "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId", "revokerMembershipCreatedAt",
-           "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "acknowledgedAt", "transactionId", "transitionAt", "createdAt"
-         ) SELECT $2::uuid, "projectId", "id", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
-           2, 2, 'revoked', 'active', 'revoked', "revokedById", "revokerProjectMembershipId", "revokerMembershipCreatedAt", "delegationVersion",
-           "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId",
-           "revokerMembershipCreatedAt", "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "acknowledgedAt", 0, $3::timestamp, $3::timestamp
-         FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
-        [grantId, randomUUID(), sqlTimestamp(createdAtBefore)],
-      );
+      await updateGrantForRevoke(grantId);
+      await insertRevokedAudit(grantId);
+      await insertRevokedLedger(grantId);
       await client.query("COMMIT");
 
       const revoked = (await client.query<{ status: string; grantVersion: number; revokedAt: Date; revocationTransactionId: string }>(
@@ -221,6 +292,29 @@ test(
       assert.equal(revoked?.grantVersion, 2);
       assert.ok(revoked?.revokedAt && revoked.revokedAt > createdAtBefore);
       assert.notEqual(revoked?.revocationTransactionId, "0");
+      const revokedEvidence = (await client.query<{
+        revocationTransactionId: string;
+        auditTransactionId: string;
+        ledgerTransactionId: string;
+        auditCreatedAt: Date;
+        ledgerTransitionAt: Date;
+        ledgerCreatedAt: Date;
+      }>(
+        `SELECT grant_row."revocationTransactionId", audit."transactionId" AS "auditTransactionId", ledger."transactionId" AS "ledgerTransactionId",
+                audit."createdAt" AS "auditCreatedAt", ledger."transitionAt" AS "ledgerTransitionAt", ledger."createdAt" AS "ledgerCreatedAt"
+         FROM "ProjectMcpToolGrant" AS grant_row
+         JOIN "ProjectMcpToolGrantAudit" AS audit ON audit."grantId" = grant_row."id" AND audit."event" = 'revoked'
+         JOIN "ProjectMcpToolGrantLedger" AS ledger ON ledger."grantId" = grant_row."id" AND ledger."event" = 'revoked'
+         WHERE grant_row."id" = $1::uuid`, [grantId],
+      )).rows[0];
+      assert.ok(revokedEvidence);
+      assert.notEqual(revokedEvidence.auditTransactionId, "0");
+      assert.notEqual(revokedEvidence.ledgerTransactionId, "0");
+      assert.equal(revokedEvidence.auditTransactionId, revokedEvidence.revocationTransactionId);
+      assert.equal(revokedEvidence.ledgerTransactionId, revokedEvidence.revocationTransactionId);
+      assert.ok(revokedEvidence.auditCreatedAt > createdAtBefore);
+      assert.ok(revokedEvidence.ledgerTransitionAt > createdAtBefore);
+      assert.ok(revokedEvidence.ledgerCreatedAt > createdAtBefore);
       const retained = await db.projectMcpToolGrantLedger.findMany({ where: { projectId, grantId }, orderBy: { grantVersion: "asc" } });
       assert.deepEqual(retained.map((row) => [row.event, row.grantVersion]), [["granted", 1], ["revoked", 2]]);
 

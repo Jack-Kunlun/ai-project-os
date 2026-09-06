@@ -16,6 +16,7 @@ import { parseAssetBuffer, PROJECT_ASSET_PARSER_VERSION } from "@/lib/project-as
 import { getUploadPolicy } from "@/lib/project-assets/policy";
 import { isSerializableTransactionConflict, withSerializableRetry } from "@/lib/prisma-transaction";
 import { listPagination } from "@/lib/list-pagination";
+import { nonLegacyMcpProjectAssetSegmentWhere } from "@/lib/legacy-mcp-source-quarantine";
 import {
   projectAiModelProjection,
   projectAiProviderProjection,
@@ -164,6 +165,7 @@ function readAssetRecord(projectId: string, assetId: string, db: PrismaClient) {
         take: 1,
         include: {
           segments: {
+            where: nonLegacyMcpProjectAssetSegmentWhere,
             orderBy: { ordinal: "asc" },
             include: {
               providerConnection: {
@@ -317,7 +319,7 @@ export async function uploadProjectAsset(input: Readonly<{
       storageKey: true,
       sizeBytes: true,
       asset: { select: { status: true } },
-      segments: { where: { projectSourceId: { not: null } }, select: { projectSourceId: true } },
+      segments: { where: { projectSourceId: { not: null }, ...nonLegacyMcpProjectAssetSegmentWhere }, select: { projectSourceId: true } },
     },
   });
   if (duplicate !== null) {
@@ -412,7 +414,7 @@ export async function uploadProjectAsset(input: Readonly<{
           projectAssetId: true,
           status: true,
           asset: { select: { status: true } },
-          segments: { where: { projectSourceId: { not: null } }, select: { projectSourceId: true } },
+          segments: { where: { projectSourceId: { not: null }, ...nonLegacyMcpProjectAssetSegmentWhere }, select: { projectSourceId: true } },
         },
       });
       if (existing !== null) {
@@ -930,8 +932,8 @@ export async function reviewProjectAssetSegment(input: Readonly<{
   await assertProjectActive(input.projectId, db);
   await db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${input.projectId}:${assetId}`}, 29082026))`;
-    const segment = await tx.projectAssetSegment.findUnique({
-      where: { projectId_id: { projectId: input.projectId, id: segmentId } },
+    const segment = await tx.projectAssetSegment.findFirst({
+      where: { projectId: input.projectId, id: segmentId, ...nonLegacyMcpProjectAssetSegmentWhere },
       include: { asset: true, version: true },
     });
     if (segment === null || segment.projectAssetId !== assetId || segment.asset.status === "deleted") {
@@ -954,11 +956,11 @@ export async function reviewProjectAssetSegment(input: Readonly<{
     });
     await tx.project.update({ where: { id: input.projectId }, data: { updatedAt: new Date() } });
     const pending = await tx.projectAssetSegment.count({
-      where: { projectId: input.projectId, projectAssetVersionId: segment.projectAssetVersionId, reviewStatus: "pending" },
+      where: { projectId: input.projectId, projectAssetVersionId: segment.projectAssetVersionId, reviewStatus: "pending", ...nonLegacyMcpProjectAssetSegmentWhere },
     });
     if (pending > 0) return;
     const accepted = await tx.projectAssetSegment.findMany({
-      where: { projectId: input.projectId, projectAssetVersionId: segment.projectAssetVersionId, reviewStatus: "accepted" },
+      where: { projectId: input.projectId, projectAssetVersionId: segment.projectAssetVersionId, reviewStatus: "accepted", ...nonLegacyMcpProjectAssetSegmentWhere },
       orderBy: { ordinal: "asc" },
     });
     for (const acceptedSegment of accepted) {
@@ -1023,7 +1025,7 @@ export async function deleteProjectAsset(projectId: string, assetIdInput: unknow
     if (asset === null || asset.status === "deleted") return fail("PROJECT_ASSET_NOT_FOUND");
     if (asset.status === "parsing" || asset.extractionRuns.length > 0) return fail("PROJECT_ASSET_INVALID_STATE");
     const segments = await tx.projectAssetSegment.findMany({
-      where: { projectId, projectAssetId: assetId, projectSourceId: { not: null } },
+      where: { projectId, projectAssetId: assetId, projectSourceId: { not: null }, ...nonLegacyMcpProjectAssetSegmentWhere },
       select: { projectSourceId: true },
     });
     const sourceIds = segments.flatMap((segment) => segment.projectSourceId ? [segment.projectSourceId] : []);

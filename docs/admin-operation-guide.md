@@ -16,7 +16,7 @@
 | `/admin/operations/backups` | 备份/运维状态 | 初始超级管理员按更严格规则读取 |
 | `/admin/guide` | 管理员流程、安全和验收 | 系统管理员 |
 
-旧的 `/settings`、`/connections`、`/connections/mcp` 和 `/system/*` 仅保留兼容入口，并由服务端先检查角色。`/system/memberships` 对 system admin 兼容跳转 `/admin/users/memberships`，普通用户返回用户工作台；`/system/operations` 仅 initial super admin 可用并兼容跳转 `/admin/operations/backups`，其他 system admin 按现有安全行为返回不可见页面，普通用户返回用户工作台。其他旧设置/连接器入口也只会把有权限的 system admin 导向对应管理页面，不会让普通用户请求平台表单。
+旧的 `/settings` 与 `/system/*` 仅保留平台管理兼容入口，并由服务端先检查角色。`/connections` 与 `/connections/mcp` 会把已登录用户分别带到个人 Git/MCP 连接页面，不是管理员连接器页面。`/system/memberships` 对 system admin 兼容跳转 `/admin/users/memberships`，普通用户返回用户工作台；`/system/operations` 仅 initial super admin 可用并兼容跳转 `/admin/operations/backups`，其他 system admin 按现有安全行为返回不可见页面，普通用户返回用户工作台。
 
 工作区 Owner/Admin 只管理所属工作区的成员、邀请、企业登录和项目权限，不等于系统管理员。工作区成员接口不提供通过成员更新全局 `AppUser.disabledAt` 的能力，也不会替其他工作区撤销会话。全局账户封禁若无配套审计接口，不应通过工作区页面伪装实现。
 
@@ -131,7 +131,7 @@ http://127.0.0.1:3000/api/auth/oidc/callback
 
 在 `/admin/models` 配置并测试 OpenAI、DeepSeek、Qwen 或 GLM 的平台连接。连接表单接收 API Key 后只在服务端以 AES-256-GCM 加密保存，页面只显示受限状态和掩码信息；禁止读取、记录或复制明文。
 
-管理员配置并验证后，可作为平台默认路由建议/供项目选择。DeepSeek 可用于生成能力，GLM 可按已验证能力用于向量能力；不要把某个 provider 的存在写成普通用户可自由配置或永久免费的承诺。普通用户免费模型策略、自定义免费模型供给和自动按会员分配的未来策略均属于 **planned / 后续能力**，不是当前已支持能力。
+管理员配置并验证平台托管模型，并为视觉、抽取、向量和生成能力维护默认路由。DeepSeek 可用于生成能力，GLM 可按已验证能力用于向量能力；不要把某个 provider 的存在写成永久免费的承诺。普通用户不能配置个人模型，只能消费平台赠送额度；只有有效会员可以维护个人模型连接，会员到期或撤销后不能继续测试、启用或调用。
 
 平台表单允许自定义模型 ID，但每种 capability 仍需符合服务端供应商协议和能力校验。GLM 可以只配置向量模型与维度，生成/视觉字段保持未配置时应保存为 `null`；DeepSeek 的默认生成模型和现有视觉意图不能因该兼容路径回归。连接测试只展示真实能力的布尔/维度结果，例如“向量连接通过（1024 维）”，不展示模型返回正文。
 
@@ -153,13 +153,13 @@ http://127.0.0.1:3000/api/auth/oidc/callback
 
 ### 5.2 MCP 只读工具
 
-当前 `/admin/connectors/mcp` 仅展示迁移说明，旧版 MCP 端点添加、发现、认证、撤销和 attestation 入口已冻结，不会读取或提交 Bearer Token。个人连接所有权、管理员安全审查和项目授权属于 planned 能力。
+当前 `/admin/connectors/mcp` 仅展示迁移说明，旧版管理员 MCP 端点添加、发现和凭据轮换入口已冻结，不会读取或提交 Bearer Token。个人 MCP 连接由用户在个人中心创建、停用和发现工具，凭据归该用户所有；管理员不代持或配置个人 Token。
 
-个人 MCP 连接开放后，系统才会执行工具发现并固化目录。届时系统限制总数、Schema 深度和响应大小；有效定义保存输入/输出 Schema、annotations 和 SHA-256 指纹。只有明确 `readOnlyHint=true` 且 `destructiveHint=false` 的定义才可申请管理员认证；annotations 属于不可信提示，不能替代管理员认证。
+个人 MCP 连接执行工具发现时会固化目录，并限制工具总数、Schema 深度和响应大小；有效定义保存输入/输出 Schema、annotations 和 SHA-256 指纹。只有明确 `readOnlyHint=true` 且 `destructiveHint=false` 的定义才可进入管理员认证流程；annotations 属于不可信提示，不能替代管理员认证。
 
-管理员对精确工具、当前网络解析和凭据指纹执行“管理员认证”，认证/撤销写入追加式审计。工具定义、DNS、凭据或连接状态变化会使旧认证失效，需重新发现和认证。项目 Owner 再逐项授权，Editor/Owner 创建调用动作，每次由 Owner 审批。执行前重新核对所有指纹；漂移、撤销或过期都失败关闭。
+管理员对精确工具、当前网络解析和凭据指纹执行安全认证，认证/撤销写入追加式审计。工具定义、DNS、凭据或连接状态变化会使旧认证失效，需重新发现和认证。项目 Owner 再逐项授权并审批每次调用；最终外发边界前重新核对所有指纹，漂移、撤销或过期都失败关闭。管理员认证、项目授权和调用派发的后端控制面已经隔离实现，但项目侧操作入口尚未开放，不能作为当前页面能力验收。
 
-成功 MCP 结果只能由 Editor/Owner 人工纳入为未审核项目资料，固定动作、输入、结果和内容指纹；不会自动成为事实、进入 RAG 或触发模型。
+成功 MCP 结果只保留为净化、受限且仅直接项目 Owner 可读的结果证据；当前页面不提供查看或纳入。它不会创建 `ProjectSource`、自动成为事实、进入 RAG/记忆/模型上下文，也不会触发后续动作。
 
 ## 6. 资料、记忆、计划和治理的运维边界
 

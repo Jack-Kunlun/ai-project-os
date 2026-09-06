@@ -359,7 +359,7 @@ async function validateCreateTuple(
     tx.mcpToolAttestation.findUnique({ where: { id: parsed.attestationId }, select: attestationSelect }),
   ]);
   if (delegation === null || definition === null || attestation === null) return fail("PROJECT_MCP_TOOL_GRANT_STALE");
-  const now = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT clock_timestamp() AS now`);
+  const now = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`);
   const databaseNow = now[0]?.now ?? new Date();
   const currentCredentialFingerprint = credentialFingerprint(definition.connection);
   const ownerEpoch = delegation.ownerProjectMembershipId === "" ? null : await tx.projectMembership.findUnique({ where: { id: delegation.ownerProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } });
@@ -455,7 +455,7 @@ export async function listProjectMcpToolGrantsV2(projectIdInput: unknown, actor:
     // must still prevent an unsafe candidate from being offered for re-grant.
     const activeSlots = await tx.projectMcpToolGrant.findMany({ where: { projectId, status: "active" }, select: { connectionId: true, toolName: true } });
     const activeSlotKeys = new Set(activeSlots.map((row) => `${row.connectionId}:${row.toolName}`));
-    const nowRows = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT clock_timestamp() AS now`);
+    const nowRows = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`);
     const now = nowRows[0]?.now ?? new Date();
     const delegations = await tx.projectMcpConnectionDelegation.findMany({
       where: { projectId, status: "active", expiresAt: { gt: now } },

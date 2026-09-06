@@ -90,7 +90,7 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function actionRevisionFromFingerprint(actionFingerprint: string): string {
+export function actionRevisionFromFingerprint(actionFingerprint: string): string {
   return sha256(`project-mcp-action-revision:v1:${actionFingerprint}`);
 }
 
@@ -155,12 +155,12 @@ async function lockActionKey(tx: Tx, key: string): Promise<void> {
   await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}::text, 32020007))`);
 }
 
-async function lockActionRow(tx: Tx, projectId: string, actionId: string): Promise<void> {
+export async function lockActionRow(tx: Tx, projectId: string, actionId: string): Promise<void> {
   await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${actionId}::text, 32020002))`);
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "ProjectMcpAction" WHERE "id" = ${actionId}::uuid AND "projectId" = ${projectId}::uuid FOR UPDATE`);
 }
 
-async function lockSourceRows(tx: Tx, projectId: string, grantId: string, delegationId: string, attestationId: string, toolDefinitionId: string): Promise<void> {
+export async function lockSourceRows(tx: Tx, projectId: string, grantId: string, delegationId: string, attestationId: string, toolDefinitionId: string): Promise<void> {
   await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${grantId}::text, 32010002))`);
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "ProjectMcpToolGrant" WHERE "id" = ${grantId}::uuid AND "projectId" = ${projectId}::uuid AND "controlPlaneVersion" = 2 FOR UPDATE`);
   await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${delegationId}::text, 32020004))`);
@@ -171,7 +171,7 @@ async function lockSourceRows(tx: Tx, projectId: string, grantId: string, delega
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "McpToolAttestation" WHERE "id" = ${attestationId}::uuid FOR UPDATE`);
 }
 
-async function lockAdmission(
+export async function lockAdmission(
   tx: Tx,
   projectId: string,
   actorIds: readonly string[],
@@ -195,7 +195,7 @@ async function lockAdmission(
   if (actionId !== undefined) await lockActionRow(tx, projectId, actionId);
 }
 
-async function ownerAdmission(
+export async function ownerAdmission(
   tx: Tx,
   projectId: string,
   actorId: string,
@@ -217,7 +217,7 @@ async function ownerAdmission(
   return { project, membership };
 }
 
-const grantSelect = {
+export const grantSelect = {
   id: true,
   projectId: true,
   connectionId: true,
@@ -306,7 +306,7 @@ const grantSelect = {
   },
 } satisfies Prisma.ProjectMcpToolGrantSelect;
 
-type GrantRow = Prisma.ProjectMcpToolGrantGetPayload<{ select: typeof grantSelect }>;
+export type GrantRow = Prisma.ProjectMcpToolGrantGetPayload<{ select: typeof grantSelect }>;
 
 function expectedCredentialFingerprint(connection: GrantRow["toolDefinition"]["connection"]): string | null {
   if (connection.authKind === "none") {
@@ -318,12 +318,17 @@ function expectedCredentialFingerprint(connection: GrantRow["toolDefinition"]["c
   return connection.credentialFingerprint;
 }
 
-async function databaseNow(tx: Tx): Promise<Date> {
-  const rows = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT clock_timestamp() AS now`);
+export async function databaseNow(tx: Tx): Promise<Date> {
+  // Prisma DateTime columns are PostgreSQL TIMESTAMP(3) UTC civil values. Read
+  // the database clock in that same representation so comparisons remain
+  // correct even when a connection has a non-UTC session TimeZone.
+  const rows = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now
+  `);
   return rows[0]?.now ?? new Date();
 }
 
-async function validateGrantTuple(tx: Tx, projectId: string, grantId: string, actorMembership: OwnerEpoch, expectedGrantVersion: 1): Promise<GrantRow> {
+export async function validateGrantTuple(tx: Tx, projectId: string, grantId: string, actorMembership: OwnerEpoch, expectedGrantVersion: 1): Promise<GrantRow> {
   const grant = await tx.projectMcpToolGrant.findFirst({ where: { id: grantId, projectId, controlPlaneVersion: 2 }, select: grantSelect });
   if (grant === null || grant.status !== "active" || grant.grantVersion !== expectedGrantVersion || grant.delegation === null || grant.attestation === null) return fail("PROJECT_MCP_ACTION_STALE");
   const now = await databaseNow(tx);
@@ -400,7 +405,7 @@ async function validateGrantTuple(tx: Tx, projectId: string, grantId: string, ac
   return grant;
 }
 
-type ActionProjectionRow = {
+export type ActionProjectionRow = {
   id: string;
   projectId: string;
   clientRequestId: string;
@@ -419,6 +424,14 @@ type ActionProjectionRow = {
   cancelledAt: Date | null;
   actionFingerprint: string;
   canonicalArguments: unknown;
+  dispatchResult?: {
+    sanitizedPayload: unknown;
+    resultFingerprint: string;
+    resultBytes: number;
+    resultNodes: number;
+    resultDepth: number;
+    omittedContentCount: number;
+  } | null;
 };
 
 const actionProjectionSelect = {
@@ -444,6 +457,16 @@ const actionProjectionSelect = {
 const actionDetailSelect = {
   ...actionProjectionSelect,
   canonicalArguments: true,
+  dispatchResult: {
+    select: {
+      sanitizedPayload: true,
+      resultFingerprint: true,
+      resultBytes: true,
+      resultNodes: true,
+      resultDepth: true,
+      omittedContentCount: true,
+    },
+  },
 } satisfies Prisma.ProjectMcpActionSelect;
 
 const actionControlSelect = {
@@ -471,7 +494,7 @@ const actionControlSelect = {
   inputSchema: true,
 } satisfies Prisma.ProjectMcpActionSelect;
 
-function projectAction(row: ActionProjectionRow, detail: boolean): Readonly<Record<string, unknown>> {
+export function projectAction(row: ActionProjectionRow, detail: boolean): Readonly<Record<string, unknown>> {
   const projection: Record<string, unknown> = {
     id: row.id,
     projectId: row.projectId,
@@ -492,28 +515,38 @@ function projectAction(row: ActionProjectionRow, detail: boolean): Readonly<Reco
     cancelledAt: safeDate(row.cancelledAt),
   };
   if (detail) projection.arguments = stableMcpJson(row.canonicalArguments);
+  if (detail && row.dispatchResult !== undefined && row.dispatchResult !== null) {
+    projection.result = Object.freeze({
+      payload: stableMcpJson(row.dispatchResult.sanitizedPayload),
+      resultFingerprint: row.dispatchResult.resultFingerprint,
+      resultBytes: row.dispatchResult.resultBytes,
+      resultNodes: row.dispatchResult.resultNodes,
+      resultDepth: row.dispatchResult.resultDepth,
+      omittedContentCount: row.dispatchResult.omittedContentCount,
+    });
+  }
   return Object.freeze(projection);
 }
 
-async function loadAction(tx: Tx, projectId: string, actionId: string, detail: boolean): Promise<Readonly<Record<string, unknown>>> {
+export async function loadAction(tx: Tx, projectId: string, actionId: string, detail: boolean): Promise<Readonly<Record<string, unknown>>> {
   const action = await tx.projectMcpAction.findFirst({ where: { id: actionId, projectId }, select: detail ? actionDetailSelect : actionProjectionSelect });
   if (action === null) return fail("PROJECT_MCP_ACTION_NOT_FOUND");
   return projectAction(action as unknown as ActionProjectionRow, detail);
 }
 
-async function loadActionRow(tx: Tx, projectId: string, actionId: string) {
+export async function loadActionRow(tx: Tx, projectId: string, actionId: string) {
   const row = await tx.projectMcpAction.findFirst({ where: { id: actionId, projectId }, select: actionControlSelect });
   if (row === null) return fail("PROJECT_MCP_ACTION_NOT_FOUND");
   return row;
 }
 
-type ActionControlRow = Prisma.ProjectMcpActionGetPayload<{ select: typeof actionControlSelect }>;
+export type ActionControlRow = Prisma.ProjectMcpActionGetPayload<{ select: typeof actionControlSelect }>;
 
 function jsonEqual(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
 }
 
-async function persistedActionHashesValid(tx: Tx, action: ActionControlRow): Promise<boolean> {
+export async function persistedActionHashesValid(tx: Tx, action: ActionControlRow): Promise<boolean> {
   const rows = await tx.$queryRaw<Array<{ argumentsHash: string; fingerprint: string }>>(Prisma.sql`
     SELECT
       encode(digest(convert_to(source."canonicalArguments"::text, 'UTF8'), 'sha256'), 'hex') AS "argumentsHash",
@@ -524,7 +557,7 @@ async function persistedActionHashesValid(tx: Tx, action: ActionControlRow): Pro
   return rows[0]?.argumentsHash === action.canonicalArgumentsHash && rows[0]?.fingerprint === action.actionFingerprint;
 }
 
-function sourceSnapshotMatchesAction(action: ActionControlRow, grant: GrantRow): boolean {
+export function sourceSnapshotMatchesAction(action: ActionControlRow, grant: GrantRow): boolean {
   const delegation = grant.delegation;
   const attestation = grant.attestation;
   const connection = grant.toolDefinition.connection;

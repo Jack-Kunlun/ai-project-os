@@ -10,6 +10,7 @@ import {
 import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { appendProjectItemRevision } from "@/lib/project-item-history";
+import { nonLegacyMcpProjectItemWhere } from "@/lib/legacy-mcp-source-quarantine";
 
 const STALE_AFTER_MS = 180 * 24 * 60 * 60 * 1_000;
 const MAX_ANALYZED_ITEMS = 1_000;
@@ -221,7 +222,14 @@ function qualityScore(issues: readonly { kind: MemoryQualityIssueKind; score: nu
 
 async function buildSummary(projectId: string, db: PrismaClient) {
   const issues = await db.memoryQualityIssue.findMany({
-    where: { projectId },
+    where: {
+      projectId,
+      primaryItem: { is: nonLegacyMcpProjectItemWhere },
+      OR: [
+        { relatedItemId: null },
+        { relatedItem: { is: nonLegacyMcpProjectItemWhere } },
+      ],
+    },
     orderBy: [{ status: "asc" }, { detectedAt: "desc" }, { id: "asc" }],
     take: 300,
     select: {
@@ -251,7 +259,11 @@ export async function analyzeProjectMemoryQuality(projectIdInput: unknown, db: P
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   if (project === null) return fail("MEMORY_QUALITY_PROJECT_NOT_FOUND");
   const items = await db.projectItem.findMany({
-    where: { projectId, reviewStatus: { in: ["candidate", "confirmed"] } },
+    where: {
+      projectId,
+      reviewStatus: { in: ["candidate", "confirmed"] },
+      ...nonLegacyMcpProjectItemWhere,
+    },
     orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
     take: MAX_ANALYZED_ITEMS + 1,
     select: {
@@ -279,7 +291,16 @@ export async function analyzeProjectMemoryQuality(projectIdInput: unknown, db: P
   const now = new Date();
 
   await db.$transaction(async (tx) => {
-    const current = await tx.memoryQualityIssue.findMany({ where: { projectId } });
+    const current = await tx.memoryQualityIssue.findMany({
+      where: {
+        projectId,
+        primaryItem: { is: nonLegacyMcpProjectItemWhere },
+        OR: [
+          { relatedItemId: null },
+          { relatedItem: { is: nonLegacyMcpProjectItemWhere } },
+        ],
+      },
+    });
     for (const issue of detected) {
       const existing = current.find((candidate) => candidate.fingerprint === issue.fingerprint);
       if (existing?.status === "dismissed") continue;
@@ -324,7 +345,16 @@ export async function resolveMemoryQualityIssue(
   const issueId = uuid(issueIdInput);
   const parsed = issueResolutionSchema.parse(input);
   const updated = await db.memoryQualityIssue.updateMany({
-    where: { id: issueId, projectId, status: "open" },
+    where: {
+      id: issueId,
+      projectId,
+      status: "open",
+      primaryItem: { is: nonLegacyMcpProjectItemWhere },
+      OR: [
+        { relatedItemId: null },
+        { relatedItem: { is: nonLegacyMcpProjectItemWhere } },
+      ],
+    },
     data: { status: parsed.status, resolvedAt: new Date(), resolvedById: actor.id, resolutionNote: parsed.note },
   });
   if (updated.count !== 1) return fail("MEMORY_QUALITY_ISSUE_NOT_FOUND");
@@ -346,8 +376,8 @@ export async function updateProjectItemMemoryMetadata(
   const validUntil = parsed.validUntil === undefined ? undefined : parsed.validUntil === null ? null : new Date(parsed.validUntil);
 
   return db.$transaction(async (tx) => {
-    const current = await tx.projectItem.findUnique({
-      where: { projectId_id: { projectId, id: itemId } },
+    const current = await tx.projectItem.findFirst({
+      where: { projectId, id: itemId, ...nonLegacyMcpProjectItemWhere },
       include: { evidences: { where: { evidenceState: "active", isActive: true } } },
     });
     if (current === null) return fail("MEMORY_QUALITY_ITEM_NOT_FOUND");
@@ -359,7 +389,7 @@ export async function updateProjectItemMemoryMetadata(
     }
     const updatedAt = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
     const changed = await tx.projectItem.updateMany({
-      where: { projectId, id: itemId, updatedAt: expectedUpdatedAt },
+      where: { projectId, id: itemId, updatedAt: expectedUpdatedAt, ...nonLegacyMcpProjectItemWhere },
       data: {
         ...(parsed.confidence === undefined ? {} : { confidence: parsed.confidence }),
         ...(parsed.importance === undefined ? {} : { importance: parsed.importance }),

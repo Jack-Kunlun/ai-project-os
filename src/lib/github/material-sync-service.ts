@@ -827,6 +827,10 @@ export function createGitHubMaterialSyncService(options: Readonly<{
             existing.capturedGitHubRepositoryId !== BigInt(claim.expectedRepositoryId) ||
             existing.sourceContentHash !== source.contentHash ||
             existing.sourceContentBytes !== source.contentBytes ||
+            existing.projectSource.kind === "mcp" ||
+            existing.projectSource.retiredAt !== null ||
+            existing.projectSource.originScope !== "repository_link" ||
+            existing.projectSource.projectRepositoryLinkId !== claim.projectRepositoryLinkId ||
             existing.projectSource.contentText !== source.contentText
           ) {
             return fail("GITHUB_MATERIAL_SYNC_INTEGRITY_ERROR");
@@ -843,6 +847,7 @@ export function createGitHubMaterialSyncService(options: Readonly<{
             projectId: claim.projectId,
             projectRepositoryLinkId: claim.projectRepositoryLinkId,
             remoteIdentity: source.remoteIdentity,
+            projectSource: { kind: { not: "mcp" } },
           },
           orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
           include: { projectSource: { select: { sourceIdentity: true } } },

@@ -153,7 +153,7 @@ async function inspectSnapshotEligibility(
       AND grant_row."issuedAt" IS NOT NULL
       AND grant_row."revokedAt" IS NULL
       AND grant_row."expiresAt" IS NOT NULL
-      AND grant_row."expiresAt" > CURRENT_TIMESTAMP
+      AND grant_row."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
       AND grant_row."effectivePolicyVersion" = snapshot."effectivePolicyVersion"
       AND profile."profileFingerprint" = ${EMBEDDING_STORAGE_PROFILE_FINGERPRINT}
     FOR SHARE OF snapshot, project_index, index_generation,
@@ -427,7 +427,7 @@ class AiDerivedArtifactServiceImpl {
             },
           },
           projectSource: {
-            select: { kind: true, externalRef: true },
+            select: { kind: true, externalRef: true, retiredAt: true },
           },
         },
       });
@@ -448,6 +448,8 @@ class AiDerivedArtifactServiceImpl {
           entry.sourceChunk.rangeStart !== context.rangeStart ||
           entry.sourceChunk.rangeEnd !== context.rangeEnd ||
           entry.projectSource.kind !== context.sourceKind ||
+          entry.projectSource.kind === "mcp" ||
+          entry.projectSource.retiredAt !== null ||
           entry.projectSource.externalRef !== context.externalRef
         ) {
           return fail("AI_ARTIFACT_PLAN_INELIGIBLE");
@@ -667,7 +669,9 @@ class AiDerivedArtifactServiceImpl {
           dependency.grantId !== artifact.grantId ||
           dependency.policyRevisionId !== artifact.policyRevisionId ||
           dependency.effectivePolicyVersion !== artifact.effectivePolicyVersion);
-      if (manifestInvalid) {
+      const legacyMcpDependency = sourceDependencies.some((dependency) =>
+        dependency.projectSource?.kind === "mcp");
+      if (manifestInvalid || legacyMcpDependency) {
         availability = "restricted";
         restrictionReasonCode = "DEPENDENCY_MISMATCH";
       } else {

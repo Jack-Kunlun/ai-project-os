@@ -8,7 +8,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
 import { createSourceChunkService } from "@/lib/ai-memory";
-import { createSession, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { createSession, DEFAULT_WORKSPACE_ID, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { grantProjectMembership } from "@/lib/membership-governance";
 import { hashSourceContent } from "@/lib/source";
 
 const execFile = promisify(execFileCallback);
@@ -230,6 +231,14 @@ test(
             { id: otherProjectId, name: "Other project", slug: "other-history-project" },
           ],
         });
+        await prisma.$transaction((tx) => grantProjectMembership(tx, {
+          projectId,
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          userId: admin.id,
+          role: "owner",
+          actorId: admin.id,
+          reason: "project_item_history_route_fixture",
+        }));
         await prisma.projectSource.createMany({
           data: [
             {

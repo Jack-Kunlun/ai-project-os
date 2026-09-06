@@ -12,6 +12,10 @@ import { getDb } from "@/lib/db";
 import { appendProjectItemRevision } from "@/lib/project-item-history";
 import { getProjectOperationsSummary, type ProjectPlanHealth } from "@/lib/project-operations";
 import { assertProjectActive } from "@/lib/project-lifecycle";
+import {
+  nonLegacyMcpProjectItemWhere,
+  referencesQuarantinedProjectLineage,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 const idSchema = z.string().uuid();
 const timestampSchema = z.string().datetime({ offset: true });
@@ -303,7 +307,11 @@ export async function buildProjectWorldState(
       select: { id: true, name: true, slug: true, description: true, archivedAt: true, updatedAt: true },
     }),
     db.projectItem.findMany({
-      where: { projectId, reviewStatus: { in: ["confirmed", "superseded"] } },
+      where: {
+        projectId,
+        reviewStatus: { in: ["confirmed", "superseded"] },
+        ...nonLegacyMcpProjectItemWhere,
+      },
       orderBy: [{ pinned: "desc" }, { importance: "desc" }, { updatedAt: "desc" }, { id: "asc" }],
       take: 5_001,
       select: worldFactSelect,
@@ -348,7 +356,9 @@ export async function buildProjectWorldState(
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
   const activeFacts = Object.freeze(facts.filter((fact) => fact.lifecycle === "active"));
   const activeIds = new Set(activeFacts.map((fact) => fact.id));
-  const relations = Object.freeze(loadedRelations.map((relation) => {
+  const relations = Object.freeze(loadedRelations
+    .filter((relation) => factById.has(relation.sourceItemId) && factById.has(relation.targetItemId))
+    .map((relation) => {
     const source = factById.get(relation.sourceItemId);
     const target = factById.get(relation.targetItemId);
     const stale = source === undefined
@@ -359,7 +369,10 @@ export async function buildProjectWorldState(
       || target.revision.id !== relation.targetRevisionId;
     return Object.freeze({ ...relation, stale });
   }));
-  const activeConflicts = qualityIssues.filter((issue) =>
+  const safeQualityIssues = qualityIssues.filter((issue) =>
+    factById.has(issue.primaryItemId)
+    && (issue.relatedItemId === null || factById.has(issue.relatedItemId)));
+  const activeConflicts = safeQualityIssues.filter((issue) =>
     issue.kind === "conflict"
     && activeIds.has(issue.primaryItemId)
     && issue.relatedItemId !== null
@@ -382,7 +395,7 @@ export async function buildProjectWorldState(
     sourceRetired: facts.filter((fact) => fact.lifecycle === "source_retired").length,
     activeRelations: relations.filter((relation) => !relation.stale).length,
     staleRelations: relations.filter((relation) => relation.stale).length,
-    openQualityIssues: qualityIssues.length,
+    openQualityIssues: safeQualityIssues.length,
     activeConflicts: activeConflicts.length,
     linkedWorkItems: new Set(activeFacts.flatMap((fact) => fact.workItems.map((item) => item.id))).size,
   });
@@ -400,7 +413,7 @@ export async function buildProjectWorldState(
       workItems: fact.workItems.map((item) => ({ id: item.id, status: item.status, targetDate: item.targetDate?.toISOString() ?? null })).sort((left, right) => left.id.localeCompare(right.id)),
     })),
     relations: relations.map((relation) => ({ id: relation.id, fingerprint: relation.fingerprint, stale: relation.stale })),
-    qualityIssues: qualityIssues.map((issue) => ({ id: issue.id, kind: issue.kind, fingerprint: issue.fingerprint })),
+    qualityIssues: safeQualityIssues.map((issue) => ({ id: issue.id, kind: issue.kind, fingerprint: issue.fingerprint })),
     planHealth,
   };
   const snapshotState = {
@@ -420,9 +433,9 @@ export async function buildProjectWorldState(
       fingerprint: relation.fingerprint,
     })),
     quality: {
-      openIssueCount: qualityIssues.length,
+      openIssueCount: safeQualityIssues.length,
       activeConflictCount: activeConflicts.length,
-      issueFingerprints: qualityIssues.map((issue) => issue.fingerprint).sort(),
+      issueFingerprints: safeQualityIssues.map((issue) => issue.fingerprint).sort(),
     },
     planHealth,
   };
@@ -443,7 +456,7 @@ export async function buildProjectWorldState(
     facts,
     activeFacts,
     relations,
-    qualityIssues: Object.freeze(qualityIssues),
+    qualityIssues: Object.freeze(safeQualityIssues),
     planHealth,
     inputManifestFingerprint,
     snapshotFingerprint,
@@ -483,7 +496,11 @@ async function createFactRelation(
   try {
     return await withProjectLock(projectId, db, async (tx) => {
       const facts = await tx.projectItem.findMany({
-        where: { projectId, id: { in: [endpoints.sourceItemId, endpoints.targetItemId] } },
+        where: {
+          projectId,
+          id: { in: [endpoints.sourceItemId, endpoints.targetItemId] },
+          ...nonLegacyMcpProjectItemWhere,
+        },
         select: {
           id: true,
           reviewStatus: true,
@@ -587,7 +604,11 @@ async function supersedeFact(
   try {
     return await withProjectLock(projectId, db, async (tx) => {
       const facts = await tx.projectItem.findMany({
-        where: { projectId, id: { in: [input.predecessorItemId, input.successorItemId] } },
+        where: {
+          projectId,
+          id: { in: [input.predecessorItemId, input.successorItemId] },
+          ...nonLegacyMcpProjectItemWhere,
+        },
         include: { evidences: { where: { evidenceState: "active", isActive: true } } },
       });
       if (facts.length !== 2) return fail("PROJECT_WORLD_FACT_NOT_FOUND");
@@ -612,19 +633,19 @@ async function supersedeFact(
       while (cursor !== null) {
         if (cursor === successor.id || ancestors.has(cursor)) return fail("PROJECT_WORLD_SUPERSESSION_CYCLE");
         ancestors.add(cursor);
-        const ancestor = await tx.projectItem.findUnique({
-          where: { projectId_id: { projectId, id: cursor } },
+        const ancestor = await tx.projectItem.findFirst({
+          where: { projectId, id: cursor, ...nonLegacyMcpProjectItemWhere },
           select: { supersedesItemId: true },
         });
         cursor = ancestor?.supersedesItemId ?? null;
       }
       const changedAt = new Date(Math.max(Date.now(), predecessor.updatedAt.getTime() + 1, successor.updatedAt.getTime() + 1));
       const predecessorChanged = await tx.projectItem.updateMany({
-        where: { projectId, id: predecessor.id, reviewStatus: "confirmed", updatedAt: predecessor.updatedAt },
+        where: { projectId, id: predecessor.id, reviewStatus: "confirmed", updatedAt: predecessor.updatedAt, ...nonLegacyMcpProjectItemWhere },
         data: { reviewStatus: "superseded", updatedAt: changedAt },
       });
       const successorChanged = await tx.projectItem.updateMany({
-        where: { projectId, id: successor.id, reviewStatus: "confirmed", updatedAt: successor.updatedAt, supersedesItemId: null },
+        where: { projectId, id: successor.id, reviewStatus: "confirmed", updatedAt: successor.updatedAt, supersedesItemId: null, ...nonLegacyMcpProjectItemWhere },
         data: { supersedesItemId: predecessor.id, updatedAt: changedAt },
       });
       if (predecessorChanged.count !== 1 || successorChanged.count !== 1) return fail("PROJECT_WORLD_SUPERSESSION_CONFLICT");
@@ -740,7 +761,7 @@ export async function getProjectWorld(
 ) {
   const projectId = idSchema.parse(projectIdInput);
   const permission: ProjectPermission = await assertProjectAccess(actor, projectId, "view", db);
-  const [state, snapshots, audits] = await Promise.all([
+  const [state, snapshots, audits, quarantinedSources, quarantinedItems] = await Promise.all([
     buildProjectWorldState(projectId, db),
     db.projectWorldSnapshot.findMany({
       where: { projectId },
@@ -774,7 +795,35 @@ export async function getProjectWorld(
         actor: { select: { id: true, username: true, displayName: true } },
       },
     }),
+    db.projectSource.findMany({
+      where: { projectId, kind: "mcp" },
+      select: { id: true },
+    }),
+    db.projectItem.findMany({
+      where: {
+        projectId,
+        OR: [
+          { source: { is: { kind: "mcp" } } },
+          { evidences: { some: { projectSource: { is: { kind: "mcp" } } } } },
+        ],
+      },
+      select: { id: true },
+    }),
   ]);
+  const quarantinedLineage = {
+    sourceIds: new Set(quarantinedSources.map((source) => source.id)),
+    itemIds: new Set(quarantinedItems.map((item) => item.id)),
+  };
+  const safeSnapshots = snapshots.filter((snapshot) =>
+    !referencesQuarantinedProjectLineage(snapshot.payload, quarantinedLineage));
+  const excludedSnapshotIds = new Set(
+    snapshots.filter((snapshot) => !safeSnapshots.includes(snapshot)).map((snapshot) => snapshot.id),
+  );
+  const safeAudits = audits.filter((audit) =>
+    (audit.sourceItemId === null || !quarantinedLineage.itemIds.has(audit.sourceItemId))
+    && (audit.targetItemId === null || !quarantinedLineage.itemIds.has(audit.targetItemId))
+    && (audit.snapshotId === null || !excludedSnapshotIds.has(audit.snapshotId))
+    && !referencesQuarantinedProjectLineage(audit.details, quarantinedLineage));
   return Object.freeze({
     permission,
     project: state.project,
@@ -789,8 +838,8 @@ export async function getProjectWorld(
     facts: state.facts,
     relations: state.relations,
     qualityIssues: state.qualityIssues,
-    snapshots: Object.freeze(snapshots),
-    audits: Object.freeze(audits),
+    snapshots: Object.freeze(safeSnapshots),
+    audits: Object.freeze(safeAudits),
   });
 }
 
@@ -804,7 +853,11 @@ export async function getProjectWorldSummaries(
     const planHealth = planHealthByProject?.get(projectId) ?? await getProjectOperationsSummary(projectId, 3, db);
     const [facts, storedRelations, qualityIssues] = await Promise.all([
       db.projectItem.findMany({
-        where: { projectId, reviewStatus: { in: ["confirmed", "superseded"] } },
+        where: {
+          projectId,
+          reviewStatus: { in: ["confirmed", "superseded"] },
+          ...nonLegacyMcpProjectItemWhere,
+        },
         orderBy: { id: "asc" },
         take: 5_001,
         select: {
@@ -844,7 +897,9 @@ export async function getProjectWorldSummaries(
     const factById = new Map(factStates.map((fact) => [fact.id, fact]));
     const activeFacts = factStates.filter((fact) => fact.lifecycle === "active");
     const activeIds = new Set(activeFacts.map((fact) => fact.id));
-    const relations = storedRelations.map((relation) => {
+    const relations = storedRelations
+      .filter((relation) => factById.has(relation.sourceItemId) && factById.has(relation.targetItemId))
+      .map((relation) => {
       const source = factById.get(relation.sourceItemId);
       const target = factById.get(relation.targetItemId);
       return {
@@ -856,7 +911,10 @@ export async function getProjectWorldSummaries(
           || target.currentRevisionId !== relation.targetRevisionId,
       };
     });
-    const activeConflictCount = qualityIssues.filter((issue) => issue.kind === "conflict"
+    const safeQualityIssues = qualityIssues.filter((issue) =>
+      factById.has(issue.primaryItemId)
+      && (issue.relatedItemId === null || factById.has(issue.relatedItemId)));
+    const activeConflictCount = safeQualityIssues.filter((issue) => issue.kind === "conflict"
       && activeIds.has(issue.primaryItemId)
       && issue.relatedItemId !== null
       && activeIds.has(issue.relatedItemId)).length;
@@ -872,7 +930,7 @@ export async function getProjectWorldSummaries(
       sourceRetired: factStates.filter((fact) => fact.lifecycle === "source_retired").length,
       activeRelations: relations.filter((relation) => !relation.stale).length,
       staleRelations: relations.filter((relation) => relation.stale).length,
-      openQualityIssues: qualityIssues.length,
+      openQualityIssues: safeQualityIssues.length,
       activeConflicts: activeConflictCount,
       linkedWorkItems: new Set(activeFacts.flatMap((fact) => fact.projectPlanEvidenceLinks.map((link) => link.workItemId))).size,
     });

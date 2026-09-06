@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 
 export const EXTERNAL_SERVICE_CATEGORIES = ["model", "git", "oidc", "mcp"] as const;
@@ -112,16 +111,6 @@ function afterProbe(value: Date | null, probe: Date | null, cutoff: Date): boole
   return value !== null && value >= cutoff && probe !== null && value >= probe;
 }
 
-function noCredentialFingerprint(): string {
-  return createHash("sha256").update("mcp:no-credential:v1", "utf8").digest("hex");
-}
-
-function jsonString(value: unknown, key: string): string | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const field = (value as Record<string, unknown>)[key];
-  return typeof field === "string" ? field : null;
-}
-
 async function readModelEvidence(db: PrismaClient, cutoff: Date): Promise<ExternalServiceEvidenceCounts> {
   const providers = await db.aiProviderConnection.findMany({
     where: { disabledAt: null },
@@ -230,94 +219,22 @@ async function readOidcEvidence(db: PrismaClient, cutoff: Date): Promise<Externa
 }
 
 async function readMcpEvidence(db: PrismaClient, cutoff: Date): Promise<ExternalServiceEvidenceCounts> {
-  const [connections, actions] = await Promise.all([
-    db.mcpConnection.findMany({
-      where: { disabledAt: null },
-      select: {
-        id: true,
-        status: true,
-        lastDiscoveredAt: true,
-        lastErrorCode: true,
-        resolvedAddressFingerprint: true,
-        credential: { select: { secretFingerprint: true } },
-        toolDefinitions: {
-          where: { current: true, remoteReadOnlyHint: true },
-          select: {
-            id: true,
-            name: true,
-            definitionFingerprint: true,
-            attestations: {
-              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-              select: {
-                id: true,
-                definitionFingerprint: true,
-                networkFingerprint: true,
-                credentialFingerprint: true,
-                audits: { select: { event: true } },
-              },
-            },
-          },
-        },
-      },
-    }),
-    db.projectAction.findMany({
-      where: { capability: "project.mcp.read-tool.invoke", status: "succeeded", completedAt: { gte: cutoff } },
-      select: { input: true, completedAt: true },
-    }),
-  ]);
-
-  const evidence = connections.map((connection) => {
-    const verified = connection.status === "verified"
-      && connection.lastErrorCode === null
-      && connection.resolvedAddressFingerprint !== null;
-    const credentialFingerprint = connection.credential?.secretFingerprint ?? noCredentialFingerprint();
-    const activeAttestations = new Map<string, {
-      id: string;
-      toolName: string;
-      definitionFingerprint: string;
-      networkFingerprint: string;
-      credentialFingerprint: string;
-    }>();
-    for (const definition of connection.toolDefinitions) {
-      const matching = definition.attestations.find((attestation) => (
-        attestation.definitionFingerprint === definition.definitionFingerprint
-        && attestation.networkFingerprint === connection.resolvedAddressFingerprint
-        && attestation.credentialFingerprint === credentialFingerprint
-      ));
-      if (matching === undefined) continue;
-      const events = new Set(matching.audits.map((audit) => audit.event));
-      if (events.has("attested") && !events.has("revoked")) {
-        activeAttestations.set(definition.id, {
-          id: matching.id,
-          toolName: definition.name,
-          definitionFingerprint: matching.definitionFingerprint,
-          networkFingerprint: matching.networkFingerprint,
-          credentialFingerprint: matching.credentialFingerprint,
-        });
-      }
-    }
-
-    const workflowAt = actions
-      .filter((action) => {
-        if (jsonString(action.input, "connectionId") !== connection.id) return false;
-        const attestation = activeAttestations.get(jsonString(action.input, "toolDefinitionId") ?? "");
-        return attestation !== undefined
-          && attestation.id === jsonString(action.input, "attestationId")
-          && attestation.toolName === jsonString(action.input, "toolName")
-          && attestation.definitionFingerprint === jsonString(action.input, "toolDefinitionFingerprint")
-          && attestation.networkFingerprint === jsonString(action.input, "networkFingerprint")
-          && attestation.credentialFingerprint === jsonString(action.input, "credentialFingerprint");
-      })
-      .map((action) => action.completedAt)
-      .filter((value): value is Date => value !== null)
-      .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
-    return { verified, probeAt: connection.lastDiscoveredAt, workflowAt };
+  const connections = await db.mcpConnection.findMany({
+    where: { disabledAt: null },
+    select: {
+      status: true,
+      lastDiscoveredAt: true,
+      lastErrorCode: true,
+      resolvedAddressFingerprint: true,
+    },
   });
-
-  const verified = evidence.filter((entry) => entry.verified);
-  const fresh = verified.filter((entry) => isFresh(entry.probeAt, cutoff));
-  const workflows = fresh.filter((entry) => afterProbe(entry.workflowAt, entry.probeAt, cutoff));
-  return { configured: evidence.length, verified: verified.length, freshProbes: fresh.length, freshWorkflows: workflows.length };
+  const verified = connections.filter((connection) => connection.status === "verified"
+    && connection.lastErrorCode === null
+    && connection.resolvedAddressFingerprint !== null);
+  const fresh = verified.filter((connection) => isFresh(connection.lastDiscoveredAt, cutoff));
+  // The product MCP workflow is not open yet. Legacy generic ProjectAction
+  // rows are neither read nor accepted as evidence for the new control plane.
+  return { configured: connections.length, verified: verified.length, freshProbes: fresh.length, freshWorkflows: 0 };
 }
 
 export async function buildExternalServiceAcceptanceReport(

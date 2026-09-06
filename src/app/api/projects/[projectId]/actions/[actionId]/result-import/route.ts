@@ -7,6 +7,7 @@ import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
+const noStore = { "cache-control": "no-store" } as const;
 
 export async function POST(
   request: Request,
@@ -24,8 +25,10 @@ export async function POST(
       await readJsonBody(request),
       user,
     );
-    return NextResponse.json({ resultImport }, { status: 201 });
+    return NextResponse.json({ resultImport }, { status: 201, headers: noStore });
   } catch (error) {
-    return handleApiError(error);
+    const response = handleApiError(error);
+    response.headers.set("cache-control", "no-store");
+    return response;
   }
 }

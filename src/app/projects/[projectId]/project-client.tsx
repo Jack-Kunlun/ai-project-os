@@ -32,7 +32,7 @@ type ProjectItem = {
   } | null;
   source: {
     id: string;
-    kind: "document" | "screenshot" | "github" | "git" | "web" | "manual" | "mcp";
+    kind: "document" | "screenshot" | "github" | "git" | "web" | "manual";
     externalRef: string | null;
     contentHash: string;
     capturedAt: string | null;
@@ -42,7 +42,7 @@ type ProjectItem = {
 
 type ProjectSourceSummary = {
   id: string;
-  kind: "document" | "screenshot" | "github" | "git" | "web" | "manual" | "mcp";
+  kind: "document" | "screenshot" | "github" | "git" | "web" | "manual";
   preview: string;
   capturedAt: string | null;
   ingestedAt: string;
@@ -619,7 +619,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
 
         <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center">
           <label className="min-w-0 flex-1"><span className="sr-only">搜索已接入资料</span><input value={sourceSearch} onChange={(event) => { setSourceSearch(event.target.value); setSourcePage(1); }} placeholder="模糊搜索正文、来源链接或内容哈希" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
-          <label className="sm:w-48"><span className="sr-only">按资料类型筛选</span><select value={sourceKind} onChange={(event) => { setSourceKind(event.target.value); setSourcePage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部资料类型</option><option value="manual">手工文本</option><option value="document">文档</option><option value="screenshot">图片或截图</option><option value="web">网页</option><option value="github">GitHub</option><option value="git">Git 仓库</option><option value="mcp">MCP 导入</option></select></label>
+          <label className="sm:w-48"><span className="sr-only">按资料类型筛选</span><select value={sourceKind} onChange={(event) => { setSourceKind(event.target.value); setSourcePage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部资料类型</option><option value="manual">手工文本</option><option value="document">文档</option><option value="screenshot">图片或截图</option><option value="web">网页</option><option value="github">GitHub</option><option value="git">Git 仓库</option></select></label>
         </div>
 
         <div className="mt-8 min-w-0">

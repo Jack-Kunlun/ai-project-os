@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 import { locateExactSourceExcerpt } from "@/lib/project-item";
 import { parseSnapshotRecord } from "@/lib/project-snapshot";
+import {
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceLineageWhere,
+  nonLegacyMcpProjectSourceWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 import { chunkSourceText } from "./chunking";
 import {
   buildGroundedRagPlan,
@@ -346,7 +351,12 @@ export function createReadOnlyProjectAgent(options: Readonly<{
           description: true,
           slug: true,
           _count: {
-            select: { sources: true, items: true, snapshots: true, scans: true },
+            select: {
+              sources: { where: nonLegacyMcpProjectSourceLineageWhere },
+              items: { where: nonLegacyMcpProjectItemWhere },
+              snapshots: true,
+              scans: true,
+            },
           },
         },
       });
@@ -407,7 +417,7 @@ export function createReadOnlyProjectAgent(options: Readonly<{
           });
         } else if (call.tool === "get_source") {
           const source = await options.db.projectSource.findFirst({
-            where: { projectId, id: call.arguments.sourceId, retiredAt: null },
+            where: { projectId, id: call.arguments.sourceId, ...nonLegacyMcpProjectSourceWhere },
             select: {
               id: true,
               kind: true,
@@ -478,7 +488,7 @@ export function createReadOnlyProjectAgent(options: Readonly<{
           const items = Object.values(snapshot.payload.sections).flat();
           const sourceIds = [...new Set(items.map((item) => item.provenance.sourceId))];
           const sources = await options.db.projectSource.findMany({
-            where: { projectId, id: { in: sourceIds }, retiredAt: null },
+            where: { projectId, id: { in: sourceIds }, ...nonLegacyMcpProjectSourceWhere },
             select: { id: true, contentText: true, contentHash: true },
           });
           const sourcesById = new Map(sources.map((source) => [source.id, source]));

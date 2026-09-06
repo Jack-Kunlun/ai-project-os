@@ -13,6 +13,11 @@ import { AccessControlError } from "@/lib/access-control";
 import { lockActorsAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import { appendProjectMembershipAudit, findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 import { DEFAULT_LIST_PAGE_SIZE, listPagination, MAX_LIST_PAGE_SIZE } from "@/lib/list-pagination";
+import {
+  nonLegacyMcpMemoryGenerationWhere,
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 export const dynamic = "force-dynamic";
 
@@ -26,14 +31,14 @@ const projectSummarySelect = {
   updatedAt: true,
   _count: {
     select: {
-      sources: { where: { retiredAt: null } },
+      sources: { where: nonLegacyMcpProjectSourceWhere },
       assets: { where: { status: { not: "deleted" } } },
-      items: { where: { reviewStatus: "confirmed" } },
+      items: { where: { reviewStatus: "confirmed", ...nonLegacyMcpProjectItemWhere } },
       scans: true,
       snapshots: true,
       repositoryLinks: { where: { status: "active" } },
       webAiRoutes: true,
-      projectAgentRuns: true,
+      projectAgentRuns: { where: { indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere } } },
     },
   },
   memoryIndexPointer: { select: { publishedAt: true } },

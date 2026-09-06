@@ -25,6 +25,11 @@ import {
 } from "@/lib/ai-runtime";
 import { hashSourceContent } from "@/lib/source";
 import {
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceLineageWhere,
+  nonLegacyMcpProjectSourceWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
+import {
   ProjectAiConfigError,
   throwProjectAiConfigError,
 } from "./project-ai-config-errors";
@@ -534,7 +539,7 @@ class ProjectAiConfigServiceImpl {
       where: { id: projectId },
       select: {
         id: true,
-        _count: { select: { sources: { where: { retiredAt: null } } } },
+        _count: { select: { sources: { where: nonLegacyMcpProjectSourceWhere } } },
         aiPolicy: {
           select: {
             currentRevision: {
@@ -560,6 +565,11 @@ class ProjectAiConfigServiceImpl {
                   where: {
                     status: ModelProcessingGrantStatus.issued,
                     sourceKind: "manual_text",
+                    sources: {
+                      every: {
+                        source: { is: nonLegacyMcpProjectSourceWhere },
+                      },
+                    },
                   },
                   include: { operations: true, sources: true },
                 },
@@ -573,7 +583,12 @@ class ProjectAiConfigServiceImpl {
       return throwProjectAiConfigError("PROJECT_NOT_FOUND");
     }
     const pendingCandidateCount = await this.db.aiCandidateClaim.count({
-      where: { projectId, reviewStatus: "candidate" },
+      where: {
+        projectId,
+        reviewStatus: "candidate",
+        source: { is: nonLegacyMcpProjectSourceLineageWhere },
+        projectItem: { is: nonLegacyMcpProjectItemWhere },
+      },
     });
     const revision = project.aiPolicy?.currentRevision ?? null;
     const matchedOperations: ProjectAiOperationStatus[] = [];
@@ -657,7 +672,11 @@ class ProjectAiConfigServiceImpl {
         return throwProjectAiConfigError("PROJECT_NOT_FOUND");
       }
       const rows = await tx.projectSource.findMany({
-        where: { projectId: request.projectId, id: { in: [...request.sourceIds] }, retiredAt: null },
+        where: {
+          projectId: request.projectId,
+          id: { in: [...request.sourceIds] },
+          ...nonLegacyMcpProjectSourceWhere,
+        },
         select: { id: true, contentText: true, contentHash: true },
       });
       if (rows.length !== request.sourceIds.length) {

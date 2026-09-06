@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { failMcp } from "./errors";
+import { McpCapabilityError, failMcp } from "./errors";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -12,6 +12,36 @@ const MAX_SCHEMA_BYTES = 32 * 1024;
 const MAX_ARGUMENT_BYTES = 64 * 1024;
 const MAX_SCHEMA_DEPTH = 8;
 const MAX_SCHEMA_NODES = 256;
+export const MCP_RESULT_MAX_DEPTH = 8;
+export const MCP_RESULT_MAX_NODES = 256;
+export const MCP_RESULT_MAX_STRING_BYTES = 64 * 1024;
+export const MCP_RESULT_MAX_BYTES = 64 * 1024;
+
+const SENSITIVE_RESULT_KEY = /(?:authorization|cookie|set-cookie|bearer|token|secret|password|credential|api[-_ ]?key|private[-_ ]?key|access[-_ ]?(?:key|token)|refresh[-_ ]?(?:key|token)|client[-_ ]?(?:secret|key))/iu;
+const SENSITIVE_RESULT_FIELD_SOURCE = String.raw`(?:authorization|proxy-authorization|bearer|access(?:[_ -]?token|[_ -]?key)|refresh(?:[_ -]?token|[_ -]?key)|client(?:[_ -]?secret|[_ -]?key)|api(?:[_ -]?key)|private(?:[_ -]?key)|cookie|set-cookie|token|secret|password|credential)`;
+const SENSITIVE_RESULT_TRIGGER = new RegExp(String.raw`\b${SENSITIVE_RESULT_FIELD_SOURCE}\b`, "iu");
+const ENCODED_ASCII = /\\+u00[0-7][0-9a-f]/iu;
+const AMBIGUOUS_RESULT_ENCODING = /[<>]|\\|&(?:#|[a-z])|%(?:[0-9a-f]{2}|u(?:[0-9a-f]{4}|\{[0-9a-f]{1,6}\}))|\p{Cf}|\p{M}/iu;
+const COMPACT_SENSITIVE_RESULT_TOKENS = Object.freeze([
+  "authorization",
+  "proxyauthorization",
+  "bearer",
+  "accesstoken",
+  "accesskey",
+  "refreshtoken",
+  "refreshkey",
+  "clientsecret",
+  "clientkey",
+  "apikey",
+  "privatekey",
+  "cookie",
+  "setcookie",
+  "token",
+  "secret",
+  "password",
+  "credential",
+]);
+const UNSAFE_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 const ALLOWED_SCHEMA_KEYS = new Set([
   "$schema", "type", "title", "description", "default", "examples", "enum", "const",
@@ -52,7 +82,7 @@ function toJsonValue(value: unknown, depth = 0): JsonValue {
   if (!isObject(value)) return failMcp("MCP_TOOL_CATALOG_INVALID");
   const output: JsonObject = {};
   for (const key of Object.keys(value).sort()) {
-    if (key.length === 0 || key.length > 256 || CONTROL.test(key)) return failMcp("MCP_TOOL_CATALOG_INVALID");
+    if (key.length === 0 || key.length > 256 || CONTROL.test(key) || UNSAFE_OBJECT_KEYS.has(key)) return failMcp("MCP_TOOL_CATALOG_INVALID");
     output[key] = toJsonValue(value[key], depth + 1);
   }
   return output;
@@ -232,6 +262,128 @@ export function canonicalMcpToolArguments(schemaInput: unknown, argumentsInput: 
   if (!isObject(value) || Buffer.byteLength(stableJson(value as JsonObject), "utf8") > MAX_ARGUMENT_BYTES) return failMcp("MCP_TOOL_INPUT_INVALID");
   validateValue(schema, value as JsonObject, 0);
   return value as JsonObject;
+}
+
+/** Validate structured MCP output against the server-attested output schema. */
+export function validateMcpToolOutput(schemaInput: unknown, outputInput: unknown): JsonValue {
+  try {
+    const schema = validateSchemaNode(schemaInput, { nodes: 0 }, 0, "root");
+    const value = toJsonValue(outputInput);
+    validateValue(schema, value, 0);
+    return value;
+  } catch (error) {
+    if (error instanceof McpCapabilityError) return failMcp("MCP_TOOL_OUTPUT_INVALID");
+    throw error;
+  }
+}
+
+type ResultSanitizeState = { nodes: number; depth: number; omittedContentCount: number };
+
+function hasSensitiveOrAmbiguousResultText(value: string): boolean {
+  const normalizedValue = value.normalize("NFKC");
+  const sensitiveMatch = SENSITIVE_RESULT_TRIGGER.exec(normalizedValue);
+  const encodedMatch = ENCODED_ASCII.exec(normalizedValue);
+  const compactValue = normalizedValue.replace(/[^a-z0-9]/giu, "").toLowerCase();
+  const compactSensitive = COMPACT_SENSITIVE_RESULT_TOKENS.some((token) => compactValue.includes(token));
+  return sensitiveMatch !== null
+    || encodedMatch !== null
+    || compactSensitive
+    || AMBIGUOUS_RESULT_ENCODING.test(normalizedValue);
+}
+
+function sanitizeResultPatterns(value: string, state: ResultSanitizeState): string {
+  if (!hasSensitiveOrAmbiguousResultText(value)) return value;
+
+  // A remote tool controls both the value syntax and surrounding prose. Once
+  // a credential-shaped token, markup delimiter, or ambiguous encoding appears, punctuation,
+  // malformed quoting, escapes, entities, combining/format characters, and
+  // folded lines cannot provide a provably safe boundary. Discard the entire
+  // attacker-controlled string rather than retaining a decodable fragment.
+  state.omittedContentCount += 1;
+  return "[REDACTED]";
+}
+
+function sanitizeResultText(value: string, state: ResultSanitizeState): string {
+  const sanitized = sanitizeResultPatterns(value, state);
+  if (Buffer.byteLength(sanitized, "utf8") > MCP_RESULT_MAX_STRING_BYTES) return failMcp("MCP_RESPONSE_TOO_LARGE");
+  return sanitized;
+}
+
+function sanitizeResultValue(value: unknown, state: ResultSanitizeState, depth: number): JsonValue {
+  if (depth > MCP_RESULT_MAX_DEPTH) return failMcp("MCP_RESPONSE_TOO_LARGE");
+  state.nodes += 1;
+  state.depth = Math.max(state.depth, depth);
+  if (state.nodes > MCP_RESULT_MAX_NODES) return failMcp("MCP_RESPONSE_TOO_LARGE");
+  if (typeof value === "string") return sanitizeResultText(value, state);
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.map((entry) => sanitizeResultValue(entry, state, depth + 1));
+  if (!isObject(value)) return failMcp("MCP_TOOL_OUTPUT_INVALID");
+  const output: JsonObject = {};
+  for (const key of Object.keys(value).sort()) {
+    if (key.length === 0 || key.length > 256 || CONTROL.test(key)) return failMcp("MCP_TOOL_OUTPUT_INVALID");
+    if (UNSAFE_OBJECT_KEYS.has(key)) {
+      state.omittedContentCount += 1;
+      continue;
+    }
+    // Keys are controlled by the remote server too. Credential field names
+    // can be hidden behind JSON/unicode/HTML/percent escapes or invisible
+    // format characters; omit the entire field so its value cannot survive
+    // under a decodable key.
+    if (SENSITIVE_RESULT_KEY.test(key) || hasSensitiveOrAmbiguousResultText(key)) {
+      state.omittedContentCount += 1;
+      continue;
+    }
+    output[key] = sanitizeResultValue(value[key], state, depth + 1);
+  }
+  return output;
+}
+
+export type SanitizedMcpToolResult = Readonly<{
+  payload: JsonValue;
+  resultFingerprint: string;
+  resultBytes: number;
+  resultNodes: number;
+  resultDepth: number;
+  omittedContentCount: number;
+}>;
+
+/**
+ * Produce the only result shape that may be persisted by the dispatch
+ * runtime. It never retains an HTTP body, headers, or authorization material.
+ */
+export function sanitizeMcpToolResult(input: Readonly<{
+  text: string | null;
+  structuredContent: unknown;
+  omittedContentCount: number;
+  outputSchema?: unknown;
+}>): SanitizedMcpToolResult {
+  if (!Number.isSafeInteger(input.omittedContentCount) || input.omittedContentCount < 0) return failMcp("MCP_RESPONSE_INVALID");
+  if (input.text !== null && typeof input.text !== "string") return failMcp("MCP_RESPONSE_INVALID");
+  // An attested output schema applies even when the server omits
+  // structuredContent. A missing value is valid only if that schema allows
+  // null; otherwise it is a deterministic output rejection.
+  if (input.outputSchema !== undefined && input.outputSchema !== null) validateMcpToolOutput(input.outputSchema, input.structuredContent);
+  // The persisted JSONB wrapper is the measured value: its object is depth 0,
+  // and text/structuredContent/omittedContentCount are depth-1 children. Keep
+  // this accounting identical to the database recursive walk, including null
+  // children, so an accepted result cannot fail only during persistence.
+  const state: ResultSanitizeState = { nodes: 1, depth: 0, omittedContentCount: input.omittedContentCount };
+  const sanitizedTextValue = sanitizeResultValue(input.text, state, 1);
+  if (sanitizedTextValue !== null && typeof sanitizedTextValue !== "string") return failMcp("MCP_RESPONSE_INVALID");
+  const sanitizedStructuredContent = sanitizeResultValue(input.structuredContent, state, 1);
+  const sanitizedOmittedContentCount = sanitizeResultValue(state.omittedContentCount, state, 1);
+  if (typeof sanitizedOmittedContentCount !== "number") return failMcp("MCP_RESPONSE_INVALID");
+  const payload: JsonObject = {
+    text: sanitizedTextValue,
+    structuredContent: sanitizedStructuredContent,
+    omittedContentCount: sanitizedOmittedContentCount,
+  };
+  const encoded = JSON.stringify(payload);
+  const resultBytes = Buffer.byteLength(encoded, "utf8");
+  if (resultBytes > MCP_RESULT_MAX_BYTES) return failMcp("MCP_RESPONSE_TOO_LARGE");
+  const resultFingerprint = createHash("sha256").update(encoded, "utf8").digest("hex");
+  return Object.freeze({ payload, resultFingerprint, resultBytes, resultNodes: Math.max(state.nodes, 1), resultDepth: state.depth, omittedContentCount: state.omittedContentCount });
 }
 
 export function mcpHeaderBindings(schemaInput: unknown): readonly McpHeaderBinding[] {

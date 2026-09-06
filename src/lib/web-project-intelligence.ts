@@ -38,6 +38,10 @@ import {
 } from "@/lib/project-ai-public-projection";
 import { jsonValue } from "@/lib/web-github";
 import type { JobAttemptClaim } from "@/lib/project-workflow";
+import {
+  nonLegacyMcpMemoryGenerationWhere,
+  nonLegacyMcpProjectItemWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 const projectIdSchema = z.string().uuid();
 const questionSchema = z.string().trim().min(2).max(2_000);
@@ -244,11 +248,17 @@ async function loadProjectState(projectIdValue: unknown, db: PrismaClient) {
         name: true,
         description: true,
         updatedAt: true,
-        _count: { select: { sources: true, items: true, repositoryLinks: true } },
+        _count: {
+          select: {
+            sources: { where: { kind: { not: "mcp" } } },
+            items: { where: nonLegacyMcpProjectItemWhere },
+            repositoryLinks: true,
+          },
+        },
       },
     }),
     db.projectItem.findMany({
-      where: { projectId, reviewStatus: "confirmed" },
+      where: { projectId, reviewStatus: "confirmed", ...nonLegacyMcpProjectItemWhere },
       orderBy: { id: "asc" },
       take: 5_001,
       select: { id: true, type: true, updatedAt: true },
@@ -336,6 +346,7 @@ async function confirmedItemEvidence(
       reviewStatus: "confirmed",
       type: { in: [...types] },
       ...(activeFactIds === undefined ? {} : { id: { in: [...activeFactIds] } }),
+      ...nonLegacyMcpProjectItemWhere,
     },
     orderBy: [{ occurredAt: "desc" }, { updatedAt: "desc" }, { id: "asc" }],
     take,
@@ -855,7 +866,7 @@ export async function listProjectIntelligence(
   const [visibility, reports, agentRuns, activeIndex, routes, currentManifest] = await Promise.all([
     loadProjectAiPublicVisibility(db, projectId, currentActor.id),
     db.projectIntelligenceReport.findMany({
-      where: { projectId },
+      where: { projectId, indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere } },
       orderBy: { createdAt: "desc" },
       take: 20,
       select: {
@@ -871,7 +882,7 @@ export async function listProjectIntelligence(
       },
     }),
     db.projectAgentRun.findMany({
-      where: { projectId },
+      where: { projectId, indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere } },
       orderBy: { createdAt: "desc" },
       take: 30,
       select: {
@@ -912,6 +923,11 @@ export async function listProjectIntelligence(
             expectedEmbeddingProviderConfigurationVersion: true,
             expectedEmbeddingRouteFenceFingerprint: true,
             embeddingWebAiGrantId: true,
+            records: {
+              where: { projectSource: { is: { kind: "mcp" } } },
+              take: 1,
+              select: { id: true },
+            },
             providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
           },
         },
@@ -966,8 +982,11 @@ export async function listProjectIntelligence(
     modelId: projectAiModelProjection(run.modelId, run.providerConnection, visibility),
     providerConnection: projectAiProviderProjection(run.providerConnection, visibility),
   }));
-  const personalEvidenceLive = embeddingRoute?.source === "personal_delegation" && activeIndex !== null
-    ? await isPersonalMemoryGenerationLive(activeIndex.generation.id, db)
+  const safeActiveIndex = activeIndex !== null && activeIndex.generation.records.length === 0
+    ? activeIndex
+    : null;
+  const personalEvidenceLive = embeddingRoute?.source === "personal_delegation" && safeActiveIndex !== null
+    ? await isPersonalMemoryGenerationLive(safeActiveIndex.generation.id, db)
     : true;
   const readinessState = resolveMemoryIndexReadiness({
     embeddingRoute: embeddingRoute === null ? null : {
@@ -982,33 +1001,33 @@ export async function listProjectIntelligence(
       providerConfigurationVersion: embeddingRoute.providerConfigurationVersion,
       routeFenceFingerprint: embeddingRoute.routeFenceFingerprint,
     },
-    activeIndex: activeIndex === null ? null : {
-      providerConnectionId: activeIndex.generation.providerConnectionId,
-      modelId: activeIndex.generation.modelId,
-      dimensions: activeIndex.generation.dimensions,
-      inputManifestFingerprint: activeIndex.generation.inputManifestFingerprint,
-      routeSource: activeIndex.generation.expectedEmbeddingRouteSource,
-      routeId: activeIndex.generation.expectedEmbeddingRouteId,
-      routeVersion: activeIndex.generation.expectedEmbeddingRouteVersion,
-      routeUpdatedAt: activeIndex.generation.expectedEmbeddingRouteUpdatedAt,
-      providerConfigurationVersion: activeIndex.generation.expectedEmbeddingProviderConfigurationVersion,
-      routeFenceFingerprint: activeIndex.generation.expectedEmbeddingRouteFenceFingerprint,
-      embeddingWebAiGrantId: activeIndex.generation.embeddingWebAiGrantId,
-      legacy: activeIndex.generation.jobId === null,
-      status: activeIndex.generation.status,
+    activeIndex: safeActiveIndex === null ? null : {
+      providerConnectionId: safeActiveIndex.generation.providerConnectionId,
+      modelId: safeActiveIndex.generation.modelId,
+      dimensions: safeActiveIndex.generation.dimensions,
+      inputManifestFingerprint: safeActiveIndex.generation.inputManifestFingerprint,
+      routeSource: safeActiveIndex.generation.expectedEmbeddingRouteSource,
+      routeId: safeActiveIndex.generation.expectedEmbeddingRouteId,
+      routeVersion: safeActiveIndex.generation.expectedEmbeddingRouteVersion,
+      routeUpdatedAt: safeActiveIndex.generation.expectedEmbeddingRouteUpdatedAt,
+      providerConfigurationVersion: safeActiveIndex.generation.expectedEmbeddingProviderConfigurationVersion,
+      routeFenceFingerprint: safeActiveIndex.generation.expectedEmbeddingRouteFenceFingerprint,
+      embeddingWebAiGrantId: safeActiveIndex.generation.embeddingWebAiGrantId,
+      legacy: safeActiveIndex.generation.jobId === null,
+      status: safeActiveIndex.generation.status,
     },
     currentInputManifestFingerprint: currentManifest,
     personalEvidenceLive,
     generationProviderVerified: generationRoute?.providerConnection.status === "verified",
   });
   const readiness = Object.freeze({
-    activeIndex: activeIndex !== null,
+    activeIndex: safeActiveIndex !== null,
     indexCompatible: readinessState.indexCompatible,
     state: readinessState.state,
     embeddingRoute: embeddingRoute?.providerConnection.status === "verified",
     generationRoute: generationRoute?.providerConnection.status === "verified",
     ready: readinessState.ready,
-    indexGenerationId: activeIndex?.indexGenerationId ?? null,
+    indexGenerationId: safeActiveIndex?.indexGenerationId ?? null,
     routes: Object.freeze({
       embedding: embeddingRoute === null ? null : Object.freeze({
         modelId: projectAiModelProjection(embeddingRoute.modelId, embeddingRoute.providerConnection, visibility),

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
+import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import {
   appendProjectItemRevision,
@@ -10,8 +11,11 @@ import {
 } from "@/lib/project-item-history";
 import { isExactSourceExcerpt, projectItemSelect } from "@/lib/project-item";
 import { createProjectItemSchema, listProjectItemsQuerySchema, projectIdSchema } from "@/lib/validation";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 import { listPagination } from "@/lib/list-pagination";
+import {
+  isLegacyMcpProjectSource,
+  nonLegacyMcpProjectItemWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +49,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
     const query = listProjectItemsQuerySchema.parse(Object.fromEntries(searchParams));
     const where: Prisma.ProjectItemWhereInput = {
       projectId,
+      ...nonLegacyMcpProjectItemWhere,
       ...(query.type === "all" ? {} : { type: query.type }),
       ...(query.reviewStatus === "all" ? {} : { reviewStatus: query.reviewStatus }),
       ...(query.search ? {
@@ -67,7 +72,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
       db.projectItem.count({ where }),
       db.projectItem.groupBy({
         by: ["reviewStatus"],
-        where: { projectId },
+        where: { projectId, ...nonLegacyMcpProjectItemWhere },
         _count: { _all: true },
       }),
     ]);
@@ -81,23 +86,23 @@ export async function GET(request: Request, context: { params: Promise<{ project
 }
 
 export async function POST(request: Request, context: { params: Promise<{ projectId: string }> }) {
-  let parsedProjectId: string | undefined;
-
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
-    parsedProjectId = projectId;
     const db = getDb();
-    await assertProjectActive(projectId, db);
     const input = createProjectItemSchema.parse(await readJsonBody(request));
-    const item = await db.$transaction(async (tx) => {
+    const item = await withWebAiProjectAccessTransaction(db, {
+      actor: user,
+      projectId,
+      required: "edit",
+    }, async (tx) => {
       const source = await tx.projectSource.findUnique({
         where: { projectId_id: { projectId, id: input.sourceId } },
-        select: { id: true, contentText: true, retiredAt: true },
+        select: { id: true, kind: true, contentText: true, retiredAt: true },
       });
 
-      if (!source || source.retiredAt !== null) {
+      if (!source || source.retiredAt !== null || isLegacyMcpProjectSource(source)) {
         const project = await tx.project.findUnique({
           where: { id: projectId },
           select: { id: true },
@@ -152,19 +157,6 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     if (isKnownError(error, "P2003")) {
-      try {
-        if (!parsedProjectId) {
-          return handleApiError(error);
-        }
-        const db = getDb();
-        const project = await db.project.findUnique({ where: { id: parsedProjectId }, select: { id: true } });
-        if (!project) {
-          return handleApiError(new ApiError(404, "PROJECT_NOT_FOUND", "Project not found"));
-        }
-      } catch (lookupError) {
-        return handleApiError(lookupError);
-      }
-
       return handleApiError(new ApiError(404, "SOURCE_NOT_FOUND", "Source not found"));
     }
 

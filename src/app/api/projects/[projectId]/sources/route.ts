@@ -3,11 +3,12 @@ import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
+import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { hashSourceContent } from "@/lib/source";
 import { createProjectSourceSchema, listProjectSourcesQuerySchema, projectIdSchema } from "@/lib/validation";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 import { listPagination } from "@/lib/list-pagination";
+import { nonLegacyMcpProjectSourceWhere } from "@/lib/legacy-mcp-source-quarantine";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +73,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
     const query = listProjectSourcesQuerySchema.parse(Object.fromEntries(searchParams));
     const where: Prisma.ProjectSourceWhereInput = {
       projectId,
-      retiredAt: null,
+      ...nonLegacyMcpProjectSourceWhere,
       ...(query.kind === "all" ? {} : { kind: query.kind }),
       ...(query.search ? {
         OR: [
@@ -105,27 +106,30 @@ export async function GET(request: Request, context: { params: Promise<{ project
 export async function POST(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
     const input = createProjectSourceSchema.parse(await readJsonBody(request));
     const db = getDb();
-    await assertProjectActive(projectId, db);
     const contentHash = hashSourceContent(input.contentText);
 
-    const source = await db.projectSource.create({
-      data: {
-        projectId,
-        kind: "manual",
-        originScope: "project",
-        projectRepositoryLinkId: null,
-        externalRef: input.externalRef ?? null,
-        contentText: input.contentText,
-        contentHash,
-        manualContentDedupeKey: contentHash,
-        capturedAt: input.capturedAt ? new Date(input.capturedAt) : null,
-      },
-      select: sourceDetailSelect,
-    });
+    const source = await withWebAiProjectAccessTransaction(db, {
+      actor: user,
+      projectId,
+      required: "edit",
+    }, (tx) => tx.projectSource.create({
+        data: {
+          projectId,
+          kind: "manual",
+          originScope: "project",
+          projectRepositoryLinkId: null,
+          externalRef: input.externalRef ?? null,
+          contentText: input.contentText,
+          contentHash,
+          manualContentDedupeKey: contentHash,
+          capturedAt: input.capturedAt ? new Date(input.capturedAt) : null,
+        },
+        select: sourceDetailSelect,
+      }));
 
     return NextResponse.json({ source }, { status: 201 });
   } catch (error) {

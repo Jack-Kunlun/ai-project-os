@@ -67,8 +67,8 @@ test("personal connection forms keep project automation boundary visible", async
   ]);
   assert.match(git, /项目页已支持一次性手动只读委托/u);
   assert.match(git, /自动化、写入\/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准/u);
-  assert.match(mcp, /项目委托开发中/u);
-  assert.match(mcp, /当前连接不能用于项目\/自动化/u);
+  assert.match(mcp, /项目委托入口尚未开放/u);
+  assert.match(mcp, /当前连接不能用于项目或自动化/u);
   assert.match(guide, /个人 Git 与 MCP 连接可以在个人中心配置/u);
   assert.doesNotMatch(guide, /普通用户不需要也不能配置平台凭据/u);
 });

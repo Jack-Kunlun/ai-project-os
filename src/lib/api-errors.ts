@@ -53,6 +53,7 @@ import { ProjectGitRepositoryDelegationServiceError } from "@/lib/project-git-re
 import { ProjectMcpConnectionDelegationServiceError } from "@/lib/project-mcp-connection-delegation-service";
 import { ProjectMcpToolGrantServiceError } from "@/lib/project-mcp-tool-grant-service";
 import { ProjectMcpActionServiceError } from "@/lib/project-mcp-action-service";
+import { ProjectMcpActionDispatchError } from "@/lib/project-mcp-action-dispatch-service";
 import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-runtime-service";
 
 export type ApiErrorBody = {
@@ -167,6 +168,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MCP_GRANT_REVOKED: [403, "项目 MCP 工具授权已撤销"],
       MCP_GRANT_CONFLICT: [409, "MCP 工具授权已被其他用户更新，请刷新后重试"],
       MCP_TOOL_INPUT_INVALID: [400, "工具参数不符合已固化的输入 Schema"],
+      MCP_TOOL_OUTPUT_INVALID: [502, "MCP 服务输出不符合已固化的输出 Schema"],
       MCP_TOOL_INPUT_REQUIRED_UNSUPPORTED: [422, "当前版本不允许 MCP 工具在执行中继续索取输入"],
       MCP_TOOL_CALL_FAILED: [502, "MCP 工具调用失败"],
     };
@@ -205,6 +207,16 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PROJECT_MCP_ACTION_APPROVAL_EXPIRED: [410, "MCP 动作审批已经过期，请重新提议"],
     };
     const [status, message] = mapping[error.code] ?? [500, "项目 MCP 动作处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof ProjectMcpActionDispatchError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PROJECT_MCP_ACTION_DISPATCH_INVALID_INPUT: [400, "MCP 动作派发请求无效"],
+      PROJECT_MCP_ACTION_DISPATCH_CONFLICT: [409, "MCP 动作状态已变化，请刷新后重试"],
+      PROJECT_MCP_ACTION_DISPATCH_FAILED: [502, "MCP 动作派发失败"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "MCP 动作派发失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

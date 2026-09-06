@@ -12,9 +12,7 @@ import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
 import { listPagination } from "@/lib/list-pagination";
 import {
-  buildMcpActionSnapshot,
   canonicalMcpActionSnapshot,
-  executeMcpActionSnapshot,
 } from "@/lib/mcp";
 
 const ACTION_LEASE_MS = 10 * 60_000;
@@ -25,6 +23,7 @@ const WORKER_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/u;
 const CLIENT_REQUEST_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/u;
 const SAFE_FAILURE_CODE = /^[A-Z][A-Z0-9_]{2,63}$/u;
 const SAFE_ACTION_HREF = /^\/[A-Za-z0-9/_?=&.-]{1,1023}$/u;
+const LEGACY_MCP_ACTION_CAPABILITY = "project.mcp.read-tool.invoke";
 
 export const PROJECT_ACTION_CAPABILITIES = [
   "project.repository.sync",
@@ -72,9 +71,9 @@ const CAPABILITY_CATALOG: Readonly<Record<ProjectActionCapability, CapabilityDef
   "project.mcp.read-tool.invoke": Object.freeze({
     id: "project.mcp.read-tool.invoke",
     label: "调用 MCP 只读工具",
-    description: "调用管理员已验证、项目 Owner 已逐项授权的远程只读工具。每次调用都必须单独审批，结果默认只保存在动作记录中，可再由成员人工固化为未审核项目资料。",
+    description: "旧版通用动作入口已冻结，不再创建、执行、展示输入或结果，也不能把历史结果纳入项目资料。请在项目 MCP 状态页查看新控制面的开放进度。",
     riskLevel: "high",
-    defaultPolicy: "approvalRequired",
+    defaultPolicy: "denied",
     effect: "external-read",
   }),
 });
@@ -160,6 +159,18 @@ const actionSelect = {
   approval: { select: { decision: true, note: true, decidedAt: true, decidedBy: { select: { id: true, username: true, displayName: true } } } },
   audits: { orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 12, select: { id: true, event: true, details: true, createdAt: true, actor: { select: { id: true, username: true, displayName: true } } } },
 } satisfies Prisma.ProjectActionSelect;
+
+type SelectedProjectAction = Prisma.ProjectActionGetPayload<{ select: typeof actionSelect }>;
+
+function publicProjectAction(action: SelectedProjectAction): SelectedProjectAction {
+  if (action.capability !== "project.mcp.read-tool.invoke") return action;
+  return {
+    ...action,
+    input: {},
+    result: null,
+    resultImport: null,
+  };
+}
 
 type ClaimedAction = Prisma.ProjectActionGetPayload<{ include: { requestedBy: true } }>;
 
@@ -344,11 +355,10 @@ export async function getProjectActionCenter(
       ] } } },
     ] } : {}),
   };
-  const [storedPolicies, actions, actionTotal, importableActions, project] = await Promise.all([
+  const [storedPolicies, actions, actionTotal, project] = await Promise.all([
     db.projectActionPolicy.findMany({ where: { projectId }, orderBy: { capability: "asc" }, select: { capability: true, mode: true, updatedAt: true, updatedBy: { select: { id: true, username: true, displayName: true } } } }),
     db.projectAction.findMany({ where: actionWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], skip: (input.page - 1) * input.pageSize, take: input.pageSize, select: actionSelect }),
     db.projectAction.count({ where: actionWhere }),
-    db.projectAction.findMany({ where: { projectId, capability: "project.mcp.read-tool.invoke", status: "succeeded" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20, select: actionSelect }),
     db.project.findUnique({ where: { id: projectId }, select: { archivedAt: true } }),
   ]);
   if (project === null) return fail("ACTION_PROJECT_NOT_FOUND");
@@ -357,7 +367,7 @@ export async function getProjectActionCenter(
     const stored = storedByCapability.get(capability.id);
     return Object.freeze({
       capability: capability.id,
-      mode: stored?.mode ?? capability.defaultPolicy,
+      mode: capability.id === "project.mcp.read-tool.invoke" ? "denied" : stored?.mode ?? capability.defaultPolicy,
       inherited: stored === undefined,
       updatedAt: stored?.updatedAt ?? null,
       updatedBy: stored?.updatedBy ?? null,
@@ -367,14 +377,14 @@ export async function getProjectActionCenter(
     catalog: projectActionCapabilityCatalog(),
     policies,
     actions: actions.map((action) => Object.freeze({
-      ...action,
+      ...publicProjectAction(action),
       canCancel: ["waitingApproval", "queued"].includes(action.status) && (permission === "owner" || action.requestedBy.id === actor.id),
     })),
-    importableActions: importableActions.map((action) => Object.freeze({ ...action, canCancel: false })),
+    importableActions: [],
     pagination: listPagination(input.page, input.pageSize, actionTotal),
     canManagePolicies: permission === "owner",
     canApprove: permission === "owner",
-    canImportResults: permission === "owner" || permission === "edit",
+    canImportResults: false,
     archived: project.archivedAt !== null,
   });
 }
@@ -385,9 +395,8 @@ export async function requestProjectAction(projectIdInput: unknown, input: unkno
   if (!parsed.success) return fail("ACTION_INVALID_INPUT");
   await assertActiveProject(actor, projectId, "edit", db);
   const capability = CAPABILITY_CATALOG[parsed.data.capability];
-  const canonicalInput = capability.id === "project.mcp.read-tool.invoke"
-    ? await buildMcpActionSnapshot(projectId, parsed.data.input, db)
-    : canonicalProjectActionInput(capability.id, parsed.data.input);
+  if (capability.id === "project.mcp.read-tool.invoke") return fail("ACTION_POLICY_DENIED");
+  const canonicalInput = canonicalProjectActionInput(capability.id, parsed.data.input);
   const inputFingerprint = projectActionInputFingerprint(projectId, capability.id, canonicalInput);
   const idempotencyKey = hash(`project-action-request:v1:${projectId}:${actor.id}:${parsed.data.clientRequestId}`);
   const existing = await db.projectAction.findUnique({
@@ -396,7 +405,7 @@ export async function requestProjectAction(projectIdInput: unknown, input: unkno
   });
   if (existing !== null) {
     if (existing.capability !== capability.id || existing.inputFingerprint !== inputFingerprint) return fail("ACTION_IDEMPOTENCY_CONFLICT");
-    return existing;
+    return publicProjectAction(existing);
   }
 
   let action;
@@ -406,7 +415,7 @@ export async function requestProjectAction(projectIdInput: unknown, input: unkno
       const duplicate = await tx.projectAction.findUnique({ where: { projectId_requestedById_idempotencyKey: { projectId, requestedById: actor.id, idempotencyKey } }, select: actionSelect });
       if (duplicate !== null) {
         if (duplicate.capability !== capability.id || duplicate.inputFingerprint !== inputFingerprint) return fail("ACTION_IDEMPOTENCY_CONFLICT");
-        return duplicate;
+        return publicProjectAction(duplicate);
       }
       const project = await tx.project.findUnique({ where: { id: projectId }, select: { archivedAt: true } });
       if (project === null) return fail("ACTION_PROJECT_NOT_FOUND");
@@ -447,12 +456,12 @@ export async function requestProjectAction(projectIdInput: unknown, input: unkno
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const duplicate = await db.projectAction.findUniqueOrThrow({ where: { projectId_requestedById_idempotencyKey: { projectId, requestedById: actor.id, idempotencyKey } }, select: actionSelect });
       if (duplicate.capability !== capability.id || duplicate.inputFingerprint !== inputFingerprint) return fail("ACTION_IDEMPOTENCY_CONFLICT");
-      return duplicate;
+      return publicProjectAction(duplicate);
     }
     throw error;
   }
   if (action.policyModeSnapshot === "approvalRequired") await notifyProjectApprovers(projectId, action.id, actor.id, capability.label, db);
-  return action;
+  return publicProjectAction(action);
 }
 
 export async function updateProjectActionPolicy(projectIdInput: unknown, capabilityInput: unknown, input: unknown, actor: AccessUser, db: PrismaClient = getDb()) {
@@ -460,7 +469,7 @@ export async function updateProjectActionPolicy(projectIdInput: unknown, capabil
   const capability = parseCapability(capabilityInput);
   const parsed = policyUpdateSchema.safeParse(input);
   if (!parsed.success) return fail("ACTION_INVALID_INPUT");
-  if (capability === "project.mcp.read-tool.invoke" && parsed.data.mode === "automatic") return fail("ACTION_INVALID_INPUT");
+  if (capability === "project.mcp.read-tool.invoke" && parsed.data.mode !== "denied") return fail("ACTION_INVALID_INPUT");
   await assertActiveProject(actor, projectId, "owner", db);
   return db.$transaction(async (tx) => {
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:${capability}`}::text, 31010001))`);
@@ -493,8 +502,9 @@ export async function decideProjectAction(projectIdInput: unknown, actionIdInput
   await assertActiveProject(actor, projectId, "owner", db);
   const outcome = await db.$transaction(async (tx) => {
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${actionId}::text, 31010002))`);
-    const action = await tx.projectAction.findFirst({ where: { id: actionId, projectId }, select: { id: true, status: true, inputFingerprint: true, approvalExpiresAt: true, updatedAt: true, requestedById: true } });
+    const action = await tx.projectAction.findFirst({ where: { id: actionId, projectId }, select: { id: true, capability: true, status: true, inputFingerprint: true, approvalExpiresAt: true, updatedAt: true, requestedById: true } });
     if (action === null) return fail("ACTION_NOT_FOUND");
+    if (action.capability === "project.mcp.read-tool.invoke") return fail("ACTION_POLICY_DENIED");
     if (action.updatedAt.getTime() !== parseTimestamp(parsed.data.expectedUpdatedAt).getTime() || action.inputFingerprint !== parsed.data.expectedFingerprint) return fail("ACTION_DECISION_CONFLICT");
     if (action.status !== "waitingApproval") return fail("ACTION_STATE_CONFLICT");
     const now = new Date();
@@ -530,7 +540,7 @@ export async function decideProjectAction(projectIdInput: unknown, actionIdInput
     actionId,
     dedupeSuffix: `decision-${outcome.action.status}`,
   }, db);
-  return outcome.action;
+  return publicProjectAction(outcome.action);
 }
 
 export async function cancelProjectAction(projectIdInput: unknown, actionIdInput: unknown, input: unknown, actor: AccessUser, db: PrismaClient = getDb()) {
@@ -541,7 +551,7 @@ export async function cancelProjectAction(projectIdInput: unknown, actionIdInput
   await assertProjectAccess(actor, projectId, "edit", db);
   const permission = await getProjectPermission(actor, projectId, db);
   if (permission === null) return fail("ACTION_PROJECT_NOT_FOUND");
-  return db.$transaction(async (tx) => {
+  const action = await db.$transaction(async (tx) => {
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${actionId}::text, 31010003))`);
     const action = await tx.projectAction.findFirst({ where: { id: actionId, projectId }, select: { id: true, requestedById: true, status: true, updatedAt: true } });
     if (action === null) return fail("ACTION_NOT_FOUND");
@@ -553,14 +563,15 @@ export async function cancelProjectAction(projectIdInput: unknown, actionIdInput
     await tx.projectActionAudit.create({ data: { id: randomUUID(), projectId, actionId, event: "cancelled", actorId: actor.id, details: { previousStatus: action.status } } });
     return tx.projectAction.findUniqueOrThrow({ where: { id: actionId }, select: actionSelect });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  return publicProjectAction(action);
 }
 
 async function recoverExpiredActions(now: Date, db: PrismaClient): Promise<{ leases: number; approvals: number }> {
-  const expiredApprovals = await db.projectAction.findMany({ where: { status: "waitingApproval", approvalExpiresAt: { lt: now } }, take: 50, select: { id: true, projectId: true, requestedById: true } });
+  const expiredApprovals = await db.projectAction.findMany({ where: { status: "waitingApproval", capability: { not: LEGACY_MCP_ACTION_CAPABILITY }, approvalExpiresAt: { lt: now } }, take: 50, select: { id: true, projectId: true, requestedById: true } });
   let approvals = 0;
   for (const action of expiredApprovals) {
     const changed = await db.$transaction(async (tx) => {
-      const updated = await tx.projectAction.updateMany({ where: { id: action.id, status: "waitingApproval", approvalExpiresAt: { lt: now } }, data: { status: "expired", completedAt: now, updatedAt: now } });
+      const updated = await tx.projectAction.updateMany({ where: { id: action.id, status: "waitingApproval", capability: { not: LEGACY_MCP_ACTION_CAPABILITY }, approvalExpiresAt: { lt: now } }, data: { status: "expired", completedAt: now, updatedAt: now } });
       if (updated.count !== 1) return false;
       await tx.projectActionAudit.create({ data: { id: randomUUID(), projectId: action.projectId, actionId: action.id, event: "expired", details: { reason: "APPROVAL_WINDOW_EXPIRED" } } });
       return true;
@@ -570,11 +581,11 @@ async function recoverExpiredActions(now: Date, db: PrismaClient): Promise<{ lea
     await tryCreateActionNotification({ userId: action.requestedById, projectId: action.projectId, kind: "actionFailed", severity: "warning", title: "动作审批已过期", body: "审批窗口已经结束，请重新创建动作。", actionId: action.id, dedupeSuffix: "approval-expired" }, db);
   }
 
-  const expiredLeases = await db.projectAction.findMany({ where: { status: "running", leaseExpiresAt: { lt: now } }, take: 50, select: { id: true, projectId: true, requestedById: true } });
+  const expiredLeases = await db.projectAction.findMany({ where: { status: "running", capability: { not: LEGACY_MCP_ACTION_CAPABILITY }, leaseExpiresAt: { lt: now } }, take: 50, select: { id: true, projectId: true, requestedById: true } });
   let leases = 0;
   for (const action of expiredLeases) {
     const changed = await db.$transaction(async (tx) => {
-      const updated = await tx.projectAction.updateMany({ where: { id: action.id, status: "running", leaseExpiresAt: { lt: now } }, data: { status: "failed", failureCode: "ACTION_LEASE_EXPIRED", leaseExpiresAt: null, completedAt: now, updatedAt: now } });
+      const updated = await tx.projectAction.updateMany({ where: { id: action.id, status: "running", capability: { not: LEGACY_MCP_ACTION_CAPABILITY }, leaseExpiresAt: { lt: now } }, data: { status: "failed", failureCode: "ACTION_LEASE_EXPIRED", leaseExpiresAt: null, completedAt: now, updatedAt: now } });
       if (updated.count !== 1) return false;
       await tx.projectActionAudit.create({ data: { id: randomUUID(), projectId: action.projectId, actionId: action.id, event: "failed", details: { failureCode: "ACTION_LEASE_EXPIRED" } } });
       return true;
@@ -593,6 +604,7 @@ async function claimAction(workerId: string, now: Date, db: PrismaClient): Promi
       FROM "ProjectAction" AS action
       JOIN "Project" AS project ON project."id" = action."projectId"
       WHERE action."status" = 'queued'::"ProjectActionStatus"
+        AND action."capability" <> 'project.mcp.read-tool.invoke'
         AND project."archivedAt" IS NULL
       ORDER BY action."createdAt" ASC, action."id" ASC
       FOR UPDATE SKIP LOCKED
@@ -627,6 +639,9 @@ function startActionHeartbeat(action: ClaimedAction, db: PrismaClient): () => vo
 
 async function executeAction(action: ClaimedAction, db: PrismaClient): Promise<Prisma.InputJsonObject> {
   const capability = parseCapability(action.capability);
+  if (capability === LEGACY_MCP_ACTION_CAPABILITY) {
+    throw new ActionExecutionError("ACTION_CAPABILITY_RETIRED");
+  }
   canonicalProjectActionInput(capability, action.input);
   if (capability === "project.repository.sync") {
     const links = await db.projectGitRepositoryLink.findMany({ where: { projectId: action.projectId, status: "active", codeEnabled: true }, orderBy: { id: "asc" }, select: { id: true } });
@@ -644,19 +659,6 @@ async function executeAction(action: ClaimedAction, db: PrismaClient): Promise<P
     const failedCount = results.filter((entry) => entry.status === "failed").length;
     if (failedCount > 0) throw new ActionExecutionError("ACTION_WEB_SOURCE_SYNC_PARTIAL_FAILURE", { sourceCount: results.length, failedCount });
     return { sourceCount: results.length, failedCount: 0 };
-  }
-  if (capability === "project.mcp.read-tool.invoke") {
-    const result = await executeMcpActionSnapshot(action.projectId, action.input, db);
-    return {
-      connectionId: result.connectionId,
-      toolName: result.toolName,
-      definitionFingerprint: result.definitionFingerprint,
-      text: result.text ?? "",
-      structuredContent: (result.structuredContent ?? {}) as Prisma.InputJsonValue,
-      hasStructuredContent: result.structuredContent !== null,
-      omittedContentCount: result.omittedContentCount,
-      resultFingerprint: result.resultFingerprint,
-    };
   }
   const { analyzeProjectMemoryQuality } = await import("@/lib/memory-quality");
   const result = await analyzeProjectMemoryQuality(action.projectId, db);

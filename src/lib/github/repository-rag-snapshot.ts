@@ -386,7 +386,19 @@ async function readRepositoryBoundary(
       },
       materialIndexPointer: {
         include: {
-          indexGeneration: { include: { materialGeneration: true } },
+          indexGeneration: {
+            include: {
+              materialGeneration: {
+                include: {
+                  entries: {
+                    include: {
+                      sourceVersion: { include: { projectSource: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -478,6 +490,9 @@ async function readRepositoryBoundary(
     materialGeneration.linkConfigVersion !== configPointer.configVersion ||
     materialGeneration.effectivePolicyVersion !==
       configPointer.effectivePolicyVersion ||
+    materialGeneration.entries.some((entry) =>
+      entry.sourceVersion.projectSource.kind === "mcp" ||
+      entry.sourceVersion.projectSource.retiredAt !== null) ||
     materialGeneration.capturedGitHubRepositoryId !==
       link.githubRepository.githubRepositoryId ||
     !COMMIT_SHA_PATTERN.test(materialGeneration.observedHeadCommitSha)
@@ -731,10 +746,10 @@ async function eligibleManualSnapshot(
       AND corpus_generation."status" = 'complete'
       AND grant_row."status" = 'issued'
       AND grant_row."issuedAt" IS NOT NULL
-      AND grant_row."issuedAt" <= CURRENT_TIMESTAMP
+      AND grant_row."issuedAt" <= (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
       AND grant_row."revokedAt" IS NULL
       AND grant_row."expiresAt" IS NOT NULL
-      AND grant_row."expiresAt" > CURRENT_TIMESTAMP
+      AND grant_row."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
       AND grant_row."effectivePolicyVersion" = ${policy.revision}
       AND profile."id" = ${EMBEDDING_STORAGE_PROFILE_ID}::uuid
       AND profile."profileFingerprint" =

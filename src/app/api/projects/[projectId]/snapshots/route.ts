@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
+import { withWebAiProjectAccessTransaction, type WebAiActor } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { isProjectSnapshotGenerationConflict } from "@/lib/project-snapshot-errors";
 import {
@@ -13,8 +14,11 @@ import {
   type SnapshotRecord,
 } from "@/lib/project-snapshot";
 import { createProjectSnapshotSchema, projectIdSchema } from "@/lib/validation";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 import { isProjectSnapshotStale } from "@/lib/project-snapshot-stale";
+import {
+  containsLegacyMcpSnapshotSource,
+  nonLegacyMcpProjectItemWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 export const dynamic = "force-dynamic";
 
@@ -113,17 +117,22 @@ async function assertProjectExists(db: ReturnType<typeof getDb>, projectId: stri
 }
 
 async function getLatestSnapshot(db: ReturnType<typeof getDb>, projectId: string): Promise<SnapshotRecord | null> {
-  const snapshot = await db.projectSnapshot.findFirst({
+  const snapshots = await db.projectSnapshot.findMany({
     where: {
       projectId,
       scanId: { not: null },
       scan: { is: { status: "completed" } },
     },
     orderBy: [{ generatedAt: "desc" }, { id: "desc" }],
+    take: 100,
     select: snapshotRecordSelect,
   });
 
-  return snapshot ? toSnapshotRecord(snapshot) : null;
+  for (const snapshot of snapshots) {
+    if (containsLegacyMcpSnapshotSource(snapshot.payload)) continue;
+    return toSnapshotRecord(snapshot);
+  }
+  return null;
 }
 
 async function getDatabaseTimestamp(tx: Prisma.TransactionClient): Promise<Date> {
@@ -138,10 +147,17 @@ async function getDatabaseTimestamp(tx: Prisma.TransactionClient): Promise<Date>
   return parsedGeneratedAt;
 }
 
-async function generateSnapshot(projectId: string): Promise<SnapshotTransactionOutcome> {
+async function generateSnapshot(projectId: string, actor: WebAiActor): Promise<SnapshotTransactionOutcome> {
   const db = getDb();
 
-  return db.$transaction(
+  return withWebAiProjectAccessTransaction(
+    db,
+    {
+      actor,
+      projectId,
+      required: "edit",
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    },
     async (tx): Promise<SnapshotTransactionOutcome> => {
       const rows = await tx.$queryRaw<ProjectLockRow[]>(Prisma.sql`
         SELECT
@@ -163,7 +179,7 @@ async function generateSnapshot(projectId: string): Promise<SnapshotTransactionO
       if (!project.lockAcquired) return { kind: "in-progress" };
 
       const items = await tx.projectItem.findMany({
-        where: { projectId },
+        where: { projectId, ...nonLegacyMcpProjectItemWhere },
         select: snapshotItemSelect,
       });
 
@@ -229,7 +245,6 @@ async function generateSnapshot(projectId: string): Promise<SnapshotTransactionO
         return { kind: "failed", code: error.code };
       }
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
 }
 
@@ -241,7 +256,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
     await assertProjectExists(db, projectId);
     const snapshot = await getLatestSnapshot(db, projectId);
     const currentItems = snapshot === null ? [] : await db.projectItem.findMany({
-      where: { projectId, reviewStatus: "confirmed" },
+      where: { projectId, reviewStatus: "confirmed", ...nonLegacyMcpProjectItemWhere },
       select: { id: true, reviewStatus: true, confirmedAt: true },
     });
     return NextResponse.json({
@@ -256,11 +271,10 @@ export async function GET(request: Request, context: { params: Promise<{ project
 export async function POST(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
-    await assertProjectActive(projectId);
     createProjectSnapshotSchema.parse(await readJsonBody(request));
-    const outcome = await generateSnapshot(projectId);
+    const outcome = await generateSnapshot(projectId, user);
 
     if (outcome.kind === "missing-project") {
       throw projectNotFoundError();

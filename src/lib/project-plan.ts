@@ -18,6 +18,14 @@ import {
   buildRepositorySyncPlanEvidence,
   isProjectPlanEvidenceStale,
 } from "@/lib/project-operations";
+import {
+  loadQuarantinedProjectLineage,
+  nonLegacyMcpMemoryGenerationWhere,
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceWhere,
+  nonLegacyMcpProjectWorkItemWhere,
+  referencesQuarantinedProjectLineage,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 const idSchema = z.string().uuid();
 const titleSchema = z.string().trim().min(1).max(160);
@@ -257,13 +265,35 @@ export async function getProjectPlan(projectIdInput: unknown, actor: AccessUser,
   const permission = await assertProjectAccess(actor, projectId, "view", db);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, name: true, archivedAt: true, workspaceId: true, membershipInheritanceMode: true } });
   if (project === null) return fail("PROJECT_PLAN_PROJECT_NOT_FOUND");
-  const [objectives, workItems, dependencies, audits, runs, evidenceLinks, impactSuggestions, members, evidenceItems, evidenceSources, pendingActions] = await Promise.all([
+  const [objectives, workItems, dependencies, audits, runs, evidenceLinks, impactSuggestions, members, evidenceItems, evidenceSources, pendingActions, quarantinedLineage] = await Promise.all([
     db.projectObjective.findMany({ where: { projectId }, orderBy: [{ status: "asc" }, { updatedAt: "desc" }], select: objectiveSelect }),
-    db.projectWorkItem.findMany({ where: { projectId }, orderBy: [{ status: "asc" }, { priority: "desc" }, { updatedAt: "desc" }], select: workItemSelect }),
-    db.projectWorkItemDependency.findMany({ where: { projectId, removedAt: null }, orderBy: { createdAt: "asc" }, select: dependencySelect }),
+    db.projectWorkItem.findMany({ where: { projectId, ...nonLegacyMcpProjectWorkItemWhere }, orderBy: [{ status: "asc" }, { priority: "desc" }, { updatedAt: "desc" }], select: workItemSelect }),
+    db.projectWorkItemDependency.findMany({
+      where: {
+        projectId,
+        removedAt: null,
+        workItem: { is: nonLegacyMcpProjectWorkItemWhere },
+        dependsOn: { is: nonLegacyMcpProjectWorkItemWhere },
+      },
+      orderBy: { createdAt: "asc" },
+      select: dependencySelect,
+    }),
     db.projectPlanAudit.findMany({ where: { projectId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 100, select: { id: true, entityType: true, entityId: true, event: true, details: true, createdAt: true, actor: { select: userSelect } } }),
-    db.projectAgentRun.findMany({ where: { projectId }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true, question: true, recommendations: true, createdAt: true } }),
-    db.projectWorkItemEvidenceLink.findMany({ where: { projectId, removedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: evidenceLinkSelect }),
+    db.projectAgentRun.findMany({ where: { projectId, indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere } }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true, question: true, recommendations: true, createdAt: true } }),
+    db.projectWorkItemEvidenceLink.findMany({
+      where: {
+        projectId,
+        removedAt: null,
+        workItem: { is: nonLegacyMcpProjectWorkItemWhere },
+        OR: [
+          { repositorySyncRunId: { not: null } },
+          { projectSource: { is: nonLegacyMcpProjectSourceWhere } },
+          { projectItem: { is: nonLegacyMcpProjectItemWhere } },
+        ],
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: evidenceLinkSelect,
+    }),
     db.projectPlanImpactSuggestion.findMany({ where: { projectId }, orderBy: [{ status: "asc" }, { createdAt: "desc" }], take: 100, select: impactSelect }),
     db.appUser.findMany({
       where: {
@@ -278,9 +308,10 @@ export async function getProjectPlan(projectIdInput: unknown, actor: AccessUser,
       orderBy: [{ displayName: "asc" }, { username: "asc" }],
       select: userSelect,
     }),
-    db.projectItem.findMany({ where: { projectId, reviewStatus: "confirmed" }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 100, select: { id: true, title: true, type: true, updatedAt: true } }),
-    db.projectSource.findMany({ where: { projectId, retiredAt: null }, orderBy: [{ ingestedAt: "desc" }, { id: "desc" }], take: 100, select: { id: true, kind: true, externalRef: true, contentText: true, contentHash: true, ingestedAt: true } }),
+    db.projectItem.findMany({ where: { projectId, reviewStatus: "confirmed", ...nonLegacyMcpProjectItemWhere }, orderBy: [{ updatedAt: "desc" }, { id: "desc" }], take: 100, select: { id: true, title: true, type: true, updatedAt: true } }),
+    db.projectSource.findMany({ where: { projectId, ...nonLegacyMcpProjectSourceWhere }, orderBy: [{ ingestedAt: "desc" }, { id: "desc" }], take: 100, select: { id: true, kind: true, externalRef: true, contentText: true, contentHash: true, ingestedAt: true } }),
     db.projectAction.findMany({ where: { projectId, status: "waitingApproval" }, select: { status: true } }),
+    loadQuarantinedProjectLineage(projectId, db),
   ]);
   const eligibleMemberIds = new Set(members.map((member) => member.id));
   const visibleWorkItems = workItems.map((item) => item.assigneeId === null || eligibleMemberIds.has(item.assigneeId)
@@ -291,6 +322,10 @@ export async function getProjectPlan(projectIdInput: unknown, actor: AccessUser,
     ...link,
     stale: isProjectPlanEvidenceStale({ ...link, evidenceSnapshot: _snapshot, projectItem, projectSource, repositorySyncRun }),
   }));
+  const publicAudits = audits.filter((audit) =>
+    !(audit.entityType === "workItem" && quarantinedLineage.workItemIds.has(audit.entityId))
+    && !(audit.entityType === "evidenceLink" && quarantinedLineage.evidenceLinkIds.has(audit.entityId))
+    && !referencesQuarantinedProjectLineage(audit.details, quarantinedLineage));
   const health = buildProjectPlanHealth({
     workItems: visibleWorkItems.map((item) => ({ ...item, assigneeId: item.assigneeId !== null && members.some((member) => member.id === item.assigneeId) ? item.assigneeId : null })),
     dependencies,
@@ -316,7 +351,7 @@ export async function getProjectPlan(projectIdInput: unknown, actor: AccessUser,
       })),
     },
     health,
-    audits,
+    audits: publicAudits,
     availableRecommendations: suggestionsFromRuns(runs, promoted),
     canEdit: project.archivedAt === null && (permission === "owner" || permission === "edit"),
   });
@@ -372,9 +407,9 @@ export async function createProjectPlanEntry(projectIdInput: unknown, input: unk
       return { workItem };
     }
     if (operation.operation === "promoteRecommendation") {
-      const existing = await tx.projectWorkItem.findFirst({ where: { projectId: projectId.data, agentRunId: operation.agentRunId, recommendationIndex: operation.recommendationIndex }, select: workItemSelect });
+      const existing = await tx.projectWorkItem.findFirst({ where: { projectId: projectId.data, agentRunId: operation.agentRunId, recommendationIndex: operation.recommendationIndex, ...nonLegacyMcpProjectWorkItemWhere }, select: workItemSelect });
       if (existing !== null) return { workItem: existing };
-      const run = await tx.projectAgentRun.findUnique({ where: { projectId_id: { projectId: projectId.data, id: operation.agentRunId } }, select: { id: true, recommendations: true, citations: true, inputManifestFingerprint: true, createdAt: true } });
+      const run = await tx.projectAgentRun.findFirst({ where: { projectId: projectId.data, id: operation.agentRunId, indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere } }, select: { id: true, recommendations: true, citations: true, inputManifestFingerprint: true, createdAt: true } });
       if (run === null) return fail("PROJECT_PLAN_RECOMMENDATION_NOT_FOUND");
       const recommendations = z.array(recommendationSchema).safeParse(run.recommendations);
       if (!recommendations.success || recommendations.data[operation.recommendationIndex] === undefined) return fail("PROJECT_PLAN_RECOMMENDATION_NOT_FOUND");
@@ -397,9 +432,17 @@ export async function createProjectPlanEntry(projectIdInput: unknown, input: unk
 async function addDependency(projectId: string, input: Extract<z.infer<typeof createSchema>, { operation: "addDependency" }>, actor: AccessUser, tx: Prisma.TransactionClient) {
   if (input.workItemId === input.dependsOnId) return fail("PROJECT_PLAN_DEPENDENCY_CYCLE");
   const [workItem, dependsOn, edges] = await Promise.all([
-    tx.projectWorkItem.findUnique({ where: { projectId_id: { projectId, id: input.workItemId } }, select: { id: true, updatedAt: true } }),
-    tx.projectWorkItem.findUnique({ where: { projectId_id: { projectId, id: input.dependsOnId } }, select: { id: true } }),
-    tx.projectWorkItemDependency.findMany({ where: { projectId, removedAt: null }, select: { workItemId: true, dependsOnId: true } }),
+    tx.projectWorkItem.findFirst({ where: { projectId, id: input.workItemId, ...nonLegacyMcpProjectWorkItemWhere }, select: { id: true, updatedAt: true } }),
+    tx.projectWorkItem.findFirst({ where: { projectId, id: input.dependsOnId, ...nonLegacyMcpProjectWorkItemWhere }, select: { id: true } }),
+    tx.projectWorkItemDependency.findMany({
+      where: {
+        projectId,
+        removedAt: null,
+        workItem: { is: nonLegacyMcpProjectWorkItemWhere },
+        dependsOn: { is: nonLegacyMcpProjectWorkItemWhere },
+      },
+      select: { workItemId: true, dependsOnId: true },
+    }),
   ]);
   if (workItem === null || dependsOn === null) return fail("PROJECT_PLAN_WORK_ITEM_NOT_FOUND");
   if (workItem.updatedAt.getTime() !== new Date(input.expectedUpdatedAt).getTime()) return fail("PROJECT_PLAN_VERSION_CONFLICT");
@@ -414,7 +457,15 @@ async function addDependency(projectId: string, input: Extract<z.infer<typeof cr
 }
 
 async function removeDependency(projectId: string, input: Extract<z.infer<typeof createSchema>, { operation: "removeDependency" }>, actor: AccessUser, tx: Prisma.TransactionClient) {
-  const dependency = await tx.projectWorkItemDependency.findUnique({ where: { projectId_id: { projectId, id: input.dependencyId } }, select: { id: true, workItemId: true, dependsOnId: true, removedAt: true, workItem: { select: { updatedAt: true } } } });
+  const dependency = await tx.projectWorkItemDependency.findFirst({
+    where: {
+      projectId,
+      id: input.dependencyId,
+      workItem: { is: nonLegacyMcpProjectWorkItemWhere },
+      dependsOn: { is: nonLegacyMcpProjectWorkItemWhere },
+    },
+    select: { id: true, workItemId: true, dependsOnId: true, removedAt: true, workItem: { select: { updatedAt: true } } },
+  });
   if (dependency === null || dependency.removedAt !== null) return fail("PROJECT_PLAN_DEPENDENCY_NOT_FOUND");
   if (dependency.workItem.updatedAt.getTime() !== new Date(input.expectedUpdatedAt).getTime()) return fail("PROJECT_PLAN_VERSION_CONFLICT");
   const now = new Date();
@@ -426,21 +477,21 @@ async function removeDependency(projectId: string, input: Extract<z.infer<typeof
 }
 
 async function linkEvidence(projectId: string, input: Extract<z.infer<typeof createSchema>, { operation: "linkEvidence" }>, actor: AccessUser, tx: Prisma.TransactionClient) {
-  const workItem = await tx.projectWorkItem.findUnique({ where: { projectId_id: { projectId, id: input.workItemId } }, select: { id: true, status: true, updatedAt: true } });
+  const workItem = await tx.projectWorkItem.findFirst({ where: { projectId, id: input.workItemId, ...nonLegacyMcpProjectWorkItemWhere }, select: { id: true, status: true, updatedAt: true } });
   if (workItem === null) return fail("PROJECT_PLAN_WORK_ITEM_NOT_FOUND");
   if (workItem.updatedAt.getTime() !== new Date(input.expectedUpdatedAt).getTime()) return fail("PROJECT_PLAN_VERSION_CONFLICT");
   if (workItem.status === "completed" || workItem.status === "cancelled") return fail("PROJECT_PLAN_STATUS_CONFLICT");
   const built = input.evidenceKind === "projectItem"
     ? await (async () => {
-      const item = await tx.projectItem.findUnique({
-        where: { projectId_id: { projectId, id: input.evidenceId } },
+      const item = await tx.projectItem.findFirst({
+        where: { projectId, id: input.evidenceId, ...nonLegacyMcpProjectItemWhere },
         select: { id: true, type: true, reviewStatus: true, title: true, content: true, sourceExcerpt: true, updatedAt: true, lastVerifiedAt: true, sourceId: true, source: { select: { contentHash: true } } },
       });
       if (item === null || item.reviewStatus !== "confirmed") return fail("PROJECT_PLAN_EVIDENCE_NOT_FOUND");
       return buildProjectItemPlanEvidence({ projectId, workItemId: workItem.id, item: { ...item, sourceContentHash: item.source.contentHash } });
     })()
     : await (async () => {
-      const source = await tx.projectSource.findUnique({ where: { projectId_id: { projectId, id: input.evidenceId } }, select: { id: true, kind: true, externalRef: true, contentText: true, contentHash: true, capturedAt: true, ingestedAt: true, retiredAt: true } });
+      const source = await tx.projectSource.findFirst({ where: { projectId, id: input.evidenceId, ...nonLegacyMcpProjectSourceWhere }, select: { id: true, kind: true, externalRef: true, contentText: true, contentHash: true, capturedAt: true, ingestedAt: true, retiredAt: true } });
       if (source === null || source.retiredAt !== null) return fail("PROJECT_PLAN_EVIDENCE_NOT_FOUND");
       return buildProjectSourcePlanEvidence({ projectId, workItemId: workItem.id, source });
     })();
@@ -467,8 +518,17 @@ async function linkEvidence(projectId: string, input: Extract<z.infer<typeof cre
 }
 
 async function removeEvidence(projectId: string, input: Extract<z.infer<typeof createSchema>, { operation: "removeEvidence" }>, actor: AccessUser, tx: Prisma.TransactionClient) {
-  const link = await tx.projectWorkItemEvidenceLink.findUnique({
-    where: { projectId_id: { projectId, id: input.evidenceLinkId } },
+  const link = await tx.projectWorkItemEvidenceLink.findFirst({
+    where: {
+      projectId,
+      id: input.evidenceLinkId,
+      workItem: { is: nonLegacyMcpProjectWorkItemWhere },
+      OR: [
+        { repositorySyncRunId: { not: null } },
+        { projectSource: { is: nonLegacyMcpProjectSourceWhere } },
+        { projectItem: { is: nonLegacyMcpProjectItemWhere } },
+      ],
+    },
     select: { id: true, workItemId: true, kind: true, removedAt: true, workItem: { select: { status: true, updatedAt: true } } },
   });
   if (link === null || link.removedAt !== null) return fail("PROJECT_PLAN_EVIDENCE_NOT_FOUND");
@@ -523,7 +583,7 @@ async function refreshImpactSuggestions(projectId: string, actor: AccessUser, tx
 
 async function linkImpact(projectId: string, input: Extract<z.infer<typeof createSchema>, { operation: "linkImpact" }>, actor: AccessUser, tx: Prisma.TransactionClient) {
   const [workItem, impact] = await Promise.all([
-    tx.projectWorkItem.findUnique({ where: { projectId_id: { projectId, id: input.workItemId } }, select: { id: true, status: true, updatedAt: true } }),
+    tx.projectWorkItem.findFirst({ where: { projectId, id: input.workItemId, ...nonLegacyMcpProjectWorkItemWhere }, select: { id: true, status: true, updatedAt: true } }),
     tx.projectPlanImpactSuggestion.findUnique({ where: { projectId_id: { projectId, id: input.impactId } }, select: { id: true, status: true, repositorySyncRunId: true, title: true, evidenceSnapshot: true, evidenceFingerprint: true } }),
   ]);
   if (workItem === null) return fail("PROJECT_PLAN_WORK_ITEM_NOT_FOUND");
@@ -592,7 +652,7 @@ export async function updateProjectPlanEntry(projectIdInput: unknown, input: unk
       await tx.project.update({ where: { id: projectId.data }, data: { updatedAt: now } });
       return { objective };
     }
-    const current = await tx.projectWorkItem.findUnique({ where: { projectId_id: { projectId: projectId.data, id: patch.id } }, select: workItemSelect });
+    const current = await tx.projectWorkItem.findFirst({ where: { projectId: projectId.data, id: patch.id, ...nonLegacyMcpProjectWorkItemWhere }, select: workItemSelect });
     if (current === null) return fail("PROJECT_PLAN_WORK_ITEM_NOT_FOUND");
     if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return fail("PROJECT_PLAN_VERSION_CONFLICT");
     if (current.status === "completed" || current.status === "cancelled") return fail("PROJECT_PLAN_STATUS_CONFLICT");
@@ -605,7 +665,18 @@ export async function updateProjectPlanEntry(projectIdInput: unknown, input: unk
       if (effectiveAssigneeId === null || effectiveAcceptanceCriteria === null) return fail("PROJECT_PLAN_READINESS_REQUIRED");
       await assertEligibleAssignee(projectId.data, effectiveAssigneeId, tx);
     }
-    if (patch.status === "completed" && await tx.projectWorkItemEvidenceLink.count({ where: { projectId: projectId.data, workItemId: current.id, removedAt: null } }) === 0) return fail("PROJECT_PLAN_COMPLETION_EVIDENCE_REQUIRED");
+    if (patch.status === "completed" && await tx.projectWorkItemEvidenceLink.count({
+      where: {
+        projectId: projectId.data,
+        workItemId: current.id,
+        removedAt: null,
+        OR: [
+          { repositorySyncRunId: { not: null } },
+          { projectSource: { is: nonLegacyMcpProjectSourceWhere } },
+          { projectItem: { is: nonLegacyMcpProjectItemWhere } },
+        ],
+      },
+    }) === 0) return fail("PROJECT_PLAN_COMPLETION_EVIDENCE_REQUIRED");
     const data: Prisma.ProjectWorkItemUpdateManyMutationInput = {
       ...(patch.title === undefined ? {} : { title: patch.title }),
       ...(patch.description === undefined ? {} : { description: nullableText(patch.description) }),

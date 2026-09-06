@@ -101,16 +101,25 @@ test("all project mutation routes reject archived projects except bounded lifecy
   const frozenMcpGrantRoutes = new Set([
     "src/app/api/projects/[projectId]/mcp-tool-grants/[grantId]/route.ts",
   ]);
+  const frozenMcpActionRoutes = new Set([
+    "src/app/api/projects/[projectId]/mcp-actions/route.ts",
+    "src/app/api/projects/[projectId]/mcp-actions/[actionId]/route.ts",
+    "src/app/api/projects/[projectId]/mcp-actions/[actionId]/decision/route.ts",
+    "src/app/api/projects/[projectId]/mcp-actions/[actionId]/cancel/route.ts",
+    "src/app/api/projects/[projectId]/mcp-actions/[actionId]/dispatch/route.ts",
+  ]);
   const archivedTerminalCleanupRoutes = new Set([
     "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/rejection/route.ts",
     "src/app/api/projects/[projectId]/mcp-connection-delegations/[delegationId]/revocation/route.ts",
     "src/app/api/projects/[projectId]/mcp-tool-grants/[grantId]/revocation/route.ts",
   ]);
   const serviceLifecycleGuarded = new Set([
+    "src/app/api/projects/[projectId]/items/route.ts",
+    "src/app/api/projects/[projectId]/items/[itemId]/route.ts",
+    "src/app/api/projects/[projectId]/sources/route.ts",
+    "src/app/api/projects/[projectId]/sources/[sourceId]/route.ts",
+    "src/app/api/projects/[projectId]/snapshots/route.ts",
     "src/app/api/projects/[projectId]/mcp-tool-grants/route.ts",
-    "src/app/api/projects/[projectId]/mcp-actions/route.ts",
-    "src/app/api/projects/[projectId]/mcp-actions/[actionId]/decision/route.ts",
-    "src/app/api/projects/[projectId]/mcp-actions/[actionId]/cancel/route.ts",
     "src/app/api/projects/[projectId]/memory/extract/route.ts",
     "src/app/api/projects/[projectId]/memory/search/route.ts",
     "src/app/api/projects/[projectId]/memory/index/route.ts",
@@ -166,6 +175,11 @@ test("all project mutation routes reject archived projects except bounded lifecy
       assert.doesNotMatch(source, /readJsonBody|revokeProjectMcpToolGrant/u, `${path} must not parse or invoke legacy mutation`);
       continue;
     }
+    if (frozenMcpActionRoutes.has(path)) {
+      assert.match(source, /projectMcpActionApiUnavailable/u, `${path} must return the fixed product gate`);
+      assert.doesNotMatch(source, /requireApiSession|readJsonBody|project-mcp-action-service|project-mcp-action-dispatch-service/u, `${path} must not enter the unopened control plane`);
+      continue;
+    }
     if (archivedTerminalCleanupRoutes.has(path)) {
       assert.doesNotMatch(source, /assertProjectActive/u, `${path} must remain an archived terminal cleanup route`);
       assert.match(source, /assertSameOrigin\(request\)/u, `${path} must enforce same-origin writes`);
@@ -182,7 +196,7 @@ test("all project mutation routes reject archived projects except bounded lifecy
     if (!/export async function (POST|PUT|PATCH|DELETE)/u.test(source)) continue;
     if (serviceLifecycleGuarded.has(path)) {
       assert.doesNotMatch(source, /assertProjectActive/u, `${path} delegates lifecycle checks`);
-      assert.match(source, /(?:requestedBy|actor):\s*user|,\s*(?:user|actor)\s*(?:,|\))/u, `${path} passes the session actor`);
+      assert.match(source, /(?:requestedBy|actor):\s*(?:user|sessionUser)|,\s*(?:user|actor)\s*(?:,|\))/u, `${path} passes the session actor`);
       continue;
     }
     assert.match(source, /assertProjectActive/u, `${path} must reject archived project mutations`);
@@ -198,6 +212,7 @@ test("all project mutation routes reject archived projects except bounded lifecy
   assert.match(projectRoute, /deleteArchivedProject/u);
   assert.match(projectRoute, /confirmationName/u);
   assert.match(projectRoute, /expectedUpdatedAt/u);
+  assert.match(projectRoute, /withWebAiProjectAccessTransaction/u);
 });
 
 test("active workspace reads exclude archived projects while the project list exposes an explicit view", async () => {

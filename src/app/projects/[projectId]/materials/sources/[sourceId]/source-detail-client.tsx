@@ -9,7 +9,7 @@ import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 
 type ProjectSource = {
   id: string;
-  kind: "document" | "screenshot" | "github" | "git" | "web" | "manual" | "mcp";
+  kind: "document" | "screenshot" | "github" | "git" | "web" | "manual";
   externalRef: string | null;
   contentText: string;
   contentHash: string;

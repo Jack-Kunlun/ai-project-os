@@ -92,7 +92,7 @@ async function assertProjectReadyForDeletion(
     }),
     tx.automationRun.count({ where: { projectId, status: { in: ["queued", "running", "waitingConsent"] } } }),
     tx.projectAction.count({ where: { projectId, status: { in: ["waitingApproval", "queued", "running"] } } }),
-    tx.projectMcpAction.count({ where: { projectId, status: { in: ["waitingApproval", "approved"] } } }),
+    tx.projectMcpAction.count({ where: { projectId, status: { in: ["waitingApproval", "approved", "dispatchReserved"] } } }),
     tx.projectAssetExtractionRun.count({ where: { projectId, status: { in: ["queued", "running", "unknown"] } } }),
     tx.projectGitRepositoryManualRun.count({ where: { projectId, status: { in: ["queued", "running"] } } }),
     tx.projectAssetUploadReservation.count({ where: { projectId, leaseExpiresAt: { gt: now } } }),
@@ -211,7 +211,7 @@ export async function updateProjectLifecycle(
           });
           const runningAutomations = await tx.automationRun.count({ where: { projectId: admission.project.id, status: "running" } });
           const runningActions = await tx.projectAction.count({ where: { projectId: admission.project.id, status: "running" } });
-          const pendingMcpActions = await tx.projectMcpAction.count({ where: { projectId: admission.project.id, status: { in: ["waitingApproval", "approved"] } } });
+          const pendingMcpActions = await tx.projectMcpAction.count({ where: { projectId: admission.project.id, status: { in: ["waitingApproval", "approved", "dispatchReserved"] } } });
           if (pendingMcpActions > 0) throw new ProjectLifecycleError("PROJECT_MCP_ACTION_PENDING");
           if (unresolvedJobs > 0 || unresolvedManualRuns > 0 || runningAutomations > 0 || runningActions > 0) throw new ProjectLifecycleError("PROJECT_HAS_UNRESOLVED_JOBS");
         } else if (current.archivedAt === null) {

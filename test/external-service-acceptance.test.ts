@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import type { PrismaClient } from "@prisma/client";
 import test from "node:test";
 
 import {
+  buildExternalServiceAcceptanceReport,
   evaluateExternalServiceCategory,
   EXTERNAL_SERVICE_CATEGORIES,
   ExternalServiceAcceptanceError,
@@ -50,4 +52,41 @@ test("external evidence classification never treats a probe alone as field accep
       reasonCode: "MODEL_READY",
     },
   );
+});
+
+test("frozen MCP acceptance never reads legacy actions or reports a ready workflow", async () => {
+  const now = new Date("2026-09-06T12:00:00.000Z");
+  const db = {
+    aiProviderConnection: { findMany: async () => [] },
+    gitConnection: { findMany: async () => [] },
+    gitHubConnection: { findMany: async () => [] },
+    oidcProvider: { findMany: async () => [] },
+    mcpConnection: {
+      findMany: async () => [{
+        status: "verified",
+        lastDiscoveredAt: new Date(now.getTime() - 60_000),
+        lastErrorCode: null,
+        resolvedAddressFingerprint: "a".repeat(64),
+      }],
+    },
+    get projectAction(): never {
+      throw new Error("LEGACY_MCP_ACTION_EVIDENCE_MUST_NOT_BE_READ");
+    },
+  } as unknown as PrismaClient;
+
+  const report = await buildExternalServiceAcceptanceReport(db, {
+    expected: ["mcp"],
+    maxAgeHours: 24,
+    now,
+  });
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.categories.mcp, {
+    configured: 1,
+    verified: 1,
+    freshProbes: 1,
+    freshWorkflows: 0,
+    required: true,
+    status: "workflow_required",
+    reasonCode: "MCP_WORKFLOW_REQUIRED",
+  });
 });

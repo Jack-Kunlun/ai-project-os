@@ -3,6 +3,7 @@ import { runProjectActionWorkerCycle } from "@/lib/action-engine";
 import { runAutomationWorkerCycle } from "@/lib/automation";
 import { getDb } from "@/lib/db";
 import { reconcileProjectDeletionStorage } from "@/lib/project-lifecycle";
+import { reconcileStaleProjectMcpActionDispatchReservations } from "@/lib/project-mcp-action-dispatch-service";
 import { reconcileStaleProjectAssetUploadReservations } from "@/lib/project-assets/quota";
 import { runProjectAssetParsingWorkerCycle } from "@/lib/project-assets/service";
 import {
@@ -89,6 +90,16 @@ async function main() {
       } catch {
         cycleFailures += 1;
         writeLog("error", "worker.upload_reservation_cleanup_failed", { errorCode: "UPLOAD_RESERVATION_CLEANUP_FAILED" });
+      }
+
+      try {
+        const result = await reconcileStaleProjectMcpActionDispatchReservations(db);
+        if (result > 0) {
+          writeLog("info", "worker.mcp_dispatch_reservation_reconciliation_completed", { reconciled: result });
+        }
+      } catch {
+        cycleFailures += 1;
+        writeLog("error", "worker.mcp_dispatch_reservation_reconciliation_failed", { errorCode: "MCP_DISPATCH_RECONCILIATION_FAILED" });
       }
 
       try {

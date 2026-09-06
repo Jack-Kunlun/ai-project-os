@@ -84,6 +84,7 @@ type RepositoryRow = {
   materialIndexStatus: string | null;
   materialIndexConfigVersion: number | null;
   materialIndexPolicyVersion: number | null;
+  materialLineageSafe: boolean;
   ragSnapshotId: string | null;
   ragReady: boolean;
 };
@@ -153,6 +154,7 @@ function statusRow(row: RepositoryRow) {
     row.codeIndexConfigVersion === row.configVersion &&
     row.codeIndexPolicyVersion === row.configEffectivePolicyVersion;
   const materialsSynced = materialsEnabled &&
+    row.materialLineageSafe &&
     row.materialGenerationStatus === "complete" &&
     row.materialGenerationConfigVersion === row.configVersion &&
     row.materialGenerationPolicyVersion === row.configEffectivePolicyVersion;
@@ -181,7 +183,7 @@ function statusRow(row: RepositoryRow) {
       indexed: materialsIndexed,
     }),
     ragSnapshotId: row.ragSnapshotId,
-    ragReady: row.ragReady === true,
+    ragReady: row.ragReady === true && row.materialLineageSafe,
   });
 }
 
@@ -244,6 +246,36 @@ export function createProjectRepositoryStatusService(options: {
                 AS "materialIndexConfigVersion",
               material_index_pointer."effectivePolicyVersion"
                 AS "materialIndexPolicyVersion",
+              CASE
+                WHEN material_generation."id" IS NULL THEN true
+                ELSE NOT EXISTS (
+                  SELECT 1
+                  FROM "RepositoryMaterialGenerationEntry" AS material_entry
+                  JOIN "GitHubSourceVersion" AS source_version
+                    ON source_version."projectId" = material_entry."projectId"
+                   AND source_version."projectRepositoryLinkId" =
+                       material_entry."projectRepositoryLinkId"
+                   AND source_version."id" =
+                       material_entry."githubSourceVersionId"
+                   AND source_version."projectSourceId" =
+                       material_entry."projectSourceId"
+                  JOIN "ProjectSource" AS material_source
+                    ON material_source."projectId" =
+                       source_version."projectId"
+                   AND material_source."id" =
+                       source_version."projectSourceId"
+                  WHERE material_entry."projectId" =
+                        material_generation."projectId"
+                    AND material_entry."projectRepositoryLinkId" =
+                        material_generation."projectRepositoryLinkId"
+                    AND material_entry."repositoryMaterialGenerationId" =
+                        material_generation."id"
+                    AND (
+                      material_source."kind"::text = 'mcp'
+                      OR material_source."retiredAt" IS NOT NULL
+                    )
+                )
+              END AS "materialLineageSafe",
               rag_pointer."repositoryRagSnapshotId"::text AS "ragSnapshotId",
               CASE
                 WHEN rag_pointer."repositoryRagSnapshotId" IS NULL THEN false

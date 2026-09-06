@@ -151,6 +151,7 @@ export function createSourceChunkService(options: {
               where: { projectId_id: { projectId, id: sourceId } },
               select: {
                 id: true,
+                kind: true,
                 originScope: true,
                 revisionKey: true,
                 contentHash: true,
@@ -169,6 +170,7 @@ export function createSourceChunkService(options: {
             }
             if (
               source.originScope !== "project" ||
+              source.kind === "mcp" ||
               source.retiredAt !== null ||
               !FINGERPRINT_PATTERN.test(source.contentHash) ||
               hashSourceContent(source.contentText) !== source.contentHash

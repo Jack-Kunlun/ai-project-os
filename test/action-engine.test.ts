@@ -14,7 +14,7 @@ function actionError(operation: () => unknown): string | null {
   catch (error) { return error instanceof ActionEngineError ? error.code : "unexpected"; }
 }
 
-test("动作能力注册表仅开放内置能力与受控 MCP 只读调用", () => {
+test("动作能力注册表保留内置能力并冻结旧 MCP 通用入口", () => {
   const catalog = projectActionCapabilityCatalog();
   assert.deepEqual(catalog.map((entry) => entry.id), [
     "project.repository.sync",
@@ -22,9 +22,10 @@ test("动作能力注册表仅开放内置能力与受控 MCP 只读调用", () 
     "project.memory-quality.scan",
     "project.mcp.read-tool.invoke",
   ]);
-  assert.deepEqual(catalog.map((entry) => entry.defaultPolicy), ["approvalRequired", "approvalRequired", "automatic", "approvalRequired"]);
+  assert.deepEqual(catalog.map((entry) => entry.defaultPolicy), ["approvalRequired", "approvalRequired", "automatic", "denied"]);
   assert.ok(catalog.every((entry) => entry.effect === "local" || entry.effect === "external-read"));
   assert.equal(catalog.find((entry) => entry.id === "project.mcp.read-tool.invoke")?.riskLevel, "high");
+  assert.match(catalog.find((entry) => entry.id === "project.mcp.read-tool.invoke")?.description ?? "", /旧版通用动作入口已冻结/u);
   assert.equal(new Set(catalog.map((entry) => entry.id)).size, catalog.length);
 });
 
@@ -97,5 +98,8 @@ test("Action Worker 与 API 权限入口保持失败关闭", async () => {
   assert.match(service, /ACTION_LEASE_EXPIRED/u);
   assert.match(service, /ACTION_IDEMPOTENCY_CONFLICT/u);
   assert.match(service, /tryCreateActionNotification/u);
+  assert.match(service, /action\."capability" <> 'project\.mcp\.read-tool\.invoke'/u);
+  assert.ok(service.indexOf("capability === LEGACY_MCP_ACTION_CAPABILITY") < service.indexOf("canonicalProjectActionInput(capability, action.input)"));
+  assert.doesNotMatch(service, /executeMcpActionSnapshot/u);
   assert.equal(service.match(/31010001/gu)?.length, 2);
 });

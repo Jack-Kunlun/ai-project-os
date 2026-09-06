@@ -10,6 +10,10 @@ import {
   projectAiProviderProjection,
   type ProjectAiPublicVisibility,
 } from "@/lib/project-ai-public-projection";
+import {
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceLineageWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 export const GOVERNANCE_DEFAULT_LIMIT = 20;
 export const GOVERNANCE_MAX_LIMIT = 50;
@@ -312,8 +316,8 @@ export async function getProjectGovernanceSummary(
     latestInvalidation,
     memory,
   ] = await Promise.all([
-    db.webAiCandidate.count({ where: { projectId, reviewStatus: "candidate" } }),
-    db.aiCandidateClaim.count({ where: { projectId, reviewStatus: "candidate" } }),
+    db.webAiCandidate.count({ where: { projectId, reviewStatus: "candidate", source: { is: nonLegacyMcpProjectSourceLineageWhere }, projectItem: { is: nonLegacyMcpProjectItemWhere } } }),
+    db.aiCandidateClaim.count({ where: { projectId, reviewStatus: "candidate", source: { is: nonLegacyMcpProjectSourceLineageWhere }, projectItem: { is: nonLegacyMcpProjectItemWhere } } }),
     db.backgroundJob.count({ where: { projectId, status: "unknown", reconciliationRequired: true } }),
     db.backgroundJob.count({ where: { projectId, status: "failed" } }),
     db.projectGitHubSyncRun.count({ where: { projectId, status: "partial" } }),
@@ -359,6 +363,7 @@ export async function listGovernanceReviews(
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > GOVERNANCE_MAX_LIMIT) throw new ProjectGovernanceError("GOVERNANCE_LIMIT_INVALID");
   const cursor = input.cursor === undefined ? null : decodeGovernanceReviewCursor(input.cursor);
   const projectItemFilter: Prisma.ProjectItemWhereInput = {
+    ...nonLegacyMcpProjectItemWhere,
     ...(input.itemType ? { type: input.itemType } : {}),
     ...(input.search ? {
       OR: [
@@ -368,10 +373,9 @@ export async function listGovernanceReviews(
       ],
     } : {}),
   };
-  const hasProjectItemFilter = input.itemType !== undefined || Boolean(input.search);
   const [webRows, verifiedRows] = await Promise.all([
     db.webAiCandidate.findMany({
-      where: { projectId, reviewStatus: "candidate", ...(hasProjectItemFilter ? { projectItem: projectItemFilter } : {}), ...reviewCursorFilter("web", cursor) },
+      where: { projectId, reviewStatus: "candidate", source: { is: nonLegacyMcpProjectSourceLineageWhere }, projectItem: { is: projectItemFilter }, ...reviewCursorFilter("web", cursor) },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: limit + 1,
       select: {
@@ -386,7 +390,7 @@ export async function listGovernanceReviews(
       },
     }),
     db.aiCandidateClaim.findMany({
-      where: { projectId, reviewStatus: "candidate", ...(hasProjectItemFilter ? { projectItem: projectItemFilter } : {}), ...reviewCursorFilter("verified", cursor) },
+      where: { projectId, reviewStatus: "candidate", source: { is: nonLegacyMcpProjectSourceLineageWhere }, projectItem: { is: projectItemFilter }, ...reviewCursorFilter("verified", cursor) },
       orderBy: [{ createdAt: "desc" }, { id: "asc" }],
       take: limit + 1,
       select: {

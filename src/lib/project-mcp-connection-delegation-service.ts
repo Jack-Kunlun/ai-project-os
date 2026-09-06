@@ -207,7 +207,7 @@ function mapDatabaseError(error: unknown): never {
 }
 
 async function databaseNow(db: PrismaClient | Prisma.TransactionClient): Promise<Date> {
-  const rows = await db.$queryRaw<Array<{ now: Date | string }>>(Prisma.sql`SELECT clock_timestamp() AS "now"`);
+  const rows = await db.$queryRaw<Array<{ now: Date | string }>>(Prisma.sql`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS "now"`);
   const value = rows[0]?.now;
   const now = value instanceof Date ? value : new Date(value ?? "");
   if (!Number.isFinite(now.getTime())) return fail("PROJECT_MCP_CONNECTION_DELEGATION_CONFLICT");

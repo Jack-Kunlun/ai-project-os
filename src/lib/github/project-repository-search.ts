@@ -396,10 +396,10 @@ async function readManualEligibility(
       AND corpus_generation."status" = 'complete'
       AND grant_row."status" = 'issued'
       AND grant_row."issuedAt" IS NOT NULL
-      AND grant_row."issuedAt" <= CURRENT_TIMESTAMP
+      AND grant_row."issuedAt" <= (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
       AND grant_row."revokedAt" IS NULL
       AND grant_row."expiresAt" IS NOT NULL
-      AND grant_row."expiresAt" > CURRENT_TIMESTAMP
+      AND grant_row."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
       AND grant_row."effectivePolicyVersion" =
           snapshot."effectivePolicyVersion"
       AND profile."id" = ${EMBEDDING_STORAGE_PROFILE_ID}::uuid
@@ -474,6 +474,8 @@ async function readManualDocuments(
       AND input_entry."entryKind" = 'project_corpus'
       AND chunk."originScope" = 'project'
       AND chunk."state" = 'active'
+      AND source."kind"::text <> 'mcp'
+      AND source."retiredAt" IS NULL
       AND chunk."contentText" IS NOT NULL
       AND chunk."contentHash" IS NOT NULL
       AND chunk."contentBytes" IS NOT NULL
@@ -562,6 +564,14 @@ async function readCodeDocuments(
      AND code_entry."id" = membership."codeGenerationEntryId"
      AND code_entry."repositoryFileRevisionId" =
          membership."repositoryFileRevisionId"
+    JOIN "ProjectSource" AS source
+      ON source."projectId" = chunk."projectId"
+     AND source."id" = chunk."projectSourceId"
+     AND source."originScope" = chunk."originScope"
+     AND source."projectRepositoryLinkId" =
+         chunk."projectRepositoryLinkId"
+     AND source."revisionKey" = chunk."sourceRevisionKey"
+     AND source."contentHash" = chunk."sourceContentHash"
     JOIN "ChunkEmbedding" AS embedding
       ON embedding."projectId" = input_entry."projectId"
      AND embedding."indexGenerationId" = input_entry."indexGenerationId"
@@ -572,6 +582,8 @@ async function readCodeDocuments(
     WHERE aggregate_entry."projectId" = ${projectId}::uuid
       AND aggregate_entry."projectRepositoryRagSnapshotId" =
           ${projectSnapshotId}::uuid
+      AND source."kind"::text <> 'mcp'
+      AND source."retiredAt" IS NULL
       AND repository_snapshot."codeIndexGenerationId" IS NOT NULL
       AND input_entry."entryKind" = 'repository_code'
       AND chunk."originScope" = 'repository_link'
@@ -581,7 +593,7 @@ async function readCodeDocuments(
       AND chunk."contentBytes" IS NOT NULL
     ORDER BY aggregate_entry."ordinal", input_entry."ordinal", input_entry."id"
     FOR SHARE OF aggregate_entry, repository_snapshot, membership,
-      input_entry, chunk, code_entry, embedding
+      input_entry, chunk, code_entry, source, embedding
   `));
 }
 
@@ -681,6 +693,8 @@ async function readMaterialDocuments(
       AND repository_snapshot."materialIndexGenerationId" IS NOT NULL
       AND chunk."originScope" = 'repository_link'
       AND source."originScope" = 'repository_link'
+      AND source."kind"::text <> 'mcp'
+      AND source."retiredAt" IS NULL
     ORDER BY aggregate_entry."ordinal", input_entry."ordinal", input_entry."id"
     FOR SHARE OF aggregate_entry, repository_snapshot, input_entry, chunk,
       material_entry, source_version, source, embedding
@@ -781,12 +795,31 @@ async function readVectorRanks(
      AND embedding."indexGenerationId" = input_entry."indexGenerationId"
      AND embedding."inputEntryId" = input_entry."id"
      AND embedding."sourceChunkId" = input_entry."sourceChunkId"
+    JOIN "RepositoryMaterialChunk" AS chunk
+      ON chunk."projectId" = input_entry."projectId"
+     AND chunk."projectRepositoryLinkId" =
+         input_entry."projectRepositoryLinkId"
+     AND chunk."repositoryMaterialGenerationId" =
+         input_entry."repositoryMaterialGenerationId"
+     AND chunk."materialGenerationEntryId" =
+         input_entry."materialGenerationEntryId"
+     AND chunk."id" = input_entry."sourceChunkId"
+    JOIN "ProjectSource" AS source
+      ON source."projectId" = chunk."projectId"
+     AND source."id" = chunk."projectSourceId"
+     AND source."originScope" = chunk."originScope"
+     AND source."projectRepositoryLinkId" =
+         chunk."projectRepositoryLinkId"
+     AND source."revisionKey" = chunk."sourceRevisionKey"
+     AND source."contentHash" = chunk."sourceContentHash"
     WHERE aggregate_entry."projectId" = ${input.projectId}::uuid
       AND aggregate_entry."projectRepositoryRagSnapshotId" =
           ${input.projectSnapshotId}::uuid
       AND repository_snapshot."materialIndexGenerationId" IS NOT NULL
       AND embedding."embeddingProfileId" =
           ${EMBEDDING_STORAGE_PROFILE_ID}::uuid
+      AND source."kind"::text <> 'mcp'
+      AND source."retiredAt" IS NULL
     ORDER BY "distance", aggregate_entry."ordinal", input_entry."ordinal",
       input_entry."id"
   `);

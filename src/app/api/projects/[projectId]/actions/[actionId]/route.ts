@@ -7,6 +7,7 @@ import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
+const noStore = { "cache-control": "no-store" } as const;
 
 export async function PATCH(request: Request, context: { params: Promise<{ projectId: string; actionId: string }> }) {
   try {
@@ -16,8 +17,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
     const projectId = idSchema.parse(params.projectId);
     await assertProjectActive(projectId);
     const action = await cancelProjectAction(projectId, idSchema.parse(params.actionId), await readJsonBody(request), user);
-    return NextResponse.json({ action });
+    return NextResponse.json({ action }, { headers: noStore });
   } catch (error) {
-    return handleApiError(error);
+    const response = handleApiError(error);
+    response.headers.set("cache-control", "no-store");
+    return response;
   }
 }

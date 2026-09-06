@@ -40,6 +40,11 @@ import {
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
 import type { EffectiveAiRoute } from "@/lib/effective-ai-route";
+import {
+  isActiveNonLegacyMcpProjectSource,
+  isLegacyMcpProjectSource,
+  nonLegacyMcpProjectSourceWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 type MemoryIndexDb = PrismaClient | Prisma.TransactionClient;
 
@@ -562,7 +567,7 @@ async function collectProjectMemoryInputsUnchecked(
 ): Promise<readonly IndexInput[]> {
   const [manualSources, materialPointers, codePointer] = await Promise.all([
     db.projectSource.findMany({
-      where: { projectId, originScope: "project", retiredAt: null },
+      where: { projectId, originScope: "project", ...nonLegacyMcpProjectSourceWhere },
       orderBy: { id: "asc" },
       select: {
         id: true,
@@ -585,7 +590,15 @@ async function collectProjectMemoryInputsUnchecked(
                 sourceVersion: {
                   select: {
                     normalizedPath: true,
-                    projectSource: { select: { id: true, externalRef: true, contentText: true } },
+                    projectSource: {
+                      select: {
+                        id: true,
+                        kind: true,
+                        externalRef: true,
+                        contentText: true,
+                        retiredAt: true,
+                      },
+                    },
                   },
                 },
               },
@@ -646,6 +659,7 @@ async function collectProjectMemoryInputsUnchecked(
   for (const pointer of materialPointers) {
     for (const entry of pointer.generation.entries) {
       const source = entry.sourceVersion.projectSource;
+      if (!isActiveNonLegacyMcpProjectSource(source)) continue;
       for (const chunk of chunkSourceText(source.contentText)) {
         records.push(Object.freeze({
           id: randomUUID(),
@@ -695,6 +709,26 @@ async function collectProjectMemoryInputsUnchecked(
   );
   ensureBudget(records);
   return Object.freeze(records);
+}
+
+async function assertMemoryInputLineageEligible(
+  projectId: string,
+  records: readonly Readonly<{ projectSourceId?: string | null }>[],
+  db: MemoryIndexDb,
+): Promise<void> {
+  const sourceIds = [...new Set(records.flatMap((record) =>
+    typeof record.projectSourceId === "string" ? [record.projectSourceId] : []))];
+  if (sourceIds.length === 0) return;
+
+  const eligible = await db.projectSource.findMany({
+    where: {
+      projectId,
+      id: { in: sourceIds },
+      ...nonLegacyMcpProjectSourceWhere,
+    },
+    select: { id: true },
+  });
+  if (eligible.length !== sourceIds.length) return fail("MEMORY_INDEX_INPUT_INVALID");
 }
 
 export async function collectProjectMemoryInputs(
@@ -773,7 +807,13 @@ async function buildMemoryIndexPlan(
           expectedEmbeddingRouteFenceFingerprint: true,
           embeddingWebAiGrantId: true,
           records: {
-            select: { id: true, inputFingerprint: true, embeddingFingerprint: true, embedding: true },
+            select: {
+              id: true,
+              inputFingerprint: true,
+              embeddingFingerprint: true,
+              embedding: true,
+              projectSource: { select: { kind: true, retiredAt: true } },
+            },
           },
         },
       },
@@ -799,6 +839,8 @@ async function buildMemoryIndexPlan(
     baseline.providerConnectionId === route.providerConnectionId &&
     baseline.modelId === route.modelId &&
     baseline.dimensions === dimensions &&
+    baselineRecords.every((record) =>
+      record.projectSource === null || !isLegacyMcpProjectSource(record.projectSource)) &&
     baselineRecords.every((record) => record.embedding.length === dimensions && record.embedding.every((value) => Number.isFinite(value))) &&
     baselineRecords.length === baselineRecords.filter((record) =>
       record.inputFingerprint !== null && record.embeddingFingerprint !== null,
@@ -939,12 +981,17 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
             expectedEmbeddingRouteFenceFingerprint: true,
             embeddingWebAiGrantId: true,
             completedAt: true,
+            records: {
+              where: { projectSource: { is: { kind: "mcp" } } },
+              take: 1,
+              select: { id: true },
+            },
             providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
           },
         },
       },
     }),
-    db.projectSource.count({ where: { projectId, originScope: "project", retiredAt: null } }),
+    db.projectSource.count({ where: { projectId, originScope: "project", ...nonLegacyMcpProjectSourceWhere } }),
     db.projectCodeSnapshotPointer.findUnique({ where: { projectId }, select: { projectCodeSnapshotId: true } }),
     db.repositoryMaterialGenerationPointer.count({ where: { projectId } }),
     resolveEffectiveAiRoute(projectId, "embedding", db).then((effective) => Object.freeze({
@@ -985,6 +1032,9 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
   const personalEvidenceLive = route?.source === "personal_delegation" && pointer !== null
     ? await isPersonalMemoryGenerationLive(pointer.generation.id, db)
     : true;
+  const safePointer = pointer !== null && pointer.generation.records.length === 0
+    ? pointer
+    : null;
   const readiness = resolveMemoryIndexReadiness({
     embeddingRoute: route === null ? null : {
       providerConnectionId: route.providerConnectionId,
@@ -998,26 +1048,26 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
       providerConfigurationVersion: route.providerConfigurationVersion,
       routeFenceFingerprint: route.routeFenceFingerprint,
     },
-    activeIndex: pointer === null ? null : {
-      providerConnectionId: pointer.generation.providerConnectionId,
-      modelId: pointer.generation.modelId,
-      dimensions: pointer.generation.dimensions,
-      inputManifestFingerprint: pointer.generation.inputManifestFingerprint,
-      routeSource: pointer.generation.expectedEmbeddingRouteSource,
-      routeId: pointer.generation.expectedEmbeddingRouteId,
-      routeVersion: pointer.generation.expectedEmbeddingRouteVersion,
-      routeUpdatedAt: pointer.generation.expectedEmbeddingRouteUpdatedAt,
-      providerConfigurationVersion: pointer.generation.expectedEmbeddingProviderConfigurationVersion,
-      routeFenceFingerprint: pointer.generation.expectedEmbeddingRouteFenceFingerprint,
-      embeddingWebAiGrantId: pointer.generation.embeddingWebAiGrantId,
-      legacy: pointer.generation.jobId === null,
-      status: pointer.generation.status,
+    activeIndex: safePointer === null ? null : {
+      providerConnectionId: safePointer.generation.providerConnectionId,
+      modelId: safePointer.generation.modelId,
+      dimensions: safePointer.generation.dimensions,
+      inputManifestFingerprint: safePointer.generation.inputManifestFingerprint,
+      routeSource: safePointer.generation.expectedEmbeddingRouteSource,
+      routeId: safePointer.generation.expectedEmbeddingRouteId,
+      routeVersion: safePointer.generation.expectedEmbeddingRouteVersion,
+      routeUpdatedAt: safePointer.generation.expectedEmbeddingRouteUpdatedAt,
+      providerConfigurationVersion: safePointer.generation.expectedEmbeddingProviderConfigurationVersion,
+      routeFenceFingerprint: safePointer.generation.expectedEmbeddingRouteFenceFingerprint,
+      embeddingWebAiGrantId: safePointer.generation.embeddingWebAiGrantId,
+      legacy: safePointer.generation.jobId === null,
+      status: safePointer.generation.status,
     },
     currentInputManifestFingerprint: currentManifest,
     personalEvidenceLive,
   });
-  const publicActiveIndex = pointer === null ? null : (() => {
-    const generation = pointer.generation;
+  const publicActiveIndex = safePointer === null ? null : (() => {
+    const generation = safePointer.generation;
     const generationProvider = projectAiProviderProjection(
       generation.providerConnection,
       visibility,
@@ -1051,7 +1101,7 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
       } : {}),
     };
     return {
-      publishedAt: pointer.publishedAt,
+      publishedAt: safePointer.publishedAt,
       generation: publicGeneration,
     };
   })();
@@ -1207,10 +1257,13 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
       jobId: granted.jobId,
       required: "edit",
       attempt: { jobId: granted.jobId, ...claim },
-    }, async (tx) => tx.memoryIndexGeneration.updateMany({
-      where: { projectId: input.projectId, id: generationId!, status: "staging" },
-      data: { status: "building" },
-    }));
+    }, async (tx) => {
+      await assertMemoryInputLineageEligible(input.projectId, plan.records, tx);
+      return tx.memoryIndexGeneration.updateMany({
+        where: { projectId: input.projectId, id: generationId!, status: "staging" },
+        data: { status: "building" },
+      });
+    });
     if (building.count !== 1) return fail("MEMORY_INDEX_INPUT_INVALID");
     heartbeat = startProjectJobHeartbeat({ jobId: granted.jobId, ...claim }, db);
 
@@ -1270,6 +1323,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
         attempt: { jobId: granted.jobId, ...claim },
       }, async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, ${MEMORY_INDEX_LOCK_NAMESPACE}))`;
+        await assertMemoryInputLineageEligible(input.projectId, data, tx);
         await tx.memoryRecord.createMany({ data });
         const nextRecordCount = persistedInputFingerprints.size + dataFingerprints.length;
         const progress = await tx.memoryIndexGeneration.updateMany({
@@ -1290,6 +1344,7 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
     for (let offset = 0; offset < generatedWorklist.length; offset += EMBEDDING_BATCH_SIZE) {
       const generatedBatch = generatedWorklist.slice(offset, offset + EMBEDDING_BATCH_SIZE);
       if (Date.now() >= plan.deadlineAtDate.getTime() - MEMORY_INDEX_DEADLINE_SAFETY_MS) return fail("MEMORY_INDEX_DEADLINE_EXCEEDED");
+      await assertMemoryInputLineageEligible(input.projectId, generatedBatch, db);
       await updateWebAiJobProgress(granted.jobId, claim, "embedding", persistedInputFingerprints.size, plan.records.length, db);
       const embeddingResult = await auditedProviderCall({
         jobId: granted.jobId,

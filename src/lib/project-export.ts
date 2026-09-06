@@ -8,6 +8,15 @@ import {
   projectAiProviderProjection,
   type ProjectAiPublicVisibility,
 } from "@/lib/project-ai-public-projection";
+import {
+  loadQuarantinedProjectLineage,
+  nonLegacyMcpMemoryGenerationWhere,
+  nonLegacyMcpProjectAssetSegmentWhere,
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceLineageWhere,
+  nonLegacyMcpProjectWorkItemWhere,
+  referencesQuarantinedProjectLineage,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 export const PROJECT_EXPORT_SCHEMA_VERSION = "ai-project-os.project-export.v3";
 export const PROJECT_EXPORT_MAX_BYTES = 20 * 1024 * 1024;
@@ -121,9 +130,9 @@ export async function exportProjectData(
       }
       const visibility = await loadProjectAiPublicVisibility(tx, input.projectId, input.requestedById);
 
-      const [sources, assets, items, repositories, routes, routeRevisions, lifecycle, jobs, answers, reports, agentRuns, actionResultImports, objectives, workItems, dependencies, planAudits] = await Promise.all([
+      const [sources, assets, items, repositories, routes, routeRevisions, lifecycle, jobs, answers, reports, agentRuns, actionResultImports, objectives, workItems, dependencies, planAudits, quarantinedLineage] = await Promise.all([
         tx.projectSource.findMany({
-          where: { projectId: input.projectId },
+          where: { projectId: input.projectId, ...nonLegacyMcpProjectSourceLineageWhere },
           orderBy: [{ ingestedAt: "asc" }, { id: "asc" }],
           select: {
             id: true,
@@ -168,6 +177,7 @@ export async function exportProjectData(
                 completedAt: true,
                 createdAt: true,
                 segments: {
+                  where: nonLegacyMcpProjectAssetSegmentWhere,
                   orderBy: { ordinal: "asc" },
                   select: {
                     id: true,
@@ -195,7 +205,7 @@ export async function exportProjectData(
           },
         }),
         tx.projectItem.findMany({
-          where: { projectId: input.projectId },
+          where: { projectId: input.projectId, ...nonLegacyMcpProjectItemWhere },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: {
             id: true,
@@ -348,7 +358,10 @@ export async function exportProjectData(
           },
         }),
         tx.ragAnswer.findMany({
-          where: { projectId: input.projectId },
+          where: {
+            projectId: input.projectId,
+            indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere },
+          },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: {
             id: true,
@@ -363,7 +376,10 @@ export async function exportProjectData(
           },
         }),
         tx.projectIntelligenceReport.findMany({
-          where: { projectId: input.projectId },
+          where: {
+            projectId: input.projectId,
+            indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere },
+          },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: {
             id: true,
@@ -377,7 +393,10 @@ export async function exportProjectData(
           },
         }),
         tx.projectAgentRun.findMany({
-          where: { projectId: input.projectId },
+          where: {
+            projectId: input.projectId,
+            indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere },
+          },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: {
             id: true,
@@ -396,7 +415,10 @@ export async function exportProjectData(
           },
         }),
         tx.projectActionResultImport.findMany({
-          where: { projectId: input.projectId },
+          where: {
+            projectId: input.projectId,
+            projectSource: { is: nonLegacyMcpProjectSourceLineageWhere },
+          },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: { id: true, actionId: true, projectSourceId: true, actionInputFingerprint: true, resultFingerprint: true, contentFingerprint: true, createdAt: true, importedBy: { select: { username: true } } },
         }),
@@ -406,12 +428,16 @@ export async function exportProjectData(
           select: { id: true, title: true, description: true, status: true, targetDate: true, createdAt: true, updatedAt: true, completedAt: true, createdBy: { select: { username: true } } },
         }),
         tx.projectWorkItem.findMany({
-          where: { projectId: input.projectId },
+          where: { projectId: input.projectId, ...nonLegacyMcpProjectWorkItemWhere },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: { id: true, objectiveId: true, title: true, description: true, status: true, priority: true, targetDate: true, origin: true, agentRunId: true, recommendationIndex: true, evidenceSnapshot: true, evidenceFingerprint: true, createdAt: true, updatedAt: true, completedAt: true, createdBy: { select: { username: true } } },
         }),
         tx.projectWorkItemDependency.findMany({
-          where: { projectId: input.projectId },
+          where: {
+            projectId: input.projectId,
+            workItem: { is: nonLegacyMcpProjectWorkItemWhere },
+            dependsOn: { is: nonLegacyMcpProjectWorkItemWhere },
+          },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: { id: true, workItemId: true, dependsOnId: true, createdAt: true, removedAt: true, createdBy: { select: { username: true } }, removedBy: { select: { username: true } } },
         }),
@@ -420,7 +446,13 @@ export async function exportProjectData(
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           select: { id: true, entityType: true, entityId: true, event: true, details: true, createdAt: true, actor: { select: { username: true } } },
         }),
+        loadQuarantinedProjectLineage(input.projectId, tx),
       ]);
+
+      const publicPlanAudits = planAudits.filter((audit) =>
+        !(audit.entityType === "workItem" && quarantinedLineage.workItemIds.has(audit.entityId))
+        && !(audit.entityType === "evidenceLink" && quarantinedLineage.evidenceLinkIds.has(audit.entityId))
+        && !referencesQuarantinedProjectLineage(audit.details, quarantinedLineage));
 
       const exportedAt = new Date();
       const document = {
@@ -604,7 +636,7 @@ export async function exportProjectData(
             completedAt: iso(workItem.completedAt),
           })),
           dependencies: dependencies.map((dependency) => ({ ...dependency, createdAt: dependency.createdAt.toISOString(), removedAt: iso(dependency.removedAt) })),
-          audits: planAudits.map((audit) => ({ ...audit, details: sanitizeProjectExportMetadata(audit.details), createdAt: audit.createdAt.toISOString() })),
+          audits: publicPlanAudits.map((audit) => ({ ...audit, details: sanitizeProjectExportMetadata(audit.details), createdAt: audit.createdAt.toISOString() })),
         },
         exclusions: [
           "系统凭据库中的 API Key、GitHub PAT 及加密密钥材料",

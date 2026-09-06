@@ -248,6 +248,8 @@ async function readBoundary(
     const sourceVersion = entry.sourceVersion;
     const source = sourceVersion.projectSource;
     if (
+      source.kind === "mcp" ||
+      source.retiredAt !== null ||
       source.originScope !== "repository_link" ||
       source.projectRepositoryLinkId !== projectRepositoryLinkId ||
       source.contentHash !== entry.sourceContentHash ||

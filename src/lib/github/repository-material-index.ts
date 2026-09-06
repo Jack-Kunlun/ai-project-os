@@ -821,6 +821,8 @@ async function readEligibleMaterialEmbeddingGrant(
       sourceVersion.sourceContentBytes !== entry.sourceContentBytes ||
       sourceVersion.capturedFullName !== generation.capturedFullName ||
       sourceVersion.observedHeadCommitSha !== generation.observedHeadCommitSha ||
+      source.kind === "mcp" ||
+      source.retiredAt !== null ||
       source.originScope !== "repository_link" ||
       source.projectRepositoryLinkId !== projectRepositoryLinkId ||
       source.contentHash !== entry.sourceContentHash ||
@@ -1135,6 +1137,93 @@ export function createRepositoryMaterialIndexService(options: {
           contentBytes: input.contentBytes,
         }))),
       });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async function revalidateClaimBeforeEgress(
+    claim: ClaimedMaterialIndex,
+  ): Promise<void> {
+    await options.db.$transaction(async (tx) => {
+      const index = await tx.repositoryMaterialIndexGeneration.findUnique({
+        where: {
+          projectId_id: {
+            projectId: claim.projectId,
+            id: claim.indexGenerationId,
+          },
+        },
+        select: {
+          status: true,
+          grantId: true,
+          repositoryMaterialGenerationId: true,
+          linkConfigVersion: true,
+          effectivePolicyVersion: true,
+          policyRevisionId: true,
+          processingBoundaryFingerprint: true,
+          expectedInputCount: true,
+        },
+      });
+      const attempt = await tx.repositoryMaterialIndexAttempt.findUnique({
+        where: { id: claim.attemptId },
+        select: { status: true, indexGenerationId: true, grantId: true },
+      });
+      if (
+        index === null ||
+        index.status !== "building" ||
+        index.grantId !== claim.grantId ||
+        index.repositoryMaterialGenerationId !==
+          claim.repositoryMaterialGenerationId ||
+        index.linkConfigVersion !== claim.linkConfigVersion ||
+        index.effectivePolicyVersion !== claim.linkEffectivePolicyVersion ||
+        index.policyRevisionId !== claim.policyRevisionId ||
+        index.processingBoundaryFingerprint !==
+          claim.processingBoundaryFingerprint ||
+        index.expectedInputCount !== claim.expectedInputCount ||
+        attempt === null ||
+        attempt.status !== "running" ||
+        attempt.indexGenerationId !== claim.indexGenerationId ||
+        attempt.grantId !== claim.grantId
+      ) {
+        return fail("REPOSITORY_MATERIAL_INDEX_RECONCILIATION_REQUIRED");
+      }
+
+      const eligible = await readEligibleMaterialEmbeddingGrant(
+        tx,
+        claim.projectId,
+        claim.projectRepositoryLinkId,
+        claim.grantId,
+        currentTime(),
+      );
+      const plan = buildIndexPlan(claim.projectId, eligible);
+      if (
+        eligible.boundary.repositoryMaterialGenerationId !==
+          claim.repositoryMaterialGenerationId ||
+        eligible.boundary.linkConfigVersion !== claim.linkConfigVersion ||
+        eligible.boundary.linkEffectivePolicyVersion !==
+          claim.linkEffectivePolicyVersion ||
+        eligible.grant.policyRevisionId !== claim.policyRevisionId ||
+        eligible.grant.aiEffectivePolicyVersion !==
+          claim.aiEffectivePolicyVersion ||
+        plan.processingBoundaryFingerprint !==
+          claim.processingBoundaryFingerprint ||
+        plan.inputs.length !== claim.inputs.length ||
+        plan.chunks.length !== claim.inputs.length ||
+        claim.inputs.some((input, ordinal) => {
+          const expectedInput = plan.inputs[ordinal];
+          const expectedChunk = plan.chunks[ordinal];
+          return expectedInput === undefined ||
+            expectedChunk === undefined ||
+            input.id !== expectedInput.id ||
+            input.sourceChunkId !== expectedInput.sourceChunkId ||
+            input.sourceChunkId !== expectedChunk.sourceChunkId ||
+            input.contentText !== expectedChunk.contentText ||
+            input.contentHash !== expectedInput.contentHash ||
+            input.contentHash !== expectedChunk.contentHash ||
+            input.contentBytes !== expectedInput.contentBytes ||
+            input.contentBytes !== expectedChunk.contentBytes;
+        })
+      ) {
+        return fail("REPOSITORY_MATERIAL_INDEX_GRANT_INELIGIBLE");
+      }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
@@ -1723,6 +1812,11 @@ export function createRepositoryMaterialIndexService(options: {
           batchIndex += 1
         ) {
           const batch = batches[batchIndex]!;
+          // A claim can outlive a grant, source retirement, pointer, or policy
+          // change. Revalidate the complete source lineage immediately before
+          // every outbound batch and never reuse the earlier claim as an
+          // authorization decision.
+          await revalidateClaimBeforeEgress(claim);
           const calledAt = currentTime();
           const plan = buildOpenAiEmbeddingsTransportPlan(
             getOpenAiEmbeddingProfile(),
@@ -1787,9 +1881,11 @@ export function createRepositoryMaterialIndexService(options: {
         }
       } catch (error) {
         const dispatched = sentAt !== null || requestCount > 0;
-        const safeCode = !dispatched && isAiRuntimeServiceError(error)
+        const safeCode = !dispatched && error instanceof RepositoryMaterialIndexError
           ? error.code
-          : "AI_PROVIDER_UNKNOWN";
+          : !dispatched && isAiRuntimeServiceError(error)
+            ? error.code
+            : "AI_PROVIDER_UNKNOWN";
         return closeIndexBuild(
           claim,
           dispatched ? "unknown" : "failed",

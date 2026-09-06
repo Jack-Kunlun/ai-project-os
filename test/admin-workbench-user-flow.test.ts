@@ -227,13 +227,13 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(userDocs, /项目概览/u);
   assert.match(userDocs, /项目六个一级入口/u);
   assert.match(userDocs, /只有当前工作区 Owner\/Admin 可以创建项目/u);
-  assert.match(userDocs, /个人 Git 连接由用户在个人中心管理/u);
-  assert.match(userDocs, /项目页支持连接所有者与项目 Owner 双确认后的一次性手动只读读取/u);
+  assert.match(userDocs, /个人 Git 与 MCP 连接都由当前用户在个人中心管理/u);
+  assert.match(userDocs, /项目页支持 Git 连接所有者与项目 Owner 双确认后的一次性手动只读读取/u);
   assert.match(userDocs, /一次性手动读取只读取双确认委托中明确的分支、目录和文本文件/u);
   assert.doesNotMatch(userDocs, /迁移期间不启动新的外部仓库访问|个人连接开放后/u);
   assert.match(adminDocs, /管理工作台/u);
-  assert.match(adminDocs, /管理员配置并验证后，可作为平台默认路由建议\/供项目选择/u);
-  assert.match(adminDocs, /planned.*后续能力/u);
+  assert.match(adminDocs, /管理员配置并验证平台托管模型，并为视觉、抽取、向量和生成能力维护默认路由/u);
+  assert.match(adminDocs, /普通用户不能配置个人模型，只能消费平台赠送额度；只有有效会员可以维护个人模型连接/u);
   assert.match(adminDocs, /`\/system\/memberships`[^。]*兼容跳转 `\/admin\/users\/memberships`/u);
   assert.match(adminDocs, /`\/system\/operations` 仅 initial super admin 可用[^。]*兼容跳转 `\/admin\/operations\/backups`/u);
   assert.match(adminDocs, /其他 system admin 按现有安全行为返回不可见页面/u);
@@ -243,8 +243,8 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(adminDocs, /管理员不代替用户持有或配置凭据/u);
   assert.match(readme, /旧版项目 Git 连接、首次关联和同步入口已冻结/u);
   assert.match(readme, /进入项目仓库页查看已有安全摘要/u);
-  assert.match(adminGuide, /管理员配置并验证后，可作为平台默认路由建议\/供项目选择/u);
-  assert.match(adminGuide, /planned.*后续能力/u);
+  assert.match(adminGuide, /管理员配置并验证平台托管模型，并为各项能力设置默认路由/u);
+  assert.match(adminGuide, /普通用户只能消费平台赠送额度，不能配置个人模型；有效会员才可维护自己的模型连接/u);
   assert.match(readme, /\/admin\/models/u);
   assert.match(readme, /\/admin\/connectors\/git/u);
   assert.match(readme, /\/admin\/connectors\/mcp/u);

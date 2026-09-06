@@ -268,7 +268,8 @@ test("connection owners retain a secret-free safety surface after project access
 
 test("terminal Git delegation routes narrowly bypass generic project edit admission", () => {
   assert.match(accessControl, /GIT_DELEGATION_TERMINAL_PATH_PATTERN/u);
-  assert.match(accessControl, /request\.method\.toUpperCase\(\) === "POST" && GIT_DELEGATION_TERMINAL_PATH_PATTERN\.test\(path\)/u);
+  assert.match(accessControl, /MCP_DELEGATION_TERMINAL_PATH_PATTERN/u);
+  assert.match(accessControl, /request\.method\.toUpperCase\(\) === "POST"[\s\S]*GIT_DELEGATION_TERMINAL_PATH_PATTERN\.test\(path\) \|\| MCP_DELEGATION_TERMINAL_PATH_PATTERN\.test\(path\)/u);
   for (const file of ["rejection/route.ts", "revocation/route.ts"]) {
     const route = readFileSync(`src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/${file}`, "utf8");
     assert.match(route, /requireApiSession/u);

@@ -26,6 +26,10 @@ import {
   updateWebAiJobProgress,
   type RuntimeRoute,
 } from "@/lib/web-ai-governance";
+import {
+  isLegacyMcpProjectSource,
+  nonLegacyMcpMemoryGenerationWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 const questionSchema = z.string().trim().min(2).max(2_000);
 const MAX_CONTEXT_CHARACTERS = 30_000;
@@ -277,6 +281,7 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
                 contentText: true,
                 contentHash: true,
                 embedding: true,
+                projectSource: { select: { kind: true } },
               },
             },
           },
@@ -294,6 +299,8 @@ export async function getActiveMemoryIndex(projectId: string, actor: WebAiActor,
     pointer.generation.jobId === null ||
     pointer.generation.status !== "complete" ||
     pointer.generation.records.length === 0 ||
+    pointer.generation.records.some((record) =>
+      record.projectSource !== null && isLegacyMcpProjectSource(record.projectSource)) ||
     route === null ||
     route.providerConnection.status !== "verified" ||
     route.providerConnectionId !== pointer.generation.providerConnectionId ||
@@ -597,7 +604,10 @@ export async function listRagAnswers(projectId: string, actor: WebAiActor, db: P
   const currentActor = await assertWebAiProjectAccess(actor, projectId, "view", db);
   const visibility = await loadProjectAiPublicVisibility(db, projectId, currentActor.id);
   const answers = await db.ragAnswer.findMany({
-    where: { projectId },
+    where: {
+      projectId,
+      indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere },
+    },
     orderBy: { createdAt: "desc" },
     take: 30,
     select: {

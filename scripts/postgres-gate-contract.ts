@@ -52,6 +52,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "project-mcp-grant-retention", file: "test/project-mcp-grant-retention-postgres.test.ts", database: "ai_project_os_project_mcp_grant_retention_test", gateEnv: "PROJECT_MCP_GRANT_RETENTION_POSTGRES_GATE", setup: "migrate" },
   { id: "project-mcp-tool-grant", file: "test/project-mcp-tool-grant-postgres.test.ts", database: "ai_project_os_project_mcp_tool_grant_test", gateEnv: "PROJECT_MCP_TOOL_GRANT_POSTGRES_GATE", setup: "migrate" },
   { id: "project-mcp-action", file: "test/project-mcp-action-postgres.test.ts", database: "ai_project_os_project_mcp_action_test", gateEnv: "PROJECT_MCP_ACTION_POSTGRES_GATE", setup: "migrate" },
+  { id: "project-mcp-action-dispatch", file: "test/project-mcp-action-dispatch-postgres.test.ts", database: "ai_project_os_project_mcp_action_dispatch_test", gateEnv: "PROJECT_MCP_ACTION_DISPATCH_POSTGRES_GATE", setup: "migrate" },
   { id: "project-plan", file: "test/project-plan-postgres.test.ts", database: "ai_project_os_project_plan_test", gateEnv: "PROJECT_PLAN_POSTGRES_GATE", setup: "migrate" },
   { id: "project-world", file: "test/project-world-postgres.test.ts", database: "ai_project_os_v5_gate_world", gateEnv: "PROJECT_WORLD_POSTGRES_GATE", setup: "migrate" },
   { id: "worker-health", file: "test/worker-health-postgres.test.ts", database: "ai_project_os_worker_health_test", gateEnv: "WORKER_HEALTH_POSTGRES_GATE", setup: "migrate" },

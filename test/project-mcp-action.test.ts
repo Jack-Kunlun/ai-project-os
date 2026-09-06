@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { mapApiError } from "../src/lib/api-errors";
+import { projectMcpActionApiUnavailable } from "../src/lib/project-mcp-action-api-gate";
 import { ProjectMcpActionServiceError } from "../src/lib/project-mcp-action-service";
 
-test("project MCP action routes expose an isolated no-store owner control plane", async () => {
+test("project MCP action service stays isolated while every public route fails closed", async () => {
   const [collection, detail, decision, cancel, service, migration] = await Promise.all([
     readFile("src/app/api/projects/[projectId]/mcp-actions/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/mcp-actions/[actionId]/route.ts", "utf8"),
@@ -13,13 +14,19 @@ test("project MCP action routes expose an isolated no-store owner control plane"
     readFile("src/lib/project-mcp-action-service.ts", "utf8"),
     readFile("prisma/migrations/20260904210000_add_project_mcp_action_approval_control_plane/migration.sql", "utf8"),
   ]);
-  assert.match(collection, /listProjectMcpActions/u);
-  assert.match(collection, /proposeProjectMcpAction/u);
-  assert.match(collection, /assertSameOrigin\(request\)/u);
-  assert.match(collection, /cache-control.*no-store/u);
-  assert.match(detail, /getProjectMcpAction/u);
-  assert.match(decision, /decideProjectMcpAction/u);
-  assert.match(cancel, /cancelProjectMcpAction/u);
+  for (const route of [collection, detail, decision, cancel]) {
+    assert.match(route, /projectMcpActionApiUnavailable/u);
+    assert.doesNotMatch(route, /project-mcp-action-service|requireApiSession|readJsonBody|assertSameOrigin/u);
+  }
+  const unavailable = projectMcpActionApiUnavailable();
+  assert.equal(unavailable.status, 404);
+  assert.equal(unavailable.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await unavailable.json(), {
+    error: {
+      code: "PROJECT_MCP_ACTION_API_UNAVAILABLE",
+      message: "项目 MCP 调用尚未开放",
+    },
+  });
   assert.match(service, /current direct project Owner|ownerAdmission|role: "owner"/u);
   assert.match(service, /TransactionIsolationLevel\.Serializable/u);
   assert.match(service, /32020002/u);
@@ -58,4 +65,21 @@ test("project MCP action errors have stable API mappings", () => {
   const mapped = mapApiError(new ProjectMcpActionServiceError("PROJECT_MCP_ACTION_STALE"));
   assert.equal(mapped.status, 409);
   assert.equal(mapped.body.error.code, "PROJECT_MCP_ACTION_STALE");
+});
+
+test("all six public MCP action handlers return the same fixed unavailable response", async () => {
+  const [collection, detail, decision, cancel, dispatch, projectTools] = await Promise.all([
+    import("../src/app/api/projects/[projectId]/mcp-actions/route"),
+    import("../src/app/api/projects/[projectId]/mcp-actions/[actionId]/route"),
+    import("../src/app/api/projects/[projectId]/mcp-actions/[actionId]/decision/route"),
+    import("../src/app/api/projects/[projectId]/mcp-actions/[actionId]/cancel/route"),
+    import("../src/app/api/projects/[projectId]/mcp-actions/[actionId]/dispatch/route"),
+    readFile("src/app/projects/[projectId]/tools/project-tools-client.tsx", "utf8"),
+  ]);
+  for (const response of [collection.GET(), collection.POST(), detail.GET(), decision.POST(), cancel.POST(), dispatch.POST()]) {
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal((await response.json() as { error: { code: string } }).error.code, "PROJECT_MCP_ACTION_API_UNAVAILABLE");
+  }
+  assert.doesNotMatch(projectTools, /mcp-actions/u);
 });

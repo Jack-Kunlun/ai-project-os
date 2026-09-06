@@ -2,7 +2,8 @@ import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { assertSameOrigin, requireApiSession } from "@/lib/auth";
+import { assertSameOrigin, requireApiSession, type SafeSessionUser } from "@/lib/auth";
+import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import {
   appendProjectItemRevision,
@@ -18,7 +19,10 @@ import {
   type ProjectItemReviewStatus,
 } from "@/lib/project-item";
 import { projectIdSchema, projectItemIdSchema, updateProjectItemSchema } from "@/lib/validation";
-import { assertProjectActive } from "@/lib/project-lifecycle";
+import {
+  isLegacyMcpProjectSource,
+  nonLegacyMcpProjectItemWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 export const dynamic = "force-dynamic";
 
@@ -87,15 +91,15 @@ function itemMutationError(code: ReturnType<typeof classifyItemMutationMiss>): A
 }
 
 async function getMutationMissError(
-  db: ReturnType<typeof getDb>,
+  db: Prisma.TransactionClient,
   projectId: string,
   itemId: string,
   expectedUpdatedAt: Date,
 ): Promise<ApiError> {
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
   const item = project
-    ? await db.projectItem.findUnique({
-        where: { projectId_id: { projectId, id: itemId } },
+    ? await db.projectItem.findFirst({
+        where: { projectId, id: itemId, ...nonLegacyMcpProjectItemWhere },
         select: itemRaceSelect,
       })
     : null;
@@ -113,30 +117,43 @@ async function getMutationMissError(
 export async function PATCH(request: Request, context: { params: Promise<{ projectId: string; itemId: string }> }) {
   let parsed: { projectId: string; itemId: string } | undefined;
   let expectedUpdatedAt: Date | undefined;
+  let user: SafeSessionUser | undefined;
 
   try {
     assertSameOrigin(request);
-    const user = await requireApiSession(request);
+    const sessionUser = await requireApiSession(request);
+    user = sessionUser;
     const routeParams = await parseParams(context.params);
     parsed = routeParams;
-    await assertProjectActive(routeParams.projectId);
     const input = updateProjectItemSchema.parse(await readJsonBody(request));
     const expectedVersion = new Date(input.expectedUpdatedAt);
     expectedUpdatedAt = expectedVersion;
     const db = getDb();
-    const item = await db.$transaction(async (tx) => {
+    const item = await withWebAiProjectAccessTransaction(db, {
+      actor: sessionUser,
+      projectId: routeParams.projectId,
+      required: "edit",
+    }, async (tx) => {
       const project = await tx.project.findUnique({ where: { id: routeParams.projectId }, select: { id: true } });
 
       if (!project) {
         throw projectNotFoundError();
       }
 
-      const existing = await tx.projectItem.findUnique({
-        where: { projectId_id: { projectId: routeParams.projectId, id: routeParams.itemId } },
+      const existing = await tx.projectItem.findFirst({
+        where: {
+          projectId: routeParams.projectId,
+          id: routeParams.itemId,
+          ...nonLegacyMcpProjectItemWhere,
+        },
         select: itemMutationSelect,
       });
 
       if (!existing) {
+        throw itemNotFoundError();
+      }
+
+      if (isLegacyMcpProjectSource(existing.source)) {
         throw itemNotFoundError();
       }
 
@@ -265,7 +282,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
       await appendProjectItemRevision(tx, {
         item: updated,
         action: revisionAction,
-        actorId: `local:${user.username}`,
+        actorId: `local:${sessionUser.username}`,
         evidences: revisionEvidence,
         createdAt: nextUpdatedAt,
       });
@@ -278,9 +295,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ proje
 
     return NextResponse.json({ item });
   } catch (error) {
-    if (isKnownError(error, "P2025") && parsed && expectedUpdatedAt) {
+    if (isKnownError(error, "P2025") && parsed && expectedUpdatedAt && user) {
       try {
-        return handleApiError(await getMutationMissError(getDb(), parsed.projectId, parsed.itemId, expectedUpdatedAt));
+        const mutation = parsed;
+        const expectedVersion = expectedUpdatedAt;
+        const accessActor = user;
+        const missError = await withWebAiProjectAccessTransaction(getDb(), {
+          actor: accessActor,
+          projectId: mutation.projectId,
+          required: "edit",
+        }, (tx) => getMutationMissError(tx, mutation.projectId, mutation.itemId, expectedVersion));
+        return handleApiError(missError);
       } catch (lookupError) {
         return handleApiError(lookupError);
       }

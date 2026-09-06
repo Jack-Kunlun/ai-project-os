@@ -372,7 +372,7 @@ export function createProjectSearchService(options: { db: PrismaClient }): {
             AND grant_row."issuedAt" IS NOT NULL
             AND grant_row."revokedAt" IS NULL
             AND grant_row."expiresAt" IS NOT NULL
-            AND grant_row."expiresAt" > CURRENT_TIMESTAMP
+            AND grant_row."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
             AND grant_row."effectivePolicyVersion" = snapshot."effectivePolicyVersion"
             AND profile."profileFingerprint" = ${EMBEDDING_STORAGE_PROFILE_FINGERPRINT}
           FOR SHARE OF snapshot, project_index, index_generation,
@@ -437,6 +437,8 @@ export function createProjectSearchService(options: { db: PrismaClient }): {
             AND input_entry."entryKind" = 'project_corpus'
             AND chunk."originScope" = 'project'
             AND chunk."state" = 'active'
+            AND source."kind"::text <> 'mcp'
+            AND source."retiredAt" IS NULL
             AND chunk."contentText" IS NOT NULL
             AND chunk."contentHash" IS NOT NULL
             AND chunk."contentBytes" IS NOT NULL

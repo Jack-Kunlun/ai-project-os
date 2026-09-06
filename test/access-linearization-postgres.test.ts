@@ -10,6 +10,7 @@ import {
   lockActorsAccess,
   lockProjectAccess,
   lockWorkspaceAccess,
+  withWebAiProjectAccessTransaction,
   WebAiAccessError,
   type WebAiActor,
 } from "../src/lib/access-linearization";
@@ -81,15 +82,27 @@ test(
         await releaseRevoke.promise;
       });
       await revokeLocked.promise;
-      const admissionAfterRevoke = db.$transaction(async (tx) => {
-        const admitted = await admitWebAiProjectAccess(tx, { actor: member, projectId: membershipProjectId, required: "edit" });
+      const blockedDescription = "must not persist after revocation";
+      const admissionAfterRevoke = withWebAiProjectAccessTransaction(db, {
+        actor: member,
+        projectId: membershipProjectId,
+        required: "edit",
+      }, async (tx, admitted) => {
         admissionCallbackCalled = true;
+        await tx.project.update({
+          where: { id: membershipProjectId },
+          data: { description: blockedDescription },
+        });
         return admitted;
       });
       releaseRevoke.resolve();
       await revoke;
       await assert.rejects(admissionAfterRevoke, accessCode("ACCESS_FORBIDDEN"));
       assert.equal(admissionCallbackCalled, false);
+      assert.notEqual(
+        (await db.project.findUniqueOrThrow({ where: { id: membershipProjectId }, select: { description: true } })).description,
+        blockedDescription,
+      );
 
       // Restore the grant, then let admission commit first.  The subsequent
       // membership removal may complete, while the next admission fails.

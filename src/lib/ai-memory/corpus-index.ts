@@ -342,7 +342,7 @@ async function readEligibleEmbeddingGrant(
       AND g."issuedAt" IS NOT NULL
       AND g."revokedAt" IS NULL
       AND g."expiresAt" IS NOT NULL
-      AND g."expiresAt" > CURRENT_TIMESTAMP
+      AND g."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
       AND g."effectivePolicyVersion" = r."revision"
       AND g."profileFingerprint" = opp."profileFingerprint"
       AND g."providerFingerprint" = opp."providerFingerprint"
@@ -390,6 +390,8 @@ async function readEligibleEmbeddingGrant(
      AND s."id" = gs."sourceId"
     WHERE gs."projectId" = ${projectId}::uuid
       AND gs."grantId" = ${grantId}::uuid
+      AND s."kind"::text <> 'mcp'
+      AND s."retiredAt" IS NULL
     ORDER BY gs."sourceId"
     FOR SHARE OF gs, s
   `);

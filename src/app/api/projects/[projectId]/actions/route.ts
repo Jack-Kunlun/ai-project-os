@@ -8,6 +8,7 @@ import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
+const noStore = { "cache-control": "no-store" } as const;
 const listSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
@@ -31,9 +32,11 @@ export async function GET(request: Request, context: { params: Promise<{ project
       search: query.search,
       capability: query.capability === "all" ? undefined : query.capability,
       status: query.status === "all" ? undefined : query.status,
-    }));
+    }), { headers: noStore });
   } catch (error) {
-    return handleApiError(error);
+    const response = handleApiError(error);
+    response.headers.set("cache-control", "no-store");
+    return response;
   }
 }
 
@@ -44,8 +47,10 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     const id = await projectId(context.params);
     await assertProjectActive(id);
     const action = await requestProjectAction(id, await readJsonBody(request), user);
-    return NextResponse.json({ action }, { status: 201 });
+    return NextResponse.json({ action }, { status: 201, headers: noStore });
   } catch (error) {
-    return handleApiError(error);
+    const response = handleApiError(error);
+    response.headers.set("cache-control", "no-store");
+    return response;
   }
 }

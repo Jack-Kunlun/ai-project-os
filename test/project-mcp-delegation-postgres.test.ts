@@ -6,6 +6,8 @@ import { cp, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { Client } from "pg";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
@@ -37,6 +39,12 @@ const fingerprintA = "a".repeat(64);
 const fingerprintB = "b".repeat(64);
 const fingerprintC = "c".repeat(64);
 const fingerprintD = "d".repeat(64);
+
+function timeZoneDatabase(timeZone: string): PrismaClient {
+  const connectionString = process.env.DATABASE_URL;
+  if (connectionString === undefined || connectionString === "") throw new Error("PROJECT_MCP_DELEGATION_TEST_DATABASE_URL_REQUIRED");
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString, options: `-c TimeZone=${timeZone}` }) });
+}
 
 async function migrationNamesFromDisk(): Promise<readonly string[]> {
   const entries = await readdir(join(repositoryRoot, "prisma", "migrations"), { withFileTypes: true });
@@ -1554,6 +1562,16 @@ test(
     context.after(() => client.end());
 
     const db = getDb();
+    const positiveTimeZoneDb = timeZoneDatabase("Asia/Shanghai");
+    const negativeTimeZoneDb = timeZoneDatabase("America/Los_Angeles");
+    context.after(async () => {
+      await positiveTimeZoneDb.$disconnect();
+      await negativeTimeZoneDb.$disconnect();
+    });
+    const positiveTimeZone = await positiveTimeZoneDb.$queryRaw<Array<{ timeZone: string }>>(Prisma.sql`SELECT current_setting('TimeZone') AS "timeZone"`);
+    const negativeTimeZone = await negativeTimeZoneDb.$queryRaw<Array<{ timeZone: string }>>(Prisma.sql`SELECT current_setting('TimeZone') AS "timeZone"`);
+    assert.equal(positiveTimeZone[0]?.timeZone, "Asia/Shanghai");
+    assert.equal(negativeTimeZone[0]?.timeZone, "America/Los_Angeles");
     const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
     const ownerId = id();
     const projectOwnerId = id();
@@ -1657,7 +1675,7 @@ test(
         "PROJECT_MCP_CONNECTION_DELEGATION_MEMBERSHIP_REQUIRED",
       );
 
-      const proposed = view(await proposeProjectMcpConnectionDelegation(projectId, proposalInput(ownerConnectionId), ownerActor, db));
+      const proposed = view(await proposeProjectMcpConnectionDelegation(projectId, proposalInput(ownerConnectionId), ownerActor, positiveTimeZoneDb));
       assert.equal(proposed.recordStatus, "draft");
       assert.equal(proposed.version, 1);
       assert.equal(proposed.connection?.id, ownerConnectionId);
@@ -1895,7 +1913,7 @@ test(
         await revokeProjectMembership(tx, projectId, ownerId, workspaceId, { actorId: projectOwnerId, reason: "MCP Package B due epoch revoked" });
       });
 
-      const dueOwnerListing = await listConnectionOwnerProjectMcpConnectionDelegations(ownerActor, db);
+      const dueOwnerListing = await listConnectionOwnerProjectMcpConnectionDelegations(ownerActor, negativeTimeZoneDb);
       const dueProjection = dueOwnerListing.find((delegation) => delegation.id === dueDraft.id);
       assert.ok(dueProjection);
       assert.equal(dueProjection.recordStatus, "draft");
@@ -1956,7 +1974,7 @@ test(
           dueDraft.id,
           { expectedVersion: 1, reason: "authorized expiry" },
           ownerActor,
-          db,
+          negativeTimeZoneDb,
         ),
         "PROJECT_MCP_CONNECTION_DELEGATION_EXPIRED",
       );

@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { type Prisma, type PrismaClient } from "@prisma/client";
 import { getDb } from "@/lib/db";
+import {
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceLineageWhere,
+  nonLegacyMcpProjectWorkItemWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 const ACTIVE_STATUSES = new Set(["planned", "inProgress", "blocked"]);
 
@@ -335,11 +340,23 @@ export async function getProjectOperationsSummaries(projectIds: readonly string[
   const where = { projectId: { in: [...projectIds] } };
   const [projects, workItems, dependencies, evidenceLinks, impacts, actions, projectMembers, workspaceMembers] = await Promise.all([
     db.project.findMany({ where: { id: { in: [...projectIds] } }, select: { id: true, workspaceId: true, membershipInheritanceMode: true } }),
-    db.projectWorkItem.findMany({ where, select: { projectId: true, id: true, title: true, status: true, targetDate: true, assigneeId: true, acceptanceCriteria: true, origin: true } }),
-    db.projectWorkItemDependency.findMany({ where: { ...where, removedAt: null }, select: { projectId: true, workItemId: true, dependsOnId: true } }),
-    db.projectWorkItemEvidenceLink.findMany({ where: { ...where, removedAt: null }, select: { projectId: true, ...operationsEvidenceSelect } }),
+    db.projectWorkItem.findMany({ where: { ...where, ...nonLegacyMcpProjectWorkItemWhere }, select: { projectId: true, id: true, title: true, status: true, targetDate: true, assigneeId: true, acceptanceCriteria: true, origin: true } }),
+    db.projectWorkItemDependency.findMany({ where: { ...where, removedAt: null, workItem: { is: nonLegacyMcpProjectWorkItemWhere }, dependsOn: { is: nonLegacyMcpProjectWorkItemWhere } }, select: { projectId: true, workItemId: true, dependsOnId: true } }),
+    db.projectWorkItemEvidenceLink.findMany({
+      where: {
+        ...where,
+        removedAt: null,
+        workItem: { is: nonLegacyMcpProjectWorkItemWhere },
+        OR: [
+          { repositorySyncRunId: { not: null } },
+          { projectSource: { is: nonLegacyMcpProjectSourceLineageWhere } },
+          { projectItem: { is: nonLegacyMcpProjectItemWhere } },
+        ],
+      },
+      select: { projectId: true, ...operationsEvidenceSelect },
+    }),
     db.projectPlanImpactSuggestion.findMany({ where, select: { projectId: true, status: true } }),
-    db.projectAction.findMany({ where: { ...where, status: "waitingApproval" }, select: { projectId: true, status: true } }),
+    db.projectAction.findMany({ where: { ...where, status: "waitingApproval", capability: { not: "project.mcp.read-tool.invoke" } }, select: { projectId: true, status: true } }),
     db.projectMembership.findMany({ where: { ...where, accessState: "confirmed", role: { in: ["owner", "editor"] }, user: { disabledAt: null } }, select: { projectId: true, userId: true } }),
     db.workspaceMembership.findMany({
       where: { accessState: "confirmed", role: { in: ["owner", "admin"] }, user: { disabledAt: null }, workspace: { projects: { some: { id: { in: [...projectIds] } } } } },

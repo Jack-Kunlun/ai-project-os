@@ -63,7 +63,7 @@ const sourceCapturedAtSchema = z.preprocess(
 
 const projectItemTypeSchema = z.enum(["decision", "progress", "issue", "risk"]);
 const projectItemReviewStatusSchema = z.enum(["candidate", "confirmed", "dismissed", "superseded"]);
-const projectSourceKindSchema = z.enum(["document", "screenshot", "github", "git", "web", "manual", "mcp"]);
+const projectSourceKindSchema = z.enum(["document", "screenshot", "github", "git", "web", "manual"]);
 const itemTitleSchema = z.string().trim().min(1, "title is required").max(160, "title is too long");
 const itemContentSchema = z.string().trim().min(1, "content is required").max(20_000, "content is too long");
 const itemSourceExcerptSchema = z

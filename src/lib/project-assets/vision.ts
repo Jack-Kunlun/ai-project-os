@@ -3,6 +3,7 @@ import { type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { invokeVisionCompletion, ProviderTransportError } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
+import { nonLegacyMcpProjectAssetSegmentWhere } from "@/lib/legacy-mcp-source-quarantine";
 import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
@@ -97,7 +98,7 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
         versions: {
           orderBy: { version: "desc" },
           take: 1,
-          include: { segments: { orderBy: { ordinal: "asc" } } },
+          include: { segments: { where: nonLegacyMcpProjectAssetSegmentWhere, orderBy: { ordinal: "asc" } } },
         },
       },
     }),

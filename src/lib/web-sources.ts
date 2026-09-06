@@ -27,6 +27,7 @@ export type WebSourceErrorCode =
   | "WEB_SOURCE_HOST_UNRESOLVED"
   | "WEB_SOURCE_REDIRECT_REJECTED"
   | "WEB_SOURCE_FETCH_FAILED"
+  | "WEB_SOURCE_REQUEST_BOUNDARY_REJECTED"
   | "WEB_SOURCE_HTTP_STATUS"
   | "WEB_SOURCE_TOO_LARGE"
   | "WEB_SOURCE_TYPE_UNSUPPORTED"
@@ -161,10 +162,19 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
   headers?: Readonly<Record<string, string>>;
   body?: string;
   maximumResponseBytes?: number;
+  onRequestBodyWriteStart?: () => void | boolean | Promise<void | boolean>;
 }> = {}): Promise<RawResponse> {
   const maximumResponseBytes = options.maximumResponseBytes ?? MAX_RESPONSE_BYTES;
   if (!Number.isInteger(maximumResponseBytes) || maximumResponseBytes < 1 || maximumResponseBytes > MAX_RESPONSE_BYTES) {
     return fail("WEB_SOURCE_INVALID_INPUT");
+  }
+  // Run the caller's irreversible-dispatch callback only after DNS/SSRF and
+  // fingerprint checks have completed, but before constructing the request.
+  // A slow or rejected callback must not leave an AbortSignal/request alive
+  // while the database reservation is being decided.
+  if (options.onRequestBodyWriteStart !== undefined) {
+    const boundaryAccepted = await options.onRequestBodyWriteStart();
+    if (boundaryAccepted === false) return fail("WEB_SOURCE_REQUEST_BOUNDARY_REJECTED");
   }
   return new Promise<RawResponse>((resolve, reject) => {
     const lookupPinned: LookupFunction = (_hostname, options, callback) => {
@@ -194,6 +204,9 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
       response.on("error", reject);
     });
     request.on("error", reject);
+    // The callback above completed before request construction; hand the body
+    // to Node immediately so no later asynchronous work can create a second
+    // dispatch opportunity. Legacy callers leave the callback unset.
     request.end(options.body);
   }).catch((error: unknown) => {
     if (error instanceof WebSourceError) throw error;
@@ -209,6 +222,7 @@ export async function securePinnedHttpRequest(input: Readonly<{
   headers?: Readonly<Record<string, string>>;
   body?: string;
   maximumResponseBytes?: number;
+  onRequestBodyWriteStart?: () => void | boolean | Promise<void | boolean>;
 }>): Promise<Readonly<{
   status: number;
   headers: Readonly<Record<string, string>>;
@@ -227,6 +241,7 @@ export async function securePinnedHttpRequest(input: Readonly<{
     headers: input.headers,
     body: input.body,
     maximumResponseBytes: input.maximumResponseBytes,
+    onRequestBodyWriteStart: input.onRequestBodyWriteStart,
   });
   return Object.freeze({ ...response, finalUrl: canonical, fingerprint: endpoint.fingerprint });
 }

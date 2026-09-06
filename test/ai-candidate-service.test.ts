@@ -418,7 +418,10 @@ test("candidate review reports stale visible item state before any mutation", as
         projectItem: {
           reviewStatus: "candidate",
           updatedAt: new Date("2026-08-28T10:00:01.000Z"),
+          source: { kind: "manual", retiredAt: null },
+          evidences: [],
         },
+        source: { kind: "manual", retiredAt: null },
       }),
     },
     projectItem: {

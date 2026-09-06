@@ -52,12 +52,12 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
       INSERT INTO "AppUser"
         ("id", "username", "passwordHash", "passwordSalt", "passwordVersion", "role", "updatedAt")
       VALUES
-        ('00000000-0000-4000-8000-000000000010', 'postgres_gate_admin', repeat('a', 43), repeat('b', 22), 1, 'admin', CURRENT_TIMESTAMP)
+        ('00000000-0000-4000-8000-000000000010', 'postgres_gate_admin', repeat('a', 43), repeat('b', 22), 1, 'admin', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
       ON CONFLICT ("username") DO NOTHING
     `);
     await client.query(`
       UPDATE "Workspace"
-      SET "createdById" = '00000000-0000-4000-8000-000000000010', "updatedAt" = CURRENT_TIMESTAMP
+      SET "createdById" = '00000000-0000-4000-8000-000000000010', "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
       WHERE "id" = '00000000-0000-4000-8000-000000000001'
     `);
     await client.query(`
@@ -65,7 +65,7 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
         INSERT INTO "WorkspaceMembership"
           ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
         VALUES
-          ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', 'owner', 'confirmed', CURRENT_TIMESTAMP)
+          ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', 'owner', 'confirmed', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
         ON CONFLICT ("id") DO NOTHING
         RETURNING "id", "workspaceId", "userId", "role", "accessState", "createdAt", "updatedAt"
       )

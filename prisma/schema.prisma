@@ -320,6 +320,29 @@ enum ProjectMcpActionRejectReason {
   policyDenied @map("policy_denied")
 }
 
+enum ProjectMcpActionDispatchAttemptStatus {
+  reserved
+  succeeded
+  failed
+  unknown
+  expired
+  invalidated
+}
+
+enum ProjectMcpActionRuntimeLedgerEvent {
+  reserved
+  succeeded
+  failed
+  unknown
+  expired
+  invalidated
+}
+
+enum ProjectMcpActionRuntimeActorKind {
+  owner
+  systemRecovery @map("system_recovery")
+}
+
 enum ProjectMcpConnectionDelegationStatus {
   draft
   ownerConfirmed @map("owner_confirmed")
@@ -1296,6 +1319,7 @@ model Project {
   actionResultImports                  ProjectActionResultImport[]
   mcpToolGrants                        ProjectMcpToolGrant[]
   mcpActions                           ProjectMcpAction[]
+  mcpActionDispatchResults             ProjectMcpActionDispatchResult[]
   memoryIndexGenerations               MemoryIndexGeneration[]
   memoryIndexPointer                   MemoryIndexPointer?
   memoryRecords                        MemoryRecord[]
@@ -4830,12 +4854,112 @@ model ProjectMcpAction {
   creationTransactionId           BigInt                   @default(dbgenerated("txid_current()")) @db.BigInt
   transitionTransactionId         BigInt                   @default(dbgenerated("txid_current()")) @db.BigInt
   project                         Project                  @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  dispatchResult                  ProjectMcpActionDispatchResult?
 
   @@unique([projectId, id])
   @@unique([projectId, clientRequestId])
   @@index([projectId, status, createdAt])
   @@index([projectId, createdAt])
   @@index([grantId, status])
+}
+
+// A single reservation is the linearization point for a single-use dispatch.
+// This table intentionally has no foreign keys: scalar evidence survives
+// project/action deletion and never stores endpoint, arguments, credentials,
+// or response payloads.
+model ProjectMcpActionDispatchAttempt {
+  id                    String                                  @id @default(uuid()) @db.Uuid
+  projectId             String                                  @db.Uuid
+  actionId              String                                  @db.Uuid
+  actorKind             ProjectMcpActionRuntimeActorKind         @default(owner)
+  actorId               String                                  @db.Uuid
+  actorProjectMembershipId String                               @db.Uuid
+  actorMembershipCreatedAt DateTime
+  rpcRequestId          String                                  @db.Uuid
+  reservationTokenHash  String                                  @db.Char(64)
+  status                ProjectMcpActionDispatchAttemptStatus   @default(reserved)
+  actionFingerprint     String                                  @db.Char(64)
+  definitionFingerprint String                                  @db.Char(64)
+  networkFingerprint    String                                  @db.Char(64)
+  credentialFingerprint String                                  @db.Char(64)
+  connectionConfigurationRevision Int
+  reservationTransactionId BigInt
+  reservationExpiresAt  DateTime
+  reservedAt            DateTime
+  boundaryReachedAt     DateTime?
+  completedAt           DateTime?
+  safeErrorCode         String?                                 @db.VarChar(64)
+  httpStatus            Int?
+  resultFingerprint     String?                                 @db.Char(64)
+  resultBytes           Int?
+  resultNodes           Int?
+  resultDepth           Int?
+  createdAt             DateTime                                @default(now())
+
+  @@unique([actionId])
+  @@unique([projectId, actionId])
+  @@unique([rpcRequestId])
+  @@index([status, reservationExpiresAt])
+  @@index([projectId, createdAt])
+}
+
+// Runtime transition evidence is append-only and deliberately has no foreign
+// keys, so project deletion retains status/fingerprints/counts/timestamps and
+// safe error codes without retaining endpoint, bearer, arguments, or body.
+model ProjectMcpActionRuntimeLedger {
+  id                    String                              @id @default(uuid()) @db.Uuid
+  projectId             String                              @db.Uuid
+  actionId              String                              @db.Uuid
+  attemptId             String?                             @db.Uuid
+  rpcRequestId          String?                             @db.Uuid
+  actorKind             ProjectMcpActionRuntimeActorKind     @default(owner)
+  actorId               String                              @db.Uuid
+  actorProjectMembershipId String                           @db.Uuid
+  actorMembershipCreatedAt DateTime
+  event                 ProjectMcpActionRuntimeLedgerEvent
+  statusBefore          ProjectMcpActionStatus?
+  statusAfter           ProjectMcpActionStatus
+  stateVersion          Int
+  actionFingerprint     String                              @db.Char(64)
+  definitionFingerprint String                              @db.Char(64)
+  networkFingerprint    String                              @db.Char(64)
+  credentialFingerprint String                              @db.Char(64)
+  connectionConfigurationRevision Int
+  safeErrorCode         String?                             @db.VarChar(64)
+  resultFingerprint     String?                             @db.Char(64)
+  resultBytes           Int?
+  resultNodes           Int?
+  resultDepth           Int?
+  transactionId         BigInt
+  transitionAt          DateTime
+  createdAt             DateTime                            @default(now())
+
+  @@unique([actionId, stateVersion])
+  @@index([projectId, createdAt])
+  @@index([actionId, createdAt])
+  @@index([transactionId, createdAt])
+}
+
+// Sanitized, bounded result content is owned by the action and is removed by
+// the existing ProjectMcpAction/Project cascade. The durable attempt/runtime
+// evidence above never stores raw HTTP bodies or authorization material.
+model ProjectMcpActionDispatchResult {
+  id                  String          @id @default(uuid()) @db.Uuid
+  projectId           String          @db.Uuid
+  actionId            String          @unique @db.Uuid
+  sanitizedPayload    Json            @db.JsonB
+  resultFingerprint   String          @db.Char(64)
+  resultBytes         Int
+  resultNodes         Int
+  resultDepth         Int
+  omittedContentCount Int
+  createdAt           DateTime        @default(now())
+  project             Project         @relation(fields: [projectId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  action              ProjectMcpAction @relation(fields: [projectId, actionId], references: [projectId, id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([projectId, id])
+  @@unique([projectId, actionId])
+  @@index([projectId, createdAt])
 }
 
 model ProjectMcpActionDecision {

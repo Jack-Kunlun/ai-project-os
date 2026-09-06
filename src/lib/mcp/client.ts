@@ -7,6 +7,7 @@ import {
   encodeMcpNameHeader,
   mcpArgumentHeaders,
   normalizeMcpToolDefinition,
+  sanitizeMcpToolResult,
   stableMcpJson,
   type JsonValue,
   type NormalizedMcpTool,
@@ -34,7 +35,20 @@ export type McpToolCallResult = Readonly<{
   structuredContent: JsonValue | null;
   omittedContentCount: number;
   resultFingerprint: string;
+  resultBytes?: number;
+  resultNodes?: number;
+  resultDepth?: number;
 }>;
+
+export type McpDetailedToolCallResult = Readonly<{
+  outcome: "succeeded" | "failed" | "unknown";
+  requestId: string;
+  result?: McpToolCallResult;
+  safeErrorCode?: string;
+  httpStatus: number | null;
+}>;
+
+export type McpDispatchBoundary = () => void | boolean | Promise<void | boolean>;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -75,6 +89,32 @@ function parseSse(body: string, expectedId: string): unknown {
     if (isObject(value) && value.id === expectedId) matched = value;
   }
   return matched ?? failMcp("MCP_RESPONSE_INVALID");
+}
+
+function parseDetailedRpcResponse(body: Buffer, contentType: string, expectedId: string): RpcResponse {
+  const text = body.toString("utf8");
+  if (/^application\/(?:[A-Za-z0-9.+-]*\+)?json(?:\s*;|$)/iu.test(contentType)) {
+    return parseRpcResponse(body, contentType, expectedId);
+  }
+  if (!/^text\/event-stream(?:\s*;|$)/iu.test(contentType)) return failMcp("MCP_RESPONSE_INVALID");
+  let matched: RpcResponse | null = null;
+  let dataSeen = false;
+  for (const block of text.split(/\r?\n\r?\n/u)) {
+    const data = block.split(/\r?\n/u)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).replace(/^ /u, ""))
+      .join("\n");
+    if (data.length === 0) continue;
+    dataSeen = true;
+    const value = parseJson(data);
+    if (!isObject(value) || value.jsonrpc !== "2.0" || value.id !== expectedId || (value.result === undefined) === (value.error === undefined)) {
+      return failMcp("MCP_RESPONSE_INVALID");
+    }
+    if (matched !== null) return failMcp("MCP_RESPONSE_INVALID");
+    matched = value as RpcResponse;
+  }
+  if (!dataSeen || matched === null) return failMcp("MCP_RESPONSE_INVALID");
+  return matched;
 }
 
 function parseRpcResponse(body: Buffer, contentType: string, expectedId: string): RpcResponse {
@@ -221,3 +261,128 @@ export async function callMcpTool(input: Readonly<{
   const resultFingerprint = createHash("sha256").update(JSON.stringify(normalized), "utf8").digest("hex");
   return Object.freeze({ ...normalized, resultFingerprint });
 }
+
+function safeDetailedErrorCode(error: unknown): string {
+  if (error instanceof McpCapabilityError) return error.code;
+  if (error instanceof WebSourceError) return error.code;
+  return "MCP_TRANSPORT_FAILED";
+}
+
+function detailedTransportOutcome(error: unknown, requestId: string, boundaryReached: boolean, httpStatus: number | null = null): McpDetailedToolCallResult {
+  const code = safeDetailedErrorCode(error);
+  if (code === "WEB_SOURCE_REQUEST_BOUNDARY_REJECTED") {
+    return Object.freeze({ outcome: "unknown", requestId, safeErrorCode: "MCP_DISPATCH_RESERVATION_STALE", httpStatus });
+  }
+  if (boundaryReached) {
+    return Object.freeze({ outcome: "unknown", requestId, safeErrorCode: code, httpStatus });
+  }
+  return Object.freeze({ outcome: "failed", requestId, safeErrorCode: code, httpStatus });
+}
+
+/**
+ * One-shot detailed client for a single-use MCP dispatch. It deliberately
+ * does not accept redirects, retries, or an internally generated request id.
+ * A request-scoped JSON or SSE response must contain exactly the persisted id;
+ * legacy standalone SSE transport is not used.
+ */
+export async function callMcpToolDetailed(input: Readonly<{
+  endpointUrl: string;
+  allowPrivateNetwork: boolean;
+  expectedAddressFingerprint: string;
+  bearerToken: string | null;
+  rpcRequestId: string;
+  toolName: string;
+  inputSchema: unknown;
+  outputSchema?: unknown;
+  arguments: unknown;
+  onDispatchBoundary: McpDispatchBoundary;
+}>): Promise<McpDetailedToolCallResult> {
+  const requestId = input.rpcRequestId;
+  let boundaryReached = false;
+  try {
+    // Canonicalization and header binding are deterministic pre-boundary
+    // checks. A rejected input therefore cannot become an unknown attempt.
+    const argumentsValue = canonicalMcpToolArguments(input.inputSchema, input.arguments);
+    const params = { name: input.toolName, arguments: argumentsValue, _meta: rpcMetadata() };
+    const body = JSON.stringify({ jsonrpc: "2.0", id: requestId, method: "tools/call", params });
+    const headers: Record<string, string> = {
+      accept: "application/json, text/event-stream",
+      "accept-encoding": "identity",
+      "content-type": "application/json",
+      "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+      "mcp-method": "tools/call",
+      "user-agent": "AI-Project-OS-MCP/3.2",
+      "mcp-name": encodeMcpNameHeader(input.toolName),
+      ...mcpArgumentHeaders(input.inputSchema, argumentsValue),
+    };
+    if (input.bearerToken !== null) headers.authorization = `Bearer ${input.bearerToken}`;
+    const response = await securePinnedHttpRequest({
+      url: input.endpointUrl,
+      allowPrivateNetwork: input.allowPrivateNetwork,
+      expectedFingerprint: input.expectedAddressFingerprint,
+      method: "POST",
+      headers,
+      body,
+      maximumResponseBytes: MAX_RESPONSE_BYTES,
+      onRequestBodyWriteStart: async () => {
+        const accepted = await input.onDispatchBoundary();
+        if (accepted === false) return false;
+        boundaryReached = true;
+        return true;
+      },
+    });
+    const contentType = response.headers["content-type"] ?? "";
+    let rpc: RpcResponse;
+    try { rpc = parseDetailedRpcResponse(response.body, contentType, requestId); }
+    catch (error) { return detailedTransportOutcome(error, requestId, boundaryReached, response.status); }
+    if (response.status < 200 || response.status >= 300) {
+      if (rpc.error !== undefined) {
+        return Object.freeze({ outcome: "failed", requestId, safeErrorCode: "MCP_TOOL_CALL_FAILED", httpStatus: response.status });
+      }
+      return detailedTransportOutcome(new McpCapabilityError("MCP_TRANSPORT_FAILED"), requestId, true, response.status);
+    }
+    if (rpc.error !== undefined) {
+      return Object.freeze({ outcome: "failed", requestId, safeErrorCode: "MCP_TOOL_CALL_FAILED", httpStatus: response.status });
+    }
+    const value = rpc.result;
+    if (!isObject(value)) return detailedTransportOutcome(new McpCapabilityError("MCP_RESPONSE_INVALID"), requestId, true, response.status);
+    if (value.resultType === "input_required") return Object.freeze({ outcome: "failed", requestId, safeErrorCode: "MCP_TOOL_INPUT_REQUIRED_UNSUPPORTED", httpStatus: response.status });
+    if (value.resultType !== "complete" || value.isError === true || !Array.isArray(value.content)) {
+      return Object.freeze({ outcome: "failed", requestId, safeErrorCode: "MCP_TOOL_CALL_FAILED", httpStatus: response.status });
+    }
+    const textParts: string[] = [];
+    let omittedContentCount = 0;
+    for (const item of value.content) {
+      if (isObject(item) && item.type === "text" && typeof item.text === "string") textParts.push(item.text);
+      else omittedContentCount += 1;
+    }
+    const sanitized = sanitizeMcpToolResult({
+      text: textParts.length === 0 ? null : textParts.join("\n\n"),
+      structuredContent: value.structuredContent === undefined ? null : value.structuredContent,
+      omittedContentCount,
+      outputSchema: input.outputSchema,
+    });
+    return Object.freeze({
+      outcome: "succeeded",
+      requestId,
+      httpStatus: response.status,
+      result: Object.freeze({
+        text: sanitized.payload && isObject(sanitized.payload) && typeof sanitized.payload.text === "string" ? sanitized.payload.text : null,
+        structuredContent: sanitized.payload && isObject(sanitized.payload) && sanitized.payload.structuredContent !== null ? sanitized.payload.structuredContent as JsonValue : null,
+        omittedContentCount: sanitized.omittedContentCount,
+        resultFingerprint: sanitized.resultFingerprint,
+        resultBytes: sanitized.resultBytes,
+        resultNodes: sanitized.resultNodes,
+        resultDepth: sanitized.resultDepth,
+      }),
+    });
+  } catch (error) {
+    if (error instanceof McpCapabilityError && error.code === "MCP_TOOL_OUTPUT_INVALID") {
+      return Object.freeze({ outcome: "failed", requestId, safeErrorCode: error.code, httpStatus: null });
+    }
+    return detailedTransportOutcome(error, requestId, boundaryReached, null);
+  }
+}
+
+// Explicit alias used by dispatch callers and contract tests.
+export const callMcpToolSingleUse = callMcpToolDetailed;

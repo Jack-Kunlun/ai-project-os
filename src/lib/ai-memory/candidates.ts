@@ -22,6 +22,11 @@ import {
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { AiCandidateError, throwAiCandidateError } from "./candidate-errors";
+import {
+  isLegacyMcpProjectSource,
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -636,7 +641,7 @@ class AiCandidateServiceImpl {
             sourceId: true,
             contentFingerprint: true,
             contentBytes: true,
-            source: { select: { contentText: true } },
+            source: { select: { kind: true, contentText: true, retiredAt: true } },
           },
         },
         candidateBatch: {
@@ -677,6 +682,7 @@ class AiCandidateServiceImpl {
     );
     for (const input of run.inputSources) {
       if (
+        isLegacyMcpProjectSource(input.source) ||
         hashSourceContent(input.source.contentText) !== input.contentFingerprint ||
         Buffer.byteLength(input.source.contentText, "utf8") !== input.contentBytes
       ) {
@@ -822,6 +828,8 @@ class AiCandidateServiceImpl {
     const claims = await this.db.aiCandidateClaim.findMany({
       where: {
         projectId,
+        source: { is: nonLegacyMcpProjectSourceWhere },
+        projectItem: { is: nonLegacyMcpProjectItemWhere },
         ...(request.reviewStatus === undefined
           ? {}
           : { reviewStatus: request.reviewStatus }),
@@ -850,11 +858,29 @@ class AiCandidateServiceImpl {
           projectItemId: true,
           reviewStatus: true,
           projectItem: {
-            select: { reviewStatus: true, updatedAt: true },
+            select: {
+              reviewStatus: true,
+              updatedAt: true,
+              source: { select: { kind: true, retiredAt: true } },
+              evidences: {
+                select: {
+                  projectSource: { select: { kind: true, retiredAt: true } },
+                },
+              },
+            },
           },
+          source: { select: { kind: true, retiredAt: true } },
         },
       });
       if (claim === null) return throwAiCandidateError("AI_CANDIDATE_NOT_FOUND");
+      if (
+        isLegacyMcpProjectSource(claim.source)
+        || isLegacyMcpProjectSource(claim.projectItem.source)
+        || claim.projectItem.evidences.some((evidence) =>
+          evidence.projectSource !== null && isLegacyMcpProjectSource(evidence.projectSource))
+      ) {
+        return throwAiCandidateError("AI_CANDIDATE_NOT_FOUND");
+      }
       if (claim.reviewStatus !== AiCandidateReviewStatus.candidate) {
         return throwAiCandidateError("AI_CANDIDATE_ALREADY_REVIEWED");
       }
@@ -964,11 +990,29 @@ class AiCandidateServiceImpl {
           reviewStatus: true,
           projectItemId: true,
           projectItem: {
-            select: { reviewStatus: true, updatedAt: true },
+            select: {
+              reviewStatus: true,
+              updatedAt: true,
+              source: { select: { kind: true, retiredAt: true } },
+              evidences: {
+                select: {
+                  projectSource: { select: { kind: true, retiredAt: true } },
+                },
+              },
+            },
           },
+          source: { select: { kind: true, retiredAt: true } },
         },
       });
       if (existing === null) return throwAiCandidateError("AI_CANDIDATE_NOT_FOUND");
+      if (
+        isLegacyMcpProjectSource(existing.source)
+        || isLegacyMcpProjectSource(existing.projectItem.source)
+        || existing.projectItem.evidences.some((evidence) =>
+          evidence.projectSource !== null && isLegacyMcpProjectSource(evidence.projectSource))
+      ) {
+        return throwAiCandidateError("AI_CANDIDATE_NOT_FOUND");
+      }
       if (existing.reviewStatus !== AiCandidateReviewStatus.candidate) {
         return throwAiCandidateError("AI_CANDIDATE_ALREADY_REVIEWED");
       }

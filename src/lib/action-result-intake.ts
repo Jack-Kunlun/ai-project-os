@@ -44,6 +44,10 @@ function fail(code: ActionResultIntakeErrorCode): never {
   throw new ActionResultIntakeError(code);
 }
 
+function projectActionResultIntakeEnabled(): boolean {
+  return false;
+}
+
 function canonicalJson(value: unknown): string {
   return JSON.stringify(stableMcpJson(value), null, 2);
 }
@@ -135,6 +139,9 @@ export async function importProjectActionResult(
   if (!projectId.success || !actionId.success || !parsed.success) return fail("ACTION_RESULT_INTAKE_INVALID_INPUT");
   await assertProjectAccess(actor, projectId.data, "edit", db);
   await assertProjectActive(projectId.data, db);
+  // The legacy generic MCP runtime is frozen. Historical results may predate
+  // the current sanitizer and must never be read or copied into project data.
+  if (!projectActionResultIntakeEnabled()) return fail("ACTION_RESULT_INTAKE_NOT_IMPORTABLE");
 
   const imported = await db.$transaction(async (tx) => {
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId.data}:${actionId.data}:result-import`}::text, 30082001))`);

@@ -4,9 +4,14 @@ import { z } from "zod";
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
+import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
-import { assertProjectActive, deleteArchivedProject } from "@/lib/project-lifecycle";
+import { deleteArchivedProject } from "@/lib/project-lifecycle";
 import { projectIdSchema, updateProjectSchema } from "@/lib/validation";
+import {
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +25,9 @@ const projectDetailSelect = {
   updatedAt: true,
   _count: {
     select: {
-      sources: { where: { retiredAt: null } },
+      sources: { where: nonLegacyMcpProjectSourceWhere },
       assets: { where: { status: { not: "deleted" } } },
-      items: true,
+      items: { where: nonLegacyMcpProjectItemWhere },
       scans: true,
       snapshots: true,
     },
@@ -63,20 +68,23 @@ export async function GET(request: Request, context: { params: Promise<{ project
 export async function PATCH(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const db = getDb();
     const projectId = await parseProjectId(context.params);
-    await assertProjectActive(projectId, db);
     const input = updateProjectSchema.parse(await readJsonBody(request));
-    const project = await db.project.update({
-      where: { id: projectId },
-      data: {
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.slug !== undefined ? { slug: input.slug } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-      },
-      select: projectDetailSelect,
-    });
+    const project = await withWebAiProjectAccessTransaction(
+      db,
+      { actor: user, projectId, required: "edit" },
+      (tx) => tx.project.update({
+        where: { id: projectId },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.slug !== undefined ? { slug: input.slug } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+        },
+        select: projectDetailSelect,
+      }),
+    );
 
     return NextResponse.json({ project });
   } catch (error) {

@@ -28,6 +28,11 @@ import {
   stableAiCallKey,
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
+import {
+  nonLegacyMcpProjectItemWhere,
+  nonLegacyMcpProjectSourceLineageWhere,
+  nonLegacyMcpProjectSourceWhere,
+} from "@/lib/legacy-mcp-source-quarantine";
 
 const MAX_SOURCE_COUNT = 10;
 const MAX_SOURCE_CHARACTERS = 60_000;
@@ -230,7 +235,7 @@ export async function listAutoExtractSources(
 ) {
   await assertWebAiProjectAccess(actor, projectId, "view", db);
   return db.projectSource.findMany({
-    where: { projectId, retiredAt: null },
+    where: { projectId, ...nonLegacyMcpProjectSourceWhere },
     orderBy: { ingestedAt: "desc" },
     select: {
       id: true,
@@ -257,7 +262,11 @@ export async function runAutoExtractJob(input: Readonly<{
   const [route, sources] = await Promise.all([
     resolveEffectiveAiRoute(input.projectId, "autoExtract", db),
     db.projectSource.findMany({
-      where: { projectId: input.projectId, id: { in: parsed.sourceIds }, retiredAt: null },
+      where: {
+        projectId: input.projectId,
+        id: { in: parsed.sourceIds },
+        ...nonLegacyMcpProjectSourceWhere,
+      },
       orderBy: { id: "asc" },
       select: {
         id: true,
@@ -307,6 +316,16 @@ export async function runAutoExtractJob(input: Readonly<{
     await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
     for (let index = 0; index < sources.length; index += 1) {
       const source = sources[index]!;
+      const currentSource = await db.projectSource.findFirst({
+        where: {
+          projectId: input.projectId,
+          id: source.id,
+          contentHash: source.contentHash,
+          ...nonLegacyMcpProjectSourceWhere,
+        },
+        select: { id: true },
+      });
+      if (currentSource === null) return fail("AUTO_EXTRACT_SOURCE_NOT_FOUND");
       const evidenceBlocks = buildAutoExtractEvidenceBlocks(source.contentText);
       await updateWebAiJobProgress(granted.jobId, claim, "extracting", index, sources.length, db);
       const response = await auditedProviderCall({
@@ -368,6 +387,16 @@ export async function runAutoExtractJob(input: Readonly<{
             expectedRequestedById: input.requestedBy.id,
             attempt: { jobId: granted.jobId, ...claim },
           }, async (tx) => {
+            const eligibleSource = await tx.projectSource.findFirst({
+              where: {
+                projectId: input.projectId,
+                id: source.id,
+                contentHash: source.contentHash,
+                ...nonLegacyMcpProjectSourceWhere,
+              },
+              select: { id: true },
+            });
+            if (eligibleSource === null) return fail("AUTO_EXTRACT_SOURCE_NOT_FOUND");
             const item = await tx.projectItem.create({
               data: {
                 id: randomUUID(),
@@ -485,7 +514,11 @@ export async function listWebAiCandidates(
   await assertWebAiProjectAccess(actor, projectId, "view", db);
   const visibility = await loadProjectAiPublicVisibility(db, projectId, actor.id);
   const rows = await db.webAiCandidate.findMany({
-    where: { projectId },
+    where: {
+      projectId,
+      source: { is: nonLegacyMcpProjectSourceLineageWhere },
+      projectItem: { is: nonLegacyMcpProjectItemWhere },
+    },
     orderBy: { createdAt: "desc" },
     take: 100,
     select: candidateListSelect,
@@ -512,7 +545,12 @@ export async function reviewWebAiCandidate(input: Readonly<{
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.candidateId}, ${WEB_AI_CANDIDATE_LOCK_NAMESPACE}))`;
     const currentActor = admission.actor;
     const candidate = await tx.webAiCandidate.findFirst({
-      where: { projectId: input.projectId, id: input.candidateId },
+      where: {
+        projectId: input.projectId,
+        id: input.candidateId,
+        source: { is: nonLegacyMcpProjectSourceLineageWhere },
+        projectItem: { is: nonLegacyMcpProjectItemWhere },
+      },
       include: { projectItem: true },
     });
     if (candidate === null) return fail("AUTO_EXTRACT_INVALID_INPUT");

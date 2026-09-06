@@ -1512,7 +1512,7 @@ async function lockGrant(
       "budgetProfile"::text AS "budgetProfile",
       "expiresAt",
       "revokedAt",
-      ("expiresAt" > CURRENT_TIMESTAMP) AS "expiresAtIsLive"
+      ("expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)) AS "expiresAtIsLive"
     FROM "ModelProcessingGrant"
     WHERE "projectId" = ${projectId}::uuid
       AND "id" = ${grantId}::uuid
@@ -1553,7 +1553,7 @@ async function lockFrozenGrant(
       "budgetProfile"::text AS "budgetProfile",
       "expiresAt",
       "revokedAt",
-      ("expiresAt" > CURRENT_TIMESTAMP) AS "expiresAtIsLive"
+      ("expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)) AS "expiresAtIsLive"
     FROM "ModelProcessingGrant"
     WHERE "projectId" = ${projectId}::uuid
       AND "id" = ${grantId}::uuid
@@ -1641,6 +1641,8 @@ async function lockProjectSource(
     FROM "ProjectSource"
     WHERE "projectId" = ${projectId}::uuid
       AND "id" = ${sourceId}::uuid
+      AND "kind"::text <> 'mcp'
+      AND "retiredAt" IS NULL
     FOR KEY SHARE
   `);
   return rows[0] ?? null;
@@ -2147,7 +2149,7 @@ class AiRuntimeServiceImpl {
          SET "status" = ${terminalStatus},
              "budgetStatus" = ${budgetStatus},
              "safeErrorCode" = ${closure.safeCode}::"AiSafeErrorCode",
-             "completedAt" = CURRENT_TIMESTAMP
+             "completedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
        WHERE "projectId" = ${request.projectId}::uuid
          AND "id" = ${request.runId}::uuid
          AND "grantId" = ${request.grantId}::uuid
@@ -2591,8 +2593,8 @@ class AiRuntimeServiceImpl {
          SET "status" = 'running'::"AiRunStatus",
              "requestCount" = 1,
              "budgetStatus" = 'allowed'::"AiBudgetStatus",
-             "claimedAt" = CURRENT_TIMESTAMP,
-             "sentAt" = CURRENT_TIMESTAMP
+             "claimedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3),
+             "sentAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
        WHERE "projectId" = ${request.projectId}::uuid
          AND "id" = ${request.runId}::uuid
          AND "grantId" = ${request.grantId}::uuid
@@ -2647,8 +2649,8 @@ class AiRuntimeServiceImpl {
         0,
         0,
         1,
-        CURRENT_TIMESTAMP,
-        CURRENT_TIMESTAMP
+        (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3),
+        (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
       )
     `);
     await this.writeDispatchAudit(
@@ -2896,7 +2898,7 @@ class AiRuntimeServiceImpl {
              "inputTokens" = ${usage.inputTokens},
              "outputTokens" = ${usage.outputTokens},
              "safeErrorCode" = ${classification.safeCode}::"AiSafeErrorCode",
-             "completedAt" = CURRENT_TIMESTAMP
+             "completedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
        WHERE "projectId" = ${claim.request.projectId}::uuid
          AND "id" = ${claim.attemptId}::uuid
          AND "aiRunId" = ${claim.runId}::uuid
@@ -2921,7 +2923,7 @@ class AiRuntimeServiceImpl {
              "httpStatus" = ${classification.httpStatus},
              "providerRequestId" = ${classification.providerRequestId},
              "providerResponseId" = ${classification.providerResponseId},
-             "completedAt" = CURRENT_TIMESTAMP
+             "completedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
        WHERE "projectId" = ${claim.request.projectId}::uuid
          AND "id" = ${claim.runId}::uuid
          AND "grantId" = ${claim.request.grantId}::uuid

@@ -311,7 +311,7 @@ const SQL = Object.freeze({
                  SELECT 1 FROM "PlatformTokenGrant" AS token_grant
                   WHERE token_grant."userId" = enabled_user."id"
                     AND token_grant."revokedAt" IS NULL
-                    AND token_grant."expiresAt" > CURRENT_TIMESTAMP
+                    AND token_grant."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
                     AND token_grant."remainingTokens" > 0
                )) AS enabled_without_available_grant
       FROM "AppUser"
@@ -820,7 +820,7 @@ const SQL = Object.freeze({
            (SELECT COUNT(*)::bigint FROM "ProjectAiRouteRevision") AS route_revisions_new,
            (SELECT COUNT(*)::bigint FROM "WebAiGrant") AS web_ai_grants,
            (SELECT COUNT(*)::bigint FROM "WebAiGrant"
-             WHERE "revokedAt" IS NULL AND "expiresAt" > CURRENT_TIMESTAMP
+             WHERE "revokedAt" IS NULL AND "expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
            ) AS open_web_ai_grants,
            (SELECT COUNT(*)::bigint FROM "PlatformTokenReservation"
              WHERE "providerConnectionId" IS NOT NULL
@@ -915,7 +915,7 @@ const SQL = Object.freeze({
               JOIN "AiProviderConnection" AS personal_provider
                 ON personal_provider."id" = web_grant."providerConnectionId"
              WHERE web_grant."revokedAt" IS NULL
-               AND web_grant."expiresAt" > CURRENT_TIMESTAMP
+               AND web_grant."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
                AND personal_provider."scope" = 'user'
                AND personal_provider."ownershipState" = 'confirmed'
                AND personal_provider."ownerUserId" IS NOT NULL
@@ -955,7 +955,7 @@ const SQL = Object.freeze({
                        ON personal_provider."id" = web_grant."providerConnectionId"
                     WHERE web_grant."projectId" = rule."projectId"
                       AND web_grant."revokedAt" IS NULL
-                      AND web_grant."expiresAt" > CURRENT_TIMESTAMP
+                      AND web_grant."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
                       AND personal_provider."scope" = 'user'
                       AND personal_provider."ownershipState" = 'confirmed'
                       AND personal_provider."ownerUserId" IS NOT NULL
@@ -1175,12 +1175,12 @@ const SQL = Object.freeze({
     SELECT COUNT(*)::bigint AS total,
            COUNT(*) FILTER (
              WHERE "revokedAt" IS NULL
-               AND "expiresAt" > CURRENT_TIMESTAMP
+               AND "expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
                AND "remainingTokens" > 0
            )::bigint AS available,
            COUNT(*) FILTER (
              WHERE "revokedAt" IS NULL
-               AND "expiresAt" <= CURRENT_TIMESTAMP
+               AND "expiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
            )::bigint AS expired,
            COUNT(*) FILTER (WHERE "revokedAt" IS NOT NULL)::bigint AS revoked
       FROM "PlatformTokenGrant"

@@ -76,7 +76,7 @@ export function AppHeader({
             <NavIcon name="help" />
             <span className="hidden text-xs font-semibold lg:block">帮助</span>
           </Link>
-          {isSystemAdmin ? <Link href="/admin" className="hidden rounded-full border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 lg:block">管理工作台</Link> : null}
+          {isSystemAdmin ? <Link href="/admin" aria-label="管理工作台" title="管理工作台" className="flex h-11 shrink-0 items-center justify-center rounded-full border border-indigo-200 bg-indigo-50 px-3 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 sm:h-auto sm:py-2"><span className="sm:hidden">管理</span><span className="hidden sm:inline">管理工作台</span></Link> : null}
           <Link
             href="/profile"
             aria-label={`个人中心：${username}`}

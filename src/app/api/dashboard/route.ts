@@ -140,6 +140,17 @@ export async function GET(request: Request) {
       attentionWorlds: current.attentionWorlds + (entry.world.status === "needs_attention" ? 1 : 0),
       insufficientDataWorlds: current.insufficientDataWorlds + (entry.world.status === "insufficient_data" ? 1 : 0),
     }), { atRiskWorlds: 0, attentionWorlds: 0, insufficientDataWorlds: 0 });
+    const hasAttention = operations.some((entry) => entry.health.status === "atRisk" || entry.health.status === "attention")
+      || worlds.some((entry) => entry.world.status === "at_risk" || entry.world.status === "needs_attention" || entry.world.status === "insufficient_data");
+    const state = projects.length === 0
+      ? "zero-project"
+      : hasAttention
+        ? "needs-attention"
+        : activeJobCount > 0
+          ? "running"
+          : operations.some((entry) => entry.health.status === "empty")
+            ? "empty-plan"
+            : "healthy";
 
     const publicProjects = projects.map((project) => ({
       ...project,
@@ -152,6 +163,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(
       {
+        state,
         summary: {
           projects: projects.length,
           ...summary,
@@ -177,6 +189,8 @@ export async function GET(request: Request) {
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
-    return handleApiError(error);
+    const response = handleApiError(error);
+    response.headers.set("cache-control", "no-store");
+    return response;
   }
 }

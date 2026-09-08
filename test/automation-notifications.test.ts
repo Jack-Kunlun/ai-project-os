@@ -119,6 +119,8 @@ test("project notifications are hidden and immutable after project access is rev
   const marked = await markNotificationRead(USER_ID, PROJECT_NOTIFICATION_ID, true, fake.db);
   assert.equal(marked.id, PROJECT_NOTIFICATION_ID);
   assert.ok(marked.readAt instanceof Date);
+  assert.equal(marked.actionHref, `/projects/${PROJECT_ID}/automations`);
+  assert.equal(marked.title, "项目需要确认");
   const readAtAfterAuthorizedUpdate = fake.notifications.get(PROJECT_NOTIFICATION_ID)?.readAt;
 
   fake.setProjectAccess(false);

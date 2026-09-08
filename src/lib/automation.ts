@@ -23,6 +23,13 @@ export type AutomationErrorCode =
   | "AUTOMATION_RUN_CONFLICT"
   | "NOTIFICATION_NOT_FOUND";
 
+export type NotificationFilter = "all" | "unread" | "system";
+export type NotificationListOptions = Readonly<{
+  filter?: NotificationFilter;
+  cursor?: string;
+  limit?: number;
+}>;
+
 export class AutomationError extends Error {
   constructor(readonly code: AutomationErrorCode) {
     super(code);
@@ -438,16 +445,20 @@ async function executeProjectPlanHealth(run: ClaimedRun, db: PrismaClient) {
     });
   const recipients = new Set(eligibleRecipients.map((entry) => entry.id));
   const dayKey = run.scheduledFor.toISOString().slice(0, 10);
-  const body = health.status === "healthy"
-    ? "当前没有逾期、受阻、缺少负责人或缺少验收证据的活动工作项。"
-    : `逾期 ${health.counts.overdue} 项、受阻 ${health.counts.blocked} 项、即将到期 ${health.counts.dueSoon} 项、未分配 ${health.counts.unassigned} 项、验收或证据缺口 ${health.counts.missingAcceptance + health.counts.missingEvidence + health.counts.staleEvidence} 项；另有 ${health.counts.openImpacts} 条仓库变更待评估。`;
+  const body = health.status === "empty"
+    ? "当前还没有工作项，系统不会把空计划推断为运行正常。"
+    : health.status === "healthy"
+      ? "当前没有逾期、受阻、缺少负责人或缺少验收证据的活动工作项。"
+      : `逾期 ${health.counts.overdue} 项、受阻 ${health.counts.blocked} 项、即将到期 ${health.counts.dueSoon} 项、未分配 ${health.counts.unassigned} 项、验收或证据缺口 ${health.counts.missingAcceptance + health.counts.missingEvidence + health.counts.staleEvidence} 项；另有 ${health.counts.openImpacts} 条仓库变更待评估。`;
+  const severity = health.status === "atRisk" ? "error" : health.status === "attention" ? "warning" : health.status === "empty" ? "info" : "success";
+  const title = health.status === "atRisk" ? "项目计划存在逾期或受阻工作" : health.status === "attention" ? "项目计划有待处理事项" : health.status === "empty" ? "项目计划尚未建立工作项" : "项目计划运行正常";
   for (const userId of recipients) {
     await createNotification({
       userId,
       projectId: run.projectId,
       kind: "projectPlanHealth",
-      severity: health.status === "atRisk" ? "error" : health.status === "attention" ? "warning" : "success",
-      title: health.status === "atRisk" ? "项目计划存在逾期或受阻工作" : health.status === "attention" ? "项目计划有待处理事项" : "项目计划运行正常",
+      severity,
+      title,
       body,
       actionHref: `/projects/${run.projectId}/plan`,
       dedupeKey: `project-plan-health:${run.automationRuleId}:${dayKey}:${userId}`,
@@ -552,31 +563,6 @@ export async function runAutomationWorkerCycle(input: Readonly<{
   return Object.freeze({ recovered, claimed, succeeded, failed });
 }
 
-export async function listUserNotifications(userIdInput: unknown, db: PrismaClient = getDb()) {
-  const userId = uuid(userIdInput);
-  const visibleWhere = notificationVisibilityWhere(userId);
-  const [notifications, unreadCount] = await Promise.all([
-    db.notification.findMany({
-      // The inbox is intentionally an unread queue. Opening a notification
-      // removes it from both this response and the bell count.
-      where: { ...visibleWhere, readAt: null },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: 100,
-      select: { id: true, projectId: true, kind: true, severity: true, title: true, body: true, actionHref: true, readAt: true, createdAt: true },
-    }),
-    db.notification.count({ where: { ...visibleWhere, readAt: null } }),
-  ]);
-  return Object.freeze({
-    notifications: notifications.map((notification) => ({
-      ...notification,
-      // Legacy rows are sanitized at the read boundary too, so an invalid
-      // stored destination becomes a harmless acknowledgement.
-      actionHref: safeNotificationActionHref(notification.actionHref),
-    })),
-    unreadCount,
-  });
-}
-
 function notificationVisibilityWhere(userId: string): Prisma.NotificationWhereInput {
   return {
     userId,
@@ -596,6 +582,67 @@ function notificationVisibilityWhere(userId: string): Prisma.NotificationWhereIn
 
 export function safeNotificationActionHref(value: string | null): string | null {
   return value !== null && SAFE_ACTION_HREF.test(value) ? value : null;
+}
+
+const notificationCursorSchema = z.object({
+  createdAt: z.string().datetime({ offset: true }),
+  id: z.string().uuid(),
+}).strict();
+
+function encodeNotificationCursor(notification: Readonly<{ createdAt: Date; id: string }>): string {
+  return Buffer.from(JSON.stringify({ createdAt: notification.createdAt.toISOString(), id: notification.id }), "utf8").toString("base64url");
+}
+
+function decodeNotificationCursor(value: string | undefined): { createdAt: Date; id: string } | null {
+  if (value === undefined) return null;
+  if (value.length === 0 || value.length > 2048 || !/^[A-Za-z0-9_-]+$/u.test(value)) return fail("AUTOMATION_INVALID_INPUT");
+  try {
+    const parsed = notificationCursorSchema.parse(JSON.parse(Buffer.from(value, "base64url").toString("utf8")));
+    const createdAt = new Date(parsed.createdAt);
+    if (!Number.isFinite(createdAt.getTime())) return fail("AUTOMATION_INVALID_INPUT");
+    return { createdAt, id: parsed.id };
+  } catch {
+    return fail("AUTOMATION_INVALID_INPUT");
+  }
+}
+
+export async function listUserNotifications(userIdInput: unknown, db: PrismaClient = getDb(), options: NotificationListOptions = {}) {
+  const userId = uuid(userIdInput);
+  const visibleWhere = notificationVisibilityWhere(userId);
+  const filter = options.filter ?? "all";
+  if (filter !== "all" && filter !== "unread" && filter !== "system") return fail("AUTOMATION_INVALID_INPUT");
+  const limit = options.limit ?? 20;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) return fail("AUTOMATION_INVALID_INPUT");
+  const cursor = decodeNotificationCursor(options.cursor);
+  const where: Prisma.NotificationWhereInput = {
+    ...visibleWhere,
+    ...(filter === "unread" ? { readAt: null } : {}),
+    ...(filter === "system" ? { kind: "system" } : {}),
+    ...(cursor ? { AND: [{ OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }] }] } : {}),
+  };
+  const [notifications, unreadCount] = await Promise.all([
+    db.notification.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      select: { id: true, projectId: true, kind: true, severity: true, title: true, body: true, actionHref: true, readAt: true, createdAt: true },
+    }),
+    db.notification.count({ where: { ...visibleWhere, readAt: null } }),
+  ]);
+  const hasNext = notifications.length > limit;
+  const page = hasNext ? notifications.slice(0, limit) : notifications;
+  const last = page.at(-1);
+  return Object.freeze({
+    filter,
+    notifications: page.map((notification) => ({
+      ...notification,
+      // Legacy rows are sanitized at the read boundary too, so an invalid
+      // stored destination becomes a harmless acknowledgement.
+      actionHref: safeNotificationActionHref(notification.actionHref),
+    })),
+    unreadCount,
+    nextCursor: hasNext && last !== undefined ? encodeNotificationCursor(last) : null,
+  });
 }
 
 export async function openNotification(userIdInput: unknown, notificationIdInput: unknown, db: PrismaClient = getDb()) {
@@ -634,8 +681,11 @@ export async function markNotificationRead(userIdInput: unknown, notificationIdI
   if (updated.count !== 1) return fail("NOTIFICATION_NOT_FOUND");
   const notification = await db.notification.findFirst({
     where: { ...visibleWhere, id: notificationId },
-    select: { id: true, readAt: true },
+    select: { id: true, projectId: true, kind: true, severity: true, title: true, body: true, actionHref: true, readAt: true, createdAt: true },
   });
   if (notification === null) return fail("NOTIFICATION_NOT_FOUND");
-  return notification;
+  return Object.freeze({
+    ...notification,
+    actionHref: safeNotificationActionHref(notification.actionHref),
+  });
 }

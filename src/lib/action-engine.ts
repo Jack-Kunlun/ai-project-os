@@ -335,16 +335,18 @@ async function notifyProjectApprovers(projectId: string, actionId: string, reque
 export async function getProjectActionCenter(
   projectIdInput: unknown,
   actor: AccessUser,
-  input: Readonly<{ page: number; pageSize: number; search?: string; capability?: ProjectActionCapability; status?: ProjectActionStatus }>,
+  input: Readonly<{ page: number; pageSize: number; actionId?: string; search?: string; capability?: ProjectActionCapability; status?: ProjectActionStatus }>,
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
   await assertProjectAccess(actor, projectId, "view", db);
   const permission = await getProjectPermission(actor, projectId, db);
   if (permission === null) return fail("ACTION_PROJECT_NOT_FOUND");
+  const actionId = input.actionId === undefined ? undefined : uuid(input.actionId);
   const search = input.search?.trim();
   const actionWhere: Prisma.ProjectActionWhereInput = {
     projectId,
+    ...(actionId ? { id: actionId } : {}),
     ...(input.capability ? { capability: input.capability } : {}),
     ...(input.status ? { status: input.status } : {}),
     ...(search ? { OR: [

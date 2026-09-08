@@ -70,7 +70,10 @@ export type RecentJob = {
   project: { id: string; name: string } | null;
 };
 
+export type DashboardState = "zero-project" | "empty-plan" | "running" | "needs-attention" | "healthy";
+
 export type DashboardPayload = {
+  state: DashboardState;
   summary: {
     projects: number;
     confirmedItems: number;

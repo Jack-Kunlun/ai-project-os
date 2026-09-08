@@ -34,7 +34,7 @@ export type ProjectPlanHealthSignal = Readonly<{
 }>;
 
 export type ProjectPlanHealth = Readonly<{
-  status: "healthy" | "attention" | "atRisk";
+  status: "empty" | "healthy" | "attention" | "atRisk";
   dueSoonDays: number;
   counts: Readonly<{
     active: number;
@@ -275,8 +275,9 @@ export function buildProjectPlanHealth(input: Readonly<{
   ];
   const atRisk = overdue.length > 0 || blocked.length > 0;
   const attention = dependencyBlocked.length + dueSoon.length + unassigned.length + missingAcceptance.length + missingEvidence.length + staleEvidence.length + pendingRecommendations.length + openImpacts.length + pendingApprovals.length > 0;
+  const status = atRisk ? "atRisk" : attention ? "attention" : input.workItems.length === 0 ? "empty" : "healthy";
   return Object.freeze({
-    status: atRisk ? "atRisk" : attention ? "attention" : "healthy",
+    status,
     dueSoonDays,
     counts: Object.freeze({
       active: active.length,

@@ -12,6 +12,7 @@ const noStore = { "cache-control": "no-store" } as const;
 const listSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
+  action: z.string().uuid().optional(),
   search: z.string().trim().max(120).optional(),
   capability: z.enum(["all", "project.repository.sync", "project.web-source.sync", "project.memory-quality.scan", "project.mcp.read-tool.invoke"]).default("all"),
   status: z.enum(["all", "waitingApproval", "queued", "running", "succeeded", "failed", "rejected", "cancelled", "expired"]).default("all"),
@@ -29,6 +30,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
     return NextResponse.json(await getProjectActionCenter(await projectId(context.params), user, {
       page: query.page,
       pageSize: query.pageSize,
+      actionId: query.action,
       search: query.search,
       capability: query.capability === "all" ? undefined : query.capability,
       status: query.status === "all" ? undefined : query.status,

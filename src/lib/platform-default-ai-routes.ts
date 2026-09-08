@@ -9,9 +9,10 @@ import { getProviderDefinition, isSafeModelId } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 
-/** The control plane deliberately keeps this list separate from runtime route
- * resolution. A later runtime batch may consume these rows, but this module
- * never changes project routes or dispatch behavior. */
+/** The control plane keeps configuration and audit rows separate from runtime
+ * route metadata. The current effective-route resolver consumes an active,
+ * validated platform-default row without letting this module mutate dispatch
+ * behavior. */
 export const PLATFORM_DEFAULT_AI_OPERATIONS = [
   "embedding",
   "visionExtract",
@@ -645,7 +646,8 @@ export type PlatformDefaultAiRouteReadiness = Readonly<{
   providerConfigurationVersion: number | null;
   validatedProviderConfigurationVersion: number | null;
   validatedAt: Date | null;
-  runtimeConnected: false;
+  /** The effective Web AI route resolver consumes this control-plane state. */
+  runtimeConnected: true;
 }>;
 
 function readinessForOperation(
@@ -653,7 +655,7 @@ function readinessForOperation(
   route: RouteWithProvider | undefined,
 ): PlatformDefaultAiRouteReadiness {
   if (route === undefined) {
-    return Object.freeze({ operation, code: "missing", activeRouteId: null, activeRouteVersion: null, providerConnectionId: null, providerConfigurationVersion: null, validatedProviderConfigurationVersion: null, validatedAt: null, runtimeConnected: false });
+    return Object.freeze({ operation, code: "missing", activeRouteId: null, activeRouteVersion: null, providerConnectionId: null, providerConfigurationVersion: null, validatedProviderConfigurationVersion: null, validatedAt: null, runtimeConnected: true as const });
   }
   const provider = route.providerConnection;
   let code: PlatformDefaultAiRouteReadinessCode = "ready";
@@ -687,7 +689,7 @@ function readinessForOperation(
     providerConfigurationVersion: provider.configurationVersion,
     validatedProviderConfigurationVersion: route.validatedProviderConfigurationVersion,
     validatedAt: route.validatedAt,
-    runtimeConnected: false,
+    runtimeConnected: true,
   });
 }
 
@@ -702,14 +704,15 @@ export async function getPlatformDefaultAiRouteReadiness(
     operations: Object.freeze(Object.fromEntries(
       PLATFORM_DEFAULT_AI_OPERATIONS.map((operation) => [operation, readinessForOperation(operation, byOperation.get(operation))]),
     ) as Record<PlatformDefaultAiOperation, PlatformDefaultAiRouteReadiness>),
-    runtimeConnected: false as const,
+    runtimeConnected: true as const,
   });
 }
 
 export type PlatformDefaultAiRouteImpact = Readonly<{
   routeId: string;
   operation: PlatformDefaultAiOperation;
-  runtimeConnected: false;
+  /** This describes resolver integration, not a successful provider call. */
+  runtimeConnected: true;
   indexImpact: Readonly<{
     applicable: boolean;
     activeIndexCount: number;
@@ -733,7 +736,7 @@ export async function getPlatformDefaultAiRouteImpact(
     return Object.freeze({
       routeId: route.id,
       operation: route.operation,
-      runtimeConnected: false,
+      runtimeConnected: true,
       indexImpact: Object.freeze({ applicable: false, activeIndexCount: 0, matchingActiveIndexCount: 0, mismatchingActiveIndexCount: 0, affectedProjectCount: 0, affectedGenerationCount: 0 }),
     });
   }
@@ -761,7 +764,7 @@ export async function getPlatformDefaultAiRouteImpact(
   return Object.freeze({
     routeId: route.id,
     operation: route.operation,
-    runtimeConnected: false,
+    runtimeConnected: true,
     indexImpact: Object.freeze({
       applicable: true,
       activeIndexCount: pointers.length,
@@ -845,7 +848,7 @@ export async function listPlatformDefaultAiRoutes(
     providers,
     readiness,
     audits,
-    runtimeConnected: false as const,
+    runtimeConnected: true as const,
   });
 }
 

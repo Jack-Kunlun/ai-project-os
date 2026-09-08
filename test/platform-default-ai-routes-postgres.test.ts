@@ -424,7 +424,7 @@ test(
       const ready = await getPlatformDefaultAiRouteReadiness({ id: adminId, role: "admin" }, db);
       assert.equal(ready.operations.projectAnalysis.code, "ready");
       assert.equal(ready.operations.projectAnalysis.activeRouteVersion, 2);
-      assert.equal(ready.runtimeConnected, false);
+      assert.equal(ready.runtimeConnected, true);
 
       const audit = await db.platformDefaultAiRouteAudit.findFirstOrThrow({ where: { routeId: first.id }, orderBy: { createdAt: "asc" } });
       await assert.rejects(

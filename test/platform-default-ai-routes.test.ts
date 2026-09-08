@@ -676,7 +676,7 @@ test("local validation, configuration-version readiness, and atomic activation s
   assert.equal(active.status, "active");
   const ready = await getPlatformDefaultAiRouteReadiness(admin, fake as unknown as PrismaClient);
   assert.equal(ready.operations.projectAnalysis.code, "ready");
-  assert.equal(ready.runtimeConnected, false);
+  assert.equal(ready.runtimeConnected, true);
   fake.providers.get(providerId)!.configurationVersion = 2;
   const stale = await getPlatformDefaultAiRouteReadiness(admin, fake as unknown as PrismaClient);
   assert.equal(stale.operations.projectAnalysis.code, "configuration-changed");
@@ -741,7 +741,7 @@ test("embedding impact counts matching and affected active indexes without expos
   assert.doesNotMatch(routeService, /matches\.includes\(/u);
 });
 
-test("list DTOs contain provider version, safe audits, six readiness entries, and no runtime switch", async () => {
+test("list DTOs contain provider version, safe audits, six readiness entries, and resolver integration state", async () => {
   const fake = db();
   fake.providers.get(providerId)!.status = "verified";
   const draft = await createPlatformDefaultAiRoute({ operation: "autoExtract", providerConnectionId: providerId, modelId: "gpt-4.1-mini", maxOutputTokens: 2048 }, admin, fake as unknown as PrismaClient);
@@ -760,7 +760,7 @@ test("list DTOs contain provider version, safe audits, six readiness entries, an
   assert.equal(listed.operations.length, 6);
   assert.equal(listed.providers[0]?.configurationVersion, 1);
   assert.deepEqual(Object.keys(listed.readiness.operations), [...PLATFORM_DEFAULT_AI_OPERATIONS]);
-  assert.equal(listed.runtimeConnected, false);
+  assert.equal(listed.runtimeConnected, true);
   const providerService = await readFile("src/lib/ai-providers/service.ts", "utf8");
   assert.match(providerService, /platformDefaultAiRoutes:\s*\{\s*where:\s*\{\s*status:\s*"active"/u);
 });
@@ -796,7 +796,7 @@ test("schema and migration add only the control-plane version fence and immutabl
   assert.doesNotMatch(ownershipExecutable, /DROP\s+(?:TABLE|TYPE|INDEX)/iu);
 });
 
-test("error mapping exposes stable control-plane codes and runtime source remains untouched", async () => {
+test("error mapping exposes stable control-plane codes and runtime projection remains conservative", async () => {
   const mapped = mapApiError(new PlatformDefaultAiRouteError("PLATFORM_AI_ROUTE_ADMIN_REQUIRED"));
   assert.equal(mapped.status, 403);
   assert.equal(mapped.body.error.code, "PLATFORM_AI_ROUTE_ADMIN_REQUIRED");
@@ -819,6 +819,18 @@ test("error mapping exposes stable control-plane codes and runtime source remain
   assert.doesNotMatch(routesClient, /window\.(?:prompt|confirm)/u);
   assert.match(routesClient, /provider-invalid/u);
   assert.match(routesClient, /控制面已激活且配置有效/u);
-  assert.match(routesClient, /运行时尚未接入/u);
+  assert.match(routesClient, /Web AI 有效路由解析会采用/u);
+  assert.match(routesClient, /真实模型调用未在此页面现场验证/u);
+  assert.doesNotMatch(routesClient, /运行时尚未接入/u);
   assert.match(routesClient, /expectedUpdatedAt: route\.updatedAt/u);
+});
+
+test("管理员连接冻结页明确个人所有权、受控委托和通用 MCP 入口边界", async () => {
+  const connectorPage = await readFile("src/app/admin/connectors/frozen-connector-page.tsx", "utf8");
+  assert.match(connectorPage, /个人 Git 连接请由用户在个人中心配置/u);
+  assert.match(connectorPage, /个人 MCP 连接请由用户在个人中心配置/u);
+  assert.match(connectorPage, /连接所有者与项目 Owner 发起明确的受控一次性只读委托/u);
+  assert.match(connectorPage, /通用 MCP 动作产品入口仍未开放/u);
+  assert.match(connectorPage, /不代替用户持有或管理私人 Git\/MCP 凭据/u);
+  assert.doesNotMatch(connectorPage, /等待个人连接配置和项目授权页面上线/u);
 });

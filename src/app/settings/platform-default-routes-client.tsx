@@ -48,7 +48,7 @@ type Readiness = {
   activeRouteId: string | null;
   activeRouteVersion: number | null;
   providerConnectionId: string | null;
-  runtimeConnected: false;
+  runtimeConnected: true;
 };
 type Audit = {
   id: string;
@@ -66,7 +66,7 @@ type Audit = {
 type Impact = {
   routeId: string;
   operation: Operation;
-  runtimeConnected: false;
+  runtimeConnected: true;
   indexImpact: {
     applicable: boolean;
     activeIndexCount: number;
@@ -300,7 +300,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
       setEditingRouteId(null);
       await reload();
       onRouteMutation?.();
-      setMessage(editingRoute === null ? "草稿已创建；运行时尚未接入，请先完成本地验证。" : "草稿已保存；需要重新完成本地验证。");
+      setMessage(editingRoute === null ? "草稿已创建；验证并激活后，后续 Web AI 有效路由解析会采用该平台默认路由。真实模型调用未在此页面现场验证。" : "草稿已保存；需要重新完成本地验证。");
     } catch (createError) {
       setMessage(createError instanceof Error ? createError.message : editingRoute === null ? "平台默认路由草稿创建失败" : "平台默认路由草稿保存失败");
     } finally {
@@ -336,7 +336,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
       if (!response.ok) throw new Error(await readError(response, "平台默认路由状态更新失败"));
       await reload();
       onRouteMutation?.();
-      setMessage(action === "validate" ? "本地配置合同验证通过；尚未发送网络请求。" : action === "activate" ? "控制面路由已激活；运行时尚未切流。" : "路由已退役。");
+      setMessage(action === "validate" ? "本地配置合同验证通过；尚未发送网络请求。" : action === "activate" ? "控制面路由已激活；后续 Web AI 有效路由解析会采用它。真实模型调用未在此页面现场验证。" : "路由已退役。");
     } catch (lifecycleError) {
       setMessage(lifecycleError instanceof Error ? lifecycleError.message : "平台默认路由状态更新失败");
     } finally {
@@ -364,9 +364,9 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">Platform default routes</p>
           <h2 className="mt-2 text-2xl font-semibold text-slate-950">平台默认模型路由控制面</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">这里仅配置、验证和审计平台默认路由。当前仅完成控制面配置与验证；运行时接入将在后续批次完成，普通用户暂不能依赖这些默认路由调用。</p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">这里仅配置、验证和审计平台默认路由。已激活且通过门禁的 active 路由会被当前 Web AI 有效路由解析采用；本页不宣称真实模型调用已现场验证。普通用户按平台赠送额度使用这些默认路由。</p>
         </div>
-        <span className="rounded-full bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-800">Runtime 未接入</span>
+        <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-800">Web AI 路由解析已接入</span>
       </div>
 
       <form onSubmit={saveDraft} className="mt-6 grid gap-4 rounded-2xl border border-white/80 bg-white p-5 shadow-sm lg:grid-cols-2">
@@ -401,7 +401,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
       <div className="mt-7 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {OPERATIONS.map((entry) => {
           const state = readiness?.[entry];
-          return <article key={entry} className="rounded-2xl border border-white/80 bg-white p-4"><p className="text-xs font-semibold text-slate-500">{operationLabels[entry]}</p><p className={`mt-2 text-sm font-semibold ${state?.code === "ready" ? "text-emerald-700" : "text-amber-700"}`}>{state ? readinessLabels[state.code] : "读取中…"}</p><p className="mt-1 text-xs text-slate-500">控制面激活不代表 runtime 已切流</p></article>;
+          return <article key={entry} className="rounded-2xl border border-white/80 bg-white p-4"><p className="text-xs font-semibold text-slate-500">{operationLabels[entry]}</p><p className={`mt-2 text-sm font-semibold ${state?.code === "ready" ? "text-emerald-700" : "text-amber-700"}`}>{state ? readinessLabels[state.code] : "读取中…"}</p><p className="mt-1 text-xs text-slate-500">就绪的 active 路由会被 Web AI 有效路由解析采用；真实模型调用需另行现场验收</p></article>;
         })}
       </div>
 
@@ -415,7 +415,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
         })}
       </div>
 
-      {impact ? <section className="mt-5 rounded-2xl border border-indigo-100 bg-white p-5" aria-live="polite"><h3 className="text-sm font-semibold text-slate-900">影响预览 · {operationLabels[impact.operation]}</h3><p className="mt-2 text-xs text-slate-500">运行时状态：尚未接入；本预览不会重建、删除或切换索引。</p><div className="mt-3 space-y-1 text-xs leading-5 text-slate-600">{operationImpactSummary(impact).map((summary) => <p key={summary}>{summary}</p>)}</div></section> : null}
+      {impact ? <section className="mt-5 rounded-2xl border border-indigo-100 bg-white p-5" aria-live="polite"><h3 className="text-sm font-semibold text-slate-900">影响预览 · {operationLabels[impact.operation]}</h3><p className="mt-2 text-xs text-slate-500">运行时状态：已接入 Web AI 有效路由解析；仅 active 且就绪的路由会影响后续运行。本页不会执行真实模型调用，也不会重建、删除或切换索引。</p><div className="mt-3 space-y-1 text-xs leading-5 text-slate-600">{operationImpactSummary(impact).map((summary) => <p key={summary}>{summary}</p>)}</div></section> : null}
       <details className="mt-7 rounded-2xl border border-white/80 bg-white p-5"><summary className="cursor-pointer text-sm font-semibold text-slate-800">最近控制面审计（仅安全快照）</summary><div className="mt-4 space-y-3">{audits.length === 0 ? <p className="text-xs text-slate-500">暂无审计记录。</p> : audits.map((audit) => <div key={audit.id} className="border-b border-slate-100 pb-3 text-xs text-slate-600"><p className="font-semibold text-slate-800">{audit.action} · {operationLabels[audit.operation]} · v{audit.routeVersion}</p><p className="mt-1">Provider 配置版本 {audit.providerConfigurationVersion} · {audit.reason ?? "无原因"}</p></div>)}</div></details>
       {dialog}
     </section>

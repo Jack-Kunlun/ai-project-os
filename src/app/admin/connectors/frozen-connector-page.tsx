@@ -22,7 +22,7 @@ export function FrozenConnectorPage({
           <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">{title}</h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">{description}</p>
           <div className="mt-7 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900" role="status">
-            旧版管理员连接配置已冻结。本页不会读取、展示或提交任何凭据；请等待个人连接配置和项目授权页面上线后再继续操作。
+            管理员连接配置已冻结。本页不会读取、展示或提交任何凭据，也不提供用户凭据池。{active === "git" ? "个人 Git 连接请由用户在个人中心配置，项目仓库页再由连接所有者与项目 Owner 发起明确的受控一次性只读委托。" : "个人 MCP 连接请由用户在个人中心配置；通用 MCP 动作产品入口仍未开放，项目不会在此页面创建或派发动作。"} 管理员只查看必要的安全状态，不代替用户持有或管理私人 Git/MCP 凭据。
           </div>
         </section>
       </div>

@@ -96,6 +96,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     await db.$transaction(async (tx) => {
       await grantWorkspaceMembership(tx, { workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "member", actorId: admin.id, reason: "v3_gate_fixture_default_workspace" });
       await grantWorkspaceMembership(tx, { workspaceId: roleWorkspaceId, userId: memberId, role: "owner", actorId: admin.id, reason: "v3_gate_fixture_role_workspace" });
+      await grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: admin.id, role: "owner", actorId: admin.id, reason: "v3_gate_fixture_admin_direct_access_for_automation_and_web_source" });
       await grantProjectMembership(tx, { projectId: projectA, workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "viewer", actorId: admin.id, reason: "v3_gate_fixture_project_a" });
       await grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "editor", actorId: admin.id, reason: "v3_gate_fixture_project_b" });
     });
@@ -142,9 +143,12 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       await revokeProjectMembership(tx, projectB, outsiderAdminId, DEFAULT_WORKSPACE_ID, { actorId: admin.id, reason: "v3_gate_revoke_outsider_project" });
       await grantWorkspaceMembership(tx, { workspaceId: DEFAULT_WORKSPACE_ID, userId: outsiderAdminId, role: "admin", actorId: admin.id, reason: "v3_gate_fixture_outsider_workspace" });
     });
-    assert.deepEqual((await listUserNotifications(outsiderAdminId, db)).notifications.map((notification) => notification.id).sort(), [platformNotification.id, projectNotification.id].sort());
-    const openedProjectNotification = await openNotification(outsiderAdminId, projectNotification.id, db);
-    assert.equal(openedProjectNotification.id, projectNotification.id);
+    assert.equal((await db.project.findUniqueOrThrow({ where: { id: projectB }, select: { membershipInheritanceMode: true } })).membershipInheritanceMode, "projectOnly");
+    assert.deepEqual((await listUserNotifications(outsiderAdminId, db)).notifications.map((notification) => notification.id), [platformNotification.id]);
+    await assert.rejects(
+      () => openNotification(outsiderAdminId, projectNotification.id, db),
+      (error: unknown) => error instanceof AutomationError && error.code === "NOTIFICATION_NOT_FOUND",
+    );
     await db.$transaction((tx) => revokeWorkspaceMembership(tx, DEFAULT_WORKSPACE_ID, outsiderAdminId, { actorId: admin.id, reason: "v3_gate_revoke_outsider_workspace" }));
     await db.notification.update({ where: { id: projectNotification.id }, data: { readAt: null } });
     assert.deepEqual((await listUserNotifications(outsiderAdminId, db)).notifications.map((notification) => notification.id), [platformNotification.id]);

@@ -172,15 +172,15 @@ export function ProjectMaterialIntake({
             <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-indigo-300 bg-white px-5 text-center hover:border-indigo-400 hover:bg-indigo-50">
               <input type="file" multiple accept={FILE_ACCEPT} onChange={chooseFiles} className="sr-only" />
               <span className="text-sm font-semibold text-indigo-700">选择图片或文档</span>
-              <span className="mt-1 text-[11px] text-slate-400">可一次多选</span>
+              <span className="mt-1 text-[12px] text-slate-400">可一次多选</span>
             </label>
             <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-violet-300 bg-white px-5 text-center hover:border-violet-400 hover:bg-violet-50">
               <input ref={(node) => { node?.setAttribute("webkitdirectory", ""); }} type="file" multiple accept={FILE_ACCEPT} onChange={chooseFiles} className="sr-only" />
               <span className="text-sm font-semibold text-violet-700">选择整个文件夹</span>
-              <span className="mt-1 text-[11px] text-slate-400">读取子目录中的受支持文件</span>
+              <span className="mt-1 text-[12px] text-slate-400">读取子目录中的受支持文件</span>
             </label>
           </div>
-          <p className="mt-3 text-[11px] leading-5 text-slate-400">单次最多 {maxFiles} 个文件；文件夹中的不支持格式会自动跳过。</p>
+          <p className="mt-3 text-[12px] leading-5 text-slate-400">单次最多 {maxFiles} 个文件；文件夹中的不支持格式会自动跳过。</p>
           {files.length > 0 ? <div className="mt-4 min-w-0 rounded-xl bg-white p-4 text-xs text-slate-600"><p className="font-semibold text-slate-800">已选择 {files.length} 个文件</p><p className="mt-2 line-clamp-3 [overflow-wrap:anywhere]">{files.map(selectedFileName).join("、")}</p></div> : null}
           <button type="button" onClick={() => void uploadFiles()} disabled={uploading || files.length === 0} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40">{uploading ? "上传并解析中…" : files.length > 0 ? `上传并解析 ${files.length} 个文件` : "请先选择文件或文件夹"}</button>
         </div>

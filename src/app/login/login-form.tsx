@@ -58,17 +58,17 @@ export function LoginForm({
         <section className="relative order-2 overflow-hidden bg-[radial-gradient(circle_at_91%_0%,rgba(91,33,182,.56),transparent_34%),linear-gradient(145deg,#060b19_0%,#070d1d_60%,#11102c_100%)] px-7 py-7 text-white sm:px-9 sm:py-8 lg:order-1 lg:px-10 lg:py-8 lg:pl-11">
           <div className="pointer-events-none absolute -bottom-40 right-[-72px] h-80 w-80 rounded-full border border-violet-400/10" />
           <div className="pointer-events-none absolute -bottom-28 right-[-28px] h-60 w-60 rounded-full border border-indigo-400/10" />
-          <div className="pointer-events-none absolute bottom-[116px] right-10 h-1.5 w-1.5 rounded-full bg-indigo-300/70 shadow-[0_0_18px_5px_rgba(129,140,248,.35)]" />
+          <div className="pointer-events-none absolute bottom-[116px] right-10 h-1.5 w-1.5 rounded-full bg-indigo-300/70 shadow-[0_0_18px_6px_rgba(129,140,248,.35)]" />
           <div className="relative flex min-h-full flex-col">
             <div className="flex items-center gap-4">
               <span className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] bg-white text-sm font-black tracking-tight text-slate-950 shadow-lg">OS</span>
-              <span className="text-[15px] font-semibold tracking-[-0.01em] text-slate-100">AI Project OS</span>
+              <span className="text-[16px] font-semibold tracking-[-0.01em] text-slate-100">AI Project OS</span>
             </div>
 
             <div className="mt-8">
-              <p className="text-[11px] font-bold uppercase tracking-[0.27em] text-indigo-400">AI Project OS</p>
+              <p className="text-[12px] font-bold uppercase tracking-[0.27em] text-indigo-400">AI Project OS</p>
               <h1 className="mt-3 max-w-[560px] text-[34px] font-semibold leading-[1.17] tracking-[-0.045em] sm:text-[38px] lg:text-[36px] xl:text-[42px]">让项目知识可追溯，<br />让每一次行动都有边界。</h1>
-              <p className="mt-4 max-w-[560px] text-[13px] leading-6 text-slate-300">把项目资料、代码来源、当前状态和团队协作放在同一个受控空间中。<br className="hidden xl:block" />系统保留原始证据与引用链，帮助团队从可靠资料出发理解项目。</p>
+              <p className="mt-4 max-w-[560px] text-[14px] leading-6 text-slate-300">把项目资料、代码来源、当前状态和团队协作放在同一个受控空间中。<br className="hidden xl:block" />系统保留原始证据与引用链，帮助团队从可靠资料出发理解项目。</p>
             </div>
 
             <div className="mt-5 grid gap-2.5 sm:grid-cols-2">
@@ -78,7 +78,7 @@ export function LoginForm({
               <Feature icon={<BoltIcon />} iconTone="bg-amber-500/20 text-amber-300" title="动作受控制">外部只读能力逐项授权、<br />逐次审批并留下审计。</Feature>
             </div>
 
-            <div className="mt-auto flex items-start gap-3 pt-5 text-[11px] leading-5 text-slate-400">
+            <div className="mt-auto flex items-start gap-3 pt-5 text-[12px] leading-5 text-slate-400">
               <span className="mt-0.5 text-slate-400"><SmallShieldIcon /></span>
               <p>当前产品聚焦可追溯资料、人工确认、项目记忆和受控只读能力。<br className="hidden xl:block" />不会替你修改代码、写入 Git、执行 Shell 或部署。</p>
             </div>
@@ -87,20 +87,20 @@ export function LoginForm({
 
         <section className="order-1 flex items-center bg-[radial-gradient(circle_at_75%_15%,rgba(238,242,255,.8),transparent_36%),#fff] px-7 py-8 sm:px-12 lg:order-2 lg:px-16 lg:py-[42px]">
           <form onSubmit={submit} className="mx-auto w-full max-w-[500px]">
-            <p className="text-[11px] font-bold uppercase tracking-[0.27em] text-indigo-600">Secure workspace</p>
+            <p className="text-[12px] font-bold uppercase tracking-[0.27em] text-indigo-600">Secure workspace</p>
             <h2 className="mt-3 text-[30px] font-semibold tracking-[-0.04em] sm:text-[34px]">登录 AI Project OS</h2>
             <p className="mt-2 text-[14px] leading-6 text-slate-500">使用账号登录你的工作区，继续处理项目资料与治理任务。</p>
 
             <label className="mt-7 block text-sm font-semibold" htmlFor="login-username">用户名</label>
             <div className="relative mt-2">
               <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center text-slate-400"><UserIcon /></span>
-              <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required placeholder="输入登录名" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[15px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+              <input id="login-username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" minLength={3} maxLength={64} required placeholder="输入登录名" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
             </div>
 
             <label className="mt-5 block text-sm font-semibold" htmlFor="login-password">密码</label>
             <div className="relative mt-2">
               <span className="pointer-events-none absolute inset-y-0 left-5 flex items-center text-slate-400"><LockIcon /></span>
-              <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder="输入密码" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[15px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
+              <input id="login-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required placeholder="输入密码" className="h-14 w-full rounded-xl border border-slate-200 bg-slate-50/80 pl-[56px] pr-5 text-[16px] outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-100" />
             </div>
 
             <div className="mt-5 flex items-center justify-between gap-4 text-[12px]">
@@ -115,16 +115,16 @@ export function LoginForm({
             {notice ? <p role={noticeTone === "error" ? "alert" : "status"} className={`mt-4 rounded-xl border px-4 py-3 text-sm ${noticeTone === "error" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>{notice}</p> : null}
             {error ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
-            <button type="submit" disabled={pending} className="mt-6 h-[52px] w-full rounded-xl bg-[linear-gradient(90deg,#4f35ff,#4a2df3)] px-4 text-[15px] font-semibold tracking-[0.22em] text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:opacity-50">{pending ? "登录中…" : "登 录"}</button>
+            <button type="submit" disabled={pending} className="mt-6 h-[52px] w-full rounded-xl bg-[linear-gradient(90deg,#4f35ff,#4a2df3)] px-4 text-[16px] font-semibold tracking-[0.22em] text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:opacity-50">{pending ? "登录中…" : "登 录"}</button>
 
             <div className="my-5 flex items-center gap-5 text-sm text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>其他登录方式</span><span className="h-px flex-1 bg-slate-200" /></div>
 
             {githubLoginAvailable ? (
-              <a href={githubHref} className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-300 bg-white text-[15px] font-semibold text-slate-900 transition hover:border-indigo-300 hover:bg-indigo-50"><GitHubIcon />使用 GitHub 登录</a>
+              <a href={githubHref} className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-300 bg-white text-[16px] font-semibold text-slate-900 transition hover:border-indigo-300 hover:bg-indigo-50"><GitHubIcon />使用 GitHub 登录</a>
             ) : (
               <div>
-                <button type="button" disabled className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-200 bg-slate-50 text-[15px] font-semibold text-slate-500"><GitHubIcon />使用 GitHub 登录</button>
-                <p className="mt-2 text-center text-[11px] text-slate-400">当前部署尚未配置 GitHub OAuth</p>
+                <button type="button" disabled className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-200 bg-slate-50 text-[16px] font-semibold text-slate-500"><GitHubIcon />使用 GitHub 登录</button>
+                <p className="mt-2 text-center text-[12px] text-slate-400">当前部署尚未配置 GitHub OAuth</p>
               </div>
             )}
 

@@ -190,14 +190,14 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
           {archived ? <h2 className="truncate text-xl font-semibold tracking-tight text-slate-700">{project.name}</h2> : <Link href={`/projects/${project.id}`} className="block truncate text-xl font-semibold tracking-tight text-slate-900 transition group-hover:text-indigo-700">{project.name}</Link>}
           <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{project.description || "还没有项目描述。进入资料与条目补充背景，让后续记忆更容易理解。"}</p>
         </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${archived ? "bg-slate-100 text-slate-600" : project.memoryIndexPointer ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{archived ? "已归档" : project.memoryIndexPointer ? "记忆就绪" : "待建立记忆"}</span>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] font-bold ${archived ? "bg-slate-100 text-slate-600" : project.memoryIndexPointer ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{archived ? "已归档" : project.memoryIndexPointer ? "记忆就绪" : "待建立记忆"}</span>
       </div>
       <div className="mt-5 grid grid-cols-4 gap-2"><SmallStat label="文件" value={project._count.assets} /><SmallStat label="事实" value={project._count.items} /><SmallStat label="仓库" value={project._count.repositoryLinks} /><SmallStat label="智能体" value={project._count.projectAgentRuns} /></div>
       {archived ? (
         <div className="mt-5 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">归档于 {formatDate(project.archivedAt!)}。项目数据未删除；恢复后才能继续修改或运行任务。</div>
       ) : (
         <div className="mt-5">
-          <div className="flex items-center justify-between text-[11px] text-slate-400"><span>配置进度</span><span>{progress}%</span></div>
+          <div className="flex items-center justify-between text-[12px] text-slate-400"><span>配置进度</span><span>{progress}%</span></div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${progress}%` }} /></div>
         </div>
       )}
@@ -208,8 +208,8 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
           <><QuickLink href={`/projects/${project.id}`} label="概览" /><QuickLink href={`/projects/${project.id}/materials`} label="资料" /><QuickLink href={`/projects/${project.id}/intelligence`} label="AI 工作台" primary /><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("archive")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:border-amber-200 hover:text-amber-700">归档</button></>
         )}
       </div>
-      {exportMessage ? <p role="status" className="mt-3 text-[11px] leading-5 text-slate-500">{exportMessage}</p> : null}
-      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-[11px] text-slate-400"><span>更新于 {formatDate(project.updatedAt)}</span><span>{latestJob ? `${jobLabels[latestJob.kind]} · ${jobStatusLabels[latestJob.status]}` : "暂无任务"}</span></div>
+      {exportMessage ? <p role="status" className="mt-3 text-[12px] leading-5 text-slate-500">{exportMessage}</p> : null}
+      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-[12px] text-slate-400"><span>更新于 {formatDate(project.updatedAt)}</span><span>{latestJob ? `${jobLabels[latestJob.kind]} · ${jobStatusLabels[latestJob.status]}` : "暂无任务"}</span></div>
     </article>
   );
 }

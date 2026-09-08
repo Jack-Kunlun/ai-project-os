@@ -133,8 +133,8 @@ export function SystemOperationsClient({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">System operations</p>
-                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-200">仅初始超级管理员</span>
-                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-200">只读</span>
+                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[12px] font-semibold text-slate-200">仅初始超级管理员</span>
+                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[12px] font-semibold text-slate-200">只读</span>
               </div>
               <h1 className="mt-4 text-3xl font-semibold tracking-[-0.04em] sm:text-5xl">生产备份与 COS 同步</h1>
               <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">查看每日、手动和部署前备份的脱敏执行状态。页面不能启动、删除或恢复备份，也不能访问 COS 密钥、age 私钥、Docker 或 systemd。</p>
@@ -205,5 +205,5 @@ function RunDetail({ label, value, mono = false }: { label: string; value: strin
 function HistoryRun({ run }: { run: PublicBackupRun }) {
   const metadata = stateMetadata[run.state];
   const message = failureMessage(run);
-  return <article className="rounded-2xl border border-slate-200 px-5 py-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold text-slate-800">{triggerLabels[run.trigger]}{run.targetTag ? ` · ${run.targetTag}` : ""}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${metadata.tone}`}>{metadata.label}</span></div><p className="mt-2 text-xs text-slate-500">{formatDate(run.startedAt)} · {formatDuration(run.durationSeconds)} · {formatBytes(run.archiveBytes)}</p></div><p className="font-mono text-[11px] text-slate-400">{run.runId}</p></div>{message ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700"><strong>{run.errorCode}</strong> · {message}</p> : null}</article>;
+  return <article className="rounded-2xl border border-slate-200 px-5 py-4"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold text-slate-800">{triggerLabels[run.trigger]}{run.targetTag ? ` · ${run.targetTag}` : ""}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${metadata.tone}`}>{metadata.label}</span></div><p className="mt-2 text-xs text-slate-500">{formatDate(run.startedAt)} · {formatDuration(run.durationSeconds)} · {formatBytes(run.archiveBytes)}</p></div><p className="font-mono text-[12px] text-slate-400">{run.runId}</p></div>{message ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700"><strong>{run.errorCode}</strong> · {message}</p> : null}</article>;
 }

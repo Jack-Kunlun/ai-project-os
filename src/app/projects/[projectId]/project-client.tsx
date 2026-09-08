@@ -648,8 +648,8 @@ export function ProjectDetailClient({ username }: { username: string }) {
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">{source.kind}</span>
-                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600">待审核资料</span>
+                        <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-wide text-indigo-700">{source.kind}</span>
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-600">待审核资料</span>
                         </div>
                         <h4 className="mt-3 line-clamp-2 text-sm font-semibold leading-6 text-slate-900">{source.preview || "未提供文字预览"}</h4>
                         <p className="mt-2 text-xs text-slate-500">{source.kind === "manual" ? "手工输入资料" : "外部来源已绑定"} · 最近接入于 {formatSourceDate(source.ingestedAt)}</p>
@@ -894,19 +894,19 @@ function ItemCard({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${itemTypeClass(item.type)}`}>
+            <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold uppercase tracking-wide ${itemTypeClass(item.type)}`}>
               {item.type} · {itemTypeLabels[item.type]}
             </span>
-            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${itemStatusClass(item.reviewStatus)}`}>
+            <span className={`rounded-full border px-2.5 py-1 text-[12px] font-semibold ${itemStatusClass(item.reviewStatus)}`}>
               {itemStatusLabels[item.reviewStatus]}
             </span>
             {item.aiCandidateClaim ? (
-              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">
                 AI 候选 · {item.aiCandidateClaim.reviewStatus === "candidate" ? "待审阅" : item.aiCandidateClaim.reviewStatus === "accepted" ? "已接受" : "已驳回"}
               </span>
             ) : null}
             {item.webAiCandidate ? (
-              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold text-indigo-700">
+              <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-700">
                 AI 候选 · {item.webAiCandidate.reviewStatus === "candidate" ? "待审阅" : item.webAiCandidate.reviewStatus === "accepted" ? "已接受" : "已驳回"}
               </span>
             ) : null}

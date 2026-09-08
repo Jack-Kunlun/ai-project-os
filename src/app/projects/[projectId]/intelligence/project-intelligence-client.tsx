@@ -273,7 +273,7 @@ function ObservationSection({ title, observations, numbers }: { title: string; o
 }
 
 function CitationChips({ ids, numbers }: { ids: string[]; numbers: ReadonlyMap<string, number> }) {
-  return <span className="mt-3 flex flex-wrap gap-1.5">{[...new Set(ids)].map((id) => <span key={id} title={id} className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">证据 {numbers.get(id) ?? "?"}</span>)}</span>;
+  return <span className="mt-3 flex flex-wrap gap-1.5">{[...new Set(ids)].map((id) => <span key={id} title={id} className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[12px] font-semibold text-indigo-700">证据 {numbers.get(id) ?? "?"}</span>)}</span>;
 }
 
 function EvidenceList({ citations }: { citations: Citation[] }) {
@@ -286,5 +286,5 @@ function ToolTraceView({ objective, trace }: { objective: string; trace: ToolTra
 }
 
 function RunMeta({ inputTokens, outputTokens, fingerprint }: { inputTokens: number; outputTokens: number; fingerprint: string }) {
-  return <p className="mt-4 text-[11px] leading-5 text-slate-400">输入 {inputTokens} tokens · 输出 {outputTokens} tokens · 输入清单 {shortHash(fingerprint)}</p>;
+  return <p className="mt-4 text-[12px] leading-5 text-slate-400">输入 {inputTokens} tokens · 输出 {outputTokens} tokens · 输入清单 {shortHash(fingerprint)}</p>;
 }

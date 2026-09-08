@@ -374,7 +374,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
           <select value={operation} disabled={editingRouteId !== null} onChange={(event) => changeOperation(event.target.value as Operation)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-400">
             {OPERATIONS.map((entry) => <option key={entry} value={entry}>{operationLabels[entry]}</option>)}
           </select>
-          {editingRouteId !== null ? <span className="mt-1 block text-[11px] font-normal text-slate-400">编辑草稿时操作固定；如需其他操作，请取消编辑后新建。</span> : null}
+          {editingRouteId !== null ? <span className="mt-1 block text-[12px] font-normal text-slate-400">编辑草稿时操作固定；如需其他操作，请取消编辑后新建。</span> : null}
         </label>
         <label className="text-xs font-semibold text-slate-600">已确认的平台供应商
           <select value={providerId} onChange={(event) => changeProvider(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">

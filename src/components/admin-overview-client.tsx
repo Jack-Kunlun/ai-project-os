@@ -56,5 +56,5 @@ function StatusCard({ label, value, detail, tone }: { label: string; value: stri
 }
 
 function Count({ label, value }: { label: string; value?: number }) {
-  return <div className="rounded-2xl bg-slate-50 px-3 py-4"><p className="text-2xl font-semibold text-slate-900">{value ?? "—"}</p><p className="mt-1 text-[11px] text-slate-500">{label}</p></div>;
+  return <div className="rounded-2xl bg-slate-50 px-3 py-4"><p className="text-2xl font-semibold text-slate-900">{value ?? "—"}</p><p className="mt-1 text-[12px] text-slate-500">{label}</p></div>;
 }

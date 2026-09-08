@@ -283,7 +283,7 @@ function ConnectionCard({ connection, onChanged, onRemoved }: { connection: Conn
   return (
     <><article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{statusLabels[connection.status]}</span></div><p className="mt-2 text-xs text-slate-500">{connection.providerKind.toUpperCase()} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div>
+        <div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{statusLabels[connection.status]}</span></div><p className="mt-2 text-xs text-slate-500">{connection.providerKind.toUpperCase()} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div>
         <div className="text-right text-xs text-slate-400"><p>{connection._count.repositories} 个仓库身份</p><p className="mt-1">凭据 ····{connection.credential?.maskedSuffix ?? "无"}</p></div>
       </div>
       <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2"><p>内网访问：{connection.allowPrivateNetwork ? "已显式允许" : "禁止"}</p><p>最近验证：{connection.lastTestedAt ? new Date(connection.lastTestedAt).toLocaleString("zh-CN") : "尚未验证"}</p>{connection.lastErrorCode ? <p className="sm:col-span-2 text-rose-600">最近错误：{connection.lastErrorCode}</p> : null}</div>

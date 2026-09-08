@@ -190,20 +190,258 @@ test("admin overview uses read-only aggregates and exposes no identity or creden
   const calls: string[] = [];
   const db = {
     $queryRaw: async () => { calls.push("health"); return [{ ok: 1 }]; },
-    appUser: { count: async () => { calls.push("users"); return 7; } },
+    appUser: {
+      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+      count: async () => { calls.push("users"); return 7; },
+    },
     membershipSubscription: { count: async () => { calls.push("memberships"); return 3; } },
     aiProviderConnection: { count: async () => { calls.push("providers"); return 2; } },
     platformTokenGrant: { aggregate: async (input: { where?: unknown }) => { calls.push(input.where ? "available" : "issued"); return { _sum: input.where ? { remainingTokens: 420 } : { amount: 500_000 } }; } },
     platformTokenReservation: { aggregate: async (input: { where?: unknown }) => { calls.push("reservations"); return JSON.stringify(input.where).includes("settled") ? { _sum: { settledTokens: 35 } } : { _sum: { reservedTokens: 80 } }; } },
     workerRuntime: { findUnique: async () => { calls.push("worker"); return { status: "running", heartbeatAt: new Date(now.getTime() - 1_000), consecutiveFailures: 0 }; } },
+    workspace: { findUnique: async () => ({ createdById: "99999999-9999-4999-8999-999999999999" }) },
   } as unknown as PrismaClient;
 
-  const overview = await getSystemOverview(db, now);
+  const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
   assert.deepEqual(overview.counts, { users: 7, activeMemberships: 3, verifiedPlatformModels: 2 });
   assert.deepEqual(overview.tokens, { issuedTokens: 500_000, availableTokens: 420, reservedTokens: 80, consumedTokens: 35 });
   assert.equal(overview.service.database, "up");
   assert.equal(overview.service.worker.status, "up");
-  assert.deepEqual(calls.sort(), ["available", "health", "issued", "memberships", "providers", "reservations", "reservations", "users", "worker"].sort());
+  assert.equal(overview.backup.access, "restricted");
+  assert.equal(overview.backup.snapshotRead, "restricted");
+  assert.equal(overview.backup.freshness.status, "restricted");
+  assert.deepEqual(calls.sort(), ["available", "health", "health", "issued", "memberships", "providers", "reservations", "reservations", "users", "worker"].sort());
+});
+
+test("admin overview keeps control-plane readiness separate from live-call evidence", async () => {
+  const now = new Date("2026-09-03T00:00:00.000Z");
+  const db = {
+    $queryRaw: async () => [{ ok: 1 }],
+    appUser: {
+      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+      count: async () => 1,
+    },
+    membershipSubscription: { count: async () => 0 },
+    aiProviderConnection: { count: async () => 1 },
+    platformTokenGrant: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where ? { remainingTokens: 10 } : { amount: 10 } }) },
+    platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 2 } : { reservedTokens: 3 } }) },
+    workerRuntime: { findUnique: async () => ({ status: "running", heartbeatAt: new Date(now.getTime() - 1_000), consecutiveFailures: 2 }) },
+    platformDefaultAiRoute: { findMany: async () => [] },
+    project: { count: async () => 0 },
+    workspace: { findUnique: async () => ({ createdById: actorId }) },
+    providerCallAudit: { groupBy: async () => [{ safeErrorCode: "PROVIDER_TIMEOUT", _count: { _all: 2 } }] },
+    projectMcpActionDispatchAttempt: { groupBy: async () => [{ safeErrorCode: "MCP_DISPATCH_FAILED", _count: { _all: 1 } }] },
+    backgroundJob: { groupBy: async () => [{ failureCode: "JOB_FAILED", _count: { _all: 3 } }] },
+    automationRun: { groupBy: async () => [] },
+    projectAction: { groupBy: async () => [] },
+  } as unknown as PrismaClient;
+
+  const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
+  assert.equal(overview.defaultRoutes.total, 6);
+  assert.equal(overview.defaultRoutes.ready, 0);
+  assert.equal(overview.defaultRoutes.controlPlane, "attention");
+  assert.equal(overview.defaultRoutes.liveCallEvidence, "not_obtained");
+  assert.equal(overview.defaultRoutes.operations.embedding.code, "missing");
+  assert.equal(overview.service.worker.consecutiveFailures, 2);
+  assert.equal(overview.mcp.pendingAttestations, null);
+  assert.equal(overview.mcp.evidence, "not_obtained");
+  assert.equal(overview.failures.total, 6);
+  assert.equal(overview.failures.window.days, 7);
+  assert.equal(overview.failures.window.from, "2026-08-27T00:00:00.000Z");
+  assert.equal(overview.failures.window.to, now.toISOString());
+  assert.deepEqual(overview.failures.providerCalls.byCode, [{ code: "PROVIDER_TIMEOUT", count: 2 }]);
+  assert.equal(overview.backup.access, "full");
+  assert.equal(overview.backup.snapshotRead, "read");
+  assert.equal(overview.backup.latestValidRecord.status, "none");
+  assert.equal(overview.backup.freshness.status, "unknown");
+  assert.equal(overview.backup.recoveryDrill.status, "not_obtained");
+  assert.equal(overview.setupChecklist.find((item) => item.key === "backup-source")?.status, "unknown");
+  assert.equal(overview.setupChecklist.find((item) => item.key === "default-routes")?.status, "attention");
+});
+
+test("MCP overview queue requires the same owner, verifier, and V2 attestation shape as the control plane", async () => {
+  const [overview, attestationService] = await Promise.all([
+    readFile("src/lib/system-overview.ts", "utf8"),
+    readFile("src/lib/mcp-attestation-control-plane-service.ts", "utf8"),
+  ]);
+  assert.match(overview, /owner\."id"\s*=\s*connection\."ownerUserId"[\s\S]*owner\."disabledAt"\s+IS\s+NULL/u);
+  assert.match(overview, /verifier\."role"\s*=\s*'admin'[\s\S]*verifier\."disabledAt"\s+IS\s+NULL/u);
+  assert.match(overview, /attestation\."version"\s*=\s*1[\s\S]*attestation\."conclusion"\s*=\s*'read_only_verified'[\s\S]*attestation\."evidence"\s*=\s*'\{\}'::jsonb/u);
+  assert.match(attestationService, /row\.version !== 1[\s\S]*row\.conclusion !== "read_only_verified"/u);
+  assert.match(attestationService, /row\.verifiedBy\.role !== "admin"[\s\S]*row\.verifiedBy\.disabledAt !== null/u);
+  assert.match(attestationService, /definition\.connection\.ownerUser\.disabledAt !== null/u);
+});
+
+test("admin overview labels MCP failures as bounded control-plane evidence and keeps backup incomplete without a drill", async () => {
+  const client = await readFile("src/components/admin-overview-client.tsx", "utf8");
+  assert.match(client, /调度\/控制面失败聚合/u);
+  assert.match(client, /MCP 调度\/控制面失败/u);
+  assert.match(client, /包括出站前拒绝，不表示已经出站/u);
+  assert.match(client, /overview\.failures\.window\.days/u);
+  assert.match(client, /backup\.sourceStatus/u);
+  assert.match(client, /backup\.recoveryDrill\.status === "verified"/u);
+  assert.match(client, /backup\.latestValidRecord\.state === "succeeded"/u);
+  assert.match(client, /Worker 循环异常/u);
+  assert.doesNotMatch(client, /连续失败/u);
+});
+
+test("admin failure aggregates use terminal completedAt windows, retain null-code evidence, exclude personal BYOK, and include automation and controlled actions", async () => {
+  const now = new Date("2026-09-03T00:00:00.000Z");
+  const whereBySource: Array<{ source: string; where: Record<string, unknown> }> = [];
+  const capture = (source: string, rows: readonly Record<string, unknown>[]) => async (input: { where?: Record<string, unknown> }) => {
+    whereBySource.push({ source, where: input.where ?? {} });
+    return rows;
+  };
+  const db = {
+    $queryRaw: async () => [],
+    appUser: {
+      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+      count: async () => 1,
+    },
+    membershipSubscription: { count: async () => 0 },
+    aiProviderConnection: { count: async () => 0 },
+    platformTokenGrant: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where ? { remainingTokens: 0 } : { amount: 0 } }) },
+    platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 0 } : { reservedTokens: 0 } }) },
+    workerRuntime: { findUnique: async () => null },
+    project: { count: async () => 0 },
+    workspace: { findUnique: async () => ({ createdById: actorId }) },
+    // Simulate both ownership classes. A Prisma groupBy applies the predicate
+    // before returning rows, so this callback models platform inclusion and
+    // personal BYOK exclusion together with the captured where clause.
+    providerCallAudit: {
+      groupBy: async (input: { where?: Record<string, unknown> }) => {
+        whereBySource.push({ source: "provider", where: input.where ?? {} });
+        return input.where?.billingMode === "platform" && input.where?.payerKind === "platformCaller"
+          ? [{ safeErrorCode: "PLATFORM_PROVIDER_FAILURE", _count: { _all: 1 } }]
+          : [
+            { safeErrorCode: "PLATFORM_PROVIDER_FAILURE", _count: { _all: 1 } },
+            { safeErrorCode: "PERSONAL_BYOK_FAILURE", _count: { _all: 1 } },
+          ];
+      },
+    },
+    projectMcpActionDispatchAttempt: { groupBy: capture("mcp", [{ safeErrorCode: "MCP_PRE_DISPATCH_REJECTED", _count: { _all: 1 } }]) },
+    backgroundJob: { groupBy: capture("background", [{ failureCode: null, _count: { _all: 1 } }]) },
+    automationRun: { groupBy: capture("automation", [{ failureCode: "AUTOMATION_EXECUTION_FAILED", _count: { _all: 1 } }]) },
+    projectAction: { groupBy: capture("controlled-action", [{ failureCode: null, _count: { _all: 1 } }]) },
+  } as unknown as PrismaClient;
+
+  const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
+  assert.equal(overview.failures.total, 5);
+  assert.deepEqual(overview.failures.providerCalls.byCode, [{ code: "PLATFORM_PROVIDER_FAILURE", count: 1 }]);
+  assert.deepEqual(overview.failures.backgroundJobs.byCode, [{ code: "UNCLASSIFIED_FAILURE", count: 1 }]);
+  assert.deepEqual(overview.failures.automationRuns.byCode, [{ code: "AUTOMATION_EXECUTION_FAILED", count: 1 }]);
+  assert.deepEqual(overview.failures.controlledActions.byCode, [{ code: "UNCLASSIFIED_FAILURE", count: 1 }]);
+  assert.equal(overview.failures.mcpCalls.byCode[0]?.code, "MCP_PRE_DISPATCH_REJECTED");
+  assert.equal(overview.failures.window.from, "2026-08-27T00:00:00.000Z");
+  assert.equal(overview.failures.window.to, now.toISOString());
+  assert.equal(whereBySource.length, 5);
+  for (const entry of whereBySource) {
+    const completedAt = entry.where.completedAt as { gte?: Date; lte?: Date } | undefined;
+    assert.equal(completedAt?.gte?.toISOString(), "2026-08-27T00:00:00.000Z", entry.source);
+    assert.equal(completedAt?.lte?.toISOString(), now.toISOString(), entry.source);
+    assert.equal("createdAt" in entry.where, false, entry.source);
+  }
+  const providerWhere = whereBySource.find((entry) => entry.source === "provider")?.where;
+  assert.equal(providerWhere?.billingMode, "platform");
+  assert.equal(providerWhere?.payerKind, "platformCaller");
+});
+
+test("admin overview keeps backup permission failures distinct from restricted access", async () => {
+  const now = new Date("2026-09-03T00:00:00.000Z");
+  const db = {
+    $queryRaw: async () => [],
+    appUser: {
+      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+      count: async () => 1,
+    },
+    membershipSubscription: { count: async () => 0 },
+    aiProviderConnection: { count: async () => 0 },
+    platformTokenGrant: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where ? { remainingTokens: 0 } : { amount: 0 } }) },
+    platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 0 } : { reservedTokens: 0 } }) },
+    workerRuntime: { findUnique: async () => null },
+    project: { count: async () => 0 },
+    workspace: { findUnique: async () => { throw new Error("permission lookup unavailable"); } },
+  } as unknown as PrismaClient;
+
+  const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
+  assert.equal(overview.backup.access, "not_obtained");
+  assert.equal(overview.backup.snapshotRead, "not_obtained");
+  assert.equal(overview.backup.latestValidRecord.status, "not_obtained");
+  assert.equal(overview.backup.freshness.status, "not_obtained");
+  assert.equal(overview.backup.recoveryDrill.status, "not_obtained");
+  assert.equal(overview.setupChecklist.find((item) => item.key === "backup-source")?.status, "unknown");
+});
+
+test("admin backup projection preserves an invalid source status instead of presenting an empty ready source", async () => {
+  const previousRoot = process.env.AI_PROJECT_OS_OPERATIONS_STATUS_ROOT;
+  process.env.AI_PROJECT_OS_OPERATIONS_STATUS_ROOT = "/";
+  try {
+    const now = new Date("2026-09-03T00:00:00.000Z");
+    const db = {
+      $queryRaw: async () => [],
+      appUser: {
+        findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+        count: async () => 1,
+      },
+      membershipSubscription: { count: async () => 0 },
+      aiProviderConnection: { count: async () => 0 },
+      platformTokenGrant: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where ? { remainingTokens: 0 } : { amount: 0 } }) },
+      platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 0 } : { reservedTokens: 0 } }) },
+      workerRuntime: { findUnique: async () => null },
+      project: { count: async () => 0 },
+      workspace: { findUnique: async () => ({ createdById: actorId }) },
+    } as unknown as PrismaClient;
+
+    const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
+    assert.equal(overview.backup.access, "full");
+    assert.equal(overview.backup.snapshotRead, "read");
+    assert.equal(overview.backup.sourceStatus, "invalid");
+    assert.equal(overview.backup.latestValidRecord.status, "none");
+    assert.equal(overview.backup.freshness.status, "unknown");
+    assert.equal(overview.setupChecklist.find((item) => item.key === "backup-source")?.status, "unknown");
+  } finally {
+    if (previousRoot === undefined) delete process.env.AI_PROJECT_OS_OPERATIONS_STATUS_ROOT;
+    else process.env.AI_PROJECT_OS_OPERATIONS_STATUS_ROOT = previousRoot;
+  }
+});
+
+test("admin overview rejects an unverified actor before reading operational aggregates", async () => {
+  let operationalRead = false;
+  const db = {
+    appUser: {
+      findUnique: async () => ({ id: actorId, role: "member" as const, disabledAt: null }),
+      count: async () => { operationalRead = true; return 1; },
+    },
+    $queryRaw: async () => { operationalRead = true; throw new Error("database health must not be read"); },
+  } as unknown as PrismaClient;
+
+  await assert.rejects(
+    () => getSystemOverview({ id: actorId, role: "member" }, db, new Date("2026-09-03T00:00:00.000Z")),
+    (error: unknown) => error instanceof Error && error.name === "AuthError" && (error as { code?: unknown }).code === "AUTH_FORBIDDEN",
+  );
+  assert.equal(operationalRead, false);
+});
+
+test("admin navigation source implements a persistent desktop rail and focus-contained mobile drawer", async () => {
+  const shell = await readFile("src/components/admin-shell.tsx", "utf8");
+  assert.match(shell, /^"use client";/u);
+  // AppHeader owns the sticky top layer; the admin sub-navigation remains in
+  // normal flow so it cannot cover the header at any viewport width.
+  assert.doesNotMatch(shell, /sticky top-2 z-40/u);
+  assert.match(shell, /rounded-3xl border border-indigo-100/u);
+  assert.match(shell, /lg:flex/u);
+  assert.match(shell, /aria-expanded=\{drawerOpen\}/u);
+  assert.match(shell, /role="dialog"/u);
+  assert.match(shell, /aria-modal="true"/u);
+  assert.match(shell, /event\.key === "Escape"/u);
+  assert.match(shell, /querySelectorAll<HTMLElement>\(focusableSelector\)/u);
+  assert.match(shell, /previousFocus\?\.focus\(\)/u);
+  assert.match(shell, /tabIndex=\{-1\}/u);
+  assert.match(shell, /originalBodyOverflow/u);
+  assert.match(shell, /addEventListener\("focusin"/u);
+  assert.match(shell, /drawerRef\.current\?\.contains/u);
+  assert.match(shell, /focus-visible:outline-2/u);
+  assert.match(shell, /用户私有连接边界/u);
 });
 
 test("user guide and project surfaces keep admin controls out of the ordinary flow", async () => {

@@ -564,14 +564,6 @@ async function readCodeDocuments(
      AND code_entry."id" = membership."codeGenerationEntryId"
      AND code_entry."repositoryFileRevisionId" =
          membership."repositoryFileRevisionId"
-    JOIN "ProjectSource" AS source
-      ON source."projectId" = chunk."projectId"
-     AND source."id" = chunk."projectSourceId"
-     AND source."originScope" = chunk."originScope"
-     AND source."projectRepositoryLinkId" =
-         chunk."projectRepositoryLinkId"
-     AND source."revisionKey" = chunk."sourceRevisionKey"
-     AND source."contentHash" = chunk."sourceContentHash"
     JOIN "ChunkEmbedding" AS embedding
       ON embedding."projectId" = input_entry."projectId"
      AND embedding."indexGenerationId" = input_entry."indexGenerationId"
@@ -582,8 +574,6 @@ async function readCodeDocuments(
     WHERE aggregate_entry."projectId" = ${projectId}::uuid
       AND aggregate_entry."projectRepositoryRagSnapshotId" =
           ${projectSnapshotId}::uuid
-      AND source."kind"::text <> 'mcp'
-      AND source."retiredAt" IS NULL
       AND repository_snapshot."codeIndexGenerationId" IS NOT NULL
       AND input_entry."entryKind" = 'repository_code'
       AND chunk."originScope" = 'repository_link'
@@ -593,7 +583,7 @@ async function readCodeDocuments(
       AND chunk."contentBytes" IS NOT NULL
     ORDER BY aggregate_entry."ordinal", input_entry."ordinal", input_entry."id"
     FOR SHARE OF aggregate_entry, repository_snapshot, membership,
-      input_entry, chunk, code_entry, source, embedding
+      input_entry, chunk, code_entry, embedding
   `));
 }
 

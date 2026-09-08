@@ -803,6 +803,18 @@ test(
         });
         assert.equal(repositoryHybridResults.mode, "hybrid");
         assert.equal(repositoryHybridResults.results.length, 3);
+        assert.deepEqual(
+          repositoryHybridResults.results
+            .map((result) => result.citation.origin)
+            .sort(),
+          ["project", "repositoryCode", "repositoryCode"],
+        );
+        assert.equal(
+          repositoryHybridResults.results.filter((result) =>
+            result.citation.origin === "repositoryCode",
+          ).length,
+          2,
+        );
         assert.equal(
           repositoryHybridResults.results[0]?.componentRanks.vector,
           1,

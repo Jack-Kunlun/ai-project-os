@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
+import { Prisma } from "@prisma/client";
 import { Client } from "pg";
 import { getDb } from "../src/lib/db";
 import {
@@ -19,6 +20,7 @@ import {
   updatePersonalProviderConnection,
 } from "../src/lib/personal-ai-provider-service";
 import { ProviderTransportError } from "../src/lib/ai-providers/transport";
+import { createControlledMembership, grantControlledMembershipInTransaction, revokeControlledMembershipInTransaction } from "./membership-fixture";
 
 const shouldRun = process.env.PERSONAL_AI_PROVIDER_POSTGRES_GATE === "1";
 const repositoryRoot = process.cwd();
@@ -126,12 +128,15 @@ test("WP05A personal providers enforce owner scope, membership lifecycle, and sa
         { id: expiredId, username: `personal_expired_${suffix}`, role: "user" },
       ],
     });
-    await db.membershipSubscription.createMany({
-      data: [
-        activeMembership(activeId, adminId, membershipNow),
-        activeMembership(otherId, adminId, membershipNow),
-        activeMembership(expiredId, adminId, membershipNow),
-      ],
+    for (const userId of [activeId, otherId]) {
+      await createControlledMembership(db, {
+        adminId,
+        ...activeMembership(userId, adminId, membershipNow),
+      });
+    }
+    const expiredMembership = await createControlledMembership(db, {
+      adminId,
+      ...activeMembership(expiredId, adminId, membershipNow),
     });
 
     const sameName = `Personal OpenAI ${suffix}`;
@@ -279,7 +284,7 @@ test("WP05A personal providers enforce owner scope, membership lifecycle, and sa
         kind: "openai",
         apiKey: `admin-key-${suffix}-a`,
         generationModelId: "gpt-4.1-mini",
-      }, actor(adminWithoutMembership.id, "admin"), db),
+    }, actor(adminWithoutMembership.id, "admin"), db),
       (error: unknown) => error instanceof PersonalProviderServiceError && error.code === "AI_MEMBERSHIP_REQUIRED",
     );
 
@@ -290,11 +295,23 @@ test("WP05A personal providers enforce owner scope, membership lifecycle, and sa
       generationModelId: "gpt-4.1-mini",
     }, actor(expiredId), db);
     providerIds.push(expiredProvider.id);
-    await db.membershipSubscription.update({
-      where: { userId: expiredId },
-      data: { expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1_000) },
-    });
     await db.aiProviderConnection.update({ where: { id: expiredProvider.id }, data: { status: "verified", lastTestedAt: new Date() } });
+
+    const expiredTransitionAt = new Date();
+    await db.$transaction((tx) => revokeControlledMembershipInTransaction(tx, {
+      subscriptionId: expiredMembership.id,
+      adminId,
+      reason: `personal provider expired fixture ${suffix}`,
+      transitionAt: expiredTransitionAt,
+    }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    await db.$transaction((tx) => grantControlledMembershipInTransaction(tx, {
+      subscriptionId: expiredMembership.id,
+      adminId,
+      startsAt: new Date(expiredTransitionAt.getTime() - 2 * 24 * 60 * 60 * 1_000),
+      expiresAt: new Date(expiredTransitionAt.getTime() - 24 * 60 * 60 * 1_000),
+      grantedById: adminId,
+      transitionAt: expiredTransitionAt,
+    }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     const expiredList = await listPersonalProviderConnections(actor(expiredId), db);
     assert.equal(expiredList.length, 1);

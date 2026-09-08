@@ -4211,6 +4211,8 @@ model AppUser {
   githubIdentity               GitHubIdentity?
   githubOauthAttempts          GitHubOauthAttempt[]
   membershipSubscription       MembershipSubscription?
+  membershipMutationPreviewsAsActor MembershipMutationPreview[] @relation("MembershipMutationPreviewActor")
+  membershipMutationPreviewsAsUser  MembershipMutationPreview[] @relation("MembershipMutationPreviewUser")
   grantedMemberships           MembershipSubscription[]       @relation("MembershipGrantedBy")
   revokedMemberships           MembershipSubscription[]       @relation("MembershipRevokedBy")
   membershipAuditEvents        MembershipSubscriptionAudit[]  @relation("MembershipAuditUser")
@@ -4277,20 +4279,68 @@ model MembershipSubscription {
   @@index([grantedById, updatedAt])
 }
 
-model MembershipSubscriptionAudit {
-  id             String                    @id @default(uuid()) @db.Uuid
-  subscriptionId String                    @db.Uuid
-  userId         String                    @db.Uuid
-  actorId        String                    @db.Uuid
-  eventKind      MembershipAuditEventKind
-  startsAt       DateTime
-  expiresAt      DateTime
-  note           String?                   @db.VarChar(500)
-  createdAt      DateTime                  @default(now())
-  subscription   MembershipSubscription   @relation(fields: [subscriptionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  user           AppUser                  @relation("MembershipAuditUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  actor          AppUser                  @relation("MembershipAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+model MembershipMutationPreview {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  actorId            String                    @db.Uuid
+  userId             String                    @db.Uuid
+  action             MembershipAuditEventKind
+  expectedVersion    Int
+  impactFingerprint  String                    @db.Char(64)
+  requestFingerprint String                    @db.Char(64)
+  issuedAt           DateTime
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime                  @default(now())
+  actor              AppUser                   @relation("MembershipMutationPreviewActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  user               AppUser                   @relation("MembershipMutationPreviewUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  auditEvents        MembershipSubscriptionAudit[]
 
+  @@index([actorId, userId, createdAt])
+  @@index([expiresAt, consumedAt])
+}
+
+model MembershipSubscriptionAudit {
+  id                       String                       @id @default(uuid()) @db.Uuid
+  subscriptionId           String                       @db.Uuid
+  userId                   String                       @db.Uuid
+  actorId                  String                       @db.Uuid
+  eventKind                MembershipAuditEventKind
+  startsAt                 DateTime
+  expiresAt                DateTime
+  note                     String?                      @db.VarChar(500)
+  versionBefore            Int?
+  versionAfter             Int?
+  statusBefore             MembershipSubscriptionStatus?
+  statusAfter              MembershipSubscriptionStatus?
+  startsAtBefore           DateTime?
+  startsAtAfter            DateTime?
+  expiresAtBefore          DateTime?
+  expiresAtAfter           DateTime?
+  revokedAtBefore          DateTime?
+  revokedAtAfter           DateTime?
+  revocationReasonBefore   String?                      @db.VarChar(500)
+  revocationReasonAfter    String?                      @db.VarChar(500)
+  noteBefore               String?                      @db.VarChar(500)
+  noteAfter                String?                      @db.VarChar(500)
+  grantedByIdBefore        String?                      @db.Uuid
+  grantedByIdAfter         String?                      @db.Uuid
+  revokedByIdBefore        String?                      @db.Uuid
+  revokedByIdAfter         String?                      @db.Uuid
+  previewId                String?                      @db.Uuid
+  reason                   String?                      @db.VarChar(500)
+  requestKey               String?                      @db.VarChar(180)
+  requestFingerprint       String?                      @db.Char(64)
+  impactFingerprint        String?                      @db.Char(64)
+  transactionId             BigInt                       @default(dbgenerated("txid_current()")) @db.BigInt
+  transitionAt             DateTime                     @default(now())
+  contractVersion          Int                          @default(1)
+  createdAt                DateTime                     @default(now())
+  subscription             MembershipSubscription      @relation(fields: [subscriptionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  preview                  MembershipMutationPreview?  @relation(fields: [previewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  user                     AppUser                     @relation("MembershipAuditUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                    AppUser                     @relation("MembershipAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([actorId, requestKey])
   @@index([userId, createdAt])
   @@index([subscriptionId, createdAt])
   @@index([actorId, createdAt])

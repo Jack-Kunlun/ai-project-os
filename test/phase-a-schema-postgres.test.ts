@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
 import { grantWorkspaceMembership } from "../src/lib/membership-governance";
+import { createControlledMembership, grantControlledMembershipInTransaction, revokeControlledMembershipInTransaction } from "./membership-fixture";
 
 const shouldRun = process.env.PHASE_A_SCHEMA_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_phase_a_schema_test";
@@ -87,7 +88,6 @@ test(
     const db = getDb();
     const userIds = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
     const suffix = randomUUID().slice(0, 8);
-    const createdMembershipSubscriptionIds: string[] = [];
     const createdInvitationIds: string[] = [];
     const createdGitConnectionIds: string[] = [];
     const createdMcpConnectionIds: string[] = [];
@@ -218,7 +218,10 @@ test(
             VALUES
               (${invalidProviderId}, ${`phase-a-invalid-user-${suffix}`}, 'openai'::"AiProviderKind", 'user'::"AiProviderScope", 'chat_completions'::"AiProviderProtocol", 'https://api.openai.com/v1', ${invalidProviderCredentialId}, 'configured'::"AiProviderConnectionStatus", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
           `,
-          (error: unknown) => String(error).includes("AiProviderConnection_scope_check"),
+          (error: unknown) => {
+            const text = errorText(error);
+            return text.includes("AiProviderConnection_scope_check") || text.includes("user provider requires a confirmed owner without workspace");
+          },
         );
       } finally {
         await db.aiProviderConnection.deleteMany({ where: { id: invalidProviderId } });
@@ -456,6 +459,7 @@ test(
           workspaceId: defaultWorkspaceId,
           ownerUserId: null,
           ownershipState: "legacyPending" as const,
+          allowedGuardMessages: ["non-workspace provider cannot carry workspace ownership"],
         },
         {
           label: "workspace-owner",
@@ -463,6 +467,7 @@ test(
           workspaceId: defaultWorkspaceId,
           ownerUserId: null,
           ownershipState: "legacyPending" as const,
+          allowedGuardMessages: ["workspace provider requires workspace and owner", "workspace provider requires a confirmed owner/admin membership"],
         },
         {
           label: "user-state",
@@ -470,6 +475,7 @@ test(
           workspaceId: null,
           ownerUserId: userId,
           ownershipState: "legacyPending" as const,
+          allowedGuardMessages: ["user provider requires a confirmed owner without workspace"],
         },
         {
           label: "user-workspace",
@@ -477,10 +483,11 @@ test(
           workspaceId: defaultWorkspaceId,
           ownerUserId: userId,
           ownershipState: "confirmed" as const,
+          allowedGuardMessages: ["user provider requires a confirmed owner without workspace"],
         },
       ];
       for (const invalidCase of invalidProviderCases) {
-        await assertPostgresConstraint(
+        await assert.rejects(
           async () => db.aiProviderConnection.create({
             data: {
               id: randomUUID(),
@@ -495,8 +502,13 @@ test(
               status: "configured",
             },
           }),
-          "23514",
-          "AiProviderConnection_scope_check",
+          (error: unknown) => {
+            const text = errorText(error);
+            return text.includes("23514") && (
+              text.includes("AiProviderConnection_scope_check")
+              || invalidCase.allowedGuardMessages.some((message) => text.includes(message))
+            );
+          },
         );
       }
 
@@ -528,25 +540,23 @@ test(
         data: { disabledAt: null, disabledReason: null, disabledById: null },
       });
 
-      const subscription = await db.membershipSubscription.create({
-        data: {
-          id: randomUUID(),
-          userId: defaultUserId,
-          status: "active",
-          startsAt: new Date("2026-09-01T00:00:00.000Z"),
-          expiresAt: new Date("2026-10-01T00:00:00.000Z"),
-        },
+      const subscription = await createControlledMembership(db, {
+        adminId,
+        userId: defaultUserId,
+        startsAt: new Date("2026-09-01T00:00:00.000Z"),
+        expiresAt: new Date("2026-10-01T00:00:00.000Z"),
       });
-      createdMembershipSubscriptionIds.push(subscription.id);
       await assertPostgresConstraint(
         () => db.membershipSubscription.update({ where: { id: subscription.id }, data: { revocationReason: "active cannot carry a reason" } }),
         "23514",
         "MembershipSubscription_revocation_check",
       );
-      await db.membershipSubscription.update({
-        where: { id: subscription.id },
-        data: { status: "revoked", revokedAt: now, revokedById: adminId, revocationReason: "phase-a revoke" },
-      });
+      await db.$transaction((tx) => revokeControlledMembershipInTransaction(tx, {
+        subscriptionId: subscription.id,
+        adminId,
+        reason: "phase-a revoke",
+        transitionAt: now,
+      }));
       const auditedSubscription = await db.membershipSubscription.findUniqueOrThrow({
         where: { id: subscription.id },
         select: { status: true, revokedAt: true, revocationReason: true },
@@ -554,7 +564,14 @@ test(
       assert.equal(auditedSubscription.status, "revoked");
       assert.equal(auditedSubscription.revokedAt?.toISOString(), now.toISOString());
       assert.equal(auditedSubscription.revocationReason, "phase-a revoke");
-      await db.membershipSubscription.update({ where: { id: subscription.id }, data: { revocationReason: null } });
+      await db.$transaction((tx) => grantControlledMembershipInTransaction(tx, {
+        subscriptionId: subscription.id,
+        adminId,
+        startsAt: new Date("2026-09-01T00:00:00.000Z"),
+        expiresAt: new Date("2026-10-01T00:00:00.000Z"),
+        grantedById: adminId,
+        transitionAt: now,
+      }));
 
       const invitation = await db.workspaceInvitation.create({
         data: {
@@ -725,9 +742,7 @@ test(
         await db.gitConnection.deleteMany({ where: { id: { in: createdGitConnectionIds } } });
         await db.mcpConnection.deleteMany({ where: { id: { in: createdMcpConnectionIds } } });
         await db.workspaceInvitation.deleteMany({ where: { id: { in: createdInvitationIds } } });
-        await db.membershipSubscription.deleteMany({ where: { id: { in: createdMembershipSubscriptionIds } } });
         await db.externalCredential.deleteMany({ where: { id: { in: createdCredentialIds } } });
-        await db.appUser.deleteMany({ where: { id: { in: userIds } } });
       } finally {
         await db.$disconnect();
       }

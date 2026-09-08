@@ -21,6 +21,7 @@ import {
   createGrantedWebAiJob,
   createSupplementalWebAiGrant,
 } from "../src/lib/web-ai-governance";
+import { createControlledMembership } from "./membership-fixture";
 const shouldRun = process.env.PERSONAL_WEB_AI_RUNTIME_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_personal_web_ai_runtime_test";
 const workspaceId = "00000000-0000-4000-8000-000000000001";
@@ -123,14 +124,12 @@ test(
           { id: projectOwnerId, username: `personal_web_runtime_project_owner_${suffix}`, role: "user" },
         ],
       });
-      await db.membershipSubscription.create({
-        data: {
-          userId: ownerId,
-          status: "active",
-          startsAt: new Date(now.getTime() - 60_000),
-          expiresAt,
-          grantedById: seededAdminId,
-        },
+      await createControlledMembership(db, {
+        adminId: seededAdminId,
+        userId: ownerId,
+        startsAt: new Date(now.getTime() - 60_000),
+        expiresAt,
+        grantedById: seededAdminId,
       });
       await db.project.create({
         data: { id: projectId, workspaceId, name: `Personal Web runtime ${suffix}`, slug: `personal-web-runtime-${suffix}` },
@@ -507,14 +506,12 @@ test(
       const supplementalCredentialId = randomUUID();
       const supplementalCredentialFingerprint = "b".repeat(64);
       await db.appUser.create({ data: { id: supplementalOwnerId, username: `personal_web_runtime_supplemental_${suffix}`, role: "user" } });
-      await db.membershipSubscription.create({
-        data: {
-          userId: supplementalOwnerId,
-          status: "active",
-          startsAt: new Date(now.getTime() - 60_000),
-          expiresAt,
-          grantedById: seededAdminId,
-        },
+      await createControlledMembership(db, {
+        adminId: seededAdminId,
+        userId: supplementalOwnerId,
+        startsAt: new Date(now.getTime() - 60_000),
+        expiresAt,
+        grantedById: seededAdminId,
       });
       await db.$transaction(async (tx) => {
         await grantWorkspaceMembership(tx, { workspaceId, userId: supplementalOwnerId, role: "member", actorId: seededAdminId, reason: "personal_web_runtime_supplemental" });
@@ -743,7 +740,9 @@ test(
           idempotencyKey: `personal-web-runtime-expiry-${suffix}-${randomUUID()}`.slice(0, 64),
         },
       });
-      const shortExpiresAt = new Date(Date.now() + 15_000);
+      // Leave enough time for the pre-expiry admission assertions above; the
+      // explicit wait below still proves that the same evidence expires.
+      const shortExpiresAt = new Date(Date.now() + 60_000);
       const shortGrant = await db.webAiGrant.create({
         data: {
           ...embeddingGrant,

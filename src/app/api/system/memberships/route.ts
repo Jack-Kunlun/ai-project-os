@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
-import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { grantOrExtendMembership, listMemberships } from "@/lib/membership-service";
+import { handleApiError } from "@/lib/api-response";
+import { listMemberships } from "@/lib/membership-service";
 
 export const dynamic = "force-dynamic";
 
@@ -10,14 +10,6 @@ const querySchema = z.object({
   search: z.string().max(160).optional(),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
-}).strict();
-
-const grantSchema = z.object({
-  userId: z.string().uuid(),
-  action: z.enum(["grant", "extend"]).default("grant"),
-  days: z.number().int().min(1).max(3650),
-  note: z.string().max(500).nullable().optional(),
-  expectedVersion: z.number().int().positive().nullable().optional(),
 }).strict();
 
 export async function GET(request: Request) {
@@ -38,10 +30,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const admin = await requireApiSession(request);
-    const input = grantSchema.parse(await readJsonBody(request));
-    const subscription = await grantOrExtendMembership({ ...input, adminUserId: admin.id, expectedVersion: input.expectedVersion ?? undefined });
-    return NextResponse.json({ subscription }, { status: 201, headers: { "cache-control": "no-store" } });
+    return NextResponse.json(
+      { error: { code: "MEMBERSHIP_METHOD_NOT_ALLOWED", message: "会员变更必须先预览，再通过用户详情 PATCH 确认" } },
+      { status: 405, headers: { allow: "GET" } },
+    );
   } catch (error) {
     return handleApiError(error);
   }

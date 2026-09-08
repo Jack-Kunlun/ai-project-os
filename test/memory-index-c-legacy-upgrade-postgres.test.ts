@@ -23,6 +23,7 @@ import {
   runProjectMemoryIndexJob,
 } from "../src/lib/web-memory-index";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
+import { createControlledMembership } from "./membership-fixture";
 
 const repositoryRoot = process.cwd();
 const databaseName = "ai_project_os_memory_index_c_legacy_upgrade_test";
@@ -1007,13 +1008,11 @@ export default defineConfig({
 
       db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
       const membershipNow = new Date();
-      await db.membershipSubscription.create({
-        data: {
-          userId,
-          status: "active",
-          startsAt: new Date(membershipNow.getTime() - 60_000),
-          expiresAt: new Date(membershipNow.getTime() + 86_400_000),
-        },
+      await createControlledMembership(db, {
+        adminId: userId,
+        userId,
+        startsAt: new Date(membershipNow.getTime() - 60_000),
+        expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
 
       // Runtime routes are platform-owned.  The old provider remains only as

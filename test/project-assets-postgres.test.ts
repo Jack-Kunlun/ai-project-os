@@ -26,6 +26,7 @@ import {
 import { runProjectAssetVisionExtraction } from "../src/lib/project-assets/vision";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { collectProjectMemoryInputs } from "../src/lib/web-memory-index";
+import { createControlledMembership } from "./membership-fixture";
 
 const shouldRun = process.env.PROJECT_ASSET_POSTGRES_GATE === "1";
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
@@ -106,13 +107,11 @@ test(
         reason: "project_assets_fixture",
       }));
       const membershipNow = new Date();
-      await db.membershipSubscription.create({
-        data: {
-          userId: user.id,
-          status: "active",
-          startsAt: new Date(membershipNow.getTime() - 60_000),
-          expiresAt: new Date(membershipNow.getTime() + 86_400_000),
-        },
+      await createControlledMembership(db, {
+        adminId: platformAdmin.id,
+        userId: user.id,
+        startsAt: new Date(membershipNow.getTime() - 60_000),
+        expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
       await issueVerifiedSignupGrant(user.id, { issuedById: platformAdmin.id }, db);
       await db.project.create({ data: { id: projectId, workspaceId, name: `Asset ${suffix}`, slug: `asset-${suffix}` } });

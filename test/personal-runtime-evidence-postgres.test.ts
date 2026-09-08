@@ -14,6 +14,7 @@ import {
 } from "../src/lib/project-ai-provider-delegation-service";
 import { deleteArchivedProject, updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
+import { createControlledMembership, revokeControlledMembershipInTransaction } from "./membership-fixture";
 
 const shouldRun = process.env.PERSONAL_RUNTIME_EVIDENCE_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_personal_runtime_evidence_test";
@@ -75,14 +76,12 @@ test(
           { id: projectOwnerId, username: `personal_runtime_project_owner_${suffix}`, role: "user" },
         ],
       });
-      const subscription = await db.membershipSubscription.create({
-        data: {
-          userId: ownerId,
-          status: "active",
-          startsAt: new Date(Date.now() - 60_000),
-          expiresAt: delegationExpiresAt,
-          grantedById: seededAdminId,
-        },
+      const subscription = await createControlledMembership(db, {
+        adminId: seededAdminId,
+        userId: ownerId,
+        startsAt: new Date(Date.now() - 60_000),
+        expiresAt: delegationExpiresAt,
+        grantedById: seededAdminId,
       });
       await db.project.create({
         data: { id: projectId, workspaceId, name: `Personal runtime ${suffix}`, slug: `personal-runtime-${suffix}` },
@@ -661,9 +660,10 @@ test(
       );
       await assertPersonalInvalidationRejected(
         "subscription revocation cannot leave a published personal generation stale",
-        () => db.$transaction((tx) => tx.membershipSubscription.update({
-          where: { id: subscription.id },
-          data: { status: "revoked", revokedAt: new Date(), revokedById: seededAdminId, revocationReason: "published generation invalidation test", version: { increment: 1 } },
+        () => db.$transaction((tx) => revokeControlledMembershipInTransaction(tx, {
+          subscriptionId: subscription.id,
+          adminId: seededAdminId,
+          reason: "published generation invalidation test",
         })),
       );
       await assertPersonalInvalidationRejected(
@@ -795,9 +795,10 @@ test(
         "safe subscription revocation can commit after cleanup",
         async (tx) => {
           await revokeProviderDelegationDependencies(tx);
-          await tx.membershipSubscription.update({
-            where: { id: subscription.id },
-            data: { status: "revoked", revokedAt: new Date(), revokedById: seededAdminId, revocationReason: "safe personal memory invalidation test", version: { increment: 1 } },
+          await revokeControlledMembershipInTransaction(tx, {
+            subscriptionId: subscription.id,
+            adminId: seededAdminId,
+            reason: "safe personal memory invalidation test",
           });
         },
         async (tx) => assert.equal((await tx.membershipSubscription.findUniqueOrThrow({ where: { id: subscription.id } })).status, "revoked"),

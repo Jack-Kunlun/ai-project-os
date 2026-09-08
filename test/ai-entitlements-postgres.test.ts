@@ -25,8 +25,9 @@ import {
   updateWorkspaceProviderConnection,
   WorkspaceProviderServiceError,
 } from "../src/lib/workspace-provider-service";
-import { revokeMembership } from "../src/lib/membership-service";
+import { executeMembership, previewMembership } from "../src/lib/membership-service";
 import { grantWorkspaceMembership } from "../src/lib/membership-governance";
+import { createControlledMembership, grantControlledMembershipInTransaction, revokeControlledMembershipInTransaction } from "./membership-fixture";
 
 const shouldRun = process.env.AI_ENTITLEMENTS_POSTGRES_GATE === "1";
 
@@ -76,14 +77,12 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
         reason: "ai_entitlements_gate_workspace_admin",
       });
     });
-    await db.membershipSubscription.create({
-      data: {
-        userId: ownerId,
-        status: "active",
-        startsAt: new Date("2026-08-01T00:00:00.000Z"),
-        expiresAt: new Date("2026-10-01T00:00:00.000Z"),
-        grantedById: adminId,
-      },
+    const ownerSubscription = await createControlledMembership(db, {
+      adminId,
+      userId: ownerId,
+      startsAt: new Date("2026-08-01T00:00:00.000Z"),
+      expiresAt: new Date("2026-10-01T00:00:00.000Z"),
+      grantedById: adminId,
     });
 
     // Exercise the actual serializable signup grant and billing ledger path,
@@ -191,7 +190,18 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
       (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_CONNECTION_UNAVAILABLE",
     );
 
-    await db.membershipSubscription.update({ where: { userId: ownerId }, data: { expiresAt: new Date("2026-08-02T00:00:00.000Z") } });
+    await db.$transaction((tx) => revokeControlledMembershipInTransaction(tx, {
+      subscriptionId: ownerSubscription.id,
+      adminId,
+      reason: "ai_entitlements_gate_expiry_fixture",
+    }));
+    await db.$transaction((tx) => grantControlledMembershipInTransaction(tx, {
+      subscriptionId: ownerSubscription.id,
+      adminId,
+      startsAt: new Date("2026-08-01T00:00:00.000Z"),
+      expiresAt: new Date("2026-08-02T00:00:00.000Z"),
+      grantedById: adminId,
+    }));
     await assert.rejects(
       () => updateWorkspaceProviderConnection(workspaceId, deepseek.id, { generationModelId: "blocked-after-expiry" }, { id: ownerId, role: "member" }, db),
       (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_MEMBERSHIP_EXPIRED",
@@ -206,7 +216,13 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
     // the remaining lifecycle assertions. Restore the fixture's membership
     // window so the owner can create the independent GLM embedding-only
     // connection below.
-    await db.membershipSubscription.update({ where: { userId: ownerId }, data: { expiresAt: new Date("2026-10-01T00:00:00.000Z") } });
+    await db.$transaction((tx) => grantControlledMembershipInTransaction(tx, {
+      subscriptionId: ownerSubscription.id,
+      adminId,
+      startsAt: new Date("2026-08-01T00:00:00.000Z"),
+      expiresAt: new Date("2026-10-01T00:00:00.000Z"),
+      grantedById: adminId,
+    }));
 
     const glm = await createWorkspaceProviderConnection(workspaceId, {
       name: `Workspace GLM ${suffix}`,
@@ -258,7 +274,25 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
       ]);
       let revokeSettled = false;
       const revokeStartedAt = Date.now();
-      const revoking = revokeMembership({ adminUserId: adminId, userId: ownerId }, db).finally(() => { revokeSettled = true; });
+      const revoking = (async () => {
+        const current = await db.membershipSubscription.findUniqueOrThrow({ where: { userId: ownerId }, select: { version: true } });
+        const preview = await previewMembership({ adminUserId: adminId, userId: ownerId, action: "revoke", reason: "ai_entitlements_gate_revoke", expectedVersion: current.version }, db);
+        return executeMembership({
+          adminUserId: adminId,
+          userId: ownerId,
+          action: "revoke",
+          reason: "ai_entitlements_gate_revoke",
+          expectedVersion: preview.current.version,
+          expectedImpactFingerprint: preview.impactFingerprint,
+          requestKey: `ai-entitlements-${suffix}-revoke`,
+          requestFingerprint: preview.requestFingerprint,
+          previewId: preview.previewId,
+          previewIssuedAt: preview.previewIssuedAt,
+          previewExpiresAt: preview.previewExpiresAt,
+          confirmation: true,
+          confirmationUsername: `entitlement_owner_${suffix}`,
+        }, db);
+      })().finally(() => { revokeSettled = true; });
       // Keep the probe open beyond Prisma's five-second default interactive
       // transaction timeout. The owner lock must remain held until the
       // bounded provider probe and final CAS have completed.
@@ -315,10 +349,7 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
     if (grantIds.length > 0) await db.platformTokenGrant.deleteMany({ where: { id: { in: grantIds } } });
     if (createdProviderIds.length > 0) await db.aiProviderConnection.deleteMany({ where: { id: { in: createdProviderIds } } });
     if (createdCredentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: createdCredentialIds } } });
-    await db.membershipSubscriptionAudit.deleteMany({ where: { userId: ownerId } });
-    await db.membershipSubscription.deleteMany({ where: { userId: ownerId } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });
-    await db.appUser.deleteMany({ where: { id: { in: [adminId, ownerId, workspaceAdminId, outsiderId] } } });
     if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;
     await rm(keyDirectory, { recursive: true, force: true });

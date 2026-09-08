@@ -31,6 +31,7 @@ import {
   reconcileMemoryIndexJob,
   runProjectMemoryIndexJob,
 } from "../src/lib/web-memory-index";
+import { createControlledMembership } from "./membership-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -343,13 +344,11 @@ test(
         reason: "memory_index_c_fixture",
       }));
       const membershipNow = new Date();
-      await db.membershipSubscription.create({
-        data: {
-          userId,
-          status: "active",
-          startsAt: new Date(membershipNow.getTime() - 60_000),
-          expiresAt: new Date(membershipNow.getTime() + 86_400_000),
-        },
+      await createControlledMembership(db, {
+        adminId,
+        userId,
+        startsAt: new Date(membershipNow.getTime() - 60_000),
+        expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
       await issueVerifiedSignupGrant(userId, { issuedById: adminId }, db);
       await db.project.createMany({

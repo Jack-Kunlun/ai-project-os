@@ -755,6 +755,15 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MEMBERSHIP_NOT_FOUND: [404, "该用户没有会员记录"],
       MEMBERSHIP_CONFLICT: [409, "会员状态已被其他管理员更新，请刷新后重试"],
       MEMBERSHIP_ADMIN_REQUIRED: [403, "只有系统管理员可以管理会员"],
+      MEMBERSHIP_ACTION_CONFLICT: [409, "当前会员状态不允许执行该操作，请刷新后重试"],
+      MEMBERSHIP_PREVIEW_STALE: [409, "会员预览已过期或状态已变化，请重新预览"],
+      MEMBERSHIP_PREVIEW_EXPIRED: [409, "会员预览已过期，请重新预览"],
+      MEMBERSHIP_DEPENDENCY_RESOLUTION_REQUIRED: [409, "请先解除个人模型委托、路由选择或已发布索引，再变更会员资格"],
+      MEMBERSHIP_REASON_REQUIRED: [400, "撤销会员必须填写原因"],
+      MEMBERSHIP_UNSAFE_AUDIT_TEXT: [400, "请求文本不能包含邮箱、令牌或凭据指纹"],
+      MEMBERSHIP_IDEMPOTENCY_CONFLICT: [409, "请求标识已用于其他会员变更，请更换请求标识"],
+      MEMBERSHIP_CONFIRMATION_REQUIRED: [400, "请完成二次确认后再提交会员变更"],
+      MEMBERSHIP_METHOD_NOT_ALLOWED: [405, "会员变更必须先预览，再通过用户详情 PATCH 确认"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

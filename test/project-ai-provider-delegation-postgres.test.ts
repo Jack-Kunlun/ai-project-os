@@ -19,6 +19,7 @@ import {
   PersonalProviderServiceError,
   updatePersonalProviderConnection,
 } from "../src/lib/personal-ai-provider-service";
+import { createControlledMembership, extendControlledMembershipInTransaction } from "./membership-fixture";
 
 const shouldRun = process.env.PROJECT_AI_PROVIDER_DELEGATION_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_project_ai_provider_delegation_test";
@@ -251,23 +252,19 @@ test(
         { id: adminEditorId, username: `delegation_admin_editor_${suffix}`, role: "admin" },
       ],
     });
-    const ownerSubscription = await db.membershipSubscription.create({
-      data: {
-        userId: connectionOwnerId,
-        status: "active",
-        startsAt: new Date(now.getTime() - 60_000),
-        expiresAt,
-        grantedById: seededAdminId,
-      },
+    const ownerSubscription = await createControlledMembership(db, {
+      adminId: seededAdminId,
+      userId: connectionOwnerId,
+      startsAt: new Date(now.getTime() - 60_000),
+      expiresAt,
+      grantedById: seededAdminId,
     });
-    const expiredSubscription = await db.membershipSubscription.create({
-      data: {
-        userId: expiredEditorId,
-        status: "active",
-        startsAt: new Date(now.getTime() - 120_000),
-        expiresAt: new Date(now.getTime() - 60_000),
-        grantedById: seededAdminId,
-      },
+    const expiredSubscription = await createControlledMembership(db, {
+      adminId: seededAdminId,
+      userId: expiredEditorId,
+      startsAt: new Date(now.getTime() - 120_000),
+      expiresAt: new Date(now.getTime() - 60_000),
+      grantedById: seededAdminId,
     });
     await db.project.create({ data: { id: projectId, workspaceId: defaultWorkspaceId, name: `Delegation ${suffix}`, slug: `delegation-${suffix}` } });
     await db.$transaction(async (tx) => {
@@ -936,9 +933,10 @@ test(
     );
     await assert.rejects(
       () => db.$transaction(async (tx) => {
-        await tx.membershipSubscription.update({
-          where: { id: ownerSubscription.id },
-          data: { version: 2 },
+        await extendControlledMembershipInTransaction(tx, {
+          subscriptionId: ownerSubscription.id,
+          adminId: seededAdminId,
+          expiresAt: new Date(ownerSubscription.expiresAt.getTime() + 24 * 60 * 60 * 1_000),
         });
       }),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_UPSTREAM_INVALIDATION_REQUIRED"),

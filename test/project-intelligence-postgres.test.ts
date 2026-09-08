@@ -25,6 +25,7 @@ import {
   runProjectAgentJob,
   runProjectBriefJob,
 } from "../src/lib/web-project-intelligence";
+import { createControlledMembership } from "./membership-fixture";
 
 const shouldRun = process.env.PROJECT_INTELLIGENCE_POSTGRES_GATE === "1";
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
@@ -145,13 +146,11 @@ test(
         reason: "project_intelligence_fixture",
       }));
       const membershipNow = new Date();
-      await db.membershipSubscription.create({
-        data: {
-          userId: user.id,
-          status: "active",
-          startsAt: new Date(membershipNow.getTime() - 60_000),
-          expiresAt: new Date(membershipNow.getTime() + 86_400_000),
-        },
+      await createControlledMembership(db, {
+        adminId: platformAdmin.id,
+        userId: user.id,
+        startsAt: new Date(membershipNow.getTime() - 60_000),
+        expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
       await issueVerifiedSignupGrant(user.id, { issuedById: platformAdmin.id }, db);
 

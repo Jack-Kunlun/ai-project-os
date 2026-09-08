@@ -7,7 +7,7 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 import { assertProjectAccess, getProjectPermission, type AccessUser } from "@/lib/access-control";
-import { lockActorsAccess, lockProjectAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
+import { admitWebAiProjectAccess, lockActorsAccess, lockProjectAccess, lockWorkspaceAccess, WebAiAccessError } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
 import { listPagination } from "@/lib/list-pagination";
@@ -41,6 +41,7 @@ type CapabilityDefinition = Readonly<{
   riskLevel: "low" | "medium" | "high";
   defaultPolicy: "automatic" | "approvalRequired" | "denied";
   effect: "local" | "external-read";
+  requiredPermission: "edit" | "owner";
 }>;
 
 const CAPABILITY_CATALOG: Readonly<Record<ProjectActionCapability, CapabilityDefinition>> = Object.freeze({
@@ -51,6 +52,7 @@ const CAPABILITY_CATALOG: Readonly<Record<ProjectActionCapability, CapabilityDef
     riskLevel: "medium",
     defaultPolicy: "approvalRequired",
     effect: "external-read",
+    requiredPermission: "edit",
   }),
   "project.web-source.sync": Object.freeze({
     id: "project.web-source.sync",
@@ -59,6 +61,7 @@ const CAPABILITY_CATALOG: Readonly<Record<ProjectActionCapability, CapabilityDef
     riskLevel: "medium",
     defaultPolicy: "approvalRequired",
     effect: "external-read",
+    requiredPermission: "owner",
   }),
   "project.memory-quality.scan": Object.freeze({
     id: "project.memory-quality.scan",
@@ -67,6 +70,7 @@ const CAPABILITY_CATALOG: Readonly<Record<ProjectActionCapability, CapabilityDef
     riskLevel: "low",
     defaultPolicy: "automatic",
     effect: "local",
+    requiredPermission: "edit",
   }),
   "project.mcp.read-tool.invoke": Object.freeze({
     id: "project.mcp.read-tool.invoke",
@@ -75,6 +79,7 @@ const CAPABILITY_CATALOG: Readonly<Record<ProjectActionCapability, CapabilityDef
     riskLevel: "high",
     defaultPolicy: "denied",
     effect: "external-read",
+    requiredPermission: "owner",
   }),
 });
 
@@ -384,6 +389,7 @@ export async function getProjectActionCenter(
     })),
     importableActions: [],
     pagination: listPagination(input.page, input.pageSize, actionTotal),
+    permission,
     canManagePolicies: permission === "owner",
     canApprove: permission === "owner",
     canImportResults: false,
@@ -395,8 +401,8 @@ export async function requestProjectAction(projectIdInput: unknown, input: unkno
   const projectId = uuid(projectIdInput);
   const parsed = requestSchema.safeParse(input);
   if (!parsed.success) return fail("ACTION_INVALID_INPUT");
-  await assertActiveProject(actor, projectId, "edit", db);
   const capability = CAPABILITY_CATALOG[parsed.data.capability];
+  await assertActiveProject(actor, projectId, capability.requiredPermission, db);
   if (capability.id === "project.mcp.read-tool.invoke") return fail("ACTION_POLICY_DENIED");
   const canonicalInput = canonicalProjectActionInput(capability.id, parsed.data.input);
   const inputFingerprint = projectActionInputFingerprint(projectId, capability.id, canonicalInput);
@@ -645,6 +651,19 @@ async function executeAction(action: ClaimedAction, db: PrismaClient): Promise<P
     throw new ActionExecutionError("ACTION_CAPABILITY_RETIRED");
   }
   canonicalProjectActionInput(capability, action.input);
+  if (capability === "project.web-source.sync") {
+    // Historical Editor-created actions can still be waitingApproval or
+    // queued after the capability becomes Owner-only. Re-admit the requester
+    // immediately before any source query or network read and fail closed
+    // with a stable action result instead of passing an Editor to the source
+    // service and pretending it is an Owner.
+    try {
+      await admitWebAiProjectAccess(db, { actor: { id: action.requestedBy.id, role: action.requestedBy.role }, projectId: action.projectId, required: "owner" });
+    } catch (error) {
+      if (error instanceof WebAiAccessError) throw new ActionExecutionError("ACTION_WEB_SOURCE_OWNER_REQUIRED");
+      throw error;
+    }
+  }
   if (capability === "project.repository.sync") {
     const links = await db.projectGitRepositoryLink.findMany({ where: { projectId: action.projectId, status: "active", codeEnabled: true }, orderBy: { id: "asc" }, select: { id: true } });
     const jobIds: string[] = [];
@@ -657,7 +676,17 @@ async function executeAction(action: ClaimedAction, db: PrismaClient): Promise<P
   }
   if (capability === "project.web-source.sync") {
     const { syncAllProjectWebSources } = await import("@/lib/web-sources");
-    const results = await syncAllProjectWebSources(action.projectId, action.requestedBy, db);
+    let results;
+    try {
+      results = await syncAllProjectWebSources(action.projectId, action.requestedBy, db);
+    } catch (error) {
+      // The project fence is checked again by the source service.  If access
+      // is revoked between this worker admission and that second admission,
+      // keep the action failure stable and fail closed before any source
+      // result is exposed.
+      if (error instanceof WebAiAccessError) throw new ActionExecutionError("ACTION_WEB_SOURCE_OWNER_REQUIRED");
+      throw error;
+    }
     const failedCount = results.filter((entry) => entry.status === "failed").length;
     if (failedCount > 0) throw new ActionExecutionError("ACTION_WEB_SOURCE_SYNC_PARTIAL_FAILURE", { sourceCount: results.length, failedCount });
     return { sourceCount: results.length, failedCount: 0 };

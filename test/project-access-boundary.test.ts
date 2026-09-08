@@ -5,10 +5,12 @@ import type { PrismaClient } from "@prisma/client";
 import {
   createProjectAutomationRule,
   listProjectAutomationRules,
+  previewProjectAutomationRule,
   triggerProjectAutomationRule,
   updateProjectAutomationRule,
 } from "../src/lib/automation";
 import { assertWebAiProjectAccess, WebAiAccessError, type WebAiActor } from "../src/lib/web-ai-access";
+import { createProjectWebSource, listProjectWebSources, syncProjectWebSource, updateProjectWebSource } from "../src/lib/web-sources";
 
 const PROJECT_A = "11111111-1111-4111-8111-111111111111";
 const PROJECT_B = "22222222-2222-4222-8222-222222222222";
@@ -211,6 +213,7 @@ test("automation service rejects cross-project reads and writes before touching 
     (projectId: string, actor: WebAiActor, db: PrismaClient) => Promise<unknown>,
   ]> = [
     ["list", (projectId, currentActor, db) => listProjectAutomationRules(projectId, currentActor, db)],
+    ["preview", (projectId, currentActor, db) => previewProjectAutomationRule(projectId, { name: "Unauthorized preview", kind: "memoryQuality", intervalMinutes: 60, config: {}, startAt: new Date(Date.now() + 3_600_000).toISOString() }, currentActor, db)],
     ["create", (projectId, currentActor, db) => createProjectAutomationRule(projectId, { name: "Unauthorized rule", kind: "memoryQuality", intervalMinutes: 60, config: {}, startAt: new Date(Date.now() + 3_600_000).toISOString() }, currentActor, db)],
     ["update", (projectId, currentActor, db) => updateProjectAutomationRule(projectId, "88888888-8888-4888-8888-888888888888", { name: "Unauthorized update" }, currentActor, db)],
     ["trigger", (projectId, currentActor, db) => triggerProjectAutomationRule(projectId, "88888888-8888-4888-8888-888888888888", currentActor, db)],
@@ -234,7 +237,8 @@ test("automation service preserves authorized owner flows within each project", 
   const currentActor = actor(USER_B);
   const listed = await listProjectAutomationRules(PROJECT_B, currentActor, db);
   assert.equal(listed.length, 1);
-  const created = await createProjectAutomationRule(PROJECT_B, { name: "Authorized rule", kind: "memoryQuality", intervalMinutes: 60, config: {}, startAt: new Date(Date.now() + 3_600_000).toISOString() }, currentActor, db);
+  const preview = await previewProjectAutomationRule(PROJECT_B, { name: "Authorized rule", kind: "memoryQuality", intervalMinutes: 60, config: {}, startAt: new Date(Date.now() + 3_600_000).toISOString() }, currentActor, db);
+  const created = await createProjectAutomationRule(PROJECT_B, { name: preview.canonicalPayload.name, kind: preview.canonicalPayload.kind, intervalMinutes: preview.canonicalPayload.intervalMinutes, config: preview.canonicalPayload.config, startAt: preview.canonicalPayload.startAtUtc, expectedPreviewFingerprint: preview.previewFingerprint, previewPayload: preview.canonicalPayload }, currentActor, db);
   assert.equal(created.projectId, PROJECT_B);
   const updated = await updateProjectAutomationRule(PROJECT_B, "99999999-9999-4999-8999-999999999999", { name: "Authorized update" }, currentActor, db);
   assert.equal(updated.name, "Authorized update");
@@ -243,14 +247,42 @@ test("automation service preserves authorized owner flows within each project", 
   assert.ok(db.automationRuleReads > 0);
 });
 
+test("web source service rejects cross-project reads, writes and sync before source access", async () => {
+  const operations: Array<[
+    string,
+    (projectId: string, currentActor: WebAiActor, db: PrismaClient) => Promise<unknown>,
+  ]> = [
+    ["list", (projectId, currentActor, db) => listProjectWebSources(projectId, { page: 1, pageSize: 20 }, currentActor, db)],
+    ["create", (projectId, currentActor, db) => createProjectWebSource(projectId, { name: "Unauthorized source", url: "https://example.com/docs" }, currentActor, db)],
+    ["update", (projectId, currentActor, db) => updateProjectWebSource(projectId, "88888888-8888-4888-8888-888888888888", { name: "Unauthorized update" }, currentActor, db)],
+    ["sync", (projectId, currentActor, db) => syncProjectWebSource(projectId, "88888888-8888-4888-8888-888888888888", currentActor, db)],
+  ];
+
+  for (const [name, operation] of operations) {
+    for (const [targetProject, currentActor] of [[PROJECT_B, actor(USER_A)], [PROJECT_A, actor(USER_B)]] as const) {
+      const db = automationAccessDb();
+      await assert.rejects(
+        () => operation(targetProject, currentActor, db),
+        (error: unknown) => error instanceof WebAiAccessError && error.code === "ACCESS_FORBIDDEN",
+        `${name} must reject an actor without target project access`,
+      );
+      assert.equal(db.automationRuleReads, 0, `${name} must authorize before touching project data`);
+    }
+  }
+});
+
 test("project resource routes and services carry actor authorization to the transaction boundary", async () => {
-  const [projectRoute, sourcesRoute, sourceDetailRoute, itemsRoute, aiRoutes, automation] = await Promise.all([
+  const [projectRoute, sourcesRoute, sourceDetailRoute, itemsRoute, aiRoutes, automation, automationPreviewRoute, webSourcesRoute, webSourceDetailRoute, webSourceSyncRoute] = await Promise.all([
     readFile("src/app/api/projects/[projectId]/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/sources/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/sources/[sourceId]/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/items/route.ts", "utf8"),
     readFile("src/lib/project-ai-routes.ts", "utf8"),
     readFile("src/lib/automation.ts", "utf8"),
+    readFile("src/app/api/projects/[projectId]/automations/preview/route.ts", "utf8"),
+    readFile("src/app/api/projects/[projectId]/web-sources/route.ts", "utf8"),
+    readFile("src/app/api/projects/[projectId]/web-sources/[webSourceId]/route.ts", "utf8"),
+    readFile("src/app/api/projects/[projectId]/web-sources/[webSourceId]/sync/route.ts", "utf8"),
   ]);
 
   for (const [name, source] of Object.entries({ projectRoute, sourcesRoute, sourceDetailRoute, itemsRoute })) {
@@ -271,8 +303,20 @@ test("project resource routes and services carry actor authorization to the tran
   ]) {
     assert.doesNotMatch(route, /assertProjectActive/u);
   }
+  assert.doesNotMatch(automationPreviewRoute, /assertProjectActive/u);
+  assert.match(automationPreviewRoute, /previewProjectAutomationRule\([\s\S]*user/u);
+  assert.doesNotMatch(webSourcesRoute, /assertProjectActive/u);
+  assert.doesNotMatch(webSourceDetailRoute, /assertProjectActive/u);
+  assert.doesNotMatch(webSourceSyncRoute, /assertProjectActive/u);
+  assert.match(webSourcesRoute, /const user = await requireApiSession\(request\)/u);
+  assert.match(webSourcesRoute, /listProjectWebSources\([\s\S]*user/u);
+  assert.match(webSourcesRoute, /createProjectWebSource\([\s\S]*user/u);
+  assert.match(webSourceDetailRoute, /const user = await requireApiSession\(request\)/u);
+  assert.match(webSourceDetailRoute, /updateProjectWebSource\([\s\S]*user/u);
+  assert.match(webSourceSyncRoute, /const user = await requireApiSession\(request\)/u);
+  assert.match(webSourceSyncRoute, /syncProjectWebSource\([\s\S]*user/u);
   assert.match(automation, /listProjectAutomationRules\([\s\S]*actor:\s*WebAiActor/u);
-  assert.match(automation, /createProjectAutomationRule\([\s\S]*required:\s*"edit"/u);
+  assert.match(automation, /createProjectAutomationRule\([\s\S]*required:\s*"owner"/u);
   assert.match(automation, /updateProjectAutomationRule\([\s\S]*required:\s*"owner"/u);
   assert.match(automation, /triggerProjectAutomationRule\([\s\S]*required:\s*"owner"/u);
 });

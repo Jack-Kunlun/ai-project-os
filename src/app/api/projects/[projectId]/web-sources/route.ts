@@ -3,7 +3,6 @@ import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from "@/lib/list-pagination";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 import { createProjectWebSource, listProjectWebSources } from "@/lib/web-sources";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +20,7 @@ async function projectId(params: Promise<{ projectId: string }>) {
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const url = new URL(request.url);
     const query = listSchema.parse(Object.fromEntries(url.searchParams));
     return NextResponse.json(await listProjectWebSources(await projectId(context.params), {
@@ -29,7 +28,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
       pageSize: query.pageSize,
       search: query.search,
       status: query.status === "all" ? undefined : query.status,
-    }));
+    }, user));
   } catch (error) {
     return handleApiError(error);
   }
@@ -40,7 +39,6 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const resolvedProjectId = await projectId(context.params);
-    await assertProjectActive(resolvedProjectId);
     const source = await createProjectWebSource(resolvedProjectId, await readJsonBody(request), user);
     return NextResponse.json({ source }, { status: 201 });
   } catch (error) {

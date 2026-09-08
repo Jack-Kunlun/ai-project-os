@@ -3,11 +3,11 @@ import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
-import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { lockProjectAccess, WebAiAccessError, withWebAiProjectAccessTransaction, type WebAiActor } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { listPagination } from "@/lib/list-pagination";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
 
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
@@ -325,103 +325,135 @@ export function extractWebDocument(body: Buffer, contentType: string, finalUrl: 
 export async function listProjectWebSources(
   projectIdInput: unknown,
   input: { page: number; pageSize: number; search?: string; status?: "active" | "disabled" | "error" },
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
-  if (project === null) return fail("WEB_SOURCE_PROJECT_NOT_FOUND");
-  const search = input.search?.trim();
-  const where: Prisma.WebSourceWhereInput = {
-    projectId,
-    ...(input.status === undefined ? {} : { status: input.status }),
-    ...(search ? { OR: [
-      { name: { contains: search, mode: "insensitive" } },
-      { url: { contains: search, mode: "insensitive" } },
-      { pointer: { is: { revision: { is: { title: { contains: search, mode: "insensitive" } } } } } },
-    ] } : {}),
-  };
-  const [sources, total] = await Promise.all([
-    db.webSource.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-      skip: (input.page - 1) * input.pageSize,
-      take: input.pageSize,
-      select: webSourceSelect,
-    }),
-    db.webSource.count({ where }),
-  ]);
-  return { sources, pagination: listPagination(input.page, input.pageSize, total) };
+  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "view", allowArchived: true }, async (tx) => {
+    const search = input.search?.trim();
+    const where: Prisma.WebSourceWhereInput = {
+      projectId,
+      ...(input.status === undefined ? {} : { status: input.status }),
+      ...(search ? { OR: [
+        { name: { contains: search, mode: "insensitive" } },
+        { url: { contains: search, mode: "insensitive" } },
+        { pointer: { is: { revision: { is: { title: { contains: search, mode: "insensitive" } } } } } },
+      ] } : {}),
+    };
+    const [sources, total] = await Promise.all([
+      tx.webSource.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+        skip: (input.page - 1) * input.pageSize,
+        take: input.pageSize,
+        select: webSourceSelect,
+      }),
+      tx.webSource.count({ where }),
+    ]);
+    return { sources, pagination: listPagination(input.page, input.pageSize, total) };
+  });
 }
 
 export async function createProjectWebSource(
   projectIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id">,
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
-  await assertProjectActive(projectId, db);
   const parsed = createSchema.parse(input);
   const url = canonicalWebSourceUrl(parsed.url, parsed.allowPrivateNetwork);
+  // Authorize before DNS resolution so a caller without project ownership
+  // cannot trigger an external network read by supplying a known project id.
+  await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async () => undefined);
   const endpoint = await resolveEndpoint(new URL(url), parsed.allowPrivateNetwork);
-  let source: { id: string };
-  try {
-    source = await db.webSource.create({
-      data: { projectId, name: parsed.name, url, allowPrivateNetwork: parsed.allowPrivateNetwork, resolvedAddressFingerprint: endpoint.fingerprint, createdById: actor.id },
-      select: { id: true },
-    });
-  } catch (error) {
-    if (isPrismaCode(error, "P2002")) return fail("WEB_SOURCE_CONFLICT");
-    if (isPrismaCode(error, "P2003")) return fail("WEB_SOURCE_PROJECT_NOT_FOUND");
-    throw error;
-  }
-  await syncProjectWebSource(projectId, source.id, actor, db);
-  return db.webSource.findUniqueOrThrow({ where: { id: source.id }, select: webSourceSelect });
+  const source = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
+    try {
+      return await tx.webSource.create({
+        data: { projectId, name: parsed.name, url, allowPrivateNetwork: parsed.allowPrivateNetwork, resolvedAddressFingerprint: endpoint.fingerprint, createdById: actor.id },
+        select: { id: true },
+      });
+    } catch (error) {
+      if (isPrismaCode(error, "P2002")) return fail("WEB_SOURCE_CONFLICT");
+      if (isPrismaCode(error, "P2003")) return fail("WEB_SOURCE_PROJECT_NOT_FOUND");
+      throw error;
+    }
+  });
+  return syncProjectWebSource(projectId, source.id, actor, db);
 }
 
 export async function updateProjectWebSource(
   projectIdInput: unknown,
   webSourceIdInput: unknown,
   input: unknown,
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
   const webSourceId = uuid(webSourceIdInput);
   const parsed = updateSchema.parse(input);
-  const current = await db.webSource.findFirst({ where: { id: webSourceId, projectId } });
+  const current = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => tx.webSource.findFirst({
+    where: { id: webSourceId, projectId },
+    select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true },
+  }));
   if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
   const fingerprint = parsed.trustCurrentNetwork === true ? (await resolveEndpoint(new URL(current.url), current.allowPrivateNetwork)).fingerprint : undefined;
-  if (parsed.enabled === false) {
-    await db.$transaction(async (tx) => {
+  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
+    const lockedCurrent = await tx.webSource.findFirst({
+      where: { id: webSourceId, projectId },
+      select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true },
+    });
+    if (lockedCurrent === null) return fail("WEB_SOURCE_NOT_FOUND");
+    // A trust-current-network update must not overwrite a newer network
+    // decision made while DNS resolution was in flight.
+    if (parsed.trustCurrentNetwork === true && lockedCurrent.resolvedAddressFingerprint !== current.resolvedAddressFingerprint) {
+      return fail("WEB_SOURCE_NETWORK_CHANGED");
+    }
+    if (parsed.enabled === false) {
       const pointer = await tx.webSourcePointer.findUnique({ where: { projectId_webSourceId: { projectId, webSourceId } }, select: { revision: { select: { projectSourceId: true } } } });
       await tx.webSource.update({ where: { id: webSourceId }, data: { status: "disabled", disabledAt: new Date(), ...(parsed.name === undefined ? {} : { name: parsed.name }), ...(fingerprint === undefined ? {} : { resolvedAddressFingerprint: fingerprint }) } });
       if (pointer?.revision.projectSourceId) await tx.projectSource.updateMany({ where: { projectId, id: pointer.revision.projectSourceId }, data: { retiredAt: new Date() } });
       await tx.webSourcePointer.deleteMany({ where: { projectId, webSourceId } });
-    });
-  } else {
-    await db.webSource.update({ where: { id: webSourceId }, data: { ...(parsed.name === undefined ? {} : { name: parsed.name }), ...(parsed.enabled === true ? { status: "active", disabledAt: null, lastErrorCode: null } : {}), ...(fingerprint === undefined ? {} : { resolvedAddressFingerprint: fingerprint, status: "active", lastErrorCode: null, disabledAt: null }) } });
-  }
-  return db.webSource.findUniqueOrThrow({ where: { id: webSourceId }, select: webSourceSelect });
+    } else {
+      await tx.webSource.update({ where: { id: webSourceId }, data: { ...(parsed.name === undefined ? {} : { name: parsed.name }), ...(parsed.enabled === true ? { status: "active", disabledAt: null, lastErrorCode: null } : {}), ...(fingerprint === undefined ? {} : { resolvedAddressFingerprint: fingerprint, status: "active", lastErrorCode: null, disabledAt: null }) } });
+    }
+    return tx.webSource.findUniqueOrThrow({ where: { id: webSourceId }, select: webSourceSelect });
+  });
 }
 
 export async function syncProjectWebSource(
   projectIdInput: unknown,
   webSourceIdInput: unknown,
-  _actor: Pick<AppUser, "id">,
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
   const webSourceId = uuid(webSourceIdInput);
-  const webSource = await db.webSource.findFirst({ where: { id: webSourceId, projectId } });
-  if (webSource === null) return fail("WEB_SOURCE_NOT_FOUND");
-  if (webSource.status === "disabled") return fail("WEB_SOURCE_DISABLED");
-  const revision = await db.webSourceRevision.create({ data: { projectId, webSourceId }, select: { id: true } });
+  // Reserve the revision only after owner admission. This keeps the first
+  // source read and the external fetch behind the same service boundary.
+  const webSource = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
+    const current = await tx.webSource.findFirst({
+      where: { id: webSourceId, projectId },
+      select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, status: true },
+    });
+    if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
+    if (current.status === "disabled") return fail("WEB_SOURCE_DISABLED");
+    const revision = await tx.webSourceRevision.create({ data: { projectId, webSourceId }, select: { id: true } });
+    return Object.freeze({ ...current, revisionId: revision.id });
+  });
   try {
     const fetched = await fetchWebSource({ url: webSource.url, allowPrivateNetwork: webSource.allowPrivateNetwork, expectedFingerprint: webSource.resolvedAddressFingerprint });
     const document = extractWebDocument(fetched.response.body, fetched.contentType, fetched.finalUrl);
     const contentHash = hashSourceContent(document.text);
     const completedAt = new Date();
-    await db.$transaction(async (tx) => {
+    const completed = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
+      const current = await tx.webSource.findFirst({
+        where: { id: webSourceId, projectId },
+        select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, status: true },
+      });
+      if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
+      if (current.status === "disabled") return fail("WEB_SOURCE_DISABLED");
+      if (current.url !== webSource.url || current.allowPrivateNetwork !== webSource.allowPrivateNetwork || current.resolvedAddressFingerprint !== webSource.resolvedAddressFingerprint) return fail("WEB_SOURCE_NETWORK_CHANGED");
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:${webSourceId}`}, 29082026))`;
       const currentPointer = await tx.webSourcePointer.findUnique({
         where: { projectId_webSourceId: { projectId, webSourceId } },
@@ -430,46 +462,60 @@ export async function syncProjectWebSource(
       let projectSourceId = currentPointer?.revision.contentHash === contentHash ? currentPointer.revision.projectSourceId : null;
       if (projectSourceId === null) {
         const created = await tx.projectSource.create({
-          data: { projectId, kind: "web", sourceIdentity: webSourceId, revisionKey: revision.id, externalRef: fetched.finalUrl, contentText: document.text, contentHash, capturedAt: completedAt },
+          data: { projectId, kind: "web", sourceIdentity: webSourceId, revisionKey: webSource.revisionId, externalRef: fetched.finalUrl, contentText: document.text, contentHash, capturedAt: completedAt },
           select: { id: true },
         });
         projectSourceId = created.id;
         if (currentPointer?.revision.projectSourceId) await tx.projectSource.updateMany({ where: { projectId, id: currentPointer.revision.projectSourceId }, data: { retiredAt: completedAt } });
       }
       await tx.webSourceRevision.update({
-        where: { id: revision.id },
+        where: { id: webSource.revisionId },
         data: { status: "complete", finalUrl: fetched.finalUrl, httpStatus: fetched.response.status, contentType: fetched.contentType, title: document.title, contentHash, contentBytes: fetched.response.body.length, projectSourceId, completedAt },
       });
       if (currentPointer !== null) await tx.webSourceRevision.updateMany({ where: { id: currentPointer.webSourceRevisionId, status: "complete" }, data: { status: "superseded", supersededAt: completedAt } });
       await tx.webSourcePointer.upsert({
         where: { projectId_webSourceId: { projectId, webSourceId } },
-        create: { projectId, webSourceId, webSourceRevisionId: revision.id, publishedAt: completedAt },
-        update: { webSourceRevisionId: revision.id, publishedAt: completedAt },
+        create: { projectId, webSourceId, webSourceRevisionId: webSource.revisionId, publishedAt: completedAt },
+        update: { webSourceRevisionId: webSource.revisionId, publishedAt: completedAt },
       });
       await tx.webSource.update({ where: { id: webSourceId }, data: { status: "active", lastFetchedAt: completedAt, lastErrorCode: null, resolvedAddressFingerprint: fetched.originFingerprint, disabledAt: null } });
       await tx.project.update({ where: { id: projectId }, data: { updatedAt: completedAt } });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    return db.webSource.findUniqueOrThrow({ where: { id: webSourceId }, select: webSourceSelect });
+      return tx.webSource.findUniqueOrThrow({ where: { id: webSourceId }, select: webSourceSelect });
+    });
+    return completed;
   } catch (error) {
     const code = error instanceof WebSourceError ? error.code : "WEB_SOURCE_FETCH_FAILED";
     const completedAt = new Date();
-    await db.$transaction([
-      db.webSourceRevision.update({ where: { id: revision.id }, data: { status: "failed", failureCode: code, completedAt } }),
-      db.webSource.update({ where: { id: webSourceId }, data: { status: "error", lastErrorCode: code, lastFetchedAt: completedAt } }),
-    ]).catch(() => undefined);
+    await db.$transaction(async (tx) => {
+      await lockProjectAccess(tx, projectId);
+      await tx.webSourceRevision.updateMany({ where: { id: webSource.revisionId, projectId, webSourceId, status: "staging" }, data: { status: "failed", failureCode: code, completedAt } });
+      const current = await tx.webSource.findFirst({ where: { id: webSourceId, projectId }, select: { status: true, disabledAt: true, resolvedAddressFingerprint: true } });
+      // A concurrent disable must remain authoritative. Likewise, a newer
+      // network decision must not be overwritten by this stale fetch failure.
+      // Access denial only closes the reserved revision and never changes the
+      // source state after the actor has lost project access.
+      if (error instanceof WebAiAccessError) return;
+      if (current?.status === "disabled" || current?.disabledAt !== null || current?.resolvedAddressFingerprint !== webSource.resolvedAddressFingerprint) return;
+      await tx.webSource.updateMany({ where: { id: webSourceId, projectId, status: { not: "disabled" }, disabledAt: null, resolvedAddressFingerprint: webSource.resolvedAddressFingerprint }, data: { status: "error", lastErrorCode: code, lastFetchedAt: completedAt } });
+    }).catch(() => undefined);
+    if (error instanceof WebAiAccessError) throw error;
     throw error instanceof WebSourceError ? error : new WebSourceError("WEB_SOURCE_FETCH_FAILED");
   }
 }
 
-export async function syncAllProjectWebSources(projectIdInput: unknown, actor: Pick<AppUser, "id">, db: PrismaClient = getDb()) {
+export async function syncAllProjectWebSources(projectIdInput: unknown, actor: WebAiActor, db: PrismaClient = getDb()) {
   const projectId = uuid(projectIdInput);
-  const sources = await db.webSource.findMany({ where: { projectId, status: { not: "disabled" } }, orderBy: { id: "asc" }, select: { id: true } });
+  const sources = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => tx.webSource.findMany({ where: { projectId, status: { not: "disabled" } }, orderBy: { id: "asc" }, select: { id: true } }));
   const results: Array<{ id: string; status: "succeeded" | "failed"; failureCode?: string }> = [];
   for (const source of sources) {
     try {
       await syncProjectWebSource(projectId, source.id, actor, db);
       results.push({ id: source.id, status: "succeeded" });
     } catch (error) {
+      // Losing project Owner access is not a source-level partial failure.
+      // Bubble it to action/automation workers so they can persist the
+      // stable authorization failure and never continue with another source.
+      if (error instanceof WebAiAccessError) throw error;
       results.push({ id: source.id, status: "failed", failureCode: error instanceof WebSourceError ? error.code : "WEB_SOURCE_FETCH_FAILED" });
     }
   }

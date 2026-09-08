@@ -24,9 +24,23 @@ test("动作能力注册表保留内置能力并冻结旧 MCP 通用入口", () 
   ]);
   assert.deepEqual(catalog.map((entry) => entry.defaultPolicy), ["approvalRequired", "approvalRequired", "automatic", "denied"]);
   assert.ok(catalog.every((entry) => entry.effect === "local" || entry.effect === "external-read"));
+  assert.equal(catalog.find((entry) => entry.id === "project.web-source.sync")?.requiredPermission, "owner");
   assert.equal(catalog.find((entry) => entry.id === "project.mcp.read-tool.invoke")?.riskLevel, "high");
   assert.match(catalog.find((entry) => entry.id === "project.mcp.read-tool.invoke")?.description ?? "", /旧版通用动作入口已冻结/u);
   assert.equal(new Set(catalog.map((entry) => entry.id)).size, catalog.length);
+});
+
+test("网页来源动作把 Owner 权限投影到 UI，并在二次授权失败时稳定收口", async () => {
+  const service = await readFile("src/lib/action-engine.ts", "utf8");
+  const sources = await readFile("src/lib/web-sources.ts", "utf8");
+  const client = await readFile("src/app/projects/[projectId]/actions/project-actions-client.tsx", "utf8");
+  assert.match(service, /permission,\s*canManagePolicies/u);
+  assert.match(service, /syncAllProjectWebSources[\s\S]*instanceof WebAiAccessError[\s\S]*ACTION_WEB_SOURCE_OWNER_REQUIRED/u);
+  const syncAllStart = sources.indexOf("export async function syncAllProjectWebSources");
+  assert.match(sources.slice(syncAllStart), /if \(error instanceof WebAiAccessError\) throw error/u);
+  assert.match(client, /capability\.requiredPermission === "owner"/u);
+  assert.match(client, /center\.permission !== "owner"/u);
+  assert.match(client, /仅项目 Owner 可执行/u);
 });
 
 test("动作输入严格、规范且指纹绑定项目与能力", () => {

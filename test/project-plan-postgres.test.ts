@@ -2,9 +2,9 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
-import { ProjectItemRevisionAction } from "@prisma/client";
+import { ProjectItemRevisionAction, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
 import { AccessControlError } from "../src/lib/access-control";
-import { createProjectAutomationRule, runAutomationWorkerCycle } from "../src/lib/automation";
+import { createProjectAutomationRule, previewProjectAutomationRule, runAutomationWorkerCycle } from "../src/lib/automation";
 import { getDb } from "../src/lib/db";
 import { ProjectLifecycleError } from "../src/lib/project-lifecycle";
 import { buildRepositoryImpactEvidence } from "../src/lib/project-operations";
@@ -13,6 +13,24 @@ import { ProjectPlanError, createProjectPlanEntry, getProjectPlan, updateProject
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.PROJECT_PLAN_POSTGRES_GATE === "1";
+
+async function createAutomationRuleWithPreview(
+  projectId: string,
+  input: Readonly<{ name: string; kind: AutomationRuleKind; intervalMinutes: number; config: unknown; startAt: string }>,
+  actor: Readonly<{ id: string; role: "admin" | "member" | "user" }>,
+  db: PrismaClient,
+) {
+  const preview = await previewProjectAutomationRule(projectId, input, actor, db);
+  return createProjectAutomationRule(projectId, {
+    name: preview.canonicalPayload.name,
+    kind: preview.canonicalPayload.kind,
+    intervalMinutes: preview.canonicalPayload.intervalMinutes,
+    config: preview.canonicalPayload.config,
+    startAt: preview.canonicalPayload.startAtUtc,
+    expectedPreviewFingerprint: preview.previewFingerprint,
+    previewPayload: preview.canonicalPayload,
+  }, actor, db);
+}
 
 test("project plan persists governed objectives, work items, dependencies and audit", { skip: !shouldRun ? "PROJECT_PLAN_POSTGRES_GATE=1 is required" : false }, async () => {
   const db = getDb();
@@ -37,7 +55,8 @@ test("project plan persists governed objectives, work items, dependencies and au
   await db.project.create({ data: { id: projectId, workspaceId, name: `Plan project ${suffix}`, slug: `plan-project-${suffix}` } });
   await db.$transaction(async (tx) => {
     await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "project_plan_gate_fixture_workspace" });
-    await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: adminId, reason: "project_plan_gate_fixture_editor" });
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "project_plan_gate_fixture_admin_owner" });
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "owner", actorId: adminId, reason: "project_plan_gate_fixture_owner" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: adminId, reason: "project_plan_gate_fixture_viewer" });
   });
 
@@ -135,18 +154,20 @@ test("project plan persists governed objectives, work items, dependencies and au
     const secondCurrentForAssignment = await db.projectWorkItem.findUniqueOrThrow({ where: { id: second.id } });
     const assignedSecondResult = await updateProjectPlanEntry(projectId, { entity: "workItem", id: second.id, expectedUpdatedAt: secondCurrentForAssignment.updatedAt.toISOString(), assigneeId: editorId, acceptanceCriteria: "完成仓库变化核对" }, editor, db);
     assert.ok("workItem" in assignedSecondResult && assignedSecondResult.workItem !== undefined);
-    const revokedRule = await createProjectAutomationRule(projectId, { name: `Revoked plan health ${suffix}`, kind: "projectPlanHealth", intervalMinutes: 60, config: { dueSoonDays: 3, includeAssignees: true }, startAt: new Date().toISOString() }, editor, db);
-    await db.$transaction((tx) => revokeProjectMembership(tx, projectId, editorId, workspaceId, { actorId: adminId, reason: "project_plan_gate_revoke_editor" }));
+    const revokedRule = await createAutomationRuleWithPreview(projectId, { name: `Revoked plan health ${suffix}`, kind: "projectPlanHealth", intervalMinutes: 60, config: { dueSoonDays: 3, includeAssignees: true }, startAt: new Date().toISOString() }, editor, db);
+    await db.$transaction((tx) => revokeProjectMembership(tx, projectId, editorId, workspaceId, { actorId: adminId, reason: "project_plan_gate_revoke_owner" }));
     await assert.rejects(
       () => updateProjectPlanEntry(projectId, { entity: "workItem", id: second.id, expectedUpdatedAt: assignedSecondResult.workItem.updatedAt.toISOString(), status: "inProgress" }, admin, db),
       (error: unknown) => error instanceof ProjectPlanError && error.code === "PROJECT_PLAN_ASSIGNEE_NOT_ELIGIBLE",
     );
     const revokedWorkerResult = await runAutomationWorkerCycle({ workerId: `plan-health-revoked-${suffix}`, maximumRuns: 1 }, db);
-    assert.equal(revokedWorkerResult.succeeded, 1);
-    assert.equal((await db.automationRun.findFirstOrThrow({ where: { automationRuleId: revokedRule.id } })).status, "succeeded");
+    assert.equal(revokedWorkerResult.succeeded, 0);
+    assert.equal(revokedWorkerResult.claimed, 0);
+    assert.equal(await db.automationRun.count({ where: { automationRuleId: revokedRule.id } }), 0);
+    assert.equal((await db.automationRule.findUniqueOrThrow({ where: { id: revokedRule.id } })).status, "paused");
     assert.equal(await db.notification.count({ where: { projectId, userId: editorId, kind: "projectPlanHealth" } }), 0);
 
-    const healthRule = await createProjectAutomationRule(projectId, { name: `Plan health ${suffix}`, kind: "projectPlanHealth", intervalMinutes: 60, config: { dueSoonDays: 3, includeAssignees: true }, startAt: new Date().toISOString() }, admin, db);
+    const healthRule = await createAutomationRuleWithPreview(projectId, { name: `Plan health ${suffix}`, kind: "projectPlanHealth", intervalMinutes: 60, config: { dueSoonDays: 3, includeAssignees: true }, startAt: new Date().toISOString() }, admin, db);
     const workerResult = await runAutomationWorkerCycle({ workerId: `plan-health-${suffix}`, maximumRuns: 1 }, db);
     assert.equal(workerResult.succeeded, 1);
     assert.equal((await db.automationRun.findFirstOrThrow({ where: { automationRuleId: healthRule.id } })).status, "succeeded");

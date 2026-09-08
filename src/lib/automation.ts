@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { lockActorsAccess, lockProjectAccess, lockWorkspaceAccess, withWebAiProjectAccessTransaction, type WebAiActor } from "@/lib/access-linearization";
+import { admitWebAiProjectAccess, lockActorsAccess, lockProjectAccess, lockWorkspaceAccess, WebAiAccessError, withWebAiProjectAccessTransaction, type WebAiActor } from "@/lib/access-linearization";
+import { projectAutomationCapabilities, requiresAiWorkbenchConfirmation } from "@/lib/automation-capabilities";
+import { projectAutomationRunResult, safeAutomationFailureCode, type AutomationRunResultProjection } from "@/lib/automation-result-projection";
+import { type AutomationScopePreview, buildAutomationScopePreview } from "@/lib/automation-scope-preview";
+import { buildAutomationSchedulePreview } from "@/lib/automation-time";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
 import { getProjectOperationsSummary } from "@/lib/project-operations";
@@ -20,6 +24,8 @@ export type AutomationErrorCode =
   | "AUTOMATION_RULE_NOT_FOUND"
   | "AUTOMATION_RULE_CONFLICT"
   | "AUTOMATION_RULE_PAUSED"
+  | "AUTOMATION_REPOSITORY_SYNC_FROZEN"
+  | "AUTOMATION_PREVIEW_STALE"
   | "AUTOMATION_RUN_CONFLICT"
   | "NOTIFICATION_NOT_FOUND";
 
@@ -37,18 +43,30 @@ export class AutomationError extends Error {
   }
 }
 
+class AutomationExecutionFailure extends Error {
+  constructor(readonly code: string, readonly result: Prisma.InputJsonValue) {
+    super(code);
+    this.name = "AutomationExecutionFailure";
+  }
+}
+
 const kindSchema = z.enum(["repositorySync", "memoryQuality", "memoryIndex", "projectBrief", "webSourceSync", "projectPlanHealth"]);
 const repositoryConfigSchema = z.object({ linkIds: z.array(z.string().uuid()).max(100).default([]) }).strict();
 const emptyConfigSchema = z.object({}).strict();
 const memoryIndexConfigSchema = z.object({ mode: z.literal("incremental").default("incremental") }).strict();
 const projectPlanHealthConfigSchema = z.object({ dueSoonDays: z.number().int().min(1).max(14).default(3), includeAssignees: z.boolean().default(true) }).strict();
-const createRuleSchema = z.object({
+const ruleInputSchema = z.object({
   name: z.string().trim().min(1).max(100),
   kind: kindSchema,
   intervalMinutes: z.number().int().min(5).max(43_200),
   config: z.unknown().optional(),
   startAt: z.string().datetime({ offset: true }).optional(),
 }).strict();
+const createRuleSchema = ruleInputSchema.extend({
+  expectedPreviewFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+  previewPayload: z.unknown(),
+}).strict();
+const previewRuleSchema = ruleInputSchema.extend({ browserTimeZone: z.string().trim().min(1).max(128).optional() }).strict();
 const updateRuleSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   intervalMinutes: z.number().int().min(5).max(43_200).optional(),
@@ -63,7 +81,6 @@ const ruleSelect = {
   kind: true,
   status: true,
   intervalMinutes: true,
-  config: true,
   nextRunAt: true,
   lastRunAt: true,
   consecutiveFailures: true,
@@ -86,9 +103,88 @@ const ruleSelect = {
   },
 } satisfies Prisma.AutomationRuleSelect;
 
+export type AutomationPreviewPayload = Readonly<{
+  name: string;
+  kind: AutomationRuleKind;
+  intervalMinutes: number;
+  config: Prisma.InputJsonObject;
+  startAtUtc: string;
+  scope: AutomationScopePreview;
+}>;
+
+function canonicalJson(value: unknown, depth = 0): string {
+  if (depth > 16) throw new Error("AUTOMATION_PREVIEW_STALE");
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(Object.is(value, -0) ? 0 : value);
+  if (Array.isArray(value)) return `[${value.map((entry) => canonicalJson(entry, depth + 1)).join(",")}]`;
+  if (typeof value !== "object") throw new Error("AUTOMATION_PREVIEW_STALE");
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key], depth + 1)}`).join(",")}}`;
+}
+
+export function buildAutomationPreviewPayload(input: Readonly<{
+  name: string;
+  kind: AutomationRuleKind;
+  intervalMinutes: number;
+  config: Prisma.InputJsonObject;
+  startAt: Date;
+  scope: AutomationScopePreview;
+}>): AutomationPreviewPayload {
+  return Object.freeze({ name: input.name, kind: input.kind, intervalMinutes: input.intervalMinutes, config: input.config, startAtUtc: input.startAt.toISOString(), scope: input.scope });
+}
+
+export function automationPreviewFingerprint(payload: AutomationPreviewPayload): string {
+  return createHash("sha256").update(canonicalJson(payload), "utf8").digest("hex");
+}
+
+export function safeAutomationJobIds(value: Prisma.JsonValue): readonly string[] {
+  if (!Array.isArray(value)) return Object.freeze([]);
+  return Object.freeze(value.filter((entry): entry is string => typeof entry === "string" && UUID_PATTERN.test(entry)).slice(0, 20));
+}
+
+type AutomationRuleProjectionRow = Prisma.AutomationRuleGetPayload<{ select: typeof ruleSelect }>;
+
+function projectAutomationRule(row: AutomationRuleProjectionRow) {
+  return Object.freeze({
+    id: row.id,
+    projectId: row.projectId,
+    name: row.name,
+    kind: row.kind,
+    status: row.status,
+    intervalMinutes: row.intervalMinutes,
+    nextRunAt: row.nextRunAt,
+    lastRunAt: row.lastRunAt,
+    consecutiveFailures: row.consecutiveFailures,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    runs: row.runs.map((run) => Object.freeze({
+      id: run.id,
+      status: run.status,
+      scheduledFor: run.scheduledFor,
+      jobIds: safeAutomationJobIds(run.jobIds),
+      result: projectAutomationRunResult(row.kind, run.status, run.result) as AutomationRunResultProjection | null,
+      failureCode: safeAutomationFailureCode(run.failureCode),
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      createdAt: run.createdAt,
+    })),
+  });
+}
+
 type ClaimedRun = Prisma.AutomationRunGetPayload<{
   include: { rule: { include: { createdBy: true } } };
 }>;
+
+type FrozenRepositoryRule = Readonly<{
+  frozenRepositorySync: true;
+  ruleId: string;
+  projectId: string;
+  name: string;
+  createdById: string;
+}>;
+
+type ClaimedRunResult = ClaimedRun | FrozenRepositoryRule | null;
 
 function fail(code: AutomationErrorCode): never {
   throw new AutomationError(code);
@@ -177,8 +273,58 @@ export async function listProjectAutomationRules(
   return withWebAiProjectAccessTransaction(
     db,
     { actor, projectId, required: "view", allowArchived: true },
-    (tx) => tx.automationRule.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: ruleSelect }),
+    async (tx) => (await tx.automationRule.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: ruleSelect })).map(projectAutomationRule),
   );
+}
+
+export async function getProjectAutomationCapabilities(
+  projectIdInput: unknown,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  const projectId = uuid(projectIdInput);
+  return withWebAiProjectAccessTransaction(
+    db,
+    { actor, projectId, required: "view", allowArchived: true },
+    async (_tx, admission) => {
+      const capabilities = projectAutomationCapabilities(admission.permission);
+      return admission.project.archivedAt === null
+        ? capabilities
+        : Object.freeze({ ...capabilities, canCreate: false, canManage: false, canRunNow: false });
+    },
+  );
+}
+
+export async function previewProjectAutomationRule(
+  projectIdInput: unknown,
+  input: unknown,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  const projectId = uuid(projectIdInput);
+  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx, admission) => {
+    const parsed = previewRuleSchema.parse(input);
+    if (parsed.kind === "repositorySync") return fail("AUTOMATION_REPOSITORY_SYNC_FROZEN");
+    const startAt = parsed.startAt === undefined ? new Date(Date.now() + parsed.intervalMinutes * 60_000) : new Date(parsed.startAt);
+    if (!Number.isFinite(startAt.getTime()) || startAt.getTime() < Date.now() - 60_000) return fail("AUTOMATION_INVALID_INPUT");
+    const config = canonicalConfig(parsed.kind, parsed.config);
+    const scope = await buildAutomationScopePreview(projectId, parsed.kind, tx, { creatorId: admission.actor.id, config });
+    const schedule = buildAutomationSchedulePreview({ startAt, intervalMinutes: parsed.intervalMinutes, browserTimeZone: parsed.browserTimeZone });
+    const canonicalPayload = buildAutomationPreviewPayload({ name: parsed.name, kind: parsed.kind, intervalMinutes: parsed.intervalMinutes, config, startAt, scope });
+    return Object.freeze({
+      ...schedule,
+      name: parsed.name,
+      kind: parsed.kind,
+      scope,
+      previewFingerprint: automationPreviewFingerprint(canonicalPayload),
+      canonicalPayload,
+      capabilities: projectAutomationCapabilities("owner"),
+      requiresConfirmation: requiresAiWorkbenchConfirmation(parsed.kind),
+      modelSelection: requiresAiWorkbenchConfirmation(parsed.kind) ? "由 AI 工作台当次确认" : "不适用",
+      billing: requiresAiWorkbenchConfirmation(parsed.kind) ? "本次自动化不扣费" : "不适用",
+      transfer: requiresAiWorkbenchConfirmation(parsed.kind) ? "本次自动化不发送项目内容" : "不外发",
+    });
+  });
 }
 
 export async function createProjectAutomationRule(
@@ -188,13 +334,25 @@ export async function createProjectAutomationRule(
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
-  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "edit" }, async (tx, admission) => {
+  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx, admission) => {
     const parsed = createRuleSchema.parse(input);
+    if (parsed.kind === "repositorySync") return fail("AUTOMATION_REPOSITORY_SYNC_FROZEN");
     const config = canonicalConfig(parsed.kind, parsed.config);
     const startAt = parsed.startAt === undefined ? new Date(Date.now() + parsed.intervalMinutes * 60_000) : new Date(parsed.startAt);
-    if (!Number.isFinite(startAt.getTime()) || startAt.getTime() < Date.now() - 60_000) return fail("AUTOMATION_INVALID_INPUT");
+    if (!Number.isFinite(startAt.getTime())) return fail("AUTOMATION_INVALID_INPUT");
+    if (startAt.getTime() < Date.now() - 60_000) return fail("AUTOMATION_PREVIEW_STALE");
+    const scope = await buildAutomationScopePreview(projectId, parsed.kind, tx, { creatorId: admission.actor.id, config });
+    const canonicalPayload = buildAutomationPreviewPayload({ name: parsed.name, kind: parsed.kind, intervalMinutes: parsed.intervalMinutes, config, startAt, scope });
+    const previewFingerprint = automationPreviewFingerprint(canonicalPayload);
+    let submittedPayload: string;
     try {
-      return await tx.automationRule.create({
+      submittedPayload = canonicalJson(parsed.previewPayload);
+    } catch {
+      return fail("AUTOMATION_PREVIEW_STALE");
+    }
+    if (parsed.expectedPreviewFingerprint !== previewFingerprint || submittedPayload !== canonicalJson(canonicalPayload)) return fail("AUTOMATION_PREVIEW_STALE");
+    try {
+      const created = await tx.automationRule.create({
         data: {
           projectId,
           name: parsed.name,
@@ -206,6 +364,7 @@ export async function createProjectAutomationRule(
         },
         select: ruleSelect,
       });
+      return projectAutomationRule(created);
     } catch (error) {
       if (isPrismaCode(error, "P2003")) return fail("AUTOMATION_PROJECT_NOT_FOUND");
       if (isPrismaCode(error, "P2002")) return fail("AUTOMATION_RULE_CONFLICT");
@@ -227,9 +386,10 @@ export async function updateProjectAutomationRule(
     const parsed = updateRuleSchema.parse(input);
     const current = await tx.automationRule.findFirst({ where: { id: ruleId, projectId } });
     if (current === null) return fail("AUTOMATION_RULE_NOT_FOUND");
+    if (current.kind === "repositorySync" && parsed.enabled === true) return fail("AUTOMATION_REPOSITORY_SYNC_FROZEN");
     const config = parsed.config === undefined ? undefined : canonicalConfig(current.kind, parsed.config);
     try {
-      return await tx.automationRule.update({
+      const updated = await tx.automationRule.update({
         where: { id: ruleId },
         data: {
           ...(parsed.name === undefined ? {} : { name: parsed.name }),
@@ -241,10 +401,47 @@ export async function updateProjectAutomationRule(
         },
         select: ruleSelect,
       });
+      return projectAutomationRule(updated);
     } catch (error) {
       if (isPrismaCode(error, "P2002")) return fail("AUTOMATION_RULE_CONFLICT");
       throw error;
     }
+  });
+}
+
+export async function getProjectAutomationRun(
+  projectIdInput: unknown,
+  runIdInput: unknown,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
+  const projectId = uuid(projectIdInput);
+  const runId = uuid(runIdInput);
+  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "view", allowArchived: true }, async (tx) => {
+    const run = await tx.automationRun.findFirst({
+      where: { id: runId, projectId },
+      select: {
+        id: true,
+        automationRuleId: true,
+        projectId: true,
+        status: true,
+        scheduledFor: true,
+        jobIds: true,
+        result: true,
+        failureCode: true,
+        startedAt: true,
+        completedAt: true,
+        createdAt: true,
+        rule: { select: { name: true, kind: true } },
+      },
+    });
+    if (run === null) return null;
+    return Object.freeze({
+      ...run,
+      jobIds: safeAutomationJobIds(run.jobIds),
+      result: projectAutomationRunResult(run.rule.kind, run.status, run.result),
+      failureCode: safeAutomationFailureCode(run.failureCode),
+    });
   });
 }
 
@@ -257,16 +454,17 @@ export async function triggerProjectAutomationRule(
   const projectId = uuid(projectIdInput);
   const ruleId = uuid(ruleIdInput);
   return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
+    const current = await tx.automationRule.findFirst({ where: { id: ruleId, projectId }, select: { kind: true } });
+    if (current === null) return fail("AUTOMATION_RULE_NOT_FOUND");
+    if (current.kind === "repositorySync") return fail("AUTOMATION_REPOSITORY_SYNC_FROZEN");
     const updated = await tx.automationRule.updateMany({
       where: { id: ruleId, projectId, status: "active" },
       data: { nextRunAt: new Date() },
     });
     if (updated.count !== 1) {
-      const exists = await tx.automationRule.findFirst({ where: { id: ruleId, projectId }, select: { status: true } });
-      if (exists === null) return fail("AUTOMATION_RULE_NOT_FOUND");
       return fail("AUTOMATION_RULE_PAUSED");
     }
-    return tx.automationRule.findUniqueOrThrow({ where: { id: ruleId }, select: ruleSelect });
+    return projectAutomationRule(await tx.automationRule.findUniqueOrThrow({ where: { id: ruleId }, select: ruleSelect }));
   });
 }
 
@@ -306,43 +504,80 @@ async function recoverExpiredRuns(now: Date, db: PrismaClient): Promise<number> 
       body: paused
         ? "上一次执行的 Worker 租约已过期，连续失败达到三次，规则已自动暂停。"
         : "上一次执行的 Worker 租约已过期，系统已安全标记失败并安排重试。",
-      actionHref: `/projects/${run.projectId}/automations`,
+      actionHref: `/projects/${run.projectId}/automations?run=${run.id}`,
       dedupeKey: `automation-expired:${run.id}`,
     }, db);
   }
   return recovered;
 }
 
-async function claimDueRun(workerId: string, now: Date, db: PrismaClient): Promise<ClaimedRun | null> {
+async function claimDueRun(workerId: string, now: Date, db: PrismaClient): Promise<ClaimedRunResult> {
   return db.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    // Discover a candidate without locking its rule row.  The worker must
+    // enter the canonical actor -> workspace -> project fence before taking
+    // the AutomationRule row lock; membership/lifecycle writers use that
+    // order too, so a revoke/archive cannot deadlock against a claimed run.
+    const candidates = await tx.$queryRaw<Array<{ id: string; projectId: string; createdById: string }>>`
       SELECT rule."id"
+        , rule."projectId"
+        , rule."createdById"
       FROM "AutomationRule" AS rule
       JOIN "Project" AS project ON project."id" = rule."projectId"
       WHERE rule."status" = 'active'::"AutomationRuleStatus"
         AND rule."nextRunAt" <= ${now}
         AND project."archivedAt" IS NULL
       ORDER BY rule."nextRunAt" ASC, rule."id" ASC
-      FOR UPDATE SKIP LOCKED
       LIMIT 1
     `;
-    const ruleId = rows[0]?.id;
-    if (ruleId === undefined) return null;
-    const rule = await tx.automationRule.findUniqueOrThrow({ where: { id: ruleId }, include: { createdBy: true } });
-    const project = await tx.project.findUnique({ where: { id: rule.projectId }, select: { workspaceId: true, membershipInheritanceMode: true } });
-    const creatorProjectMembership = project === null ? 0 : await tx.projectMembership.count({
-      where: { projectId: rule.projectId, userId: rule.createdById, accessState: "confirmed", role: { in: ["owner", "editor"] } },
-    });
-    const creatorWorkspaceMembership = project === null || project.membershipInheritanceMode !== "workspaceInherited" ? 0 : await tx.workspaceMembership.count({
-      where: { workspaceId: project.workspaceId, userId: rule.createdById, accessState: "confirmed", role: { in: ["owner", "admin"] } },
-    });
-    const creatorAllowed = project !== null && rule.createdBy.disabledAt === null && (creatorProjectMembership > 0 || creatorWorkspaceMembership > 0);
-    if (!creatorAllowed) {
+    const candidate = candidates[0];
+    if (candidate === undefined) return null;
+    // Re-admit the rule creator behind the canonical actor -> workspace ->
+    // project advisory-lock sequence. The helper reloads the actor, project
+    // and confirmed memberships after locking, so an Editor or a downgraded
+    // Owner cannot become a runtime principal between a revoke and a claim.
+    try {
+      await admitWebAiProjectAccess(tx, { actor: { id: candidate.createdById, role: "user" }, projectId: candidate.projectId, required: "owner" });
+    } catch (error) {
+      if (!(error instanceof WebAiAccessError) || (error.code !== "ACCESS_FORBIDDEN" && error.code !== "ACCOUNT_DISABLED")) throw error;
       // A rule owned by a revoked/pending/disabled account is no longer a
       // valid runtime principal. Pause it so the worker cannot repeatedly
       // perform work after access has been removed.
-      await tx.automationRule.update({ where: { id: rule.id }, data: { status: "paused" } });
+      await tx.automationRule.updateMany({
+        where: { id: candidate.id, projectId: candidate.projectId, status: "active", nextRunAt: { lte: now } },
+        data: { status: "paused" },
+      });
       return null;
+    }
+
+    // Only after admission has taken the project fence may the worker lock
+    // and re-read the candidate rule.  The predicate handles another worker
+    // or an owner edit that won the race while this transaction was waiting
+    // on the access fence.
+    const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT rule."id"
+      FROM "AutomationRule" AS rule
+      JOIN "Project" AS project ON project."id" = rule."projectId"
+      WHERE rule."id" = ${candidate.id}
+        AND rule."projectId" = ${candidate.projectId}
+        AND rule."status" = 'active'::"AutomationRuleStatus"
+        AND rule."nextRunAt" <= ${now}
+        AND project."archivedAt" IS NULL
+      FOR UPDATE SKIP LOCKED
+    `;
+    if (lockedRows[0] === undefined) return null;
+    const rule = await tx.automationRule.findUniqueOrThrow({ where: { id: candidate.id }, include: { createdBy: true } });
+    if (rule.kind === "repositorySync") {
+      // Git automation is intentionally frozen. Pause legacy active rules
+      // before a run is created, so no worker path can read a Git credential,
+      // resolve a repository, or make a network request.
+      await tx.automationRule.update({ where: { id: rule.id }, data: { status: "paused" } });
+      return {
+        frozenRepositorySync: true,
+        ruleId: rule.id,
+        projectId: rule.projectId,
+        name: rule.name,
+        createdById: rule.createdById,
+      } satisfies FrozenRepositoryRule;
     }
     const scheduledFor = rule.nextRunAt;
     const nextBase = scheduledFor.getTime() < now.getTime() - rule.intervalMinutes * 60_000 ? now : scheduledFor;
@@ -451,16 +686,16 @@ async function executeProjectPlanHealth(run: ClaimedRun, db: PrismaClient) {
   const assigneeIds = new Set(health.signals.flatMap((signal) => signal.assigneeId === null ? [] : [signal.assigneeId]));
   const candidateIds = new Set([run.rule.createdById, ...(config.includeAssignees ? [...assigneeIds] : [])]);
   const eligibleRecipients = await db.appUser.findMany({
-      where: {
-        id: { in: [...candidateIds] },
-        disabledAt: null,
-        OR: [
-          { projectMemberships: { some: { projectId: run.projectId, accessState: "confirmed" } } },
-          { workspaceMemberships: { some: { workspace: { projects: { some: { id: run.projectId, membershipInheritanceMode: "workspaceInherited" } } }, accessState: "confirmed", role: { in: ["owner", "admin"] } } } },
-        ],
-      },
-      select: { id: true },
-    });
+    where: {
+      id: { in: [...candidateIds] },
+      disabledAt: null,
+      OR: [
+        { projectMemberships: { some: { projectId: run.projectId, accessState: "confirmed", role: { in: ["owner", "editor"] } } } },
+        { workspaceMemberships: { some: { workspace: { projects: { some: { id: run.projectId, membershipInheritanceMode: "workspaceInherited" } } }, accessState: "confirmed", role: { in: ["owner", "admin"] } } } },
+      ],
+    },
+    select: { id: true },
+  });
   const recipients = new Set(eligibleRecipients.map((entry) => entry.id));
   const dayKey = run.scheduledFor.toISOString().slice(0, 10);
   const body = health.status === "empty"
@@ -519,21 +754,44 @@ async function executeRun(run: ClaimedRun, db: PrismaClient): Promise<void> {
   if (run.rule.kind === "webSourceSync") {
     const { syncAllProjectWebSources } = await import("@/lib/web-sources");
     const result = await syncAllProjectWebSources(run.projectId, run.rule.createdBy, db);
-    await completeRun(run, { status: "succeeded", result: { sourceCount: result.length } }, db);
+    const successCount = result.filter((source) => source.status === "succeeded").length;
+    const failedCount = result.length - successCount;
+    const failureSummary = result
+      .filter((source) => source.status === "failed")
+      .slice(0, 20)
+      .map((source) => ({ id: source.id, failureCode: source.failureCode ?? "WEB_SOURCE_FETCH_FAILED" }));
+    if (failedCount > 0) {
+      // Leave the run transition to the worker catch path. This keeps the
+      // partial-failure result and failure counter in one atomic completion,
+      // instead of completing failed here and then attempting a second
+      // completion after the error bubbles up.
+      throw new AutomationExecutionFailure("AUTOMATION_WEB_SOURCE_PARTIAL_FAILURE", { successCount, failedCount, failures: failureSummary });
+    }
+    await completeRun(run, { status: "succeeded", result: { successCount, failedCount } }, db);
     return;
   }
   if (run.rule.kind === "projectPlanHealth") {
     await executeProjectPlanHealth(run, db);
     return;
   }
-  await completeRun(run, { status: "waitingConsent", result: { reason: "MODEL_TRANSFER_REQUIRES_CONFIRMATION" } }, db);
+  await completeRun(run, {
+    status: "waitingConsent",
+    result: {
+      reason: "MODEL_TRANSFER_REQUIRES_CONFIRMATION",
+      delivery: "waitingConsent",
+      modelSelection: "deferred_to_ai_workbench",
+      billing: "none",
+      externalTransfer: false,
+      notificationOnly: true,
+    },
+  }, db);
   await createNotification({
     userId: run.rule.createdById,
     projectId: run.projectId,
     kind: "consentRequired",
     severity: "warning",
     title: `需要确认模型数据发送：${run.rule.name}`,
-    body: "自动化已准备好输入边界。请在项目页面确认本次模型、范围和外发内容后执行。",
+    body: "自动化只创建了待确认通知，不选模型、不扣费、不发送项目内容；请到 AI 工作台确认本次模型、范围和外发内容后再执行。",
     actionHref: run.rule.kind === "memoryIndex" ? `/projects/${run.projectId}/memory` : `/projects/${run.projectId}/intelligence`,
     dedupeKey: `automation-consent:${run.id}`,
   }, db);
@@ -553,6 +811,19 @@ export async function runAutomationWorkerCycle(input: Readonly<{
   for (let index = 0; index < maximumRuns; index += 1) {
     const run = await claimDueRun(input.workerId, new Date(), db);
     if (run === null) break;
+    if ("frozenRepositorySync" in run) {
+      await createNotification({
+        userId: run.createdById,
+        projectId: run.projectId,
+        kind: "automationFailed",
+        severity: "warning",
+        title: `自动化已暂停：${run.name}`,
+        body: "Git 自动化尚未开放。历史规则已安全暂停，系统未读取 Git 凭据，也未发起网络请求。",
+        actionHref: `/projects/${run.projectId}/automations`,
+        dedupeKey: `automation-repository-sync-frozen:${run.ruleId}`,
+      }, db);
+      continue;
+    }
     claimed += 1;
     const stopHeartbeat = startAutomationHeartbeat(run, db);
     try {
@@ -560,10 +831,17 @@ export async function runAutomationWorkerCycle(input: Readonly<{
       succeeded += 1;
     } catch (error) {
       failed += 1;
-      const failureCode = error instanceof Error && /^[A-Z0-9_]{3,64}$/u.test(error.message)
+      const failureCode = error instanceof AutomationExecutionFailure
+        ? error.code
+        : error instanceof Error && /^[A-Z0-9_]{3,64}$/u.test(error.message)
         ? error.message
         : "AUTOMATION_EXECUTION_FAILED";
-      await completeRun(run, { status: "failed", failureCode }, db).catch(() => undefined);
+      const failureResult = error instanceof AutomationExecutionFailure ? error.result : undefined;
+      await completeRun(run, {
+        status: "failed",
+        failureCode,
+        ...(failureResult === undefined ? {} : { result: failureResult }),
+      }, db).catch(() => undefined);
       await createNotification({
         userId: run.rule.createdById,
         projectId: run.projectId,
@@ -571,7 +849,7 @@ export async function runAutomationWorkerCycle(input: Readonly<{
         severity: "error",
         title: `自动化执行失败：${run.rule.name}`,
         body: `安全错误码：${failureCode}。连续失败三次后规则会自动暂停。`,
-        actionHref: `/projects/${run.projectId}/automations`,
+        actionHref: `/projects/${run.projectId}/automations?run=${run.id}`,
         dedupeKey: `automation-failed:${run.id}`,
       }, db);
     } finally {

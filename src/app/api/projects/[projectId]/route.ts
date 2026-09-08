@@ -50,14 +50,16 @@ async function parseProjectId(params: Promise<{ projectId: string }>): Promise<s
 
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const db = getDb();
     const projectId = await parseProjectId(context.params);
-    const project = await db.project.findUnique({ where: { id: projectId }, select: projectDetailSelect });
+    const project = await withWebAiProjectAccessTransaction(
+      db,
+      { actor: user, projectId, required: "view", allowArchived: true },
+      (tx) => tx.project.findUnique({ where: { id: projectId }, select: projectDetailSelect }),
+    );
 
-    if (!project) {
-      throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found");
-    }
+    if (project === null) throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found");
 
     return NextResponse.json({ project });
   } catch (error) {

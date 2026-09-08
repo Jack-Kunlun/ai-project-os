@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type AccessUser } from "@/lib/access-control";
 import { getProviderDefinition, isSafeModelId } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
+import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import {
   findConfirmedProjectMembership,
   findConfirmedWorkspaceMembership,
@@ -313,160 +314,167 @@ export type ProjectAiRouteChangePreview = Readonly<{
 export async function previewProjectAiRouteChange(
   projectId: string,
   input: unknown,
+  actor: AccessUser,
   db: PrismaClient = getDb(),
 ): Promise<ProjectAiRouteChangePreview> {
-  const parsed = routeSchema.parse(input);
-  const next = routeData(parsed);
-  const state = await readOperationState(projectId, parsed.operation, parsed.providerConnectionId, db);
-  validateTarget(parsed, state.provider, state.project.workspaceId);
-  const changed = !routeValuesEqual(state.current, next);
-  return Object.freeze({
-    operation: parsed.operation,
-    current: currentResponse(state.current),
-    next: Object.freeze({ operation: parsed.operation, ...next }),
-    impact: impactSummary(parsed.operation, changed, state.activeIndex, next),
-  });
+  return withWebAiProjectAccessTransaction(
+    db,
+    { actor, projectId, required: "owner" },
+    async (tx, admission) => {
+      const projectMembership = await findConfirmedProjectMembership(tx, admission.project.id, admission.actor.id);
+      if (projectMembership === null || projectMembership.role !== "owner") return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
+      const parsed = routeSchema.parse(input);
+      const next = routeData(parsed);
+      const state = await readOperationState(projectId, parsed.operation, parsed.providerConnectionId, tx);
+      validateTarget(parsed, state.provider, state.project.workspaceId);
+      const changed = !routeValuesEqual(state.current, next);
+      return Object.freeze({
+        operation: parsed.operation,
+        current: currentResponse(state.current),
+        next: Object.freeze({ operation: parsed.operation, ...next }),
+        impact: impactSummary(parsed.operation, changed, state.activeIndex, next),
+      });
+    },
+  );
 }
 
 export async function getProjectAiRoutes(projectId: string, actor: AccessUser, db: PrismaClient = getDb()) {
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true } });
-  if (project === null) return fail("PROJECT_NOT_FOUND");
-  const canViewWorkspaceProviders = await findConfirmedWorkspaceMembership(db, project.workspaceId, actor.id);
-  const canViewWorkspaceProviderConnections = canViewWorkspaceProviders !== null
-    && (canViewWorkspaceProviders.role === "owner" || canViewWorkspaceProviders.role === "admin");
-  const [routes, providers] = await Promise.all([
-    db.projectAiRoute.findMany({
-      where: { projectId, operation: { in: [...SUPPORTED_OPERATIONS] } },
-      orderBy: { operation: "asc" },
-      select: routeSelect,
-    }),
-    db.aiProviderConnection.findMany({
-      where: { status: { not: "disabled" }, OR: [
-        { scope: "platform" },
-        ...(canViewWorkspaceProviderConnections ? [{ scope: "workspace" as const, workspaceId: project.workspaceId }] : []),
-      ] },
-      orderBy: { name: "asc" },
-      select: {
-        id: true,
-        name: true,
-        kind: true,
-        status: true,
-        defaultGenerationModelId: true,
-        defaultEmbeddingModelId: true,
-        defaultVisionModelId: true,
-        embeddingDimensions: true,
-        scope: true,
-        workspaceId: true,
-      },
-    }),
-  ]);
-  return Object.freeze({ routes, providers, supportedOperations: SUPPORTED_OPERATIONS });
+  return withWebAiProjectAccessTransaction(
+    db,
+    { actor, projectId, required: "view", allowArchived: true },
+    async (tx, admission) => {
+      const project = admission.project;
+      const canViewWorkspaceProviders = await findConfirmedWorkspaceMembership(tx, project.workspaceId, admission.actor.id);
+      const canViewWorkspaceProviderConnections = canViewWorkspaceProviders !== null
+        && (canViewWorkspaceProviders.role === "owner" || canViewWorkspaceProviders.role === "admin");
+      const [routes, providers] = await Promise.all([
+        tx.projectAiRoute.findMany({
+          where: { projectId, operation: { in: [...SUPPORTED_OPERATIONS] } },
+          orderBy: { operation: "asc" },
+          select: routeSelect,
+        }),
+        tx.aiProviderConnection.findMany({
+          where: { status: { not: "disabled" }, OR: [
+            { scope: "platform" },
+            ...(canViewWorkspaceProviderConnections ? [{ scope: "workspace" as const, workspaceId: project.workspaceId }] : []),
+          ] },
+          orderBy: { name: "asc" },
+          select: {
+            id: true,
+            name: true,
+            kind: true,
+            status: true,
+            defaultGenerationModelId: true,
+            defaultEmbeddingModelId: true,
+            defaultVisionModelId: true,
+            embeddingDimensions: true,
+            scope: true,
+            workspaceId: true,
+          },
+        }),
+      ]);
+      return Object.freeze({ routes, providers, supportedOperations: SUPPORTED_OPERATIONS });
+    },
+  );
 }
 
 export async function upsertProjectAiRoute(
   projectId: string,
   input: unknown,
+  actor: AccessUser,
   db: PrismaClient = getDb(),
-  actorId?: string,
 ) {
-  const parsed = routeSchema.parse(input);
-  const expectedUpdatedAt = normalizeExpectedUpdatedAt(parsed.expectedUpdatedAt);
-  if (actorId !== undefined && expectedUpdatedAt === undefined) {
-    return fail("PROJECT_AI_ROUTE_INVALID_INPUT");
-  }
-  const next = routeData(parsed);
-
   try {
-    return await db.$transaction(async (tx) => {
-      await lockProjectRouteScope(tx, projectId);
-      const state = await readOperationState(projectId, parsed.operation, parsed.providerConnectionId, tx);
-      validateTarget(parsed, state.provider, state.project.workspaceId);
-      if (actorId !== undefined) {
-        const actor = await tx.appUser.findUnique({ where: { id: actorId }, select: { id: true } });
-        if (actor === null) return fail("PROJECT_AI_ROUTE_INVALID_INPUT");
-        const projectMembership = await findConfirmedProjectMembership(tx, projectId, actorId);
-        if (projectMembership === null || projectMembership.role !== "owner") {
-          return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
-        }
-        if (state.provider?.scope === "workspace") await assertWorkspaceProviderManager(state.project.workspaceId, actorId, tx);
-      }
+    return await withWebAiProjectAccessTransaction(
+      db,
+      { actor, projectId, required: "owner", isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      async (tx, admission) => {
+        const projectMembership = await findConfirmedProjectMembership(tx, admission.project.id, admission.actor.id);
+        if (projectMembership === null || projectMembership.role !== "owner") return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
+        const parsed = routeSchema.parse(input);
+        const expectedUpdatedAt = normalizeExpectedUpdatedAt(parsed.expectedUpdatedAt);
+        if (expectedUpdatedAt === undefined) return fail("PROJECT_AI_ROUTE_INVALID_INPUT");
+        const next = routeData(parsed);
+        await lockProjectRouteScope(tx, projectId);
+        const state = await readOperationState(projectId, parsed.operation, parsed.providerConnectionId, tx);
+        validateTarget(parsed, state.provider, state.project.workspaceId);
+        if (state.provider?.scope === "workspace") await assertWorkspaceProviderManager(state.project.workspaceId, admission.actor.id, tx);
 
-      if (expectedUpdatedAt !== undefined) {
         const matches = expectedUpdatedAt === null
           ? state.current === null
           : state.current !== null && state.current.updatedAt.getTime() === expectedUpdatedAt.getTime();
         if (!matches) return fail("PROJECT_AI_ROUTE_CONFLICT");
-      }
 
-      const changed = !routeValuesEqual(state.current, next);
-      const impact = impactSummary(parsed.operation, changed, state.activeIndex, next);
-      if (impact.requiresIndexRebuildAcknowledgement && parsed.acknowledgeIndexRebuild !== true) {
-        return fail("PROJECT_AI_ROUTE_CONFIRMATION_REQUIRED");
-      }
+        const changed = !routeValuesEqual(state.current, next);
+        const impact = impactSummary(parsed.operation, changed, state.activeIndex, next);
+        if (impact.requiresIndexRebuildAcknowledgement && parsed.acknowledgeIndexRebuild !== true) {
+          return fail("PROJECT_AI_ROUTE_CONFIRMATION_REQUIRED");
+        }
 
-      if (!changed && state.current !== null) {
-        return Object.freeze({
-          route: routeResponse(state.current),
-          impact,
-          revision: null,
-        });
-      }
-
-      const saved = state.current === null
-        ? await tx.projectAiRoute.create({
-            data: {
-              projectId,
-              operation: parsed.operation,
-              ...next,
-            },
-            select: routeSelect,
-          })
-        : await tx.projectAiRoute.update({
-            where: { projectId_operation: { projectId, operation: parsed.operation } },
-            data: next,
-            select: routeSelect,
+        if (!changed && state.current !== null) {
+          return Object.freeze({
+            route: routeResponse(state.current),
+            impact,
+            revision: null,
           });
-      const revision = await tx.projectAiRouteRevision.create({
-        data: {
-          projectId,
-          operation: parsed.operation as AiOperation,
-          oldProviderConnectionId: state.current?.providerConnectionId ?? null,
-          oldModelId: state.current?.modelId ?? null,
-          oldEmbeddingDimensions: state.current?.embeddingDimensions ?? null,
-          oldMaxOutputTokens: state.current?.maxOutputTokens ?? null,
-          newProviderConnectionId: saved.providerConnectionId,
-          newModelId: saved.modelId,
-          newEmbeddingDimensions: saved.embeddingDimensions,
-          newMaxOutputTokens: saved.maxOutputTokens,
-          onlyFutureRuns: impact.onlyFutureRuns,
-          indexInvalidated: impact.indexInvalidated,
-          activeIndexGenerationId: impact.activeIndexGenerationId,
-          actorId: actorId ?? null,
-        },
-        select: {
-          id: true,
-          operation: true,
-          oldProviderConnectionId: true,
-          oldModelId: true,
-          oldEmbeddingDimensions: true,
-          oldMaxOutputTokens: true,
-          newProviderConnectionId: true,
-          newModelId: true,
-          newEmbeddingDimensions: true,
-          newMaxOutputTokens: true,
-          onlyFutureRuns: true,
-          indexInvalidated: true,
-          activeIndexGenerationId: true,
-          actorId: true,
-          createdAt: true,
-        },
-      });
-      return Object.freeze({
-        route: routeResponse(saved),
-        impact,
-        revision: Object.freeze(revision),
-      });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        }
+
+        const saved = state.current === null
+          ? await tx.projectAiRoute.create({
+              data: {
+                projectId,
+                operation: parsed.operation,
+                ...next,
+              },
+              select: routeSelect,
+            })
+          : await tx.projectAiRoute.update({
+              where: { projectId_operation: { projectId, operation: parsed.operation } },
+              data: next,
+              select: routeSelect,
+            });
+        const revision = await tx.projectAiRouteRevision.create({
+          data: {
+            projectId,
+            operation: parsed.operation as AiOperation,
+            oldProviderConnectionId: state.current?.providerConnectionId ?? null,
+            oldModelId: state.current?.modelId ?? null,
+            oldEmbeddingDimensions: state.current?.embeddingDimensions ?? null,
+            oldMaxOutputTokens: state.current?.maxOutputTokens ?? null,
+            newProviderConnectionId: saved.providerConnectionId,
+            newModelId: saved.modelId,
+            newEmbeddingDimensions: saved.embeddingDimensions,
+            newMaxOutputTokens: saved.maxOutputTokens,
+            onlyFutureRuns: impact.onlyFutureRuns,
+            indexInvalidated: impact.indexInvalidated,
+            activeIndexGenerationId: impact.activeIndexGenerationId,
+            actorId: admission.actor.id,
+          },
+          select: {
+            id: true,
+            operation: true,
+            oldProviderConnectionId: true,
+            oldModelId: true,
+            oldEmbeddingDimensions: true,
+            oldMaxOutputTokens: true,
+            newProviderConnectionId: true,
+            newModelId: true,
+            newEmbeddingDimensions: true,
+            newMaxOutputTokens: true,
+            onlyFutureRuns: true,
+            indexInvalidated: true,
+            activeIndexGenerationId: true,
+            actorId: true,
+            createdAt: true,
+          },
+        });
+        return Object.freeze({
+          route: routeResponse(saved),
+          impact,
+          revision: Object.freeze(revision),
+        });
+      },
+    );
   } catch (error) {
     if (isKnown(error, "P2003")) return fail("PROJECT_NOT_FOUND");
     if (isKnown(error, "P2034")) return fail("PROJECT_AI_ROUTE_CONFLICT");

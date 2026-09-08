@@ -4,11 +4,9 @@ import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import {
   getProjectAiRoutes,
-  assertProjectAiRouteManager,
   previewProjectAiRouteChange,
   upsertProjectAiRoute,
 } from "@/lib/project-ai-routes";
-import { assertProjectActive } from "@/lib/project-lifecycle";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
@@ -31,11 +29,10 @@ export async function POST(request: Request, context: { params: Promise<{ projec
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const resolvedProjectId = await projectId(context.params);
-    await assertProjectAiRouteManager(resolvedProjectId, user);
-    await assertProjectActive(resolvedProjectId);
     return NextResponse.json(await previewProjectAiRouteChange(
       resolvedProjectId,
       await readJsonBody(request),
+      user,
     ));
   } catch (error) {
     return handleApiError(error);
@@ -47,13 +44,10 @@ export async function PUT(request: Request, context: { params: Promise<{ project
     assertSameOrigin(request);
     const user = await requireApiSession(request);
     const resolvedProjectId = await projectId(context.params);
-    await assertProjectAiRouteManager(resolvedProjectId, user);
-    await assertProjectActive(resolvedProjectId);
     const result = await upsertProjectAiRoute(
       resolvedProjectId,
       await readJsonBody(request),
-      undefined,
-      user.id,
+      user,
     );
     return NextResponse.json(result);
   } catch (error) {

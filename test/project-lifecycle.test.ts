@@ -151,6 +151,10 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/manual-sync/route.ts",
     "src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/manual-runs/[runId]/reconciliation/route.ts",
     "src/app/api/projects/[projectId]/ai-effective-route-selections/[operation]/route.ts",
+    "src/app/api/projects/[projectId]/ai-routes/route.ts",
+    "src/app/api/projects/[projectId]/automations/route.ts",
+    "src/app/api/projects/[projectId]/automations/[ruleId]/route.ts",
+    "src/app/api/projects/[projectId]/automations/[ruleId]/run/route.ts",
   ]);
   for (const entry of entries.filter((value) => value.endsWith("route.ts"))) {
     const path = `${root}/${entry}`;

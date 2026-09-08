@@ -13,6 +13,7 @@ import {
   requireProjectAiRoute,
   upsertProjectAiRoute,
 } from "../src/lib/project-ai-routes";
+import { WebAiAccessError } from "../src/lib/web-ai-access";
 import {
   isMemoryIndexPublicationCurrent,
   resolveMemoryIndexReadiness,
@@ -20,7 +21,10 @@ import {
 } from "../src/lib/web-memory-index";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
+const foreignProjectId = "99999999-9999-4999-8999-999999999999";
 const actorId = "22222222-2222-4222-8222-222222222222";
+const routeActor = { id: actorId, role: "member" } satisfies AccessUser;
+const workspaceId = "88888888-8888-4888-8888-888888888888";
 const openAiConnectionId = "33333333-3333-4333-8333-333333333333";
 const qwenConnectionId = "44444444-4444-4444-8444-444444444444";
 const userConnectionId = "66666666-6666-4666-8666-666666666666";
@@ -50,7 +54,23 @@ type FakeProvider = {
   embeddingDimensions: number | null;
 };
 
+type FakeRouteDbOptions = Readonly<{
+  membershipInheritanceMode?: "projectOnly" | "workspaceInherited";
+  workspaceRole?: "owner" | "admin" | null;
+  projectRole?: "owner" | "editor" | "viewer" | null;
+}>;
+
 class FakeRouteDb {
+  private membershipInheritanceMode: "projectOnly" | "workspaceInherited" = "projectOnly";
+  private workspaceRole: "owner" | "admin" | null = "owner";
+  private projectRole: "owner" | "editor" | "viewer" | null = "owner";
+
+  constructor(options: FakeRouteDbOptions = {}) {
+    this.membershipInheritanceMode = options.membershipInheritanceMode ?? "projectOnly";
+    this.workspaceRole = options.workspaceRole === undefined ? "owner" : options.workspaceRole;
+    this.projectRole = options.projectRole === undefined ? "owner" : options.projectRole;
+  }
+
   readonly routes = new Map<string, FakeRoute>();
   readonly providers = new Map<string, FakeProvider>([
     [openAiConnectionId, {
@@ -88,27 +108,30 @@ class FakeRouteDb {
     }],
   ]);
   readonly revisions: Array<Record<string, unknown>> = [];
+  routeReads = 0;
   activeIndex: unknown = null;
   private routeClock = 0;
 
   readonly project = {
-    findUnique: async () => ({ id: projectId, workspaceId: null }),
+    findUnique: async () => ({ id: projectId, workspaceId, archivedAt: null, membershipInheritanceMode: this.membershipInheritanceMode }),
   };
 
   readonly appUser = {
     findUnique: async ({ where }: { where: { id: string } }) =>
-      where.id === actorId ? { id: actorId } : null,
+      where.id === actorId ? { id: actorId, role: "member" as const, disabledAt: null } : null,
   };
 
   readonly workspaceMembership = {
     findMany: async ({ where }: { where: { userId: string } }) =>
-      where.userId === actorId ? [{ role: "owner" as const, accessState: "confirmed" as const }] : [],
+      where.userId === actorId && this.workspaceRole !== null
+        ? [{ role: this.workspaceRole, accessState: "confirmed" as const }]
+        : [],
   };
 
   readonly projectMembership = {
     findMany: async ({ where }: { where: { projectId: string; userId: string } }) =>
-      where.projectId === projectId && where.userId === actorId
-        ? [{ role: "owner" as const, accessState: "confirmed" as const }]
+      where.projectId === projectId && where.userId === actorId && this.projectRole !== null
+        ? [{ role: this.projectRole, accessState: "confirmed" as const }]
         : [],
   };
 
@@ -140,6 +163,7 @@ class FakeRouteDb {
       where: { projectId_operation: { projectId: string; operation: FakeRoute["operation"] } };
       include?: { providerConnection?: true };
     }) => {
+      this.routeReads += 1;
       const route = this.routes.get(this.routeKey(where.projectId_operation.projectId, where.projectId_operation.operation));
       if (route === undefined || include?.providerConnection !== true) return route ?? null;
       const provider = this.providers.get(route.providerConnectionId);
@@ -241,7 +265,7 @@ test("route preview marks generation changes as future-only and preserves the in
     providerConnectionId: qwenConnectionId,
     modelId: "qwen-plus",
     maxOutputTokens: 2048,
-  }, db as unknown as PrismaClient);
+  }, routeActor, db as unknown as PrismaClient);
 
   assert.equal(preview.impact.changed, true);
   assert.equal(preview.impact.onlyFutureRuns, true);
@@ -258,7 +282,7 @@ test("vision route accepts only the provider's configured vision model and stays
     providerConnectionId: qwenConnectionId,
     modelId: "qwen3-vl-plus",
     maxOutputTokens: 2048,
-  }, db as unknown as PrismaClient);
+  }, routeActor, db as unknown as PrismaClient);
   assert.equal(preview.impact.onlyFutureRuns, true);
   assert.equal(preview.impact.indexInvalidated, false);
   await assert.rejects(
@@ -267,7 +291,7 @@ test("vision route accepts only the provider's configured vision model and stays
       providerConnectionId: qwenConnectionId,
       modelId: "qwen-vl-unconfigured",
       maxOutputTokens: 2048,
-    }, db as unknown as PrismaClient),
+    }, routeActor, db as unknown as PrismaClient),
     (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_CAPABILITY_MISMATCH",
   );
 });
@@ -278,15 +302,16 @@ test("legacy project routes fail closed for user-scoped providers", async () => 
     providerConnectionId: userConnectionId,
     modelId: "gpt-4.1-mini",
     maxOutputTokens: 2048,
+    expectedUpdatedAt: null,
   };
   const db = new FakeRouteDb();
 
   await assert.rejects(
-    () => previewProjectAiRouteChange(projectId, input, db as unknown as PrismaClient),
+    () => previewProjectAiRouteChange(projectId, input, routeActor, db as unknown as PrismaClient),
     (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
   );
   await assert.rejects(
-    () => upsertProjectAiRoute(projectId, input, db as unknown as PrismaClient),
+    () => upsertProjectAiRoute(projectId, input, routeActor, db as unknown as PrismaClient),
     (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
   );
 
@@ -311,6 +336,67 @@ test("legacy project routes fail closed for user-scoped providers", async () => 
   assert.equal(listed.providers.some((provider) => provider.id === userConnectionId), false);
 });
 
+test("AI route preview and upsert reject a foreign project before reading route state", async () => {
+  const input = {
+    operation: "autoExtract" as const,
+    providerConnectionId: openAiConnectionId,
+    modelId: "gpt-4.1-mini",
+    maxOutputTokens: 2048,
+    expectedUpdatedAt: null,
+  };
+  const previewDb = new FakeRouteDb();
+  await assert.rejects(
+    () => previewProjectAiRouteChange(foreignProjectId, input, routeActor, previewDb as unknown as PrismaClient),
+    (error: unknown) => error instanceof WebAiAccessError && error.code === "ACCESS_FORBIDDEN",
+  );
+  assert.equal(previewDb.routeReads, 0);
+
+  const upsertDb = new FakeRouteDb();
+  await assert.rejects(
+    () => upsertProjectAiRoute(foreignProjectId, input, routeActor, upsertDb as unknown as PrismaClient),
+    (error: unknown) => error instanceof WebAiAccessError && error.code === "ACCESS_FORBIDDEN",
+  );
+  assert.equal(upsertDb.routeReads, 0);
+});
+
+test("AI route writes require a direct project owner grant when workspace access is inherited", async () => {
+  const input = {
+    operation: "autoExtract" as const,
+    providerConnectionId: openAiConnectionId,
+    modelId: "gpt-4.1-mini",
+    maxOutputTokens: 2048,
+    expectedUpdatedAt: null,
+  };
+
+  for (const workspaceRole of ["owner", "admin"] as const) {
+    const db = new FakeRouteDb({
+      membershipInheritanceMode: "workspaceInherited",
+      workspaceRole,
+      projectRole: null,
+    });
+    await assert.rejects(
+      () => previewProjectAiRouteChange(projectId, input, routeActor, db as unknown as PrismaClient),
+      (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
+      `workspace ${workspaceRole} without a direct project owner grant must be rejected`,
+    );
+    await assert.rejects(
+      () => upsertProjectAiRoute(projectId, input, routeActor, db as unknown as PrismaClient),
+      (error: unknown) => error instanceof ProjectAiRouteError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
+      `workspace ${workspaceRole} without a direct project owner grant must be rejected`,
+    );
+    assert.equal(db.routeReads, 0, `workspace ${workspaceRole} must be rejected before route state reads`);
+  }
+
+  const directOwnerDb = new FakeRouteDb({
+    membershipInheritanceMode: "workspaceInherited",
+    workspaceRole: null,
+    projectRole: "owner",
+  });
+  await assert.doesNotReject(() => previewProjectAiRouteChange(projectId, input, routeActor, directOwnerDb as unknown as PrismaClient));
+  await assert.doesNotReject(() => upsertProjectAiRoute(projectId, input, routeActor, directOwnerDb as unknown as PrismaClient));
+  assert.ok(directOwnerDb.routeReads > 0);
+});
+
 test("embedding changes require acknowledgement, record provenance, and reject stale CAS writes", async () => {
   const currentUpdatedAt = new Date("2026-08-28T00:00:00.000Z");
   const db = dbWithRoute({
@@ -328,7 +414,7 @@ test("embedding changes require acknowledgement, record provenance, and reject s
     providerConnectionId: qwenConnectionId,
     modelId: "text-embedding-v4",
     embeddingDimensions: 1024,
-  }, db as unknown as PrismaClient);
+  }, routeActor, db as unknown as PrismaClient);
 
   assert.equal(preview.impact.onlyFutureRuns, false);
   assert.equal(preview.impact.indexInvalidated, true);
@@ -342,7 +428,7 @@ test("embedding changes require acknowledgement, record provenance, and reject s
       modelId: "text-embedding-v4",
       embeddingDimensions: 1024,
       expectedUpdatedAt: currentUpdatedAt.toISOString(),
-    }, db as unknown as PrismaClient, actorId),
+    }, routeActor, db as unknown as PrismaClient),
     (error: unknown) => error instanceof ProjectAiRouteError && error.code === "PROJECT_AI_ROUTE_CONFIRMATION_REQUIRED",
   );
   assert.equal(db.revisions.length, 0);
@@ -354,7 +440,7 @@ test("embedding changes require acknowledgement, record provenance, and reject s
     embeddingDimensions: 1024,
     expectedUpdatedAt: currentUpdatedAt.toISOString(),
     acknowledgeIndexRebuild: true,
-  }, db as unknown as PrismaClient, actorId);
+  }, routeActor, db as unknown as PrismaClient);
   assert.equal(saved.impact.indexInvalidated, true);
   assert.equal(saved.revision?.oldProviderConnectionId, openAiConnectionId);
   assert.equal(saved.revision?.oldModelId, "text-embedding-3-small");
@@ -372,7 +458,7 @@ test("embedding changes require acknowledgement, record provenance, and reject s
       embeddingDimensions: 1536,
       expectedUpdatedAt: currentUpdatedAt.toISOString(),
       acknowledgeIndexRebuild: true,
-    }, db as unknown as PrismaClient, actorId),
+    }, routeActor, db as unknown as PrismaClient),
     (error: unknown) => error instanceof ProjectAiRouteError && error.code === "PROJECT_AI_ROUTE_CONFLICT",
   );
   assert.equal(db.routes.get(`${projectId}:embedding`)?.providerConnectionId, qwenConnectionId);

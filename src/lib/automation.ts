@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Prisma, type AppUser, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
+import { Prisma, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { lockActorsAccess, lockProjectAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
+import { lockActorsAccess, lockProjectAccess, lockWorkspaceAccess, withWebAiProjectAccessTransaction, type WebAiActor } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
 import { getProjectOperationsSummary } from "@/lib/project-operations";
@@ -168,88 +168,106 @@ async function createNotification(input: Readonly<{
   });
 }
 
-export async function listProjectAutomationRules(projectIdInput: unknown, db: PrismaClient = getDb()) {
+export async function listProjectAutomationRules(
+  projectIdInput: unknown,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
   const projectId = uuid(projectIdInput);
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
-  if (project === null) return fail("AUTOMATION_PROJECT_NOT_FOUND");
-  return db.automationRule.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: ruleSelect });
+  return withWebAiProjectAccessTransaction(
+    db,
+    { actor, projectId, required: "view", allowArchived: true },
+    (tx) => tx.automationRule.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: ruleSelect }),
+  );
 }
 
 export async function createProjectAutomationRule(
   projectIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id">,
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
-  const parsed = createRuleSchema.parse(input);
-  const config = canonicalConfig(parsed.kind, parsed.config);
-  const startAt = parsed.startAt === undefined ? new Date(Date.now() + parsed.intervalMinutes * 60_000) : new Date(parsed.startAt);
-  if (!Number.isFinite(startAt.getTime()) || startAt.getTime() < Date.now() - 60_000) return fail("AUTOMATION_INVALID_INPUT");
-  try {
-    return await db.automationRule.create({
-      data: {
-        projectId,
-        name: parsed.name,
-        kind: parsed.kind,
-        intervalMinutes: parsed.intervalMinutes,
-        config,
-        nextRunAt: startAt,
-        createdById: actor.id,
-      },
-      select: ruleSelect,
-    });
-  } catch (error) {
-    if (isPrismaCode(error, "P2003")) return fail("AUTOMATION_PROJECT_NOT_FOUND");
-    if (isPrismaCode(error, "P2002")) return fail("AUTOMATION_RULE_CONFLICT");
-    throw error;
-  }
+  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "edit" }, async (tx, admission) => {
+    const parsed = createRuleSchema.parse(input);
+    const config = canonicalConfig(parsed.kind, parsed.config);
+    const startAt = parsed.startAt === undefined ? new Date(Date.now() + parsed.intervalMinutes * 60_000) : new Date(parsed.startAt);
+    if (!Number.isFinite(startAt.getTime()) || startAt.getTime() < Date.now() - 60_000) return fail("AUTOMATION_INVALID_INPUT");
+    try {
+      return await tx.automationRule.create({
+        data: {
+          projectId,
+          name: parsed.name,
+          kind: parsed.kind,
+          intervalMinutes: parsed.intervalMinutes,
+          config,
+          nextRunAt: startAt,
+          createdById: admission.actor.id,
+        },
+        select: ruleSelect,
+      });
+    } catch (error) {
+      if (isPrismaCode(error, "P2003")) return fail("AUTOMATION_PROJECT_NOT_FOUND");
+      if (isPrismaCode(error, "P2002")) return fail("AUTOMATION_RULE_CONFLICT");
+      throw error;
+    }
+  });
 }
 
 export async function updateProjectAutomationRule(
   projectIdInput: unknown,
   ruleIdInput: unknown,
   input: unknown,
+  actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
   const ruleId = uuid(ruleIdInput);
-  const parsed = updateRuleSchema.parse(input);
-  const current = await db.automationRule.findFirst({ where: { id: ruleId, projectId } });
-  if (current === null) return fail("AUTOMATION_RULE_NOT_FOUND");
-  const config = parsed.config === undefined ? undefined : canonicalConfig(current.kind, parsed.config);
-  try {
-    return await db.automationRule.update({
-      where: { id: ruleId },
-      data: {
-        ...(parsed.name === undefined ? {} : { name: parsed.name }),
-        ...(parsed.intervalMinutes === undefined ? {} : { intervalMinutes: parsed.intervalMinutes }),
-        ...(config === undefined ? {} : { config }),
-        ...(parsed.enabled === undefined ? {} : parsed.enabled
-          ? { status: "active", nextRunAt: new Date(Date.now() + (parsed.intervalMinutes ?? current.intervalMinutes) * 60_000) }
-          : { status: "paused" }),
-      },
-      select: ruleSelect,
-    });
-  } catch (error) {
-    if (isPrismaCode(error, "P2002")) return fail("AUTOMATION_RULE_CONFLICT");
-    throw error;
-  }
+  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
+    const parsed = updateRuleSchema.parse(input);
+    const current = await tx.automationRule.findFirst({ where: { id: ruleId, projectId } });
+    if (current === null) return fail("AUTOMATION_RULE_NOT_FOUND");
+    const config = parsed.config === undefined ? undefined : canonicalConfig(current.kind, parsed.config);
+    try {
+      return await tx.automationRule.update({
+        where: { id: ruleId },
+        data: {
+          ...(parsed.name === undefined ? {} : { name: parsed.name }),
+          ...(parsed.intervalMinutes === undefined ? {} : { intervalMinutes: parsed.intervalMinutes }),
+          ...(config === undefined ? {} : { config }),
+          ...(parsed.enabled === undefined ? {} : parsed.enabled
+            ? { status: "active", nextRunAt: new Date(Date.now() + (parsed.intervalMinutes ?? current.intervalMinutes) * 60_000) }
+            : { status: "paused" }),
+        },
+        select: ruleSelect,
+      });
+    } catch (error) {
+      if (isPrismaCode(error, "P2002")) return fail("AUTOMATION_RULE_CONFLICT");
+      throw error;
+    }
+  });
 }
 
-export async function triggerProjectAutomationRule(projectIdInput: unknown, ruleIdInput: unknown, db: PrismaClient = getDb()) {
+export async function triggerProjectAutomationRule(
+  projectIdInput: unknown,
+  ruleIdInput: unknown,
+  actor: WebAiActor,
+  db: PrismaClient = getDb(),
+) {
   const projectId = uuid(projectIdInput);
   const ruleId = uuid(ruleIdInput);
-  const updated = await db.automationRule.updateMany({
-    where: { id: ruleId, projectId, status: "active" },
-    data: { nextRunAt: new Date() },
+  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
+    const updated = await tx.automationRule.updateMany({
+      where: { id: ruleId, projectId, status: "active" },
+      data: { nextRunAt: new Date() },
+    });
+    if (updated.count !== 1) {
+      const exists = await tx.automationRule.findFirst({ where: { id: ruleId, projectId }, select: { status: true } });
+      if (exists === null) return fail("AUTOMATION_RULE_NOT_FOUND");
+      return fail("AUTOMATION_RULE_PAUSED");
+    }
+    return tx.automationRule.findUniqueOrThrow({ where: { id: ruleId }, select: ruleSelect });
   });
-  if (updated.count !== 1) {
-    const exists = await db.automationRule.findFirst({ where: { id: ruleId, projectId }, select: { status: true } });
-    if (exists === null) return fail("AUTOMATION_RULE_NOT_FOUND");
-    return fail("AUTOMATION_RULE_PAUSED");
-  }
-  return db.automationRule.findUniqueOrThrow({ where: { id: ruleId }, select: ruleSelect });
 }
 
 async function recoverExpiredRuns(now: Date, db: PrismaClient): Promise<number> {

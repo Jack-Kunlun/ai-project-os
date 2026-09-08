@@ -28,20 +28,11 @@ async function parseProjectId(params: Promise<{ projectId: string }>): Promise<s
   return projectIdSchema.parse(projectId);
 }
 
-async function assertProjectExists(db: ReturnType<typeof getDb>, projectId: string): Promise<void> {
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
-
-  if (!project) {
-    throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found");
-  }
-}
-
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
     const db = getDb();
-    await assertProjectExists(db, projectId);
     const searchParams = new URL(request.url).searchParams;
     for (const key of new Set(searchParams.keys())) {
       if (searchParams.getAll(key).length !== 1) throw new ApiError(400, "INVALID_QUERY", `Query parameter ${key} must be unique`);
@@ -61,21 +52,28 @@ export async function GET(request: Request, context: { params: Promise<{ project
       } : {}),
     };
 
-    const [items, total, statusCounts] = await Promise.all([
-      db.projectItem.findMany({
-        where,
-        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-        skip: (query.page - 1) * query.pageSize,
-        take: query.pageSize,
-        select: projectItemSelect,
-      }),
-      db.projectItem.count({ where }),
-      db.projectItem.groupBy({
-        by: ["reviewStatus"],
-        where: { projectId, ...nonLegacyMcpProjectItemWhere },
-        _count: { _all: true },
-      }),
-    ]);
+    const { items, total, statusCounts } = await withWebAiProjectAccessTransaction(
+      db,
+      { actor: user, projectId, required: "view", allowArchived: true },
+      async (tx) => {
+        const [items, total, statusCounts] = await Promise.all([
+          tx.projectItem.findMany({
+            where,
+            orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+            skip: (query.page - 1) * query.pageSize,
+            take: query.pageSize,
+            select: projectItemSelect,
+          }),
+          tx.projectItem.count({ where }),
+          tx.projectItem.groupBy({
+            by: ["reviewStatus"],
+            where: { projectId, ...nonLegacyMcpProjectItemWhere },
+            _count: { _all: true },
+          }),
+        ]);
+        return { items, total, statusCounts };
+      },
+    );
     const counts = { candidate: 0, confirmed: 0, dismissed: 0, superseded: 0 };
     for (const entry of statusCounts) counts[entry.reviewStatus] = entry._count._all;
 

@@ -51,21 +51,11 @@ async function parseProjectId(params: Promise<{ projectId: string }>): Promise<s
   return projectIdSchema.parse(projectId);
 }
 
-async function assertProjectExists(projectId: string): Promise<void> {
-  const db = getDb();
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
-
-  if (!project) {
-    throw new ApiError(404, "PROJECT_NOT_FOUND", "Project not found");
-  }
-}
-
 export async function GET(request: Request, context: { params: Promise<{ projectId: string }> }) {
   try {
-    await requireApiSession(request);
+    const user = await requireApiSession(request);
     const projectId = await parseProjectId(context.params);
     const db = getDb();
-    await assertProjectExists(projectId);
     const searchParams = new URL(request.url).searchParams;
     for (const key of new Set(searchParams.keys())) {
       if (searchParams.getAll(key).length !== 1) throw new ApiError(400, "INVALID_QUERY", `Query parameter ${key} must be unique`);
@@ -84,16 +74,23 @@ export async function GET(request: Request, context: { params: Promise<{ project
       } : {}),
     };
 
-    const [sources, total] = await Promise.all([
-      db.projectSource.findMany({
-        where,
-        orderBy: [{ ingestedAt: "desc" }, { id: "desc" }],
-        skip: (query.page - 1) * query.pageSize,
-        take: query.pageSize,
-        select: sourceListRecordSelect,
-      }),
-      db.projectSource.count({ where }),
-    ]);
+    const { sources, total } = await withWebAiProjectAccessTransaction(
+      db,
+      { actor: user, projectId, required: "view", allowArchived: true },
+      async (tx) => {
+        const [sources, total] = await Promise.all([
+          tx.projectSource.findMany({
+            where,
+            orderBy: [{ ingestedAt: "desc" }, { id: "desc" }],
+            skip: (query.page - 1) * query.pageSize,
+            take: query.pageSize,
+            select: sourceListRecordSelect,
+          }),
+          tx.projectSource.count({ where }),
+        ]);
+        return { sources, total };
+      },
+    );
 
     return NextResponse.json({ sources: sources.map(toSourceSummary), pagination: listPagination(query.page, query.pageSize, total) }, {
       headers: { "cache-control": "no-store" },

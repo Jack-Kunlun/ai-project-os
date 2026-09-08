@@ -159,17 +159,58 @@ test("first-run administrator can reach protected pages with production security
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
   const projectHref = await page.getByRole("link", { name: "Browser layout project", exact: true }).getAttribute("href");
   expect(projectHref).toMatch(/^\/projects\/[0-9a-f-]+$/u);
-  await page.goto(`${projectHref!}/materials`);
-  const itemForm = page.locator("#project-item-form");
-  const selectedSourcePanel = page.getByRole("heading", { name: "所选 Source 原文" }).locator("..");
-  await expect(itemForm).toBeVisible();
-  await expect(selectedSourcePanel).toBeVisible();
-  const [itemFormBox, selectedSourceBox] = await Promise.all([itemForm.boundingBox(), selectedSourcePanel.boundingBox()]);
-  expect(itemFormBox).not.toBeNull();
-  expect(selectedSourceBox).not.toBeNull();
-  expect(Math.abs(itemFormBox!.height - selectedSourceBox!.height)).toBeLessThanOrEqual(1);
-
   const projectId = projectHref!.split("/")[2]!;
+  await page.goto(`${projectHref!}/materials`);
+  await expect(page.getByRole("heading", { name: "原始资料来源库", exact: true })).toBeVisible();
+  await expectNoHorizontalOverflow(page, `${projectHref!}/materials`, "原始资料来源库", "project materials");
+
+  const addSourceTrigger = page.locator("#add-source-trigger");
+  await expect(addSourceTrigger).toBeVisible();
+  await addSourceTrigger.click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?kind=all&view=add$`, "u"));
+  const addSourceDialog = page.getByRole("dialog", { name: "添加来源" });
+  await expect(addSourceDialog).toBeVisible();
+  const closeSourceDialog = addSourceDialog.getByRole("button", { name: "关闭", exact: true });
+  await expect(closeSourceDialog).toBeFocused();
+  await closeSourceDialog.press("Tab");
+  await expect(addSourceDialog.getByRole("link", { name: "管理已上传文件", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(addSourceDialog).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?kind=all$`, "u"));
+  await expect(addSourceTrigger).toBeFocused();
+
+  const sourceText = `Browser smoke original source ${projectId}`;
+  await addSourceTrigger.click();
+  await expect(addSourceDialog).toBeVisible();
+  await addSourceDialog.locator("#manual-text textarea").fill(sourceText);
+  await addSourceDialog.getByRole("button", { name: "加入原始资料", exact: true }).click();
+  await expect(addSourceDialog.getByRole("status")).toContainText("加入原始资料来源库");
+  await closeSourceDialog.click();
+  await expect(addSourceDialog).toHaveCount(0);
+  await expect(addSourceTrigger).toBeFocused();
+
+  const sourceList = page.getByRole("list", { name: "项目原始资料列表", exact: true });
+  const sourceRow = sourceList.getByRole("listitem").filter({ hasText: sourceText });
+  await expect(sourceRow).toBeVisible();
+
+  await page.getByRole("link", { name: "审核 AI 候选", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials/review$`, "u"));
+  await expect(page.getByRole("heading", { name: "审核 AI 候选", exact: true }).first()).toBeVisible();
+  await expect(page.getByText("当前没有待审核 AI 候选。", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "返回项目资料", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials$`, "u"));
+  await expect(page.getByRole("heading", { name: "原始资料来源库", exact: true })).toBeVisible();
+
+  const returnedSourceRow = page.getByRole("list", { name: "项目原始资料列表", exact: true }).getByRole("listitem").filter({ hasText: sourceText });
+  await expect(returnedSourceRow).toBeVisible();
+  await returnedSourceRow.getByRole("link", { name: "查看详情", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials/sources/[0-9a-f-]+\\?returnTo=`, "u"));
+  await expect(page.getByRole("heading", { name: "原始资料内容", exact: true })).toBeVisible();
+  await expect(page.getByText(sourceText, { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "返回原始资料", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?kind=all&focus=[0-9a-f-]+$`, "u"));
+  await expect(page.locator("a[id^='source-link-']").first()).toBeFocused();
+
   const browserSmokeFixtures = await seedBrowserSmokeFixtures(projectId);
 
   await page.goto("/dashboard");

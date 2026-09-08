@@ -264,6 +264,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [itemDraftDirty, setItemDraftDirty] = useState(false);
   const focusRestoredRef = useRef<string | null>(null);
+  const focusCancelledRef = useRef<string | null>(null);
   const { confirm, dialog } = useAppConfirmDialog();
   const [itemForm, setItemForm] = useState<ItemFormState>({
     type: "progress",
@@ -276,16 +277,53 @@ export function ProjectDetailClient({ username }: { username: string }) {
   });
 
   useEffect(() => {
-    if (!focusSourceId || isSourcesLoading || focusRestoredRef.current === focusSourceId || !sources.some((source) => source.id === focusSourceId)) return;
-    const timer = window.setTimeout(() => {
-      const target = document.getElementById(`source-link-${focusSourceId}`);
-      if (target instanceof HTMLElement) {
-        target.scrollIntoView({ block: "center" });
-        target.focus();
-        focusRestoredRef.current = focusSourceId;
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
+    if (!focusSourceId) {
+      focusRestoredRef.current = null;
+      focusCancelledRef.current = null;
+      return;
+    }
+    if (isSourcesLoading || focusRestoredRef.current === focusSourceId || focusCancelledRef.current === focusSourceId || !sources.some((source) => source.id === focusSourceId)) return;
+    const sourceId = focusSourceId;
+    const initialTarget = document.getElementById(`source-link-${sourceId}`);
+    if (!(initialTarget instanceof HTMLAnchorElement) || !initialTarget.isConnected) return;
+
+    let userCancelled = false;
+    let firstFrame = 0;
+    let secondFrame = 0;
+    const removeFocusListeners = () => {
+      document.removeEventListener("pointerdown", cancelFocusRestore, true);
+      document.removeEventListener("keydown", cancelFocusRestore, true);
+    };
+    const cancelFocusRestore = () => {
+      userCancelled = true;
+      focusCancelledRef.current = sourceId;
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      removeFocusListeners();
+    };
+    document.addEventListener("pointerdown", cancelFocusRestore, true);
+    document.addEventListener("keydown", cancelFocusRestore, true);
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        if (userCancelled) {
+          removeFocusListeners();
+          return;
+        }
+        const target = document.getElementById(`source-link-${sourceId}`);
+        if (target instanceof HTMLAnchorElement && target.isConnected) {
+          target.scrollIntoView({ block: "center" });
+          target.focus({ preventScroll: true });
+          if (document.activeElement === target) focusRestoredRef.current = sourceId;
+        }
+        removeFocusListeners();
+      });
+    });
+    return () => {
+      userCancelled = true;
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      removeFocusListeners();
+    };
   }, [focusSourceId, isSourcesLoading, sources]);
 
   function replaceMaterialsQuery(input: { view?: "add" | null; search?: string; kind?: MaterialKind; page?: number }): void {

@@ -60,7 +60,7 @@ export function ProjectSourceDetailClient({ username }: { username: string }) {
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" />
       <div className="mx-auto max-w-5xl px-6 py-8 sm:px-10 lg:px-12">
-        <div className="mb-6">{fromNotifications ? <ParentPageLink href="/notifications" label="返回通知中心" /> : safeReturnTo ? <ParentPageLink href={safeReturnTo} label="返回原始资料" /> : <ProjectMaterialsParentLink projectId={projectId} />}</div>
+        <div className="mb-6">{fromNotifications ? <ParentPageLink href="/notifications" label="返回通知中心" /> : safeReturnTo ? <ParentPageLink href={safeReturnTo} label="返回原始资料" scroll={false} /> : <ProjectMaterialsParentLink projectId={projectId} />}</div>
         <section className="pb-8">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Source detail</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目资料详情</h1>

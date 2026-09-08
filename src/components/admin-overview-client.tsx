@@ -86,7 +86,7 @@ export function AdminOverviewClient() {
       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">System overview</p>
       <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-5xl">管理员总览</h1>
       <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里把平台托管配置、控制面状态和真实运行证据分开显示。只读聚合不会包含邮箱、凭据、个人账本、连接 Token 或外部调用正文。</p>
-      {overview ? <p className="mt-4 text-xs text-slate-400">测量于 {formatDate(overview.service.measuredAt)} · 应用版本 {overview.service.version}</p> : null}
+      {overview ? <p className="mt-4 text-xs text-slate-300">测量于 {formatDate(overview.service.measuredAt)} · 应用版本 {overview.service.version}</p> : null}
     </section>
 
     {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}

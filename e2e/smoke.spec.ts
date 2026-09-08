@@ -203,13 +203,19 @@ test("first-run administrator can reach protected pages with production security
 
   const returnedSourceRow = page.getByRole("list", { name: "项目原始资料列表", exact: true }).getByRole("listitem").filter({ hasText: sourceText });
   await expect(returnedSourceRow).toBeVisible();
-  await returnedSourceRow.getByRole("link", { name: "查看详情", exact: true }).click();
+  const sourceDetailsLink = returnedSourceRow.getByRole("link", { name: "查看详情", exact: true });
+  const sourceLinkId = await sourceDetailsLink.getAttribute("id");
+  if (sourceLinkId === null || !/^source-link-[0-9a-f-]+$/u.test(sourceLinkId)) throw new Error("source details link id missing");
+  const returnedSourceId = sourceLinkId.slice("source-link-".length);
+  await sourceDetailsLink.click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials/sources/[0-9a-f-]+\\?returnTo=`, "u"));
   await expect(page.getByRole("heading", { name: "原始资料内容", exact: true })).toBeVisible();
   await expect(page.getByText(sourceText, { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "返回原始资料", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?kind=all&focus=[0-9a-f-]+$`, "u"));
-  await expect(page.locator("a[id^='source-link-']").first()).toBeFocused();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?kind=all&focus=${returnedSourceId}$`, "u"));
+  const restoredSourceLink = page.locator(`#source-link-${returnedSourceId}`);
+  await expect(restoredSourceLink).toBeVisible();
+  await expect(restoredSourceLink).toBeFocused();
 
   const browserSmokeFixtures = await seedBrowserSmokeFixtures(projectId);
 
@@ -306,12 +312,55 @@ test("first-run administrator can reach protected pages with production security
     const list = await listResponse.json() as { items: Array<{ id: string; username: string }> };
     const currentUser = list.items.find((item) => item.username === "browser_admin");
     if (currentUser === undefined) throw new Error("browser_admin membership row missing");
+    const grantDays = 1;
+    const grantNote = "browser smoke disposable";
+    const previewResponse = await fetch("/api/system/memberships/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: window.location.origin },
+      body: JSON.stringify({ userId: currentUser.id, action: "grant", days: grantDays, note: grantNote }),
+    });
+    const previewBody = await previewResponse.json() as {
+      preview?: {
+        action: "grant" | "extend" | "revoke";
+        current: { version: number };
+        blockingCategories: string[];
+        canExecute: boolean;
+        impactFingerprint: string;
+        requestFingerprint: string;
+        previewId: string;
+        previewIssuedAt: string;
+        previewExpiresAt: string;
+      };
+      error?: { message?: string };
+    };
+    if (!previewResponse.ok || previewBody.preview === undefined) {
+      throw new Error(`membership preview failed: ${previewResponse.status} ${previewBody.error?.message ?? "unknown error"}`);
+    }
+    const preview = previewBody.preview;
+    if (!preview.canExecute || preview.blockingCategories.length > 0) {
+      throw new Error(`membership preview blocked: ${preview.blockingCategories.join(", ") || "unknown dependency"}`);
+    }
+    const requestKey = crypto.randomUUID();
     const response = await fetch(`/api/system/memberships/${currentUser.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json", origin: window.location.origin },
-      body: JSON.stringify({ action: "grant", days: 1, note: "browser smoke disposable" }),
+      body: JSON.stringify({
+        action: preview.action,
+        days: grantDays,
+        note: grantNote,
+        expectedVersion: preview.current.version,
+        expectedImpactFingerprint: preview.impactFingerprint,
+        requestKey,
+        requestFingerprint: preview.requestFingerprint,
+        previewId: preview.previewId,
+        previewIssuedAt: preview.previewIssuedAt,
+        previewExpiresAt: preview.previewExpiresAt,
+        confirmation: true,
+      }),
     });
-    return { status: response.status, body: await response.json() as { subscription?: { status?: string } } };
+    const body = await response.json() as { subscription?: { status?: string }; error?: { message?: string } };
+    if (!response.ok) throw new Error(`membership grant failed: ${response.status} ${body.error?.message ?? "unknown error"}`);
+    return { status: response.status, body };
   });
   expect(membershipGrant.status).toBe(200);
   expect(membershipGrant.body.subscription?.status).toBe("active");

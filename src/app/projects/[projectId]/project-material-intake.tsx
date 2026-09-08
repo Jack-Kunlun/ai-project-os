@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
+import type { MaterialKind } from "./materials/materials-navigation";
 
 type UploadPolicy = { maxFiles: number };
 const SUPPORTED_FILE_EXTENSIONS = [".txt", ".md", ".markdown", ".csv", ".json", ".pdf", ".docx", ".pptx", ".xlsx", ".png", ".jpg", ".jpeg", ".webp"] as const;
@@ -28,9 +29,15 @@ function isSupportedFile(file: File): boolean {
 export function ProjectMaterialIntake({
   projectId,
   onChanged,
+  open,
+  kind,
+  onClose,
 }: {
   projectId: string;
   onChanged: () => Promise<void>;
+  open: boolean;
+  kind: MaterialKind;
+  onClose: () => void;
 }) {
   const [contentText, setContentText] = useState("");
   const [externalRef, setExternalRef] = useState("");
@@ -41,6 +48,62 @@ export function ProjectMaterialIntake({
   const [maxFiles, setMaxFiles] = useState(10);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const kindLabels: Record<MaterialKind, string> = {
+    all: "资料",
+    manual: "文本资料",
+    document: "文档资料",
+    screenshot: "图片资料",
+    web: "网页资料",
+    github: "GitHub 资料",
+    git: "代码仓库资料",
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const activeElement = document.activeElement;
+    openerRef.current = activeElement instanceof HTMLElement && activeElement.id === "add-source-trigger"
+      ? activeElement
+      : document.getElementById("add-source-trigger");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    return () => {
+      window.clearTimeout(focusTimer);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
+  function closeDrawer() {
+    onClose();
+    window.setTimeout(() => {
+      (openerRef.current ?? document.getElementById("add-source-trigger"))?.focus();
+    }, 0);
+  }
+
+  function handleDialogKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeDrawer();
+      return;
+    }
+    if (event.key !== "Tab" || !dialogRef.current) return;
+    const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+      "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+    ));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +140,7 @@ export function ProjectMaterialIntake({
       setExternalRef("");
       setCapturedAt("");
       await onChanged();
-      setMessage("文本已加入项目资料。它仍是待审核来源，不会直接成为已确认事实。");
+      setMessage("文本已加入原始资料来源库。它仍需审核，不会直接成为已确认事实。");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "文本资料保存失败");
     } finally {
@@ -128,7 +191,7 @@ export function ProjectMaterialIntake({
         setError(`已保存 ${uploaded} 个，失败 ${failures.length} 个：${failures.slice(0, 3).join("；")}${failures.length > 3 ? "；其余失败项请分批重试" : ""}`);
         setMessage(uploaded > 0 ? "已保存文件的本地解析状态可在“管理全部文件”查看；需要模型识别的任务结束后会进入通知中心。" : null);
       } else {
-        setMessage(`已保存 ${uploaded} 个文件。本地解析状态可在“管理全部文件”查看；需要模型识别的任务结束后会进入通知中心。需要人工确认的内容不会自动写入记忆。`);
+        setMessage(`已保存 ${uploaded} 个文件。本地解析状态可在“管理全部文件”查看；需要模型识别的任务结束后会进入通知中心。需要人工确认的内容不会自动进入 AI 可引用记忆。`);
       }
     } catch {
       setError("文件上传已经结束，但资料列表刷新失败；请打开“管理全部文件”确认结果。");
@@ -137,14 +200,24 @@ export function ProjectMaterialIntake({
     }
   }
 
+  if (!open) return null;
+
   return (
-    <section id="project-materials" className="scroll-mt-44 rounded-3xl border border-indigo-100 bg-white p-6 shadow-sm sm:p-7">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/45 p-4 sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="add-source-dialog-title" aria-describedby="add-source-dialog-description" onKeyDown={handleDialogKeyDown} className="my-4 w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl sm:my-6">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-5 sm:px-8">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight text-slate-950">添加项目资料</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">直接输入文本，或上传图片、文档和整个文件夹。</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Add source</p>
+          <h2 id="add-source-dialog-title" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">添加来源</h2>
+          <p id="add-source-dialog-description" className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">新增的内容会先进入“原始资料”，经过核对后才会形成已确认事实；不会自动成为 AI 可引用记忆。</p>
         </div>
-        <Link href={`/projects/${projectId}/assets`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700">管理全部文件</Link>
+        <button ref={closeButtonRef} type="button" onClick={closeDrawer} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-indigo-300 hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">关闭</button>
+      </div>
+
+      <div className="max-h-[calc(100vh-8rem)] overflow-y-auto px-6 py-6 sm:px-8">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+        <p>当前入口：<strong className="font-semibold">{kindLabels[kind]}</strong></p>
+        <Link href={`/projects/${projectId}/assets`} onClick={() => closeDrawer()} className="font-semibold text-indigo-700 underline decoration-indigo-300 underline-offset-4">管理已上传文件</Link>
       </div>
 
       {error ? <p role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm leading-6 text-rose-700">{error}</p> : null}
@@ -153,7 +226,7 @@ export function ProjectMaterialIntake({
       <div className="mt-5 grid min-w-0 gap-4 lg:grid-cols-2">
         <form id="manual-text" onSubmit={saveText} className="min-w-0 rounded-2xl bg-slate-950 p-5 text-white">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">输入文本</p>
-          <h3 className="mt-2 text-xl font-semibold">粘贴一段项目资料</h3>
+          <h3 className="mt-2 text-xl font-semibold">粘贴一段原始资料</h3>
           <p className="mt-2 text-xs leading-5 text-slate-400">适合会议记录、项目进展、需求说明和临时笔记。系统保留原文，不会把未审核内容当成事实。</p>
           <textarea value={contentText} onChange={(event) => setContentText(event.target.value)} rows={5} maxLength={100_000} required placeholder="直接输入或粘贴项目资料…" className="mt-4 w-full resize-y rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-slate-500 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/20" />
           <details className="mt-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
@@ -161,7 +234,7 @@ export function ProjectMaterialIntake({
             <label className="mt-4 block text-xs text-slate-300">来源链接<input type="url" value={externalRef} onChange={(event) => setExternalRef(event.target.value)} maxLength={2_048} placeholder="https://example.com/document" className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500" /></label>
             <label className="mt-4 block text-xs text-slate-300">资料时间<input type="datetime-local" value={capturedAt} onChange={(event) => setCapturedAt(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none [color-scheme:dark]" /></label>
           </details>
-          <button disabled={savingText || !contentText.trim()} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-indigo-300 disabled:cursor-not-allowed disabled:opacity-50">{savingText ? "保存中…" : "加入项目资料"}</button>
+          <button disabled={savingText || !contentText.trim()} className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-indigo-400 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-indigo-300 disabled:cursor-not-allowed disabled:opacity-50">{savingText ? "保存中…" : "加入原始资料"}</button>
         </form>
 
         <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-5">
@@ -190,6 +263,8 @@ export function ProjectMaterialIntake({
         <Link href={`/projects/${projectId}/external-sources`} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50">添加网页资料</Link>
         <Link href={`/projects/${projectId}/repositories`} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50">连接代码仓库</Link>
       </div>
-    </section>
+      </div>
+      </div>
+    </div>
   );
 }

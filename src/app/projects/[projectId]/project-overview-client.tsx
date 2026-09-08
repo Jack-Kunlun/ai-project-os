@@ -139,7 +139,7 @@ export function ProjectOverviewClient({ username }: { username: string }) {
   const nextStep = (() => {
     if (data === null || summary === null) return null;
     if (data.project._count.sources === 0 && data.project._count.assets === 0) return { title: "添加第一份项目资料", detail: "输入文本，或上传图片、文档和文件夹。", href: `/projects/${projectId}/materials`, action: "添加资料" };
-    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "只有人工确认后的内容才会进入项目事实与记忆。", href: `/projects/${projectId}/materials#review-queue`, action: "开始审核" };
+    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "核对原始资料后，只有人工确认的内容才会进入已确认事实。", href: `/projects/${projectId}/materials/review`, action: "开始审核" };
     if (!data.governance.index.compatible) return { title: "建立或更新项目记忆", detail: "把已确认内容建立为可检索、可引用的语义索引。", href: `/projects/${projectId}/memory`, action: "管理记忆" };
     return { title: "查询项目或生成简报", detail: "当前项目已经具备可引用的智能查询基础。", href: `/projects/${projectId}/intelligence`, action: "打开 AI 工作台" };
   })();
@@ -201,7 +201,7 @@ export function ProjectOverviewClient({ username }: { username: string }) {
               <article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
                 <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Attention</p><h2 className="mt-2 text-xl font-semibold">需要关注</h2></div>
                 <div className="mt-5 divide-y divide-slate-100">
-                  <AttentionRow label="待审核内容" value={summary.pendingContent} href={`/projects/${projectId}/materials#review-queue`} />
+                  <AttentionRow label="待审核内容" value={summary.pendingContent} href={`/projects/${projectId}/materials/review`} />
                   <AttentionRow label="任务异常" value={summary.taskIssues} href={`/projects/${projectId}/governance`} />
                   <AttentionRow label="仓库同步风险" value={summary.githubIssues} href={`/projects/${projectId}/repositories`} />
                 </div>

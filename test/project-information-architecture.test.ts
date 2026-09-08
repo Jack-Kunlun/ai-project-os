@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("project overview and materials use separate routes with a compact navigation", async () => {
-  const [page, overview, materialsPage, materials, header, dashboard, world, governance] = await Promise.all([
+  const [page, overview, materialsPage, materials, reviewPage, header, dashboard, world, governance] = await Promise.all([
     readFile("src/app/projects/[projectId]/page.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-overview-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/materials/page.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/materials/review/page.tsx", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
     readFile("src/app/dashboard/dashboard-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/world/project-world-client.tsx", "utf8"),
@@ -55,7 +56,11 @@ test("project overview and materials use separate routes with a compact navigati
 
   assert.match(materials, /projectSection="materials"/u);
   assert.match(materials, /ProjectMaterialIntake/u);
-  assert.match(materials, /ProjectMaterialReviewQueue/u);
+  assert.match(reviewPage, /ProjectMaterialReviewQueue/u);
+  assert.match(materials, /id="add-source-trigger"/u);
+  assert.match(materials, /审核 AI 候选/u);
+  assert.doesNotMatch(materials, /ProjectMaterialReviewQueue/u);
+  assert.match(materialsPage, /Suspense/u);
   assert.match(materials, /materials\/sources/u);
   assert.doesNotMatch(materials, /<details|查看原文/u);
   assert.doesNotMatch(materials, /SnapshotPanel|AiCapabilityGuide|PlaceholderCard/u);

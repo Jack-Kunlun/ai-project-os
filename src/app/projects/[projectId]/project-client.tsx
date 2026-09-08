@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useCallback, useDeferredValue, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
+import { buildMaterialsReturnTo, isAddSourceView, parseMaterialKind, parseMaterialsPage, type MaterialKind } from "./materials/materials-navigation";
 import { ProjectMaterialIntake } from "./project-material-intake";
-import { ProjectMaterialReviewQueue } from "./project-material-review-queue";
 
 type ProjectItem = {
   id: string;
@@ -228,14 +228,20 @@ function itemActionText(action: ItemAction): string {
 
 export function ProjectDetailClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const focusSourceId = searchParams.get("focus");
+  const isAddSourceOpen = isAddSourceView(searchParams.get("view"));
+  const queryMaterialKind = parseMaterialKind(searchParams.get("kind"));
+  const intakeKind: MaterialKind = queryMaterialKind === "all" ? "manual" : queryMaterialKind;
   const [project, setProject] = useState<Project | null>(null);
   const [sources, setSources] = useState<ProjectSourceSummary[]>([]);
   const [sourceDetails, setSourceDetails] = useState<Record<string, ProjectSource>>({});
   const [sourcePagination, setSourcePagination] = useState<ListPaginationState>(emptyPagination);
-  const [sourceSearch, setSourceSearch] = useState("");
+  const sourceSearch = searchParams.get("search") ?? "";
   const deferredSourceSearch = useDeferredValue(sourceSearch);
-  const [sourceKind, setSourceKind] = useState("all");
-  const [sourcePage, setSourcePage] = useState(1);
+  const sourceKind: MaterialKind = queryMaterialKind;
+  const sourcePage = parseMaterialsPage(searchParams.get("page"));
   const [isSourceDetailLoading, setIsSourceDetailLoading] = useState(false);
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [itemCounts, setItemCounts] = useState<ItemCounts>({ candidate: 0, confirmed: 0, dismissed: 0, superseded: 0 });
@@ -257,6 +263,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
   const [itemActionId, setItemActionId] = useState<string | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [itemDraftDirty, setItemDraftDirty] = useState(false);
+  const focusRestoredRef = useRef<string | null>(null);
   const { confirm, dialog } = useAppConfirmDialog();
   const [itemForm, setItemForm] = useState<ItemFormState>({
     type: "progress",
@@ -267,6 +274,33 @@ export function ProjectDetailClient({ username }: { username: string }) {
     occurredAt: "",
     expectedUpdatedAt: "",
   });
+
+  useEffect(() => {
+    if (!focusSourceId || isSourcesLoading || focusRestoredRef.current === focusSourceId || !sources.some((source) => source.id === focusSourceId)) return;
+    const timer = window.setTimeout(() => {
+      const target = document.getElementById(`source-link-${focusSourceId}`);
+      if (target instanceof HTMLElement) {
+        target.scrollIntoView({ block: "center" });
+        target.focus();
+        focusRestoredRef.current = focusSourceId;
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [focusSourceId, isSourcesLoading, sources]);
+
+  function replaceMaterialsQuery(input: { view?: "add" | null; search?: string; kind?: MaterialKind; page?: number }): void {
+    const params = new URLSearchParams();
+    const nextSearch = input.search ?? searchParams.get("search") ?? "";
+    const nextKind = input.kind ?? parseMaterialKind(searchParams.get("kind"));
+    const nextPage = input.page ?? parseMaterialsPage(searchParams.get("page"));
+    if (nextSearch.trim()) params.set("search", nextSearch.trim().slice(0, 200));
+    params.set("kind", nextKind);
+    if (nextPage > 1) params.set("page", String(nextPage));
+    const nextView = input.view === undefined ? searchParams.get("view") : input.view;
+    if (nextView === "add") params.set("view", "add");
+    const query = params.toString();
+    router.replace(`/projects/${encodeURIComponent(projectId)}/materials${query ? `?${query}` : ""}`, { scroll: false });
+  }
 
   const loadProject = useCallback(async () => {
     try {
@@ -284,7 +318,6 @@ export function ProjectDetailClient({ username }: { username: string }) {
       setSources(loaded.sources);
       setSourcePagination(loaded.pagination);
       setItemForm((current) => ({ ...current, sourceId: current.sourceId || loaded.sources[0]?.id || "" }));
-      if (sourcePage > loaded.pagination.totalPages) setSourcePage(loaded.pagination.totalPages);
       setSourceError(null);
     } catch (loadError) {
       setSourceError(loadError instanceof Error ? loadError.message : "项目资料加载失败");
@@ -342,8 +375,8 @@ export function ProjectDetailClient({ username }: { username: string }) {
     if (!projectId || deletingSourceId) return;
     const confirmation = await confirm({
       eyebrow: "Project materials",
-      title: "删除这条候选资料？",
-      description: "此操作会永久删除尚未被项目条目引用的候选资料；已经被引用的资料会由服务端拒绝删除。",
+      title: "删除这条原始资料？",
+      description: "此操作会永久删除尚未被项目条目引用的原始资料；已经被引用的资料会由服务端拒绝删除。",
       confirmLabel: "确认删除",
       tone: "danger",
     });
@@ -360,7 +393,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
       }
 
       await reloadProjectAndSources();
-      setSourceSuccess("候选资料已删除。");
+      setSourceSuccess("原始资料已删除。");
     } catch (deleteError) {
       setSourceError(deleteError instanceof Error ? deleteError.message : "资料删除失败");
     } finally {
@@ -431,7 +464,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
     if (!projectId || isSavingItem) return;
 
     if (!itemForm.sourceId) {
-      setItemError("请先接入并选择一条 Source，再保存 Item。");
+      setItemError("请先添加并选择一条原始资料，再保存事实候选。");
       setItemSuccess(null);
       return;
     }
@@ -583,31 +616,31 @@ export function ProjectDetailClient({ username }: { username: string }) {
   return (
     <ProjectShell username={username} projectId={projectId}>
       <div className="border-b border-slate-200/80 pb-8">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project materials</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name} · 项目资料</h1>
-          <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">在一个页面添加和管理文本、图片、文档、文件夹、网页与代码仓库资料。</p>
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Project materials</p>
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] text-slate-950">{project.name} · 原始资料</h1>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">先收集可追溯的原始资料，再审核 AI 候选，最后形成已确认事实与 AI 可引用记忆。</p>
+          </div>
+          <div className="flex flex-wrap gap-3" aria-label="资料主要操作">
+            <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">添加来源</button>
+            <Link href={`/projects/${encodeURIComponent(projectId)}/materials/review`} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-3 text-sm font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">审核 AI 候选</Link>
+          </div>
         </div>
       </div>
-
-      <div className="mt-8">
-        <ProjectMaterialIntake projectId={projectId} onChanged={reloadProjectAndSources} />
-      </div>
-
-      <ProjectMaterialReviewQueue projectId={projectId} onChanged={reloadProjectAndSources} />
 
       <section id="source-library" aria-labelledby="sources-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Source library</p>
-            <h2 id="sources-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">已接入资料</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">统一查看文本、文件、网页和仓库发布的可追溯来源。这里展示的是资料，不等同于已确认事实或 AI 结论。</p>
+            <h2 id="sources-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">原始资料来源库</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">这里保存文本、文件、网页和仓库发布的原始内容。它们是可追溯输入，不等同于 AI 候选、已确认事实或 AI 可引用记忆。</p>
           </div>
-          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isSourcesLoading ? "读取中…" : `${sourcePagination.total} 条候选资料`}</span>
+          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isSourcesLoading ? "读取中…" : `${sourcePagination.total} 条原始资料`}</span>
         </div>
 
         <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900" role="note">
-          <strong className="font-semibold">安全提示：</strong>这里只保存候选资料，不代表已确认的事实或 AI 摘要。不要录入密码、Token、私密连接串，也不要使用带凭据的 URL。
+          <strong className="font-semibold">安全提示：</strong>这里只保存原始资料，不代表已确认事实或 AI 摘要。不要录入密码、Token、私密连接串，也不要使用带凭据的 URL。
         </div>
 
         {sourceError ? (
@@ -618,8 +651,8 @@ export function ProjectDetailClient({ username }: { username: string }) {
         ) : null}
 
         <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center">
-          <label className="min-w-0 flex-1"><span className="sr-only">搜索已接入资料</span><input value={sourceSearch} onChange={(event) => { setSourceSearch(event.target.value); setSourcePage(1); }} placeholder="模糊搜索正文、来源链接或内容哈希" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
-          <label className="sm:w-48"><span className="sr-only">按资料类型筛选</span><select value={sourceKind} onChange={(event) => { setSourceKind(event.target.value); setSourcePage(1); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部资料类型</option><option value="manual">手工文本</option><option value="document">文档</option><option value="screenshot">图片或截图</option><option value="web">网页</option><option value="github">GitHub</option><option value="git">Git 仓库</option></select></label>
+          <label className="min-w-0 flex-1"><span className="sr-only">搜索原始资料</span><input value={sourceSearch} onChange={(event) => { replaceMaterialsQuery({ search: event.target.value, page: 1 }); }} placeholder="搜索正文、来源链接或内容哈希" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
+          <label className="sm:w-48"><span className="sr-only">按原始资料类型筛选</span><select value={sourceKind} onChange={(event) => { const value = parseMaterialKind(event.target.value); replaceMaterialsQuery({ kind: value, page: 1 }); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部资料类型</option><option value="manual">手工文本</option><option value="document">文档</option><option value="screenshot">图片或截图</option><option value="web">网页</option><option value="github">GitHub</option><option value="git">Git 仓库</option></select></label>
         </div>
 
         <div className="mt-8 min-w-0">
@@ -627,7 +660,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Traceable inputs</p>
-                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">已接入资料</h3>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">原始资料清单</h3>
               </div>
               <span className="text-xs text-slate-400">按最近接入排序</span>
             </div>
@@ -638,30 +671,30 @@ export function ProjectDetailClient({ username }: { username: string }) {
               </div>
             ) : sources.length === 0 ? (
               <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
-                <p className="text-sm font-medium text-slate-700">{sourceSearch.trim() || sourceKind !== "all" ? "没有匹配的资料" : "还没有候选资料"}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-500">{sourceSearch.trim() || sourceKind !== "all" ? "调整关键词或资料类型后重试。" : "从页面上方输入文本、上传文件或文件夹，也可以添加网页和代码仓库。"}</p>
+                <p className="text-sm font-medium text-slate-700">{sourceSearch.trim() || sourceKind !== "all" ? "没有匹配的原始资料" : "还没有原始资料"}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-500">{sourceSearch.trim() || sourceKind !== "all" ? "调整关键词或资料类型后重试。" : "使用上方“添加来源”收集文本、文件、网页或代码仓库资料。"}</p>
               </div>
             ) : (
-              <ul className="mt-5 min-w-0 space-y-4" aria-label="项目候选资料列表">
+              <ul className="mt-5 min-w-0 space-y-4" aria-label="项目原始资料列表">
                 {sources.map((source) => (
                   <li key={source.id} className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
                         <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-wide text-indigo-700">{source.kind}</span>
-                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-600">待审核资料</span>
+                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-600">原始资料</span>
                         </div>
                         <h4 className="mt-3 line-clamp-2 text-sm font-semibold leading-6 text-slate-900">{source.preview || "未提供文字预览"}</h4>
                         <p className="mt-2 text-xs text-slate-500">{source.kind === "manual" ? "手工输入资料" : "外部来源已绑定"} · 最近接入于 {formatSourceDate(source.ingestedAt)}</p>
                       </div>
                       <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
-                        <Link href={`/projects/${projectId}/materials/sources/${source.id}`} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700">查看详情</Link>
+                        <Link id={`source-link-${source.id}`} href={`/projects/${encodeURIComponent(projectId)}/materials/sources/${encodeURIComponent(source.id)}?returnTo=${encodeURIComponent(buildMaterialsReturnTo(projectId, { search: sourceSearch, kind: sourceKind, page: sourcePage, focus: source.id }))}`} className="inline-flex min-h-9 items-center justify-center rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">查看详情</Link>
                         <button
                           type="button"
                           onClick={() => void handleDeleteSource(source)}
                           disabled={deletingSourceId !== null}
                           className="inline-flex min-h-9 items-center justify-center rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          aria-label={`删除候选资料 ${source.preview.slice(0, 24)}`}
+                          aria-label={`删除原始资料 ${source.preview.slice(0, 24)}`}
                         >
                           {deletingSourceId === source.id ? "删除中…" : "删除"}
                         </button>
@@ -671,17 +704,17 @@ export function ProjectDetailClient({ username }: { username: string }) {
                 ))}
               </ul>
             )}
-            <ListPagination {...sourcePagination} onPageChange={setSourcePage} disabled={isSourcesLoading} />
+            <ListPagination {...sourcePagination} onPageChange={(page) => { replaceMaterialsQuery({ page }); }} disabled={isSourcesLoading} />
           </div>
         </div>
       </section>
 
-      <section aria-labelledby="items-heading" className="mt-10 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+      <section id="confirmed-facts" aria-labelledby="items-heading" className="mt-10 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Item review</p>
-            <h2 id="items-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">项目条目</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">手工记录 decision、progress、issue 或 risk，并通过精确原文摘录回溯到当前项目 Source。</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Confirmed facts</p>
+            <h2 id="items-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">已确认事实</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">人工记录或审核项目事实，并通过精确原文摘录回溯到原始资料。只有已确认事实才可能进入后续 AI 可引用记忆流程。</p>
           </div>
           <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isItemsLoading ? "读取中…" : `${itemCounts.confirmed} 已确认 · ${itemCounts.candidate} 待确认`}</span>
         </div>
@@ -695,12 +728,12 @@ export function ProjectDetailClient({ username }: { username: string }) {
 
         <div className="mt-8 grid min-w-0 items-stretch grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
           <form id="project-item-form" onSubmit={handleItemSubmit} className="min-w-0 max-w-full rounded-2xl bg-slate-950 p-6 text-white shadow-lg shadow-slate-950/10" aria-labelledby="item-form-heading">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Manual item</p>
-            <h3 id="item-form-heading" className="mt-3 text-xl font-semibold tracking-tight text-white">{isEditingItem ? "编辑项目条目" : "新增项目条目"}</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-400">{isEditingItem ? "编辑后条目会回到待确认状态；Source 归属保持不变。" : "先选择当前项目的 Source，再填写可以被原文精确支持的条目。"}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Fact candidate</p>
+            <h3 id="item-form-heading" className="mt-3 text-xl font-semibold tracking-tight text-white">{isEditingItem ? "编辑事实候选" : "补充事实候选"}</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-400">{isEditingItem ? "编辑后会回到待确认状态；原始资料归属保持不变。" : "选择当前项目的原始资料，填写可以被原文精确支持的事实候选。"}</p>
 
             <label className="mt-6 block text-sm font-medium text-slate-200" htmlFor="item-source">Source <span className="text-rose-300">（必选）</span></label>
-            <select
+              <select
               id="item-source"
               value={itemForm.sourceId}
               onChange={(event) => updateItemForm((current) => ({ ...current, sourceId: event.target.value }))}
@@ -708,7 +741,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
               required
               className="mt-2 w-full min-w-0 max-w-full rounded-xl border border-white/10 bg-white/10 px-4 py-3 text-sm text-white outline-none transition [color-scheme:dark] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-300/30 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <option value="" className="bg-slate-950">选择当前项目的 Source</option>
+                <option value="" className="bg-slate-950">选择当前项目的原始资料</option>
               {sourceOptions.map((source) => (
                 <option key={source.id} value={source.id} className="bg-slate-950">
                   {source.kind} · {sourcePreview(source.preview).slice(0, 52)}
@@ -799,8 +832,8 @@ export function ProjectDetailClient({ username }: { username: string }) {
 
           <div className="min-w-0 max-w-full rounded-2xl border border-indigo-100 bg-indigo-50/60 p-6">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Selected source</p>
-            <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-950">所选 Source 原文</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-600">复制下方原文中的连续片段到“精确原文摘录”，服务端会验证它确实来自当前 Source。</p>
+            <h3 className="mt-3 text-xl font-semibold tracking-tight text-slate-950">所选原始资料</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">复制下方原文中的连续片段到“精确原文摘录”，服务端会验证它确实来自当前原始资料。</p>
             {selectedSource && "contentText" in selectedSource ? (
               <div className="mt-5 min-w-0 max-w-full rounded-xl border border-indigo-100 bg-white p-4">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -815,7 +848,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
               </div>
             ) : (
               <div className="mt-5 rounded-xl border border-dashed border-indigo-200 bg-white/70 px-5 py-10 text-center text-sm leading-6 text-slate-500">
-                {sources.length === 0 ? "请先在上方项目资料区域接入 Source。" : "请选择一条 Source 查看完整内容。"}
+                {sources.length === 0 ? "请先在上方添加一条原始资料。" : "请选择一条原始资料查看完整内容。"}
               </div>
             )}
           </div>
@@ -825,7 +858,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">All project items</p>
-              <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">全部项目条目</h3>
+              <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-950">事实与候选记录</h3>
             </div>
             <span className="text-xs text-slate-400">按最近更新时间排序</span>
           </div>
@@ -843,7 +876,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
           ) : items.length === 0 ? (
             <div className="mt-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
               <p className="text-sm font-medium text-slate-700">{itemSearch.trim() || itemType !== "all" || itemStatus !== "all" ? "没有匹配的项目条目" : "还没有项目条目"}</p>
-              <p className="mt-2 text-sm leading-6 text-slate-500">{itemSearch.trim() || itemType !== "all" || itemStatus !== "all" ? "调整关键词、类型或状态后重试。" : "从上方选择 Source 并保存第一条 decision、progress、issue 或 risk。"}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">{itemSearch.trim() || itemType !== "all" || itemStatus !== "all" ? "调整关键词、类型或状态后重试。" : "从上方选择原始资料并保存第一条决策、进展、问题或风险候选。"}</p>
             </div>
           ) : (
             <ul className="mt-5 space-y-4" aria-label="全部项目条目列表">
@@ -851,6 +884,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
                 <ItemCard
                   key={item.id}
                   item={item}
+                  projectId={projectId}
                   itemActionId={itemActionId}
                   isSavingItem={isSavingItem}
                   editingItemId={editingItemId}
@@ -863,6 +897,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
           <ListPagination {...itemPagination} onPageChange={setItemPage} disabled={isItemsLoading} />
         </div>
       </section>
+      <ProjectMaterialIntake projectId={projectId} onChanged={reloadProjectAndSources} open={isAddSourceOpen} kind={intakeKind} onClose={() => replaceMaterialsQuery({ view: null })} />
       {dialog}
     </ProjectShell>
   );
@@ -870,6 +905,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
 
 function ItemCard({
   item,
+  projectId,
   itemActionId,
   isSavingItem,
   editingItemId,
@@ -877,6 +913,7 @@ function ItemCard({
   onAction,
 }: {
   item: ProjectItem;
+  projectId: string;
   itemActionId: string | null;
   isSavingItem: boolean;
   editingItemId: string | null;
@@ -957,7 +994,7 @@ function ItemCard({
           </div>
         ) : (
           <span className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-400">
-            {requiresAiWorkbench && item.reviewStatus === "candidate" ? "请在待审核候选中审阅" : "只读"}
+            {requiresAiWorkbench && item.reviewStatus === "candidate" ? <Link href={`/projects/${encodeURIComponent(projectId)}/materials/review`} className="text-indigo-700 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-900">前往审核 AI 候选</Link> : "只读"}
           </span>
         )}
       </div>

@@ -41,7 +41,7 @@ test("high-growth project lists use server pagination with search and filters", 
   assert.match(governance, /搜索任务记录/u);
   assert.match(governance, /搜索模型路由变更/u);
   assert.match(reviewQueue, /CursorPagination/u);
-  assert.match(reviewQueue, /搜索待审核候选/u);
+  assert.match(reviewQueue, /搜索 AI 候选/u);
 });
 
 test("project creation capability follows workspace membership in the API and UI", async () => {

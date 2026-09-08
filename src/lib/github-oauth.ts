@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Prisma, type GitHubOauthIntent, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { createSession, DEFAULT_WORKSPACE_ID, type CreatedSession } from "@/lib/auth";
+import { appendEmailVerificationAudit, createSession, DEFAULT_WORKSPACE_ID, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
 import { createCredential, readCredentialSecret } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
@@ -380,6 +380,9 @@ export async function completeGitHubOAuth(
       if ((byGitHub !== null && byGitHub.userId !== user.id) || (byUser !== null && byUser.githubUserId !== profile.githubUserId)) {
         return fail("GITHUB_OAUTH_IDENTITY_CONFLICT");
       }
+      const emailOwner = await tx.appUser.findUnique({ where: { email: profile.email }, select: { id: true } });
+      if (emailOwner !== null && emailOwner.id !== user.id) return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
+      await setVerifiedAccountEmail(tx, user.id, profile.email, "github", now);
       await tx.gitHubIdentity.upsert({
         where: { userId: user.id },
         create: { userId: user.id, ...profile, lastLoginAt: now },
@@ -400,10 +403,21 @@ export async function completeGitHubOAuth(
           username: await availableGitHubUsername(profile.login, tx),
           displayName: profile.displayName,
           email: profile.email,
+          emailVerifiedAt: now,
           role: "user",
           passwordHash: null,
           passwordSalt: null,
         },
+      });
+      await appendEmailVerificationAudit(tx, {
+        userId: user.id,
+        event: "verified",
+        emailBefore: null,
+        emailAfter: profile.email,
+        verifiedAtBefore: null,
+        verifiedAtAfter: now,
+        source: "github",
+        reason: "github_primary_email_verified",
       });
       const workspaceMembership = await tx.workspaceMembership.create({
         data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "member", accessState: "confirmed" },
@@ -416,6 +430,9 @@ export async function completeGitHubOAuth(
       });
     } else {
       if (identity.user.disabledAt !== null) return fail("GITHUB_OAUTH_ACCOUNT_DISABLED");
+      const emailOwner = await tx.appUser.findUnique({ where: { email: profile.email }, select: { id: true } });
+      if (emailOwner !== null && emailOwner.id !== identity.user.id) return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
+      await setVerifiedAccountEmail(tx, identity.user.id, profile.email, "github", now);
       const currentMembership = await findCurrentWorkspaceMembership(tx, DEFAULT_WORKSPACE_ID, identity.user.id);
       if (currentMembership !== null && currentMembership.accessState !== "confirmed") return fail("GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED");
       if (currentMembership === null) {

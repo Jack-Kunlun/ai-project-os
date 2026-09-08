@@ -5,6 +5,7 @@ import {
   AuthError,
   changeAccountPassword,
   createPasswordRecord,
+  updateAccountProfile,
   updateAccountUsername,
   verifyPasswordRecord,
 } from "@/lib/auth";
@@ -90,4 +91,42 @@ test("profile mutation endpoint rejects cross-origin requests before account acc
     body,
   }));
   assert.equal(crossOrigin.status, 403);
+});
+
+test("profile keeps verification for same email and clears it for an actual email change", async () => {
+  const verifiedAt = new Date("2026-09-01T00:00:00.000Z");
+  const record: { id: string; displayName: string | null; email: string | null; emailVerifiedAt: Date | null } = {
+    id: userId,
+    displayName: "Owner",
+    email: "owner@example.com",
+    emailVerifiedAt: verifiedAt,
+  };
+  const audits: Array<Record<string, unknown>> = [];
+  const tx = {
+    $executeRaw: async () => 1,
+    appUser: {
+      findUnique: async () => ({ ...record }),
+      update: async ({ data }: { data: Partial<typeof record> }) => {
+        Object.assign(record, data);
+        return { ...record };
+      },
+    },
+    appUserEmailVerificationAudit: {
+      create: async ({ data }: { data: Record<string, unknown> }) => { audits.push(data); return data; },
+    },
+  };
+  const db = {
+    $transaction: async (operation: (client: typeof tx) => Promise<unknown>) => operation(tx),
+  } as unknown as PrismaClient;
+
+  const unchanged = await updateAccountProfile(userId, { displayName: "Owner 2", email: "owner@example.com" }, db);
+  assert.equal(unchanged.emailVerifiedAt?.toISOString(), verifiedAt.toISOString());
+  assert.equal(audits.length, 0);
+
+  const changed = await updateAccountProfile(userId, { displayName: "Owner 2", email: "new-owner@example.com" }, db);
+  assert.equal(changed.email, "new-owner@example.com");
+  assert.equal(changed.emailVerifiedAt, null);
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0]?.event, "unverified");
+  assert.equal("email" in (audits[0] ?? {}), false);
 });

@@ -72,7 +72,8 @@ function fakeDb() {
   const credentials = new Map<string, ExternalCredential>();
   const attempts = new Map<string, Attempt>();
   const identities = new Map<string, { id: string; userId: string; githubUserId: bigint; login: string; email: string; displayName: string | null; lastLoginAt: Date }>();
-  const users = new Map<string, { id: string; username: string; role: "admin" | "member" | "user"; displayName?: string | null; email?: string | null; disabledAt: Date | null }>();
+  const users = new Map<string, { id: string; username: string; role: "admin" | "member" | "user"; displayName?: string | null; email?: string | null; emailVerifiedAt?: Date | null; disabledAt: Date | null }>();
+  const emailVerificationAudits: Array<Record<string, unknown>> = [];
   const memberships: Array<{
     id: string;
     workspaceId: string;
@@ -85,7 +86,7 @@ function fakeDb() {
   const platformTokenGrants = new Map<string, PlatformTokenGrantRecord>();
   const platformTokenLedgerEntries = new Map<string, PlatformTokenLedgerEntryRecord>();
   let sequence = 0;
-  const user = { id: USER_ID, username: "admin", role: "admin" as const, disabledAt: null };
+  const user = { id: USER_ID, username: "admin", role: "admin" as const, emailVerifiedAt: null, disabledAt: null };
   users.set(user.id, user);
 
   const tx = {
@@ -95,7 +96,13 @@ function fakeDb() {
         ? users.get(where.id) ?? null
         : [...users.values()].find((item) => item.email === where.email) ?? null,
       count: async ({ where }: { where: { username: string } }) => [...users.values()].filter((item) => item.username === where.username).length,
-      create: async ({ data }: { data: { username: string; displayName: string | null; email: string; role: "user" } }) => {
+      update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+        const current = users.get(where.id);
+        if (!current) throw new Error("missing user");
+        Object.assign(current, data);
+        return current;
+      },
+      create: async ({ data }: { data: { username: string; displayName: string | null; email: string | null; emailVerifiedAt?: Date | null; role: "user" } }) => {
         const created = { id: `55555555-5555-4555-8555-${String(++sequence).padStart(12, "0")}`, ...data, disabledAt: null };
         users.set(created.id, created);
         return created;
@@ -113,6 +120,9 @@ function fakeDb() {
     },
     membershipAccessAudit: {
       create: async () => ({}),
+    },
+    appUserEmailVerificationAudit: {
+      create: async ({ data }: { data: Record<string, unknown> }) => { emailVerificationAudits.push(data); return data; },
     },
     platformTokenGrant: {
       findUnique: async ({ where }: { where: { userId_kind: { userId: string; kind: PlatformTokenGrantRecord["kind"] } } }) => [...platformTokenGrants.values()].find((grant) => grant.userId === where.userId_kind.userId && grant.kind === where.userId_kind.kind) ?? null,
@@ -215,7 +225,7 @@ function fakeDb() {
     ...tx,
     $transaction: async (callback: (client: typeof tx) => unknown) => callback(tx),
   } as unknown as PrismaClient;
-  return { db, credentials, attempts, identities, users, memberships, platformTokenGrants, platformTokenLedgerEntries };
+  return { db, credentials, attempts, identities, users, memberships, platformTokenGrants, platformTokenLedgerEntries, emailVerificationAudits };
 }
 
 test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient token revocation", async () => {

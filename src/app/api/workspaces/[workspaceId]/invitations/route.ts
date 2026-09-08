@@ -13,6 +13,6 @@ export async function GET(request: Request, context: { params: Promise<{ workspa
 }
 
 export async function POST(request: Request, context: { params: Promise<{ workspaceId: string }> }) {
-  try { assertSameOrigin(request); const actor = await requireApiSession(request); const result = await createWorkspaceInvitation(idSchema.parse((await context.params).workspaceId), await readJsonBody(request), actor); return NextResponse.json(result, { status: 201 }); }
+  try { assertSameOrigin(request); const actor = await requireApiSession(request); const result = await createWorkspaceInvitation(idSchema.parse((await context.params).workspaceId), await readJsonBody(request), actor); return NextResponse.json(result, { status: result.alreadyCreated ? 200 : 201, headers: { "cache-control": "no-store" } }); }
   catch (error) { return handleApiError(error); }
 }

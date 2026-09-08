@@ -3,7 +3,7 @@ import { Prisma, type OidcTokenAuthMethod, type PrismaClient } from "@prisma/cli
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
 import { z } from "zod";
 import { assertWorkspaceAdmin, type AccessUser } from "@/lib/access-control";
-import { createSession, type CreatedSession } from "@/lib/auth";
+import { appendEmailVerificationAudit, createSession, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
 import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
@@ -27,6 +27,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const DOMAIN_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))+$/u;
 const SCOPE_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/u;
 const JWT_ALGORITHMS = ["RS256", "PS256", "ES256", "EdDSA"] as const;
+const PROJECT_ROLE_RANK: Record<"viewer" | "editor" | "owner", number> = { viewer: 1, editor: 2, owner: 3 };
 
 export type OidcErrorCode =
   | "OIDC_INVALID_INPUT"
@@ -535,7 +536,7 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     let identity = await tx.oidcIdentity.findUnique({ where: { providerId_subject: { providerId: provider.id, subject } }, include: { user: true } });
     let user = identity?.user ?? null;
     const identityExistedBeforeLock = identity !== null;
-    const invitationCandidate = claimedEmail === null ? null : await tx.workspaceInvitation.findFirst({ where: { workspaceId: provider.workspaceId, email: claimedEmail, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "asc" } });
+    const invitationCandidate = claimedEmail === null || !emailVerified ? null : await tx.workspaceInvitation.findFirst({ where: { workspaceId: provider.workspaceId, email: claimedEmail, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "asc" } });
     const emailOwner = claimedEmail !== null && emailVerified ? await tx.appUser.findUnique({ where: { email: claimedEmail }, select: { id: true } }) : null;
     if (user === null && emailOwner !== null) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     if (user !== null) await lockActorsAccess(tx, [user.id]);
@@ -555,18 +556,33 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     if (invitation !== null && (invitation.acceptedAt !== null || invitation.revokedAt !== null || invitation.expiresAt <= new Date())) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     if (invitation !== null && invitation.workspaceId !== provider.workspaceId) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     const lockedEmailOwner = claimedEmail !== null && emailVerified ? await tx.appUser.findUnique({ where: { email: claimedEmail }, select: { id: true } }) : null;
-    if (user === null && lockedEmailOwner !== null) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+    if (lockedEmailOwner !== null && (user === null || lockedEmailOwner.id !== user.id)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     const domains = provider.allowedEmailDomains as string[];
     const domainAllowed = claimedEmail !== null && emailVerified && (domains.length === 0 || (emailDomain(claimedEmail) !== null && domains.includes(emailDomain(claimedEmail)!)));
     if (user === null && invitation === null && !(provider.autoProvision && domainAllowed)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     const newlyCreated = user === null;
     if (user === null) {
-      user = await tx.appUser.create({ data: { username: await availableUsername(preferredUsername, tx), displayName, email: claimedEmail, role: "user", passwordHash: null, passwordSalt: null } });
+      user = await tx.appUser.create({ data: { username: await availableUsername(preferredUsername, tx), displayName, email: emailVerified ? claimedEmail : null, emailVerifiedAt: emailVerified ? new Date() : null, role: "user", passwordHash: null, passwordSalt: null } });
+      if (emailVerified && claimedEmail !== null) {
+        await appendEmailVerificationAudit(tx, {
+          userId: user.id,
+          event: "verified",
+          emailBefore: null,
+          emailAfter: claimedEmail,
+          verifiedAtBefore: null,
+          verifiedAtAfter: user.emailVerifiedAt ?? new Date(),
+          source: "oidc",
+          reason: "oidc_email_claim_verified",
+        });
+      }
       if (newlyCreated && invitation === null && emailVerified) {
         await issueVerifiedSignupGrant(user.id, { issuedById: null, now: new Date() }, tx);
       }
     }
     if (user.disabledAt !== null) return fail("OIDC_ACCOUNT_DISABLED");
+    if (emailVerified && claimedEmail !== null) {
+      await setVerifiedAccountEmail(tx, user.id, claimedEmail, "oidc", new Date());
+    }
     const invitedWorkspaceRole = invitation?.workspaceRole ?? provider.defaultWorkspaceRole;
     const currentWorkspaceMembership = await findCurrentWorkspaceMembership(tx, provider.workspaceId, user.id);
     if (currentWorkspaceMembership !== null && currentWorkspaceMembership.accessState !== "confirmed") return fail("OIDC_ACCOUNT_NOT_ALLOWED");
@@ -585,6 +601,10 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     if (invitation?.projectId !== null && invitation?.projectId !== undefined && invitation.projectRole !== null) {
       const currentProjectMembership = await findCurrentProjectMembership(tx, invitation.projectId, user.id);
       if (currentProjectMembership !== null && currentProjectMembership.accessState !== "confirmed") return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+      if (currentWorkspaceMembership !== null && currentWorkspaceMembership.accessState === "confirmed"
+        && (currentProjectMembership === null || PROJECT_ROLE_RANK[invitation.projectRole] > PROJECT_ROLE_RANK[currentProjectMembership.role])) {
+        return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+      }
       if (currentProjectMembership === null) {
         if (await hasRevokedProjectMembership(tx, invitation.projectId, user.id)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
         await grantProjectMembership(tx, {
@@ -597,8 +617,9 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
         });
       }
     }
-    if (invitation !== null) await tx.workspaceInvitation.update({ where: { id: invitation.id }, data: { acceptedById: user.id, acceptedAt: new Date() } });
-    identity = await tx.oidcIdentity.upsert({ where: { providerId_subject: { providerId: provider.id, subject } }, create: { providerId: provider.id, userId: user.id, subject, email: claimedEmail, displayName, lastLoginAt: new Date() }, update: { email: claimedEmail, displayName, lastLoginAt: new Date() }, include: { user: true } });
+    if (invitation !== null) await tx.workspaceInvitation.update({ where: { id: invitation.id }, data: { acceptedById: user.id, acceptedAt: new Date(), version: { increment: 1 } } });
+    const identityEmail = emailVerified ? claimedEmail : identity?.email ?? null;
+    identity = await tx.oidcIdentity.upsert({ where: { providerId_subject: { providerId: provider.id, subject } }, create: { providerId: provider.id, userId: user.id, subject, email: identityEmail, displayName, lastLoginAt: new Date() }, update: { email: identityEmail, displayName, lastLoginAt: new Date() }, include: { user: true } });
     await tx.oidcLoginAttempt.delete({ where: { id: attempt.id } });
     await tx.externalCredential.delete({ where: { id: attempt.credentialId } });
     const session = await createSession(tx, identity.user);

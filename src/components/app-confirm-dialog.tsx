@@ -29,32 +29,54 @@ type PendingRequest = Readonly<{
 export function useAppConfirmDialog() {
   const [request, setRequest] = useState<PendingRequest | null>(null);
   const [value, setValue] = useState("");
+  const valueRef = useRef("");
   const requestRef = useRef<PendingRequest | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
+  const descriptionId = useId();
 
   const close = useCallback((confirmed: boolean) => {
     const current = requestRef.current;
     if (current === null) return;
     requestRef.current = null;
     setRequest(null);
-    current.resolve({ confirmed, value: confirmed ? value : "" });
-  }, [value]);
+    current.resolve({ confirmed, value: confirmed ? valueRef.current : "" });
+  }, []);
 
   const confirm = useCallback((options: AppConfirmOptions) => new Promise<AppConfirmResult>((resolve) => {
     requestRef.current?.resolve({ confirmed: false, value: "" });
     const next = { options, resolve };
     requestRef.current = next;
-    setValue(options.defaultValue ?? "");
+    valueRef.current = options.defaultValue ?? "";
+    setValue(valueRef.current);
     setRequest(next);
   }), []);
 
   useEffect(() => {
     if (request === null) return;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusTimer = window.setTimeout(() => {
+      const firstFocusable = dialogRef.current?.querySelector<HTMLElement>("button, input, select, textarea, [href], [tabindex]:not([tabindex=\"-1\"])");
+      firstFocusable?.focus();
+    }, 0);
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") close(false);
+      if (event.key !== "Tab" || dialogRef.current === null) return;
+      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>("button, input, select, textarea, [href], [tabindex]:not([tabindex=\"-1\"])")].filter((element) => !element.hasAttribute("disabled") && element.getAttribute("aria-hidden") !== "true");
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     }
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", onKeyDown);
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    };
   }, [close, request]);
 
   useEffect(() => () => {
@@ -75,14 +97,14 @@ export function useAppConfirmDialog() {
 
   const dialog = request === null || options === undefined ? null : (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(false); }}>
-      <section role="dialog" aria-modal="true" aria-labelledby={titleId} className="w-full max-w-lg rounded-t-[2rem] bg-white p-7 shadow-2xl sm:rounded-[2rem] sm:p-8">
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className="w-full max-w-lg rounded-t-[2rem] bg-white p-7 shadow-2xl sm:rounded-[2rem] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{options.eyebrow ?? "Confirm action"}</p>
         <h2 id={titleId} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{options.title}</h2>
-        <p className={`mt-3 text-sm leading-6 ${descriptionClass}`}>{options.description}</p>
+        <p id={descriptionId} className={`mt-3 text-sm leading-6 ${descriptionClass}`}>{options.description}</p>
         {hasInput ? (
           <label className="mt-5 block text-sm font-semibold text-slate-700">
             {options.inputLabel}
-            <input autoFocus value={value} onChange={(event) => setValue(event.target.value)} maxLength={options.maxLength ?? 500} placeholder={options.inputPlaceholder} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${tone === "danger" ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-indigo-300 focus:ring-indigo-100"}`} />
+            <input autoFocus value={value} onChange={(event) => { valueRef.current = event.target.value; setValue(event.target.value); }} maxLength={options.maxLength ?? 500} placeholder={options.inputPlaceholder} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${tone === "danger" ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-indigo-300 focus:ring-indigo-100"}`} />
           </label>
         ) : null}
         <div className="mt-7 flex justify-end gap-3">
@@ -95,4 +117,3 @@ export function useAppConfirmDialog() {
 
   return { confirm, dialog } as const;
 }
-

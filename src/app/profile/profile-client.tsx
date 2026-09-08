@@ -11,6 +11,7 @@ type Profile = {
   username: string;
   displayName: string | null;
   email: string | null;
+  emailVerifiedAt: string | null;
   role: "admin" | "user";
   hasLocalPassword: boolean;
   workspaceMemberships: Array<{ role: "owner" | "admin" | "member" | "viewer"; workspace: { id: string; name: string } }>;
@@ -168,7 +169,7 @@ export function ProfileClient({
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Account settings</p>
             <h2 className="mt-2 text-xl font-semibold">登录与安全</h2>
           </div>
-          <ProfileDetailsForm key={`${profile?.displayName ?? ""}:${profile?.email ?? ""}`} profile={profile} onUpdated={(details) => setProfile((current) => current ? { ...current, ...details } : current)} />
+          <ProfileDetailsForm key={`${profile?.displayName ?? ""}:${profile?.email ?? ""}:${profile?.emailVerifiedAt ?? ""}`} profile={profile} onUpdated={(details) => setProfile((current) => current ? { ...current, ...details } : current)} />
           <UsernameForm key={profile?.username ?? "loading"} profile={profile} loading={loading} onUpdated={(username) => { setHeaderUsername(username); setProfile((current) => current ? { ...current, username } : current); }} />
           <PasswordForm hasLocalPassword={profile?.hasLocalPassword ?? true} />
         </section>
@@ -178,7 +179,7 @@ export function ProfileClient({
   );
 }
 
-function ProfileDetailsForm({ profile, onUpdated }: { profile: Profile | null; onUpdated: (value: { displayName: string | null; email: string | null }) => void }) {
+function ProfileDetailsForm({ profile, onUpdated }: { profile: Profile | null; onUpdated: (value: { displayName: string | null; email: string | null; emailVerifiedAt: string | null }) => void }) {
   const [displayName, setDisplayName] = useState(profile?.displayName ?? "");
   const [email, setEmail] = useState(profile?.email ?? "");
   const [pending, setPending] = useState(false);
@@ -188,12 +189,12 @@ function ProfileDetailsForm({ profile, onUpdated }: { profile: Profile | null; o
     try {
       const response = await fetch("/api/profile", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "updateProfile", displayName: displayName || null, email: email || null }) });
       if (!response.ok) throw new Error(await readError(response, "个人资料更新失败"));
-      const next = (await response.json() as { user: { displayName: string | null; email: string | null } }).user;
+      const next = (await response.json() as { user: { displayName: string | null; email: string | null; emailVerifiedAt: string | null } }).user;
       onUpdated(next); setMessage({ tone: "success", text: "个人资料已更新。" });
     } catch (cause) { setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "个人资料更新失败" }); }
     finally { setPending(false); }
   }
-  return <section className="grid gap-5 border-t border-slate-100 px-6 py-6 sm:grid-cols-[0.72fr_1.28fr] sm:px-7"><div><h3 className="text-sm font-semibold text-slate-800">个人资料</h3><p className="mt-1.5 text-xs leading-5 text-slate-400">显示名称用于页面展示；邮箱用于邀请匹配与企业身份关联。</p></div><form onSubmit={submit} className="grid gap-3 sm:grid-cols-2"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="显示名称" maxLength={160} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="邮箱" maxLength={320} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><div className="sm:col-span-2"><button disabled={pending || !profile} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : "保存个人资料"}</button>{message ? <Message {...message} /> : null}</div></form></section>;
+  return <section className="grid gap-5 border-t border-slate-100 px-6 py-6 sm:grid-cols-[0.72fr_1.28fr] sm:px-7"><div><h3 className="text-sm font-semibold text-slate-800">个人资料</h3><p className="mt-1.5 text-xs leading-5 text-slate-400">显示名称用于页面展示；邮箱用于邀请匹配与企业身份关联。</p><p className={`mt-2 text-xs leading-5 ${profile?.emailVerifiedAt ? "text-emerald-700" : "text-amber-700"}`}>{profile?.emailVerifiedAt ? "邮箱已验证，可接受定向工作区邀请。" : "邮箱未验证，不能消费工作区邀请；请通过 GitHub 或企业 OIDC 等可信身份重新确认。"}</p></div><form onSubmit={submit} className="grid gap-3 sm:grid-cols-2"><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="显示名称" maxLength={160} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="邮箱" maxLength={320} className="rounded-xl border border-slate-200 px-4 py-3 text-sm" /><div className="sm:col-span-2"><button disabled={pending || !profile} className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : "保存个人资料"}</button>{message ? <Message {...message} /> : null}</div></form></section>;
 }
 
 function UsernameForm({ profile, loading, onUpdated }: { profile: Profile | null; loading: boolean; onUpdated: (username: string) => void }) {

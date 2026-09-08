@@ -560,18 +560,28 @@ test(
         data: {
           id: randomUUID(),
           workspaceId: defaultWorkspaceId,
-          tokenHash: `${"a".repeat(63)}${suffix.slice(0, 1)}`,
-          workspaceRole: "member",
+         email: `phase-a-${suffix}@example.com`,
+         tokenHash: `${"a".repeat(63)}${suffix.slice(0, 1)}`,
+          requestKey: `phase-a-request-${suffix}`,
+          requestFingerprint: "1".repeat(64),
+         workspaceRole: "member",
           invitedById: adminId,
           expiresAt: new Date("2026-10-01T00:00:00.000Z"),
         },
       });
       createdInvitationIds.push(invitation.id);
       assert.ok(invitation.updatedAt instanceof Date);
-      await db.workspaceInvitation.update({ where: { id: invitation.id }, data: { revokedAt: now } });
       await db.workspaceInvitation.update({
         where: { id: invitation.id },
-        data: { revokedById: ownerId, revocationReason: "phase-a revoke" },
+        data: {
+          revokedAt: now,
+          revokedById: ownerId,
+          revocationReason: "phase-a revoke",
+          revocationRequestKey: `phase-a-revoke-${suffix}`,
+          revocationRequestFingerprint: "2".repeat(64),
+          revocationImpactFingerprint: "3".repeat(64),
+          version: invitation.version + 1,
+        },
       });
       const auditedInvitation = await db.workspaceInvitation.findUniqueOrThrow({
         where: { id: invitation.id },

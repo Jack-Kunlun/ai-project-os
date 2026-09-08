@@ -34,6 +34,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "access-linearization", file: "test/access-linearization-postgres.test.ts", database: "ai_project_os_access_linearization_test", gateEnv: "ACCESS_LINEARIZATION_POSTGRES_GATE", setup: "migrate" },
   { id: "project-intelligence", file: "test/project-intelligence-postgres.test.ts", database: "ai_project_os_project_intelligence_test", gateEnv: "PROJECT_INTELLIGENCE_POSTGRES_GATE", setup: "migrate" },
   { id: "phase-a-schema", file: "test/phase-a-schema-postgres.test.ts", database: "ai_project_os_phase_a_schema_test", gateEnv: "PHASE_A_SCHEMA_POSTGRES_GATE", setup: "migrate" },
+  { id: "user-governance", file: "test/user-governance-postgres.test.ts", database: "ai_project_os_user_governance_test", gateEnv: "USER_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
   { id: "ownership-inventory", file: "test/0.2x-migration-inventory-postgres.test.ts", database: "ai_project_os_ownership_inventory_test", gateEnv: "OWNERSHIP_INVENTORY_POSTGRES_GATE", databaseUrlEnv: "OWNERSHIP_INVENTORY_TEST_DATABASE_URL", setup: "migrate" },
   { id: "platform-default-ai-routes", file: "test/platform-default-ai-routes-postgres.test.ts", database: "ai_project_os_platform_default_routes_test", gateEnv: "PLATFORM_DEFAULT_AI_ROUTES_POSTGRES_GATE", setup: "migrate" },
   { id: "ai-entitlements", file: "test/ai-entitlements-postgres.test.ts", database: "ai_project_os_ai_entitlements_test", gateEnv: "AI_ENTITLEMENTS_POSTGRES_GATE", setup: "migrate" },
@@ -54,6 +55,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "project-mcp-action", file: "test/project-mcp-action-postgres.test.ts", database: "ai_project_os_project_mcp_action_test", gateEnv: "PROJECT_MCP_ACTION_POSTGRES_GATE", setup: "migrate" },
   { id: "project-mcp-action-dispatch", file: "test/project-mcp-action-dispatch-postgres.test.ts", database: "ai_project_os_project_mcp_action_dispatch_test", gateEnv: "PROJECT_MCP_ACTION_DISPATCH_POSTGRES_GATE", setup: "migrate" },
   { id: "project-plan", file: "test/project-plan-postgres.test.ts", database: "ai_project_os_project_plan_test", gateEnv: "PROJECT_PLAN_POSTGRES_GATE", setup: "migrate" },
+  { id: "automation-governance", file: "test/automation-governance-postgres.test.ts", database: "ai_project_os_automation_governance_test", gateEnv: "AUTOMATION_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
   { id: "project-world", file: "test/project-world-postgres.test.ts", database: "ai_project_os_v5_gate_world", gateEnv: "PROJECT_WORLD_POSTGRES_GATE", setup: "migrate" },
   { id: "worker-health", file: "test/worker-health-postgres.test.ts", database: "ai_project_os_worker_health_test", gateEnv: "WORKER_HEALTH_POSTGRES_GATE", setup: "migrate" },
 ]);

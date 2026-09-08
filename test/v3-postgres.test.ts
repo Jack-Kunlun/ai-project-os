@@ -5,9 +5,9 @@ import { unlink } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
-import { ProjectItemRevisionAction } from "@prisma/client";
+import { ProjectItemRevisionAction, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
 import { AccessControlError, accessibleProjectWhere, authorizeApiRequest } from "../src/lib/access-control";
-import { AutomationError, createProjectAutomationRule, listUserNotifications, openNotification, runAutomationWorkerCycle } from "../src/lib/automation";
+import { AutomationError, createProjectAutomationRule, listUserNotifications, openNotification, previewProjectAutomationRule, runAutomationWorkerCycle } from "../src/lib/automation";
 import { DEFAULT_WORKSPACE_ID } from "../src/lib/auth";
 import { getDb } from "../src/lib/db";
 import { analyzeProjectMemoryQuality, resolveMemoryQualityIssue, updateProjectItemMemoryMetadata } from "../src/lib/memory-quality";
@@ -21,6 +21,24 @@ import { findConfirmedProjectMembership, findConfirmedWorkspaceMembership, grant
 const shouldRun = process.env.V3_POSTGRES_GATE === "1";
 
 function digest(value: string) { return createHash("sha256").update(value, "utf8").digest("hex"); }
+
+async function createAutomationRuleWithPreview(
+  projectId: string,
+  input: Readonly<{ name: string; kind: AutomationRuleKind; intervalMinutes: number; config: unknown; startAt: string }>,
+  actor: Readonly<{ id: string; role: "admin" | "member" | "user" }>,
+  db: PrismaClient,
+) {
+  const preview = await previewProjectAutomationRule(projectId, input, actor, db);
+  return createProjectAutomationRule(projectId, {
+    name: preview.canonicalPayload.name,
+    kind: preview.canonicalPayload.kind,
+    intervalMinutes: preview.canonicalPayload.intervalMinutes,
+    config: preview.canonicalPayload.config,
+    startAt: preview.canonicalPayload.startAtUtc,
+    expectedPreviewFingerprint: preview.previewFingerprint,
+    previewPayload: preview.canonicalPayload,
+  }, actor, db);
+}
 
 test("V3 persists RBAC, memory governance, automation, web sources and OIDC code flow", { skip: !shouldRun ? "V3_POSTGRES_GATE=1 is required" : false }, async () => {
   const db = getDb();
@@ -86,7 +104,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   try {
     const admin = await db.appUser.findFirstOrThrow({ where: { role: "admin" } });
     const memberEmail = `v3-member-${suffix}@example.com`;
-    await db.appUser.create({ data: { id: memberId, username: `v3_member_${suffix}`, email: memberEmail, role: "member", passwordHash: null, passwordSalt: null } });
+    await db.appUser.create({ data: { id: memberId, username: `v3_member_${suffix}`, email: memberEmail, emailVerifiedAt: new Date(), role: "member", passwordHash: null, passwordSalt: null } });
     await db.appUser.create({ data: { id: outsiderAdminId, username: `v3_outsider_admin_${suffix}`, role: "admin", passwordHash: null, passwordSalt: null } });
     await db.workspace.create({ data: { id: roleWorkspaceId, name: `Role safety ${suffix}`, slug: `role-safety-${suffix}`, createdById: admin.id } });
     await db.project.createMany({ data: [
@@ -157,7 +175,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       (error: unknown) => error instanceof AutomationError && error.code === "NOTIFICATION_NOT_FOUND",
     );
     await assert.rejects(() => updateWorkspaceMember(roleWorkspaceId, memberId, { workspaceRole: "viewer" }, member, db), (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_LAST_OWNER_REQUIRED");
-    const invitation = await createWorkspaceInvitation(DEFAULT_WORKSPACE_ID, { email: memberEmail, workspaceRole: "viewer", projectId: projectB, projectRole: "viewer", expiresInDays: 7 }, admin, db);
+    const invitation = await createWorkspaceInvitation(DEFAULT_WORKSPACE_ID, { email: memberEmail, workspaceRole: "viewer", projectId: projectB, projectRole: "viewer", expiresInDays: 7, requestKey: randomUUID() }, admin, db);
     await acceptWorkspaceInvitation(invitation.token, { id: memberId, email: memberEmail }, "/dashboard", db);
     assert.equal((await findConfirmedWorkspaceMembership(db, DEFAULT_WORKSPACE_ID, memberId))?.role, "member");
     assert.equal((await findConfirmedProjectMembership(db, projectB, memberId))?.role, "editor");
@@ -196,14 +214,14 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     const issueToResolve = quality.issues.find((issue) => issue.status === "open")!;
     await resolveMemoryQualityIssue(projectB, issueToResolve.id, { status: "resolved", note: "V3 集成测试人工处置" }, admin, db);
 
-    const consentRule = await createProjectAutomationRule(projectB, { name: `Index ${suffix}`, kind: "memoryIndex", intervalMinutes: 60, config: { mode: "incremental" }, startAt: new Date().toISOString() }, admin, db);
+    const consentRule = await createAutomationRuleWithPreview(projectB, { name: `Index ${suffix}`, kind: "memoryIndex", intervalMinutes: 60, config: { mode: "incremental" }, startAt: new Date().toISOString() }, admin, db);
     await runAutomationWorkerCycle({ workerId: `v3-worker-${suffix}`, maximumRuns: 1 }, db);
     assert.equal((await db.automationRun.findFirstOrThrow({ where: { automationRuleId: consentRule.id } })).status, "waitingConsent");
     assert.equal(await db.notification.count({ where: { userId: admin.id, projectId: projectB, kind: "consentRequired" } }), 1);
-    const qualityRule = await createProjectAutomationRule(projectB, { name: `Quality ${suffix}`, kind: "memoryQuality", intervalMinutes: 60, config: {}, startAt: new Date().toISOString() }, admin, db);
+    const qualityRule = await createAutomationRuleWithPreview(projectB, { name: `Quality ${suffix}`, kind: "memoryQuality", intervalMinutes: 60, config: {}, startAt: new Date().toISOString() }, admin, db);
     await runAutomationWorkerCycle({ workerId: `v3-worker-${suffix}`, maximumRuns: 1 }, db);
     assert.equal((await db.automationRun.findFirstOrThrow({ where: { automationRuleId: qualityRule.id } })).status, "succeeded");
-    const recoveryRule = await createProjectAutomationRule(projectB, { name: `Lease recovery ${suffix}`, kind: "memoryQuality", intervalMinutes: 60, config: {}, startAt: new Date(Date.now() + 3_600_000).toISOString() }, admin, db);
+    const recoveryRule = await createAutomationRuleWithPreview(projectB, { name: `Lease recovery ${suffix}`, kind: "memoryQuality", intervalMinutes: 60, config: {}, startAt: new Date(Date.now() + 3_600_000).toISOString() }, admin, db);
     await db.automationRule.update({ where: { id: recoveryRule.id }, data: { consecutiveFailures: 2 } });
     const expiredAt = new Date(Date.now() - 20 * 60_000);
     await db.automationRun.create({ data: { automationRuleId: recoveryRule.id, projectId: projectB, status: "running", scheduledFor: expiredAt, workerId: `expired-${suffix}`, leaseExpiresAt: expiredAt, startedAt: expiredAt } });
@@ -237,6 +255,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     const oidcUser = await db.appUser.findUniqueOrThrow({ where: { email: `oidc-${suffix}@example.com` } });
     oidcUserId = oidcUser.id;
     assert.equal(oidcUser.role, "user");
+    assert.ok(oidcUser.emailVerifiedAt instanceof Date);
     assert.equal(oidcUser.passwordHash, null);
     assert.equal((await findConfirmedWorkspaceMembership(db, DEFAULT_WORKSPACE_ID, oidcUser.id))?.role, "viewer");
     assert.equal(await db.appSession.count({ where: { userId: oidcUser.id, revokedAt: null } }), 1);

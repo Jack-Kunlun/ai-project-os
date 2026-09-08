@@ -21,6 +21,8 @@ import { canonicalInternalReturnPath } from "@/lib/redirects";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const UNSAFE_AUDIT_TEXT_PATTERN = /[\u0000-\u001f\u007f-\u009f]|[A-Za-z0-9_-]{40,128}/u;
+const EMAIL_SHAPED_AUDIT_TEXT_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/u;
 
 export type WorkspaceErrorCode =
   | "WORKSPACE_INVALID_INPUT"
@@ -31,6 +33,13 @@ export type WorkspaceErrorCode =
   | "WORKSPACE_INVITATION_NOT_FOUND"
   | "WORKSPACE_INVITATION_EXPIRED"
   | "WORKSPACE_INVITATION_EMAIL_MISMATCH"
+  | "WORKSPACE_INVITATION_IDEMPOTENCY_CONFLICT"
+  | "WORKSPACE_INVITATION_IMPACT_STALE"
+  | "WORKSPACE_INVITATION_REASON_REQUIRED"
+  | "WORKSPACE_INVITATION_EMAIL_UNVERIFIED"
+  | "WORKSPACE_INVITATION_UNSAFE_AUDIT_TEXT"
+  | "WORKSPACE_INVITATION_STATE_CONFLICT"
+  | "WORKSPACE_INVITATION_EXISTING_MEMBER"
   | "WORKSPACE_LAST_OWNER_REQUIRED";
 
 export class WorkspaceError extends Error {
@@ -56,11 +65,20 @@ const updateMemberSchema = z.object({
   projectGrants: z.array(projectGrantSchema).max(100).optional(),
 }).strict();
 const invitationSchema = z.object({
-  email: z.string().trim().toLowerCase().max(320).nullable().optional(),
+  email: z.string().trim().toLowerCase().email().max(320),
   workspaceRole: roleSchema.exclude(["owner"]).default("member"),
   projectId: z.string().uuid().nullable().optional(),
   projectRole: projectRoleSchema.nullable().optional(),
   expiresInDays: z.number().int().min(1).max(30).default(7),
+  requestKey: z.string().trim().min(8).max(180),
+}).strict();
+
+const revokeInvitationSchema = z.object({
+  reason: z.string().trim().min(1).max(500),
+  requestKey: z.string().trim().min(8).max(180),
+  expectedVersion: z.number().int().positive(),
+  expectedImpactFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+  confirmation: z.literal(true),
 }).strict();
 
 const workspaceMemberSelect = {
@@ -107,8 +125,69 @@ function email(value: string | null | undefined): string | null {
   return EMAIL_PATTERN.test(value) ? value : fail("WORKSPACE_INVALID_INPUT");
 }
 
+function safeAuditText(value: string): string {
+  if (UNSAFE_AUDIT_TEXT_PATTERN.test(value) || EMAIL_SHAPED_AUDIT_TEXT_PATTERN.test(value) || /^[0-9a-f]{64}$/iu.test(value)) return fail("WORKSPACE_INVITATION_UNSAFE_AUDIT_TEXT");
+  return value;
+}
+
 function hashToken(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function hashFingerprint(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+}
+
+function sameFingerprint(left: string | null, right: string): boolean {
+  return left?.trim() === right;
+}
+
+function invitationStatus(invitation: Readonly<{ acceptedAt: Date | null; revokedAt: Date | null; expiresAt: Date }>): "pending" | "accepted" | "revoked" | "expired" {
+  if (invitation.revokedAt !== null) return "revoked";
+  if (invitation.acceptedAt !== null) return "accepted";
+  if (invitation.expiresAt <= new Date()) return "expired";
+  return "pending";
+}
+
+function invitationImpact(invitation: Readonly<{
+  id: string;
+  workspaceId: string;
+  workspaceRole: WorkspaceMembershipRole;
+  projectId: string | null;
+  projectRole: ProjectMembershipRole | null;
+  acceptedAt: Date | null;
+  revokedAt: Date | null;
+  expiresAt: Date;
+  version: number;
+}>, dependency: Readonly<{ existingMember: boolean; projectGrant: boolean }>) {
+  const status = invitationStatus(invitation);
+  const blockingCategories = status === "pending" ? [] : [status];
+  const fingerprint = hashFingerprint({
+    invitationId: invitation.id,
+    workspaceRole: invitation.workspaceRole,
+    projectId: invitation.projectId,
+    projectRole: invitation.projectRole,
+    status,
+    version: invitation.version,
+    existingMember: dependency.existingMember,
+    projectGrant: dependency.projectGrant,
+    blockingCategories,
+  });
+  return Object.freeze({
+    target: Object.freeze({ invitationId: invitation.id, status, workspaceRole: invitation.workspaceRole, projectRole: invitation.projectRole }),
+    expectedVersion: invitation.version,
+    dependencyStats: Object.freeze({ existingWorkspaceMember: dependency.existingMember ? 1 : 0, projectGrant: dependency.projectGrant ? 1 : 0 }),
+    blockingCategories,
+    impactFingerprint: fingerprint,
+  });
+}
+
+function invitationRequestFingerprint(input: Readonly<{ email: string; workspaceRole: WorkspaceMembershipRole; projectId: string | null; projectRole: ProjectMembershipRole | null; expiresInDays: number }>): string {
+  return hashFingerprint({ email: input.email, workspaceRole: input.workspaceRole, projectId: input.projectId, projectRole: input.projectRole, expiresInDays: input.expiresInDays });
+}
+
+function invitationRevokeFingerprint(input: Readonly<{ invitationId: string; reason: string; requestKey: string; expectedVersion: number; expectedImpactFingerprint: string; confirmation: true }>): string {
+  return hashFingerprint(input);
 }
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -281,29 +360,40 @@ export async function updateWorkspaceMember(
 export async function createWorkspaceInvitation(workspaceIdInput: unknown, input: unknown, actor: AccessUser, db: PrismaClient = getDb()) {
   const workspaceId = uuid(workspaceIdInput);
   const parsed = invitationSchema.parse(input);
-  const normalizedEmail = email(parsed.email);
+  const normalizedEmail = parsed.email;
   const projectId = parsed.projectId ?? null;
   const projectRole = parsed.projectRole ?? null;
   if ((projectId === null) !== (projectRole === null)) return fail("WORKSPACE_INVALID_INPUT");
-  const token = randomBytes(32).toString("base64url");
-  const invitation = await db.$transaction(async (tx) => {
+  safeAuditText(parsed.requestKey);
+  const requestFingerprint = invitationRequestFingerprint({ email: normalizedEmail, workspaceRole: parsed.workspaceRole, projectId, projectRole, expiresInDays: parsed.expiresInDays });
+  const result = await db.$transaction(async (tx) => {
     // Invitation creation is fenced with the same actor -> workspace ->
     // project order as membership changes.  The pre-lock inputs only locate
     // lock keys; the actor and confirmed admin membership are reloaded after
     // the locks before any durable write.
     await lockActorsAccess(tx, [actor.id]);
     await lockWorkspaceAccess(tx, workspaceId);
-    if (projectId !== null) await lockProjectAccess(tx, projectId);
+    const located = await tx.workspaceInvitation.findFirst({ where: { workspaceId, invitedById: actor.id, requestKey: parsed.requestKey }, select: { id: true, projectId: true } });
+    const projectIds = [...new Set([projectId, located?.projectId].filter((value): value is string => typeof value === "string" && UUID_PATTERN.test(value)))].sort();
+    for (const candidateProjectId of projectIds) await lockProjectAccess(tx, candidateProjectId);
+    if (located !== null) await lockWorkspaceInvitationAccess(tx, located.id);
     const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
     if (currentActor === null || currentActor.disabledAt !== null) throw new AccessControlError("ACCESS_FORBIDDEN");
     await assertWorkspaceAdmin(actor, workspaceId, tx);
     if (projectId !== null) await assertProjectsInWorkspace(workspaceId, [{ projectId }], tx);
-    return tx.workspaceInvitation.create({
-      data: { workspaceId, email: normalizedEmail, tokenHash: hashToken(token), workspaceRole: parsed.workspaceRole, projectId, projectRole, invitedById: actor.id, expiresAt: new Date(Date.now() + parsed.expiresInDays * 86_400_000) },
-      select: { id: true, email: true, workspaceRole: true, projectId: true, projectRole: true, expiresAt: true, createdAt: true },
+    const existing = await tx.workspaceInvitation.findFirst({ where: { workspaceId, invitedById: actor.id, requestKey: parsed.requestKey }, select: { id: true, email: true, workspaceRole: true, projectId: true, projectRole: true, expiresAt: true, acceptedAt: true, revokedAt: true, version: true, createdAt: true, requestFingerprint: true } });
+    if (existing !== null) {
+      if (!sameFingerprint(existing.requestFingerprint, requestFingerprint)) return fail("WORKSPACE_INVITATION_IDEMPOTENCY_CONFLICT");
+      return Object.freeze({ invitation: existing, token: null, alreadyCreated: true });
+    }
+    const token = randomBytes(32).toString("base64url");
+    const invitation = await tx.workspaceInvitation.create({
+      data: { workspaceId, email: normalizedEmail, tokenHash: hashToken(token), requestKey: parsed.requestKey, requestFingerprint, workspaceRole: parsed.workspaceRole, projectId, projectRole, invitedById: actor.id, expiresAt: new Date(Date.now() + parsed.expiresInDays * 86_400_000) },
+      select: { id: true, email: true, workspaceRole: true, projectId: true, projectRole: true, expiresAt: true, acceptedAt: true, revokedAt: true, version: true, createdAt: true, requestFingerprint: true },
     });
+    return Object.freeze({ invitation, token, alreadyCreated: false });
   });
-  return Object.freeze({ invitation, token, acceptPath: `/accept-invitation?token=${encodeURIComponent(token)}` });
+  return Object.freeze({ invitation: result.invitation, alreadyCreated: result.alreadyCreated, token: result.token, acceptPath: result.token === null ? null : `/accept-invitation?token=${encodeURIComponent(result.token)}` });
 }
 
 export async function listWorkspaceInvitations(workspaceIdInput: unknown, actor: AccessUser, db: PrismaClient = getDb()) {
@@ -319,7 +409,7 @@ export async function listWorkspaceInvitations(workspaceIdInput: unknown, actor:
       where: { workspaceId },
       orderBy: { createdAt: "desc" },
       take: 100,
-      select: { id: true, email: true, workspaceRole: true, projectId: true, projectRole: true, expiresAt: true, acceptedAt: true, revokedAt: true, createdAt: true, project: { select: { name: true } }, invitedBy: { select: { username: true } } },
+      select: { id: true, email: true, workspaceRole: true, projectId: true, projectRole: true, expiresAt: true, acceptedAt: true, revokedAt: true, version: true, createdAt: true, project: { select: { name: true } }, invitedBy: { select: { username: true } } },
     });
   });
 }
@@ -346,9 +436,10 @@ export async function acceptWorkspaceInvitation(
     const invitation = await tx.workspaceInvitation.findUnique({ where: { id: locatedInvitation.id } });
     if (invitation === null || invitation.revokedAt !== null || invitation.acceptedAt !== null) return fail("WORKSPACE_INVITATION_NOT_FOUND");
     if (invitation.expiresAt <= new Date()) return fail("WORKSPACE_INVITATION_EXPIRED");
-    const currentActor = await tx.appUser.findUnique({ where: { id: actorId }, select: { id: true, email: true, disabledAt: true } });
+    const currentActor = await tx.appUser.findUnique({ where: { id: actorId }, select: { id: true, email: true, emailVerifiedAt: true, disabledAt: true } });
     if (currentActor === null || currentActor.disabledAt !== null) throw new AccessControlError("ACCESS_FORBIDDEN");
-    if (invitation.email !== null && invitation.email !== currentActor.email?.toLowerCase()) return fail("WORKSPACE_INVITATION_EMAIL_MISMATCH");
+    if (currentActor.emailVerifiedAt === null) return fail("WORKSPACE_INVITATION_EMAIL_UNVERIFIED");
+    if (invitation.email === null || invitation.email !== currentActor.email?.toLowerCase()) return fail("WORKSPACE_INVITATION_EMAIL_MISMATCH");
     if (invitation.projectId !== null) {
       const project = await tx.project.findUnique({ where: { id: invitation.projectId }, select: { workspaceId: true } });
       if (project === null || project.workspaceId !== invitation.workspaceId) return fail("WORKSPACE_INVITATION_NOT_FOUND");
@@ -372,6 +463,10 @@ export async function acceptWorkspaceInvitation(
       const currentProjectMembership = await findCurrentProjectMembership(tx, invitation.projectId, actorId);
       if (currentProjectMembership === null && await hasRevokedProjectMembership(tx, invitation.projectId, actorId)) return fail("MEMBERSHIP_REVIEW_REQUIRED");
       if (currentProjectMembership !== null && currentProjectMembership.accessState !== MembershipAccessState.confirmed) return fail("MEMBERSHIP_REVIEW_REQUIRED");
+      if (currentWorkspaceMembership !== null && currentWorkspaceMembership.accessState === MembershipAccessState.confirmed
+        && (currentProjectMembership === null || projectRoleRank[invitation.projectRole] > projectRoleRank[currentProjectMembership.role])) {
+        return fail("WORKSPACE_INVITATION_EXISTING_MEMBER");
+      }
       const projectRole = currentProjectMembership === null ? invitation.projectRole : currentProjectMembership.role;
       if (currentProjectMembership === null) {
         await grantProjectMembership(tx, {
@@ -384,9 +479,102 @@ export async function acceptWorkspaceInvitation(
         });
       }
     }
-    await tx.workspaceInvitation.update({ where: { id: invitation.id }, data: { acceptedById: actorId, acceptedAt: new Date() } });
+    await tx.workspaceInvitation.update({ where: { id: invitation.id }, data: { acceptedById: actorId, acceptedAt: new Date(), version: { increment: 1 } } });
     return Object.freeze({ workspaceId: invitation.workspaceId, returnTo });
   });
+}
+
+export async function getWorkspaceInvitationImpact(
+  workspaceIdInput: unknown,
+  invitationIdInput: unknown,
+  actor: AccessUser,
+  db: PrismaClient = getDb(),
+) {
+  const workspaceId = uuid(workspaceIdInput);
+  const invitationId = uuid(invitationIdInput);
+  return db.$transaction(async (tx) => {
+    await lockActorsAccess(tx, [actor.id]);
+    await lockWorkspaceAccess(tx, workspaceId);
+    const located = await tx.workspaceInvitation.findUnique({ where: { id: invitationId }, select: { id: true, workspaceId: true, projectId: true } });
+    if (located === null || located.workspaceId !== workspaceId) return fail("WORKSPACE_INVITATION_NOT_FOUND");
+    if (located.projectId !== null) await lockProjectAccess(tx, located.projectId);
+    await lockWorkspaceInvitationAccess(tx, invitationId);
+    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
+    if (currentActor === null || currentActor.disabledAt !== null) throw new AccessControlError("ACCESS_FORBIDDEN");
+    await assertWorkspaceAdmin(actor, workspaceId, tx);
+    const invitation = await tx.workspaceInvitation.findUnique({ where: { id: invitationId }, select: { id: true, workspaceId: true, email: true, workspaceRole: true, projectId: true, projectRole: true, acceptedAt: true, revokedAt: true, expiresAt: true, version: true } });
+    if (invitation === null || invitation.workspaceId !== workspaceId) return fail("WORKSPACE_INVITATION_NOT_FOUND");
+    const currentMember = invitation.email === null ? false : await findConfirmedWorkspaceMembershipByEmail(tx, workspaceId, invitation.email);
+    const projectGrant = invitation.projectId === null || invitation.email === null ? false : await findConfirmedProjectMembershipByEmail(tx, invitation.projectId, invitation.email);
+    return invitationImpact(invitation, { existingMember: currentMember, projectGrant });
+  });
+}
+
+export async function revokeWorkspaceInvitation(
+  workspaceIdInput: unknown,
+  invitationIdInput: unknown,
+  input: unknown,
+  actor: AccessUser,
+  db: PrismaClient = getDb(),
+) {
+  const workspaceId = uuid(workspaceIdInput);
+  const invitationId = uuid(invitationIdInput);
+  const raw = typeof input === "object" && input !== null ? input as { reason?: unknown } : null;
+  if (typeof raw?.reason !== "string" || raw.reason.trim().length === 0) return fail("WORKSPACE_INVITATION_REASON_REQUIRED");
+  const parsed = revokeInvitationSchema.parse({ ...(input as object), reason: raw.reason.trim() });
+  safeAuditText(parsed.reason);
+  safeAuditText(parsed.requestKey);
+  const requestFingerprint = invitationRevokeFingerprint({ ...parsed, invitationId });
+  return db.$transaction(async (tx) => {
+    await lockActorsAccess(tx, [actor.id]);
+    await lockWorkspaceAccess(tx, workspaceId);
+    const located = await tx.workspaceInvitation.findUnique({ where: { id: invitationId }, select: { id: true, workspaceId: true, projectId: true } });
+    if (located === null || located.workspaceId !== workspaceId) return fail("WORKSPACE_INVITATION_NOT_FOUND");
+    if (located.projectId !== null) await lockProjectAccess(tx, located.projectId);
+    await lockWorkspaceInvitationAccess(tx, invitationId);
+    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
+    if (currentActor === null || currentActor.disabledAt !== null) throw new AccessControlError("ACCESS_FORBIDDEN");
+    await assertWorkspaceAdmin(actor, workspaceId, tx);
+    const existing = await tx.workspaceInvitation.findUnique({ where: { id: invitationId }, select: { id: true, workspaceId: true, email: true, workspaceRole: true, projectId: true, projectRole: true, acceptedAt: true, revokedAt: true, expiresAt: true, version: true, revocationRequestKey: true, revocationRequestFingerprint: true } });
+    if (existing === null || existing.workspaceId !== workspaceId) return fail("WORKSPACE_INVITATION_NOT_FOUND");
+    if (existing.revocationRequestKey === parsed.requestKey) {
+      if (!sameFingerprint(existing.revocationRequestFingerprint, requestFingerprint)) return fail("WORKSPACE_INVITATION_IDEMPOTENCY_CONFLICT");
+      return Object.freeze({ invitation: existing, alreadyRevoked: true });
+    }
+    if (existing.acceptedAt !== null || existing.revokedAt !== null || invitationStatus(existing) !== "pending") return fail("WORKSPACE_INVITATION_STATE_CONFLICT");
+    const currentImpact = await getInvitationImpactInsideTransaction(tx, existing, workspaceId);
+    if (existing.version !== parsed.expectedVersion || currentImpact.impactFingerprint !== parsed.expectedImpactFingerprint) return fail("WORKSPACE_INVITATION_IMPACT_STALE");
+    const now = new Date();
+    const invitation = await tx.workspaceInvitation.update({
+      where: { id: invitationId },
+      data: { revokedAt: now, revokedById: actor.id, revocationReason: parsed.reason, revocationRequestKey: parsed.requestKey, revocationRequestFingerprint: requestFingerprint, revocationImpactFingerprint: currentImpact.impactFingerprint, version: { increment: 1 } },
+      select: { id: true, email: true, workspaceRole: true, projectId: true, projectRole: true, expiresAt: true, acceptedAt: true, revokedAt: true, version: true, createdAt: true },
+    });
+    return Object.freeze({ invitation, alreadyRevoked: false });
+  }).catch((error) => {
+    if (isPrismaCode(error, "P2002")) return fail("WORKSPACE_INVITATION_IDEMPOTENCY_CONFLICT");
+    throw error;
+  });
+}
+
+async function findConfirmedWorkspaceMembershipByEmail(db: PrismaClient | Prisma.TransactionClient, workspaceId: string, invitationEmail: string): Promise<boolean> {
+  const count = await db.workspaceMembership.count({ where: { workspaceId, accessState: "confirmed", user: { email: invitationEmail } } });
+  return count > 0;
+}
+
+async function findConfirmedProjectMembershipByEmail(db: PrismaClient | Prisma.TransactionClient, projectId: string, invitationEmail: string): Promise<boolean> {
+  const count = await db.projectMembership.count({ where: { projectId, accessState: "confirmed", user: { email: invitationEmail } } });
+  return count > 0;
+}
+
+async function getInvitationImpactInsideTransaction(
+  tx: Prisma.TransactionClient,
+  invitation: Readonly<{ id: string; workspaceId: string; email: string | null; workspaceRole: WorkspaceMembershipRole; projectId: string | null; projectRole: ProjectMembershipRole | null; acceptedAt: Date | null; revokedAt: Date | null; expiresAt: Date; version: number }>,
+  workspaceId: string,
+) {
+  const existingMember = invitation.email === null ? false : await findConfirmedWorkspaceMembershipByEmail(tx, workspaceId, invitation.email);
+  const projectGrant = invitation.projectId === null || invitation.email === null ? false : await findConfirmedProjectMembershipByEmail(tx, invitation.projectId, invitation.email);
+  return invitationImpact(invitation, { existingMember, projectGrant });
 }
 
 export function asProjectRole(value: string): ProjectMembershipRole {

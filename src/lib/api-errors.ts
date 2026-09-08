@@ -250,6 +250,13 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       WORKSPACE_INVITATION_NOT_FOUND: [404, "邀请不存在或已使用"],
       WORKSPACE_INVITATION_EXPIRED: [410, "邀请已经过期"],
       WORKSPACE_INVITATION_EMAIL_MISMATCH: [403, "当前账户邮箱与邀请对象不一致"],
+      WORKSPACE_INVITATION_IDEMPOTENCY_CONFLICT: [409, "邀请请求标识已用于其他内容，请更换请求标识"],
+      WORKSPACE_INVITATION_IMPACT_STALE: [409, "邀请影响或版本已变化，请刷新后重新确认"],
+      WORKSPACE_INVITATION_REASON_REQUIRED: [400, "撤销邀请必须填写原因"],
+      WORKSPACE_INVITATION_EMAIL_UNVERIFIED: [403, "当前账户邮箱尚未验证，不能接受工作区邀请"],
+      WORKSPACE_INVITATION_UNSAFE_AUDIT_TEXT: [400, "请求文本不能包含明文邀请令牌或凭据指纹"],
+      WORKSPACE_INVITATION_STATE_CONFLICT: [409, "邀请已经进入终态，不能再次撤销"],
+      WORKSPACE_INVITATION_EXISTING_MEMBER: [409, "已有成员不能通过邀请提升权限，请直接管理成员授权"],
       WORKSPACE_LAST_OWNER_REQUIRED: [409, "工作区必须至少保留一位所有者"],
     };
     const [status, message] = mapping[error.code] ?? [500, "工作区操作失败"];
@@ -327,6 +334,8 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AUTOMATION_RULE_NOT_FOUND: [404, "自动化规则不存在"],
       AUTOMATION_RULE_CONFLICT: [409, "自动化规则名称已存在"],
       AUTOMATION_RULE_PAUSED: [409, "已暂停的自动化规则不能立即运行"],
+      AUTOMATION_REPOSITORY_SYNC_FROZEN: [409, "代码仓库自动化尚未开放"],
+      AUTOMATION_PREVIEW_STALE: [409, "自动化预览已变化，请重新预览后确认"],
       AUTOMATION_RUN_CONFLICT: [409, "自动化运行状态已变化"],
       NOTIFICATION_NOT_FOUND: [404, "通知不存在"],
     };

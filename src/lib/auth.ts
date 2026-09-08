@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { authorizeApiRequest } from "@/lib/access-control";
-import { lockWorkspaceAccess } from "@/lib/access-linearization";
+import { lockActorAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import { appendWorkspaceMembershipAudit } from "@/lib/membership-governance";
 import { toSystemRole, type SystemRole } from "@/lib/system-role";
 
@@ -95,6 +95,85 @@ function canonicalEmail(value: unknown): string | null {
 
 function tokenHash(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+function emailFingerprint(value: string | null): string | null {
+  return value === null ? null : createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+type EmailVerificationAuditInput = Readonly<{
+  userId: string;
+  event: "verified" | "unverified";
+  emailBefore: string | null;
+  emailAfter: string | null;
+  verifiedAtBefore: Date | null;
+  verifiedAtAfter: Date | null;
+  source: "profile" | "github" | "oidc";
+  reason: string;
+}>;
+
+/**
+ * Keep email evidence useful without copying an address into an audit row.
+ * Callers must already hold the actor lock and be inside the same transaction
+ * as the AppUser mutation.
+ */
+export async function appendEmailVerificationAudit(
+  db: Prisma.TransactionClient,
+  input: EmailVerificationAuditInput,
+): Promise<void> {
+  await db.appUserEmailVerificationAudit.create({
+    data: {
+      userId: input.userId,
+      event: input.event,
+      emailFingerprintBefore: emailFingerprint(input.emailBefore),
+      emailFingerprintAfter: emailFingerprint(input.emailAfter),
+      verifiedAtBefore: input.verifiedAtBefore,
+      verifiedAtAfter: input.verifiedAtAfter,
+      source: input.source,
+      reason: input.reason,
+    },
+  });
+}
+
+/**
+ * Apply a trusted upstream email assertion.  The caller owns the common
+ * actor lock; this helper deliberately never accepts an email from a browser
+ * request or from an unverified upstream claim.
+ */
+export async function setVerifiedAccountEmail(
+  db: Prisma.TransactionClient,
+  userId: string,
+  emailInput: string,
+  source: "github" | "oidc",
+  now = new Date(),
+) {
+  const email = canonicalEmail(emailInput);
+  if (email === null) return fail("AUTH_INVALID_INPUT");
+  const current = await db.appUser.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, emailVerifiedAt: true },
+  });
+  if (current === null) return fail("AUTH_REQUIRED");
+  const storedEmail = current.email ?? null;
+  const currentEmail = storedEmail?.trim().toLowerCase() ?? null;
+  const currentVerifiedAt = current.emailVerifiedAt ?? null;
+  if (currentEmail === email && currentVerifiedAt !== null) return current;
+  const updated = await db.appUser.update({
+    where: { id: userId },
+    data: { email, emailVerifiedAt: now },
+    select: { id: true, email: true, emailVerifiedAt: true },
+  });
+  await appendEmailVerificationAudit(db, {
+    userId,
+    event: "verified",
+    emailBefore: storedEmail,
+    emailAfter: email,
+    verifiedAtBefore: currentVerifiedAt,
+    verifiedAtAfter: now,
+    source,
+    reason: source === "github" ? "github_primary_email_verified" : "oidc_email_claim_verified",
+  });
+  return updated;
 }
 
 async function passwordDigest(password: string, salt: Buffer): Promise<Buffer> {
@@ -251,11 +330,39 @@ export async function updateAccountProfile(
   userId: string,
   input: Readonly<{ displayName: unknown; email: unknown }>,
   db: PrismaClient = getDb(),
-): Promise<Readonly<{ id: string; displayName: string | null; email: string | null }>> {
-  return db.appUser.update({
-    where: { id: userId },
-    data: { displayName: canonicalOptionalProfileText(input.displayName, 160), email: canonicalEmail(input.email) },
-    select: { id: true, displayName: true, email: true },
+): Promise<Readonly<{ id: string; displayName: string | null; email: string | null; emailVerifiedAt: Date | null }>> {
+  const displayName = canonicalOptionalProfileText(input.displayName, 160);
+  const email = canonicalEmail(input.email);
+  return db.$transaction(async (tx) => {
+    await lockActorAccess(tx, userId);
+    const current = await tx.appUser.findUnique({
+      where: { id: userId },
+      select: { id: true, displayName: true, email: true, emailVerifiedAt: true },
+    });
+    if (current === null) return fail("AUTH_REQUIRED");
+    const storedEmail = current.email ?? null;
+    const currentEmail = storedEmail?.trim().toLowerCase() ?? null;
+    const currentVerifiedAt = current.emailVerifiedAt ?? null;
+    const emailChanged = currentEmail !== email;
+    const nextVerifiedAt = emailChanged ? null : currentVerifiedAt;
+    const updated = await tx.appUser.update({
+      where: { id: userId },
+      data: { displayName, email, emailVerifiedAt: nextVerifiedAt },
+      select: { id: true, displayName: true, email: true, emailVerifiedAt: true },
+    });
+    if (emailChanged) {
+      await appendEmailVerificationAudit(tx, {
+        userId,
+        event: "unverified",
+        emailBefore: storedEmail,
+        emailAfter: email,
+        verifiedAtBefore: currentVerifiedAt,
+        verifiedAtAfter: null,
+        source: "profile",
+        reason: "profile_email_changed",
+      });
+    }
+    return updated;
   });
 }
 

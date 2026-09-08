@@ -1046,6 +1046,17 @@ enum MembershipAuditEventKind {
   revoke
 }
 
+enum WorkspaceInvitationAuditEvent {
+  created
+  accepted
+  revoked
+}
+
+enum AppUserEmailVerificationAuditEvent {
+  verified
+  unverified
+}
+
 enum AiCandidateReviewStatus {
   candidate
   accepted
@@ -4119,6 +4130,7 @@ model AppUser {
   username                     String                            @unique @db.VarChar(64)
   displayName                  String?                           @db.VarChar(160)
   email                        String?                           @unique @db.VarChar(320)
+  emailVerifiedAt              DateTime?
   passwordHash                 String?                           @db.VarChar(128)
   passwordSalt                 String?                           @db.VarChar(128)
   passwordVersion              Int                               @default(1)
@@ -4220,6 +4232,26 @@ model AppUser {
   projectAiProviderDelegationProjectConfirmations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProjectConfirmer")
   projectAiEffectiveRouteSelections            ProjectAiEffectiveRouteSelection[] @relation("ProjectAiEffectiveRouteSelectionSelectedBy")
   billedWebAiGrants             WebAiGrant[]                    @relation("WebAiGrantBillingUser")
+}
+
+// Email verification evidence contains only status transitions and email
+// fingerprints; the raw email remains on AppUser and is never copied here.
+// No foreign key is intentional so the evidence survives account cleanup.
+model AppUserEmailVerificationAudit {
+  id                    String                               @id @default(uuid()) @db.Uuid
+  userId                String                               @db.Uuid
+  event                 AppUserEmailVerificationAuditEvent
+  emailFingerprintBefore String?                             @db.Char(64)
+  emailFingerprintAfter  String?                             @db.Char(64)
+  verifiedAtBefore      DateTime?
+  verifiedAtAfter       DateTime?
+  source                String                               @db.VarChar(32)
+  reason                String                               @db.VarChar(180)
+  transactionId         BigInt                               @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt             DateTime                             @default(now())
+
+  @@index([userId, createdAt])
+  @@index([event, createdAt])
 }
 
 model MembershipSubscription {
@@ -4505,6 +4537,12 @@ model WorkspaceInvitation {
   workspaceId   String                  @db.Uuid
   email         String?                 @db.VarChar(320)
   tokenHash     String                  @unique @db.Char(64)
+  requestKey    String?                 @db.VarChar(180)
+  requestFingerprint String?             @db.Char(64)
+  revocationRequestKey String?           @db.VarChar(180)
+  revocationRequestFingerprint String?   @db.Char(64)
+  revocationImpactFingerprint String?    @db.Char(64)
+  version       Int                     @default(1)
   workspaceRole WorkspaceMembershipRole
   projectId     String?                 @db.Uuid
   projectRole   ProjectMembershipRole?
@@ -4526,6 +4564,33 @@ model WorkspaceInvitation {
   @@index([workspaceId, expiresAt])
   @@index([email, expiresAt])
   @@index([projectId, expiresAt])
+  @@index([workspaceId, invitedById, requestKey])
+}
+
+// Invitation lifecycle evidence intentionally has no foreign keys. Workspace
+// deletion may remove the live invitation row, but the no-token audit trail
+// remains available for governance and incident review.
+model WorkspaceInvitationAudit {
+  id                 String                       @id @default(uuid()) @db.Uuid
+  invitationId       String                       @db.Uuid
+  workspaceId        String                       @db.Uuid
+  event              WorkspaceInvitationAuditEvent
+  versionBefore      Int?
+  versionAfter       Int
+  statusBefore       String?                      @db.VarChar(16)
+  statusAfter        String                       @db.VarChar(16)
+  actorId            String?                      @db.Uuid
+  reason             String                       @db.VarChar(500)
+  requestKey         String?                      @db.VarChar(180)
+  requestFingerprint String?                      @db.Char(64)
+  impactFingerprint  String?                      @db.Char(64)
+  transactionId      BigInt                       @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt          DateTime                     @default(now())
+
+  @@unique([invitationId, event, requestKey])
+  @@index([workspaceId, createdAt])
+  @@index([invitationId, createdAt])
+  @@index([requestKey])
 }
 
 model OidcProvider {

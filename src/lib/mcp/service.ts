@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import { assertProjectAccess, getProjectPermission, type AccessUser } from "@/lib/access-control";
+import { lockActorAccess } from "@/lib/access-linearization";
 import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { assertProjectActive } from "@/lib/project-lifecycle";
@@ -86,6 +88,7 @@ const connectionSelect = {
   lastDiscoveredAt: true,
   lastErrorCode: true,
   disabledAt: true,
+  ownerAccountAccessVersion: true,
   createdAt: true,
   updatedAt: true,
   credential: { select: { maskedSuffix: true, rotatedAt: true, updatedAt: true } },
@@ -119,6 +122,44 @@ const connectionSelect = {
 } satisfies Prisma.McpConnectionSelect;
 
 type McpDb = PrismaClient | Prisma.TransactionClient;
+type McpConnectionActor = Readonly<{ id: string; accountAccessVersion?: number }>;
+
+type McpOwnerEpoch = Readonly<{ id: string; disabledAt: Date | null; accountAccessVersion: number }>;
+
+async function loadMcpOwner(db: McpDb, ownerId: string): Promise<McpOwnerEpoch> {
+  const owner = await db.appUser.findUnique({
+    where: { id: ownerId },
+    select: { id: true, disabledAt: true, accountAccessVersion: true },
+  });
+  if (owner === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
+  if (owner.disabledAt !== null) return failMcp("MCP_CONNECTION_DISABLED");
+  return owner;
+}
+
+async function assertMcpActor(db: McpDb, actor: McpConnectionActor): Promise<void> {
+  try {
+    await assertAccountAccessForActor(db, actor);
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError) {
+      if (error.code === "ACCOUNT_DISABLED") return failMcp("MCP_CONNECTION_DISABLED");
+      if (error.code === "ACCOUNT_ACCESS_STALE") return failMcp("MCP_CONNECTION_NOT_VERIFIED");
+      return failMcp("MCP_CONNECTION_NOT_FOUND");
+    }
+    throw error;
+  }
+}
+
+function assertMcpConnectionEpoch(
+  connection: Readonly<{ ownerUserId: string | null; ownerAccountAccessVersion: number | null }>,
+  owner: McpOwnerEpoch,
+): void {
+  if (connection.ownerUserId === null
+    || connection.ownerAccountAccessVersion === null
+    || connection.ownerUserId !== owner.id
+    || connection.ownerAccountAccessVersion !== owner.accountAccessVersion) {
+    return failMcp("MCP_CONNECTION_NOT_VERIFIED");
+  }
+}
 type McpFingerprintTuple = Readonly<{
   connectionId: string;
   toolDefinitionId: string;
@@ -225,7 +266,10 @@ async function loadMcpAttestationDefinition(db: McpDb, toolDefinitionId: string)
         select: {
           id: true,
           status: true,
+          ownerUserId: true,
+          ownerAccountAccessVersion: true,
           resolvedAddressFingerprint: true,
+          ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } },
           credential: { select: { secretFingerprint: true } },
         },
       },
@@ -234,6 +278,12 @@ async function loadMcpAttestationDefinition(db: McpDb, toolDefinitionId: string)
   if (definition === null) return failMcp("MCP_TOOL_NOT_FOUND");
   if (!definition.current) return failMcp("MCP_TOOL_DEFINITION_STALE");
   if (!definition.remoteReadOnlyHint) return failMcp("MCP_TOOL_NOT_READ_ONLY");
+  if (definition.connection.ownerUserId === null || definition.connection.ownerUser === null) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
+  if (definition.connection.ownerUser.disabledAt !== null
+    || definition.connection.ownerAccountAccessVersion === null
+    || definition.connection.ownerAccountAccessVersion !== definition.connection.ownerUser.accountAccessVersion) {
+    return failMcp("MCP_CONNECTION_NOT_VERIFIED");
+  }
   if (definition.connection.status !== "verified" || definition.connection.resolvedAddressFingerprint === null) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
   return {
     definition,
@@ -256,6 +306,7 @@ export async function attestMcpToolDefinition(
   connectionIdInput?: unknown,
 ) {
   assertMcpAdmin(actor);
+  await assertMcpActor(db, actor);
   const toolDefinitionId = uuid(toolDefinitionIdInput);
   const expectedConnectionId = connectionIdInput === undefined ? null : uuid(connectionIdInput);
   const parsed = attestSchema.safeParse(input);
@@ -264,6 +315,8 @@ export async function attestMcpToolDefinition(
   const loaded = await loadMcpAttestationDefinition(db, toolDefinitionId);
   if (expectedConnectionId !== null && loaded.tuple.connectionId !== expectedConnectionId) return failMcp("MCP_TOOL_NOT_FOUND");
   return db.$transaction(async (tx) => {
+    await lockActorAccess(tx, actor.id);
+    await assertMcpActor(tx, actor);
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${loaded.tuple.connectionId}::text, 32010003))`);
     const current = await loadMcpAttestationDefinition(tx, toolDefinitionId);
     if (JSON.stringify(current.tuple) !== JSON.stringify(loaded.tuple)) return failMcp("MCP_TOOL_DEFINITION_STALE");
@@ -277,6 +330,7 @@ export async function attestMcpToolDefinition(
         definitionFingerprint: current.tuple.definitionFingerprint,
         networkFingerprint: current.tuple.networkFingerprint,
         credentialFingerprint: current.tuple.credentialFingerprint,
+        connectionOwnerAccountAccessVersion: current.definition.connection.ownerAccountAccessVersion,
         verifiedById: actor.id,
         note: parsed.data.note ?? null,
         evidence,
@@ -295,6 +349,7 @@ export async function attestMcpToolDefinition(
         definitionFingerprint: current.tuple.definitionFingerprint,
         networkFingerprint: current.tuple.networkFingerprint,
         credentialFingerprint: current.tuple.credentialFingerprint,
+        connectionOwnerAccountAccessVersion: current.definition.connection.ownerAccountAccessVersion,
         details: { note: parsed.data.note ?? null, evidence },
       },
     });
@@ -309,11 +364,14 @@ export async function revokeMcpToolAttestation(
   db: PrismaClient = getDb(),
 ) {
   assertMcpAdmin(actor);
+  await assertMcpActor(db, actor);
   const attestationId = uuid(attestationIdInput);
   const parsed = revokeAttestationSchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
   return db.$transaction(async (tx) => {
+    await lockActorAccess(tx, actor.id);
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${attestationId}::text, 32010004))`);
+    await assertMcpActor(tx, actor);
     const existing = await tx.mcpToolAttestation.findUnique({ where: { id: attestationId }, include: { audits: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] } } });
     if (existing === null) return failMcp("MCP_ATTESTATION_NOT_FOUND");
     if (existing.attestedAt.getTime() !== timestamp(parsed.data.expectedAttestedAt).getTime()) return failMcp("MCP_ATTESTATION_CONFLICT");
@@ -329,6 +387,7 @@ export async function revokeMcpToolAttestation(
           definitionFingerprint: existing.definitionFingerprint,
           networkFingerprint: existing.networkFingerprint,
           credentialFingerprint: existing.credentialFingerprint,
+          connectionOwnerAccountAccessVersion: existing.connectionOwnerAccountAccessVersion,
           details: { note: parsed.data.note ?? null },
         },
       });
@@ -337,7 +396,8 @@ export async function revokeMcpToolAttestation(
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
-export async function listMcpConnections(actor: Pick<AppUser, "id">, db: PrismaClient = getDb()) {
+export async function listMcpConnections(actor: McpConnectionActor, db: PrismaClient = getDb()) {
+  await assertMcpActor(db, actor);
   return db.mcpConnection.findMany({
     where: { ownerUserId: actor.id, ownershipState: "confirmed" },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -345,7 +405,8 @@ export async function listMcpConnections(actor: Pick<AppUser, "id">, db: PrismaC
   });
 }
 
-export async function getMcpConnection(connectionIdInput: unknown, actor: Pick<AppUser, "id">, db: PrismaClient = getDb()) {
+export async function getMcpConnection(connectionIdInput: unknown, actor: McpConnectionActor, db: PrismaClient = getDb()) {
+  await assertMcpActor(db, actor);
   const connectionId = uuid(connectionIdInput);
   const connection = await db.mcpConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
@@ -355,9 +416,11 @@ export async function getMcpConnection(connectionIdInput: unknown, actor: Pick<A
   return connection;
 }
 
-export async function createMcpConnection(input: unknown, actor: Pick<AppUser, "id">, db: PrismaClient = getDb()) {
+export async function createMcpConnection(input: unknown, actor: McpConnectionActor, db: PrismaClient = getDb()) {
   const parsed = createConnectionSchema.safeParse(input);
   if (!parsed.success || (parsed.data.authKind === "none") !== (parsed.data.bearerToken == null)) return failMcp("MCP_INVALID_INPUT");
+  await assertMcpActor(db, actor);
+  await loadMcpOwner(db, actor.id);
   const endpoint = await resolveSecureEndpointFingerprint({ url: parsed.data.endpointUrl, allowPrivateNetwork: parsed.data.allowPrivateNetwork })
     .catch((error: unknown) => {
       if (error instanceof Error && error.message === "WEB_SOURCE_NETWORK_BLOCKED") return failMcp("MCP_NETWORK_BLOCKED");
@@ -365,6 +428,10 @@ export async function createMcpConnection(input: unknown, actor: Pick<AppUser, "
     });
   try {
     return await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
+      await tx.$queryRaw`SELECT "id" FROM "AppUser" WHERE "id" = ${actor.id}::uuid FOR UPDATE`;
+      await assertMcpActor(tx, actor);
+      const currentOwner = await loadMcpOwner(tx, actor.id);
       const credential = parsed.data.authKind === "bearer"
         ? await createCredential("mcp", parsed.data.bearerToken, tx)
         : null;
@@ -379,6 +446,7 @@ export async function createMcpConnection(input: unknown, actor: Pick<AppUser, "
           resolvedAddressFingerprint: endpoint.fingerprint,
           createdById: actor.id,
           ownerUserId: actor.id,
+          ownerAccountAccessVersion: currentOwner.accountAccessVersion,
           ownershipState: "confirmed",
         },
         select: connectionSelect,
@@ -393,29 +461,43 @@ export async function createMcpConnection(input: unknown, actor: Pick<AppUser, "
 export async function updateMcpConnection(
   connectionIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id">,
+  actor: McpConnectionActor,
   db: PrismaClient = getDb(),
 ) {
   const connectionId = uuid(connectionIdInput);
   const parsed = updateConnectionSchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
+  await assertMcpActor(db, actor);
   const existing = await db.mcpConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
   });
   if (existing === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
   if (parsed.data.bearerToken !== undefined && (existing.authKind !== "bearer" || existing.credentialId === null)) return failMcp("MCP_INVALID_INPUT");
+  const existingOwner = await loadMcpOwner(db, actor.id);
+  const rotatesCredential = parsed.data.bearerToken !== undefined;
+  if (!rotatesCredential) assertMcpConnectionEpoch(existing, existingOwner);
   const trusted = parsed.data.trustCurrentNetwork === true
     ? await resolveSecureEndpointFingerprint({ url: existing.endpointUrl, allowPrivateNetwork: existing.allowPrivateNetwork }).catch(() => failMcp("MCP_TRANSPORT_FAILED"))
     : null;
   try {
     return await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
+      await tx.$queryRaw`SELECT "id" FROM "AppUser" WHERE "id" = ${actor.id}::uuid FOR UPDATE`;
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010000))`);
+      await assertMcpActor(tx, actor);
+      const currentOwner = await loadMcpOwner(tx, actor.id);
       const current = await tx.mcpConnection.findFirst({
         where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
       });
       if (current === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
       if (current.updatedAt.getTime() !== timestamp(parsed.data.expectedUpdatedAt).getTime()) return failMcp("MCP_CONNECTION_CONFLICT");
       if (parsed.data.bearerToken !== undefined && (current.authKind !== "bearer" || current.credentialId === null)) return failMcp("MCP_INVALID_INPUT");
+      if (!rotatesCredential) assertMcpConnectionEpoch(current, currentOwner);
+      if (rotatesCredential) {
+        await tx.$executeRaw`SELECT set_config('app.personal_mcp_credential_rotation_context', '1', true)`;
+        await tx.$executeRaw`SELECT set_config('app.personal_mcp_credential_rotation_owner_id', ${actor.id}, true)`;
+        await tx.$executeRaw`SELECT set_config('app.personal_mcp_credential_rotation_connection_id', ${current.id}, true)`;
+      }
       if (parsed.data.bearerToken !== undefined) await rotateCredential(current.credentialId!, "mcp", parsed.data.bearerToken, tx);
       const securityChanged = parsed.data.bearerToken !== undefined || trusted !== null;
       const requestedStatus = parsed.data.enabled === false
@@ -430,6 +512,7 @@ export async function updateMcpConnection(
         data: {
           ...(parsed.data.name === undefined ? {} : { name: parsed.data.name }),
           ...(trusted === null ? {} : { resolvedAddressFingerprint: trusted.fingerprint }),
+          ...(rotatesCredential ? { ownerAccountAccessVersion: currentOwner.accountAccessVersion } : {}),
           ...requestedStatus,
           ...(securityChanged ? { protocolVersion: null, catalogFingerprint: null, lastDiscoveredAt: null, lastErrorCode: null } : {}),
         },
@@ -445,15 +528,18 @@ export async function updateMcpConnection(
 export async function deleteMcpConnection(
   connectionIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id">,
+  actor: McpConnectionActor,
   db: PrismaClient = getDb(),
 ) {
   const connectionId = uuid(connectionIdInput);
   const parsed = deleteConnectionSchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
+  await assertMcpActor(db, actor);
   try {
     return await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010000))`);
+      await assertMcpActor(tx, actor);
       const connection = await tx.mcpConnection.findFirst({
         where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
         select: { id: true, name: true, status: true, credentialId: true, updatedAt: true },
@@ -494,42 +580,108 @@ async function bearerToken(
   return readCredentialSecret(connection.credentialId, "mcp", db, { expectedSecretFingerprint });
 }
 
+/**
+ * Final, database-owned admission immediately before credential decryption and
+ * the first MCP network request.  Locks are released when this transaction
+ * commits; the network call is intentionally outside the transaction so the
+ * account/connection lifecycle cannot be held over I/O.
+ */
+async function acceptMcpDiscoveryDispatchBoundary(input: Readonly<{
+  db: PrismaClient;
+  actor: McpConnectionActor;
+  connectionId: string;
+  expectedUpdatedAt: Date;
+  expectedCredentialFingerprint: string | null;
+}>): Promise<boolean> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await input.db.$transaction(async (tx) => {
+        await lockActorAccess(tx, input.actor.id);
+        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${input.connectionId}::text, 32010000))`);
+        await tx.$queryRaw`SELECT "id" FROM "McpConnection" WHERE "id" = ${input.connectionId}::uuid FOR UPDATE`;
+        await assertMcpActor(tx, input.actor);
+        const current = await tx.mcpConnection.findFirst({
+          where: { id: input.connectionId, ownerUserId: input.actor.id, ownershipState: "confirmed" },
+          select: {
+            ownerUserId: true,
+            ownerAccountAccessVersion: true,
+            status: true,
+            updatedAt: true,
+            credential: { select: { secretFingerprint: true } },
+          },
+        });
+        if (
+          current === null
+          || current.status === "disabled"
+          || current.ownerUserId !== input.actor.id
+          || current.ownerAccountAccessVersion === null
+          || typeof input.actor.accountAccessVersion !== "number"
+          || current.ownerAccountAccessVersion !== input.actor.accountAccessVersion
+          || current.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()
+          || (current.credential?.secretFingerprint ?? null) !== input.expectedCredentialFingerprint
+        ) return false;
+        return true;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (isPrismaCode(error, "P2034") && attempt < 3) continue;
+      return false;
+    }
+  }
+  return false;
+}
+
 export async function discoverMcpConnectionTools(
   connectionIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id">,
+  actor: McpConnectionActor,
   db: PrismaClient = getDb(),
 ) {
   const connectionId = uuid(connectionIdInput);
   const parsed = discoverConnectionSchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
   const expectedUpdatedAt = timestamp(parsed.data.expectedUpdatedAt);
+  await assertMcpActor(db, actor);
   const connection = await db.mcpConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
     include: { credential: true },
   });
   if (connection === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
   if (connection.status === "disabled") return failMcp("MCP_CONNECTION_DISABLED");
+  const owner = await loadMcpOwner(db, actor.id);
+  assertMcpConnectionEpoch(connection, owner);
   if (connection.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return failMcp("MCP_CONNECTION_CONFLICT");
   const expectedCredentialFingerprint = connection.credential?.secretFingerprint ?? null;
   try {
+    const accepted = await acceptMcpDiscoveryDispatchBoundary({
+      db,
+      actor,
+      connectionId,
+      expectedUpdatedAt: connection.updatedAt,
+      expectedCredentialFingerprint,
+    });
+    if (!accepted) return failMcp("MCP_CONNECTION_CONFLICT");
     const discovery = await discoverMcpTools({
       endpointUrl: connection.endpointUrl,
       allowPrivateNetwork: connection.allowPrivateNetwork,
       expectedAddressFingerprint: connection.resolvedAddressFingerprint,
-      bearerToken: await bearerToken(connection, db, connection.credential?.secretFingerprint ?? noCredentialFingerprint()),
+      bearerToken: await bearerToken(connection, db, expectedCredentialFingerprint ?? noCredentialFingerprint()),
     });
     const now = new Date();
     const stored = await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
+      await tx.$queryRaw`SELECT "id" FROM "AppUser" WHERE "id" = ${actor.id}::uuid FOR UPDATE`;
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010000))`);
       await tx.$queryRaw`SELECT "id" FROM "McpConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
+      await assertMcpActor(tx, actor);
       const currentConnection = await tx.mcpConnection.findFirst({
         where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
-        select: { status: true, updatedAt: true, credential: { select: { secretFingerprint: true } } },
+        select: { ownerUserId: true, ownerAccountAccessVersion: true, status: true, updatedAt: true, credential: { select: { secretFingerprint: true } } },
       });
       if (currentConnection === null || currentConnection.status === "disabled") {
         return failMcp(currentConnection === null ? "MCP_CONNECTION_NOT_FOUND" : "MCP_CONNECTION_DISABLED");
       }
+      const currentOwner = await loadMcpOwner(tx, actor.id);
+      assertMcpConnectionEpoch(currentConnection, currentOwner);
       if (currentConnection.updatedAt.getTime() !== expectedUpdatedAt.getTime() ||
         (currentConnection.credential?.secretFingerprint ?? null) !== expectedCredentialFingerprint) {
         return failMcp("MCP_CONNECTION_CONFLICT");
@@ -571,14 +723,26 @@ export async function discoverMcpConnectionTools(
     }
     const code = error instanceof McpCapabilityError ? error.code : "MCP_TRANSPORT_FAILED";
     const marked = await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
       await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010000))`);
       await tx.$queryRaw`SELECT "id" FROM "McpConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
+      try {
+        await assertMcpActor(tx, actor);
+      } catch {
+        return false;
+      }
       const current = await tx.mcpConnection.findFirst({
         where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
-        select: { status: true, updatedAt: true, credential: { select: { secretFingerprint: true } } },
+        select: { ownerUserId: true, ownerAccountAccessVersion: true, status: true, updatedAt: true, credential: { select: { secretFingerprint: true } } },
       });
       if (current === null || current.status === "disabled" || current.updatedAt.getTime() !== expectedUpdatedAt.getTime() ||
         (current.credential?.secretFingerprint ?? null) !== expectedCredentialFingerprint) return false;
+      const currentOwner = await loadMcpOwner(tx, actor.id);
+      try {
+        assertMcpConnectionEpoch(current, currentOwner);
+      } catch {
+        return false;
+      }
       await tx.mcpConnection.update({
         where: { id: connectionId },
         data: { status: "error", lastErrorCode: code, lastDiscoveredAt: new Date() },

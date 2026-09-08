@@ -33,7 +33,7 @@ const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION }
 
 async function activateDefaultVisionRoute(
   db: ReturnType<typeof getDb>,
-  actor: Readonly<{ id: string; role: string }>,
+  actor: Readonly<{ id: string; role: string; accountAccessVersion: number }>,
   providerConnectionId: string,
 ) {
   const draft = await createPlatformDefaultAiRoute({
@@ -159,12 +159,12 @@ test(
         visionModelId: "glm-5v-turbo",
         embeddingModelId: null,
         embeddingDimensions: null,
-      }, { id: platformAdmin.id, role: platformAdmin.role }, db);
+      }, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, db);
       await db.aiProviderConnection.update({
         where: { id: provider.id },
         data: { status: "verified", lastTestedAt: new Date() },
       });
-      const defaultRoute = await activateDefaultVisionRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, provider.id);
+      const defaultRoute = await activateDefaultVisionRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, provider.id);
       assert.equal(defaultRoute.status, "active");
 
       const job = await runProjectAssetVisionExtraction({
@@ -239,7 +239,7 @@ test(
           visionModelId: adapter.model,
           embeddingModelId: null,
           embeddingDimensions: null,
-        }, { id: platformAdmin.id, role: "admin" }, db);
+        }, { id: platformAdmin.id, role: "admin", accountAccessVersion: platformAdmin.accountAccessVersion }, db);
         const row = await db.aiProviderConnection.findUniqueOrThrow({ where: { id: connection.id } });
         const response = await invokeVisionCompletion({
           connection: row,

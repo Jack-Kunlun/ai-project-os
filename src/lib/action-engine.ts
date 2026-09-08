@@ -658,7 +658,15 @@ async function executeAction(action: ClaimedAction, db: PrismaClient): Promise<P
     // with a stable action result instead of passing an Editor to the source
     // service and pretending it is an Owner.
     try {
-      await admitWebAiProjectAccess(db, { actor: { id: action.requestedBy.id, role: action.requestedBy.role }, projectId: action.projectId, required: "owner" });
+      await admitWebAiProjectAccess(db, {
+        actor: {
+          id: action.requestedBy.id,
+          role: action.requestedBy.role,
+          accountAccessVersion: action.requestedBy.accountAccessVersion,
+        },
+        projectId: action.projectId,
+        required: "owner",
+      });
     } catch (error) {
       if (error instanceof WebAiAccessError) throw new ActionExecutionError("ACTION_WEB_SOURCE_OWNER_REQUIRED");
       throw error;

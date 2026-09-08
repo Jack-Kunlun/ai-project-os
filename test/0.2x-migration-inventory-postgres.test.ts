@@ -7,11 +7,21 @@ import { promisify } from "node:util";
 import { Client } from "pg";
 import { INVENTORY_TABLES, parseOwnershipInventoryDatabaseUrl } from "../scripts/0.2x-migration-inventory-contract";
 import { main, runOwnershipInventory } from "../scripts/0.2x-migration-inventory";
+import { getDb } from "../src/lib/db";
+import { createMcpControlPlaneAttestation } from "../src/lib/mcp";
+import {
+  confirmProjectMcpConnectionDelegationOwner,
+  confirmProjectMcpConnectionDelegationProject,
+  proposeProjectMcpConnectionDelegation,
+} from "../src/lib/project-mcp-connection-delegation-service";
+import { grantProjectMembership } from "../src/lib/membership-governance";
+import { createProjectMcpToolGrantV2 } from "../src/lib/project-mcp-tool-grant-service";
 
 const shouldRun = process.env.OWNERSHIP_INVENTORY_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_ownership_inventory_test";
 const readerRole = "ai_project_os_inventory_reader";
 const execFile = promisify(execFileCallback);
+const NO_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
 
 function adminDatabaseUrl(): string {
   const value = process.env.OWNERSHIP_INVENTORY_TEST_DATABASE_URL;
@@ -140,8 +150,6 @@ test(
     const mcpAmbiguousId = randomUUID();
     const mcpDefinitionId = randomUUID();
     const mcpConfirmedDefinitionId = randomUUID();
-    const mcpGrantId = randomUUID();
-    const mcpConfirmedGrantId = randomUUID();
     const platformProviderId = randomUUID();
     const workspaceOwnerProviderId = randomUUID();
     const workspaceAdminProviderId = randomUUID();
@@ -188,13 +196,13 @@ test(
 
       await admin.query("BEGIN");
       await admin.query(`
-        INSERT INTO "AppUser" ("id", "username", "role", "updatedAt") VALUES
-          ($1, $2, 'member', CURRENT_TIMESTAMP),
-          ($3, $4, 'admin', CURRENT_TIMESTAMP),
-          ($5, $6, 'member', CURRENT_TIMESTAMP),
-          ($7, $8, 'user', CURRENT_TIMESTAMP),
-          ($9, $10, 'user', CURRENT_TIMESTAMP),
-          ($11, $12, 'user', CURRENT_TIMESTAMP)
+        INSERT INTO "AppUser" ("id", "username", "role", "disabledAt", "disabledReason", "updatedAt") VALUES
+          ($1, $2, 'member', NULL, NULL, CURRENT_TIMESTAMP),
+          ($3, $4, 'admin', NULL, NULL, CURRENT_TIMESTAMP),
+          ($5, $6, 'member', NULL, NULL, CURRENT_TIMESTAMP),
+          ($7, $8, 'user', NULL, NULL, CURRENT_TIMESTAMP),
+          ($9, $10, 'user', NULL, NULL, CURRENT_TIMESTAMP),
+          ($11, $12, 'user', CURRENT_TIMESTAMP, 'inventory test account disabled', CURRENT_TIMESTAMP)
       `, [
         userOwnerId, `inventory_owner_${suffix}`,
         userAdminId, `inventory_admin_${suffix}`,
@@ -203,12 +211,6 @@ test(
         userProviderId, `inventory_provider_${suffix}`,
         userDisabledId, `inventory_disabled_${suffix}`,
       ]);
-      await admin.query(`
-        UPDATE "AppUser"
-           SET "disabledAt" = CURRENT_TIMESTAMP,
-               "disabledReason" = 'inventory test account disabled'
-         WHERE "id" = $1
-      `, [userDisabledId]);
       await admin.query(`
         INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt")
         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
@@ -228,7 +230,7 @@ test(
                'confirmed', NULL, membership."accessState", membership."role", NULL,
                'ownership inventory confirmed workspace membership',
                encode(digest(convert_to(concat_ws(E'\\x1f', membership."id"::text, membership."workspaceId"::text, membership."userId"::text, membership."role"::text, to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS'), to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS')), 'UTF8'), 'sha256'), 'hex')
-          FROM memberships
+          FROM memberships AS membership
       `, [workspaceId, userOwnerId, userAdminId, userMemberId, userViewerId]);
       await admin.query(`
         INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt")
@@ -242,11 +244,11 @@ test(
 
       await admin.query(`
         INSERT INTO "GitConnection"
-          ("id", "name", "providerKind", "transport", "baseUrl", "authKind", "status", "createdById", "ownerUserId", "ownershipState", "updatedAt")
+          ("id", "name", "providerKind", "transport", "baseUrl", "authKind", "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt")
         VALUES
-          ($1, $2, 'generic', 'https', $3, 'none', 'configured', $4, NULL, 'legacy_pending', CURRENT_TIMESTAMP),
-          ($5, $6, 'generic', 'https', $3, 'none', 'verified', $7, $7, 'confirmed', CURRENT_TIMESTAMP),
-          ($8, $9, 'generic', 'https', $3, 'none', 'configured', $4, NULL, 'ambiguous', CURRENT_TIMESTAMP)
+          ($1, $2, 'generic', 'https', $3, 'none', 'configured', $4, NULL, NULL, 'legacy_pending', CURRENT_TIMESTAMP),
+          ($5, $6, 'generic', 'https', $3, 'none', 'verified', $7, $7, 1, 'confirmed', CURRENT_TIMESTAMP),
+          ($8, $9, 'generic', 'https', $3, 'none', 'configured', $4, NULL, NULL, 'ambiguous', CURRENT_TIMESTAMP)
       `, [
         gitLegacyId, `inventory_git_legacy_${suffix}`, `https://sentinel.invalid/${suffix}`, userProviderId,
         gitConfirmedId, `inventory_git_confirmed_${suffix}`,
@@ -270,11 +272,11 @@ test(
 
       await admin.query(`
         INSERT INTO "McpConnection"
-          ("id", "name", "endpointUrl", "authKind", "status", "createdById", "ownerUserId", "ownershipState", "updatedAt")
+          ("id", "name", "endpointUrl", "authKind", "resolvedAddressFingerprint", "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt")
         VALUES
-          ($1, $2, $3, 'none', 'configured', $4, NULL, 'legacy_pending', CURRENT_TIMESTAMP),
-          ($5, $6, $3, 'none', 'verified', $7, $7, 'confirmed', CURRENT_TIMESTAMP),
-          ($8, $9, $3, 'none', 'configured', $4, NULL, 'ambiguous', CURRENT_TIMESTAMP)
+          ($1, $2, $3, 'none', NULL, 'configured', $4, NULL, NULL, 'legacy_pending', CURRENT_TIMESTAMP),
+          ($5, $6, $3, 'none', repeat('b', 64), 'verified', $7, $7, 1, 'confirmed', CURRENT_TIMESTAMP),
+          ($8, $9, $3, 'none', NULL, 'configured', $4, NULL, NULL, 'ambiguous', CURRENT_TIMESTAMP)
       `, [
         mcpLegacyId, `inventory_mcp_legacy_${suffix}`, `https://sentinel-mcp.invalid/${suffix}`, userProviderId,
         mcpConfirmedId, `inventory_mcp_confirmed_${suffix}`,
@@ -284,14 +286,8 @@ test(
         INSERT INTO "McpToolDefinition"
           ("id", "connectionId", "name", "inputSchema", "readOnlyEligible", "definitionFingerprint")
         VALUES ($1, $2, 'sentinel_tool', '{}'::jsonb, true, repeat('a', 64)),
-               ($3, $4, 'sentinel_tool', '{}'::jsonb, true, repeat('c', 64))
-      `, [mcpDefinitionId, mcpLegacyId, mcpConfirmedDefinitionId, mcpConfirmedId]);
-      await admin.query(`
-        INSERT INTO "ProjectMcpToolGrant"
-          ("id", "projectId", "connectionId", "toolName", "toolDefinitionId", "status", "managedById", "acknowledgedAt", "updatedAt")
-        VALUES ($1, $2, $3, 'sentinel_tool', $4, 'active', $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-               ($6, $2, $7, 'sentinel_tool', $8, 'active', $9, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `, [mcpGrantId, projectId, mcpLegacyId, mcpDefinitionId, userOwnerId, mcpConfirmedGrantId, mcpConfirmedId, mcpConfirmedDefinitionId, userAdminId]);
+               ($3, $4, 'sentinel_tool_secondary', '{}'::jsonb, true, repeat('c', 64))
+      `, [mcpDefinitionId, mcpConfirmedId, mcpConfirmedDefinitionId, mcpConfirmedId]);
 
       const credentialIds = [
         routeProviderCredentialId, workspaceOwnerCredentialId, workspaceAdminCredentialId,
@@ -305,14 +301,14 @@ test(
       `, [credentialIds]);
       await admin.query(`
         INSERT INTO "AiProviderConnection"
-          ("id", "name", "kind", "scope", "workspaceId", "ownerUserId", "ownershipState", "baseUrl", "credentialId", "status", "updatedAt")
+          ("id", "name", "kind", "scope", "workspaceId", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "baseUrl", "credentialId", "status", "updatedAt")
         VALUES
-          ($1, $2, 'deepseek', 'platform', NULL, NULL, 'legacy_pending', 'https://sentinel-provider.invalid', $3, 'verified', CURRENT_TIMESTAMP),
-          ($4, $5, 'deepseek', 'workspace', $6, $7, 'legacy_pending', 'https://sentinel-provider.invalid', $8, 'verified', CURRENT_TIMESTAMP),
-          ($9, $10, 'deepseek', 'workspace', $6, $11, 'legacy_pending', 'https://sentinel-provider.invalid', $12, 'verified', CURRENT_TIMESTAMP),
-          ($13, $14, 'deepseek', 'workspace', $6, $15, 'ambiguous', 'https://sentinel-provider.invalid', $16, 'disabled', CURRENT_TIMESTAMP),
-          ($17, $18, 'deepseek', 'workspace', $6, $19, 'ambiguous', 'https://sentinel-provider.invalid', $20, 'disabled', CURRENT_TIMESTAMP),
-          ($21, $22, 'deepseek', 'user', NULL, $23, 'confirmed', 'https://sentinel-provider.invalid', $24, 'verified', CURRENT_TIMESTAMP)
+          ($1, $2, 'deepseek', 'platform', NULL, NULL, NULL, 'legacy_pending', 'https://sentinel-provider.invalid', $3, 'verified', CURRENT_TIMESTAMP),
+          ($4, $5, 'deepseek', 'workspace', $6, $7, NULL, 'legacy_pending', 'https://sentinel-provider.invalid', $8, 'verified', CURRENT_TIMESTAMP),
+          ($9, $10, 'deepseek', 'workspace', $6, $11, NULL, 'legacy_pending', 'https://sentinel-provider.invalid', $12, 'verified', CURRENT_TIMESTAMP),
+          ($13, $14, 'deepseek', 'workspace', $6, $15, NULL, 'ambiguous', 'https://sentinel-provider.invalid', $16, 'disabled', CURRENT_TIMESTAMP),
+          ($17, $18, 'deepseek', 'workspace', $6, $19, NULL, 'ambiguous', 'https://sentinel-provider.invalid', $20, 'disabled', CURRENT_TIMESTAMP),
+          ($21, $22, 'deepseek', 'user', NULL, $23, 1, 'confirmed', 'https://api.deepseek.com', $24, 'verified', CURRENT_TIMESTAMP)
       `, [
         platformProviderId, `inventory_provider_platform_${suffix}`, routeProviderCredentialId,
         workspaceOwnerProviderId, `inventory_provider_owner_${suffix}`, workspaceId, userOwnerId, workspaceOwnerCredentialId,
@@ -381,8 +377,8 @@ test(
       }
       await admin.query(`
         INSERT INTO "PlatformTokenReservation"
-          ("id", "userId", "grantId", "providerConnectionId", "callKey", "operation", "modelId", "status", "reservedTokens", "expiresAt")
-        VALUES ($1, $2, $3, $4, 'inventory-sentinel-call', 'projectAnalysis', 'sentinel-model', 'reserved', 1, CURRENT_TIMESTAMP + INTERVAL '1 day')
+          ("id", "userId", "grantId", "providerConnectionId", "callKey", "operation", "modelId", "status", "reservedTokens", "rawEstimatedTokens", "quotaMultiplierBps", "expiresAt")
+        VALUES ($1, $2, $3, $4, 'inventory-sentinel-call', 'projectAnalysis', 'sentinel-model', 'reserved', 1, 1, 10000, CURRENT_TIMESTAMP + INTERVAL '1 day')
       `, [reservationId, userOwnerId, tokenGrantId, platformProviderId]);
       await admin.query(`
         INSERT INTO "ProviderCallAudit"
@@ -390,6 +386,95 @@ test(
         VALUES ($1, $2, 'projectAnalysis', 'sentinel-model', $3, 'inventory-sentinel-call', $4, 'succeeded')
       `, [auditId, platformProviderId, userOwnerId, reservationId]);
       await admin.query("COMMIT");
+
+      // V2 grants are created through the production attestation, delegation,
+      // and grant services. The inventory database is already at the latest
+      // schema, so a raw legacy-shaped insert would correctly trip the
+      // immutable V2 grant guard instead of representing historical data.
+      const db = getDb();
+      const ownerActor = { id: userOwnerId, role: "user" as const, accountAccessVersion: 1 };
+      const adminActor = { id: userAdminId, role: "admin" as const, accountAccessVersion: 1 };
+      await db.$transaction(async (tx) => {
+        await grantProjectMembership(tx, {
+          projectId,
+          workspaceId,
+          userId: userOwnerId,
+          role: "owner",
+          actorId: userAdminId,
+          reason: "ownership inventory MCP project owner",
+        });
+        await grantProjectMembership(tx, {
+          projectId,
+          workspaceId,
+          userId: userAdminId,
+          role: "owner",
+          actorId: userOwnerId,
+          reason: "ownership inventory MCP grant manager",
+        });
+      });
+      const definitionFingerprint = "a".repeat(64);
+      const secondaryDefinitionFingerprint = "c".repeat(64);
+      const networkFingerprint = "b".repeat(64);
+      const attestation = await createMcpControlPlaneAttestation(adminActor, {
+        toolDefinitionId: mcpDefinitionId,
+        expectedConnectionConfigurationRevision: 1,
+        expectedDefinitionFingerprint: definitionFingerprint,
+        expectedNetworkFingerprint: networkFingerprint,
+        expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
+        conclusion: "read_only_verified",
+        riskLevel: "low",
+        evidenceNote: "manual_read_only_review",
+      }, db);
+      const secondaryAttestation = await createMcpControlPlaneAttestation(adminActor, {
+        toolDefinitionId: mcpConfirmedDefinitionId,
+        expectedConnectionConfigurationRevision: 1,
+        expectedDefinitionFingerprint: secondaryDefinitionFingerprint,
+        expectedNetworkFingerprint: networkFingerprint,
+        expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
+        conclusion: "read_only_verified",
+        riskLevel: "low",
+        evidenceNote: "manual_read_only_review",
+      }, db);
+      const delegationDraft = await proposeProjectMcpConnectionDelegation(
+        projectId,
+        { mcpConnectionId: mcpConfirmedId, expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString() },
+        ownerActor,
+        db,
+      );
+      if (!("id" in delegationDraft)) throw new Error("OWNERSHIP_INVENTORY_MCP_DELEGATION_CREATE_FAILED");
+      await confirmProjectMcpConnectionDelegationOwner(
+        projectId,
+        delegationDraft.id,
+        { expectedVersion: 1, acknowledgeCredentialUse: true },
+        ownerActor,
+        db,
+      );
+      const activeDelegation = await confirmProjectMcpConnectionDelegationProject(
+        projectId,
+        delegationDraft.id,
+        { expectedVersion: 2, acknowledgeProjectScope: true, acknowledgeDataEgress: true },
+        ownerActor,
+        db,
+      );
+      if (!("id" in activeDelegation)) throw new Error("OWNERSHIP_INVENTORY_MCP_DELEGATION_ACTIVATE_FAILED");
+      const activeDelegationRow = await db.projectMcpConnectionDelegation.findUniqueOrThrow({
+        where: { id: activeDelegation.id },
+        select: { id: true, version: true },
+      });
+      for (const [toolDefinitionId, attestationId] of [
+        [mcpDefinitionId, attestation.id],
+        [mcpConfirmedDefinitionId, secondaryAttestation.id],
+      ] as const) {
+        const createdGrant = await createProjectMcpToolGrantV2(projectId, {
+          delegationId: activeDelegationRow.id,
+          toolDefinitionId,
+          attestationId,
+          expectedDelegationVersion: activeDelegationRow.version,
+          expectedAttestationVersion: 1,
+          acknowledgeReadOnly: true,
+        }, adminActor, db);
+        assert.equal(createdGrant.created, true);
+      }
 
       await admin.query(`GRANT SELECT ON TABLE "ExternalCredential" TO "${readerRole}"`);
       try {
@@ -471,14 +556,14 @@ test(
           references: { toolDefinitions: 2, currentToolDefinitions: 2, projectToolGrants: 2, activeProjectToolGrants: 2 },
           referencesWithDifferentActor: 2,
           activeReferencesWithDifferentActor: 2,
-          connectionsWithDifferentReferenceActor: 2,
-          connectionsWithCreatorOutsideProjectAccess: 1,
-          activeConnectionsWithCreatorOutsideProjectAccess: 1,
+          connectionsWithDifferentReferenceActor: 1,
+          connectionsWithCreatorOutsideProjectAccess: 0,
+          activeConnectionsWithCreatorOutsideProjectAccess: 0,
           ownerCandidateExactNameConflictGroups: 0,
           connectionsInOwnerCandidateExactNameConflicts: 0,
           personalReferences: {
-            directReferences: 1,
-            activeDirectReferences: 1,
+            directReferences: 2,
+            activeDirectReferences: 2,
             distinctProjects: 1,
             potentialNonTerminalJobsInReferencedProjects: 1,
             potentialActiveAutomationsInReferencedProjects: 1,

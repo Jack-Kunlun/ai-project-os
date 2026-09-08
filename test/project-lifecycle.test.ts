@@ -118,6 +118,9 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/items/[itemId]/route.ts",
     "src/app/api/projects/[projectId]/sources/route.ts",
     "src/app/api/projects/[projectId]/sources/[sourceId]/route.ts",
+    "src/app/api/projects/[projectId]/web-sources/route.ts",
+    "src/app/api/projects/[projectId]/web-sources/[webSourceId]/route.ts",
+    "src/app/api/projects/[projectId]/web-sources/[webSourceId]/sync/route.ts",
     "src/app/api/projects/[projectId]/snapshots/route.ts",
     "src/app/api/projects/[projectId]/mcp-tool-grants/route.ts",
     "src/app/api/projects/[projectId]/memory/extract/route.ts",
@@ -153,6 +156,7 @@ test("all project mutation routes reject archived projects except bounded lifecy
     "src/app/api/projects/[projectId]/ai-effective-route-selections/[operation]/route.ts",
     "src/app/api/projects/[projectId]/ai-routes/route.ts",
     "src/app/api/projects/[projectId]/automations/route.ts",
+    "src/app/api/projects/[projectId]/automations/preview/route.ts",
     "src/app/api/projects/[projectId]/automations/[ruleId]/route.ts",
     "src/app/api/projects/[projectId]/automations/[ruleId]/run/route.ts",
   ]);

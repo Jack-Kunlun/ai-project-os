@@ -5,7 +5,7 @@ import test from "node:test";
 import { PrismaClient, ProjectRepositoryRole } from "@prisma/client";
 import { getDb } from "../src/lib/db";
 import { GITHUB_SOFT_EXCLUDE_CLASSES, createGitHubRepositoryLedgerService, type VerifiedGitHubRepository } from "../src/lib/github";
-import { ProjectLifecycleError } from "../src/lib/project-lifecycle";
+import { deleteArchivedProject, ProjectLifecycleError, updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { cancelProjectJob, getProjectJob } from "../src/lib/project-workflow";
 import { listProjectJobs, runGitHubCodeScanJob, runGitHubMaterialSyncJob } from "../src/lib/background-jobs";
 import { runGitHubProjectSyncJob } from "../src/lib/github/project-sync-service";
@@ -54,13 +54,13 @@ test(
       disabled: false,
       defaultBranch: "main",
     });
-    const owner: WebAiActor = { id: ownerId, role: "user" };
-    const viewer: WebAiActor = { id: viewerId, role: "user" };
-    const editor: WebAiActor = { id: editorId, role: "user" };
-    const disabled: WebAiActor = { id: disabledId, role: "user" };
-    const nonMember: WebAiActor = { id: nonMemberId, role: "user" };
-    const admin: WebAiActor = { id: adminId, role: "admin" };
-    const outsiderAdmin: WebAiActor = { id: outsiderAdminId, role: "admin" };
+    const owner: WebAiActor = { id: ownerId, role: "user", accountAccessVersion: 1 };
+    const viewer: WebAiActor = { id: viewerId, role: "user", accountAccessVersion: 1 };
+    const editor: WebAiActor = { id: editorId, role: "user", accountAccessVersion: 1 };
+    const disabled: WebAiActor = { id: disabledId, role: "user", accountAccessVersion: 1 };
+    const nonMember: WebAiActor = { id: nonMemberId, role: "user", accountAccessVersion: 1 };
+    const admin: WebAiActor = { id: adminId, role: "admin", accountAccessVersion: 1 };
+    const outsiderAdmin: WebAiActor = { id: outsiderAdminId, role: "admin", accountAccessVersion: 1 };
     const jobIds: string[] = [];
     const previousFetch = globalThis.fetch;
     let providerFetches = 0;
@@ -279,25 +279,26 @@ test(
           },
         }) as unknown as PrismaClient;
         const clientKey = `revoked-${kind}-${suffix}-${randomUUID()}`;
+        const providerAuditCountBefore = await db.providerCallAudit.count();
         await assert.rejects(
           () => run(guardedDb, clientKey),
-          hasCode("ACCOUNT_DISABLED"),
+          hasCode("BACKGROUND_JOB_INVALID_STATE"),
         );
-        assert.equal(actorLookups, 2);
-        assert.equal(await db.backgroundJob.count({ where: { projectId } }), projectJobCountBefore + 1);
-        const job = await db.backgroundJob.findFirstOrThrow({ where: { projectId }, orderBy: { createdAt: "desc" } });
-        assert.equal(job.kind, kind);
-        assert.equal(job.status, "failed");
-        assert.equal(job.failureCode, "ACCOUNT_DISABLED");
-        const attempt = await db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: job.id } });
-        assert.equal(attempt.status, "failed");
-        assert.equal(attempt.dispatchState, "pending");
+        assert.equal(actorLookups, 3);
+        assert.equal(await db.backgroundJob.count({ where: { projectId } }), projectJobCountBefore);
         assert.equal(githubLinkReads, 0);
         assert.equal(credentialReads, 0);
-        assert.equal(await db.providerCallAudit.count({ where: { jobId: job.id } }), 0);
+        assert.equal(await db.providerCallAudit.count(), providerAuditCountBefore);
       }
       assert.equal(providerFetches, 0);
 
+      // Project-level GitHub sync is frozen before admission. A valid owner
+      // must still see the stable contract error without creating any job,
+      // root, entry, or provider audit row.
+      const projectJobCountBefore = await db.backgroundJob.count({ where: { projectId: githubProjectId } });
+      const projectRootCountBefore = await db.projectGitHubSyncRun.count({ where: { projectId: githubProjectId } });
+      const projectEntryCountBefore = await db.projectGitHubSyncEntry.count({ where: { projectId: githubProjectId } });
+      const providerAuditCountBefore = await db.providerCallAudit.count();
       let actorLookups = 0;
       let postGuardLinkReads = 0;
       let postGuardCredentialReads = 0;
@@ -329,24 +330,17 @@ test(
         () => runGitHubProjectSyncJob({
           projectId: githubProjectId,
           requestedBy: owner,
-          clientKey: `revoked-project-sync-${suffix}-${randomUUID()}`,
+          clientKey: `frozen-project-sync-${suffix}-${randomUUID()}`,
         }, guardedProjectDb),
-        hasCode("ACCOUNT_DISABLED"),
+        hasCode("PROJECT_GITHUB_SYNC_PROJECT_CONNECT_FROZEN"),
       );
-      assert.equal(actorLookups, 2);
-      const revokedRoot = await db.projectGitHubSyncRun.findFirstOrThrow({ where: { projectId: githubProjectId } });
-      assert.equal(revokedRoot.status, "failed");
-      assert.equal(revokedRoot.failureCode, "PROJECT_GITHUB_SYNC_INCOMPLETE");
-      assert.equal(revokedRoot.reconciliationRequired, false);
-      const revokedJob = await db.backgroundJob.findFirstOrThrow({ where: { projectId: githubProjectId, kind: "githubProjectSync" } });
-      assert.equal(revokedJob.status, "failed");
-      assert.equal(revokedJob.failureCode, "PROJECT_GITHUB_SYNC_INCOMPLETE");
-      const revokedAttempt = await db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: revokedJob.id } });
-      assert.equal(revokedAttempt.status, "failed");
-      assert.equal(revokedAttempt.dispatchState, "pending");
+      assert.equal(actorLookups, 3);
+      assert.equal(await db.backgroundJob.count({ where: { projectId: githubProjectId } }), projectJobCountBefore);
+      assert.equal(await db.projectGitHubSyncRun.count({ where: { projectId: githubProjectId } }), projectRootCountBefore);
+      assert.equal(await db.projectGitHubSyncEntry.count({ where: { projectId: githubProjectId } }), projectEntryCountBefore);
       assert.equal(postGuardLinkReads, 0);
       assert.equal(postGuardCredentialReads, 0);
-      assert.equal(await db.providerCallAudit.count({ where: { jobId: revokedJob.id } }), 0);
+      assert.equal(await db.providerCallAudit.count(), providerAuditCountBefore);
       assert.equal(providerFetches, 0);
     } finally {
       globalThis.fetch = previousFetch;
@@ -365,19 +359,24 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const userId = randomUUID();
+    const adminId = randomUUID();
     const workspaceId = randomUUID();
     const projectId = randomUUID();
     const providerId = randomUUID();
     const credentialId = randomUUID();
     const grantId = randomUUID();
     const sourceId = randomUUID();
-    const actor: WebAiActor = { id: userId, role: "user" };
+    const platformRouteId = randomUUID();
+    const actor: WebAiActor = { id: userId, role: "user", accountAccessVersion: 1 };
     let actorLookups = 0;
     let providerFetches = 0;
     const previousFetch = globalThis.fetch;
 
     await db.appUser.create({
       data: { id: userId, username: `web_ai_post_claim_${suffix}`, role: "user" },
+    });
+    await db.appUser.create({
+      data: { id: adminId, username: `web_ai_post_claim_admin_${suffix}`, role: "admin" },
     });
     await db.workspace.create({
       data: { id: workspaceId, name: `Web AI post claim ${suffix}`, slug: `web-ai-post-claim-${suffix}`, createdById: userId },
@@ -432,6 +431,7 @@ test(
         scope: "platform",
         workspaceId: null,
         ownerUserId: null,
+        ownershipState: "confirmed",
         baseUrl: "https://api.deepseek.com",
         credentialId,
         defaultGenerationModelId: "deepseek-v4-flash",
@@ -442,13 +442,21 @@ test(
         lastTestedAt: new Date(),
       },
     });
-    await db.projectAiRoute.create({
+    await db.platformDefaultAiRoute.create({
       data: {
-        projectId,
+        id: platformRouteId,
         operation: "autoExtract",
+        version: 1,
+        status: "active",
         providerConnectionId: providerId,
         modelId: "deepseek-v4-flash",
         maxOutputTokens: 256,
+        embeddingDimensions: null,
+        quotaMultiplierBps: 10_000,
+        validatedProviderConfigurationVersion: 1,
+        validatedAt: new Date(),
+        createdById: adminId,
+        updatedById: adminId,
       },
     });
     await db.platformTokenGrant.create({
@@ -463,16 +471,36 @@ test(
       },
     });
 
+    let revocationInjected = false;
     const guardedDb = db.$extends({
       query: {
         appUser: {
           async findUnique({ args, query }) {
             actorLookups += 1;
             const result = await query(args);
-            // The first four lookups cover the request guard, the idempotency
-            // guard, the serializable grant guard, and platform entitlement.
-            // Revoke the actor exactly at the post-claim guard.
-            if (actorLookups === 5 && result !== null) return { ...result, disabledAt: new Date() };
+            const resultId = typeof result === "object" && result !== null && "id" in result
+              ? (result as { id?: unknown }).id
+              : null;
+            if (!revocationInjected && resultId === userId) {
+              // Read through the base client so this test-only state probe does
+              // not recurse through the extension. The committed job+attempt
+              // pair is the post-claim boundary; query-count timing is not.
+              const persistedJob = await db.backgroundJob.findFirst({
+                where: { projectId, kind: "autoExtract", status: "running" },
+                orderBy: { createdAt: "desc" },
+                select: { id: true },
+              });
+              if (persistedJob !== null) {
+                const persistedAttempt = await db.backgroundJobAttempt.findFirst({
+                  where: { jobId: persistedJob.id, status: "running" },
+                  select: { id: true },
+                });
+                if (persistedAttempt !== null) {
+                  revocationInjected = true;
+                  return { ...result, disabledAt: new Date() };
+                }
+              }
+            }
             return result;
           },
         },
@@ -494,7 +522,8 @@ test(
         }, guardedDb),
         hasCode("ACCOUNT_DISABLED"),
       );
-      assert.equal(actorLookups, 5);
+      assert.ok(revocationInjected);
+      assert.ok(actorLookups >= 2);
       const job = await db.backgroundJob.findFirstOrThrow({
         where: { projectId, kind: "autoExtract" },
         orderBy: { createdAt: "desc" },
@@ -509,15 +538,36 @@ test(
       assert.equal(providerFetches, 0);
     } finally {
       globalThis.fetch = previousFetch;
-      await db.project.deleteMany({ where: { id: projectId } });
-      await db.webAiGrant.deleteMany({ where: { providerConnectionId: providerId } });
-      await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
-      await db.externalCredential.deleteMany({ where: { id: credentialId } });
+      const projectForCleanup = await db.project.findUnique({
+        where: { id: projectId },
+        select: { name: true, archivedAt: true, updatedAt: true },
+      });
+      if (projectForCleanup !== null) {
+        const archived = projectForCleanup.archivedAt === null
+          ? await updateProjectLifecycle({
+            projectId,
+            actor,
+            action: "archive",
+            expectedUpdatedAt: projectForCleanup.updatedAt,
+          }, db)
+          : { project: projectForCleanup };
+        await deleteArchivedProject({
+          projectId,
+          actor,
+          confirmationName: archived.project.name,
+          expectedUpdatedAt: archived.project.updatedAt,
+        }, db);
+      }
+      await db.providerCallAudit.deleteMany({ where: { providerConnectionId: providerId } });
       await db.platformTokenLedgerEntry.deleteMany({ where: { userId } });
       await db.platformTokenReservation.deleteMany({ where: { userId } });
+      await db.webAiGrant.deleteMany({ where: { providerConnectionId: providerId } });
+      await db.platformDefaultAiRoute.deleteMany({ where: { id: platformRouteId } });
       await db.platformTokenGrant.deleteMany({ where: { id: grantId } });
+      await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
+      await db.externalCredential.deleteMany({ where: { id: credentialId } });
       await db.workspace.deleteMany({ where: { id: workspaceId } });
-      await db.appUser.deleteMany({ where: { id: userId } });
+      await db.appUser.deleteMany({ where: { id: { in: [userId, adminId] } } });
     }
   },
 );

@@ -44,6 +44,7 @@ import { ProjectPlanError } from "@/lib/project-plan";
 import { ProjectWorldError } from "@/lib/project-world";
 import { AiEntitlementError } from "@/lib/ai-entitlements";
 import { MembershipServiceError } from "@/lib/membership-service";
+import { AccountAccessServiceError } from "@/lib/account-access-service";
 import { WorkspaceProviderServiceError } from "@/lib/workspace-provider-service";
 import { PlatformDefaultAiRouteError } from "@/lib/platform-default-ai-routes";
 import { EffectiveAiRouteError } from "@/lib/effective-ai-route";
@@ -313,6 +314,8 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       ACCESS_PROJECT_NOT_FOUND: [404, "项目不存在"],
       ACCESS_WORKSPACE_NOT_FOUND: [404, "工作区不存在"],
       ACCESS_LAST_OWNER_REQUIRED: [409, "工作区必须至少保留一位所有者"],
+      ACCOUNT_DISABLED: [403, "账户已停用"],
+      ACCOUNT_ACCESS_STALE: [409, "账户访问状态已变化，请刷新后重试"],
     };
     const [status, message] = mapping[error.code] ?? [403, "访问被拒绝"];
     return { status, body: { error: { code: error.code, message } } };
@@ -322,6 +325,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     const mapping: Record<string, readonly [number, string]> = {
       ACCESS_FORBIDDEN: [403, "你没有执行此操作所需的权限"],
       ACCOUNT_DISABLED: [403, "账户已停用"],
+      ACCOUNT_ACCESS_STALE: [409, "账户访问状态已变化，请刷新后重试"],
     };
     const [status, message] = mapping[error.code] ?? [403, "访问被拒绝"];
     return { status, body: { error: { code: error.code, message } } };
@@ -764,6 +768,28 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MEMBERSHIP_IDEMPOTENCY_CONFLICT: [409, "请求标识已用于其他会员变更，请更换请求标识"],
       MEMBERSHIP_CONFIRMATION_REQUIRED: [400, "请完成二次确认后再提交会员变更"],
       MEMBERSHIP_METHOD_NOT_ALLOWED: [405, "会员变更必须先预览，再通过用户详情 PATCH 确认"],
+    } as const;
+    const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof AccountAccessServiceError) {
+    const mapping = {
+      ACCOUNT_ACCESS_INVALID_INPUT: [400, "账号治理请求无效"],
+      ACCOUNT_ACCESS_USER_NOT_FOUND: [404, "目标用户不存在"],
+      ACCOUNT_ACCESS_ADMIN_REQUIRED: [403, "只有系统管理员可以治理账号状态"],
+      ACCOUNT_ACCESS_ADMIN_STALE: [409, "管理员会话版本已变化，请刷新后重试"],
+      ACCOUNT_ACCESS_SELF_FORBIDDEN: [403, "不能停用或恢复当前登录的系统管理员账号"],
+      ACCOUNT_ACCESS_ACTION_CONFLICT: [409, "当前账号状态不允许执行该操作，请刷新后重试"],
+      ACCOUNT_ACCESS_CONFLICT: [409, "账号状态已被其他操作更新，请刷新后重试"],
+      ACCOUNT_ACCESS_PREVIEW_STALE: [409, "账号状态预览已过期或状态已变化，请重新预览"],
+      ACCOUNT_ACCESS_PREVIEW_EXPIRED: [409, "账号状态预览已过期，请重新预览"],
+      ACCOUNT_ACCESS_LAST_ADMIN_REQUIRED: [409, "平台必须至少保留一位启用的系统管理员"],
+      ACCOUNT_ACCESS_REASON_REQUIRED: [400, "停用或恢复账号必须填写原因"],
+      ACCOUNT_ACCESS_UNSAFE_AUDIT_TEXT: [400, "请求文本不能包含邮箱、令牌或凭据指纹"],
+      ACCOUNT_ACCESS_IDEMPOTENCY_CONFLICT: [409, "请求标识已用于其他账号变更，请更换请求标识"],
+      ACCOUNT_ACCESS_CONFIRMATION_REQUIRED: [400, "请完成用户名二次确认后再提交账号变更"],
+      ACCOUNT_ACCESS_METHOD_NOT_ALLOWED: [405, "账号变更必须先预览，再通过用户详情 PATCH 确认"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

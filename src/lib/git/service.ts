@@ -1,10 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { Prisma, type AppUser, type GitAuthKind, type PrismaClient } from "@prisma/client";
+import { Prisma, type GitAuthKind, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { CredentialVaultError, createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
+import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
+import { lockActorAccess } from "@/lib/access-linearization";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
@@ -86,6 +88,8 @@ export class GitServiceError extends Error {
   }
 }
 
+type GitConnectionActor = Readonly<{ id: string; accountAccessVersion?: number }>;
+
 // A GitRunnerError can be raised while creating the temporary workspace or
 // configuring the local repository, before the fetch process is started. Keep
 // that distinction out of the public error shape while allowing the caller to
@@ -103,6 +107,7 @@ export function isDefinitelyPreDispatchGitSyncFailure(error: unknown): boolean {
   if (error instanceof GitSafetyError) return error.code !== "GIT_NETWORK_CHANGED";
   return error instanceof GitServiceError && [
     "GIT_CONNECTION_INVALID_INPUT",
+    "GIT_CONNECTION_NOT_VERIFIED",
     "GIT_REPOSITORY_LINK_NOT_FOUND",
     "GIT_REPOSITORY_LINK_DISABLED",
   ].includes(error.code);
@@ -311,21 +316,92 @@ function defaultUsername(connection: Pick<GitConnectionWithSecret, "providerKind
   return connection.authKind === "none" ? null : "git";
 }
 
-async function loadOwnedConnection(connectionId: string, actor: Pick<AppUser, "id">, db: PrismaClient): Promise<GitConnectionWithSecret> {
+async function assertGitActor(db: PrismaClient | Prisma.TransactionClient, actor: GitConnectionActor): Promise<void> {
+  try {
+    await assertAccountAccessForActor(db, actor);
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError) {
+      if (error.code === "ACCOUNT_DISABLED") return fail("GIT_CONNECTION_DISABLED");
+      return fail("GIT_CONNECTION_NOT_VERIFIED");
+    }
+    throw error;
+  }
+}
+
+async function loadOwnedConnection(connectionId: string, actor: GitConnectionActor, db: PrismaClient): Promise<GitConnectionWithSecret> {
+  await assertGitActor(db, actor);
   const connection = await db.gitConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
     include: { credential: true },
   });
   if (connection === null) return fail("GIT_CONNECTION_NOT_FOUND");
   if (connection.status === "disabled") return fail("GIT_CONNECTION_DISABLED");
+  const owner = await db.appUser.findUnique({ where: { id: actor.id }, select: { disabledAt: true, accountAccessVersion: true } });
+  if (owner === null || owner.disabledAt !== null) return fail("GIT_CONNECTION_DISABLED");
+  if (connection.ownerAccountAccessVersion === null || connection.ownerAccountAccessVersion !== owner.accountAccessVersion) {
+    return fail("GIT_CONNECTION_NOT_VERIFIED");
+  }
   return connection;
+}
+
+/**
+ * Re-admit a connection immediately before the probe's first remote call.
+ * The transaction intentionally ends before `ls-remote` starts; it only
+ * linearizes owner access, connection configuration, and credential evidence.
+ */
+async function acceptGitProbeDispatchBoundary(input: Readonly<{
+  db: PrismaClient;
+  actor: GitConnectionActor;
+  connectionId: string;
+  expectedUpdatedAt: Date;
+  expectedCredentialFingerprint: string | null;
+}>): Promise<boolean> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await input.db.$transaction(async (tx) => {
+        await lockActorAccess(tx, input.actor.id);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))`;
+        await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${input.connectionId}::uuid FOR UPDATE`;
+        const connection = await tx.gitConnection.findFirst({
+          where: { id: input.connectionId, ownerUserId: input.actor.id, ownershipState: "confirmed" },
+          include: { credential: true },
+        });
+        if (connection?.credentialId !== null && connection?.credentialId !== undefined) {
+          await tx.$queryRaw`SELECT "id" FROM "ExternalCredential" WHERE "id" = ${connection.credentialId}::uuid FOR UPDATE`;
+        }
+        const [owner, current] = await Promise.all([
+          tx.appUser.findUnique({ where: { id: input.actor.id }, select: { disabledAt: true, accountAccessVersion: true } }),
+          tx.gitConnection.findFirst({
+            where: { id: input.connectionId, ownerUserId: input.actor.id, ownershipState: "confirmed" },
+            include: { credential: true },
+          }),
+        ]);
+        await assertGitActor(tx, input.actor);
+        if (
+          owner === null
+          || owner.disabledAt !== null
+          || current === null
+          || current.status === "disabled"
+          || current.ownerAccountAccessVersion === null
+          || current.ownerAccountAccessVersion !== owner.accountAccessVersion
+          || current.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()
+          || (current.credential?.secretFingerprint ?? null) !== input.expectedCredentialFingerprint
+        ) return false;
+        return true;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (isSerializationConflict(error) && attempt < 3) continue;
+      return false;
+    }
+  }
+  return false;
 }
 
 async function probeRepository(
   connection: GitConnectionWithSecret,
   repositoryPath: string,
   trackedRef: string,
-  options: Readonly<{ pinExistingAddress: boolean; db: PrismaClient }>,
+  options: Readonly<{ pinExistingAddress: boolean; db: PrismaClient; onDispatchBoundary?: () => Promise<boolean> }>,
 ): Promise<Readonly<{ commitSha: string; addressFingerprint: string }>> {
   const resolution = options.pinExistingAddress
     ? await assertPinnedGitEndpoint({
@@ -338,6 +414,11 @@ async function probeRepository(
         allowPrivateNetwork: connection.allowPrivateNetwork,
       });
   const endpointUrl = new URL(connection.baseUrl);
+  // The database-owned fence must succeed before decrypting credentials or
+  // creating a runner.  A losing disable/rotation race therefore performs no
+  // secret read and starts no Git process.
+  const accepted = await options.onDispatchBoundary?.() ?? true;
+  if (!accepted) return fail("GIT_CONNECTION_NOT_VERIFIED");
   const credential = await loadCredential(connection, options.db, connection.credential?.secretFingerprint ?? undefined);
   const remote = gitRemoteUrl(connection.baseUrl, repositoryPath);
   const output = await withGitRunner({
@@ -348,7 +429,9 @@ async function probeRepository(
     tlsCaCertificate: connection.tlsCaCertificate,
     sshKnownHost: connection.sshKnownHost,
     pinnedEndpoint: { hostname: endpointUrl.hostname, port: endpointUrl.port || (connection.transport === "ssh" ? "22" : "443"), addresses: resolution.addresses },
-  }, (runner) => runner.runText(["ls-remote", "--exit-code", remote, `refs/heads/${trackedRef}`], { maxOutputBytes: 64 * 1024 }));
+  }, async (runner) => {
+    return runner.runText(["ls-remote", "--exit-code", remote, `refs/heads/${trackedRef}`], { maxOutputBytes: 64 * 1024 });
+  });
   const commitSha = output.trim().split(/\s+/u)[0] ?? "";
   if (!/^[0-9a-f]{40,64}$/u.test(commitSha)) return fail("GIT_REPOSITORY_NOT_FOUND");
   return Object.freeze({ commitSha, addressFingerprint: resolution.fingerprint });
@@ -446,18 +529,22 @@ async function readRepositoryFiles(input: Readonly<{
   softExcludePatterns: readonly string[];
   db: PrismaClient;
   pinnedResolution?: GitEndpointResolution;
-  onDispatchStart?: () => void;
+  onDispatchBoundary?: () => Promise<boolean>;
 }>): Promise<Readonly<{ commitSha: string; addressFingerprint: string; files: readonly GitScannedFile[] }>> {
   const resolution = input.pinnedResolution ?? await assertPinnedGitEndpoint({
     baseUrl: input.connection.baseUrl,
     allowPrivateNetwork: input.connection.allowPrivateNetwork,
     expectedFingerprint: input.connection.resolvedAddressFingerprint,
   });
-  const credential = await loadCredential(input.connection, input.db, input.connection.credential?.secretFingerprint ?? undefined);
   const remote = gitRemoteUrl(input.connection.baseUrl, input.repositoryPath);
   const endpointUrl = new URL(input.connection.baseUrl);
   let fetchStarted = false;
   try {
+    // Commit the final database-owned dispatch marker before any credential
+    // decryption or runner creation.  This is the last no-network boundary.
+    const accepted = await input.onDispatchBoundary?.() ?? true;
+    if (!accepted) return fail("GIT_CONNECTION_NOT_VERIFIED");
+    const credential = await loadCredential(input.connection, input.db, input.connection.credential?.secretFingerprint ?? undefined);
     return await withGitRunner({
     transport: input.connection.transport,
     authKind: input.connection.authKind,
@@ -474,7 +561,6 @@ async function readRepositoryFiles(input: Readonly<{
     // From this point Git may contact the configured remote. Any later
     // runner error therefore keeps the dispatch marker for reconciliation.
     fetchStarted = true;
-    input.onDispatchStart?.();
     await runner.runText(["-C", repositoryDir, "fetch", "--depth=1", "--no-tags", "origin", `refs/heads/${input.trackedRef}`], { timeoutMs: 180_000, maxOutputBytes: 256 * 1024 });
     const commitSha = (await runner.runText(["-C", repositoryDir, "rev-parse", "FETCH_HEAD"], { maxOutputBytes: 64 * 1024 })).trim();
     if (!/^[0-9a-f]{40,64}$/u.test(commitSha)) return fail("GIT_REPOSITORY_EMPTY");
@@ -529,7 +615,7 @@ export async function readGitRepositoryFilesForDelegation(input: Readonly<{
   softExcludePatterns: readonly string[];
   db: PrismaClient;
   pinnedResolution: GitEndpointResolution;
-  onDispatchStart?: () => void;
+  onDispatchBoundary?: () => Promise<boolean>;
 }>): Promise<Readonly<{ commitSha: string; addressFingerprint: string; files: readonly GitScannedFile[] }>> {
   return readRepositoryFiles(input);
 }
@@ -545,7 +631,8 @@ export function gitConnectionCatalog() {
   ] as const);
 }
 
-export async function listGitConnections(actor: Pick<AppUser, "id">, db: PrismaClient = getDb()) {
+export async function listGitConnections(actor: GitConnectionActor, db: PrismaClient = getDb()) {
+  await assertGitActor(db, actor);
   return db.gitConnection.findMany({
     where: { ownerUserId: actor.id, ownershipState: "confirmed" },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -553,7 +640,8 @@ export async function listGitConnections(actor: Pick<AppUser, "id">, db: PrismaC
   });
 }
 
-export async function getGitConnection(connectionIdInput: unknown, actor: Pick<AppUser, "id">, db: PrismaClient = getDb()) {
+export async function getGitConnection(connectionIdInput: unknown, actor: GitConnectionActor, db: PrismaClient = getDb()) {
+  await assertGitActor(db, actor);
   const connectionId = uuid(connectionIdInput);
   const connection = await db.gitConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
@@ -563,7 +651,7 @@ export async function getGitConnection(connectionIdInput: unknown, actor: Pick<A
   return connection;
 }
 
-export async function createGitConnection(input: unknown, actor: Pick<AppUser, "id">, db: PrismaClient = getDb()) {
+export async function createGitConnection(input: unknown, actor: GitConnectionActor, db: PrismaClient = getDb()) {
   const parsed = createConnectionSchema.parse(input);
   validateAuth(parsed);
   const baseUrl = canonicalGitBaseUrl(parsed.baseUrl, parsed.transport);
@@ -571,6 +659,13 @@ export async function createGitConnection(input: unknown, actor: Pick<AppUser, "
   const sshKnownHost = parsed.transport === "ssh" ? canonicalSshKnownHost(parsed.sshKnownHost) : null;
   try {
     return await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
+      await assertGitActor(tx, actor);
+      const owner = await tx.appUser.findUnique({
+        where: { id: actor.id },
+        select: { id: true, disabledAt: true, accountAccessVersion: true },
+      });
+      if (owner === null || owner.disabledAt !== null) return fail("GIT_CONNECTION_DISABLED");
       const credential = parsed.authKind === "none"
         ? null
         : await createCredential("git", encodeGitCredential(credentialAuthKind(parsed.authKind), parsed.secret), tx);
@@ -588,6 +683,7 @@ export async function createGitConnection(input: unknown, actor: Pick<AppUser, "
           sshKnownHost,
           createdById: actor.id,
           ownerUserId: actor.id,
+          ownerAccountAccessVersion: owner.accountAccessVersion,
           ownershipState: "confirmed",
         },
         select: connectionSelect,
@@ -602,12 +698,13 @@ export async function createGitConnection(input: unknown, actor: Pick<AppUser, "
 export async function updateGitConnection(
   connectionIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id">,
+  actor: GitConnectionActor,
   db: PrismaClient = getDb(),
 ) {
   const connectionId = uuid(connectionIdInput);
   const parsed = updateConnectionSchema.parse(input);
   const expectedUpdatedAt = timestamp(parsed.expectedUpdatedAt);
+  await assertGitActor(db, actor);
   const existing = await db.gitConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
   });
@@ -627,6 +724,8 @@ export async function updateGitConnection(
     : existing.transport === "ssh" ? canonicalSshKnownHost(parsed.sshKnownHost) : null;
   try {
     return await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
+      await assertGitActor(tx, actor);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))`;
       await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
       const current = await tx.gitConnection.findFirst({
@@ -634,8 +733,21 @@ export async function updateGitConnection(
       });
       if (current === null) return fail("GIT_CONNECTION_NOT_FOUND");
       if (current.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return fail("GIT_CONNECTION_CONFLICT");
+      const currentOwner = await tx.appUser.findUnique({
+        where: { id: actor.id },
+        select: { id: true, disabledAt: true, accountAccessVersion: true },
+      });
+      if (currentOwner === null || currentOwner.disabledAt !== null) return fail("GIT_CONNECTION_DISABLED");
+      const rotatesCredential = parsed.secret !== undefined;
+      if (!rotatesCredential && (current.ownerAccountAccessVersion === null
+        || current.ownerAccountAccessVersion !== currentOwner.accountAccessVersion)) {
+        return fail("GIT_CONNECTION_NOT_VERIFIED");
+      }
       if (parsed.secret !== undefined) {
         if (current.credentialId === null || current.authKind === "none") return fail("GIT_CONNECTION_INVALID_INPUT");
+        await tx.$executeRaw`SELECT set_config('app.personal_git_credential_rotation_context', '1', true)`;
+        await tx.$executeRaw`SELECT set_config('app.personal_git_credential_rotation_owner_id', ${actor.id}, true)`;
+        await tx.$executeRaw`SELECT set_config('app.personal_git_credential_rotation_connection_id', ${current.id}, true)`;
         await rotateCredential(current.credentialId, "git", encodeGitCredential(credentialAuthKind(current.authKind), parsed.secret), tx);
       }
       const securityChanged = parsed.secret !== undefined
@@ -662,6 +774,7 @@ export async function updateGitConnection(
           ...(parsed.allowPrivateNetwork === undefined ? {} : { allowPrivateNetwork: parsed.allowPrivateNetwork }),
           ...(tlsCaCertificate === undefined ? {} : { tlsCaCertificate }),
           ...(sshKnownHost === undefined ? {} : { sshKnownHost }),
+          ...(rotatesCredential ? { ownerAccountAccessVersion: currentOwner.accountAccessVersion } : {}),
           ...statusData,
           ...(securityChanged && current.resolvedAddressFingerprint !== null
             ? { resolvedAddressFingerprint: null, lastTestedAt: null, lastErrorCode: null }
@@ -676,8 +789,9 @@ export async function updateGitConnection(
   }
 }
 
-export async function disableGitConnection(connectionIdInput: unknown, actor: Pick<AppUser, "id">, db: PrismaClient = getDb()) {
+export async function disableGitConnection(connectionIdInput: unknown, actor: GitConnectionActor, db: PrismaClient = getDb()) {
   const connectionId = uuid(connectionIdInput);
+  await assertGitActor(db, actor);
   const connection = await db.gitConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
     select: { id: true, repositories: { select: { projectLinks: { where: { status: "active" }, select: { id: true }, take: 1 } } } },
@@ -685,6 +799,8 @@ export async function disableGitConnection(connectionIdInput: unknown, actor: Pi
   if (connection === null) return fail("GIT_CONNECTION_NOT_FOUND");
   if (connection.repositories.some((repository) => repository.projectLinks.length > 0)) return fail("GIT_CONNECTION_IN_USE");
   return db.$transaction(async (tx) => {
+    await lockActorAccess(tx, actor.id);
+    await assertGitActor(tx, actor);
     await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
     const current = await tx.gitConnection.findFirst({
       where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
@@ -702,11 +818,12 @@ export async function disableGitConnection(connectionIdInput: unknown, actor: Pi
 export async function deleteGitConnection(
   connectionIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id">,
+  actor: GitConnectionActor,
   db: PrismaClient = getDb(),
 ) {
   const connectionId = uuid(connectionIdInput);
   const parsed = deleteConnectionSchema.parse(input);
+  await assertGitActor(db, actor);
   const ownedConnection = await db.gitConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
     select: { id: true },
@@ -717,6 +834,8 @@ export async function deleteGitConnection(
       return await db.$transaction(async (tx) => {
         // Match delegation writes: take the shared fence before the connection
         // row lock, then repeat the owner/state admission under both locks.
+        await lockActorAccess(tx, actor.id);
+        await assertGitActor(tx, actor);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))`;
         await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
         const connection = await tx.gitConnection.findFirst({
@@ -771,7 +890,7 @@ export async function deleteGitConnection(
 export async function testGitConnection(
   connectionIdInput: unknown,
   input: unknown,
-  actor: Pick<AppUser, "id">,
+  actor: GitConnectionActor,
   db: PrismaClient = getDb(),
 ) {
   const connectionId = uuid(connectionIdInput);
@@ -783,8 +902,20 @@ export async function testGitConnection(
   if (connection.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return fail("GIT_CONNECTION_CONFLICT");
   const expectedCredentialFingerprint = connection.credential?.secretFingerprint ?? null;
   try {
-    const probe = await probeRepository(connection, repositoryPath, trackedRef, { pinExistingAddress: false, db });
+    const probe = await probeRepository(connection, repositoryPath, trackedRef, {
+      pinExistingAddress: false,
+      db,
+      onDispatchBoundary: () => acceptGitProbeDispatchBoundary({
+        db,
+        actor,
+        connectionId: connection.id,
+        expectedUpdatedAt: connection.updatedAt,
+        expectedCredentialFingerprint,
+      }),
+    });
     const updated = await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
+      await assertGitActor(tx, actor);
       await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connection.id}::uuid FOR UPDATE`;
       const current = await tx.gitConnection.findFirst({
         where: { id: connection.id, ownerUserId: actor.id, ownershipState: "confirmed" },
@@ -792,8 +923,15 @@ export async function testGitConnection(
       });
       if (current === null) return fail("GIT_CONNECTION_NOT_FOUND");
       if (current.status === "disabled") return fail("GIT_CONNECTION_DISABLED");
+      const currentOwner = await tx.appUser.findUnique({
+        where: { id: actor.id },
+        select: { disabledAt: true, accountAccessVersion: true },
+      });
+      if (currentOwner === null || currentOwner.disabledAt !== null) return fail("GIT_CONNECTION_DISABLED");
       if (current.updatedAt.getTime() !== connection.updatedAt.getTime() ||
-        (current.credential?.secretFingerprint ?? null) !== expectedCredentialFingerprint) {
+        (current.credential?.secretFingerprint ?? null) !== expectedCredentialFingerprint
+        || current.ownerAccountAccessVersion === null
+        || current.ownerAccountAccessVersion !== currentOwner.accountAccessVersion) {
         return fail("GIT_CONNECTION_CONFLICT");
       }
       return tx.gitConnection.update({
@@ -810,19 +948,28 @@ export async function testGitConnection(
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return Object.freeze({ connection: updated, probe: { repositoryPath, trackedRef, commitSha: probe.commitSha } });
   } catch (error) {
-    if (error instanceof GitServiceError && ["GIT_CONNECTION_CONFLICT", "GIT_CONNECTION_NOT_FOUND", "GIT_CONNECTION_DISABLED"].includes(error.code)) {
+    if (error instanceof GitServiceError && ["GIT_CONNECTION_CONFLICT", "GIT_CONNECTION_NOT_FOUND", "GIT_CONNECTION_DISABLED", "GIT_CONNECTION_NOT_VERIFIED"].includes(error.code)) {
       throw error;
     }
     const code = error instanceof GitSafetyError || error instanceof GitRunnerError || error instanceof GitServiceError
       ? error.code
       : "GIT_OPERATION_FAILED";
     const marked = await db.$transaction(async (tx) => {
+      await lockActorAccess(tx, actor.id);
+      await assertGitActor(tx, actor);
       await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connection.id}::uuid FOR UPDATE`;
       const current = await tx.gitConnection.findFirst({
         where: { id: connection.id, ownerUserId: actor.id, ownershipState: "confirmed" },
         include: { credential: true },
       });
       if (current === null || current.status === "disabled") return false;
+      const currentOwner = await tx.appUser.findUnique({
+        where: { id: actor.id },
+        select: { disabledAt: true, accountAccessVersion: true },
+      });
+      if (currentOwner === null || currentOwner.disabledAt !== null
+        || current.ownerAccountAccessVersion === null
+        || current.ownerAccountAccessVersion !== currentOwner.accountAccessVersion) return false;
       if (current.updatedAt.getTime() !== connection.updatedAt.getTime() ||
         (current.credential?.secretFingerprint ?? null) !== expectedCredentialFingerprint) return false;
       await tx.gitConnection.update({

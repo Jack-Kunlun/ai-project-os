@@ -27,7 +27,7 @@ const repositoryRoot = process.cwd();
 const execFile = promisify(execFileCallback);
 
 function actor(id: string, role: "admin" | "user" = "user") {
-  return { id, role } as const;
+  return { id, role, accountAccessVersion: 1 } as const;
 }
 
 function activeMembership(userId: string, grantedById: string, now: Date) {

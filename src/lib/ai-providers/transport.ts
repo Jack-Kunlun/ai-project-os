@@ -63,6 +63,14 @@ type RuntimeConnection = Pick<
 > & Readonly<{
   /** Present only for a governed dispatch admitted against an exact secret. */
   credentialSecretFingerprint?: string;
+  /**
+   * Fresh control-plane fence immediately before the credential is read.
+   * Governed callers attach this to the in-process connection instead of
+   * widening every provider call site with a second dispatch argument.
+   */
+  onBeforeCredentialRead?: () => void | boolean | Promise<void | boolean>;
+  /** Fresh control-plane fence after credential read and before fetch(). */
+  onBeforeRequest?: () => void | boolean | Promise<void | boolean>;
 }>;
 
 function fail(code: ProviderTransportErrorCode, status = 502): never {
@@ -109,6 +117,7 @@ async function providerPost(
     ? PROVIDER_REQUEST_TIMEOUT_MS
     : absoluteDeadlineAt.getTime() - Date.now();
   if (remaining <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
+  await runProviderBoundary(connection.onBeforeCredentialRead);
   let apiKey: string;
   try {
     apiKey = await readCredentialSecretWithDeadline(
@@ -131,6 +140,7 @@ async function providerPost(
   if (remainingAfterCredential <= 0) {
     throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
   }
+  await runProviderBoundary(connection.onBeforeRequest);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.min(PROVIDER_REQUEST_TIMEOUT_MS, remainingAfterCredential));
   try {
@@ -160,6 +170,27 @@ async function providerPost(
     return fail("AI_PROVIDER_UNAVAILABLE", 502);
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+/**
+ * A rejected fresh fence is still pre-dispatch. Keep that classification
+ * explicit so auditedProviderCall can release a reservation and reset the
+ * durable dispatch marker instead of treating a rejected request as unknown.
+ * Any unexpected fence error is conservatively mapped to the same safe
+ * pre-dispatch outcome; the caller must never reach fetch after a fence
+ * failure.
+ */
+async function runProviderBoundary(
+  boundary: (() => void | boolean | Promise<void | boolean>) | undefined,
+): Promise<void> {
+  if (boundary === undefined) return;
+  try {
+    const accepted = await boundary();
+    if (accepted === false) throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+  } catch (error) {
+    if (error instanceof ProviderTransportError && error.requestDispatched === false) throw error;
+    throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
   }
 }
 

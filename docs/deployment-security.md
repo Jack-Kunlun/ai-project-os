@@ -10,6 +10,8 @@
 4. 在入口层对 `/api/auth/login`、`/api/auth/github/start`、`/api/auth/github/callback`、`/api/auth/oidc/start/*`、`/api/setup` 和项目上传入口按来源限流，并在多实例部署中改用共享限流设施。应用本身还会用 PostgreSQL durable admission 做按用户速率、单用户并发和全部署并发控制；默认在读取正文前最多放行 2 个上传。
 5. 使用独立的只读或最小权限外部服务凭据，定期轮换；主密钥、数据库备份和上传卷必须分开保管。
 6. 保留代理访问日志和应用日志，但不得记录 Cookie、Authorization、密码、API Key、Token 或请求正文。
+7. 为 app/worker、迁移 owner 和离线治理执行器使用不同数据库角色并按表最小授权；限制 runtime 数据库网络来源，不能把可写 `app.*` 会话上下文或 trigger 当作抵抗已泄漏数据库凭据与任意 SQL 的独立授权边界。
+8. 账号访问代次和个人连接代次迁移不支持旧、新应用滚动并存。升级时必须停止旧 app/worker，等待在途任务按既定最终准入合同收口，完成备份与迁移后再启动新版本并验证登录、停用、恢复和新授权链。
 
 应用会统一发送 CSP、禁止嵌入、MIME 嗅探、来源策略和浏览器权限限制等响应头。HSTS 由入口代理负责，因为只有部署方能确认站点是否始终使用 HTTPS。
 

@@ -12,6 +12,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
 import { getDb } from "../src/lib/db";
+import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 import {
   confirmProjectGitRepositoryDelegationOwner,
@@ -125,6 +126,10 @@ export default defineConfig({
 
 async function seedUpgradeDelegation(databaseUrl: string, invalid: boolean): Promise<{ database: PrismaClient; delegationId: string; flags: { manualSyncAllowed: boolean; automationAllowed: boolean } }> {
   const database = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+  // This fixture is intentionally written against the pre-epoch schema.  A
+  // client generated from the current schema would emit account epoch
+  // columns that do not exist until the later forward migration.
+  const legacyClient = new Client({ connectionString: databaseUrl });
   const adminId = randomUUID();
   const ownerId = randomUUID();
   const seededWorkspaceId = randomUUID();
@@ -138,20 +143,27 @@ async function seedUpgradeDelegation(databaseUrl: string, invalid: boolean): Pro
     : { manualSyncAllowed: true, automationAllowed: false };
 
   try {
-    await database.appUser.createMany({
-      data: [
-        { id: adminId, username: `upgrade_admin_${suffix}`, role: "admin" },
-        { id: ownerId, username: `upgrade_owner_${suffix}`, role: "user" },
-      ],
-    });
-    await database.workspace.create({
-      data: { id: seededWorkspaceId, name: `Upgrade workspace ${suffix}`, slug: `upgrade-${suffix}`, createdById: adminId },
-    });
-    const project = await database.project.create({
-      data: { id: projectId, workspaceId: seededWorkspaceId, name: `Upgrade project ${suffix}`, slug: `upgrade-project-${suffix}` },
-    });
+    await legacyClient.connect();
+    await legacyClient.query(`
+      INSERT INTO "AppUser" (
+        "id", "username", "passwordHash", "passwordSalt", "role", "createdAt", "updatedAt"
+      ) VALUES
+        ($1::uuid, $2, NULL, NULL, 'admin'::"AppUserRole", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+        ($3::uuid, $4, NULL, NULL, 'member'::"AppUserRole", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [adminId, `upgrade_admin_${suffix}`, ownerId, `upgrade_owner_${suffix}`]);
+    await legacyClient.query(`
+      INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "createdAt", "updatedAt")
+      VALUES ($1::uuid, $2, $3, $4::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [seededWorkspaceId, `Upgrade workspace ${suffix}`, `upgrade-${suffix}`, adminId]);
+    await legacyClient.query(`
+      INSERT INTO "Project" (
+        "id", "workspaceId", "membershipInheritanceMode", "name", "slug", "description", "archivedAt", "createdAt", "updatedAt"
+      ) VALUES (
+        $1::uuid, $2::uuid, 'project_only'::"ProjectMembershipInheritanceMode", $3, $4, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+    `, [projectId, seededWorkspaceId, `Upgrade project ${suffix}`, `upgrade-project-${suffix}`]);
+    const project = { id: projectId };
     let ownerMembershipId: string;
-    let ownerMembershipCreatedAt: Date;
     await database.$transaction(async (tx) => {
       await grantWorkspaceMembership(tx, {
         workspaceId: seededWorkspaceId,
@@ -176,105 +188,84 @@ async function seedUpgradeDelegation(databaseUrl: string, invalid: boolean): Pro
         reason: "project git delegation upgrade fixture owner",
       });
       ownerMembershipId = membership.id;
-      ownerMembershipCreatedAt = membership.createdAt;
     });
-    await database.externalCredential.create({
-      data: {
-        id: credentialId,
-        kind: "git",
-        ciphertext: Buffer.from([1]),
-        nonce: Buffer.from([2]),
-        authTag: Buffer.from([3]),
-        maskedSuffix: "gate",
-        secretFingerprint: "c".repeat(64),
-      },
-    });
-    await database.gitConnection.create({
-      data: {
-        id: connectionId,
-        name: `Upgrade Git ${suffix}`,
-        providerKind: "github",
-        transport: "https",
-        baseUrl: "https://github.com",
-        authKind: "token",
-        credentialId,
-        resolvedAddressFingerprint: "b".repeat(64),
-        status: "verified",
-        createdById: ownerId,
-        ownerUserId: ownerId,
-        ownershipState: "confirmed",
-      },
-    });
-    await database.$transaction(async (tx) => {
-      const delegation = await tx.projectGitRepositoryDelegation.create({
-        data: {
-          id: delegationId,
-          projectId: project.id,
-          gitConnectionId: connectionId,
-          connectionOwnerId: ownerId,
-          repositoryPath: "org/upgrade-repository",
-          trackedRef: "main",
-          includeRoots: ["."],
-          softExcludePatterns: [],
-          role: "primary",
-          requiredForProjectSnapshot: true,
-          codeEnabled: true,
-          metadataEnabled: true,
-          manualSyncAllowed: flags.manualSyncAllowed,
-          automationAllowed: flags.automationAllowed,
-          expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
-          connectionConfigurationVersion: 1,
-          resolvedAddressFingerprint: "b".repeat(64),
-          credentialFingerprint: "c".repeat(64),
-          delegationFingerprint: "d".repeat(64),
-          version: 1,
-          status: "draft",
-          ownerProjectMembershipId: ownerMembershipId!,
-          ownerMembershipCreatedAt: ownerMembershipCreatedAt!,
-          proposedById: ownerId,
-        },
-      });
-      await tx.projectGitRepositoryDelegationAudit.create({
-        data: {
-          id: randomUUID(),
-          projectId: delegation.projectId,
-          gitConnectionId: delegation.gitConnectionId,
-          delegationId: delegation.id,
-          connectionOwnerId: delegation.connectionOwnerId,
-          action: "proposed",
-          delegationVersion: delegation.version,
-          statusBefore: null,
-          statusAfter: delegation.status,
-          actorKind: "user",
-          actorId: ownerId,
-          actorProjectMembershipId: ownerMembershipId!,
-          actorMembershipCreatedAt: ownerMembershipCreatedAt!,
-          ownerProjectMembershipId: delegation.ownerProjectMembershipId,
-          ownerMembershipCreatedAt: delegation.ownerMembershipCreatedAt,
-          projectConfirmedProjectMembershipId: null,
-          projectConfirmedMembershipCreatedAt: null,
-          repositoryPath: delegation.repositoryPath,
-          trackedRef: delegation.trackedRef,
-          includeRoots: ["."],
-          softExcludePatterns: [],
-          role: delegation.role,
-          requiredForProjectSnapshot: delegation.requiredForProjectSnapshot,
-          codeEnabled: delegation.codeEnabled,
-          metadataEnabled: delegation.metadataEnabled,
-          manualSyncAllowed: delegation.manualSyncAllowed,
-          automationAllowed: delegation.automationAllowed,
-          expiresAt: delegation.expiresAt,
-          connectionConfigurationVersion: delegation.connectionConfigurationVersion,
-          resolvedAddressFingerprint: delegation.resolvedAddressFingerprint,
-          credentialFingerprint: delegation.credentialFingerprint,
-          delegationFingerprint: delegation.delegationFingerprint,
-          reason: "legacy upgrade fixture proposal",
-          transitionAt: delegation.proposedAt,
-        },
-      });
-    });
+    await legacyClient.query(`
+      INSERT INTO "ExternalCredential" (
+        "id", "kind", "ciphertext", "nonce", "authTag", "maskedSuffix", "secretFingerprint", "createdAt", "updatedAt"
+      ) VALUES ($1::uuid, 'git'::"ExternalCredentialKind", decode('01', 'hex'), decode('02', 'hex'), decode('03', 'hex'), 'gate', $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [credentialId, "c".repeat(64)]);
+    await legacyClient.query(`
+      INSERT INTO "GitConnection" (
+        "id", "name", "providerKind", "transport", "baseUrl", "authKind", "credentialId",
+        "resolvedAddressFingerprint", "status", "createdById", "ownerUserId", "ownershipState", "createdAt", "updatedAt"
+      ) VALUES (
+        $1::uuid, $2, 'github'::"GitProviderKind", 'https'::"GitTransport", 'https://github.com',
+        'token'::"GitAuthKind", $3::uuid, $4, 'verified'::"GitConnectionStatus", $5::uuid, $5::uuid,
+        'confirmed'::"ResourceOwnershipState", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+    `, [connectionId, `Upgrade Git ${suffix}`, credentialId, "b".repeat(64), ownerId]);
+    await legacyClient.query("BEGIN");
+    try {
+      await legacyClient.query(`
+        INSERT INTO "ProjectGitRepositoryDelegation" (
+          "id", "projectId", "gitConnectionId", "connectionOwnerId", "repositoryPath", "trackedRef",
+          "includeRoots", "softExcludePatterns", "role", "requiredForProjectSnapshot", "codeEnabled",
+          "metadataEnabled", "manualSyncAllowed", "automationAllowed", "expiresAt",
+          "connectionConfigurationVersion", "resolvedAddressFingerprint", "credentialFingerprint",
+          "delegationFingerprint", "version", "status", "ownerProjectMembershipId",
+          "ownerMembershipCreatedAt", "proposedById"
+        ) SELECT
+          $1::uuid, $2::uuid, $3::uuid, $4::uuid, 'org/upgrade-repository', 'main',
+          $5::jsonb, $6::jsonb, 'primary'::"ProjectRepositoryRole", true, true,
+          true, $7, $8, CURRENT_TIMESTAMP + INTERVAL '1 hour', 1, $9, $10, $11, 1,
+          'draft'::"ProjectGitRepositoryDelegationStatus", $12::uuid, membership."createdAt", $4::uuid
+        FROM "ProjectMembership" membership
+        WHERE membership."id" = $12::uuid
+      `, [
+        delegationId,
+        project.id,
+        connectionId,
+        ownerId,
+        JSON.stringify(["."]),
+        JSON.stringify([]),
+        flags.manualSyncAllowed,
+        flags.automationAllowed,
+        "b".repeat(64),
+        "c".repeat(64),
+        "d".repeat(64),
+        ownerMembershipId!,
+      ]);
+      await legacyClient.query(`
+        INSERT INTO "ProjectGitRepositoryDelegationAudit" (
+          "id", "projectId", "gitConnectionId", "delegationId", "connectionOwnerId",
+          "action", "delegationVersion", "statusBefore", "statusAfter", "actorKind", "actorId",
+          "actorProjectMembershipId", "actorMembershipCreatedAt", "ownerProjectMembershipId",
+          "ownerMembershipCreatedAt", "repositoryPath", "trackedRef", "includeRoots",
+          "softExcludePatterns", "role", "requiredForProjectSnapshot", "codeEnabled", "metadataEnabled",
+          "manualSyncAllowed", "automationAllowed", "expiresAt", "connectionConfigurationVersion",
+          "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "reason", "transitionAt"
+        )
+          SELECT $1::uuid, delegation."projectId", delegation."gitConnectionId", delegation."id", delegation."connectionOwnerId",
+            'proposed'::"ProjectGitRepositoryDelegationAuditAction", delegation."version", NULL,
+            delegation."status", 'user'::"ProjectGitRepositoryDelegationActorKind", delegation."connectionOwnerId",
+            delegation."ownerProjectMembershipId", delegation."ownerMembershipCreatedAt", delegation."ownerProjectMembershipId",
+            delegation."ownerMembershipCreatedAt", delegation."repositoryPath", delegation."trackedRef", delegation."includeRoots",
+            delegation."softExcludePatterns", delegation."role", delegation."requiredForProjectSnapshot", delegation."codeEnabled",
+            delegation."metadataEnabled", delegation."manualSyncAllowed", delegation."automationAllowed", delegation."expiresAt",
+            delegation."connectionConfigurationVersion", delegation."resolvedAddressFingerprint", delegation."credentialFingerprint",
+            delegation."delegationFingerprint", 'legacy upgrade fixture proposal', delegation."proposedAt"
+          FROM "ProjectGitRepositoryDelegation" delegation
+         WHERE delegation."id" = $2::uuid
+      `, [randomUUID(), delegationId]);
+      await legacyClient.query("COMMIT");
+    } catch (error) {
+      await legacyClient.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
+    await legacyClient.end();
     return { database, delegationId, flags };
   } catch (error) {
+    await legacyClient.end().catch(() => undefined);
     await database.$disconnect().catch(() => undefined);
     throw error;
   }
@@ -300,6 +291,53 @@ async function waitForDelegationFenceWait(db: ReturnType<typeof getDb>): Promise
   throw new Error("GIT_CONNECTION_DELEGATION_FENCE_WAIT_NOT_OBSERVED");
 }
 
+async function setAccountAccessState(
+  db: ReturnType<typeof getDb>,
+  input: Readonly<{
+    adminUserId: string;
+    userId: string;
+    action: "disable" | "restore";
+    reason: string;
+    requestKey: string;
+  }>,
+) {
+  const [admin, target] = await Promise.all([
+    db.appUser.findUniqueOrThrow({
+      where: { id: input.adminUserId },
+      select: { accountAccessVersion: true },
+    }),
+    db.appUser.findUniqueOrThrow({
+      where: { id: input.userId },
+      select: { accountAccessVersion: true },
+    }),
+  ]);
+  const preview = await previewAccountAccess({
+    adminUserId: input.adminUserId,
+    adminAccountAccessVersion: admin.accountAccessVersion,
+    userId: input.userId,
+    action: input.action,
+    reason: input.reason,
+    expectedVersion: target.accountAccessVersion,
+  }, db);
+  assert.equal(preview.canExecute, true);
+  return executeAccountAccess({
+    adminUserId: input.adminUserId,
+    adminAccountAccessVersion: admin.accountAccessVersion,
+    userId: preview.user.id,
+    action: preview.action,
+    reason: input.reason,
+    expectedVersion: preview.current.accountAccessVersion,
+    expectedImpactFingerprint: preview.impactFingerprint,
+    requestKey: input.requestKey,
+    requestFingerprint: preview.requestFingerprint,
+    previewId: preview.previewId,
+    previewIssuedAt: preview.previewIssuedAt,
+    previewExpiresAt: preview.previewExpiresAt,
+    confirmation: true,
+    confirmationUsername: preview.user.username,
+  }, db);
+}
+
 async function insertCurrentDelegationAudit(
   tx: Prisma.TransactionClient,
   input: {
@@ -322,7 +360,7 @@ async function insertCurrentDelegationAudit(
     : Prisma.sql`${input.terminalActorMembershipCreatedAt}::timestamp(3)`;
   await tx.$executeRaw(Prisma.sql`
     INSERT INTO "ProjectGitRepositoryDelegationAudit" (
-      "id", "projectId", "gitConnectionId", "delegationId", "connectionOwnerId",
+      "id", "projectId", "gitConnectionId", "delegationId", "connectionOwnerId", "connectionOwnerAccountAccessVersion",
       "action", "delegationVersion", "statusBefore", "statusAfter", "actorKind",
       "actorId", "actorProjectMembershipId", "actorMembershipCreatedAt",
       "terminalActorKind", "terminalActorId", "terminalActorProjectMembershipId",
@@ -334,7 +372,7 @@ async function insertCurrentDelegationAudit(
       "connectionConfigurationVersion", "resolvedAddressFingerprint", "credentialFingerprint",
       "delegationFingerprint", "reason", "transitionAt"
     )
-    SELECT ${randomUUID()}::uuid, delegation."projectId", delegation."gitConnectionId", delegation."id", delegation."connectionOwnerId",
+    SELECT ${randomUUID()}::uuid, delegation."projectId", delegation."gitConnectionId", delegation."id", delegation."connectionOwnerId", delegation."connectionOwnerAccountAccessVersion",
       ${input.action}::"ProjectGitRepositoryDelegationAuditAction", delegation."version",
       ${input.statusBefore}::"ProjectGitRepositoryDelegationStatus", delegation."status",
       'user'::"ProjectGitRepositoryDelegationActorKind", ${input.actorId}::uuid,
@@ -375,6 +413,14 @@ test(
     const now = new Date();
     const connectionFingerprint = "a".repeat(64);
     const addressFingerprint = "b".repeat(64);
+    let connectionOwnerAccountAccessVersion = 1;
+    const connectionOwnerActor = () => ({
+      id: connectionOwnerId,
+      role: "user" as const,
+      accountAccessVersion: connectionOwnerAccountAccessVersion,
+    });
+    const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
+    const viewerActor = { id: viewerId, role: "user" as const, accountAccessVersion: 1 };
 
     await db.appUser.createMany({
       data: [
@@ -423,6 +469,7 @@ test(
       createdById: connectionOwnerId,
       ownerUserId: connectionOwnerId,
       credentialId,
+      ownerAccountAccessVersion: 1,
     };
     await db.gitConnection.create({ data: { ...common, id: connectionId, name: `Own Git ${suffix}` } });
     await db.gitConnection.create({ data: { ...common, id: foreignConnectionId, name: `Foreign Git ${suffix}`, ownerUserId: projectOwnerId, createdById: projectOwnerId, credentialId: foreignCredentialId } });
@@ -436,7 +483,7 @@ test(
         softExcludePatterns: [],
         role: "primary",
         expiresAt: new Date(now.getTime() + 60 * 60 * 1_000).toISOString(),
-      }, { id: connectionOwnerId, role: "user" }, db),
+      }, connectionOwnerActor(), db),
       (error: unknown) => errorText(error).includes("CONNECTION_NOT_FOUND"),
     );
 
@@ -448,7 +495,7 @@ test(
       softExcludePatterns: ["docs/generated/**"],
       role: "primary",
       expiresAt: new Date(now.getTime() + 60 * 60 * 1_000).toISOString(),
-    }, { id: connectionOwnerId, role: "user" }, db);
+    }, connectionOwnerActor(), db);
     assert.equal(draft.status, "draft");
     assert.equal(draft.scope.manualSyncAllowed, true);
     assert.equal(draft.scope.automationAllowed, false);
@@ -456,14 +503,14 @@ test(
     await assert.rejects(
       () => db.$executeRaw(Prisma.sql`
         INSERT INTO "ProjectGitRepositoryDelegation" (
-          "id", "projectId", "gitConnectionId", "connectionOwnerId", "repositoryPath", "trackedRef",
+          "id", "projectId", "gitConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "repositoryPath", "trackedRef",
           "includeRoots", "softExcludePatterns", "role", "requiredForProjectSnapshot", "codeEnabled",
           "metadataEnabled", "manualSyncAllowed", "automationAllowed", "expiresAt",
           "connectionConfigurationVersion", "resolvedAddressFingerprint", "credentialFingerprint",
           "delegationFingerprint", "version", "status", "ownerProjectMembershipId",
           "ownerMembershipCreatedAt", "proposedById"
         )
-        SELECT gen_random_uuid(), "projectId", "gitConnectionId", "connectionOwnerId", 'org/manual-read-only-check',
+          SELECT gen_random_uuid(), "projectId", "gitConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", 'org/manual-read-only-check',
           "trackedRef", "includeRoots", "softExcludePatterns", "role", "requiredForProjectSnapshot", "codeEnabled",
           "metadataEnabled", true, true, "expiresAt", "connectionConfigurationVersion",
           "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", 1, 'draft',
@@ -476,14 +523,14 @@ test(
     await assert.rejects(
       () => db.$executeRaw(Prisma.sql`
         INSERT INTO "ProjectGitRepositoryDelegation" (
-          "id", "projectId", "gitConnectionId", "connectionOwnerId", "repositoryPath", "trackedRef",
+          "id", "projectId", "gitConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "repositoryPath", "trackedRef",
           "includeRoots", "softExcludePatterns", "role", "requiredForProjectSnapshot", "codeEnabled",
           "metadataEnabled", "manualSyncAllowed", "automationAllowed", "expiresAt",
           "connectionConfigurationVersion", "resolvedAddressFingerprint", "credentialFingerprint",
           "delegationFingerprint", "version", "status", "ownerProjectMembershipId",
           "ownerMembershipCreatedAt", "proposedById"
         )
-        SELECT gen_random_uuid(), "projectId", "gitConnectionId", "connectionOwnerId", 'org/manual-read-only-check-2',
+          SELECT gen_random_uuid(), "projectId", "gitConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", 'org/manual-read-only-check-2',
           "trackedRef", "includeRoots", "softExcludePatterns", "role", "requiredForProjectSnapshot", "codeEnabled",
           "metadataEnabled", false, false, "expiresAt", "connectionConfigurationVersion",
           "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", 1, 'draft',
@@ -497,13 +544,13 @@ test(
     const ownerConfirmed = await confirmProjectGitRepositoryDelegationOwner(projectId, draft.id, {
       expectedVersion: draft.version,
       acknowledgeReadOnlyCredentialUse: true,
-    }, { id: connectionOwnerId, role: "user" }, db);
+    }, connectionOwnerActor(), db);
     assert.equal(ownerConfirmed.status, "ownerConfirmed");
     const active = await confirmProjectGitRepositoryDelegationProject(projectId, draft.id, {
       expectedVersion: ownerConfirmed.version,
       acknowledgeRepositoryScope: true,
       acknowledgeDataEgress: true,
-    }, { id: projectOwnerId, role: "user" }, db);
+    }, projectOwnerActor, db);
     assert.equal(active.status, "active");
 
     const connectionBeforeLockOrderCheck = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId } });
@@ -520,7 +567,7 @@ test(
     const blockedConnectionUpdate = updateGitConnection(connectionId, {
       name: connectionBeforeLockOrderCheck.name,
       expectedUpdatedAt: connectionBeforeLockOrderCheck.updatedAt.toISOString(),
-    }, { id: connectionOwnerId }, db);
+    }, connectionOwnerActor(), db);
     let lockOrderFailure: unknown;
     try {
       await waitForDelegationFenceWait(db);
@@ -536,36 +583,72 @@ test(
     await blockedConnectionUpdate;
     if (lockOrderFailure !== undefined) throw lockOrderFailure;
 
-    const viewerProjection = await listProjectGitRepositoryDelegations(projectId, { id: viewerId, role: "user" }, db);
+    const viewerProjection = await listProjectGitRepositoryDelegations(projectId, viewerActor, db);
     assert.equal(viewerProjection.delegations.length, 1);
     assert.equal(viewerProjection.delegations[0]?.connectionOwner?.displayName, "项目成员");
     assert.doesNotMatch(JSON.stringify(viewerProjection), /git_delegation_(?:owner|project_owner|viewer)_/u);
     assert.equal(viewerProjection.delegations[0]?.capabilities.canProjectConfirm, false);
     assert.equal(viewerProjection.delegations[0]?.capabilities.canManualSync, false);
-    const ownerSafetyBeforeMembershipDrift = await listConnectionOwnerProjectGitRepositoryDelegations({ id: connectionOwnerId, role: "user" }, db);
+    const ownerSafetyBeforeMembershipDrift = await listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db);
     assert.equal(ownerSafetyBeforeMembershipDrift.some((item) => item.id === draft.id && item.capabilities.canRevoke), true);
-    assert.deepEqual(await listConnectionOwnerProjectGitRepositoryDelegations({ id: projectOwnerId, role: "user" }, db), []);
-    await db.appUser.update({ where: { id: connectionOwnerId }, data: { disabledAt: new Date(), disabledReason: "delegation safety list gate" } });
+    assert.deepEqual(await listConnectionOwnerProjectGitRepositoryDelegations(projectOwnerActor, db), []);
+    const disabledOwner = await setAccountAccessState(db, {
+      adminUserId: seededAdminId,
+      userId: connectionOwnerId,
+      action: "disable",
+      reason: "delegation safety list gate",
+      requestKey: `git-delegation-disable-${suffix}`,
+    });
+    assert.equal(disabledOwner.state, "disabled");
     await assert.rejects(
-      () => listConnectionOwnerProjectGitRepositoryDelegations({ id: connectionOwnerId, role: "user" }, db),
+      () => listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db),
       /PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN/u,
     );
-    await db.appUser.update({ where: { id: connectionOwnerId }, data: { disabledAt: null, disabledReason: null } });
-    assert.equal((await getProjectGitRepositoryDelegationLiveEligibility(projectId, draft.id, db)).eligible, true);
+    const restoredOwner = await setAccountAccessState(db, {
+      adminUserId: seededAdminId,
+      userId: connectionOwnerId,
+      action: "restore",
+      reason: "delegation safety list gate restored",
+      requestKey: `git-delegation-restore-${suffix}`,
+    });
+    assert.equal(restoredOwner.state, "enabled");
+    connectionOwnerAccountAccessVersion = restoredOwner.accountAccessVersion;
+    assert.deepEqual(await listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db), []);
+    assert.equal((await getProjectGitRepositoryDelegationLiveEligibility(projectId, draft.id, db)).eligible, false);
     await assert.rejects(
       () => revokeProjectGitRepositoryDelegation(projectId, draft.id, {
         expectedVersion: active.version,
         reason: "viewer must not revoke",
-      }, { id: viewerId, role: "user" }, db),
+      }, viewerActor, db),
       /PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN/u,
     );
     await assert.rejects(
       () => revokeProjectGitRepositoryDelegation(projectId, randomUUID(), {
         expectedVersion: 1,
         reason: "viewer must not learn delegation existence",
-      }, { id: viewerId, role: "user" }, db),
+      }, viewerActor, db),
       /PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN/u,
     );
+
+    const connectionBeforeCredentialRotation = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId } });
+    const rotatedConnection = await updateGitConnection(connectionId, {
+      secret: `rotated-git-secret-${suffix}`,
+      expectedUpdatedAt: connectionBeforeCredentialRotation.updatedAt.toISOString(),
+    }, connectionOwnerActor(), db);
+    assert.equal(rotatedConnection.status, "configured");
+    // The gate does not contact a real forge.  This database write represents
+    // the successful, separately governed probe after the explicit rotation.
+    const reverifiedConnection = await db.gitConnection.update({
+      where: { id: connectionId },
+      data: {
+        status: "verified",
+        resolvedAddressFingerprint: addressFingerprint,
+        lastTestedAt: new Date(),
+        lastErrorCode: null,
+        disabledAt: null,
+      },
+    });
+    assert.equal(reverifiedConnection.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
 
     const forgedDraft = await proposeProjectGitRepositoryDelegation(projectId, {
       gitConnectionId: connectionId,
@@ -575,7 +658,7 @@ test(
       softExcludePatterns: [],
       role: "library",
       expiresAt: new Date(now.getTime() + 60 * 60 * 1_000).toISOString(),
-    }, { id: connectionOwnerId, role: "user" }, db);
+    }, connectionOwnerActor(), db);
     await assert.rejects(
       () => db.$transaction(async (tx) => {
         await tx.$executeRaw(Prisma.sql`
@@ -648,7 +731,7 @@ test(
     await assert.rejects(
       () => db.$executeRaw(Prisma.sql`
         INSERT INTO "ProjectGitRepositoryDelegationAudit" (
-          "id", "projectId", "gitConnectionId", "delegationId", "connectionOwnerId",
+          "id", "projectId", "gitConnectionId", "delegationId", "connectionOwnerId", "connectionOwnerAccountAccessVersion",
           "action", "delegationVersion", "statusBefore", "statusAfter", "actorKind",
           "actorId", "actorProjectMembershipId", "actorMembershipCreatedAt",
           "terminalActorKind", "terminalActorId", "terminalActorProjectMembershipId",
@@ -660,7 +743,7 @@ test(
           "connectionConfigurationVersion", "resolvedAddressFingerprint", "credentialFingerprint",
           "delegationFingerprint", "reason", "transitionAt"
         )
-        SELECT ${randomUUID()}::uuid, "projectId", "gitConnectionId", "delegationId", "connectionOwnerId",
+        SELECT ${randomUUID()}::uuid, "projectId", "gitConnectionId", "delegationId", "connectionOwnerId", "connectionOwnerAccountAccessVersion",
           'proposed'::"ProjectGitRepositoryDelegationAuditAction", "delegationVersion", "statusBefore", "statusAfter",
           'user'::"ProjectGitRepositoryDelegationActorKind", ${viewerId}::uuid, ${viewerMembership.id}::uuid,
           ${viewerMembership.createdAt}, "terminalActorKind", "terminalActorId", "terminalActorProjectMembershipId",
@@ -684,24 +767,40 @@ test(
       softExcludePatterns: [],
       role: "library",
       expiresAt: new Date(now.getTime() + 60 * 60 * 1_000).toISOString(),
-    }, { id: connectionOwnerId, role: "user" }, db);
+    }, connectionOwnerActor(), db);
     const parityOwnerConfirmed = await confirmProjectGitRepositoryDelegationOwner(projectId, parityDraft.id, {
       expectedVersion: parityDraft.version,
       acknowledgeReadOnlyCredentialUse: true,
-    }, { id: connectionOwnerId, role: "user" }, db);
-    const parityBeforeDrift = await listProjectGitRepositoryDelegations(projectId, { id: projectOwnerId, role: "user" }, db);
+    }, connectionOwnerActor(), db);
+    const parityBeforeDrift = await listProjectGitRepositoryDelegations(projectId, projectOwnerActor, db);
     assert.equal(parityBeforeDrift.delegations.find((item) => item.id === parityDraft.id)?.capabilities.canProjectConfirm, true);
-    await db.appUser.update({ where: { id: connectionOwnerId }, data: { disabledAt: new Date(), disabledReason: "capability parity disabled owner" } });
-    const parityAfterOwnerDisabled = await listProjectGitRepositoryDelegations(projectId, { id: projectOwnerId, role: "user" }, db);
+    const parityDisabledOwner = await setAccountAccessState(db, {
+      adminUserId: seededAdminId,
+      userId: connectionOwnerId,
+      action: "disable",
+      reason: "capability parity disabled owner",
+      requestKey: `git-delegation-parity-disable-${suffix}`,
+    });
+    assert.equal(parityDisabledOwner.state, "disabled");
+    const parityAfterOwnerDisabled = await listProjectGitRepositoryDelegations(projectId, projectOwnerActor, db);
     assert.equal(parityAfterOwnerDisabled.delegations.find((item) => item.id === parityDraft.id)?.capabilities.canProjectConfirm, false);
-    await db.appUser.update({ where: { id: connectionOwnerId }, data: { disabledAt: null, disabledReason: null } });
+    const parityRestoredOwner = await setAccountAccessState(db, {
+      adminUserId: seededAdminId,
+      userId: connectionOwnerId,
+      action: "restore",
+      reason: "capability parity owner restored",
+      requestKey: `git-delegation-parity-restore-${suffix}`,
+    });
+    assert.equal(parityRestoredOwner.state, "enabled");
+    connectionOwnerAccountAccessVersion = parityRestoredOwner.accountAccessVersion;
+    assert.equal((await getProjectGitRepositoryDelegationLiveEligibility(projectId, parityDraft.id, db)).eligible, false);
     await db.$transaction(async (tx) => {
       await revokeProjectMembership(tx, projectId, connectionOwnerId, workspaceId, { actorId: seededAdminId, reason: "git_delegation_gate_capability_owner_epoch" });
       await grantProjectMembership(tx, { projectId, workspaceId, userId: connectionOwnerId, role: "editor", actorId: seededAdminId, reason: "git_delegation_gate_capability_owner_epoch_readd" });
     });
-    const parityAfterOwnerDrift = await listProjectGitRepositoryDelegations(projectId, { id: projectOwnerId, role: "user" }, db);
+    const parityAfterOwnerDrift = await listProjectGitRepositoryDelegations(projectId, projectOwnerActor, db);
     assert.equal(parityAfterOwnerDrift.delegations.find((item) => item.id === parityDraft.id)?.capabilities.canProjectConfirm, false);
-    const parityRejected = await rejectProjectGitRepositoryDelegation(projectId, parityDraft.id, { expectedVersion: parityOwnerConfirmed.version, reason: "capability parity owner epoch drift" }, { id: connectionOwnerId, role: "user" }, db);
+    const parityRejected = await rejectProjectGitRepositoryDelegation(projectId, parityDraft.id, { expectedVersion: parityOwnerConfirmed.version, reason: "capability parity owner epoch drift" }, connectionOwnerActor(), db);
     assert.equal(parityRejected.status, "rejected");
 
     const disabledConnection = await db.gitConnection.update({ where: { id: connectionId }, data: { status: "disabled", disabledAt: new Date() } });
@@ -709,13 +808,13 @@ test(
       () => deleteGitConnection(connectionId, {
         confirmationName: `Own Git ${suffix}`,
         expectedUpdatedAt: disabledConnection.updatedAt.toISOString(),
-      }, { id: connectionOwnerId }, db),
+      }, connectionOwnerActor(), db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_IN_USE",
     );
     const drifted = await getProjectGitRepositoryDelegationLiveEligibility(projectId, draft.id, db);
     assert.equal(drifted.eligible, false);
     assert.equal(drifted.reason, "CONNECTION_DRIFT");
-    const disabledProjection = await listProjectGitRepositoryDelegations(projectId, { id: projectOwnerId, role: "user" }, db);
+    const disabledProjection = await listProjectGitRepositoryDelegations(projectId, projectOwnerActor, db);
     assert.equal(disabledProjection.delegations.find((item) => item.id === draft.id)?.capabilities.canManualSync, false);
 
     await db.$transaction(async (tx) => {
@@ -733,30 +832,30 @@ test(
       });
     });
 
-    const ownerSafetyAfterMembershipDrift = await listConnectionOwnerProjectGitRepositoryDelegations({ id: connectionOwnerId, role: "user" }, db);
-    assert.equal(ownerSafetyAfterMembershipDrift.some((item) => item.id === draft.id && item.project.archivedAt === null && item.capabilities.canRevoke), true);
+    const ownerSafetyAfterMembershipDrift = await listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db);
+    assert.equal(ownerSafetyAfterMembershipDrift.some((item) => item.id === draft.id && item.project.archivedAt === null && item.capabilities.canRevoke), false);
 
     const rejected = await rejectProjectGitRepositoryDelegation(projectId, forgedDraft.id, {
       expectedVersion: forgedDraft.version,
       reason: "connection owner rejected after membership replacement",
-    }, { id: connectionOwnerId, role: "user" }, db);
+    }, connectionOwnerActor(), db);
     assert.equal(rejected.status, "rejected");
 
     const currentProject = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { updatedAt: true } });
     await updateProjectLifecycle({
       projectId,
-      actor: { id: projectOwnerId, role: "user" },
+      actor: projectOwnerActor,
       action: "archive",
       expectedUpdatedAt: currentProject.updatedAt,
     }, db);
 
-    const ownerSafetyAfterArchive = await listConnectionOwnerProjectGitRepositoryDelegations({ id: connectionOwnerId, role: "user" }, db);
-    assert.equal(ownerSafetyAfterArchive.some((item) => item.id === draft.id && item.project.archivedAt !== null && item.capabilities.canRevoke), true);
+    const ownerSafetyAfterArchive = await listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db);
+    assert.equal(ownerSafetyAfterArchive.some((item) => item.id === draft.id && item.project.archivedAt !== null && item.capabilities.canRevoke), false);
 
     const revoked = await revokeProjectGitRepositoryDelegation(projectId, draft.id, {
       expectedVersion: active.version,
       reason: "connection owner revoked after membership replacement and archive",
-    }, { id: connectionOwnerId, role: "user" }, db);
+    }, connectionOwnerActor(), db);
     assert.equal(revoked.status, "revoked");
     const revokedAudit = await db.projectGitRepositoryDelegationAudit.findFirstOrThrow({ where: { delegationId: draft.id, action: "revoked" }, orderBy: [{ delegationVersion: "desc" }], select: { actorProjectMembershipId: true, actorMembershipCreatedAt: true } });
     assert.equal(revokedAudit.actorProjectMembershipId, connectionOwnerMembership.id);
@@ -777,7 +876,7 @@ test(
     await deleteGitConnection(connectionId, {
       confirmationName: `Own Git ${suffix}`,
       expectedUpdatedAt: disabledConnection.updatedAt.toISOString(),
-    }, { id: connectionOwnerId }, db);
+    }, connectionOwnerActor(), db);
     assert.equal(await db.projectGitRepositoryDelegation.count({ where: { gitConnectionId: connectionId } }), 0);
     assert.equal(await db.gitConnection.count({ where: { id: connectionId } }), 0);
     assert.equal(await db.externalCredential.count({ where: { id: credentialId } }), 0);
@@ -825,6 +924,12 @@ test(
       try {
         await admin.query(`CREATE DATABASE "${databaseName}" OWNER "${ownerRole}"`);
         databaseCreated = true;
+        // A prior case may have staged the reconciliation migration before its
+        // preflight failed.  Reset the temporary directory so the legacy seed
+        // is always performed against the exact pre-74 migration boundary;
+        // otherwise Prisma could apply migration 74 before the fixture rows
+        // are inserted.
+        await rm(join(tempRoot, "prisma", "migrations"), { recursive: true, force: true });
         await stageMigrations(tempRoot, oldMigrationNames);
         await deployStagedMigrations(tempRoot, targetUrl.toString());
         fixture = await seedUpgradeDelegation(targetUrl.toString(), invalid);

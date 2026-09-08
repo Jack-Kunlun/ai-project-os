@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
     const actor = await requireApiSession(request);
-    const result = await createMcpControlPlaneAttestation(actor.id, await readJsonBody(request));
+    const result = await createMcpControlPlaneAttestation(actor, await readJsonBody(request));
     const created = result.created === true;
     const attestation = Object.fromEntries(Object.entries(result).filter(([key]) => key !== "created"));
     return NextResponse.json({ attestation, created }, { status: created ? 201 : 200, headers: noStore });

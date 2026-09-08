@@ -34,6 +34,10 @@ import {
   createAiCandidateService,
   createProjectAiConfigService,
 } from "@/lib/ai-memory";
+import {
+  appendProjectMembershipAudit,
+  appendWorkspaceMembershipAudit,
+} from "@/lib/membership-governance";
 import { hashSourceContent } from "@/lib/source";
 
 const execFile = promisify(execFileCallback);
@@ -48,6 +52,11 @@ const shouldRunPostgresGate = hasConfiguredTestUrl && postgresGate === "1";
 const projectAId = "11111111-1111-4111-8111-111111111111";
 const projectBId = "22222222-2222-4222-8222-222222222222";
 const candidateActorId = "91919191-9191-4919-8919-919191919191";
+const candidateActor = {
+  id: candidateActorId,
+  role: "admin" as const,
+  accountAccessVersion: 1,
+};
 const sourceAId = "33333333-3333-4333-8333-333333333333";
 const sourceA2Id = "66666666-6666-4666-8666-666666666666";
 const sourceBId = "44444444-4444-4444-8444-444444444444";
@@ -316,6 +325,33 @@ const currentSchemaThroughMemoryQualityMigrationNames =
   currentSchemaThroughMemoryQualityMigrationPaths.map(migrationNameFromPath);
 const webSourcesMigrationName = migrationNameFromPath(webSourcesMigrationPath);
 const workspaceRbacMigrationName = migrationNameFromPath(workspaceRbacMigrationPath);
+const accountAccessLifecycleMigrationName = "20260905030000_harden_account_access_lifecycle";
+const candidateMatrixPostWorkspaceRbacMigrationNames = [
+  "20260829211000_fix_long_path_constraints",
+  "20260829212000_scope_manual_source_deduplication",
+  "20260829213000_add_oidc_endpoint_pinning",
+  "20260829214000_align_oidc_discovery_defaults",
+  "20260829220000_add_project_action_engine",
+  "20260829230000_add_controlled_mcp_capabilities",
+  "20260830010000_add_action_result_intake",
+  "20260830020000_add_evidence_driven_project_plan",
+  "20260830030000_add_project_operations_loop",
+  "20260830040000_add_project_world_model",
+  "20260830050000_harden_source_provenance_and_mcp_attestation",
+  "20260831000000_add_worker_runtime_health",
+  "20260901000000_add_project_asset_upload_admission",
+  "20260901010000_add_safe_project_deletion",
+  "20260902000000_add_github_oauth_login",
+  "20260902010000_add_ai_entitlements_and_provider_scope",
+  "20260903010000_add_user_system_role_compatibility",
+  "20260903020000_add_user_ai_provider_scope",
+  "20260903030000_add_platform_policies_and_connection_ownership",
+  "20260904010000_default_new_app_users_to_user",
+  "20260904020000_add_platform_default_route_control_plane",
+  "20260904030000_add_ai_provider_ownership_audit",
+  "20260904040000_add_membership_access_governance",
+  accountAccessLifecycleMigrationName,
+] as const;
 
 function rejectUrl(): never {
   throw new Error("AI_RUNTIME_TEST_DATABASE_URL_INVALID");
@@ -1625,6 +1661,12 @@ async function runV0UpgradePath(client: Client, url: unknown = testDatabaseUrl):
     await seedV0Rows(client);
     await assertV0RowsSurviveAiMigration(client);
     await migrations.stage(aiMigrationNames);
+    await migrations.deploy();
+    await assertV0RowsSurviveAiMigration(client);
+    // The runtime services used by this upgrade fixture read the project-source
+    // retirement boundary. Keep the staged legacy path continuous after the
+    // AI runtime migrations through the migration that introduces `retiredAt`.
+    await migrations.stage(currentSchemaThroughMemoryQualityMigrationNames);
     await migrations.deploy();
     await assertV0RowsSurviveAiMigration(client);
     await assertV0ItemHistoryBackfill(client);
@@ -4075,9 +4117,9 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
       [projectAId, revisionA2Id],
     );
 
-    // Candidate review is an authenticated project operation. This historical
-    // fixture predates the RBAC migrations, so install only the schema and
-    // actor data required to exercise the current service contract.
+    // Candidate review is an authenticated project operation. Seed its admin
+    // before the real RBAC migration so the migration's historical backfill is
+    // exercised, then confirm the resulting pending memberships below.
     await safeQuery(
       client,
       `INSERT INTO "AppUser"
@@ -4086,35 +4128,96 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
                'fixture-password-salt', 1, 'admin', CURRENT_TIMESTAMP)`,
       [candidateActorId],
     );
-    await migrations.stage([webSourcesMigrationName, workspaceRbacMigrationName]);
+    await migrations.stage([
+      webSourcesMigrationName,
+      workspaceRbacMigrationName,
+      ...candidateMatrixPostWorkspaceRbacMigrationNames,
+    ]);
     await migrations.deploy();
 
-    // Keep the actor fixture valid independently of the RBAC migration's
-    // historical admin backfill. Candidate review now reloads this membership
-    // inside its write transaction, so the fixture must express the same
-    // tenant relationship that a real admin would have.
-    await safeQuery(
-      client,
-      `INSERT INTO "WorkspaceMembership"
-         ("id", "workspaceId", "userId", "role", "createdAt", "updatedAt")
-       SELECT '92929292-9292-4929-8929-929292929292'::uuid,
-              "workspaceId", $1, 'owner', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-         FROM "Project"
-        WHERE "id" = $2
-       ON CONFLICT ("id") DO UPDATE
-         SET "role" = 'owner', "updatedAt" = CURRENT_TIMESTAMP`,
-      [candidateActorId, projectAId],
-    );
-    await safeQuery(
-      client,
-      `INSERT INTO "ProjectMembership"
-         ("id", "projectId", "userId", "role", "createdAt", "updatedAt")
-       VALUES ('93939393-9393-4939-8939-939393939393'::uuid,
-               $1, $2, 'owner', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-       ON CONFLICT ("id") DO UPDATE
-         SET "role" = 'owner', "updatedAt" = CURRENT_TIMESTAMP`,
-      [projectAId, candidateActorId],
-    );
+    // The governance migration quarantines the RBAC backfill as pending. Move
+    // only the memberships needed by candidate review to confirmed with the
+    // immutable audit in the same transaction; never update accessState alone.
+    const membershipAdapter = new PrismaPg({ connectionString: url });
+    const membershipPrisma = new PrismaClient({ adapter: membershipAdapter });
+    try {
+      await membershipPrisma.$transaction(async (tx) => {
+        const workspaceMembership = await tx.workspaceMembership.findFirstOrThrow({
+          where: { workspaceId: "00000000-0000-4000-8000-000000000001", userId: candidateActorId },
+          select: {
+            id: true,
+            workspaceId: true,
+            userId: true,
+            role: true,
+            accessState: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        if (workspaceMembership.accessState !== "pending") {
+          throw new Error("AI_RUNTIME_POSTGRES_CANDIDATE_WORKSPACE_MEMBERSHIP_STATE_INVALID");
+        }
+        const confirmedWorkspaceMembership = await tx.workspaceMembership.update({
+          where: { id: workspaceMembership.id },
+          data: { accessState: "confirmed" },
+          select: {
+            id: true,
+            workspaceId: true,
+            userId: true,
+            role: true,
+            accessState: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        await appendWorkspaceMembershipAudit(tx, confirmedWorkspaceMembership, {
+          action: "confirmed",
+          previousState: "pending",
+          actorId: candidateActorId,
+          reason: "ai_runtime_candidate_review_fixture_workspace",
+        });
+
+        const projectMembership = await tx.projectMembership.findFirstOrThrow({
+          where: { projectId: projectAId, userId: candidateActorId },
+          select: {
+            id: true,
+            projectId: true,
+            userId: true,
+            role: true,
+            accessState: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        if (projectMembership.accessState !== "pending") {
+          throw new Error("AI_RUNTIME_POSTGRES_CANDIDATE_PROJECT_MEMBERSHIP_STATE_INVALID");
+        }
+        const confirmedProjectMembership = await tx.projectMembership.update({
+          where: { id: projectMembership.id },
+          data: { accessState: "confirmed" },
+          select: {
+            id: true,
+            projectId: true,
+            userId: true,
+            role: true,
+            accessState: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        await appendProjectMembershipAudit(tx, {
+          ...confirmedProjectMembership,
+          workspaceId: "00000000-0000-4000-8000-000000000001",
+        }, {
+          action: "confirmed",
+          previousState: "pending",
+          actorId: candidateActorId,
+          reason: "ai_runtime_candidate_review_fixture_project",
+        });
+      });
+    } finally {
+      await membershipPrisma.$disconnect();
+    }
   } finally {
     await migrations.close();
   }
@@ -4315,7 +4418,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
     const accepted = await service.acceptCandidate({
       projectId: projectAId,
       candidateId: decision.id,
-      actor: { id: candidateActorId, role: "admin" },
+      actor: candidateActor,
       expectedItemUpdatedAt: decision.projectItem.updatedAt,
       item: {
         type: ProjectItemType.decision,
@@ -4327,7 +4430,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
     const dismissed = await service.dismissCandidate({
       projectId: projectAId,
       candidateId: risk.id,
-      actor: { id: candidateActorId, role: "admin" },
+      actor: candidateActor,
       expectedItemUpdatedAt: risk.projectItem.updatedAt,
     });
     requireCondition(
@@ -4387,7 +4490,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
         await service.acceptCandidate({
           projectId: projectAId,
           candidateId: decision.id,
-          actor: { id: candidateActorId, role: "admin" },
+          actor: candidateActor,
           expectedItemUpdatedAt: accepted.projectItem.updatedAt,
           item: {
             type: ProjectItemType.decision,
@@ -4402,7 +4505,7 @@ async function runCandidateMemoryMatrix(client: Client, url: string): Promise<vo
       await service.dismissCandidate({
         projectId: projectAId,
         candidateId: decision.id,
-        actor: { id: candidateActorId, role: "admin" },
+        actor: candidateActor,
         expectedItemUpdatedAt: accepted.projectItem.updatedAt,
       });
       throw new Error("AI_CANDIDATE_POSTGRES_TERMINAL_REVIEW_ACCEPTED");

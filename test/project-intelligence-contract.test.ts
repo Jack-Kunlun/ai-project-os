@@ -4,9 +4,8 @@ import { join } from "node:path";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
 import { getPlatformTokenAdvisory } from "../src/lib/ai-entitlements";
-import { EffectiveAiRouteError, resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
+import { EffectiveAiRouteError } from "../src/lib/effective-ai-route";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
-import { createGrantedWebAiJob } from "../src/lib/web-ai-governance";
 import {
   PROJECT_AGENT_TOOLS,
   ProjectIntelligenceError,
@@ -194,7 +193,7 @@ function legacyRuntimeDb() {
     appUser: {
       findUnique: async () => {
         calls.push("actor");
-        return { id: projectId, role: "user", disabledAt: null };
+        return { id: projectId, role: "user", disabledAt: null, accountAccessVersion: 1 };
       },
     },
     project: {
@@ -234,13 +233,13 @@ test("brief and agent reject any legacy ProjectAiRoute before runtime reads", as
     const run = operation === "brief"
       ? runProjectBriefJob({
         projectId,
-        requestedBy: { id: projectId, role: "user" },
+        requestedBy: { id: projectId, role: "user", accountAccessVersion: 1 },
         clientKey: `legacy-${operation}`,
         consent: { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION },
       }, runtime.db)
       : runProjectAgentJob({
         projectId,
-        requestedBy: { id: projectId, role: "user" },
+        requestedBy: { id: projectId, role: "user", accountAccessVersion: 1 },
         clientKey: `legacy-${operation}`,
         consent: { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION },
         question: "当前状态如何？",
@@ -249,7 +248,7 @@ test("brief and agent reject any legacy ProjectAiRoute before runtime reads", as
       () => run,
       (error: unknown) => error instanceof EffectiveAiRouteError && error.code === "PROJECT_ROUTE_INVALID",
     );
-    assert.deepEqual(runtime.calls, ["actor", "project", "membership", "project", "legacy-route"]);
+    assert.deepEqual(runtime.calls, ["actor", "actor", "actor", "project", "membership", "project", "legacy-route"]);
     assert.equal(runtime.projectReads(), 2);
   }
 });
@@ -309,7 +308,7 @@ function statusTransactionDb() {
     appUser: {
       findUnique: async () => {
         read();
-        return { id: projectId, role: "user", disabledAt: null };
+        return { id: projectId, role: "user", disabledAt: null, accountAccessVersion: 1 };
       },
     },
     project,
@@ -375,7 +374,7 @@ function statusTransactionDb() {
 
 test("project intelligence status uses the access transaction admission for every read", async () => {
   const runtime = statusTransactionDb();
-  const status = await listProjectIntelligence(projectId, { id: projectId, role: "user" }, runtime.db);
+  const status = await listProjectIntelligence(projectId, { id: projectId, role: "user", accountAccessVersion: 1 }, runtime.db);
   assert.equal(runtime.accessTransactions(), 1);
   assert.equal(runtime.outsideReads(), 0);
   assert.equal(status.runtimeDecision.code, "platform_route_blocked");
@@ -490,7 +489,7 @@ test("project intelligence requires per-run consent before database or provider 
   await assert.rejects(
     () => runProjectBriefJob({
       projectId,
-      requestedBy: { id: projectId, role: "user" },
+      requestedBy: { id: projectId, role: "user", accountAccessVersion: 1 },
       clientKey: "brief-without-consent",
       consent: { acknowledged: false, version: "invalid" },
     }, unreachableDb),
@@ -499,7 +498,7 @@ test("project intelligence requires per-run consent before database or provider 
   await assert.rejects(
     () => runProjectAgentJob({
       projectId,
-      requestedBy: { id: projectId, role: "user" },
+      requestedBy: { id: projectId, role: "user", accountAccessVersion: 1 },
       clientKey: "agent-without-consent",
       consent: { acknowledged: false, version: "invalid" },
       question: "当前状态如何？",

@@ -165,7 +165,7 @@ test("C2 eligible lookup sends every exact tuple in a batch instead of truncatin
     $transaction: async (operation: (tx: unknown) => Promise<unknown>) => operation(fakeDb),
     $executeRaw: async () => 0,
     $queryRaw: async () => [],
-    appUser: { findUnique: async () => ({ role: "admin", disabledAt: null }) },
+    appUser: { findUnique: async () => ({ role: "admin", disabledAt: null, accountAccessVersion: 1 }) },
     mcpToolDefinition: {
       findMany: async () => {
         definitionCalls += 1;
@@ -179,7 +179,11 @@ test("C2 eligible lookup sends every exact tuple in a batch instead of truncatin
       },
     },
   } as unknown as PrismaClient;
-  const result = await listMcpControlPlaneAttestationCandidates(adminId, { state: "eligible", page: 1, pageSize: 50 }, fakeDb);
+  const result = await listMcpControlPlaneAttestationCandidates(
+    { id: adminId, role: "admin", accountAccessVersion: 1 },
+    { state: "eligible", page: 1, pageSize: 50 },
+    fakeDb,
+  );
   assert.equal(result.total, 65);
   assert.equal(result.candidates.length, 50);
   assert.equal(exactTupleCount, 65);

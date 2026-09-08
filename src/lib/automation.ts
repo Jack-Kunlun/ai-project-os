@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Prisma, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
+import { Prisma, type AppUserRole, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { admitWebAiProjectAccess, lockActorsAccess, lockProjectAccess, lockWorkspaceAccess, WebAiAccessError, withWebAiProjectAccessTransaction, type WebAiActor } from "@/lib/access-linearization";
 import { projectAutomationCapabilities, requiresAiWorkbenchConfirmation } from "@/lib/automation-capabilities";
@@ -517,12 +517,21 @@ async function claimDueRun(workerId: string, now: Date, db: PrismaClient): Promi
     // enter the canonical actor -> workspace -> project fence before taking
     // the AutomationRule row lock; membership/lifecycle writers use that
     // order too, so a revoke/archive cannot deadlock against a claimed run.
-    const candidates = await tx.$queryRaw<Array<{ id: string; projectId: string; createdById: string }>>`
+    const candidates = await tx.$queryRaw<Array<{
+      id: string;
+      projectId: string;
+      createdById: string;
+      createdByRole: AppUserRole;
+      createdByAccountAccessVersion: number;
+    }>>`
       SELECT rule."id"
         , rule."projectId"
         , rule."createdById"
+        , creator."role" AS "createdByRole"
+        , creator."accountAccessVersion" AS "createdByAccountAccessVersion"
       FROM "AutomationRule" AS rule
       JOIN "Project" AS project ON project."id" = rule."projectId"
+      JOIN "AppUser" AS creator ON creator."id" = rule."createdById"
       WHERE rule."status" = 'active'::"AutomationRuleStatus"
         AND rule."nextRunAt" <= ${now}
         AND project."archivedAt" IS NULL
@@ -536,7 +545,15 @@ async function claimDueRun(workerId: string, now: Date, db: PrismaClient): Promi
     // and confirmed memberships after locking, so an Editor or a downgraded
     // Owner cannot become a runtime principal between a revoke and a claim.
     try {
-      await admitWebAiProjectAccess(tx, { actor: { id: candidate.createdById, role: "user" }, projectId: candidate.projectId, required: "owner" });
+      await admitWebAiProjectAccess(tx, {
+        actor: {
+          id: candidate.createdById,
+          role: candidate.createdByRole,
+          accountAccessVersion: candidate.createdByAccountAccessVersion,
+        },
+        projectId: candidate.projectId,
+        required: "owner",
+      });
     } catch (error) {
       if (!(error instanceof WebAiAccessError) || (error.code !== "ACCESS_FORBIDDEN" && error.code !== "ACCOUNT_DISABLED")) throw error;
       // A rule owned by a revoked/pending/disabled account is no longer a

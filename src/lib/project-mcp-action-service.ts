@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import { getDb } from "@/lib/db";
 import { lockActorWorkspaceProjectAccess } from "@/lib/access-linearization";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
@@ -70,7 +71,7 @@ export class ProjectMcpActionServiceError extends Error {
 }
 
 type Tx = Prisma.TransactionClient;
-type Actor = Readonly<{ id: string; role: string }>;
+type Actor = Readonly<{ id: string; role: string; accountAccessVersion?: number }>;
 type OwnerEpoch = Readonly<{ id: string; userId: string; createdAt: Date }>;
 
 function fail(code: ProjectMcpActionServiceErrorCode): never {
@@ -200,13 +201,22 @@ export async function ownerAdmission(
   projectId: string,
   actorId: string,
   allowArchived: boolean,
+  accountAccessVersion?: number,
 ): Promise<{ project: { id: string; workspaceId: string; archivedAt: Date | null }; membership: OwnerEpoch }> {
   const [actor, project] = await Promise.all([
-    tx.appUser.findUnique({ where: { id: actorId }, select: { id: true, disabledAt: true } }),
+    tx.appUser.findUnique({ where: { id: actorId }, select: { id: true, disabledAt: true, accountAccessVersion: true } }),
     tx.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true, archivedAt: true } }),
   ]);
   if (actor === null || project === null) return fail("PROJECT_MCP_ACTION_FORBIDDEN");
   if (actor.disabledAt !== null) return fail("PROJECT_MCP_ACTION_ACCOUNT_DISABLED");
+  try {
+    await assertAccountAccessForActor(tx, { id: actorId, accountAccessVersion });
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError && error.code === "ACCOUNT_DISABLED") {
+      return fail("PROJECT_MCP_ACTION_ACCOUNT_DISABLED");
+    }
+    return fail("PROJECT_MCP_ACTION_FORBIDDEN");
+  }
   if (!allowArchived && project.archivedAt !== null) return fail("PROJECT_MCP_ACTION_PROJECT_ARCHIVED");
   const membership = await tx.projectMembership.findFirst({
     where: { projectId, userId: actorId, role: "owner", accessState: "confirmed" },
@@ -230,6 +240,7 @@ export const grantSelect = {
   definitionFingerprint: true,
   networkFingerprint: true,
   credentialFingerprint: true,
+  connectionOwnerAccountAccessVersion: true,
   delegationVersion: true,
   delegationFingerprint: true,
   connectionConfigurationRevision: true,
@@ -254,10 +265,12 @@ export const grantSelect = {
           status: true,
           disabledAt: true,
           ownerUserId: true,
+          ownerAccountAccessVersion: true,
           ownershipState: true,
           updatedAt: true,
           allowPrivateNetwork: true,
           credential: { select: { kind: true, secretFingerprint: true, updatedAt: true } },
+          ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } },
         },
       },
     },
@@ -268,6 +281,7 @@ export const grantSelect = {
       projectId: true,
       mcpConnectionId: true,
       connectionOwnerId: true,
+      connectionOwnerAccountAccessVersion: true,
       connectionConfigurationRevision: true,
       resolvedAddressFingerprint: true,
       credentialFingerprint: true,
@@ -301,6 +315,7 @@ export const grantSelect = {
       note: true,
       evidence: true,
       verifiedById: true,
+      connectionOwnerAccountAccessVersion: true,
       verifiedBy: { select: { role: true, disabledAt: true } },
     },
   },
@@ -336,7 +351,7 @@ export async function validateGrantTuple(tx: Tx, projectId: string, grantId: str
   const definition = grant.toolDefinition;
   const connection = definition.connection;
   const expectedCredential = expectedCredentialFingerprint(connection);
-  const ownerMembership = await tx.projectMembership.findUnique({ where: { id: delegation.ownerProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } });
+  const ownerMembership = await tx.projectMembership.findUnique({ where: { id: delegation.ownerProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true, accountAccessVersion: true } } } });
   const confirmedMembership = delegation.projectConfirmedProjectMembershipId === null
     ? null
     : await tx.projectMembership.findUnique({ where: { id: delegation.projectConfirmedProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } });
@@ -354,6 +369,9 @@ export async function validateGrantTuple(tx: Tx, projectId: string, grantId: str
     && ownerMembership.accessState === "confirmed"
     && ownerMembership.createdAt.getTime() === delegation.ownerMembershipCreatedAt.getTime()
     && ownerMembership.user.disabledAt === null
+    && delegation.connectionOwnerAccountAccessVersion !== null
+    && grant.connectionOwnerAccountAccessVersion === delegation.connectionOwnerAccountAccessVersion
+    && ownerMembership.user.accountAccessVersion === delegation.connectionOwnerAccountAccessVersion
     && delegation.projectConfirmedProjectMembershipId !== null
     && delegation.projectConfirmedMembershipCreatedAt !== null
     && delegation.projectConfirmedById !== null
@@ -374,6 +392,10 @@ export async function validateGrantTuple(tx: Tx, projectId: string, grantId: str
     && connection.status === "verified"
     && connection.disabledAt === null
     && connection.ownerUserId === delegation.connectionOwnerId
+    && connection.ownerAccountAccessVersion === delegation.connectionOwnerAccountAccessVersion
+    && connection.ownerUser !== null
+    && connection.ownerUser.disabledAt === null
+    && connection.ownerUser.accountAccessVersion === delegation.connectionOwnerAccountAccessVersion
     && connection.ownershipState === "confirmed"
     && connection.resolvedAddressFingerprint !== null
     && connection.configurationRevision === delegation.connectionConfigurationRevision
@@ -392,6 +414,7 @@ export async function validateGrantTuple(tx: Tx, projectId: string, grantId: str
     && grant.attestation.definitionFingerprint === grant.definitionFingerprint
     && grant.attestation.networkFingerprint === grant.networkFingerprint
     && grant.attestation.credentialFingerprint === grant.credentialFingerprint
+    && grant.attestation.connectionOwnerAccountAccessVersion === delegation.connectionOwnerAccountAccessVersion
     && grant.attestation.connectionConfigurationRevision === connection.configurationRevision
     && grant.attestation.conclusion === "read_only_verified"
     && ["low", "medium", "high"].includes(grant.attestation.riskLevel ?? "")
@@ -480,6 +503,7 @@ const actionControlSelect = {
   networkFingerprint: true,
   credentialFingerprint: true,
   connectionConfigurationRevision: true,
+  connectionOwnerAccountAccessVersion: true,
   proposerProjectMembershipId: true,
   proposerMembershipCreatedAt: true,
   connectionOwnerId: true,
@@ -579,6 +603,14 @@ export function sourceSnapshotMatchesAction(action: ActionControlRow, grant: Gra
     && action.credentialFingerprint === grant.credentialFingerprint
     && action.connectionConfigurationRevision === grant.connectionConfigurationRevision
     && action.connectionOwnerId === connection.ownerUserId
+    && action.connectionOwnerAccountAccessVersion !== null
+    && action.connectionOwnerAccountAccessVersion === grant.connectionOwnerAccountAccessVersion
+    && action.connectionOwnerAccountAccessVersion === delegation.connectionOwnerAccountAccessVersion
+    && action.connectionOwnerAccountAccessVersion === attestation.connectionOwnerAccountAccessVersion
+    && action.connectionOwnerAccountAccessVersion === connection.ownerAccountAccessVersion
+    && connection.ownerUser !== null
+    && connection.ownerUser.disabledAt === null
+    && connection.ownerUser.accountAccessVersion === action.connectionOwnerAccountAccessVersion
     && action.connectionOwnershipState === connection.ownershipState
     && action.connectionAllowPrivateNetwork === connection.allowPrivateNetwork
     && action.connectionUpdatedAt.getTime() === connection.updatedAt.getTime()
@@ -596,7 +628,7 @@ export async function listProjectMcpActions(projectIdInput: unknown, actor: Acto
   const actorId = parseActor(actor);
   return withSerializableRetry(db, async (tx) => {
     await lockAdmission(tx, projectId, [actorId]);
-    const { project } = await ownerAdmission(tx, projectId, actorId, true);
+    const { project } = await ownerAdmission(tx, projectId, actorId, true, actor.accountAccessVersion);
     const rows = await tx.projectMcpAction.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: actionProjectionSelect });
     return Object.freeze({ projectId, archived: project.archivedAt !== null, actions: rows.map((row) => projectAction({ ...row, canonicalArguments: null } as unknown as ActionProjectionRow, false)) });
   });
@@ -608,10 +640,10 @@ export async function getProjectMcpAction(projectIdInput: unknown, actionIdInput
   const actorId = parseActor(actor);
   return withSerializableRetry(db, async (tx) => {
     await lockAdmission(tx, projectId, [actorId]);
-    await ownerAdmission(tx, projectId, actorId, true);
+    await ownerAdmission(tx, projectId, actorId, true, actor.accountAccessVersion);
     const seed = await preflightAction(tx, projectId, actionId);
     await lockAdmission(tx, projectId, [actorId], seed.connectionId, seed.toolDefinitionId, seed.grantId, seed.delegationId, seed.attestationId, undefined, seed.id);
-    await ownerAdmission(tx, projectId, actorId, true);
+    await ownerAdmission(tx, projectId, actorId, true, actor.accountAccessVersion);
     return loadAction(tx, projectId, actionId, true);
   });
 }
@@ -642,7 +674,7 @@ export async function proposeProjectMcpAction(projectIdInput: unknown, input: un
   try {
     preflight = await withSerializableRetry(db, async (tx) => {
       await lockAdmission(tx, projectId, [actorId]);
-      await ownerAdmission(tx, projectId, actorId, false);
+      await ownerAdmission(tx, projectId, actorId, false, actor.accountAccessVersion);
       return proposalPreflight(tx, projectId, parsed.data.grantId);
     });
   } catch (error) {
@@ -652,7 +684,7 @@ export async function proposeProjectMcpAction(projectIdInput: unknown, input: un
 
   return withSerializableRetry(db, async (tx) => {
     await lockAdmission(tx, projectId, [actorId, preflight.connectionOwnerId, preflight.projectConfirmedById, preflight.attestationVerifierId], preflight.connectionId, preflight.toolDefinitionId, preflight.grantId, preflight.delegationId, preflight.attestationId, `${projectId}:${parsed.data.clientRequestId}`);
-    const { membership } = await ownerAdmission(tx, projectId, actorId, false);
+    const { membership } = await ownerAdmission(tx, projectId, actorId, false, actor.accountAccessVersion);
 
     // Idempotent replays are resolved from the project-scoped request key before
     // re-reading the external grant tuple. A source grant may have been revoked
@@ -713,6 +745,7 @@ export async function proposeProjectMcpAction(projectIdInput: unknown, input: un
       credentialFingerprint: grant.credentialFingerprint!,
       connectionConfigurationRevision: grant.connectionConfigurationRevision!,
       connectionOwnerId: connection.ownerUserId!,
+      connectionOwnerAccountAccessVersion: grant.connectionOwnerAccountAccessVersion!,
       connectionOwnershipState: connection.ownershipState,
       connectionAllowPrivateNetwork: connection.allowPrivateNetwork,
       connectionUpdatedAt: connection.updatedAt,
@@ -728,6 +761,8 @@ export async function proposeProjectMcpAction(projectIdInput: unknown, input: un
       grantVersion: action.grantVersion, delegationVersion: action.delegationVersion, attestationVersion: action.attestationVersion,
       delegationFingerprint: action.delegationFingerprint, definitionFingerprint: action.definitionFingerprint, networkFingerprint: action.networkFingerprint,
       credentialFingerprint: action.credentialFingerprint, connectionConfigurationRevision: action.connectionConfigurationRevision,
+      connectionOwnerId: action.connectionOwnerId,
+      connectionOwnerAccountAccessVersion: action.connectionOwnerAccountAccessVersion!,
       canonicalArgumentsHash: action.canonicalArgumentsHash, actionFingerprint: action.actionFingerprint,
       transactionId: BigInt(0), transitionAt: new Date(0), createdAt: new Date(0),
     } });
@@ -748,10 +783,10 @@ export async function decideProjectMcpAction(projectIdInput: unknown, actionIdIn
   const actorId = parseActor(actor);
   return withSerializableRetry(db, async (tx) => {
     await lockAdmission(tx, projectId, [actorId]);
-    await ownerAdmission(tx, projectId, actorId, false);
+    await ownerAdmission(tx, projectId, actorId, false, actor.accountAccessVersion);
     const seed = await preflightAction(tx, projectId, actionId);
     await lockAdmission(tx, projectId, [actorId], seed.connectionId, seed.toolDefinitionId, seed.grantId, seed.delegationId, seed.attestationId, undefined, seed.id);
-    const { membership } = await ownerAdmission(tx, projectId, actorId, false);
+    const { membership } = await ownerAdmission(tx, projectId, actorId, false, actor.accountAccessVersion);
     const action = await loadActionRow(tx, projectId, actionId);
     const existingDecision = await tx.projectMcpActionDecision.findUnique({ where: { projectId_actionId: { projectId, actionId } } });
     if (existingDecision !== null) {
@@ -800,6 +835,8 @@ export async function decideProjectMcpAction(projectIdInput: unknown, actionIdIn
       grantVersion: action.grantVersion, delegationVersion: action.delegationVersion, attestationVersion: action.attestationVersion,
       delegationFingerprint: action.delegationFingerprint, definitionFingerprint: action.definitionFingerprint, networkFingerprint: action.networkFingerprint,
       credentialFingerprint: action.credentialFingerprint, connectionConfigurationRevision: action.connectionConfigurationRevision,
+      connectionOwnerId: action.connectionOwnerId,
+      connectionOwnerAccountAccessVersion: action.connectionOwnerAccountAccessVersion!,
       canonicalArgumentsHash: action.canonicalArgumentsHash, actionFingerprint: action.actionFingerprint,
       transactionId: BigInt(0), transitionAt: new Date(0), createdAt: new Date(0),
     } });
@@ -816,10 +853,10 @@ export async function cancelProjectMcpAction(projectIdInput: unknown, actionIdIn
   const actorId = parseActor(actor);
   return withSerializableRetry(db, async (tx) => {
     await lockAdmission(tx, projectId, [actorId]);
-    await ownerAdmission(tx, projectId, actorId, true);
+    await ownerAdmission(tx, projectId, actorId, true, actor.accountAccessVersion);
     const seed = await preflightAction(tx, projectId, actionId);
     await lockAdmission(tx, projectId, [actorId], seed.connectionId, seed.toolDefinitionId, seed.grantId, seed.delegationId, seed.attestationId, undefined, seed.id);
-    const { membership } = await ownerAdmission(tx, projectId, actorId, true);
+    const { membership } = await ownerAdmission(tx, projectId, actorId, true, actor.accountAccessVersion);
     const action = await loadActionRow(tx, projectId, actionId);
     const expectedActionFingerprint = action.actionFingerprint;
     if (action.status === "cancelled" && action.stateVersion === parsed.data.expectedStateVersion + 1 && actionRevisionFromFingerprint(expectedActionFingerprint) === parsed.data.expectedActionRevision && sameActorEpoch(action, actorId, membership)) {
@@ -837,6 +874,8 @@ export async function cancelProjectMcpAction(projectIdInput: unknown, actionIdIn
       grantVersion: action.grantVersion, delegationVersion: action.delegationVersion, attestationVersion: action.attestationVersion,
       delegationFingerprint: action.delegationFingerprint, definitionFingerprint: action.definitionFingerprint, networkFingerprint: action.networkFingerprint,
       credentialFingerprint: action.credentialFingerprint, connectionConfigurationRevision: action.connectionConfigurationRevision,
+      connectionOwnerId: action.connectionOwnerId,
+      connectionOwnerAccountAccessVersion: action.connectionOwnerAccountAccessVersion!,
       canonicalArgumentsHash: action.canonicalArgumentsHash, actionFingerprint: action.actionFingerprint,
       transactionId: BigInt(0), transitionAt: new Date(0), createdAt: new Date(0),
     } });

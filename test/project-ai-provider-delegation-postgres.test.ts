@@ -2,7 +2,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { Prisma, type ProjectAiProviderDelegation } from "@prisma/client";
+import { Prisma, type PrismaClient, type ProjectAiProviderDelegation } from "@prisma/client";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 import { lockActorAccess } from "../src/lib/access-linearization";
@@ -19,6 +19,10 @@ import {
   PersonalProviderServiceError,
   updatePersonalProviderConnection,
 } from "../src/lib/personal-ai-provider-service";
+import {
+  executeAccountAccess,
+  previewAccountAccess,
+} from "../src/lib/account-access-service";
 import { createControlledMembership, extendControlledMembershipInTransaction } from "./membership-fixture";
 
 const shouldRun = process.env.PROJECT_AI_PROVIDER_DELEGATION_POSTGRES_GATE === "1";
@@ -60,6 +64,50 @@ function isSerializationConflict(error: unknown): boolean {
   return errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LOCK_BUSY");
 }
 
+async function executeGovernedAccountAccess(
+  db: PrismaClient,
+  targetId: string,
+  action: "disable" | "restore",
+  reason: string,
+  requestKey: string,
+) {
+  const [admin, target] = await Promise.all([
+    db.appUser.findUniqueOrThrow({
+      where: { id: seededAdminId },
+      select: { accountAccessVersion: true },
+    }),
+    db.appUser.findUniqueOrThrow({
+      where: { id: targetId },
+      select: { accountAccessVersion: true },
+    }),
+  ]);
+  const preview = await previewAccountAccess({
+    adminUserId: seededAdminId,
+    adminAccountAccessVersion: admin.accountAccessVersion,
+    userId: targetId,
+    action,
+    reason,
+    expectedVersion: target.accountAccessVersion,
+  }, db);
+  assert.equal(preview.canExecute, true);
+  return executeAccountAccess({
+    adminUserId: seededAdminId,
+    adminAccountAccessVersion: admin.accountAccessVersion,
+    userId: targetId,
+    action,
+    reason,
+    expectedVersion: preview.current.accountAccessVersion,
+    expectedImpactFingerprint: preview.impactFingerprint,
+    requestKey,
+    requestFingerprint: preview.requestFingerprint,
+    previewId: preview.previewId,
+    previewIssuedAt: preview.previewIssuedAt,
+    previewExpiresAt: preview.previewExpiresAt,
+    confirmation: true,
+    confirmationUsername: preview.user.username,
+  }, db);
+}
+
 type DelegationSnapshot = Pick<
   ProjectAiProviderDelegation,
   | "id"
@@ -80,6 +128,7 @@ type DelegationSnapshot = Pick<
   | "connectionOwnerSubscriptionVersion"
   | "connectionOwnerSubscriptionStartsAt"
   | "connectionOwnerSubscriptionExpiresAt"
+  | "connectionOwnerAccountAccessVersion"
   | "modelId"
   | "embeddingDimensions"
   | "maxOutputTokens"
@@ -155,6 +204,7 @@ async function insertDelegationAudit(
       connectionOwnerSubscriptionVersion: delegation.connectionOwnerSubscriptionVersion,
       connectionOwnerSubscriptionStartsAt: delegation.connectionOwnerSubscriptionStartsAt,
       connectionOwnerSubscriptionExpiresAt: delegation.connectionOwnerSubscriptionExpiresAt,
+      connectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion,
       modelId: delegation.modelId,
       embeddingDimensions: delegation.embeddingDimensions,
       maxOutputTokens: delegation.maxOutputTokens,
@@ -188,6 +238,7 @@ async function insertSelectionAudit(
     selectedById: string;
     selectedByProjectMembershipId: string;
     selectedByMembershipCreatedAt: Date;
+    connectionOwnerAccountAccessVersion?: number | null;
     version: number;
     createdAt: Date;
     updatedAt: Date;
@@ -208,6 +259,7 @@ async function insertSelectionAudit(
       selectedDelegationId: input.delegationId,
       selectedByProjectMembershipId: input.selectedByProjectMembershipId,
       selectedByMembershipCreatedAt: input.selectedByMembershipCreatedAt,
+      connectionOwnerAccountAccessVersion: input.connectionOwnerAccountAccessVersion ?? null,
       actorId: input.selectedById,
       actorProjectMembershipId: input.selectedByProjectMembershipId,
       actorMembershipCreatedAt: input.selectedByMembershipCreatedAt,
@@ -345,6 +397,7 @@ test(
         kind: "openai",
         scope: "user",
         ownerUserId: connectionOwnerId,
+        ownerAccountAccessVersion: 1,
         ownershipState: "confirmed",
         protocol: "chatCompletions",
         baseUrl: "https://api.openai.com/v1",
@@ -373,6 +426,7 @@ test(
         kind: "openai",
         scope: "user",
         ownerUserId: projectOwnerId,
+        ownerAccountAccessVersion: 1,
         ownershipState: "confirmed",
         protocol: "chatCompletions",
         baseUrl: "https://api.openai.com/v1",
@@ -390,7 +444,7 @@ test(
         () => proposeProjectAiProviderDelegation(
           projectId,
           { providerConnectionId, operation: "autoExtract", expiresAt: proposalExpiresAt },
-          { id: freeEditorId, role: "user" },
+          { id: freeEditorId, role: "user", accountAccessVersion: 1 },
           db,
         ),
         (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_MEMBERSHIP_REQUIRED"),
@@ -399,7 +453,7 @@ test(
         () => proposeProjectAiProviderDelegation(
           projectId,
           { providerConnectionId, operation: "autoExtract", expiresAt: proposalExpiresAt },
-          { id: expiredEditorId, role: "user" },
+          { id: expiredEditorId, role: "user", accountAccessVersion: 1 },
           db,
         ),
         (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_MEMBERSHIP_EXPIRED"),
@@ -408,7 +462,7 @@ test(
         () => proposeProjectAiProviderDelegation(
           projectId,
           { providerConnectionId, operation: "autoExtract", expiresAt: proposalExpiresAt },
-          { id: adminEditorId, role: "admin" },
+          { id: adminEditorId, role: "admin", accountAccessVersion: 1 },
           db,
         ),
         (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_MEMBERSHIP_REQUIRED"),
@@ -419,17 +473,27 @@ test(
       () => proposeProjectAiProviderDelegation(
         projectId,
         { providerConnectionId: providerId, operation: "embedding", maxOutputTokens: 128, expiresAt: proposalExpiresAt },
-        { id: connectionOwnerId, role: "user" },
+        { id: connectionOwnerId, role: "user", accountAccessVersion: 1 },
         db,
       ),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_INVALID_INPUT"),
     );
 
+    let connectionOwnerAccountAccessVersionForFixtures = 1;
+    let providerConfigurationVersionForFixtures = 1;
+    let credentialFingerprintForFixtures = fingerprint;
+    const connectionOwnerActor = () => ({
+      id: connectionOwnerId,
+      role: "user" as const,
+      accountAccessVersion: connectionOwnerAccountAccessVersionForFixtures,
+    });
+    const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
+    const nonOwnerEditorActor = { id: nonOwnerEditorId, role: "user" as const, accountAccessVersion: 1 };
     const createDraft = async (
       operation: AiOperation = "projectAnalysis",
       modelId = "gpt-4.1-mini",
       maxOutputTokens = 2048,
-      providerConfigurationVersion = 1,
+      providerConfigurationVersion = providerConfigurationVersionForFixtures,
       delegationFingerprintValue = delegationFingerprint,
       options: {
         expiresAt?: Date;
@@ -452,6 +516,7 @@ test(
           operation,
           providerConnectionId: options.providerConnectionId ?? providerId,
           connectionOwnerId,
+          connectionOwnerAccountAccessVersion: connectionOwnerAccountAccessVersionForFixtures,
           ownerProjectMembershipId: options.ownerProjectMembershipId ?? ownerMembership.id,
           ownerMembershipCreatedAt: options.ownerMembershipCreatedAt ?? ownerMembership.createdAt,
           connectionOwnerSubscriptionId: ownerSubscription.id,
@@ -461,7 +526,7 @@ test(
           modelId,
           maxOutputTokens,
           providerConfigurationVersion,
-          credentialFingerprint: options.credentialFingerprint ?? fingerprint,
+          credentialFingerprint: options.credentialFingerprint ?? credentialFingerprintForFixtures,
           delegationFingerprint: delegationFingerprintValue,
           expiresAt: options.expiresAt ?? expiresAt,
           proposedById: connectionOwnerId,
@@ -473,15 +538,55 @@ test(
       return draft;
     });
 
-    await db.appUser.update({
-      where: { id: connectionOwnerId },
-      data: { disabledAt: new Date(), disabledReason: "delegation_gate_disabled_owner" },
-    });
+    const disabledOwner = await executeGovernedAccountAccess(
+      db,
+      connectionOwnerId,
+      "disable",
+      "delegation gate disabled owner",
+      `delegation-owner-disable-${suffix}`,
+    );
+    assert.equal(disabledOwner.accountAccessVersion, 2);
     await assert.rejects(
       () => createDraft("projectAnalysis"),
-      (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LIVE_OWNER_INVALID"),
+      (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LIVE_OWNER_INVALID")
+        || errorText(error).includes("PERSONAL_AI_ACCOUNT_EPOCH_INVALID"),
     );
-    await db.appUser.update({ where: { id: connectionOwnerId }, data: { disabledAt: null, disabledReason: null } });
+    const restoredOwner = await executeGovernedAccountAccess(
+      db,
+      connectionOwnerId,
+      "restore",
+      "delegation gate restored owner",
+      `delegation-owner-restore-${suffix}`,
+    );
+    assert.equal(restoredOwner.accountAccessVersion, 3);
+    connectionOwnerAccountAccessVersionForFixtures = restoredOwner.accountAccessVersion;
+    const rotatedProvider = await updatePersonalProviderConnection(
+      providerId,
+      { apiKey: `delegation-rotated-key-${suffix}` },
+      connectionOwnerActor(),
+      db,
+    );
+    assert.equal(rotatedProvider.status, "configured");
+    // The rotation service intentionally resets the provider to configured.
+    // Model delegation requires a verified connectivity probe, so represent a
+    // successful probe with a controlled fixture update instead of real network I/O.
+    await db.aiProviderConnection.update({
+      where: { id: providerId },
+      data: { status: "verified", lastTestedAt: new Date(), lastErrorCode: null },
+    });
+    const refreshedProvider = await db.aiProviderConnection.findUniqueOrThrow({
+      where: { id: providerId },
+      select: {
+        ownerAccountAccessVersion: true,
+        configurationVersion: true,
+        credential: { select: { secretFingerprint: true } },
+      },
+    });
+    assert.equal(refreshedProvider.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
+    if (refreshedProvider.ownerAccountAccessVersion === null) throw new Error("DELEGATION_GATE_PROVIDER_EPOCH_MISSING");
+    connectionOwnerAccountAccessVersionForFixtures = refreshedProvider.ownerAccountAccessVersion;
+    providerConfigurationVersionForFixtures = refreshedProvider.configurationVersion;
+    credentialFingerprintForFixtures = refreshedProvider.credential.secretFingerprint;
 
     await assert.rejects(
       () => createDraft("visionExtract", "gpt-4.1-mini", 2048, 1, delegationFingerprint, {
@@ -491,7 +596,7 @@ test(
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LIVE_PROVIDER_INVALID"),
     );
     await assert.rejects(
-      () => createDraft("autoExtract", "gpt-4.1-mini", 2048, 2),
+      () => createDraft("autoExtract", "gpt-4.1-mini", 2048, providerConfigurationVersionForFixtures + 1),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LIVE_PROVIDER_INVALID"),
     );
     await assert.rejects(
@@ -501,13 +606,13 @@ test(
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LIVE_PROVIDER_INVALID"),
     );
     await assert.rejects(
-      () => createDraft("generateWithContext", "gpt-4.1-mini", 2048, 1, delegationFingerprint, {
+      () => createDraft("generateWithContext", "gpt-4.1-mini", 2048, providerConfigurationVersionForFixtures, delegationFingerprint, {
         ownerMembershipCreatedAt: new Date(ownerMembership.createdAt.getTime() + 1),
       }),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LIVE_OWNER_INVALID"),
     );
     await assert.rejects(
-      () => createDraft("projectAnalysis", "gpt-4.1-mini", 2048, 1, delegationFingerprint, {
+      () => createDraft("projectAnalysis", "gpt-4.1-mini", 2048, providerConfigurationVersionForFixtures, delegationFingerprint, {
         subscriptionExpiresAt: new Date(now.getTime() - 1_000),
       }),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LIVE_OWNER_INVALID"),
@@ -548,7 +653,7 @@ test(
     const waitForExpiry = async (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 300));
 
     const fakeEventTime = new Date("2099-01-01T00:00:00.000Z");
-    const timeProbe = await createDraft("autoExtract", "gpt-4.1-mini", 2048, 1, delegationFingerprint, {
+    const timeProbe = await createDraft("autoExtract", "gpt-4.1-mini", 2048, providerConfigurationVersionForFixtures, delegationFingerprint, {
       proposedAt: fakeEventTime,
       auditCreatedAt: fakeEventTime,
     });
@@ -581,7 +686,7 @@ test(
 
     for (const terminalActorKind of ["user", "systemExpiry"] as const) {
       await assert.rejects(
-        () => createDraft("autoExtract", "gpt-4.1-mini", 2048, 1, delegationFingerprint, { terminalActorKind }),
+        () => createDraft("autoExtract", "gpt-4.1-mini", 2048, providerConfigurationVersionForFixtures, delegationFingerprint, { terminalActorKind }),
         (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_STATE_INVALID"),
       );
     }
@@ -632,6 +737,7 @@ test(
           operation: "projectAnalysis",
           source: "personalDelegation",
           delegationId: active.id,
+          connectionOwnerAccountAccessVersion: connectionOwnerAccountAccessVersionForFixtures,
           selectedById: projectOwnerId,
           selectedByProjectMembershipId: projectOwnerMembership.id,
           selectedByMembershipCreatedAt: projectOwnerMembership.createdAt,
@@ -660,6 +766,7 @@ test(
           version: 2,
           source: "platformDefault",
           delegationId: null,
+          connectionOwnerAccountAccessVersion: null,
           updatedAt: fakeSelectionUpdateAt,
         },
       });
@@ -676,7 +783,7 @@ test(
     assert.equal(selectionUpdateAudit.transitionAt.getTime(), platformSelection.updatedAt.getTime());
     assert.notEqual(selectionUpdateAudit.createdAt.getTime(), fakeSelectionUpdateAt.getTime());
 
-    const expiringDraft = await createDraft("autoExtract", "gpt-4.1-mini", 2048, 1, delegationFingerprint, {
+    const expiringDraft = await createDraft("autoExtract", "gpt-4.1-mini", 2048, providerConfigurationVersionForFixtures, delegationFingerprint, {
       expiresAt: new Date(Date.now() + 250),
     });
     await waitForExpiry();
@@ -688,7 +795,7 @@ test(
     const replacementDraft = await createDraft("autoExtract");
     await rejectDelegation(replacementDraft.id);
 
-    const expiringOwnerConfirmed = await createDraft("sourceSummary", "gpt-4.1-mini", 2048, 1, delegationFingerprint, {
+    const expiringOwnerConfirmed = await createDraft("sourceSummary", "gpt-4.1-mini", 2048, providerConfigurationVersionForFixtures, delegationFingerprint, {
       expiresAt: new Date(Date.now() + 250),
     });
     const expiringOwnerConfirmedRow = await db.$transaction(async (tx) => {
@@ -712,7 +819,7 @@ test(
     const replacementOwnerConfirmed = await createDraft("sourceSummary");
     await rejectDelegation(replacementOwnerConfirmed.id);
 
-    const expiringActive = await createDraft("visionExtract", "gpt-4.1-mini", 2048, 1, delegationFingerprint, {
+    const expiringActive = await createDraft("visionExtract", "gpt-4.1-mini", 2048, providerConfigurationVersionForFixtures, delegationFingerprint, {
       expiresAt: new Date(Date.now() + 250),
     });
     const expiringOwnerConfirmedActive = await db.$transaction(async (tx) => {
@@ -752,6 +859,7 @@ test(
           operation: "visionExtract",
           source: "personalDelegation",
           delegationId: expiringActiveRow.id,
+          connectionOwnerAccountAccessVersion: connectionOwnerAccountAccessVersionForFixtures,
           selectedById: projectOwnerId,
           selectedByProjectMembershipId: projectOwnerMembership.id,
           selectedByMembershipCreatedAt: projectOwnerMembership.createdAt,
@@ -763,7 +871,7 @@ test(
     await db.$transaction(async (tx) => {
       const row = await tx.projectAiEffectiveRouteSelection.update({
         where: { id: expiringSelection.id },
-        data: { version: 2, source: "platformDefault", delegationId: null },
+        data: { version: 2, source: "platformDefault", delegationId: null, connectionOwnerAccountAccessVersion: null },
       });
       await insertSelectionAudit(tx, row, "selectionUpdated");
     });
@@ -811,6 +919,7 @@ test(
             operation: "sourceSummary",
             source: "personalDelegation",
             delegationId: ownerConfirmedOnly.id,
+            connectionOwnerAccountAccessVersion: connectionOwnerAccountAccessVersionForFixtures,
             selectedById: projectOwnerId,
             selectedByProjectMembershipId: projectOwnerMembership.id,
             selectedByMembershipCreatedAt: projectOwnerMembership.createdAt,
@@ -841,7 +950,7 @@ test(
     assert.equal(rejectedOwnerConfirmed.terminalReason, "owner_cancelled_before_project_confirmation");
 
     await assert.rejects(
-      () => createDraft("autoExtract", "gpt-4.1-mini", 2048, 2, "c".repeat(64)),
+      () => createDraft("autoExtract", "gpt-4.1-mini", 2048, providerConfigurationVersionForFixtures + 1, "c".repeat(64)),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LIVE_PROVIDER_INVALID"),
     );
 
@@ -912,6 +1021,7 @@ test(
             operation: "autoExtract",
             source: "personalDelegation",
             delegationId: active.id,
+            connectionOwnerAccountAccessVersion: connectionOwnerAccountAccessVersionForFixtures,
             selectedById: projectOwnerId,
             selectedByProjectMembershipId: projectOwnerMembership.id,
             selectedByMembershipCreatedAt: projectOwnerMembership.createdAt,
@@ -926,7 +1036,7 @@ test(
       () => db.$transaction(async (tx) => {
         await tx.aiProviderConnection.update({
           where: { id: providerId },
-          data: { configurationVersion: 2 },
+          data: { configurationVersion: providerConfigurationVersionForFixtures + 1 },
         });
       }),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_UPSTREAM_INVALIDATION_REQUIRED"),
@@ -986,7 +1096,7 @@ test(
       await invalidationMayContinue;
       await tx.aiProviderConnection.update({
         where: { id: providerId },
-        data: { configurationVersion: 2 },
+        data: { configurationVersion: providerConfigurationVersionForFixtures + 1 },
       });
     });
     await invalidationLockAcquired;
@@ -1008,6 +1118,7 @@ test(
           operation: "generateWithContext",
           source: "personalDelegation",
           delegationId: activationResult.id,
+          connectionOwnerAccountAccessVersion: connectionOwnerAccountAccessVersionForFixtures,
           selectedById: projectOwnerId,
           selectedByProjectMembershipId: projectOwnerMembership.id,
           selectedByMembershipCreatedAt: projectOwnerMembership.createdAt,
@@ -1046,10 +1157,12 @@ test(
     );
     await rejectDelegation(statusAuditMissing.id);
 
+    const terminalizeProviderConfigurationVersion = providerConfigurationVersionForFixtures + 1;
+    const competingProviderConfigurationVersion = providerConfigurationVersionForFixtures + 2;
     const terminalizePromise = db.$transaction(async (tx) => {
       const switchedSelection = await tx.projectAiEffectiveRouteSelection.update({
         where: { id: concurrentSelection.id },
-        data: { version: 2, source: "platformDefault", delegationId: null },
+        data: { version: 2, source: "platformDefault", delegationId: null, connectionOwnerAccountAccessVersion: null },
       });
       await insertSelectionAudit(tx, switchedSelection, "selectionUpdated");
       const revokedMain = await tx.projectAiProviderDelegation.update({
@@ -1081,14 +1194,14 @@ test(
       await tx.$executeRawUnsafe("SELECT pg_sleep(0.2)");
       await tx.aiProviderConnection.update({
         where: { id: providerId },
-        data: { configurationVersion: 2 },
+        data: { configurationVersion: terminalizeProviderConfigurationVersion },
       });
     });
     await new Promise((resolve) => setTimeout(resolve, 100));
     const competingProviderMutation = db.$transaction(async (tx) => {
       await tx.aiProviderConnection.update({
         where: { id: providerId },
-        data: { configurationVersion: 3 },
+        data: { configurationVersion: competingProviderConfigurationVersion },
       });
     });
     const [terminalizeResult, competingMutationResult] = await Promise.allSettled([
@@ -1101,9 +1214,10 @@ test(
     await db.$transaction(async (tx) => {
       await tx.aiProviderConnection.update({
         where: { id: providerId },
-        data: { configurationVersion: 3 },
+        data: { configurationVersion: competingProviderConfigurationVersion },
       });
     });
+    providerConfigurationVersionForFixtures = competingProviderConfigurationVersion;
     const finalConcurrentSelection = await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({
       where: { id: concurrentSelection.id },
     });
@@ -1115,7 +1229,7 @@ test(
     );
     assert.equal(
       (await db.aiProviderConnection.findUniqueOrThrow({ where: { id: providerId } })).configurationVersion,
-      3,
+      providerConfigurationVersionForFixtures,
     );
 
     const generateDelegationCountBeforeLegacy = await db.projectAiProviderDelegation.count({
@@ -1187,6 +1301,7 @@ test(
             operation: "generateWithContext",
             providerConnectionId: providerId,
             connectionOwnerId,
+            connectionOwnerAccountAccessVersion: connectionOwnerAccountAccessVersionForFixtures,
             ownerProjectMembershipId: ownerMembership.id,
             ownerMembershipCreatedAt: ownerMembership.createdAt,
             connectionOwnerSubscriptionId: ownerSubscription.id,
@@ -1195,8 +1310,8 @@ test(
             connectionOwnerSubscriptionExpiresAt: ownerSubscription.expiresAt,
             modelId: "gpt-4.1-mini",
             maxOutputTokens: 2048,
-            providerConfigurationVersion: 3,
-            credentialFingerprint: fingerprint,
+            providerConfigurationVersion: providerConfigurationVersionForFixtures,
+            credentialFingerprint: credentialFingerprintForFixtures,
             delegationFingerprint: "c".repeat(64),
             expiresAt,
             proposedById: connectionOwnerId,
@@ -1228,6 +1343,7 @@ test(
             operation: "autoExtract",
             providerConnectionId: providerId,
             connectionOwnerId,
+            connectionOwnerAccountAccessVersion: connectionOwnerAccountAccessVersionForFixtures,
             ownerProjectMembershipId: ownerMembership.id,
             ownerMembershipCreatedAt: ownerMembership.createdAt,
             connectionOwnerSubscriptionId: ownerSubscription.id,
@@ -1236,8 +1352,8 @@ test(
             connectionOwnerSubscriptionExpiresAt: ownerSubscription.expiresAt,
             modelId: "gpt-4.1-mini",
             maxOutputTokens: 2048,
-            providerConfigurationVersion: 3,
-            credentialFingerprint: fingerprint,
+            providerConfigurationVersion: providerConfigurationVersionForFixtures,
+            credentialFingerprint: credentialFingerprintForFixtures,
             delegationFingerprint: "d".repeat(64),
             expiresAt,
             proposedById: connectionOwnerId,
@@ -1286,7 +1402,7 @@ test(
     const serviceDraft = await proposeProjectAiProviderDelegation(
       projectId,
       { providerConnectionId: providerId, operation: "autoExtract", expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString() },
-      { id: connectionOwnerId, role: "user" },
+      connectionOwnerActor(),
       db,
     );
     assert.equal(serviceDraft.status, "draft");
@@ -1294,7 +1410,7 @@ test(
       projectId,
       serviceDraft.id,
       { expectedVersion: serviceDraft.version, acknowledgeProviderCharges: true },
-      { id: connectionOwnerId, role: "user" },
+      connectionOwnerActor(),
       db,
     );
     assert.equal(serviceOwnerConfirmed.status, "ownerConfirmed");
@@ -1302,7 +1418,7 @@ test(
       projectId,
       serviceDraft.id,
       { expectedVersion: serviceOwnerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
-      { id: projectOwnerId, role: "user" },
+      projectOwnerActor,
       db,
     );
     assert.equal(serviceActive.status, "active");
@@ -1310,7 +1426,7 @@ test(
       projectId,
       "autoExtract",
       { source: "personalDelegation", delegationId: serviceDraft.id, expectedVersion: null },
-      { id: projectOwnerId, role: "user" },
+      projectOwnerActor,
       db,
     );
     assert.equal(serviceSelection.source, "personalDelegation");
@@ -1318,7 +1434,7 @@ test(
       projectId,
       serviceDraft.id,
       { expectedVersion: serviceActive.version, reason: "service gate cleanup", switchToPlatformDefault: true },
-      { id: projectOwnerId, role: "user" },
+      projectOwnerActor,
       db,
     );
     assert.equal(serviceRevoked.status, "revoked");
@@ -1333,21 +1449,21 @@ test(
     const ownerSwitchDraft = await proposeProjectAiProviderDelegation(
       projectId,
       { providerConnectionId: providerId, operation: "sourceSummary", expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString() },
-      { id: connectionOwnerId, role: "user" },
+      connectionOwnerActor(),
       db,
     );
     const ownerSwitchConfirmed = await confirmProjectAiProviderDelegationOwner(
       projectId,
       ownerSwitchDraft.id,
       { expectedVersion: ownerSwitchDraft.version, acknowledgeProviderCharges: true },
-      { id: connectionOwnerId, role: "user" },
+      connectionOwnerActor(),
       db,
     );
     const ownerSwitchActive = await confirmProjectAiProviderDelegationProject(
       projectId,
       ownerSwitchDraft.id,
       { expectedVersion: ownerSwitchConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
-      { id: projectOwnerId, role: "user" },
+      projectOwnerActor,
       db,
     );
     const sourceSummarySelection = await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({
@@ -1357,7 +1473,7 @@ test(
       projectId,
       "sourceSummary",
       { source: "personalDelegation", delegationId: ownerSwitchDraft.id, expectedVersion: sourceSummarySelection.version },
-      { id: projectOwnerId, role: "user" },
+      projectOwnerActor,
       db,
     );
     assert.equal(ownerSwitchSelection.source, "personalDelegation");
@@ -1368,6 +1484,7 @@ test(
           SET "version" = "version" + 1,
               "source" = 'platform_default',
               "delegationId" = NULL,
+              "connectionOwnerAccountAccessVersion" = NULL,
               "selectedById" = ${connectionOwnerId}::uuid,
               "selectedByProjectMembershipId" = ${ownerMembership.id}::uuid,
               "selectedByMembershipCreatedAt" = ${ownerMembership.createdAt}
@@ -1404,7 +1521,7 @@ test(
         projectId,
         ownerSwitchDraft.id,
         { expectedVersion: ownerSwitchActive.version, reason: "owner switch must be explicit" },
-        { id: connectionOwnerId, role: "user" },
+        connectionOwnerActor(),
         db,
       ),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_SELECTION_SWITCH_REQUIRED"),
@@ -1420,7 +1537,7 @@ test(
         projectId,
         ownerSwitchDraft.id,
         { expectedVersion: ownerSwitchActive.version, reason: "another editor cannot revoke", switchToPlatformDefault: true },
-        { id: nonOwnerEditorId, role: "user" },
+        nonOwnerEditorActor,
         db,
       ),
       (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_PROJECT_OWNER_REQUIRED"),
@@ -1429,7 +1546,7 @@ test(
       () => updatePersonalProviderConnection(
         providerId,
         { enabled: false },
-        { id: connectionOwnerId, role: "user" },
+        connectionOwnerActor(),
         db,
       ),
       (error: unknown) => error instanceof PersonalProviderServiceError && error.code === "AI_PROVIDER_IN_USE",
@@ -1438,7 +1555,7 @@ test(
       projectId,
       ownerSwitchDraft.id,
       { expectedVersion: ownerSwitchActive.version, reason: "connection owner explicit safety switch", switchToPlatformDefault: true },
-      { id: connectionOwnerId, role: "user" },
+      connectionOwnerActor(),
       db,
     );
     assert.equal(ownerRevoked.status, "revoked");
@@ -1466,14 +1583,14 @@ test(
         projectId,
         "sourceSummary",
         { source: "platformDefault", delegationId: null, expectedVersion: casBaseSelection.version },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       ),
       putProjectAiEffectiveRouteSelection(
         projectId,
         "sourceSummary",
         { source: "platformDefault", delegationId: null, expectedVersion: casBaseSelection.version },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       ),
     ]);
@@ -1500,7 +1617,7 @@ test(
     let listSettled = false;
     const gatedList = listProjectAiProviderDelegations(
       projectId,
-      { id: nonOwnerEditorId, role: "user" },
+      nonOwnerEditorActor,
       db,
     ).then((value) => {
       listSettled = true;
@@ -1546,7 +1663,7 @@ test(
     const gatedDetail = getProjectAiProviderDelegation(
       projectId,
       ownerSwitchDraft.id,
-      { id: nonOwnerEditorId, role: "user" },
+      nonOwnerEditorActor,
       db,
     ).then((value) => {
       detailSettled = true;

@@ -136,7 +136,7 @@ test(
     const projectId = "11111111-1111-4111-8111-111111111111";
     const userId = "22222222-2222-4222-8222-222222222222";
     const workspaceId = "00000000-0000-4000-8000-000000000001";
-    const actor = { id: userId, role: "member" as const };
+    const actor = { id: userId, role: "member" as const, accountAccessVersion: 1 };
     const sourceId = "33333333-3333-4333-8333-333333333333";
     const legacyCompleteId = "44444444-4444-4444-8444-444444444444";
     const legacyStagingAId = "55555555-5555-4555-8555-555555555555";
@@ -1018,7 +1018,7 @@ export default defineConfig({
       // Runtime routes are platform-owned.  The old provider remains only as
       // historical billing evidence; it is never used as a workspace or
       // project runtime route in this upgrade test.
-      const platformActor = { id: userId, role: "admin" as const };
+      const platformActor = { id: userId, role: "admin" as const, accountAccessVersion: 1 };
       const provider = await createProviderConnection({
         name: `Legacy upgrade platform provider ${projectId.slice(0, 8)}`,
         kind: "glm",

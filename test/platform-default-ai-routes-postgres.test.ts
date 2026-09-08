@@ -61,6 +61,7 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const adminId = randomUUID();
+    const adminActor = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
     const providerId = randomUUID();
     const credentialId = randomUUID();
     const legacyProviderId = randomUUID();
@@ -186,13 +187,13 @@ test(
         confirmPlatformProviderOwnership(
           legacyProvider.id,
           { confirmationName: legacyProvider.name, reason: "历史平台托管归属已核对 A" },
-          { id: adminId, role: "admin" },
+          adminActor,
           db,
         ),
         confirmPlatformProviderOwnership(
           legacyProvider.id,
           { confirmationName: legacyProvider.name, reason: "历史平台托管归属已核对 B" },
-          { id: adminId, role: "admin" },
+          adminActor,
           db,
         ),
       ]);
@@ -224,7 +225,7 @@ test(
       await confirmPlatformProviderOwnership(
         legacyProvider.id,
         { confirmationName: legacyProvider.name, reason: "重复确认保持幂等" },
-        { id: adminId, role: "admin" },
+        adminActor,
         db,
       );
       assert.equal(await db.aiProviderOwnershipAudit.count({ where: { providerConnectionId: legacyProvider.id } }), 1);
@@ -285,21 +286,21 @@ test(
         providerConnectionId: configRaceProvider.id,
         modelId: "gpt-4.1-mini",
         maxOutputTokens: 2048,
-      }, { id: adminId, role: "admin" }, db);
+      }, adminActor, db);
       const configurationRaceVerified = await validatePlatformDefaultAiRoute(
         configurationRaceDraft.id,
-        { id: adminId, role: "admin" },
+        adminActor,
         db,
         configurationRaceDraft.updatedAt,
       );
       const configurationRaceResults = await Promise.allSettled([
         activatePlatformDefaultAiRoute(
           configurationRaceVerified.id,
-          { id: adminId, role: "admin" },
+          adminActor,
           db,
           configurationRaceVerified.updatedAt,
         ),
-        updateProviderConnection(configRaceProvider.id, { generationModelId: "gpt-4.1" }, { id: adminId, role: "admin" }, db),
+        updateProviderConnection(configRaceProvider.id, { generationModelId: "gpt-4.1" }, adminActor, db),
       ]);
       const configurationActivation = configurationRaceResults[0];
       const configurationUpdate = configurationRaceResults[1];
@@ -308,7 +309,7 @@ test(
       const configurationRaceProviderAfter = await db.aiProviderConnection.findUniqueOrThrow({ where: { id: configRaceProvider.id } });
       if (configurationActivation?.status === "fulfilled") {
         assert.equal(configurationRaceRoute.status, "active");
-        const configurationReadiness = await getPlatformDefaultAiRouteReadiness({ id: adminId, role: "admin" }, db);
+        const configurationReadiness = await getPlatformDefaultAiRouteReadiness(adminActor, db);
         assert.equal(configurationReadiness.operations.autoExtract.code, "configuration-changed");
         assert.equal(configurationRaceProviderAfter.status, "configured");
       } else {
@@ -326,7 +327,7 @@ test(
       const configurationRaceRouteForCleanup = await db.platformDefaultAiRoute.findUniqueOrThrow({ where: { id: configurationRaceDraft.id } });
       await retirePlatformDefaultAiRoute(
         configurationRaceRouteForCleanup.id,
-        { id: adminId, role: "admin" },
+        adminActor,
         "并发配置变更测试清理",
         db,
         configurationRaceRouteForCleanup.updatedAt,
@@ -337,21 +338,21 @@ test(
         providerConnectionId: disableRaceProvider.id,
         modelId: "gpt-4.1-mini",
         maxOutputTokens: 2048,
-      }, { id: adminId, role: "admin" }, db);
+      }, adminActor, db);
       const disableRaceVerified = await validatePlatformDefaultAiRoute(
         disableRaceDraft.id,
-        { id: adminId, role: "admin" },
+        adminActor,
         db,
         disableRaceDraft.updatedAt,
       );
       const disableRaceResults = await Promise.allSettled([
         activatePlatformDefaultAiRoute(
           disableRaceVerified.id,
-          { id: adminId, role: "admin" },
+          adminActor,
           db,
           disableRaceVerified.updatedAt,
         ),
-        updateProviderConnection(disableRaceProvider.id, { enabled: false }, { id: adminId, role: "admin" }, db),
+        updateProviderConnection(disableRaceProvider.id, { enabled: false }, adminActor, db),
       ]);
       const disableActivation = disableRaceResults[0];
       const disableUpdate = disableRaceResults[1];
@@ -376,7 +377,7 @@ test(
       const disableRaceRouteForCleanup = await db.platformDefaultAiRoute.findUniqueOrThrow({ where: { id: disableRaceDraft.id } });
       await retirePlatformDefaultAiRoute(
         disableRaceRouteForCleanup.id,
-        { id: adminId, role: "admin" },
+        adminActor,
         "并发停用测试清理",
         db,
         disableRaceRouteForCleanup.updatedAt,
@@ -388,13 +389,13 @@ test(
           providerConnectionId: provider.id,
           modelId: "gpt-4.1-mini",
           maxOutputTokens: 2048,
-        }, { id: adminId, role: "admin" }, db),
+        }, adminActor, db),
         createPlatformDefaultAiRoute({
           operation: "sourceSummary",
           providerConnectionId: provider.id,
           modelId: "gpt-4.1-mini",
           maxOutputTokens: 2048,
-        }, { id: adminId, role: "admin" }, db),
+        }, adminActor, db),
       ]);
       assert.deepEqual(concurrentDrafts.map((route) => route.version).sort((left, right) => left - right), [1, 2]);
 
@@ -403,25 +404,25 @@ test(
         providerConnectionId: provider.id,
         modelId: "gpt-4.1-mini",
         maxOutputTokens: 2048,
-      }, { id: adminId, role: "admin" }, db);
+      }, adminActor, db);
       assert.equal(first.version, 1);
-      const verifiedFirst = await validatePlatformDefaultAiRoute(first.id, { id: adminId, role: "admin" }, db, first.updatedAt);
-      await activatePlatformDefaultAiRoute(verifiedFirst.id, { id: adminId, role: "admin" }, db, verifiedFirst.updatedAt);
+      const verifiedFirst = await validatePlatformDefaultAiRoute(first.id, adminActor, db, first.updatedAt);
+      await activatePlatformDefaultAiRoute(verifiedFirst.id, adminActor, db, verifiedFirst.updatedAt);
 
       const second = await createPlatformDefaultAiRoute({
         operation: "projectAnalysis",
         providerConnectionId: provider.id,
         modelId: "gpt-4.1-mini",
         maxOutputTokens: 2048,
-      }, { id: adminId, role: "admin" }, db);
+      }, adminActor, db);
       assert.equal(second.version, 2);
-      const verifiedSecond = await validatePlatformDefaultAiRoute(second.id, { id: adminId, role: "admin" }, db, second.updatedAt);
-      const activeSecond = await activatePlatformDefaultAiRoute(verifiedSecond.id, { id: adminId, role: "admin" }, db, verifiedSecond.updatedAt);
+      const verifiedSecond = await validatePlatformDefaultAiRoute(second.id, adminActor, db, second.updatedAt);
+      const activeSecond = await activatePlatformDefaultAiRoute(verifiedSecond.id, adminActor, db, verifiedSecond.updatedAt);
       assert.equal(activeSecond.status, "active");
       assert.equal(await db.platformDefaultAiRoute.count({ where: { operation: "projectAnalysis", status: "active" } }), 1);
       assert.equal(await db.platformDefaultAiRoute.count({ where: { id: first.id, status: "retired" } }), 1);
 
-      const ready = await getPlatformDefaultAiRouteReadiness({ id: adminId, role: "admin" }, db);
+      const ready = await getPlatformDefaultAiRouteReadiness(adminActor, db);
       assert.equal(ready.operations.projectAnalysis.code, "ready");
       assert.equal(ready.operations.projectAnalysis.activeRouteVersion, 2);
       assert.equal(ready.runtimeConnected, true);
@@ -447,27 +448,27 @@ test(
         (error: unknown) => errorText(error).includes("AI provider ownership audit is immutable"),
       );
 
-      const renamed = await updateProviderConnection(provider.id, { name: `Renamed platform route provider ${suffix}` }, { id: adminId, role: "admin" }, db);
+      const renamed = await updateProviderConnection(provider.id, { name: `Renamed platform route provider ${suffix}` }, adminActor, db);
       assert.equal(renamed.configurationVersion, 1);
-      const changed = await updateProviderConnection(provider.id, { generationModelId: "gpt-4.1-nano" }, { id: adminId, role: "admin" }, db);
+      const changed = await updateProviderConnection(provider.id, { generationModelId: "gpt-4.1-nano" }, adminActor, db);
       assert.equal(changed.configurationVersion, 2);
       assert.equal(changed.status, "configured");
-      const stale = await getPlatformDefaultAiRouteReadiness({ id: adminId, role: "admin" }, db);
+      const stale = await getPlatformDefaultAiRouteReadiness(adminActor, db);
       assert.equal(stale.operations.projectAnalysis.code, "configuration-changed");
 
       await assert.rejects(
-        () => updateProviderConnection(provider.id, { enabled: false }, { id: adminId, role: "admin" }, db),
+        () => updateProviderConnection(provider.id, { enabled: false }, adminActor, db),
         (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_IN_USE",
       );
-      await retirePlatformDefaultAiRoute(activeSecond.id, { id: adminId, role: "admin" }, "retire before disable", db, activeSecond.updatedAt);
-      const disabled = await updateProviderConnection(provider.id, { enabled: false }, { id: adminId, role: "admin" }, db);
+      await retirePlatformDefaultAiRoute(activeSecond.id, adminActor, "retire before disable", db, activeSecond.updatedAt);
+      const disabled = await updateProviderConnection(provider.id, { enabled: false }, adminActor, db);
       assert.equal(disabled.status, "disabled");
       assert.equal(disabled.configurationVersion, 3);
       await assert.rejects(
-        () => deleteProviderConnection(provider.id, { confirmationName: disabled.name }, { id: adminId, role: "admin" }, db),
+        () => deleteProviderConnection(provider.id, { confirmationName: disabled.name }, adminActor, db),
         (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_IN_USE",
       );
-      const disabledReadiness = await getPlatformDefaultAiRouteReadiness({ id: adminId, role: "admin" }, db);
+      const disabledReadiness = await getPlatformDefaultAiRouteReadiness(adminActor, db);
       assert.equal(disabledReadiness.operations.projectAnalysis.code, "missing");
     } finally {
       await db.$disconnect();

@@ -42,9 +42,9 @@ test("session, profile, and admin membership boundaries expose canonical system 
       },
     },
   } as unknown as PrismaClient;
-  const legacySession = await createSession(sessionDb, { id: memberId, username: "legacy-member", role: "member" });
-  const currentSession = await createSession(sessionDb, { id: memberId, username: "current-user", role: "user" });
-  const adminSession = await createSession(sessionDb, { id: adminId, username: "admin", role: "admin" });
+  const legacySession = await createSession(sessionDb, { id: memberId, username: "legacy-member", role: "member", accountAccessVersion: 1 });
+  const currentSession = await createSession(sessionDb, { id: memberId, username: "current-user", role: "user", accountAccessVersion: 1 });
+  const adminSession = await createSession(sessionDb, { id: adminId, username: "admin", role: "admin", accountAccessVersion: 1 });
   assert.equal(legacySession.user.role, "user");
   assert.equal(currentSession.user.role, "user");
   assert.equal(adminSession.user.role, "admin");
@@ -79,6 +79,7 @@ test("session, profile, and admin membership boundaries expose canonical system 
 test("workspace member list/create/update use a minimal DTO without system credentials", async () => {
   let listSelect: Record<string, unknown> | undefined;
   const listDb = {
+    appUser: { findUnique: async () => ({ id: adminId, disabledAt: null, accountAccessVersion: 1 }) },
     workspaceMembership: {
       findMany: async ({ where, select }: { where?: { userId?: string }; select?: Record<string, unknown> }) => {
         if (where?.userId === adminId) return [{ role: "admin" as const, accessState: "confirmed" as const }];
@@ -88,7 +89,7 @@ test("workspace member list/create/update use a minimal DTO without system crede
     },
     projectMembership: { findMany: async () => [] },
   } as unknown as PrismaClient;
-  const listed = await listWorkspaceMembers(workspaceId, { id: adminId, role: "admin" }, listDb);
+  const listed = await listWorkspaceMembers(workspaceId, { id: adminId, role: "admin", accountAccessVersion: 1 }, listDb);
   assert.equal("role" in listed[0]!.user, false);
   assert.equal("passwordHash" in listed[0]!.user, false);
   assert.equal("passwordSalt" in listed[0]!.user, false);
@@ -96,18 +97,19 @@ test("workspace member list/create/update use a minimal DTO without system crede
   assert.deepEqual(Object.keys(userSelect), ["id", "username", "displayName", "email", "disabledAt", "createdAt", "oidcIdentities"]);
 
   const noMembershipDb = {
+    appUser: { findUnique: async () => ({ id: adminId, disabledAt: null, accountAccessVersion: 1 }) },
     workspace: { count: async () => 1 },
     workspaceMembership: { findMany: async () => [] },
   } as unknown as PrismaClient;
   await assert.rejects(
-    () => listWorkspaceMembers(workspaceId, { id: adminId, role: "admin" }, noMembershipDb),
+    () => listWorkspaceMembers(workspaceId, { id: adminId, role: "admin", accountAccessVersion: 1 }, noMembershipDb),
     (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
   );
 
   let createdData: Record<string, unknown> | undefined;
   const createTx = {
     appUser: {
-      findUnique: async () => ({ id: adminId, disabledAt: null }),
+      findUnique: async () => ({ id: adminId, disabledAt: null, accountAccessVersion: 1 }),
       create: async ({ data }: { data: Record<string, unknown> }) => {
         createdData = data;
         return { ...data, id: memberId };
@@ -123,6 +125,7 @@ test("workspace member list/create/update use a minimal DTO without system crede
     $executeRaw: async () => 0,
   };
   const createDb = {
+    appUser: { findUnique: async () => ({ id: adminId, disabledAt: null, accountAccessVersion: 1 }) },
     project: { count: async () => 0 },
     workspaceMembership: { findMany: async () => [{ role: "admin" as const, accessState: "confirmed" as const }] },
     $transaction: async (callback: (tx: typeof createTx) => unknown) => callback(createTx),
@@ -130,7 +133,7 @@ test("workspace member list/create/update use a minimal DTO without system crede
   const created = await createLocalWorkspaceMember(
     workspaceId,
     { username: "new-member", password: "ValidPassword123", displayName: null, email: null },
-    { id: adminId, role: "admin" },
+    { id: adminId, role: "admin", accountAccessVersion: 1 },
     createDb,
   );
   assert.equal(createdData?.role, "user");
@@ -160,19 +163,20 @@ test("workspace member list/create/update use a minimal DTO without system crede
     },
     projectMembership: { findMany: async () => [] },
     membershipAccessAudit: { create: async () => ({}) },
-    appUser: { findUnique: async () => ({ id: adminId, disabledAt: null }) },
+    appUser: { findUnique: async () => ({ id: adminId, disabledAt: null, accountAccessVersion: 1 }) },
     $executeRaw: async () => 0,
   };
   const updateDb = {
+    appUser: { findUnique: async () => ({ id: adminId, disabledAt: null, accountAccessVersion: 1 }) },
     workspaceMembership: { findMany: async () => [{ role: "admin" as const, accessState: "confirmed" as const }] },
     $transaction: async (callback: (tx: typeof updateTx) => unknown) => callback(updateTx),
   } as unknown as PrismaClient;
-  const updated = await updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "viewer" }, { id: adminId, role: "admin" }, updateDb);
+  const updated = await updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "viewer" }, { id: adminId, role: "admin", accountAccessVersion: 1 }, updateDb);
   assert.equal("passwordHash" in updated.user, false);
   assert.equal("passwordSalt" in updated.user, false);
   assert.equal("role" in updated.user, false);
   await assert.rejects(
-    () => updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "owner" }, { id: adminId, role: "admin" }, updateDb),
+    () => updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "owner" }, { id: adminId, role: "admin", accountAccessVersion: 1 }, updateDb),
     (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
   );
 

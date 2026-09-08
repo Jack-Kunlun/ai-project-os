@@ -163,6 +163,8 @@ function hasCompletePersonalEvidence(route: RuntimeRoute): boolean {
     || !isFiniteDate(evidence.selectedByMembershipCreatedAt)
     || !/^[0-9a-f]{64}$/u.test(evidence.personalDelegationFingerprint)
     || !/^[0-9a-f]{64}$/u.test(evidence.credentialSecretFingerprint)
+    || !Number.isSafeInteger(evidence.connectionOwnerAccountAccessVersion)
+    || evidence.connectionOwnerAccountAccessVersion < 1
     || evidence.connectionOwnerId !== evidence.billingUserId
     || evidence.payerProviderConnectionId.length === 0
   ) return false;
@@ -305,6 +307,7 @@ function personalRouteSnapshotData(route: RuntimeRoute & {
     selectedById: evidence.selectedById,
     selectedByProjectMembershipId: evidence.selectedByProjectMembershipId,
     selectedByMembershipCreatedAt: evidence.selectedByMembershipCreatedAt,
+    connectionOwnerAccountAccessVersion: evidence.connectionOwnerAccountAccessVersion,
     embeddingDimensions: evidence.embeddingDimensions,
     maxOutputTokens: evidence.maxOutputTokens,
   };
@@ -531,6 +534,7 @@ type RuntimeGrantTuple = Readonly<{
   selectedById: string | null;
   selectedByProjectMembershipId: string | null;
   selectedByMembershipCreatedAt: Date | null;
+  connectionOwnerAccountAccessVersion: number | null;
   embeddingDimensions: number | null;
   maxOutputTokens: number | null;
   expiresAt: Date;
@@ -589,6 +593,7 @@ function grantMatchesRuntimeTuple(
         grant.selectedById,
         grant.selectedByProjectMembershipId,
         grant.selectedByMembershipCreatedAt,
+        grant.connectionOwnerAccountAccessVersion,
       ].every((value) => value === null)
       && grant.embeddingDimensions === input.route.embeddingDimensions
       && grant.maxOutputTokens === input.route.maxOutputTokens;
@@ -615,6 +620,7 @@ function grantMatchesRuntimeTuple(
     && grant.selectedById === evidence.selectedById
     && grant.selectedByProjectMembershipId === evidence.selectedByProjectMembershipId
     && sameDate(grant.selectedByMembershipCreatedAt, evidence.selectedByMembershipCreatedAt)
+    && grant.connectionOwnerAccountAccessVersion === evidence.connectionOwnerAccountAccessVersion
     && grant.embeddingDimensions === evidence.embeddingDimensions
     && grant.maxOutputTokens === evidence.maxOutputTokens;
 }
@@ -658,6 +664,7 @@ function runtimeGrantSelect() {
     selectedById: true,
     selectedByProjectMembershipId: true,
     selectedByMembershipCreatedAt: true,
+    connectionOwnerAccountAccessVersion: true,
     embeddingDimensions: true,
     maxOutputTokens: true,
     expiresAt: true,
@@ -666,6 +673,131 @@ function runtimeGrantSelect() {
     scopeIds: true,
     manifestFingerprint: true,
   } as const;
+}
+
+/**
+ * Rejoin the access/job/provider fences after the durable dispatch marker has
+ * committed and immediately before a provider transport reads a credential or
+ * attaches a request to the network.  The admission transaction deliberately
+ * performs no secret or network I/O; this second transaction is the final
+ * fresh decision for the in-process connection object.
+ */
+async function revalidateProviderDispatchBeforeTransport(input: Readonly<{
+  actor: WebAiActor;
+  projectId: string;
+  jobId: string;
+  attempt: JobAttemptClaim;
+  route: DispatchRoute;
+  grantId: string;
+  auditId: string;
+  callKey: string;
+  billing: RuntimeBilling;
+}>, db: PrismaClient): Promise<void> {
+  try {
+    const additionalActorIds = typeof input.route.providerConnection.ownerUserId !== "string"
+      ? []
+      : [input.route.providerConnection.ownerUserId];
+    await withProjectJobAccessTransaction(db, {
+      actor: input.actor,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      required: "edit",
+      expectedRequestedById: input.actor.id,
+      additionalActorIds,
+      attempt: { jobId: input.jobId, ...input.attempt },
+    }, async (tx, accessAdmission) => {
+      if (accessAdmission.attempt === null) {
+        throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+      }
+      const marker = await tx.backgroundJobAttempt.findUnique({
+        where: { id: input.attempt.attemptId },
+        select: { jobId: true, dispatchState: true },
+      });
+      if (marker === null || marker.jobId !== input.jobId || marker.dispatchState !== "dispatched") {
+        throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+      }
+
+      // Reload the effective route and provider under their lifecycle locks;
+      // the object captured at admission is only a routing hint. This also
+      // rechecks personal owner membership/subscription/access epochs.
+      const persistedRoute = await reloadDispatchRoute(tx, {
+        projectId: input.projectId,
+        route: input.route,
+      });
+      const provider = await reloadDispatchProvider(tx, persistedRoute, input.route);
+      const credential = await tx.externalCredential.findUnique({
+        where: { id: provider.credentialId },
+        select: { kind: true, secretFingerprint: true },
+      });
+      if (
+        credential === null
+        || credential.kind !== "aiProvider"
+        || !/^[0-9a-f]{64}$/u.test(credential.secretFingerprint)
+        || credential.secretFingerprint !== persistedRoute.credentialSecretFingerprint
+        || credential.secretFingerprint !== input.route.credentialSecretFingerprint
+      ) {
+        throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+      }
+      const dispatchRoute: DispatchRoute = {
+        ...persistedRoute,
+        providerConnection: Object.freeze({ ...provider, credentialSecretFingerprint: credential.secretFingerprint }),
+      };
+      const grant = await tx.webAiGrant.findUnique({
+        where: { id: input.grantId },
+        select: runtimeGrantSelect(),
+      });
+      if (
+        grant === null
+        || !grantMatchesRuntimeTuple(grant, {
+          projectId: input.projectId,
+          jobId: input.jobId,
+          route: dispatchRoute,
+          billingUserId: input.billing.billingUserId,
+          billingMode: input.billing.billingMode,
+        })
+      ) {
+        throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+      }
+      const audit = await tx.providerCallAudit.findUnique({
+        where: { id: input.auditId },
+        select: {
+          jobId: true,
+          webAiGrantId: true,
+          providerConnectionId: true,
+          operation: true,
+          billingMode: true,
+          billingUserId: true,
+          callKey: true,
+          routeFenceFingerprint: true,
+          credentialSecretFingerprint: true,
+          connectionOwnerAccountAccessVersion: true,
+          status: true,
+        },
+      });
+      if (
+        audit === null
+        || audit.status !== "running"
+        || audit.jobId !== input.jobId
+        || audit.webAiGrantId !== input.grantId
+        || audit.providerConnectionId !== provider.id
+        || audit.operation !== dispatchRoute.operation
+        || audit.billingMode !== input.billing.billingMode
+        || audit.billingUserId !== input.billing.billingUserId
+        || audit.callKey !== input.callKey
+        || audit.routeFenceFingerprint !== dispatchRoute.routeFenceFingerprint
+        || audit.credentialSecretFingerprint !== credential.secretFingerprint
+        || audit.connectionOwnerAccountAccessVersion !== (dispatchRoute.personalEvidence?.connectionOwnerAccountAccessVersion ?? null)
+      ) {
+        throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+      }
+    });
+  } catch (error) {
+    // This callback is invoked before credential or request I/O. Preserve the
+    // explicit pre-dispatch classification for all stale/revoked/drifted
+    // control-plane outcomes so the caller can safely release its reservation.
+    if (error instanceof ProviderTransportError && error.requestDispatched === false) throw error;
+    throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+  }
 }
 
 export async function createGrantedWebAiJob(input: Readonly<{
@@ -1160,6 +1292,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
             selectedById: personalEvidence?.selectedById ?? null,
             selectedByProjectMembershipId: personalEvidence?.selectedByProjectMembershipId ?? null,
             selectedByMembershipCreatedAt: personalEvidence?.selectedByMembershipCreatedAt ?? null,
+            connectionOwnerAccountAccessVersion: personalEvidence?.connectionOwnerAccountAccessVersion ?? null,
             embeddingDimensions: personalEvidence?.embeddingDimensions ?? dispatchRoute.embeddingDimensions,
             maxOutputTokens: personalEvidence?.maxOutputTokens ?? (personalEvidence === null ? dispatchRoute.maxOutputTokens : null),
             status: "running",
@@ -1192,8 +1325,31 @@ export async function auditedProviderCall<T>(input: Readonly<{
     });
     auditId = admitted.auditId;
     dispatchMarked = admitted.dispatchMarked;
+    const revalidate = () => revalidateProviderDispatchBeforeTransport({
+      actor: input.actor,
+      projectId: input.route.projectId,
+      jobId: input.jobId,
+      attempt: input.attempt,
+      route: ({
+        ...input.route,
+        providerConnection: admitted.dispatch.connection,
+        credentialSecretFingerprint: admitted.dispatch.connection.credentialSecretFingerprint,
+      } as DispatchRoute),
+      grantId: admitted.grantId,
+      auditId: admitted.auditId,
+      callKey: input.callKey,
+      billing: admitted.billing,
+    }, db);
+    const dispatch: ProviderDispatchContext = Object.freeze({
+      ...admitted.dispatch,
+      connection: Object.freeze({
+        ...admitted.dispatch.connection,
+        onBeforeCredentialRead: revalidate,
+        onBeforeRequest: revalidate,
+      }),
+    });
     networkStarted = true;
-    const result = await input.call(admitted.dispatch);
+    const result = await input.call(dispatch);
     await markProviderAcknowledged({ jobId: input.jobId, ...input.attempt }, db);
     if (reservation !== null && reservation.created) {
       const settled = await settlePlatformTokenReservation({
@@ -1227,7 +1383,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
       ...result,
       providerCallAuditId: admitted.auditId,
       webAiGrantId: admitted.grantId,
-      routeFenceFingerprint: admitted.dispatch.routeFenceFingerprint,
+      routeFenceFingerprint: dispatch.routeFenceFingerprint,
     });
   } catch (error) {
     const uncertain = networkStarted && isUncertainProviderDispatch(error);

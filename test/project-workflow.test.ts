@@ -97,6 +97,7 @@ type FakeNotification = {
 type FakeActorState = {
   role: "admin" | "member" | "user";
   disabledAt: Date | null;
+  accountAccessVersion: number;
 };
 
 const fakeWorkspaceId = "55555555-5555-4555-8555-555555555555";
@@ -209,7 +210,7 @@ class FakeWorkflowDb {
         return state === undefined ? null : { id: where.id, ...state };
       }
       return this.users.has(where.id)
-        ? { id: where.id, role: "admin" as const, disabledAt: null }
+        ? { id: where.id, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }
         : null;
     },
   };
@@ -330,7 +331,7 @@ class FakeWorkflowDb {
 }
 
 const db = () => new FakeWorkflowDb();
-const workflowActor = (id: string) => ({ id, role: "admin" as const });
+const workflowActor = (id: string) => ({ id, role: "admin" as const, accountAccessVersion: 1 });
 
 test("attempt claim, heartbeat and dispatch state are token-bound", async () => {
   const fake = db();
@@ -437,8 +438,10 @@ test("reconcile and cancel recheck the actor inside the job lock before state re
     const actorId = randomUUID();
     fake.users.add(actorId);
     fake.actorStates.set(actorId, [
-      { role: "admin", disabledAt: null },
-      { role: "admin", disabledAt: new Date("2026-09-04T00:00:00.000Z") },
+      { role: "admin", disabledAt: null, accountAccessVersion: 1 },
+      { role: "admin", disabledAt: null, accountAccessVersion: 1 },
+      { role: "admin", disabledAt: null, accountAccessVersion: 1 },
+      { role: "admin", disabledAt: new Date("2026-09-04T00:00:00.000Z"), accountAccessVersion: 1 },
     ]);
     const job = fake.addJob(operation === "reconcile" ? "unknown" : "queued", projectId);
     job.reconciliationRequired = operation === "reconcile";
@@ -526,12 +529,12 @@ test("handler-facing job details require an actor with project access", async ()
   const projectId = randomUUID();
   const job = fake.addJob("queued", projectId);
   const actorId = randomUUID();
-  const actor = { id: actorId, role: "user" as const };
+  const actor = { id: actorId, role: "user" as const, accountAccessVersion: 1 };
   fake.users.add(actorId);
   const guarded = Object.assign(fake, {
     appUser: {
       findUnique: async ({ where }: { where: { id: string } }) =>
-        where.id === actorId ? { id: actorId, role: "user" as const, disabledAt: null } : null,
+        where.id === actorId ? { id: actorId, role: "user" as const, disabledAt: null, accountAccessVersion: 1 } : null,
     },
     project: {
       count: async () => 1,
@@ -541,7 +544,7 @@ test("handler-facing job details require an actor with project access", async ()
   const detail = await getProjectJob(projectId, job.id, actor, guarded as never);
   assert.equal(detail.id, job.id);
   await assert.rejects(
-    () => getProjectJob(projectId, job.id, { id: randomUUID(), role: "user" }, guarded as never),
+    () => getProjectJob(projectId, job.id, { id: randomUUID(), role: "user", accountAccessVersion: 1 }, guarded as never),
     (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
       (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
   );

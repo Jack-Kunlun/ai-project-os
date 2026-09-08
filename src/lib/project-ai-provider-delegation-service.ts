@@ -139,6 +139,7 @@ type DelegationRow = ProjectAiProviderDelegation & {
     defaultVisionModelId: string | null;
     embeddingDimensions: number | null;
     configurationVersion: number;
+    ownerAccountAccessVersion: number | null;
     status: AiProviderConnectionStatus;
     lastTestedAt: Date | null;
     disabledAt: Date | null;
@@ -163,6 +164,7 @@ const delegationInclude = {
       defaultVisionModelId: true,
       embeddingDimensions: true,
       configurationVersion: true,
+      ownerAccountAccessVersion: true,
       status: true,
       lastTestedAt: true,
       disabledAt: true,
@@ -182,6 +184,7 @@ const selectionSelect = {
   selectedById: true,
   selectedByProjectMembershipId: true,
   selectedByMembershipCreatedAt: true,
+  connectionOwnerAccountAccessVersion: true,
   version: true,
   createdAt: true,
   updatedAt: true,
@@ -368,6 +371,7 @@ async function loadProviderForOwner(
       defaultVisionModelId: true,
       embeddingDimensions: true,
       configurationVersion: true,
+      ownerAccountAccessVersion: true,
       status: true,
       lastTestedAt: true,
       disabledAt: true,
@@ -455,6 +459,7 @@ function canonicalFingerprintPayload(input: Readonly<{
   connectionOwnerSubscriptionVersion: number;
   connectionOwnerSubscriptionStartsAt: Date;
   connectionOwnerSubscriptionExpiresAt: Date;
+  connectionOwnerAccountAccessVersion: number;
   modelId: string;
   embeddingDimensions: number | null;
   maxOutputTokens: number | null;
@@ -473,6 +478,7 @@ function canonicalFingerprintPayload(input: Readonly<{
     connectionOwnerSubscriptionVersion: input.connectionOwnerSubscriptionVersion,
     connectionOwnerSubscriptionStartsAt: input.connectionOwnerSubscriptionStartsAt.toISOString(),
     connectionOwnerSubscriptionExpiresAt: input.connectionOwnerSubscriptionExpiresAt.toISOString(),
+    connectionOwnerAccountAccessVersion: input.connectionOwnerAccountAccessVersion,
     modelId: input.modelId,
     embeddingDimensions: input.embeddingDimensions,
     maxOutputTokens: input.maxOutputTokens,
@@ -528,6 +534,7 @@ async function appendDelegationAudit(
       connectionOwnerSubscriptionVersion: row.connectionOwnerSubscriptionVersion,
       connectionOwnerSubscriptionStartsAt: row.connectionOwnerSubscriptionStartsAt,
       connectionOwnerSubscriptionExpiresAt: row.connectionOwnerSubscriptionExpiresAt,
+      connectionOwnerAccountAccessVersion: row.connectionOwnerAccountAccessVersion,
       modelId: row.modelId,
       embeddingDimensions: row.embeddingDimensions,
       maxOutputTokens: row.maxOutputTokens,
@@ -555,6 +562,12 @@ async function appendSelectionAudit(
   action: ProjectAiProviderDelegationAuditAction,
   reason: string,
 ): Promise<void> {
+  const delegation = row.delegationId === null
+    ? null
+    : await db.projectAiProviderDelegation.findUnique({
+        where: { id: row.delegationId },
+        select: { connectionOwnerAccountAccessVersion: true },
+      });
   await db.projectAiProviderDelegationAudit.create({
     data: {
       id: randomUUID(),
@@ -572,6 +585,7 @@ async function appendSelectionAudit(
       actorMembershipCreatedAt: row.selectedByMembershipCreatedAt,
       selectedByProjectMembershipId: row.selectedByProjectMembershipId,
       selectedByMembershipCreatedAt: row.selectedByMembershipCreatedAt,
+      connectionOwnerAccountAccessVersion: delegation?.connectionOwnerAccountAccessVersion ?? null,
       reason,
       transitionAt: row.version === 1 ? row.createdAt : row.updatedAt,
     },
@@ -585,6 +599,17 @@ async function assertLiveDelegationDependencies(
 ): Promise<void> {
   if (row.expiresAt <= now) return fail("PROJECT_AI_PROVIDER_DELEGATION_EXPIRED");
   const provider = await loadProviderForOwner(db, row.providerConnectionId, row.connectionOwnerId);
+  const owner = await db.appUser.findUnique({
+    where: { id: row.connectionOwnerId },
+    select: { disabledAt: true, accountAccessVersion: true },
+  });
+  if (
+    owner === null
+    || owner.disabledAt !== null
+    || provider.ownerAccountAccessVersion === null
+    || row.connectionOwnerAccountAccessVersion !== provider.ownerAccountAccessVersion
+    || provider.ownerAccountAccessVersion !== owner.accountAccessVersion
+  ) return fail("PROJECT_AI_PROVIDER_DELEGATION_CONNECTION_UNAVAILABLE");
   const derived = providerModel(provider, row.operation, row.maxOutputTokens ?? undefined);
   if (
     provider.configurationVersion !== row.providerConfigurationVersion
@@ -757,6 +782,16 @@ export async function proposeProjectAiProviderDelegation(
     const subscription = await loadSubscription(tx, admission.actor.id, now);
     if (expiresAt > subscription.expiresAt) return fail("PROJECT_AI_PROVIDER_DELEGATION_INVALID_INPUT");
     const provider = await loadProviderForOwner(tx, providerId, admission.actor.id);
+    const owner = await tx.appUser.findUnique({
+      where: { id: admission.actor.id },
+      select: { disabledAt: true, accountAccessVersion: true },
+    });
+    if (
+      owner === null
+      || owner.disabledAt !== null
+      || provider.ownerAccountAccessVersion === null
+      || provider.ownerAccountAccessVersion !== owner.accountAccessVersion
+    ) return fail("PROJECT_AI_PROVIDER_DELEGATION_CONNECTION_UNAVAILABLE");
     const model = providerModel(provider, parsed.operation, parsed.maxOutputTokens);
     const delegationFingerprint = fingerprint({
       projectId,
@@ -769,6 +804,7 @@ export async function proposeProjectAiProviderDelegation(
       connectionOwnerSubscriptionVersion: subscription.version,
       connectionOwnerSubscriptionStartsAt: subscription.startsAt,
       connectionOwnerSubscriptionExpiresAt: subscription.expiresAt,
+      connectionOwnerAccountAccessVersion: provider.ownerAccountAccessVersion,
       modelId: model.modelId,
       embeddingDimensions: model.embeddingDimensions,
       maxOutputTokens: model.maxOutputTokens,
@@ -789,6 +825,7 @@ export async function proposeProjectAiProviderDelegation(
         connectionOwnerSubscriptionVersion: subscription.version,
         connectionOwnerSubscriptionStartsAt: subscription.startsAt,
         connectionOwnerSubscriptionExpiresAt: subscription.expiresAt,
+        connectionOwnerAccountAccessVersion: provider.ownerAccountAccessVersion,
         modelId: model.modelId,
         embeddingDimensions: model.embeddingDimensions,
         maxOutputTokens: model.maxOutputTokens,
@@ -894,7 +931,7 @@ async function mutateDelegation(
         if (switchMembership === null) return fail("PROJECT_AI_PROVIDER_DELEGATION_PROJECT_OWNER_REQUIRED");
         const changedSelection = await tx.projectAiEffectiveRouteSelection.updateMany({
           where: { id: selected.id, version: selected.version, source: "personalDelegation", delegationId: current.id },
-          data: { version: selected.version + 1, source: "platformDefault", delegationId: null, selectedById: admission.actor.id, selectedByProjectMembershipId: switchMembership.id, selectedByMembershipCreatedAt: switchMembership.createdAt },
+          data: { version: selected.version + 1, source: "platformDefault", delegationId: null, connectionOwnerAccountAccessVersion: null, selectedById: admission.actor.id, selectedByProjectMembershipId: switchMembership.id, selectedByMembershipCreatedAt: switchMembership.createdAt },
         });
         if (changedSelection.count !== 1) return fail("PROJECT_AI_PROVIDER_DELEGATION_VERSION_CONFLICT");
         const nextSelection = await tx.projectAiEffectiveRouteSelection.findUniqueOrThrow({ where: { id: selected.id } });
@@ -1007,10 +1044,12 @@ export async function putProjectAiEffectiveRouteSelection(
     if (existing === null && parsed.expectedVersion !== null) return fail("PROJECT_AI_PROVIDER_DELEGATION_VERSION_CONFLICT");
     if (existing !== null && (parsed.expectedVersion === null || existing.version !== parsed.expectedVersion)) return fail("PROJECT_AI_PROVIDER_DELEGATION_VERSION_CONFLICT");
 
+    let connectionOwnerAccountAccessVersion: number | null = null;
     if (parsed.source === "personalDelegation") {
       const delegation = await loadDelegation(tx, projectId, parsed.delegationId!);
       if (delegation === null || delegation.operation !== operation.data || delegation.status !== "active") return fail("PROJECT_AI_PROVIDER_DELEGATION_STATE_CONFLICT");
       await assertLiveDelegationDependencies(tx, delegation, await databaseNow(tx));
+      connectionOwnerAccountAccessVersion = delegation.connectionOwnerAccountAccessVersion;
     }
 
     const row = existing === null
@@ -1024,6 +1063,7 @@ export async function putProjectAiEffectiveRouteSelection(
             selectedById: admission.actor.id,
             selectedByProjectMembershipId: ownerMembership.id,
             selectedByMembershipCreatedAt: ownerMembership.createdAt,
+            connectionOwnerAccountAccessVersion,
           },
           select: selectionSelect,
         })
@@ -1036,6 +1076,7 @@ export async function putProjectAiEffectiveRouteSelection(
             selectedById: admission.actor.id,
             selectedByProjectMembershipId: ownerMembership.id,
             selectedByMembershipCreatedAt: ownerMembership.createdAt,
+            connectionOwnerAccountAccessVersion,
           },
         }).then(async (result) => {
           if (result.count !== 1) return fail("PROJECT_AI_PROVIDER_DELEGATION_VERSION_CONFLICT");

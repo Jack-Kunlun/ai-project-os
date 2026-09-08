@@ -19,6 +19,7 @@ import {
 } from "./transport";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 import { findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
+import { AccountAccessGuardError, assertAccountAccessForActor, requireAccountAccessVersion } from "@/lib/account-access-guard";
 
 export type ProviderServiceErrorCode =
   | "AI_PROVIDER_INVALID_INPUT"
@@ -46,7 +47,7 @@ export type ProviderDb = PrismaClient | Prisma.TransactionClient;
  * this actor contract separate from workspace actors so a workspace role can
  * never accidentally authorize a platform-owned connection.
  */
-export type PlatformProviderActor = Readonly<{ id: string; role: string }>;
+export type PlatformProviderActor = Readonly<{ id: string; role: string; accountAccessVersion?: number }>;
 
 function isPrismaClient(db: ProviderDb): db is PrismaClient {
   return typeof (db as unknown as { $transaction?: unknown }).$transaction === "function";
@@ -216,10 +217,17 @@ export function providerCatalog() {
  */
 export function assertPlatformProviderAdminHint(actor: unknown): PlatformProviderActor {
   if (typeof actor !== "object" || actor === null) return fail("AI_PROVIDER_ADMIN_REQUIRED");
-  const candidate = actor as { id?: unknown; role?: unknown };
+  const candidate = actor as { id?: unknown; role?: unknown; accountAccessVersion?: unknown };
   const parsedId = z.string().uuid().safeParse(candidate.id);
   if (!parsedId.success || candidate.role !== "admin") return fail("AI_PROVIDER_ADMIN_REQUIRED");
-  return Object.freeze({ id: parsedId.data, role: "admin" });
+  let accountAccessVersion: number;
+  try {
+    accountAccessVersion = requireAccountAccessVersion(candidate);
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError) return fail("AI_PROVIDER_ADMIN_REQUIRED");
+    throw error;
+  }
+  return Object.freeze({ id: parsedId.data, role: "admin", accountAccessVersion });
 }
 
 async function assertPlatformProviderAdminRecord(
@@ -228,12 +236,18 @@ async function assertPlatformProviderAdminRecord(
 ): Promise<PlatformProviderActor> {
   const current = await db.appUser.findUnique({
     where: { id: actor.id },
-    select: { id: true, role: true, disabledAt: true },
+    select: { id: true, role: true, disabledAt: true, accountAccessVersion: true },
   });
   if (current === null || current.role !== "admin" || current.disabledAt !== null) {
     return fail("AI_PROVIDER_ADMIN_REQUIRED");
   }
-  return Object.freeze({ id: current.id, role: "admin" });
+  try {
+    await assertAccountAccessForActor(db, actor);
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError) return fail("AI_PROVIDER_ADMIN_REQUIRED");
+    throw error;
+  }
+  return Object.freeze({ id: current.id, role: "admin", accountAccessVersion: current.accountAccessVersion });
 }
 
 /**

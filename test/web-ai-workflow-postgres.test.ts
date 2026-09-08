@@ -24,7 +24,7 @@ const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION }
 
 async function activateDefaultRoute(
   db: ReturnType<typeof getDb>,
-  actor: Readonly<{ id: string; role: string }>,
+  actor: Readonly<{ id: string; role: string; accountAccessVersion: number }>,
   input: Readonly<{
     operation: "embedding" | "autoExtract" | "generateWithContext";
     providerConnectionId: string;
@@ -151,27 +151,27 @@ test(
         embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
         visionModelId: null,
-      }, { id: platformAdmin.id, role: platformAdmin.role }, db);
+      }, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, db);
       await db.aiProviderConnection.update({
         where: { id: provider.id },
         data: { status: "verified", lastTestedAt: new Date() },
       });
 
-      const defaultEmbeddingRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
+      const defaultEmbeddingRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, {
         operation: "embedding",
         providerConnectionId: provider.id,
         modelId: "embedding-3",
         embeddingDimensions: 8,
       });
       assert.equal(defaultEmbeddingRoute.status, "active");
-      const defaultAutoExtractRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
+      const defaultAutoExtractRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, {
         operation: "autoExtract",
         providerConnectionId: provider.id,
         modelId: "glm-4-flash",
         maxOutputTokens: 1024,
       });
       assert.equal(defaultAutoExtractRoute.status, "active");
-      const defaultGenerationRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
+      const defaultGenerationRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, {
         operation: "generateWithContext",
         providerConnectionId: provider.id,
         modelId: "glm-4-flash",

@@ -49,7 +49,7 @@ export class ProjectMcpActionDispatchError extends Error {
 }
 
 type Tx = Prisma.TransactionClient;
-type Actor = Readonly<{ id: string; role: string }>;
+type Actor = Readonly<{ id: string; role: string; accountAccessVersion?: number }>;
 
 function fail(code: ConstructorParameters<typeof ProjectMcpActionDispatchError>[0]): never {
   throw new ProjectMcpActionDispatchError(code);
@@ -104,6 +104,8 @@ type DispatchAttemptRow = Readonly<{
   networkFingerprint: string;
   credentialFingerprint: string;
   connectionConfigurationRevision: number;
+  connectionOwnerId: string | null;
+  connectionOwnerAccountAccessVersion: number | null;
   reservationExpiresAt: Date;
   boundaryReachedAt: Date | null;
   completedAt: Date | null;
@@ -157,9 +159,14 @@ type BoundaryLockSeed = Readonly<{
     lastActorProjectMembershipId: string;
     lastActorId: string;
     connectionOwnerId: string;
+    connectionOwnerAccountAccessVersion: number | null;
   }>;
   actorIds: readonly string[];
   membershipIds: readonly string[];
+}>;
+
+type AcceptedDispatchBoundary = Readonly<{
+  bearerToken: string | null;
 }>;
 
 function projectDispatchResult(result: McpDetailedToolCallResult): Readonly<{
@@ -237,6 +244,8 @@ async function appendRuntimeLedger(
       networkFingerprint: action.networkFingerprint,
       credentialFingerprint: action.credentialFingerprint,
       connectionConfigurationRevision: action.connectionConfigurationRevision,
+      connectionOwnerId: action.connectionOwnerId,
+      connectionOwnerAccountAccessVersion: action.connectionOwnerAccountAccessVersion,
       safeErrorCode: result.safeErrorCode ?? null,
       resultFingerprint: result.resultFingerprint ?? null,
       resultBytes: result.resultBytes ?? null,
@@ -264,6 +273,8 @@ async function loadAttempt(tx: Tx, projectId: string, actionId: string): Promise
       networkFingerprint: true,
       credentialFingerprint: true,
       connectionConfigurationRevision: true,
+      connectionOwnerId: true,
+      connectionOwnerAccountAccessVersion: true,
       reservationExpiresAt: true,
       boundaryReachedAt: true,
       completedAt: true,
@@ -305,11 +316,11 @@ async function reserveDispatch(
   const actorId = parseActor(actor);
   return withSerializableRetry(db, async (tx) => {
     await lockAdmission(tx, projectId, [actorId]);
-    await ownerAdmission(tx, projectId, actorId, false);
+    await ownerAdmission(tx, projectId, actorId, false, actor.accountAccessVersion);
     const seed = await tx.projectMcpAction.findFirst({ where: { projectId, id: actionId }, select: { id: true, grantId: true, delegationId: true, attestationId: true, connectionId: true, toolDefinitionId: true } });
     if (seed === null) throw new ProjectMcpActionServiceError("PROJECT_MCP_ACTION_NOT_FOUND");
     await lockAdmission(tx, projectId, [actorId], seed.connectionId, seed.toolDefinitionId, seed.grantId, seed.delegationId, seed.attestationId, undefined, seed.id);
-    const { membership } = await ownerAdmission(tx, projectId, actorId, false);
+    const { membership } = await ownerAdmission(tx, projectId, actorId, false, actor.accountAccessVersion);
     const action = await loadActionRow(tx, projectId, actionId);
     if (["dispatchReserved", "succeeded", "failed", "unknown", "expired", "invalidated"].includes(action.status)) {
       return Object.freeze({ kind: "replay", action: await loadAction(tx, projectId, actionId, true) });
@@ -365,6 +376,8 @@ async function reserveDispatch(
         networkFingerprint: reserved.networkFingerprint,
         credentialFingerprint: reserved.credentialFingerprint,
         connectionConfigurationRevision: reserved.connectionConfigurationRevision,
+        connectionOwnerId: reserved.connectionOwnerId,
+        connectionOwnerAccountAccessVersion: reserved.connectionOwnerAccountAccessVersion,
         reservationTransactionId: BigInt(0),
         reservationExpiresAt: new Date(now.getTime() + DISPATCH_RESERVATION_MS),
         reservedAt: new Date(0),
@@ -480,7 +493,7 @@ async function revalidateReservation(
     }
     let membership: { id: string; userId: string; createdAt: Date };
     try {
-      membership = (await ownerAdmission(tx, reservation.projectId, actorId, false)).membership;
+      membership = (await ownerAdmission(tx, reservation.projectId, actorId, false, actor.accountAccessVersion)).membership;
     } catch (error) {
       if (error instanceof Error && /PROJECT_MCP_ACTION_(PROJECT_OWNER_REQUIRED|ACCOUNT_DISABLED|PROJECT_ARCHIVED|FORBIDDEN)/u.test(error.message)) {
         return Object.freeze({ kind: "terminalize", status: "invalidated", safeErrorCode: "MCP_DISPATCH_OWNER_DRIFT" });
@@ -489,6 +502,14 @@ async function revalidateReservation(
     }
     if (action.lastActorId !== actorId || action.lastActorProjectMembershipId !== membership.id || action.lastActorMembershipCreatedAt.getTime() !== membership.createdAt.getTime()) {
       return Object.freeze({ kind: "terminalize", status: "invalidated", safeErrorCode: "MCP_DISPATCH_OWNER_EPOCH_DRIFT" });
+    }
+    // A reservation created before account-epoch binding is never eligible
+    // for a second boundary attempt. Its request may already have crossed the
+    // remote boundary, so close it as unknown without reading credentials or
+    // touching the network.
+    if (action.connectionOwnerAccountAccessVersion === null
+      && attempt.connectionOwnerAccountAccessVersion === null) {
+      return Object.freeze({ kind: "terminalize", status: "unknown", safeErrorCode: "MCP_DISPATCH_OWNER_EPOCH_DRIFT" });
     }
     const now = await databaseNow(tx);
     if (attempt.reservationExpiresAt.getTime() <= now.getTime()) {
@@ -554,6 +575,7 @@ async function loadBoundaryLockSeed(tx: Tx, reservation: Reservation, actorId: s
       lastActorProjectMembershipId: true,
       lastActorId: true,
       connectionOwnerId: true,
+      connectionOwnerAccountAccessVersion: true,
     },
   });
   if (action === null) return null;
@@ -622,18 +644,18 @@ async function lockBoundaryIdentityRows(tx: Tx, projectId: string, seed: Boundar
   return projectRows.length === 1;
 }
 
-async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispatch, actor: Actor, db: PrismaClient): Promise<boolean> {
+async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispatch, actor: Actor, db: PrismaClient): Promise<AcceptedDispatchBoundary | null> {
   try {
     const actorId = parseActor(actor);
-    const updated = await withSerializableRetry(db, async (tx) => {
+    return await withSerializableRetry(db, async (tx): Promise<AcceptedDispatchBoundary | null> => {
       const seed = await loadBoundaryLockSeed(tx, reservation, actorId);
-      if (seed === null) return [];
+      if (seed === null) return null;
       // Acquire the same actor -> workspace -> project fence used by access,
       // grant, delegation, and lifecycle mutations before taking source rows.
       // Explicit row locks also fence direct account/membership mutations that
       // do not participate in the advisory-lock protocol.
       await lockAdmission(tx, reservation.projectId, seed.actorIds);
-      if (!await lockBoundaryIdentityRows(tx, reservation.projectId, seed)) return [];
+      if (!await lockBoundaryIdentityRows(tx, reservation.projectId, seed)) return null;
       await lockAdmission(
         tx,
         reservation.projectId,
@@ -648,14 +670,14 @@ async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispat
       );
       const connection = await tx.mcpConnection.findUnique({
         where: { id: seed.action.connectionId },
-        select: { credentialId: true },
+        select: { authKind: true, credentialId: true },
       });
-      if (connection === null) return [];
+      if (connection === null || connection.authKind !== ready.authKind || connection.credentialId !== ready.credentialId) return null;
       if (connection.credentialId !== null) {
         const credentials = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
           SELECT "id" FROM "ExternalCredential" WHERE "id" = ${connection.credentialId}::uuid FOR UPDATE
         `);
-        if (credentials.length !== 1) return [];
+        if (credentials.length !== 1) return null;
       }
 
       const action = await loadActionRow(tx, reservation.projectId, reservation.actionId);
@@ -668,24 +690,29 @@ async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispat
         || action.status !== "dispatchReserved"
         || action.stateVersion !== 3
         || action.lastActorId !== actorId
-        || action.actionFingerprint !== ready.action.actionFingerprint) return [];
+        || action.actionFingerprint !== ready.action.actionFingerprint
+        || action.connectionOwnerId !== ready.action.connectionOwnerId
+        || action.connectionOwnerAccountAccessVersion === null
+        || action.connectionOwnerAccountAccessVersion !== ready.action.connectionOwnerAccountAccessVersion
+        || attempt.connectionOwnerId !== action.connectionOwnerId
+        || attempt.connectionOwnerAccountAccessVersion !== action.connectionOwnerAccountAccessVersion) return null;
       let membership: { id: string; userId: string; createdAt: Date };
       try {
-        membership = (await ownerAdmission(tx, reservation.projectId, actorId, false)).membership;
+        membership = (await ownerAdmission(tx, reservation.projectId, actorId, false, actor.accountAccessVersion)).membership;
       } catch {
-        return [];
+        return null;
       }
       if (action.lastActorProjectMembershipId !== membership.id
-        || action.lastActorMembershipCreatedAt.getTime() !== membership.createdAt.getTime()) return [];
+        || action.lastActorMembershipCreatedAt.getTime() !== membership.createdAt.getTime()) return null;
       let grant: GrantRow;
       try {
         grant = await validateGrantTuple(tx, reservation.projectId, action.grantId, membership, 1);
       } catch {
-        return [];
+        return null;
       }
-      if (!sourceSnapshotMatchesAction(action, grant) || !await persistedActionHashesValid(tx, action)) return [];
+      if (!sourceSnapshotMatchesAction(action, grant) || !await persistedActionHashesValid(tx, action)) return null;
 
-      return tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      const updated = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         UPDATE "ProjectMcpActionDispatchAttempt" AS attempt
         SET "boundaryReachedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
         FROM "ProjectMcpAction" AS action
@@ -702,7 +729,11 @@ async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispat
           AND action."status" = 'dispatch_reserved'::"ProjectMcpActionStatus"
           AND action."stateVersion" = 3
           AND action."actionFingerprint" = ${ready.action.actionFingerprint}
+          AND action."connectionOwnerId" = attempt."connectionOwnerId"
+          AND action."connectionOwnerAccountAccessVersion" IS NOT NULL
+          AND action."connectionOwnerAccountAccessVersion" = attempt."connectionOwnerAccountAccessVersion"
           AND action."approvalExpiresAt" > (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
+          AND "personal_mcp_action_epoch_valid"(action)
           AND "project_mcp_action_source_tuple_valid"(action)
           AND "project_mcp_action_actor_valid"(
             action."projectId",
@@ -714,22 +745,35 @@ async function markDispatchBoundary(reservation: Reservation, ready: ReadyDispat
           AND project."archivedAt" IS NULL
         RETURNING attempt."id"
       `);
+      if (updated.length !== 1) return null;
+
+      // The durable final fence is committed only after the credential has
+      // been read inside the same transaction.  The row locks acquired above
+      // therefore prevent an account, owner, connection, or credential
+      // mutation from committing between the fence and secret decryption.
+      let bearerToken: string | null = null;
+      if (ready.authKind === "bearer") {
+        if (connection.credentialId === null) throw new CredentialVaultError("CREDENTIAL_NOT_FOUND");
+        bearerToken = await readCredentialSecret(connection.credentialId, "mcp", tx, { expectedSecretFingerprint: ready.credentialFingerprint });
+      }
+      return Object.freeze({ bearerToken });
     });
-    return updated.length === 1;
-  } catch {
+  } catch (error) {
+    if (error instanceof CredentialVaultError) throw error;
     // A failed DB-owned boundary check is fail-closed. No request object is
     // created, and the caller terminalizes the consumed reservation unknown.
-    return false;
+    return null;
   }
 }
 
 async function dispatchReserved(reservation: Reservation, ready: ReadyDispatch, actor: Actor, db: PrismaClient): Promise<Readonly<Record<string, unknown>>> {
   let bearerToken: string | null = null;
   try {
-    if (ready.authKind === "bearer") {
-      if (ready.credentialId === null) throw new CredentialVaultError("CREDENTIAL_NOT_FOUND");
-      bearerToken = await readCredentialSecret(ready.credentialId, "mcp", db, { expectedSecretFingerprint: ready.credentialFingerprint });
+    const boundary = await markDispatchBoundary(reservation, ready, actor, db);
+    if (boundary === null) {
+      return terminalizeReserved(ready.action.projectId, ready.action.id, reservation.tokenHash, "unknown", { safeErrorCode: "MCP_DISPATCH_RESERVATION_STALE" }, db);
     }
+    bearerToken = boundary.bearerToken;
   } catch (error) {
     return terminalizeReserved(ready.action.projectId, ready.action.id, reservation.tokenHash, "failed", { safeErrorCode: safeErrorCode(error, "MCP_CREDENTIAL_UNAVAILABLE") }, db);
   }
@@ -746,7 +790,10 @@ async function dispatchReserved(reservation: Reservation, ready: ReadyDispatch, 
       inputSchema: ready.inputSchema,
       outputSchema: ready.outputSchema,
       arguments: ready.arguments,
-      onDispatchBoundary: () => markDispatchBoundary(reservation, ready, actor, db),
+      // The DB-owned boundary was accepted before any bearer secret was read.
+      // Keep the client callback as an immediate write gate without opening a
+      // second transaction after the secret has entered process memory.
+      onDispatchBoundary: () => true,
     });
   } catch (error) {
     result = Object.freeze({ outcome: "unknown", requestId: reservation.rpcRequestId, safeErrorCode: safeErrorCode(error, "MCP_DISPATCH_UNKNOWN"), httpStatus: null });

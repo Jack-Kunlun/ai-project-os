@@ -9,6 +9,7 @@ import {
   type ProjectRepositoryRole,
 } from "@prisma/client";
 import { z } from "zod";
+import { assertAccountAccessForActor } from "@/lib/account-access-guard";
 import { getDb } from "@/lib/db";
 import {
   admitWebAiProjectAccess,
@@ -95,6 +96,7 @@ const delegationSelect = {
   projectId: true,
   gitConnectionId: true,
   connectionOwnerId: true,
+  connectionOwnerAccountAccessVersion: true,
   repositoryPath: true,
   trackedRef: true,
   includeRoots: true,
@@ -148,6 +150,7 @@ const delegationSelect = {
       ownerUserId: true,
       configurationVersion: true,
       resolvedAddressFingerprint: true,
+      ownerAccountAccessVersion: true,
       credential: { select: { kind: true, secretFingerprint: true } },
     },
   },
@@ -291,11 +294,16 @@ async function runTerminalMutation<T>(
       projectId,
     });
     const [currentActor, project, delegation] = await Promise.all([
-      tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, role: true, disabledAt: true } }),
+      tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, role: true, disabledAt: true, accountAccessVersion: true } }),
       tx.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true, archivedAt: true } }),
       tx.projectGitRepositoryDelegation.findFirst({ where: { id: delegationId, projectId }, select: { connectionOwnerId: true } }),
     ]);
     if (currentActor === null || currentActor.disabledAt !== null) return fail("PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN");
+    try {
+      await assertAccountAccessForActor(tx, actor);
+    } catch {
+      return fail("PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN");
+    }
     if (project === null || project.workspaceId !== located.workspaceId) return fail("PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN");
     if (delegation?.connectionOwnerId !== actor.id) {
       const admission = await admitWebAiProjectAccess(tx, {
@@ -308,7 +316,7 @@ async function runTerminalMutation<T>(
       return operation(tx, admission);
     }
     const admission: ProjectAccessAdmission = Object.freeze({
-      actor: Object.freeze({ id: currentActor.id, role: currentActor.role }),
+      actor: Object.freeze({ id: currentActor.id, role: currentActor.role, accountAccessVersion: currentActor.accountAccessVersion }),
       workspace: Object.freeze({ id: project.workspaceId }),
       project: Object.freeze({ id: project.id, workspaceId: project.workspaceId, archivedAt: project.archivedAt }),
       permission: "edit",
@@ -396,9 +404,11 @@ async function loadConnectionForOwner(db: Prisma.TransactionClient, connectionId
       status: true,
       ownershipState: true,
       ownerUserId: true,
+      ownerAccountAccessVersion: true,
       configurationVersion: true,
       resolvedAddressFingerprint: true,
       credential: { select: { id: true, kind: true, secretFingerprint: true } },
+      ownerUser: { select: { disabledAt: true, accountAccessVersion: true } },
     },
   });
   if (connection === null) return fail("PROJECT_GIT_REPOSITORY_DELEGATION_CONNECTION_NOT_FOUND");
@@ -410,6 +420,10 @@ function requireConnectionEvidence(connection: Awaited<ReturnType<typeof loadCon
     connection.status !== "verified"
     || connection.ownershipState !== "confirmed"
     || connection.ownerUserId === null
+    || connection.ownerAccountAccessVersion === null
+    || connection.ownerUser === null
+    || connection.ownerUser.disabledAt !== null
+    || connection.ownerUser.accountAccessVersion !== connection.ownerAccountAccessVersion
     || connection.credential === null
     || connection.credential.kind !== "git"
     || connection.resolvedAddressFingerprint === null
@@ -473,12 +487,15 @@ type CapabilityContext = Readonly<{
   now: Date;
   explicitMembership: { id: string; createdAt: Date; role: "owner" | "editor" } | null;
   membershipEvidence: ReadonlyMap<string, { id: string; userId: string; createdAt: Date; role: "owner" | "editor"; accessState: string }>;
-  userEvidence: ReadonlyMap<string, { id: string; disabledAt: Date | null }>;
+  userEvidence: ReadonlyMap<string, { id: string; disabledAt: Date | null; accountAccessVersion: number }>;
 }>;
 
 function currentConnectionEvidence(row: DelegationRow): boolean {
   const connection = row.gitConnection;
   return connection.ownerUserId === row.connectionOwnerId
+    && connection.ownerAccountAccessVersion !== null
+    && row.connectionOwnerAccountAccessVersion !== null
+    && connection.ownerAccountAccessVersion === row.connectionOwnerAccountAccessVersion
     && connection.ownershipState === "confirmed"
     && connection.status === "verified"
     && connection.configurationVersion === row.connectionConfigurationVersion
@@ -496,7 +513,9 @@ function delegationCapabilities(row: DelegationRow, context: CapabilityContext):
     && ownerMembership.userId === row.connectionOwnerId
     && ownerMembership.accessState === "confirmed"
     && ownerMembership.createdAt.getTime() === row.ownerMembershipCreatedAt.getTime();
-  const ownerActorActive = context.userEvidence.get(row.connectionOwnerId)?.disabledAt === null;
+  const ownerEvidence = context.userEvidence.get(row.connectionOwnerId);
+  const ownerActorActive = ownerEvidence?.disabledAt === null
+    && ownerEvidence.accountAccessVersion === row.connectionOwnerAccountAccessVersion;
   const projectOwnerMembership = row.projectConfirmedProjectMembershipId === null
     ? undefined
     : context.membershipEvidence.get(row.projectConfirmedProjectMembershipId);
@@ -543,7 +562,7 @@ async function loadCapabilityContext(
       : db.projectMembership.findMany({ where: { projectId, id: { in: membershipIds } }, select: { id: true, userId: true, createdAt: true, role: true, accessState: true } }),
     userIds.length === 0
       ? Promise.resolve([])
-      : db.appUser.findMany({ where: { id: { in: userIds } }, select: { id: true, disabledAt: true } }),
+      : db.appUser.findMany({ where: { id: { in: userIds } }, select: { id: true, disabledAt: true, accountAccessVersion: true } }),
   ]);
   const value = nowRows[0]?.now;
   const now = value instanceof Date ? value : new Date(value ?? "");
@@ -554,7 +573,7 @@ async function loadCapabilityContext(
     now,
     explicitMembership: membership === null ? null : membership as { id: string; createdAt: Date; role: "owner" | "editor" },
     membershipEvidence: new Map(membershipRows.map((row) => [row.id, row as { id: string; userId: string; createdAt: Date; role: "owner" | "editor"; accessState: string }])),
-    userEvidence: new Map(userRows.map((row) => [row.id, row])),
+    userEvidence: new Map(userRows.map((row) => [row.id, row as { id: string; disabledAt: Date | null; accountAccessVersion: number }])),
   });
 }
 
@@ -633,6 +652,7 @@ async function appendAudit(
       gitConnectionId: row.gitConnectionId,
       delegationId: row.id,
       connectionOwnerId: row.connectionOwnerId,
+      connectionOwnerAccountAccessVersion: row.connectionOwnerAccountAccessVersion,
       action,
       delegationVersion: row.version,
       statusBefore,
@@ -723,10 +743,11 @@ const connectionOwnerDelegationSelect = {
   version: true,
   status: true,
   connectionOwnerId: true,
+  connectionOwnerAccountAccessVersion: true,
   ownerProjectMembershipId: true,
   ownerMembershipCreatedAt: true,
   project: { select: { id: true, name: true, archivedAt: true } },
-  gitConnection: { select: { id: true, name: true, providerKind: true, transport: true, status: true, ownershipState: true, ownerUserId: true } },
+  gitConnection: { select: { id: true, name: true, providerKind: true, transport: true, status: true, ownershipState: true, ownerUserId: true, ownerAccountAccessVersion: true } },
   ownerProjectMembership: { select: { userId: true, createdAt: true } },
 } as const;
 
@@ -734,7 +755,7 @@ export async function listConnectionOwnerProjectGitRepositoryDelegations(
   actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
-  const currentActor = await db.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
+  const currentActor = await db.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true, accountAccessVersion: true } });
   if (currentActor === null || currentActor.disabledAt !== null) return fail("PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN");
   const rows = await db.projectGitRepositoryDelegation.findMany({
     where: {
@@ -748,6 +769,9 @@ export async function listConnectionOwnerProjectGitRepositoryDelegations(
   return Object.freeze(rows.flatMap((row) => {
     const ownerEpochMatches = row.connectionOwnerId === actor.id
       && row.gitConnection.ownerUserId === actor.id
+      && row.connectionOwnerAccountAccessVersion !== null
+      && row.gitConnection.ownerAccountAccessVersion === row.connectionOwnerAccountAccessVersion
+      && row.connectionOwnerAccountAccessVersion === currentActor.accountAccessVersion
       && row.ownerProjectMembership.userId === actor.id
       && row.ownerProjectMembership.createdAt.getTime() === row.ownerMembershipCreatedAt.getTime();
     if (!ownerEpochMatches) return [];
@@ -827,6 +851,7 @@ export async function proposeProjectGitRepositoryDelegation(
         projectId,
         gitConnectionId: connection.id,
         connectionOwnerId: admission.actor.id,
+        connectionOwnerAccountAccessVersion: connection.ownerAccountAccessVersion,
         repositoryPath,
         trackedRef,
         includeRoots,
@@ -1000,6 +1025,7 @@ export async function getProjectGitRepositoryDelegationLiveEligibility(
       expiresAt: true,
       project: { select: { archivedAt: true } },
       connectionOwnerId: true,
+      connectionOwnerAccountAccessVersion: true,
       ownerProjectMembershipId: true,
       ownerMembershipCreatedAt: true,
       projectConfirmedById: true,
@@ -1008,6 +1034,7 @@ export async function getProjectGitRepositoryDelegationLiveEligibility(
       gitConnection: {
         select: {
           ownerUserId: true,
+          ownerAccountAccessVersion: true,
           ownershipState: true,
           status: true,
           configurationVersion: true,
@@ -1029,6 +1056,9 @@ export async function getProjectGitRepositoryDelegationLiveEligibility(
   const connection = row.gitConnection;
   if (
     connection.ownerUserId !== row.connectionOwnerId
+    || connection.ownerAccountAccessVersion === null
+    || row.connectionOwnerAccountAccessVersion === null
+    || connection.ownerAccountAccessVersion !== row.connectionOwnerAccountAccessVersion
     || connection.ownershipState !== "confirmed"
     || connection.status !== "verified"
     || connection.configurationVersion !== row.connectionConfigurationVersion
@@ -1036,8 +1066,11 @@ export async function getProjectGitRepositoryDelegationLiveEligibility(
     || connection.credential?.kind !== "git"
     || connection.credential.secretFingerprint !== row.credentialFingerprint
   ) return { eligible: false, reason: "CONNECTION_DRIFT", status: row.status, version: row.version };
-  const ownerMembership = await db.projectMembership.findFirst({ where: { id: row.ownerProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } });
+  const ownerMembership = await db.projectMembership.findFirst({ where: { id: row.ownerProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true, accountAccessVersion: true } } } });
   if (ownerMembership === null || ownerMembership.projectId !== projectId || ownerMembership.userId !== row.connectionOwnerId || ownerMembership.role !== "owner" && ownerMembership.role !== "editor" || ownerMembership.accessState !== "confirmed" || ownerMembership.createdAt.getTime() !== row.ownerMembershipCreatedAt.getTime() || ownerMembership.user.disabledAt !== null) {
+    return { eligible: false, reason: "OWNER_MEMBERSHIP_DRIFT", status: row.status, version: row.version };
+  }
+  if (ownerMembership.user.accountAccessVersion !== row.connectionOwnerAccountAccessVersion) {
     return { eligible: false, reason: "OWNER_MEMBERSHIP_DRIFT", status: row.status, version: row.version };
   }
   const projectOwnerMembership = await db.projectMembership.findFirst({ where: { id: row.projectConfirmedProjectMembershipId ?? "00000000-0000-0000-0000-000000000000" }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } });

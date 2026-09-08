@@ -91,8 +91,11 @@ test("项目 API 授权对 UUID 大小写、编码路径和新版 UUID 使用同
     workspaceMembership: {
       findMany: async () => [],
     },
+    appUser: {
+      findUnique: async () => ({ id: "22222222-2222-4222-8222-222222222222", role: "member" as const, disabledAt: null, accountAccessVersion: 1 }),
+    },
   } as unknown as PrismaClient;
-  const member = { id: "22222222-2222-4222-8222-222222222222", role: "member" as const };
+  const member = { id: "22222222-2222-4222-8222-222222222222", role: "member" as const, accountAccessVersion: 1 };
 
   await assert.rejects(
     () => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectId}/items`, { method: "POST" }), db),
@@ -127,8 +130,11 @@ test("个人 Git/MCP 终止旁路只匹配原始精确 POST 路径", async () =>
   const nilDelegationId = "00000000-0000-0000-0000-000000000000";
   const invalidDelegationId = "not-a-uuid";
   const zodRejectedDelegationId = "14141414-1414-0141-0141-141414141414";
-  const actor = { id: "15151515-1515-4151-8151-151515151515", role: "member" as const };
+  const actor = { id: "15151515-1515-4151-8151-151515151515", role: "member" as const, accountAccessVersion: 1 };
   const denyDb = {
+    appUser: {
+      findUnique: async () => ({ id: actor.id, role: "member" as const, disabledAt: null, accountAccessVersion: 1 }),
+    },
     project: {
       findUnique: async () => ({ workspace: { memberships: [] }, memberships: [] }),
       count: async () => 1,
@@ -140,12 +146,12 @@ test("个人 Git/MCP 终止旁路只匹配原始精确 POST 路径", async () =>
     const exact = `http://localhost/api/projects/${projectId}/${resource}/${delegationId}/rejection`;
     const exactRevocation = `http://localhost/api/projects/${projectId}/${resource}/${delegationId}/revocation`;
 
-    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(exact, { method: "POST" }), {} as PrismaClient));
-    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`${exact}/`, { method: "POST" }), {} as PrismaClient));
-    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(exactRevocation, { method: "POST" }), {} as PrismaClient));
-    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`${exactRevocation}/`, { method: "POST" }), {} as PrismaClient));
-    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectIdV7}/${resource}/${delegationIdV8}/rejection`, { method: "POST" }), {} as PrismaClient));
-    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId.toUpperCase()}/${resource}/${delegationId.toUpperCase()}/revocation`, { method: "POST" }), {} as PrismaClient));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(exact, { method: "POST" }), denyDb));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`${exact}/`, { method: "POST" }), denyDb));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(exactRevocation, { method: "POST" }), denyDb));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`${exactRevocation}/`, { method: "POST" }), denyDb));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectIdV7}/${resource}/${delegationIdV8}/rejection`, { method: "POST" }), denyDb));
+    await assert.doesNotReject(() => authorizeApiRequest(actor, new Request(`http://localhost/api/projects/${projectId.toUpperCase()}/${resource}/${delegationId.toUpperCase()}/revocation`, { method: "POST" }), denyDb));
     await assert.rejects(
       () => authorizeApiRequest(actor, new Request(exact, { method: "GET" }), denyDb),
       (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
@@ -188,13 +194,21 @@ test("个人 Git/MCP 终止旁路只匹配原始精确 POST 路径", async () =>
 test("项目 API 预授权隐藏非成员项目是否存在，但直接权限校验保留 not found 语义", async () => {
   const existingProjectId = "33333333-3333-4333-8333-333333333333";
   const missingProjectId = "44444444-4444-4444-8444-444444444444";
-  const nonMember = { id: "55555555-5555-4555-8555-555555555555", role: "member" as const };
-  const authorized = { id: "66666666-6666-4666-8666-666666666666", role: "member" as const };
+  const nonMember = { id: "55555555-5555-4555-8555-555555555555", role: "member" as const, accountAccessVersion: 1 };
+  const authorized = { id: "66666666-6666-4666-8666-666666666666", role: "member" as const, accountAccessVersion: 1 };
   type ProjectLookupArgs = {
     where: { id: string };
     select?: { memberships?: { where?: { userId?: string } } };
   };
   const db = {
+    appUser: {
+      findUnique: async ({ where }: { where: { id: string } }) => ({
+        id: where.id,
+        role: "member" as const,
+        disabledAt: null,
+        accountAccessVersion: 1,
+      }),
+    },
     project: {
       findUnique: async ({ where, select }: ProjectLookupArgs) => {
         if (where.id !== existingProjectId) return null;
@@ -259,11 +273,14 @@ test("项目 API 预授权隐藏非成员项目是否存在，但直接权限校
 test("系统管理员的租户项目权限必须来自真实 workspace/project membership", async () => {
   const projectId = "77777777-7777-4777-8777-777777777777";
   const missingProjectId = "88888888-8888-4888-8888-888888888888";
-  const admin = { id: "99999999-9999-4999-8999-999999999999", role: "admin" as const };
+  const admin = { id: "99999999-9999-4999-8999-999999999999", role: "admin" as const, accountAccessVersion: 1 };
   let workspaceRole: "owner" | "admin" | "member" | null = null;
   let projectRole: "owner" | "editor" | "viewer" | null = null;
   let inheritanceMode: "workspaceInherited" | "projectOnly" = "workspaceInherited";
   const db = {
+    appUser: {
+      findUnique: async () => ({ id: admin.id, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
+    },
     project: {
       findUnique: async ({ where }: { where: { id: string } }) => {
         if (where.id !== projectId) return null;
@@ -329,10 +346,13 @@ test("系统管理员的租户项目权限必须来自真实 workspace/project m
 
 test("系统管理员不能凭全局角色自动解析租户工作区", async () => {
   const workspaceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-  const admin = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", role: "admin" as const };
+  const admin = { id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", role: "admin" as const, accountAccessVersion: 1 };
   const workspace = { id: workspaceId, name: "租户工作区" };
   let membership: { role: "owner" | "admin"; accessState: "confirmed" } | null = null;
   const db = {
+    appUser: {
+      findUnique: async () => ({ id: admin.id, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
+    },
     workspaceMembership: {
       findFirst: async () => membership === null ? null : { workspaceId, workspace, role: membership.role },
       findMany: async () => membership === null ? [] : [{ workspaceId, role: membership.role, accessState: membership.accessState }],

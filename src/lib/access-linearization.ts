@@ -1,6 +1,7 @@
 import { Prisma, type AppUserRole, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { type AccessUser, type ProjectPermission } from "@/lib/access-control";
+import { type ProjectPermission } from "@/lib/access-control";
+import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import {
   findConfirmedProjectMembership,
   findConfirmedWorkspaceMembership,
@@ -22,10 +23,11 @@ const UUID_SCHEMA = z.string().uuid();
 const ACTOR_ROLE_SCHEMA = z.enum(["admin", "member", "user"]);
 
 export type AccessLinearizationDb = Prisma.TransactionClient;
-export type WebAiActor = Readonly<{ id: string; role: AppUserRole }>;
+export type WebAiActor = Readonly<{ id: string; role: AppUserRole; accountAccessVersion?: number }>;
+export type CurrentWebAiActor = Readonly<{ id: string; role: AppUserRole; accountAccessVersion: number }>;
 export type AccessLinearizationClient = PrismaClient | Prisma.TransactionClient;
 
-export type WebAiAccessErrorCode = "ACCESS_FORBIDDEN" | "ACCOUNT_DISABLED";
+export type WebAiAccessErrorCode = "ACCESS_FORBIDDEN" | "ACCOUNT_DISABLED" | "ACCOUNT_ACCESS_STALE";
 
 /**
  * This error is shared by the ordinary service guard and the transactional
@@ -40,7 +42,7 @@ export class WebAiAccessError extends Error {
 }
 
 export type ProjectAccessAdmission = Readonly<{
-  actor: AccessUser;
+  actor: CurrentWebAiActor;
   workspace: Readonly<{ id: string }>;
   project: Readonly<{ id: string; workspaceId: string; archivedAt: Date | null }>;
   permission: ProjectPermission;
@@ -50,6 +52,14 @@ const permissionRank: Record<ProjectPermission, number> = { view: 1, edit: 2, ow
 
 function fail(code: WebAiAccessErrorCode): never {
   throw new WebAiAccessError(code);
+}
+
+function mapAccountAccessError(error: unknown): never {
+  if (error instanceof AccountAccessGuardError) {
+    if (error.code === "ACCOUNT_DISABLED") return fail("ACCOUNT_DISABLED");
+    if (error.code === "ACCOUNT_ACCESS_STALE") return fail("ACCOUNT_ACCESS_STALE");
+  }
+  return fail("ACCESS_FORBIDDEN");
 }
 
 function canonicalUuid(value: unknown): string | null {
@@ -65,10 +75,15 @@ function requireUuid(value: unknown): string {
 
 function assertActorShape(actor: unknown): asserts actor is WebAiActor {
   if (typeof actor !== "object" || actor === null) return fail("ACCESS_FORBIDDEN");
-  const candidate = actor as { id?: unknown; role?: unknown };
+  const candidate = actor as { id?: unknown; role?: unknown; accountAccessVersion?: unknown };
   if (canonicalUuid(candidate.id) === null || !ACTOR_ROLE_SCHEMA.safeParse(candidate.role).success) {
     return fail("ACCESS_FORBIDDEN");
   }
+  if (
+    typeof candidate.accountAccessVersion !== "number"
+    || !Number.isSafeInteger(candidate.accountAccessVersion)
+    || candidate.accountAccessVersion < 1
+  ) return fail("ACCOUNT_ACCESS_STALE");
 }
 
 async function advisoryLock(db: AccessLinearizationDb, key: string, namespace: number): Promise<void> {
@@ -176,8 +191,14 @@ export async function admitWebAiProjectAccess(
   await lockWorkspaceAccess(db, workspaceId);
   await lockProjectAccess(db, projectId);
 
+  try {
+    await assertAccountAccessForActor(db, input.actor);
+  } catch (error) {
+    return mapAccountAccessError(error);
+  }
+
   const [currentActor, project, workspaceMembership, projectMembership] = await Promise.all([
-    db.appUser.findUnique({ where: { id: actorId }, select: { id: true, role: true, disabledAt: true } }),
+    db.appUser.findUnique({ where: { id: actorId }, select: { id: true, role: true, disabledAt: true, accountAccessVersion: true } }),
     db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true, archivedAt: true, membershipInheritanceMode: true } }),
     findConfirmedWorkspaceMembership(db, workspaceId, actorId),
     findConfirmedProjectMembership(db, projectId, actorId),
@@ -200,7 +221,7 @@ export async function admitWebAiProjectAccess(
   // reuse the admission helper as an archived-project bypass.
   if (!input.allowArchived && project.archivedAt !== null) return fail("ACCESS_FORBIDDEN");
   return Object.freeze({
-    actor: Object.freeze({ id: currentActor.id, role: currentActor.role }),
+    actor: Object.freeze({ id: currentActor.id, role: currentActor.role, accountAccessVersion: currentActor.accountAccessVersion }),
     workspace: Object.freeze({ id: workspaceId }),
     project: Object.freeze({ id: project.id, workspaceId: project.workspaceId, archivedAt: project.archivedAt }),
     permission,

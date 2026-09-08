@@ -26,9 +26,9 @@ test("Action Engine persists policy, approval, execution, recovery and archive b
   const viewerId = randomUUID();
   const workspaceId = randomUUID();
   const projectId = randomUUID();
-  const admin = { id: adminId, role: "admin" as const };
-  const editor = { id: editorId, role: "member" as const };
-  const viewer = { id: viewerId, role: "member" as const };
+  const admin = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
+  const editor = { id: editorId, role: "member" as const, accountAccessVersion: 1 };
+  const viewer = { id: viewerId, role: "member" as const, accountAccessVersion: 1 };
 
   await db.appUser.createMany({ data: [
     { id: adminId, username: `action_admin_${suffix}`, role: "admin" },

@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const query = Object.fromEntries(url.searchParams.entries());
     return NextResponse.json(
-      await listMcpControlPlaneAttestationCandidates(actor.id, query),
+      await listMcpControlPlaneAttestationCandidates(actor, query),
       { headers: noStore },
     );
   } catch (error) {

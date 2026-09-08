@@ -68,6 +68,8 @@ test(
     const alternateCredentialId = randomUUID();
     const fingerprint = "a".repeat(64);
     const delegationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1_000);
+    const ownerActor = { id: ownerId, role: "user" as const, accountAccessVersion: 1 };
+    const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
 
     try {
       await db.appUser.createMany({
@@ -121,6 +123,7 @@ test(
           kind: "openai",
           scope: "user",
           ownerUserId: ownerId,
+          ownerAccountAccessVersion: 1,
           ownershipState: "confirmed",
           protocol: "chatCompletions",
           baseUrl: "https://api.openai.com/v1",
@@ -139,6 +142,7 @@ test(
           kind: "openai",
           scope: "user",
           ownerUserId: ownerId,
+          ownerAccountAccessVersion: 1,
           ownershipState: "confirmed",
           protocol: "chatCompletions",
           baseUrl: "https://api.openai.com/v1",
@@ -154,28 +158,28 @@ test(
       const proposal = await proposeProjectAiProviderDelegation(
         projectId,
         { providerConnectionId: providerId, operation: "autoExtract", expiresAt: delegationExpiresAt.toISOString() },
-        { id: ownerId, role: "user" },
+        ownerActor,
         db,
       );
       const ownerConfirmed = await confirmProjectAiProviderDelegationOwner(
         projectId,
         proposal.id,
         { expectedVersion: proposal.version, acknowledgeProviderCharges: true },
-        { id: ownerId, role: "user" },
+        ownerActor,
         db,
       );
       const active = await confirmProjectAiProviderDelegationProject(
         projectId,
         proposal.id,
         { expectedVersion: ownerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       const selection = await putProjectAiEffectiveRouteSelection(
         projectId,
         "autoExtract",
         { source: "personalDelegation", delegationId: proposal.id, expectedVersion: null },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       assert.equal(active.status, "active");
@@ -218,6 +222,7 @@ test(
         ownerSubscriptionVersion: subscription.version,
         ownerSubscriptionStartsAt: subscription.startsAt,
         ownerSubscriptionExpiresAt: subscription.expiresAt,
+        connectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion,
         projectConfirmedById: projectOwnerId,
         projectConfirmedProjectMembershipId: projectOwnerMembership.id,
         projectConfirmedMembershipCreatedAt: projectOwnerMembership.createdAt,
@@ -302,6 +307,7 @@ test(
         selectedByMembershipCreatedAt: grant.selectedByMembershipCreatedAt,
         embeddingDimensions: grant.embeddingDimensions,
         maxOutputTokens: grant.maxOutputTokens,
+        connectionOwnerAccountAccessVersion: grant.connectionOwnerAccountAccessVersion,
         reservationId: null,
         status: "running",
       } as const;
@@ -336,8 +342,9 @@ test(
             expectedEmbeddingRouteId: selected.id,
             expectedEmbeddingRouteVersion: selected.version,
             expectedEmbeddingRouteUpdatedAt: selected.updatedAt,
-            expectedEmbeddingProviderConfigurationVersion: delegation.providerConfigurationVersion,
-            expectedEmbeddingRouteFenceFingerprint: grant.routeFenceFingerprint,
+          expectedEmbeddingProviderConfigurationVersion: delegation.providerConfigurationVersion,
+          expectedEmbeddingConnectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion,
+          expectedEmbeddingRouteFenceFingerprint: grant.routeFenceFingerprint,
             embeddingWebAiGrantId: grant.id,
           },
         }),
@@ -364,6 +371,7 @@ test(
             expectedEmbeddingRouteVersion: selected.version,
             expectedEmbeddingRouteUpdatedAt: selected.updatedAt,
             expectedEmbeddingProviderConfigurationVersion: delegation.providerConfigurationVersion,
+            expectedEmbeddingConnectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion,
             expectedEmbeddingRouteFenceFingerprint: grant.routeFenceFingerprint,
             embeddingWebAiGrantId: null,
           },
@@ -384,28 +392,28 @@ test(
       const embeddingProposal = await proposeProjectAiProviderDelegation(
         projectId,
         { providerConnectionId: providerId, operation: "embedding", expiresAt: delegationExpiresAt.toISOString() },
-        { id: ownerId, role: "user" },
+        ownerActor,
         db,
       );
       const embeddingOwnerConfirmed = await confirmProjectAiProviderDelegationOwner(
         projectId,
         embeddingProposal.id,
         { expectedVersion: embeddingProposal.version, acknowledgeProviderCharges: true },
-        { id: ownerId, role: "user" },
+        ownerActor,
         db,
       );
       await confirmProjectAiProviderDelegationProject(
         projectId,
         embeddingProposal.id,
         { expectedVersion: embeddingOwnerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       const embeddingSelection = await putProjectAiEffectiveRouteSelection(
         projectId,
         "embedding",
         { source: "personalDelegation", delegationId: embeddingProposal.id, expectedVersion: null },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       const persistedEmbeddingSelection = await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({ where: { id: embeddingSelection.id } });
@@ -456,6 +464,7 @@ test(
           ownerSubscriptionVersion: subscription.version,
           ownerSubscriptionStartsAt: subscription.startsAt,
           ownerSubscriptionExpiresAt: subscription.expiresAt,
+          connectionOwnerAccountAccessVersion: embeddingDelegation.connectionOwnerAccountAccessVersion,
           projectConfirmedById: projectOwnerId,
           projectConfirmedProjectMembershipId: projectOwnerMembership.id,
           projectConfirmedMembershipCreatedAt: projectOwnerMembership.createdAt,
@@ -495,6 +504,7 @@ test(
               expectedEmbeddingRouteVersion: embeddingSelection.version,
               expectedEmbeddingRouteUpdatedAt: embeddingSelection.updatedAt,
               expectedEmbeddingProviderConfigurationVersion: embeddingDelegation.providerConfigurationVersion,
+              expectedEmbeddingConnectionOwnerAccountAccessVersion: embeddingDelegation.connectionOwnerAccountAccessVersion,
               expectedEmbeddingRouteFenceFingerprint: embeddingGrant.routeFenceFingerprint,
               embeddingWebAiGrantId: embeddingGrant.id,
               ...overrides,
@@ -536,6 +546,7 @@ test(
           expectedEmbeddingRouteVersion: embeddingSelection.version,
           expectedEmbeddingRouteUpdatedAt: embeddingSelection.updatedAt,
           expectedEmbeddingProviderConfigurationVersion: embeddingDelegation.providerConfigurationVersion,
+          expectedEmbeddingConnectionOwnerAccountAccessVersion: embeddingDelegation.connectionOwnerAccountAccessVersion,
           expectedEmbeddingRouteFenceFingerprint: embeddingGrant.routeFenceFingerprint,
           embeddingWebAiGrantId: embeddingGrant.id,
         },
@@ -601,6 +612,7 @@ test(
           expectedEmbeddingRouteVersion: embeddingSelection.version,
           expectedEmbeddingRouteUpdatedAt: embeddingSelection.updatedAt,
           expectedEmbeddingProviderConfigurationVersion: embeddingDelegation.providerConfigurationVersion,
+          expectedEmbeddingConnectionOwnerAccountAccessVersion: embeddingDelegation.connectionOwnerAccountAccessVersion,
           expectedEmbeddingRouteFenceFingerprint: completeCandidateGrant.routeFenceFingerprint,
           embeddingWebAiGrantId: completeCandidateGrant.id,
         },
@@ -620,6 +632,15 @@ test(
         assert.equal((await db.memoryIndexPointer.findUnique({ where: { projectId } }))?.indexGenerationId, completeCandidateGeneration.id);
         assert.equal((await db.memoryIndexGeneration.findUniqueOrThrow({ where: { id: completeCandidateGeneration.id } })).status, "complete");
       };
+      const assertAccountLifecycleBypassRejected = async (label: string, operation: () => Promise<unknown>) => {
+        await assert.rejects(
+          operation,
+          (error: unknown) => /account access lifecycle context is required/iu.test(errorText(error)),
+          label,
+        );
+        assert.equal((await db.memoryIndexPointer.findUnique({ where: { projectId } }))?.indexGenerationId, completeCandidateGeneration.id);
+        assert.equal((await db.memoryIndexGeneration.findUniqueOrThrow({ where: { id: completeCandidateGeneration.id } })).status, "complete");
+      };
 
       await db.aiProviderConnection.update({
         where: { id: providerId },
@@ -633,7 +654,7 @@ test(
           projectId,
           "embedding",
           { source: "platformDefault", delegationId: null, expectedVersion: embeddingSelection.version },
-          { id: projectOwnerId, role: "user" },
+          projectOwnerActor,
           db,
         ),
       );
@@ -643,7 +664,7 @@ test(
           projectId,
           embeddingDelegation.id,
           { expectedVersion: embeddingDelegation.version, reason: "published generation invalidation test", switchToPlatformDefault: true },
-          { id: projectOwnerId, role: "user" },
+          projectOwnerActor,
           db,
         ),
       );
@@ -676,8 +697,8 @@ test(
           { actorId: projectOwnerId, reason: "published generation invalidation test" },
         )),
       );
-      await assertPersonalInvalidationRejected(
-        "user disable cannot leave a published personal generation stale",
+      await assertAccountLifecycleBypassRejected(
+        "direct user disable requires the governed account lifecycle service",
         () => db.$transaction((tx) => tx.appUser.update({ where: { id: ownerId }, data: { disabledAt: new Date(), disabledById: seededAdminId, disabledReason: "published generation invalidation test" } })),
       );
       await assertPersonalInvalidationRejected(
@@ -732,7 +753,7 @@ test(
             projectId,
             current.id,
             { expectedVersion: current.version, reason: "safe personal memory invalidation test", switchToPlatformDefault: true },
-            { id: projectOwnerId, role: "user" },
+            projectOwnerActor,
             tx,
           );
           assert.equal(revoked.status, "revoked");
@@ -746,7 +767,7 @@ test(
             projectId,
             "embedding",
             { source: "platformDefault", delegationId: null, expectedVersion: embeddingSelection.version },
-            { id: projectOwnerId, role: "user" },
+            projectOwnerActor,
             tx,
           );
         },
@@ -814,15 +835,6 @@ test(
           (await tx.projectMembership.findUniqueOrThrow({ where: { id: embeddingDelegation.ownerProjectMembershipId } })).accessState,
           "revoked",
         ),
-      );
-
-      await assertSafeInvalidation(
-        "safe user disable can commit after cleanup",
-        async (tx) => {
-          await revokeProviderDelegationDependencies(tx);
-          await tx.appUser.update({ where: { id: ownerId }, data: { disabledAt: new Date(), disabledById: seededAdminId, disabledReason: "safe personal memory invalidation test" } });
-        },
-        async (tx) => assert.ok((await tx.appUser.findUniqueOrThrow({ where: { id: ownerId } })).disabledAt),
       );
 
       await assertSafeInvalidation(
@@ -920,6 +932,7 @@ test(
               expectedEmbeddingRouteVersion: embeddingSelection.version,
               expectedEmbeddingRouteUpdatedAt: embeddingSelection.updatedAt,
               expectedEmbeddingProviderConfigurationVersion: embeddingDelegation.providerConfigurationVersion,
+              expectedEmbeddingConnectionOwnerAccountAccessVersion: embeddingDelegation.connectionOwnerAccountAccessVersion,
               expectedEmbeddingRouteFenceFingerprint: expiredGrant.routeFenceFingerprint,
               embeddingWebAiGrantId: expiredGrant.id,
             },
@@ -963,6 +976,7 @@ test(
           expectedEmbeddingRouteVersion: embeddingSelection.version,
           expectedEmbeddingRouteUpdatedAt: embeddingSelection.updatedAt,
           expectedEmbeddingProviderConfigurationVersion: embeddingDelegation.providerConfigurationVersion,
+          expectedEmbeddingConnectionOwnerAccountAccessVersion: embeddingDelegation.connectionOwnerAccountAccessVersion,
           expectedEmbeddingRouteFenceFingerprint: sameTransactionGrant.routeFenceFingerprint,
           embeddingWebAiGrantId: sameTransactionGrant.id,
         },
@@ -976,6 +990,39 @@ test(
         data: { projectId, indexGenerationId: sameTransactionGeneration.id },
       });
 
+      const [providerEpochState] = await db.$queryRaw<Array<{
+        ownerDisabledAt: Date | null;
+        ownerEpoch: number;
+        providerEpoch: number | null;
+        epochValid: boolean;
+      }>>`
+        SELECT owner_user."disabledAt" AS "ownerDisabledAt",
+               owner_user."accountAccessVersion" AS "ownerEpoch",
+               provider."ownerAccountAccessVersion" AS "providerEpoch",
+               "personal_ai_owner_account_access_epoch_valid"(
+                 provider."ownerUserId",
+                 provider."ownerAccountAccessVersion"
+               ) AS "epochValid"
+          FROM "AiProviderConnection" provider
+          JOIN "AppUser" owner_user ON owner_user."id" = provider."ownerUserId"
+         WHERE provider."id" = ${providerId}::uuid
+      `;
+      assert.deepEqual(providerEpochState, {
+        ownerDisabledAt: null,
+        ownerEpoch: 1,
+        providerEpoch: 1,
+        epochValid: true,
+      });
+      const providerGlobalLockTriggers = await db.$queryRaw<Array<{ enabled: string }>>`
+        SELECT trigger_row.tgenabled::text AS "enabled"
+          FROM pg_trigger trigger_row
+          JOIN pg_class relation_row ON relation_row.oid = trigger_row.tgrelid
+         WHERE relation_row.relname = 'AiProviderConnection'
+           AND trigger_row.tgname = 'PAD_provider_global_lock'
+           AND NOT trigger_row.tgisinternal
+      `;
+      assert.deepEqual(providerGlobalLockTriggers, [{ enabled: "O" }]);
+
       let releaseRace!: () => void;
       let signalRaceReady!: () => void;
       const raceRelease = new Promise<void>((resolve) => { releaseRace = resolve; });
@@ -987,19 +1034,31 @@ test(
         await raceRelease;
       });
       await raceReady;
-      await assert.rejects(
-        () => db.$transaction(async (tx) => {
+      const providerInvalidationResult = await db.$transaction(async (tx) => {
           const provider = await tx.aiProviderConnection.findUniqueOrThrow({ where: { id: providerId }, select: { configurationVersion: true } });
           await tx.aiProviderConnection.update({ where: { id: providerId }, data: { configurationVersion: provider.configurationVersion + 1 } });
-        }),
-        (error: unknown) => errorText(error).includes("PROJECT_AI_PROVIDER_DELEGATION_LOCK_BUSY")
-          || errorText(error).includes("40001")
-          || errorText(error).includes("P2034")
-          || errorText(error).includes("write conflict"),
-        "provider invalidation loses deterministically to the memory publish advisory lock",
-      );
+        })
+        .then(() => ({ status: "fulfilled" as const, reason: null }))
+        .catch((error: unknown) => ({ status: "rejected" as const, reason: error }));
       releaseRace();
-      await publishRace;
+      const publishResult = await publishRace
+        .then(() => ({ status: "fulfilled" as const, reason: null }))
+        .catch((error: unknown) => ({ status: "rejected" as const, reason: error }));
+      assert.equal(
+        providerInvalidationResult.status,
+        "rejected",
+        "provider invalidation must lose while memory publish holds the global lock",
+      );
+      assert.match(
+        errorText(providerInvalidationResult.reason),
+        /PROJECT_AI_PROVIDER_DELEGATION_LOCK_BUSY|40001|P2034|write conflict/u,
+        "provider invalidation must fail at the shared serialization boundary",
+      );
+      assert.equal(
+        publishResult.status,
+        "fulfilled",
+        `memory publish must retain valid personal epoch evidence: ${errorText(publishResult.reason)}`,
+      );
       assert.equal((await db.memoryIndexPointer.findUnique({ where: { projectId } }))?.indexGenerationId, sameTransactionGeneration.id);
 
       await assert.rejects(
@@ -1039,20 +1098,20 @@ test(
           projectId,
           liveDelegation.id,
           { expectedVersion: liveDelegation.version, reason: "personal runtime evidence deletion fixture", switchToPlatformDefault: true },
-          { id: projectOwnerId, role: "user" },
+          projectOwnerActor,
           db,
         );
       }
       const projectBeforeDelete = await db.project.findUniqueOrThrow({ where: { id: projectId } });
       const archivedProject = await updateProjectLifecycle({
         projectId,
-        actor: { id: projectOwnerId, role: "user" },
+        actor: projectOwnerActor,
         action: "archive",
         expectedUpdatedAt: projectBeforeDelete.updatedAt,
       }, db);
       await deleteArchivedProject({
         projectId,
-        actor: { id: projectOwnerId, role: "user" },
+        actor: projectOwnerActor,
         confirmationName: projectBeforeDelete.name,
         expectedUpdatedAt: archivedProject.project.updatedAt,
       }, db);
@@ -1060,6 +1119,14 @@ test(
       assert.equal(await db.webAiGrant.findUnique({ where: { id: embeddingGrant.id } }), null);
       assert.equal(await db.memoryIndexGeneration.findUnique({ where: { id: validGeneration.id } }), null);
       assert.equal(await db.projectAiProviderDelegation.findUnique({ where: { id: embeddingDelegation.id } }), null);
+      const retainedPersonalAudit = await db.providerCallAudit.findUniqueOrThrow({ where: { id: personalAudit.id } });
+      assert.equal(retainedPersonalAudit.jobId, null);
+      assert.equal(retainedPersonalAudit.webAiGrantId, null);
+      assert.equal(retainedPersonalAudit.webAiGrantReferenceId, personalAudit.webAiGrantReferenceId);
+      assert.equal(retainedPersonalAudit.webAiGrantProjectId, personalAudit.webAiGrantProjectId);
+      assert.equal(retainedPersonalAudit.personalDelegationId, personalAudit.personalDelegationId);
+      assert.equal(retainedPersonalAudit.personalDelegationVersion, personalAudit.personalDelegationVersion);
+      assert.equal(retainedPersonalAudit.connectionOwnerAccountAccessVersion, personalAudit.connectionOwnerAccountAccessVersion);
       assert.ok(await db.projectAiProviderDelegationAudit.count({ where: { projectId } }) > 0);
     } finally {
       await db.$disconnect();

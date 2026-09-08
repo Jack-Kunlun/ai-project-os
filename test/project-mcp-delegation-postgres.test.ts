@@ -11,6 +11,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { Client } from "pg";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
+import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import {
   ProjectMcpConnectionDelegationServiceError,
   confirmProjectMcpConnectionDelegationOwner,
@@ -315,14 +316,14 @@ async function insertDelegationAudit(client: Client, delegation: Record<string, 
        "terminalActorProjectMembershipId", "terminalActorMembershipCreatedAt", "terminalReason",
        "ownerProjectMembershipId", "ownerMembershipCreatedAt", "projectConfirmedProjectMembershipId",
        "projectConfirmedMembershipCreatedAt", "expiresAt", "connectionConfigurationRevision",
-       "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "reason", "transitionAt"
+       "resolvedAddressFingerprint", "credentialFingerprint", "connectionOwnerAccountAccessVersion", "delegationFingerprint", "reason", "transitionAt"
      ) VALUES (
        $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::"ProjectMcpConnectionDelegationAuditAction",
        $7, $8::"ProjectMcpConnectionDelegationStatus", $9::"ProjectMcpConnectionDelegationStatus",
        $10::"ProjectMcpConnectionDelegationActorKind", $11::uuid, $12::uuid, $13::timestamp,
        $14::"ProjectMcpConnectionDelegationActorKind", $15::uuid, $16::uuid, $17::timestamp, $18,
        $19::uuid, $20::timestamp, $21::uuid, $22::timestamp, $23::timestamp, $24,
-       $25, $26, $27, $28, $29::timestamp)`,
+       $25, $26, $27, $28, $29, $30::timestamp)`,
     [
       id(), delegation.projectId, delegation.mcpConnectionId, delegation.id, delegation.connectionOwnerId,
       action, delegation.version, delegation.statusBefore ?? null, delegation.status, action === "expired" ? "system_expiry" : "user",
@@ -331,7 +332,7 @@ async function insertDelegationAudit(client: Client, delegation: Record<string, 
       delegation.terminalActorMembershipCreatedAt ?? null, delegation.terminalReason ?? null, delegation.ownerProjectMembershipId,
       delegation.ownerMembershipCreatedAt, delegation.projectConfirmedProjectMembershipId ?? null,
       delegation.projectConfirmedMembershipCreatedAt ?? null, delegation.expiresAt, delegation.connectionConfigurationRevision,
-      delegation.resolvedAddressFingerprint, delegation.credentialFingerprint, delegation.delegationFingerprint, reason,
+      delegation.resolvedAddressFingerprint, delegation.credentialFingerprint, delegation.connectionOwnerAccountAccessVersion ?? null, delegation.delegationFingerprint, reason,
       delegation.transitionAt ?? delegation.proposedAt,
     ],
   );
@@ -388,11 +389,11 @@ test("MCP Package A PostgreSQL control plane enforces ownership, epochs, fingerp
       [credentialId, fingerprintA],
     );
     await client.query(
-      `INSERT INTO "McpConnection" ("id", "name", "endpointUrl", "authKind", "credentialId", "allowPrivateNetwork", "resolvedAddressFingerprint", "status", "createdById", "ownerUserId", "ownershipState", "updatedAt") VALUES ($1::uuid, $2, 'https://mcp.example.test/mcp', 'bearer', $3::uuid, false, $4, 'verified', $5::uuid, $5::uuid, 'confirmed', CURRENT_TIMESTAMP)`,
+      `INSERT INTO "McpConnection" ("id", "name", "endpointUrl", "authKind", "credentialId", "allowPrivateNetwork", "resolvedAddressFingerprint", "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt") VALUES ($1::uuid, $2, 'https://mcp.example.test/mcp', 'bearer', $3::uuid, false, $4, 'verified', $5::uuid, $5::uuid, 1, 'confirmed', CURRENT_TIMESTAMP)`,
       [connectionId, `MCP ${suffix}`, credentialId, fingerprintB, ownerId],
     );
     await client.query(
-      `INSERT INTO "McpConnection" ("id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint", "status", "createdById", "ownerUserId", "ownershipState", "updatedAt") VALUES ($1::uuid, $2, 'https://mcp.example.test/no-auth', 'none', false, $3, 'configured', $4::uuid, $4::uuid, 'confirmed', CURRENT_TIMESTAMP)`,
+      `INSERT INTO "McpConnection" ("id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint", "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt") VALUES ($1::uuid, $2, 'https://mcp.example.test/no-auth', 'none', false, $3, 'configured', $4::uuid, $4::uuid, 1, 'confirmed', CURRENT_TIMESTAMP)`,
       [noCredentialConnectionId, `MCP none ${suffix}`, fingerprintB, ownerId],
     );
     await client.query("COMMIT");
@@ -495,7 +496,7 @@ test("MCP Package A PostgreSQL control plane enforces ownership, epochs, fingerp
     } as Record<string, unknown>;
     await client.query("BEGIN");
     await client.query(
-      `INSERT INTO "ProjectMcpConnectionDelegation" ("id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionConfigurationRevision", "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "expiresAt", "ownerProjectMembershipId", "ownerMembershipCreatedAt", "proposedById", "updatedAt") VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9::timestamp, $10::uuid, $11::timestamp, $4::uuid, CURRENT_TIMESTAMP)`,
+      `INSERT INTO "ProjectMcpConnectionDelegation" ("id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "connectionConfigurationRevision", "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "expiresAt", "ownerProjectMembershipId", "ownerMembershipCreatedAt", "proposedById", "updatedAt") VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, $7, $8, $9::timestamp, $10::uuid, $11::timestamp, $4::uuid, CURRENT_TIMESTAMP)`,
       [delegationId, projectId, connectionId, ownerId, 5, fingerprintB, fingerprintC, fingerprintD, sqlTimestamp(expiresAt), ownerMembershipId, sqlTimestamp(ownerMembership.rows[0]!.createdAt)],
     );
     const draft = (await client.query(`SELECT * FROM "ProjectMcpConnectionDelegation" WHERE "id" = $1::uuid`, [delegationId])).rows[0] as Record<string, unknown>;
@@ -629,7 +630,7 @@ test("MCP Package A PostgreSQL control plane enforces ownership, epochs, fingerp
     // allowed to cascade and their scalar audit rows remain after deletion.
     await client.query("BEGIN");
     await client.query(
-      `INSERT INTO "ProjectMcpConnectionDelegation" ("id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionConfigurationRevision", "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "expiresAt", "ownerProjectMembershipId", "ownerMembershipCreatedAt", "proposedById", "updatedAt") VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 5, $5, $6, $7, $8::timestamp, $9::uuid, $10::timestamp, $4::uuid, CURRENT_TIMESTAMP)`,
+      `INSERT INTO "ProjectMcpConnectionDelegation" ("id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "connectionConfigurationRevision", "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "expiresAt", "ownerProjectMembershipId", "ownerMembershipCreatedAt", "proposedById", "updatedAt") VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, 5, $5, $6, $7, $8::timestamp, $9::uuid, $10::timestamp, $4::uuid, CURRENT_TIMESTAMP)`,
       [rejectedDelegationId, projectId, connectionId, ownerId, fingerprintB, fingerprintC, fingerprintD, sqlTimestamp(expiresAt), ownerMembershipId, sqlTimestamp(ownerMembership.rows[0]!.createdAt)],
     );
     const rejectedDraft = (await client.query(`SELECT * FROM "ProjectMcpConnectionDelegation" WHERE "id" = $1::uuid`, [rejectedDelegationId])).rows[0] as Record<string, unknown>;
@@ -719,8 +720,8 @@ test(
         `INSERT INTO "McpToolAttestation" (
            "id", "controlPlaneVersion", "status", "version", "connectionId", "toolDefinitionId", "toolName",
            "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "conclusion", "riskLevel",
-           "evidenceNote", "note", "connectionConfigurationRevision", "verifiedById", "evidence", "attestedAt", "createdAt"
-         ) VALUES ($1::uuid, 2, 'active', 1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid, $14::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+           "evidenceNote", "note", "connectionConfigurationRevision", "connectionOwnerAccountAccessVersion", "verifiedById", "evidence", "attestedAt", "createdAt"
+         ) VALUES ($1::uuid, 2, 'active', 1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::uuid, $15::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [
           input.attestationId,
           input.connectionId,
@@ -734,6 +735,7 @@ test(
           input.evidenceNote ?? "manual_read_only_review",
           input.note ?? null,
           input.connectionConfigurationRevision ?? 1,
+          1,
           input.verifiedById,
           input.evidence ?? "{}",
         ],
@@ -755,11 +757,11 @@ test(
       await client.query(
         `INSERT INTO "McpToolAttestationAudit" (
            "id", "attestationId", "connectionId", "toolDefinitionId", "event", "actorId", "controlPlaneVersion",
-           "attestationVersion", "statusBefore", "statusAfter", "connectionConfigurationRevision",
+           "attestationVersion", "statusBefore", "statusAfter", "connectionConfigurationRevision", "connectionOwnerAccountAccessVersion",
            "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "details", "createdAt"
          ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"McpToolAttestationAuditEvent", $6::uuid, 2,
-           $7, $8::"McpToolAttestationStatus", $9::"McpToolAttestationStatus", $10,
-           $11, $12, $13, '{}'::jsonb, CURRENT_TIMESTAMP)`,
+           $7, $8::"McpToolAttestationStatus", $9::"McpToolAttestationStatus", $10, $11,
+           $12, $13, $14, '{}'::jsonb, CURRENT_TIMESTAMP)`,
         [
           id(),
           input.attestationId,
@@ -771,6 +773,7 @@ test(
           input.statusBefore,
           input.statusAfter,
           input.connectionConfigurationRevision,
+          1,
           input.definitionFingerprint ?? fingerprintD,
           fingerprintB,
           sentinel,
@@ -849,8 +852,8 @@ test(
         await client.query(
           `INSERT INTO "McpConnection" (
              "id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint",
-             "status", "createdById", "ownerUserId", "ownershipState", "updatedAt"
-           ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 'confirmed', CURRENT_TIMESTAMP)`,
+             "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt"
+           ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 1, 'confirmed', CURRENT_TIMESTAMP)`,
           [connectionId, `MCP C1 ${name} ${suffix}`, `https://mcp.example.test/c1/${name}/${suffix}`, fingerprintB, ownerId],
         );
       }
@@ -997,11 +1000,11 @@ test(
       await client.query("SET LOCAL session_replication_role = 'replica'");
       await client.query(
         `INSERT INTO "ProjectMcpConnectionDelegation" (
-           "id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionConfigurationRevision",
+           "id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "connectionConfigurationRevision",
            "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "expiresAt", "version", "status",
            "ownerProjectMembershipId", "ownerMembershipCreatedAt", "projectConfirmedProjectMembershipId", "projectConfirmedMembershipCreatedAt",
            "proposedById", "proposedAt", "ownerConfirmedById", "ownerConfirmedAt", "projectConfirmedById", "projectConfirmedAt", "activatedAt", "createdAt", "updatedAt"
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, $7, $8::timestamp, 3, 'active',
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, 1, $5, $6, $7, $8::timestamp, 3, 'active',
            $9::uuid, $10::timestamp, $11::uuid, $12::timestamp, $4::uuid, $13::timestamp, $4::uuid, $13::timestamp,
            $14::uuid, $15::timestamp, $15::timestamp, $13::timestamp, $13::timestamp)`,
         [delegationId, projectId, grantConnectionId, ownerId, fingerprintB, sentinel, fingerprintC, sqlTimestamp(expiresAt), ownerMembership.id, sqlTimestamp(ownerMembership.createdAt), projectOwnerMembership.id, sqlTimestamp(projectOwnerMembership.createdAt), sqlTimestamp(now), projectOwnerId, sqlTimestamp(now)],
@@ -1015,35 +1018,36 @@ test(
           `INSERT INTO "ProjectMcpToolGrant" (
              "id", "projectId", "connectionId", "delegationId", "controlPlaneVersion", "grantVersion", "toolName",
              "toolDefinitionId", "attestationId", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId",
+             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "connectionOwnerAccountAccessVersion", "grantorProjectMembershipId",
              "grantorMembershipCreatedAt", "status", "managedById", "acknowledgedAt", "creationTransactionId", "createdAt", "updatedAt"
            ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 2, 1, $5, $6::uuid, $7::uuid, $8, $9, $10,
-             3, $11, 1, $12::uuid, $13::timestamp, 'active', $14::uuid, CURRENT_TIMESTAMP, txid_current(), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+             3, $11, 1, 1, $12::uuid, $13::timestamp, 'active', $14::uuid, CURRENT_TIMESTAMP, txid_current(), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
           [grantIdValue, projectId, grantConnectionId, delegationId, toolName, definitionValue, attestationValue, definitionFingerprint, fingerprintB, sentinel, fingerprintC, ownerMembership.id, sqlTimestamp(ownerMembership.createdAt), ownerId],
         );
         await client.query(
           `INSERT INTO "ProjectMcpToolGrantAudit" (
              "id", "projectId", "grantId", "event", "actorId", "controlPlaneVersion", "grantVersion", "statusBefore", "statusAfter",
-             "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
-             "definitionFingerprint", "details", "transactionId"
-           ) SELECT $2::uuid, "projectId", "id", 'granted', "managedById", 2, 1, NULL, 'active', "delegationVersion", "delegationFingerprint",
-             "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint", '{}'::jsonb, "creationTransactionId"
+           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
+           "connectionOwnerAccountAccessVersion", "definitionFingerprint", "details", "transactionId"
+         ) SELECT $2::uuid, "projectId", "id", 'granted', "managedById", 2, 1, NULL, 'active', "delegationVersion", "delegationFingerprint",
+             "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "connectionOwnerAccountAccessVersion",
+             "definitionFingerprint", '{}'::jsonb, "creationTransactionId"
            FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
           [grantIdValue, id()],
         );
         await client.query(
           `INSERT INTO "ProjectMcpToolGrantLedger" (
-             "id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+             "id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "toolName",
              "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "actorProjectMembershipId",
              "actorMembershipCreatedAt", "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision",
              "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint", "networkFingerprint",
              "credentialFingerprint", "acknowledgedAt", "transactionId"
-           ) SELECT $2::uuid, "projectId", "id", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
+           ) SELECT $2::uuid, "projectId", "id", "connectionId", "delegationId", "toolDefinitionId", "attestationId", $3::uuid, "connectionOwnerAccountAccessVersion", "toolName",
              2, 1, 'granted', NULL, 'active', "managedById", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "delegationVersion",
              "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "definitionFingerprint",
              "networkFingerprint", "credentialFingerprint", "acknowledgedAt", "creationTransactionId"
            FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
-          [grantIdValue, id()],
+          [grantIdValue, id(), ownerId],
         );
       }
       await client.query("COMMIT");
@@ -1090,7 +1094,35 @@ test(
       await client.query("ROLLBACK").catch(() => undefined);
       assert.equal((await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count FROM "McpToolAttestation" WHERE "id" = $1::uuid`, [nullVersionAttestationId])).rows[0]?.count, 0);
 
-      await client.query(`UPDATE "AppUser" SET "disabledAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [verifierId]);
+      const [revoker, verifier] = await Promise.all([
+        db.appUser.findUniqueOrThrow({ where: { id: revokerId }, select: { accountAccessVersion: true } }),
+        db.appUser.findUniqueOrThrow({ where: { id: verifierId }, select: { accountAccessVersion: true, username: true } }),
+      ]);
+      const verifierDisablePreview = await previewAccountAccess({
+        adminUserId: revokerId,
+        adminAccountAccessVersion: revoker.accountAccessVersion,
+        userId: verifierId,
+        action: "disable",
+        reason: "MCP C1 verifier access revoked",
+        expectedVersion: verifier.accountAccessVersion,
+      }, db);
+      assert.equal(verifierDisablePreview.canExecute, true);
+      await executeAccountAccess({
+        adminUserId: revokerId,
+        adminAccountAccessVersion: revoker.accountAccessVersion,
+        userId: verifierId,
+        action: "disable",
+        reason: "MCP C1 verifier access revoked",
+        expectedVersion: verifierDisablePreview.current.accountAccessVersion,
+        expectedImpactFingerprint: verifierDisablePreview.impactFingerprint,
+        requestKey: `mcp-c1-verifier-disable-${suffix}`,
+        requestFingerprint: verifierDisablePreview.requestFingerprint,
+        previewId: verifierDisablePreview.previewId,
+        previewIssuedAt: verifierDisablePreview.previewIssuedAt,
+        previewExpiresAt: verifierDisablePreview.previewExpiresAt,
+        confirmation: true,
+        confirmationUsername: verifier.username,
+      }, db);
       await client.query(`UPDATE "McpConnection" SET "status" = 'disabled', "disabledAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [attestationConnectionId]);
       await client.query(`UPDATE "McpToolDefinition" SET "current" = false, "supersededAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [attestationDefinitionId]);
       await client.query("BEGIN");
@@ -1195,7 +1227,6 @@ test(
         [grantConnectionId, fingerprintA],
       );
       await client.query(`UPDATE "McpToolDefinition" SET "current" = false, "supersededAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [grantDefinitionId]);
-      await client.query(`UPDATE "AppUser" SET "disabledAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [verifierId]);
       await client.query(`UPDATE "ProjectMembership" SET "accessState" = 'revoked' WHERE "id" = $1::uuid`, [ownerMembership.id]);
       await client.query("COMMIT");
 
@@ -1214,9 +1245,9 @@ test(
       await client.query(
         `INSERT INTO "ProjectMcpToolGrantAudit" (
            "id", "projectId", "grantId", "event", "actorId", "controlPlaneVersion", "grantVersion", "statusBefore", "statusAfter",
-           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
+           "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision", "connectionOwnerAccountAccessVersion", "grantorProjectMembershipId", "grantorMembershipCreatedAt",
            "revokerProjectMembershipId", "revokerMembershipCreatedAt", "definitionFingerprint", "details"
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'revoked', $4::uuid, 2, 2, 'active', 'revoked', 3, $5, 1, $6::uuid, $7::timestamp, $8::uuid, $9::timestamp, $10, '{}'::jsonb)`,
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'revoked', $4::uuid, 2, 2, 'active', 'revoked', 3, $5, 1, 1, $6::uuid, $7::timestamp, $8::uuid, $9::timestamp, $10, '{}'::jsonb)`,
         [id(), projectId, grantId, projectOwnerId, fingerprintC, ownerMembership.id, sqlTimestamp(ownerMembership.createdAt), projectOwnerMembership.id, sqlTimestamp(projectOwnerMembership.createdAt), fingerprintD],
       );
       await client.query(
@@ -1224,14 +1255,14 @@ test(
            "id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
            "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "actorProjectMembershipId",
            "actorMembershipCreatedAt", "delegationVersion", "delegationFingerprint", "connectionConfigurationRevision",
-           "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId", "revokerMembershipCreatedAt",
+           "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId", "revokerMembershipCreatedAt", "connectionOwnerId", "connectionOwnerAccountAccessVersion",
            "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "acknowledgedAt"
          ) SELECT $2::uuid, "projectId", "id", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "toolName",
            2, 2, 'revoked', 'active', 'revoked', "revokedById", "revokerProjectMembershipId", "revokerMembershipCreatedAt", "delegationVersion",
            "delegationFingerprint", "connectionConfigurationRevision", "grantorProjectMembershipId", "grantorMembershipCreatedAt", "revokerProjectMembershipId",
-           "revokerMembershipCreatedAt", "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "acknowledgedAt"
+           "revokerMembershipCreatedAt", $3::uuid, "connectionOwnerAccountAccessVersion", "definitionFingerprint", "networkFingerprint", "credentialFingerprint", "acknowledgedAt"
          FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`,
-        [grantId, id()],
+        [grantId, id(), ownerId],
       );
       await client.query("COMMIT");
       const durableGrant = await client.query<{ status: string; grantVersion: number; managedById: string; revokedById: string | null; revocationTransactionId: string | null }>(
@@ -1333,10 +1364,10 @@ test(
       try {
         await client.query(
           `INSERT INTO "ProjectMcpConnectionDelegation" (
-             "id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionConfigurationRevision",
+             "id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "connectionConfigurationRevision",
              "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "expiresAt",
              "ownerProjectMembershipId", "ownerMembershipCreatedAt", "proposedById", "updatedAt"
-           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, $7, CURRENT_TIMESTAMP + interval '1 hour', $8::uuid, $9::timestamp, $4::uuid, CURRENT_TIMESTAMP)`,
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, 1, $5, $6, $7, CURRENT_TIMESTAMP + interval '1 hour', $8::uuid, $9::timestamp, $4::uuid, CURRENT_TIMESTAMP)`,
           [delegationId, projectId, connectionId, ownerId, fingerprintB, sentinel, fingerprintD, ownerMembershipId, sqlTimestamp(ownerMembershipCreatedAt)],
         );
         const draft = (await client.query(`SELECT * FROM "ProjectMcpConnectionDelegation" WHERE "id" = $1::uuid`, [delegationId])).rows[0] as Record<string, unknown>;
@@ -1401,8 +1432,8 @@ test(
         await client.query(
           `INSERT INTO "McpConnection" (
              "id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint",
-             "status", "createdById", "ownerUserId", "ownershipState", "updatedAt"
-           ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 'confirmed', CURRENT_TIMESTAMP)`,
+             "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt"
+           ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 1, 'confirmed', CURRENT_TIMESTAMP)`,
           [connectionId, `MCP terminal connection ${index} ${suffix}`, `https://mcp.example.test/terminal/${index}`, fingerprintB, ownerId],
         );
       }
@@ -1587,11 +1618,11 @@ test(
     const foreignConnectionId = id();
     const adminConnectionId = id();
     let ownerMembership: { id: string; createdAt: Date } | null = null;
-    const ownerActor = { id: ownerId, role: "user" as const };
-    const projectOwnerActor = { id: projectOwnerId, role: "user" as const };
-    const viewerActor = { id: viewerId, role: "user" as const };
-    const workspaceAdminActor = { id: workspaceAdminId, role: "admin" as const };
-    const foreignOwnerActor = { id: foreignOwnerId, role: "user" as const };
+    const ownerActor = { id: ownerId, role: "user" as const, accountAccessVersion: 1 };
+    const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
+    const viewerActor = { id: viewerId, role: "user" as const, accountAccessVersion: 1 };
+    const workspaceAdminActor = { id: workspaceAdminId, role: "admin" as const, accountAccessVersion: 1 };
+    const foreignOwnerActor = { id: foreignOwnerId, role: "user" as const, accountAccessVersion: 1 };
     type DelegationViewLike = Readonly<{
       id: string;
       recordStatus: string;
@@ -1642,8 +1673,8 @@ test(
         await client.query(
           `INSERT INTO "McpConnection" (
              "id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint",
-             "status", "createdById", "ownerUserId", "ownershipState", "updatedAt"
-           ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 'confirmed', CURRENT_TIMESTAMP)`,
+             "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt"
+           ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 1, 'confirmed', CURRENT_TIMESTAMP)`,
           [connectionId, name, `https://mcp.example.test/package-b/${connectionId}`, fingerprintB, owner],
         );
       }
@@ -1898,10 +1929,10 @@ test(
       await client.query("SET LOCAL session_replication_role = 'replica'");
       await client.query(
         `INSERT INTO "ProjectMcpConnectionDelegation" (
-           "id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionConfigurationRevision",
+           "id", "projectId", "mcpConnectionId", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "connectionConfigurationRevision",
            "resolvedAddressFingerprint", "credentialFingerprint", "delegationFingerprint", "expiresAt", "version", "status",
            "ownerProjectMembershipId", "ownerMembershipCreatedAt", "proposedById", "proposedAt", "createdAt", "updatedAt"
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 1, $5, $6, $7, $8::timestamp, 1, 'draft', $9::uuid, $10::timestamp, $4::uuid, $11::timestamp, $11::timestamp, $11::timestamp)`,
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, (SELECT "ownerAccountAccessVersion" FROM "McpConnection" WHERE "id" = $3::uuid), 1, $5, $6, $7, $8::timestamp, 1, 'draft', $9::uuid, $10::timestamp, $4::uuid, $11::timestamp, $11::timestamp, $11::timestamp)`,
         [dueDraftId, projectId, dueConnectionId, ownerId, fingerprintB, sentinel, fingerprintD, dueExpiresAt.toISOString(), readdedMembership.id, readdedMembership.createdAt.toISOString(), dueProposedAt.toISOString()],
       );
       const seededDueDraft = (await client.query(`SELECT * FROM "ProjectMcpConnectionDelegation" WHERE "id" = $1::uuid`, [dueDraftId])).rows[0] as Record<string, unknown>;

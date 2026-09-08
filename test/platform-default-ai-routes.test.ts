@@ -31,8 +31,8 @@ import {
 } from "../src/lib/ai-providers";
 import { isSerializationConflict } from "../src/lib/project-snapshot-errors";
 
-const admin = { id: "11111111-1111-4111-8111-111111111111", role: "admin" } as const;
-const member = { id: "22222222-2222-4222-8222-222222222222", role: "user" } as const;
+const admin = { id: "11111111-1111-4111-8111-111111111111", role: "admin", accountAccessVersion: 1 } as const;
+const member = { id: "22222222-2222-4222-8222-222222222222", role: "user", accountAccessVersion: 1 } as const;
 const providerId = "33333333-3333-4333-8333-333333333333";
 const secondProviderId = "44444444-4444-4444-8444-444444444444";
 
@@ -116,6 +116,12 @@ class FakePlatformRouteDb {
     { projectId: "77777777-7777-4777-8777-777777777777", indexGenerationId: "88888888-8888-4888-8888-888888888888", generation: { providerConnectionId: secondProviderId, modelId: "text-embedding-3-small", dimensions: 1536 } },
   ];
   private clock = 0;
+
+  readonly appUser = {
+    findUnique: async ({ where }: { where: { id: string } }) => where.id === admin.id
+      ? { id: admin.id, role: "admin" as const, disabledAt: null, accountAccessVersion: admin.accountAccessVersion }
+      : null,
+  };
 
   readonly aiProviderConnection = {
     findUnique: async ({ where }: { where: { id: string } }) => this.providerWithDefaults(this.providers.get(where.id)),
@@ -247,7 +253,7 @@ class FakeProviderLifecycleDb {
     findUnique: async ({ where }: { where: { id: string } }) => {
       this.events.push("actor-read");
       return where.id === admin.id
-        ? { id: admin.id, role: "admin" as const, disabledAt: null }
+        ? { id: admin.id, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }
         : null;
     },
   };
@@ -307,7 +313,7 @@ class CountingPlatformProviderGuardDb {
   readonly appUser = {
     findUnique: async () => {
       this.providerCalls += 1;
-      return { id: admin.id, role: "admin" as const, disabledAt: new Date("2026-09-04T00:00:00.000Z") };
+      return { id: admin.id, role: "admin" as const, disabledAt: new Date("2026-09-04T00:00:00.000Z"), accountAccessVersion: 1 };
     },
   };
   readonly aiProviderConnection = new Proxy({}, {
@@ -357,6 +363,26 @@ test("platform provider services reject a disabled admin before provider access"
   assert.equal(fake.credentialCalls, 0);
 });
 
+test("platform provider services reject an administrator actor from a prior account epoch", async () => {
+  let providerReads = 0;
+  const fake = {
+    appUser: {
+      findUnique: async () => ({ id: admin.id, role: "admin" as const, disabledAt: null, accountAccessVersion: 3 }),
+    },
+    aiProviderConnection: {
+      findMany: async () => {
+        providerReads += 1;
+        return [];
+      },
+    },
+  } as unknown as PrismaClient;
+  await assert.rejects(
+    () => listProviderConnections({ ...admin, accountAccessVersion: 1 }, fake),
+    (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_ADMIN_REQUIRED",
+  );
+  assert.equal(providerReads, 0);
+});
+
 test("platform provider routes retain the authenticated actor through every mutation and probe", async () => {
   const [collectionRoute, itemRoute, testRoute, ownershipRoute] = await Promise.all([
     readFile("src/app/api/settings/providers/route.ts", "utf8"),
@@ -372,6 +398,16 @@ test("platform provider routes retain the authenticated actor through every muta
   assert.match(testRoute, /const actor = await requireApiSession\(request\)/u);
   assert.match(testRoute, /testPlatformProviderConnection\(providerId, actor\)/u);
   assert.match(ownershipRoute, /confirmPlatformProviderOwnership\(providerId, await readJsonBody\(request\), actor\)/u);
+});
+
+test("platform default routes reject an administrator actor from a prior account epoch", async () => {
+  const fake = db();
+  await assert.rejects(
+    () => listPlatformDefaultAiRoutes({ ...admin, accountAccessVersion: 2 }, fake as unknown as PrismaClient),
+    (error: unknown) => error instanceof PlatformDefaultAiRouteError && error.code === "PLATFORM_AI_ROUTE_ADMIN_REQUIRED",
+  );
+  assert.equal(fake.routes.size, 0);
+  assert.equal(fake.audits.length, 0);
 });
 
 test("the platform route control plane keeps six exact, independent operations", () => {
@@ -557,7 +593,8 @@ test("provider configuration versions fence route readiness and lifecycle change
 test("platform provider mutations lock the actor before provider access", async () => {
   const fake = new FakeProviderLifecycleDb();
   await updateProviderConnection(fake.provider.id, { name: "Actor-fenced provider" }, admin, fake as unknown as PrismaClient);
-  assert.deepEqual(fake.events.slice(0, 5), ["transaction", "lock", "actor-read", "lock", "provider-read"]);
+  assert.deepEqual(fake.events.slice(0, 5), ["transaction", "lock", "actor-read", "actor-read", "lock"]);
+  assert.equal(fake.events[5], "provider-read");
 });
 
 test("provider lifecycle serializable conflicts map to a stable provider conflict", async () => {

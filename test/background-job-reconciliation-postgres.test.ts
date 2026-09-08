@@ -13,6 +13,7 @@ import {
   ProjectWorkflowError,
   reconcileProjectJob,
 } from "../src/lib/project-workflow";
+import { grantProjectMembership } from "../src/lib/membership-governance";
 
 const repositoryRoot = process.cwd();
 const databaseName = "ai_project_os_background_job_reconciliation_test";
@@ -51,6 +52,69 @@ const baseMigrationNames = [
   "20260829131000_add_project_github_sync_runs",
   "20260829140000_add_memory_index_build_modes",
   "20260829141000_add_memory_index_candidates",
+] as const;
+const postD0ThroughWorkspaceRbacMigrationNames = [
+  "20260829150000_add_project_lifecycle_and_export_audits",
+  "20260829151000_guard_archived_project_jobs",
+  "20260829160000_add_project_assets",
+  "20260829170000_add_multi_git_repositories",
+  "20260829180000_add_automation_worker",
+  "20260829190000_add_memory_quality",
+  "20260829200000_add_web_sources",
+  "20260829210000_add_workspaces_rbac_oidc",
+] as const;
+const postWorkspaceRbacMigrationNames = [
+  "20260829211000_fix_long_path_constraints",
+  "20260829212000_scope_manual_source_deduplication",
+  "20260829213000_add_oidc_endpoint_pinning",
+  "20260829214000_align_oidc_discovery_defaults",
+  "20260829220000_add_project_action_engine",
+  "20260829230000_add_controlled_mcp_capabilities",
+  "20260830010000_add_action_result_intake",
+  "20260830020000_add_evidence_driven_project_plan",
+  "20260830030000_add_project_operations_loop",
+  "20260830040000_add_project_world_model",
+  "20260830050000_harden_source_provenance_and_mcp_attestation",
+  "20260831000000_add_worker_runtime_health",
+  "20260901000000_add_project_asset_upload_admission",
+  "20260901010000_add_safe_project_deletion",
+  "20260902000000_add_github_oauth_login",
+  "20260902010000_add_ai_entitlements_and_provider_scope",
+  "20260903010000_add_user_system_role_compatibility",
+  "20260903020000_add_user_ai_provider_scope",
+  "20260903030000_add_platform_policies_and_connection_ownership",
+  "20260904010000_default_new_app_users_to_user",
+  "20260904020000_add_platform_default_route_control_plane",
+  "20260904030000_add_ai_provider_ownership_audit",
+  "20260904040000_add_membership_access_governance",
+] as const;
+const postMemorySchemaMigrationNames = [
+  "20260904060000_add_runtime_ai_route_snapshots",
+  "20260904070000_add_runtime_ai_grant_billing_fences",
+  "20260904080000_add_personal_ai_provider_ownership",
+  "20260904090000_add_project_ai_provider_delegations",
+  "20260904100000_allow_delegation_owner_safety_switch",
+  "20260904110000_add_personal_ai_runtime_evidence",
+  "20260904120000_harden_personal_memory_runtime_invalidation",
+  "20260904130000_bind_personal_memory_dispatch_admission",
+  "20260904140000_scope_personal_git_mcp_connections",
+  "20260904150000_add_project_git_repository_delegations",
+  "20260904160000_add_project_git_manual_runtime",
+  "20260904170000_add_project_git_manual_run_reconciliation",
+  "20260904180000_add_project_mcp_connection_delegations",
+  "20260904190000_add_mcp_control_plane_v2",
+  "20260904200000_add_project_mcp_grant_retention_ledger",
+  "20260904210000_add_project_mcp_action_approval_control_plane",
+  "20260904220000_add_project_mcp_action_dispatch_runtime",
+  "20260904230000_quarantine_legacy_mcp_sources",
+  "20260905010000_harden_workspace_invitation_governance",
+  "20260905020000_harden_membership_subscription_lifecycle",
+  "20260905030000_harden_account_access_lifecycle",
+  "20260905040000_bind_personal_ai_owner_access_epoch",
+  "20260905045000_preserve_personal_ai_audit_on_project_deletion",
+  "20260905046000_preserve_personal_ai_audit_multi_fk_cascade",
+  "20260905050000_bind_personal_git_owner_access_epoch",
+  "20260905060000_bind_personal_mcp_owner_access_epoch",
 ] as const;
 
 function validateUrl(value: unknown): string {
@@ -96,34 +160,6 @@ function fixedKey(prefix: string): string {
   return `${prefix}${"0".repeat(64 - prefix.length)}`;
 }
 
-function createHistoricalSchemaCompatibilityClient(db: PrismaClient): PrismaClient {
-  // This self gate intentionally stops at D0 (20260829142000), before the
-  // later AppUser.disabledAt and Project.archivedAt columns. Keep the current
-  // actor-aware workflow and its RBAC/active checks under test by adapting
-  // only those absent, backwards-compatible nullable fields; the current
-  // schema authorization path is covered by the web-ai-access PostgreSQL gate.
-  return db.$extends({
-    query: {
-      $allModels: {
-        async $allOperations({ model, operation, args, query }) {
-          const selectedValue = (args as { select?: unknown }).select;
-          if (operation !== "findUnique" || (model !== "AppUser" && model !== "Project") ||
-            selectedValue === null || typeof selectedValue !== "object" || Array.isArray(selectedValue)) {
-            return query(args);
-          }
-          const selected = selectedValue as Record<string, boolean>;
-          const absentField = model === "AppUser" ? "disabledAt" : "archivedAt";
-          if (!(absentField in selected)) return query(args);
-          const select = { ...selected };
-          delete select[absentField];
-          const current = await query({ ...args, select: Object.keys(select).length > 0 ? select : { id: true } } as typeof args) as Record<string, unknown> | null;
-          return current === null ? null : { ...current, [absentField]: null };
-        },
-      },
-    },
-  }) as unknown as PrismaClient;
-}
-
 test(
   "background-job reconciliation upgrade gate is isolated and auditable",
   { skip: !shouldRun ? "BACKGROUND_JOB_RECONCILIATION_POSTGRES_GATE=1 is required" : false },
@@ -137,7 +173,8 @@ test(
     const otherProjectId = "22222222-2222-4222-8222-222222222222";
     const cascadeProjectId = "33333333-3333-4333-8333-333333333333";
     const userId = "44444444-4444-4444-8444-444444444444";
-    const actor = { id: userId, role: "admin" as const };
+    const actorId = "55555555-5555-4555-8555-555555555555";
+    const actor = { id: actorId, role: "admin" as const, accountAccessVersion: 1 };
     const unknownJobId = "55555555-5555-4555-8555-555555555555";
     const crossProjectJobId = "66666666-6666-4666-8666-666666666666";
     const wrongActorJobId = "77777777-7777-4777-8777-777777777777";
@@ -147,6 +184,7 @@ test(
     const cascadeJobId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const genericCrossJobId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     const memoryGenerationId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const memoryReconciliationId = "12121212-1212-4121-8121-121212121212";
     const memoryCredentialId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     const memoryProviderId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
     const githubSyncRunId = "00000000-0000-4000-8000-000000000001";
@@ -210,15 +248,102 @@ export default defineConfig({
       );
       assert.deepEqual(afterD0.rows[0], { status: "unknown", reconciliationRequired: true });
 
+      await stageMigrations(tempRoot, postD0ThroughWorkspaceRbacMigrationNames);
+      await deployStagedMigrations(tempRoot, url);
+      await raw.query(
+        `INSERT INTO "AppUser"
+          ("id", "username", "passwordHash", "passwordSalt", "passwordVersion", "role", "createdAt", "updatedAt")
+         VALUES ($1, 'background_reconciliation_actor', $2, $3, 1, 'admin', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [actorId, "c".repeat(43), "d".repeat(22)],
+      );
+      await stageMigrations(tempRoot, postWorkspaceRbacMigrationNames);
+      await deployStagedMigrations(tempRoot, url);
+
+      // Stop before runtime route snapshots so the memory job, its platform
+      // provider, credential, and generation are genuine pre-0600 rows. The
+      // subsequent migration chain must preserve this history as legacy data.
+      await stageMigrations(tempRoot, ["20260904050000_add_membership_governance_manifest_evidence"]);
+      await deployStagedMigrations(tempRoot, url);
+      await raw.query(
+        `INSERT INTO "ExternalCredential"
+          ("id", "kind", "ciphertext", "nonce", "authTag", "keyVersion", "maskedSuffix", "secretFingerprint", "createdAt", "updatedAt")
+         VALUES ($1, 'ai_provider', decode('00', 'hex'), decode('00', 'hex'), decode('00', 'hex'), 1, '0000', $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [memoryCredentialId, "f".repeat(64)],
+      );
+      await raw.query(
+        `INSERT INTO "AiProviderConnection"
+          ("id", "name", "kind", "scope", "workspaceId", "ownerUserId", "ownershipState", "protocol", "baseUrl", "credentialId", "defaultGenerationModelId", "defaultEmbeddingModelId", "embeddingDimensions", "configurationVersion", "status", "createdAt", "updatedAt")
+         VALUES ($1, $2, 'openai', 'platform', NULL, NULL, 'legacy_pending', 'chat_completions', 'https://api.openai.com/v1', $3,
+                 'generation-background-reconciliation', 'embedding-background-reconciliation', 8, 1, 'verified', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [memoryProviderId, `Background reconciliation provider ${projectId.slice(0, 8)}`, memoryCredentialId],
+      );
+      await raw.query(
+        `INSERT INTO "BackgroundJob"
+          ("id", "projectId", "kind", "status", "stage", "payload", "failureCode", "idempotencyKey", "requestedById", "reconciliationRequired", "createdAt", "completedAt")
+         VALUES ($1, $2, 'memory_index', 'unknown', 'reconciliation_required', '{}'::jsonb, 'RECONCILIATION_REQUIRED', $3, $4, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [memoryJobId, projectId, fixedKey("memory-"), userId],
+      );
+      await raw.query(
+        `INSERT INTO "MemoryIndexGeneration"
+          ("id", "projectId", "jobId", "providerConnectionId", "modelId", "dimensions", "status", "buildMode", "inputManifestFingerprint", "expectedEmbeddingRouteUpdatedAt", "expectedInputCount", "generatedRecordCount", "reusedRecordCount", "deadlineAt", "failureCode", "reconciliationRequired", "recordCount", "createdAt", "completedAt")
+         VALUES ($1, $2, $3, $4, 'embedding-background-reconciliation', 8, 'unknown', 'full', $5, NULL, 0, 0, 0, NULL, 'RECONCILIATION_REQUIRED', true, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [memoryGenerationId, projectId, memoryJobId, memoryProviderId, "1".repeat(64)],
+      );
+      await stageMigrations(tempRoot, postMemorySchemaMigrationNames);
+      await deployStagedMigrations(tempRoot, url);
+
       db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
-      const historicalDb = createHistoricalSchemaCompatibilityClient(db);
+      const historicalProvider = await db.aiProviderConnection.findUniqueOrThrow({
+        where: { id: memoryProviderId },
+        select: { scope: true, ownershipState: true, ownerAccountAccessVersion: true },
+      });
+      assert.equal(historicalProvider.scope, "platform");
+      assert.equal(historicalProvider.ownershipState, "legacyPending");
+      assert.equal(historicalProvider.ownerAccountAccessVersion, null);
+      const historicalGeneration = await db.memoryIndexGeneration.findUniqueOrThrow({
+        where: { projectId_id: { projectId, id: memoryGenerationId } },
+        select: {
+          status: true,
+          expectedEmbeddingRouteSource: true,
+          expectedEmbeddingRouteId: true,
+          expectedEmbeddingRouteVersion: true,
+          expectedEmbeddingProviderConfigurationVersion: true,
+          expectedEmbeddingConnectionOwnerAccountAccessVersion: true,
+          expectedEmbeddingRouteFenceFingerprint: true,
+          embeddingWebAiGrantId: true,
+        },
+      });
+      assert.equal(historicalGeneration.status, "unknown");
+      assert.equal(historicalGeneration.expectedEmbeddingRouteSource, null);
+      assert.equal(historicalGeneration.expectedEmbeddingRouteId, null);
+      assert.equal(historicalGeneration.expectedEmbeddingRouteVersion, null);
+      assert.equal(historicalGeneration.expectedEmbeddingProviderConfigurationVersion, null);
+      assert.equal(historicalGeneration.expectedEmbeddingConnectionOwnerAccountAccessVersion, null);
+      assert.equal(historicalGeneration.expectedEmbeddingRouteFenceFingerprint, null);
+      assert.equal(historicalGeneration.embeddingWebAiGrantId, null);
+      const workspace = await db.project.findUniqueOrThrow({
+        where: { id: projectId },
+        select: { workspaceId: true },
+      });
+      await db.$transaction(async (tx) => {
+        for (const directProjectId of [projectId, otherProjectId, cascadeProjectId]) {
+          await grantProjectMembership(tx, {
+            projectId: directProjectId,
+            workspaceId: workspace.workspaceId,
+            userId: actorId,
+            role: "owner",
+            actorId,
+            reason: "background_reconciliation_gate_direct_project_owner",
+          });
+        }
+      });
       await assert.rejects(
         () => db!.backgroundJob.update({ where: { id: unknownJobId }, data: { reconciliationRequired: false } }),
       );
       const unreleased = await db.backgroundJob.findUniqueOrThrow({ where: { id: unknownJobId } });
       assert.equal(unreleased.reconciliationRequired, true);
 
-      const reconciled = await reconcileProjectJob(projectId, unknownJobId, actor, historicalDb);
+      const reconciled = await reconcileProjectJob(projectId, unknownJobId, actor, db);
       assert.equal(reconciled.status, "unknown");
       assert.equal(reconciled.stage, "reconciled_unknown");
       assert.equal(reconciled.reconciliationRequired, false);
@@ -226,10 +351,10 @@ export default defineConfig({
       const evidence = await db.backgroundJobReconciliation.findUniqueOrThrow({
         where: { projectId_jobId: { projectId, jobId: unknownJobId } },
       });
-      assert.equal(evidence.requestedById, userId);
+      assert.equal(evidence.requestedById, actorId);
       assert.equal(evidence.resolution, "explicitAbandon");
       assert.match(evidence.evidenceFingerprint, /^[0-9a-f]{64}$/u);
-      const replay = await reconcileProjectJob(projectId, unknownJobId, actor, historicalDb);
+      const replay = await reconcileProjectJob(projectId, unknownJobId, actor, db);
       assert.equal(replay.id, reconciled.id);
       assert.equal(await db.backgroundJobReconciliation.count({ where: { projectId, jobId: unknownJobId } }), 1);
       await assert.rejects(
@@ -258,7 +383,7 @@ export default defineConfig({
         },
       });
       await assert.rejects(
-        () => reconcileProjectJob(projectId, crossProjectJob.id, actor, historicalDb),
+        () => reconcileProjectJob(projectId, crossProjectJob.id, actor, db!),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_PROJECT_MISMATCH",
       );
       await assert.rejects(
@@ -285,18 +410,6 @@ export default defineConfig({
             reconciliationRequired: true,
             requestedById: userId,
             idempotencyKey: fixedKey("wrong-actor-"),
-            payload: {},
-          },
-          {
-            id: memoryJobId,
-            projectId,
-            kind: "memoryIndex",
-            status: "unknown",
-            stage: "reconciliation_required",
-            failureCode: "RECONCILIATION_REQUIRED",
-            reconciliationRequired: true,
-            requestedById: userId,
-            idempotencyKey: fixedKey("memory-"),
             payload: {},
           },
           {
@@ -358,16 +471,16 @@ export default defineConfig({
         ],
       });
       await assert.rejects(
-        () => reconcileProjectJob(projectId, wrongActorJobId, { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", role: "admin" }, historicalDb),
+        () => reconcileProjectJob(projectId, wrongActorJobId, { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", role: "admin", accountAccessVersion: 1 }, db!),
         (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
           (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
       );
       await assert.rejects(
-        () => reconcileProjectJob(projectId, memoryJobId, actor, historicalDb),
+        () => reconcileProjectJob(projectId, memoryJobId, actor, db!),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED",
       );
       await assert.rejects(
-        () => reconcileProjectJob(projectId, githubJobId, actor, historicalDb),
+        () => reconcileProjectJob(projectId, githubJobId, actor, db!),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_SPECIALIZED_OPERATION_REQUIRED",
       );
       for (const specializedJobId of [memoryJobId, githubJobId, githubScanJobId, githubMaterialJobId]) {
@@ -386,6 +499,21 @@ export default defineConfig({
           () => db!.backgroundJob.update({ where: { id: specializedJobId }, data: { reconciliationRequired: false } }),
         );
       }
+
+      // Keep the historical memory generation without reconciliation evidence
+      // until the generic specialized-job rejection checks have run. The
+      // current client then appends the exact evidence required to release the
+      // legacy memory job.
+      await db.memoryIndexReconciliation.create({
+        data: {
+          id: memoryReconciliationId,
+          projectId,
+          indexGenerationId: memoryGenerationId,
+          requestedById: userId,
+          resolution: "explicitAbandon",
+          evidenceFingerprint: "2".repeat(64),
+        },
+      });
 
       await db.backgroundJobReconciliation.create({
         data: {
@@ -406,48 +534,6 @@ export default defineConfig({
       assert.equal(genericCrossJob.kind, "projectBrief");
       assert.equal(genericCrossJob.reconciliationRequired, true);
 
-      await raw.query(
-        `INSERT INTO "ExternalCredential"
-          ("id", "kind", "ciphertext", "nonce", "authTag", "keyVersion", "maskedSuffix", "secretFingerprint", "createdAt", "updatedAt")
-         VALUES ($1, 'ai_provider', decode('00', 'hex'), decode('00', 'hex'), decode('00', 'hex'), 1, '0000', $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        [memoryCredentialId, "f".repeat(64)],
-      );
-      await raw.query(
-        `INSERT INTO "AiProviderConnection"
-          ("id", "name", "kind", "protocol", "baseUrl", "credentialId", "defaultGenerationModelId", "defaultEmbeddingModelId", "embeddingDimensions", "status", "createdAt", "updatedAt")
-         VALUES ($1, $2, 'openai', 'chat_completions', 'https://api.openai.com/v1', $3,
-                 'generation-background-reconciliation', 'embedding-background-reconciliation', 8, 'verified', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-        [memoryProviderId, `Background reconciliation provider ${projectId.slice(0, 8)}`, memoryCredentialId],
-      );
-      await db.memoryIndexGeneration.create({
-        data: {
-          id: memoryGenerationId,
-          projectId,
-          jobId: memoryJobId,
-          providerConnectionId: memoryProviderId,
-          modelId: "embedding-background-reconciliation",
-          dimensions: 8,
-          status: "unknown",
-          buildMode: "full",
-          inputManifestFingerprint: "1".repeat(64),
-          expectedInputCount: 0,
-          generatedRecordCount: 0,
-          reusedRecordCount: 0,
-          recordCount: 0,
-          failureCode: "RECONCILIATION_REQUIRED",
-          reconciliationRequired: true,
-          completedAt: new Date(),
-        },
-      });
-      await db.memoryIndexReconciliation.create({
-        data: {
-          projectId,
-          indexGenerationId: memoryGenerationId,
-          requestedById: userId,
-          resolution: "explicitAbandon",
-          evidenceFingerprint: "2".repeat(64),
-        },
-      });
       await assert.rejects(
         () => db!.backgroundJob.update({
           where: { id: memoryJobId },
@@ -497,7 +583,7 @@ export default defineConfig({
       assert.equal((await db.backgroundJob.findUniqueOrThrow({ where: { id: githubJobId } })).reconciliationRequired, false);
 
       await assert.rejects(
-        () => reconcileProjectJob(projectId, queuedJobId, actor, historicalDb),
+        () => reconcileProjectJob(projectId, queuedJobId, actor, db!),
         (error: unknown) => error instanceof ProjectWorkflowError && error.code === "PROJECT_WORKFLOW_INVALID_STATE",
       );
 
@@ -515,21 +601,14 @@ export default defineConfig({
           payload: {},
         },
       });
-      await reconcileProjectJob(cascadeProjectId, cascadeJob.id, actor, historicalDb);
-      // This gate intentionally stops before the later project-lifecycle
-      // migrations. Use SQL that does not ask the current Prisma Client to
-      // select fields (such as Project.archivedAt) that do not exist yet.
+      await reconcileProjectJob(cascadeProjectId, cascadeJob.id, actor, db);
+      // Keep the cascade as the only business cleanup assertion. The remaining
+      // history is intentionally left for disposable-database teardown.
       await raw.query('DELETE FROM "Project" WHERE "id" = $1', [cascadeProjectId]);
       assert.equal(await db.backgroundJob.findUnique({ where: { id: cascadeJob.id } }), null);
       assert.equal(await db.backgroundJobReconciliation.count({ where: { projectId: cascadeProjectId } }), 0);
     } finally {
       if (db !== null) {
-        if (rawConnected) {
-          await raw.query('DELETE FROM "Project" WHERE "id" IN ($1, $2)', [projectId, otherProjectId]);
-        }
-        await db.aiProviderConnection.deleteMany({ where: { id: memoryProviderId } });
-        await db.externalCredential.deleteMany({ where: { id: memoryCredentialId } });
-        await db.appUser.deleteMany({ where: { id: userId } });
         await db.$disconnect();
       }
       if (rawConnected) await raw.end();

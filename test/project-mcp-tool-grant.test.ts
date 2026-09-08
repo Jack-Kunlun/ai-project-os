@@ -62,7 +62,7 @@ test("V2 create admits the target Owner before reading caller-supplied resource 
   assert.doesNotMatch(beforePreflight, /findUnique\(|findFirst\(|lockConnection|lockTuple|lockGrantSlot|lockGrantRow/u);
   const preflight = createBody.slice(preflightIndex, mutationIndex);
   assert.match(preflight, /await lockAdmission\(tx, projectId, \[actorId\]\)/u);
-  assert.match(preflight, /await requireActorAndProject\(tx, projectId, actorId, false\)/u);
+  assert.match(preflight, /await requireActorAndProject\(tx, projectId, actorId, false, actor\.accountAccessVersion\)/u);
   assert.match(preflight, /where: \{ id: parsed\.data\.delegationId, projectId, status: "active" \}/u);
   assert.match(preflight, /connectionId: delegation\.mcpConnectionId/u);
   assert.match(preflight, /controlPlaneVersion: 2,[\s\S]*connectionId: delegation\.mcpConnectionId/u);
@@ -83,7 +83,7 @@ test("V2 create rejects a non-owner before touching external resource repositori
     $transaction: async (operation: (tx: unknown) => Promise<unknown>) => operation({
       $executeRaw: async () => 0,
       project: { findUnique: async () => ({ id: projectId, workspaceId, archivedAt: null }) },
-      appUser: { findUnique: async () => ({ id: actorId, disabledAt: null }) },
+      appUser: { findUnique: async () => ({ id: actorId, disabledAt: null, accountAccessVersion: 1 }) },
       projectMembership: { findFirst: async () => ({ id: membershipId, userId: actorId, role: "editor", createdAt: new Date("2026-01-01T00:00:00.000Z") }) },
       projectMcpConnectionDelegation: { findFirst: async () => { calls.push("delegation"); return null; } },
       mcpToolDefinition: { findFirst: async () => { calls.push("definition"); return null; } },
@@ -98,7 +98,7 @@ test("V2 create rejects a non-owner before touching external resource repositori
       expectedDelegationVersion: 1,
       expectedAttestationVersion: 1,
       acknowledgeReadOnly: true,
-    }, { id: actorId, role: "member" }, db),
+    }, { id: actorId, role: "member", accountAccessVersion: 1 }, db),
     (error: unknown) => error instanceof ProjectMcpToolGrantServiceError && error.code === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED",
   );
   assert.deepEqual(calls, []);
@@ -110,7 +110,7 @@ test("V2 revoke admits the target project before scoped grant lookup and resourc
   assert.doesNotMatch(revokeBody.slice(0, revokeBody.indexOf("return withSerializableRetry")), /findUnique\(|findFirst\(/u);
   const transactionBody = revokeBody.slice(revokeBody.indexOf("return withSerializableRetry"));
   const admissionIndex = transactionBody.indexOf("await lockAdmission(tx, projectId, [actorId]);");
-  const ownerAdmissionIndex = transactionBody.indexOf("await requireActorAndProject(tx, projectId, actorId, true);");
+  const ownerAdmissionIndex = transactionBody.indexOf("await requireActorAndProject(tx, projectId, actorId, true, actor.accountAccessVersion);");
   const scopedLookupIndex = transactionBody.indexOf("where: { id: grantId, projectId, controlPlaneVersion: 2 }");
   const resourceLockIndex = transactionBody.indexOf("scopedSeed.connectionId, scopedSeed.toolDefinitionId");
   assert.ok(admissionIndex >= 0 && ownerAdmissionIndex > admissionIndex);

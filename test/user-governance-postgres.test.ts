@@ -49,8 +49,8 @@ test(
     const outsiderId = randomUUID();
     const inviteeId = randomUUID();
     const unverifiedInviteeId = randomUUID();
-    const owner: AccessUser = { id: ownerId, role: "user" };
-    const outsider: AccessUser = { id: outsiderId, role: "admin" };
+    const owner: AccessUser = { id: ownerId, role: "user", accountAccessVersion: 1 };
+    const outsider: AccessUser = { id: outsiderId, role: "admin", accountAccessVersion: 1 };
 
     await db.appUser.createMany({ data: [
       { id: ownerId, username: `governance_owner_${suffix}`, email: `owner-${suffix}@example.com`, role: "user" },

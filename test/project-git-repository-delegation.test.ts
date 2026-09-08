@@ -17,6 +17,10 @@ const runtimeMigration = readFileSync(
   "prisma/migrations/20260904170000_add_project_git_manual_run_reconciliation/migration.sql",
   "utf8",
 );
+const epochMigration = readFileSync(
+  "prisma/migrations/20260905050000_bind_personal_git_owner_access_epoch/migration.sql",
+  "utf8",
+);
 const service = readFileSync("src/lib/project-git-repository-delegation-service.ts", "utf8");
 const gitService = readFileSync("src/lib/git/service.ts", "utf8");
 const runtimeService = readFileSync("src/lib/project-delegated-git-runtime-service.ts", "utf8");
@@ -40,6 +44,8 @@ test("Git repository delegation has an independent typed two-party schema", () =
   assert.match(schema, /resolvedAddressFingerprint\s+String\s+@db\.Char\(64\)/u);
   assert.match(schema, /credentialFingerprint\s+String\s+@db\.Char\(64\)/u);
   assert.match(schema, /delegationFingerprint\s+String\s+@db\.Char\(64\)/u);
+  assert.match(schema, /connectionOwnerAccountAccessVersion\s+Int\?/u);
+  assert.match(schema, /ownerAccountAccessVersion\s+Int\?/u);
   assert.match(schema, /gitConnection\s+GitConnection\s+@relation\(fields:\s*\[gitConnectionId\],\s*references:\s*\[id\],\s*onDelete:\s*Cascade/u);
   assert.match(schema, /gitRepositoryDelegations\s+ProjectGitRepositoryDelegation\[\]/u);
 });
@@ -76,6 +82,12 @@ test("Git delegation migration is additive, append-only, and remains runtime-fro
   assert.doesNotMatch(tableDefinitions, /baseUrl|username|tlsCaCertificate|sshKnownHost|maskedSuffix|credentialId/u);
   assert.match(runtimeMigration, /PGRD_MANUAL_READ_ONLY_PREFLIGHT_FAILED[\s\S]*manual remediation/u);
   assert.match(runtimeMigration, /ADD CONSTRAINT "PGRD_manual_read_only_check"[\s\S]*CHECK \("manualSyncAllowed" = true AND "automationAllowed" = false\)/u);
+  assert.match(epochMigration, /personal_git_connection_epoch_guard/u);
+  assert.match(epochMigration, /personal_git_delegation_epoch_guard/u);
+  assert.match(epochMigration, /personal_git_manual_run_epoch_guard/u);
+  assert.match(epochMigration, /personal_git_manual_run_audit_epoch_guard/u);
+  assert.match(epochMigration, /personal_git_credential_rotation_context/u);
+  assert.match(epochMigration, /project_git_manual_runtime_shape_guard/u);
 });
 
 test("Git delegation proposals accept only the canonical one-shot read-only scope", async () => {
@@ -183,6 +195,34 @@ test("Git connection updates leave version ownership to the database guard", () 
   }
 });
 
+test("Git connection probes re-admit immediately before ls-remote", () => {
+  const probeStart = gitService.indexOf("async function probeRepository");
+  const probeEnd = gitService.indexOf("\nfunction canonicalWebUrl", probeStart);
+  const probe = gitService.slice(probeStart, probeEnd);
+  const boundary = probe.indexOf("options.onDispatchBoundary");
+  const credential = probe.indexOf("loadCredential");
+  const runner = probe.indexOf("withGitRunner");
+  const remoteCall = probe.indexOf('"ls-remote"');
+  assert.ok(boundary >= 0 && credential > boundary && runner > credential && remoteCall > runner);
+
+  const readStart = gitService.indexOf("async function readRepositoryFiles");
+  const readEnd = gitService.indexOf("\n/**", readStart);
+  const read = gitService.slice(readStart, readEnd);
+  const readBoundary = read.indexOf("input.onDispatchBoundary");
+  const readCredential = read.indexOf("loadCredential");
+  const readRunner = read.indexOf("withGitRunner");
+  assert.ok(readBoundary >= 0 && readCredential > readBoundary && readRunner > readCredential);
+
+  const admissionStart = gitService.indexOf("async function acceptGitProbeDispatchBoundary");
+  const admission = gitService.slice(admissionStart, probeStart);
+  assert.match(admission, /lockActorAccess/u);
+  assert.match(admission, /FOR UPDATE/u);
+  assert.match(admission, /accountAccessVersion/u);
+  assert.match(admission, /updatedAt\.getTime/u);
+  assert.match(admission, /secretFingerprint/u);
+  assert.match(gitService, /onDispatchBoundary: \(\) => acceptGitProbeDispatchBoundary/u);
+});
+
 test("Git delegation API uses same-origin writes and no external runtime dispatch", () => {
   const route = readFileSync("src/app/api/projects/[projectId]/git-repository-delegations/route.ts", "utf8");
   const manualSyncRoute = readFileSync("src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/manual-sync/route.ts", "utf8");
@@ -246,7 +286,8 @@ test("delegated Git runtime treats post-dispatch failures as unknown", () => {
   assert.equal(isDefinitelyPreDispatchGitSyncFailure(new GitRunnerError("GIT_REMOTE_UNAVAILABLE")), false);
   assert.equal(isDefinitelyPreDispatchGitSyncFailure(new GitServiceError("GIT_REPOSITORY_EMPTY")), false);
   assert.equal(isDefinitelyPreDispatchGitSyncFailure(new GitServiceError("GIT_CONNECTION_INVALID_INPUT")), true);
-  assert.match(runtimeService, /onDispatchStart/u);
+  assert.match(runtimeService, /onDispatchBoundary/u);
+  assert.doesNotMatch(runtimeService, /onDispatchStart/u);
   assert.match(runtimeService, /dispatched && !isDefinitelyPreDispatchGitSyncFailure\(error\)/u);
   assert.match(repositoriesClient, /结果未知；外部读取可能已发出，系统不会自动重试/u);
 });

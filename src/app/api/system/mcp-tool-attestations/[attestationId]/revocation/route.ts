@@ -14,7 +14,7 @@ export async function POST(
     assertSameOrigin(request);
     const actor = await requireApiSession(request);
     const { attestationId } = await context.params;
-    const attestation = await revokeMcpControlPlaneAttestation(actor.id, attestationId, await readJsonBody(request));
+    const attestation = await revokeMcpControlPlaneAttestation(actor, attestationId, await readJsonBody(request));
     return NextResponse.json({ attestation }, { headers: noStore });
   } catch (error) {
     return handleApiError(error);

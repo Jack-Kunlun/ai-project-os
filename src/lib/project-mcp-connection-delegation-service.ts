@@ -9,6 +9,7 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
+import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import {
   admitWebAiProjectAccess,
   lockActorWorkspaceProjectAccess,
@@ -77,6 +78,7 @@ const delegationSelect = {
   projectId: true,
   mcpConnectionId: true,
   connectionOwnerId: true,
+  connectionOwnerAccountAccessVersion: true,
   connectionConfigurationRevision: true,
   resolvedAddressFingerprint: true,
   credentialFingerprint: true,
@@ -105,7 +107,7 @@ const delegationSelect = {
   terminalReason: true,
   createdAt: true,
   updatedAt: true,
-  connectionOwner: { select: { displayName: true, disabledAt: true } },
+  connectionOwner: { select: { displayName: true, disabledAt: true, accountAccessVersion: true } },
   projectConfirmedBy: { select: { displayName: true } },
   terminalActor: { select: { displayName: true } },
   project: { select: { id: true, name: true, archivedAt: true, workspaceId: true } },
@@ -118,14 +120,15 @@ const delegationSelect = {
       disabledAt: true,
       ownershipState: true,
       ownerUserId: true,
+      ownerAccountAccessVersion: true,
       configurationRevision: true,
       resolvedAddressFingerprint: true,
       credentialFingerprint: true,
       credential: { select: { kind: true, secretFingerprint: true } },
     },
   },
-  ownerProjectMembership: { select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } },
-  projectConfirmedProjectMembership: { select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } },
+  ownerProjectMembership: { select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true, accountAccessVersion: true } } } },
+  projectConfirmedProjectMembership: { select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true, accountAccessVersion: true } } } },
 } as const;
 
 type DelegationRow = Prisma.ProjectMcpConnectionDelegationGetPayload<{ select: typeof delegationSelect }>;
@@ -309,11 +312,20 @@ async function frozenOwnerMembership(tx: Prisma.TransactionClient, row: Delegati
   return membership;
 }
 
-async function activeActor(tx: Prisma.TransactionClient, actorId: string): Promise<{ id: string; role: WebAiActor["role"] }> {
-  const actor = await tx.appUser.findUnique({ where: { id: actorId }, select: { id: true, role: true, disabledAt: true } });
-  if (actor === null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_FORBIDDEN");
-  if (actor.disabledAt !== null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_ACCOUNT_DISABLED");
-  return actor;
+async function activeActor(tx: Prisma.TransactionClient, actor: WebAiActor): Promise<{ id: string; role: WebAiActor["role"] }> {
+  const actorRow = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, role: true, disabledAt: true, accountAccessVersion: true } });
+  const currentActor = actorRow === null ? null : { id: actorRow.id, role: actorRow.role, disabledAt: actorRow.disabledAt };
+  if (currentActor === null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_FORBIDDEN");
+  if (currentActor.disabledAt !== null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_ACCOUNT_DISABLED");
+  try {
+    await assertAccountAccessForActor(tx, actor);
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError && error.code === "ACCOUNT_DISABLED") {
+      return fail("PROJECT_MCP_CONNECTION_DELEGATION_ACCOUNT_DISABLED");
+    }
+    return fail("PROJECT_MCP_CONNECTION_DELEGATION_FORBIDDEN");
+  }
+  return currentActor;
 }
 
 function connectionEvidenceCurrent(row: DelegationRow): boolean {
@@ -324,6 +336,9 @@ function connectionEvidenceCurrent(row: DelegationRow): boolean {
       && connection.credential?.kind === "mcp"
       && connection.credential.secretFingerprint === connection.credentialFingerprint;
   return connection.ownerUserId === row.connectionOwnerId
+    && row.connectionOwnerAccountAccessVersion !== null
+    && connection.ownerAccountAccessVersion === row.connectionOwnerAccountAccessVersion
+    && row.connectionOwner?.accountAccessVersion === row.connectionOwnerAccountAccessVersion
     && connection.ownershipState === "confirmed"
     && connection.status === "verified"
     && connection.disabledAt === null
@@ -343,7 +358,9 @@ function ownerMembershipCurrent(row: DelegationRow): boolean {
     && (membership.role === "owner" || membership.role === "editor")
     && membership.accessState === "confirmed"
     && membership.createdAt.getTime() === row.ownerMembershipCreatedAt.getTime()
-    && membership.user.disabledAt === null;
+    && membership.user.disabledAt === null
+    && row.connectionOwnerAccountAccessVersion !== null
+    && membership.user.accountAccessVersion === row.connectionOwnerAccountAccessVersion;
 }
 
 function projectOwnerMembershipCurrent(row: DelegationRow): boolean {
@@ -376,7 +393,10 @@ function capabilities(row: DelegationRow, actorId: string, directProjectOwner: b
   const ownerActor = row.connectionOwnerId === actorId;
   const ownerActive = row.mcpConnection.ownerUserId === row.connectionOwnerId
     && row.mcpConnection.ownershipState === "confirmed"
-    && row.connectionOwner?.disabledAt === null;
+    && row.connectionOwner?.disabledAt === null
+    && row.connectionOwnerAccountAccessVersion !== null
+    && row.mcpConnection.ownerAccountAccessVersion === row.connectionOwnerAccountAccessVersion
+    && row.connectionOwner?.accountAccessVersion === row.connectionOwnerAccountAccessVersion;
   const ownerEpoch = ownerMembershipCurrent(row);
   const actorMembership = ownerActor && ownerEpoch;
   const terminalOwnerSafe = ownerActor
@@ -487,6 +507,7 @@ async function appendAudit(
     connectionConfigurationRevision: row.connectionConfigurationRevision,
     resolvedAddressFingerprint: row.resolvedAddressFingerprint,
     credentialFingerprint: row.credentialFingerprint,
+    connectionOwnerAccountAccessVersion: row.connectionOwnerAccountAccessVersion,
     delegationFingerprint: row.delegationFingerprint,
     reason,
     // Prisma requires a value for this non-null field; the migration's
@@ -544,10 +565,12 @@ async function loadConnectionForOwner(tx: Prisma.TransactionClient, connectionId
       disabledAt: true,
       ownershipState: true,
       ownerUserId: true,
+      ownerAccountAccessVersion: true,
       configurationRevision: true,
       resolvedAddressFingerprint: true,
       credentialFingerprint: true,
       credential: { select: { kind: true, secretFingerprint: true } },
+      ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } },
     },
   });
   if (connection === null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_CONNECTION_NOT_FOUND");
@@ -560,6 +583,10 @@ function requireConnectionEvidence(connection: Awaited<ReturnType<typeof loadCon
     || connection.disabledAt !== null
     || connection.ownershipState !== "confirmed"
     || connection.ownerUserId === null
+    || connection.ownerUser === null
+    || connection.ownerUser.disabledAt !== null
+    || connection.ownerAccountAccessVersion === null
+    || connection.ownerUser.accountAccessVersion !== connection.ownerAccountAccessVersion
     || !FINGERPRINT_PATTERN.test(connection.credentialFingerprint)
     || connection.resolvedAddressFingerprint === null
     || !FINGERPRINT_PATTERN.test(connection.resolvedAddressFingerprint)
@@ -600,8 +627,16 @@ export async function getProjectMcpConnectionDelegation(projectIdInput: string, 
 
 export async function listConnectionOwnerProjectMcpConnectionDelegations(actor: WebAiActor, db: PrismaClient = getDb()) {
   try {
-    const current = await db.appUser.findUnique({ where: { id: actor.id }, select: { id: true, role: true, disabledAt: true } });
+    const current = await db.appUser.findUnique({ where: { id: actor.id }, select: { id: true, role: true, disabledAt: true, accountAccessVersion: true } });
     if (current === null || current.disabledAt !== null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_ACCOUNT_DISABLED");
+    try {
+      await assertAccountAccessForActor(db, actor);
+    } catch (error) {
+      if (error instanceof AccountAccessGuardError && error.code === "ACCOUNT_DISABLED") {
+        return fail("PROJECT_MCP_CONNECTION_DELEGATION_ACCOUNT_DISABLED");
+      }
+      return fail("PROJECT_MCP_CONNECTION_DELEGATION_FORBIDDEN");
+    }
     const now = await databaseNow(db);
     const rows = await db.projectMcpConnectionDelegation.findMany({
       where: { connectionOwnerId: actor.id, status: { in: ["draft", "ownerConfirmed", "active"] }, mcpConnection: { ownerUserId: actor.id, ownershipState: "confirmed" } },
@@ -620,7 +655,7 @@ export async function proposeProjectMcpConnectionDelegation(projectIdInput: stri
   const connectionId = parseUuid(parsed.mcpConnectionId);
   const expiresAt = parseUtcTimestamp(parsed.expiresAt);
   return runLockedMutation(db, actor, projectId, connectionId, null, async (tx) => {
-    const currentActor = await activeActor(tx, actor.id);
+    const currentActor = await activeActor(tx, actor);
     const project = await loadProjectRouting(tx, projectId);
     if (project === null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_FORBIDDEN");
     if (project.archivedAt !== null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_PROJECT_ARCHIVED");
@@ -648,6 +683,7 @@ export async function proposeProjectMcpConnectionDelegation(projectIdInput: stri
         projectId,
         mcpConnectionId: connection.id,
         connectionOwnerId: currentActor.id,
+        connectionOwnerAccountAccessVersion: connection.ownerAccountAccessVersion,
         connectionConfigurationRevision: connection.configurationRevision,
         resolvedAddressFingerprint: connection.resolvedAddressFingerprint ?? "",
         credentialFingerprint: connection.credentialFingerprint,
@@ -698,7 +734,7 @@ async function mutateDelegation(
       return fail("PROJECT_MCP_CONNECTION_DELEGATION_NOT_FOUND");
     }
     const now = await databaseNow(tx);
-    await activeActor(tx, actor.id);
+    await activeActor(tx, actor);
     const project = await loadProjectRouting(tx, projectId);
     if (project === null) return fail("PROJECT_MCP_CONNECTION_DELEGATION_FORBIDDEN");
     // Lazy expiry is a write.  Establish the same actor/ownership admission

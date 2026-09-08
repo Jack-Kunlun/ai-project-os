@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Prisma, type ProjectAiProviderDelegation } from "@prisma/client";
+import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { createPersonalProviderConnection } from "../src/lib/personal-ai-provider-service";
@@ -91,6 +92,47 @@ async function previewFor(
   return previewMembership({ adminUserId, userId, action, ...input }, getDb());
 }
 
+async function executeGovernedAccountAccess(
+  db: ReturnType<typeof getDb>,
+  input: Readonly<{
+    adminUserId: string;
+    userId: string;
+    action: "disable" | "restore";
+    reason: string;
+    requestKey: string;
+  }>,
+) {
+  const [admin, target] = await Promise.all([
+    db.appUser.findUniqueOrThrow({ where: { id: input.adminUserId }, select: { accountAccessVersion: true } }),
+    db.appUser.findUniqueOrThrow({ where: { id: input.userId }, select: { accountAccessVersion: true } }),
+  ]);
+  const preview = await previewAccountAccess({
+    adminUserId: input.adminUserId,
+    adminAccountAccessVersion: admin.accountAccessVersion,
+    userId: input.userId,
+    action: input.action,
+    reason: input.reason,
+    expectedVersion: target.accountAccessVersion,
+  }, db);
+  assert.equal(preview.canExecute, true);
+  return executeAccountAccess({
+    adminUserId: input.adminUserId,
+    adminAccountAccessVersion: admin.accountAccessVersion,
+    userId: input.userId,
+    action: input.action,
+    reason: input.reason,
+    expectedVersion: preview.current.accountAccessVersion,
+    expectedImpactFingerprint: preview.impactFingerprint,
+    requestKey: input.requestKey,
+    requestFingerprint: preview.requestFingerprint,
+    previewId: preview.previewId,
+    previewIssuedAt: preview.previewIssuedAt,
+    previewExpiresAt: preview.previewExpiresAt,
+    confirmation: true,
+    confirmationUsername: preview.user.username,
+  }, db);
+}
+
 async function createNearExpiryMembershipFixture(db: ReturnType<typeof getDb>, input: Readonly<{ adminId: string; userId: string; requestKey: string }>): Promise<void> {
   const previewId = randomUUID();
   const requestFingerprint = "c".repeat(64);
@@ -158,6 +200,8 @@ async function insertDelegationFixtureAudit(
   const isExpiry = action === "expired";
   const transitionAt = action === "proposed" ? delegation.proposedAt : delegation.expiredAt;
   if (transitionAt === null) throw new Error("MEMBERSHIP_LIFECYCLE_DELEGATION_AUDIT_FIXTURE_INVALID");
+  const connectionOwnerAccountAccessVersion = delegation.connectionOwnerAccountAccessVersion;
+  if (connectionOwnerAccountAccessVersion === null) throw new Error("MEMBERSHIP_LIFECYCLE_DELEGATION_OWNER_EPOCH_MISSING");
   await tx.projectAiProviderDelegationAudit.create({
     data: {
       id: randomUUID(),
@@ -171,6 +215,7 @@ async function insertDelegationFixtureAudit(
       statusAfter: delegation.status,
       providerConnectionId: delegation.providerConnectionId,
       connectionOwnerId: delegation.connectionOwnerId,
+      connectionOwnerAccountAccessVersion,
       ownerProjectMembershipId: delegation.ownerProjectMembershipId,
       projectConfirmedProjectMembershipId: delegation.projectConfirmedProjectMembershipId,
       projectConfirmedMembershipCreatedAt: delegation.projectConfirmedMembershipCreatedAt,
@@ -229,6 +274,7 @@ test("membership lifecycle is preview-confirmed, idempotent, CAS protected, and 
       { id: expiringTargetId, username: `membership_expiring_${suffix}`, role: "user" },
     ],
   });
+  const targetActor = { id: targetId, role: "user" as const, accountAccessVersion: 1 };
 
   try {
     const grantPreview = await previewFor(adminId, targetId, "grant", { days: 30, note: "gate grant" });
@@ -378,19 +424,19 @@ test("membership lifecycle is preview-confirmed, idempotent, CAS protected, and 
       kind: "openai",
       apiKey: `membership-lifecycle-key-${suffix}`,
       generationModelId: "gpt-4.1-mini",
-    }, { id: targetId, role: "user" }, db);
+    }, targetActor, db);
     await db.aiProviderConnection.update({ where: { id: personalProvider.id }, data: { status: "verified", lastTestedAt: new Date() } });
     const delegation = await proposeProjectAiProviderDelegation(dependencyProjectId, {
       providerConnectionId: personalProvider.id,
       operation: "generateWithContext",
       maxOutputTokens: 128,
       expiresAt: new Date(Date.now() + day).toISOString(),
-    }, { id: targetId, role: "user" }, db);
+    }, targetActor, db);
     await assertDelegationDependencyBlock("draft", "draft", 1, 0);
-    const ownerConfirmed = await confirmProjectAiProviderDelegationOwner(dependencyProjectId, delegation.id, { expectedVersion: delegation.version, acknowledgeProviderCharges: true }, { id: targetId, role: "user" }, db);
+    const ownerConfirmed = await confirmProjectAiProviderDelegationOwner(dependencyProjectId, delegation.id, { expectedVersion: delegation.version, acknowledgeProviderCharges: true }, targetActor, db);
     await assertDelegationDependencyBlock("owner-confirmed", "owner", 1, 0);
-    const activeDelegation = await confirmProjectAiProviderDelegationProject(dependencyProjectId, delegation.id, { expectedVersion: ownerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true }, { id: targetId, role: "user" }, db);
-    await putProjectAiEffectiveRouteSelection(dependencyProjectId, "generateWithContext", { source: "personalDelegation", delegationId: activeDelegation.id, expectedVersion: null }, { id: targetId, role: "user" }, db);
+    const activeDelegation = await confirmProjectAiProviderDelegationProject(dependencyProjectId, delegation.id, { expectedVersion: ownerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true }, targetActor, db);
+    await putProjectAiEffectiveRouteSelection(dependencyProjectId, "generateWithContext", { source: "personalDelegation", delegationId: activeDelegation.id, expectedVersion: null }, targetActor, db);
 
     const blockedRevokePreview = await assertDelegationDependencyBlock("active", "active", 1, 1);
     assert.equal(blockedRevokePreview.dependencyStats.affectedProjects.length, 1);
@@ -401,7 +447,9 @@ test("membership lifecycle is preview-confirmed, idempotent, CAS protected, and 
     assert.ok(blockedRevokePreview.blockingCategories.includes("non_terminal_personal_ai_delegation"));
     assert.ok(blockedRevokePreview.blockingCategories.includes("effective_personal_route_selection"));
     const activeDelegationRecord = await db.projectAiProviderDelegation.findUniqueOrThrow({ where: { id: activeDelegation.id } });
-    await revokeProjectAiProviderDelegation(dependencyProjectId, activeDelegation.id, { expectedVersion: activeDelegation.version, reason: "membership lifecycle gate explicit resolution", switchToPlatformDefault: true }, { id: targetId, role: "user" }, db);
+    await revokeProjectAiProviderDelegation(dependencyProjectId, activeDelegation.id, { expectedVersion: activeDelegation.version, reason: "membership lifecycle gate explicit resolution", switchToPlatformDefault: true }, targetActor, db);
+    const connectionOwnerAccountAccessVersion = activeDelegationRecord.connectionOwnerAccountAccessVersion;
+    assert.ok(connectionOwnerAccountAccessVersion !== null, "MEMBERSHIP_LIFECYCLE_DELEGATION_OWNER_EPOCH_MISSING");
     const shortExpiryDraft = await db.$transaction(async (tx) => {
       const draft = await tx.projectAiProviderDelegation.create({
         data: {
@@ -410,6 +458,7 @@ test("membership lifecycle is preview-confirmed, idempotent, CAS protected, and 
           operation: "sourceSummary",
           providerConnectionId: activeDelegationRecord.providerConnectionId,
           connectionOwnerId: activeDelegationRecord.connectionOwnerId,
+          connectionOwnerAccountAccessVersion,
           ownerProjectMembershipId: activeDelegationRecord.ownerProjectMembershipId,
           ownerMembershipCreatedAt: activeDelegationRecord.ownerMembershipCreatedAt,
           connectionOwnerSubscriptionId: activeDelegationRecord.connectionOwnerSubscriptionId,
@@ -428,8 +477,8 @@ test("membership lifecycle is preview-confirmed, idempotent, CAS protected, and 
       await insertDelegationFixtureAudit(tx, draft, "proposed", null);
       return draft;
     });
-    const shortExpiryOwnerConfirmed = await confirmProjectAiProviderDelegationOwner(dependencyProjectId, shortExpiryDraft.id, { expectedVersion: shortExpiryDraft.version, acknowledgeProviderCharges: true }, { id: targetId, role: "user" }, db);
-    const shortExpiryActive = await confirmProjectAiProviderDelegationProject(dependencyProjectId, shortExpiryDraft.id, { expectedVersion: shortExpiryOwnerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true }, { id: targetId, role: "user" }, db);
+    const shortExpiryOwnerConfirmed = await confirmProjectAiProviderDelegationOwner(dependencyProjectId, shortExpiryDraft.id, { expectedVersion: shortExpiryDraft.version, acknowledgeProviderCharges: true }, targetActor, db);
+    const shortExpiryActive = await confirmProjectAiProviderDelegationProject(dependencyProjectId, shortExpiryDraft.id, { expectedVersion: shortExpiryOwnerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true }, targetActor, db);
     assert.equal(shortExpiryActive.status, "active");
     await new Promise((resolve) => setTimeout(resolve, 20_200));
     await assertDelegationDependencyBlock("expired-active", "expired", 1, 0);
@@ -473,12 +522,24 @@ test("membership lifecycle is preview-confirmed, idempotent, CAS protected, and 
       }, db),
       (error: unknown) => serviceCode(error) === "MEMBERSHIP_PREVIEW_EXPIRED",
     );
-    await db.appUser.update({ where: { id: adminId }, data: { disabledAt: new Date(), disabledById: secondAdminId, disabledReason: "membership lifecycle gate" } });
+    await executeGovernedAccountAccess(db, {
+      adminUserId: secondAdminId,
+      userId: adminId,
+      action: "disable",
+      reason: "membership lifecycle gate",
+      requestKey: `membership-${suffix}-disable-admin`,
+    });
     await assert.rejects(
       () => executeMembership(lifecycleInput(disabledPreview, { adminUserId: adminId, requestKey: `membership-${suffix}-disabled`, days: 1 }), db),
       (error: unknown) => serviceCode(error) === "MEMBERSHIP_ADMIN_REQUIRED",
     );
-    await db.appUser.update({ where: { id: adminId }, data: { disabledAt: null, disabledById: null, disabledReason: null } });
+    await executeGovernedAccountAccess(db, {
+      adminUserId: secondAdminId,
+      userId: adminId,
+      action: "restore",
+      reason: "membership lifecycle gate restore",
+      requestKey: `membership-${suffix}-restore-admin`,
+    });
 
     const concurrentPreviewOne = await previewFor(adminId, concurrentTargetId, "grant", { days: 10, note: "concurrent grant" });
     const concurrentPreviewTwo = await previewFor(secondAdminId, concurrentTargetId, "grant", { days: 10, note: "concurrent grant" });

@@ -19,7 +19,7 @@ const runId = "22222222-2222-4222-8222-222222222222";
 const sourceId = "33333333-3333-4333-8333-333333333333";
 const actorId = "44444444-4444-4444-8444-444444444444";
 const workspaceId = "55555555-5555-4555-8555-555555555555";
-const actor = { id: actorId, role: "user" } as const;
+const actor = { id: actorId, role: "user" as const, accountAccessVersion: 1 };
 const operationKey = "a".repeat(64);
 const fingerprint = "b".repeat(64);
 const modelId = "gpt-test-model-2026-08-27";
@@ -115,6 +115,7 @@ function serviceWithCandidateAccessFixture(options: Readonly<{
         id: actorId,
         role: options.storedRole,
         disabledAt: options.disabledAt ?? null,
+        accountAccessVersion: 1,
       }),
     },
     project: {
@@ -274,7 +275,7 @@ test("candidate listing authorizes the current actor before reading claims", asy
     },
     {
       name: "forged-admin-role",
-      actor: { id: actorId, role: "admin" } as const,
+      actor: { id: actorId, role: "admin" as const, accountAccessVersion: 1 },
       options: { storedRole: "user" as const },
       expected: "ACCESS_FORBIDDEN",
     },
@@ -331,7 +332,7 @@ test("candidate review authorizes edit access before opening the write transacti
     },
     {
       name: "forged-admin-role",
-      actor: { id: actorId, role: "admin" } as const,
+      actor: { id: actorId, role: "admin" as const, accountAccessVersion: 1 },
       options: { storedRole: "user" as const },
       expected: "ACCESS_FORBIDDEN",
     },
@@ -388,7 +389,7 @@ test("candidate review reports stale visible item state before any mutation", as
   let itemWrites = 0;
   const tx = {
     appUser: {
-      findUnique: async () => ({ id: actorId, role: "user", disabledAt: null }),
+      findUnique: async () => ({ id: actorId, role: "user", disabledAt: null, accountAccessVersion: 1 }),
     },
     project: {
       findUnique: async (query: { select?: { id?: boolean; workspaceId?: boolean; membershipInheritanceMode?: boolean; archivedAt?: boolean; workspace?: unknown; memberships?: unknown } }) => {
@@ -434,7 +435,7 @@ test("candidate review reports stale visible item state before any mutation", as
   };
   const db = {
     appUser: {
-      findUnique: async () => ({ id: actorId, role: "user", disabledAt: null }),
+      findUnique: async () => ({ id: actorId, role: "user", disabledAt: null, accountAccessVersion: 1 }),
     },
     project: {
       findUnique: async (query: { select?: { id?: boolean; workspaceId?: boolean; membershipInheritanceMode?: boolean; archivedAt?: boolean; workspace?: unknown; memberships?: unknown } }) => {
@@ -484,7 +485,7 @@ test("candidate review repeats actor and membership authorization inside the wri
     const appUser = {
       findUnique: async () => {
         actorLookups += 1;
-        return { id: actorId, role: "user", disabledAt: null };
+        return { id: actorId, role: "user", disabledAt: null, accountAccessVersion: 1 };
       },
     };
     const project = {
@@ -577,7 +578,7 @@ test("candidate review repeats actor and membership authorization inside the wri
         (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
       operation,
     );
-    assert.equal(actorLookups, 2, `${operation} reloads actor inside transaction`);
+    assert.equal(actorLookups, 5, `${operation} reloads actor inside transaction`);
     assert.equal(membershipLookups, 1, `${operation} reloads membership inside transaction`);
     assert.equal(candidateReads, 0, `${operation} reads no candidate after revoke`);
     assert.equal(itemWrites, 0, `${operation} writes no item after revoke`);

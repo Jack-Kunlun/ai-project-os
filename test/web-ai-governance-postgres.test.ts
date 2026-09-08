@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
+import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { invokeChatCompletion, ProviderTransportError } from "../src/lib/ai-providers";
 import { issueVerifiedSignupGrant, lockMembershipUser, reservePlatformTokens } from "../src/lib/ai-entitlements";
 import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
@@ -33,7 +34,7 @@ async function createDispatchFixture() {
   const projectId = randomUUID();
   const providerId = randomUUID();
   const credentialId = randomUUID();
-  const actor: WebAiActor = { id: userId, role: "user" };
+  const actor: WebAiActor = { id: userId, role: "user", accountAccessVersion: 1 };
   const now = new Date();
 
   await db.appUser.create({ data: { id: userId, username: `dispatch_${suffix}`, role: "user" } });
@@ -145,6 +146,39 @@ async function cleanupDispatchFixture(fixture: Awaited<ReturnType<typeof createD
   // platform-route audits and project-deletion receipts, are immutable and
   // must remain available for inspection; the gate runner drops the database
   // after the test instead of attempting row-level cleanup.
+}
+
+async function transitionDispatchActor(
+  fixture: Awaited<ReturnType<typeof createDispatchFixture>>,
+  action: "disable" | "restore",
+  expectedVersion: number,
+  requestKey: string,
+) {
+  const reason = `web_ai_governance_${action}`;
+  const preview = await previewAccountAccess({
+    adminUserId: fixture.platformAdminId,
+    adminAccountAccessVersion: 1,
+    userId: fixture.userId,
+    action,
+    reason,
+    expectedVersion,
+  }, fixture.db);
+  return executeAccountAccess({
+    adminUserId: fixture.platformAdminId,
+    adminAccountAccessVersion: 1,
+    userId: fixture.userId,
+    action,
+    reason,
+    expectedVersion,
+    expectedImpactFingerprint: preview.impactFingerprint,
+    requestKey,
+    requestFingerprint: preview.requestFingerprint,
+    previewId: preview.previewId,
+    previewIssuedAt: preview.previewIssuedAt,
+    previewExpiresAt: preview.previewExpiresAt,
+    confirmation: true,
+    confirmationUsername: preview.user.username,
+  }, fixture.db);
 }
 
 test(
@@ -337,6 +371,62 @@ test(
       });
       assert.equal(audit.credentialSecretFingerprint, "d".repeat(64));
       assert.equal(audit.status, "failed");
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  },
+);
+
+test(
+  "actor disable and restore after admission fails before credential read or provider fetch",
+  { skip: !shouldRun ? "WEB_AI_GOVERNANCE_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const fixture = await createDispatchFixture();
+    const previousFetch = globalThis.fetch;
+    let networkCalls = 0;
+    globalThis.fetch = async () => {
+      networkCalls += 1;
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    try {
+      const admissionPaused = deferred();
+      const releaseAdmission = deferred();
+      const dispatch = auditedProviderCall({
+        jobId: fixture.jobId,
+        attempt: fixture.claim,
+        actor: fixture.actor,
+        route: fixture.route,
+        grantId: fixture.grantId,
+        callKey: stableAiCallKey(fixture.jobId, "autoExtract", "actor-disable-restore"),
+        call: async (admitted) => {
+          admissionPaused.resolve();
+          await releaseAdmission.promise;
+          return invokeChatCompletion({
+            connection: admitted.connection,
+            operation: "autoExtract",
+            modelId: admitted.modelId,
+            messages: [{ role: "user", content: "probe" }],
+            maxOutputTokens: admitted.maxOutputTokens,
+          });
+        },
+      }, fixture.db);
+      await admissionPaused.promise;
+      const disabled = await transitionDispatchActor(fixture, "disable", 1, "dispatch-actor-disable");
+      assert.equal(disabled.accountAccessVersion, 2);
+      const restored = await transitionDispatchActor(fixture, "restore", 2, "dispatch-actor-restore");
+      assert.equal(restored.accountAccessVersion, 3);
+      releaseAdmission.resolve();
+      await assert.rejects(
+        dispatch,
+        (error: unknown) => error instanceof ProviderTransportError && error.code === "AI_PROVIDER_UNAVAILABLE",
+      );
+      assert.equal(networkCalls, 0);
+      const audit = await fixture.db.providerCallAudit.findFirstOrThrow({
+        where: { jobId: fixture.jobId, callKey: stableAiCallKey(fixture.jobId, "autoExtract", "actor-disable-restore") },
+      });
+      assert.equal(audit.status, "failed");
+      const attempt = await fixture.db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: fixture.jobId } });
+      assert.equal(attempt.dispatchState, "pending");
     } finally {
       globalThis.fetch = previousFetch;
     }

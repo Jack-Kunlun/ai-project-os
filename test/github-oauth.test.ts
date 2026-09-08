@@ -72,7 +72,7 @@ function fakeDb() {
   const credentials = new Map<string, ExternalCredential>();
   const attempts = new Map<string, Attempt>();
   const identities = new Map<string, { id: string; userId: string; githubUserId: bigint; login: string; email: string; displayName: string | null; lastLoginAt: Date }>();
-  const users = new Map<string, { id: string; username: string; role: "admin" | "member" | "user"; displayName?: string | null; email?: string | null; emailVerifiedAt?: Date | null; disabledAt: Date | null }>();
+  const users = new Map<string, { id: string; username: string; role: "admin" | "member" | "user"; displayName?: string | null; email?: string | null; emailVerifiedAt?: Date | null; disabledAt: Date | null; accountAccessVersion: number }>();
   const emailVerificationAudits: Array<Record<string, unknown>> = [];
   const memberships: Array<{
     id: string;
@@ -86,7 +86,7 @@ function fakeDb() {
   const platformTokenGrants = new Map<string, PlatformTokenGrantRecord>();
   const platformTokenLedgerEntries = new Map<string, PlatformTokenLedgerEntryRecord>();
   let sequence = 0;
-  const user = { id: USER_ID, username: "admin", role: "admin" as const, emailVerifiedAt: null, disabledAt: null };
+  const user = { id: USER_ID, username: "admin", role: "admin" as const, emailVerifiedAt: null, disabledAt: null, accountAccessVersion: 1 };
   users.set(user.id, user);
 
   const tx = {
@@ -103,7 +103,7 @@ function fakeDb() {
         return current;
       },
       create: async ({ data }: { data: { username: string; displayName: string | null; email: string | null; emailVerifiedAt?: Date | null; role: "user" } }) => {
-        const created = { id: `55555555-5555-4555-8555-${String(++sequence).padStart(12, "0")}`, ...data, disabledAt: null };
+        const created = { id: `55555555-5555-4555-8555-${String(++sequence).padStart(12, "0")}`, ...data, disabledAt: null, accountAccessVersion: 1 };
         users.set(created.id, created);
         return created;
       },
@@ -331,6 +331,7 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
       role: "member",
       email: "octocat@github.test",
       disabledAt: null,
+      accountAccessVersion: 1,
     });
     const existingEmailFlow = await beginGitHubOAuth({
       returnTo: "/dashboard",

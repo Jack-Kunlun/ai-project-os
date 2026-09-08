@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import { getDb } from "@/lib/db";
 import { lockActorWorkspaceProjectAccess } from "@/lib/access-linearization";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
@@ -40,7 +41,7 @@ export class ProjectMcpToolGrantServiceError extends Error {
 }
 
 type Tx = Prisma.TransactionClient;
-type Actor = Readonly<{ id: string; role: string }>;
+type Actor = Readonly<{ id: string; role: string; accountAccessVersion?: number }>;
 
 function fail(code: ProjectMcpToolGrantServiceErrorCode): never {
   throw new ProjectMcpToolGrantServiceError(code);
@@ -62,6 +63,7 @@ type CreateGrantPreflight = Readonly<{
   connectionId: string;
   toolName: string;
   connectionOwnerId: string;
+  connectionOwnerAccountAccessVersion: number;
   projectConfirmedById: string;
   attestationVerifierId: string;
 }>;
@@ -156,13 +158,22 @@ async function requireActorAndProject(
   projectId: string,
   actorId: string,
   allowArchived: boolean,
+  accountAccessVersion?: number,
 ): Promise<{ project: { id: string; workspaceId: string; archivedAt: Date | null }; membership: ProjectOwnerEpoch }> {
   const [actor, project] = await Promise.all([
-    tx.appUser.findUnique({ where: { id: actorId }, select: { id: true, disabledAt: true } }),
+    tx.appUser.findUnique({ where: { id: actorId }, select: { id: true, disabledAt: true, accountAccessVersion: true } }),
     tx.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true, archivedAt: true } }),
   ]);
   if (actor === null || project === null) return fail("PROJECT_MCP_TOOL_GRANT_FORBIDDEN");
   if (actor.disabledAt !== null) return fail("PROJECT_MCP_TOOL_GRANT_ACCOUNT_DISABLED");
+  try {
+    await assertAccountAccessForActor(tx, { id: actorId, accountAccessVersion });
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError && error.code === "ACCOUNT_DISABLED") {
+      return fail("PROJECT_MCP_TOOL_GRANT_ACCOUNT_DISABLED");
+    }
+    return fail("PROJECT_MCP_TOOL_GRANT_FORBIDDEN");
+  }
   if (!allowArchived && project.archivedAt !== null) return fail("PROJECT_MCP_TOOL_GRANT_PROJECT_ARCHIVED");
   const membership = await reloadOwnerEpoch(tx, projectId, actorId);
   return { project, membership };
@@ -186,6 +197,7 @@ type GrantProjectionRow = {
   toolName: string;
   toolDefinitionId: string;
   attestationId: string | null;
+  connectionOwnerAccountAccessVersion: number | null;
   status: "active" | "revoked";
   acknowledgedAt: Date;
   revokedAt: Date | null;
@@ -219,6 +231,7 @@ const grantProjectionSelect = {
   toolName: true,
   toolDefinitionId: true,
   attestationId: true,
+  connectionOwnerAccountAccessVersion: true,
   status: true,
   acknowledgedAt: true,
   revokedAt: true,
@@ -272,6 +285,7 @@ type FullDelegation = {
   projectId: string;
   mcpConnectionId: string;
   connectionOwnerId: string;
+  connectionOwnerAccountAccessVersion: number | null;
   connectionConfigurationRevision: number;
   resolvedAddressFingerprint: string;
   credentialFingerprint: string;
@@ -287,7 +301,7 @@ type FullDelegation = {
 };
 
 const delegationSelect = {
-  id: true, projectId: true, mcpConnectionId: true, connectionOwnerId: true,
+  id: true, projectId: true, mcpConnectionId: true, connectionOwnerId: true, connectionOwnerAccountAccessVersion: true,
   connectionConfigurationRevision: true, resolvedAddressFingerprint: true, credentialFingerprint: true,
   delegationFingerprint: true, expiresAt: true, version: true, status: true,
   ownerProjectMembershipId: true, ownerMembershipCreatedAt: true,
@@ -312,8 +326,10 @@ type FullDefinition = {
     status: "configured" | "verified" | "error" | "disabled";
     disabledAt: Date | null;
     ownerUserId: string | null;
+    ownerAccountAccessVersion: number | null;
     ownershipState: "legacyPending" | "ambiguous" | "confirmed";
     credential: { kind: string; secretFingerprint: string } | null;
+    ownerUser: { id: string; disabledAt: Date | null; accountAccessVersion: number } | null;
   };
 };
 
@@ -322,8 +338,9 @@ const definitionSelect = {
   connection: {
     select: {
       id: true, authKind: true, credentialId: true, credentialFingerprint: true, configurationRevision: true,
-      resolvedAddressFingerprint: true, status: true, disabledAt: true, ownerUserId: true, ownershipState: true,
+      resolvedAddressFingerprint: true, status: true, disabledAt: true, ownerUserId: true, ownerAccountAccessVersion: true, ownershipState: true,
       credential: { select: { kind: true, secretFingerprint: true } },
+      ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } },
     },
   },
 } satisfies Prisma.McpToolDefinitionSelect;
@@ -332,6 +349,7 @@ const attestationSelect = {
   id: true, controlPlaneVersion: true, status: true, version: true, connectionId: true, toolDefinitionId: true,
   toolName: true, definitionFingerprint: true, networkFingerprint: true, credentialFingerprint: true,
   conclusion: true, riskLevel: true, evidenceNote: true, connectionConfigurationRevision: true,
+  connectionOwnerAccountAccessVersion: true,
   note: true, evidence: true, verifiedById: true,
   verifiedBy: { select: { role: true, disabledAt: true } },
 } satisfies Prisma.McpToolAttestationSelect;
@@ -362,7 +380,7 @@ async function validateCreateTuple(
   const now = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`);
   const databaseNow = now[0]?.now ?? new Date();
   const currentCredentialFingerprint = credentialFingerprint(definition.connection);
-  const ownerEpoch = delegation.ownerProjectMembershipId === "" ? null : await tx.projectMembership.findUnique({ where: { id: delegation.ownerProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } });
+  const ownerEpoch = delegation.ownerProjectMembershipId === "" ? null : await tx.projectMembership.findUnique({ where: { id: delegation.ownerProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true, accountAccessVersion: true } } } });
   const confirmerEpoch = delegation.projectConfirmedProjectMembershipId === null ? null : await tx.projectMembership.findUnique({ where: { id: delegation.projectConfirmedProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } });
   const valid = delegation.projectId === projectId
     && delegation.status === "active"
@@ -375,6 +393,8 @@ async function validateCreateTuple(
     && ownerEpoch.accessState === "confirmed"
     && ownerEpoch.createdAt.getTime() === delegation.ownerMembershipCreatedAt.getTime()
     && ownerEpoch.user.disabledAt === null
+    && delegation.connectionOwnerAccountAccessVersion !== null
+    && ownerEpoch.user.accountAccessVersion === delegation.connectionOwnerAccountAccessVersion
     && delegation.projectConfirmedProjectMembershipId !== null
     && delegation.projectConfirmedMembershipCreatedAt !== null
     && delegation.projectConfirmedById !== null
@@ -390,6 +410,10 @@ async function validateCreateTuple(
     && definition.current
     && definition.remoteReadOnlyHint
     && definition.connection.ownerUserId === delegation.connectionOwnerId
+    && definition.connection.ownerAccountAccessVersion === delegation.connectionOwnerAccountAccessVersion
+    && definition.connection.ownerUser !== null
+    && definition.connection.ownerUser.disabledAt === null
+    && definition.connection.ownerUser.accountAccessVersion === delegation.connectionOwnerAccountAccessVersion
     && definition.connection.ownershipState === "confirmed"
     && definition.connection.status === "verified"
     && definition.connection.disabledAt === null
@@ -406,6 +430,7 @@ async function validateCreateTuple(
     && attestation.definitionFingerprint === definition.definitionFingerprint
     && attestation.networkFingerprint === delegation.resolvedAddressFingerprint
     && attestation.credentialFingerprint === currentCredentialFingerprint
+    && attestation.connectionOwnerAccountAccessVersion === delegation.connectionOwnerAccountAccessVersion
     && attestation.connectionConfigurationRevision === definition.connection.configurationRevision
     && attestation.conclusion === "read_only_verified"
     && (attestation.riskLevel === "low" || attestation.riskLevel === "medium" || attestation.riskLevel === "high")
@@ -418,7 +443,7 @@ async function validateCreateTuple(
   return { delegation, definition, attestation, networkFingerprint: delegation.resolvedAddressFingerprint, credentialFingerprint: currentCredentialFingerprint };
 }
 
-function isSameTuple(existing: { controlPlaneVersion: number | null; grantVersion: number | null; status: string; managedById: string; delegationId: string | null; toolDefinitionId: string; attestationId: string | null; delegationVersion: number | null; grantorProjectMembershipId: string | null; grantorMembershipCreatedAt: Date | null; connectionConfigurationRevision: number | null; definitionFingerprint: string | null; networkFingerprint: string | null; credentialFingerprint: string | null; delegationFingerprint: string | null }, tuple: { delegationId: string; toolDefinitionId: string; attestationId: string; delegationVersion: number; grantorProjectMembershipId: string; grantorMembershipCreatedAt: Date; connectionConfigurationRevision: number; definitionFingerprint: string; networkFingerprint: string; credentialFingerprint: string; delegationFingerprint: string }, actorMembership: ProjectOwnerEpoch, actorId: string): boolean {
+function isSameTuple(existing: { controlPlaneVersion: number | null; grantVersion: number | null; status: string; managedById: string; delegationId: string | null; toolDefinitionId: string; attestationId: string | null; delegationVersion: number | null; grantorProjectMembershipId: string | null; grantorMembershipCreatedAt: Date | null; connectionConfigurationRevision: number | null; definitionFingerprint: string | null; networkFingerprint: string | null; credentialFingerprint: string | null; delegationFingerprint: string | null; connectionOwnerAccountAccessVersion: number | null }, tuple: { delegationId: string; toolDefinitionId: string; attestationId: string; delegationVersion: number; grantorProjectMembershipId: string; grantorMembershipCreatedAt: Date; connectionConfigurationRevision: number; definitionFingerprint: string; networkFingerprint: string; credentialFingerprint: string; delegationFingerprint: string; connectionOwnerAccountAccessVersion: number }, actorMembership: ProjectOwnerEpoch, actorId: string): boolean {
   return existing.controlPlaneVersion === 2
     && existing.grantVersion === 1
     && existing.status === "active"
@@ -433,7 +458,8 @@ function isSameTuple(existing: { controlPlaneVersion: number | null; grantVersio
     && existing.definitionFingerprint === tuple.definitionFingerprint
     && existing.networkFingerprint === tuple.networkFingerprint
     && existing.credentialFingerprint === tuple.credentialFingerprint
-    && existing.delegationFingerprint === tuple.delegationFingerprint;
+    && existing.delegationFingerprint === tuple.delegationFingerprint
+    && existing.connectionOwnerAccountAccessVersion === tuple.connectionOwnerAccountAccessVersion;
 }
 
 async function loadProjectedGrant(tx: Tx, id: string): Promise<GrantProjectionRow> {
@@ -445,7 +471,7 @@ export async function listProjectMcpToolGrantsV2(projectIdInput: unknown, actor:
   const actorId = parseActor(actor);
   return withSerializableRetry(db, async (tx) => {
     await lockAdmission(tx, projectId, [actorId]);
-    const { project } = await requireActorAndProject(tx, projectId, actorId, true);
+    const { project } = await requireActorAndProject(tx, projectId, actorId, true, actor.accountAccessVersion);
     const rows = await tx.projectMcpToolGrant.findMany({ where: { projectId, controlPlaneVersion: 2 }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: grantProjectionSelect });
     if (project.archivedAt !== null) {
       return Object.freeze({ projectId, archived: true, grants: rows.map((row) => projectGrant(row as unknown as GrantProjectionRow)), candidates: [] });
@@ -459,7 +485,7 @@ export async function listProjectMcpToolGrantsV2(projectIdInput: unknown, actor:
     const now = nowRows[0]?.now ?? new Date();
     const delegations = await tx.projectMcpConnectionDelegation.findMany({
       where: { projectId, status: "active", expiresAt: { gt: now } },
-      select: { id: true, mcpConnectionId: true, connectionOwnerId: true, version: true, expiresAt: true, connectionConfigurationRevision: true, resolvedAddressFingerprint: true, credentialFingerprint: true, ownerProjectMembershipId: true, ownerMembershipCreatedAt: true, projectConfirmedProjectMembershipId: true, projectConfirmedMembershipCreatedAt: true, projectConfirmedById: true },
+      select: { id: true, mcpConnectionId: true, connectionOwnerId: true, connectionOwnerAccountAccessVersion: true, version: true, expiresAt: true, connectionConfigurationRevision: true, resolvedAddressFingerprint: true, credentialFingerprint: true, ownerProjectMembershipId: true, ownerMembershipCreatedAt: true, projectConfirmedProjectMembershipId: true, projectConfirmedMembershipCreatedAt: true, projectConfirmedById: true },
     });
     const candidates: Array<Readonly<Record<string, unknown>>> = [];
     const definitions = await tx.mcpToolDefinition.findMany({
@@ -468,24 +494,25 @@ export async function listProjectMcpToolGrantsV2(projectIdInput: unknown, actor:
       select: {
         id: true, connectionId: true, name: true, title: true, description: true, inputSchema: true, outputSchema: true, annotations: true,
         definitionFingerprint: true,
-        connection: { select: { id: true, authKind: true, credentialId: true, credentialFingerprint: true, configurationRevision: true, resolvedAddressFingerprint: true, status: true, disabledAt: true, ownerUserId: true, ownershipState: true, credential: { select: { kind: true, secretFingerprint: true } } } },
+        connection: { select: { id: true, authKind: true, credentialId: true, credentialFingerprint: true, configurationRevision: true, resolvedAddressFingerprint: true, status: true, disabledAt: true, ownerUserId: true, ownerAccountAccessVersion: true, ownershipState: true, credential: { select: { kind: true, secretFingerprint: true } }, ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } } } },
       },
     });
     for (const definition of definitions) {
       if (activeSlotKeys.has(`${definition.connectionId}:${definition.name}`)) continue;
       const delegation = delegations.find((row) => row.mcpConnectionId === definition.connectionId);
       if (delegation === undefined || delegation.projectConfirmedProjectMembershipId === null || delegation.projectConfirmedMembershipCreatedAt === null || delegation.projectConfirmedById === null) continue;
-      const ownerEpoch = await tx.projectMembership.findUnique({ where: { id: delegation.ownerProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } });
+      const ownerEpoch = await tx.projectMembership.findUnique({ where: { id: delegation.ownerProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true, accountAccessVersion: true } } } });
       if (ownerEpoch === null || ownerEpoch.projectId !== projectId || ownerEpoch.userId !== delegation.connectionOwnerId || (ownerEpoch.role !== "owner" && ownerEpoch.role !== "editor") || ownerEpoch.accessState !== "confirmed" || ownerEpoch.createdAt.getTime() !== delegation.ownerMembershipCreatedAt.getTime() || ownerEpoch.user.disabledAt !== null) continue;
+      if (delegation.connectionOwnerAccountAccessVersion === null || ownerEpoch.user.accountAccessVersion !== delegation.connectionOwnerAccountAccessVersion) continue;
       const confirmer = await tx.projectMembership.findUnique({ where: { id: delegation.projectConfirmedProjectMembershipId }, select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true, user: { select: { disabledAt: true } } } });
       if (confirmer === null || confirmer.projectId !== projectId || confirmer.userId !== delegation.projectConfirmedById || confirmer.role !== "owner" || confirmer.accessState !== "confirmed" || confirmer.createdAt.getTime() !== delegation.projectConfirmedMembershipCreatedAt.getTime() || confirmer.user.disabledAt !== null) continue;
       const connection = definition.connection;
       const expectedCredential = connection.authKind === "none"
         ? connection.credentialId === null && connection.credentialFingerprint === NO_CREDENTIAL_FINGERPRINT ? NO_CREDENTIAL_FINGERPRINT : null
         : connection.authKind === "bearer" && connection.credential?.kind === "mcp" && connection.credential.secretFingerprint === connection.credentialFingerprint ? connection.credentialFingerprint : null;
-      if (connection.status !== "verified" || connection.disabledAt !== null || connection.ownerUserId !== delegation.connectionOwnerId || connection.ownershipState !== "confirmed" || connection.resolvedAddressFingerprint === null || expectedCredential === null) continue;
+      if (connection.status !== "verified" || connection.disabledAt !== null || connection.ownerUserId !== delegation.connectionOwnerId || connection.ownerAccountAccessVersion !== delegation.connectionOwnerAccountAccessVersion || connection.ownerUser === null || connection.ownerUser.disabledAt !== null || connection.ownerUser.accountAccessVersion !== delegation.connectionOwnerAccountAccessVersion || connection.ownershipState !== "confirmed" || connection.resolvedAddressFingerprint === null || expectedCredential === null) continue;
       if (connection.configurationRevision !== delegation.connectionConfigurationRevision || connection.resolvedAddressFingerprint !== delegation.resolvedAddressFingerprint || expectedCredential !== delegation.credentialFingerprint) continue;
-      const attestation = await tx.mcpToolAttestation.findFirst({ where: { controlPlaneVersion: 2, status: "active", version: 1, connectionId: definition.connectionId, toolDefinitionId: definition.id, toolName: definition.name, definitionFingerprint: definition.definitionFingerprint, networkFingerprint: connection.resolvedAddressFingerprint, credentialFingerprint: expectedCredential, connectionConfigurationRevision: connection.configurationRevision, audits: { none: { event: "revoked" } } }, select: { id: true, conclusion: true, riskLevel: true, evidenceNote: true, note: true, evidence: true, verifiedBy: { select: { role: true, disabledAt: true } } } });
+      const attestation = await tx.mcpToolAttestation.findFirst({ where: { controlPlaneVersion: 2, status: "active", version: 1, connectionId: definition.connectionId, toolDefinitionId: definition.id, toolName: definition.name, definitionFingerprint: definition.definitionFingerprint, networkFingerprint: connection.resolvedAddressFingerprint, credentialFingerprint: expectedCredential, connectionConfigurationRevision: connection.configurationRevision, connectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion, audits: { none: { event: "revoked" } } }, select: { id: true, connectionOwnerAccountAccessVersion: true, conclusion: true, riskLevel: true, evidenceNote: true, note: true, evidence: true, verifiedBy: { select: { role: true, disabledAt: true } } } });
       if (attestation === null) continue;
       const effective = attestation.conclusion === "read_only_verified"
         && ["low", "medium", "high"].includes(attestation.riskLevel ?? "")
@@ -520,13 +547,13 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
     // acting user. No caller-supplied delegation, definition, or attestation
     // identifier is read or locked until direct Owner admission succeeds.
     await lockAdmission(tx, projectId, [actorId]);
-    await requireActorAndProject(tx, projectId, actorId, false);
+    await requireActorAndProject(tx, projectId, actorId, false, actor.accountAccessVersion);
 
     const delegation = await tx.projectMcpConnectionDelegation.findFirst({
       where: { id: parsed.data.delegationId, projectId, status: "active" },
-      select: { id: true, mcpConnectionId: true, connectionOwnerId: true, projectConfirmedById: true },
+      select: { id: true, mcpConnectionId: true, connectionOwnerId: true, connectionOwnerAccountAccessVersion: true, projectConfirmedById: true },
     });
-    if (delegation === null || delegation.projectConfirmedById === null) return fail("PROJECT_MCP_TOOL_GRANT_STALE");
+    if (delegation === null || delegation.projectConfirmedById === null || delegation.connectionOwnerAccountAccessVersion === null) return fail("PROJECT_MCP_TOOL_GRANT_STALE");
     const definition = await tx.mcpToolDefinition.findFirst({
       where: { id: parsed.data.toolDefinitionId, connectionId: delegation.mcpConnectionId },
       select: { id: true, connectionId: true, name: true },
@@ -552,6 +579,7 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
       connectionId: delegation.mcpConnectionId,
       toolName: definition.name,
       connectionOwnerId: delegation.connectionOwnerId,
+      connectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion,
       projectConfirmedById: delegation.projectConfirmedById,
       attestationVerifierId: attestation.verifiedById,
     };
@@ -566,10 +594,10 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
       preflight.toolDefinitionId,
       `${projectId}:${preflight.connectionId}:${preflight.toolName}`,
     );
-    const { membership } = await requireActorAndProject(tx, projectId, actorId, false);
+    const { membership } = await requireActorAndProject(tx, projectId, actorId, false, actor.accountAccessVersion);
     const liveSeed = await tx.projectMcpConnectionDelegation.findFirst({
       where: { id: preflight.delegationId, projectId, status: "active" },
-      select: { id: true, mcpConnectionId: true, connectionOwnerId: true, projectConfirmedById: true },
+      select: { id: true, mcpConnectionId: true, connectionOwnerId: true, connectionOwnerAccountAccessVersion: true, projectConfirmedById: true },
     });
     const liveDefinition = liveSeed === null ? null : await tx.mcpToolDefinition.findFirst({
       where: { id: preflight.toolDefinitionId, connectionId: liveSeed.mcpConnectionId },
@@ -591,6 +619,7 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
       liveSeed === null
       || liveSeed.mcpConnectionId !== preflight.connectionId
       || liveSeed.connectionOwnerId !== preflight.connectionOwnerId
+      || liveSeed.connectionOwnerAccountAccessVersion !== preflight.connectionOwnerAccountAccessVersion
       || liveSeed.projectConfirmedById !== preflight.projectConfirmedById
       || liveDefinition === null
       || liveDefinition.connectionId !== preflight.connectionId
@@ -599,8 +628,8 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
       || liveAttestation.verifiedById !== preflight.attestationVerifierId
     ) return fail("PROJECT_MCP_TOOL_GRANT_STALE");
     const tuple = await validateCreateTuple(tx, projectId, parsed.data);
-    const existing = await tx.projectMcpToolGrant.findFirst({ where: { projectId, connectionId: tuple.definition.connectionId, toolName: tuple.definition.name, status: "active" }, select: { id: true, controlPlaneVersion: true, grantVersion: true, status: true, managedById: true, delegationId: true, toolDefinitionId: true, attestationId: true, delegationVersion: true, grantorProjectMembershipId: true, grantorMembershipCreatedAt: true, connectionConfigurationRevision: true, definitionFingerprint: true, networkFingerprint: true, credentialFingerprint: true, delegationFingerprint: true } });
-    const expected = { delegationId: tuple.delegation.id, toolDefinitionId: tuple.definition.id, attestationId: tuple.attestation.id, delegationVersion: tuple.delegation.version, grantorProjectMembershipId: membership.id, grantorMembershipCreatedAt: membership.createdAt, connectionConfigurationRevision: tuple.definition.connection.configurationRevision, definitionFingerprint: tuple.definition.definitionFingerprint, networkFingerprint: tuple.networkFingerprint, credentialFingerprint: tuple.credentialFingerprint, delegationFingerprint: tuple.delegation.delegationFingerprint };
+    const existing = await tx.projectMcpToolGrant.findFirst({ where: { projectId, connectionId: tuple.definition.connectionId, toolName: tuple.definition.name, status: "active" }, select: { id: true, controlPlaneVersion: true, grantVersion: true, status: true, managedById: true, delegationId: true, toolDefinitionId: true, attestationId: true, delegationVersion: true, grantorProjectMembershipId: true, grantorMembershipCreatedAt: true, connectionConfigurationRevision: true, definitionFingerprint: true, networkFingerprint: true, credentialFingerprint: true, delegationFingerprint: true, connectionOwnerAccountAccessVersion: true } });
+    const expected = { delegationId: tuple.delegation.id, toolDefinitionId: tuple.definition.id, attestationId: tuple.attestation.id, delegationVersion: tuple.delegation.version, grantorProjectMembershipId: membership.id, grantorMembershipCreatedAt: membership.createdAt, connectionConfigurationRevision: tuple.definition.connection.configurationRevision, definitionFingerprint: tuple.definition.definitionFingerprint, networkFingerprint: tuple.networkFingerprint, credentialFingerprint: tuple.credentialFingerprint, delegationFingerprint: tuple.delegation.delegationFingerprint, connectionOwnerAccountAccessVersion: tuple.delegation.connectionOwnerAccountAccessVersion! };
     if (existing !== null) {
       if (!isSameTuple(existing, expected, membership, actorId)) return fail("PROJECT_MCP_TOOL_GRANT_CONFLICT");
       return { created: false, grant: projectGrant(await loadProjectedGrant(tx, existing.id)) };
@@ -610,6 +639,7 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
       id: grantId, projectId, connectionId: tuple.definition.connectionId, delegationId: tuple.delegation.id, controlPlaneVersion: 2, grantVersion: 1,
       toolName: tuple.definition.name, toolDefinitionId: tuple.definition.id, attestationId: tuple.attestation.id,
       definitionFingerprint: tuple.definition.definitionFingerprint, networkFingerprint: tuple.networkFingerprint, credentialFingerprint: tuple.credentialFingerprint,
+      connectionOwnerAccountAccessVersion: tuple.delegation.connectionOwnerAccountAccessVersion,
       delegationVersion: tuple.delegation.version, delegationFingerprint: tuple.delegation.delegationFingerprint, connectionConfigurationRevision: tuple.definition.connection.configurationRevision,
       grantorProjectMembershipId: membership.id, grantorMembershipCreatedAt: membership.createdAt, status: "active", managedById: actorId,
       acknowledgedAt: new Date(0), creationTransactionId: BigInt(0),
@@ -619,7 +649,7 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
       statusBefore: null, statusAfter: "active", delegationVersion: tuple.delegation.version, delegationFingerprint: tuple.delegation.delegationFingerprint,
       connectionConfigurationRevision: tuple.definition.connection.configurationRevision, grantorProjectMembershipId: membership.id,
       grantorMembershipCreatedAt: membership.createdAt, revokerProjectMembershipId: null, revokerMembershipCreatedAt: null,
-      definitionFingerprint: tuple.definition.definitionFingerprint, details: {},
+      definitionFingerprint: tuple.definition.definitionFingerprint, connectionOwnerAccountAccessVersion: tuple.delegation.connectionOwnerAccountAccessVersion, details: {},
     } });
     await tx.projectMcpToolGrantLedger.create({ data: {
       id: randomUUID(), projectId, grantId: grant.id, connectionId: tuple.definition.connectionId, delegationId: tuple.delegation.id,
@@ -629,6 +659,7 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
       connectionConfigurationRevision: tuple.definition.connection.configurationRevision, grantorProjectMembershipId: membership.id,
       grantorMembershipCreatedAt: membership.createdAt, revokerProjectMembershipId: null, revokerMembershipCreatedAt: null,
       definitionFingerprint: tuple.definition.definitionFingerprint, networkFingerprint: tuple.networkFingerprint, credentialFingerprint: tuple.credentialFingerprint,
+      connectionOwnerId: tuple.delegation.connectionOwnerId, connectionOwnerAccountAccessVersion: tuple.delegation.connectionOwnerAccountAccessVersion,
       acknowledgedAt: grant.acknowledgedAt, transactionId: BigInt(0), transitionAt: new Date(0), createdAt: new Date(0),
     } });
     return { created: true, grant: projectGrant(await loadProjectedGrant(tx, grant.id)) };
@@ -647,7 +678,7 @@ export async function revokeProjectMcpToolGrantV2(projectIdInput: unknown, grant
     // different project on the same forbidden/not-found boundary without
     // locking or reading the other project's grant row.
     await lockAdmission(tx, projectId, [actorId]);
-    await requireActorAndProject(tx, projectId, actorId, true);
+    await requireActorAndProject(tx, projectId, actorId, true, actor.accountAccessVersion);
 
     const scopedSeed = await tx.projectMcpToolGrant.findFirst({
       where: { id: grantId, projectId, controlPlaneVersion: 2 },
@@ -658,7 +689,7 @@ export async function revokeProjectMcpToolGrantV2(projectIdInput: unknown, grant
     // Only after target-project admission do we acquire the resource locks,
     // in the shared order connection -> definition tuple -> grant row.
     await lockAdmission(tx, projectId, [actorId], scopedSeed.connectionId, scopedSeed.toolDefinitionId, undefined, scopedSeed.id);
-    const { membership } = await requireActorAndProject(tx, projectId, actorId, true);
+    const { membership } = await requireActorAndProject(tx, projectId, actorId, true, actor.accountAccessVersion);
     const existing = await tx.projectMcpToolGrant.findFirst({ where: { id: scopedSeed.id, projectId, controlPlaneVersion: 2 }, select: { id: true, controlPlaneVersion: true, status: true, grantVersion: true, revokedById: true, revokerProjectMembershipId: true, revokerMembershipCreatedAt: true } });
     if (existing === null) return fail("PROJECT_MCP_TOOL_GRANT_NOT_FOUND");
     if (existing.status === "revoked" && existing.grantVersion === 2 && parsed.data.expectedGrantVersion === 1 && existing.revokedById === actorId && existing.revokerProjectMembershipId === membership.id && existing.revokerMembershipCreatedAt?.getTime() === membership.createdAt.getTime()) {
@@ -670,17 +701,18 @@ export async function revokeProjectMcpToolGrantV2(projectIdInput: unknown, grant
     const current = await tx.projectMcpToolGrant.findFirstOrThrow({ where: { id: scopedSeed.id, projectId, controlPlaneVersion: 2 }, select: {
       projectId: true, connectionId: true, delegationId: true, toolDefinitionId: true, attestationId: true, toolName: true,
       controlPlaneVersion: true, grantVersion: true, definitionFingerprint: true, networkFingerprint: true, credentialFingerprint: true,
-      delegationVersion: true, delegationFingerprint: true, connectionConfigurationRevision: true, grantorProjectMembershipId: true,
+      connectionOwnerAccountAccessVersion: true, delegationVersion: true, delegationFingerprint: true, connectionConfigurationRevision: true, grantorProjectMembershipId: true,
       grantorMembershipCreatedAt: true, managedById: true, status: true, revokedById: true, revokerProjectMembershipId: true, revokerMembershipCreatedAt: true,
       acknowledgedAt: true,
+      delegation: { select: { connectionOwnerId: true } },
     } });
-    if (current.delegationId === null || current.attestationId === null || current.definitionFingerprint === null || current.networkFingerprint === null || current.credentialFingerprint === null || current.delegationVersion === null || current.delegationFingerprint === null || current.connectionConfigurationRevision === null || current.grantorProjectMembershipId === null || current.grantorMembershipCreatedAt === null || current.revokerProjectMembershipId === null || current.revokerMembershipCreatedAt === null) return fail("PROJECT_MCP_TOOL_GRANT_CONFLICT");
+    if (current.delegationId === null || current.delegation === null || current.attestationId === null || current.definitionFingerprint === null || current.networkFingerprint === null || current.credentialFingerprint === null || current.delegationVersion === null || current.delegationFingerprint === null || current.connectionConfigurationRevision === null || current.grantorProjectMembershipId === null || current.grantorMembershipCreatedAt === null || current.revokerProjectMembershipId === null || current.revokerMembershipCreatedAt === null) return fail("PROJECT_MCP_TOOL_GRANT_CONFLICT");
     await tx.projectMcpToolGrantAudit.create({ data: {
       id: randomUUID(), projectId, grantId, event: "revoked", actorId, controlPlaneVersion: 2, grantVersion: 2, statusBefore: "active", statusAfter: "revoked",
       delegationVersion: current.delegationVersion, delegationFingerprint: current.delegationFingerprint, connectionConfigurationRevision: current.connectionConfigurationRevision,
       grantorProjectMembershipId: current.grantorProjectMembershipId, grantorMembershipCreatedAt: current.grantorMembershipCreatedAt,
       revokerProjectMembershipId: current.revokerProjectMembershipId, revokerMembershipCreatedAt: current.revokerMembershipCreatedAt,
-      definitionFingerprint: current.definitionFingerprint, details: {},
+      definitionFingerprint: current.definitionFingerprint, connectionOwnerAccountAccessVersion: current.connectionOwnerAccountAccessVersion, details: {},
     } });
     await tx.projectMcpToolGrantLedger.create({ data: {
       id: randomUUID(), projectId, grantId, connectionId: current.connectionId, delegationId: current.delegationId, toolDefinitionId: current.toolDefinitionId,
@@ -690,6 +722,7 @@ export async function revokeProjectMcpToolGrantV2(projectIdInput: unknown, grant
       grantorProjectMembershipId: current.grantorProjectMembershipId, grantorMembershipCreatedAt: current.grantorMembershipCreatedAt,
       revokerProjectMembershipId: current.revokerProjectMembershipId, revokerMembershipCreatedAt: current.revokerMembershipCreatedAt,
       definitionFingerprint: current.definitionFingerprint, networkFingerprint: current.networkFingerprint, credentialFingerprint: current.credentialFingerprint,
+      connectionOwnerId: current.delegation.connectionOwnerId, connectionOwnerAccountAccessVersion: current.connectionOwnerAccountAccessVersion,
       acknowledgedAt: current.acknowledgedAt, transactionId: BigInt(0), transitionAt: new Date(0), createdAt: new Date(0),
     } });
     return { created: true, grant: projectGrant(await loadProjectedGrant(tx, grantId)) };

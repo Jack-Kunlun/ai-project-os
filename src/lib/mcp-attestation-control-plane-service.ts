@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import { getDb } from "@/lib/db";
 import { McpCapabilityError, failMcp } from "@/lib/mcp/errors";
 
@@ -41,6 +42,7 @@ type ConnectionSnapshot = Readonly<{
   authKind: "none" | "bearer";
   credentialId: string | null;
   credentialFingerprint: string;
+  ownerAccountAccessVersion: number | null;
   configurationRevision: number;
   resolvedAddressFingerprint: string | null;
   status: "configured" | "verified" | "error" | "disabled";
@@ -48,7 +50,7 @@ type ConnectionSnapshot = Readonly<{
   ownerUserId: string | null;
   ownershipState: "legacyPending" | "ambiguous" | "confirmed";
   credential: Readonly<{ kind: string; secretFingerprint: string }> | null;
-  ownerUser: Readonly<{ id: string; disabledAt: Date | null }> | null;
+  ownerUser: Readonly<{ id: string; disabledAt: Date | null; accountAccessVersion: number }> | null;
 }>;
 
 type DefinitionSnapshot = Readonly<{
@@ -77,6 +79,7 @@ type AttestationSnapshot = Readonly<{
   definitionFingerprint: string;
   networkFingerprint: string;
   credentialFingerprint: string;
+  connectionOwnerAccountAccessVersion: number | null;
   conclusion: string | null;
   riskLevel: string | null;
   evidenceNote: string | null;
@@ -112,6 +115,12 @@ function uuid(value: unknown): string {
 
 function actorIdFromInput(value: unknown): string {
   return isObject(value) && "id" in value ? uuid(value.id) : uuid(value);
+}
+
+function actorAccountAccessVersionFromInput(value: unknown): number | undefined {
+  if (!isObject(value)) return undefined;
+  const version = value.accountAccessVersion;
+  return typeof version === "number" ? version : undefined;
 }
 
 function isPrismaCode(error: unknown, code: string): boolean {
@@ -164,9 +173,15 @@ async function lockAttestation(tx: Tx, attestationId: string): Promise<void> {
   await tx.$queryRaw`SELECT "id" FROM "McpToolAttestation" WHERE "id" = ${attestationId}::uuid FOR UPDATE`;
 }
 
-async function requireAdminActor(db: PrismaClient | Tx, actorId: string): Promise<void> {
+async function requireAdminActor(db: PrismaClient | Tx, actorId: string, accountAccessVersion?: number): Promise<void> {
   const actor = await db.appUser.findUnique({ where: { id: actorId }, select: { role: true, disabledAt: true } });
   if (actor === null || actor.role !== "admin" || actor.disabledAt !== null) return failMcp("MCP_ADMIN_REQUIRED");
+  try {
+    await assertAccountAccessForActor(db, { id: actorId, accountAccessVersion });
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError) return failMcp("MCP_ADMIN_REQUIRED");
+    throw error;
+  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -338,6 +353,10 @@ function assessActiveAttestation(row: AttestationSnapshot, definition: Definitio
     || definition.connection.ownerUserId === null
     || definition.connection.ownerUser === null
     || definition.connection.ownerUser.disabledAt !== null
+    || definition.connection.ownerAccountAccessVersion === null
+    || definition.connection.ownerAccountAccessVersion !== definition.connection.ownerUser.accountAccessVersion
+    || row.connectionOwnerAccountAccessVersion === null
+    || row.connectionOwnerAccountAccessVersion !== definition.connection.ownerAccountAccessVersion
     || networkFingerprint === null) {
     return { effective: false, reason: "connection_not_verified" };
   }
@@ -405,7 +424,12 @@ function assertDefinitionEligible(definition: DefinitionSnapshot): string {
   const connection = definition.connection;
   if (!definition.current || !definition.remoteReadOnlyHint) return failMcp(definition.current ? "MCP_TOOL_NOT_READ_ONLY" : "MCP_TOOL_DEFINITION_STALE");
   if (connection.status !== "verified" || connection.disabledAt !== null || connection.resolvedAddressFingerprint === null) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
-  if (connection.ownerUserId === null || connection.ownershipState !== "confirmed" || connection.ownerUser === null || connection.ownerUser.disabledAt !== null) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
+  if (connection.ownerUserId === null
+    || connection.ownershipState !== "confirmed"
+    || connection.ownerUser === null
+    || connection.ownerUser.disabledAt !== null
+    || connection.ownerAccountAccessVersion === null
+    || connection.ownerAccountAccessVersion !== connection.ownerUser.accountAccessVersion) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
   return connectionCredentialFingerprint(connection);
 }
 
@@ -455,6 +479,7 @@ function projectAttestation(row: AttestationSnapshot, assessment?: ActiveAssessm
     },
     snapshots: {
       connectionConfigurationRevision: row.connectionConfigurationRevision,
+      connectionOwnerAccountAccessVersion: row.connectionOwnerAccountAccessVersion,
       definitionFingerprint: row.definitionFingerprint,
       networkFingerprint: row.networkFingerprint,
       credentialFingerprint: row.credentialFingerprint,
@@ -489,9 +514,10 @@ async function loadDefinition(tx: Tx, toolDefinitionId: string): Promise<Definit
           status: true,
           disabledAt: true,
           ownerUserId: true,
+          ownerAccountAccessVersion: true,
           ownershipState: true,
           credential: { select: { kind: true, secretFingerprint: true } },
-          ownerUser: { select: { id: true, disabledAt: true } },
+          ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } },
         },
       },
     },
@@ -518,6 +544,7 @@ async function loadAttestation(tx: Tx, attestationId: string): Promise<Attestati
       riskLevel: true,
       evidenceNote: true,
       connectionConfigurationRevision: true,
+      connectionOwnerAccountAccessVersion: true,
       verifiedById: true,
       note: true,
       evidence: true,
@@ -537,9 +564,10 @@ async function loadAttestation(tx: Tx, attestationId: string): Promise<Attestati
           status: true,
           disabledAt: true,
           ownerUserId: true,
+          ownerAccountAccessVersion: true,
           ownershipState: true,
           credential: { select: { kind: true, secretFingerprint: true } },
-          ownerUser: { select: { id: true, disabledAt: true } },
+          ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } },
         },
       },
       toolDefinition: {
@@ -599,11 +627,12 @@ export async function listMcpControlPlaneAttestationCandidates(
   db: PrismaClient = getDb(),
 ) {
   const actorId = actorIdFromInput(actorIdInput);
+  const actorAccountAccessVersion = actorAccountAccessVersionFromInput(actorIdInput);
   const parsed = candidateQuerySchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
   return withSerializableRetry(db, async (tx) => {
     await lockActor(tx, actorId);
-    await requireAdminActor(tx, actorId);
+    await requireAdminActor(tx, actorId, actorAccountAccessVersion);
     const start = (parsed.data.page - 1) * parsed.data.pageSize;
     if (parsed.data.state === "active") {
       const where = { controlPlaneVersion: 2, status: "active" } as const;
@@ -664,7 +693,8 @@ export async function listMcpControlPlaneAttestationCandidates(
               ownerUserId: true,
               ownershipState: true,
               credential: { select: { kind: true, secretFingerprint: true } },
-              ownerUser: { select: { id: true, disabledAt: true } },
+              ownerAccountAccessVersion: true,
+              ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } },
             },
           },
         },
@@ -771,16 +801,17 @@ export async function createMcpControlPlaneAttestation(
   db: PrismaClient = getDb(),
 ) {
   const actorId = actorIdFromInput(actorIdInput);
+  const actorAccountAccessVersion = actorAccountAccessVersionFromInput(actorIdInput);
   const parsed = createAttestationSchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
   return withSerializableRetry(db, async (tx) => {
     await lockActor(tx, actorId);
-    await requireAdminActor(tx, actorId);
+    await requireAdminActor(tx, actorId, actorAccountAccessVersion);
     const initial = await tx.mcpToolDefinition.findUnique({ where: { id: parsed.data.toolDefinitionId }, select: { connectionId: true } });
     if (initial === null) return failMcp("MCP_TOOL_NOT_FOUND");
     await lockConnection(tx, initial.connectionId);
     await lockTuple(tx, initial.connectionId, parsed.data.toolDefinitionId);
-    await requireAdminActor(tx, actorId);
+    await requireAdminActor(tx, actorId, actorAccountAccessVersion);
     const definition = await loadDefinition(tx, parsed.data.toolDefinitionId);
     if (definition.connectionId !== initial.connectionId) return failMcp("MCP_TOOL_DEFINITION_STALE");
     const { networkFingerprint, credentialFingerprint } = assertExpectedSnapshot(definition, parsed.data);
@@ -816,6 +847,7 @@ export async function createMcpControlPlaneAttestation(
         riskLevel: parsed.data.riskLevel,
         evidenceNote: parsed.data.evidenceNote,
         connectionConfigurationRevision: definition.connection.configurationRevision,
+        connectionOwnerAccountAccessVersion: definition.connection.ownerAccountAccessVersion,
         verifiedById: actorId,
         note: null,
         evidence: {},
@@ -834,6 +866,7 @@ export async function createMcpControlPlaneAttestation(
         statusBefore: null,
         statusAfter: "active",
         connectionConfigurationRevision: definition.connection.configurationRevision,
+        connectionOwnerAccountAccessVersion: definition.connection.ownerAccountAccessVersion,
         definitionFingerprint: definition.definitionFingerprint,
         networkFingerprint,
         credentialFingerprint,
@@ -853,12 +886,13 @@ export async function revokeMcpControlPlaneAttestation(
   db: PrismaClient = getDb(),
 ) {
   const actorId = actorIdFromInput(actorIdInput);
+  const actorAccountAccessVersion = actorAccountAccessVersionFromInput(actorIdInput);
   const attestationId = uuid(attestationIdInput);
   const parsed = revokeAttestationSchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
   return withSerializableRetry(db, async (tx) => {
     await lockActor(tx, actorId);
-    await requireAdminActor(tx, actorId);
+    await requireAdminActor(tx, actorId, actorAccountAccessVersion);
     const initial = await tx.mcpToolAttestation.findUnique({
       where: { id: attestationId },
       select: { connectionId: true, toolDefinitionId: true },
@@ -867,7 +901,7 @@ export async function revokeMcpControlPlaneAttestation(
     await lockConnection(tx, initial.connectionId);
     await lockTuple(tx, initial.connectionId, initial.toolDefinitionId);
     await lockAttestation(tx, attestationId);
-    await requireAdminActor(tx, actorId);
+    await requireAdminActor(tx, actorId, actorAccountAccessVersion);
     const existing = await loadAttestation(tx, attestationId);
     if (existing === null || existing.controlPlaneVersion !== 2) return failMcp("MCP_ATTESTATION_NOT_FOUND");
     if (existing.connectionId !== initial.connectionId || existing.toolDefinitionId !== initial.toolDefinitionId) return failMcp("MCP_ATTESTATION_CONFLICT");
@@ -890,6 +924,7 @@ export async function revokeMcpControlPlaneAttestation(
         statusBefore: "active",
         statusAfter: "revoked",
         connectionConfigurationRevision: existing.connectionConfigurationRevision,
+        connectionOwnerAccountAccessVersion: existing.connectionOwnerAccountAccessVersion,
         definitionFingerprint: existing.definitionFingerprint,
         networkFingerprint: existing.networkFingerprint,
         credentialFingerprint: existing.credentialFingerprint,

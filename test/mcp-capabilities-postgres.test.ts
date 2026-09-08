@@ -28,7 +28,7 @@ test("MCP personal discovery remains available while project runtime is fail-clo
   const editorId = randomUUID();
   const workspaceId = randomUUID();
   const projectId = randomUUID();
-  const admin = { id: adminId, role: "admin" as const };
+  const admin = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
   const token = `mcp-test-token-${suffix}`;
   const definitionRevision = 1;
   const requests: string[] = [];

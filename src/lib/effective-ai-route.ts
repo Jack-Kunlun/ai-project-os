@@ -79,6 +79,7 @@ export type PersonalEffectiveAiRouteEvidence = Readonly<{
   selectedById: string;
   selectedByProjectMembershipId: string;
   selectedByMembershipCreatedAt: Date;
+  connectionOwnerAccountAccessVersion: number;
   credentialSecretFingerprint: string;
   embeddingDimensions: number | null;
   maxOutputTokens: number | null;
@@ -182,6 +183,7 @@ type PersonalProviderRow = {
   status: AiProviderConnection["status"];
   disabledAt: Date | null;
   credential: { kind: string; secretFingerprint: string };
+  ownerAccountAccessVersion: number | null;
 };
 
 function assertPersonalProvider(
@@ -372,6 +374,7 @@ async function resolvePersonalRoute(
     selectedById: string;
     selectedByProjectMembershipId: string;
     selectedByMembershipCreatedAt: Date;
+    connectionOwnerAccountAccessVersion: number | null;
     version: number;
     createdAt: Date;
     updatedAt: Date;
@@ -401,6 +404,7 @@ async function resolvePersonalRoute(
       connectionOwnerSubscriptionVersion: true,
       connectionOwnerSubscriptionStartsAt: true,
       connectionOwnerSubscriptionExpiresAt: true,
+      connectionOwnerAccountAccessVersion: true,
       modelId: true,
       embeddingDimensions: true,
       maxOutputTokens: true,
@@ -424,6 +428,7 @@ async function resolvePersonalRoute(
           defaultVisionModelId: true,
           embeddingDimensions: true,
           configurationVersion: true,
+          ownerAccountAccessVersion: true,
           status: true,
           disabledAt: true,
           credential: { select: { kind: true, secretFingerprint: true } },
@@ -447,8 +452,20 @@ async function resolvePersonalRoute(
   );
   if (provider.configurationVersion !== delegation.providerConfigurationVersion) return fail("AI_PROVIDER_CONFIGURATION_DRIFT");
 
-  const owner = await db.appUser.findUnique({ where: { id: delegation.connectionOwnerId }, select: { disabledAt: true } });
-  if (owner === null || owner.disabledAt !== null) return fail("PERSONAL_ROUTE_UNAVAILABLE");
+  const owner = await db.appUser.findUnique({
+    where: { id: delegation.connectionOwnerId },
+    select: { disabledAt: true, accountAccessVersion: true },
+  });
+  if (
+    owner === null
+    || owner.disabledAt !== null
+    || provider.ownerAccountAccessVersion === null
+    || delegation.connectionOwnerAccountAccessVersion === null
+    || provider.ownerAccountAccessVersion !== owner.accountAccessVersion
+    || delegation.connectionOwnerAccountAccessVersion !== owner.accountAccessVersion
+    || delegation.connectionOwnerAccountAccessVersion !== provider.ownerAccountAccessVersion
+    || selection.connectionOwnerAccountAccessVersion !== owner.accountAccessVersion
+  ) return fail("PERSONAL_ROUTE_UNAVAILABLE");
   const ownerMembership = await db.projectMembership.findUnique({
     where: { id: delegation.ownerProjectMembershipId },
     select: { projectId: true, userId: true, role: true, accessState: true, createdAt: true },
@@ -530,6 +547,7 @@ async function resolvePersonalRoute(
     selectedById: selection.selectedById,
     selectedByProjectMembershipId: selection.selectedByProjectMembershipId,
     selectedByMembershipCreatedAt: selection.selectedByMembershipCreatedAt,
+    connectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion,
     credentialSecretFingerprint: delegation.credentialFingerprint,
     embeddingDimensions: delegation.embeddingDimensions,
     maxOutputTokens: delegation.maxOutputTokens,
@@ -620,6 +638,7 @@ export async function resolveEffectiveAiRoute(
       selectedById: true,
       selectedByProjectMembershipId: true,
       selectedByMembershipCreatedAt: true,
+      connectionOwnerAccountAccessVersion: true,
       version: true,
       createdAt: true,
       updatedAt: true,

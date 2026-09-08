@@ -85,6 +85,9 @@ async function createTestMemoryGeneration(
       expectedEmbeddingRouteId: input.route.routeId,
       expectedEmbeddingRouteVersion: input.route.routeVersion,
       expectedEmbeddingProviderConfigurationVersion: input.route.providerConfigurationVersion,
+      expectedEmbeddingConnectionOwnerAccountAccessVersion: input.route.source === "personal_delegation"
+        ? input.route.personalEvidence?.connectionOwnerAccountAccessVersion ?? null
+        : null,
       expectedEmbeddingRouteFenceFingerprint: input.route.routeFenceFingerprint,
       embeddingWebAiGrantId: input.grantId,
       failureCode: terminal ? `PERSONAL_RUNTIME_${input.status.toUpperCase()}_FIXTURE` : null,
@@ -109,6 +112,9 @@ test(
     const credentialFingerprint = "a".repeat(64);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1_000);
+    const ownerActor = { id: ownerId, role: "user" as const, accountAccessVersion: 1 };
+    const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
+    const actorFor = (id: string) => ({ id, role: "user" as const, accountAccessVersion: 1 });
     const operations = [
       { operation: "embedding" as const, kind: "memoryIndex" as const, scopeKind: "projectMemory" as const },
       { operation: "visionExtract" as const, kind: "assetExtract" as const, scopeKind: "projectAssets" as const },
@@ -158,6 +164,7 @@ test(
           kind: "openai",
           scope: "user",
           ownerUserId: ownerId,
+          ownerAccountAccessVersion: 1,
           ownershipState: "confirmed",
           protocol: "chatCompletions",
           baseUrl: "https://api.openai.com/v1",
@@ -181,7 +188,7 @@ test(
           manualContentDedupeKey: memoryContentHash,
         },
       });
-      const memoryManifest = await getProjectMemoryInputManifest(projectId, { id: ownerId, role: "user" }, db);
+      const memoryManifest = await getProjectMemoryInputManifest(projectId, ownerActor, db);
       assert.ok(memoryManifest);
 
       const routeByOperation = new Map<string, Awaited<ReturnType<typeof resolveEffectiveAiRoute>>>();
@@ -189,28 +196,28 @@ test(
         const proposal = await proposeProjectAiProviderDelegation(
           projectId,
           { providerConnectionId: providerId, operation: item.operation, expiresAt: expiresAt.toISOString() },
-          { id: ownerId, role: "user" },
+          ownerActor,
           db,
         );
         const ownerConfirmed = await confirmProjectAiProviderDelegationOwner(
           projectId,
           proposal.id,
           { expectedVersion: proposal.version, acknowledgeProviderCharges: true },
-          { id: ownerId, role: "user" },
+          ownerActor,
           db,
         );
         const active = await confirmProjectAiProviderDelegationProject(
           projectId,
           proposal.id,
           { expectedVersion: ownerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
-          { id: projectOwnerId, role: "user" },
+          projectOwnerActor,
           db,
         );
         const selection = await putProjectAiEffectiveRouteSelection(
           projectId,
           item.operation,
           { source: "personalDelegation", delegationId: active.id, expectedVersion: null },
-          { id: projectOwnerId, role: "user" },
+          projectOwnerActor,
           db,
         );
         assert.equal(active.status, "active");
@@ -229,7 +236,7 @@ test(
           projectId,
           kind: item.kind,
           route,
-          requestedBy: { id: ownerId, role: "user" },
+          requestedBy: ownerActor,
           clientKey: `personal-web-runtime-${item.operation}-${suffix}`,
           scopeKind: item.scopeKind,
           scopeIds: { projectId, operation: item.operation },
@@ -254,6 +261,9 @@ test(
                   expectedEmbeddingRouteId: selectedRoute.routeId,
                   expectedEmbeddingRouteVersion: selectedRoute.routeVersion,
                   expectedEmbeddingProviderConfigurationVersion: selectedRoute.providerConfigurationVersion,
+                  expectedEmbeddingConnectionOwnerAccountAccessVersion: selectedRoute.source === "personal_delegation"
+                    ? selectedRoute.personalEvidence?.connectionOwnerAccountAccessVersion ?? null
+                    : null,
                   expectedEmbeddingRouteFenceFingerprint: selectedRoute.routeFenceFingerprint,
                   embeddingWebAiGrantId: grantId,
                 },
@@ -284,7 +294,7 @@ test(
         }>({
           jobId: created.jobId,
           attempt: claim,
-          actor: { id: ownerId, role: "user" },
+          actor: ownerActor,
           route,
           grantId: created.grantId,
           personalMemoryGeneration: item.operation === "embedding"
@@ -331,28 +341,28 @@ test(
       const sourceSummaryProposal = await proposeProjectAiProviderDelegation(
         projectId,
         { providerConnectionId: providerId, operation: "sourceSummary", expiresAt: expiresAt.toISOString() },
-        { id: ownerId, role: "user" },
+        ownerActor,
         db,
       );
       const sourceSummaryOwnerConfirmed = await confirmProjectAiProviderDelegationOwner(
         projectId,
         sourceSummaryProposal.id,
         { expectedVersion: sourceSummaryProposal.version, acknowledgeProviderCharges: true },
-        { id: ownerId, role: "user" },
+        ownerActor,
         db,
       );
       const sourceSummaryActive = await confirmProjectAiProviderDelegationProject(
         projectId,
         sourceSummaryProposal.id,
         { expectedVersion: sourceSummaryOwnerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       await putProjectAiEffectiveRouteSelection(
         projectId,
         "sourceSummary",
         { source: "personalDelegation", delegationId: sourceSummaryActive.id, expectedVersion: null },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       const sourceSummaryRoute = await resolveEffectiveAiRoute(projectId, "sourceSummary", db);
@@ -361,7 +371,7 @@ test(
           projectId,
           kind: "projectBrief",
           route: sourceSummaryRoute,
-          requestedBy: { id: ownerId, role: "user" },
+          requestedBy: ownerActor,
           clientKey: `personal-web-runtime-source-summary-${suffix}`,
           scopeKind: "projectSources",
           scopeIds: { projectId },
@@ -387,28 +397,28 @@ test(
       const crossProposal = await proposeProjectAiProviderDelegation(
         crossProjectId,
         { providerConnectionId: providerId, operation: "embedding", expiresAt: expiresAt.toISOString() },
-        { id: ownerId, role: "user" },
+        ownerActor,
         db,
       );
       const crossOwnerConfirmed = await confirmProjectAiProviderDelegationOwner(
         crossProjectId,
         crossProposal.id,
         { expectedVersion: crossProposal.version, acknowledgeProviderCharges: true },
-        { id: ownerId, role: "user" },
+        ownerActor,
         db,
       );
       const crossActive = await confirmProjectAiProviderDelegationProject(
         crossProjectId,
         crossProposal.id,
         { expectedVersion: crossOwnerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       await putProjectAiEffectiveRouteSelection(
         crossProjectId,
         "embedding",
         { source: "personalDelegation", delegationId: crossActive.id, expectedVersion: null },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       const crossRoute = await resolveEffectiveAiRoute(crossProjectId, "embedding", db);
@@ -416,7 +426,7 @@ test(
         projectId: crossProjectId,
         kind: "memoryIndex",
         route: crossRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         clientKey: `personal-web-runtime-cross-project-${suffix}`,
         scopeKind: "projectMemory",
         scopeIds: { projectId: crossProjectId },
@@ -431,7 +441,7 @@ test(
         () => auditedProviderCall({
           jobId: crossJob.jobId,
           attempt: crossClaim,
-          actor: { id: ownerId, role: "user" },
+          actor: ownerActor,
           route: crossRoute,
           grantId: crossJob.grantId,
           personalMemoryGeneration: { generationId: embeddingGenerationId!, mode: "build" },
@@ -456,7 +466,7 @@ test(
           projectId: crossProjectId,
           kind: "memoryIndex",
           route: crossRoute,
-          requestedBy: { id: ownerId, role: "user" },
+          requestedBy: ownerActor,
           clientKey: `personal-web-runtime-${status}-${suffix}`,
           scopeKind: "projectMemory",
           scopeIds: { projectId: crossProjectId, status },
@@ -479,7 +489,7 @@ test(
           () => auditedProviderCall({
             jobId: invalidJob.jobId,
             attempt: invalidClaim,
-            actor: { id: ownerId, role: "user" },
+            actor: ownerActor,
             route: crossRoute,
             grantId: invalidJob.grantId,
             personalMemoryGeneration: { generationId: invalidGeneration.id, mode: "build" },
@@ -535,6 +545,7 @@ test(
           kind: "openai",
           scope: "user",
           ownerUserId: supplementalOwnerId,
+          ownerAccountAccessVersion: 1,
           ownershipState: "confirmed",
           protocol: "chatCompletions",
           baseUrl: "https://api.openai.com/v1",
@@ -552,35 +563,35 @@ test(
         projectId,
         previousProjectAnalysis.id,
         { expectedVersion: previousProjectAnalysis.version, reason: "replace supplemental payer fixture", switchToPlatformDefault: true },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       const platformProjectAnalysisSelection = await db.projectAiEffectiveRouteSelection.findUniqueOrThrow({ where: { projectId_operation: { projectId, operation: "projectAnalysis" } }, select: { version: true } });
       const supplementalProposal = await proposeProjectAiProviderDelegation(
         projectId,
         { providerConnectionId: supplementalProviderId, operation: "projectAnalysis", expiresAt: expiresAt.toISOString() },
-        { id: supplementalOwnerId, role: "user" },
+        actorFor(supplementalOwnerId),
         db,
       );
       const supplementalOwnerConfirmed = await confirmProjectAiProviderDelegationOwner(
         projectId,
         supplementalProposal.id,
         { expectedVersion: supplementalProposal.version, acknowledgeProviderCharges: true },
-        { id: supplementalOwnerId, role: "user" },
+        actorFor(supplementalOwnerId),
         db,
       );
       const supplementalActive = await confirmProjectAiProviderDelegationProject(
         projectId,
         supplementalProposal.id,
         { expectedVersion: supplementalOwnerConfirmed.version, acknowledgeDataEgress: true, acknowledgeIndexImpact: true },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       await putProjectAiEffectiveRouteSelection(
         projectId,
         "projectAnalysis",
         { source: "personalDelegation", delegationId: supplementalActive.id, expectedVersion: platformProjectAnalysisSelection.version },
-        { id: projectOwnerId, role: "user" },
+        projectOwnerActor,
         db,
       );
       const supplementalRoute = await resolveEffectiveAiRoute(projectId, "projectAnalysis", db);
@@ -595,7 +606,7 @@ test(
         projectId,
         kind: "memoryIndex",
         route: embeddingRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         clientKey: `personal-web-runtime-supplemental-${suffix}`,
         scopeKind: "query",
         scopeIds: { projectId },
@@ -606,7 +617,7 @@ test(
         projectId,
         jobId: supplementalJob.jobId,
         route: generationRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         scopeKind: "projectMemory",
         scopeIds: { supplemental: true },
         manifestFingerprint: "7".repeat(64),
@@ -624,7 +635,7 @@ test(
       const supplementalResult = await auditedProviderCall({
         jobId: supplementalJob.jobId,
         attempt: supplementalClaim,
-        actor: { id: ownerId, role: "user" },
+        actor: ownerActor,
         route: generationRoute,
         grantId: supplemental.grantId,
         callKey: `personal-web-runtime-supplemental-call-${suffix}`,
@@ -651,7 +662,7 @@ test(
         projectId,
         kind: "autoExtract",
         route: revokedRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         clientKey: `personal-web-runtime-revoked-${suffix}`,
         scopeKind: "projectSources",
         scopeIds: { projectId },
@@ -667,7 +678,7 @@ test(
         () => auditedProviderCall({
           jobId: revokedJob.jobId,
           attempt: revokedClaim,
-          actor: { id: ownerId, role: "user" },
+          actor: ownerActor,
           route: revokedRoute,
           grantId: revokedJob.grantId,
           callKey: `personal-web-runtime-revoked-call-${suffix}`,
@@ -687,7 +698,7 @@ test(
         projectId,
         kind: "ragAnswer",
         route: driftRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         clientKey: `personal-web-runtime-credential-drift-${suffix}`,
         scopeKind: "query",
         scopeIds: { projectId, drift: true },
@@ -710,7 +721,7 @@ test(
         () => auditedProviderCall({
           jobId: driftJob.jobId,
           attempt: driftClaim,
-          actor: { id: ownerId, role: "user" },
+          actor: ownerActor,
           route: driftedRoute,
           grantId: driftJob.grantId,
           callKey: `personal-web-runtime-credential-drift-call-${suffix}`,
@@ -771,6 +782,7 @@ test(
           expectedEmbeddingRouteId: shortGrant.routeId,
           expectedEmbeddingRouteVersion: shortGrant.routeVersion,
           expectedEmbeddingProviderConfigurationVersion: shortGrant.providerConfigurationVersion!,
+          expectedEmbeddingConnectionOwnerAccountAccessVersion: shortGrant.connectionOwnerAccountAccessVersion,
           expectedEmbeddingRouteFenceFingerprint: shortGrant.routeFenceFingerprint!,
           embeddingWebAiGrantId: shortGrant.id,
           expectedInputCount: 1,
@@ -804,7 +816,7 @@ test(
         projectId,
         kind: "memoryIndex",
         route: embeddingRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         clientKey: `personal-web-runtime-embedding-consume-${suffix}`,
         scopeKind: "projectMemory",
         scopeIds: { projectId, indexGenerationId: shortGeneration.id, consume: true },
@@ -818,7 +830,7 @@ test(
       const embeddingConsumeResult = await auditedProviderCall({
         jobId: embeddingConsumeJob.jobId,
         attempt: embeddingConsumeClaim,
-        actor: { id: ownerId, role: "user" },
+        actor: ownerActor,
         route: embeddingRoute,
         grantId: embeddingConsumeJob.grantId,
         personalMemoryGeneration: { generationId: shortGeneration.id, mode: "consume" },
@@ -843,7 +855,7 @@ test(
         projectId,
         kind: "ragAnswer",
         route: consumeRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         clientKey: `personal-web-runtime-consume-${suffix}`,
         scopeKind: "query",
         scopeIds: { projectId, indexGenerationId: shortGeneration.id },
@@ -857,7 +869,7 @@ test(
       await auditedProviderCall({
         jobId: consumeJob.jobId,
         attempt: consumeClaim,
-        actor: { id: ownerId, role: "user" },
+        actor: ownerActor,
         route: consumeRoute,
         grantId: consumeJob.grantId,
         personalMemoryGeneration: { generationId: shortGeneration.id, mode: "consume" },
@@ -875,7 +887,7 @@ test(
         projectId,
         kind: "memoryIndex",
         route: embeddingRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         clientKey: `personal-web-runtime-nonpointer-embedding-${suffix}`,
         scopeKind: "projectMemory",
         scopeIds: { projectId, nonPointer: true },
@@ -917,7 +929,7 @@ test(
         projectId,
         kind: "ragAnswer",
         route: consumeRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         clientKey: `personal-web-runtime-nonpointer-consume-${suffix}`,
         scopeKind: "query",
         scopeIds: { projectId, indexGenerationId: nonPointerGeneration.id, nonPointer: true },
@@ -934,7 +946,7 @@ test(
         () => auditedProviderCall({
           jobId: nonPointerConsumeJob.jobId,
           attempt: nonPointerClaim,
-          actor: { id: ownerId, role: "user" },
+          actor: ownerActor,
           route: consumeRoute,
           grantId: nonPointerConsumeJob.grantId,
           personalMemoryGeneration: { generationId: nonPointerGeneration.id, mode: "consume" },
@@ -951,7 +963,7 @@ test(
       assert.equal(await db.providerCallAudit.count({ where: { webAiGrantId: nonPointerConsumeJob.grantId } }), nonPointerAuditCountBefore);
       const nonPointerAttempt = await db.backgroundJobAttempt.findUniqueOrThrow({ where: { id: nonPointerClaim.attemptId }, select: { dispatchState: true } });
       assert.equal(nonPointerAttempt.dispatchState, "pending");
-      const readyStatus = await getProjectMemoryIndexStatus(projectId, { id: ownerId, role: "user" }, db);
+      const readyStatus = await getProjectMemoryIndexStatus(projectId, ownerActor, db);
       assert.equal(readyStatus.readiness, "ready");
       assert.deepEqual(readyStatus.route?.providerConnection, {
         name: `Personal Web runtime provider ${suffix}`,
@@ -960,15 +972,15 @@ test(
       });
       assert.equal("providerConnectionId" in (readyStatus.route ?? {}), false);
       assert.equal("providerConnectionId" in (readyStatus.activeIndex?.generation ?? {}), false);
-      const projectOwnerStatus = await getProjectMemoryIndexStatus(projectId, { id: projectOwnerId, role: "user" }, db);
+      const projectOwnerStatus = await getProjectMemoryIndexStatus(projectId, projectOwnerActor, db);
       assert.deepEqual(projectOwnerStatus.route?.providerConnection, { kind: "openai" });
       assert.deepEqual(projectOwnerStatus.activeIndex?.generation.providerConnection, { kind: "openai" });
       assert.equal(projectOwnerStatus.route?.modelId, embeddingRoute.modelId);
       assert.equal(projectOwnerStatus.route?.embeddingDimensions, embeddingRoute.embeddingDimensions);
       assert.equal(JSON.stringify(projectOwnerStatus).includes(providerId), false);
-      const activeMemory = await getActiveMemoryIndex(projectId, { id: ownerId, role: "user" }, db);
+      const activeMemory = await getActiveMemoryIndex(projectId, ownerActor, db);
       assert.equal(activeMemory.id, shortGeneration.id);
-      const incrementalPlan = await getProjectMemoryIndexPlan(projectId, "incremental", { id: ownerId, role: "user" }, db);
+      const incrementalPlan = await getProjectMemoryIndexPlan(projectId, "incremental", ownerActor, db);
       assert.equal(incrementalPlan.reuseCount, 0);
       while (Date.now() < shortExpiresAt.getTime()) await new Promise<void>((resolve) => setTimeout(resolve, 50));
       const liveAfterExpiry = await db.$queryRaw<Array<{ live: boolean }>>`
@@ -980,7 +992,7 @@ test(
         () => auditedProviderCall({
           jobId: shortJob.id,
           attempt: shortClaim,
-          actor: { id: ownerId, role: "user" },
+          actor: ownerActor,
           route: embeddingRoute,
           grantId: shortGrant.id,
           personalMemoryGeneration: { generationId: shortGeneration.id, mode: "consume" },
@@ -1000,7 +1012,7 @@ test(
         projectId,
         kind: "ragAnswer",
         route: staleGenerationRoute,
-        requestedBy: { id: ownerId, role: "user" },
+        requestedBy: ownerActor,
         clientKey: `personal-web-runtime-stale-generation-${suffix}`,
         scopeKind: "query",
         scopeIds: { projectId, indexGenerationId: activeMemory.id },
@@ -1015,7 +1027,7 @@ test(
         () => auditedProviderCall({
           jobId: staleGenerationJob.jobId,
           attempt: staleGenerationClaim,
-          actor: { id: ownerId, role: "user" },
+          actor: ownerActor,
           route: staleGenerationRoute,
           grantId: staleGenerationJob.grantId,
           personalMemoryGeneration: { generationId: activeMemory.id, mode: "consume" },
@@ -1030,13 +1042,13 @@ test(
       );
       assert.equal(staleGenerationNetworkCalls, 0);
       await assert.rejects(
-        () => getActiveMemoryIndex(projectId, { id: ownerId, role: "user" }, db),
+        () => getActiveMemoryIndex(projectId, ownerActor, db),
         (error: unknown) => errorText(error).includes("SEMANTIC_INDEX_NOT_READY"),
         "naturally expired personal evidence cannot be read as an active memory index",
       );
-      const expiredStatus = await getProjectMemoryIndexStatus(projectId, { id: ownerId, role: "user" }, db);
+      const expiredStatus = await getProjectMemoryIndexStatus(projectId, ownerActor, db);
       assert.notEqual(expiredStatus.readiness, "ready");
-      const expiredPlan = await getProjectMemoryIndexPlan(projectId, "incremental", { id: ownerId, role: "user" }, db);
+      const expiredPlan = await getProjectMemoryIndexPlan(projectId, "incremental", ownerActor, db);
       assert.equal(expiredPlan.reuseCount, 0);
     } finally {
       await db.$disconnect();

@@ -23,8 +23,9 @@ import {
   invokeVisionCompletion,
 } from "@/lib/ai-providers/transport";
 import { lockProviderConfiguration } from "@/lib/ai-providers/service";
+import { AccountAccessGuardError, assertAccountAccessForActor, requireAccountAccessVersion } from "@/lib/account-access-guard";
 
-export type PersonalProviderActor = Readonly<{ id: string; role: "admin" | "user" }>;
+export type PersonalProviderActor = Readonly<{ id: string; role: "admin" | "user"; accountAccessVersion?: number }>;
 
 export type PersonalProviderServiceErrorCode =
   | "AI_PROVIDER_INVALID_INPUT"
@@ -104,6 +105,7 @@ const internalProviderSelect = {
   scope: true,
   ownerUserId: true,
   credentialId: true,
+  ownerAccountAccessVersion: true,
 } as const;
 
 const liveDelegationStatuses: ProjectAiProviderDelegationStatus[] = ["draft", "ownerConfirmed", "active"];
@@ -206,20 +208,29 @@ function parseProviderId(providerId: string): string {
  */
 export function assertPersonalProviderActorHint(actor: unknown): PersonalProviderActor {
   if (typeof actor !== "object" || actor === null) return fail("AI_PROVIDER_FORBIDDEN");
-  const candidate = actor as { id?: unknown; role?: unknown };
+  const candidate = actor as { id?: unknown; role?: unknown; accountAccessVersion?: unknown };
   const id = z.string().uuid().safeParse(candidate.id);
   if (!id.success || (candidate.role !== "admin" && candidate.role !== "user")) {
     return fail("AI_PROVIDER_FORBIDDEN");
   }
-  return Object.freeze({ id: id.data, role: candidate.role });
+  try {
+    const accountAccessVersion = requireAccountAccessVersion(candidate);
+    return Object.freeze({ id: id.data, role: candidate.role, accountAccessVersion });
+  } catch {
+    return fail("AI_PROVIDER_FORBIDDEN");
+  }
 }
 
-async function assertCurrentActor(actor: PersonalProviderActor, db: PersonalProviderDb): Promise<void> {
-  const current = await db.appUser.findUnique({
-    where: { id: actor.id },
-    select: { id: true, disabledAt: true },
-  });
-  if (current === null || current.disabledAt !== null) return fail("AI_PROVIDER_FORBIDDEN");
+async function assertCurrentActor(
+  actor: PersonalProviderActor,
+  db: PersonalProviderDb,
+): Promise<{ accountAccessVersion: number }> {
+  try {
+    return await assertAccountAccessForActor(db, actor);
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError) return fail("AI_PROVIDER_FORBIDDEN");
+    throw error;
+  }
 }
 
 async function assertActiveMembership(userId: string, db: PersonalProviderDb): Promise<void> {
@@ -381,7 +392,7 @@ export async function createPersonalProviderConnection(
   try {
     return await withSerializableRetry(() => db.$transaction(async (tx) => {
       await lockMembershipUser(tx, actorHint.id);
-      await assertCurrentActor(actorHint, tx);
+      const currentActor = await assertCurrentActor(actorHint, tx);
       await assertActiveMembership(actorHint.id, tx);
       const parsed = createSchema.safeParse(input);
       if (!parsed.success) return fail("AI_PROVIDER_INVALID_INPUT");
@@ -404,6 +415,7 @@ export async function createPersonalProviderConnection(
           protocol: "chatCompletions",
           baseUrl: canonicalProviderBaseUrl(parsed.data.kind),
           credentialId: credential.id,
+          ownerAccountAccessVersion: currentActor.accountAccessVersion,
           defaultGenerationModelId: parsed.data.generationModelId ?? null,
           defaultVisionModelId: parsed.data.visionModelId ?? null,
           defaultEmbeddingModelId: parsed.data.embeddingModelId ?? null,
@@ -431,7 +443,7 @@ export async function updatePersonalProviderConnection(
   try {
     return await withSerializableRetry(() => db.$transaction(async (tx) => {
       await lockMembershipUser(tx, actorHint.id);
-      await assertCurrentActor(actorHint, tx);
+      const currentActor = await assertCurrentActor(actorHint, tx);
       const parsedInput = updateSchema.safeParse(input);
       if (!parsedInput.success || !hasUpdateField(parsedInput.data)) return fail("AI_PROVIDER_INVALID_INPUT");
       const parsed = parsedInput.data;
@@ -470,9 +482,21 @@ export async function updatePersonalProviderConnection(
         (parsed.enabled !== undefined && parsed.enabled !== currentlyEnabled) ||
         disableStateIncomplete;
       const configurationChanged = modelConfigurationChanged || lifecycleChanged;
-      if (configurationChanged && current._count.projectAiProviderDelegations > 0) return fail("AI_PROVIDER_IN_USE");
+      const credentialRotationOnly = parsed.apiKey !== undefined
+        && parsed.generationModelId === undefined
+        && parsed.visionModelId === undefined
+        && parsed.embeddingModelId === undefined
+        && parsed.embeddingDimensions === undefined
+        && parsed.enabled === undefined
+        && parsed.name === undefined;
+      if (configurationChanged && current._count.projectAiProviderDelegations > 0 && !credentialRotationOnly) return fail("AI_PROVIDER_IN_USE");
       if (parsed.enabled === false && current._count.projectRoutes > 0) return fail("AI_PROVIDER_IN_USE");
-      if (parsed.apiKey !== undefined) await rotateCredential(current.credentialId, "aiProvider", parsed.apiKey, tx);
+      if (parsed.apiKey !== undefined) {
+        await tx.$executeRaw`SELECT set_config('app.personal_ai_credential_rotation_context', '1', true)`;
+        await tx.$executeRaw`SELECT set_config('app.personal_ai_credential_rotation_owner_id', ${actorHint.id}, true)`;
+        await tx.$executeRaw`SELECT set_config('app.personal_ai_credential_rotation_provider_id', ${current.id}, true)`;
+        await rotateCredential(current.credentialId, "aiProvider", parsed.apiKey, tx);
+      }
 
       const remainsDisabled = parsed.enabled === false || (parsed.enabled === undefined && !currentlyEnabled);
       const data: Prisma.AiProviderConnectionUpdateInput = {
@@ -481,6 +505,7 @@ export async function updatePersonalProviderConnection(
         ...(parsed.visionModelId === undefined ? {} : { defaultVisionModelId: parsed.visionModelId }),
         ...(parsed.embeddingModelId === undefined ? {} : { defaultEmbeddingModelId: parsed.embeddingModelId }),
         ...(parsed.embeddingDimensions === undefined ? {} : { embeddingDimensions: parsed.embeddingDimensions }),
+        ...(parsed.apiKey === undefined ? {} : { ownerAccountAccessVersion: currentActor.accountAccessVersion }),
         ...(configurationChanged
           ? {
               configurationVersion: { increment: 1 },
@@ -606,7 +631,7 @@ async function testPersonalProviderInTransaction(
   db: Prisma.TransactionClient,
 ): Promise<PersonalProviderTestOutcome> {
   await lockMembershipUser(db, actor.id);
-  await assertCurrentActor(actor, db);
+  const currentActor = await assertCurrentActor(actor, db);
   // Membership is checked before loading the provider or its credential
   // fingerprint, so a free/expired account cannot probe a private connection.
   await assertActiveMembership(actor.id, db);
@@ -618,6 +643,9 @@ async function testPersonalProviderInTransaction(
   // is the first operation that can decrypt the credential.
   assertCanonicalProviderBinding(provider);
   if (provider.status === "disabled" || provider.disabledAt !== null) return fail("AI_PROVIDER_CONNECTION_UNAVAILABLE");
+  if (provider.ownerAccountAccessVersion !== currentActor.accountAccessVersion) {
+    return fail("AI_PROVIDER_CONNECTION_UNAVAILABLE");
+  }
   assertCapabilities(
     provider.kind,
     provider.defaultGenerationModelId,
@@ -701,7 +729,7 @@ async function testPersonalProviderInTransaction(
     // this transaction, while these reads make the linearization contract
     // visible and fail closed if a lower-level database operation changed the
     // account or subscription inside the transaction.
-    await assertCurrentActor(actor, db);
+    const finalActor = await assertCurrentActor(actor, db);
     await assertActiveMembership(actor.id, db);
 
     const finalProvider = await personalProviderForOwner(provider.id, actor.id, db, testProviderSelect);
@@ -712,6 +740,7 @@ async function testPersonalProviderInTransaction(
       finalProvider.status === "disabled" ||
       finalProvider.disabledAt !== null ||
       finalProvider.credential.secretFingerprint !== credentialSecretFingerprint
+      || finalProvider.ownerAccountAccessVersion !== finalActor.accountAccessVersion
     ) return fail("AI_PROVIDER_CONFLICT");
 
     const verified = await db.aiProviderConnection.updateMany({

@@ -2,6 +2,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { getDb } from "../src/lib/db";
 import { buildMcpActionSnapshot, createMcpControlPlaneAttestation, executeMcpActionSnapshot, getProjectMcpToolCenter, grantProjectMcpTool, McpCapabilityError, revokeProjectMcpToolGrant } from "../src/lib/mcp";
 import {
@@ -47,8 +48,37 @@ test(
     const fingerprint = "a".repeat(64);
     const fingerprint2 = "d".repeat(64);
     const networkFingerprint = "b".repeat(64);
-    const actor = { id: adminId, role: "admin" } as const;
-    try {
+      const actor = { id: adminId, role: "admin", accountAccessVersion: 1 } as const;
+      const disableUser = async () => {
+        const admin = await db.appUser.findUniqueOrThrow({ where: { id: adminId }, select: { accountAccessVersion: true } });
+        const target = await db.appUser.findUniqueOrThrow({ where: { id: disabledOwnerId }, select: { accountAccessVersion: true } });
+        const preview = await previewAccountAccess({
+          adminUserId: adminId,
+          adminAccountAccessVersion: admin.accountAccessVersion,
+          userId: disabledOwnerId,
+          action: "disable",
+          reason: "MCP grant gate disabled-owner fixture",
+          expectedVersion: target.accountAccessVersion,
+        }, db);
+        assert.equal(preview.canExecute, true);
+        return executeAccountAccess({
+          adminUserId: adminId,
+          adminAccountAccessVersion: admin.accountAccessVersion,
+          userId: disabledOwnerId,
+          action: "disable",
+          reason: "MCP grant gate disabled-owner fixture",
+          expectedVersion: preview.current.accountAccessVersion,
+          expectedImpactFingerprint: preview.impactFingerprint,
+          requestKey: `mcp-grant-disable-${suffix}`,
+          requestFingerprint: preview.requestFingerprint,
+          previewId: preview.previewId,
+          previewIssuedAt: preview.previewIssuedAt,
+          previewExpiresAt: preview.previewExpiresAt,
+          confirmation: true,
+          confirmationUsername: preview.user.username,
+        }, db);
+      };
+      try {
       await db.appUser.createMany({ data: [
         { id: adminId, username: `mcp_grant_owner_${suffix}`, role: "admin" },
         { id: editorId, username: `mcp_grant_editor_${suffix}`, role: "member" },
@@ -68,12 +98,12 @@ test(
         await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: adminId, reason: "mcp_grant_gate_project_viewer" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: disabledOwnerId, role: "owner", actorId: adminId, reason: "mcp_grant_gate_disabled_owner" });
       });
-      await db.appUser.update({ where: { id: disabledOwnerId }, data: { disabledAt: new Date() } });
+      await disableUser();
       await db.mcpConnection.create({ data: {
         id: connectionId, name: `MCP grant connection ${suffix}`, endpointUrl: "https://mcp.example.invalid/mcp", authKind: "none",
         credentialId: null, allowPrivateNetwork: false, resolvedAddressFingerprint: networkFingerprint, protocolVersion: "2026-07-28",
         catalogFingerprint: "c".repeat(64), credentialFingerprint: NO_CREDENTIAL_FINGERPRINT, configurationRevision: 1,
-        status: "verified", createdById: adminId, ownerUserId: adminId, ownershipState: "confirmed",
+        status: "verified", createdById: adminId, ownerUserId: adminId, ownerAccountAccessVersion: 1, ownershipState: "confirmed",
       } });
       await db.mcpToolDefinition.create({ data: {
         id: definitionId, connectionId, name: "project.lookup", title: "Lookup", description: "Safe read-only lookup",
@@ -86,12 +116,12 @@ test(
         inputSchema: { type: "object" }, outputSchema: { type: "object" }, annotations: { readOnlyHint: true },
         remoteReadOnlyHint: true, definitionFingerprint: fingerprint2, current: true,
       } });
-      const attestation = await createMcpControlPlaneAttestation(adminId, {
+      const attestation = await createMcpControlPlaneAttestation(actor, {
         toolDefinitionId: definitionId, expectedConnectionConfigurationRevision: 1, expectedDefinitionFingerprint: fingerprint,
         expectedNetworkFingerprint: networkFingerprint, expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
         conclusion: "read_only_verified", riskLevel: "low", evidenceNote: "manual_read_only_review",
       }, db);
-      const attestation2 = await createMcpControlPlaneAttestation(adminId, {
+      const attestation2 = await createMcpControlPlaneAttestation(actor, {
         toolDefinitionId: definition2Id, expectedConnectionConfigurationRevision: 1, expectedDefinitionFingerprint: fingerprint2,
         expectedNetworkFingerprint: networkFingerprint, expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
         conclusion: "read_only_verified", riskLevel: "low", evidenceNote: "manual_read_only_review",
@@ -106,12 +136,12 @@ test(
       const concurrentInput = { ...createInput, toolDefinitionId: definition2Id, attestationId: attestation2.id };
 
       await assert.rejects(() => createProjectMcpToolGrantV2(projectId, { ...createInput, extra: true }, actor, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_INVALID_INPUT");
-      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: editorId, role: "member" }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED");
-      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: viewerId, role: "member" }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED");
+      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: editorId, role: "member", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED");
+      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: viewerId, role: "member", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED");
       for (const unauthorized of [workspaceAdminId, systemAdminId, nonmemberId]) {
-        await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: unauthorized, role: "admin" }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_FORBIDDEN");
+        await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: unauthorized, role: "admin", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_FORBIDDEN");
       }
-      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: disabledOwnerId, role: "member" }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_ACCOUNT_DISABLED");
+      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: disabledOwnerId, role: "member", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_ACCOUNT_DISABLED");
 
       const supersededAt = new Date();
       await db.mcpToolDefinition.update({ where: { id: definitionId }, data: { current: false, supersededAt } });

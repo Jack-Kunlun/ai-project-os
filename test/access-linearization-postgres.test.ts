@@ -2,7 +2,13 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { Prisma } from "@prisma/client";
 import { getDb } from "../src/lib/db";
+import {
+  executeAccountAccess,
+  previewAccountAccess,
+  type AccountAccessPreview,
+} from "../src/lib/account-access-service";
 import {
   admitWebAiProjectAccess,
   lockActorAccess,
@@ -29,6 +35,88 @@ function deferred(): Readonly<{ promise: Promise<void>; resolve: () => void }> {
   return Object.freeze({ promise, resolve });
 }
 
+function executeAccountAccessInput(
+  preview: AccountAccessPreview,
+  input: Readonly<{ adminUserId: string; adminAccountAccessVersion: number; reason: string; requestKey: string }>,
+) {
+  return {
+    adminUserId: input.adminUserId,
+    adminAccountAccessVersion: input.adminAccountAccessVersion,
+    userId: preview.user.id,
+    action: preview.action,
+    reason: input.reason,
+    expectedVersion: preview.current.accountAccessVersion,
+    expectedImpactFingerprint: preview.impactFingerprint,
+    requestKey: input.requestKey,
+    requestFingerprint: preview.requestFingerprint,
+    previewId: preview.previewId,
+    previewIssuedAt: preview.previewIssuedAt,
+    previewExpiresAt: preview.previewExpiresAt,
+    confirmation: true as const,
+    confirmationUsername: preview.user.username,
+  };
+}
+
+async function previewGovernedAccountAccess(
+  db: ReturnType<typeof getDb>,
+  input: Readonly<{
+    adminUserId: string;
+    userId: string;
+    action: "disable" | "restore";
+    reason: string;
+  }>,
+): Promise<Readonly<{ preview: AccountAccessPreview; adminAccountAccessVersion: number }>> {
+  const [admin, target] = await Promise.all([
+    db.appUser.findUniqueOrThrow({ where: { id: input.adminUserId }, select: { accountAccessVersion: true } }),
+    db.appUser.findUniqueOrThrow({ where: { id: input.userId }, select: { accountAccessVersion: true } }),
+  ]);
+  const preview = await previewAccountAccess({
+    adminUserId: input.adminUserId,
+    adminAccountAccessVersion: admin.accountAccessVersion,
+    userId: input.userId,
+    action: input.action,
+    reason: input.reason,
+    expectedVersion: target.accountAccessVersion,
+  }, db);
+  assert.equal(preview.canExecute, true);
+  return Object.freeze({ preview, adminAccountAccessVersion: admin.accountAccessVersion });
+}
+
+async function executeGovernedAccountAccess(
+  db: ReturnType<typeof getDb>,
+  input: Readonly<{
+    adminUserId: string;
+    userId: string;
+    action: "disable" | "restore";
+    reason: string;
+    requestKey: string;
+  }>,
+) {
+  const prepared = await previewGovernedAccountAccess(db, input);
+  return executeAccountAccess(executeAccountAccessInput(prepared.preview, {
+    adminUserId: input.adminUserId,
+    adminAccountAccessVersion: prepared.adminAccountAccessVersion,
+    reason: input.reason,
+    requestKey: input.requestKey,
+  }), db);
+}
+
+async function waitForAdvisoryLockWait(db: ReturnType<typeof getDb>): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = await db.$queryRaw<Array<{ waiting: number }>>(Prisma.sql`
+      SELECT count(*)::integer AS waiting
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND pid <> pg_backend_pid()
+        AND wait_event_type = 'Lock'
+        AND query LIKE '%pg_advisory_xact_lock%'
+    `);
+    if ((rows[0]?.waiting ?? 0) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("ACCESS_LINEARIZATION_ACTOR_FENCE_WAIT_NOT_OBSERVED");
+}
+
 test(
   "PostgreSQL access admission and revocation share actor, workspace and project locks",
   { skip: !shouldRun ? "ACCESS_LINEARIZATION_POSTGRES_GATE=1 is required" : false },
@@ -36,16 +124,18 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const workspaceId = randomUUID();
+    const adminId = randomUUID();
     const memberId = randomUUID();
     const ownerId = randomUUID();
     const membershipProjectId = randomUUID();
     const archiveProjectId = randomUUID();
     const legacyProjectOnlyId = randomUUID();
-    const member: WebAiActor = { id: memberId, role: "user" };
-    const owner: WebAiActor = { id: ownerId, role: "user" };
+    const member: WebAiActor = { id: memberId, role: "user", accountAccessVersion: 1 };
+    const owner: WebAiActor = { id: ownerId, role: "user", accountAccessVersion: 1 };
     let admissionCallbackCalled = false;
 
     await db.appUser.createMany({ data: [
+      { id: adminId, username: `linearization_admin_${suffix}`, role: "admin" },
       { id: memberId, username: `linearization_member_${suffix}`, role: "user" },
       { id: ownerId, username: `linearization_owner_${suffix}`, role: "user" },
     ] });
@@ -134,20 +224,46 @@ test(
       // Account disable wins under the same actor fence. The admission may
       // have read the old row before waiting, but its post-lock reload must
       // reject before a caller callback can record work.
+      const disableReason = "access_linearization_disable";
+      const disablePrepared = await previewGovernedAccountAccess(db, {
+        adminUserId: adminId,
+        userId: ownerId,
+        action: "disable",
+        reason: disableReason,
+      });
       const disableLocked = deferred();
       const releaseDisable = deferred();
-      const disable = db.$transaction(async (tx) => {
+      const disableFence = db.$transaction(async (tx) => {
         await lockActorAccess(tx, ownerId);
         disableLocked.resolve();
-        await tx.appUser.update({ where: { id: ownerId }, data: { disabledAt: new Date() } });
         await releaseDisable.promise;
       });
       await disableLocked.promise;
+      const disable = executeAccountAccess(executeAccountAccessInput(disablePrepared.preview, {
+        adminUserId: adminId,
+        adminAccountAccessVersion: disablePrepared.adminAccountAccessVersion,
+        reason: disableReason,
+        requestKey: `access-linearization-disable-${suffix}`,
+      }), db);
+      await waitForAdvisoryLockWait(db);
       const admissionAfterDisable = db.$transaction((tx) => admitWebAiProjectAccess(tx, { actor: owner, projectId: archiveProjectId, required: "owner" }));
       releaseDisable.resolve();
       await disable;
+      await disableFence;
       await assert.rejects(admissionAfterDisable, accessCode("ACCOUNT_DISABLED"));
-      await db.appUser.update({ where: { id: ownerId }, data: { disabledAt: null } });
+      const restored = await executeGovernedAccountAccess(db, {
+        adminUserId: adminId,
+        userId: ownerId,
+        action: "restore",
+        reason: "access_linearization_restore",
+        requestKey: `access-linearization-restore-${suffix}`,
+      });
+      assert.equal(restored.state, "enabled");
+      const restoredOwner: WebAiActor = {
+        id: ownerId,
+        role: "user",
+        accountAccessVersion: restored.accountAccessVersion,
+      };
 
       // Archive wins: lifecycle-style project state mutation holds the same
       // access lock while the admission waits, so the admission sees the
@@ -161,7 +277,7 @@ test(
         await releaseArchive.promise;
       });
       await archiveLocked.promise;
-      const admissionAfterArchive = db.$transaction((tx) => admitWebAiProjectAccess(tx, { actor: owner, projectId: archiveProjectId, required: "owner" }));
+      const admissionAfterArchive = db.$transaction((tx) => admitWebAiProjectAccess(tx, { actor: restoredOwner, projectId: archiveProjectId, required: "owner" }));
       releaseArchive.resolve();
       await archive;
       await assert.rejects(admissionAfterArchive, accessCode("ACCESS_FORBIDDEN"));
@@ -172,7 +288,7 @@ test(
       const admissionBeforeArchiveReady = deferred();
       const releaseAdmissionBeforeArchive = deferred();
       const admissionBeforeArchive = db.$transaction(async (tx) => {
-        const admitted = await admitWebAiProjectAccess(tx, { actor: owner, projectId: archiveProjectId, required: "owner" });
+        const admitted = await admitWebAiProjectAccess(tx, { actor: restoredOwner, projectId: archiveProjectId, required: "owner" });
         admissionBeforeArchiveReady.resolve();
         await releaseAdmissionBeforeArchive.promise;
         return admitted;
@@ -180,7 +296,7 @@ test(
       await admissionBeforeArchiveReady.promise;
       const archiveAfterAdmission = updateProjectLifecycle({
         projectId: archiveProjectId,
-        actor: owner,
+        actor: restoredOwner,
         action: "archive",
         expectedUpdatedAt: activeArchiveProject.updatedAt,
       }, db);
@@ -192,7 +308,9 @@ test(
     } finally {
       await db.project.deleteMany({ where: { id: { in: [membershipProjectId, archiveProjectId, legacyProjectOnlyId] } } });
       await db.workspace.deleteMany({ where: { id: workspaceId } });
-      await db.appUser.deleteMany({ where: { id: { in: [memberId, ownerId] } } });
+      // Account lifecycle previews and audits are intentionally append-only;
+      // the disposable gate runner drops this database after the test, so the
+      // fixture users remain until that boundary instead of bypassing guards.
     }
   },
 );

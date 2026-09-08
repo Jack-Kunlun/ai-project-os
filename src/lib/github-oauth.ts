@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Prisma, type GitHubOauthIntent, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { appendEmailVerificationAudit, createSession, DEFAULT_WORKSPACE_ID, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
+import { appendEmailVerificationAudit, createSessionInTransaction, DEFAULT_WORKSPACE_ID, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
 import { createCredential, readCredentialSecret } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
@@ -453,7 +453,7 @@ export async function completeGitHubOAuth(
     }
     await tx.gitHubOauthAttempt.delete({ where: { id: attempt.id } });
     await tx.externalCredential.delete({ where: { id: attempt.credentialId } });
-    const session = await createSession(tx, identity.user);
+    const session = await createSessionInTransaction(tx, identity.user);
     return Object.freeze({ session, returnTo: canonicalInternalReturnPath(attempt.returnTo), intent: attempt.intent, remember: attempt.remember });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

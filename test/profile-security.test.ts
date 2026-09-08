@@ -71,7 +71,7 @@ test("username update applies the canonical login-name boundary", async () => {
     appUser: {
       update: async ({ data }: { data: { username: string } }) => {
         storedUsername = data.username;
-        return { id: userId, username: storedUsername, role: "admin" as const };
+        return { id: userId, username: storedUsername, role: "admin" as const, accountAccessVersion: 1 };
       },
     },
   } as unknown as PrismaClient;

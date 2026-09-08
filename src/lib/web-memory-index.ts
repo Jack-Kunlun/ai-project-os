@@ -219,6 +219,7 @@ export type MemoryIndexPublicationSnapshot = Readonly<{
     routeVersion?: number | null;
     providerConfigurationVersion?: number;
     routeFenceFingerprint?: string;
+    connectionOwnerAccountAccessVersion?: number | null;
   }>;
   currentRoute: Readonly<{
     providerConnectionId: string;
@@ -231,6 +232,7 @@ export type MemoryIndexPublicationSnapshot = Readonly<{
     routeVersion?: number | null;
     providerConfigurationVersion?: number;
     routeFenceFingerprint?: string;
+    connectionOwnerAccountAccessVersion?: number | null;
   }> | null;
   expectedInputManifestFingerprint: string;
   currentInputManifestFingerprint: string | null;
@@ -305,6 +307,11 @@ export function isMemoryIndexPublicationCurrent(input: MemoryIndexPublicationSna
     input.currentRoute.routeFenceFingerprint !== undefined &&
     input.expectedRoute.routeFenceFingerprint !== undefined &&
     input.currentRoute.routeFenceFingerprint === input.expectedRoute.routeFenceFingerprint &&
+    (input.expectedRoute.source !== "personal_delegation" || (
+      Number.isSafeInteger(input.expectedRoute.connectionOwnerAccountAccessVersion)
+      && (input.expectedRoute.connectionOwnerAccountAccessVersion ?? 0) > 0
+      && input.currentRoute.connectionOwnerAccountAccessVersion === input.expectedRoute.connectionOwnerAccountAccessVersion
+    )) &&
     input.currentInputManifestFingerprint === input.expectedInputManifestFingerprint;
 }
 
@@ -805,6 +812,7 @@ async function buildMemoryIndexPlan(
           expectedEmbeddingRouteVersion: true,
           expectedEmbeddingProviderConfigurationVersion: true,
           expectedEmbeddingRouteFenceFingerprint: true,
+          expectedEmbeddingConnectionOwnerAccountAccessVersion: true,
           embeddingWebAiGrantId: true,
           records: {
             select: {
@@ -979,6 +987,7 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
             expectedEmbeddingRouteVersion: true,
             expectedEmbeddingProviderConfigurationVersion: true,
             expectedEmbeddingRouteFenceFingerprint: true,
+            expectedEmbeddingConnectionOwnerAccountAccessVersion: true,
             embeddingWebAiGrantId: true,
             completedAt: true,
             records: {
@@ -1224,6 +1233,9 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
             expectedEmbeddingRouteVersion: lockedPlan.routeVersion,
             expectedEmbeddingProviderConfigurationVersion: lockedPlan.providerConfigurationVersion,
             expectedEmbeddingRouteFenceFingerprint: lockedPlan.routeFenceFingerprint,
+            expectedEmbeddingConnectionOwnerAccountAccessVersion: lockedPlan.routeSource === "personal_delegation"
+              ? lockedPlan.route.personalEvidence?.connectionOwnerAccountAccessVersion ?? null
+              : null,
             embeddingWebAiGrantId: lockedPlan.routeSource === "personal_delegation" ? grantId : null,
             expectedInputCount: lockedPlan.expectedInputCount,
             generatedRecordCount: 0,
@@ -1428,6 +1440,9 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
           routeVersion: plan.routeVersion,
           providerConfigurationVersion: plan.providerConfigurationVersion,
           routeFenceFingerprint: plan.routeFenceFingerprint,
+          connectionOwnerAccountAccessVersion: plan.routeSource === "personal_delegation"
+            ? plan.route.personalEvidence?.connectionOwnerAccountAccessVersion ?? null
+            : null,
         },
         currentRoute: currentRoute === null ? null : {
           providerConnectionId: currentRoute.providerConnectionId,
@@ -1440,6 +1455,9 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
           routeVersion: currentRoute.routeVersion,
           providerConfigurationVersion: currentRoute.providerConfigurationVersion,
           routeFenceFingerprint: currentRoute.routeFenceFingerprint,
+          connectionOwnerAccountAccessVersion: currentRoute.source === "personal_delegation"
+            ? currentRoute.personalEvidence?.connectionOwnerAccountAccessVersion ?? null
+            : null,
         },
         expectedInputManifestFingerprint: plan.currentInputManifestFingerprint,
         currentInputManifestFingerprint: currentManifest,

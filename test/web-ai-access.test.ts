@@ -26,6 +26,16 @@ const PROJECT_ID = "22222222-2222-4222-8222-222222222222";
 const OTHER_PROJECT_ID = "33333333-3333-4333-8333-333333333333";
 const WORKSPACE_ID = "44444444-4444-4444-8444-444444444444";
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
+const CURRENT_USER_ACTOR = {
+  id: ACTOR_ID,
+  role: "user" as const,
+  accountAccessVersion: 1,
+} as const satisfies WebAiActor;
+const CURRENT_ADMIN_ACTOR = {
+  id: ACTOR_ID,
+  role: "admin" as const,
+  accountAccessVersion: 1,
+} as const satisfies WebAiActor;
 
 type FakeProjectSelect = Readonly<{
   id?: boolean;
@@ -67,6 +77,7 @@ function fakeDb(options: FakeOptions) {
           id: ACTOR_ID,
           role: options.storedRoleSequence?.[actorLookups - 1] ?? options.storedRole,
           disabledAt: options.disabledAtSequence?.[actorLookups - 1] ?? options.disabledAt ?? null,
+          accountAccessVersion: 1,
         };
       },
     },
@@ -119,7 +130,7 @@ function hasCode(code: string) {
 }
 
 test("service authorization reloads the stored role and requires admin project membership", async () => {
-  const forgedAdmin = { id: ACTOR_ID, role: "admin" } as const satisfies WebAiActor;
+  const forgedAdmin = CURRENT_ADMIN_ACTOR;
   const forgedRoleDb = fakeDb({ storedRole: "user" });
   await assert.rejects(
     () => assertWebAiProjectAccess(forgedAdmin, PROJECT_ID, "view", forgedRoleDb.db),
@@ -134,19 +145,19 @@ test("service authorization reloads the stored role and requires admin project m
 
   const adminDb = fakeDb({ storedRole: "admin", accessibleProjectId: PROJECT_ID, projectRole: "owner" });
   const current = await assertWebAiProjectAccess(forgedAdmin, PROJECT_ID, "edit", adminDb.db);
-  assert.deepEqual(current, { id: ACTOR_ID, role: "admin" });
+  assert.deepEqual(current, CURRENT_ADMIN_ACTOR);
 });
 
 test("a second actor check catches disablement or edit-role revocation", async () => {
-  const actor = { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor;
+  const actor = CURRENT_USER_ACTOR;
   for (const [label, options, expectedCode] of [
     [
       "disabled",
       {
         storedRole: "user" as const,
         accessibleProjectId: PROJECT_ID,
-        projectRoleSequence: ["editor", "editor"] as const,
-        disabledAtSequence: [null, new Date("2026-09-04T00:00:00.000Z")] as const,
+        projectRoleSequence: ["editor", "editor", "editor", "editor", "editor", "editor"] as const,
+        disabledAtSequence: [null, null, null, null, null, new Date("2026-09-04T00:00:00.000Z")] as const,
       },
       "ACCOUNT_DISABLED",
     ],
@@ -155,7 +166,7 @@ test("a second actor check catches disablement or edit-role revocation", async (
       {
         storedRole: "user" as const,
         accessibleProjectId: PROJECT_ID,
-        projectRoleSequence: ["editor", "viewer"] as const,
+        projectRoleSequence: ["editor", "editor", "editor", "viewer", "viewer", "viewer"] as const,
       },
       "ACCESS_FORBIDDEN",
     ],
@@ -205,8 +216,18 @@ test("malformed project IDs fail closed before reloading the actor", async () =>
   assert.equal(fixture.sensitiveCalls, 0);
 });
 
+test("actors without an account access epoch fail closed before reloading the actor", async () => {
+  const fixture = fakeDb({ storedRole: "user" });
+  await assert.rejects(
+    () => assertWebAiProjectAccess({ id: ACTOR_ID, role: "user" }, PROJECT_ID, "view", fixture.db),
+    hasCode("ACCOUNT_ACCESS_STALE"),
+  );
+  assert.equal(fixture.actorLookups, 0);
+  assert.equal(fixture.sensitiveCalls, 0);
+});
+
 test("viewer reads succeed while editor and owner writes pass the service guard", async () => {
-  const actor = { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor;
+  const actor = CURRENT_USER_ACTOR;
   const viewer = fakeDb({ storedRole: "user", accessibleProjectId: PROJECT_ID, projectRole: "viewer" });
   assert.deepEqual(await assertWebAiProjectAccess(actor, PROJECT_ID, "view", viewer.db), actor);
 
@@ -217,7 +238,7 @@ test("viewer reads succeed while editor and owner writes pass the service guard"
 });
 
 test("disabled actors fail closed before project or sensitive reads", async () => {
-  const actor = { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor;
+  const actor = CURRENT_USER_ACTOR;
   const fixture = fakeDb({ storedRole: "user", disabledAt: new Date("2026-09-04T00:00:00.000Z") });
   await assert.rejects(
     () => listAutoExtractSources(PROJECT_ID, actor, fixture.db),
@@ -227,7 +248,7 @@ test("disabled actors fail closed before project or sensitive reads", async () =
 });
 
 test("non-members and cross-project reads are denied before project content queries", async () => {
-  const actor = { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor;
+  const actor = CURRENT_USER_ACTOR;
   const nonMember = fakeDb({ storedRole: "user" });
   await assert.rejects(
     () => listAutoExtractSources(PROJECT_ID, actor, nonMember.db),
@@ -244,7 +265,7 @@ test("non-members and cross-project reads are denied before project content quer
 });
 
 test("governance and job list services authorize before their queries", async () => {
-  const actor = { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor;
+  const actor = CURRENT_USER_ACTOR;
   const fixture = fakeDb({ storedRole: "user" });
   const calls = [
     () => listGovernanceReviews(PROJECT_ID, actor, {}, fixture.db),
@@ -253,12 +274,14 @@ test("governance and job list services authorize before their queries", async ()
     () => listProjectJobs(PROJECT_ID, actor, fixture.db),
   ];
   for (const call of calls) await assert.rejects(call, hasCode("ACCESS_FORBIDDEN"));
-  assert.equal(fixture.actorLookups, calls.length);
+  // Each service performs the actor guard, current-row reload, and the
+  // project-level access guard before touching its protected query.
+  assert.equal(fixture.actorLookups, calls.length * 3);
   assert.equal(fixture.sensitiveCalls, 0);
 });
 
 test("active memory job search authorizes before progress, audit, or reservation work", async () => {
-  const actor = { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor;
+  const actor = CURRENT_USER_ACTOR;
   const fixture = fakeDb({ storedRole: "user" });
   await assert.rejects(
     () => searchActiveMemoryForJob({
@@ -277,7 +300,7 @@ test("active memory job search authorizes before progress, audit, or reservation
 });
 
 test("generic job mutations deny non-members and viewers before job reads or writes", async () => {
-  const actor = { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor;
+  const actor = CURRENT_USER_ACTOR;
   for (const options of [
     { storedRole: "user" as const },
     { storedRole: "user" as const, accessibleProjectId: PROJECT_ID, projectRole: "viewer" as const },
@@ -299,42 +322,42 @@ test("GitHub job services enforce current actor access before job or GitHub work
   const cases = [
     {
       name: "viewer",
-      actor: { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor,
+      actor: CURRENT_USER_ACTOR,
       options: { storedRole: "user" as const, accessibleProjectId: PROJECT_ID, projectRole: "viewer" as const },
       projectId: PROJECT_ID,
       expectedCode: "ACCESS_FORBIDDEN",
     },
     {
       name: "disabled",
-      actor: { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor,
+      actor: CURRENT_USER_ACTOR,
       options: { storedRole: "user" as const, disabledAt: new Date("2026-09-04T00:00:00.000Z") },
       projectId: PROJECT_ID,
       expectedCode: "ACCOUNT_DISABLED",
     },
     {
       name: "non-member",
-      actor: { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor,
+      actor: CURRENT_USER_ACTOR,
       options: { storedRole: "user" as const },
       projectId: PROJECT_ID,
       expectedCode: "ACCESS_FORBIDDEN",
     },
     {
       name: "cross-project",
-      actor: { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor,
+      actor: CURRENT_USER_ACTOR,
       options: { storedRole: "user" as const, accessibleProjectId: OTHER_PROJECT_ID, projectRole: "editor" as const },
       projectId: PROJECT_ID,
       expectedCode: "ACCESS_FORBIDDEN",
     },
     {
       name: "forged-admin-role",
-      actor: { id: ACTOR_ID, role: "admin" } as const satisfies WebAiActor,
+      actor: CURRENT_ADMIN_ACTOR,
       options: { storedRole: "user" as const, accessibleProjectId: OTHER_PROJECT_ID, projectRole: "editor" as const },
       projectId: PROJECT_ID,
       expectedCode: "ACCESS_FORBIDDEN",
     },
     {
       name: "archived",
-      actor: { id: ACTOR_ID, role: "admin" } as const satisfies WebAiActor,
+      actor: CURRENT_ADMIN_ACTOR,
       options: { storedRole: "admin" as const, accessibleProjectId: PROJECT_ID, projectRole: "owner" as const, archivedAt: new Date("2026-09-04T00:00:00.000Z") },
       projectId: PROJECT_ID,
       expectedCode: "PROJECT_ARCHIVED",
@@ -361,7 +384,7 @@ test("GitHub job services enforce current actor access before job or GitHub work
 });
 
 test("viewer cannot create a web AI job and the guard runs before route/source reads", async () => {
-  const actor = { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor;
+  const actor = CURRENT_USER_ACTOR;
   const fixture = fakeDb({ storedRole: "user", accessibleProjectId: PROJECT_ID, projectRole: "viewer" });
   await assert.rejects(
     () => runAutoExtractJob({
@@ -377,7 +400,7 @@ test("viewer cannot create a web AI job and the guard runs before route/source r
 });
 
 test("archived projects reject model work after access but before route reads", async () => {
-  const actor = { id: ACTOR_ID, role: "admin" } as const satisfies WebAiActor;
+  const actor = CURRENT_ADMIN_ACTOR;
   const fixture = fakeDb({ storedRole: "admin", accessibleProjectId: PROJECT_ID, projectRole: "owner", archivedAt: new Date("2026-09-04T00:00:00.000Z") });
   await assert.rejects(
     () => runAutoExtractJob({
@@ -411,7 +434,7 @@ test("legacy candidate review repeats authorization inside the write transaction
     const appUser = {
       findUnique: async () => {
         actorLookups += 1;
-        return { id: ACTOR_ID, role: "user" as const, disabledAt: null };
+        return { id: ACTOR_ID, role: "user" as const, disabledAt: null, accountAccessVersion: 1 };
       },
     };
     const project = {
@@ -465,12 +488,14 @@ test("legacy candidate review repeats authorization inside the write transaction
         candidateId: ACTOR_ID,
         action,
         expectedItemUpdatedAt: new Date("2026-09-04T00:00:00.000Z"),
-        actor: { id: ACTOR_ID, role: "user" },
+        actor: CURRENT_USER_ACTOR,
       }, db),
       hasCode("ACCESS_FORBIDDEN"),
       action,
     );
-    assert.equal(actorLookups, 2, `${action} reloads actor inside transaction`);
+    // The service performs a preflight access check, then the transactional
+    // admission reloads the actor twice (guard plus current-row snapshot).
+    assert.equal(actorLookups, 5, `${action} reloads actor inside transaction`);
     assert.equal(membershipLookups, 1, `${action} reloads membership inside transaction`);
     assert.equal(sensitiveCalls, 0, `${action} touched candidate data after revoke`);
   }
@@ -509,13 +534,13 @@ test("actor-aware Web AI routes delegate lifecycle checks to their services", ()
 });
 
 test("governance transport binds the current actor to the same project job", async () => {
-  const actor = { id: ACTOR_ID, role: "user" } as const satisfies WebAiActor;
+  const actor = CURRENT_USER_ACTOR;
   let providerCalls = 0;
   let auditCreates = 0;
   let jobIdentity = { projectId: OTHER_PROJECT_ID, requestedById: ACTOR_ID };
   const db = {
     appUser: {
-      findUnique: async () => ({ id: ACTOR_ID, role: "user" as const, disabledAt: null }),
+      findUnique: async () => ({ id: ACTOR_ID, role: "user" as const, disabledAt: null, accountAccessVersion: 1 }),
     },
     project: {
       findUnique: async (query: FakeProjectQuery) => query.select?.archivedAt === true

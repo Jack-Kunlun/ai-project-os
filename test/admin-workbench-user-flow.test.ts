@@ -12,6 +12,7 @@ const memberId = "22222222-2222-4222-8222-222222222222";
 const actorId = "33333333-3333-4333-8333-333333333333";
 const projectId = "44444444-4444-4444-8444-444444444444";
 const gitConnectionId = "55555555-5555-4555-8555-555555555555";
+const currentAdminActor = { id: actorId, role: "admin" as const, accountAccessVersion: 1 };
 
 const repositoryLinkInput = {
   gitConnectionId,
@@ -191,7 +192,7 @@ test("admin overview uses read-only aggregates and exposes no identity or creden
   const db = {
     $queryRaw: async () => { calls.push("health"); return [{ ok: 1 }]; },
     appUser: {
-      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
       count: async () => { calls.push("users"); return 7; },
     },
     membershipSubscription: { count: async () => { calls.push("memberships"); return 3; } },
@@ -202,7 +203,7 @@ test("admin overview uses read-only aggregates and exposes no identity or creden
     workspace: { findUnique: async () => ({ createdById: "99999999-9999-4999-8999-999999999999" }) },
   } as unknown as PrismaClient;
 
-  const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
+  const overview = await getSystemOverview(currentAdminActor, db, now);
   assert.deepEqual(overview.counts, { users: 7, activeMemberships: 3, verifiedPlatformModels: 2 });
   assert.deepEqual(overview.tokens, { issuedTokens: 500_000, availableTokens: 420, reservedTokens: 80, consumedTokens: 35 });
   assert.equal(overview.service.database, "up");
@@ -218,7 +219,7 @@ test("admin overview keeps control-plane readiness separate from live-call evide
   const db = {
     $queryRaw: async () => [{ ok: 1 }],
     appUser: {
-      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
       count: async () => 1,
     },
     membershipSubscription: { count: async () => 0 },
@@ -236,7 +237,7 @@ test("admin overview keeps control-plane readiness separate from live-call evide
     projectAction: { groupBy: async () => [] },
   } as unknown as PrismaClient;
 
-  const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
+  const overview = await getSystemOverview(currentAdminActor, db, now);
   assert.equal(overview.defaultRoutes.total, 6);
   assert.equal(overview.defaultRoutes.ready, 0);
   assert.equal(overview.defaultRoutes.controlPlane, "attention");
@@ -295,7 +296,7 @@ test("admin failure aggregates use terminal completedAt windows, retain null-cod
   const db = {
     $queryRaw: async () => [],
     appUser: {
-      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
       count: async () => 1,
     },
     membershipSubscription: { count: async () => 0 },
@@ -325,7 +326,7 @@ test("admin failure aggregates use terminal completedAt windows, retain null-cod
     projectAction: { groupBy: capture("controlled-action", [{ failureCode: null, _count: { _all: 1 } }]) },
   } as unknown as PrismaClient;
 
-  const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
+  const overview = await getSystemOverview(currentAdminActor, db, now);
   assert.equal(overview.failures.total, 5);
   assert.deepEqual(overview.failures.providerCalls.byCode, [{ code: "PLATFORM_PROVIDER_FAILURE", count: 1 }]);
   assert.deepEqual(overview.failures.backgroundJobs.byCode, [{ code: "UNCLASSIFIED_FAILURE", count: 1 }]);
@@ -351,7 +352,7 @@ test("admin overview keeps backup permission failures distinct from restricted a
   const db = {
     $queryRaw: async () => [],
     appUser: {
-      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+      findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
       count: async () => 1,
     },
     membershipSubscription: { count: async () => 0 },
@@ -363,7 +364,7 @@ test("admin overview keeps backup permission failures distinct from restricted a
     workspace: { findUnique: async () => { throw new Error("permission lookup unavailable"); } },
   } as unknown as PrismaClient;
 
-  const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
+  const overview = await getSystemOverview(currentAdminActor, db, now);
   assert.equal(overview.backup.access, "not_obtained");
   assert.equal(overview.backup.snapshotRead, "not_obtained");
   assert.equal(overview.backup.latestValidRecord.status, "not_obtained");
@@ -380,7 +381,7 @@ test("admin backup projection preserves an invalid source status instead of pres
     const db = {
       $queryRaw: async () => [],
       appUser: {
-        findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null }),
+        findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
         count: async () => 1,
       },
       membershipSubscription: { count: async () => 0 },
@@ -392,7 +393,7 @@ test("admin backup projection preserves an invalid source status instead of pres
       workspace: { findUnique: async () => ({ createdById: actorId }) },
     } as unknown as PrismaClient;
 
-    const overview = await getSystemOverview({ id: actorId, role: "admin" }, db, now);
+    const overview = await getSystemOverview(currentAdminActor, db, now);
     assert.equal(overview.backup.access, "full");
     assert.equal(overview.backup.snapshotRead, "read");
     assert.equal(overview.backup.sourceStatus, "invalid");

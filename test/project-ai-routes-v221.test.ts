@@ -23,7 +23,7 @@ import {
 const projectId = "11111111-1111-4111-8111-111111111111";
 const foreignProjectId = "99999999-9999-4999-8999-999999999999";
 const actorId = "22222222-2222-4222-8222-222222222222";
-const routeActor = { id: actorId, role: "member" } satisfies AccessUser;
+const routeActor = { id: actorId, role: "member", accountAccessVersion: 1 } satisfies AccessUser;
 const workspaceId = "88888888-8888-4888-8888-888888888888";
 const openAiConnectionId = "33333333-3333-4333-8333-333333333333";
 const qwenConnectionId = "44444444-4444-4444-8444-444444444444";
@@ -118,7 +118,7 @@ class FakeRouteDb {
 
   readonly appUser = {
     findUnique: async ({ where }: { where: { id: string } }) =>
-      where.id === actorId ? { id: actorId, role: "member" as const, disabledAt: null } : null,
+      where.id === actorId ? { id: actorId, role: "member" as const, disabledAt: null, accountAccessVersion: 1 } : null,
   };
 
   readonly workspaceMembership = {
@@ -330,7 +330,7 @@ test("legacy project routes fail closed for user-scoped providers", async () => 
 
   const listed = await getProjectAiRoutes(
     projectId,
-    { id: actorId, role: "member" } satisfies AccessUser,
+    routeActor,
     db as unknown as PrismaClient,
   );
   assert.equal(listed.providers.some((provider) => provider.id === userConnectionId), false);

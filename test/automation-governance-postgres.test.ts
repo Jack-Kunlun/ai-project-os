@@ -18,7 +18,7 @@ import { resolveSecureEndpointFingerprint, syncProjectWebSource, updateProjectWe
 
 const shouldRun = process.env.AUTOMATION_GOVERNANCE_POSTGRES_GATE === "1";
 
-type Actor = Readonly<{ id: string; role: "admin" | "member" | "user" }>;
+type Actor = Readonly<{ id: string; role: "admin" | "member" | "user"; accountAccessVersion: number }>;
 
 function deferred(): Readonly<{ promise: Promise<void>; resolve: () => void }> {
   let resolve!: () => void;
@@ -45,15 +45,36 @@ async function createRuleWithPreview(
   return { preview, rule };
 }
 
-async function startFixtureServer(): Promise<Readonly<{ close: () => Promise<void>; baseUrl: string; holdStarted: Promise<void>; releaseHold: () => void }>> {
+async function startFixtureServer(): Promise<Readonly<{
+  close: () => Promise<void>;
+  baseUrl: string;
+  holdStarted: Promise<void>;
+  releaseHold: () => void;
+  redirectStarted: Promise<void>;
+  releaseRedirect: () => void;
+  requestCount: (path: string) => number;
+}>> {
   const holdStarted = deferred();
   const holdRelease = deferred();
+  const redirectStarted = deferred();
+  const redirectRelease = deferred();
+  const requestCounts = new Map<string, number>();
   const server = createServer((request, response) => {
+    const path = request.url ?? "";
+    requestCounts.set(path, (requestCounts.get(path) ?? 0) + 1);
     if (request.url === "/hold") {
       holdStarted.resolve();
       void holdRelease.promise.then(() => {
         response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
         response.end("fixture held source");
+      });
+      return;
+    }
+    if (request.url === "/redirect") {
+      redirectStarted.resolve();
+      void redirectRelease.promise.then(() => {
+        response.writeHead(302, { location: "/ok" });
+        response.end();
       });
       return;
     }
@@ -79,6 +100,9 @@ async function startFixtureServer(): Promise<Readonly<{ close: () => Promise<voi
     close: () => new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))),
     holdStarted: holdStarted.promise,
     releaseHold: holdRelease.resolve,
+    redirectStarted: redirectStarted.promise,
+    releaseRedirect: redirectRelease.resolve,
+    requestCount: (path) => requestCounts.get(path) ?? 0,
   });
 }
 
@@ -95,7 +119,7 @@ test(
     const workspaceId = randomUUID();
     const projectId = randomUUID();
     const secondProjectId = randomUUID();
-    const owner: Actor = { id: ownerId, role: "user" };
+    const owner: Actor = { id: ownerId, role: "user", accountAccessVersion: 1 };
     const fixture = await startFixtureServer();
 
     await db.appUser.createMany({ data: [
@@ -281,6 +305,27 @@ test(
       assert.equal(disabledHeldSource.status, "disabled");
       assert.notEqual(disabledHeldSource.disabledAt, null);
       assert.equal(await db.webSourceRevision.count({ where: { webSourceId: heldSource.id, status: "failed" } }), 1);
+
+      // A redirect hop must re-enter the source fence. Disable the source
+      // after the first hop is received but before its redirect response is
+      // released; the second-hop /ok request must never be constructed.
+      const redirectUrl = `${fixture.baseUrl}/redirect`;
+      const redirectEndpoint = await resolveSecureEndpointFingerprint({ url: redirectUrl, allowPrivateNetwork: true });
+      const redirectSource = await db.webSource.create({
+        data: { projectId, name: `Fixture redirect ${suffix}`, url: redirectEndpoint.url, allowPrivateNetwork: true, resolvedAddressFingerprint: redirectEndpoint.fingerprint, createdById: ownerId },
+        select: { id: true },
+      });
+      const okCountBeforeRedirect = fixture.requestCount("/ok");
+      const redirectSync = syncProjectWebSource(projectId, redirectSource.id, owner, db);
+      await fixture.redirectStarted;
+      await updateProjectWebSource(projectId, redirectSource.id, { enabled: false }, owner, db);
+      fixture.releaseRedirect();
+      await assert.rejects(
+        redirectSync,
+        (error: unknown) => error instanceof WebSourceError && error.code === "WEB_SOURCE_DISABLED",
+      );
+      assert.equal(fixture.requestCount("/redirect"), 1);
+      assert.equal(fixture.requestCount("/ok"), okCountBeforeRedirect);
 
       // The same run id is not readable through another project, even for a
       // user who owns both projects; projection is scoped by project id.

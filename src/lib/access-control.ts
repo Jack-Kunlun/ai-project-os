@@ -1,5 +1,6 @@
 import { Prisma, type AppUserRole, type PrismaClient, type ProjectMembershipRole, type WorkspaceMembershipRole } from "@prisma/client";
 import { z } from "zod";
+import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import { getDb } from "@/lib/db";
 import { findConfirmedProjectMembership, findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 
@@ -33,7 +34,9 @@ export type AccessControlErrorCode =
   | "ACCESS_FORBIDDEN"
   | "ACCESS_PROJECT_NOT_FOUND"
   | "ACCESS_WORKSPACE_NOT_FOUND"
-  | "ACCESS_LAST_OWNER_REQUIRED";
+  | "ACCESS_LAST_OWNER_REQUIRED"
+  | "ACCOUNT_DISABLED"
+  | "ACCOUNT_ACCESS_STALE";
 
 export class AccessControlError extends Error {
   constructor(readonly code: AccessControlErrorCode) {
@@ -42,11 +45,21 @@ export class AccessControlError extends Error {
   }
 }
 
-export type AccessUser = Readonly<{ id: string; role: AppUserRole }>;
+export type AccessUser = Readonly<{ id: string; role: AppUserRole; accountAccessVersion?: number }>;
 export type ProjectPermission = "owner" | "edit" | "view";
 
 function fail(code: AccessControlErrorCode): never {
   throw new AccessControlError(code);
+}
+
+async function assertCurrentAccountAccess(user: AccessUser, db: PrismaClient | Prisma.TransactionClient): Promise<void> {
+  try {
+    await assertAccountAccessForActor(db, user);
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError && error.code === "ACCOUNT_DISABLED") return fail("ACCOUNT_DISABLED");
+    if (error instanceof AccountAccessGuardError && error.code === "ACCOUNT_ACCESS_STALE") return fail("ACCOUNT_ACCESS_STALE");
+    return fail("ACCESS_FORBIDDEN");
+  }
 }
 
 function projectRolePermission(role: ProjectMembershipRole): ProjectPermission {
@@ -105,6 +118,7 @@ export async function getProjectPermission(user: AccessUser, projectId: string, 
 }
 
 export async function assertProjectAccess(user: AccessUser, projectId: string, required: ProjectPermission, db: PrismaClient = getDb()): Promise<ProjectPermission> {
+  await assertCurrentAccountAccess(user, db);
   const canonicalId = canonicalProjectId(projectId);
   const permission = await getProjectPermission(user, canonicalId, db);
   if (permission === null) {
@@ -121,6 +135,7 @@ export async function assertWorkspaceAdmin(
   workspaceId: string,
   db: PrismaClient | Prisma.TransactionClient = getDb(),
 ): Promise<WorkspaceMembershipRole> {
+  await assertCurrentAccountAccess(user, db);
   const membership = await findConfirmedWorkspaceMembership(db, workspaceId, user.id);
   if (membership === null) {
     const exists = await db.workspace.count({ where: { id: workspaceId } });
@@ -142,6 +157,7 @@ export async function resolveProjectCreationWorkspace(user: AccessUser, db: Pris
 }
 
 export async function authorizeApiRequest(user: AccessUser, request: Request, db: PrismaClient = getDb()): Promise<void> {
+  await assertCurrentAccountAccess(user, db);
   const rawPath = new URL(request.url).pathname;
   const path = decodedApiPath(request);
   if (path.startsWith("/api/system/")) {

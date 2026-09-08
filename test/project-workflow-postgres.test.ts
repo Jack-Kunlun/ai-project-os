@@ -14,6 +14,7 @@ import {
   reconcileProjectJob,
   updateProjectJobProgress,
 } from "../src/lib/project-workflow";
+import { grantProjectMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.PROJECT_WORKFLOW_POSTGRES_GATE === "1";
 
@@ -49,6 +50,22 @@ test(
           { id: projectId, name: `Workflow ${suffix}`, slug: `workflow-${suffix}` },
           { id: otherProjectId, name: `Workflow other ${suffix}`, slug: `workflow-other-${suffix}` },
         ],
+      });
+      const projectWorkspace = await db.project.findUniqueOrThrow({
+        where: { id: projectId },
+        select: { workspaceId: true },
+      });
+      await db.$transaction(async (tx) => {
+        for (const directProjectId of [projectId, otherProjectId]) {
+          await grantProjectMembership(tx, {
+            projectId: directProjectId,
+            workspaceId: projectWorkspace.workspaceId,
+            userId: user.id,
+            role: "owner",
+            actorId: user.id,
+            reason: "workflow_gate_fixture_direct_project_owner",
+          });
+        }
       });
       const baseJob = {
         projectId,
@@ -181,7 +198,7 @@ test(
         },
       });
       await assert.rejects(
-        () => reconcileProjectJob(projectId, wrongActorJob.id, { id: randomUUID(), role: "admin" }, db),
+        () => reconcileProjectJob(projectId, wrongActorJob.id, { id: randomUUID(), role: "admin", accountAccessVersion: 1 }, db),
         (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
           (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
       );

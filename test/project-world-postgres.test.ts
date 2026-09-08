@@ -26,8 +26,8 @@ test("project world persists version-bound relations, supersession and immutable
   const workspaceId = randomUUID();
   const projectId = randomUUID();
   const otherProjectId = randomUUID();
-  const editor = { id: editorId, username: `world_editor_${suffix}`, role: "member" as const };
-  const viewer = { id: viewerId, username: `world_viewer_${suffix}`, role: "member" as const };
+  const editor = { id: editorId, username: `world_editor_${suffix}`, role: "member" as const, accountAccessVersion: 1 };
+  const viewer = { id: viewerId, username: `world_viewer_${suffix}`, role: "member" as const, accountAccessVersion: 1 };
 
   await db.appUser.createMany({ data: [
     { id: adminId, username: `world_admin_${suffix}`, role: "admin" },

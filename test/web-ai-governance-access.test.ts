@@ -27,7 +27,8 @@ function governanceFixture() {
         return {
           id: ACTOR_ID,
           role: "member" as const,
-          disabledAt: actorLookups >= 3 ? new Date("2026-09-04T00:00:00.000Z") : null,
+          disabledAt: actorLookups >= 5 ? new Date("2026-09-04T00:00:00.000Z") : null,
+          accountAccessVersion: 1,
         };
       },
     },
@@ -166,7 +167,7 @@ test("auditedProviderCall releases a reservation when the actor is revoked befor
     () => auditedProviderCall({
       jobId: JOB_ID,
       attempt: { attemptId: ATTEMPT_ID, claimToken: "claim-token" },
-      actor: { id: ACTOR_ID, role: "member" },
+      actor: { id: ACTOR_ID, role: "member", accountAccessVersion: 1 },
       route: route as never,
       grantId: "88888888-8888-4888-8888-888888888888",
       callKey: "ai-governance-revoke-test",
@@ -175,7 +176,7 @@ test("auditedProviderCall releases a reservation when the actor is revoked befor
     }, fixture.db),
     (error: unknown) => error instanceof WebAiAccessError && error.code === "ACCOUNT_DISABLED",
   );
-  assert.equal(fixture.actorLookups, 3);
+  assert.equal(fixture.actorLookups, 5);
   assert.equal(fixture.reservationCreates, 1);
   assert.equal(fixture.reservationReleases, 1);
   assert.equal(fixture.reservationStatus, "released");

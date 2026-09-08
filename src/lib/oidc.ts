@@ -3,7 +3,7 @@ import { Prisma, type OidcTokenAuthMethod, type PrismaClient } from "@prisma/cli
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
 import { z } from "zod";
 import { assertWorkspaceAdmin, type AccessUser } from "@/lib/access-control";
-import { appendEmailVerificationAudit, createSession, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
+import { appendEmailVerificationAudit, createSessionInTransaction, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
 import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
@@ -622,7 +622,7 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     identity = await tx.oidcIdentity.upsert({ where: { providerId_subject: { providerId: provider.id, subject } }, create: { providerId: provider.id, userId: user.id, subject, email: identityEmail, displayName, lastLoginAt: new Date() }, update: { email: identityEmail, displayName, lastLoginAt: new Date() }, include: { user: true } });
     await tx.oidcLoginAttempt.delete({ where: { id: attempt.id } });
     await tx.externalCredential.delete({ where: { id: attempt.credentialId } });
-    const session = await createSession(tx, identity.user);
+    const session = await createSessionInTransaction(tx, identity.user);
     return Object.freeze({ session, returnTo: canonicalInternalReturnPath(attempt.returnTo) });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

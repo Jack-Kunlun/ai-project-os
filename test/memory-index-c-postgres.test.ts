@@ -273,10 +273,10 @@ test(
     const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     const previousFetch = globalThis.fetch;
     const userId = randomUUID();
-    const actor = { id: userId, role: "user" as const };
+    const actor = { id: userId, role: "user" as const, accountAccessVersion: 1 };
     const adminId = randomUUID();
-    const workspaceId = randomUUID();
-    const projectId = randomUUID();
+      const workspaceId = randomUUID();
+      const projectId = randomUUID();
     const otherProjectId = randomUUID();
     const concurrentProjectId = randomUUID();
     const pointerProjectId = randomUUID();
@@ -289,7 +289,8 @@ test(
     let rawConnected = false;
     let fetchMode: "success" | "unknown" = "success";
     let fetchCalls = 0;
-    const embeddingInputs: string[][] = [];
+      const embeddingInputs: string[][] = [];
+      const adminActor = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
 
     try {
       await raw.connect();
@@ -378,12 +379,12 @@ test(
         embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
         visionModelId: null,
-      }, { id: adminId, role: "admin" }, db);
+      }, adminActor, db);
       await db.aiProviderConnection.update({
         where: { id: provider.id },
         data: { status: "verified", lastTestedAt: new Date() },
       });
-      const defaultEmbeddingRoute = await activateDefaultEmbeddingRoute(db, { id: adminId, role: "admin" }, provider.id);
+      const defaultEmbeddingRoute = await activateDefaultEmbeddingRoute(db, adminActor, provider.id);
       assert.equal(defaultEmbeddingRoute.status, "active");
       const originalText = "原始事实：项目使用可追溯的长期记忆。";
       const originalHash = digest(originalText);

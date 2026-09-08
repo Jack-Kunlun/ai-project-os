@@ -263,7 +263,12 @@ export async function securePinnedJsonRequest(input: Readonly<{
   return Object.freeze({ value, finalUrl: response.finalUrl, fingerprint: response.fingerprint, status: response.status });
 }
 
-async function fetchWebSource(input: Readonly<{ url: string; allowPrivateNetwork: boolean; expectedFingerprint: string | null }>) {
+async function fetchWebSource(input: Readonly<{
+  url: string;
+  allowPrivateNetwork: boolean;
+  expectedFingerprint: string | null;
+  onRequestBodyWriteStart?: () => void | boolean | Promise<void | boolean>;
+}>) {
   let url = new URL(input.url);
   const originHost = url.hostname.toLowerCase();
   let originFingerprint: string | null = null;
@@ -273,7 +278,12 @@ async function fetchWebSource(input: Readonly<{ url: string; allowPrivateNetwork
       originFingerprint = endpoint.fingerprint;
       if (input.expectedFingerprint !== null && input.expectedFingerprint !== originFingerprint) return fail("WEB_SOURCE_NETWORK_CHANGED");
     }
-    const response = await requestPinned(url, endpoint);
+    // requestPinned invokes this callback before constructing every actual
+    // request. Keeping it inside the redirect loop prevents a redirect hop
+    // from reusing an admission decision made for the first URL.
+    const response = await requestPinned(url, endpoint, {
+      onRequestBodyWriteStart: input.onRequestBodyWriteStart,
+    });
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       const location = response.headers.location;
       if (location === undefined || redirect === MAX_REDIRECTS) return fail("WEB_SOURCE_REDIRECT_REJECTED");
@@ -442,7 +452,44 @@ export async function syncProjectWebSource(
     return Object.freeze({ ...current, revisionId: revision.id });
   });
   try {
-    const fetched = await fetchWebSource({ url: webSource.url, allowPrivateNetwork: webSource.allowPrivateNetwork, expectedFingerprint: webSource.resolvedAddressFingerprint });
+    const onRequestBodyWriteStart = async () => {
+      await withWebAiProjectAccessTransaction(db, {
+        actor,
+        projectId,
+        required: "owner",
+      }, async (tx) => {
+        const current = await tx.webSource.findFirst({
+          where: { id: webSourceId, projectId },
+          select: {
+            id: true,
+            url: true,
+            allowPrivateNetwork: true,
+            resolvedAddressFingerprint: true,
+            status: true,
+            disabledAt: true,
+          },
+        });
+        if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
+        if (current.status === "disabled" || current.disabledAt !== null) return fail("WEB_SOURCE_DISABLED");
+        if (
+          current.url !== webSource.url
+          || current.allowPrivateNetwork !== webSource.allowPrivateNetwork
+          || current.resolvedAddressFingerprint !== webSource.resolvedAddressFingerprint
+        ) return fail("WEB_SOURCE_NETWORK_CHANGED");
+        const revision = await tx.webSourceRevision.findFirst({
+          where: { id: webSource.revisionId, projectId, webSourceId },
+          select: { status: true },
+        });
+        if (revision === null) return fail("WEB_SOURCE_NOT_FOUND");
+        if (revision.status !== "staging") return fail("WEB_SOURCE_REQUEST_BOUNDARY_REJECTED");
+      });
+    };
+    const fetched = await fetchWebSource({
+      url: webSource.url,
+      allowPrivateNetwork: webSource.allowPrivateNetwork,
+      expectedFingerprint: webSource.resolvedAddressFingerprint,
+      onRequestBodyWriteStart,
+    });
     const document = extractWebDocument(fetched.response.body, fetched.contentType, fetched.finalUrl);
     const contentHash = hashSourceContent(document.text);
     const completedAt = new Date();

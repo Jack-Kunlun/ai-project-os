@@ -46,6 +46,7 @@ export type SafeSessionUser = Readonly<{
   id: string;
   username: string;
   role: SystemRole;
+  accountAccessVersion: number;
 }>;
 
 export type CreatedSession = Readonly<{
@@ -225,26 +226,100 @@ export async function verifyPasswordRecord(
   return timingSafeEqual(actual, expected);
 }
 
-function safeUser(user: Pick<AppUser, "id" | "username" | "role">): SafeSessionUser {
-  return Object.freeze({ id: user.id, username: user.username, role: toSystemRole(user.role) });
+function safeUser(user: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick<AppUser, "accountAccessVersion">>): SafeSessionUser {
+  const accountAccessVersion = user.accountAccessVersion;
+  if (
+    typeof accountAccessVersion !== "number"
+    || !Number.isSafeInteger(accountAccessVersion)
+    || accountAccessVersion < 1
+  ) {
+    return fail("AUTH_REQUIRED");
+  }
+  return Object.freeze({ id: user.id, username: user.username, role: toSystemRole(user.role), accountAccessVersion });
 }
 
-export async function createSession(
+/**
+ * Create a session using the transaction that the caller already owns.
+ *
+ * Keep this separate from createSession's PrismaClient entry point. Prisma's
+ * interactive TransactionClient exposes a $transaction-shaped proxy too, so
+ * detecting transactions by the presence of that property recurses forever.
+ * Callers that are already inside a transaction must use this function.
+ */
+export async function createSessionInTransaction(
   db: PrismaClient | Prisma.TransactionClient,
-  user: Pick<AppUser, "id" | "username" | "role">,
+  user: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick<AppUser, "accountAccessVersion">>,
   now = new Date(),
 ): Promise<CreatedSession> {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(now.getTime() + SESSION_LIFETIME_DAYS * 24 * 60 * 60 * 1_000);
+  let sessionUser: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick<AppUser, "accountAccessVersion">> = user;
+  const appUserDelegate = (db as unknown as {
+    appUser?: {
+      findUnique?: (args: unknown) => Promise<Readonly<{
+        id: string;
+        username: string;
+        role: AppUser["role"];
+        disabledAt: Date | null;
+        accountAccessVersion: number;
+      }> | null>;
+    };
+  }).appUser;
+  if (typeof appUserDelegate?.findUnique === "function") {
+    const current = await appUserDelegate.findUnique({
+      where: { id: user.id },
+      select: { id: true, username: true, role: true, disabledAt: true, accountAccessVersion: true },
+    });
+    if (current === null) return fail("AUTH_REQUIRED");
+    if (current.disabledAt !== null) return fail("AUTH_ACCOUNT_DISABLED");
+    sessionUser = current;
+  }
+  const accountAccessVersion = sessionUser.accountAccessVersion;
+  if (
+    typeof accountAccessVersion !== "number"
+    || !Number.isSafeInteger(accountAccessVersion)
+    || accountAccessVersion < 1
+  ) {
+    return fail("AUTH_REQUIRED");
+  }
+  // The migration installs a DB guard on AppSession. The context is scoped to
+  // this transaction and is intentionally not exposed to request callers.
+  const executeRaw = (db as unknown as { $executeRaw?: (query: Prisma.Sql) => Promise<unknown> }).$executeRaw;
+  if (typeof executeRaw === "function") {
+    await executeRaw.call(db, Prisma.sql`SELECT set_config('app.account_session_context', '1', true)`);
+    await executeRaw.call(db, Prisma.sql`SELECT set_config('app.account_session_user_id', ${sessionUser.id}, true)`);
+    await executeRaw.call(db, Prisma.sql`SELECT set_config('app.account_session_version', ${accountAccessVersion.toString()}, true)`);
+  }
   await db.appSession.create({
     data: {
-      userId: user.id,
+      userId: sessionUser.id,
+      accountAccessVersion,
       tokenHash: tokenHash(token),
       expiresAt,
       lastSeenAt: now,
     },
   });
-  return Object.freeze({ token, expiresAt, user: safeUser(user) });
+  return Object.freeze({ token, expiresAt, user: safeUser(sessionUser) });
+}
+
+/**
+ * Top-level session creation entry point. The transaction is opened exactly
+ * once here; transaction callbacks use createSessionInTransaction directly.
+ * The no-$transaction fallback is retained for the small in-memory auth
+ * doubles used by boundary tests.
+ */
+export async function createSession(
+  db: PrismaClient | Prisma.TransactionClient,
+  user: Pick<AppUser, "id" | "username" | "role"> & Partial<Pick<AppUser, "accountAccessVersion">>,
+  now = new Date(),
+): Promise<CreatedSession> {
+  const transaction = (db as unknown as {
+    $transaction?: <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
+  }).$transaction;
+  if (typeof transaction === "function") {
+    return await transaction.call(db, (tx) => createSessionInTransaction(tx, user, now)) as CreatedSession;
+  }
+  return createSessionInTransaction(db, user, now);
 }
 
 export async function isApplicationInitialized(db: PrismaClient = getDb()): Promise<boolean> {
@@ -283,7 +358,7 @@ export async function initializeAdmin(
       actorId: user.id,
       reason: "fresh_application_bootstrap",
     });
-    return createSession(tx, user);
+    return createSessionInTransaction(tx, user);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -306,7 +381,7 @@ export async function loginAdmin(
     return fail("AUTH_INVALID_CREDENTIALS");
   }
   await db.appSession.updateMany({
-    where: { userId: user.id, OR: [{ expiresAt: { lte: new Date() } }, { revokedAt: { not: null } }] },
+    where: { userId: user.id, expiresAt: { lte: new Date() }, revokedAt: null },
     data: { revokedAt: new Date() },
   });
   return createSession(db, user);
@@ -321,7 +396,7 @@ export async function updateAccountUsername(
   const user = await db.appUser.update({
     where: { id: userId },
     data: { username },
-    select: { id: true, username: true, role: true },
+    select: { id: true, username: true, role: true, accountAccessVersion: true },
   });
   return safeUser(user);
 }
@@ -441,10 +516,27 @@ export async function readSessionToken(
     where: { tokenHash: tokenHash(token) },
     include: { user: true },
   });
-  if (session === null || session.revokedAt !== null || session.expiresAt <= now || session.user.disabledAt !== null) return null;
+  if (
+    session === null
+    || session.revokedAt !== null
+    || session.expiresAt <= now
+    || session.user.disabledAt !== null
+    || session.accountAccessVersion !== session.user.accountAccessVersion
+  ) return null;
   if (now.getTime() - session.lastSeenAt.getTime() > 5 * 60 * 1_000) {
     await db.appSession.updateMany({
-      where: { id: session.id, revokedAt: null, expiresAt: { gt: now } },
+      where: {
+        id: session.id,
+        revokedAt: null,
+        expiresAt: { gt: now },
+        accountAccessVersion: session.accountAccessVersion,
+        user: {
+          is: {
+            disabledAt: null,
+            accountAccessVersion: session.user.accountAccessVersion,
+          },
+        },
+      },
       data: { lastSeenAt: now },
     });
   }

@@ -25,8 +25,8 @@ function isolatedAccessDb(): PrismaClient {
     [PROJECT_B, { id: PROJECT_B, workspaceId: WORKSPACE_B, membershipInheritanceMode: "projectOnly" as const }],
   ]);
   const users = new Map([
-    [USER_A, { id: USER_A, role: "user" as const, disabledAt: null }],
-    [USER_B, { id: USER_B, role: "user" as const, disabledAt: null }],
+    [USER_A, { id: USER_A, role: "user" as const, disabledAt: null, accountAccessVersion: 1 }],
+    [USER_B, { id: USER_B, role: "user" as const, disabledAt: null, accountAccessVersion: 1 }],
   ]);
   const projectMemberships = new Map([
     [`${PROJECT_A}:${USER_A}`, { role: "viewer" as const, accessState: "confirmed" as const }],
@@ -61,7 +61,7 @@ function isolatedAccessDb(): PrismaClient {
 }
 
 function actor(id: string): WebAiActor {
-  return { id, role: "user" };
+  return { id, role: "user", accountAccessVersion: 1 };
 }
 
 type FakeAutomationRule = {
@@ -87,8 +87,8 @@ function automationAccessDb(): PrismaClient & { automationRuleReads: number } {
     [PROJECT_B, { id: PROJECT_B, workspaceId: WORKSPACE_B, archivedAt: null, membershipInheritanceMode: "projectOnly" as const }],
   ]);
   const users = new Map([
-    [USER_A, { id: USER_A, role: "user" as const, disabledAt: null }],
-    [USER_B, { id: USER_B, role: "user" as const, disabledAt: null }],
+    [USER_A, { id: USER_A, role: "user" as const, disabledAt: null, accountAccessVersion: 1 }],
+    [USER_B, { id: USER_B, role: "user" as const, disabledAt: null, accountAccessVersion: 1 }],
   ]);
   const memberships = new Map([
     [`${PROJECT_A}:${USER_A}`, "owner" as const],

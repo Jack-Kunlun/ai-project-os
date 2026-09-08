@@ -57,6 +57,7 @@ test("delegation inputs derive private provider snapshots and require explicit c
   assert.match(service, /acknowledgeDataEgress: z\.literal\(true\)/u);
   assert.match(service, /acknowledgeIndexImpact: z\.literal\(true\)/u);
   assert.match(service, /switchToPlatformDefault: z\.boolean\(\)\.optional\(\)\.default\(false\)/u);
+  assert.match(service, /source: "platformDefault", delegationId: null, connectionOwnerAccountAccessVersion: null/u);
   assert.match(service, /MIN_EXPIRY_MS = 10 \* 60 \* 1_000/u);
   assert.match(service, /MAX_EXPIRY_MS = 30 \* 24 \* 60 \* 60 \* 1_000/u);
   assert.match(service, /credentialFingerprint: provider\.credential\.secretFingerprint/u);

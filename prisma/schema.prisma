@@ -169,6 +169,16 @@ enum AppUserRole {
   user
 }
 
+enum AccountAccessAction {
+  disable
+  restore
+}
+
+enum AccountAccessAuditEvent {
+  disabled
+  restored
+}
+
 enum ResourceOwnershipState {
   legacyPending @map("legacy_pending")
   ambiguous
@@ -1480,6 +1490,7 @@ model GitConnection {
   disabledAt                 DateTime?
   createdById                String              @db.Uuid
   ownerUserId                String?             @db.Uuid
+  ownerAccountAccessVersion  Int?
   ownershipState             ResourceOwnershipState @default(legacyPending)
   createdAt                  DateTime            @default(now())
   updatedAt                  DateTime            @updatedAt
@@ -1551,6 +1562,7 @@ model ProjectGitRepositoryDelegation {
   projectId                           String                              @db.Uuid
   gitConnectionId                     String                              @db.Uuid
   connectionOwnerId                   String                              @db.Uuid
+  connectionOwnerAccountAccessVersion Int?
   repositoryPath                      String                              @db.VarChar(768)
   trackedRef                          String                              @db.VarChar(255)
   includeRoots                        Json                                @db.JsonB
@@ -1616,6 +1628,7 @@ model ProjectGitRepositoryDelegationAudit {
   gitConnectionId                     String                              @db.Uuid
   delegationId                       String                              @db.Uuid
   connectionOwnerId                   String                              @db.Uuid
+  connectionOwnerAccountAccessVersion Int?
   action                              ProjectGitRepositoryDelegationAuditAction
   delegationVersion                  Int
   statusBefore                       ProjectGitRepositoryDelegationStatus?
@@ -1668,6 +1681,7 @@ model ProjectGitRepositoryManualRun {
   projectId                           String                                      @db.Uuid
   delegationId                        String                                      @db.Uuid
   requestedById                       String                                      @db.Uuid
+  requestedByAccountAccessVersion     Int?
   requestedByProjectMembershipId     String                                      @db.Uuid
   requestedByMembershipCreatedAt      DateTime
   clientRequestKey                    String                                      @db.Uuid
@@ -1679,6 +1693,7 @@ model ProjectGitRepositoryManualRun {
   delegationVersion                   Int
   delegationFingerprint               String                                      @db.Char(64)
   connectionOwnerId                   String                                      @db.Uuid
+  connectionOwnerAccountAccessVersion Int?
   ownerProjectMembershipId            String                                      @db.Uuid
   ownerMembershipCreatedAt            DateTime
   projectConfirmedById                String                                      @db.Uuid
@@ -1765,9 +1780,11 @@ model ProjectGitRepositoryManualRunAudit {
   dispatchState                       ProjectGitRepositoryManualRunDispatchState
   actorId                             String?                                     @db.Uuid
   requestedById                       String                                      @db.Uuid
+  requestedByAccountAccessVersion     Int?
   requestedByProjectMembershipId       String                                      @db.Uuid
   requestedByMembershipCreatedAt      DateTime
   connectionOwnerId                   String                                      @db.Uuid
+  connectionOwnerAccountAccessVersion Int?
   ownerProjectMembershipId            String                                      @db.Uuid
   ownerMembershipCreatedAt            DateTime
   projectConfirmedById                String                                      @db.Uuid
@@ -4138,6 +4155,7 @@ model AppUser {
   disabledAt                   DateTime?
   disabledReason               String?                           @db.VarChar(500)
   disabledById                 String?                           @db.Uuid
+  accountAccessVersion         Int                               @default(1)
   createdAt                    DateTime                          @default(now())
   updatedAt                    DateTime                          @updatedAt
   disabledBy                   AppUser?                          @relation("AppUserDisabledBy", fields: [disabledById], references: [id], onDelete: NoAction, onUpdate: Cascade)
@@ -4217,6 +4235,10 @@ model AppUser {
   revokedMemberships           MembershipSubscription[]       @relation("MembershipRevokedBy")
   membershipAuditEvents        MembershipSubscriptionAudit[]  @relation("MembershipAuditUser")
   membershipAuditActors        MembershipSubscriptionAudit[]  @relation("MembershipAuditActor")
+  accountAccessPreviewsAsActor AccountAccessMutationPreview[]  @relation("AccountAccessPreviewActor")
+  accountAccessPreviewsAsUser  AccountAccessMutationPreview[]  @relation("AccountAccessPreviewUser")
+  accountAccessAuditsAsUser    AccountAccessAudit[]            @relation("AccountAccessAuditUser")
+  accountAccessAuditActors     AccountAccessAudit[]            @relation("AccountAccessAuditActor")
   platformTokenGrants          PlatformTokenGrant[]
   issuedPlatformTokenGrants    PlatformTokenGrant[]            @relation("PlatformTokenGrantIssuedBy")
   platformTokenReservations    PlatformTokenReservation[]
@@ -4254,6 +4276,63 @@ model AppUserEmailVerificationAudit {
 
   @@index([userId, createdAt])
   @@index([event, createdAt])
+}
+
+// Account access mutation previews are short-lived, single-use control-plane
+// records.  They contain only aggregate impact fingerprints; private
+// connection names, endpoints and credentials never cross this boundary.
+model AccountAccessMutationPreview {
+  id                 String              @id @default(uuid()) @db.Uuid
+  actorId            String              @db.Uuid
+  userId             String              @db.Uuid
+  action             AccountAccessAction
+  expectedVersion    Int
+  impactFingerprint  String              @db.Char(64)
+  requestFingerprint String              @db.Char(64)
+  issuedAt           DateTime
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  createdAt          DateTime            @default(now())
+  actor              AppUser             @relation("AccountAccessPreviewActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  user               AppUser             @relation("AccountAccessPreviewUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audits             AccountAccessAudit[]
+
+  @@index([actorId, userId, createdAt])
+  @@index([expiresAt, consumedAt])
+}
+
+// Append-only account lifecycle evidence.  It deliberately stores no email,
+// token, endpoint, provider name, tool parameter or other private payload.
+model AccountAccessAudit {
+  id                       String                 @id @default(uuid()) @db.Uuid
+  userId                   String                 @db.Uuid
+  actorId                  String                 @db.Uuid
+  event                    AccountAccessAuditEvent
+  versionBefore            Int
+  versionAfter             Int
+  disabledAtBefore         DateTime?
+  disabledAtAfter          DateTime?
+  disabledReasonBefore     String?                @db.VarChar(500)
+  disabledReasonAfter      String?                @db.VarChar(500)
+  disabledByIdBefore       String?                @db.Uuid
+  disabledByIdAfter        String?                @db.Uuid
+  previewId                String                 @db.Uuid
+  reason                   String                 @db.VarChar(500)
+  requestKey               String                 @db.VarChar(180)
+  requestFingerprint       String                 @db.Char(64)
+  impactFingerprint        String                 @db.Char(64)
+  transactionId            BigInt                 @default(dbgenerated("txid_current()")) @db.BigInt
+  transitionAt             DateTime               @default(now())
+  contractVersion          Int                    @default(1)
+  createdAt                DateTime               @default(now())
+  user                     AppUser                @relation("AccountAccessAuditUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                    AppUser                @relation("AccountAccessAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  preview                  AccountAccessMutationPreview @relation(fields: [previewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([actorId, requestKey])
+  @@index([userId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([previewId, createdAt])
 }
 
 model MembershipSubscription {
@@ -4440,6 +4519,7 @@ model PlatformTokenLedgerEntry {
 model AppSession {
   id         String    @id @default(uuid()) @db.Uuid
   userId     String    @db.Uuid
+  accountAccessVersion Int @default(1)
   tokenHash  String    @unique @db.Char(64)
   expiresAt  DateTime
   lastSeenAt DateTime  @default(now())
@@ -4794,6 +4874,7 @@ model McpConnection {
   disabledAt                 DateTime?
   createdById                String              @db.Uuid
   ownerUserId                String?             @db.Uuid
+  ownerAccountAccessVersion  Int?
   ownershipState             ResourceOwnershipState @default(legacyPending)
   createdAt                  DateTime            @default(now())
   updatedAt                  DateTime            @updatedAt
@@ -4849,6 +4930,7 @@ model ProjectMcpToolGrant {
   delegationVersion Int?
   delegationFingerprint String?               @db.Char(64)
   connectionConfigurationRevision Int?
+  connectionOwnerAccountAccessVersion Int?
   grantorProjectMembershipId String?          @db.Uuid
   grantorMembershipCreatedAt DateTime?
   status            ProjectMcpToolGrantStatus @default(active)
@@ -4892,6 +4974,8 @@ model ProjectMcpToolGrantLedger {
   delegationId                    String                           @db.Uuid
   toolDefinitionId                String                           @db.Uuid
   attestationId                   String                           @db.Uuid
+  connectionOwnerId               String?                          @db.Uuid
+  connectionOwnerAccountAccessVersion Int?
   toolName                        String                           @db.VarChar(128)
   controlPlaneVersion             Int
   grantVersion                    Int
@@ -4956,6 +5040,7 @@ model ProjectMcpAction {
   credentialFingerprint            String                   @db.Char(64)
   connectionConfigurationRevision  Int
   connectionOwnerId               String                   @db.Uuid
+  connectionOwnerAccountAccessVersion Int?
   connectionOwnershipState        ResourceOwnershipState
   connectionAllowPrivateNetwork   Boolean
   connectionUpdatedAt             DateTime
@@ -4992,6 +5077,8 @@ model ProjectMcpActionDispatchAttempt {
   actorMembershipCreatedAt DateTime
   rpcRequestId          String                                  @db.Uuid
   reservationTokenHash  String                                  @db.Char(64)
+  connectionOwnerId     String?                                 @db.Uuid
+  connectionOwnerAccountAccessVersion Int?
   status                ProjectMcpActionDispatchAttemptStatus   @default(reserved)
   actionFingerprint     String                                  @db.Char(64)
   definitionFingerprint String                                  @db.Char(64)
@@ -5040,6 +5127,8 @@ model ProjectMcpActionRuntimeLedger {
   networkFingerprint    String                              @db.Char(64)
   credentialFingerprint String                              @db.Char(64)
   connectionConfigurationRevision Int
+  connectionOwnerId     String?                             @db.Uuid
+  connectionOwnerAccountAccessVersion Int?
   safeErrorCode         String?                             @db.VarChar(64)
   resultFingerprint     String?                             @db.Char(64)
   resultBytes           Int?
@@ -5110,6 +5199,7 @@ model ProjectMcpActionLedger {
   toolDefinitionId                String                    @db.Uuid
   attestationId                   String                    @db.Uuid
   connectionId                    String                    @db.Uuid
+  connectionOwnerId               String?                   @db.Uuid
   toolName                        String                    @db.VarChar(128)
   event                           ProjectMcpActionLedgerEvent
   statusBefore                    ProjectMcpActionStatus?
@@ -5125,6 +5215,7 @@ model ProjectMcpActionLedger {
   definitionFingerprint            String                    @db.Char(64)
   networkFingerprint               String                    @db.Char(64)
   credentialFingerprint            String                    @db.Char(64)
+  connectionOwnerAccountAccessVersion Int?
   connectionConfigurationRevision  Int
   canonicalArgumentsHash          String                    @db.Char(64)
   actionFingerprint               String                    @db.Char(64)
@@ -5145,6 +5236,7 @@ model ProjectMcpConnectionDelegation {
   projectId                           String                                      @db.Uuid
   mcpConnectionId                     String                                      @db.Uuid
   connectionOwnerId                   String                                      @db.Uuid
+  connectionOwnerAccountAccessVersion Int?
   connectionConfigurationRevision     Int
   resolvedAddressFingerprint          String                                      @db.Char(64)
   credentialFingerprint               String                                      @db.Char(64)
@@ -5219,6 +5311,7 @@ model ProjectMcpConnectionDelegationAudit {
   connectionConfigurationRevision     Int
   resolvedAddressFingerprint          String                                      @db.Char(64)
   credentialFingerprint               String                                      @db.Char(64)
+  connectionOwnerAccountAccessVersion Int?
   delegationFingerprint               String                                      @db.Char(64)
   reason                              String                                      @db.VarChar(500)
   transitionAt                        DateTime
@@ -5246,6 +5339,7 @@ model McpToolAttestation {
   riskLevel              String?                   @db.VarChar(16)
   evidenceNote           String?                   @db.VarChar(500)
   connectionConfigurationRevision Int?
+  connectionOwnerAccountAccessVersion Int?
   verifiedById          String                    @db.Uuid
   note                  String?                   @db.Text
   evidence              Json                      @default("{}") @db.JsonB
@@ -5281,6 +5375,7 @@ model McpToolAttestationAudit {
   definitionFingerprint String                      @db.Char(64)
   networkFingerprint    String                      @db.Char(64)
   credentialFingerprint String                      @db.Char(64)
+  connectionOwnerAccountAccessVersion Int?
   details               Json                        @default("{}") @db.JsonB
   transactionId         BigInt?                     @db.BigInt
   createdAt             DateTime                    @default(now())
@@ -5305,6 +5400,7 @@ model ProjectMcpToolGrantAudit {
   delegationVersion     Int?
   delegationFingerprint String?                           @db.Char(64)
   connectionConfigurationRevision Int?
+  connectionOwnerAccountAccessVersion Int?
   grantorProjectMembershipId String?                       @db.Uuid
   grantorMembershipCreatedAt DateTime?
   revokerProjectMembershipId String?                       @db.Uuid
@@ -5337,6 +5433,7 @@ model AiProviderConnection {
   defaultVisionModelId     String?                     @db.VarChar(128)
   embeddingDimensions      Int?
   configurationVersion     Int                         @default(1)
+  ownerAccountAccessVersion Int?
   status                   AiProviderConnectionStatus  @default(configured)
   lastTestedAt             DateTime?
   lastErrorCode            String?                     @db.VarChar(64)
@@ -5496,6 +5593,7 @@ model ProjectAiProviderDelegation {
   connectionOwnerSubscriptionVersion Int
   connectionOwnerSubscriptionStartsAt DateTime
   connectionOwnerSubscriptionExpiresAt DateTime
+  connectionOwnerAccountAccessVersion Int?
   modelId                   String                              @db.VarChar(128)
   embeddingDimensions       Int?
   maxOutputTokens           Int?
@@ -5542,6 +5640,7 @@ model ProjectAiEffectiveRouteSelection {
   selectedById       String                              @db.Uuid
   selectedByProjectMembershipId String                     @db.Uuid
   selectedByMembershipCreatedAt DateTime
+  connectionOwnerAccountAccessVersion Int?
   version            Int                                 @default(1)
   createdAt          DateTime                            @default(now())
   updatedAt          DateTime                            @updatedAt
@@ -5587,6 +5686,7 @@ model ProjectAiProviderDelegationAudit {
   maxOutputTokens           Int?
   providerConfigurationVersion Int?
   credentialFingerprint     String?                             @db.Char(64)
+  connectionOwnerAccountAccessVersion Int?
   delegationFingerprint     String?                             @db.Char(64)
   terminalActorKind         ProjectAiProviderDelegationActorKind?
   terminalActorId           String?                             @db.Uuid
@@ -5675,6 +5775,7 @@ model WebAiGrant {
   ownerSubscriptionVersion Int?
   ownerSubscriptionStartsAt DateTime?
   ownerSubscriptionExpiresAt DateTime?
+  connectionOwnerAccountAccessVersion Int?
   projectConfirmedById String?               @db.Uuid
   projectConfirmedProjectMembershipId String? @db.Uuid
   projectConfirmedMembershipCreatedAt DateTime?
@@ -6223,6 +6324,7 @@ model MemoryIndexGeneration {
   expectedEmbeddingRouteId String?                             @db.Uuid
   expectedEmbeddingRouteVersion Int?
   expectedEmbeddingProviderConfigurationVersion Int?
+  expectedEmbeddingConnectionOwnerAccountAccessVersion Int?
   expectedEmbeddingRouteFenceFingerprint String?                @db.Char(64)
   embeddingWebAiGrantId           String?                       @db.Uuid
   expectedInputCount              Int                         @default(0)
@@ -6600,6 +6702,7 @@ model ProviderCallAudit {
   ownerSubscriptionVersion Int?
   ownerSubscriptionStartsAt DateTime?
   ownerSubscriptionExpiresAt DateTime?
+  connectionOwnerAccountAccessVersion Int?
   projectConfirmedById String?               @db.Uuid
   projectConfirmedProjectMembershipId String? @db.Uuid
   projectConfirmedMembershipCreatedAt DateTime?

@@ -50,7 +50,7 @@ test("MCP delegation lifecycle keeps direct membership, frozen epochs, CAS and e
   assert.match(service, /status: "active"/u);
   assert.match(service, /status: "expired"/u);
   assert.match(service, /const expired = await expireIfNeeded/u);
-  assert.ok(service.indexOf("await activeActor(tx, actor.id)") < service.indexOf("const expired = await expireIfNeeded"));
+  assert.ok(service.indexOf("await activeActor(tx, actor)") < service.indexOf("const expired = await expireIfNeeded"));
   assert.match(service, /admitWebAiProjectAccess\(tx, \{ actor, projectId, required: "view", allowArchived: true \}\)/u);
   assert.match(service, /if \(typeof result === "object"[\s\S]*PROJECT_MCP_CONNECTION_DELEGATION_EXPIRED/u);
   assert.match(service, /const now = await databaseNow\(db\)/u);

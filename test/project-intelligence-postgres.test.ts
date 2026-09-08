@@ -32,7 +32,7 @@ const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION }
 
 async function activateDefaultRoute(
   db: ReturnType<typeof getDb>,
-  actor: Readonly<{ id: string; role: string }>,
+  actor: Readonly<{ id: string; role: string; accountAccessVersion: number }>,
   input: Readonly<{
     operation: "embedding" | "generateWithContext" | "projectAnalysis";
     providerConnectionId: string;
@@ -230,27 +230,27 @@ test(
         embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
         visionModelId: null,
-      }, { id: platformAdmin.id, role: platformAdmin.role }, db);
+      }, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, db);
       await db.aiProviderConnection.update({
         where: { id: provider.id },
         data: { status: "verified", lastTestedAt: new Date() },
       });
 
-      const defaultEmbeddingRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
+      const defaultEmbeddingRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, {
         operation: "embedding",
         providerConnectionId: provider.id,
         modelId: "embedding-3",
         embeddingDimensions: 8,
       });
       assert.equal(defaultEmbeddingRoute.status, "active");
-      const defaultGenerationRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
+      const defaultGenerationRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, {
         operation: "generateWithContext",
         providerConnectionId: provider.id,
         modelId: "glm-4-flash",
         maxOutputTokens: 2_048,
       });
       assert.equal(defaultGenerationRoute.status, "active");
-      const defaultAnalysisRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
+      const defaultAnalysisRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, {
         operation: "projectAnalysis",
         providerConnectionId: provider.id,
         modelId: "glm-4-flash",
@@ -384,7 +384,7 @@ test(
         embeddingModelId: "embedding-3",
         embeddingDimensions: 8,
         visionModelId: null,
-      }, { id: platformAdmin.id, role: platformAdmin.role }, db);
+      }, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, db);
       await db.aiProviderConnection.update({
         where: { id: alternateProvider.id },
         data: { status: "verified", lastTestedAt: new Date() },
@@ -394,7 +394,7 @@ test(
         include: { generation: true },
       });
       assert.notEqual(pointerBeforeRouteChange, null);
-      const alternateEmbeddingRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role }, {
+      const alternateEmbeddingRoute = await activateDefaultRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, {
         operation: "embedding",
         providerConnectionId: alternateProvider.id,
         modelId: "embedding-3",

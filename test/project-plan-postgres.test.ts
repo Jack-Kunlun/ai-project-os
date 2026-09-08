@@ -17,7 +17,7 @@ const shouldRun = process.env.PROJECT_PLAN_POSTGRES_GATE === "1";
 async function createAutomationRuleWithPreview(
   projectId: string,
   input: Readonly<{ name: string; kind: AutomationRuleKind; intervalMinutes: number; config: unknown; startAt: string }>,
-  actor: Readonly<{ id: string; role: "admin" | "member" | "user" }>,
+  actor: Readonly<{ id: string; role: "admin" | "member" | "user"; accountAccessVersion: number }>,
   db: PrismaClient,
 ) {
   const preview = await previewProjectAutomationRule(projectId, input, actor, db);
@@ -41,9 +41,9 @@ test("project plan persists governed objectives, work items, dependencies and au
   const outsiderId = randomUUID();
   const workspaceId = randomUUID();
   const projectId = randomUUID();
-  const admin = { id: adminId, role: "admin" as const };
-  const editor = { id: editorId, role: "member" as const };
-  const viewer = { id: viewerId, role: "member" as const };
+  const admin = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
+  const editor = { id: editorId, role: "member" as const, accountAccessVersion: 1 };
+  const viewer = { id: viewerId, role: "member" as const, accountAccessVersion: 1 };
 
   await db.appUser.createMany({ data: [
     { id: adminId, username: `plan_admin_${suffix}`, role: "admin" },

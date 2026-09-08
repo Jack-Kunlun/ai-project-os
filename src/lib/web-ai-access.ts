@@ -1,11 +1,12 @@
 import { z } from "zod";
 import type { PrismaClient } from "@prisma/client";
-import { assertProjectAccess, type AccessUser, type ProjectPermission } from "@/lib/access-control";
-import { WebAiAccessError, type WebAiAccessErrorCode, type WebAiActor } from "@/lib/access-linearization";
+import { assertProjectAccess, type ProjectPermission } from "@/lib/access-control";
+import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
+import { WebAiAccessError, type WebAiAccessErrorCode, type CurrentWebAiActor, type WebAiActor } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { assertProjectActive } from "@/lib/project-lifecycle";
 
-export { WebAiAccessError, type WebAiAccessErrorCode, type WebAiActor } from "@/lib/access-linearization";
+export { WebAiAccessError, type CurrentWebAiActor, type WebAiAccessErrorCode, type WebAiActor } from "@/lib/access-linearization";
 
 const actorIdSchema = z.string().uuid();
 const actorRoleSchema = z.enum(["admin", "member", "user"]);
@@ -13,6 +14,14 @@ const projectIdSchema = z.string().uuid();
 
 function accessError(code: WebAiAccessErrorCode): never {
   throw new WebAiAccessError(code);
+}
+
+function mapAccountAccessError(error: unknown): never {
+  if (error instanceof AccountAccessGuardError) {
+    if (error.code === "ACCOUNT_DISABLED") return accessError("ACCOUNT_DISABLED");
+    if (error.code === "ACCOUNT_ACCESS_STALE") return accessError("ACCOUNT_ACCESS_STALE");
+  }
+  return accessError("ACCESS_FORBIDDEN");
 }
 
 function validateActorShape(actor: unknown): asserts actor is WebAiActor {
@@ -24,6 +33,12 @@ function validateActorShape(actor: unknown): asserts actor is WebAiActor {
   ) {
     return accessError("ACCESS_FORBIDDEN");
   }
+  const accountAccessVersion = (actor as { accountAccessVersion?: unknown }).accountAccessVersion;
+  if (
+    typeof accountAccessVersion !== "number"
+    || !Number.isSafeInteger(accountAccessVersion)
+    || accountAccessVersion < 1
+  ) return accessError("ACCOUNT_ACCESS_STALE");
 }
 
 /**
@@ -31,15 +46,19 @@ function validateActorShape(actor: unknown): asserts actor is WebAiActor {
  * role on a session/request object is only a shape check; authorization uses
  * this current row so a stale or forged role cannot grant access.
  */
-export async function loadCurrentWebAiActor(actor: WebAiActor, db: PrismaClient = getDb()): Promise<AccessUser> {
+export async function loadCurrentWebAiActor(actor: WebAiActor, db: PrismaClient = getDb()): Promise<CurrentWebAiActor> {
   validateActorShape(actor);
+  try {
+    await assertAccountAccessForActor(db, actor);
+  } catch (error) {
+    return mapAccountAccessError(error);
+  }
   const current = await db.appUser.findUnique({
     where: { id: actor.id },
-    select: { id: true, role: true, disabledAt: true },
+    select: { id: true, role: true, accountAccessVersion: true },
   });
   if (current === null) return accessError("ACCESS_FORBIDDEN");
-  if (current.disabledAt !== null) return accessError("ACCOUNT_DISABLED");
-  return Object.freeze({ id: current.id, role: current.role });
+  return Object.freeze({ id: current.id, role: current.role, accountAccessVersion: current.accountAccessVersion });
 }
 
 /**
@@ -52,7 +71,7 @@ export async function assertWebAiProjectAccess(
   projectId: string,
   required: ProjectPermission,
   db: PrismaClient,
-): Promise<AccessUser> {
+): Promise<CurrentWebAiActor> {
   if (!projectIdSchema.safeParse(projectId).success) return accessError("ACCESS_FORBIDDEN");
   const current = await loadCurrentWebAiActor(actor, db);
   try {

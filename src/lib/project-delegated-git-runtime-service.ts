@@ -23,7 +23,7 @@ import {
   type GitScannedFile,
 } from "@/lib/git";
 import { getDb } from "@/lib/db";
-import { withWebAiProjectAccessTransaction, type ProjectAccessAdmission } from "@/lib/access-linearization";
+import { lockActorAccess, withWebAiProjectAccessTransaction, type ProjectAccessAdmission } from "@/lib/access-linearization";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 
 const UUID = z.string().uuid();
@@ -31,6 +31,7 @@ const requestSchema = z.object({ clientRequestKey: UUID }).strict();
 const GLOBAL_LOCK_SQL = "ai-project-git-repository-delegation-global";
 export const PROJECT_GIT_MANUAL_STALE_AFTER_MS = 5 * 60 * 1000;
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+const PROJECT_GIT_MANUAL_LEGACY_EPOCH_INVALIDATED = "PROJECT_GIT_MANUAL_LEGACY_EPOCH_INVALIDATED";
 type DelegationDb = PrismaClient | Prisma.TransactionClient;
 
 export type ProjectDelegatedGitRuntimeErrorCode =
@@ -124,6 +125,7 @@ const runSelect = {
   projectId: true,
   delegationId: true,
   requestedById: true,
+  requestedByAccountAccessVersion: true,
   requestedByProjectMembershipId: true,
   requestedByMembershipCreatedAt: true,
   projectConfirmedById: true,
@@ -136,6 +138,7 @@ const runSelect = {
   delegationVersion: true,
   delegationFingerprint: true,
   connectionOwnerId: true,
+  connectionOwnerAccountAccessVersion: true,
   ownerProjectMembershipId: true,
   ownerMembershipCreatedAt: true,
   projectConfirmedProjectMembershipId: true,
@@ -284,6 +287,7 @@ type AdmissionConnection = Readonly<{
   resolvedAddressFingerprint: string | null;
   credentialId: string | null;
   ownerUserId: string | null;
+  ownerAccountAccessVersion: number | null;
   ownershipState: GitConnectionWithSecret["ownershipState"];
   credential: Readonly<{ id: string; kind: string; secretFingerprint: string }> | null;
 }>;
@@ -292,12 +296,14 @@ type AdmissionSnapshot = Readonly<{
   projectId: string;
   workspaceId: string;
   requestedById: string;
+  requestedByAccountAccessVersion: number;
   requestedByProjectMembershipId: string;
   requestedByMembershipCreatedAt: Date;
   delegationId: string;
   delegationVersion: number;
   delegationFingerprint: string;
   connectionOwnerId: string;
+  connectionOwnerAccountAccessVersion: number;
   ownerProjectMembershipId: string;
   ownerMembershipCreatedAt: Date;
   projectConfirmedById: string;
@@ -352,12 +358,13 @@ function assertStoredScope(snapshot: Readonly<{
 function assertConnectionSnapshot(connection: AdmissionConnection, snapshot: AdmissionSnapshot): void {
   if (
     connection.ownerUserId !== snapshot.connectionOwnerId
+    || connection.ownerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
     || connection.ownershipState !== "confirmed"
     || connection.status !== "verified"
     || connection.configurationVersion !== snapshot.connectionConfigurationVersion
     || connection.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint
     || connection.credential?.secretFingerprint !== snapshot.credentialFingerprint
-    || connection.credential.kind !== "git"
+    || connection.credential?.kind !== "git"
   ) return fail("PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE");
 }
 
@@ -366,6 +373,7 @@ async function lockActorWorkspaceProject(
   snapshot: Readonly<{ projectId: string; workspaceId: string; actorIds: readonly string[] }>,
 ): Promise<void> {
   for (const actorId of [...new Set(snapshot.actorIds)].sort()) {
+    await lockActorAccess(tx, actorId);
     await tx.$queryRaw`SELECT "id" FROM "AppUser" WHERE "id" = ${actorId}::uuid FOR SHARE`;
   }
   await tx.$queryRaw`SELECT "id" FROM "Workspace" WHERE "id" = ${snapshot.workspaceId}::uuid FOR SHARE`;
@@ -420,9 +428,11 @@ async function appendAudit(
     resolvedAddressFingerprint: string;
     credentialFingerprint: string;
     requestedById: string;
+    requestedByAccountAccessVersion: number | null;
     requestedByProjectMembershipId: string;
     requestedByMembershipCreatedAt: Date;
     connectionOwnerId: string;
+    connectionOwnerAccountAccessVersion: number | null;
     ownerProjectMembershipId: string;
     ownerMembershipCreatedAt: Date;
     projectConfirmedById: string;
@@ -454,9 +464,11 @@ async function appendAudit(
       actorId,
       reason: reason.slice(0, 500),
       requestedById: row.requestedById,
+      requestedByAccountAccessVersion: row.requestedByAccountAccessVersion,
       requestedByProjectMembershipId: row.requestedByProjectMembershipId,
       requestedByMembershipCreatedAt: row.requestedByMembershipCreatedAt,
       connectionOwnerId: row.connectionOwnerId,
+      connectionOwnerAccountAccessVersion: row.connectionOwnerAccountAccessVersion,
       ownerProjectMembershipId: row.ownerProjectMembershipId,
       ownerMembershipCreatedAt: row.ownerMembershipCreatedAt,
       projectConfirmedById: row.projectConfirmedById,
@@ -485,7 +497,7 @@ async function loadAdmissionSnapshot(
   actor: WebAiActor,
   db: PrismaClient,
 ): Promise<AdmissionSnapshot> {
-  await assertWebAiProjectAccess(actor, projectId, "edit", db);
+  const currentActor = await assertWebAiProjectAccess(actor, projectId, "edit", db);
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true, archivedAt: true } });
   if (project === null) return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
   if (project.archivedAt !== null) return fail("PROJECT_GIT_MANUAL_PROJECT_ARCHIVED");
@@ -501,6 +513,7 @@ async function loadAdmissionSnapshot(
       projectId: true,
       gitConnectionId: true,
       connectionOwnerId: true,
+      connectionOwnerAccountAccessVersion: true,
       repositoryPath: true,
       trackedRef: true,
       includeRoots: true,
@@ -540,6 +553,7 @@ async function loadAdmissionSnapshot(
           resolvedAddressFingerprint: true,
           credentialId: true,
           ownerUserId: true,
+          ownerAccountAccessVersion: true,
           ownershipState: true,
           credential: { select: { id: true, kind: true, secretFingerprint: true } },
         },
@@ -556,6 +570,19 @@ async function loadAdmissionSnapshot(
   const scope = assertStoredScope(delegation);
   const connection = delegation.gitConnection as AdmissionConnection;
   if (connection.id !== delegation.gitConnectionId || connection.ownerUserId !== delegation.connectionOwnerId) {
+    return fail("PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE");
+  }
+  if (delegation.connectionOwnerAccountAccessVersion === null
+    || connection.ownerAccountAccessVersion === null
+    || connection.ownerAccountAccessVersion !== delegation.connectionOwnerAccountAccessVersion) {
+    return fail("PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE");
+  }
+  const connectionOwner = await db.appUser.findUnique({
+    where: { id: delegation.connectionOwnerId },
+    select: { disabledAt: true, accountAccessVersion: true },
+  });
+  if (connectionOwner === null || connectionOwner.disabledAt !== null
+    || connectionOwner.accountAccessVersion !== delegation.connectionOwnerAccountAccessVersion) {
     return fail("PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE");
   }
   if (connection.status !== "verified" || connection.ownershipState !== "confirmed" || connection.credential?.kind !== "git"
@@ -579,12 +606,14 @@ async function loadAdmissionSnapshot(
     projectId,
     workspaceId: project.workspaceId,
     requestedById: actor.id,
+    requestedByAccountAccessVersion: currentActor.accountAccessVersion,
     requestedByProjectMembershipId: membership.id,
     requestedByMembershipCreatedAt: membership.createdAt,
     delegationId,
     delegationVersion: delegation.version,
     delegationFingerprint: delegation.delegationFingerprint,
     connectionOwnerId: delegation.connectionOwnerId,
+    connectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion,
     ownerProjectMembershipId: delegation.ownerProjectMembershipId,
     ownerMembershipCreatedAt: delegation.ownerMembershipCreatedAt,
     projectConfirmedById: delegation.projectConfirmedById,
@@ -613,6 +642,224 @@ async function readRunForUpdate(tx: Prisma.TransactionClient, runId: string): Pr
   return tx.projectGitRepositoryManualRun.findUnique({ where: { id: runId }, select: runSelect });
 }
 
+/**
+ * Invalidate one pre-epoch run without loading a credential or crossing a
+ * network boundary.  The lock order mirrors admission and dispatch: actors,
+ * workspace/project, global delegation fence, delegation/connection/
+ * credential, memberships, then the run row.  The final update is a state CAS
+ * and its audit is appended in the same transaction.
+ */
+async function reconcileLegacyProjectGitManualRunById(
+  runId: string,
+  db: PrismaClient,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await db.$transaction(async (tx) => {
+        const seed = await tx.projectGitRepositoryManualRun.findUnique({
+          where: { id: runId },
+          select: {
+            id: true,
+            projectId: true,
+            delegationId: true,
+            requestedById: true,
+            requestedByProjectMembershipId: true,
+            connectionOwnerId: true,
+            ownerProjectMembershipId: true,
+            projectConfirmedById: true,
+            projectConfirmedProjectMembershipId: true,
+          },
+        });
+        if (seed === null) return false;
+        const project = await tx.project.findUnique({
+          where: { id: seed.projectId },
+          select: { workspaceId: true },
+        });
+        if (project === null) return false;
+
+        await lockActorWorkspaceProject(tx, {
+          projectId: seed.projectId,
+          workspaceId: project.workspaceId,
+          actorIds: [seed.requestedById, seed.connectionOwnerId, seed.projectConfirmedById],
+        });
+        const actors = await tx.appUser.findMany({
+          where: { id: { in: [seed.requestedById, seed.connectionOwnerId, seed.projectConfirmedById] } },
+          select: { id: true },
+        });
+        if (actors.length !== new Set([seed.requestedById, seed.connectionOwnerId, seed.projectConfirmedById]).size) return false;
+
+        const delegation = await tx.projectGitRepositoryDelegation.findFirst({
+          where: { id: seed.delegationId, projectId: seed.projectId },
+          select: { id: true, gitConnectionId: true },
+        });
+        if (delegation === null) return false;
+        const delegationLock = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id"
+          FROM "ProjectGitRepositoryDelegation"
+          WHERE "id" = ${delegation.id}::uuid AND "projectId" = ${seed.projectId}::uuid
+          FOR SHARE
+        `;
+        if (delegationLock.length !== 1) return false;
+
+        const connection = await tx.gitConnection.findUnique({
+          where: { id: delegation.gitConnectionId },
+          select: { id: true, credentialId: true },
+        });
+        if (connection === null) return false;
+        const connectionLock = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT "id"
+          FROM "GitConnection"
+          WHERE "id" = ${connection.id}::uuid
+          FOR SHARE
+        `;
+        if (connectionLock.length !== 1) return false;
+        if (connection.credentialId !== null) {
+          const credentialLock = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "id"
+            FROM "ExternalCredential"
+            WHERE "id" = ${connection.credentialId}::uuid
+            FOR SHARE
+          `;
+          if (credentialLock.length !== 1) return false;
+        }
+
+        const membershipIds = [
+          seed.requestedByProjectMembershipId,
+          seed.ownerProjectMembershipId,
+          seed.projectConfirmedProjectMembershipId,
+        ];
+        for (const membershipId of [...new Set(membershipIds)].sort()) {
+          const membership = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "id"
+            FROM "ProjectMembership"
+            WHERE "id" = ${membershipId}::uuid
+            FOR SHARE
+          `;
+          if (membership.length !== 1) return false;
+        }
+
+        const current = await readRunForUpdate(tx, runId);
+        if (current === null
+          || current.projectId !== seed.projectId
+          || current.delegationId !== seed.delegationId
+          || current.requestedById !== seed.requestedById
+          || current.connectionOwnerId !== seed.connectionOwnerId
+          || current.ownerProjectMembershipId !== seed.ownerProjectMembershipId
+          || current.projectConfirmedById !== seed.projectConfirmedById
+          || current.projectConfirmedProjectMembershipId !== seed.projectConfirmedProjectMembershipId
+          || current.requestedByAccountAccessVersion !== null
+          || current.connectionOwnerAccountAccessVersion !== null
+          || current.result !== null
+          || current.frozenCommitSha !== null
+          || current.manifestFingerprint !== null
+          || current.fileCount !== 0
+          || current.decodedTextBytes !== 0) return false;
+
+        const chainRows = await tx.$queryRaw<Array<{ valid: boolean | null }>>`
+          SELECT "personal_git_manual_run_legacy_chain_valid"(run_row) AS valid
+          FROM "ProjectGitRepositoryManualRun" run_row
+          WHERE run_row."id" = ${runId}::uuid
+        `;
+        if (chainRows[0]?.valid !== true) return false;
+
+        let terminalStatus: "failed" | "unknown";
+        let terminalDispatchState: "acknowledged" | "dispatched";
+        if (current.status === "queued"
+          && current.stage === "queued"
+          && current.dispatchState === "pending"
+          && current.startedAt === null) {
+          terminalStatus = "failed";
+          terminalDispatchState = "acknowledged";
+        } else if (current.status === "running"
+          && current.stage === "admitted"
+          && current.dispatchState === "pending"
+          && current.startedAt !== null) {
+          terminalStatus = "failed";
+          terminalDispatchState = "acknowledged";
+        } else if (current.status === "running"
+          && (current.stage === "fetching" || current.stage === "validating" || current.stage === "publishing")
+          && (current.dispatchState === "dispatched" || current.dispatchState === "acknowledged")
+          && current.startedAt !== null) {
+          terminalStatus = "unknown";
+          terminalDispatchState = "dispatched";
+        } else {
+          return false;
+        }
+
+        const completedAt = await databaseNow(tx);
+        const updated = await tx.projectGitRepositoryManualRun.updateMany({
+          where: {
+            id: current.id,
+            projectId: current.projectId,
+            connectionOwnerAccountAccessVersion: null,
+            status: current.status,
+            stage: current.stage,
+            dispatchState: current.dispatchState,
+            failureCode: current.failureCode,
+          },
+          data: {
+            status: terminalStatus,
+            stage: "terminal",
+            dispatchState: terminalDispatchState,
+            failureCode: PROJECT_GIT_MANUAL_LEGACY_EPOCH_INVALIDATED,
+            completedAt,
+          },
+        });
+        if (updated.count !== 1) return false;
+
+        const terminal = await tx.projectGitRepositoryManualRun.findUnique({ where: { id: current.id }, select: runSelect });
+        if (terminal === null) return false;
+        await setAuditContext(tx);
+        await appendAudit(
+          tx,
+          terminal,
+          terminalStatus === "failed" ? "failed" : "unknown",
+          current.status,
+          null,
+          PROJECT_GIT_MANUAL_LEGACY_EPOCH_INVALIDATED,
+        );
+        return true;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (isSerializationConflict(error) && attempt < 2) continue;
+      if (isSerializationConflict(error)) return false;
+      throw error;
+    }
+  }
+  return false;
+}
+
+/** Worker entry point for bounded, no-network invalidation of legacy runs. */
+export async function reconcileLegacyProjectGitManualRuns(
+  db: PrismaClient = getDb(),
+  maximum = 50,
+): Promise<number> {
+  if (!Number.isInteger(maximum) || maximum <= 0) return 0;
+  let reconciled = 0;
+  while (reconciled < maximum) {
+    const candidates = await db.projectGitRepositoryManualRun.findMany({
+      where: {
+        connectionOwnerAccountAccessVersion: null,
+        status: { in: ["queued", "running"] },
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: Math.max(maximum * 2, maximum + 8),
+      select: { id: true },
+    });
+    if (candidates.length === 0) break;
+    let progress = false;
+    for (const candidate of candidates) {
+      if (await reconcileLegacyProjectGitManualRunById(candidate.id, db)) {
+        reconciled += 1;
+        progress = true;
+        if (reconciled >= maximum) break;
+      }
+    }
+    if (!progress) break;
+  }
+  return reconciled;
+}
+
 type ExistingRunReplayInput = Readonly<{
   projectId: string;
   workspaceId: string;
@@ -636,13 +883,16 @@ async function replayExistingRunInTransaction(
   if (project === null) return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
   if (project.workspaceId !== input.workspaceId) return fail("PROJECT_GIT_MANUAL_CONFLICT");
   if (project.archivedAt !== null) return fail("PROJECT_GIT_MANUAL_PROJECT_ARCHIVED");
-  const actor = await tx.appUser.findUnique({ where: { id: input.actor.id }, select: { disabledAt: true } });
+  const actor = await tx.appUser.findUnique({ where: { id: input.actor.id }, select: { disabledAt: true, accountAccessVersion: true } });
   const current = await tx.projectGitRepositoryManualRun.findUnique({
     where: { delegationId_clientRequestKey: { delegationId: input.delegationId, clientRequestKey: input.clientRequestKey } },
     select: runSelect,
   });
   if (current === null || current.projectId !== input.projectId) return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
-  if (current.requestedById !== input.actor.id || actor === null || actor.disabledAt !== null) return fail("PROJECT_GIT_MANUAL_FORBIDDEN");
+  if (current.requestedById !== input.actor.id || actor === null || actor.disabledAt !== null
+    || input.actor.accountAccessVersion !== actor.accountAccessVersion) {
+    return fail("PROJECT_GIT_MANUAL_FORBIDDEN");
+  }
   const membership = await tx.projectMembership.findFirst({
     where: {
       id: current.requestedByProjectMembershipId,
@@ -661,6 +911,23 @@ async function replayExistingRunInTransaction(
     return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
   }
   if (locked.status !== "running") return locked;
+  if (locked.requestedByAccountAccessVersion === null
+    || locked.requestedByAccountAccessVersion !== actor.accountAccessVersion) {
+    const terminal = await tx.projectGitRepositoryManualRun.update({
+      where: { id: locked.id },
+      data: {
+        status: "unknown",
+        stage: "terminal",
+        dispatchState: "dispatched",
+        failureCode: "PROJECT_GIT_MANUAL_RUN_STALE",
+        completedAt: await databaseNow(tx),
+      },
+      select: runSelect,
+    });
+    await setAuditContext(tx);
+    await appendAudit(tx, terminal, "unknown", "running", null, "PROJECT_GIT_MANUAL_RUN_STALE");
+    return terminal;
+  }
   const now = await databaseNow(tx);
   const stale = await isStaleManualRun(tx, locked.id);
   if (!stale) return locked;
@@ -725,12 +992,14 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
         const project = await tx.project.findUnique({ where: { id: snapshot.projectId }, select: { workspaceId: true, archivedAt: true } });
         if (project === null) return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
         if (project.archivedAt !== null) return fail("PROJECT_GIT_MANUAL_PROJECT_ARCHIVED");
-        const currentActor = await tx.appUser.findUnique({ where: { id: snapshot.requestedById }, select: { disabledAt: true } });
+        const currentActor = await tx.appUser.findUnique({ where: { id: snapshot.requestedById }, select: { disabledAt: true, accountAccessVersion: true } });
         const currentMembership = await tx.projectMembership.findFirst({
           where: { id: snapshot.requestedByProjectMembershipId, projectId: snapshot.projectId, userId: snapshot.requestedById, role: { in: ["owner", "editor"] }, accessState: "confirmed" },
           select: { id: true, createdAt: true },
         });
-        if (currentActor === null || currentActor.disabledAt !== null || currentMembership === null
+        if (currentActor === null || currentActor.disabledAt !== null
+          || currentActor.accountAccessVersion !== snapshot.requestedByAccountAccessVersion
+          || currentMembership === null
           || currentMembership.createdAt.getTime() !== snapshot.requestedByMembershipCreatedAt.getTime()) {
           return fail("PROJECT_GIT_MANUAL_FORBIDDEN");
         }
@@ -744,7 +1013,7 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
             workspaceId: snapshot.workspaceId,
             delegationId: snapshot.delegationId,
             clientRequestKey,
-            actor: { id: snapshot.requestedById, role: "user" },
+            actor: { id: snapshot.requestedById, role: "user", accountAccessVersion: snapshot.requestedByAccountAccessVersion },
           });
           return { run: replayed, claimed: false };
         }
@@ -765,6 +1034,7 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
         if (delegation === null) return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
         if (delegation.status !== "active" || !delegation.manualSyncAllowed || delegation.expiresAt.getTime() <= (await databaseNow(tx)).getTime()) return fail("PROJECT_GIT_MANUAL_INELIGIBLE");
         if (delegation.version !== snapshot.delegationVersion || delegation.delegationFingerprint !== snapshot.delegationFingerprint
+          || delegation.connectionOwnerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
           || delegation.connectionConfigurationVersion !== snapshot.connectionConfigurationVersion
           || delegation.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint
           || delegation.credentialFingerprint !== snapshot.credentialFingerprint
@@ -775,6 +1045,37 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
           || delegation.metadataEnabled !== snapshot.metadataEnabled
           || delegation.manualSyncAllowed !== snapshot.manualSyncAllowed
           || delegation.automationAllowed !== snapshot.automationAllowed) return fail("PROJECT_GIT_MANUAL_CONFLICT");
+        const currentConnection = await tx.gitConnection.findFirst({
+          where: { id: snapshot.connection.id },
+          select: {
+            id: true,
+            ownerUserId: true,
+            ownerAccountAccessVersion: true,
+            ownershipState: true,
+            status: true,
+            configurationVersion: true,
+            resolvedAddressFingerprint: true,
+            credential: { select: { kind: true, secretFingerprint: true } },
+          },
+        });
+        const connectionOwner = await tx.appUser.findUnique({
+          where: { id: snapshot.connectionOwnerId },
+          select: { disabledAt: true, accountAccessVersion: true },
+        });
+        if (currentConnection === null
+          || currentConnection.ownerUserId !== snapshot.connectionOwnerId
+          || currentConnection.ownerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
+          || currentConnection.ownershipState !== "confirmed"
+          || currentConnection.status !== "verified"
+          || currentConnection.configurationVersion !== snapshot.connectionConfigurationVersion
+          || currentConnection.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint
+          || currentConnection.credential?.kind !== "git"
+          || currentConnection.credential.secretFingerprint !== snapshot.credentialFingerprint
+          || connectionOwner === null
+          || connectionOwner.disabledAt !== null
+          || connectionOwner.accountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion) {
+          return fail("PROJECT_GIT_MANUAL_CONNECTION_UNAVAILABLE");
+        }
         const ownerMembership = await tx.projectMembership.findFirst({ where: { id: snapshot.ownerProjectMembershipId, projectId: snapshot.projectId, userId: snapshot.connectionOwnerId, role: { in: ["owner", "editor"] }, accessState: "confirmed" }, select: { createdAt: true } });
         const projectOwnerMembership = await tx.projectMembership.findFirst({ where: { id: snapshot.projectConfirmedProjectMembershipId, projectId: snapshot.projectId, userId: snapshot.projectConfirmedById, role: "owner", accessState: "confirmed" }, select: { createdAt: true } });
         const projectOwner = delegation.projectConfirmedById === null
@@ -807,12 +1108,14 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
             projectId: snapshot.projectId,
             delegationId: snapshot.delegationId,
             requestedById: snapshot.requestedById,
+            requestedByAccountAccessVersion: snapshot.requestedByAccountAccessVersion,
             requestedByProjectMembershipId: snapshot.requestedByProjectMembershipId,
             requestedByMembershipCreatedAt: snapshot.requestedByMembershipCreatedAt,
             clientRequestKey,
             delegationVersion: snapshot.delegationVersion,
             delegationFingerprint: snapshot.delegationFingerprint,
             connectionOwnerId: snapshot.connectionOwnerId,
+            connectionOwnerAccountAccessVersion: snapshot.connectionOwnerAccountAccessVersion,
             ownerProjectMembershipId: snapshot.ownerProjectMembershipId,
             ownerMembershipCreatedAt: snapshot.ownerMembershipCreatedAt,
             projectConfirmedById: snapshot.projectConfirmedById,
@@ -838,11 +1141,10 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
         await appendAudit(tx, run, "requested", null, snapshot.requestedById, "manual_sync_requested");
         const running = await tx.projectGitRepositoryManualRun.update({
           where: { id: run.id },
-          data: { status: "running", stage: "fetching", dispatchState: "dispatched", startedAt: await databaseNow(tx) },
+          data: { status: "running", stage: "admitted", dispatchState: "pending", startedAt: await databaseNow(tx) },
           select: runSelect,
         });
         await appendAudit(tx, running, "admitted", "queued", snapshot.requestedById, "manual_sync_admitted");
-        await appendAudit(tx, running, "dispatched", "queued", snapshot.requestedById, "manual_sync_dispatch_marker");
         return { run: running, claimed: true };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
@@ -853,7 +1155,7 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
             projectId: snapshot.projectId,
             delegationId: snapshot.delegationId,
             clientRequestKey,
-            actor: { id: snapshot.requestedById, role: "user" },
+            actor: { id: snapshot.requestedById, role: "user", accountAccessVersion: snapshot.requestedByAccountAccessVersion },
           }, db);
           return { run: replayed, claimed: false };
         }
@@ -866,6 +1168,181 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
     }
   }
   return fail("PROJECT_GIT_MANUAL_CONFLICT");
+}
+
+/**
+ * Commit the database-owned dispatch marker immediately before the first
+ * network-capable Git command.  Admission deliberately leaves the run in
+ * `running/admitted/pending`; this second transaction is the only operation
+ * that may move it to `running/fetching/dispatched`.
+ */
+async function markGitDispatchBoundary(
+  runId: string,
+  snapshot: AdmissionSnapshot,
+  db: PrismaClient,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await db.$transaction(async (tx) => {
+        await lockActorWorkspaceProject(tx, {
+          projectId: snapshot.projectId,
+          workspaceId: snapshot.workspaceId,
+          actorIds: [snapshot.requestedById, snapshot.connectionOwnerId, snapshot.projectConfirmedById],
+        });
+        const current = await readRunForUpdate(tx, runId);
+        if (current === null
+          || current.status !== "running"
+          || current.stage !== "admitted"
+          || current.dispatchState !== "pending"
+          || current.projectId !== snapshot.projectId
+          || current.delegationId !== snapshot.delegationId
+          || current.delegationVersion !== snapshot.delegationVersion
+          || current.delegationFingerprint !== snapshot.delegationFingerprint
+          || current.connectionOwnerId !== snapshot.connectionOwnerId
+          || current.connectionOwnerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
+          || current.requestedByAccountAccessVersion !== snapshot.requestedByAccountAccessVersion) {
+          return false;
+        }
+        const project = await tx.project.findUnique({
+          where: { id: snapshot.projectId },
+          select: { workspaceId: true, archivedAt: true },
+        });
+        const [requester, connectionOwner, projectConfirmer] = await Promise.all([
+          tx.appUser.findUnique({ where: { id: snapshot.requestedById }, select: { disabledAt: true, accountAccessVersion: true } }),
+          tx.appUser.findUnique({ where: { id: snapshot.connectionOwnerId }, select: { disabledAt: true, accountAccessVersion: true } }),
+          tx.appUser.findUnique({ where: { id: snapshot.projectConfirmedById }, select: { disabledAt: true } }),
+        ]);
+        if (project === null || project.workspaceId !== snapshot.workspaceId || project.archivedAt !== null
+          || requester === null || requester.disabledAt !== null
+          || requester.accountAccessVersion !== snapshot.requestedByAccountAccessVersion
+          || connectionOwner === null || connectionOwner.disabledAt !== null
+          || connectionOwner.accountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
+          || projectConfirmer === null || projectConfirmer.disabledAt !== null) {
+          return false;
+        }
+        const requesterMembership = await tx.projectMembership.findFirst({
+          where: {
+            id: snapshot.requestedByProjectMembershipId,
+            projectId: snapshot.projectId,
+            userId: snapshot.requestedById,
+            role: { in: ["owner", "editor"] },
+            accessState: "confirmed",
+          },
+          select: { createdAt: true },
+        });
+        const ownerMembership = await tx.projectMembership.findFirst({
+          where: {
+            id: snapshot.ownerProjectMembershipId,
+            projectId: snapshot.projectId,
+            userId: snapshot.connectionOwnerId,
+            role: { in: ["owner", "editor"] },
+            accessState: "confirmed",
+          },
+          select: { createdAt: true },
+        });
+        const projectOwnerMembership = await tx.projectMembership.findFirst({
+          where: {
+            id: snapshot.projectConfirmedProjectMembershipId,
+            projectId: snapshot.projectId,
+            userId: snapshot.projectConfirmedById,
+            role: "owner",
+            accessState: "confirmed",
+          },
+          select: { createdAt: true },
+        });
+        if (requesterMembership === null
+          || requesterMembership.createdAt.getTime() !== snapshot.requestedByMembershipCreatedAt.getTime()
+          || ownerMembership === null
+          || ownerMembership.createdAt.getTime() !== snapshot.ownerMembershipCreatedAt.getTime()
+          || projectOwnerMembership === null
+          || projectOwnerMembership.createdAt.getTime() !== snapshot.projectConfirmedMembershipCreatedAt.getTime()) {
+          return false;
+        }
+
+        // Keep the same global -> connection -> credential -> membership lock
+        // sequence used by admission and lifecycle mutations.  All reads
+        // below therefore observe one linearized control-plane snapshot.
+        await lockDelegationEvidence(tx, snapshot);
+        const delegation = await tx.projectGitRepositoryDelegation.findFirst({
+          where: { id: snapshot.delegationId, projectId: snapshot.projectId },
+          select: {
+            status: true,
+            version: true,
+            delegationFingerprint: true,
+            connectionOwnerId: true,
+            connectionOwnerAccountAccessVersion: true,
+            projectConfirmedById: true,
+            connectionConfigurationVersion: true,
+            resolvedAddressFingerprint: true,
+            credentialFingerprint: true,
+            role: true,
+            requiredForProjectSnapshot: true,
+            codeEnabled: true,
+            metadataEnabled: true,
+            manualSyncAllowed: true,
+            automationAllowed: true,
+            expiresAt: true,
+          },
+        });
+        const connection = await tx.gitConnection.findFirst({
+          where: { id: snapshot.connection.id },
+          select: {
+            id: true,
+            ownerUserId: true,
+            ownerAccountAccessVersion: true,
+            ownershipState: true,
+            status: true,
+            configurationVersion: true,
+            resolvedAddressFingerprint: true,
+            credential: { select: { kind: true, secretFingerprint: true } },
+          },
+        });
+        const now = await databaseNow(tx);
+        if (delegation === null
+          || delegation.status !== "active"
+          || delegation.expiresAt.getTime() <= now.getTime()
+          || delegation.version !== snapshot.delegationVersion
+          || delegation.delegationFingerprint !== snapshot.delegationFingerprint
+          || delegation.connectionOwnerId !== snapshot.connectionOwnerId
+          || delegation.connectionOwnerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
+          || delegation.projectConfirmedById !== snapshot.projectConfirmedById
+          || delegation.connectionConfigurationVersion !== snapshot.connectionConfigurationVersion
+          || delegation.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint
+          || delegation.credentialFingerprint !== snapshot.credentialFingerprint
+          || delegation.role !== snapshot.role
+          || delegation.requiredForProjectSnapshot !== snapshot.requiredForProjectSnapshot
+          || delegation.codeEnabled !== snapshot.codeEnabled
+          || delegation.metadataEnabled !== snapshot.metadataEnabled
+          || delegation.manualSyncAllowed !== snapshot.manualSyncAllowed
+          || delegation.automationAllowed !== snapshot.automationAllowed
+          || connection === null
+          || connection.id !== snapshot.connection.id
+          || connection.ownerUserId !== snapshot.connectionOwnerId
+          || connection.ownerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
+          || connection.ownershipState !== "confirmed"
+          || connection.status !== "verified"
+          || connection.configurationVersion !== snapshot.connectionConfigurationVersion
+          || connection.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint
+          || connection.credential?.kind !== "git"
+          || connection.credential.secretFingerprint !== snapshot.credentialFingerprint) {
+          return false;
+        }
+        const dispatched = await tx.projectGitRepositoryManualRun.update({
+          where: { id: runId },
+          data: { stage: "fetching", dispatchState: "dispatched" },
+          select: runSelect,
+        });
+        await setAuditContext(tx);
+        await appendAudit(tx, dispatched, "dispatched", "running", null, "manual_sync_dispatch_boundary_committed");
+        return true;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (isSerializationConflict(error) && attempt < 2) continue;
+      if (isSerializationConflict(error)) return false;
+      throw error;
+    }
+  }
+  return false;
 }
 
 async function loadFreshConnection(snapshot: AdmissionSnapshot, db: PrismaClient): Promise<GitConnectionWithSecret> {
@@ -885,7 +1362,9 @@ async function terminalizeRun(
   try {
     return await db.$transaction(async (tx) => {
       const current = await readRunForUpdate(tx, runId);
-      if (current === null || current.status !== "running") return current;
+      if (current === null || current.status !== "running"
+        || current.requestedByAccountAccessVersion !== snapshot.requestedByAccountAccessVersion
+        || current.connectionOwnerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion) return current;
       const completedAt = await databaseNow(tx);
       const terminal = await tx.projectGitRepositoryManualRun.update({
         where: { id: runId },
@@ -937,11 +1416,11 @@ async function publishResult(
       const current = await readRunForUpdate(tx, runId);
       if (current === null || current.status !== "running") return current;
       await lockDelegationEvidence(tx, snapshot);
-      await tx.projectGitRepositoryManualRun.update({ where: { id: runId }, data: { stage: "validating" } });
       const delegation = await tx.projectGitRepositoryDelegation.findFirst({ where: { id: snapshot.delegationId, projectId: snapshot.projectId } });
       const now = await databaseNow(tx);
-      const currentConnection = await tx.gitConnection.findFirst({ where: { id: snapshot.connection.id }, select: { id: true, ownerUserId: true, ownershipState: true, status: true, configurationVersion: true, resolvedAddressFingerprint: true, credentialId: true, credential: { select: { kind: true, secretFingerprint: true } } } });
-      const actor = await tx.appUser.findUnique({ where: { id: snapshot.requestedById }, select: { disabledAt: true } });
+      const currentConnection = await tx.gitConnection.findFirst({ where: { id: snapshot.connection.id }, select: { id: true, ownerUserId: true, ownerAccountAccessVersion: true, ownershipState: true, status: true, configurationVersion: true, resolvedAddressFingerprint: true, credentialId: true, credential: { select: { kind: true, secretFingerprint: true } } } });
+      const actor = await tx.appUser.findUnique({ where: { id: snapshot.requestedById }, select: { disabledAt: true, accountAccessVersion: true } });
+      const connectionOwner = await tx.appUser.findUnique({ where: { id: snapshot.connectionOwnerId }, select: { disabledAt: true, accountAccessVersion: true } });
       const actorMembership = await tx.projectMembership.findFirst({ where: { id: snapshot.requestedByProjectMembershipId, projectId: snapshot.projectId, userId: snapshot.requestedById, role: { in: ["owner", "editor"] }, accessState: "confirmed" }, select: { createdAt: true } });
       const ownerMembership = await tx.projectMembership.findFirst({ where: { id: snapshot.ownerProjectMembershipId, projectId: snapshot.projectId, userId: snapshot.connectionOwnerId, role: { in: ["owner", "editor"] }, accessState: "confirmed" }, select: { createdAt: true } });
       const projectOwnerMembership = await tx.projectMembership.findFirst({ where: { id: snapshot.projectConfirmedProjectMembershipId, projectId: snapshot.projectId, userId: snapshot.projectConfirmedById, role: "owner", accessState: "confirmed" }, select: { createdAt: true } });
@@ -950,17 +1429,22 @@ async function publishResult(
         : await tx.appUser.findUnique({ where: { id: snapshot.projectConfirmedById }, select: { disabledAt: true } });
       if (delegation === null || delegation.status !== "active" || !delegation.manualSyncAllowed || delegation.expiresAt.getTime() <= now.getTime()
         || delegation.version !== snapshot.delegationVersion || delegation.delegationFingerprint !== snapshot.delegationFingerprint
+        || delegation.connectionOwnerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
         || delegation.connectionConfigurationVersion !== snapshot.connectionConfigurationVersion || delegation.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint || delegation.credentialFingerprint !== snapshot.credentialFingerprint
         || delegation.projectConfirmedById !== snapshot.projectConfirmedById
         || delegation.role !== snapshot.role || delegation.requiredForProjectSnapshot !== snapshot.requiredForProjectSnapshot || delegation.codeEnabled !== snapshot.codeEnabled || delegation.metadataEnabled !== snapshot.metadataEnabled || delegation.manualSyncAllowed !== snapshot.manualSyncAllowed || delegation.automationAllowed !== snapshot.automationAllowed
         || current.projectConfirmedById !== snapshot.projectConfirmedById
-        || currentConnection === null || currentConnection.ownerUserId !== snapshot.connectionOwnerId || currentConnection.ownershipState !== "confirmed" || currentConnection.status !== "verified" || currentConnection.configurationVersion !== snapshot.connectionConfigurationVersion || currentConnection.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint || currentConnection.credential?.secretFingerprint !== snapshot.credentialFingerprint || currentConnection.credential?.kind !== "git"
-        || actor === null || actor.disabledAt !== null || actorMembership === null || actorMembership.createdAt.getTime() !== snapshot.requestedByMembershipCreatedAt.getTime()
+        || currentConnection === null || currentConnection.ownerUserId !== snapshot.connectionOwnerId || currentConnection.ownerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion || currentConnection.ownershipState !== "confirmed" || currentConnection.status !== "verified" || currentConnection.configurationVersion !== snapshot.connectionConfigurationVersion || currentConnection.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint || currentConnection.credential?.secretFingerprint !== snapshot.credentialFingerprint || currentConnection.credential?.kind !== "git"
+        || connectionOwner === null || connectionOwner.disabledAt !== null || connectionOwner.accountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
+        || current.requestedByAccountAccessVersion !== snapshot.requestedByAccountAccessVersion
+        || actor === null || actor.disabledAt !== null || actor.accountAccessVersion !== snapshot.requestedByAccountAccessVersion
+        || actorMembership === null || actorMembership.createdAt.getTime() !== snapshot.requestedByMembershipCreatedAt.getTime()
         || ownerMembership === null || ownerMembership.createdAt.getTime() !== snapshot.ownerMembershipCreatedAt.getTime()
         || projectOwnerMembership === null || projectOwnerMembership.createdAt.getTime() !== snapshot.projectConfirmedMembershipCreatedAt.getTime()
         || projectOwner === null || projectOwner.disabledAt !== null) return null;
       if (connection.id !== currentConnection.id) return null;
 
+      await tx.projectGitRepositoryManualRun.update({ where: { id: runId }, data: { stage: "validating" } });
       await tx.projectGitRepositoryManualRun.update({ where: { id: runId }, data: { stage: "publishing" } });
       const publishedAt = await databaseNow(tx);
       const pointer = await tx.projectGitRepositoryManualPointer.findUnique({ where: { projectId_delegationId: { projectId: snapshot.projectId, delegationId: snapshot.delegationId } }, select: { runId: true } });
@@ -1016,6 +1500,19 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
   });
   if (existing !== null) {
     if (existing.projectId !== projectId) return fail("PROJECT_GIT_MANUAL_NOT_FOUND");
+    if (existing.connectionOwnerAccountAccessVersion === null
+      && (existing.status === "queued" || existing.status === "running")) {
+      await reconcileLegacyProjectGitManualRunById(existing.id, db);
+      const reconciled = await db.projectGitRepositoryManualRun.findUnique({ where: { id: existing.id }, select: runSelect });
+      if (reconciled !== null && reconciled.connectionOwnerAccountAccessVersion === null
+        && (reconciled.status === "queued" || reconciled.status === "running")) {
+        // A malformed legacy chain stays durable but non-executable.  Do not
+        // send it through the ordinary stale replay path, which would invent a
+        // dispatch outcome without the required legacy evidence.
+        return publicRun(reconciled);
+      }
+      if (reconciled !== null) return publicRun(reconciled);
+    }
     return publicRun(await replayExistingRun({ projectId, delegationId, clientRequestKey: parsed.data.clientRequestKey, actor: input.actor }, db));
   }
   const snapshot = await loadAdmissionSnapshot(projectId, delegationId, input.actor, db);
@@ -1034,7 +1531,11 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
       softExcludePatterns: snapshot.softExcludePatterns,
       db,
       pinnedResolution: snapshot.pinnedResolution,
-      onDispatchStart: () => { dispatched = true; },
+      onDispatchBoundary: async () => {
+        const accepted = await markGitDispatchBoundary(admitted.id, snapshot, db);
+        dispatched = accepted;
+        return accepted;
+      },
     });
   } catch (error) {
     const terminal = await terminalizeRun(

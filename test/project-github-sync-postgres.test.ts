@@ -8,22 +8,17 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import {
   PrismaClient,
   ProjectRepositoryRole,
-  type BackgroundJobKind,
 } from "@prisma/client";
 import { Client } from "pg";
 import {
   GITHUB_SOFT_EXCLUDE_CLASSES,
   createGitHubRepositoryLedgerService,
   cancelGitHubProjectSync,
-  prepareGitHubProjectSync,
   reconcileGitHubProjectSync,
   runGitHubProjectSyncJob,
-  GITHUB_READ_ONLY_CLIENT_VERSION,
   type RepositoryLinkStatus,
   type VerifiedGitHubRepository,
 } from "../src/lib/github";
-import { GitHubReadError } from "../src/lib/github/read-only-client";
-import type { WebGitHubCredentialClient } from "../src/lib/web-github";
 import {
   hasBlockingUnknownProjectCodeBatch,
   hasBlockingUnknownProjectMaterialRun,
@@ -31,8 +26,7 @@ import {
 } from "../src/lib/github/project-sync-lock";
 import { runGitRepositorySyncJob } from "../src/lib/git";
 import { runGitHubCodeScanJob } from "../src/lib/background-jobs";
-import { lockActorWorkspaceProjectAccess } from "../src/lib/access-linearization";
-import { grantProjectMembership, revokeProjectMembership } from "../src/lib/membership-governance";
+import { grantProjectMembership } from "../src/lib/membership-governance";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -44,113 +38,6 @@ const hasUrl = typeof configuredUrl === "string" && configuredUrl.length > 0;
 const shouldRun = hasUrl && gate === "1";
 const hash = "a".repeat(64);
 const commitSha = "b".repeat(40);
-
-function unknownClient(): WebGitHubCredentialClient {
-  const uncertain = () => Promise.reject(new GitHubReadError("GITHUB_REQUEST_TIMEOUT", null, null, true));
-  return {
-    version: GITHUB_READ_ONLY_CLIENT_VERSION,
-    getRepository: uncertain,
-    getReference: uncertain,
-    getCommit: uncertain,
-    getTree: uncertain,
-    getBlob: uncertain,
-    getIssuesPage: uncertain,
-    getPullRequestsPage: uncertain,
-    getPullRequest: uncertain,
-    getPullRequestFilesPage: uncertain,
-    getReleasesPage: uncertain,
-  } as unknown as WebGitHubCredentialClient;
-}
-
-function preDispatchTimeoutClient(): WebGitHubCredentialClient {
-  // This client models a deterministic budget check in the read-only client:
-  // no fetch is attempted, and the explicit false marker must remain known.
-  const beforeFetch = () => Promise.reject(new GitHubReadError("GITHUB_REQUEST_TIMEOUT", null, null, false));
-  return {
-    version: GITHUB_READ_ONLY_CLIENT_VERSION,
-    getRepository: beforeFetch,
-    getReference: beforeFetch,
-    getCommit: beforeFetch,
-    getTree: beforeFetch,
-    getBlob: beforeFetch,
-    getIssuesPage: beforeFetch,
-    getPullRequestsPage: beforeFetch,
-    getPullRequest: beforeFetch,
-    getPullRequestFilesPage: beforeFetch,
-    getReleasesPage: beforeFetch,
-  } as unknown as WebGitHubCredentialClient;
-}
-
-function deferred(): Readonly<{ promise: Promise<void>; resolve: () => void }> {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => { resolve = done; });
-  return Object.freeze({ promise, resolve });
-}
-
-async function waitForClaimedJob(db: PrismaClient, projectId: string, kind: BackgroundJobKind) {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const job = await db.backgroundJob.findFirst({
-      where: { projectId, kind },
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      select: { id: true },
-    });
-    if (job !== null) {
-      const claim = await db.backgroundJobAttempt.findFirst({
-        where: { jobId: job.id, status: "running" },
-        select: { id: true },
-      });
-      if (claim !== null) return job;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("POSTGRES_GATE_JOB_CLAIM_TIMEOUT");
-}
-
-function twoRepositoryCodeClient(
-  onLastBlob: () => Promise<void>,
-  onProviderCall: () => void = () => undefined,
-): WebGitHubCredentialClient {
-  const commit = "b".repeat(40);
-  const rootTree = "c".repeat(40);
-  const sourceTree = "d".repeat(40);
-  const blob = "e".repeat(40);
-  const content = "export const admissionGate = true;\n";
-  const repositories = new Map([
-    ["alpha", repositoryA],
-    ["beta", repositoryB],
-  ]);
-  return {
-    version: GITHUB_READ_ONLY_CLIENT_VERSION,
-    getRepository: async ({ repository }: { repository: string }) => {
-      onProviderCall();
-      return repositories.get(repository) ?? repositoryA;
-    },
-    getReference: async () => {
-      onProviderCall();
-      return { ref: "refs/heads/main", commitSha: commit };
-    },
-    getCommit: async () => {
-      onProviderCall();
-      return { commitSha: commit, treeSha: rootTree };
-    },
-    getTree: async ({ treeSha }: { treeSha: string }) => {
-      onProviderCall();
-      return treeSha === rootTree
-      ? { treeSha, truncated: false, entries: [{ path: "src", mode: "040000", type: "tree", sha: sourceTree, size: null }] }
-      : { treeSha, truncated: false, entries: [{ path: "admission.ts", mode: "100644", type: "blob", sha: blob, size: Buffer.byteLength(content) }] };
-    },
-    getBlob: async () => {
-      onProviderCall();
-      await onLastBlob();
-      return { blobSha: blob, size: Buffer.byteLength(content), encoding: "base64", content: Buffer.from(content).toString("base64") };
-    },
-    getIssuesPage: async () => ({ items: [], nextPage: null }),
-    getPullRequestsPage: async () => ({ items: [], nextPage: null }),
-    getPullRequest: async () => { throw new Error("PROJECT_SYNC_GATE_UNEXPECTED_PULL_REQUEST"); },
-    getPullRequestFilesPage: async () => ({ items: [], nextPage: null }),
-    getReleasesPage: async () => ({ items: [], nextPage: null }),
-  } as unknown as WebGitHubCredentialClient;
-}
 
 const repositoryA: VerifiedGitHubRepository = Object.freeze({
   repositoryId: 3_000_001,
@@ -543,16 +430,11 @@ test(
       { cwd: repositoryRoot, env: { ...process.env, DATABASE_URL: url } },
     );
     const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
-    const admissionDb = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
     const userId = randomUUID();
     const projectAId = randomUUID();
     const projectBId = randomUUID();
     const projectCId = randomUUID();
-    const runnerMaterialProjectId = randomUUID();
-    const runnerCodeProjectId = randomUUID();
-    const rotationProjectId = randomUUID();
     const credentialId = randomUUID();
-    const rotatingCredentialId = randomUUID();
 
     try {
       await db.appUser.create({
@@ -569,13 +451,10 @@ test(
           { id: projectAId, name: "Sync A", slug: `sync-a-${randomUUID()}` },
           { id: projectBId, name: "Sync B", slug: `sync-b-${randomUUID()}` },
           { id: projectCId, name: "Sync C", slug: `sync-c-${randomUUID()}` },
-          { id: runnerMaterialProjectId, name: "Runner material", slug: `sync-material-${randomUUID()}` },
-          { id: runnerCodeProjectId, name: "Runner code", slug: `sync-code-${randomUUID()}` },
-          { id: rotationProjectId, name: "Credential rotation", slug: `sync-rotation-${randomUUID()}` },
         ],
       });
       await db.$transaction(async (tx) => {
-        for (const projectId of [projectAId, projectBId, projectCId, runnerMaterialProjectId, runnerCodeProjectId, rotationProjectId]) {
+        for (const projectId of [projectAId, projectBId, projectCId]) {
           const project = await tx.project.findUniqueOrThrow({ where: { id: projectId }, select: { workspaceId: true } });
           await grantProjectMembership(tx, {
             projectId,
@@ -588,52 +467,10 @@ test(
         }
       });
       await createCredential(db, credentialId);
-      await createCredential(db, rotatingCredentialId);
       const linkA = await createLink(db, projectAId, credentialId, repositoryA, true);
       const linkA2 = await createLink(db, projectAId, credentialId, repositoryB, false);
       const linkB = await createLink(db, projectBId, credentialId, repositoryC, true);
-      await createLink(db, runnerMaterialProjectId, credentialId, repositoryA, true, false, true);
-      await createLink(db, runnerCodeProjectId, credentialId, repositoryB, true, true, false);
-      await createLink(db, rotationProjectId, rotatingCredentialId, repositoryC, true, false, true);
-
-      // Two-session revoke-wins gates: hold the canonical access locks while
-      // the worker claims its job, revoke the project grant, then release the
-      // lock. The worker must fail at access admission without reading a
-      // credential or reaching the provider.
-      const revokeWins = async (
-        projectId: string,
-        kind: BackgroundJobKind,
-        run: () => Promise<unknown>,
-      ): Promise<unknown> => {
-        const project = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { workspaceId: true } });
-        const locksReady = deferred();
-        const claimReady = deferred();
-        const membershipUpdated = deferred();
-        const release = deferred();
-        const revoking = admissionDb.$transaction(async (tx) => {
-          await lockActorWorkspaceProjectAccess(tx, {
-            actorIds: [userId],
-            workspaceId: project.workspaceId,
-            projectId,
-          });
-          locksReady.resolve();
-          await claimReady.promise;
-          await revokeProjectMembership(tx, projectId, userId, project.workspaceId, {
-            actorId: userId,
-            reason: "project_sync_gate_revoke",
-          });
-          membershipUpdated.resolve();
-          await release.promise;
-        });
-        await locksReady.promise;
-        const running = run();
-        await waitForClaimedJob(db, projectId, kind);
-        claimReady.resolve();
-        await membershipUpdated.promise;
-        release.resolve();
-        await revoking;
-        return running;
-      };
+      const linkC = await createLink(db, projectCId, credentialId, repositoryC, true);
 
       let credentialReads = 0;
       let providerFetches = 0;
@@ -653,235 +490,59 @@ test(
         throw new Error("PROJECT_SYNC_GATE_PROVIDER_MUST_NOT_RUN");
       }) as typeof fetch;
       try {
+        // The legacy project-level sync contract is intentionally frozen.  It
+        // must reject before creating a background job or reading a
+        // credential, even while the project membership is valid.
+        const legacyJobCountBefore = await db.backgroundJob.count({ where: { projectId: projectCId } });
         await assert.rejects(
-          () => revokeWins(
-            projectCId,
-            "gitRepositorySync",
-            () => runGitRepositorySyncJob({
-              projectId: projectCId,
-              linkId: randomUUID(),
-              requestedBy: { id: userId, role: "admin" },
-              clientKey: `revoke-git-${randomUUID()}`,
-            }, guardedDb),
-          ),
-          /ACCESS_FORBIDDEN/,
+          () => runGitRepositorySyncJob({
+            projectId: projectCId,
+            linkId: randomUUID(),
+            requestedBy: { id: userId, role: "admin", accountAccessVersion: 1 },
+            clientKey: `legacy-frozen-${randomUUID()}`,
+          }, guardedDb),
+          /GIT_LEGACY_PROJECT_CONNECT_FROZEN/u,
         );
         assert.equal(credentialReads, 0);
         assert.equal(providerFetches, 0);
-        const projectC = await db.project.findUniqueOrThrow({ where: { id: projectCId }, select: { workspaceId: true } });
-        await db.$transaction((tx) => grantProjectMembership(tx, {
-          projectId: projectCId,
-          workspaceId: projectC.workspaceId,
-          userId,
-          role: "owner",
-          actorId: userId,
-          reason: "project_sync_gate_restore",
-        }));
+        assert.equal(await db.backgroundJob.count({ where: { projectId: projectCId } }), legacyJobCountBefore);
 
         credentialReads = 0;
+        const projectSyncJobCountBefore = await db.backgroundJob.count({ where: { projectId: projectCId } });
+        const projectSyncRootCountBefore = await db.projectGitHubSyncRun.count({ where: { projectId: projectCId } });
+        const projectSyncEntryCountBefore = await db.projectGitHubSyncEntry.count({ where: { projectId: projectCId } });
+        const projectSyncProviderAuditCountBefore = await db.providerCallAudit.count();
         await assert.rejects(
-          () => revokeWins(
-            projectCId,
-            "githubScan",
-            () => runGitHubCodeScanJob({
-              projectId: projectCId,
-              requestedBy: { id: userId, role: "admin" },
-              clientKey: `revoke-github-${randomUUID()}`,
-            }, guardedDb),
-          ),
-          /ACCESS_FORBIDDEN/,
+          () => runGitHubProjectSyncJob({
+            projectId: projectCId,
+            requestedBy: { id: userId, role: "admin", accountAccessVersion: 1 },
+            clientKey: `legacy-project-sync-frozen-${randomUUID()}`,
+          }, guardedDb),
+          /PROJECT_GITHUB_SYNC_PROJECT_CONNECT_FROZEN/u,
         );
         assert.equal(credentialReads, 0);
         assert.equal(providerFetches, 0);
-        await db.$transaction((tx) => grantProjectMembership(tx, {
-          projectId: projectCId,
-          workspaceId: projectC.workspaceId,
-          userId,
-          role: "owner",
-          actorId: userId,
-          reason: "project_sync_gate_restore",
-        }));
+        assert.equal(await db.backgroundJob.count({ where: { projectId: projectCId } }), projectSyncJobCountBefore);
+        assert.equal(await db.projectGitHubSyncRun.count({ where: { projectId: projectCId } }), projectSyncRootCountBefore);
+        assert.equal(await db.projectGitHubSyncEntry.count({ where: { projectId: projectCId } }), projectSyncEntryCountBefore);
+        assert.equal(await db.providerCallAudit.count(), projectSyncProviderAuditCountBefore);
+
+        credentialReads = 0;
+        const githubJobCountBefore = await db.backgroundJob.count({ where: { projectId: projectCId } });
+        await assert.rejects(
+          () => runGitHubCodeScanJob({
+            projectId: projectCId,
+            requestedBy: { id: userId, role: "admin", accountAccessVersion: 1 },
+            clientKey: `legacy-github-frozen-${randomUUID()}`,
+          }, guardedDb),
+          /BACKGROUND_JOB_INVALID_STATE/u,
+        );
+        assert.equal(credentialReads, 0);
+        assert.equal(providerFetches, 0);
+        assert.equal(await db.backgroundJob.count({ where: { projectId: projectCId } }), githubJobCountBefore);
       } finally {
         globalThis.fetch = previousFetch;
       }
-
-      // Root sync gate: the first code child is allowed to finish after its
-      // admission, then the second child must re-admit and observe the
-      // committed revoke. Only one client load and one child's provider calls
-      // are therefore permitted.
-      const raceClientKey = `revoke-between-children-${randomUUID()}`;
-      const preparedAfterRevoke = await prepareGitHubProjectSync({
-        projectId: projectAId,
-        requestedBy: { id: userId, role: "admin" },
-        clientKey: raceClientKey,
-      }, db);
-      const raceProject = await db.project.findUniqueOrThrow({ where: { id: projectAId }, select: { workspaceId: true } });
-      let clientLoads = 0;
-      let networkCalls = 0;
-      let networkCallsAtRevoke = 0;
-      let revoked = false;
-      const revokeDuringFirstChild = async () => {
-        if (revoked) return;
-        revoked = true;
-        await admissionDb.$transaction(async (tx) => {
-          await lockActorWorkspaceProjectAccess(tx, {
-            actorIds: [userId],
-            workspaceId: raceProject.workspaceId,
-            projectId: projectAId,
-          });
-          await revokeProjectMembership(tx, projectAId, userId, raceProject.workspaceId, {
-            actorId: userId,
-            reason: "project_sync_gate_race_revoke",
-          });
-        });
-        networkCallsAtRevoke = networkCalls;
-      };
-      const raceResult = await runGitHubProjectSyncJob({
-        projectId: projectAId,
-        requestedBy: { id: userId, role: "admin" },
-        clientKey: raceClientKey,
-      }, db, {
-        loadClientForCredential: async () => {
-          clientLoads += 1;
-          return twoRepositoryCodeClient(revokeDuringFirstChild, () => { networkCalls += 1; });
-        },
-      });
-      assert.ok(["failed", "partial"].includes(raceResult.status));
-      assert.equal(clientLoads, 1);
-      assert.ok(networkCallsAtRevoke > 0);
-      assert.equal(networkCalls, networkCallsAtRevoke);
-      const raceRoot = await db.projectGitHubSyncRun.findUniqueOrThrow({ where: { id: preparedAfterRevoke.syncRun.id } });
-      assert.ok(["failed", "partial"].includes(raceRoot.status));
-      const raceEntries = await db.projectGitHubSyncEntry.findMany({ where: { syncRunId: raceRoot.id }, select: { targetKind: true, status: true } });
-      assert.equal(raceEntries.filter((entry) => entry.targetKind === "code" && entry.status === "succeeded").length, 1);
-      assert.ok(raceEntries.some((entry) => entry.targetKind === "code" && entry.status === "skipped"));
-      const raceAttempt = await db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: preparedAfterRevoke.job.id } });
-      assert.equal(raceAttempt.dispatchState, "acknowledged");
-      await db.$transaction((tx) => grantProjectMembership(tx, {
-        projectId: projectAId,
-        workspaceId: raceProject.workspaceId,
-        userId,
-        role: "owner",
-        actorId: userId,
-        reason: "project_sync_gate_restore",
-      }));
-
-      // Execute the real root runner with a frozen material target. The
-      // client reports a deterministic pre-dispatch timeout on its first read;
-      // the child must be cancelled (known incomplete), not failed/unknown.
-      const materialRunnerClientKey = `runner-material-${randomUUID()}`;
-      const preparedMaterialRunner = await prepareGitHubProjectSync({
-        projectId: runnerMaterialProjectId,
-        requestedBy: { id: userId, role: "admin" },
-        clientKey: materialRunnerClientKey,
-      }, db);
-      await db.projectGitHubSyncRun.update({
-        where: { id: preparedMaterialRunner.syncRun.id },
-        data: { deadlineAt: new Date(Date.now() + 60_000) },
-      });
-      let materialLoaderCalls = 0;
-      const materialFetchCalls = 0;
-      const materialRunnerResult = await runGitHubProjectSyncJob({
-        projectId: runnerMaterialProjectId,
-        requestedBy: { id: userId, role: "admin" },
-        clientKey: materialRunnerClientKey,
-      }, db, {
-        loadClientForCredential: async () => {
-          materialLoaderCalls += 1;
-          return preDispatchTimeoutClient();
-        },
-      });
-      assert.equal(materialLoaderCalls, 1);
-      assert.equal(materialFetchCalls, 0);
-      assert.equal(materialRunnerResult.status, "failed");
-      const materialRunnerRoot = await db.projectGitHubSyncRun.findUniqueOrThrow({ where: { id: preparedMaterialRunner.syncRun.id } });
-      assert.equal(materialRunnerRoot.status, "failed");
-      assert.equal(materialRunnerRoot.reconciliationRequired, false);
-      const materialRunnerEntry = await db.projectGitHubSyncEntry.findFirstOrThrow({ where: { syncRunId: materialRunnerRoot.id } });
-      assert.equal(materialRunnerEntry.status, "skipped");
-      assert.ok(materialRunnerEntry.childMaterialSyncRunId);
-      const materialRunnerChild = await db.gitHubMaterialSyncRun.findUniqueOrThrow({ where: { id: materialRunnerEntry.childMaterialSyncRunId! } });
-      assert.equal(materialRunnerChild.status, "cancelled");
-      assert.equal(materialRunnerChild.stage, "terminal");
-      assert.ok(materialRunnerChild.completedAt);
-      const materialRunnerAttempt = await db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: preparedMaterialRunner.job.id } });
-      assert.notEqual(materialRunnerAttempt.dispatchState, "dispatched");
-      assert.equal(materialRunnerAttempt.dispatchState, "acknowledged");
-      assert.equal(await db.projectGitHubSyncReconciliation.count({ where: { syncRunId: materialRunnerRoot.id } }), 0);
-      assert.equal(await db.projectGitHubSyncRun.count({ where: { projectId: runnerMaterialProjectId, status: { in: ["queued", "running"] } } }), 0);
-
-      // A credential can rotate in place after scope freeze. The default
-      // loader must reject the frozen fingerprint before decrypting or
-      // dispatching any GitHub request, leaving a known failure with no child.
-      const rotationClientKey = `credential-rotation-${randomUUID()}`;
-      const preparedRotation = await prepareGitHubProjectSync({
-        projectId: rotationProjectId,
-        requestedBy: { id: userId, role: "admin" },
-        clientKey: rotationClientKey,
-      }, db);
-      const frozenRotationEntry = await db.projectGitHubSyncEntry.findFirstOrThrow({ where: { syncRunId: preparedRotation.syncRun.id } });
-      assert.equal(frozenRotationEntry.credentialSecretFingerprint, hash);
-      await db.externalCredential.update({
-        where: { id: rotatingCredentialId },
-        data: { secretFingerprint: "c".repeat(64) },
-      });
-      const rotationResult = await runGitHubProjectSyncJob({
-        projectId: rotationProjectId,
-        requestedBy: { id: userId, role: "admin" },
-        clientKey: rotationClientKey,
-      }, db);
-      assert.equal(rotationResult.status, "failed");
-      assert.equal(rotationResult.reconciliationRequired, false);
-      const rotationRoot = await db.projectGitHubSyncRun.findUniqueOrThrow({ where: { id: preparedRotation.syncRun.id } });
-      assert.equal(rotationRoot.status, "failed");
-      assert.equal(rotationRoot.reconciliationRequired, false);
-      assert.equal(await db.gitHubMaterialSyncRun.count({ where: { projectId: rotationProjectId } }), 0);
-      assert.equal(await db.projectScanBatch.count({ where: { projectId: rotationProjectId } }), 0);
-      assert.equal(await db.projectGitHubSyncReconciliation.count({ where: { syncRunId: rotationRoot.id } }), 0);
-      const rotationAttempt = await db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: preparedRotation.job.id } });
-      assert.equal(rotationAttempt.dispatchState, "pending");
-      assert.equal(await db.projectGitHubSyncRun.count({ where: { projectId: rotationProjectId, status: { in: ["queued", "running"] } } }), 0);
-
-      // The real runner keeps a dispatched code request unknown and retains
-      // the attempt dispatch marker. Explicit reconciliation then releases
-      // admission without invoking GitHub or an AI provider.
-      const codeRunnerClientKey = `runner-code-${randomUUID()}`;
-      const preparedCodeRunner = await prepareGitHubProjectSync({
-        projectId: runnerCodeProjectId,
-        requestedBy: { id: userId, role: "admin" },
-        clientKey: codeRunnerClientKey,
-      }, db);
-      const codeRunnerResult = await runGitHubProjectSyncJob({
-        projectId: runnerCodeProjectId,
-        requestedBy: { id: userId, role: "admin" },
-        clientKey: codeRunnerClientKey,
-      }, db, {
-        loadClientForCredential: async () => unknownClient(),
-      });
-      assert.equal(codeRunnerResult.status, "unknown");
-      const codeRunnerRoot = await db.projectGitHubSyncRun.findUniqueOrThrow({ where: { id: preparedCodeRunner.syncRun.id } });
-      assert.equal(codeRunnerRoot.status, "unknown");
-      assert.equal(codeRunnerRoot.manifestFingerprint, null);
-      const codeRunnerEntry = await db.projectGitHubSyncEntry.findFirstOrThrow({ where: { syncRunId: codeRunnerRoot.id } });
-      assert.equal(codeRunnerEntry.status, "unknown");
-      const codeRunnerBatch = await db.projectScanBatch.findUniqueOrThrow({ where: { id: codeRunnerEntry.childCodeBatchId! } });
-      assert.equal(codeRunnerBatch.status, "unknown");
-      assert.equal(codeRunnerBatch.completedAt, null);
-      const codeRunnerChild = await db.repoCodeScanRun.findFirstOrThrow({ where: { projectScanBatchId: codeRunnerBatch.id } });
-      assert.equal(codeRunnerChild.status, "unknown");
-      assert.equal(codeRunnerChild.completedAt, null);
-      assert.equal(codeRunnerChild.stage, "terminal");
-      const codeRunnerAttempt = await db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: preparedCodeRunner.job.id } });
-      assert.equal(codeRunnerAttempt.status, "unknown");
-      assert.equal(codeRunnerAttempt.dispatchState, "dispatched");
-      const reconciledRunnerJob = await reconcileGitHubProjectSync({ projectId: runnerCodeProjectId, jobId: preparedCodeRunner.job.id, actor: { id: userId, role: "admin" } }, db);
-      assert.equal(reconciledRunnerJob.status, "unknown");
-      assert.equal(reconciledRunnerJob.reconciliationRequired, false);
-      assert.equal(await db.projectGitHubSyncReconciliation.count({ where: { syncRunId: codeRunnerRoot.id } }), 1);
-      const admissionAfterReconcile = await prepareGitHubProjectSync({ projectId: runnerCodeProjectId, requestedBy: { id: userId, role: "admin" }, clientKey: `runner-code-after-${randomUUID()}` }, db);
-      assert.equal(admissionAfterReconcile.job.status, "queued");
-      const cancelledRunnerJob = await cancelGitHubProjectSync({ projectId: runnerCodeProjectId, jobId: admissionAfterReconcile.job.id, actor: { id: userId, role: "admin" } }, db);
-      assert.equal(cancelledRunnerJob.status, "cancelled");
 
       // A successful root includes two repositories with the same path identity,
       // but each change remains traceable to its frozen target key.
@@ -1128,7 +789,7 @@ test(
       const providerAuditCount = await db.providerCallAudit.count({ where: { jobId: unknownJob.id } });
       const grantCount = await db.webAiGrant.count({ where: { projectId: projectAId } });
       const reconciledJob = await reconcileGitHubProjectSync(
-        { projectId: projectAId, jobId: unknownJob.id, actor: { id: userId, role: "admin" } },
+        { projectId: projectAId, jobId: unknownJob.id, actor: { id: userId, role: "admin", accountAccessVersion: 1 } },
         db,
       );
       assert.equal(reconciledJob.status, "unknown");
@@ -1141,7 +802,7 @@ test(
       assert.equal(reconciledRoot.reconciliationRequired, true);
       assert.equal(await db.projectGitHubSyncReconciliation.count({ where: { syncRunId: unknownRoot.id } }), 1);
       const replay = await reconcileGitHubProjectSync(
-        { projectId: projectAId, jobId: unknownJob.id, actor: { id: userId, role: "admin" } },
+        { projectId: projectAId, jobId: unknownJob.id, actor: { id: userId, role: "admin", accountAccessVersion: 1 } },
         db,
       );
       assert.equal(replay.id, reconciledJob.id);
@@ -1149,11 +810,35 @@ test(
       assert.equal(await hasBlockingUnknownProjectSyncRun(db, projectAId), false);
       assert.equal(await hasBlockingUnknownProjectCodeBatch(db, projectAId), false);
       assert.equal(await hasBlockingUnknownProjectMaterialRun(db, projectAId), false);
-      const preparedAfterReconcile = await prepareGitHubProjectSync(
-        { projectId: projectAId, requestedBy: { id: userId, role: "admin" }, clientKey: `after-reconcile-${randomUUID()}` },
+
+      // Cancellation remains covered with a historical queued root. The frozen
+      // project-sync entry point is not used to create this fixture.
+      const cancelledJob = await createJob(db, projectCId, userId, "cancelled");
+      const cancelledRoot = await createRoot(db, {
+        projectId: projectCId,
+        parentJobId: cancelledJob.id,
+        label: "cancelled",
+        codeTargetCount: 1,
+      });
+      const cancelledEntry = await createEntry(db, {
+        projectId: projectCId,
+        syncRunId: cancelledRoot.id,
+        link: linkC,
+        ordinal: 0,
+        targetKind: "code",
+        status: "pending",
+      });
+      const cancelledPublicJob = await cancelGitHubProjectSync(
+        { projectId: projectCId, jobId: cancelledJob.id, actor: { id: userId, role: "admin", accountAccessVersion: 1 } },
         db,
       );
-      assert.equal(preparedAfterReconcile.job.status, "queued");
+      assert.equal(cancelledPublicJob.status, "cancelled");
+      const cancelledRootRow = await db.projectGitHubSyncRun.findUniqueOrThrow({ where: { id: cancelledRoot.id } });
+      assert.equal(cancelledRootRow.status, "cancelled");
+      assert.equal(cancelledRootRow.stage, "terminal");
+      const cancelledEntryRow = await db.projectGitHubSyncEntry.findUniqueOrThrow({ where: { id: cancelledEntry.id } });
+      assert.equal(cancelledEntryRow.status, "skipped");
+      assert.equal(cancelledEntryRow.failureCode, "PROJECT_GITHUB_SYNC_CANCELLED");
 
       // Skipped targets have no comparable after-state and therefore produce no
       // fabricated deleted/withheld change rows. This project is deleted below.
@@ -1203,10 +888,10 @@ test(
       assert.equal(await db.projectGitHubSyncReconciliation.count({ where: { projectId: projectBId } }), 0);
 
       // Project A is the terminal immutability fixture and remains for disposable
-      // schema teardown. Project C has no child rows after the active-root checks.
+      // schema teardown. Project C's historical cancellation fixture is removed
+      // with the project below.
       await assert.doesNotReject(() => db.project.delete({ where: { id: projectCId } }));
     } finally {
-      await admissionDb.$disconnect();
       await db.$disconnect();
       await raw.end();
       if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;

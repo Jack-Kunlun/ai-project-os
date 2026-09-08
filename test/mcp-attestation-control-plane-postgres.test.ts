@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
+import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import {
   McpCapabilityError,
   createMcpControlPlaneAttestation,
@@ -26,9 +27,42 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
   const memberId = randomUUID();
   const connectionId = randomUUID();
   const toolDefinitionId = randomUUID();
+  const adminActor = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
+  const replacementAdminActor = { id: replacementAdminId, role: "admin" as const, accountAccessVersion: 1 };
+  const memberActor = { id: memberId, role: "member" as const, accountAccessVersion: 1 };
   const definitionFingerprint = "a".repeat(64);
   const networkFingerprint = "b".repeat(64);
   const configurationRevision = 1;
+
+  const mutateReplacementAdminAccess = async (action: "disable" | "restore", reason: string, requestKey: string) => {
+    const admin = await db.appUser.findUniqueOrThrow({ where: { id: adminId }, select: { accountAccessVersion: true } });
+    const target = await db.appUser.findUniqueOrThrow({ where: { id: replacementAdminId }, select: { accountAccessVersion: true } });
+    const preview = await previewAccountAccess({
+      adminUserId: adminId,
+      adminAccountAccessVersion: admin.accountAccessVersion,
+      userId: replacementAdminId,
+      action,
+      reason,
+      expectedVersion: target.accountAccessVersion,
+    }, db);
+    assert.equal(preview.canExecute, true);
+    return executeAccountAccess({
+      adminUserId: adminId,
+      adminAccountAccessVersion: admin.accountAccessVersion,
+      userId: replacementAdminId,
+      action,
+      reason,
+      expectedVersion: preview.current.accountAccessVersion,
+      expectedImpactFingerprint: preview.impactFingerprint,
+      requestKey,
+      requestFingerprint: preview.requestFingerprint,
+      previewId: preview.previewId,
+      previewIssuedAt: preview.previewIssuedAt,
+      previewExpiresAt: preview.previewExpiresAt,
+      confirmation: true,
+      confirmationUsername: preview.user.username,
+    }, db);
+  };
 
   await db.appUser.createMany({ data: [
     { id: adminId, username: `mcp_c2_admin_${suffix}`, role: "admin" },
@@ -52,6 +86,7 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
       disabledAt: null,
       createdById: adminId,
       ownerUserId: adminId,
+      ownerAccountAccessVersion: 1,
       ownershipState: "confirmed",
     },
   });
@@ -81,56 +116,56 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
     riskLevel: "medium" as const,
     evidenceNote: "manual_read_only_review" as const,
   };
-  const eligible = await listMcpControlPlaneAttestationCandidates(adminId, { state: "eligible", page: 1, pageSize: 50 }, db);
+  const eligible = await listMcpControlPlaneAttestationCandidates(adminActor, { state: "eligible", page: 1, pageSize: 50 }, db);
   assert.equal(eligible.total, 1);
   const eligibleCandidate = eligible.candidates[0] as { snapshots?: { credentialFingerprint?: string } } | undefined;
   assert.equal(eligibleCandidate?.snapshots?.credentialFingerprint, NO_CREDENTIAL_FINGERPRINT);
   assert.equal(JSON.stringify(eligible).includes("endpointUrl"), false);
 
-  await assert.rejects(() => createMcpControlPlaneAttestation(memberId, input, db), isMcpCode("MCP_ADMIN_REQUIRED"));
-  await assert.rejects(() => createMcpControlPlaneAttestation(adminId, { ...input, extra: true }, db), isMcpCode("MCP_INVALID_INPUT"));
-  await assert.rejects(() => createMcpControlPlaneAttestation(adminId, { ...input, expectedNetworkFingerprint: "d".repeat(64) }, db), isMcpCode("MCP_TOOL_DEFINITION_STALE"));
+  await assert.rejects(() => createMcpControlPlaneAttestation(memberActor, input, db), isMcpCode("MCP_ADMIN_REQUIRED"));
+  await assert.rejects(() => createMcpControlPlaneAttestation(adminActor, { ...input, extra: true }, db), isMcpCode("MCP_INVALID_INPUT"));
+  await assert.rejects(() => createMcpControlPlaneAttestation(adminActor, { ...input, expectedNetworkFingerprint: "d".repeat(64) }, db), isMcpCode("MCP_TOOL_DEFINITION_STALE"));
 
-  const created = await createMcpControlPlaneAttestation(adminId, input, db);
-  const repeated = await createMcpControlPlaneAttestation(adminId, input, db);
+  const created = await createMcpControlPlaneAttestation(adminActor, input, db);
+  const repeated = await createMcpControlPlaneAttestation(adminActor, input, db);
   assert.equal(created.created, true);
   assert.equal(repeated.created, false);
   assert.equal(created.id, repeated.id);
-  await assert.rejects(() => createMcpControlPlaneAttestation(adminId, { ...input, riskLevel: "high" }, db), isMcpCode("MCP_ATTESTATION_CONFLICT"));
+  await assert.rejects(() => createMcpControlPlaneAttestation(adminActor, { ...input, riskLevel: "high" }, db), isMcpCode("MCP_ATTESTATION_CONFLICT"));
 
   await db.appUser.update({ where: { id: adminId }, data: { role: "member" } });
-  const demotedActive = await listMcpControlPlaneAttestationCandidates(replacementAdminId, { state: "active", page: 1, pageSize: 50 }, db);
+  const demotedActive = await listMcpControlPlaneAttestationCandidates(replacementAdminActor, { state: "active", page: 1, pageSize: 50 }, db);
   const demotedCandidate = demotedActive.candidates.find((candidate) => (candidate as { id?: string }).id === created.id) as {
     effective?: boolean;
     effectiveReason?: string | null;
   } | undefined;
   assert.equal(demotedCandidate?.effective, false);
   assert.equal(demotedCandidate?.effectiveReason, "verifier_not_admin");
-  const reauthRequired = await listMcpControlPlaneAttestationCandidates(replacementAdminId, { state: "eligible", page: 1, pageSize: 50 }, db);
+  const reauthRequired = await listMcpControlPlaneAttestationCandidates(replacementAdminActor, { state: "eligible", page: 1, pageSize: 50 }, db);
   const blockedCandidate = reauthRequired.candidates.find((candidate) => (candidate as { blockingAttestationId?: string }).blockingAttestationId === created.id) as {
     blockingAttestationId?: string;
     requiresRevocation?: boolean;
   } | undefined;
   assert.equal(blockedCandidate?.blockingAttestationId, created.id);
   assert.equal(blockedCandidate?.requiresRevocation, true);
-  await assert.rejects(() => createMcpControlPlaneAttestation(replacementAdminId, input, db), isMcpCode("MCP_ATTESTATION_REAUTHENTICATION_REQUIRED"));
-  await revokeMcpControlPlaneAttestation(replacementAdminId, created.id, { expectedVersion: 1 }, db);
+  await assert.rejects(() => createMcpControlPlaneAttestation(replacementAdminActor, input, db), isMcpCode("MCP_ATTESTATION_REAUTHENTICATION_REQUIRED"));
+  await revokeMcpControlPlaneAttestation(replacementAdminActor, created.id, { expectedVersion: 1 }, db);
   await db.appUser.update({ where: { id: adminId }, data: { role: "admin" } });
-  const recreated = await createMcpControlPlaneAttestation(adminId, input, db);
+  const recreated = await createMcpControlPlaneAttestation(adminActor, input, db);
   assert.equal(recreated.created, true);
   assert.notEqual(recreated.id, created.id);
   const activeAttestationId = recreated.id as string;
 
-  await db.appUser.update({ where: { id: adminId }, data: { disabledAt: new Date(), disabledReason: "C2 test" } });
+  await mutateReplacementAdminAccess("disable", "C2 account access test", `mcp-c2-disable-${suffix}`);
   await assert.rejects(
-    () => listMcpControlPlaneAttestationCandidates(adminId, { state: "active", page: 1, pageSize: 50 }, db),
+    () => listMcpControlPlaneAttestationCandidates(replacementAdminActor, { state: "active", page: 1, pageSize: 50 }, db),
     isMcpCode("MCP_ADMIN_REQUIRED"),
   );
-  await db.appUser.update({ where: { id: adminId }, data: { disabledAt: null, disabledReason: null } });
+  await mutateReplacementAdminAccess("restore", "C2 account access restore", `mcp-c2-restore-${suffix}`);
 
-  await assert.rejects(() => revokeMcpControlPlaneAttestation(adminId, activeAttestationId, { expectedVersion: 2 }, db), isMcpCode("MCP_ATTESTATION_CONFLICT"));
+  await assert.rejects(() => revokeMcpControlPlaneAttestation(adminActor, activeAttestationId, { expectedVersion: 2 }, db), isMcpCode("MCP_ATTESTATION_CONFLICT"));
 
-  const active = await listMcpControlPlaneAttestationCandidates(adminId, { state: "active", page: 1, pageSize: 50 }, db);
+  const active = await listMcpControlPlaneAttestationCandidates(adminActor, { state: "active", page: 1, pageSize: 50 }, db);
   assert.equal(active.total, 1);
   const activeCandidate = active.candidates[0] as { id?: string } | undefined;
   assert.equal(activeCandidate?.id, activeAttestationId);
@@ -167,6 +202,7 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
       disabledAt: null,
       createdById: adminId,
       ownerUserId: adminId,
+      ownerAccountAccessVersion: 1,
       ownershipState: "confirmed",
     },
   });
@@ -196,24 +232,24 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
     evidenceNote: "manual_read_only_review" as const,
   };
   await assert.rejects(
-    () => createMcpControlPlaneAttestation(adminId, { ...bearerInput, expectedCredentialFingerprint: "3".repeat(64) }, db),
+    () => createMcpControlPlaneAttestation(adminActor, { ...bearerInput, expectedCredentialFingerprint: "3".repeat(64) }, db),
     isMcpCode("MCP_TOOL_DEFINITION_STALE"),
   );
-  const bearerCreated = await createMcpControlPlaneAttestation(adminId, bearerInput, db);
+  const bearerCreated = await createMcpControlPlaneAttestation(adminActor, bearerInput, db);
   assert.equal(bearerCreated.created, true);
   assert.equal((bearerCreated as unknown as { snapshots: { credentialFingerprint?: string } }).snapshots.credentialFingerprint, bearerFingerprint);
-  await revokeMcpControlPlaneAttestation(adminId, bearerCreated.id, { expectedVersion: 1 }, db);
+  await revokeMcpControlPlaneAttestation(adminActor, bearerCreated.id, { expectedVersion: 1 }, db);
 
   await db.mcpConnection.update({ where: { id: connectionId }, data: { status: "error", lastErrorCode: "test_drift" } });
   await db.mcpToolDefinition.update({ where: { id: toolDefinitionId }, data: { current: false, supersededAt: new Date() } });
-  const driftedActive = await listMcpControlPlaneAttestationCandidates(adminId, { state: "active", page: 1, pageSize: 50 }, db);
+  const driftedActive = await listMcpControlPlaneAttestationCandidates(adminActor, { state: "active", page: 1, pageSize: 50 }, db);
   const driftedCandidate = driftedActive.candidates.find((candidate) => (candidate as { id?: string }).id === activeAttestationId) as {
     effective?: boolean;
     effectiveReason?: string | null;
   } | undefined;
   assert.equal(driftedCandidate?.effective, false);
   assert.equal(driftedCandidate?.effectiveReason, "tool_definition_stale");
-  const revoked = await revokeMcpControlPlaneAttestation(adminId, activeAttestationId, { expectedVersion: 1 }, db);
+  const revoked = await revokeMcpControlPlaneAttestation(adminActor, activeAttestationId, { expectedVersion: 1 }, db);
   assert.equal(revoked.status, "revoked");
   assert.equal(revoked.version, 2);
   const stored = await db.mcpToolAttestation.findUniqueOrThrow({ where: { id: activeAttestationId } });
@@ -231,19 +267,19 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
   assert.equal(revokedAudit?.attestationVersion, 2);
   assert.equal(revokedAudit?.statusBefore, "active");
   assert.equal(revokedAudit?.statusAfter, "revoked");
-  await assert.rejects(() => revokeMcpControlPlaneAttestation(adminId, activeAttestationId, { expectedVersion: 1 }, db), isMcpCode("MCP_ATTESTATION_CONFLICT"));
+  await assert.rejects(() => revokeMcpControlPlaneAttestation(adminActor, activeAttestationId, { expectedVersion: 1 }, db), isMcpCode("MCP_ATTESTATION_CONFLICT"));
 
   await db.mcpConnection.update({ where: { id: connectionId }, data: { status: "verified", lastErrorCode: null } });
   await db.mcpToolDefinition.update({ where: { id: toolDefinitionId }, data: { current: true, supersededAt: null } });
-  const rebuiltAfterDrift = await createMcpControlPlaneAttestation(adminId, input, db);
+  const rebuiltAfterDrift = await createMcpControlPlaneAttestation(adminActor, input, db);
   assert.equal(rebuiltAfterDrift.created, true);
   assert.notEqual(rebuiltAfterDrift.id, activeAttestationId);
-  const rebuiltRevoked = await revokeMcpControlPlaneAttestation(adminId, rebuiltAfterDrift.id, { expectedVersion: 1 }, db);
+  const rebuiltRevoked = await revokeMcpControlPlaneAttestation(adminActor, rebuiltAfterDrift.id, { expectedVersion: 1 }, db);
   assert.equal(rebuiltRevoked.status, "revoked");
 
   const disabled = await db.mcpConnection.update({ where: { id: connectionId }, data: { status: "disabled", disabledAt: new Date() } });
   await assert.rejects(
-    () => deleteMcpConnection(connectionId, { confirmationName: disabled.name, expectedUpdatedAt: disabled.updatedAt.toISOString() }, { id: adminId }, db),
+    () => deleteMcpConnection(connectionId, { confirmationName: disabled.name, expectedUpdatedAt: disabled.updatedAt.toISOString() }, adminActor, db),
     isMcpCode("MCP_CONNECTION_V2_ATTESTATION_DELETE_FORBIDDEN"),
   );
 });

@@ -54,7 +54,6 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   await unlink(masterKeyPath).catch(() => undefined);
   let oidcProviderId: string | null = null;
   let oidcProviderCredentialId: string | null = null;
-  let oidcUserId: string | null = null;
   let collisionUserId: string | null = null;
   let failedFlowCredentialId: string | null = null;
   let disposableOidcProviderId: string | null = null;
@@ -119,7 +118,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       await grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "editor", actorId: admin.id, reason: "v3_gate_fixture_project_b" });
     });
 
-    const member = { id: memberId, role: "member" as const };
+    const member = { id: memberId, role: "member" as const, accountAccessVersion: 1 };
     const visible = await db.project.findMany({ where: accessibleProjectWhere(member), select: { id: true } });
     assert.deepEqual(new Set(visible.map((project) => project.id)), new Set([projectA, projectB]));
     await authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectA}`, { method: "GET" }), db);
@@ -253,7 +252,6 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     const completed = await completeOidcLogin({ code: "valid-code", state: flow.state, cookieState: flow.state }, db);
     assert.equal(completed.returnTo, "/dashboard");
     const oidcUser = await db.appUser.findUniqueOrThrow({ where: { email: `oidc-${suffix}@example.com` } });
-    oidcUserId = oidcUser.id;
     assert.equal(oidcUser.role, "user");
     assert.ok(oidcUser.emailVerifiedAt instanceof Date);
     assert.equal(oidcUser.passwordHash, null);
@@ -341,11 +339,9 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       if (disposableOidcCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: disposableOidcCredentialId } });
       if (pendingOidcCredentials.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: pendingOidcCredentials } } });
       await db.project.deleteMany({ where: { id: { in: [projectA, projectB] } } });
-      if (oidcUserId !== null) {
-        await db.platformTokenLedgerEntry.deleteMany({ where: { userId: oidcUserId } });
-        await db.platformTokenGrant.deleteMany({ where: { userId: oidcUserId } });
-        await db.appUser.deleteMany({ where: { id: oidcUserId } });
-      }
+      // The successful OIDC flow intentionally creates an AppSession and
+      // immutable user evidence.  Keep that user/ledger/grant chain intact;
+      // the disposable database teardown owns its final cleanup.
       if (collisionUserId !== null) await db.appUser.deleteMany({ where: { id: collisionUserId } });
       await db.workspace.deleteMany({ where: { id: roleWorkspaceId } });
       await db.appUser.deleteMany({ where: { id: memberId } });

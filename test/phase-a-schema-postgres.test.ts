@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
+import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { createControlledMembership, grantControlledMembershipInTransaction, revokeControlledMembershipInTransaction } from "./membership-fixture";
 
@@ -220,7 +221,9 @@ test(
           `,
           (error: unknown) => {
             const text = errorText(error);
-            return text.includes("AiProviderConnection_scope_check") || text.includes("user provider requires a confirmed owner without workspace");
+            return text.includes("AiProviderConnection_scope_check")
+              || text.includes("user provider requires a confirmed owner without workspace")
+              || text.includes("PERSONAL_AI_ACCOUNT_EPOCH_INVALID");
           },
         );
       } finally {
@@ -252,6 +255,43 @@ test(
       const userId = userIds[2]!;
       const defaultUserId = userIds[3]!;
       const now = new Date("2026-09-03T00:00:00.000Z");
+
+      async function executeGovernedAccountAccess(input: Readonly<{
+        userId: string;
+        action: "disable" | "restore";
+        reason: string;
+        requestKey: string;
+      }>) {
+        const [admin, target] = await Promise.all([
+          db.appUser.findUniqueOrThrow({ where: { id: adminId }, select: { accountAccessVersion: true } }),
+          db.appUser.findUniqueOrThrow({ where: { id: input.userId }, select: { accountAccessVersion: true } }),
+        ]);
+        const preview = await previewAccountAccess({
+          adminUserId: adminId,
+          adminAccountAccessVersion: admin.accountAccessVersion,
+          userId: input.userId,
+          action: input.action,
+          reason: input.reason,
+          expectedVersion: target.accountAccessVersion,
+        }, db);
+        assert.equal(preview.canExecute, true);
+        return executeAccountAccess({
+          adminUserId: adminId,
+          adminAccountAccessVersion: admin.accountAccessVersion,
+          userId: input.userId,
+          action: input.action,
+          reason: input.reason,
+          expectedVersion: preview.current.accountAccessVersion,
+          expectedImpactFingerprint: preview.impactFingerprint,
+          requestKey: input.requestKey,
+          requestFingerprint: preview.requestFingerprint,
+          previewId: preview.previewId,
+          previewIssuedAt: preview.previewIssuedAt,
+          previewExpiresAt: preview.previewExpiresAt,
+          confirmation: true,
+          confirmationUsername: preview.user.username,
+        }, db);
+      }
 
       await db.$transaction(async (tx) => {
         await grantWorkspaceMembership(tx, {
@@ -288,6 +328,7 @@ test(
           authKind: "none",
           createdById: adminId,
           ownerUserId: ownerId,
+          ownerAccountAccessVersion: 1,
           ownershipState: "confirmed",
         },
       });
@@ -322,6 +363,7 @@ test(
             authKind: "none",
             createdById: adminId,
             ownerUserId: ownerId,
+            ownerAccountAccessVersion: 1,
             ownershipState: "legacyPending",
           },
         }),
@@ -350,11 +392,13 @@ test(
           authKind: "none",
           createdById: adminId,
           ownerUserId: ownerId,
+          ownerAccountAccessVersion: 1,
           ownershipState: "confirmed",
         },
       });
       createdMcpConnectionIds.push(confirmedMcp.id);
       assert.equal(confirmedMcp.ownerUserId, ownerId);
+      assert.equal(confirmedMcp.ownerAccountAccessVersion, 1);
       assert.equal(confirmedMcp.ownershipState, "confirmed");
 
       await assertPostgresConstraint(
@@ -443,6 +487,7 @@ test(
           kind: "qwen",
           scope: "user",
           ownerUserId: userId,
+          ownerAccountAccessVersion: 1,
           ownershipState: "confirmed",
           baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
           credentialId: await createProviderCredential(),
@@ -458,6 +503,7 @@ test(
           scope: "platform" as const,
           workspaceId: defaultWorkspaceId,
           ownerUserId: null,
+          ownerAccountAccessVersion: null,
           ownershipState: "legacyPending" as const,
           allowedGuardMessages: ["non-workspace provider cannot carry workspace ownership"],
         },
@@ -466,6 +512,7 @@ test(
           scope: "workspace" as const,
           workspaceId: defaultWorkspaceId,
           ownerUserId: null,
+          ownerAccountAccessVersion: null,
           ownershipState: "legacyPending" as const,
           allowedGuardMessages: ["workspace provider requires workspace and owner", "workspace provider requires a confirmed owner/admin membership"],
         },
@@ -474,6 +521,7 @@ test(
           scope: "user" as const,
           workspaceId: null,
           ownerUserId: userId,
+          ownerAccountAccessVersion: 1,
           ownershipState: "legacyPending" as const,
           allowedGuardMessages: ["user provider requires a confirmed owner without workspace"],
         },
@@ -482,6 +530,7 @@ test(
           scope: "user" as const,
           workspaceId: defaultWorkspaceId,
           ownerUserId: userId,
+          ownerAccountAccessVersion: 1,
           ownershipState: "confirmed" as const,
           allowedGuardMessages: ["user provider requires a confirmed owner without workspace"],
         },
@@ -496,6 +545,7 @@ test(
               scope: invalidCase.scope,
               workspaceId: invalidCase.workspaceId,
               ownerUserId: invalidCase.ownerUserId,
+              ownerAccountAccessVersion: invalidCase.ownerAccountAccessVersion,
               ownershipState: invalidCase.ownershipState,
               baseUrl: "https://api.openai.com/v1",
               credentialId: await createProviderCredential(),
@@ -512,33 +562,57 @@ test(
         );
       }
 
-      await db.appUser.update({ where: { id: userId }, data: { disabledAt: now } });
+      await assertPostgresConstraint(
+        () => db.appUser.update({ where: { id: userId }, data: { disabledAt: now } }),
+        "23514",
+        "account access lifecycle context is required",
+      );
+      const legacyDisabledUserId = randomUUID();
+      await db.appUser.create({
+        data: {
+          id: legacyDisabledUserId,
+          username: `phase-a-disabled-legacy-${suffix}`,
+          disabledAt: now,
+        },
+      });
       const legacyDisabledUser = await db.appUser.findUniqueOrThrow({
-        where: { id: userId },
+        where: { id: legacyDisabledUserId },
         select: { disabledAt: true, disabledReason: true, disabledById: true },
       });
       assert.equal(legacyDisabledUser.disabledAt?.toISOString(), now.toISOString());
       assert.equal(legacyDisabledUser.disabledReason, null);
       assert.equal(legacyDisabledUser.disabledById, null);
       await assertPostgresConstraint(
-        () => db.appUser.update({ where: { id: userId }, data: { disabledAt: null, disabledReason: "missing disabled timestamp" } }),
+        () => db.appUser.create({
+          data: {
+            id: randomUUID(),
+            username: `phase-a-disabled-metadata-invalid-${suffix}`,
+            disabledReason: "missing disabled timestamp",
+          },
+        }),
         "23514",
         "AppUser_disabled_metadata_check",
       );
-      await db.appUser.update({
-        where: { id: userId },
-        data: { disabledAt: now, disabledReason: "phase-a audit", disabledById: adminId },
+      const disabled = await executeGovernedAccountAccess({
+        userId,
+        action: "disable",
+        reason: "phase-a audit",
+        requestKey: `phase-a-account-disable-${suffix}`,
       });
+      assert.equal(disabled.state, "disabled");
       const auditedDisabledUser = await db.appUser.findUniqueOrThrow({
         where: { id: userId },
         select: { disabledReason: true, disabledById: true },
       });
       assert.equal(auditedDisabledUser.disabledReason, "phase-a audit");
       assert.equal(auditedDisabledUser.disabledById, adminId);
-      await db.appUser.update({
-        where: { id: userId },
-        data: { disabledAt: null, disabledReason: null, disabledById: null },
+      const restored = await executeGovernedAccountAccess({
+        userId,
+        action: "restore",
+        reason: "phase-a restore",
+        requestKey: `phase-a-account-restore-${suffix}`,
       });
+      assert.equal(restored.state, "enabled");
 
       const subscription = await createControlledMembership(db, {
         adminId,

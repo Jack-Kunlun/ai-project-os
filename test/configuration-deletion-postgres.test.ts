@@ -40,6 +40,7 @@ test("unused model and Git connections can be permanently deleted while historic
   const suffix = randomUUID().slice(0, 8);
   const userId = randomUUID();
   const otherUserId = randomUUID();
+  const adminActor = { id: userId, role: "admin" as const, accountAccessVersion: 1 };
   const projectId = randomUUID();
   const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-configuration-delete-"));
   const previousKeyFile = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
@@ -68,19 +69,19 @@ test("unused model and Git connections can be permanently deleted while historic
       visionModelId: null,
       embeddingModelId: null,
       embeddingDimensions: null,
-    }, { id: userId, role: "admin" }, db);
+    }, adminActor, db);
     providerId = provider.id;
     providerCredentialId = (await db.aiProviderConnection.findUniqueOrThrow({ where: { id: provider.id }, select: { credentialId: true } })).credentialId;
     await assert.rejects(
-      () => deleteProviderConnection(provider.id, { confirmationName: provider.name }, { id: userId, role: "admin" }, db),
+      () => deleteProviderConnection(provider.id, { confirmationName: provider.name }, adminActor, db),
       (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_DELETE_REQUIRES_DISABLED",
     );
-    await updateProviderConnection(provider.id, { enabled: false }, { id: userId, role: "admin" }, db);
+    await updateProviderConnection(provider.id, { enabled: false }, adminActor, db);
     await assert.rejects(
-      () => deleteProviderConnection(provider.id, { confirmationName: "wrong name" }, { id: userId, role: "admin" }, db),
+      () => deleteProviderConnection(provider.id, { confirmationName: "wrong name" }, adminActor, db),
       (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_CONFIRMATION_MISMATCH",
     );
-    await deleteProviderConnection(provider.id, { confirmationName: provider.name }, { id: userId, role: "admin" }, db);
+    await deleteProviderConnection(provider.id, { confirmationName: provider.name }, adminActor, db);
     assert.equal(await db.aiProviderConnection.count({ where: { id: provider.id } }), 0);
     assert.equal(await db.externalCredential.count({ where: { id: providerCredentialId } }), 0);
     providerId = null;
@@ -94,7 +95,7 @@ test("unused model and Git connections can be permanently deleted while historic
       authKind: "token",
       secret: `github-test-${suffix}`,
       allowPrivateNetwork: false,
-    }, { id: userId }, db);
+    }, adminActor, db);
     gitConnectionId = gitConnection.id;
     gitCredentialId = (await db.gitConnection.findUniqueOrThrow({ where: { id: gitConnection.id }, select: { credentialId: true } })).credentialId;
     const verifiedGit = await db.gitConnection.update({
@@ -104,7 +105,7 @@ test("unused model and Git connections can be permanently deleted while historic
     const usernameChangedGit = await updateGitConnection(gitConnection.id, {
       username: `git-user-${suffix}`,
       expectedUpdatedAt: verifiedGit.updatedAt.toISOString(),
-    }, { id: userId }, db);
+    }, adminActor, db);
     const usernameChangedDetails = await db.gitConnection.findUniqueOrThrow({
       where: { id: gitConnection.id },
       select: { status: true, configurationVersion: true, resolvedAddressFingerprint: true },
@@ -114,8 +115,8 @@ test("unused model and Git connections can be permanently deleted while historic
     assert.equal(usernameChangedDetails.configurationVersion, verifiedGit.configurationVersion + 1);
     assert.equal(usernameChangedDetails.resolvedAddressFingerprint, null);
     gitConnection = usernameChangedGit;
-    const gitActor = { id: userId };
-    const otherActor = { id: otherUserId };
+    const gitActor = { id: userId, accountAccessVersion: 1 };
+    const otherActor = { id: otherUserId, accountAccessVersion: 1 };
     assert.deepEqual(await listGitConnections(otherActor, db), []);
     await assert.rejects(
       () => getGitConnection(gitConnection.id, otherActor, db),
@@ -175,7 +176,7 @@ test("unused model and Git connections can be permanently deleted while historic
       authKind: "token",
       secret: `github-history-${suffix}`,
       allowPrivateNetwork: false,
-    }, { id: userId }, db);
+    }, gitActor, db);
     historicalConnectionId = historicalConnection.id;
     historicalCredentialId = (await db.gitConnection.findUniqueOrThrow({ where: { id: historicalConnection.id }, select: { credentialId: true } })).credentialId;
     const repository = await db.gitRepository.create({

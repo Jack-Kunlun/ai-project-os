@@ -6,6 +6,8 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 import { getProviderDefinition, isSafeModelId } from "@/lib/ai-providers";
+import { AccountAccessGuardError, assertAccountAccessForActor, requireAccountAccessVersion } from "@/lib/account-access-guard";
+import { lockActorAccess } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 
@@ -23,7 +25,7 @@ export const PLATFORM_DEFAULT_AI_OPERATIONS = [
 ] as const;
 
 export type PlatformDefaultAiOperation = typeof PLATFORM_DEFAULT_AI_OPERATIONS[number];
-export type PlatformDefaultAiRouteActor = Readonly<{ id: string; role: string }>;
+export type PlatformDefaultAiRouteActor = Readonly<{ id: string; role: string; accountAccessVersion?: number }>;
 type RouteDb = PrismaClient | Prisma.TransactionClient;
 
 export type PlatformDefaultAiRouteErrorCode =
@@ -179,10 +181,42 @@ function parseLifecycleInput(value: unknown) {
   return parsed.data;
 }
 
-function assertAdmin(actor: PlatformDefaultAiRouteActor): void {
+function assertAdmin(actor: PlatformDefaultAiRouteActor): PlatformDefaultAiRouteActor {
   if (actor === null || actor === undefined || actor.role !== "admin" || typeof actor.id !== "string" || actor.id.length === 0) {
     return fail("PLATFORM_AI_ROUTE_ADMIN_REQUIRED");
   }
+  try {
+    requireAccountAccessVersion(actor);
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError) return fail("PLATFORM_AI_ROUTE_ADMIN_REQUIRED");
+    throw error;
+  }
+  return actor;
+}
+
+async function assertCurrentAdmin(
+  actor: PlatformDefaultAiRouteActor,
+  db: RouteDb,
+): Promise<void> {
+  try {
+    await assertAccountAccessForActor(db, actor);
+  } catch (error) {
+    if (error instanceof AccountAccessGuardError) return fail("PLATFORM_AI_ROUTE_ADMIN_REQUIRED");
+    throw error;
+  }
+  const current = await db.appUser.findUnique({
+    where: { id: actor.id },
+    select: { role: true },
+  });
+  if (current === null || current.role !== "admin") return fail("PLATFORM_AI_ROUTE_ADMIN_REQUIRED");
+}
+
+async function lockAndAssertCurrentAdmin(
+  actor: PlatformDefaultAiRouteActor,
+  db: Prisma.TransactionClient,
+): Promise<void> {
+  await lockActorAccess(db, actor.id);
+  await assertCurrentAdmin(actor, db);
 }
 
 function isKnown(error: unknown, code: string): boolean {
@@ -402,11 +436,12 @@ export async function createPlatformDefaultAiRoute(
   actor: PlatformDefaultAiRouteActor,
   db: PrismaClient = getDb(),
 ) {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
   const parsed = parseRouteInput(input);
   const payload = normalizePayload(parsed.operation, parsed.embeddingDimensions, parsed.maxOutputTokens);
   try {
     return await withSerializableRetry(() => db.$transaction(async (tx) => {
+      await lockAndAssertCurrentAdmin(actorHint, tx);
       await lockOperation(tx, parsed.operation);
       await lockProviderConfiguration(tx, parsed.providerConnectionId);
       const provider = await tx.aiProviderConnection.findUnique({
@@ -426,12 +461,12 @@ export async function createPlatformDefaultAiRoute(
           version: (latest?.version ?? 0) + 1,
           status: "draft",
           ...routeData(parsed.providerConnectionId, parsed.modelId, payload, parsed.quotaMultiplierBps),
-          createdById: actor.id,
-          updatedById: actor.id,
+          createdById: actorHint.id,
+          updatedById: actorHint.id,
         },
         select: routeSelect,
       });
-      await writeAudit(tx, route, "draftCreated", actor.id, parsed.reason);
+      await writeAudit(tx, route, "draftCreated", actorHint.id, parsed.reason);
       return routeResponse(route);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
   } catch (error) {
@@ -446,12 +481,13 @@ export async function updatePlatformDefaultAiRoute(
   actor: PlatformDefaultAiRouteActor,
   db: PrismaClient = getDb(),
 ) {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
   const id = parseRouteId(routeId);
   const parsed = parseRouteUpdate(input);
   const expectedUpdatedAt = normalizeDate(parsed.expectedUpdatedAt);
   try {
     return await withSerializableRetry(() => db.$transaction(async (tx) => {
+      await lockAndAssertCurrentAdmin(actorHint, tx);
       const current = await findRoute(id, tx);
       if (current === null) return fail("PLATFORM_AI_ROUTE_NOT_FOUND");
       if (current.status !== "draft") return fail("PLATFORM_AI_ROUTE_NOT_DRAFT");
@@ -484,7 +520,7 @@ export async function updatePlatformDefaultAiRoute(
         where: { id, status: "draft", updatedAt: expectedUpdatedAt },
         data: {
           ...nextData,
-          updatedById: actor.id,
+          updatedById: actorHint.id,
           validatedProviderConfigurationVersion: null,
           validatedAt: null,
         },
@@ -492,7 +528,7 @@ export async function updatePlatformDefaultAiRoute(
       if (updated.count !== 1) return fail("PLATFORM_AI_ROUTE_CONFLICT");
       const route = await findRoute(id, tx);
       if (route === null) return fail("PLATFORM_AI_ROUTE_CONFLICT");
-      await writeAudit(tx, route, "draftUpdated", actor.id, parsed.reason);
+      await writeAudit(tx, route, "draftUpdated", actorHint.id, parsed.reason);
       return routeResponse(route);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
   } catch (error) {
@@ -507,11 +543,12 @@ export async function validatePlatformDefaultAiRoute(
   db: PrismaClient = getDb(),
   expectedUpdatedAt: string | Date,
 ) {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
   const id = parseRouteId(routeId);
   const expected = normalizeDate(expectedUpdatedAt);
   try {
     return await withSerializableRetry(() => db.$transaction(async (tx) => {
+      await lockAndAssertCurrentAdmin(actorHint, tx);
       const target = await findRouteLockTarget(id, tx);
       if (target === null) return fail("PLATFORM_AI_ROUTE_NOT_FOUND");
       await lockOperation(tx, target.operation);
@@ -532,13 +569,13 @@ export async function validatePlatformDefaultAiRoute(
           status: "verified",
           validatedProviderConfigurationVersion: currentProvider.configurationVersion,
           validatedAt: new Date(),
-          updatedById: actor.id,
+          updatedById: actorHint.id,
         },
       });
       if (updated.count !== 1) return fail("PLATFORM_AI_ROUTE_CONFLICT");
       const route = await findRoute(id, tx);
       if (route === null) return fail("PLATFORM_AI_ROUTE_CONFLICT");
-      await writeAudit(tx, route, "validated", actor.id);
+      await writeAudit(tx, route, "validated", actorHint.id);
       return routeResponse(route);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
   } catch (error) {
@@ -553,11 +590,12 @@ export async function activatePlatformDefaultAiRoute(
   db: PrismaClient = getDb(),
   expectedUpdatedAt: string | Date,
 ) {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
   const id = parseRouteId(routeId);
   const expected = normalizeDate(expectedUpdatedAt);
   try {
     return await withSerializableRetry(() => db.$transaction(async (tx) => {
+      await lockAndAssertCurrentAdmin(actorHint, tx);
       const target = await findRouteLockTarget(id, tx);
       if (target === null) return fail("PLATFORM_AI_ROUTE_NOT_FOUND");
       await lockOperation(tx, target.operation);
@@ -580,20 +618,20 @@ export async function activatePlatformDefaultAiRoute(
       if (active !== null && active.id !== lockedCurrent.id) {
         const retired = await tx.platformDefaultAiRoute.updateMany({
           where: { id: active.id, status: "active" },
-          data: { status: "retired", updatedById: actor.id },
+          data: { status: "retired", updatedById: actorHint.id },
         });
         if (retired.count !== 1) return fail("PLATFORM_AI_ROUTE_CONFLICT");
         const retiredRoute = await findRoute(active.id, tx);
-        if (retiredRoute !== null) await writeAudit(tx, retiredRoute, "retired", actor.id, "replaced by a newer active route");
+        if (retiredRoute !== null) await writeAudit(tx, retiredRoute, "retired", actorHint.id, "replaced by a newer active route");
       }
       const activated = await tx.platformDefaultAiRoute.updateMany({
         where: { id, status: "verified", updatedAt: expected },
-        data: { status: "active", updatedById: actor.id },
+        data: { status: "active", updatedById: actorHint.id },
       });
       if (activated.count !== 1) return fail("PLATFORM_AI_ROUTE_CONFLICT");
       const route = await findRoute(id, tx);
       if (route === null) return fail("PLATFORM_AI_ROUTE_CONFLICT");
-      await writeAudit(tx, route, "activated", actor.id);
+      await writeAudit(tx, route, "activated", actorHint.id);
       return routeResponse(route);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
   } catch (error) {
@@ -609,13 +647,14 @@ export async function retirePlatformDefaultAiRoute(
   db: PrismaClient = getDb(),
   expectedUpdatedAt: string | Date,
 ) {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
   const id = parseRouteId(routeId);
   const parsedReason = z.string().trim().min(1).max(500).safeParse(reason);
   if (!parsedReason.success) return fail("PLATFORM_AI_ROUTE_REASON_REQUIRED");
   const expected = normalizeDate(expectedUpdatedAt);
   try {
     return await withSerializableRetry(() => db.$transaction(async (tx) => {
+      await lockAndAssertCurrentAdmin(actorHint, tx);
       const current = await findRoute(id, tx);
       if (current === null) return fail("PLATFORM_AI_ROUTE_NOT_FOUND");
       await lockOperation(tx, current.operation);
@@ -623,12 +662,12 @@ export async function retirePlatformDefaultAiRoute(
       if (current.status === "retired") return fail("PLATFORM_AI_ROUTE_CONFLICT");
       const retired = await tx.platformDefaultAiRoute.updateMany({
         where: { id, status: current.status, updatedAt: expected },
-        data: { status: "retired", updatedById: actor.id },
+        data: { status: "retired", updatedById: actorHint.id },
       });
       if (retired.count !== 1) return fail("PLATFORM_AI_ROUTE_CONFLICT");
       const route = await findRoute(id, tx);
       if (route === null) return fail("PLATFORM_AI_ROUTE_CONFLICT");
-      await writeAudit(tx, route, "retired", actor.id, parsedReason.data);
+      await writeAudit(tx, route, "retired", actorHint.id, parsedReason.data);
       return routeResponse(route);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
   } catch (error) {
@@ -697,7 +736,8 @@ export async function getPlatformDefaultAiRouteReadiness(
   actor: PlatformDefaultAiRouteActor,
   db: PrismaClient = getDb(),
 ) {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
+  await assertCurrentAdmin(actorHint, db);
   const routes = await db.platformDefaultAiRoute.findMany({ where: { status: "active" }, select: routeSelect });
   const byOperation = new Map(routes.map((route) => [route.operation, route]));
   return Object.freeze({
@@ -728,7 +768,8 @@ export async function getPlatformDefaultAiRouteImpact(
   actor: PlatformDefaultAiRouteActor,
   db: PrismaClient = getDb(),
 ): Promise<PlatformDefaultAiRouteImpact> {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
+  await assertCurrentAdmin(actorHint, db);
   const id = parseRouteId(routeId);
   const route = await findRoute(id, db);
   if (route === null) return fail("PLATFORM_AI_ROUTE_NOT_FOUND");
@@ -809,7 +850,8 @@ export async function listPlatformDefaultAiRouteAudits(
   db: PrismaClient = getDb(),
   limit = 50,
 ) {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
+  await assertCurrentAdmin(actorHint, db);
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) return fail("PLATFORM_AI_ROUTE_INVALID_INPUT");
   const audits = await db.platformDefaultAiRouteAudit.findMany({
     orderBy: { createdAt: "desc" },
@@ -835,12 +877,13 @@ export async function listPlatformDefaultAiRoutes(
   actor: PlatformDefaultAiRouteActor,
   db: PrismaClient = getDb(),
 ) {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
+  await assertCurrentAdmin(actorHint, db);
   const [routes, providers, readiness, audits] = await Promise.all([
     db.platformDefaultAiRoute.findMany({ orderBy: [{ operation: "asc" }, { version: "desc" }], select: routeSelect }),
     db.aiProviderConnection.findMany({ where: { scope: "platform" }, orderBy: { createdAt: "asc" }, select: providerListSelect }),
-    getPlatformDefaultAiRouteReadiness(actor, db),
-    listPlatformDefaultAiRouteAudits(actor, db),
+    getPlatformDefaultAiRouteReadiness(actorHint, db),
+    listPlatformDefaultAiRouteAudits(actorHint, db),
   ]);
   return Object.freeze({
     operations: PLATFORM_DEFAULT_AI_OPERATIONS,
@@ -858,15 +901,15 @@ export async function runPlatformDefaultAiRouteLifecycle(
   actor: PlatformDefaultAiRouteActor,
   db: PrismaClient = getDb(),
 ) {
-  assertAdmin(actor);
+  const actorHint = assertAdmin(actor);
   const parsed = parseLifecycleInput(input);
   if (parsed.action === "validate") {
-    return validatePlatformDefaultAiRoute(routeId, actor, db, parsed.expectedUpdatedAt);
+    return validatePlatformDefaultAiRoute(routeId, actorHint, db, parsed.expectedUpdatedAt);
   }
   if (parsed.action === "activate") {
-    return activatePlatformDefaultAiRoute(routeId, actor, db, parsed.expectedUpdatedAt);
+    return activatePlatformDefaultAiRoute(routeId, actorHint, db, parsed.expectedUpdatedAt);
   }
-  return retirePlatformDefaultAiRoute(routeId, actor, parsed.reason, db, parsed.expectedUpdatedAt);
+  return retirePlatformDefaultAiRoute(routeId, actorHint, parsed.reason, db, parsed.expectedUpdatedAt);
 }
 
 export const PLATFORM_DEFAULT_AI_ROUTE_OPERATION_LABELS: Readonly<Record<PlatformDefaultAiOperation, string>> = Object.freeze({

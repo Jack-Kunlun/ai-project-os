@@ -18,7 +18,7 @@ const OTHER_PROJECT_ID = "33333333-3333-4333-8333-333333333333";
 const LINK_ID = "44444444-4444-4444-8444-444444444444";
 const CONNECTION_ID = "55555555-5555-4555-8555-555555555555";
 
-const actor = (role: AppUserRole = "member"): WebAiActor => ({ id: ACTOR_ID, role });
+const actor = (role: AppUserRole = "member"): WebAiActor => ({ id: ACTOR_ID, role, accountAccessVersion: 1 });
 
 const repositoryInput = {
   gitConnectionId: CONNECTION_ID,
@@ -59,6 +59,7 @@ function fakeDb(options: FakeOptions = {}) {
           id: ACTOR_ID,
           role: options.storedRoleSequence?.[actorLookups - 1] ?? options.storedRole ?? "member",
           disabledAt: options.disabledAtSequence?.[actorLookups - 1] ?? options.disabledAt ?? null,
+          accountAccessVersion: 1,
         };
       },
     },
@@ -121,6 +122,11 @@ function hasCode(code: string) {
     error instanceof WebAiAccessError && error.code === code;
 }
 
+function hasErrorCode(code: string) {
+  return (error: unknown): boolean =>
+    error instanceof Error && "code" in error && (error as { code?: unknown }).code === code;
+}
+
 function hasGitCode(code: string) {
   return (error: unknown): boolean => error instanceof GitServiceError && error.code === code;
 }
@@ -171,7 +177,8 @@ function repositorySyncFixture() {
         return {
           id: ACTOR_ID,
           role: "member" as const,
-          disabledAt: actorLookups >= 2 ? new Date("2026-09-04T00:00:00.000Z") : null,
+          disabledAt: null,
+          accountAccessVersion: 1,
         };
       },
     },
@@ -368,11 +375,11 @@ test("Git repository list fails closed for disabled and cross-project actors", a
 test("Git connect and disable recheck revocation before sensitive work and writes", async () => {
   const disableRevoked = fakeDb({
     projectRole: "editor",
-    disabledAtSequence: [null, new Date("2026-09-04T00:00:00.000Z")],
+    disabledAtSequence: [null, null, null, null, null, new Date("2026-09-04T00:00:00.000Z")],
   });
   await assert.rejects(
     () => disableProjectGitRepository(PROJECT_ID, LINK_ID, actor(), disableRevoked.db),
-    hasCode("ACCOUNT_DISABLED"),
+    hasErrorCode("ACCOUNT_DISABLED"),
   );
   assert.equal(disableRevoked.linkWrites, 0);
 });

@@ -52,8 +52,8 @@ test(
     const definitionId = randomUUID();
     const networkFingerprint = "b".repeat(64);
     const definitionFingerprint = "a".repeat(64);
-    const actor = { id: ownerId, role: "admin" } as const;
-    const approvingOwner = { id: secondOwnerId, role: "member" } as const;
+    const actor = { id: ownerId, role: "admin", accountAccessVersion: 1 } as const;
+    const approvingOwner = { id: secondOwnerId, role: "member", accountAccessVersion: 1 } as const;
     const createProposal = async (grantId: string, query: string) => proposeProjectMcpAction(projectId, { clientRequestId: randomUUID(), grantId, expectedGrantVersion: 1, arguments: { query } }, actor, db);
     const recomputeFingerprint = async (targetActionId: string, dateStyle?: "ISO, MDY" | "SQL, DMY") => db.$transaction(async (tx) => {
       if (dateStyle === "ISO, MDY") await tx.$executeRaw(Prisma.sql`SET LOCAL DateStyle = 'ISO, MDY'`);
@@ -82,15 +82,15 @@ test(
       `);
       await tx.$executeRaw(Prisma.sql`
         INSERT INTO "ProjectMcpActionLedger" (
-          "id", "projectId", "actionId", "clientRequestId", "grantId", "delegationId", "toolDefinitionId", "attestationId", "connectionId", "toolName",
+          "id", "projectId", "actionId", "clientRequestId", "grantId", "delegationId", "toolDefinitionId", "attestationId", "connectionId", "connectionOwnerId", "toolName",
           "event", "statusBefore", "statusAfter", "stateVersion", "actorId", "actorProjectMembershipId", "actorMembershipCreatedAt",
           "grantVersion", "delegationVersion", "attestationVersion", "delegationFingerprint", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-          "connectionConfigurationRevision", "canonicalArgumentsHash", "actionFingerprint", "transactionId", "transitionAt", "createdAt"
+          "connectionConfigurationRevision", "connectionOwnerAccountAccessVersion", "canonicalArgumentsHash", "actionFingerprint", "transactionId", "transitionAt", "createdAt"
         )
-        SELECT gen_random_uuid(), source."projectId", source."id", source."clientRequestId", source."grantId", source."delegationId", source."toolDefinitionId", source."attestationId", source."connectionId", source."toolName",
+        SELECT gen_random_uuid(), source."projectId", source."id", source."clientRequestId", source."grantId", source."delegationId", source."toolDefinitionId", source."attestationId", source."connectionId", source."connectionOwnerId", source."toolName",
           'cancelled'::"ProjectMcpActionLedgerEvent", ${statusBefore}::"ProjectMcpActionStatus", source."status", source."stateVersion", source."lastActorId", source."lastActorProjectMembershipId", source."lastActorMembershipCreatedAt",
           source."grantVersion", source."delegationVersion", source."attestationVersion", source."delegationFingerprint", source."definitionFingerprint", source."networkFingerprint", source."credentialFingerprint",
-          source."connectionConfigurationRevision", source."canonicalArgumentsHash", source."actionFingerprint", 0, TIMESTAMP 'epoch', TIMESTAMP 'epoch'
+          source."connectionConfigurationRevision", source."connectionOwnerAccountAccessVersion", source."canonicalArgumentsHash", source."actionFingerprint", 0, TIMESTAMP 'epoch', TIMESTAMP 'epoch'
         FROM "ProjectMcpAction" AS source
         WHERE source."id" = ${targetActionId}::uuid AND source."projectId" = ${projectId}::uuid
       `);
@@ -123,14 +123,14 @@ test(
       await db.mcpConnection.create({ data: {
         id: connectionId, name: `MCP action connection ${suffix}`, endpointUrl: "https://mcp.example.invalid/mcp", authKind: "none", credentialId: null,
         allowPrivateNetwork: false, resolvedAddressFingerprint: networkFingerprint, protocolVersion: "2026-07-28", catalogFingerprint: "c".repeat(64),
-        credentialFingerprint: NO_CREDENTIAL_FINGERPRINT, configurationRevision: 1, status: "verified", createdById: ownerId, ownerUserId: ownerId, ownershipState: "confirmed",
+        credentialFingerprint: NO_CREDENTIAL_FINGERPRINT, configurationRevision: 1, status: "verified", createdById: ownerId, ownerUserId: ownerId, ownerAccountAccessVersion: 1, ownershipState: "confirmed",
       } });
       await db.mcpToolDefinition.create({ data: {
         id: definitionId, connectionId, name: "project.lookup", title: "Lookup", description: "Safe lookup",
         inputSchema: { type: "object", properties: { query: { type: "string", minLength: 1 } }, required: ["query"], additionalProperties: false },
         outputSchema: { type: "object" }, annotations: { readOnlyHint: true, destructiveHint: false }, remoteReadOnlyHint: true, definitionFingerprint, current: true,
       } });
-      const attestation = await createMcpControlPlaneAttestation(ownerId, {
+      const attestation = await createMcpControlPlaneAttestation(actor, {
         toolDefinitionId: definitionId, expectedConnectionConfigurationRevision: 1, expectedDefinitionFingerprint: definitionFingerprint,
         expectedNetworkFingerprint: networkFingerprint, expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
         conclusion: "read_only_verified", riskLevel: "low", evidenceNote: "manual_read_only_review",
@@ -203,14 +203,14 @@ test(
           "inputSchema", "canonicalArguments", "canonicalArgumentsHash", "actionFingerprint", "status", "stateVersion",
           "proposerProjectMembershipId", "proposerMembershipCreatedAt", "lastActorId", "lastActorProjectMembershipId", "lastActorMembershipCreatedAt",
           "grantVersion", "delegationVersion", "attestationVersion", "delegationFingerprint", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-          "connectionConfigurationRevision", "connectionOwnerId", "connectionOwnershipState", "connectionAllowPrivateNetwork", "connectionUpdatedAt", "credentialUpdatedAt",
+          "connectionConfigurationRevision", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "connectionOwnershipState", "connectionAllowPrivateNetwork", "connectionUpdatedAt", "credentialUpdatedAt",
           "creationTransactionId", "transitionTransactionId"
         )
         SELECT gen_random_uuid(), source."projectId", gen_random_uuid(), ${randomUUID()}::uuid, source."delegationId", source."toolDefinitionId", source."attestationId", source."connectionId", source."toolName",
           source."inputSchema", source."canonicalArguments", repeat('f', 64), repeat('e', 64), 'waiting_approval'::"ProjectMcpActionStatus", 1,
           source."proposerProjectMembershipId", source."proposerMembershipCreatedAt", source."lastActorId", source."lastActorProjectMembershipId", source."lastActorMembershipCreatedAt",
           source."grantVersion", source."delegationVersion", source."attestationVersion", source."delegationFingerprint", source."definitionFingerprint", source."networkFingerprint", source."credentialFingerprint",
-          source."connectionConfigurationRevision", source."connectionOwnerId", source."connectionOwnershipState", source."connectionAllowPrivateNetwork", source."connectionUpdatedAt", source."credentialUpdatedAt",
+          source."connectionConfigurationRevision", source."connectionOwnerId", source."connectionOwnerAccountAccessVersion", source."connectionOwnershipState", source."connectionAllowPrivateNetwork", source."connectionUpdatedAt", source."credentialUpdatedAt",
           0, 0
         FROM "ProjectMcpAction" AS source
         WHERE source."id" = ${actionId}::uuid
@@ -224,14 +224,14 @@ test(
             "inputSchema", "canonicalArguments", "canonicalArgumentsHash", "actionFingerprint", "status", "stateVersion",
             "proposerProjectMembershipId", "proposerMembershipCreatedAt", "lastActorId", "lastActorProjectMembershipId", "lastActorMembershipCreatedAt",
             "grantVersion", "delegationVersion", "attestationVersion", "delegationFingerprint", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-            "connectionConfigurationRevision", "connectionOwnerId", "connectionOwnershipState", "connectionAllowPrivateNetwork", "connectionUpdatedAt", "credentialUpdatedAt",
+            "connectionConfigurationRevision", "connectionOwnerId", "connectionOwnerAccountAccessVersion", "connectionOwnershipState", "connectionAllowPrivateNetwork", "connectionUpdatedAt", "credentialUpdatedAt",
             "creationTransactionId", "transitionTransactionId"
           )
           SELECT gen_random_uuid(), source."projectId", ${cloneRequestId}::uuid, source."grantId", source."delegationId", source."toolDefinitionId", source."attestationId", source."connectionId", source."toolName",
             source."inputSchema", source."canonicalArguments", repeat('f', 64), repeat('e', 64), 'waiting_approval'::"ProjectMcpActionStatus", 1,
             source."proposerProjectMembershipId", source."proposerMembershipCreatedAt", source."lastActorId", source."lastActorProjectMembershipId", source."lastActorMembershipCreatedAt",
             source."grantVersion", source."delegationVersion", source."attestationVersion", source."delegationFingerprint", source."definitionFingerprint", source."networkFingerprint", source."credentialFingerprint",
-            source."connectionConfigurationRevision", source."connectionOwnerId", source."connectionOwnershipState", source."connectionAllowPrivateNetwork", source."connectionUpdatedAt", source."credentialUpdatedAt",
+            source."connectionConfigurationRevision", source."connectionOwnerId", source."connectionOwnerAccountAccessVersion", source."connectionOwnershipState", source."connectionAllowPrivateNetwork", source."connectionUpdatedAt", source."credentialUpdatedAt",
             0, 0
           FROM "ProjectMcpAction" AS source
           WHERE source."id" = ${actionId}::uuid
@@ -254,15 +254,15 @@ test(
           `);
           await tx.$executeRaw(Prisma.sql`
             INSERT INTO "ProjectMcpActionLedger" (
-              "id", "projectId", "actionId", "clientRequestId", "grantId", "delegationId", "toolDefinitionId", "attestationId", "connectionId", "toolName",
+              "id", "projectId", "actionId", "clientRequestId", "grantId", "delegationId", "toolDefinitionId", "attestationId", "connectionId", "connectionOwnerId", "toolName",
               "event", "statusBefore", "statusAfter", "stateVersion", "actorId", "actorProjectMembershipId", "actorMembershipCreatedAt",
               "grantVersion", "delegationVersion", "attestationVersion", "delegationFingerprint", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-              "connectionConfigurationRevision", "canonicalArgumentsHash", "actionFingerprint", "transactionId", "transitionAt", "createdAt"
+              "connectionConfigurationRevision", "connectionOwnerAccountAccessVersion", "canonicalArgumentsHash", "actionFingerprint", "transactionId", "transitionAt", "createdAt"
             )
-            SELECT gen_random_uuid(), source."projectId", source."id", source."clientRequestId", source."grantId", source."delegationId", source."toolDefinitionId", source."attestationId", source."connectionId", source."toolName",
+            SELECT gen_random_uuid(), source."projectId", source."id", source."clientRequestId", source."grantId", source."delegationId", source."toolDefinitionId", source."attestationId", source."connectionId", source."connectionOwnerId", source."toolName",
               ${status === "approved" ? "approved" : "rejected"}::"ProjectMcpActionLedgerEvent", 'waiting_approval'::"ProjectMcpActionStatus", source."status", source."stateVersion", source."lastActorId", source."lastActorProjectMembershipId", source."lastActorMembershipCreatedAt",
               source."grantVersion", source."delegationVersion", source."attestationVersion", source."delegationFingerprint", source."definitionFingerprint", source."networkFingerprint", source."credentialFingerprint",
-              source."connectionConfigurationRevision", source."canonicalArgumentsHash", source."actionFingerprint", 0, TIMESTAMP 'epoch', TIMESTAMP 'epoch'
+              source."connectionConfigurationRevision", source."connectionOwnerAccountAccessVersion", source."canonicalArgumentsHash", source."actionFingerprint", 0, TIMESTAMP 'epoch', TIMESTAMP 'epoch'
             FROM "ProjectMcpAction" AS source
             WHERE source."id" = ${proposalId}::uuid AND source."projectId" = ${projectId}::uuid
           `);

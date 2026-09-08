@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { invokeChatCompletion } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
+import {
+  withWebAiProjectAccessTransaction,
+  type ProjectAccessAdmission,
+} from "@/lib/access-linearization";
 import { createProjectRepositoryStatusService } from "@/lib/github/project-repository-status";
-import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
+import { EffectiveAiRouteError, resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
+import { getPlatformTokenAdvisory } from "@/lib/ai-entitlements";
 import { getProjectJobInternal } from "@/lib/project-workflow";
 import { buildProjectWorldState } from "@/lib/project-world";
 import {
@@ -42,6 +47,12 @@ import {
   nonLegacyMcpMemoryGenerationWhere,
   nonLegacyMcpProjectItemWhere,
 } from "@/lib/legacy-mcp-source-quarantine";
+import {
+  decideProjectIntelligenceRuntime,
+  type ProjectIntelligenceRouteErrorCode,
+  type ProjectIntelligenceRuntimeDecision,
+  type ProjectIntelligenceRuntimeRoute,
+} from "@/lib/project-intelligence-runtime-decision";
 
 const projectIdSchema = z.string().uuid();
 const questionSchema = z.string().trim().min(2).max(2_000);
@@ -141,6 +152,7 @@ type EvidenceContext = Readonly<{
 }>;
 
 type ProjectState = Awaited<ReturnType<typeof loadProjectState>>;
+type ProjectIntelligenceDb = PrismaClient | Prisma.TransactionClient;
 type ProjectAgentCall = z.infer<typeof agentCallSchema>;
 export type ProjectAgentPlan = Readonly<{
   objective: string;
@@ -238,7 +250,36 @@ export function parseProjectAgentAnswer(
   return Object.freeze(parsed.data);
 }
 
-async function loadProjectState(projectIdValue: unknown, db: PrismaClient) {
+function isPrismaClient(db: ProjectIntelligenceDb): db is PrismaClient {
+  return typeof (db as { $transaction?: unknown }).$transaction === "function";
+}
+
+/**
+ * The repository-status reader predates the shared access transaction and
+ * owns a small read-only transaction for its SQL snapshot.  When the
+ * intelligence status is already inside the access fence, reuse that same
+ * transaction instead of opening a nested one.  This adapter only supplies
+ * the reader's transaction entry point; it does not perform authorization or
+ * external I/O.
+ */
+function loadRepositoryStatusInSnapshot(
+  projectId: string,
+  db: ProjectIntelligenceDb,
+) {
+  const repositoryStatusDb = isPrismaClient(db)
+    ? db
+    : new Proxy(db, {
+      get(target, property) {
+        if (property === "$transaction") {
+          return <T>(callback: (tx: Prisma.TransactionClient) => Promise<T>) => callback(target);
+        }
+        return Reflect.get(target, property, target);
+      },
+    }) as unknown as PrismaClient;
+  return createProjectRepositoryStatusService({ db: repositoryStatusDb }).getStatus(projectId);
+}
+
+async function loadProjectState(projectIdValue: unknown, db: ProjectIntelligenceDb) {
   const projectId = projectIdSchema.parse(projectIdValue);
   const [project, itemVersions, repositoryVersions, world] = await Promise.all([
     db.project.findUnique({
@@ -273,7 +314,7 @@ async function loadProjectState(projectIdValue: unknown, db: PrismaClient) {
   if (project === null || itemVersions.length > 5_000) {
     return fail("PROJECT_INTELLIGENCE_INVALID_INPUT");
   }
-  const repositoryStatus = await createProjectRepositoryStatusService({ db }).getStatus(projectId);
+  const repositoryStatus = await loadRepositoryStatusInSnapshot(projectId, db);
   return Object.freeze({
     projectId,
     project,
@@ -467,6 +508,14 @@ async function prepareRuntime(
   db: PrismaClient,
 ) {
   await assertWebAiProjectAccess(actor, projectId, "edit", db);
+  // The legacy control-plane table is not a runtime fallback. Check every
+  // operation before loading project state, routes, or memory so direct POST
+  // callers fail closed in the same way as the status projection.
+  const legacyRoute = await db.projectAiRoute.findFirst({
+    where: { projectId },
+    select: { projectId: true },
+  });
+  if (legacyRoute !== null) throw new EffectiveAiRouteError("PROJECT_ROUTE_INVALID");
   const [state, generationRoute, embeddingRoute, index] = await Promise.all([
     loadProjectState(projectId, db),
     resolveEffectiveAiRoute(projectId, "projectAnalysis", db),
@@ -474,6 +523,17 @@ async function prepareRuntime(
     getActiveMemoryIndex(projectId, actor, db),
   ]);
   return Object.freeze({ state, generationRoute, embeddingRoute, index });
+}
+
+async function assertNoLegacyProjectAiRoute(
+  tx: Prisma.TransactionClient,
+  admission: ProjectAccessAdmission,
+): Promise<void> {
+  const legacyRoute = await tx.projectAiRoute.findFirst({
+    where: { projectId: admission.project.id },
+    select: { projectId: true },
+  });
+  if (legacyRoute !== null) throw new EffectiveAiRouteError("PROJECT_ROUTE_INVALID");
 }
 
 export async function runProjectBriefJob(input: Readonly<{
@@ -502,6 +562,7 @@ export async function runProjectBriefJob(input: Readonly<{
     scopeIds: { indexGenerationId: runtime.index.id, stateManifest },
     manifestFingerprint: manifest,
     payload: { reportVersion: "project-intelligence-report:v2", indexGenerationId: runtime.index.id, projectWorldStateFingerprint: runtime.state.world.snapshotFingerprint },
+    beforeCreate: assertNoLegacyProjectAiRoute,
   }, db);
   if (!granted.created) return getProjectJobInternal(projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
@@ -704,6 +765,7 @@ export async function runProjectAgentJob(input: Readonly<{
     scopeIds: { indexGenerationId: runtime.index.id, questionHash: sha256(question), stateManifest },
     manifestFingerprint: manifest,
     payload: { agentVersion: "read-only-project-intelligence-agent:v2", question, projectWorldStateFingerprint: runtime.state.world.snapshotFingerprint },
+    beforeCreate: assertNoLegacyProjectAiRoute,
   }, db);
   if (!granted.created) return getProjectJobInternal(projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
@@ -854,15 +916,93 @@ export async function runProjectAgentJob(input: Readonly<{
   }
 }
 
+type PublicIntelligenceRouteSource = "platform_default" | "personal_delegation";
+
+export function publicRouteSource(source: string): PublicIntelligenceRouteSource | null {
+  if (source === "personal_delegation") return "personal_delegation";
+  if (source === "platform_default") return "platform_default";
+  // The effective-route resolver currently rejects the retired
+  // project_override source. Keep this boundary fail-closed so a future
+  // resolver change cannot expose an unknown route as platform-owned.
+  return null;
+}
+
+function publicRouteSourceOrNull(source: string | null): PublicIntelligenceRouteSource | null {
+  return source === null ? null : publicRouteSource(source);
+}
+
+function routePayer(source: PublicIntelligenceRouteSource | null): "platform_caller" | "personal_connection_owner" | null {
+  if (source === "platform_default") return "platform_caller";
+  if (source === "personal_delegation") return "personal_connection_owner";
+  return null;
+}
+
+function routePayerLabel(source: PublicIntelligenceRouteSource | null): "平台额度，由当前发起人扣减" | "个人连接承担" | null {
+  if (source === "platform_default") return "平台额度，由当前发起人扣减";
+  if (source === "personal_delegation") return "个人连接承担";
+  return null;
+}
+
+function publicIntelligenceRoute(
+  route: Awaited<ReturnType<typeof resolveEffectiveAiRoute>>,
+  visibility: Parameters<typeof projectAiProviderProjection>[1],
+) {
+  const source = publicRouteSource(route.source);
+  if (source === null) return null;
+  const modelId = projectAiModelProjection(route.modelId, route.providerConnection, visibility);
+  return Object.freeze({
+    modelId,
+    embeddingDimensions: modelId === null ? null : route.embeddingDimensions,
+    providerConnection: projectAiProviderProjection(route.providerConnection, visibility),
+    operation: route.operation,
+    source,
+    sourceLabel: source === "platform_default" ? "平台默认模型" : "个人连接",
+    payer: routePayer(source),
+    payerLabel: routePayerLabel(source),
+    ...(isProjectAiPlatformProvider(route.providerConnection) ? {
+      routeId: route.routeId,
+      routeVersion: route.routeVersion,
+      routeUpdatedAt: route.routeUpdatedAt,
+      providerConfigurationVersion: route.providerConfigurationVersion,
+      routeFenceFingerprint: route.routeFenceFingerprint,
+    } : {}),
+  });
+}
+
 export async function listProjectIntelligence(
   projectIdValue: unknown,
   actor: WebAiActor,
   db: PrismaClient = getDb(),
 ) {
   const projectId = projectIdSchema.parse(projectIdValue);
-  const currentActor = await assertWebAiProjectAccess(actor, projectId, "view", db);
-  const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true } });
-  if (project === null) return fail("PROJECT_INTELLIGENCE_INVALID_INPUT");
+  return withWebAiProjectAccessTransaction(
+    db,
+    { actor, projectId, required: "view", allowArchived: true },
+    (tx, admission) => listProjectIntelligenceAuthorized(projectId, admission, tx),
+  );
+}
+
+async function listProjectIntelligenceAuthorized(
+  projectId: string,
+  admission: ProjectAccessAdmission,
+  db: ProjectIntelligenceDb,
+) {
+  const currentActor = admission.actor;
+  const projectPermission = admission.permission;
+  const project = admission.project;
+  const [legacyRoutes, effectiveSelections] = await Promise.all([
+    db.projectAiRoute.findMany({
+      // Any surviving ProjectAiRoute row is a legacy control-plane write.
+      // The retired control page could write generateWithContext and other
+      // operations that are not directly resolved by this workbench.
+      where: { projectId },
+      select: { operation: true },
+    }),
+    db.projectAiEffectiveRouteSelection.findMany({
+      where: { projectId, operation: { in: ["embedding", "projectAnalysis"] } },
+      select: { operation: true, source: true },
+    }),
+  ]);
   const [visibility, reports, agentRuns, activeIndex, routes, currentManifest] = await Promise.all([
     loadProjectAiPublicVisibility(db, projectId, currentActor.id),
     db.projectIntelligenceReport.findMany({
@@ -937,38 +1077,26 @@ export async function listProjectIntelligence(
       try {
         const route = await resolveEffectiveAiRoute(projectId, operation, db);
         return Object.freeze({
-          operation: route.operation,
-          modelId: route.modelId,
-          embeddingDimensions: route.embeddingDimensions,
+          operation,
           source: route.source,
-          routeId: route.routeId,
-          routeVersion: route.routeVersion,
-          routeUpdatedAt: route.routeUpdatedAt,
-          providerConfigurationVersion: route.providerConfigurationVersion,
-          routeFenceFingerprint: route.routeFenceFingerprint,
-          providerConnection: Object.freeze({
-            id: route.providerConnection.id,
-            scope: route.providerConnection.scope,
-            workspaceId: route.providerConnection.workspaceId,
-            ownershipState: route.providerConnection.ownershipState,
-            ownerUserId: route.providerConnection.ownerUserId,
-            name: route.providerConnection.name,
-            kind: route.providerConnection.kind,
-            status: route.providerConnection.status,
-          }),
+          errorCode: null,
+          route,
         });
       } catch (error) {
-        if (error instanceof Error && "code" in error) {
-          const code = (error as { code?: unknown }).code;
-          if (code === "PLATFORM_ROUTE_UNAVAILABLE" || code === "PROJECT_ROUTE_INVALID" || code === "PERSONAL_ROUTE_UNAVAILABLE" || code === "AI_PROVIDER_CONFIGURATION_DRIFT" || code === "AI_ROUTE_LOCK_BUSY") return null;
-        }
-        throw error;
+        if (!(error instanceof EffectiveAiRouteError)) throw error;
+        const selection = effectiveSelections.find((item) => item.operation === operation);
+        const source = error.code === "PROJECT_ROUTE_INVALID"
+          ? null
+          : selection?.source === "personalDelegation" ? "personal_delegation" : "platform_default";
+        return Object.freeze({ operation, source, errorCode: error.code, route: null });
       }
-    }))).then((routes) => routes.filter((route): route is NonNullable<typeof route> => route !== null)),
-    getProjectMemoryInputManifest(projectId, actor, db),
+    }))),
+    getProjectMemoryInputManifest(projectId, currentActor, db),
   ]);
-  const embeddingRoute = routes.find((route) => route.operation === "embedding") ?? null;
-  const generationRoute = routes.find((route) => route.operation === "projectAnalysis") ?? null;
+  const embeddingResolution = routes.find((resolution) => resolution.operation === "embedding")!;
+  const generationResolution = routes.find((resolution) => resolution.operation === "projectAnalysis")!;
+  const embeddingRoute = embeddingResolution.route;
+  const generationRoute = generationResolution.route;
   const publicReports = reports.map((report) => {
     const providerConnection = projectAiProviderProjection(report.providerConnection, visibility);
     return Object.freeze({
@@ -1020,6 +1148,36 @@ export async function listProjectIntelligence(
     personalEvidenceLive,
     generationProviderVerified: generationRoute?.providerConnection.status === "verified",
   });
+  const publicEmbeddingRoute = embeddingRoute === null ? null : publicIntelligenceRoute(embeddingRoute, visibility);
+  const publicGenerationRoute = generationRoute === null ? null : publicIntelligenceRoute(generationRoute, visibility);
+  const embeddingSource = publicRouteSourceOrNull(embeddingRoute?.source ?? null) ?? publicRouteSourceOrNull(embeddingResolution.source);
+  const generationSource = publicRouteSourceOrNull(generationRoute?.source ?? null) ?? publicRouteSourceOrNull(generationResolution.source);
+  const embeddingRuntimeRoute: ProjectIntelligenceRuntimeRoute = Object.freeze({
+    available: embeddingRoute !== null,
+    source: embeddingSource,
+    payer: routePayer(embeddingSource),
+    errorCode: embeddingResolution.errorCode as ProjectIntelligenceRouteErrorCode | null,
+  });
+  const projectAnalysisRuntimeRoute: ProjectIntelligenceRuntimeRoute = Object.freeze({
+    available: generationRoute !== null,
+    source: generationSource,
+    payer: routePayer(generationSource),
+    errorCode: generationResolution.errorCode as ProjectIntelligenceRouteErrorCode | null,
+  });
+  const platformRouteUsed = embeddingSource === "platform_default" || generationSource === "platform_default";
+  const platformQuotaAvailable = projectPermission !== null && projectPermission !== "view" && project.archivedAt === null && platformRouteUsed
+    ? (await getPlatformTokenAdvisory(currentActor.id, db)).hasAvailableTokens
+    : null;
+  const runtimeDecision: ProjectIntelligenceRuntimeDecision = decideProjectIntelligenceRuntime({
+    projectId,
+    permission: projectPermission,
+    archived: project.archivedAt !== null,
+    legacyRouteConflict: legacyRoutes.length > 0,
+    embeddingRoute: embeddingRuntimeRoute,
+    projectAnalysisRoute: projectAnalysisRuntimeRoute,
+    indexState: readinessState.state,
+    platformQuotaAvailable,
+  });
   const readiness = Object.freeze({
     activeIndex: safeActiveIndex !== null,
     indexCompatible: readinessState.indexCompatible,
@@ -1028,36 +1186,29 @@ export async function listProjectIntelligence(
     generationRoute: generationRoute?.providerConnection.status === "verified",
     ready: readinessState.ready,
     indexGenerationId: safeActiveIndex?.indexGenerationId ?? null,
-    routes: Object.freeze({
-      embedding: embeddingRoute === null ? null : Object.freeze({
-        modelId: projectAiModelProjection(embeddingRoute.modelId, embeddingRoute.providerConnection, visibility),
-        embeddingDimensions: projectAiModelProjection(embeddingRoute.modelId, embeddingRoute.providerConnection, visibility) === null ? null : embeddingRoute.embeddingDimensions,
-        providerConnection: projectAiProviderProjection(embeddingRoute.providerConnection, visibility),
-        operation: embeddingRoute.operation,
-        source: embeddingRoute.source,
-        ...(isProjectAiPlatformProvider(embeddingRoute.providerConnection) ? {
-          routeId: embeddingRoute.routeId,
-          routeVersion: embeddingRoute.routeVersion,
-          routeUpdatedAt: embeddingRoute.routeUpdatedAt,
-          providerConfigurationVersion: embeddingRoute.providerConfigurationVersion,
-          routeFenceFingerprint: embeddingRoute.routeFenceFingerprint,
-        } : {}),
+    runtimeDecision,
+    nextAction: runtimeDecision.nextAction,
+    routeErrors: Object.freeze({
+      embedding: embeddingResolution.errorCode === null ? null : Object.freeze({
+        code: embeddingResolution.errorCode,
+        source: embeddingResolution.source,
       }),
-      generation: generationRoute === null ? null : Object.freeze({
-        modelId: projectAiModelProjection(generationRoute.modelId, generationRoute.providerConnection, visibility),
-        embeddingDimensions: projectAiModelProjection(generationRoute.modelId, generationRoute.providerConnection, visibility) === null ? null : generationRoute.embeddingDimensions,
-        providerConnection: projectAiProviderProjection(generationRoute.providerConnection, visibility),
-        operation: generationRoute.operation,
-        source: generationRoute.source,
-        ...(isProjectAiPlatformProvider(generationRoute.providerConnection) ? {
-          routeId: generationRoute.routeId,
-          routeVersion: generationRoute.routeVersion,
-          routeUpdatedAt: generationRoute.routeUpdatedAt,
-          providerConfigurationVersion: generationRoute.providerConfigurationVersion,
-          routeFenceFingerprint: generationRoute.routeFenceFingerprint,
-        } : {}),
+      generation: generationResolution.errorCode === null ? null : Object.freeze({
+        code: generationResolution.errorCode,
+        source: generationResolution.source,
       }),
     }),
+    routes: Object.freeze({
+      embedding: publicEmbeddingRoute,
+      generation: publicGenerationRoute,
+    }),
   });
-  return Object.freeze({ reports: publicReports, agentRuns: publicAgentRuns, tools: PROJECT_AGENT_TOOLS, readiness });
+  return Object.freeze({
+    reports: publicReports,
+    agentRuns: publicAgentRuns,
+    tools: PROJECT_AGENT_TOOLS,
+    runtimeDecision,
+    nextAction: runtimeDecision.nextAction,
+    readiness,
+  });
 }

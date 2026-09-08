@@ -3,18 +3,383 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
+import { getPlatformTokenAdvisory } from "../src/lib/ai-entitlements";
+import { EffectiveAiRouteError, resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
+import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
+import { createGrantedWebAiJob } from "../src/lib/web-ai-governance";
 import {
   PROJECT_AGENT_TOOLS,
   ProjectIntelligenceError,
   parseProjectAgentAnswer,
   parseProjectAgentPlan,
   parseProjectIntelligenceReport,
+  listProjectIntelligence,
+  publicRouteSource,
   runProjectAgentJob,
   runProjectBriefJob,
 } from "../src/lib/web-project-intelligence";
+import { decideProjectIntelligenceRuntime } from "../src/lib/project-intelligence-runtime-decision";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const memoryId = "22222222-2222-4222-8222-222222222222";
+
+const platformRoute = {
+  available: true,
+  source: "platform_default" as const,
+  payer: "platform_caller" as const,
+  errorCode: null,
+};
+const personalRoute = {
+  available: true,
+  source: "personal_delegation" as const,
+  payer: "personal_connection_owner" as const,
+  errorCode: null,
+};
+const blockedPlatformRoute = {
+  available: false,
+  source: "platform_default" as const,
+  payer: "platform_caller" as const,
+  errorCode: "PLATFORM_ROUTE_UNAVAILABLE" as const,
+};
+const blockedPersonalRoute = {
+  available: false,
+  source: "personal_delegation" as const,
+  payer: "personal_connection_owner" as const,
+  errorCode: "PERSONAL_ROUTE_UNAVAILABLE" as const,
+};
+const unknownRoute = {
+  available: true,
+  source: null,
+  payer: null,
+  errorCode: null,
+};
+
+test("project intelligence runtime decision preserves payer and one next action", () => {
+  const base = {
+    projectId,
+    permission: "edit" as const,
+    archived: false,
+    legacyRouteConflict: false,
+    embeddingRoute: platformRoute,
+    projectAnalysisRoute: platformRoute,
+  };
+  const ready = decideProjectIntelligenceRuntime({ ...base, indexState: "ready" });
+  assert.equal(ready.code, "ready");
+  assert.equal(ready.canRun, true);
+  assert.equal(ready.payer, "platform_caller");
+  assert.equal(ready.payerLabel, "平台额度，由当前发起人扣减");
+  assert.equal(ready.nextAction.kind, "run_project_ai");
+
+  const personal = decideProjectIntelligenceRuntime({
+    ...base,
+    embeddingRoute: personalRoute,
+    projectAnalysisRoute: personalRoute,
+    indexState: "ready",
+  });
+  assert.equal(personal.payer, "personal_connection_owner");
+  assert.equal(personal.payerLabel, "个人连接承担");
+
+  const mixed = decideProjectIntelligenceRuntime({
+    ...base,
+    embeddingRoute: personalRoute,
+    projectAnalysisRoute: platformRoute,
+    indexState: "ready",
+  });
+  assert.equal(mixed.code, "ready");
+  assert.equal(mixed.payer, "mixed");
+  assert.equal(mixed.routeSource, "mixed");
+  assert.equal(mixed.payerLabel, "混合承担：平台额度与个人连接");
+
+  const observedQuota = decideProjectIntelligenceRuntime({
+    ...base,
+    indexState: "ready",
+    platformQuotaAvailable: true,
+  });
+  assert.match(observedQuota.detail, /已观察到有剩余额度/u);
+  assert.match(observedQuota.detail, /提交时仍复核额度、并发与授权/u);
+
+  const blocked = decideProjectIntelligenceRuntime({ ...base, projectAnalysisRoute: blockedPlatformRoute, indexState: "ready" });
+  assert.equal(blocked.code, "platform_route_blocked");
+  assert.equal(blocked.canRun, false);
+  assert.equal(blocked.nextAction.kind, "contact_platform_admin");
+
+  const unknown = decideProjectIntelligenceRuntime({ ...base, projectAnalysisRoute: unknownRoute, indexState: "ready" });
+  assert.equal(unknown.code, "platform_route_blocked");
+  assert.equal(unknown.canRun, false);
+
+  const quotaBlocked = decideProjectIntelligenceRuntime({ ...base, indexState: "ready", platformQuotaAvailable: false });
+  assert.equal(quotaBlocked.code, "platform_quota_advisory_blocked");
+  assert.equal(quotaBlocked.payerLabel, "平台额度，由当前发起人扣减");
+  assert.equal(quotaBlocked.nextAction.kind, "contact_platform_admin");
+
+  const personalBlocked = decideProjectIntelligenceRuntime({
+    ...base,
+    embeddingRoute: blockedPersonalRoute,
+    projectAnalysisRoute: blockedPersonalRoute,
+    indexState: "ready",
+  });
+  assert.equal(personalBlocked.code, "personal_route_blocked");
+  assert.equal(personalBlocked.payer, "personal_connection_owner");
+
+  const legacy = decideProjectIntelligenceRuntime({ ...base, legacyRouteConflict: true, indexState: "ready" });
+  assert.equal(legacy.code, "legacy_route_conflict");
+  assert.equal(legacy.nextAction.kind, "contact_platform_admin");
+
+  const viewer = decideProjectIntelligenceRuntime({ ...base, permission: "view", indexState: "ready" });
+  assert.equal(viewer.code, "run_forbidden");
+  assert.equal(viewer.canRun, false);
+  assert.equal(viewer.nextAction.kind, "request_edit_access");
+
+  const archived = decideProjectIntelligenceRuntime({ ...base, archived: true, indexState: "ready" });
+  assert.equal(archived.code, "run_forbidden");
+  assert.equal(archived.reason, "archived");
+  assert.equal(archived.nextAction.kind, "contact_project_admin");
+
+  assert.equal(publicRouteSource("platform_default"), "platform_default");
+  assert.equal(publicRouteSource("personal_delegation"), "personal_delegation");
+  assert.equal(publicRouteSource("project_override"), null);
+  assert.equal(publicRouteSource("unknown_route"), null);
+
+  for (const [indexState, code] of [
+    ["indexMissing", "index_missing"],
+    ["legacyIndex", "legacy_index"],
+    ["routeIncompatible", "index_incompatible"],
+    ["inputsChanged", "inputs_changed"],
+  ] as const) {
+    const decision = decideProjectIntelligenceRuntime({ ...base, indexState });
+    assert.equal(decision.code, code);
+    assert.equal(decision.canRun, false);
+    assert.match(decision.nextAction.kind, /memory_index/iu);
+  }
+});
+
+test("project intelligence workbench does not advertise legacy project route controls", () => {
+  const source = readFileSync(join(process.cwd(), "src/app/projects/[projectId]/intelligence/project-intelligence-client.tsx"), "utf8");
+  const runtimeSource = readFileSync(join(process.cwd(), "src/lib/project-intelligence-runtime-decision.ts"), "utf8");
+  assert.doesNotMatch(source, /\/control/u);
+  assert.match(source, /operation: "embedding" \| "projectAnalysis"/u);
+  assert.match(runtimeSource, /平台额度，由当前发起人扣减/u);
+  assert.match(runtimeSource, /个人连接承担/u);
+});
+
+test("platform quota advisory is read-only and does not recover reservations", async () => {
+  let grantReads = 0;
+  let reservationReads = 0;
+  const db = {
+    platformTokenGrant: {
+      findMany: async () => {
+        grantReads += 1;
+        return [{ remainingTokens: 12, expiresAt: new Date("2030-01-01T00:00:00.000Z") }];
+      },
+    },
+    platformTokenReservation: {
+      findMany: async () => {
+        reservationReads += 1;
+        return [{ reservedTokens: 3 }];
+      },
+    },
+  } as unknown as PrismaClient;
+  const advisory = await getPlatformTokenAdvisory("11111111-1111-4111-8111-111111111111", db, new Date("2029-01-01T00:00:00.000Z"));
+  assert.equal(advisory.availableTokens, 12);
+  assert.equal(advisory.reservedTokens, 3);
+  assert.equal(advisory.hasAvailableTokens, true);
+  assert.equal(grantReads, 1);
+  assert.equal(reservationReads, 1);
+});
+
+function legacyRuntimeDb() {
+  let projectReads = 0;
+  const calls: string[] = [];
+  const db = {
+    appUser: {
+      findUnique: async () => {
+        calls.push("actor");
+        return { id: projectId, role: "user", disabledAt: null };
+      },
+    },
+    project: {
+      findUnique: async () => {
+        projectReads += 1;
+        calls.push("project");
+        return { membershipInheritanceMode: "projectOnly", workspaceId: "33333333-3333-4333-8333-333333333333", archivedAt: null };
+      },
+    },
+    projectMembership: {
+      findMany: async () => {
+        calls.push("membership");
+        return [{
+          id: "44444444-4444-4444-8444-444444444444",
+          projectId,
+          userId: projectId,
+          role: "editor",
+          accessState: "confirmed",
+          createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+        }];
+      },
+    },
+    projectAiRoute: {
+      findFirst: async () => {
+        calls.push("legacy-route");
+        return { projectId, operation: "generateWithContext" };
+      },
+    },
+  } as unknown as PrismaClient;
+  return { db, calls, projectReads: () => projectReads };
+}
+
+test("brief and agent reject any legacy ProjectAiRoute before runtime reads", async () => {
+  for (const operation of ["brief", "agent"] as const) {
+    const runtime = legacyRuntimeDb();
+    const run = operation === "brief"
+      ? runProjectBriefJob({
+        projectId,
+        requestedBy: { id: projectId, role: "user" },
+        clientKey: `legacy-${operation}`,
+        consent: { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION },
+      }, runtime.db)
+      : runProjectAgentJob({
+        projectId,
+        requestedBy: { id: projectId, role: "user" },
+        clientKey: `legacy-${operation}`,
+        consent: { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION },
+        question: "当前状态如何？",
+      }, runtime.db);
+    await assert.rejects(
+      () => run,
+      (error: unknown) => error instanceof EffectiveAiRouteError && error.code === "PROJECT_ROUTE_INVALID",
+    );
+    assert.deepEqual(runtime.calls, ["actor", "project", "membership", "project", "legacy-route"]);
+    assert.equal(runtime.projectReads(), 2);
+  }
+});
+
+function statusTransactionDb() {
+  const workspaceId = "33333333-3333-4333-8333-333333333333";
+  const now = new Date("2026-01-01T00:00:00.000Z");
+  let transactionDepth = 0;
+  let accessTransactions = 0;
+  let outsideReads = 0;
+  let rawQueryCount = 0;
+  const read = () => {
+    if (transactionDepth === 0) outsideReads += 1;
+  };
+  const emptyModel = () => ({
+    findMany: async () => { read(); return []; },
+    findUnique: async () => { read(); return null; },
+    findFirst: async () => { read(); return null; },
+    count: async () => { read(); return 0; },
+  });
+  const project = {
+    findUnique: async () => {
+      read();
+      return {
+        id: projectId,
+        workspaceId,
+        membershipInheritanceMode: "projectOnly",
+        archivedAt: null,
+        name: "事务快照测试项目",
+        slug: "transaction-snapshot-test",
+        description: null,
+        updatedAt: now,
+        _count: { sources: 0, items: 0, repositoryLinks: 0 },
+      };
+    },
+    findMany: async () => { read(); return [{ id: projectId, workspaceId, membershipInheritanceMode: "projectOnly" }]; },
+    count: async () => { read(); return 1; },
+  };
+  const projectMembership = {
+    findMany: async () => {
+      read();
+      return [{
+        id: "44444444-4444-4444-8444-444444444444",
+        projectId,
+        workspaceId,
+        userId: projectId,
+        role: "editor",
+        accessState: "confirmed",
+        createdAt: now,
+        updatedAt: now,
+      }];
+    },
+    findFirst: async () => { read(); return null; },
+    findUnique: async () => { read(); return null; },
+  };
+  const db = {
+    appUser: {
+      findUnique: async () => {
+        read();
+        return { id: projectId, role: "user", disabledAt: null };
+      },
+    },
+    project,
+    projectMembership,
+    workspaceMembership: emptyModel(),
+    projectAiRoute: emptyModel(),
+    projectAiEffectiveRouteSelection: emptyModel(),
+    platformDefaultAiRoute: emptyModel(),
+    projectIntelligenceReport: emptyModel(),
+    projectAgentRun: emptyModel(),
+    memoryIndexPointer: emptyModel(),
+    projectSource: emptyModel(),
+    repositoryMaterialGenerationPointer: emptyModel(),
+    projectCodeSnapshotPointer: emptyModel(),
+    projectRepositoryLink: emptyModel(),
+    projectItem: emptyModel(),
+    projectFactRelation: emptyModel(),
+    memoryQualityIssue: emptyModel(),
+    projectWorkItem: emptyModel(),
+    projectWorkItemDependency: emptyModel(),
+    projectWorkItemEvidenceLink: emptyModel(),
+    projectPlanImpactSuggestion: emptyModel(),
+    projectAction: emptyModel(),
+    platformTokenGrant: emptyModel(),
+    platformTokenReservation: emptyModel(),
+    $executeRaw: async () => { read(); return 0; },
+    $queryRaw: async () => {
+      read();
+      rawQueryCount += 1;
+      // The repository status service issues its repository and project
+      // snapshot queries in this order. Both execute through the access tx.
+      return rawQueryCount === 2 ? [{
+        projectCodeSnapshotId: null,
+        projectRagSnapshotId: null,
+        requiredRepositoryCount: null,
+        manualRagSnapshotId: null,
+        publishedAt: null,
+        ragReady: false,
+      }] : [];
+    },
+  } as Record<string, unknown>;
+  const tx = new Proxy(db, {
+    get(target, property, receiver) {
+      if (property === "$transaction") return undefined;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  db.$transaction = async (callback: (transaction: unknown) => Promise<unknown>) => {
+    accessTransactions += 1;
+    transactionDepth += 1;
+    try {
+      return await callback(tx);
+    } finally {
+      transactionDepth -= 1;
+    }
+  };
+  return {
+    db: db as unknown as PrismaClient,
+    accessTransactions: () => accessTransactions,
+    outsideReads: () => outsideReads,
+  };
+}
+
+test("project intelligence status uses the access transaction admission for every read", async () => {
+  const runtime = statusTransactionDb();
+  const status = await listProjectIntelligence(projectId, { id: projectId, role: "user" }, runtime.db);
+  assert.equal(runtime.accessTransactions(), 1);
+  assert.equal(runtime.outsideReads(), 0);
+  assert.equal(status.runtimeDecision.code, "platform_route_blocked");
+});
 
 test("read-only project agent accepts only its fixed bounded tool plan", () => {
   const plan = parseProjectAgentPlan(JSON.stringify({

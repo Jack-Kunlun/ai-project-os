@@ -1016,3 +1016,27 @@ export async function getPlatformTokenSummary(userId: string, db: EntitlementDb 
     membership,
   });
 }
+
+/**
+ * Read-only quota information for status/advisory views. Unlike
+ * getPlatformTokenSummary, this deliberately does not recover expired
+ * reservations or touch grants, reservations, or ledger rows.
+ */
+export async function getPlatformTokenAdvisory(
+  userId: string,
+  db: EntitlementDb = getDb(),
+  now = new Date(),
+) {
+  const [grants, reservations] = await Promise.all([
+    db.platformTokenGrant.findMany({ where: { userId, revokedAt: null }, select: { remainingTokens: true, expiresAt: true } }),
+    db.platformTokenReservation.findMany({ where: { userId, status: { in: ["reserved", "held"] } }, select: { reservedTokens: true } }),
+  ]);
+  const activeGrants = grants.filter((grant) => grant.expiresAt > now);
+  const availableTokens = activeGrants.reduce((sum, grant) => sum + grant.remainingTokens, 0);
+  return Object.freeze({
+    availableTokens,
+    reservedTokens: reservations.reduce((sum, reservation) => sum + reservation.reservedTokens, 0),
+    nextExpiryAt: activeGrants.map((grant) => grant.expiresAt).sort((left, right) => left.getTime() - right.getTime())[0] ?? null,
+    hasAvailableTokens: availableTokens > 0,
+  });
+}

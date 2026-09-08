@@ -21,7 +21,10 @@ import {
 } from "@/lib/ai-entitlements";
 import { reloadProviderConfiguration } from "@/lib/ai-providers/service";
 import { getDb } from "@/lib/db";
-import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
+import {
+  withWebAiProjectAccessTransaction,
+  type ProjectAccessAdmission,
+} from "@/lib/access-linearization";
 import { jsonValue } from "@/lib/web-github";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 import {
@@ -676,6 +679,13 @@ export async function createGrantedWebAiJob(input: Readonly<{
   manifestFingerprint: string;
   payload: Record<string, unknown>;
   /**
+   * Run DB-only admission checks after the route is reloaded while the
+   * project access locks are held, before idempotency lookup or job/grant
+   * creation. This seam is intentionally inside the transaction so legacy
+   * route writes and runtime job creation observe one linearized decision.
+   */
+  beforeCreate?: (tx: Prisma.TransactionClient, admission: ProjectAccessAdmission) => Promise<void>;
+  /**
    * A kind-specific resource can be created while the grant/job transaction
    * is still open. Memory index candidates use this seam to hold the project
    * admission lock and create their generation atomically with the job.
@@ -693,6 +703,7 @@ export async function createGrantedWebAiJob(input: Readonly<{
   }, async (tx, admission) => {
     const transactionActor = admission.actor;
     const route = await reloadRuntimeRoute(tx, { projectId: input.projectId, route: input.route });
+    if (input.beforeCreate !== undefined) await input.beforeCreate(tx, admission);
     const key = idempotencyKey(input.kind, input.projectId, transactionActor.id, input.clientKey);
     const personal = isPersonalRuntimeRoute(route);
     const existing = await tx.backgroundJob.findUnique({

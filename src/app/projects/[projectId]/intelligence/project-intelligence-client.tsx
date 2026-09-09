@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
-import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 import type {
   ProjectIntelligenceNextAction,
   ProjectIntelligenceOperationPayer,
@@ -105,7 +104,14 @@ type StatusPayload = {
   nextAction: ProjectIntelligenceNextAction;
 };
 
-const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
+type Confirmation = {
+  challengeId: string;
+  targetAction: string;
+  expiresAt: string;
+  safeSummary: Record<string, unknown>;
+};
+type ApiFailure = { code?: string; message?: string };
+
 const toolLabels: Record<ToolTrace["tool"], string> = {
   project_overview: "项目概览",
   confirmed_items: "已确认条目",
@@ -127,6 +133,40 @@ async function readError(response: Response, fallback: string): Promise<string> 
   } catch {
     return fallback;
   }
+}
+
+async function readApiFailure(response: Response, fallback: string): Promise<ApiFailure> {
+  try {
+    const payload = await response.json() as { error?: ApiFailure };
+    return { code: payload.error?.code, message: payload.error?.message ?? fallback };
+  } catch {
+    return { message: fallback };
+  }
+}
+
+function confirmationMessage(code: string | undefined): string | null {
+  if (code === "WEB_AI_CONFIRMATION_EXPIRED") return "本次确认已过期，请重新读取外发摘要。";
+  if (code === "WEB_AI_CONFIRMATION_STALE") return "项目资料、索引或模型路由已变化，请重新读取外发摘要。";
+  if (code === "WEB_AI_CONFIRMATION_CONSUMED") return "本次确认已使用，请重新读取外发摘要后再执行。";
+  if (code === "WEB_AI_CONFIRMATION_REQUIRED") return "请先读取本次外发摘要，再点击确认并执行。";
+  return null;
+}
+
+function summaryText(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(summaryText).join("、");
+  if (typeof value === "object") return Object.entries(value as Record<string, unknown>).map(([key, entry]) => `${key}: ${summaryText(entry)}`).join(" · ");
+  return "—";
+}
+
+function ConfirmationCard({ confirmation, pending, executeLabel, onExecute }: { confirmation: Confirmation; pending: boolean; executeLabel: string; onExecute: () => void }) {
+  return <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4" role="status">
+    <p className="text-sm font-semibold text-indigo-900">本次外发摘要</p>
+    <p className="mt-2 text-xs leading-5 text-indigo-800">动作：{confirmation.targetAction} · 路由：{summaryText(confirmation.safeSummary.route)} · 范围：{summaryText(confirmation.safeSummary.scope)}</p>
+    <p className="mt-2 text-xs text-indigo-700">确认有效期至 {formatDate(confirmation.expiresAt)}。摘要不包含原文、问题或指纹。</p>
+    <button type="button" onClick={onExecute} disabled={pending} className="mt-4 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "执行中…" : executeLabel}</button>
+  </div>;
 }
 
 function formatDate(value: string): string {
@@ -224,34 +264,86 @@ function ReadinessPanel({ readiness }: { readiness: Readiness }) {
   return <section className={`rounded-3xl border p-6 shadow-sm ${decision.canRun ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Runtime readiness</p><h2 className="mt-2 text-xl font-semibold">{decision.title}</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-700">{decision.detail}</p>{decision.payerLabel ? <p className="mt-2 text-xs font-semibold text-slate-600">本次项目分析：{decision.payerLabel}</p> : null}</div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${decision.canRun ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{decision.canRun ? "可提交" : "需处理"}</span></div><div className="mt-5 grid gap-3 md:grid-cols-3">{checks.map((check) => <div key={check.label} className="rounded-2xl border border-white/80 bg-white/80 p-4"><div className="flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${check.ready ? "bg-emerald-500" : "bg-amber-400"}`} /><p className="text-sm font-semibold">{check.label}</p></div><p className="mt-2 truncate text-xs text-slate-500" title={check.detail}>{check.detail}</p></div>)}</div><div className="mt-5 flex flex-wrap items-center gap-3"><span className="text-xs font-semibold text-slate-600">下一步：{decision.nextAction.label}</span>{decision.nextAction.href ? <Link href={decision.nextAction.href} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700">{decision.nextAction.label}</Link> : null}</div></section>;
 }
 
-function ConsentCheck({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
-  return <label className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} className="mt-0.5" /><span>我确认本次项目概览、已确认条目、仓库状态、问题和命中的记忆片段会发送给页面所选模型供应商；不会发送未命中的完整项目库，也不会执行任何写入。</span></label>;
-}
-
 function BriefPanel({ projectId, report, canRun, onReload }: { projectId: string; report: Report | null; canRun: boolean; onReload: () => Promise<void> }) {
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [clientKey, setClientKey] = useState<string | null>(null);
+  const prepareSequence = useRef(0);
+  const prepareController = useRef<AbortController | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function generate() {
+  function invalidatePrepareRequest() {
+    prepareSequence.current += 1;
+    prepareController.current?.abort();
+    prepareController.current = null;
+  }
+
+  async function prepare() {
+    invalidatePrepareRequest();
+    const sequence = prepareSequence.current;
+    const controller = new AbortController();
+    prepareController.current = controller;
+    const preparedClientKey = crypto.randomUUID();
     setPending(true); setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/intelligence/brief`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientKey: crypto.randomUUID(), consent }),
+        body: JSON.stringify({ phase: "prepare", clientKey: preparedClientKey }),
+        signal: controller.signal,
       });
-      if (!response.ok) throw new Error(await readError(response, "项目简报生成失败"));
-      setMessage("当前状态简报已生成并保存"); await onReload();
-    } catch (generateError) {
-      setMessage(generateError instanceof Error ? generateError.message : "项目简报生成失败");
+      if (sequence !== prepareSequence.current || controller.signal.aborted) return;
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "外发摘要读取失败");
+        throw new Error(failure.message ?? "外发摘要读取失败");
+      }
+      const payload = await response.json() as { confirmation: Confirmation };
+      setConfirmation(payload.confirmation);
+      setClientKey(preparedClientKey);
+      setMessage("已读取本次外发摘要。请核对路由和范围后，点击确认并执行。");
+    } catch (prepareError) {
+      if (controller.signal.aborted || sequence !== prepareSequence.current) return;
+      setMessage(prepareError instanceof Error ? prepareError.message : "外发摘要读取失败");
     } finally {
-      setAcknowledged(false);
-      setPending(false);
+      if (sequence === prepareSequence.current) {
+        setPending(false);
+        if (prepareController.current === controller) prepareController.current = null;
+      }
     }
   }
 
-  return <section id="project-brief" className="scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5 border-b border-slate-100 pb-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Current state brief</p><h2 className="mt-2 text-2xl font-semibold">项目当前状态</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">聚合已确认条目、当前索引和仓库状态，生成可追溯的进展、决策、问题、风险与关注事项。</p></div>{canRun ? <button type="button" onClick={() => void generate()} disabled={!acknowledged || pending} className="rounded-xl border border-indigo-200 px-5 py-3 text-xs font-semibold text-indigo-700 hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-40">{pending ? "调查与生成中…" : report ? "重新生成简报" : "生成当前状态简报"}</button> : null}</div>{canRun ? <ConsentCheck checked={acknowledged} onChange={setAcknowledged} /> : null}{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{report ? <ReportView report={report} /> : <div className="mt-6 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有项目智能简报。完成上方下一步后，才可以生成并保存带证据的简报。</div>}</section>;
+  async function generate() {
+    if (confirmation === null || clientKey === null) {
+      setMessage("请先读取本次外发摘要。");
+      return;
+    }
+    setPending(true); setMessage(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/intelligence/brief`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phase: "execute", challengeId: confirmation.challengeId, clientKey }),
+      });
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "项目简报生成失败");
+        const nextStep = confirmationMessage(failure.code);
+        if (nextStep !== null) { setConfirmation(null); setClientKey(null); }
+        throw new Error(nextStep ?? failure.message ?? "项目简报生成失败");
+      }
+      setConfirmation(null); setClientKey(null);
+      setMessage("当前状态简报已生成并保存"); await onReload();
+    } catch (generateError) {
+      setMessage(generateError instanceof Error ? generateError.message : "项目简报生成失败");
+    } finally { setPending(false); }
+  }
+
+  function actionButton() {
+    if (!canRun) return null;
+    if (confirmation !== null) return <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel={report ? "重新生成简报" : "生成当前状态简报"} onExecute={() => void generate()} />;
+    return <button type="button" onClick={() => void prepare()} disabled={pending} className="rounded-xl border border-indigo-200 px-5 py-3 text-xs font-semibold text-indigo-700 hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button>;
+  }
+
+  return <section id="project-brief" className="scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5 border-b border-slate-100 pb-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Current state brief</p><h2 className="mt-2 text-2xl font-semibold">项目当前状态</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">聚合已确认条目、当前索引和仓库状态，生成可追溯的进展、决策、问题、风险与关注事项。</p></div>{actionButton()}</div>{confirmation === null && canRun ? <p className="mt-4 text-xs leading-5 text-slate-500">先读取本次外发摘要，确认实际路由、范围和有效期后，才会创建任务。</p> : null}{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{report ? <ReportView report={report} /> : <div className="mt-6 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有项目智能简报。完成上方下一步后，才可以生成并保存带证据的简报。</div>}</section>;
 }
 
 function ReportView({ report }: { report: Report }) {
@@ -263,31 +355,86 @@ function ReportView({ report }: { report: Report }) {
 
 function AgentPanel({ projectId, runs, tools, canRun, onReload }: { projectId: string; runs: AgentRun[]; tools: ToolTrace["tool"][]; canRun: boolean; onReload: () => Promise<void> }) {
   const [question, setQuestion] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [clientKey, setClientKey] = useState<string | null>(null);
+  const prepareSequence = useRef(0);
+  const prepareController = useRef<AbortController | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const selectedRun = runs.find((run) => run.id === selectedRunId) ?? runs[0] ?? null;
 
-  async function ask(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setPending(true); setMessage(null);
+  function resetConfirmation() {
+    prepareSequence.current += 1;
+    prepareController.current?.abort();
+    prepareController.current = null;
+    setConfirmation(null);
+    setClientKey(null);
+  }
+
+  async function prepare(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (question.trim().length < 2) return;
+    prepareSequence.current += 1;
+    prepareController.current?.abort();
+    const sequence = prepareSequence.current;
+    const controller = new AbortController();
+    prepareController.current = controller;
+    const preparedClientKey = crypto.randomUUID();
+    setPending(true); setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/intelligence/agent`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientKey: crypto.randomUUID(), question, consent }),
+        body: JSON.stringify({ phase: "prepare", clientKey: preparedClientKey, question }),
+        signal: controller.signal,
       });
-      if (!response.ok) throw new Error(await readError(response, "项目调查失败"));
-      setQuestion(""); setSelectedRunId(null); setMessage("只读调查已完成"); await onReload();
-    } catch (askError) {
-      setMessage(askError instanceof Error ? askError.message : "项目调查失败");
+      if (sequence !== prepareSequence.current || controller.signal.aborted) return;
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "外发摘要读取失败");
+        throw new Error(failure.message ?? "外发摘要读取失败");
+      }
+      const payload = await response.json() as { confirmation: Confirmation };
+      setConfirmation(payload.confirmation);
+      setClientKey(preparedClientKey);
+      setMessage("已读取本次外发摘要。请核对路由和范围后，点击确认并执行。");
+    } catch (prepareError) {
+      if (controller.signal.aborted || sequence !== prepareSequence.current) return;
+      setMessage(prepareError instanceof Error ? prepareError.message : "外发摘要读取失败");
     } finally {
-      setAcknowledged(false);
-      setPending(false);
+      if (sequence === prepareSequence.current) {
+        setPending(false);
+        if (prepareController.current === controller) prepareController.current = null;
+      }
     }
   }
 
-  return <section id="agent-investigation" className="scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Read-only investigation</p><h2 className="mt-2 text-2xl font-semibold">向项目智能体提问</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">模型只能从固定工具中规划调查；服务端逐项校验并执行只读查询，最终回答只能引用本次工具取得的证据。</p><div className="mt-4 flex flex-wrap gap-2">{tools.map((tool) => <span key={tool} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">{toolLabels[tool]}</span>)}</div></div>{canRun ? <form onSubmit={ask} className="mt-6"><label className="block text-sm font-semibold text-slate-700">你想了解什么？<textarea value={question} onChange={(event) => setQuestion(event.target.value)} minLength={2} maxLength={2_000} rows={4} placeholder="例如：目前最需要关注的风险是什么？哪些关键决策仍缺少证据？" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:bg-white" /></label><ConsentCheck checked={acknowledged} onChange={setAcknowledged} /><div className="mt-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">不提供 Shell、文件系统、代码修改或 GitHub 写入工具。</p><button disabled={!acknowledged || pending || question.trim().length < 2} className="shrink-0 rounded-xl border border-slate-300 px-5 py-3 text-xs font-semibold text-slate-800 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40">{pending ? "规划与调查中…" : "开始只读调查"}</button></div></form> : null}{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{runs.length > 1 ? <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{runs.slice(0, 10).map((run) => <button key={run.id} type="button" onClick={() => setSelectedRunId(run.id)} className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${selectedRun?.id === run.id ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{formatDate(run.createdAt)}</button>)}</div> : null}{selectedRun ? <AgentRunView run={selectedRun} /> : <div className="mt-7 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有调查记录。完成上方下一步后，可提交一个只读问题并保存证据轨迹。</div>}</section>;
+  async function ask() {
+    if (confirmation === null || clientKey === null) {
+      setMessage("请先读取本次外发摘要。");
+      return;
+    }
+    setPending(true); setMessage(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/intelligence/agent`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phase: "execute", challengeId: confirmation.challengeId, clientKey, question }),
+      });
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "项目调查失败");
+        const nextStep = confirmationMessage(failure.code);
+        if (nextStep !== null) resetConfirmation();
+        throw new Error(nextStep ?? failure.message ?? "项目调查失败");
+      }
+      resetConfirmation();
+      setQuestion(""); setSelectedRunId(null); setMessage("只读调查已完成"); await onReload();
+    } catch (askError) {
+      setMessage(askError instanceof Error ? askError.message : "项目调查失败");
+    } finally { setPending(false); }
+  }
+
+  return <section id="agent-investigation" className="scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Read-only investigation</p><h2 className="mt-2 text-2xl font-semibold">向项目智能体提问</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">模型只能从固定工具中规划调查；服务端逐项校验并执行只读查询，最终回答只能引用本次工具取得的证据。</p><div className="mt-4 flex flex-wrap gap-2">{tools.map((tool) => <span key={tool} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">{toolLabels[tool]}</span>)}</div></div>{canRun ? <form onSubmit={(event) => void prepare(event)} className="mt-6"><label className="block text-sm font-semibold text-slate-700">你想了解什么？<textarea value={question} onChange={(event) => { setQuestion(event.target.value); resetConfirmation(); }} minLength={2} maxLength={2_000} rows={4} placeholder="例如：目前最需要关注的风险是什么？哪些关键决策仍缺少证据？" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:bg-white" /></label>{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel="开始只读调查" onExecute={() => void ask()} /> : <div className="mt-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">不提供 Shell、文件系统、代码修改或 GitHub 写入工具。</p><button disabled={pending || question.trim().length < 2} className="shrink-0 rounded-xl border border-slate-300 px-5 py-3 text-xs font-semibold text-slate-800 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button></div>}</form> : null}{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{runs.length > 1 ? <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{runs.slice(0, 10).map((run) => <button key={run.id} type="button" onClick={() => setSelectedRunId(run.id)} className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${selectedRun?.id === run.id ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{formatDate(run.createdAt)}</button>)}</div> : null}{selectedRun ? <AgentRunView run={selectedRun} /> : <div className="mt-7 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有调查记录。完成上方下一步后，可提交一个只读问题并保存证据轨迹。</div>}</section>;
 }
 
 function AgentRunView({ run }: { run: AgentRun }) {

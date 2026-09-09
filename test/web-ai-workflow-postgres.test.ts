@@ -12,15 +12,18 @@ import {
   createPlatformDefaultAiRoute,
   validatePlatformDefaultAiRoute,
 } from "../src/lib/platform-default-ai-routes";
-import { reviewWebAiCandidate, runAutoExtractJob } from "../src/lib/web-auto-extract";
-import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
-import { runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
+import { prepareAutoExtractConfirmation, reviewWebAiCandidate, runAutoExtractJob } from "../src/lib/web-auto-extract";
+import { prepareProjectMemoryIndexConfirmation, runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
 import { hashSourceContent } from "../src/lib/source";
-import { runRagAnswerJob, runSemanticSearchJob } from "../src/lib/web-rag";
+import {
+  prepareRagAnswerConfirmation,
+  prepareSemanticSearchConfirmation,
+  runRagAnswerJob,
+  runSemanticSearchJob,
+} from "../src/lib/web-rag";
 import { createControlledMembership } from "./membership-fixture";
 
 const shouldRun = process.env.WEB_AI_POSTGRES_GATE === "1";
-const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
 
 async function activateDefaultRoute(
   db: ReturnType<typeof getDb>,
@@ -179,11 +182,20 @@ test(
       });
       assert.equal(defaultGenerationRoute.status, "active");
 
+      const indexClientKey = `index-${suffix}`;
+      const indexConfirmation = await prepareProjectMemoryIndexConfirmation({
+        projectId,
+        requestedBy: user,
+        clientKey: indexClientKey,
+        mode: "full",
+        db,
+      });
       const indexJob = await runProjectMemoryIndexJob({
         projectId,
         requestedBy: user,
-        clientKey: `index-${suffix}`,
-        consent,
+        clientKey: indexClientKey,
+        challengeId: indexConfirmation.challengeId,
+        mode: "full",
       }, db);
       assert.equal(indexJob.status, "succeeded");
       const pointer = await db.memoryIndexPointer.findUnique({
@@ -194,11 +206,19 @@ test(
       assert.equal(pointer?.generation.recordCount, 1);
       assert.equal(pointer?.generation.dimensions, 8);
 
+      const extractClientKey = `extract-${suffix}`;
+      const extractConfirmation = await prepareAutoExtractConfirmation({
+        projectId,
+        requestedBy: user,
+        clientKey: extractClientKey,
+        sourceIds: [source.id],
+        db,
+      });
       const extractJob = await runAutoExtractJob({
         projectId,
         requestedBy: user,
-        clientKey: `extract-${suffix}`,
-        consent,
+        clientKey: extractClientKey,
+        challengeId: extractConfirmation.challengeId,
         request: { sourceIds: [source.id] },
       }, db);
       assert.equal(extractJob.status, "succeeded");
@@ -228,12 +248,21 @@ test(
       assert.equal(reviewedRow.reviewedBy, user.id);
       assert.equal(reviewRevision.actorId, user.id);
 
+      const searchQuestion = "项目采用了什么记忆方案？";
+      const searchClientKey = `search-${suffix}`;
+      const searchConfirmation = await prepareSemanticSearchConfirmation({
+        projectId,
+        requestedBy: user,
+        clientKey: searchClientKey,
+        question: searchQuestion,
+        db,
+      });
       const searchJob = await runSemanticSearchJob({
         projectId,
         requestedBy: user,
-        clientKey: `search-${suffix}`,
-        consent,
-        question: "项目采用了什么记忆方案？",
+        clientKey: searchClientKey,
+        challengeId: searchConfirmation.challengeId,
+        question: searchQuestion,
       }, db);
       assert.equal(searchJob.status, "succeeded");
       const searchResult = searchJob.result as { results: Array<{ contentText: string; score: number }> };
@@ -241,12 +270,21 @@ test(
       assert.match(searchResult.results[0]!.contentText, /统一记忆索引/);
       assert.equal(Number.isFinite(searchResult.results[0]!.score), true);
 
+      const ragQuestion = "项目采用了什么记忆方案？";
+      const ragClientKey = `rag-${suffix}`;
+      const ragConfirmation = await prepareRagAnswerConfirmation({
+        projectId,
+        requestedBy: user,
+        clientKey: ragClientKey,
+        question: ragQuestion,
+        db,
+      });
       const ragJob = await runRagAnswerJob({
         projectId,
         requestedBy: user,
-        clientKey: `rag-${suffix}`,
-        consent,
-        question: "项目采用了什么记忆方案？",
+        clientKey: ragClientKey,
+        challengeId: ragConfirmation.challengeId,
+        question: ragQuestion,
       }, db);
       assert.equal(ragJob.status, "succeeded");
       const answer = await db.ragAnswer.findFirstOrThrow({ where: { projectId } });

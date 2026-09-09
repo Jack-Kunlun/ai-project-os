@@ -25,12 +25,13 @@ import {
   validatePlatformDefaultAiRoute,
 } from "../src/lib/platform-default-ai-routes";
 import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
-import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import {
   getProjectMemoryIndexPlan,
+  prepareProjectMemoryIndexConfirmation,
   reconcileMemoryIndexJob,
   runProjectMemoryIndexJob,
 } from "../src/lib/web-memory-index";
+import type { WebAiActor } from "../src/lib/web-ai-access";
 import { createControlledMembership } from "./membership-fixture";
 
 const execFile = promisify(execFileCallback);
@@ -45,7 +46,6 @@ const configuredUrl = process.env.MEMORY_INDEX_C_TEST_DATABASE_URL ??
   (gate === "1" ? process.env.DATABASE_URL : undefined);
 const hasUrl = typeof configuredUrl === "string" && configuredUrl.length > 0;
 const shouldRun = gate === "1";
-const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
 
 async function activateDefaultEmbeddingRoute(
   db: PrismaClient,
@@ -219,6 +219,19 @@ async function createMemoryJob(db: PrismaClient, projectId: string, requestedByI
       payload: {},
     },
   });
+}
+
+async function prepareMemoryIndexChallenge(
+  db: PrismaClient,
+  input: Readonly<{
+    projectId: string;
+    requestedBy: WebAiActor;
+    clientKey: string;
+    mode: "full" | "incremental";
+    planFingerprint?: string;
+  }>,
+) {
+  return prepareProjectMemoryIndexConfirmation({ ...input, db });
 }
 
 async function createStagingGeneration(
@@ -401,11 +414,18 @@ test(
         },
       });
 
+      const fullClientKey = `full-${randomUUID()}`;
+      const fullConfirmation = await prepareMemoryIndexChallenge(db, {
+        projectId,
+        requestedBy: actor,
+        clientKey: fullClientKey,
+        mode: "full",
+      });
       const fullJob = await runProjectMemoryIndexJob({
         projectId,
         requestedBy: actor,
-        clientKey: `full-${randomUUID()}`,
-        consent,
+        clientKey: fullClientKey,
+        challengeId: fullConfirmation.challengeId,
         mode: "full",
       }, db);
       assert.equal(fullJob.status, "succeeded");
@@ -435,11 +455,18 @@ test(
         },
       });
       embeddingInputs.length = 0;
+      const incrementalClientKey = `incremental-${randomUUID()}`;
+      const incrementalConfirmation = await prepareMemoryIndexChallenge(db, {
+        projectId,
+        requestedBy: actor,
+        clientKey: incrementalClientKey,
+        mode: "incremental",
+      });
       const incrementalJob = await runProjectMemoryIndexJob({
         projectId,
         requestedBy: actor,
-        clientKey: `incremental-${randomUUID()}`,
-        consent,
+        clientKey: incrementalClientKey,
+        challengeId: incrementalConfirmation.challengeId,
         mode: "incremental",
       }, db);
       assert.equal(incrementalJob.status, "succeeded");
@@ -477,12 +504,19 @@ test(
       });
       fetchMode = "unknown";
       const callsBeforeUnknown = fetchCalls;
+      const unknownClientKey = `unknown-${randomUUID()}`;
+      const unknownConfirmation = await prepareMemoryIndexChallenge(db, {
+        projectId,
+        requestedBy: actor,
+        clientKey: unknownClientKey,
+        mode: "incremental",
+      });
       await assert.rejects(
         () => runProjectMemoryIndexJob({
           projectId,
           requestedBy: actor,
-          clientKey: `unknown-${randomUUID()}`,
-          consent,
+          clientKey: unknownClientKey,
+          challengeId: unknownConfirmation.challengeId,
           mode: "incremental",
         }, db!),
         (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
@@ -528,11 +562,18 @@ test(
       // fresh client key can now start a new candidate and the old pointer is
       // still the baseline.
       fetchMode = "success";
+      const resumedClientKey = `resumed-${randomUUID()}`;
+      const resumedConfirmation = await prepareMemoryIndexChallenge(db, {
+        projectId,
+        requestedBy: actor,
+        clientKey: resumedClientKey,
+        mode: "incremental",
+      });
       const resumedJob = await runProjectMemoryIndexJob({
         projectId,
         requestedBy: actor,
-        clientKey: `resumed-${randomUUID()}`,
-        consent,
+        clientKey: resumedClientKey,
+        challengeId: resumedConfirmation.challengeId,
         mode: "incremental",
       }, db);
       assert.equal(resumedJob.status, "succeeded");
@@ -586,11 +627,18 @@ test(
       const codeScanner = createGitHubCodeScanService({ db, client: repositoryClient });
       const initialScan = await codeScanner.scanProject(pointerProjectId);
       assert.equal(initialScan.status, "succeeded");
+      const pointerFullClientKey = `pointer-full-${randomUUID()}`;
+      const pointerFullConfirmation = await prepareMemoryIndexChallenge(db, {
+        projectId: pointerProjectId,
+        requestedBy: actor,
+        clientKey: pointerFullClientKey,
+        mode: "full",
+      });
       const pointerFullJob = await runProjectMemoryIndexJob({
         projectId: pointerProjectId,
         requestedBy: actor,
-        clientKey: `pointer-full-${randomUUID()}`,
-        consent,
+        clientKey: pointerFullClientKey,
+        challengeId: pointerFullConfirmation.challengeId,
         mode: "full",
       }, db);
       assert.equal(pointerFullJob.status, "succeeded");
@@ -606,11 +654,19 @@ test(
       assert.equal(sparsePlan.deadlineEligible, true);
       embeddingInputs.length = 0;
       const sparseCallsBefore = fetchCalls;
+      const sparseClientKey = `pointer-sparse-${randomUUID()}`;
+      const sparseConfirmation = await prepareMemoryIndexChallenge(db, {
+        projectId: pointerProjectId,
+        requestedBy: actor,
+        clientKey: sparseClientKey,
+        mode: "incremental",
+        planFingerprint: sparsePlan.planFingerprint,
+      });
       const sparseJob = await runProjectMemoryIndexJob({
         projectId: pointerProjectId,
         requestedBy: actor,
-        clientKey: `pointer-sparse-${randomUUID()}`,
-        consent,
+        clientKey: sparseClientKey,
+        challengeId: sparseConfirmation.challengeId,
         mode: "incremental",
         planFingerprint: sparsePlan.planFingerprint,
       }, db);
@@ -627,11 +683,19 @@ test(
       assert.ok(deletePlan.deleteCount >= 1);
       assert.equal(deletePlan.generateCount, 0);
       const deleteCallsBefore = fetchCalls;
+      const deleteClientKey = `pointer-delete-${randomUUID()}`;
+      const deleteConfirmation = await prepareMemoryIndexChallenge(db, {
+        projectId: pointerProjectId,
+        requestedBy: actor,
+        clientKey: deleteClientKey,
+        mode: "incremental",
+        planFingerprint: deletePlan.planFingerprint,
+      });
       const deleteJob = await runProjectMemoryIndexJob({
         projectId: pointerProjectId,
         requestedBy: actor,
-        clientKey: `pointer-delete-${randomUUID()}`,
-        consent,
+        clientKey: deleteClientKey,
+        challengeId: deleteConfirmation.challengeId,
         mode: "incremental",
         planFingerprint: deletePlan.planFingerprint,
       }, db);
@@ -735,13 +799,26 @@ test(
       assert.equal(deadlineScan.status, "succeeded");
       const deadlineFetchCalls = fetchCalls;
       await assert.rejects(
-        () => runProjectMemoryIndexJob({
-          projectId: deadlineProjectId,
-          requestedBy: actor,
-          clientKey: `deadline-${randomUUID()}`,
-          consent,
-          mode: "full",
-        }, db!),
+        async () => {
+          const deadlineClientKey = `deadline-${randomUUID()}`;
+          // The deadline guard is evaluated while preparing the plan, before
+          // a confirmation challenge can be issued. If preparation is
+          // eligible, execute with its challenge so a missing challenge can
+          // never mask the intended deadline assertion.
+          const deadlineConfirmation = await prepareMemoryIndexChallenge(db!, {
+            projectId: deadlineProjectId,
+            requestedBy: actor,
+            clientKey: deadlineClientKey,
+            mode: "full",
+          });
+          return runProjectMemoryIndexJob({
+            projectId: deadlineProjectId,
+            requestedBy: actor,
+            clientKey: deadlineClientKey,
+            challengeId: deadlineConfirmation.challengeId,
+            mode: "full",
+          }, db!);
+        },
         (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
           (error as { code?: unknown }).code === "MEMORY_INDEX_DEADLINE_EXCEEDED",
       );

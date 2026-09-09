@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Prisma, ProjectItemRevisionAction, type PrismaClient } from "@prisma/client";
+import { Prisma, ProjectItemRevisionAction, type ContentOriginScope, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { invokeChatCompletion } from "@/lib/ai-providers";
 import { getDb } from "@/lib/db";
@@ -18,7 +18,6 @@ import {
 import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
 import { getProjectJobInternal, withProjectJobAccessTransaction } from "@/lib/project-workflow";
 import {
-  assertWebAiConsent,
   auditedProviderCall,
   claimWebAiJob,
   createGrantedWebAiJob,
@@ -28,6 +27,12 @@ import {
   stableAiCallKey,
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
+import {
+  confirmationRouteDisplay,
+  confirmationRouteSnapshot,
+  prepareWebAiConfirmation,
+  type WebAiConfirmationAction,
+} from "@/lib/web-ai-confirmation";
 import {
   nonLegacyMcpProjectItemWhere,
   nonLegacyMcpProjectSourceLineageWhere,
@@ -249,24 +254,29 @@ export async function listAutoExtractSources(
   });
 }
 
-export async function runAutoExtractJob(input: Readonly<{
-  projectId: string;
-  requestedBy: WebAiActor;
-  clientKey: unknown;
-  consent: unknown;
-  request: unknown;
-}>, db: PrismaClient = getDb()) {
-  assertWebAiConsent(input.consent);
-  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
-  const parsed = requestSchema.parse(input.request);
+type AutoExtractMaterial = Readonly<{
+  route: Awaited<ReturnType<typeof resolveEffectiveAiRoute>>;
+  sources: ReadonlyArray<{
+    id: string;
+    kind: string;
+    originScope: ContentOriginScope;
+    projectRepositoryLinkId: string | null;
+    externalRef: string | null;
+    contentText: string;
+    contentHash: string;
+  }>;
+  manifest: string;
+}>;
+
+async function loadAutoExtractMaterial(
+  projectId: string,
+  sourceIds: ReadonlyArray<string>,
+  db: PrismaClient | Prisma.TransactionClient,
+): Promise<AutoExtractMaterial> {
   const [route, sources] = await Promise.all([
-    resolveEffectiveAiRoute(input.projectId, "autoExtract", db),
+    resolveEffectiveAiRoute(projectId, "autoExtract", db as unknown as PrismaClient),
     db.projectSource.findMany({
-      where: {
-        projectId: input.projectId,
-        id: { in: parsed.sourceIds },
-        ...nonLegacyMcpProjectSourceWhere,
-      },
+      where: { projectId, id: { in: [...sourceIds] }, ...nonLegacyMcpProjectSourceWhere },
       orderBy: { id: "asc" },
       select: {
         id: true,
@@ -279,14 +289,74 @@ export async function runAutoExtractJob(input: Readonly<{
       },
     }),
   ]);
-  if (sources.length !== new Set(parsed.sourceIds).size) return fail("AUTO_EXTRACT_SOURCE_NOT_FOUND");
+  if (sources.length !== new Set(sourceIds).size) return fail("AUTO_EXTRACT_SOURCE_NOT_FOUND");
   if (
     sources.some((source) => source.contentText.length > MAX_SOURCE_CHARACTERS) ||
     sources.reduce((sum, source) => sum + source.contentText.length, 0) > MAX_TOTAL_CHARACTERS
-  ) {
-    return fail("AUTO_EXTRACT_SOURCE_TOO_LARGE");
-  }
-  const manifest = manifestFingerprint(sources.map((source) => ({ id: source.id, contentHash: source.contentHash })));
+  ) return fail("AUTO_EXTRACT_SOURCE_TOO_LARGE");
+  return Object.freeze({
+    route,
+    sources,
+    manifest: manifestFingerprint(sources.map((source) => ({ id: source.id, contentHash: source.contentHash }))),
+  });
+}
+
+function autoExtractConfirmationMaterial(material: AutoExtractMaterial, visibility: ProjectAiPublicVisibility) {
+  return Object.freeze({
+    contentVersion: `auto-extract:v1:${material.manifest}`,
+    inputFingerprintPayload: {
+      sourceIds: material.sources.map((source) => source.id),
+      sourceManifest: material.sources.map((source) => ({ id: source.id, contentHash: source.contentHash })),
+    },
+    routeSnapshot: confirmationRouteSnapshot(material.route),
+    safeSummary: {
+      action: "memoryExtract",
+      route: confirmationRouteDisplay(material.route, visibility),
+      scope: { sourceCount: material.sources.length },
+    },
+  });
+}
+
+export async function prepareAutoExtractConfirmation(input: Readonly<{
+  projectId: string;
+  requestedBy: WebAiActor;
+  sourceIds: unknown;
+  clientKey: unknown;
+  db?: PrismaClient;
+}>) {
+  const sourceIds = requestSchema.parse({ sourceIds: input.sourceIds }).sourceIds;
+  return prepareWebAiConfirmation({
+    projectId: input.projectId,
+    actor: input.requestedBy,
+    targetAction: "memoryExtract" satisfies WebAiConfirmationAction,
+    clientKey: input.clientKey,
+    db: input.db,
+    resolve: async (tx, admission) => {
+      const material = await loadAutoExtractMaterial(input.projectId, sourceIds, tx);
+      const visibility = await loadProjectAiPublicVisibility(tx, admission.project.id, admission.actor.id);
+      return autoExtractConfirmationMaterial(material, visibility);
+    },
+  });
+}
+
+export async function runAutoExtractJob(input: Readonly<{
+  projectId: string;
+  requestedBy: WebAiActor;
+  clientKey: unknown;
+  challengeId?: unknown;
+  consent?: unknown;
+  request: unknown;
+}>, db: PrismaClient = getDb()) {
+  // Keep the access fence ahead of request/source material reads. The grant
+  // transaction repeats this check and refreshes the challenge material under
+  // lock; this preflight only prevents an already-ineligible actor from
+  // touching source rows on the way to that transaction.
+  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
+  const parsed = requestSchema.parse(input.request);
+  const material = await loadAutoExtractMaterial(input.projectId, parsed.sourceIds, db);
+  const { route, sources, manifest } = material;
+  const visibility = await loadProjectAiPublicVisibility(db, input.projectId, input.requestedBy.id);
+  const confirmationMaterial = autoExtractConfirmationMaterial(material, visibility);
   const granted = await createGrantedWebAiJob({
     projectId: input.projectId,
     kind: "autoExtract",
@@ -297,6 +367,27 @@ export async function runAutoExtractJob(input: Readonly<{
     scopeIds: sources.map((source) => source.id),
     manifestFingerprint: manifest,
     payload: { sourceIds: sources.map((source) => source.id), manifest },
+    confirmation: {
+      challengeId: input.challengeId,
+      clientKey: input.clientKey,
+      targetAction: "memoryExtract",
+      contentVersion: confirmationMaterial.contentVersion,
+      inputFingerprintPayload: confirmationMaterial.inputFingerprintPayload,
+      routeSnapshot: confirmationMaterial.routeSnapshot,
+    },
+    refreshConfirmation: async (tx) => {
+      const freshMaterial = await loadAutoExtractMaterial(input.projectId, parsed.sourceIds, tx);
+      const freshVisibility = await loadProjectAiPublicVisibility(tx, input.projectId, input.requestedBy.id);
+      const fresh = autoExtractConfirmationMaterial(freshMaterial, freshVisibility);
+      return {
+        challengeId: input.challengeId,
+        clientKey: input.clientKey,
+        targetAction: "memoryExtract",
+        contentVersion: fresh.contentVersion,
+        inputFingerprintPayload: fresh.inputFingerprintPayload,
+        routeSnapshot: fresh.routeSnapshot,
+      };
+    },
   }, db);
   if (!granted.created) return getProjectJobInternal(input.projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);

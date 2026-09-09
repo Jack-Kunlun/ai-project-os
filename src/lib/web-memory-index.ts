@@ -28,7 +28,6 @@ import {
   workflowSafeFailureCode,
 } from "@/lib/project-workflow";
 import {
-  assertWebAiConsent,
   auditedProviderCall,
   claimWebAiJob,
   createGrantedWebAiJob,
@@ -39,6 +38,11 @@ import {
   stableAiCallKey,
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
+import {
+  confirmationRouteDisplay,
+  confirmationRouteSnapshot,
+  prepareWebAiConfirmation,
+} from "@/lib/web-ai-confirmation";
 import type { EffectiveAiRoute } from "@/lib/effective-ai-route";
 import {
   isActiveNonLegacyMcpProjectSource,
@@ -960,6 +964,50 @@ export async function getProjectMemoryIndexPlan(
   return toPublicMemoryIndexPlan(await buildMemoryIndexPlan(projectId, mode, db), visibility);
 }
 
+export async function prepareProjectMemoryIndexConfirmation(input: Readonly<{
+  projectId: string;
+  requestedBy: WebAiActor;
+  mode: "full" | "incremental";
+  planFingerprint?: string;
+  clientKey: unknown;
+  db?: PrismaClient;
+}>) {
+  return prepareWebAiConfirmation({
+    projectId: input.projectId,
+    actor: input.requestedBy,
+    targetAction: "memoryIndex",
+    clientKey: input.clientKey,
+    db: input.db,
+    resolve: async (tx, admission) => {
+      const plan = await buildMemoryIndexPlan(input.projectId, input.mode, tx);
+      if (plan.ineligibleCode !== null) return fail(plan.ineligibleCode);
+      if (input.planFingerprint !== undefined && input.planFingerprint !== plan.planFingerprint) return fail("MEMORY_INDEX_PLAN_STALE");
+      const visibility = await loadProjectAiPublicVisibility(tx, admission.project.id, admission.actor.id);
+      return {
+        contentVersion: `memory-index:v1:${plan.planFingerprint}`,
+        inputFingerprintPayload: {
+          mode: input.mode,
+          planFingerprint: plan.planFingerprint,
+          inputManifestFingerprint: plan.currentInputManifestFingerprint,
+        },
+        routeSnapshot: confirmationRouteSnapshot(plan.route),
+        safeSummary: {
+          action: "memoryIndex",
+          route: confirmationRouteDisplay(plan.route, visibility),
+          scope: {
+            mode: plan.mode,
+            inputCount: plan.expectedInputCount,
+            generateCount: plan.generateCount,
+            reuseCount: plan.reuseCount,
+            deleteCount: plan.deleteCount,
+            estimatedProviderCalls: plan.estimatedProviderCalls,
+          },
+        },
+      };
+    },
+  });
+}
+
 export async function getProjectMemoryIndexStatus(projectId: string, actor: WebAiActor, db: PrismaClient = getDb()) {
   const currentActor = await assertWebAiProjectAccess(actor, projectId, "view", db);
   const [visibility, pointer, sourceCount, codePointer, materialPointerCount, route, currentManifest, latestJob] = await Promise.all([
@@ -1186,16 +1234,28 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
   projectId: string;
   requestedBy: WebAiActor;
   clientKey: unknown;
-  consent: unknown;
+  challengeId?: unknown;
+  consent?: unknown;
   mode?: "full" | "incremental";
   planFingerprint?: string;
 }>, db: PrismaClient = getDb()) {
-  assertWebAiConsent(input.consent);
+  // Do not build a plan from project content before the actor has passed the
+  // current access fence. createGrantedWebAiJob repeats the check and binds
+  // the final plan/challenge under the admission lock.
   await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const mode = input.mode ?? "full";
   const initialPlan = await buildMemoryIndexPlan(input.projectId, mode, db);
   if (initialPlan.ineligibleCode !== null) return fail(initialPlan.ineligibleCode);
   const expectedPlanFingerprint = input.planFingerprint ?? initialPlan.planFingerprint;
+  const confirmationMaterial = {
+    contentVersion: `memory-index:v1:${initialPlan.planFingerprint}`,
+    inputFingerprintPayload: {
+      mode,
+      planFingerprint: expectedPlanFingerprint,
+      inputManifestFingerprint: initialPlan.currentInputManifestFingerprint,
+    },
+    routeSnapshot: confirmationRouteSnapshot(initialPlan.route),
+  } as const;
   let generationId: string | null = null;
   let plannedGeneration: MemoryIndexPlanSnapshot | null = null;
   let granted: Readonly<{ jobId: string; grantId: string; created: boolean }>;
@@ -1210,6 +1270,30 @@ export async function runProjectMemoryIndexJob(input: Readonly<{
       scopeIds: safePlanPayload(initialPlan),
       manifestFingerprint: initialPlan.currentInputManifestFingerprint,
       payload: safePlanPayload(initialPlan),
+      confirmation: {
+        challengeId: input.challengeId,
+        clientKey: input.clientKey,
+        targetAction: "memoryIndex",
+        ...confirmationMaterial,
+      },
+      refreshConfirmation: async (tx) => {
+        const freshPlan = await buildMemoryIndexPlan(input.projectId, mode, tx);
+        const freshMaterial = {
+          contentVersion: `memory-index:v1:${freshPlan.planFingerprint}`,
+          inputFingerprintPayload: {
+            mode,
+            planFingerprint: expectedPlanFingerprint,
+            inputManifestFingerprint: freshPlan.currentInputManifestFingerprint,
+          },
+          routeSnapshot: confirmationRouteSnapshot(freshPlan.route),
+        } as const;
+        return {
+          challengeId: input.challengeId,
+          clientKey: input.clientKey,
+          targetAction: "memoryIndex",
+          ...freshMaterial,
+        };
+      },
       afterCreate: async (tx, jobId, grantId) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.projectId}, ${MEMORY_INDEX_LOCK_NAMESPACE}))`;
         const lockedPlan = await buildMemoryIndexPlan(input.projectId, mode, tx);

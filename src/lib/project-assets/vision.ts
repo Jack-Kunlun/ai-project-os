@@ -7,12 +7,12 @@ import { nonLegacyMcpProjectAssetSegmentWhere } from "@/lib/legacy-mcp-source-qu
 import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
+import { loadProjectAiPublicVisibility } from "@/lib/project-ai-public-projection";
 import { renderPdfPageForVision } from "@/lib/project-assets/parser";
 import { ProjectAssetError } from "@/lib/project-assets/service";
 import { readAssetBlob } from "@/lib/project-assets/storage";
 import { getProjectJobInternal, isUncertainProviderDispatch } from "@/lib/project-workflow";
 import {
-  assertWebAiConsent,
   auditedProviderCall,
   claimWebAiJob,
   createGrantedWebAiJob,
@@ -22,6 +22,11 @@ import {
   stableAiCallKey,
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
+import {
+  confirmationRouteDisplay,
+  confirmationRouteSnapshot,
+  prepareWebAiConfirmation,
+} from "@/lib/web-ai-confirmation";
 
 const assetIdSchema = z.string().uuid();
 const visionResponseSchema = z.object({
@@ -80,20 +85,31 @@ function promptFor(locatorLabel: string): string {
   ].join("\n");
 }
 
-export async function runProjectAssetVisionExtraction(input: Readonly<{
-  projectId: string;
-  assetId: unknown;
-  requestedBy: WebAiActor;
-  clientKey: unknown;
-  consent: unknown;
-}>, db: PrismaClient = getDb()) {
-  assertWebAiConsent(input.consent);
-  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
-  const assetId = assetIdSchema.parse(input.assetId);
+type VisionMaterial = Readonly<{
+  assetId: string;
+  route: Awaited<ReturnType<typeof resolveEffectiveAiRoute>>;
+  asset: Readonly<{ status: string }>;
+  version: Readonly<{
+    id: string;
+    status: string;
+    mimeType: string;
+    contentHash: string;
+    segments: ReadonlyArray<Readonly<{ id: string; requiresVision: boolean; locatorLabel: string; ordinal: number; pageNumber: number | null }>>;
+  }>;
+  segments: ReadonlyArray<Readonly<{ id: string; requiresVision: boolean; locatorLabel: string; ordinal: number; pageNumber: number | null }>>;
+  manifest: string;
+}>;
+
+async function loadVisionMaterial(
+  projectId: string,
+  rawAssetId: unknown,
+  db: PrismaClient,
+): Promise<VisionMaterial> {
+  const assetId = assetIdSchema.parse(rawAssetId);
   const [route, asset] = await Promise.all([
-    resolveEffectiveAiRoute(input.projectId, "visionExtract", db),
+    resolveEffectiveAiRoute(projectId, "visionExtract", db),
     db.projectAsset.findUnique({
-      where: { projectId_id: { projectId: input.projectId, id: assetId } },
+      where: { projectId_id: { projectId, id: assetId } },
       include: {
         versions: {
           orderBy: { version: "desc" },
@@ -115,7 +131,6 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
   if (!(version.mimeType.startsWith("image/") || version.mimeType === "application/pdf")) {
     throw new ProviderTransportError("AI_PROVIDER_VISION_UNSUPPORTED", 422, false);
   }
-
   const manifest = manifestFingerprint({
     assetId,
     versionId: version.id,
@@ -125,6 +140,58 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
     modelId: route.modelId,
     segments: segments.map((segment) => ({ id: segment.id, locatorLabel: segment.locatorLabel })),
   });
+  return Object.freeze({ assetId, route, asset, version, segments, manifest });
+}
+
+export async function prepareProjectAssetVisionConfirmation(input: Readonly<{
+  projectId: string;
+  assetId: unknown;
+  requestedBy: WebAiActor;
+  clientKey: unknown;
+  db?: PrismaClient;
+}>) {
+  return prepareWebAiConfirmation({
+    projectId: input.projectId,
+    actor: input.requestedBy,
+    targetAction: "assetRecognize",
+    clientKey: input.clientKey,
+    db: input.db,
+    resolve: async (tx, admission) => {
+      const material = await loadVisionMaterial(input.projectId, input.assetId, tx as unknown as PrismaClient);
+      const visibility = await loadProjectAiPublicVisibility(tx, admission.project.id, admission.actor.id);
+      return {
+        contentVersion: `asset-recognize:v1:${material.manifest}`,
+        inputFingerprintPayload: {
+          assetId: material.assetId,
+          versionId: material.version.id,
+          contentHash: material.version.contentHash,
+          segmentIds: material.segments.map((segment) => segment.id),
+        },
+        routeSnapshot: confirmationRouteSnapshot(material.route),
+        safeSummary: {
+          action: "assetRecognize",
+          route: confirmationRouteDisplay(material.route, visibility),
+          scope: { segmentCount: material.segments.length, mimeType: material.version.mimeType },
+        },
+      };
+    },
+  });
+}
+
+export async function runProjectAssetVisionExtraction(input: Readonly<{
+  projectId: string;
+  assetId: unknown;
+  requestedBy: WebAiActor;
+  clientKey: unknown;
+  challengeId?: unknown;
+  consent?: unknown;
+}>, db: PrismaClient = getDb()) {
+  // Asset/version and route reads stay behind the current project access
+  // fence. The grant admission repeats this check while consuming the
+  // challenge, so this is only the early fail-closed boundary.
+  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
+  const material = await loadVisionMaterial(input.projectId, input.assetId, db);
+  const { assetId, route, version, segments, manifest } = material;
   const runId = randomUUID();
   const granted = await createGrantedWebAiJob({
     projectId: input.projectId,
@@ -136,6 +203,35 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
     scopeIds: { assetId, versionId: version.id, segmentIds: segments.map((segment) => segment.id) },
     manifestFingerprint: manifest,
     payload: { assetId, versionId: version.id, segmentIds: segments.map((segment) => segment.id), manifest },
+    confirmation: {
+      challengeId: input.challengeId,
+      clientKey: input.clientKey,
+      targetAction: "assetRecognize",
+      contentVersion: `asset-recognize:v1:${manifest}`,
+      inputFingerprintPayload: {
+        assetId,
+        versionId: version.id,
+        contentHash: version.contentHash,
+        segmentIds: segments.map((segment) => segment.id),
+      },
+      routeSnapshot: confirmationRouteSnapshot(route),
+    },
+    refreshConfirmation: async (tx) => {
+      const fresh = await loadVisionMaterial(input.projectId, input.assetId, tx as unknown as PrismaClient);
+      return {
+        challengeId: input.challengeId,
+        clientKey: input.clientKey,
+        targetAction: "assetRecognize",
+        contentVersion: `asset-recognize:v1:${fresh.manifest}`,
+        inputFingerprintPayload: {
+          assetId: fresh.assetId,
+          versionId: fresh.version.id,
+          contentHash: fresh.version.contentHash,
+          segmentIds: fresh.segments.map((segment) => segment.id),
+        },
+        routeSnapshot: confirmationRouteSnapshot(fresh.route),
+      };
+    },
     afterCreate: async (tx, jobId) => {
       const currentVersion = await tx.projectAssetVersion.findUnique({
         where: { projectId_id: { projectId: input.projectId, id: version.id } },

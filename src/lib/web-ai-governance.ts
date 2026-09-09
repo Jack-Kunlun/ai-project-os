@@ -48,6 +48,13 @@ import {
   updateProjectJobProgress,
 } from "@/lib/project-workflow";
 import { isProjectAiRuntimeOperation } from "@/lib/project-ai-runtime-capabilities";
+import {
+  consumeWebAiConfirmation,
+  normalizeWebAiConfirmationId,
+  validateWebAiConfirmation,
+  type WebAiConfirmationExecuteInput,
+  WebAiConfirmationError,
+} from "@/lib/web-ai-confirmation";
 
 export { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 const GRANT_LIFETIME_MS = 24 * 60 * 60 * 1_000;
@@ -71,7 +78,64 @@ type DispatchRoute = RuntimeRoute;
 
 type RuntimeDatabase = PrismaClient | Prisma.TransactionClient;
 
-function isFiniteDate(value: Date): boolean {
+/**
+ * PostgreSQL jsonb does not preserve object key insertion order. Canonicalize
+ * only strict JSON values before comparing persisted grant scopes, while
+ * keeping array order and primitive types exact. Anything outside JSON is
+ * rejected instead of allowing JSON.stringify to coerce or omit it.
+ */
+function canonicalJson(value: unknown): string | null {
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    return JSON.stringify(value);
+  }
+  if (typeof value !== "object") return null;
+
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    if (Array.isArray(value)) {
+      if (prototype !== Array.prototype) return null;
+      const keys = Object.keys(value);
+      if (keys.length !== value.length || keys.some((key, index) => key !== String(index))) return null;
+      const items = keys.map((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return descriptor === undefined || descriptor.get !== undefined || descriptor.set !== undefined
+          ? null
+          : canonicalJson(descriptor.value);
+      });
+      if (items.some((item) => item === null)) return null;
+      return `[${items.join(",")}]`;
+    }
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const ownKeys = Reflect.ownKeys(value);
+    if (ownKeys.some((key) => typeof key !== "string")) return null;
+    const keys = Object.keys(value).sort();
+    if (keys.length !== ownKeys.length) return null;
+    const entries = keys.map((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      const child = descriptor === undefined || descriptor.get !== undefined || descriptor.set !== undefined
+        ? null
+        : canonicalJson(descriptor.value);
+      return child === null ? null : `${JSON.stringify(key)}:${child}`;
+    });
+    if (entries.some((entry) => entry === null)) return null;
+    return `{${entries.join(",")}}`;
+  } catch {
+    return null;
+  }
+}
+
+/** @internal Focused contract coverage for the strict grant-scope comparator. */
+export function canonicalJsonScopeEqual(left: unknown, right: unknown): boolean {
+  const leftCanonical = canonicalJson(left);
+  const rightCanonical = canonicalJson(right);
+  return leftCanonical !== null && rightCanonical !== null && leftCanonical === rightCanonical;
+}
+
+function isFiniteDate(value: unknown): value is Date {
   return value instanceof Date && Number.isFinite(value.getTime());
 }
 
@@ -367,16 +431,39 @@ async function assertRuntimeBilling(input: Readonly<{
 async function personalGrantExpiresAt(
   tx: Prisma.TransactionClient,
   route: RuntimeRoute,
+  grantExpiresAtCap?: unknown,
 ): Promise<Date> {
-  if (!isPersonalRuntimeRoute(route)) return new Date(Date.now() + GRANT_LIFETIME_MS);
-  const delegation = await tx.projectAiProviderDelegation.findUnique({
-    where: { id: route.personalEvidence.personalDelegationId },
-    select: { expiresAt: true },
-  });
-  if (delegation === null || delegation.expiresAt <= new Date()) {
+  const now = new Date();
+  let normalExpiresAt = new Date(now.getTime() + GRANT_LIFETIME_MS);
+  if (isPersonalRuntimeRoute(route)) {
+    const delegation = await tx.projectAiProviderDelegation.findUnique({
+      where: { id: route.personalEvidence.personalDelegationId },
+      select: { expiresAt: true },
+    });
+    if (delegation === null || delegation.expiresAt <= now) {
+      throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+    }
+    normalExpiresAt = new Date(Math.min(normalExpiresAt.getTime(), delegation.expiresAt.getTime()));
+  }
+  return applyGrantExpiresAtCap(normalExpiresAt, grantExpiresAtCap);
+}
+
+/**
+ * Apply an internal, pre-authorized expiry cap without ever extending the
+ * normal grant lifetime.  The cap is deliberately runtime-validated because
+ * this service is also callable from test and worker code outside TypeScript's
+ * static type boundary.
+ */
+export function applyGrantExpiresAtCap(normalExpiresAt: Date, cap: unknown): Date {
+  if (cap === undefined) return normalExpiresAt;
+  if (!isFiniteDate(normalExpiresAt) || !isFiniteDate(cap)) {
     throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
   }
-  return new Date(Math.min(Date.now() + GRANT_LIFETIME_MS, delegation.expiresAt.getTime()));
+  const now = Date.now();
+  if (cap.getTime() <= now || cap.getTime() > normalExpiresAt.getTime()) {
+    throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+  }
+  return new Date(cap.getTime());
 }
 
 async function reloadDispatchRoute(
@@ -514,6 +601,7 @@ type RuntimeGrantTuple = Readonly<{
   quotaMultiplierBps: number | null;
   routeFenceFingerprint: string | null;
   credentialSecretFingerprint: string | null;
+  confirmationChallengeId: string | null;
   payerKind: string | null;
   payerProviderConnectionId: string | null;
   personalDelegationId: string | null;
@@ -546,7 +634,7 @@ type RuntimeGrantTuple = Readonly<{
 
 function grantMatchesRuntimeTuple(
   grant: RuntimeGrantTuple,
-  input: Readonly<{ projectId: string; jobId: string; route: RuntimeRoute; billingUserId: string; billingMode: string; scopeKind?: WebAiScopeKind; scopeIds?: unknown; manifestFingerprint?: string }>,
+  input: Readonly<{ projectId: string; jobId: string; route: RuntimeRoute; billingUserId: string; billingMode: string; scopeKind?: WebAiScopeKind; scopeIds?: unknown; manifestFingerprint?: string; confirmationChallengeId?: string }>,
 ): boolean {
   const common = grant.projectId === input.projectId
     && grant.operation === input.route.operation
@@ -567,8 +655,9 @@ function grantMatchesRuntimeTuple(
     && grant.quotaMultiplierBps === input.route.quotaMultiplierBps
     && grant.routeFenceFingerprint === input.route.routeFenceFingerprint
     && grant.credentialSecretFingerprint === input.route.credentialSecretFingerprint
+    && (input.confirmationChallengeId === undefined || grant.confirmationChallengeId === input.confirmationChallengeId)
     && (input.scopeKind === undefined || grant.scopeKind === input.scopeKind)
-    && (input.scopeIds === undefined || JSON.stringify(grant.scopeIds) === JSON.stringify(input.scopeIds))
+    && (input.scopeIds === undefined || canonicalJsonScopeEqual(grant.scopeIds, input.scopeIds))
     && (input.manifestFingerprint === undefined || grant.manifestFingerprint === input.manifestFingerprint);
   if (!common) return false;
   if (!isPersonalRuntimeRoute(input.route)) {
@@ -644,6 +733,7 @@ function runtimeGrantSelect() {
     quotaMultiplierBps: true,
     routeFenceFingerprint: true,
     credentialSecretFingerprint: true,
+    confirmationChallengeId: true,
     payerKind: true,
     payerProviderConnectionId: true,
     personalDelegationId: true,
@@ -810,6 +900,21 @@ export async function createGrantedWebAiJob(input: Readonly<{
   scopeIds: unknown;
   manifestFingerprint: string;
   payload: Record<string, unknown>;
+  /** Internal-only cap; public HTTP routes never derive or forward this field. */
+  grantExpiresAtCap?: Date;
+  confirmation?: WebAiConfirmationExecuteInput;
+  /** Rebuild the confirmation material while the admission locks are held. */
+  refreshConfirmation?: (
+    tx: Prisma.TransactionClient,
+    admission: ProjectAccessAdmission,
+    route: RuntimeRoute,
+  ) => Promise<WebAiConfirmationExecuteInput>;
+  supplemental?: Readonly<{
+    route: RuntimeRoute;
+    scopeKind: WebAiScopeKind;
+    scopeIds: unknown;
+    manifestFingerprint: string;
+  }>;
   /**
    * Run DB-only admission checks after the route is reloaded while the
    * project access locks are held, before idempotency lookup or job/grant
@@ -836,6 +941,75 @@ export async function createGrantedWebAiJob(input: Readonly<{
     const transactionActor = admission.actor;
     const route = await reloadRuntimeRoute(tx, { projectId: input.projectId, route: input.route });
     if (input.beforeCreate !== undefined) await input.beforeCreate(tx, admission);
+    const confirmationInput = input.refreshConfirmation === undefined
+      ? input.confirmation
+      : await input.refreshConfirmation(tx, admission, route);
+    if (confirmationInput === undefined) throw new WebAiConfirmationError("WEB_AI_CONFIRMATION_REQUIRED");
+    const confirmation = await validateWebAiConfirmation(tx, admission, confirmationInput);
+    if (confirmation.row.consumedJobId !== null) {
+      const recovered = await tx.backgroundJob.findUnique({
+        where: { id: confirmation.row.consumedJobId },
+        select: { id: true, projectId: true, requestedById: true, webAiGrantId: true },
+      });
+      if (
+        recovered === null
+        || recovered.projectId !== input.projectId
+        || recovered.requestedById !== transactionActor.id
+        || recovered.webAiGrantId === null
+      ) return fail("WEB_AI_JOB_NOT_FOUND");
+      const recoveredGrant = await tx.webAiGrant.findUnique({
+        where: { id: recovered.webAiGrantId },
+        select: runtimeGrantSelect(),
+      });
+      if (
+        recoveredGrant === null
+        || recoveredGrant.confirmationChallengeId !== confirmation.row.id
+        || !grantMatchesRuntimeTuple(recoveredGrant, {
+          projectId: input.projectId,
+          jobId: recovered.id,
+          route,
+          billingUserId: isPersonalRuntimeRoute(route) ? route.personalEvidence.billingUserId : transactionActor.id,
+          billingMode: isPersonalRuntimeRoute(route) ? "byok" : "platform",
+          scopeKind: input.scopeKind,
+          scopeIds: input.scopeIds,
+          manifestFingerprint: input.manifestFingerprint,
+          confirmationChallengeId: confirmation.row.id,
+        })
+      ) return fail("WEB_AI_JOB_NOT_FOUND");
+      if (input.supplemental !== undefined) {
+        const supplementalRoute = await reloadRuntimeRoute(tx, {
+          projectId: input.projectId,
+          route: input.supplemental.route,
+        });
+        assertRuntimeRoute(supplementalRoute);
+        const supplementalBilling = await assertRuntimeBilling({
+          projectId: input.projectId,
+          requestedById: transactionActor.id,
+          route: supplementalRoute,
+          db: tx,
+          enforceConcurrency: false,
+        });
+        const supplementalGrant = await tx.webAiGrant.findUnique({
+          where: { boundJobId_operation: { boundJobId: recovered.id, operation: supplementalRoute.operation } },
+          select: runtimeGrantSelect(),
+        });
+        if (
+          supplementalGrant === null
+          || !grantMatchesRuntimeTuple(supplementalGrant, {
+            projectId: input.projectId,
+            jobId: recovered.id,
+            route: supplementalRoute,
+            billingUserId: supplementalBilling.billingUserId,
+            billingMode: supplementalBilling.billingMode,
+            scopeKind: input.supplemental.scopeKind,
+            scopeIds: { jobId: recovered.id, scope: input.supplemental.scopeIds },
+            manifestFingerprint: input.supplemental.manifestFingerprint,
+            confirmationChallengeId: confirmation.row.id,
+          })
+        ) return fail("WEB_AI_JOB_NOT_FOUND");
+      }
+      return Object.freeze({ jobId: recovered.id, grantId: recoveredGrant.id, created: false });
+    }
     const key = idempotencyKey(input.kind, input.projectId, transactionActor.id, input.clientKey);
     const personal = isPersonalRuntimeRoute(route);
     const existing = await tx.backgroundJob.findUnique({
@@ -863,8 +1037,10 @@ export async function createGrantedWebAiJob(input: Readonly<{
           scopeKind: input.scopeKind,
           scopeIds: input.scopeIds,
           manifestFingerprint: input.manifestFingerprint,
+          confirmationChallengeId: confirmation.row.id,
         })
       ) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
+      await consumeWebAiConfirmation(tx, confirmation, existing.id, transactionActor.id);
       return Object.freeze({ jobId: existing.id, grantId: existing.webAiGrant.id, created: false });
     }
     const billing = await assertRuntimeBilling({
@@ -902,12 +1078,50 @@ export async function createGrantedWebAiJob(input: Readonly<{
         billingUserId: billing.billingUserId,
         callKey: stableAiCallKey(jobId, route.operation, "grant"),
         boundJobId: job.id,
+        confirmationChallengeId: confirmation.row.id,
         ...routeSnapshotData(route),
-        expiresAt: await personalGrantExpiresAt(tx, route),
+        expiresAt: await personalGrantExpiresAt(tx, route, input.grantExpiresAtCap),
       },
     });
     await tx.backgroundJob.update({ where: { id: job.id }, data: { webAiGrantId: grant.id } });
+    if (input.supplemental !== undefined) {
+      const supplementalRoute = await reloadRuntimeRoute(tx, {
+        projectId: input.projectId,
+        route: input.supplemental.route,
+      });
+      assertRuntimeRoute(supplementalRoute);
+      const supplementalBilling = await assertRuntimeBilling({
+        projectId: input.projectId,
+        requestedById: transactionActor.id,
+        route: supplementalRoute,
+        db: tx,
+        enforceConcurrency: false,
+      });
+      const supplementalScopeIds = { jobId: job.id, scope: input.supplemental.scopeIds };
+      await tx.webAiGrant.create({
+        data: {
+          id: randomUUID(),
+          projectId: input.projectId,
+          operation: supplementalRoute.operation,
+          scopeKind: input.supplemental.scopeKind,
+          scopeIds: jsonValue(supplementalScopeIds),
+          manifestFingerprint: input.supplemental.manifestFingerprint,
+          providerConnectionId: supplementalRoute.providerConnectionId,
+          modelId: supplementalRoute.modelId,
+          consentVersion: WEB_AI_TRANSFER_CONSENT_VERSION,
+          issuedById: transactionActor.id,
+          billingMode: supplementalBilling.billingMode,
+          billingUserId: supplementalBilling.billingUserId,
+          callKey: stableAiCallKey(job.id, supplementalRoute.operation, "supplemental"),
+          boundJobId: job.id,
+          confirmationChallengeId: confirmation.row.id,
+          ...routeSnapshotData(supplementalRoute),
+          expiresAt: await personalGrantExpiresAt(tx, supplementalRoute, input.grantExpiresAtCap),
+        },
+      });
+    }
     if (input.afterCreate !== undefined) await input.afterCreate(tx, job.id, grant.id);
+    await consumeWebAiConfirmation(tx, confirmation, job.id, transactionActor.id);
     return Object.freeze({ jobId: job.id, grantId: grant.id, created: true });
   });
 }
@@ -920,8 +1134,11 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
   scopeKind: WebAiScopeKind;
   scopeIds: unknown;
   manifestFingerprint: string;
+  confirmationChallengeId?: string;
 }>, db: PrismaClient = getDb()) {
   assertRuntimeRoute(input.route);
+  if (input.confirmationChallengeId === undefined) throw new WebAiConfirmationError("WEB_AI_CONFIRMATION_REQUIRED");
+  const confirmationChallengeId = normalizeWebAiConfirmationId(input.confirmationChallengeId);
   const additionalActorIds = typeof input.route.providerConnection.ownerUserId !== "string"
     ? []
     : [input.route.providerConnection.ownerUserId];
@@ -934,11 +1151,26 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
     const currentActor = admission.actor;
     const job = await tx.backgroundJob.findUnique({
       where: { id: input.jobId },
-      select: { id: true, projectId: true, requestedById: true, kind: true },
+      select: { id: true, projectId: true, requestedById: true, kind: true, webAiGrantId: true },
     });
     if (job === null || job.projectId !== input.projectId || job.requestedById !== currentActor.id) {
       return fail("WEB_AI_JOB_NOT_FOUND");
     }
+    const challenge = await tx.webAiConfirmationChallenge.findUnique({
+      where: { id: confirmationChallengeId },
+      select: { actorId: true, actorAccountAccessVersion: true, consumedAt: true, consumedJobId: true },
+    });
+    const primaryGrant = job.webAiGrantId === null
+      ? null
+      : await tx.webAiGrant.findUnique({ where: { id: job.webAiGrantId }, select: { confirmationChallengeId: true } });
+    if (
+      challenge === null
+      || challenge.actorId !== currentActor.id
+      || challenge.actorAccountAccessVersion !== currentActor.accountAccessVersion
+      || challenge.consumedAt === null
+      || challenge.consumedJobId !== input.jobId
+      || primaryGrant?.confirmationChallengeId !== confirmationChallengeId
+    ) throw new WebAiConfirmationError("WEB_AI_CONFIRMATION_STALE");
     const route = await reloadRuntimeRoute(tx, { projectId: input.projectId, route: input.route });
     const billing = await assertRuntimeBilling({
       projectId: input.projectId,
@@ -962,30 +1194,19 @@ export async function createSupplementalWebAiGrant(input: Readonly<{
         scopeKind: input.scopeKind,
         scopeIds: supplementalScopeIds,
         manifestFingerprint: input.manifestFingerprint,
+        confirmationChallengeId,
       })) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
       return Object.freeze({ grantId: existing.id, created: false });
     }
-    const grant = await tx.webAiGrant.create({
-      data: {
-        id: randomUUID(),
-        projectId: input.projectId,
-        operation: route.operation,
-        scopeKind: input.scopeKind,
-        scopeIds: jsonValue(supplementalScopeIds),
-        manifestFingerprint: input.manifestFingerprint,
-        providerConnectionId: route.providerConnectionId,
-        modelId: route.modelId,
-        consentVersion: WEB_AI_TRANSFER_CONSENT_VERSION,
-        issuedById: currentActor.id,
-        billingMode: billing.billingMode,
-        billingUserId: billing.billingUserId,
-        callKey: stableAiCallKey(input.jobId, route.operation, "supplemental"),
-        boundJobId: input.jobId,
-        ...routeSnapshotData(route),
-        expiresAt: await personalGrantExpiresAt(tx, route),
-      },
-    });
-    return Object.freeze({ grantId: grant.id, created: true });
+    // Supplemental grants for the seven Web AI actions are created together
+    // with the primary job/grant and challenge consumption. Once the
+    // challenge is consumed, creating a missing supplemental grant in this
+    // later transaction would turn it into a bypass. Recover only an already
+    // bound grant; fail closed if the atomic creation evidence is absent.
+    if (challenge.consumedAt !== null) {
+      throw new WebAiConfirmationError("WEB_AI_CONFIRMATION_STALE");
+    }
+    throw new WebAiConfirmationError("WEB_AI_CONFIRMATION_REQUIRED");
   });
 }
 

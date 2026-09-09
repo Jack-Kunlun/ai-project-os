@@ -15,12 +15,16 @@ import {
   createPlatformDefaultAiRoute,
   validatePlatformDefaultAiRoute,
 } from "../src/lib/platform-default-ai-routes";
-import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
-import { runProjectMemoryIndexJob } from "../src/lib/web-memory-index";
+import {
+  prepareProjectMemoryIndexConfirmation,
+  runProjectMemoryIndexJob,
+} from "../src/lib/web-memory-index";
 import { claimProjectJob, reconcileProjectJob } from "../src/lib/project-workflow";
 import { hashSourceContent } from "../src/lib/source";
 import {
   listProjectIntelligence,
+  prepareProjectAgentConfirmation,
+  prepareProjectBriefConfirmation,
   PROJECT_AGENT_TOOLS,
   runProjectAgentJob,
   runProjectBriefJob,
@@ -28,7 +32,6 @@ import {
 import { createControlledMembership } from "./membership-fixture";
 
 const shouldRun = process.env.PROJECT_INTELLIGENCE_POSTGRES_GATE === "1";
-const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
 
 async function activateDefaultRoute(
   db: ReturnType<typeof getDb>,
@@ -262,11 +265,20 @@ test(
       assert.equal(beforeIndex.readiness.ready, false);
       assert.equal(beforeIndex.readiness.activeIndex, false);
 
+      const indexClientKey = `index-${suffix}`;
+      const indexConfirmation = await prepareProjectMemoryIndexConfirmation({
+        projectId,
+        requestedBy: user,
+        clientKey: indexClientKey,
+        mode: "full",
+        db,
+      });
       const indexJob = await runProjectMemoryIndexJob({
         projectId,
         requestedBy: user,
-        clientKey: `index-${suffix}`,
-        consent,
+        clientKey: indexClientKey,
+        challengeId: indexConfirmation.challengeId,
+        mode: "full",
       }, db);
       assert.equal(indexJob.status, "succeeded");
 
@@ -309,11 +321,18 @@ test(
       });
       assert.equal(sameProjectGeneration.expectedActiveIndexGenerationId, indexedPointer!.generation.id);
 
+      const briefClientKey = `brief-${suffix}`;
+      const briefConfirmation = await prepareProjectBriefConfirmation({
+        projectId,
+        requestedBy: user,
+        clientKey: briefClientKey,
+        db,
+      });
       const briefJob = await runProjectBriefJob({
         projectId,
         requestedBy: user,
-        clientKey: `brief-${suffix}`,
-        consent,
+        clientKey: briefClientKey,
+        challengeId: briefConfirmation.challengeId,
       }, db);
       assert.equal(briefJob.status, "succeeded");
       const report = await db.projectIntelligenceReport.findFirstOrThrow({ where: { projectId } });
@@ -322,12 +341,21 @@ test(
       assert.equal(reportCitations.every((citation) => /^[0-9a-f-]{36}$/u.test(citation.id)), true);
       assert.equal(reportCitations.every((citation) => citation.contentHash.length === 64), true);
 
+      const agentQuestion = "项目目前采用了什么方案，还有哪些风险？";
+      const agentClientKey = `agent-${suffix}`;
+      const agentConfirmation = await prepareProjectAgentConfirmation({
+        projectId,
+        requestedBy: user,
+        clientKey: agentClientKey,
+        question: agentQuestion,
+        db,
+      });
       const agentJob = await runProjectAgentJob({
         projectId,
         requestedBy: user,
-        clientKey: `agent-${suffix}`,
-        consent,
-        question: "项目目前采用了什么方案，还有哪些风险？",
+        clientKey: agentClientKey,
+        challengeId: agentConfirmation.challengeId,
+        question: agentQuestion,
       }, db);
       assert.equal(agentJob.status, "succeeded");
       const run = await db.projectAgentRun.findFirstOrThrow({ where: { projectId } });
@@ -411,12 +439,14 @@ test(
       assert.equal(incompatible.readiness.activeIndex, true);
       assert.equal(incompatible.readiness.indexCompatible, false);
       assert.equal(incompatible.readiness.ready, false);
+      // Route readiness is checked before confirmation material is loaded;
+      // this failure is intentionally a pre-confirmation boundary rather
+      // than a missing-challenge execution failure.
       await assert.rejects(
         () => runProjectAgentJob({
           projectId,
           requestedBy: user,
           clientKey: `agent-incompatible-${suffix}`,
-          consent,
           question: "当前状态如何？",
         }, db),
         (error: unknown) => error instanceof Error && error.message === "SEMANTIC_INDEX_NOT_READY",

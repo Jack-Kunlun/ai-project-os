@@ -19,9 +19,9 @@ import {
   auditedProviderCall,
   claimWebAiJob,
   createGrantedWebAiJob,
-  createSupplementalWebAiGrant,
 } from "../src/lib/web-ai-governance";
 import { createControlledMembership } from "./membership-fixture";
+import { createConfirmedWebAiJobForPostgresGate } from "./web-ai-confirmation-fixture";
 const shouldRun = process.env.PERSONAL_WEB_AI_RUNTIME_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_personal_web_ai_runtime_test";
 const workspaceId = "00000000-0000-4000-8000-000000000001";
@@ -232,7 +232,7 @@ test(
       for (const [index, item] of operations.entries()) {
         const route = routeByOperation.get(item.operation);
         assert.ok(route);
-        const created = await createGrantedWebAiJob({
+        const created = await createConfirmedWebAiJobForPostgresGate({
           projectId,
           kind: item.kind,
           route,
@@ -366,6 +366,8 @@ test(
         db,
       );
       const sourceSummaryRoute = await resolveEffectiveAiRoute(projectId, "sourceSummary", db);
+      // This route is intentionally exercised with the original function:
+      // the invalid operation must fail before confirmation is consulted.
       await assert.rejects(
         () => createGrantedWebAiJob({
           projectId,
@@ -422,7 +424,7 @@ test(
         db,
       );
       const crossRoute = await resolveEffectiveAiRoute(crossProjectId, "embedding", db);
-      const crossJob = await createGrantedWebAiJob({
+      const crossJob = await createConfirmedWebAiJobForPostgresGate({
         projectId: crossProjectId,
         kind: "memoryIndex",
         route: crossRoute,
@@ -462,7 +464,7 @@ test(
       // Failed and reconciliation-unknown generations are never valid build
       // evidence, even when their frozen grant tuple is otherwise current.
       for (const status of ["failed", "unknown"] as const) {
-        const invalidJob = await createGrantedWebAiJob({
+        const invalidJob = await createConfirmedWebAiJobForPostgresGate({
           projectId: crossProjectId,
           kind: "memoryIndex",
           route: crossRoute,
@@ -602,7 +604,7 @@ test(
       const generationRoute = supplementalRoute;
       assert.ok(embeddingRoute);
       assert.ok(generationRoute);
-      const supplementalJob = await createGrantedWebAiJob({
+      const supplementalJob = await createConfirmedWebAiJobForPostgresGate({
         projectId,
         kind: "memoryIndex",
         route: embeddingRoute,
@@ -612,18 +614,19 @@ test(
         scopeIds: { projectId },
         manifestFingerprint: "8".repeat(64),
         payload: {},
+        supplemental: {
+          route: generationRoute,
+          scopeKind: "projectMemory",
+          scopeIds: { supplemental: true },
+          manifestFingerprint: "7".repeat(64),
+        },
       }, db);
-      const supplemental = await createSupplementalWebAiGrant({
-        projectId,
-        jobId: supplementalJob.jobId,
-        route: generationRoute,
-        requestedBy: ownerActor,
-        scopeKind: "projectMemory",
-        scopeIds: { supplemental: true },
-        manifestFingerprint: "7".repeat(64),
-      }, db);
-      assert.equal(supplemental.created, true);
-      const supplementalGrant = await db.webAiGrant.findUniqueOrThrow({ where: { id: supplemental.grantId } });
+      const supplementalGrant = await db.webAiGrant.findFirstOrThrow({
+        where: {
+          boundJobId: supplementalJob.jobId,
+          operation: generationRoute.operation,
+        },
+      });
       assert.equal(supplementalGrant.billingUserId, supplementalOwnerId);
       assert.equal(supplementalGrant.payerProviderConnectionId, supplementalProviderId);
       const supplementalClaim = await claimWebAiJob(supplementalJob.jobId, db);
@@ -637,7 +640,7 @@ test(
         attempt: supplementalClaim,
         actor: ownerActor,
         route: generationRoute,
-        grantId: supplemental.grantId,
+        grantId: supplementalGrant.id,
         callKey: `personal-web-runtime-supplemental-call-${suffix}`,
         call: async (dispatch) => {
           supplementalNetworkCalls += 1;
@@ -658,7 +661,7 @@ test(
 
       const revokedRoute = routeByOperation.get("autoExtract");
       assert.ok(revokedRoute);
-      const revokedJob = await createGrantedWebAiJob({
+      const revokedJob = await createConfirmedWebAiJobForPostgresGate({
         projectId,
         kind: "autoExtract",
         route: revokedRoute,
@@ -694,7 +697,7 @@ test(
 
       const driftRoute = routeByOperation.get("generateWithContext");
       assert.ok(driftRoute);
-      const driftJob = await createGrantedWebAiJob({
+      const driftJob = await createConfirmedWebAiJobForPostgresGate({
         projectId,
         kind: "ragAnswer",
         route: driftRoute,
@@ -741,36 +744,32 @@ test(
         where: { id: embeddingGenerationId! },
         data: { status: "failed", failureCode: "PERSONAL_RUNTIME_GATE_REPLACED", completedAt: new Date() },
       });
-      const embeddingGrant = await db.webAiGrant.findUniqueOrThrow({ where: { id: embeddingGrantId! } });
-      const shortJob = await db.backgroundJob.create({
-        data: {
-          id: randomUUID(),
-          projectId,
-          kind: "memoryIndex",
-          requestedById: ownerId,
-          idempotencyKey: `personal-web-runtime-expiry-${suffix}-${randomUUID()}`.slice(0, 64),
-        },
-      });
-      // Leave enough time for the pre-expiry admission assertions above; the
-      // explicit wait below still proves that the same evidence expires.
+      assert.ok(embeddingGrantId);
+      // Create the expiry fixture through the internal expiry cap.
+      // Grant expiry is immutable by design, so the cap is applied while the
+      // confirmation-bound job and grant are created atomically.
       const shortExpiresAt = new Date(Date.now() + 60_000);
-      const shortGrant = await db.webAiGrant.create({
-        data: {
-          ...embeddingGrant,
-          id: randomUUID(),
-          callKey: `personal-web-runtime-expiry-grant-${suffix}`,
-          boundJobId: shortJob.id,
-          expiresAt: shortExpiresAt,
-          revokedAt: null,
-          issuedAt: new Date(),
-        } as never,
-      });
-      await db.backgroundJob.update({ where: { id: shortJob.id }, data: { webAiGrantId: shortGrant.id } });
+      const shortEmbeddingRoute = embeddingRoute;
+      assert.ok(shortEmbeddingRoute);
+      const shortJob = await createConfirmedWebAiJobForPostgresGate({
+        projectId,
+        kind: "memoryIndex",
+        route: shortEmbeddingRoute,
+        requestedBy: ownerActor,
+        clientKey: `personal-web-runtime-expiry-${suffix}`,
+        scopeKind: "projectMemory",
+        scopeIds: { projectId, expiry: true },
+        manifestFingerprint: "8".repeat(64),
+        payload: { expiry: true },
+        grantExpiresAtCap: shortExpiresAt,
+      }, db);
+      const shortGrant = await db.webAiGrant.findUniqueOrThrow({ where: { id: shortJob.grantId } });
+      assert.equal(shortGrant.expiresAt.getTime(), shortExpiresAt.getTime());
       const shortGeneration = await db.memoryIndexGeneration.create({
         data: {
           id: randomUUID(),
           projectId,
-          jobId: shortJob.id,
+          jobId: shortJob.jobId,
           providerConnectionId: shortGrant.providerConnectionId,
           modelId: shortGrant.modelId,
           dimensions: shortGrant.embeddingDimensions!,
@@ -809,13 +808,13 @@ test(
         data: { status: "complete", generatedRecordCount: 1, recordCount: 1, completedAt: new Date() },
       });
       await db.memoryIndexPointer.create({ data: { projectId, indexGenerationId: shortGeneration.id } });
-      const shortClaim = await claimWebAiJob(shortJob.id, db);
+      const shortClaim = await claimWebAiJob(shortJob.jobId, db);
       assert.notEqual(shortClaim, false);
       if (shortClaim === false) throw new Error("PERSONAL_WEB_RUNTIME_EXPIRY_CLAIM_FAILED");
-      const embeddingConsumeJob = await createGrantedWebAiJob({
+      const embeddingConsumeJob = await createConfirmedWebAiJobForPostgresGate({
         projectId,
         kind: "memoryIndex",
-        route: embeddingRoute,
+        route: shortEmbeddingRoute,
         requestedBy: ownerActor,
         clientKey: `personal-web-runtime-embedding-consume-${suffix}`,
         scopeKind: "projectMemory",
@@ -831,7 +830,7 @@ test(
         jobId: embeddingConsumeJob.jobId,
         attempt: embeddingConsumeClaim,
         actor: ownerActor,
-        route: embeddingRoute,
+        route: shortEmbeddingRoute,
         grantId: embeddingConsumeJob.grantId,
         personalMemoryGeneration: { generationId: shortGeneration.id, mode: "consume" },
         callKey: `personal-web-runtime-embedding-consume-call-${suffix}`,
@@ -851,7 +850,7 @@ test(
       assert.equal(embeddingConsumeAudit.reservationId, null);
       const consumeRoute = routeByOperation.get("generateWithContext");
       assert.ok(consumeRoute);
-      const consumeJob = await createGrantedWebAiJob({
+      const consumeJob = await createConfirmedWebAiJobForPostgresGate({
         projectId,
         kind: "ragAnswer",
         route: consumeRoute,
@@ -883,10 +882,10 @@ test(
 
       // A complete generation without the project pointer is not a valid
       // consume admission, even while its frozen evidence remains live.
-      const nonPointerJob = await createGrantedWebAiJob({
+      const nonPointerJob = await createConfirmedWebAiJobForPostgresGate({
         projectId,
         kind: "memoryIndex",
-        route: embeddingRoute,
+        route: shortEmbeddingRoute,
         requestedBy: ownerActor,
         clientKey: `personal-web-runtime-nonpointer-embedding-${suffix}`,
         scopeKind: "projectMemory",
@@ -898,7 +897,7 @@ test(
         projectId,
         jobId: nonPointerJob.jobId,
         grantId: nonPointerJob.grantId,
-        route: embeddingRoute,
+        route: shortEmbeddingRoute,
         inputManifestFingerprint: memoryManifest,
         status: "building",
       });
@@ -925,7 +924,7 @@ test(
       // The generation is produced by an embedding build job, but consume
       // admission must be exercised through the separate generation route and
       // grant that would actually serve the RAG answer.
-      const nonPointerConsumeJob = await createGrantedWebAiJob({
+      const nonPointerConsumeJob = await createConfirmedWebAiJobForPostgresGate({
         projectId,
         kind: "ragAnswer",
         route: consumeRoute,
@@ -990,10 +989,10 @@ test(
       let expiredNetworkCalls = 0;
       await assert.rejects(
         () => auditedProviderCall({
-          jobId: shortJob.id,
+          jobId: shortJob.jobId,
           attempt: shortClaim,
           actor: ownerActor,
-          route: embeddingRoute,
+          route: shortEmbeddingRoute,
           grantId: shortGrant.id,
           personalMemoryGeneration: { generationId: shortGeneration.id, mode: "consume" },
           callKey: `personal-web-runtime-expiry-call-${suffix}`,
@@ -1008,7 +1007,7 @@ test(
       assert.equal(expiredNetworkCalls, 0);
       const staleGenerationRoute = routeByOperation.get("generateWithContext");
       assert.ok(staleGenerationRoute);
-      const staleGenerationJob = await createGrantedWebAiJob({
+      const staleGenerationJob = await createConfirmedWebAiJobForPostgresGate({
         projectId,
         kind: "ragAnswer",
         route: staleGenerationRoute,

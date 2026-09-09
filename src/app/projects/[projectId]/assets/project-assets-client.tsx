@@ -2,13 +2,12 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useDeferredValue, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
 import { ProjectMaterialsParentLink } from "@/components/project-parent-link";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
-import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 import { DEFAULT_UPLOAD_POLICY, type PublicUploadPolicy } from "@/lib/project-assets/policy";
 
 type AssetStatus = "uploaded" | "parsing" | "waitingVision" | "awaitingReview" | "ready" | "failed" | "deleted";
@@ -66,7 +65,13 @@ const statusLabels: Record<AssetStatus, string> = {
   deleted: "已删除",
 };
 const kindLabels = { text: "文本", document: "文档", spreadsheet: "表格", presentation: "演示文稿", image: "图片" } as const;
-const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
+type Confirmation = {
+  challengeId: string;
+  targetAction: string;
+  expiresAt: string;
+  safeSummary: Record<string, unknown>;
+};
+type ApiFailure = { code?: string; message?: string };
 
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
@@ -75,6 +80,40 @@ async function readError(response: Response, fallback: string): Promise<string> 
   } catch {
     return fallback;
   }
+}
+
+async function readApiFailure(response: Response, fallback: string): Promise<ApiFailure> {
+  try {
+    const payload = await response.json() as { error?: ApiFailure };
+    return { code: payload.error?.code, message: payload.error?.message ?? fallback };
+  } catch {
+    return { message: fallback };
+  }
+}
+
+function confirmationMessage(code: string | undefined): string | null {
+  if (code === "WEB_AI_CONFIRMATION_EXPIRED") return "本次确认已过期，请重新读取外发摘要。";
+  if (code === "WEB_AI_CONFIRMATION_STALE") return "文件内容或模型路由已变化，请重新读取外发摘要。";
+  if (code === "WEB_AI_CONFIRMATION_CONSUMED") return "本次确认已使用，请重新读取外发摘要后再执行。";
+  if (code === "WEB_AI_CONFIRMATION_REQUIRED") return "请先读取本次外发摘要，再点击确认并执行。";
+  return null;
+}
+
+function summaryText(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(summaryText).join("、");
+  if (typeof value === "object") return Object.entries(value as Record<string, unknown>).map(([key, entry]) => `${key}: ${summaryText(entry)}`).join(" · ");
+  return "—";
+}
+
+function ConfirmationCard({ confirmation, pending, executeLabel, onExecute }: { confirmation: Confirmation; pending: boolean; executeLabel: string; onExecute: () => void }) {
+  return <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4" role="status">
+    <p className="text-sm font-semibold text-indigo-900">本次外发摘要</p>
+    <p className="mt-2 text-xs leading-5 text-indigo-800">动作：{confirmation.targetAction} · 路由：{summaryText(confirmation.safeSummary.route)} · 范围：{summaryText(confirmation.safeSummary.scope)}</p>
+    <p className="mt-2 text-xs text-indigo-700">确认有效期至 {formatDate(confirmation.expiresAt)}。摘要不包含原文、问题或指纹。</p>
+    <button type="button" onClick={onExecute} disabled={pending} className="mt-4 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "执行中…" : executeLabel}</button>
+  </div>;
 }
 
 function formatBytes(value: number): string {
@@ -112,11 +151,20 @@ export function ProjectAssetsClient({ username }: { username: string }) {
   const [recognizing, setRecognizing] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
-  const [consents, setConsents] = useState<Record<string, boolean>>({});
+  const [confirmations, setConfirmations] = useState<Record<string, Confirmation | undefined>>({});
+  const [clientKeys, setClientKeys] = useState<Record<string, string | undefined>>({});
+  const prepareSequences = useRef<Record<string, number>>({});
+  const prepareControllers = useRef<Record<string, AbortController | undefined>>({});
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [policy, setPolicy] = useState<PublicUploadPolicy>(DEFAULT_UPLOAD_POLICY);
   const [usage, setUsage] = useState<UploadUsage>({ projectBytes: "0", activeAssetCount: 0, retainedObjectCount: 0, activeUploads: 0 });
   const { confirm, dialog } = useAppConfirmDialog();
+
+  function invalidatePrepareRequest(assetId: string) {
+    prepareSequences.current[assetId] = (prepareSequences.current[assetId] ?? 0) + 1;
+    prepareControllers.current[assetId]?.abort();
+    prepareControllers.current[assetId] = undefined;
+  }
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
@@ -199,24 +247,74 @@ export function ProjectAssetsClient({ username }: { username: string }) {
     setUploading(false);
   }
 
+  async function prepareRecognition(asset: Asset) {
+    invalidatePrepareRequest(asset.id);
+    const sequence = prepareSequences.current[asset.id]!;
+    const controller = new AbortController();
+    prepareControllers.current[asset.id] = controller;
+    const preparedClientKey = crypto.randomUUID();
+    setRecognizing(asset.id);
+    setMessage(null);
+    setError(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/assets/${asset.id}/recognize`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phase: "prepare", clientKey: preparedClientKey }),
+        signal: controller.signal,
+      });
+      if (sequence !== prepareSequences.current[asset.id] || controller.signal.aborted) return;
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "外发摘要读取失败");
+        throw new Error(failure.message ?? "外发摘要读取失败");
+      }
+      const payload = await response.json() as { confirmation: Confirmation };
+      setConfirmations((current) => ({ ...current, [asset.id]: payload.confirmation }));
+      setClientKeys((current) => ({ ...current, [asset.id]: preparedClientKey }));
+      setMessage("已读取本次外发摘要。请核对文件范围和路由后，点击确认并执行。");
+    } catch (prepareError) {
+      if (controller.signal.aborted || sequence !== prepareSequences.current[asset.id]) return;
+      setError(prepareError instanceof Error ? prepareError.message : "外发摘要读取失败");
+    } finally {
+      if (sequence === prepareSequences.current[asset.id]) {
+        setRecognizing(null);
+        if (prepareControllers.current[asset.id] === controller) prepareControllers.current[asset.id] = undefined;
+      }
+    }
+  }
+
   async function recognize(asset: Asset) {
-    if (!consents[asset.id]) return;
+    const confirmation = confirmations[asset.id];
+    const clientKey = clientKeys[asset.id];
+    if (confirmation === undefined || clientKey === undefined) {
+      setMessage("请先读取本次外发摘要。");
+      return;
+    }
     setRecognizing(asset.id);
     setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/assets/${asset.id}/recognize`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientKey: crypto.randomUUID(), consent }),
+        body: JSON.stringify({ phase: "execute", challengeId: confirmation.challengeId, clientKey }),
       });
-      if (!response.ok) throw new Error(await readError(response, "图片识别失败"));
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "图片识别失败");
+        const nextStep = confirmationMessage(failure.code);
+        if (nextStep !== null) {
+          setConfirmations((current) => ({ ...current, [asset.id]: undefined }));
+          setClientKeys((current) => ({ ...current, [asset.id]: undefined }));
+        }
+        throw new Error(nextStep ?? failure.message ?? "图片识别失败");
+      }
       const payload = await response.json() as { job: { status: string; failureCode?: string | null } };
       setMessage(payload.job.status === "succeeded"
         ? "识别完成。结果仍未进入记忆，请逐项检查并确认。"
         : payload.job.status === "unknown"
           ? "供应商返回状态未知，系统没有发布识别结果；请前往治理页人工收口。"
           : `识别任务状态：${payload.job.status}${payload.job.failureCode ? `（${payload.job.failureCode}）` : ""}`);
-      setConsents((current) => ({ ...current, [asset.id]: false }));
+      setConfirmations((current) => ({ ...current, [asset.id]: undefined }));
+      setClientKeys((current) => ({ ...current, [asset.id]: undefined }));
       await reload();
     } catch (recognizeError) {
       setError(recognizeError instanceof Error ? recognizeError.message : "图片识别失败");
@@ -323,7 +421,7 @@ export function ProjectAssetsClient({ username }: { username: string }) {
             <article key={asset.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4 p-6 sm:p-7"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="max-w-xl truncate text-lg font-semibold">{asset.displayName}</h3><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{kindLabels[asset.kind]}</span><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusTone(asset.status)}`}>{statusLabels[asset.status]}</span></div><p className="mt-2 text-xs text-slate-400">{asset.version ? `${formatBytes(asset.version.sizeBytes)} · ${asset.version.mimeType}` : "版本信息不可用"} · {formatDate(asset.createdAt)}</p><p className="mt-3 text-xs leading-5 text-slate-500">已形成 {asset.segments.filter((segment) => segment.projectSourceId !== null).length} 个活动资料来源，共 {asset.segments.length} 个可定位片段。{asset.latestRun?.modelId ? ` 最近视觉模型：${asset.latestRun.modelId}。` : ""}</p>{asset.version?.failureCode || asset.latestRun?.failureCode ? <p className="mt-2 text-xs text-rose-600">失败代码：{asset.version?.failureCode ?? asset.latestRun?.failureCode}</p> : null}</div><div className="flex flex-wrap items-center gap-2">{asset.status === "failed" ? <button type="button" onClick={() => void retryParsing(asset)} disabled={retrying !== null} className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-semibold text-white disabled:opacity-40">{retrying === asset.id ? "重新解析中…" : "重新解析"}</button> : null}<a href={`/api/projects/${projectId}/assets/${asset.id}/download`} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600">查看原文件</a><button type="button" onClick={() => void remove(asset)} className="inline-flex h-10 items-center justify-center rounded-xl border border-rose-200 px-4 text-xs font-semibold text-rose-700">移除</button></div></div>
 
-              {asset.status === "waitingVision" ? <div className="border-t border-amber-100 bg-amber-50/70 p-6 sm:px-7"><h4 className="text-sm font-semibold text-amber-950">需要视觉模型识别</h4><p className="mt-2 text-xs leading-5 text-amber-900">系统只发送该图片，或 PDF 中无足够本地文字的扫描页；不会发送项目中的其他资料。本次共有 {asset.segments.filter((segment) => segment.requiresVision).length} 个待识别片段。请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置“图片与扫描件识别”路由。</p><label className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-white/70 px-4 py-3 text-xs leading-5 text-amber-950"><input type="checkbox" checked={consents[asset.id] ?? false} onChange={(event) => setConsents((current) => ({ ...current, [asset.id]: event.target.checked }))} className="mt-0.5" /><span>我确认将“{asset.displayName}”中上述 {asset.segments.filter((segment) => segment.requiresVision).length} 个图片或扫描页发送给项目当前配置的第三方视觉模型，并使用我的供应商额度。识别结果必须由我逐项确认后才会发布。</span></label><button type="button" onClick={() => void recognize(asset)} disabled={!consents[asset.id] || recognizing !== null} className="mt-4 inline-flex h-11 items-center justify-center rounded-xl bg-amber-900 px-5 text-xs font-semibold text-white disabled:opacity-40">{recognizing === asset.id ? "识别中…" : "开始图片识别"}</button></div> : null}
+              {asset.status === "waitingVision" ? <div className="border-t border-amber-100 bg-amber-50/70 p-6 sm:px-7"><h4 className="text-sm font-semibold text-amber-950">需要视觉模型识别</h4><p className="mt-2 text-xs leading-5 text-amber-900">系统只发送该图片，或 PDF 中无足够本地文字的扫描页；不会发送项目中的其他资料。本次共有 {asset.segments.filter((segment) => segment.requiresVision).length} 个待识别片段。请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置“图片与扫描件识别”路由。</p>{confirmations[asset.id] ? <ConfirmationCard confirmation={confirmations[asset.id]!} pending={recognizing === asset.id} executeLabel="开始图片识别" onExecute={() => void recognize(asset)} /> : <button type="button" onClick={() => void prepareRecognition(asset)} disabled={recognizing !== null} className="mt-4 inline-flex h-11 items-center justify-center rounded-xl bg-amber-900 px-5 text-xs font-semibold text-white disabled:opacity-40">{recognizing === asset.id ? "读取摘要中…" : "读取本次外发摘要"}</button>}</div> : null}
 
               {asset.status === "awaitingReview" ? <div className="border-t border-indigo-100 bg-indigo-50/40 p-6 sm:px-7"><div className="mb-4"><h4 className="text-sm font-semibold text-indigo-950">确认识别结果</h4><p className="mt-2 text-xs leading-5 text-indigo-800">所有片段审核结束后，接受的内容才会一起发布到项目资料库；驳回的片段不会参与记忆与问答。</p></div><div className="space-y-4">{asset.segments.map((segment) => <div key={segment.id} className="rounded-2xl border border-indigo-100 bg-white p-5"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-700">{segment.locatorLabel}</p><span className="text-[12px] text-slate-400">{segment.extractionMethod === "vision" ? `${segment.providerConnection?.name ?? "视觉模型"} · ${segment.modelId ?? "模型未记录"}` : "本地解析"}</span></div>{segment.reviewStatus === "pending" ? <><textarea value={edits[segment.id] ?? segment.contentText} onChange={(event) => setEdits((current) => ({ ...current, [segment.id]: event.target.value }))} rows={Math.min(12, Math.max(5, Math.ceil((edits[segment.id] ?? segment.contentText).length / 100)))} className="mt-3 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-700 outline-none focus:border-indigo-400" /><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void review(asset.id, segment, "accept")} disabled={reviewing !== null || !(edits[segment.id] ?? segment.contentText).trim()} className="inline-flex h-10 items-center justify-center rounded-xl bg-emerald-600 px-4 text-xs font-semibold text-white disabled:opacity-40">{reviewing === segment.id ? "保存中…" : "确认并保留"}</button><button type="button" onClick={() => void review(asset.id, segment, "dismiss")} disabled={reviewing !== null} className="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-semibold text-slate-600 disabled:opacity-40">驳回片段</button></div></> : <p className="mt-3 text-xs text-slate-500">{segment.reviewStatus === "accepted" ? "已确认，等待文件其余片段完成。" : "已驳回，不会发布。"}</p>}</div>)}</div></div> : null}
             </article>

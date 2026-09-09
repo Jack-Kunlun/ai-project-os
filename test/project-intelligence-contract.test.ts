@@ -484,27 +484,17 @@ test("project intelligence runtime has no direct host execution or external writ
   assert.doesNotMatch(source, /node:(?:child_process|fs)/u);
 });
 
-test("project intelligence requires per-run consent before database or provider work", async () => {
-  const unreachableDb = {} as PrismaClient;
-  await assert.rejects(
-    () => runProjectBriefJob({
-      projectId,
-      requestedBy: { id: projectId, role: "user", accountAccessVersion: 1 },
-      clientKey: "brief-without-consent",
-      consent: { acknowledged: false, version: "invalid" },
-    }, unreachableDb),
-    (error: unknown) => error instanceof Error && error.message === "WEB_AI_CONSENT_REQUIRED",
-  );
-  await assert.rejects(
-    () => runProjectAgentJob({
-      projectId,
-      requestedBy: { id: projectId, role: "user", accountAccessVersion: 1 },
-      clientKey: "agent-without-consent",
-      consent: { acknowledged: false, version: "invalid" },
-      question: "当前状态如何？",
-    }, unreachableDb),
-    (error: unknown) => error instanceof Error && error.message === "WEB_AI_CONSENT_REQUIRED",
-  );
+test("project intelligence requires a server challenge before database or provider work", () => {
+  for (const path of [
+    "src/app/api/projects/[projectId]/intelligence/brief/route.ts",
+    "src/app/api/projects/[projectId]/intelligence/agent/route.ts",
+  ]) {
+    const source = readFileSync(join(process.cwd(), path), "utf8");
+    assert.match(source, /phase: z\.literal\("prepare"\)/u, path);
+    assert.match(source, /phase: z\.literal\("execute"\)/u, path);
+    assert.match(source, /challengeId: z\.string\(\)\.uuid\(\)/u, path);
+    assert.doesNotMatch(source, /\b(?:acknowledged|consent|version)\b/u, path);
+  }
 });
 
 test("project intelligence write routes reject cross-site requests before authentication", async () => {

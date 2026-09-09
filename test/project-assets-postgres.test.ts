@@ -23,13 +23,14 @@ import {
   reviewProjectAssetSegment,
   uploadProjectAsset,
 } from "../src/lib/project-assets/service";
-import { runProjectAssetVisionExtraction } from "../src/lib/project-assets/vision";
-import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
+import {
+  prepareProjectAssetVisionConfirmation,
+  runProjectAssetVisionExtraction,
+} from "../src/lib/project-assets/vision";
 import { collectProjectMemoryInputs } from "../src/lib/web-memory-index";
 import { createControlledMembership } from "./membership-fixture";
 
 const shouldRun = process.env.PROJECT_ASSET_POSTGRES_GATE === "1";
-const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
 
 async function activateDefaultVisionRoute(
   db: ReturnType<typeof getDb>,
@@ -167,12 +168,20 @@ test(
       const defaultRoute = await activateDefaultVisionRoute(db, { id: platformAdmin.id, role: platformAdmin.role, accountAccessVersion: platformAdmin.accountAccessVersion }, provider.id);
       assert.equal(defaultRoute.status, "active");
 
+      const visionClientKey = `vision-${suffix}`;
+      const visionConfirmation = await prepareProjectAssetVisionConfirmation({
+        projectId,
+        assetId: image!.id,
+        requestedBy: user,
+        clientKey: visionClientKey,
+        db,
+      });
       const job = await runProjectAssetVisionExtraction({
         projectId,
         assetId: image!.id,
         requestedBy: user,
-        clientKey: `vision-${suffix}`,
-        consent,
+        clientKey: visionClientKey,
+        challengeId: visionConfirmation.challengeId,
       }, db);
       assert.equal(job.status, "succeeded");
       let recognized = await getProjectAsset(projectId, image!.id, db);

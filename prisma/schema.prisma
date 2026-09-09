@@ -459,6 +459,16 @@ enum WebAiScopeKind {
   query
 }
 
+enum WebAiConfirmationAction {
+  memoryExtract     @map("memory_extract")
+  memoryIndex       @map("memory_index")
+  memorySearch      @map("memory_search")
+  memoryAnswer      @map("memory_answer")
+  assetRecognize    @map("asset_recognize")
+  intelligenceBrief @map("intelligence_brief")
+  intelligenceAgent @map("intelligence_agent")
+}
+
 enum BackgroundJobKind {
   assetExtract       @map("asset_extract")
   githubScan         @map("github_scan")
@@ -5783,6 +5793,7 @@ model WebAiGrant {
   selectedByProjectMembershipId String?       @db.Uuid
   selectedByMembershipCreatedAt DateTime?
   credentialSecretFingerprint String?        @db.Char(64)
+  confirmationChallengeId String?            @db.Uuid
   embeddingDimensions   Int?
   maxOutputTokens       Int?
   issuedAt             DateTime             @default(now())
@@ -5804,6 +5815,34 @@ model WebAiGrant {
   @@index([billingUserId, issuedAt])
   @@index([callKey])
   @@index([projectId, operation, personalDelegationId, effectiveRouteSelectionId], map: "WebAiGrant_personal_runtime_evidence_idx")
+  @@index([confirmationChallengeId])
+}
+
+// A challenge is an immutable, one-time server-side confirmation capability.
+// It deliberately keeps scalar evidence only: project/user rows may be
+// deleted later without cascading away the safety record.
+model WebAiConfirmationChallenge {
+  id                         String                    @id @default(uuid()) @db.Uuid
+  projectId                  String                    @db.Uuid
+  actorId                    String                    @db.Uuid
+  actorAccountAccessVersion Int
+  actorAccessFingerprint     String                    @db.Char(64)
+  targetAction               WebAiConfirmationAction
+  contentVersion             String                    @db.VarChar(128)
+  inputFingerprint           String                    @db.Char(64)
+  routeSnapshot              Json                      @db.JsonB
+  safeSummary                Json                      @db.JsonB
+  preparedClientKeyHash      String                    @db.Char(64)
+  issuedAt                   DateTime                  @default(dbgenerated("clock_timestamp()"))
+  expiresAt                  DateTime
+  consumedAt                 DateTime?
+  consumedJobId              String?                   @db.Uuid
+  consumedClientKeyHash      String?                   @db.Char(64)
+
+  @@index([projectId, actorId, targetAction, issuedAt])
+  @@index([expiresAt, consumedAt])
+  @@index([consumedJobId])
+  @@index([inputFingerprint])
 }
 
 model BackgroundJob {

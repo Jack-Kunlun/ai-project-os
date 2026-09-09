@@ -9,9 +9,10 @@ import { issueVerifiedSignupGrant, lockMembershipUser, reservePlatformTokens } f
 import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
 import { deleteArchivedProject, updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { claimProjectJob } from "../src/lib/project-workflow";
-import { createGrantedWebAiJob, finishWebAiJob, stableAiCallKey, auditedProviderCall } from "../src/lib/web-ai-governance";
+import { finishWebAiJob, stableAiCallKey, auditedProviderCall } from "../src/lib/web-ai-governance";
 import { WebAiAccessError, type WebAiActor } from "../src/lib/web-ai-access";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
+import { createConfirmedWebAiJobForPostgresGate } from "./web-ai-confirmation-fixture";
 
 const shouldRun = process.env.WEB_AI_GOVERNANCE_POSTGRES_GATE === "1";
 
@@ -108,7 +109,7 @@ async function createDispatchFixture() {
     },
   });
   const route = await resolveEffectiveAiRoute(projectId, "autoExtract", db);
-  const created = await createGrantedWebAiJob({
+  const created = await createConfirmedWebAiJobForPostgresGate({
     projectId,
     kind: "autoExtract",
     route,

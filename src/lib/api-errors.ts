@@ -13,6 +13,7 @@ import {
 import { ProjectAiRouteError } from "@/lib/project-ai-routes";
 import { WebGitHubError } from "@/lib/web-github";
 import { WebAiGovernanceError } from "@/lib/web-ai-governance";
+import { WebAiConfirmationError } from "@/lib/web-ai-confirmation";
 import { WebAutoExtractError } from "@/lib/web-auto-extract";
 import { WebMemoryIndexError } from "@/lib/web-memory-index";
 import { ProjectIntelligenceError } from "@/lib/web-project-intelligence";
@@ -938,6 +939,18 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     const message = error.code === "WEB_AI_CONSENT_REQUIRED"
       ? "请先确认本次内容会发送给所选模型供应商"
       : "AI 任务状态已变化，请刷新后重试";
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof WebAiConfirmationError) {
+    const status = error.code === "WEB_AI_CONFIRMATION_EXPIRED" ? 410 : 409;
+    const message = error.code === "WEB_AI_CONFIRMATION_REQUIRED"
+      ? "请先读取本次外发确认摘要，再点击执行"
+      : error.code === "WEB_AI_CONFIRMATION_EXPIRED"
+        ? "本次确认已过期，请重新读取摘要"
+        : error.code === "WEB_AI_CONFIRMATION_CONSUMED"
+          ? "本次确认已经执行，请使用原任务结果"
+          : "项目、输入或模型路由已变化，请重新读取确认摘要";
     return { status, body: { error: { code: error.code, message } } };
   }
 

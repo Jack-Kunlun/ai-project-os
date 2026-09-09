@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { ProjectIntelligenceParentLink } from "@/components/project-parent-link";
-import { WEB_AI_TRANSFER_CONSENT_VERSION } from "@/lib/web-ai-contract";
 
 type Source = {
   id: string;
@@ -106,11 +105,50 @@ async function readError(response: Response, fallback: string): Promise<string> 
   catch { return fallback; }
 }
 
+type Confirmation = {
+  challengeId: string;
+  targetAction: string;
+  expiresAt: string;
+  safeSummary: Record<string, unknown>;
+};
+
+type ApiFailure = { code?: string; message?: string };
+
+async function readApiFailure(response: Response, fallback: string): Promise<ApiFailure> {
+  try {
+    const payload = await response.json() as { error?: ApiFailure };
+    return { code: payload.error?.code, message: payload.error?.message ?? fallback };
+  } catch { return { message: fallback }; }
+}
+
+function confirmationMessage(code: string | undefined): string | null {
+  if (code === "WEB_AI_CONFIRMATION_EXPIRED") return "本次确认已过期，请重新读取外发摘要。";
+  if (code === "WEB_AI_CONFIRMATION_STALE") return "项目资料、索引或模型路由已变化，请重新读取外发摘要。";
+  if (code === "WEB_AI_CONFIRMATION_CONSUMED") return "本次确认已使用，请重新读取外发摘要后再执行。";
+  if (code === "WEB_AI_CONFIRMATION_REQUIRED") return "请先读取本次外发摘要，再点击确认并执行。";
+  return null;
+}
+
+function summaryText(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(summaryText).join("、");
+  if (typeof value === "object") return Object.entries(value as Record<string, unknown>).map(([key, entry]) => `${key}: ${summaryText(entry)}`).join(" · ");
+  return "—";
+}
+
+function ConfirmationCard({ confirmation, pending, executeLabel, onExecute }: { confirmation: Confirmation; pending: boolean; executeLabel: string; onExecute: () => void }) {
+  return <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4" role="status">
+    <p className="text-sm font-semibold text-indigo-900">本次外发摘要</p>
+    <p className="mt-2 text-xs leading-5 text-indigo-800">动作：{confirmation.targetAction} · 路由：{summaryText(confirmation.safeSummary.route)} · 范围：{summaryText(confirmation.safeSummary.scope)}</p>
+    <p className="mt-2 text-xs text-indigo-700">确认有效期至 {dateLabel(confirmation.expiresAt)}。摘要不包含原文、问题或指纹。</p>
+    <button type="button" onClick={onExecute} disabled={pending} className="mt-4 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "执行中…" : executeLabel}</button>
+  </div>;
+}
+
 function dateLabel(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
-
-const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
 
 export function ProjectMemoryClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
@@ -144,37 +182,28 @@ export function ProjectMemoryClient({ username }: { username: string }) {
   return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" /><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI memory workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">从可追溯原文自动抽取候选，建立跨人工资料与多仓库代码的向量记忆，并通过语义检索和引用式问答找到项目答案。</p></section>{error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading || !index ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : <><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} indexReady={index.activeIndex !== null && index.compatible} answers={answers} onReload={reload} /></>}</div></main>;
 }
 
-function ConsentCheck({ checked, setChecked }: { checked: boolean; setChecked: (value: boolean) => void }) {
-  return <label className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} className="mt-0.5" /><span>我确认本次所选资料、检索问题及命中的证据片段会发送给项目路由中选择的模型供应商处理；不会发送未命中的完整项目库。</span></label>;
-}
-
-function MemoryIndexConsentCheck({
-  checked,
-  setChecked,
-  plan,
-}: {
-  checked: boolean;
-  setChecked: (value: boolean) => void;
-  plan: IndexPlan | null;
-}) {
-  const modeLabel = plan?.mode === "incremental" ? "增量" : "全量";
-  const details = plan === null
-    ? "请先读取当前索引计划。"
-    : `${modeLabel}构建将使用 ${plan.providerName ?? plan.providerKind ?? "当前路由"} 的 ${plan.modelId ?? "受限模型"}（${plan.dimensions ?? "未知"} 维），待生成 ${plan.generateCount} 条、复用 ${plan.reuseCount} 条，预计 ${plan.estimatedProviderCalls} 次向量请求。所有待生成片段会发送给该供应商；复用片段不会再次外发。`;
-  return <label className="mt-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900"><input type="checkbox" checked={checked} disabled={plan === null} onChange={(event) => setChecked(event.target.checked)} className="mt-0.5" /><span>我确认本次索引构建的传输范围：{details}</span></label>;
-}
-
 function IndexPanel({ projectId, index, onReload }: { projectId: string; index: IndexStatus; onReload: () => Promise<IndexStatus | null> }) {
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [clientKey, setClientKey] = useState<string | null>(null);
+  const prepareSequence = useRef(0);
+  const prepareController = useRef<AbortController | null>(null);
   const [pending, setPending] = useState(false);
   const [mode, setMode] = useState<"full" | "incremental">("full");
   const [plan, setPlan] = useState<IndexPlan | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  function invalidatePrepareRequest() {
+    prepareSequence.current += 1;
+    prepareController.current?.abort();
+    prepareController.current = null;
+  }
+
   const loadPlan = useCallback(async () => {
     if (!index.route) { setPlan(null); return; }
-    setAcknowledged(false);
+    invalidatePrepareRequest();
+    setConfirmation(null);
+    setClientKey(null);
     setPlanLoading(true);
     try {
       const response = await fetch(`/api/projects/${projectId}/memory/index?mode=${mode}`, { cache: "no-store" });
@@ -188,9 +217,48 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
 
   useEffect(() => { const timer = window.setTimeout(() => void loadPlan(), 0); return () => window.clearTimeout(timer); }, [loadPlan]);
 
-  async function build() {
+  async function prepare() {
     if (plan === null || !plan.deadlineEligible || plan.ineligibleCode !== null) {
       setMessage("当前索引计划不可执行，请重新读取计划或先建立全量基线");
+      return;
+    }
+    invalidatePrepareRequest();
+    const sequence = prepareSequence.current;
+    const controller = new AbortController();
+    prepareController.current = controller;
+    const preparedClientKey = crypto.randomUUID();
+    setPending(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/memory/index`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phase: "prepare", clientKey: preparedClientKey, mode, planFingerprint: plan.planFingerprint }),
+        signal: controller.signal,
+      });
+      if (sequence !== prepareSequence.current || controller.signal.aborted) return;
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "外发摘要读取失败");
+        throw new Error(failure.message ?? "外发摘要读取失败");
+      }
+      const payload = await response.json() as { confirmation: Confirmation };
+      setConfirmation(payload.confirmation);
+      setClientKey(preparedClientKey);
+      setMessage("已读取本次外发摘要。请核对路由和范围后，点击确认并执行。");
+    } catch (prepareError) {
+      if (controller.signal.aborted || sequence !== prepareSequence.current) return;
+      setMessage(prepareError instanceof Error ? prepareError.message : "外发摘要读取失败");
+    } finally {
+      if (sequence === prepareSequence.current) {
+        setPending(false);
+        if (prepareController.current === controller) prepareController.current = null;
+      }
+    }
+  }
+
+  async function build() {
+    if (plan === null || confirmation === null || clientKey === null) {
+      setMessage("请先读取本次外发摘要。");
       return;
     }
     setPending(true);
@@ -199,17 +267,17 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
       const response = await fetch(`/api/projects/${projectId}/memory/index`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientKey: crypto.randomUUID(), mode, planFingerprint: plan.planFingerprint, consent }),
+        body: JSON.stringify({ phase: "execute", challengeId: confirmation.challengeId, clientKey, mode, planFingerprint: plan.planFingerprint }),
       });
       if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
-        if (response.status === 409 && payload?.error?.code === "MEMORY_INDEX_PLAN_STALE") {
-          setAcknowledged(false);
-          await loadPlan();
-          setMessage("索引输入或路由已变化，计划已刷新；请重新确认后再构建，不会自动重试保存。");
-          return;
+        const failure = await readApiFailure(response, "索引构建失败");
+        const nextStep = confirmationMessage(failure.code);
+        if (nextStep !== null) {
+          setConfirmation(null);
+          setClientKey(null);
+          if (failure.code === "WEB_AI_CONFIRMATION_STALE") await loadPlan();
         }
-        throw new Error(payload?.error?.message ?? "索引构建失败");
+        throw new Error(nextStep ?? failure.message ?? "索引构建失败");
       }
       const payload = await response.json() as { job: { status: string; result?: { indexGenerationId?: string } } };
       const refreshed = await onReload();
@@ -218,6 +286,8 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
         payload.job.result?.indexGenerationId !== undefined &&
         activeGenerationId === payload.job.result.indexGenerationId &&
         refreshed?.activeIndex?.generation.status === "complete";
+      setConfirmation(null);
+      setClientKey(null);
       setMessage(switched
         ? "新索引已完成并原子切换"
         : payload.job.status === "succeeded"
@@ -225,10 +295,7 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
           : `索引任务状态：${payload.job.status}，旧索引保持不变`);
     } catch (buildError) {
       setMessage(buildError instanceof Error ? buildError.message : "索引构建失败");
-    } finally {
-      setAcknowledged(false);
-      setPending(false);
-    }
+    } finally { setPending(false); }
   }
 
   async function reconcile() {
@@ -261,8 +328,8 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
   };
   const ready = index.readiness === "ready";
 
-  const changeMode = (nextMode: "full" | "incremental") => { setMode(nextMode); setAcknowledged(false); setPlan(null); };
-  return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Unified vector memory</p><h2 className="mt-2 text-2xl font-semibold">项目语义索引</h2><p className="mt-2 text-sm leading-6 text-slate-500">使用当前冻结的人工资料、仓库资料生成和项目代码快照。失败或未知不会替换上一个可用索引。</p></div><div className="grid grid-cols-3 gap-2"><Metric label="资料" value={index.inputs.projectSourceCount} /><Metric label="代码" value={index.inputs.hasCodeSnapshot ? "已冻结" : "无"} /><Metric label="仓库资料" value={index.inputs.repositoryMaterialGenerationCount} /></div></div>{index.activeIndex ? <div className={`mt-6 rounded-2xl border p-5 ${ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className={`text-sm font-semibold ${ready ? "text-emerald-900" : "text-amber-900"}`}>{readinessLabels[index.readiness]} · {index.activeIndex.generation.recordCount} 条记忆</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>索引：{index.activeIndex.generation.providerConnection?.name ?? index.activeIndex.generation.providerConnection?.kind ?? "个人连接"} · {index.activeIndex.generation.modelId ?? "模型信息受限"} · {index.activeIndex.generation.dimensions === null ? "维度受限" : `${index.activeIndex.generation.dimensions} 维`} · {dateLabel(index.activeIndex.publishedAt)}</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>当前路由：{index.route ? `${index.route.providerConnection?.name ?? index.route.providerConnection?.kind ?? "个人连接"} · ${index.route.modelId ?? "模型信息受限"} · ${index.route.embeddingDimensions ?? "未知"} 维` : "未配置"}</p></div>{index.activeIndex.generation.inputManifestFingerprint ? <code className={`text-[10px] ${ready ? "text-emerald-700" : "text-amber-700"}`}>{index.activeIndex.generation.inputManifestFingerprint.slice(0, 16)}…</code> : null}</div>{!ready ? <p className="mt-3 text-xs leading-5 text-amber-800">{index.readiness === "providerUnavailable" ? "当前向量供应商未通过连接测试或已停用，语义查询和项目智能体已暂停。" : index.readiness === "legacyIndex" ? "这是旧版索引格式，升级后需首次全量重建；重建前语义查询和项目智能体保持暂停。" : index.readiness === "inputsChanged" ? "资料或仓库快照已变化，旧索引不会混用新输入；请重建后恢复语义能力。" : "当前向量供应商、模型或维度与该索引不一致，重建前已停用语义查询和项目智能体。"}</p> : null}</div> : <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">{readinessLabels[index.readiness]}</div>}{index.latestJob?.status === "unknown" && index.latestJob.reconciliationRequired ? <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><p>上一次索引请求结果未知，不能自动重试模型。</p><button type="button" onClick={() => void reconcile()} disabled={pending} className="mt-3 rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold">人工收口未知结果</button></div> : null}{!index.route ? <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置语义向量路由。</p> : <><div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-700">选择构建方式</p><div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600"><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "full"} onChange={() => changeMode("full")} />全量构建（不复用旧向量）</label><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "incremental"} onChange={() => changeMode("incremental")} />增量构建（仅复用兼容向量）</label></div>{planLoading ? <p className="mt-3 text-xs text-slate-500">正在计算当前计划…</p> : plan ? <p className="mt-3 text-xs leading-5 text-slate-500">当前路由：{plan.providerName ?? plan.providerKind ?? "当前路由"} · {plan.modelId ?? "模型信息受限"} · {plan.dimensions ?? "未知"} 维；输入 {plan.expectedInputCount} 条，需生成 {plan.generateCount} 条，复用 {plan.reuseCount} 条，删除 {plan.deleteCount} 条。{plan.ineligibleCode === "MEMORY_INDEX_INCREMENTAL_BASELINE_REQUIRED" ? "当前没有可复用的兼容全量基线，请先执行全量构建。" : !plan.deadlineEligible ? "规模无法在一次请求期限内安全完成。" : "计划可执行，确认后才会发送选中内容。"}</p> : null}</div><MemoryIndexConsentCheck checked={acknowledged} setChecked={setAcknowledged} plan={plan} /><button type="button" onClick={() => void build()} disabled={!acknowledged || pending || planLoading || plan === null || !plan.deadlineEligible || plan.ineligibleCode !== null} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "分批嵌入并发布中…" : index.activeIndex ? `${mode === "full" ? "全量重建" : "增量重建"}并切换索引` : "建立语义索引"}</button></>}{message ? <p role="status" className="mt-3 text-sm text-slate-600">{message}</p> : null}</section>;
+  const changeMode = (nextMode: "full" | "incremental") => { invalidatePrepareRequest(); setMode(nextMode); setConfirmation(null); setClientKey(null); setPlan(null); };
+  return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="flex flex-wrap items-start justify-between gap-5"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Unified vector memory</p><h2 className="mt-2 text-2xl font-semibold">项目语义索引</h2><p className="mt-2 text-sm leading-6 text-slate-500">使用当前冻结的人工资料、仓库资料生成和项目代码快照。失败或未知不会替换上一个可用索引。</p></div><div className="grid grid-cols-3 gap-2"><Metric label="资料" value={index.inputs.projectSourceCount} /><Metric label="代码" value={index.inputs.hasCodeSnapshot ? "已冻结" : "无"} /><Metric label="仓库资料" value={index.inputs.repositoryMaterialGenerationCount} /></div></div>{index.activeIndex ? <div className={`mt-6 rounded-2xl border p-5 ${ready ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className={`text-sm font-semibold ${ready ? "text-emerald-900" : "text-amber-900"}`}>{readinessLabels[index.readiness]} · {index.activeIndex.generation.recordCount} 条记忆</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>索引：{index.activeIndex.generation.providerConnection?.name ?? index.activeIndex.generation.providerConnection?.kind ?? "个人连接"} · {index.activeIndex.generation.modelId ?? "模型信息受限"} · {index.activeIndex.generation.dimensions === null ? "维度受限" : `${index.activeIndex.generation.dimensions} 维`} · {dateLabel(index.activeIndex.publishedAt)}</p><p className={`mt-1 text-xs ${ready ? "text-emerald-700" : "text-amber-700"}`}>当前路由：{index.route ? `${index.route.providerConnection?.name ?? index.route.providerConnection?.kind ?? "个人连接"} · ${index.route.modelId ?? "模型信息受限"} · ${index.route.embeddingDimensions ?? "未知"} 维` : "未配置"}</p></div>{index.activeIndex.generation.inputManifestFingerprint ? <code className={`text-[10px] ${ready ? "text-emerald-700" : "text-amber-700"}`}>{index.activeIndex.generation.inputManifestFingerprint.slice(0, 16)}…</code> : null}</div>{!ready ? <p className="mt-3 text-xs leading-5 text-amber-800">{index.readiness === "providerUnavailable" ? "当前向量供应商未通过连接测试或已停用，语义查询和项目智能体已暂停。" : index.readiness === "legacyIndex" ? "这是旧版索引格式，升级后需首次全量重建；重建前语义查询和项目智能体保持暂停。" : index.readiness === "inputsChanged" ? "资料或仓库快照已变化，旧索引不会混用新输入；请重建后恢复语义能力。" : "当前向量供应商、模型或维度与该索引不一致，重建前已停用语义查询和项目智能体。"}</p> : null}</div> : <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">{readinessLabels[index.readiness]}</div>}{index.latestJob?.status === "unknown" && index.latestJob.reconciliationRequired ? <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><p>上一次索引请求结果未知，不能自动重试模型。</p><button type="button" onClick={() => void reconcile()} disabled={pending} className="mt-3 rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold">人工收口未知结果</button></div> : null}{!index.route ? <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">请先在 <Link href={`/projects/${projectId}/control`} className="font-semibold underline">智能控制台</Link> 配置语义向量路由。</p> : <><div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4"><p className="text-sm font-semibold text-slate-700">选择构建方式</p><div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-600"><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "full"} onChange={() => changeMode("full")} />全量构建（不复用旧向量）</label><label className="flex items-center gap-2"><input type="radio" name="memory-index-mode" checked={mode === "incremental"} onChange={() => changeMode("incremental")} />增量构建（仅复用兼容向量）</label></div>{planLoading ? <p className="mt-3 text-xs text-slate-500">正在计算当前计划…</p> : plan ? <p className="mt-3 text-xs leading-5 text-slate-500">当前路由：{plan.providerName ?? plan.providerKind ?? "当前路由"} · {plan.modelId ?? "模型信息受限"} · {plan.dimensions ?? "未知"} 维；输入 {plan.expectedInputCount} 条，需生成 {plan.generateCount} 条，复用 {plan.reuseCount} 条，删除 {plan.deleteCount} 条。{plan.ineligibleCode === "MEMORY_INDEX_INCREMENTAL_BASELINE_REQUIRED" ? "当前没有可复用的兼容全量基线，请先执行全量构建。" : !plan.deadlineEligible ? "规模无法在一次请求期限内安全完成。" : "计划可执行，读取摘要后才会发送选中内容。"}</p> : null}</div>{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel={index.activeIndex ? `${mode === "full" ? "全量重建" : "增量重建"}并切换索引` : "建立语义索引"} onExecute={() => void build()} /> : <button type="button" onClick={() => void prepare()} disabled={pending || planLoading || plan === null || !plan.deadlineEligible || plan.ineligibleCode !== null} className="mt-4 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button>}</>}{message ? <p role="status" className="mt-3 text-sm text-slate-600">{message}</p> : null}</section>;
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) { return <div className="min-w-20 rounded-xl bg-slate-50 px-3 py-3 text-center"><p className="text-[10px] uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div>; }
@@ -272,7 +339,10 @@ const MAX_BATCH_SELECTION = 10;
 function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId: string; sources: Source[]; candidates: Candidate[]; onReload: () => Promise<unknown> }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [selectedCandidates, setSelectedCandidates] = useState<string[]>([]);
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [clientKey, setClientKey] = useState<string | null>(null);
+  const prepareSequence = useRef(0);
+  const prepareController = useRef<AbortController | null>(null);
   const [pending, setPending] = useState(false);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [batchReviewAction, setBatchReviewAction] = useState<"accept" | "dismiss" | null>(null);
@@ -281,17 +351,32 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
   const pendingCandidateIds = new Set(pendingCandidates.map((candidate) => candidate.id));
   const activeSelectedCandidates = selectedCandidates.filter((id) => pendingCandidateIds.has(id));
 
+  function invalidatePrepareRequest() {
+    prepareSequence.current += 1;
+    prepareController.current?.abort();
+    prepareController.current = null;
+  }
+
   function toggle(sourceId: string) {
+    invalidatePrepareRequest();
+    setConfirmation(null);
+    setClientKey(null);
     setSelected((current) => current.includes(sourceId)
       ? current.filter((id) => id !== sourceId)
       : current.length < MAX_BATCH_SELECTION ? [...current, sourceId] : current);
   }
 
   function selectFirstSources() {
+    invalidatePrepareRequest();
+    setConfirmation(null);
+    setClientKey(null);
     setSelected(sources.slice(0, MAX_BATCH_SELECTION).map((source) => source.id));
   }
 
   function invertSources() {
+    invalidatePrepareRequest();
+    setConfirmation(null);
+    setClientKey(null);
     setSelected((current) => {
       const selectedSet = new Set(current);
       return sources.filter((source) => !selectedSet.has(source.id)).slice(0, MAX_BATCH_SELECTION).map((source) => source.id);
@@ -316,16 +401,67 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
     setSelectedCandidates(pendingCandidates.filter((candidate) => !selectedSet.has(candidate.id)).slice(0, MAX_BATCH_SELECTION).map((candidate) => candidate.id));
   }
 
-  async function extract() {
+  async function prepareExtract() {
+    if (selected.length === 0) {
+      setMessage("请先选择要分析的资料。");
+      return;
+    }
+    invalidatePrepareRequest();
+    const sequence = prepareSequence.current;
+    const controller = new AbortController();
+    prepareController.current = controller;
+    const preparedClientKey = crypto.randomUUID();
     setPending(true);
     setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/memory/extract`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientKey: crypto.randomUUID(), sourceIds: selected, consent }),
+        body: JSON.stringify({ phase: "prepare", clientKey: preparedClientKey, sourceIds: selected }),
+        signal: controller.signal,
       });
-      if (!response.ok) throw new Error(await readError(response, "自动抽取失败"));
+      if (sequence !== prepareSequence.current || controller.signal.aborted) return;
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "外发摘要读取失败");
+        throw new Error(failure.message ?? "外发摘要读取失败");
+      }
+      const payload = await response.json() as { confirmation: Confirmation };
+      setConfirmation(payload.confirmation);
+      setClientKey(preparedClientKey);
+      setMessage("已读取本次外发摘要。请核对路由和范围后，点击确认并执行。");
+    } catch (prepareError) {
+      if (controller.signal.aborted || sequence !== prepareSequence.current) return;
+      setMessage(prepareError instanceof Error ? prepareError.message : "外发摘要读取失败");
+    } finally {
+      if (sequence === prepareSequence.current) {
+        setPending(false);
+        if (prepareController.current === controller) prepareController.current = null;
+      }
+    }
+  }
+
+  async function extract() {
+    if (confirmation === null || clientKey === null) {
+      setMessage("请先读取本次外发摘要。");
+      return;
+    }
+    setPending(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/memory/extract`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phase: "execute", challengeId: confirmation.challengeId, clientKey, sourceIds: selected }),
+      });
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "自动抽取失败");
+        const nextStep = confirmationMessage(failure.code);
+        if (nextStep !== null) {
+          setConfirmation(null);
+          setClientKey(null);
+        }
+        throw new Error(nextStep ?? failure.message ?? "自动抽取失败");
+      }
       const payload = await response.json() as { job?: { result?: {
         candidateCount?: number;
         duplicateCount?: number;
@@ -342,6 +478,8 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       const recovered = result?.recoveredExcerptCount ?? 0;
       const anchored = result?.anchoredExcerptCount ?? 0;
       setSelected([]);
+      setConfirmation(null);
+      setClientKey(null);
       if (returned > 0 && created === 0 && duplicates === 0 && rejected > 0) {
         setMessage(`供应商调用成功并返回 ${returned} 条，但 ${rejected} 条既未引用有效证据块，也不是原文中的连续摘录，因此系统未写入候选。建议一次只选 1 条较短资料重试，或在智能控制台切换生成模型。`);
       } else if (returned === 0) {
@@ -357,10 +495,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       await onReload();
     } catch (extractError) {
       setMessage(extractError instanceof Error ? extractError.message : "自动抽取失败");
-    } finally {
-      setAcknowledged(false);
-      setPending(false);
-    }
+    } finally { setPending(false); }
   }
 
   async function submitReview(candidate: Candidate, action: "accept" | "dismiss") {
@@ -448,8 +583,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
               </label>
             ))}
           </div>
-          <ConsentCheck checked={acknowledged} setChecked={setAcknowledged} />
-          <button type="button" onClick={() => void extract()} disabled={pending || !acknowledged || selected.length === 0} className="mt-4 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "逐条分析并校验原文中…" : `抽取 ${selected.length} 条资料`}</button>
+          {confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel={`抽取 ${selected.length} 条资料`} onExecute={() => void extract()} /> : <button type="button" onClick={() => void prepareExtract()} disabled={pending || selected.length === 0} className="mt-4 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button>}
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-col">
@@ -491,7 +625,94 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
 }
 
 function QueryPanel({ projectId, indexReady, answers, onReload }: { projectId: string; indexReady: boolean; answers: Answer[]; onReload: () => Promise<unknown> }) {
-  const [question, setQuestion] = useState(""); const [acknowledged, setAcknowledged] = useState(false); const [pending, setPending] = useState<"search" | "answer" | null>(null); const [message, setMessage] = useState<string | null>(null); const [results, setResults] = useState<SearchResult[]>([]);
-  async function run(mode: "search" | "answer", event?: FormEvent) { event?.preventDefault(); setPending(mode); setMessage(null); try { const response = await fetch(`/api/projects/${projectId}/memory/${mode === "search" ? "search" : "answers"}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientKey: crypto.randomUUID(), question, consent }) }); if (!response.ok) throw new Error(await readError(response, mode === "search" ? "语义检索失败" : "引用式问答失败")); const payload = await response.json() as { job: { result?: { results?: SearchResult[] } } }; if (mode === "search") setResults(payload.job.result?.results ?? []); else { await onReload(); setMessage("回答已生成并保存；每条引用都来自当前索引。 "); } } catch (runError) { setMessage(runError instanceof Error ? runError.message : "请求失败"); } finally { setAcknowledged(false); setPending(null); } }
-  return <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Semantic search & grounded RAG</p><h2 className="mt-2 text-2xl font-semibold">检索与引用式问答</h2><p className="mt-2 text-sm leading-6 text-slate-500">语义分数与关键词分数混合排序；生成回答只能引用本次检索命中的记录 ID。</p></div><form onSubmit={(event) => void run("answer", event)} className="mt-6"><label className="text-sm font-semibold" htmlFor="memory-question">你想了解什么？</label><textarea id="memory-question" value={question} onChange={(event) => setQuestion(event.target.value)} rows={3} maxLength={2000} required className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="例如：当前项目最重要的技术风险是什么？哪些代码和资料支持这个判断？" /><ConsentCheck checked={acknowledged} setChecked={setAcknowledged} /><div className="mt-4 flex gap-3"><button type="button" onClick={() => void run("search")} disabled={!indexReady || !question.trim() || !acknowledged || pending !== null} className="rounded-xl border border-indigo-200 px-5 py-3 text-sm font-semibold text-indigo-700 disabled:opacity-40">{pending === "search" ? "检索中…" : "仅做语义检索"}</button><button disabled={!indexReady || !question.trim() || !acknowledged || pending !== null} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending === "answer" ? "检索并生成中…" : "生成带引用回答"}</button></div></form>{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{results.length > 0 ? <div className="mt-7"><h3 className="text-sm font-semibold">语义检索结果</h3><div className="mt-3 space-y-3">{results.map((result, index) => <article key={result.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><div className="flex items-center justify-between gap-4"><span className="text-xs font-semibold text-indigo-700">#{index + 1} · {result.scope}{result.path ? ` · ${result.path}` : ""}</span><span className="text-xs text-slate-400">综合 {result.score.toFixed(3)}</span></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{result.contentText}</p></article>)}</div></div> : null}<div className="mt-9 border-t border-slate-100 pt-7"><h3 className="text-sm font-semibold">回答历史</h3>{answers.length === 0 ? <p className="mt-3 text-sm text-slate-500">还没有引用式回答。</p> : <div className="mt-3 space-y-5">{answers.map((answer) => <article key={answer.id} className="rounded-2xl border border-slate-200 p-6"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">{answer.question}</p><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700">{answer.answer}</p><div className="mt-5 space-y-2 border-t border-slate-100 pt-4"><p className="text-xs font-semibold text-slate-500">引用证据</p>{Array.isArray(answer.citations) ? answer.citations.map((citation) => <details key={citation.id} className="rounded-xl bg-slate-50 px-4 py-3"><summary className="cursor-pointer text-xs font-medium text-slate-600">{citation.scope}{citation.path ? ` · ${citation.path}` : ""}{citation.frozenCommitSha ? ` @ ${citation.frozenCommitSha.slice(0, 8)}` : ""}</summary><blockquote className="mt-3 border-l-2 border-indigo-200 pl-3 text-xs leading-5 text-slate-500">{citation.excerpt}</blockquote></details>) : null}</div><p className="mt-4 text-[12px] text-slate-400">{answer.providerConnection?.name ?? answer.providerConnection?.kind ?? "个人连接"} · {answer.modelId ?? "模型信息受限"} · {dateLabel(answer.createdAt)}</p></article>)}</div>}</div></section>;
+  const [question, setQuestion] = useState("");
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [clientKey, setClientKey] = useState<string | null>(null);
+  const prepareSequence = useRef(0);
+  const prepareController = useRef<AbortController | null>(null);
+  const [preparedMode, setPreparedMode] = useState<"search" | "answer" | null>(null);
+  const [pending, setPending] = useState<"prepare" | "search" | "answer" | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [results, setResults] = useState<SearchResult[]>([]);
+
+  function resetConfirmation() {
+    prepareSequence.current += 1;
+    prepareController.current?.abort();
+    prepareController.current = null;
+    setConfirmation(null);
+    setClientKey(null);
+    setPreparedMode(null);
+  }
+
+  async function prepare(mode: "search" | "answer", event?: FormEvent) {
+    event?.preventDefault();
+    if (!indexReady || !question.trim()) return;
+    prepareSequence.current += 1;
+    prepareController.current?.abort();
+    const sequence = prepareSequence.current;
+    const controller = new AbortController();
+    prepareController.current = controller;
+    const preparedClientKey = crypto.randomUUID();
+    setPending("prepare");
+    setMessage(null);
+    try {
+      const endpoint = mode === "search" ? "search" : "answers";
+      const response = await fetch(`/api/projects/${projectId}/memory/${endpoint}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phase: "prepare", clientKey: preparedClientKey, question }),
+        signal: controller.signal,
+      });
+      if (sequence !== prepareSequence.current || controller.signal.aborted) return;
+      if (!response.ok) {
+        const failure = await readApiFailure(response, "外发摘要读取失败");
+        throw new Error(failure.message ?? "外发摘要读取失败");
+      }
+      const payload = await response.json() as { confirmation: Confirmation };
+      setConfirmation(payload.confirmation);
+      setClientKey(preparedClientKey);
+      setPreparedMode(mode);
+      setMessage("已读取本次外发摘要。请核对路由和范围后，点击确认并执行。");
+    } catch (prepareError) {
+      if (controller.signal.aborted || sequence !== prepareSequence.current) return;
+      setMessage(prepareError instanceof Error ? prepareError.message : "外发摘要读取失败");
+    } finally {
+      if (sequence === prepareSequence.current) {
+        setPending(null);
+        if (prepareController.current === controller) prepareController.current = null;
+      }
+    }
+  }
+
+  async function run() {
+    if (confirmation === null || clientKey === null || preparedMode === null) {
+      setMessage("请先读取本次外发摘要。");
+      return;
+    }
+    const mode = preparedMode;
+    setPending(mode);
+    setMessage(null);
+    try {
+      const endpoint = mode === "search" ? "search" : "answers";
+      const response = await fetch(`/api/projects/${projectId}/memory/${endpoint}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ phase: "execute", challengeId: confirmation.challengeId, clientKey, question }),
+      });
+      if (!response.ok) {
+        const failure = await readApiFailure(response, mode === "search" ? "语义检索失败" : "引用式问答失败");
+        const nextStep = confirmationMessage(failure.code);
+        if (nextStep !== null) resetConfirmation();
+        throw new Error(nextStep ?? failure.message ?? "请求失败");
+      }
+      const payload = await response.json() as { job: { result?: { results?: SearchResult[] } } };
+      resetConfirmation();
+      if (mode === "search") setResults(payload.job.result?.results ?? []);
+      else { await onReload(); setMessage("回答已生成并保存；每条引用都来自当前索引。"); }
+    } catch (runError) {
+      setMessage(runError instanceof Error ? runError.message : "请求失败");
+    } finally { setPending(null); }
+  }
+
+  return <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Semantic search & grounded RAG</p><h2 className="mt-2 text-2xl font-semibold">检索与引用式问答</h2><p className="mt-2 text-sm leading-6 text-slate-500">语义分数与关键词分数混合排序；生成回答只能引用本次检索命中的记录 ID。</p></div><form onSubmit={(event) => void prepare("answer", event)} className="mt-6"><label className="text-sm font-semibold" htmlFor="memory-question">你想了解什么？</label><textarea id="memory-question" value={question} onChange={(event) => { setQuestion(event.target.value); resetConfirmation(); }} rows={3} maxLength={2000} required className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="例如：当前项目最重要的技术风险是什么？哪些代码和资料支持这个判断？" />{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending !== null} executeLabel={preparedMode === "search" ? "仅做语义检索" : "生成带引用回答"} onExecute={() => void run()} /> : <div className="mt-4 flex gap-3"><button type="button" onClick={() => void prepare("search")} disabled={!indexReady || !question.trim() || pending !== null} className="rounded-xl border border-indigo-200 px-5 py-3 text-sm font-semibold text-indigo-700 disabled:opacity-40">{pending === "prepare" ? "读取摘要中…" : "仅做语义检索"}</button><button type="submit" disabled={!indexReady || !question.trim() || pending !== null} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending === "prepare" ? "读取摘要中…" : "生成带引用回答"}</button></div>}</form>{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{results.length > 0 ? <div className="mt-7"><h3 className="text-sm font-semibold">语义检索结果</h3><div className="mt-3 space-y-3">{results.map((result, index) => <article key={result.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><div className="flex items-center justify-between gap-4"><span className="text-xs font-semibold text-indigo-700">#{index + 1} · {result.scope}{result.path ? ` · ${result.path}` : ""}</span><span className="text-xs text-slate-400">综合 {result.score.toFixed(3)}</span></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{result.contentText}</p></article>)}</div></div> : null}<div className="mt-9 border-t border-slate-100 pt-7"><h3 className="text-sm font-semibold">回答历史</h3>{answers.length === 0 ? <p className="mt-3 text-sm text-slate-500">还没有引用式回答。</p> : <div className="mt-3 space-y-5">{answers.map((answer) => <article key={answer.id} className="rounded-2xl border border-slate-200 p-6"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">{answer.question}</p><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700">{answer.answer}</p><div className="mt-5 space-y-2 border-t border-slate-100 pt-4"><p className="text-xs font-semibold text-slate-500">引用证据</p>{Array.isArray(answer.citations) ? answer.citations.map((citation) => <details key={citation.id} className="rounded-xl bg-slate-50 px-4 py-3"><summary className="cursor-pointer text-xs font-medium text-slate-600">{citation.scope}{citation.path ? ` · ${citation.path}` : ""}{citation.frozenCommitSha ? ` @ ${citation.frozenCommitSha.slice(0, 8)}` : ""}</summary><blockquote className="mt-3 border-l-2 border-indigo-200 pl-3 text-xs leading-5 text-slate-500">{citation.excerpt}</blockquote></details>) : null}</div><p className="mt-4 text-[12px] text-slate-400">{answer.providerConnection?.name ?? answer.providerConnection?.kind ?? "个人连接"} · {answer.modelId ?? "模型信息受限"} · {dateLabel(answer.createdAt)}</p></article>)}</div>}</div></section>;
 }

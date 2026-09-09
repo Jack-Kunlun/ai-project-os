@@ -30,7 +30,39 @@ import {
 } from "../src/lib/project-workflow";
 import { ProviderTransportError } from "../src/lib/ai-providers";
 import { WebAiAccessError } from "../src/lib/web-ai-access";
+import { applyGrantExpiresAtCap, canonicalJsonScopeEqual } from "../src/lib/web-ai-governance";
 import { serializeRagAnswer } from "../src/lib/web-rag";
+
+test("Web AI grant scope comparison canonicalizes object keys and preserves JSON meaning", () => {
+  assert.equal(canonicalJsonScopeEqual(
+    { jobId: "job-1", scope: { indexGenerationId: "index-1", questionHash: "a".repeat(64) } },
+    { scope: { questionHash: "a".repeat(64), indexGenerationId: "index-1" }, jobId: "job-1" },
+  ), true);
+  assert.equal(canonicalJsonScopeEqual({ ids: ["a", "b"] }, { ids: ["b", "a"] }), false);
+  assert.equal(canonicalJsonScopeEqual({ count: 1 }, { count: 2 }), false);
+  assert.equal(canonicalJsonScopeEqual({ invalid: undefined }, {}), false);
+});
+
+test("Web AI grant expiry caps only shorten a valid future lifetime", () => {
+  const now = Date.now();
+  const normalExpiresAt = new Date(now + 24 * 60 * 60 * 1_000);
+  const shortExpiresAt = new Date(now + 60_000);
+
+  assert.equal(applyGrantExpiresAtCap(normalExpiresAt, shortExpiresAt).getTime(), shortExpiresAt.getTime());
+  assert.equal(applyGrantExpiresAtCap(normalExpiresAt, undefined), normalExpiresAt);
+  assert.throws(
+    () => applyGrantExpiresAtCap(normalExpiresAt, new Date(now - 1)),
+    /AI_ROUTE_CONFIGURATION_FORBIDDEN/,
+  );
+  assert.throws(
+    () => applyGrantExpiresAtCap(normalExpiresAt, new Date(normalExpiresAt.getTime() + 1)),
+    /AI_ROUTE_CONFIGURATION_FORBIDDEN/,
+  );
+  assert.throws(
+    () => applyGrantExpiresAtCap(normalExpiresAt, new Date("invalid")),
+    /AI_ROUTE_CONFIGURATION_FORBIDDEN/,
+  );
+});
 
 type JobStatus = "queued" | "waitingConsent" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
 
@@ -659,14 +691,18 @@ test("GitHub nested outcomes preserve success, warning, known failure and unknow
   }
 });
 
-test("every model-transfer action resets its consent checkbox in finally", () => {
+test("every model-transfer action requires an explicit server confirmation execute", () => {
   const clients = [
     "src/app/projects/[projectId]/memory/project-memory-client.tsx",
     "src/app/projects/[projectId]/intelligence/project-intelligence-client.tsx",
+    "src/app/projects/[projectId]/assets/project-assets-client.tsx",
   ];
   for (const path of clients) {
     const source = readFileSync(join(process.cwd(), path), "utf8");
-    assert.match(source, /finally[\s\S]{0,260}setAcknowledged\(false\)/u, path);
+    assert.match(source, /phase: "prepare"/u, path);
+    assert.match(source, /phase: "execute"/u, path);
+    assert.match(source, /setConfirm(?:ation|ations)\(/u, path);
+    assert.doesNotMatch(source, /\b(?:acknowledged|setAcknowledged)\b/u, path);
   }
 });
 

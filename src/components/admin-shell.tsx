@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
-export type AdminSection = "overview" | "models" | "git" | "mcp" | "memberships" | "accountAccess" | "operations" | "guide";
+export type AdminSection = "overview" | "models" | "git" | "mcp" | "memberships" | "accountAccess" | "audit" | "operations" | "guide";
 
 const items: Array<{ key: AdminSection; label: string; href: string; description: string }> = [
   { key: "overview", label: "总览", href: "/admin", description: "平台就绪与待处理" },
@@ -12,6 +12,7 @@ const items: Array<{ key: AdminSection; label: string; href: string; description
   { key: "mcp", label: "MCP 连接", href: "/admin/connectors/mcp", description: "安全认证与只读工具" },
   { key: "memberships", label: "用户与会员", href: "/admin/users/memberships", description: "会员资格管理" },
   { key: "accountAccess", label: "账号状态", href: "/system/account-access", description: "停用与恢复治理" },
+  { key: "audit", label: "审计中心", href: "/admin/audit", description: "安全证据与变更历史" },
   { key: "operations", label: "备份 / 运维", href: "/admin/operations/backups", description: "受限只读状态" },
   { key: "guide", label: "管理员指南", href: "/admin/guide", description: "职责与安全边界" },
 ];

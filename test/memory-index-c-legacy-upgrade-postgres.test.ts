@@ -20,9 +20,9 @@ import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
 import { getActiveMemoryIndex } from "../src/lib/web-rag";
 import {
   getProjectMemoryIndexStatus,
+  prepareProjectMemoryIndexConfirmation,
   runProjectMemoryIndexJob,
 } from "../src/lib/web-memory-index";
-import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { createControlledMembership } from "./membership-fixture";
 
 const repositoryRoot = process.cwd();
@@ -61,7 +61,6 @@ const migrationNames = [
   "20260829130000_add_github_project_sync_job_kind",
   "20260829131000_add_project_github_sync_runs",
 ] as const;
-const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
 
 function errorText(error: unknown): string {
   if (error instanceof Error) return `${error.name} ${error.message}`;
@@ -1066,11 +1065,19 @@ export default defineConfig({
           usage: { prompt_tokens: texts.length, completion_tokens: 0 },
         }), { status: 200, headers: { "content-type": "application/json" } });
       };
+      const rebuildClientKey = `legacy-upgrade-${Date.now()}`;
+      const rebuildConfirmation = await prepareProjectMemoryIndexConfirmation({
+        projectId,
+        requestedBy: actor,
+        clientKey: rebuildClientKey,
+        mode: "full",
+        db,
+      });
       const rebuilt = await runProjectMemoryIndexJob({
         projectId,
         requestedBy: actor,
-        clientKey: `legacy-upgrade-${Date.now()}`,
-        consent,
+        clientKey: rebuildClientKey,
+        challengeId: rebuildConfirmation.challengeId,
         mode: "full",
       }, db);
       assert.equal(rebuilt.status, "succeeded");

@@ -13,7 +13,6 @@ import {
   projectAiProviderProjection,
 } from "@/lib/project-ai-public-projection";
 import {
-  assertWebAiConsent,
   auditedProviderCall,
   claimWebAiJob,
   createGrantedWebAiJob,
@@ -26,6 +25,11 @@ import {
   updateWebAiJobProgress,
   type RuntimeRoute,
 } from "@/lib/web-ai-governance";
+import {
+  confirmationRouteDisplay,
+  confirmationRouteSnapshot,
+  prepareWebAiConfirmation,
+} from "@/lib/web-ai-confirmation";
 import {
   isLegacyMcpProjectSource,
   nonLegacyMcpMemoryGenerationWhere,
@@ -384,25 +388,122 @@ export async function searchActiveMemoryForJob(input: Readonly<{
   return rankRecords(input.question, vector, input.index.records as SearchRecord[], input.take ?? 10);
 }
 
-export async function runSemanticSearchJob(input: Readonly<{
-  projectId: string;
-  requestedBy: WebAiActor;
-  clientKey: unknown;
-  consent: unknown;
-  question: unknown;
-}>, db: PrismaClient = getDb()) {
-  assertWebAiConsent(input.consent);
-  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
-  const question = questionSchema.parse(input.question);
-  const [route, index] = await Promise.all([
-    resolveEffectiveAiRoute(input.projectId, "embedding", db),
-    getActiveMemoryIndex(input.projectId, input.requestedBy, db),
+type WebRagMaterial = Readonly<{
+  embeddingRoute: RuntimeRoute;
+  generationRoute: RuntimeRoute;
+  index: Awaited<ReturnType<typeof getActiveMemoryIndex>>;
+  question: string;
+  manifest: string;
+}>;
+
+async function loadWebRagMaterial(
+  projectId: string,
+  actor: WebAiActor,
+  question: string,
+  db: PrismaClient,
+): Promise<WebRagMaterial> {
+  const [embeddingRoute, generationRoute, index] = await Promise.all([
+    resolveEffectiveAiRoute(projectId, "embedding", db),
+    resolveEffectiveAiRoute(projectId, "generateWithContext", db),
+    getActiveMemoryIndex(projectId, actor, db),
   ]);
   const manifest = manifestFingerprint({
     questionHash: sha256(question),
     indexGenerationId: index.id,
     indexManifest: index.inputManifestFingerprint,
   });
+  return Object.freeze({ embeddingRoute, generationRoute, index, question, manifest });
+}
+
+function ragConfirmationMaterial(
+  material: WebRagMaterial,
+  action: "memorySearch" | "memoryAnswer",
+  visibility: Parameters<typeof projectAiProviderProjection>[1],
+) {
+  return Object.freeze({
+    contentVersion: `${action === "memorySearch" ? "semantic-search" : "rag-answer"}:v1:${material.manifest}`,
+    inputFingerprintPayload: {
+      questionHash: sha256(material.question),
+      indexGenerationId: material.index.id,
+      indexManifest: material.index.inputManifestFingerprint,
+    },
+    routeSnapshot: {
+      embedding: confirmationRouteSnapshot(material.embeddingRoute),
+      ...(action === "memoryAnswer" ? { generation: confirmationRouteSnapshot(material.generationRoute) } : {}),
+    },
+    safeSummary: {
+      action,
+      route: {
+        embedding: confirmationRouteDisplay(material.embeddingRoute, visibility),
+        ...(action === "memoryAnswer" ? { generation: confirmationRouteDisplay(material.generationRoute, visibility) } : {}),
+      },
+      scope: { indexGenerationId: material.index.id },
+    },
+  });
+}
+
+export async function prepareSemanticSearchConfirmation(input: Readonly<{
+  projectId: string;
+  requestedBy: WebAiActor;
+  question: unknown;
+  clientKey: unknown;
+  db?: PrismaClient;
+}>) {
+  const question = questionSchema.parse(input.question);
+  return prepareWebAiConfirmation({
+    projectId: input.projectId,
+    actor: input.requestedBy,
+    targetAction: "memorySearch",
+    clientKey: input.clientKey,
+    db: input.db,
+    resolve: async (tx, admission) => {
+      const material = await loadWebRagMaterial(input.projectId, input.requestedBy, question, tx as unknown as PrismaClient);
+      const visibility = await loadProjectAiPublicVisibility(tx, admission.project.id, admission.actor.id);
+      const confirmation = ragConfirmationMaterial(material, "memorySearch", visibility);
+      return confirmation;
+    },
+  });
+}
+
+export async function prepareRagAnswerConfirmation(input: Readonly<{
+  projectId: string;
+  requestedBy: WebAiActor;
+  question: unknown;
+  clientKey: unknown;
+  db?: PrismaClient;
+}>) {
+  const question = questionSchema.parse(input.question);
+  return prepareWebAiConfirmation({
+    projectId: input.projectId,
+    actor: input.requestedBy,
+    targetAction: "memoryAnswer",
+    clientKey: input.clientKey,
+    db: input.db,
+    resolve: async (tx, admission) => {
+      const material = await loadWebRagMaterial(input.projectId, input.requestedBy, question, tx as unknown as PrismaClient);
+      const visibility = await loadProjectAiPublicVisibility(tx, admission.project.id, admission.actor.id);
+      return ragConfirmationMaterial(material, "memoryAnswer", visibility);
+    },
+  });
+}
+
+export async function runSemanticSearchJob(input: Readonly<{
+  projectId: string;
+  requestedBy: WebAiActor;
+  clientKey: unknown;
+  challengeId?: unknown;
+  consent?: unknown;
+  question: unknown;
+}>, db: PrismaClient = getDb()) {
+  // The index and route snapshots are project-scoped material. Guard before
+  // loading them; the grant transaction performs the authoritative fresh
+  // check and challenge revalidation later.
+  await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
+  const question = questionSchema.parse(input.question);
+  const material = await loadWebRagMaterial(input.projectId, input.requestedBy, question, db);
+  const { embeddingRoute: route, index, manifest } = material;
+  const visibility = await loadProjectAiPublicVisibility(db, input.projectId, input.requestedBy.id);
+  const confirmationMaterial = ragConfirmationMaterial(material, "memorySearch", visibility);
   const granted = await createGrantedWebAiJob({
     projectId: input.projectId,
     kind: "semanticSearch",
@@ -413,6 +514,29 @@ export async function runSemanticSearchJob(input: Readonly<{
     scopeIds: { indexGenerationId: index.id, questionHash: sha256(question) },
     manifestFingerprint: manifest,
     payload: { question, indexGenerationId: index.id },
+    confirmation: {
+      challengeId: input.challengeId,
+      clientKey: input.clientKey,
+      targetAction: "memorySearch",
+      contentVersion: confirmationMaterial.contentVersion,
+      inputFingerprintPayload: confirmationMaterial.inputFingerprintPayload,
+      routeSnapshot: confirmationMaterial.routeSnapshot,
+    },
+    refreshConfirmation: async (tx) => {
+      const fresh = ragConfirmationMaterial(
+        await loadWebRagMaterial(input.projectId, input.requestedBy, question, tx as unknown as PrismaClient),
+        "memorySearch",
+        await loadProjectAiPublicVisibility(tx, input.projectId, input.requestedBy.id),
+      );
+      return {
+        challengeId: input.challengeId,
+        clientKey: input.clientKey,
+        targetAction: "memorySearch",
+        contentVersion: fresh.contentVersion,
+        inputFingerprintPayload: fresh.inputFingerprintPayload,
+        routeSnapshot: fresh.routeSnapshot,
+      };
+    },
   }, db);
   if (!granted.created) return getProjectJobInternal(input.projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
@@ -461,22 +585,19 @@ export async function runRagAnswerJob(input: Readonly<{
   projectId: string;
   requestedBy: WebAiActor;
   clientKey: unknown;
-  consent: unknown;
+  challengeId?: unknown;
+  consent?: unknown;
   question: unknown;
 }>, db: PrismaClient = getDb()) {
-  assertWebAiConsent(input.consent);
+  // Keep project access ahead of index/route reads for the answer path too;
+  // supplemental embedding authorization is still coupled to the primary
+  // challenge transaction below.
   await assertWebAiProjectAccess(input.requestedBy, input.projectId, "edit", db);
   const question = questionSchema.parse(input.question);
-  const [embeddingRoute, generationRoute, index] = await Promise.all([
-    resolveEffectiveAiRoute(input.projectId, "embedding", db),
-    resolveEffectiveAiRoute(input.projectId, "generateWithContext", db),
-    getActiveMemoryIndex(input.projectId, input.requestedBy, db),
-  ]);
-  const manifest = manifestFingerprint({
-    questionHash: sha256(question),
-    indexGenerationId: index.id,
-    indexManifest: index.inputManifestFingerprint,
-  });
+  const material = await loadWebRagMaterial(input.projectId, input.requestedBy, question, db);
+  const { embeddingRoute, generationRoute, index, manifest } = material;
+  const visibility = await loadProjectAiPublicVisibility(db, input.projectId, input.requestedBy.id);
+  const confirmationMaterial = ragConfirmationMaterial(material, "memoryAnswer", visibility);
   const granted = await createGrantedWebAiJob({
     projectId: input.projectId,
     kind: "ragAnswer",
@@ -487,6 +608,35 @@ export async function runRagAnswerJob(input: Readonly<{
     scopeIds: { indexGenerationId: index.id, questionHash: sha256(question) },
     manifestFingerprint: manifest,
     payload: { question, indexGenerationId: index.id },
+    confirmation: {
+      challengeId: input.challengeId,
+      clientKey: input.clientKey,
+      targetAction: "memoryAnswer",
+      contentVersion: confirmationMaterial.contentVersion,
+      inputFingerprintPayload: confirmationMaterial.inputFingerprintPayload,
+      routeSnapshot: confirmationMaterial.routeSnapshot,
+    },
+    refreshConfirmation: async (tx) => {
+      const fresh = ragConfirmationMaterial(
+        await loadWebRagMaterial(input.projectId, input.requestedBy, question, tx as unknown as PrismaClient),
+        "memoryAnswer",
+        await loadProjectAiPublicVisibility(tx, input.projectId, input.requestedBy.id),
+      );
+      return {
+        challengeId: input.challengeId,
+        clientKey: input.clientKey,
+        targetAction: "memoryAnswer",
+        contentVersion: fresh.contentVersion,
+        inputFingerprintPayload: fresh.inputFingerprintPayload,
+        routeSnapshot: fresh.routeSnapshot,
+      };
+    },
+    supplemental: {
+      route: embeddingRoute,
+      scopeKind: "query",
+      scopeIds: { indexGenerationId: index.id, questionHash: sha256(question) },
+      manifestFingerprint: manifest,
+    },
   }, db);
   if (!granted.created) return getProjectJobInternal(input.projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
@@ -503,6 +653,7 @@ export async function runRagAnswerJob(input: Readonly<{
       scopeKind: "query",
       scopeIds: { indexGenerationId: index.id, questionHash: sha256(question) },
       manifestFingerprint: manifest,
+      confirmationChallengeId: input.challengeId as string,
     }, db);
     const ranked = await searchActiveMemoryForJob({
       projectId: input.projectId,

@@ -15,7 +15,6 @@ import { getProjectJobInternal } from "@/lib/project-workflow";
 import { buildProjectWorldState } from "@/lib/project-world";
 import {
   auditedProviderCall,
-  assertWebAiConsent,
   claimWebAiJob,
   createGrantedWebAiJob,
   createSupplementalWebAiGrant,
@@ -26,6 +25,11 @@ import {
   stableAiCallKey,
   updateWebAiJobProgress,
 } from "@/lib/web-ai-governance";
+import {
+  confirmationRouteDisplay,
+  confirmationRouteSnapshot,
+  prepareWebAiConfirmation,
+} from "@/lib/web-ai-confirmation";
 import {
   getActiveMemoryIndex,
   searchActiveMemoryForJob,
@@ -536,13 +540,103 @@ async function assertNoLegacyProjectAiRoute(
   if (legacyRoute !== null) throw new EffectiveAiRouteError("PROJECT_ROUTE_INVALID");
 }
 
+function intelligenceConfirmationMaterial(
+  action: "intelligenceBrief" | "intelligenceAgent",
+  runtime: Awaited<ReturnType<typeof prepareRuntime>>,
+  manifest: string,
+  question?: string,
+  visibility?: Parameters<typeof projectAiProviderProjection>[1],
+) {
+  return Object.freeze({
+    contentVersion: `${action === "intelligenceBrief" ? "project-brief" : "project-agent"}:v1:${manifest}`,
+    inputFingerprintPayload: {
+      ...(question === undefined ? {} : { questionHash: sha256(question) }),
+      stateManifest: projectStateFingerprint(runtime.state),
+      indexGenerationId: runtime.index.id,
+      indexManifest: runtime.index.inputManifestFingerprint,
+    },
+    routeSnapshot: {
+      embedding: confirmationRouteSnapshot(runtime.embeddingRoute),
+      generation: confirmationRouteSnapshot(runtime.generationRoute),
+    },
+    safeSummary: {
+      action,
+      route: {
+        embedding: confirmationRouteDisplay(runtime.embeddingRoute, visibility ?? { actorId: "", projectOwner: false }),
+        generation: confirmationRouteDisplay(runtime.generationRoute, visibility ?? { actorId: "", projectOwner: false }),
+      },
+      scope: {
+        indexGenerationId: runtime.index.id,
+        ...(question === undefined ? {} : { questionProvided: true }),
+      },
+    },
+  });
+}
+
+export async function prepareProjectBriefConfirmation(input: Readonly<{
+  projectId: string;
+  requestedBy: WebAiActor;
+  clientKey: unknown;
+  db?: PrismaClient;
+}>) {
+  const projectId = projectIdSchema.parse(input.projectId);
+  return prepareWebAiConfirmation({
+    projectId,
+    actor: input.requestedBy,
+    targetAction: "intelligenceBrief",
+    clientKey: input.clientKey,
+    db: input.db,
+    resolve: async (tx, admission) => {
+      const runtime = await prepareRuntime(projectId, input.requestedBy, tx as unknown as PrismaClient);
+      const manifest = manifestFingerprint({
+        kind: "project-brief:v2",
+        stateManifest: projectStateFingerprint(runtime.state),
+        indexGenerationId: runtime.index.id,
+        indexManifest: runtime.index.inputManifestFingerprint,
+      });
+      const visibility = await loadProjectAiPublicVisibility(tx, admission.project.id, admission.actor.id);
+      return intelligenceConfirmationMaterial("intelligenceBrief", runtime, manifest, undefined, visibility);
+    },
+  });
+}
+
+export async function prepareProjectAgentConfirmation(input: Readonly<{
+  projectId: string;
+  requestedBy: WebAiActor;
+  question: unknown;
+  clientKey: unknown;
+  db?: PrismaClient;
+}>) {
+  const projectId = projectIdSchema.parse(input.projectId);
+  const question = questionSchema.parse(input.question);
+  return prepareWebAiConfirmation({
+    projectId,
+    actor: input.requestedBy,
+    targetAction: "intelligenceAgent",
+    clientKey: input.clientKey,
+    db: input.db,
+    resolve: async (tx, admission) => {
+      const runtime = await prepareRuntime(projectId, input.requestedBy, tx as unknown as PrismaClient);
+      const manifest = manifestFingerprint({
+        kind: "project-agent:v2",
+        questionHash: sha256(question),
+        stateManifest: projectStateFingerprint(runtime.state),
+        indexGenerationId: runtime.index.id,
+        indexManifest: runtime.index.inputManifestFingerprint,
+      });
+      const visibility = await loadProjectAiPublicVisibility(tx, admission.project.id, admission.actor.id);
+      return intelligenceConfirmationMaterial("intelligenceAgent", runtime, manifest, question, visibility);
+    },
+  });
+}
+
 export async function runProjectBriefJob(input: Readonly<{
   projectId: string;
   requestedBy: WebAiActor;
   clientKey: unknown;
-  consent: unknown;
+  challengeId?: unknown;
+  consent?: unknown;
 }>, db: PrismaClient = getDb()) {
-  assertWebAiConsent(input.consent);
   const projectId = projectIdSchema.parse(input.projectId);
   const runtime = await prepareRuntime(projectId, input.requestedBy, db);
   const stateManifest = projectStateFingerprint(runtime.state);
@@ -552,6 +646,7 @@ export async function runProjectBriefJob(input: Readonly<{
     indexGenerationId: runtime.index.id,
     indexManifest: runtime.index.inputManifestFingerprint,
   });
+  const confirmationMaterial = intelligenceConfirmationMaterial("intelligenceBrief", runtime, manifest);
   const granted = await createGrantedWebAiJob({
     projectId,
     kind: "projectBrief",
@@ -562,6 +657,39 @@ export async function runProjectBriefJob(input: Readonly<{
     scopeIds: { indexGenerationId: runtime.index.id, stateManifest },
     manifestFingerprint: manifest,
     payload: { reportVersion: "project-intelligence-report:v2", indexGenerationId: runtime.index.id, projectWorldStateFingerprint: runtime.state.world.snapshotFingerprint },
+    confirmation: {
+      challengeId: input.challengeId,
+      clientKey: input.clientKey,
+      targetAction: "intelligenceBrief",
+      contentVersion: confirmationMaterial.contentVersion,
+      inputFingerprintPayload: confirmationMaterial.inputFingerprintPayload,
+      routeSnapshot: confirmationMaterial.routeSnapshot,
+    },
+    refreshConfirmation: async (tx) => {
+      const freshRuntime = await prepareRuntime(projectId, input.requestedBy, tx as unknown as PrismaClient);
+      const freshStateManifest = projectStateFingerprint(freshRuntime.state);
+      const freshManifest = manifestFingerprint({
+        kind: "project-brief:v2",
+        stateManifest: freshStateManifest,
+        indexGenerationId: freshRuntime.index.id,
+        indexManifest: freshRuntime.index.inputManifestFingerprint,
+      });
+      const fresh = intelligenceConfirmationMaterial("intelligenceBrief", freshRuntime, freshManifest);
+      return {
+        challengeId: input.challengeId,
+        clientKey: input.clientKey,
+        targetAction: "intelligenceBrief",
+        contentVersion: fresh.contentVersion,
+        inputFingerprintPayload: fresh.inputFingerprintPayload,
+        routeSnapshot: fresh.routeSnapshot,
+      };
+    },
+    supplemental: {
+      route: runtime.embeddingRoute,
+      scopeKind: "projectIntelligence",
+      scopeIds: { indexGenerationId: runtime.index.id, queryHash: sha256(REPORT_SEARCH_QUERY) },
+      manifestFingerprint: manifest,
+    },
     beforeCreate: assertNoLegacyProjectAiRoute,
   }, db);
   if (!granted.created) return getProjectJobInternal(projectId, granted.jobId, db);
@@ -583,6 +711,7 @@ export async function runProjectBriefJob(input: Readonly<{
       scopeKind: "projectIntelligence",
       scopeIds: { indexGenerationId: runtime.index.id, queryHash: sha256(REPORT_SEARCH_QUERY) },
       manifestFingerprint: manifest,
+      confirmationChallengeId: input.challengeId as string,
     }, db);
     await updateWebAiJobProgress(granted.jobId, claim, "collecting_evidence", 0, 2, db);
     const [items, searchResults] = await Promise.all([
@@ -740,10 +869,10 @@ export async function runProjectAgentJob(input: Readonly<{
   projectId: string;
   requestedBy: WebAiActor;
   clientKey: unknown;
-  consent: unknown;
+  challengeId?: unknown;
+  consent?: unknown;
   question: unknown;
 }>, db: PrismaClient = getDb()) {
-  assertWebAiConsent(input.consent);
   const projectId = projectIdSchema.parse(input.projectId);
   const question = questionSchema.parse(input.question);
   const runtime = await prepareRuntime(projectId, input.requestedBy, db);
@@ -755,6 +884,7 @@ export async function runProjectAgentJob(input: Readonly<{
     indexGenerationId: runtime.index.id,
     indexManifest: runtime.index.inputManifestFingerprint,
   });
+  const confirmationMaterial = intelligenceConfirmationMaterial("intelligenceAgent", runtime, manifest, question);
   const granted = await createGrantedWebAiJob({
     projectId,
     kind: "projectAgent",
@@ -765,6 +895,40 @@ export async function runProjectAgentJob(input: Readonly<{
     scopeIds: { indexGenerationId: runtime.index.id, questionHash: sha256(question), stateManifest },
     manifestFingerprint: manifest,
     payload: { agentVersion: "read-only-project-intelligence-agent:v2", question, projectWorldStateFingerprint: runtime.state.world.snapshotFingerprint },
+    confirmation: {
+      challengeId: input.challengeId,
+      clientKey: input.clientKey,
+      targetAction: "intelligenceAgent",
+      contentVersion: confirmationMaterial.contentVersion,
+      inputFingerprintPayload: confirmationMaterial.inputFingerprintPayload,
+      routeSnapshot: confirmationMaterial.routeSnapshot,
+    },
+    refreshConfirmation: async (tx) => {
+      const freshRuntime = await prepareRuntime(projectId, input.requestedBy, tx as unknown as PrismaClient);
+      const freshStateManifest = projectStateFingerprint(freshRuntime.state);
+      const freshManifest = manifestFingerprint({
+        kind: "project-agent:v2",
+        questionHash: sha256(question),
+        stateManifest: freshStateManifest,
+        indexGenerationId: freshRuntime.index.id,
+        indexManifest: freshRuntime.index.inputManifestFingerprint,
+      });
+      const fresh = intelligenceConfirmationMaterial("intelligenceAgent", freshRuntime, freshManifest, question);
+      return {
+        challengeId: input.challengeId,
+        clientKey: input.clientKey,
+        targetAction: "intelligenceAgent",
+        contentVersion: fresh.contentVersion,
+        inputFingerprintPayload: fresh.inputFingerprintPayload,
+        routeSnapshot: fresh.routeSnapshot,
+      };
+    },
+    supplemental: {
+      route: runtime.embeddingRoute,
+      scopeKind: "projectIntelligence",
+      scopeIds: { indexGenerationId: runtime.index.id, questionHash: sha256(question) },
+      manifestFingerprint: manifest,
+    },
     beforeCreate: assertNoLegacyProjectAiRoute,
   }, db);
   if (!granted.created) return getProjectJobInternal(projectId, granted.jobId, db);
@@ -786,6 +950,7 @@ export async function runProjectAgentJob(input: Readonly<{
       scopeKind: "projectIntelligence",
       scopeIds: { indexGenerationId: runtime.index.id, questionHash: sha256(question) },
       manifestFingerprint: manifest,
+      confirmationChallengeId: input.challengeId as string,
     }, db);
     await updateWebAiJobProgress(granted.jobId, claim, "planning", 0, 3, db);
     const planned = await auditedProviderCall({

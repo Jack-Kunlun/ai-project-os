@@ -95,6 +95,8 @@ test(
       `);
       assert.ok(!triggerNames.rows.some((row) => row.tgname === "AiProviderConnection_workspace_membership_guard"));
       assert.ok(!triggerNames.rows.some((row) => row.tgname === "WorkspaceMembership_ai_provider_membership_guard"));
+      assert.ok(!triggerNames.rows.some((row) => row.tgname === "AiProviderConnection_workspace_owner_guard"));
+      assert.ok(!triggerNames.rows.some((row) => row.tgname === "WorkspaceMembership_provider_owner_integrity_guard"));
 
       const insertWorkspaceAudit = async (input: Readonly<{
         auditId?: string;
@@ -479,23 +481,12 @@ test(
       );
       await client.query("ROLLBACK").catch(() => undefined);
 
-      await assert.rejects(
-        async () => {
-          await client.query("BEGIN");
-          await client.query(`UPDATE "WorkspaceMembership" SET "accessState" = 'revoked' WHERE "id" = $1`, [replacementMembershipId]);
-          await insertWorkspaceAudit({ membershipId: replacementMembershipId, action: "revoked", newState: "revoked", previousState: "confirmed", workspaceId, userId });
-          await client.query("COMMIT");
-        },
-        (error: unknown) => errorCode(error) === "23514",
-      );
-      await client.query("ROLLBACK").catch(() => undefined);
-      const stillOwner = await client.query<{ access_state: string }>(`SELECT "accessState"::text AS access_state FROM "WorkspaceMembership" WHERE "id" = $1`, [replacementMembershipId]);
-      assert.equal(stillOwner.rows[0]?.access_state, "confirmed");
-
       await client.query("BEGIN");
       await client.query(`UPDATE "WorkspaceMembership" SET "accessState" = 'revoked' WHERE "id" = $1`, [replacementMembershipId]);
       await insertWorkspaceAudit({ membershipId: replacementMembershipId, action: "revoked", newState: "revoked", previousState: "confirmed", workspaceId, userId });
       await client.query("COMMIT");
+      const revokedReplacement = await client.query<{ access_state: string }>(`SELECT "accessState"::text AS access_state FROM "WorkspaceMembership" WHERE "id" = $1`, [replacementMembershipId]);
+      assert.equal(revokedReplacement.rows[0]?.access_state, "revoked");
 
       const memberId = randomUUID();
       await client.query("BEGIN");

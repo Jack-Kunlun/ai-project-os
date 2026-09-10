@@ -11,7 +11,7 @@ import { listProjectJobs, runGitHubCodeScanJob, runGitHubMaterialSyncJob } from 
 import { runGitHubProjectSyncJob } from "../src/lib/github/project-sync-service";
 import { WebAiAccessError, type WebAiActor } from "../src/lib/web-ai-access";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
-import { runAutoExtractJob } from "../src/lib/web-auto-extract";
+import { prepareAutoExtractConfirmation, runAutoExtractJob } from "../src/lib/web-auto-extract";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.WEB_AI_ACCESS_POSTGRES_GATE === "1";
@@ -469,6 +469,15 @@ test(
       },
     });
 
+    const clientKey = `post-claim-${suffix}`;
+    const confirmation = await prepareAutoExtractConfirmation({
+      projectId,
+      requestedBy: actor,
+      clientKey,
+      sourceIds: [sourceId],
+      db,
+    });
+
     let revocationInjected = false;
     const guardedDb = db.$extends({
       query: {
@@ -514,7 +523,8 @@ test(
         () => runAutoExtractJob({
           projectId,
           requestedBy: actor,
-          clientKey: `post-claim-${suffix}`,
+          clientKey,
+          challengeId: confirmation.challengeId,
           consent,
           request: { sourceIds: [sourceId] },
         }, guardedDb),

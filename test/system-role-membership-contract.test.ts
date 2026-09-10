@@ -32,7 +32,6 @@ function scenario(id: RoleMatrixScenario["id"]): RoleMatrixScenario {
 test("stored system roles expose the canonical public role", () => {
   const storedRoles: Array<[AppUserRole, "admin" | "user"]> = [
     ["admin", "admin"],
-    ["member", "user"],
     ["user", "user"],
   ];
   for (const [storedRole, publicRole] of storedRoles) assert.equal(toSystemRole(storedRole), publicRole);
@@ -41,7 +40,6 @@ test("stored system roles expose the canonical public role", () => {
   for (const systemRole of SYSTEM_ROLES) {
     assert.equal(toSystemRole(CURRENT_STORED_ROLE_BY_SYSTEM_ROLE[systemRole]), systemRole);
   }
-  assert.equal(toSystemRole("member"), SYSTEM_ROLE_BY_LEGACY_STORED_ROLE.member);
 });
 
 test("role matrix declares every independent role, membership, collaboration, and account dimension", () => {

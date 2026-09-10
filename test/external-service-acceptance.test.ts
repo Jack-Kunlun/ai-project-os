@@ -54,6 +54,34 @@ test("external evidence classification never treats a probe alone as field accep
   );
 });
 
+test("model acceptance queries only confirmed platform-owned connections", async () => {
+  let modelWhere: unknown;
+  const db = {
+    aiProviderConnection: {
+      findMany: async ({ where }: { where: unknown }) => {
+        modelWhere = where;
+        return [];
+      },
+    },
+    gitConnection: { findMany: async () => [] },
+    gitHubConnection: { findMany: async () => [] },
+    oidcProvider: { findMany: async () => [] },
+    mcpConnection: { findMany: async () => [] },
+  } as unknown as PrismaClient;
+
+  await buildExternalServiceAcceptanceReport(db, {
+    expected: ["model"],
+    maxAgeHours: 24,
+    now: new Date("2026-09-06T12:00:00.000Z"),
+  });
+
+  assert.deepEqual(modelWhere, {
+    disabledAt: null,
+    scope: "platform",
+    ownerUserId: null,
+  });
+});
+
 test("frozen MCP acceptance never reads legacy actions or reports a ready workflow", async () => {
   const now = new Date("2026-09-06T12:00:00.000Z");
   const db = {

@@ -42,10 +42,8 @@ test("session, profile, and admin membership boundaries expose canonical system 
       },
     },
   } as unknown as PrismaClient;
-  const legacySession = await createSession(sessionDb, { id: memberId, username: "legacy-member", role: "member", accountAccessVersion: 1 });
   const currentSession = await createSession(sessionDb, { id: memberId, username: "current-user", role: "user", accountAccessVersion: 1 });
   const adminSession = await createSession(sessionDb, { id: adminId, username: "admin", role: "admin", accountAccessVersion: 1 });
-  assert.equal(legacySession.user.role, "user");
   assert.equal(currentSession.user.role, "user");
   assert.equal(adminSession.user.role, "admin");
   assert.equal(sessionCreateInput?.userId, adminId);
@@ -57,7 +55,7 @@ test("session, profile, and admin membership boundaries expose canonical system 
       findMany: async ({ select }: { select: Record<string, unknown> }) => {
         selectedUserFields.push(Object.keys(select));
         return [
-          { id: memberId, username: "legacy-member", displayName: null, email: null, role: "member" as const, disabledAt: null, membershipSubscription: null },
+          { id: memberId, username: "current-user", displayName: null, email: null, role: "user" as const, disabledAt: null, membershipSubscription: null },
           { id: adminId, username: "admin", displayName: null, email: null, role: "admin" as const, disabledAt: null, membershipSubscription: null },
         ];
       },
@@ -187,9 +185,8 @@ test("workspace member list/create/update use a minimal DTO without system crede
   assert.doesNotMatch(source, /actor\.role\s*===\s*["']admin["']/u);
 });
 
-test("system-role mapper is fail-closed and canonical for legacy and current storage values", () => {
+test("system-role mapper is fail-closed and canonical for current storage values", () => {
   assert.equal(toSystemRole("admin"), "admin");
-  assert.equal(toSystemRole("member"), "user");
   assert.equal(toSystemRole("user"), "user");
   assert.throws(() => toSystemRole("future" as never), /UNSUPPORTED_APP_USER_ROLE/u);
 });

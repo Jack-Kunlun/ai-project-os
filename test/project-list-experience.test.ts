@@ -39,7 +39,9 @@ test("high-growth project lists use server pagination with search and filters", 
   }
   assert.match(governance, /CursorPagination/u);
   assert.match(governance, /搜索任务记录/u);
-  assert.match(governance, /搜索模型路由变更/u);
+  assert.match(governance, /AI 用量与计费/u);
+  assert.match(governance, /刷新/u);
+  assert.doesNotMatch(governance, /搜索模型路由变更|governance\/routes|RouteRevision/u);
   assert.match(reviewQueue, /CursorPagination/u);
   assert.match(reviewQueue, /搜索 AI 候选/u);
 });

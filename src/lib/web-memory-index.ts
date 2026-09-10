@@ -258,7 +258,7 @@ function routeSnapshotComplete(input: Readonly<{
   const updatedAt = input.routeUpdatedAt === null || input.routeUpdatedAt === undefined
     ? Number.NaN
     : new Date(input.routeUpdatedAt).getTime();
-  const common = (input.source === "project_override" || input.source === "platform_default" || input.source === "personal_delegation")
+  const common = (input.source === "platform_default" || input.source === "personal_delegation")
     && Number.isFinite(updatedAt)
     && Number.isSafeInteger(input.providerConfigurationVersion)
     && (input.providerConfigurationVersion ?? 0) > 0
@@ -269,10 +269,8 @@ function routeSnapshotComplete(input: Readonly<{
     return typeof input.routeId === "string" && input.routeId.length > 0
       && Number.isSafeInteger(input.routeVersion) && (input.routeVersion ?? 0) > 0;
   }
-  return input.source === "platform_default"
-    ? typeof input.routeId === "string" && input.routeId.length > 0
-      && Number.isSafeInteger(input.routeVersion) && (input.routeVersion ?? 0) > 0
-    : input.routeId === null && input.routeVersion === null;
+  return typeof input.routeId === "string" && input.routeId.length > 0
+    && Number.isSafeInteger(input.routeVersion) && (input.routeVersion ?? 0) > 0;
 }
 
 export function isMemoryIndexPublicationCurrent(input: MemoryIndexPublicationSnapshot): boolean {
@@ -1010,44 +1008,44 @@ export async function prepareProjectMemoryIndexConfirmation(input: Readonly<{
 
 export async function getProjectMemoryIndexStatus(projectId: string, actor: WebAiActor, db: PrismaClient = getDb()) {
   const currentActor = await assertWebAiProjectAccess(actor, projectId, "view", db);
-  const [visibility, pointer, sourceCount, codePointer, materialPointerCount, route, currentManifest, latestJob] = await Promise.all([
-    loadProjectAiPublicVisibility(db, projectId, currentActor.id),
-    db.memoryIndexPointer.findUnique({
-      where: { projectId },
-      select: {
-        publishedAt: true,
-        generation: {
-          select: {
-            id: true,
-            jobId: true,
-            status: true,
-            buildMode: true,
-            providerConnectionId: true,
-            modelId: true,
-            dimensions: true,
-            recordCount: true,
-            generatedRecordCount: true,
-            reusedRecordCount: true,
-            inputManifestFingerprint: true,
-            expectedEmbeddingRouteUpdatedAt: true,
-            expectedEmbeddingRouteSource: true,
-            expectedEmbeddingRouteId: true,
-            expectedEmbeddingRouteVersion: true,
-            expectedEmbeddingProviderConfigurationVersion: true,
-            expectedEmbeddingRouteFenceFingerprint: true,
-            expectedEmbeddingConnectionOwnerAccountAccessVersion: true,
-            embeddingWebAiGrantId: true,
-            completedAt: true,
-            records: {
-              where: { projectSource: { is: { kind: "mcp" } } },
-              take: 1,
-              select: { id: true },
-            },
-            providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
+  const pointerQuery = db.memoryIndexPointer.findUnique({
+    where: { projectId },
+    select: {
+      publishedAt: true,
+      generation: {
+        select: {
+          id: true,
+          jobId: true,
+          status: true,
+          buildMode: true,
+          providerConnectionId: true,
+          modelId: true,
+          dimensions: true,
+          recordCount: true,
+          generatedRecordCount: true,
+          reusedRecordCount: true,
+          inputManifestFingerprint: true,
+          expectedEmbeddingRouteUpdatedAt: true,
+          expectedEmbeddingRouteSource: true,
+          expectedEmbeddingRouteId: true,
+          expectedEmbeddingRouteVersion: true,
+          expectedEmbeddingProviderConfigurationVersion: true,
+          expectedEmbeddingRouteFenceFingerprint: true,
+          expectedEmbeddingConnectionOwnerAccountAccessVersion: true,
+          embeddingWebAiGrantId: true,
+          completedAt: true,
+          records: {
+            where: { projectSource: { is: { kind: "mcp" } } },
+            take: 1,
+            select: { id: true },
           },
+          providerConnection: { select: { scope: true, ownerUserId: true, name: true, kind: true, status: true } },
         },
       },
-    }),
+    },
+  });
+  const [visibility, sourceCount, codePointer, materialPointerCount, route, currentManifest, latestJob] = await Promise.all([
+    loadProjectAiPublicVisibility(db, projectId, currentActor.id),
     db.projectSource.count({ where: { projectId, originScope: "project", ...nonLegacyMcpProjectSourceWhere } }),
     db.projectCodeSnapshotPointer.findUnique({ where: { projectId }, select: { projectCodeSnapshotId: true } }),
     db.repositoryMaterialGenerationPointer.count({ where: { projectId } }),
@@ -1064,8 +1062,6 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
       updatedAt: effective.updatedAt,
       providerConnection: Object.freeze({
         scope: effective.providerConnection.scope,
-        workspaceId: effective.providerConnection.workspaceId,
-        ownershipState: effective.providerConnection.ownershipState,
         ownerUserId: effective.providerConnection.ownerUserId,
         id: effective.providerConnection.id,
         name: effective.providerConnection.name,
@@ -1086,6 +1082,7 @@ export async function getProjectMemoryIndexStatus(projectId: string, actor: WebA
       select: { id: true, status: true, stage: true, failureCode: true, reconciliationRequired: true, createdAt: true, completedAt: true },
     }),
   ]);
+  const pointer = await pointerQuery;
   const personalEvidenceLive = route?.source === "personal_delegation" && pointer !== null
     ? await isPersonalMemoryGenerationLive(pointer.generation.id, db)
     : true;

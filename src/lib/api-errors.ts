@@ -10,7 +10,6 @@ import {
   GitHubReadError,
   ProjectGitHubSyncError,
 } from "@/lib/github";
-import { ProjectAiRouteError } from "@/lib/project-ai-routes";
 import { WebGitHubError } from "@/lib/web-github";
 import { WebAiGovernanceError } from "@/lib/web-ai-governance";
 import { WebAiConfirmationError } from "@/lib/web-ai-confirmation";
@@ -46,7 +45,6 @@ import { ProjectWorldError } from "@/lib/project-world";
 import { AiEntitlementError } from "@/lib/ai-entitlements";
 import { MembershipServiceError } from "@/lib/membership-service";
 import { AccountAccessServiceError } from "@/lib/account-access-service";
-import { WorkspaceProviderServiceError } from "@/lib/workspace-provider-service";
 import { PlatformDefaultAiRouteError } from "@/lib/platform-default-ai-routes";
 import { EffectiveAiRouteError } from "@/lib/effective-ai-route";
 import { PersonalProviderServiceError } from "@/lib/personal-ai-provider-service";
@@ -697,25 +695,6 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     return { status, body: { error: { code: error.code, message } } };
   }
 
-  if (error instanceof WorkspaceProviderServiceError) {
-    const mapping = {
-      AI_PROVIDER_INVALID_INPUT: [400, "供应商配置无效"],
-      AI_PROVIDER_NOT_FOUND: [404, "工作区模型连接不存在"],
-      AI_PROVIDER_NAME_CONFLICT: [409, "模型连接名称已存在"],
-      AI_PROVIDER_IN_USE: [409, "模型连接仍被项目路由或历史审计记录引用"],
-      AI_PROVIDER_DELETE_REQUIRES_DISABLED: [409, "请先停用模型连接，再执行永久删除"],
-      AI_PROVIDER_CONFIRMATION_MISMATCH: [400, "连接名称确认不一致，未执行删除"],
-      AI_PROVIDER_SCOPE_FORBIDDEN: [403, "模型连接不属于当前工作区"],
-      AI_PROVIDER_OWNER_REQUIRED: [403, "只有该连接所有者且为工作区 Owner/Admin 才能操作"],
-      AI_MEMBERSHIP_REQUIRED: [403, "配置工作区模型需要有效会员资格"],
-      AI_MEMBERSHIP_EXPIRED: [403, "会员资格已到期，不能继续配置模型"],
-      AI_PROVIDER_CONNECTION_UNAVAILABLE: [409, "模型连接尚未验证或已停用"],
-      AI_PROVIDER_CONFLICT: [409, "模型连接已被其他操作更新，请刷新后重试"],
-    } as const;
-    const [status, message] = mapping[error.code];
-    return { status, body: { error: { code: error.code, message } } };
-  }
-
   if (error instanceof ProviderTransportError) {
     const messages = {
       AI_PROVIDER_AUTH_FAILED: "API Key 无效或没有所需权限",
@@ -791,21 +770,6 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       ACCOUNT_ACCESS_IDEMPOTENCY_CONFLICT: [409, "请求标识已用于其他账号变更，请更换请求标识"],
       ACCOUNT_ACCESS_CONFIRMATION_REQUIRED: [400, "请完成用户名二次确认后再提交账号变更"],
       ACCOUNT_ACCESS_METHOD_NOT_ALLOWED: [405, "账号变更必须先预览，再通过用户详情 PATCH 确认"],
-    } as const;
-    const [status, message] = mapping[error.code];
-    return { status, body: { error: { code: error.code, message } } };
-  }
-
-  if (error instanceof ProjectAiRouteError) {
-    const mapping = {
-      PROJECT_AI_ROUTE_INVALID_INPUT: [400, "项目模型路由配置无效"],
-      PROJECT_AI_ROUTE_CONFLICT: [409, "项目模型路由已被其他操作更新，请刷新后重试"],
-      PROJECT_AI_ROUTE_CONFIRMATION_REQUIRED: [409, "切换向量模型前请确认并在完成后重建索引"],
-      PROJECT_NOT_FOUND: [404, "项目不存在"],
-      AI_PROVIDER_NOT_FOUND: [404, "模型供应商不存在"],
-      AI_PROVIDER_NOT_VERIFIED: [409, "请先通过供应商连接测试"],
-      AI_PROVIDER_CAPABILITY_MISMATCH: [422, "所选供应商或模型不支持该能力"],
-      AI_PROVIDER_SCOPE_FORBIDDEN: [403, "所选供应商不属于当前项目工作区"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

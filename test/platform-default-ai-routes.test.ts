@@ -22,7 +22,6 @@ import { mapApiError } from "../src/lib/api-errors";
 import {
   createProviderConnection,
   deleteProviderConnection,
-  confirmPlatformProviderOwnership,
   disableProviderConnection,
   listProviderConnections,
   ProviderServiceError,
@@ -41,9 +40,7 @@ type Provider = {
   name: string;
   kind: "openai";
   scope: "platform";
-  workspaceId: null;
   ownerUserId: null;
-  ownershipState: "legacyPending" | "ambiguous" | "confirmed";
   status: "configured" | "verified" | "disabled" | "error";
   disabledAt: Date | null;
   configurationVersion: number;
@@ -81,9 +78,7 @@ class FakePlatformRouteDb {
       name: "Platform OpenAI",
       kind: "openai",
       scope: "platform",
-      workspaceId: null,
       ownerUserId: null,
-      ownershipState: "confirmed",
       status: "configured",
       disabledAt: null,
       configurationVersion: 1,
@@ -97,9 +92,7 @@ class FakePlatformRouteDb {
       name: "Platform OpenAI 2",
       kind: "openai",
       scope: "platform",
-      workspaceId: null,
       ownerUserId: null,
-      ownershipState: "confirmed",
       status: "verified",
       disabledAt: null,
       configurationVersion: 1,
@@ -226,9 +219,7 @@ class FakeProviderLifecycleDb {
     name: "Platform provider",
     kind: "openai" as const,
     scope: "platform" as const,
-    workspaceId: null,
     ownerUserId: null,
-    ownershipState: "confirmed" as "legacyPending" | "ambiguous" | "confirmed",
     protocol: "chatCompletions" as const,
     baseUrl: "https://api.openai.com/v1",
     credentialId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -276,16 +267,8 @@ class FakeProviderLifecycleDb {
       return this.provider;
     },
   };
-  readonly projectAiRoute = { count: async () => 0 };
   readonly platformDefaultAiRoute = { count: async () => this.activeDefaultRouteCount };
   readonly externalCredential = { updateMany: async () => ({ count: 1 }) };
-  readonly ownershipAudits: Array<Record<string, unknown>> = [];
-  readonly aiProviderOwnershipAudit = {
-    create: async ({ data }: { data: Record<string, unknown> }) => {
-      this.ownershipAudits.push(data);
-      return data;
-    },
-  };
   transactionError: unknown = null;
 
   async $executeRaw(..._args: unknown[]): Promise<number> {
@@ -384,11 +367,10 @@ test("platform provider services reject an administrator actor from a prior acco
 });
 
 test("platform provider routes retain the authenticated actor through every mutation and probe", async () => {
-  const [collectionRoute, itemRoute, testRoute, ownershipRoute] = await Promise.all([
+  const [collectionRoute, itemRoute, testRoute] = await Promise.all([
     readFile("src/app/api/settings/providers/route.ts", "utf8"),
     readFile("src/app/api/settings/providers/[providerId]/route.ts", "utf8"),
     readFile("src/app/api/settings/providers/[providerId]/test/route.ts", "utf8"),
-    readFile("src/app/api/settings/providers/[providerId]/ownership/confirm/route.ts", "utf8"),
   ]);
   assert.equal(collectionRoute.match(/const actor = await requireApiSession\(request\)/gu)?.length, 2);
   assert.match(collectionRoute, /listProviderConnections\(actor\)/u);
@@ -397,7 +379,6 @@ test("platform provider routes retain the authenticated actor through every muta
   assert.match(itemRoute, /await readJsonBody\(request\),\s*actor,/u);
   assert.match(testRoute, /const actor = await requireApiSession\(request\)/u);
   assert.match(testRoute, /testPlatformProviderConnection\(providerId, actor\)/u);
-  assert.match(ownershipRoute, /confirmPlatformProviderOwnership\(providerId, await readJsonBody\(request\), actor\)/u);
 });
 
 test("platform default routes reject an administrator actor from a prior account epoch", async () => {
@@ -624,81 +605,6 @@ test("provider lifecycle serializable conflicts map to a stable provider conflic
   );
 });
 
-test("legacy platform ownership confirmation is explicit, audited, and fail-closed", async () => {
-  const fake = new FakeProviderLifecycleDb();
-  fake.provider.ownershipState = "legacyPending";
-  const confirmed = await confirmPlatformProviderOwnership(
-    fake.provider.id,
-    { confirmationName: fake.provider.name, reason: "已核对为历史平台托管连接" },
-    admin,
-    fake as unknown as PrismaClient,
-  );
-  assert.ok(confirmed);
-  assert.equal(confirmed.ownershipState, "confirmed");
-  assert.deepEqual(fake.ownershipAudits, [{
-    providerConnectionId: fake.provider.id,
-    actorId: admin.id,
-    action: "legacyOwnershipConfirmed",
-    reason: "已核对为历史平台托管连接",
-    oldScope: "platform",
-    newScope: "platform",
-    oldOwnershipState: "legacyPending",
-    newOwnershipState: "confirmed",
-    oldWorkspacePresent: false,
-    newWorkspacePresent: false,
-    oldOwnerPresent: false,
-    newOwnerPresent: false,
-  }]);
-  const idempotent = await confirmPlatformProviderOwnership(
-    fake.provider.id,
-    { confirmationName: fake.provider.name, reason: "重复提交不新增审计" },
-    admin,
-    fake as unknown as PrismaClient,
-  );
-  assert.ok(idempotent);
-  assert.equal(idempotent.ownershipState, "confirmed");
-  assert.equal(fake.ownershipAudits.length, 1);
-
-  const retried = new FakeProviderLifecycleDb();
-  retried.provider.ownershipState = "legacyPending";
-  retried.transactionError = new Prisma.PrismaClientKnownRequestError(
-    "Raw query failed. Code: 40001. Message: could not serialize access due to concurrent update",
-    {
-      code: "P2010",
-      clientVersion: "7.10.0",
-      meta: { code: "40001" },
-    },
-  );
-  const retriedConfirmation = await confirmPlatformProviderOwnership(
-    retried.provider.id,
-    { confirmationName: retried.provider.name, reason: "重试后确认历史平台归属" },
-    admin,
-    retried as unknown as PrismaClient,
-  );
-  assert.ok(retriedConfirmation);
-  assert.equal(retriedConfirmation.ownershipState, "confirmed");
-  assert.equal(retried.ownershipAudits.length, 1);
-
-  const nonAdmin = new FakeProviderLifecycleDb();
-  nonAdmin.provider.ownershipState = "legacyPending";
-  await assert.rejects(
-    () => confirmPlatformProviderOwnership(nonAdmin.provider.id, { confirmationName: nonAdmin.provider.name, reason: "no" }, member, nonAdmin as unknown as PrismaClient),
-    (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_ADMIN_REQUIRED",
-  );
-  const ambiguous = new FakeProviderLifecycleDb();
-  ambiguous.provider.ownershipState = "ambiguous";
-  await assert.rejects(
-    () => confirmPlatformProviderOwnership(ambiguous.provider.id, { confirmationName: ambiguous.provider.name, reason: "manual" }, admin, ambiguous as unknown as PrismaClient),
-    (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE",
-  );
-  const wrongScope = new FakeProviderLifecycleDb();
-  (wrongScope.provider as { scope: string }).scope = "workspace";
-  await assert.rejects(
-    () => confirmPlatformProviderOwnership(wrongScope.provider.id, { confirmationName: wrongScope.provider.name, reason: "manual" }, admin, wrongScope as unknown as PrismaClient),
-    (error: unknown) => error instanceof ProviderServiceError && error.code === "AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE",
-  );
-});
-
 test("local validation, configuration-version readiness, and atomic activation stay control-plane only", async () => {
   const fake = db();
   const route = await createPlatformDefaultAiRoute({ operation: "projectAnalysis", providerConnectionId: providerId, modelId: "gpt-4.1-mini", maxOutputTokens: 2048 }, admin, fake as unknown as PrismaClient);
@@ -717,9 +623,10 @@ test("local validation, configuration-version readiness, and atomic activation s
   fake.providers.get(providerId)!.configurationVersion = 2;
   const stale = await getPlatformDefaultAiRouteReadiness(admin, fake as unknown as PrismaClient);
   assert.equal(stale.operations.projectAnalysis.code, "configuration-changed");
-  fake.providers.get(providerId)!.ownershipState = "ambiguous";
+  fake.providers.get(providerId)!.configurationVersion = 1;
+  fake.providers.get(providerId)!.status = "error";
   const invalidProvider = await getPlatformDefaultAiRouteReadiness(admin, fake as unknown as PrismaClient);
-  assert.equal(invalidProvider.operations.projectAnalysis.code, "provider-invalid");
+  assert.equal(invalidProvider.operations.projectAnalysis.code, "provider-not-verified");
   await assert.rejects(
     () => activatePlatformDefaultAiRoute(route.id, admin, fake as unknown as PrismaClient, active.updatedAt),
     (error: unknown) => error instanceof PlatformDefaultAiRouteError && error.code === "PLATFORM_AI_ROUTE_NOT_VALIDATED",
@@ -805,13 +712,12 @@ test("list DTOs contain provider version, safe audits, six readiness entries, an
 test("schema and migration add only the control-plane version fence and immutable audit boundary", async () => {
   const schema = await readFile("prisma/schema.prisma", "utf8");
   const migration = await readFile("prisma/migrations/20260904020000_add_platform_default_route_control_plane/migration.sql", "utf8");
-  const ownershipMigration = await readFile("prisma/migrations/20260904030000_add_ai_provider_ownership_audit/migration.sql", "utf8");
+  const cleanSlateMigration = await readFile("prisma/migrations/20260910010000_clean_slate_ai_provider_model/migration.sql", "utf8");
   const entries = (await readdir("prisma/migrations", { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && /^\d{14}_[a-z0-9_]+$/u.test(entry.name))
     .map((entry) => entry.name)
     .sort();
   assert.equal(entries.indexOf("20260904020000_add_platform_default_route_control_plane"), 58);
-  assert.equal(entries.indexOf("20260904030000_add_ai_provider_ownership_audit"), 59);
   assert.match(schema, /configurationVersion\s+Int\s+@default\(1\)/u);
   assert.match(schema, /validatedProviderConfigurationVersion\s+Int\?/u);
   assert.match(schema, /validatedAt\s+DateTime\?/u);
@@ -819,18 +725,10 @@ test("schema and migration add only the control-plane version fence and immutabl
   assert.match(schema, /PlatformDefaultAiRouteAuditAction/u);
   assert.match(migration, /CREATE TRIGGER "PlatformDefaultAiRouteAudit_immutable_guard"[\s\S]*BEFORE UPDATE OR DELETE/u);
   assert.match(migration, /DROP CONSTRAINT "AiProviderConnection_scope_check"/u);
-  assert.match(schema, /enum AiProviderOwnershipAuditAction\s*\{[\s\S]*legacyOwnershipConfirmed\s+@map\("legacy_ownership_confirmed"\)/u);
-  assert.match(schema, /model AiProviderOwnershipAudit\s+\{[\s\S]*reason\s+String[\s\S]*oldScope\s+AiProviderScope[\s\S]*newOwnershipState\s+ResourceOwnershipState/u);
-  assert.match(ownershipMigration, /CREATE TABLE "AiProviderOwnershipAudit"/u);
-  assert.match(ownershipMigration, /FOREIGN KEY \("providerConnectionId"\)[\s\S]*ON DELETE NO ACTION ON UPDATE CASCADE/u);
-  assert.match(ownershipMigration, /FOREIGN KEY \("actorId"\)[\s\S]*ON DELETE NO ACTION ON UPDATE CASCADE/u);
-  assert.match(ownershipMigration, /CREATE TRIGGER "AiProviderOwnershipAudit_immutable_guard"[\s\S]*BEFORE UPDATE OR DELETE/u);
+  assert.match(cleanSlateMigration, /CLEAN_SLATE_PRECONDITION_FAILED/u);
   const executable = migration.replace(/--[^\n]*(?:\n|$)/gu, "");
   assert.doesNotMatch(executable, /(?:^|;)\s*(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/imu);
   assert.doesNotMatch(executable, /DROP\s+(?:TABLE|TYPE|INDEX)/iu);
-  const ownershipExecutable = ownershipMigration.replace(/--[^\n]*(?:\n|$)/gu, "");
-  assert.doesNotMatch(ownershipExecutable, /(?:^|;)\s*(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/imu);
-  assert.doesNotMatch(ownershipExecutable, /DROP\s+(?:TABLE|TYPE|INDEX)/iu);
 });
 
 test("error mapping exposes stable control-plane codes and runtime projection remains conservative", async () => {
@@ -838,20 +736,10 @@ test("error mapping exposes stable control-plane codes and runtime projection re
   assert.equal(mapped.status, 403);
   assert.equal(mapped.body.error.code, "PLATFORM_AI_ROUTE_ADMIN_REQUIRED");
   const routeService = await readFile("src/lib/platform-default-ai-routes.ts", "utf8");
-  const projectRoute = await readFile("src/lib/project-ai-routes.ts", "utf8");
-  assert.doesNotMatch(routeService, /ProjectAiRoute|requireProjectAiRoute|platformModelAllowed/u);
-  assert.match(projectRoute, /isLegacyProjectProviderScope/u);
+  assert.doesNotMatch(routeService, /platformModelAllowed/u);
   const providerService = await readFile("src/lib/ai-providers/service.ts", "utf8");
   assert.match(providerService, /configurationVersion:\s*\{\s*increment:\s*1\s*\}/u);
   assert.match(providerService, /platformDefaultAiRoutes/u);
-  assert.match(providerService, /confirmPlatformProviderOwnership/u);
-  assert.match(providerService, /AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE/u);
-  const ownershipRoute = await readFile("src/app/api/settings/providers/[providerId]/ownership/confirm/route.ts", "utf8");
-  assert.match(ownershipRoute, /assertSameOrigin\(request\)/u);
-  assert.match(ownershipRoute, /requireApiSession\(request\)/u);
-  assert.match(ownershipRoute, /await context\.params/u);
-  assert.match(ownershipRoute, /confirmPlatformProviderOwnership/u);
-  assert.doesNotMatch(ownershipRoute, /ciphertext|secretFingerprint|apiKey/u);
   const routesClient = await readFile("src/app/settings/platform-default-routes-client.tsx", "utf8");
   assert.doesNotMatch(routesClient, /window\.(?:prompt|confirm)/u);
   assert.match(routesClient, /provider-invalid/u);

@@ -440,23 +440,6 @@ test(
       `, [secondaryWorkspaceId, concurrentUserId]);
       assert.equal(concurrentCurrent.rows[0]?.count, "1");
 
-      // Workspace provider ownership is status/role sensitive and allows a
-      // same-transaction owner replacement as long as a valid owner/admin row
-      // exists when the transaction commits.
-      const credentialId = randomUUID();
-      const providerId = randomUUID();
-      await client.query("BEGIN");
-      await client.query(`
-        INSERT INTO "ExternalCredential" ("id", "kind", "ciphertext", "nonce", "authTag", "maskedSuffix", "secretFingerprint", "createdAt", "updatedAt")
-        VALUES ($1, 'ai_provider', decode('00', 'hex'), decode('00', 'hex'), decode('00', 'hex'), 'gate', repeat('b', 64), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `, [credentialId]);
-      await client.query(`
-        INSERT INTO "AiProviderConnection" (
-          "id", "name", "kind", "scope", "workspaceId", "ownerUserId", "ownershipState", "protocol", "baseUrl", "credentialId", "status", "createdAt", "updatedAt"
-        ) VALUES ($1, $2, 'openai', 'workspace', $3, $4, 'legacy_pending', 'chat_completions', 'https://api.openai.com/v1', $5, 'configured', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `, [providerId, `Governance provider ${suffix}`, workspaceId, userId, credentialId]);
-      await client.query("COMMIT");
-
       const replacementMembershipId = randomUUID();
       await client.query("BEGIN");
       await client.query(`UPDATE "WorkspaceMembership" SET "accessState" = 'revoked' WHERE "id" = $1 AND "accessState" = 'confirmed'`, [workspaceMembershipId]);
@@ -510,7 +493,6 @@ test(
       assert.equal(stillOwner.rows[0]?.access_state, "confirmed");
 
       await client.query("BEGIN");
-      await client.query(`UPDATE "AiProviderConnection" SET "status" = 'disabled' WHERE "id" = $1`, [providerId]);
       await client.query(`UPDATE "WorkspaceMembership" SET "accessState" = 'revoked' WHERE "id" = $1`, [replacementMembershipId]);
       await insertWorkspaceAudit({ membershipId: replacementMembershipId, action: "revoked", newState: "revoked", previousState: "confirmed", workspaceId, userId });
       await client.query("COMMIT");
@@ -523,20 +505,6 @@ test(
       `, [memberId, workspaceId, userId]);
       await insertWorkspaceAudit({ membershipId: memberId, action: "confirmed", newState: "confirmed", workspaceId, userId });
       await client.query("COMMIT");
-      const invalidProviderCredentialId = randomUUID();
-      await client.query(`
-        INSERT INTO "ExternalCredential" ("id", "kind", "ciphertext", "nonce", "authTag", "maskedSuffix", "secretFingerprint", "createdAt", "updatedAt")
-        VALUES ($1, 'ai_provider', decode('00', 'hex'), decode('00', 'hex'), decode('00', 'hex'), 'gate2', repeat('c', 64), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-      `, [invalidProviderCredentialId]);
-      await assert.rejects(
-        () => client.query(`
-          INSERT INTO "AiProviderConnection" (
-            "id", "name", "kind", "scope", "workspaceId", "ownerUserId", "ownershipState", "protocol", "baseUrl", "credentialId", "status", "createdAt", "updatedAt"
-          ) VALUES ($1, $2, 'openai', 'workspace', $3, $4, 'legacy_pending', 'chat_completions', 'https://api.openai.com/v1', $5, 'configured', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        `, [randomUUID(), `Invalid member provider ${suffix}`, workspaceId, userId, invalidProviderCredentialId]),
-        (error: unknown) => errorCode(error) === "23514",
-      );
-
       // Project/User membership FKs still cascade, but their immutable audit
       // snapshots are independent and must survive the parent deletion.
       const projectAuditCount = await client.query<{ count: string }>(`

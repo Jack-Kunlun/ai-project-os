@@ -79,8 +79,6 @@ test("public memory index plan mapper is a strict runtime boundary", () => {
     route: {
       providerConnection: {
         scope: "platform",
-        workspaceId: null,
-        ownershipState: "confirmed",
         ownerUserId: null,
         name: "OpenAI",
         kind: "openai",
@@ -332,11 +330,12 @@ test("memory index schema and API contracts expose candidate guards and explicit
   assert.match(client, /MEMORY_INDEX_PLAN_STALE/);
   assert.match(client, /activeGenerationId/);
   assert.match(client, /generation\.status === "complete"/);
-  assert.match(client, /function MemoryIndexConsentCheck/);
+  assert.match(client, /function ConfirmationCard/);
   assert.match(client, /estimatedProviderCalls/);
   assert.match(client, /所有待生成片段会发送给该供应商；复用片段不会再次外发/);
-  assert.match(client, /setAcknowledged\(false\);\n    setPlanLoading/u);
-  assert.match(client, /setAcknowledged\(false\);\n          await loadPlan/u);
+  assert.match(client, /phase: "prepare"/);
+  assert.match(client, /phase: "execute"/);
+  assert.match(client, /failure\.code === "MEMORY_INDEX_PLAN_STALE"[\s\S]*await loadPlan/u);
   assert.match(readFileSync(join(root, "docs/operation-manual.md"), "utf8"), /所有待生成片段会发送给供应商/);
   assert.match(rag, /pointer\.generation\.jobId === null/);
 });

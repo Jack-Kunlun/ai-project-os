@@ -149,7 +149,7 @@ async function seedUpgradeDelegation(databaseUrl: string, invalid: boolean): Pro
         "id", "username", "passwordHash", "passwordSalt", "role", "createdAt", "updatedAt"
       ) VALUES
         ($1::uuid, $2, NULL, NULL, 'admin'::"AppUserRole", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-        ($3::uuid, $4, NULL, NULL, 'member'::"AppUserRole", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ($3::uuid, $4, NULL, NULL, 'user'::"AppUserRole", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `, [adminId, `upgrade_admin_${suffix}`, ownerId, `upgrade_owner_${suffix}`]);
     await legacyClient.query(`
       INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "createdAt", "updatedAt")

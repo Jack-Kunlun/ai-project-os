@@ -53,7 +53,7 @@ test(
     const networkFingerprint = "b".repeat(64);
     const definitionFingerprint = "a".repeat(64);
     const actor = { id: ownerId, role: "admin", accountAccessVersion: 1 } as const;
-    const approvingOwner = { id: secondOwnerId, role: "member", accountAccessVersion: 1 } as const;
+    const approvingOwner = { id: secondOwnerId, role: "user", accountAccessVersion: 1 } as const;
     const createProposal = async (grantId: string, query: string) => proposeProjectMcpAction(projectId, { clientRequestId: randomUUID(), grantId, expectedGrantVersion: 1, arguments: { query } }, actor, db);
     const recomputeFingerprint = async (targetActionId: string, dateStyle?: "ISO, MDY" | "SQL, DMY") => db.$transaction(async (tx) => {
       if (dateStyle === "ISO, MDY") await tx.$executeRaw(Prisma.sql`SET LOCAL DateStyle = 'ISO, MDY'`);
@@ -102,12 +102,12 @@ test(
     try {
       await db.appUser.createMany({ data: [
         { id: ownerId, username: `mcp_action_owner_${suffix}`, role: "admin" },
-        { id: secondOwnerId, username: `mcp_action_second_owner_${suffix}`, role: "member" },
-        { id: editorId, username: `mcp_action_editor_${suffix}`, role: "member" },
-        { id: viewerId, username: `mcp_action_viewer_${suffix}`, role: "member" },
+        { id: secondOwnerId, username: `mcp_action_second_owner_${suffix}`, role: "user" },
+        { id: editorId, username: `mcp_action_editor_${suffix}`, role: "user" },
+        { id: viewerId, username: `mcp_action_viewer_${suffix}`, role: "user" },
         { id: workspaceAdminId, username: `mcp_action_workspace_admin_${suffix}`, role: "admin" },
         { id: systemAdminId, username: `mcp_action_system_admin_${suffix}`, role: "admin" },
-        { id: nonmemberId, username: `mcp_action_nonmember_${suffix}`, role: "member" },
+        { id: nonmemberId, username: `mcp_action_nonmember_${suffix}`, role: "user" },
       ] });
       await db.workspace.create({ data: { id: workspaceId, name: `MCP action ${suffix}`, slug: `mcp-action-${suffix}`, createdById: ownerId } });
       const project = await db.project.create({ data: { id: projectId, workspaceId, name: `MCP action ${suffix}`, slug: `mcp-action-project-${suffix}` } });
@@ -145,8 +145,8 @@ test(
       const grantId = grant.grant.id as string;
 
       for (const unauthorized of [editorId, viewerId, workspaceAdminId, systemAdminId, nonmemberId]) {
-        await assert.rejects(() => listProjectMcpActions(projectId, { id: unauthorized, role: "member" }, db), (error: unknown) => ["PROJECT_MCP_ACTION_PROJECT_OWNER_REQUIRED", "PROJECT_MCP_ACTION_FORBIDDEN"].includes(serviceCode(error)));
-        await assert.rejects(() => proposeProjectMcpAction(projectId, { clientRequestId: randomUUID(), grantId, expectedGrantVersion: 1, arguments: { query: "blocked" } }, { id: unauthorized, role: "member" }, db), (error: unknown) => ["PROJECT_MCP_ACTION_PROJECT_OWNER_REQUIRED", "PROJECT_MCP_ACTION_FORBIDDEN"].includes(serviceCode(error)));
+        await assert.rejects(() => listProjectMcpActions(projectId, { id: unauthorized, role: "user" }, db), (error: unknown) => ["PROJECT_MCP_ACTION_PROJECT_OWNER_REQUIRED", "PROJECT_MCP_ACTION_FORBIDDEN"].includes(serviceCode(error)));
+        await assert.rejects(() => proposeProjectMcpAction(projectId, { clientRequestId: randomUUID(), grantId, expectedGrantVersion: 1, arguments: { query: "blocked" } }, { id: unauthorized, role: "user" }, db), (error: unknown) => ["PROJECT_MCP_ACTION_PROJECT_OWNER_REQUIRED", "PROJECT_MCP_ACTION_FORBIDDEN"].includes(serviceCode(error)));
       }
 
       const proposal = await proposeProjectMcpAction(projectId, { clientRequestId: randomUUID(), grantId, expectedGrantVersion: 1, arguments: { query: "release" } }, actor, db);

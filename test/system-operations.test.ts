@@ -130,13 +130,13 @@ test("system backup API permits only the initial super administrator and never r
 
   const unauthenticatedResponse = await handleBackupOperationsGet(
     new Request("http://127.0.0.1:3000/api/system/operations/backups"),
-    { db: fakeSessionDb({ id: otherAdminId, role: "member" }), readSnapshot },
+    { db: fakeSessionDb({ id: otherAdminId, role: "user" }), readSnapshot },
   );
   assert.equal(unauthenticatedResponse.status, 401);
   assert.equal(reads, 0);
 
   const memberResponse = await handleBackupOperationsGet(request(), {
-    db: fakeSessionDb({ id: otherAdminId, role: "member" }),
+    db: fakeSessionDb({ id: otherAdminId, role: "user" }),
     readSnapshot,
   });
   assert.equal(memberResponse.status, 403);

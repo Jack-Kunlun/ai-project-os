@@ -13,7 +13,6 @@ const shouldRun = process.env.SYSTEM_AUDIT_POSTGRES_GATE === "1";
 
 const expectedEnums: Readonly<Record<string, readonly string[]>> = {
   PlatformDefaultAiRouteAuditAction: ["draft_created", "draft_updated", "validated", "activated", "retired"],
-  AiProviderOwnershipAuditAction: ["legacy_ownership_confirmed"],
   MembershipAuditEventKind: ["grant", "extend", "revoke"],
   AccountAccessAuditEvent: ["disabled", "restored"],
   MembershipAccessAuditAction: ["migration_quarantined", "confirmed", "revoked", "bootstrap_confirmed"],

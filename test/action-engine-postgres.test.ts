@@ -27,14 +27,14 @@ test("Action Engine persists policy, approval, execution, recovery and archive b
   const workspaceId = randomUUID();
   const projectId = randomUUID();
   const admin = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
-  const editor = { id: editorId, role: "member" as const, accountAccessVersion: 1 };
-  const viewer = { id: viewerId, role: "member" as const, accountAccessVersion: 1 };
+  const editor = { id: editorId, role: "user" as const, accountAccessVersion: 1 };
+  const viewer = { id: viewerId, role: "user" as const, accountAccessVersion: 1 };
 
   await db.appUser.createMany({ data: [
     { id: adminId, username: `action_admin_${suffix}`, role: "admin" },
     { id: outsiderAdminId, username: `action_outsider_admin_${suffix}`, role: "admin" },
-    { id: editorId, username: `action_editor_${suffix}`, role: "member" },
-    { id: viewerId, username: `action_viewer_${suffix}`, role: "member" },
+    { id: editorId, username: `action_editor_${suffix}`, role: "user" },
+    { id: viewerId, username: `action_viewer_${suffix}`, role: "user" },
   ] });
   await db.workspace.create({ data: { id: workspaceId, name: `Action ${suffix}`, slug: `action-${suffix}`, createdById: adminId } });
   await db.$transaction(async (tx) => {

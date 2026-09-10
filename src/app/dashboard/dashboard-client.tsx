@@ -135,10 +135,6 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
       const current = projects[0]!;
       return { label: `为「${current.name}」建立计划`, detail: "当前没有足够的计划工作项可判断运行状态，先添加一个目标明确的工作项。", href: `/projects/${current.id}/plan`, action: "打开项目计划" };
     }
-    const unrouted = projects.find((project) => project._count.webAiRoutes < 4);
-    if (unrouted) {
-      return { label: `完成「${unrouted.name}」的 AI 路由`, detail: "分别选择图片识别、语义向量、自动抽取和引用式问答供应商。", href: `/projects/${unrouted.id}/control`, action: "继续配置" };
-    }
     if (summary.pendingAssetReviews > 0) {
       const current = projects.find((project) => project._count.assets > 0) ?? projects[0]!;
       return { label: "核对文件识别结果", detail: `${summary.pendingAssetReviews} 个文件正在等待人工确认，确认前不会进入项目记忆。`, href: `/projects/${current.id}/assets`, action: "进入文件资料" };
@@ -162,7 +158,7 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">Your project command center</p>
               <h1 className="mt-4 text-3xl font-semibold tracking-[-0.035em] sm:text-5xl">欢迎回来，{username}</h1>
-              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">从这里查看跨项目状态、判断工作空间是否就绪，并继续最近的同步、记忆或智能分析任务。</p>
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">从这里查看跨项目状态、判断工作空间是否就绪，并继续最近的同步、记忆或智能分析任务。模型能力由平台默认模型或个人双确认委托提供。</p>
               <div className="mt-7 flex flex-wrap gap-3">
                 <Link href="/projects" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">进入项目</Link>
                 <Link href="/guide#dashboard" className="rounded-xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15">查看使用指南</Link>
@@ -239,11 +235,10 @@ function WorldStatusPanel({ payload, loading, unavailable }: { payload: Dashboar
 function ReadinessPanel({ payload, loading, unavailable }: { payload: DashboardPayload; loading: boolean; unavailable: boolean }) {
   const steps = [
     { label: "项目空间", detail: "至少创建一个项目", done: payload.summary.projects > 0, href: "/projects" },
-    { label: "能力路由", detail: `${payload.summary.routedProjects}/${payload.summary.projects} 个项目完成`, done: payload.summary.projects > 0 && payload.summary.routedProjects === payload.summary.projects, href: payload.projects[0] ? `/projects/${payload.projects[0].id}/control` : "/projects" },
     { label: "智能记忆", detail: `${payload.summary.indexedProjects}/${payload.summary.projects} 个项目有索引`, done: payload.summary.projects > 0 && payload.summary.indexedProjects === payload.summary.projects, href: payload.projects[0] ? `/projects/${payload.projects[0].id}/memory` : "/projects" },
   ];
   const completed = steps.filter((step) => step.done).length;
-  return <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Setup progress</p><h2 className="mt-2 text-xl font-semibold">项目就绪度</h2></div><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600">{loading ? "…" : unavailable ? "—" : `${completed}/3`}</span></div>{loading ? <div className="mt-5 h-20 animate-pulse rounded-2xl bg-slate-100" /> : unavailable ? <div className="mt-5 rounded-2xl bg-rose-50 px-5 py-7 text-center text-sm text-rose-700">暂时无法确认项目就绪度，请重试。</div> : <><div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all" style={{ width: `${completed / steps.length * 100}%` }} /></div><div className="mt-5 space-y-2">{steps.map((step, index) => <Link key={step.label} href={step.href} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition hover:bg-slate-50"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-700">{step.label}</span><span className="block truncate text-xs text-slate-400">{step.detail}</span></span><span className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500">→</span></Link>)}</div></>}</section>;
+  return <section className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Setup progress</p><h2 className="mt-2 text-xl font-semibold">项目就绪度</h2><p className="mt-2 text-xs leading-5 text-slate-500">模型路由由平台默认模型或个人双确认委托提供，不在项目内单独配置。</p></div><span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-600">{loading ? "…" : unavailable ? "—" : `${completed}/${steps.length}`}</span></div>{loading ? <div className="mt-5 h-20 animate-pulse rounded-2xl bg-slate-100" /> : unavailable ? <div className="mt-5 rounded-2xl bg-rose-50 px-5 py-7 text-center text-sm text-rose-700">暂时无法确认项目就绪度，请重试。</div> : <><div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all" style={{ width: `${completed / steps.length * 100}%` }} /></div><div className="mt-5 space-y-2">{steps.map((step, index) => <Link key={step.label} href={step.href} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition hover:bg-slate-50"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{step.done ? "✓" : index + 1}</span><span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-slate-700">{step.label}</span><span className="block truncate text-xs text-slate-400">{step.detail}</span></span><span className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500">→</span></Link>)}</div></>}</section>;
 }
 
 function RecentJobs({ jobs, loading, unavailable }: { jobs: RecentJob[]; loading: boolean; unavailable: boolean }) {

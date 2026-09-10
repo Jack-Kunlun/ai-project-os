@@ -272,12 +272,11 @@ test("web source service rejects cross-project reads, writes and sync before sou
 });
 
 test("project resource routes and services carry actor authorization to the transaction boundary", async () => {
-  const [projectRoute, sourcesRoute, sourceDetailRoute, itemsRoute, aiRoutes, automation, automationPreviewRoute, webSourcesRoute, webSourceDetailRoute, webSourceSyncRoute] = await Promise.all([
+  const [projectRoute, sourcesRoute, sourceDetailRoute, itemsRoute, automation, automationPreviewRoute, webSourcesRoute, webSourceDetailRoute, webSourceSyncRoute] = await Promise.all([
     readFile("src/app/api/projects/[projectId]/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/sources/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/sources/[sourceId]/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/items/route.ts", "utf8"),
-    readFile("src/lib/project-ai-routes.ts", "utf8"),
     readFile("src/lib/automation.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/automations/preview/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/web-sources/route.ts", "utf8"),
@@ -290,12 +289,6 @@ test("project resource routes and services carry actor authorization to the tran
     assert.match(source, /withWebAiProjectAccessTransaction/u, `${name} must use the transactional project guard`);
     assert.match(source, /actor:\s*user/u, `${name} must pass the current actor`);
   }
-  assert.match(aiRoutes, /export async function getProjectAiRoutes\([\s\S]*withWebAiProjectAccessTransaction/u);
-  assert.match(aiRoutes, /required:\s*"view"[\s\S]*allowArchived:\s*true/u);
-  const aiRouteHandler = await readFile("src/app/api/projects/[projectId]/ai-routes/route.ts", "utf8");
-  assert.match(aiRouteHandler, /previewProjectAiRouteChange\([\s\S]*user/u);
-  assert.match(aiRouteHandler, /upsertProjectAiRoute\([\s\S]*user/u);
-  assert.doesNotMatch(aiRouteHandler, /assertProjectAiRouteManager|assertProjectActive/u);
   for (const route of [
     await readFile("src/app/api/projects/[projectId]/automations/route.ts", "utf8"),
     await readFile("src/app/api/projects/[projectId]/automations/[ruleId]/route.ts", "utf8"),

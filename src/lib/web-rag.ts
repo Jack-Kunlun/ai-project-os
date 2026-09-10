@@ -770,7 +770,7 @@ export async function listRagAnswers(projectId: string, actor: WebAiActor, db: P
       inputTokens: true,
       outputTokens: true,
       createdAt: true,
-      providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
+      providerConnection: { select: { scope: true, ownerUserId: true, name: true, kind: true, status: true } },
     },
   });
   return answers.map((answer) => {

@@ -398,7 +398,6 @@ test(
         scope: "user",
         ownerUserId: connectionOwnerId,
         ownerAccountAccessVersion: 1,
-        ownershipState: "confirmed",
         protocol: "chatCompletions",
         baseUrl: "https://api.openai.com/v1",
         credentialId,
@@ -427,7 +426,6 @@ test(
         scope: "user",
         ownerUserId: projectOwnerId,
         ownerAccountAccessVersion: 1,
-        ownershipState: "confirmed",
         protocol: "chatCompletions",
         baseUrl: "https://api.openai.com/v1",
         credentialId: foreignCredentialId,
@@ -1230,24 +1228,6 @@ test(
     assert.equal(
       (await db.aiProviderConnection.findUniqueOrThrow({ where: { id: providerId } })).configurationVersion,
       providerConfigurationVersionForFixtures,
-    );
-
-    const generateDelegationCountBeforeLegacy = await db.projectAiProviderDelegation.count({
-      where: { operation: "generateWithContext" },
-    });
-    const legacyRoute = await db.projectAiRoute.create({
-      data: {
-        projectId,
-        operation: "generateWithContext",
-        providerConnectionId: providerId,
-        modelId: "gpt-4.1-mini",
-        maxOutputTokens: 2048,
-      },
-    });
-    assert.equal(legacyRoute.projectId, projectId);
-    assert.equal(
-      await db.projectAiProviderDelegation.count({ where: { operation: "generateWithContext" } }),
-      generateDelegationCountBeforeLegacy,
     );
 
     await assert.rejects(

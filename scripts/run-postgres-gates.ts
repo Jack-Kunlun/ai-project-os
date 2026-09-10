@@ -135,11 +135,14 @@ async function main(): Promise<void> {
       BEGIN
         IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${POSTGRES_GATE_TEST_USER}') THEN
           ALTER ROLE "${POSTGRES_GATE_TEST_USER}" WITH LOGIN SUPERUSER PASSWORD '${testPassword}';
+          ALTER ROLE "${POSTGRES_GATE_TEST_USER}" SET default_transaction_read_only = 'off';
         ELSE
           CREATE ROLE "${POSTGRES_GATE_TEST_USER}" LOGIN SUPERUSER PASSWORD '${testPassword}';
+          ALTER ROLE "${POSTGRES_GATE_TEST_USER}" SET default_transaction_read_only = 'off';
         END IF;
       END
     $$`);
+    await admin.query("SET default_transaction_read_only = off");
     for (const [index, gate] of gates.entries()) {
       await runGate(admin, adminUrl, gate, testPassword, index + 1, gates.length);
     }

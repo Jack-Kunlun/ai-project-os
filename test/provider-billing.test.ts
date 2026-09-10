@@ -5,13 +5,11 @@ import { ProviderBillingError, readProviderBalance, type ProviderBillingErrorCod
 
 const projectId = "11111111-1111-4111-8111-111111111111";
 const connectionId = "22222222-2222-4222-8222-222222222222";
-const projectWorkspaceId = "44444444-4444-4444-8444-444444444444";
-const otherWorkspaceId = "55555555-5555-4555-8555-555555555555";
 const ownerUserId = "66666666-6666-4666-8666-666666666666";
 const otherOwnerUserId = "77777777-7777-4777-8777-777777777777";
 
 type BillingProviderKind = "deepseek" | "qwen";
-type BillingProviderScope = "platform" | "workspace" | "user";
+type BillingProviderScope = "platform" | "user";
 type BillingProviderStatus = "verified" | "configured" | "error" | "disabled";
 
 type BillingProvider = {
@@ -19,20 +17,22 @@ type BillingProvider = {
   name: string;
   kind: BillingProviderKind;
   scope: BillingProviderScope;
-  workspaceId: string | null;
   ownerUserId: string | null;
   status: BillingProviderStatus;
   disabledAt: Date | null;
   credentialId: string;
 };
 
-function billingDb(kind: BillingProviderKind = "deepseek", overrides: Partial<BillingProvider> = {}) {
+function billingDb(
+  kind: BillingProviderKind = "deepseek",
+  overrides: Partial<BillingProvider> = {},
+  onFindFirst?: (args: unknown) => void,
+) {
   const provider: BillingProvider = {
     id: connectionId,
     name: kind === "deepseek" ? "DeepSeek" : "Qwen",
     kind,
     scope: "platform",
-    workspaceId: null,
     ownerUserId: null,
     status: "verified",
     disabledAt: null,
@@ -40,11 +40,20 @@ function billingDb(kind: BillingProviderKind = "deepseek", overrides: Partial<Bi
     ...overrides,
   };
   return {
-    projectAiRoute: {
-      findFirst: async () => ({
-        project: { workspaceId: projectWorkspaceId },
-        providerConnection: provider,
-      }),
+    project: {
+      findUnique: async () => ({ id: projectId }),
+    },
+    platformDefaultAiRoute: {
+      findFirst: async (args: unknown) => {
+        onFindFirst?.(args);
+        return { id: "platform-route-id" };
+      },
+    },
+    aiProviderConnection: {
+      findUnique: async (args: unknown) => {
+        onFindFirst?.(args);
+        return provider;
+      },
     },
   };
 }
@@ -126,10 +135,9 @@ test("balance lookup rejects a user-scoped DeepSeek connection before dispatch",
   await assertRejectedBeforeDispatch(billingDb("deepseek", { scope: "user" }), "PROVIDER_BILLING_CONNECTION_NOT_ROUTED");
 });
 
-test("balance lookup rejects a workspace connection from another workspace before dispatch", async () => {
+test("balance lookup rejects a personal connection before dispatch", async () => {
   await assertRejectedBeforeDispatch(billingDb("deepseek", {
-    scope: "workspace",
-    workspaceId: otherWorkspaceId,
+    scope: "user",
     ownerUserId: otherOwnerUserId,
   }), "PROVIDER_BILLING_CONNECTION_NOT_ROUTED");
 });
@@ -141,10 +149,9 @@ test("balance lookup rejects a platform connection carrying an owner before disp
   }), "PROVIDER_BILLING_CONNECTION_NOT_ROUTED");
 });
 
-test("balance lookup rejects a workspace connection without an owner before dispatch", async () => {
+test("balance lookup rejects a personal connection without an owner before dispatch", async () => {
   await assertRejectedBeforeDispatch(billingDb("deepseek", {
-    scope: "workspace",
-    workspaceId: projectWorkspaceId,
+    scope: "user",
   }), "PROVIDER_BILLING_CONNECTION_NOT_ROUTED");
 });
 
@@ -173,34 +180,26 @@ test("balance lookup classifies a structurally valid non-verified Qwen as unsupp
   await assertRejectedBeforeDispatch(billingDb("qwen", { status: "error" }), "PROVIDER_BILLING_UNSUPPORTED");
 });
 
-test("balance lookup accepts a verified DeepSeek workspace connection", async () => {
-  let fetchCalls = 0;
-  const result = await readProviderBalance(projectId, connectionId, billingDb("deepseek", {
-    scope: "workspace",
-    workspaceId: projectWorkspaceId,
+test("balance lookup rejects a verified DeepSeek personal connection before credential or network dispatch", async () => {
+  await assertRejectedBeforeDispatch(billingDb("deepseek", {
+    scope: "user",
     ownerUserId,
-  }) as never, {
-    fetchImpl: async (input, init) => {
-      fetchCalls += 1;
-      assert.equal(input.toString(), "https://api.deepseek.com/user/balance");
-      assert.equal(init?.method, "GET");
-      return Response.json({
-        is_available: true,
-        balance_infos: [{
-          currency: "USD",
-          total_balance: "1.00",
-          granted_balance: "0.50",
-          topped_up_balance: "0.50",
-        }],
-      });
-    },
-    readSecret: async () => "workspace-secret",
-    now: () => new Date("2026-09-02T03:04:05.000Z"),
-  });
+  }), "PROVIDER_BILLING_CONNECTION_NOT_ROUTED");
+});
 
-  assert.equal(fetchCalls, 1);
-  assert.equal(result.providerConnectionId, connectionId);
-  assert.deepEqual(result.balances, [{ currency: "USD", total: "1.00", granted: "0.50", toppedUp: "0.50" }]);
+test("balance lookup selects current scope and owner fields before allowing the platform connection", async () => {
+  let query: unknown;
+  await assertRejectedBeforeDispatch(
+    billingDb("deepseek", { scope: "user" }, (args) => {
+      query = args;
+    }),
+    "PROVIDER_BILLING_CONNECTION_NOT_ROUTED",
+  );
+  const select = (query as { select: Record<string, unknown> }).select;
+  assert.equal(select.scope, true);
+  assert.equal(select.ownerUserId, true);
+  assert.equal("workspaceId" in select, false);
+  assert.equal("ownershipState" in select, false);
 });
 
 test("balance lookup rejects oversized provider responses", async () => {

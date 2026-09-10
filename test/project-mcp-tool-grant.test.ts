@@ -98,7 +98,7 @@ test("V2 create rejects a non-owner before touching external resource repositori
       expectedDelegationVersion: 1,
       expectedAttestationVersion: 1,
       acknowledgeReadOnly: true,
-    }, { id: actorId, role: "member", accountAccessVersion: 1 }, db),
+    }, { id: actorId, role: "user", accountAccessVersion: 1 }, db),
     (error: unknown) => error instanceof ProjectMcpToolGrantServiceError && error.code === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED",
   );
   assert.deepEqual(calls, []);

@@ -92,10 +92,10 @@ test("项目 API 授权对 UUID 大小写、编码路径和新版 UUID 使用同
       findMany: async () => [],
     },
     appUser: {
-      findUnique: async () => ({ id: "22222222-2222-4222-8222-222222222222", role: "member" as const, disabledAt: null, accountAccessVersion: 1 }),
+      findUnique: async () => ({ id: "22222222-2222-4222-8222-222222222222", role: "user" as const, disabledAt: null, accountAccessVersion: 1 }),
     },
   } as unknown as PrismaClient;
-  const member = { id: "22222222-2222-4222-8222-222222222222", role: "member" as const, accountAccessVersion: 1 };
+  const member = { id: "22222222-2222-4222-8222-222222222222", role: "user" as const, accountAccessVersion: 1 };
 
   await assert.rejects(
     () => authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectId}/items`, { method: "POST" }), db),
@@ -130,10 +130,10 @@ test("个人 Git/MCP 终止旁路只匹配原始精确 POST 路径", async () =>
   const nilDelegationId = "00000000-0000-0000-0000-000000000000";
   const invalidDelegationId = "not-a-uuid";
   const zodRejectedDelegationId = "14141414-1414-0141-0141-141414141414";
-  const actor = { id: "15151515-1515-4151-8151-151515151515", role: "member" as const, accountAccessVersion: 1 };
+  const actor = { id: "15151515-1515-4151-8151-151515151515", role: "user" as const, accountAccessVersion: 1 };
   const denyDb = {
     appUser: {
-      findUnique: async () => ({ id: actor.id, role: "member" as const, disabledAt: null, accountAccessVersion: 1 }),
+      findUnique: async () => ({ id: actor.id, role: "user" as const, disabledAt: null, accountAccessVersion: 1 }),
     },
     project: {
       findUnique: async () => ({ workspace: { memberships: [] }, memberships: [] }),
@@ -194,8 +194,8 @@ test("个人 Git/MCP 终止旁路只匹配原始精确 POST 路径", async () =>
 test("项目 API 预授权隐藏非成员项目是否存在，但直接权限校验保留 not found 语义", async () => {
   const existingProjectId = "33333333-3333-4333-8333-333333333333";
   const missingProjectId = "44444444-4444-4444-8444-444444444444";
-  const nonMember = { id: "55555555-5555-4555-8555-555555555555", role: "member" as const, accountAccessVersion: 1 };
-  const authorized = { id: "66666666-6666-4666-8666-666666666666", role: "member" as const, accountAccessVersion: 1 };
+  const nonMember = { id: "55555555-5555-4555-8555-555555555555", role: "user" as const, accountAccessVersion: 1 };
+  const authorized = { id: "66666666-6666-4666-8666-666666666666", role: "user" as const, accountAccessVersion: 1 };
   type ProjectLookupArgs = {
     where: { id: string };
     select?: { memberships?: { where?: { userId?: string } } };
@@ -204,7 +204,7 @@ test("项目 API 预授权隐藏非成员项目是否存在，但直接权限校
     appUser: {
       findUnique: async ({ where }: { where: { id: string } }) => ({
         id: where.id,
-        role: "member" as const,
+        role: "user" as const,
         disabledAt: null,
         accountAccessVersion: 1,
       }),

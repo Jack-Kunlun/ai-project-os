@@ -16,22 +16,10 @@ import {
   settlePlatformTokenReservation,
 } from "../src/lib/ai-entitlements";
 import { getDb } from "../src/lib/db";
-import {
-  createWorkspaceProviderConnection,
-  assertWorkspaceProviderOutbound,
-  deleteWorkspaceProviderConnection,
-  listWorkspaceProviderConnections,
-  testWorkspaceProviderConnection,
-  updateWorkspaceProviderConnection,
-  WorkspaceProviderServiceError,
-} from "../src/lib/workspace-provider-service";
-import { executeMembership, previewMembership } from "../src/lib/membership-service";
-import { grantWorkspaceMembership } from "../src/lib/membership-governance";
-import { createControlledMembership, grantControlledMembershipInTransaction, revokeControlledMembershipInTransaction } from "./membership-fixture";
 
 const shouldRun = process.env.AI_ENTITLEMENTS_POSTGRES_GATE === "1";
 
-test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership and project cleanup retention", {
+test("AI entitlements enforce signup-compatible scope and project cleanup retention", {
   skip: !shouldRun ? "AI_ENTITLEMENTS_POSTGRES_GATE=1 is required" : false,
 }, async () => {
   const db = getDb();
@@ -43,8 +31,6 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
   const adminId = randomUUID();
   const adminActor = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
   const ownerId = randomUUID();
-  const workspaceAdminId = randomUUID();
-  const outsiderId = randomUUID();
   const projectId = randomUUID();
   const createdProviderIds: string[] = [];
   const createdCredentialIds: string[] = [];
@@ -56,36 +42,10 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
     await db.appUser.createMany({
       data: [
         { id: adminId, username: `entitlement_admin_${suffix}`, role: "admin" },
-        { id: ownerId, username: `entitlement_owner_${suffix}`, role: "member" },
-        { id: workspaceAdminId, username: `entitlement_workspace_admin_${suffix}`, role: "member" },
-        { id: outsiderId, username: `entitlement_outsider_${suffix}`, role: "member" },
+        { id: ownerId, username: `entitlement_owner_${suffix}`, role: "user" },
       ],
     });
     await db.workspace.create({ data: { id: workspaceId, name: `Entitlements ${suffix}`, slug: `entitlements-${suffix}`, createdById: adminId } });
-    await db.$transaction(async (tx) => {
-      await grantWorkspaceMembership(tx, {
-        workspaceId,
-        userId: ownerId,
-        role: "owner",
-        actorId: adminId,
-        reason: "ai_entitlements_gate_workspace_owner",
-      });
-      await grantWorkspaceMembership(tx, {
-        workspaceId,
-        userId: workspaceAdminId,
-        role: "admin",
-        actorId: adminId,
-        reason: "ai_entitlements_gate_workspace_admin",
-      });
-    });
-    const ownerSubscription = await createControlledMembership(db, {
-      adminId,
-      userId: ownerId,
-      startsAt: new Date("2026-08-01T00:00:00.000Z"),
-      expiresAt: new Date("2026-10-01T00:00:00.000Z"),
-      grantedById: adminId,
-    });
-
     // Exercise the actual serializable signup grant and billing ledger path,
     // including the retry/idempotency boundary used by verified auth flows.
     const entitlementNow = new Date("2026-09-02T00:00:00.000Z");
@@ -129,196 +89,6 @@ test("AI entitlements enforce signup-compatible scope, workspace BYOK ownership 
     reservationIds.push(expiredReservation.reservationId);
     assert.deepEqual(await recoverExpiredPlatformTokenReservations({ userId: ownerId, now: new Date("2026-09-02T02:00:00.000Z") }, db), { inspected: 1, released: 1, held: 0 });
     assert.deepEqual(await recoverExpiredPlatformTokenReservations({ userId: ownerId, now: new Date("2026-09-02T03:00:00.000Z") }, db), { inspected: 0, released: 0, held: 0 });
-
-    await assert.rejects(
-      () => createWorkspaceProviderConnection(workspaceId, { name: `Denied ${suffix}`, kind: "deepseek", apiKey: "deepseek-denied-key", generationModelId: "deepseek-custom" }, { id: outsiderId, role: "member" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
-    );
-    await assert.rejects(
-      () => listWorkspaceProviderConnections(workspaceId, { id: adminId, role: "admin" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
-    );
-    await assert.rejects(
-      () => createWorkspaceProviderConnection(workspaceId, { name: `Denied system admin ${suffix}`, kind: "deepseek", apiKey: "deepseek-denied-system-key", generationModelId: "deepseek-custom" }, { id: adminId, role: "admin" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
-    );
-    await assert.rejects(
-      () => createWorkspaceProviderConnection(workspaceId, { name: `Denied admin ${suffix}`, kind: "deepseek", apiKey: "deepseek-denied-admin-key", generationModelId: "deepseek-custom" }, { id: workspaceAdminId, role: "member" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_MEMBERSHIP_REQUIRED",
-    );
-
-    const deepseek = await createWorkspaceProviderConnection(workspaceId, {
-      name: `Workspace DeepSeek ${suffix}`,
-      kind: "deepseek",
-      apiKey: "deepseek-workspace-key",
-      generationModelId: "deepseek-custom-model",
-      visionModelId: null,
-    }, { id: ownerId, role: "member" }, db);
-    createdProviderIds.push(deepseek.id);
-    const deepseekRecord = await db.aiProviderConnection.findUniqueOrThrow({ where: { id: deepseek.id }, select: { credentialId: true } });
-    createdCredentialIds.push(deepseekRecord.credentialId);
-    assert.equal(deepseek.scope, "workspace");
-    assert.equal(deepseek.ownerUserId, ownerId);
-    assert.equal(deepseek.defaultGenerationModelId, "deepseek-custom-model");
-    const verifiedDeepseek = await db.aiProviderConnection.update({ where: { id: deepseek.id }, data: { status: "verified", lastTestedAt: entitlementNow } });
-    await assert.rejects(
-      () => assertWorkspaceProviderOutbound(workspaceId, deepseek.id, { id: adminId, role: "admin" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
-    );
-
-    const updated = await updateWorkspaceProviderConnection(workspaceId, deepseek.id, {
-      generationModelId: "deepseek-custom-model-v2",
-      expectedUpdatedAt: verifiedDeepseek.updatedAt.toISOString(),
-    }, { id: ownerId, role: "member" }, db);
-    assert.equal(updated.defaultGenerationModelId, "deepseek-custom-model-v2");
-    await assert.rejects(
-      () => updateWorkspaceProviderConnection(workspaceId, deepseek.id, { generationModelId: "cross-owner-model" }, { id: workspaceAdminId, role: "member" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_OWNER_REQUIRED",
-    );
-    await assert.rejects(
-      () => listWorkspaceProviderConnections(workspaceId, { id: outsiderId, role: "member" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
-    );
-    assert.equal((await listWorkspaceProviderConnections(workspaceId, { id: ownerId, role: "member" }, db)).length, 1);
-
-    await db.aiProviderConnection.update({ where: { id: deepseek.id }, data: { status: "disabled", disabledAt: new Date() } });
-    await assert.rejects(
-      () => testWorkspaceProviderConnection(workspaceId, deepseek.id, { id: outsiderId, role: "member" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_SCOPE_FORBIDDEN",
-    );
-    await assert.rejects(
-      () => testWorkspaceProviderConnection(workspaceId, deepseek.id, { id: ownerId, role: "member" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_CONNECTION_UNAVAILABLE",
-    );
-
-    await db.$transaction((tx) => revokeControlledMembershipInTransaction(tx, {
-      subscriptionId: ownerSubscription.id,
-      adminId,
-      reason: "ai_entitlements_gate_expiry_fixture",
-    }));
-    await db.$transaction((tx) => grantControlledMembershipInTransaction(tx, {
-      subscriptionId: ownerSubscription.id,
-      adminId,
-      startsAt: new Date("2026-08-01T00:00:00.000Z"),
-      expiresAt: new Date("2026-08-02T00:00:00.000Z"),
-      grantedById: adminId,
-    }));
-    await assert.rejects(
-      () => updateWorkspaceProviderConnection(workspaceId, deepseek.id, { generationModelId: "blocked-after-expiry" }, { id: ownerId, role: "member" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_MEMBERSHIP_EXPIRED",
-    );
-    await assert.rejects(
-      () => updateWorkspaceProviderConnection(workspaceId, deepseek.id, { enabled: false, apiKey: "replacement-key" }, { id: ownerId, role: "member" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_MEMBERSHIP_EXPIRED",
-    );
-    const disabled = await updateWorkspaceProviderConnection(workspaceId, deepseek.id, { enabled: false }, { id: ownerId, role: "member" }, db);
-    assert.equal(disabled.status, "disabled");
-    // The expiry check above is intentionally covered before continuing with
-    // the remaining lifecycle assertions. Restore the fixture's membership
-    // window so the owner can create the independent GLM embedding-only
-    // connection below.
-    await db.$transaction((tx) => grantControlledMembershipInTransaction(tx, {
-      subscriptionId: ownerSubscription.id,
-      adminId,
-      startsAt: new Date("2026-08-01T00:00:00.000Z"),
-      expiresAt: new Date("2026-10-01T00:00:00.000Z"),
-      grantedById: adminId,
-    }));
-
-    const glm = await createWorkspaceProviderConnection(workspaceId, {
-      name: `Workspace GLM ${suffix}`,
-      kind: "glm",
-      apiKey: "glm-workspace-key",
-      generationModelId: null,
-      embeddingModelId: "embedding-3",
-      embeddingDimensions: 1024,
-      visionModelId: null,
-    }, { id: ownerId, role: "member" }, db);
-    createdProviderIds.push(glm.id);
-    const glmRecord = await db.aiProviderConnection.findUniqueOrThrow({ where: { id: glm.id }, select: { credentialId: true, defaultGenerationModelId: true, defaultEmbeddingModelId: true, embeddingDimensions: true } });
-    createdCredentialIds.push(glmRecord.credentialId);
-    assert.equal(glmRecord.defaultGenerationModelId, null);
-    assert.equal(glmRecord.defaultEmbeddingModelId, "embedding-3");
-    assert.equal(glmRecord.embeddingDimensions, 1024);
-    await assert.rejects(
-      () => deleteWorkspaceProviderConnection(workspaceId, glm.id, { confirmationName: glm.name }, { id: ownerId, role: "member" }, db),
-      (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_PROVIDER_DELETE_REQUIRES_DISABLED",
-    );
-    await updateWorkspaceProviderConnection(workspaceId, glm.id, { enabled: false }, { id: ownerId, role: "member" }, db);
-    await deleteWorkspaceProviderConnection(workspaceId, glm.id, { confirmationName: glm.name }, { id: ownerId, role: "member" }, db);
-    createdProviderIds.splice(createdProviderIds.indexOf(glm.id), 1);
-    createdCredentialIds.splice(createdCredentialIds.indexOf(glmRecord.credentialId), 1);
-    assert.equal(await db.aiProviderConnection.count({ where: { id: glm.id } }), 0);
-
-    // The owner lock must cover the complete bounded provider probe. This
-    // barrier proves a revoke started after the test fence cannot commit until
-    // the probe and final provider CAS have completed; the follow-up call then
-    // proves revoke-first fails before another fetch.
-    await updateWorkspaceProviderConnection(workspaceId, deepseek.id, { enabled: true }, { id: ownerId, role: "member" }, db);
-    const originalProviderFetch = globalThis.fetch;
-    let fetchCount = 0;
-    let signalFetchStarted = () => {};
-    const fetchStarted = new Promise<void>((resolve) => { signalFetchStarted = resolve; });
-    let releaseFetch = () => {};
-    const fetchGate = new Promise<void>((resolve) => { releaseFetch = resolve; });
-    globalThis.fetch = async () => {
-      fetchCount += 1;
-      signalFetchStarted();
-      await fetchGate;
-      return Response.json({ choices: [{ message: { content: "OK" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }, { headers: { "x-request-id": "workspace-probe" } });
-    };
-    try {
-      const testing = testWorkspaceProviderConnection(workspaceId, deepseek.id, { id: ownerId, role: "member" }, db);
-      await Promise.race([
-        fetchStarted,
-        testing.then(() => { throw new Error("provider test completed before fetch barrier"); }, (error) => { throw error; }),
-      ]);
-      let revokeSettled = false;
-      const revokeStartedAt = Date.now();
-      const revoking = (async () => {
-        const current = await db.membershipSubscription.findUniqueOrThrow({ where: { userId: ownerId }, select: { version: true } });
-        const preview = await previewMembership({ adminUserId: adminId, userId: ownerId, action: "revoke", reason: "ai_entitlements_gate_revoke", expectedVersion: current.version }, db);
-        return executeMembership({
-          adminUserId: adminId,
-          userId: ownerId,
-          action: "revoke",
-          reason: "ai_entitlements_gate_revoke",
-          expectedVersion: preview.current.version,
-          expectedImpactFingerprint: preview.impactFingerprint,
-          requestKey: `ai-entitlements-${suffix}-revoke`,
-          requestFingerprint: preview.requestFingerprint,
-          previewId: preview.previewId,
-          previewIssuedAt: preview.previewIssuedAt,
-          previewExpiresAt: preview.previewExpiresAt,
-          confirmation: true,
-          confirmationUsername: `entitlement_owner_${suffix}`,
-        }, db);
-      })().finally(() => { revokeSettled = true; });
-      // Keep the probe open beyond Prisma's five-second default interactive
-      // transaction timeout. The owner lock must remain held until the
-      // bounded provider probe and final CAS have completed.
-      await new Promise((resolve) => setTimeout(resolve, 5_200));
-      assert.equal(revokeSettled, false);
-      assert.ok(Date.now() - revokeStartedAt >= 5_000);
-      releaseFetch();
-      const tested = await testing;
-      const revoked = await revoking;
-      assert.equal(tested.provider.status, "verified");
-      assert.equal(revoked.status, "revoked");
-
-      globalThis.fetch = async () => {
-        fetchCount += 1;
-        throw new Error("revoke-first provider test must not dispatch");
-      };
-      await assert.rejects(
-        () => testWorkspaceProviderConnection(workspaceId, deepseek.id, { id: ownerId, role: "member" }, db),
-        (error: unknown) => error instanceof WorkspaceProviderServiceError && error.code === "AI_MEMBERSHIP_REQUIRED",
-      );
-      assert.equal(fetchCount, 1);
-    } finally {
-      releaseFetch();
-      globalThis.fetch = originalProviderFetch;
-    }
 
     await db.project.create({ data: { id: projectId, name: `Entitlement project ${suffix}`, slug: `entitlement-project-${suffix}`, workspaceId } });
     const grant = await db.platformTokenGrant.create({ data: { userId: ownerId, kind: "manual", amount: 100, remainingTokens: 100, offerVersion: "gate", expiresAt: new Date("2026-10-01T00:00:00.000Z") } });

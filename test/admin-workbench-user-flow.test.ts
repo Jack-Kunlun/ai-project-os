@@ -37,7 +37,7 @@ test("workspace member API rejects a direct global disable payload before openin
   } as unknown as PrismaClient;
 
   await assert.rejects(
-    () => updateWorkspaceMember(workspaceId, memberId, { disabled: true }, { id: actorId, role: "member" }, db),
+    () => updateWorkspaceMember(workspaceId, memberId, { disabled: true }, { id: actorId, role: "user" }, db),
     (error: unknown) => error instanceof Error && error.name === "ZodError",
   );
   assert.equal(transactionOpened, false);
@@ -62,7 +62,7 @@ test("legacy project Git connect is frozen before project metadata for ordinary 
   let gitConnectionReads = 0;
   let transactionOpened = false;
   const db = {
-    appUser: { findUnique: async () => ({ id: actorId, role: "member" as const, disabledAt: null }) },
+    appUser: { findUnique: async () => ({ id: actorId, role: "user" as const, disabledAt: null }) },
     project: {
       findUnique: async (input: { select?: { archivedAt?: boolean } }) => input.select?.archivedAt === true
         ? { archivedAt: null }
@@ -73,7 +73,7 @@ test("legacy project Git connect is frozen before project metadata for ordinary 
   } as unknown as PrismaClient;
 
   await assert.rejects(
-    () => connectProjectGitRepository(projectId, null, { id: actorId, role: "member" }, db),
+    () => connectProjectGitRepository(projectId, null, { id: actorId, role: "user" }, db),
     (error: unknown) => error instanceof GitServiceError && error.code === "GIT_LEGACY_PROJECT_CONNECT_FROZEN",
   );
   assert.equal(gitConnectionReads, 0);
@@ -410,14 +410,14 @@ test("admin overview rejects an unverified actor before reading operational aggr
   let operationalRead = false;
   const db = {
     appUser: {
-      findUnique: async () => ({ id: actorId, role: "member" as const, disabledAt: null }),
+      findUnique: async () => ({ id: actorId, role: "user" as const, disabledAt: null }),
       count: async () => { operationalRead = true; return 1; },
     },
     $queryRaw: async () => { operationalRead = true; throw new Error("database health must not be read"); },
   } as unknown as PrismaClient;
 
   await assert.rejects(
-    () => getSystemOverview({ id: actorId, role: "member" }, db, new Date("2026-09-03T00:00:00.000Z")),
+    () => getSystemOverview({ id: actorId, role: "user" }, db, new Date("2026-09-03T00:00:00.000Z")),
     (error: unknown) => error instanceof Error && error.name === "AuthError" && (error as { code?: unknown }).code === "AUTH_FORBIDDEN",
   );
   assert.equal(operationalRead, false);

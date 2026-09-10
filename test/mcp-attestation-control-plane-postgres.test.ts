@@ -29,7 +29,7 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
   const toolDefinitionId = randomUUID();
   const adminActor = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
   const replacementAdminActor = { id: replacementAdminId, role: "admin" as const, accountAccessVersion: 1 };
-  const memberActor = { id: memberId, role: "member" as const, accountAccessVersion: 1 };
+  const memberActor = { id: memberId, role: "user" as const, accountAccessVersion: 1 };
   const definitionFingerprint = "a".repeat(64);
   const networkFingerprint = "b".repeat(64);
   const configurationRevision = 1;
@@ -67,7 +67,7 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
   await db.appUser.createMany({ data: [
     { id: adminId, username: `mcp_c2_admin_${suffix}`, role: "admin" },
     { id: replacementAdminId, username: `mcp_c2_replacement_${suffix}`, role: "admin" },
-    { id: memberId, username: `mcp_c2_member_${suffix}`, role: "member" },
+    { id: memberId, username: `mcp_c2_member_${suffix}`, role: "user" },
   ] });
   await db.mcpConnection.create({
     data: {
@@ -133,7 +133,7 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
   assert.equal(created.id, repeated.id);
   await assert.rejects(() => createMcpControlPlaneAttestation(adminActor, { ...input, riskLevel: "high" }, db), isMcpCode("MCP_ATTESTATION_CONFLICT"));
 
-  await db.appUser.update({ where: { id: adminId }, data: { role: "member" } });
+  await db.appUser.update({ where: { id: adminId }, data: { role: "user" } });
   const demotedActive = await listMcpControlPlaneAttestationCandidates(replacementAdminActor, { state: "active", page: 1, pageSize: 50 }, db);
   const demotedCandidate = demotedActive.candidates.find((candidate) => (candidate as { id?: string }).id === created.id) as {
     effective?: boolean;

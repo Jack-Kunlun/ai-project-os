@@ -57,9 +57,7 @@ type ProviderUsageSnapshot = Readonly<{
   name: string;
   kind: string;
   scope: string;
-  workspaceId: string | null;
   ownerUserId: string | null;
-  ownershipState?: string | null;
   status?: string;
 }>;
 
@@ -78,9 +76,7 @@ function usageProvider(
 ): PublicUsageProvider {
   const isPlatform = provider !== null
     && provider.scope === "platform"
-    && provider.workspaceId === null
-    && provider.ownerUserId === null
-    && provider.ownershipState === "confirmed";
+    && provider.ownerUserId === null;
   if (isPlatform) {
     return Object.freeze({
       key: JSON.stringify(["platform", provider.name, provider.kind, modelId]),
@@ -91,7 +87,7 @@ function usageProvider(
       balanceAvailable: provider.kind === "deepseek",
     });
   }
-  if (provider?.scope === "user" && provider.workspaceId === null && provider.ownerUserId !== null && provider.ownershipState === "confirmed") {
+  if (provider?.scope === "user" && provider.ownerUserId !== null) {
     // Usage has no actor context. Redact the complete personal-provider
     // identity and aggregate it under a stable non-provider key instead of
     // correlating rows through a raw connection UUID.
@@ -127,7 +123,7 @@ export async function getProjectUsageSummary(
 
   const periodEnd = new Date();
   const periodStart = new Date(periodEnd.getTime() - days * 24 * 60 * 60 * 1_000);
-  const [webRows, legacyRows, routeRows] = await Promise.all([
+  const [webRows, legacyRows] = await Promise.all([
     db.providerCallAudit.groupBy({
       by: ["providerConnectionId", "operation", "modelId", "status"],
       where: { createdAt: { gte: periodStart, lt: periodEnd }, job: { projectId } },
@@ -140,21 +136,11 @@ export async function getProjectUsageSummary(
       _count: { _all: true },
       _sum: { requestCount: true, inputTokens: true, outputTokens: true },
     }),
-    db.projectAiRoute.findMany({
-      where: { projectId },
-      orderBy: { operation: "asc" },
-      select: {
-        operation: true,
-        providerConnectionId: true,
-        modelId: true,
-        providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownerUserId: true, ownershipState: true, status: true } },
-      },
-    }),
   ]);
   const providerIds = [...new Set(webRows.map((row) => row.providerConnectionId))];
   const providers = providerIds.length === 0 ? [] : await db.aiProviderConnection.findMany({
     where: { id: { in: providerIds } },
-    select: { id: true, name: true, kind: true, scope: true, workspaceId: true, ownerUserId: true, ownershipState: true, status: true },
+    select: { id: true, name: true, kind: true, scope: true, ownerUserId: true, status: true },
   });
   const providersById = new Map(providers.map((provider) => [provider.id, provider]));
   const totals = emptyUsage();
@@ -233,17 +219,6 @@ export async function getProjectUsageSummary(
     project: Object.freeze({ ...project, archivedAt: project.archivedAt?.toISOString() ?? null }),
     period: Object.freeze({ days, start: periodStart.toISOString(), end: periodEnd.toISOString() }),
     totals: publicUsage(totals),
-    routes: Object.freeze(routeRows.map((route) => {
-      const display = usageProvider(route.providerConnection, route.modelId);
-      return Object.freeze({
-        operation: route.operation,
-        providerName: display.providerName,
-        providerKind: display.providerKind,
-        providerStatus: display.providerStatus,
-        modelId: display.modelId,
-        balanceAvailable: display.balanceAvailable,
-      });
-    })),
     byProvider: Object.freeze(byProvider),
     byOperation: Object.freeze(byOperation),
     pricing: Object.freeze({ available: false, reason: "未保存逐次价格、缓存命中和峰谷时段快照，因此不估算金额" }),

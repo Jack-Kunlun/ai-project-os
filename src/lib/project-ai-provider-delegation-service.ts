@@ -130,7 +130,7 @@ type DelegationRow = ProjectAiProviderDelegation & {
     id: string;
     name: string;
     kind: AiProviderKind;
-    scope: "platform" | "workspace" | "user";
+    scope: "platform" | "user";
     ownerUserId: string | null;
     protocol: "chatCompletions";
     baseUrl: string;

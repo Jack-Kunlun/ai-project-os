@@ -37,7 +37,6 @@ const projectSummarySelect = {
       scans: true,
       snapshots: true,
       repositoryLinks: { where: { status: "active" } },
-      webAiRoutes: true,
       projectAgentRuns: { where: { indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere } } },
     },
   },

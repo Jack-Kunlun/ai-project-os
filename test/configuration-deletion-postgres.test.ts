@@ -56,7 +56,7 @@ test("unused model and Git connections can be permanently deleted while historic
 
   await db.appUser.createMany({ data: [
     { id: userId, username: `configuration_delete_${suffix}`, role: "admin" },
-    { id: otherUserId, username: `configuration_delete_other_${suffix}`, role: "member" },
+    { id: otherUserId, username: `configuration_delete_other_${suffix}`, role: "user" },
   ] });
   await db.project.create({ data: { id: projectId, name: `Configuration deletion ${suffix}`, slug: `configuration-deletion-${suffix}` } });
 

@@ -128,8 +128,8 @@ async function createFixture(client: Client, options: FixtureOptions = {}): Prom
   `, [credentialId, "c".repeat(64)]);
   await query(client, `
     INSERT INTO "AiProviderConnection"
-      ("id", "name", "kind", "scope", "ownershipState", "baseUrl", "credentialId", "defaultGenerationModelId", "status", "updatedAt")
-    VALUES ($1::uuid, $2, 'glm', 'platform', 'confirmed', 'https://open.bigmodel.cn/api/paas/v4', $3::uuid, 'glm-4-flash', 'verified', CURRENT_TIMESTAMP)
+      ("id", "name", "kind", "scope", "ownerUserId", "baseUrl", "credentialId", "defaultGenerationModelId", "status", "updatedAt")
+    VALUES ($1::uuid, $2, 'glm', 'platform', NULL, 'https://open.bigmodel.cn/api/paas/v4', $3::uuid, 'glm-4-flash', 'verified', CURRENT_TIMESTAMP)
   `, [providerId, `Confirmation provider ${suffix}`, credentialId]);
   await query(client, `
     INSERT INTO "WebAiConfirmationChallenge"
@@ -434,9 +434,7 @@ test(
       operation: "projectAnalysis",
       providerConnection: {
         scope: "user",
-        workspaceId: null,
         ownerUserId: ownerId,
-        ownershipState: "confirmed",
         name: "个人私有连接",
         kind: "openai",
         status: "verified",

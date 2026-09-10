@@ -91,5 +91,5 @@ test("计划健康自动化只读取本地运营状态且不进入模型运行",
   assert.match(automation, /getProjectOperationsSummary/u);
   assert.match(automation, /run\.rule\.kind === "projectPlanHealth"/u);
   const branch = automation.slice(automation.indexOf("async function executeProjectPlanHealth"), automation.indexOf("async function executeRun"));
-  assert.doesNotMatch(branch, /requireProjectAiRoute|AiProvider|fetch\(|model/u);
+  assert.doesNotMatch(branch, /fetch\(|model/u);
 });

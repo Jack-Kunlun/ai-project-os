@@ -18,7 +18,7 @@ import { resolveSecureEndpointFingerprint, syncProjectWebSource, updateProjectWe
 
 const shouldRun = process.env.AUTOMATION_GOVERNANCE_POSTGRES_GATE === "1";
 
-type Actor = Readonly<{ id: string; role: "admin" | "member" | "user"; accountAccessVersion: number }>;
+type Actor = Readonly<{ id: string; role: "admin" | "user"; accountAccessVersion: number }>;
 
 function deferred(): Readonly<{ promise: Promise<void>; resolve: () => void }> {
   let resolve!: () => void;

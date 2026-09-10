@@ -7,7 +7,6 @@ import { getDb } from "@/lib/db";
 
 export const SYSTEM_AUDIT_SOURCES = [
   "platformDefaultAiRoute",
-  "aiProviderOwnership",
   "membershipSubscription",
   "accountAccess",
   "membershipAccess",
@@ -23,7 +22,6 @@ export type SystemAuditSource = (typeof SYSTEM_AUDIT_SOURCES)[number];
 
 export const SYSTEM_AUDIT_SOURCE_LABELS: Readonly<Record<SystemAuditSource, string>> = {
   platformDefaultAiRoute: "平台默认路由",
-  aiProviderOwnership: "AI 供应商归属",
   membershipSubscription: "会员资格",
   accountAccess: "账号状态",
   membershipAccess: "成员访问",
@@ -41,7 +39,6 @@ export const SYSTEM_AUDIT_ACTIONS = [
   "validated",
   "activated",
   "retired",
-  "legacyOwnershipConfirmed",
   "grant",
   "extend",
   "revoke",
@@ -117,18 +114,6 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     actionMap: actionMapping(["draftCreated", "draftUpdated", "validated", "activated", "retired"]),
     resultField: "action",
     resultMap: resultMapping({ applied: ["draftCreated", "draftUpdated", "validated", "activated", "retired"] }),
-  },
-  aiProviderOwnership: {
-    source: "aiProviderOwnership",
-    label: SYSTEM_AUDIT_SOURCE_LABELS.aiProviderOwnership,
-    table: "AiProviderOwnershipAudit",
-    selectedFields: ["id", "providerConnectionId", "actorId", "action", "reason", "oldScope", "newScope", "oldOwnershipState", "newOwnershipState", "oldWorkspacePresent", "newWorkspacePresent", "oldOwnerPresent", "newOwnerPresent", "createdAt"],
-    referenceFields: ["providerConnectionId"],
-    actionField: "action",
-    allowedActions: ["legacyOwnershipConfirmed"],
-    actionMap: actionMapping(["legacyOwnershipConfirmed"]),
-    resultField: "action",
-    resultMap: resultMapping({ applied: ["legacyOwnershipConfirmed"] }),
   },
   membershipSubscription: {
     source: "membershipSubscription",
@@ -493,24 +478,6 @@ const platformSelect = {
   createdAt: true,
 } as const;
 
-type OwnershipRow = Prisma.AiProviderOwnershipAuditGetPayload<{ select: typeof ownershipSelect }>;
-const ownershipSelect = {
-  id: true,
-  providerConnectionId: true,
-  actorId: true,
-  action: true,
-  reason: true,
-  oldScope: true,
-  newScope: true,
-  oldOwnershipState: true,
-  newOwnershipState: true,
-  oldWorkspacePresent: true,
-  newWorkspacePresent: true,
-  oldOwnerPresent: true,
-  newOwnerPresent: true,
-  createdAt: true,
-} as const;
-
 type SubscriptionRow = Prisma.MembershipSubscriptionAuditGetPayload<{ select: typeof subscriptionSelect }>;
 const subscriptionSelect = {
   id: true,
@@ -784,27 +751,6 @@ function platformProjection(row: PlatformRow): RawAuditEvent {
   });
 }
 
-function ownershipProjection(row: OwnershipRow): RawAuditEvent {
-  const action = String(row.action);
-  return rawEvent({
-    id: row.id,
-    source: "aiProviderOwnership",
-    action,
-    createdAt: row.createdAt,
-    actorId: row.actorId,
-    actorKind: "user",
-    subjectId: null,
-    references: safeReferences({ categories: ["providerConnection"] }),
-    evidence: evidence(
-      { scope: String(row.oldScope), ownershipState: String(row.oldOwnershipState), workspacePresent: row.oldWorkspacePresent, ownerPresent: row.oldOwnerPresent },
-      { scope: String(row.newScope), ownershipState: String(row.newOwnershipState), workspacePresent: row.newWorkspacePresent, ownerPresent: row.newOwnerPresent },
-      {},
-      true,
-    ),
-    result: statusResult(action, null),
-  });
-}
-
 function subscriptionProjection(row: SubscriptionRow): RawAuditEvent {
   const action = String(row.eventKind);
   return rawEvent({
@@ -1004,16 +950,6 @@ async function fetchPlatform(context: QueryContext): Promise<RawAuditEvent[]> {
   return rows.map(platformProjection);
 }
 
-async function fetchOwnership(context: QueryContext): Promise<RawAuditEvent[]> {
-  const rows = await context.db.aiProviderOwnershipAudit.findMany({
-    where: sourceWhere(context, "aiProviderOwnership", { actorField: "actorId" }) as Prisma.AiProviderOwnershipAuditWhereInput,
-    orderBy: orderBy(),
-    take: context.take,
-    select: ownershipSelect,
-  });
-  return rows.map(ownershipProjection);
-}
-
 async function fetchSubscription(context: QueryContext): Promise<RawAuditEvent[]> {
   const rows = await context.db.membershipSubscriptionAudit.findMany({
     where: sourceWhere(context, "membershipSubscription", { actorField: "actorId", subjectField: "userId" }) as Prisma.MembershipSubscriptionAuditWhereInput,
@@ -1107,7 +1043,6 @@ async function fetchGrant(context: QueryContext): Promise<RawAuditEvent[]> {
 async function fetchSource(context: QueryContext, source: SystemAuditSource): Promise<RawAuditEvent[]> {
   switch (source) {
     case "platformDefaultAiRoute": return fetchPlatform(context);
-    case "aiProviderOwnership": return fetchOwnership(context);
     case "membershipSubscription": return fetchSubscription(context);
     case "accountAccess": return fetchAccountAccess(context);
     case "membershipAccess": return fetchMembershipAccess(context);

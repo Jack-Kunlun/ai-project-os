@@ -17,7 +17,6 @@ type Provider = {
   name: string;
   kind: string;
   scope: "platform";
-  ownershipState: "legacyPending" | "ambiguous" | "confirmed";
   status: "configured" | "verified" | "error" | "disabled";
   disabledAt: string | null;
   configurationVersion: number;
@@ -25,7 +24,6 @@ type Provider = {
   defaultEmbeddingModelId: string | null;
   defaultVisionModelId: string | null;
   embeddingDimensions: number | null;
-  _count: { projectRoutes: number; platformDefaultAiRoutes: number };
 };
 type Route = {
   id: string;
@@ -88,7 +86,7 @@ const operationLabels: Record<Operation, string> = {
 
 const readinessLabels: Record<Readiness["code"], string> = {
   missing: "未配置",
-  "provider-invalid": "供应商归属或结构无效",
+  "provider-invalid": "供应商结构无效",
   "provider-not-verified": "供应商待验证",
   "provider-disabled": "供应商已停用",
   "configuration-changed": "供应商配置已变化",
@@ -114,7 +112,7 @@ function providerModel(provider: Provider | undefined, operation: Operation): { 
 }
 
 function providerSupportsRoute(provider: Provider | undefined, route: Route): boolean {
-  if (provider === undefined || provider.ownershipState !== "confirmed" || provider.scope !== "platform") return false;
+  if (provider === undefined || provider.status !== "verified" || provider.disabledAt !== null || provider.scope !== "platform") return false;
   if (route.operation === "embedding") {
     return provider.defaultEmbeddingModelId === route.modelId
       && provider.embeddingDimensions === route.embeddingDimensions
@@ -131,9 +129,7 @@ function providerSupportsRoute(provider: Provider | undefined, route: Route): bo
 }
 
 function routeValidationLabel(route: Route, provider: Provider | undefined): string {
-  if (provider === undefined || provider.ownershipState !== "confirmed" || provider.scope !== "platform") {
-    return "验证已失效 · 供应商结构无效";
-  }
+  if (provider === undefined || provider.scope !== "platform") return "验证已失效 · 供应商结构无效";
   if (provider.status === "disabled" || provider.disabledAt !== null) return "验证已失效 · 供应商已停用";
   if (route.validatedAt === null || route.validatedProviderConfigurationVersion === null) return "未验证";
   if (route.validatedProviderConfigurationVersion !== provider.configurationVersion) {
@@ -175,7 +171,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
   const operationRef = useRef<Operation>("embedding");
   const requestSequenceRef = useRef(0);
 
-  const eligibleProviders = providers.filter((provider) => provider.ownershipState === "confirmed");
+  const eligibleProviders = providers.filter((provider) => provider.status === "verified" && provider.disabledAt === null);
 
   const reload = useCallback(async () => {
     const requestSequence = ++requestSequenceRef.current;
@@ -191,9 +187,10 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
       if (requestSequence !== requestSequenceRef.current) return;
       const currentEditingRouteId = editingRouteIdRef.current;
       const currentProviderId = providerIdRef.current;
-      const nextProviderId = currentProviderId !== "" && payload.providers.some((provider) => provider.id === currentProviderId)
+      const validProviders = payload.providers.filter((provider) => provider.status === "verified" && provider.disabledAt === null);
+      const nextProviderId = currentProviderId !== "" && validProviders.some((provider) => provider.id === currentProviderId)
         ? currentProviderId
-        : payload.providers.find((provider) => provider.ownershipState === "confirmed")?.id ?? "";
+        : validProviders[0]?.id ?? "";
       const shouldApplyDefaults = currentEditingRouteId === null
         && (currentProviderId === "" || nextProviderId !== currentProviderId);
       setRoutes(payload.routes);
@@ -376,7 +373,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
           </select>
           {editingRouteId !== null ? <span className="mt-1 block text-[12px] font-normal text-slate-400">编辑草稿时操作固定；如需其他操作，请取消编辑后新建。</span> : null}
         </label>
-        <label className="text-xs font-semibold text-slate-600">已确认的平台供应商
+        <label className="text-xs font-semibold text-slate-600">有效平台供应商
           <select value={providerId} onChange={(event) => changeProvider(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm">
             <option value="">请选择供应商</option>
             {eligibleProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} · 配置版本 {provider.configurationVersion}</option>)}

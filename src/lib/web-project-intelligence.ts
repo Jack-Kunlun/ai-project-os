@@ -512,14 +512,6 @@ async function prepareRuntime(
   db: PrismaClient,
 ) {
   await assertWebAiProjectAccess(actor, projectId, "edit", db);
-  // The legacy control-plane table is not a runtime fallback. Check every
-  // operation before loading project state, routes, or memory so direct POST
-  // callers fail closed in the same way as the status projection.
-  const legacyRoute = await db.projectAiRoute.findFirst({
-    where: { projectId },
-    select: { projectId: true },
-  });
-  if (legacyRoute !== null) throw new EffectiveAiRouteError("PROJECT_ROUTE_INVALID");
   const [state, generationRoute, embeddingRoute, index] = await Promise.all([
     loadProjectState(projectId, db),
     resolveEffectiveAiRoute(projectId, "projectAnalysis", db),
@@ -527,17 +519,6 @@ async function prepareRuntime(
     getActiveMemoryIndex(projectId, actor, db),
   ]);
   return Object.freeze({ state, generationRoute, embeddingRoute, index });
-}
-
-async function assertNoLegacyProjectAiRoute(
-  tx: Prisma.TransactionClient,
-  admission: ProjectAccessAdmission,
-): Promise<void> {
-  const legacyRoute = await tx.projectAiRoute.findFirst({
-    where: { projectId: admission.project.id },
-    select: { projectId: true },
-  });
-  if (legacyRoute !== null) throw new EffectiveAiRouteError("PROJECT_ROUTE_INVALID");
 }
 
 function intelligenceConfirmationMaterial(
@@ -690,7 +671,6 @@ export async function runProjectBriefJob(input: Readonly<{
       scopeIds: { indexGenerationId: runtime.index.id, queryHash: sha256(REPORT_SEARCH_QUERY) },
       manifestFingerprint: manifest,
     },
-    beforeCreate: assertNoLegacyProjectAiRoute,
   }, db);
   if (!granted.created) return getProjectJobInternal(projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
@@ -929,7 +909,6 @@ export async function runProjectAgentJob(input: Readonly<{
       scopeIds: { indexGenerationId: runtime.index.id, questionHash: sha256(question) },
       manifestFingerprint: manifest,
     },
-    beforeCreate: assertNoLegacyProjectAiRoute,
   }, db);
   if (!granted.created) return getProjectJobInternal(projectId, granted.jobId, db);
   const claim = await claimWebAiJob(granted.jobId, db);
@@ -1086,9 +1065,8 @@ type PublicIntelligenceRouteSource = "platform_default" | "personal_delegation";
 export function publicRouteSource(source: string): PublicIntelligenceRouteSource | null {
   if (source === "personal_delegation") return "personal_delegation";
   if (source === "platform_default") return "platform_default";
-  // The effective-route resolver currently rejects the retired
-  // project_override source. Keep this boundary fail-closed so a future
-  // resolver change cannot expose an unknown route as platform-owned.
+  // Keep this boundary fail-closed so an unknown resolver source cannot be
+  // exposed as a platform-owned route.
   return null;
 }
 
@@ -1155,20 +1133,42 @@ async function listProjectIntelligenceAuthorized(
   const currentActor = admission.actor;
   const projectPermission = admission.permission;
   const project = admission.project;
-  const [legacyRoutes, effectiveSelections] = await Promise.all([
-    db.projectAiRoute.findMany({
-      // Any surviving ProjectAiRoute row is a legacy control-plane write.
-      // The retired control page could write generateWithContext and other
-      // operations that are not directly resolved by this workbench.
-      where: { projectId },
-      select: { operation: true },
-    }),
-    db.projectAiEffectiveRouteSelection.findMany({
-      where: { projectId, operation: { in: ["embedding", "projectAnalysis"] } },
-      select: { operation: true, source: true },
-    }),
-  ]);
-  const [visibility, reports, agentRuns, activeIndex, routes, currentManifest] = await Promise.all([
+  const effectiveSelections = await db.projectAiEffectiveRouteSelection.findMany({
+    where: { projectId, operation: { in: ["embedding", "projectAnalysis"] } },
+    select: { operation: true, source: true },
+  });
+  const activeIndexQuery = db.memoryIndexPointer.findUnique({
+    where: { projectId },
+    select: {
+      indexGenerationId: true,
+      publishedAt: true,
+      generation: {
+        select: {
+          id: true,
+          jobId: true,
+          status: true,
+          providerConnectionId: true,
+          modelId: true,
+          dimensions: true,
+          inputManifestFingerprint: true,
+          expectedEmbeddingRouteSource: true,
+          expectedEmbeddingRouteId: true,
+          expectedEmbeddingRouteVersion: true,
+          expectedEmbeddingRouteUpdatedAt: true,
+          expectedEmbeddingProviderConfigurationVersion: true,
+          expectedEmbeddingRouteFenceFingerprint: true,
+          embeddingWebAiGrantId: true,
+          records: {
+            where: { projectSource: { is: { kind: "mcp" } } },
+            take: 1,
+            select: { id: true },
+          },
+          providerConnection: { select: { scope: true, ownerUserId: true, name: true, kind: true, status: true } },
+        },
+      },
+    },
+  });
+  const [visibility, reports, agentRuns, routes, currentManifest] = await Promise.all([
     loadProjectAiPublicVisibility(db, projectId, currentActor.id),
     db.projectIntelligenceReport.findMany({
       where: { projectId, indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere } },
@@ -1183,7 +1183,7 @@ async function listProjectIntelligenceAuthorized(
         outputTokens: true,
         inputManifestFingerprint: true,
         createdAt: true,
-        providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
+        providerConnection: { select: { scope: true, ownerUserId: true, name: true, kind: true, status: true } },
       },
     }),
     db.projectAgentRun.findMany({
@@ -1204,38 +1204,7 @@ async function listProjectIntelligenceAuthorized(
         outputTokens: true,
         inputManifestFingerprint: true,
         createdAt: true,
-        providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
-      },
-    }),
-    db.memoryIndexPointer.findUnique({
-      where: { projectId },
-      select: {
-        indexGenerationId: true,
-        publishedAt: true,
-        generation: {
-          select: {
-            id: true,
-            jobId: true,
-            status: true,
-            providerConnectionId: true,
-            modelId: true,
-            dimensions: true,
-            inputManifestFingerprint: true,
-            expectedEmbeddingRouteSource: true,
-            expectedEmbeddingRouteId: true,
-            expectedEmbeddingRouteVersion: true,
-            expectedEmbeddingRouteUpdatedAt: true,
-            expectedEmbeddingProviderConfigurationVersion: true,
-            expectedEmbeddingRouteFenceFingerprint: true,
-            embeddingWebAiGrantId: true,
-            records: {
-              where: { projectSource: { is: { kind: "mcp" } } },
-              take: 1,
-              select: { id: true },
-            },
-            providerConnection: { select: { scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, name: true, kind: true, status: true } },
-          },
-        },
+        providerConnection: { select: { scope: true, ownerUserId: true, name: true, kind: true, status: true } },
       },
     }),
     Promise.all(["embedding", "projectAnalysis"] as const).then(async (operations) => Promise.all(operations.map(async (operation) => {
@@ -1258,6 +1227,7 @@ async function listProjectIntelligenceAuthorized(
     }))),
     getProjectMemoryInputManifest(projectId, currentActor, db),
   ]);
+  const activeIndex = await activeIndexQuery;
   const embeddingResolution = routes.find((resolution) => resolution.operation === "embedding")!;
   const generationResolution = routes.find((resolution) => resolution.operation === "projectAnalysis")!;
   const embeddingRoute = embeddingResolution.route;
@@ -1337,7 +1307,6 @@ async function listProjectIntelligenceAuthorized(
     projectId,
     permission: projectPermission,
     archived: project.archivedAt !== null,
-    legacyRouteConflict: legacyRoutes.length > 0,
     embeddingRoute: embeddingRuntimeRoute,
     projectAnalysisRoute: projectAnalysisRuntimeRoute,
     indexState: readinessState.state,

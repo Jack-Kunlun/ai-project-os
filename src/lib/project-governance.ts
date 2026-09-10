@@ -1,4 +1,4 @@
-import { Prisma, type AiOperation, type BackgroundJobKind, type BackgroundJobStatus, type PrismaClient } from "@prisma/client";
+import { Prisma, type BackgroundJobKind, type BackgroundJobStatus, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
@@ -40,7 +40,7 @@ const reviewCursorSchema = z.object({
 
 const listCursorSchema = z.object({
   v: z.literal(1),
-  kind: z.enum(["operations", "routes"]),
+  kind: z.literal("operations"),
   createdAt: z.string().datetime({ offset: true }),
   id: z.string().uuid(),
 }).strict();
@@ -116,14 +116,14 @@ export function decodeGovernanceReviewCursor(value: string): GovernanceReviewCur
 }
 
 export function encodeGovernanceListCursor(
-  kind: GovernanceListCursor["kind"],
+  kind: "operations",
   input: Pick<GovernanceListCursor, "createdAt" | "id">,
 ): string {
   return encodeCursor({ v: 1, kind, ...input });
 }
 
 export function decodeGovernanceListCursor(
-  kind: GovernanceListCursor["kind"],
+  kind: "operations",
   value: string,
 ): GovernanceListCursor {
   const parsed = listCursorSchema.safeParse(decodeCursorText(value));
@@ -191,8 +191,6 @@ type WebReviewRow = Readonly<{
     name: string;
     kind: string;
     scope?: string | null;
-    workspaceId?: string | null;
-    ownershipState?: string | null;
     ownerUserId?: string | null;
     status?: string;
   }>;
@@ -225,18 +223,6 @@ type VerifiedReviewRow = Readonly<{
 }>;
 
 const REDACTED_PROJECT_AI_VISIBILITY: ProjectAiPublicVisibility = Object.freeze({ actorId: "", projectOwner: false });
-
-function isConfirmedPlatformProvider(provider: Readonly<{
-  scope?: string | null;
-  workspaceId?: string | null;
-  ownerUserId?: string | null;
-  ownershipState?: string | null;
-}> | null): boolean {
-  return provider?.scope === "platform"
-    && provider.workspaceId === null
-    && provider.ownerUserId === null
-    && provider.ownershipState === "confirmed";
-}
 
 export function toGovernanceWebReview(
   row: WebReviewRow,
@@ -313,7 +299,6 @@ export async function getProjectGovernanceSummary(
     githubPartial,
     githubRateLimited,
     githubUnknown,
-    latestInvalidation,
     memory,
   ] = await Promise.all([
     db.webAiCandidate.count({ where: { projectId, reviewStatus: "candidate", source: { is: nonLegacyMcpProjectSourceLineageWhere }, projectItem: { is: nonLegacyMcpProjectItemWhere } } }),
@@ -323,11 +308,6 @@ export async function getProjectGovernanceSummary(
     db.projectGitHubSyncRun.count({ where: { projectId, status: "partial" } }),
     db.projectGitHubSyncRun.count({ where: { projectId, status: "rateLimited" } }),
     db.projectGitHubSyncRun.count({ where: { projectId, status: "unknown" } }),
-    db.projectAiRouteRevision.findFirst({
-      where: { projectId, indexInvalidated: true },
-      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-      select: { id: true, operation: true, createdAt: true },
-    }),
     getProjectMemoryIndexStatus(projectId, actor, db),
   ]);
   const indexRisk = memory.readiness === "ready" ? 0 : 1;
@@ -341,11 +321,6 @@ export async function getProjectGovernanceSummary(
       compatible: memory.compatible,
       activeRecordCount: memory.activeIndex?.generation.recordCount ?? 0,
       publishedAt: memory.activeIndex?.publishedAt.toISOString() ?? null,
-    }),
-    latestIndexInvalidation: latestInvalidation === null ? null : Object.freeze({
-      id: latestInvalidation.id,
-      operation: latestInvalidation.operation,
-      createdAt: latestInvalidation.createdAt.toISOString(),
     }),
     attentionTotal: webPending + verifiedPending + unknownJobs + failedJobs + githubPartial + githubRateLimited + githubUnknown + indexRisk,
   });
@@ -382,7 +357,7 @@ export async function listGovernanceReviews(
         id: true,
         modelId: true,
         createdAt: true,
-        providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+        providerConnection: { select: { name: true, kind: true, scope: true, ownerUserId: true, status: true } },
         source: { select: { id: true, kind: true, contentHash: true } },
         projectItem: {
           select: { id: true, type: true, title: true, content: true, sourceExcerpt: true, occurredAt: true, updatedAt: true },
@@ -508,105 +483,6 @@ export async function listGovernanceOperations(
     items: Object.freeze(items),
     nextCursor: rows.length > limit && last !== undefined
       ? encodeGovernanceListCursor("operations", { createdAt: last.createdAt.toISOString(), id: last.id })
-      : null,
-  });
-}
-
-export async function listGovernanceRouteRevisions(
-  projectId: string,
-  actor: WebAiActor,
-  input: Readonly<{ cursor?: string; limit?: number; search?: string; operation?: AiOperation }> = {},
-  db: PrismaClient = getDb(),
-) {
-  await assertWebAiProjectAccess(actor, projectId, "view", db);
-  if (!(await projectExists(projectId, db))) return null;
-  const limit = input.limit ?? GOVERNANCE_DEFAULT_LIMIT;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > GOVERNANCE_MAX_LIMIT) throw new ProjectGovernanceError("GOVERNANCE_LIMIT_INVALID");
-  const cursor = input.cursor === undefined ? null : decodeGovernanceListCursor("routes", input.cursor);
-  const rows = await db.projectAiRouteRevision.findMany({
-    where: {
-      projectId,
-      ...(input.operation ? { operation: input.operation } : {}),
-      AND: [
-        listCursorFilter(cursor),
-        ...(input.search ? [{
-          OR: [
-            { oldModelId: { contains: input.search, mode: "insensitive" as const } },
-            { newModelId: { contains: input.search, mode: "insensitive" as const } },
-            { oldProviderConnection: { is: { name: { contains: input.search, mode: "insensitive" as const } } } },
-            { newProviderConnection: { is: { name: { contains: input.search, mode: "insensitive" as const } } } },
-          ],
-        }] : []),
-      ],
-    },
-    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
-    take: limit + 1,
-    select: {
-      id: true,
-      operation: true,
-      oldModelId: true,
-      newModelId: true,
-      oldEmbeddingDimensions: true,
-      newEmbeddingDimensions: true,
-      oldMaxOutputTokens: true,
-      newMaxOutputTokens: true,
-      onlyFutureRuns: true,
-      indexInvalidated: true,
-      activeIndexGenerationId: true,
-      createdAt: true,
-      oldProviderConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
-      newProviderConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
-      actor: { select: { username: true } },
-    },
-  });
-  const visibility = await loadProjectAiPublicVisibility(db, projectId, actor.id);
-  const pageRows = rows.slice(0, limit);
-  const items = pageRows.map((row) => {
-    const previousProvider = row.oldProviderConnection === null
-      ? null
-      : projectAiProviderProjection(row.oldProviderConnection, visibility);
-    const currentProvider = projectAiProviderProjection(row.newProviderConnection, visibility);
-    const previousModelId = row.oldModelId === null || row.oldProviderConnection === null
-      ? null
-      : projectAiModelProjection(row.oldModelId, row.oldProviderConnection, visibility);
-    const currentModelId = projectAiModelProjection(row.newModelId, row.newProviderConnection, visibility);
-    return Object.freeze({
-      id: row.id,
-      operation: row.operation,
-      previous: row.oldModelId === null ? null : Object.freeze({
-        providerName: previousProvider?.name ?? null,
-        providerKind: previousProvider?.kind ?? null,
-        modelId: previousModelId,
-        embeddingDimensions: previousModelId !== null && isConfirmedPlatformProvider(row.oldProviderConnection)
-          ? row.oldEmbeddingDimensions
-          : null,
-        maxOutputTokens: previousModelId !== null && isConfirmedPlatformProvider(row.oldProviderConnection)
-          ? row.oldMaxOutputTokens
-          : null,
-      }),
-      current: Object.freeze({
-        providerName: currentProvider?.name ?? null,
-        providerKind: currentProvider?.kind ?? null,
-        modelId: currentModelId,
-        embeddingDimensions: currentModelId !== null && isConfirmedPlatformProvider(row.newProviderConnection)
-          ? row.newEmbeddingDimensions
-          : null,
-        maxOutputTokens: currentModelId !== null && isConfirmedPlatformProvider(row.newProviderConnection)
-          ? row.newMaxOutputTokens
-          : null,
-      }),
-      onlyFutureRuns: row.onlyFutureRuns,
-      indexInvalidated: row.indexInvalidated,
-      activeIndexGenerationId: row.activeIndexGenerationId,
-      actor: row.actor?.username ?? "system",
-      createdAt: row.createdAt.toISOString(),
-    });
-  });
-  const last = pageRows.at(-1);
-  return Object.freeze({
-    items: Object.freeze(items),
-    nextCursor: rows.length > limit && last !== undefined
-      ? encodeGovernanceListCursor("routes", { createdAt: last.createdAt.toISOString(), id: last.id })
       : null,
   });
 }

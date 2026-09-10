@@ -3,7 +3,6 @@ import {
   type AiOperation,
   type AiProviderConnection,
   type PrismaClient,
-  type ProjectAiRoute,
   type PlatformDefaultAiRoute,
 } from "@prisma/client";
 import { canonicalProviderBaseUrl, getProviderDefinition } from "@/lib/ai-providers";
@@ -11,7 +10,7 @@ import { getDb } from "@/lib/db";
 
 type RouteDb = PrismaClient | import("@prisma/client").Prisma.TransactionClient;
 
-export const EFFECTIVE_AI_ROUTE_SOURCES = ["project_override", "platform_default", "personal_delegation"] as const;
+export const EFFECTIVE_AI_ROUTE_SOURCES = ["platform_default", "personal_delegation"] as const;
 export type EffectiveAiRouteSource = typeof EFFECTIVE_AI_ROUTE_SOURCES[number];
 
 export type EffectiveAiRouteErrorCode =
@@ -150,19 +149,16 @@ function routeFence(input: Readonly<{
 
 function assertProviderScope(
   provider: AiProviderConnection,
-  workspaceId: string,
   source: EffectiveAiRouteSource,
 ): void {
   if (
     provider.scope !== "platform"
-    || provider.ownershipState !== "confirmed"
     || provider.disabledAt !== null
     || provider.status !== "verified"
   ) return fail(source === "platform_default" ? "PLATFORM_ROUTE_UNAVAILABLE" : "PROJECT_ROUTE_INVALID");
-  if (provider.workspaceId !== null || provider.ownerUserId !== null) {
+  if (provider.ownerUserId !== null) {
     return fail(source === "platform_default" ? "PLATFORM_ROUTE_UNAVAILABLE" : "PROJECT_ROUTE_INVALID");
   }
-  void workspaceId;
 }
 
 type PersonalProviderRow = {
@@ -171,8 +167,6 @@ type PersonalProviderRow = {
   kind: AiProviderConnection["kind"];
   scope: AiProviderConnection["scope"];
   ownerUserId: string | null;
-  workspaceId: string | null;
-  ownershipState: AiProviderConnection["ownershipState"];
   protocol: AiProviderConnection["protocol"];
   baseUrl: string;
   defaultGenerationModelId: string | null;
@@ -201,8 +195,6 @@ function assertPersonalProvider(
     || provider.scope !== "user"
     || provider.ownerUserId === null
     || provider.ownerUserId !== expectedOwnerId
-    || provider.workspaceId !== null
-    || provider.ownershipState !== "confirmed"
     || provider.status !== "verified"
     || provider.disabledAt !== null
     || provider.protocol !== "chatCompletions"
@@ -273,7 +265,15 @@ function assertCapability(
 
 function toEffectiveRoute(
   projectId: string,
-  route: ProjectAiRoute,
+  route: Readonly<{
+    operation: AiOperation;
+    providerConnectionId: string;
+    modelId: string;
+    embeddingDimensions: number | null;
+    maxOutputTokens: number;
+    createdAt: Date;
+    updatedAt: Date;
+  }>,
   provider: AiProviderConnection,
   source: EffectiveAiRouteSource,
   routeId: string | null,
@@ -324,7 +324,7 @@ function toEffectiveRoute(
   });
 }
 
-function toDefaultProjectRoute(route: PlatformDefaultAiRoute): ProjectAiRoute {
+function toDefaultProjectRoute(route: PlatformDefaultAiRoute) {
   return {
     projectId: "",
     operation: route.operation,
@@ -417,10 +417,7 @@ async function resolvePersonalRoute(
           id: true,
           name: true,
           kind: true,
-          scope: true,
-          workspaceId: true,
           ownerUserId: true,
-          ownershipState: true,
           protocol: true,
           baseUrl: true,
           defaultGenerationModelId: true,
@@ -616,17 +613,6 @@ export async function resolveEffectiveAiRoute(
   const project = await db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true, archivedAt: true } });
   if (project === null) return fail("PROJECT_NOT_FOUND");
 
-  const projectRoute = await db.projectAiRoute.findUnique({
-    where: { projectId_operation: { projectId, operation } },
-  });
-  if (projectRoute !== null) {
-    // ProjectAiRoute predates the platform-default admission contract and has
-    // no user-provider ownership/double-consent fence. Treat any surviving
-    // row as a legacy reference: it must not override the administrator-owned
-    // platform route or silently fall back to it.
-    return fail("PROJECT_ROUTE_INVALID");
-  }
-
   const selection = await db.projectAiEffectiveRouteSelection.findUnique({
     where: { projectId_operation: { projectId, operation } },
     select: {
@@ -674,7 +660,7 @@ export async function resolveEffectiveAiRoute(
   if (provider.credential.kind !== "aiProvider" || !/^[0-9a-f]{64}$/u.test(provider.credential.secretFingerprint)) {
     return fail("PLATFORM_ROUTE_UNAVAILABLE");
   }
-  assertProviderScope(provider, project.workspaceId, "platform_default");
+  assertProviderScope(provider, "platform_default");
   if (
     defaultRoute.validatedAt === null
     || defaultRoute.validatedProviderConfigurationVersion === null

@@ -6,7 +6,6 @@ import {
   loadProjectAiPublicVisibility,
   projectAiModelProjection,
   projectAiProviderProjection,
-  type ProjectAiPublicVisibility,
 } from "@/lib/project-ai-public-projection";
 import {
   loadQuarantinedProjectLineage,
@@ -42,18 +41,6 @@ function iso(value: Date | null): string | null {
   return value?.toISOString() ?? null;
 }
 
-function isConfirmedPlatformProvider(provider: Readonly<{
-  scope?: string | null;
-  workspaceId?: string | null;
-  ownerUserId?: string | null;
-  ownershipState?: string | null;
-}> | null): boolean {
-  return provider?.scope === "platform"
-    && provider.workspaceId === null
-    && provider.ownerUserId === null
-    && provider.ownershipState === "confirmed";
-}
-
 const PRIVATE_EXPORT_METADATA_KEYS = new Set([
   "providerconnectionid",
   "credentialid",
@@ -86,34 +73,6 @@ export function sanitizeProjectExportMetadata(value: Prisma.JsonValue): Prisma.J
   return value;
 }
 
-function publicRouteConfig(
-  provider: Readonly<{
-    scope?: string | null;
-    workspaceId?: string | null;
-    ownerUserId: string | null;
-    ownershipState?: string | null;
-    name: string;
-    kind: string;
-    status?: string;
-  }> | null,
-  modelId: string,
-  embeddingDimensions: number | null,
-  maxOutputTokens: number | null,
-  visibility: ProjectAiPublicVisibility,
-) {
-  const projectedModelId = provider === null ? null : projectAiModelProjection(modelId, provider, visibility);
-  const projectedProvider = provider === null ? null : projectAiProviderProjection(provider, visibility);
-  const exposeConfig = projectedModelId !== null && isConfirmedPlatformProvider(provider);
-  return Object.freeze({
-    providerName: projectedProvider?.name ?? null,
-    providerKind: projectedProvider?.kind ?? null,
-    providerStatus: projectedProvider?.status ?? null,
-    modelId: projectedModelId,
-    embeddingDimensions: exposeConfig ? embeddingDimensions : null,
-    maxOutputTokens: exposeConfig ? maxOutputTokens : null,
-  });
-}
-
 export async function exportProjectData(
   input: Readonly<{ projectId: string; requestedById: string; expectedUpdatedAt: Date }>,
   db: PrismaClient = getDb(),
@@ -130,7 +89,7 @@ export async function exportProjectData(
       }
       const visibility = await loadProjectAiPublicVisibility(tx, input.projectId, input.requestedById);
 
-      const [sources, assets, items, repositories, routes, routeRevisions, lifecycle, jobs, answers, reports, agentRuns, actionResultImports, objectives, workItems, dependencies, planAudits, quarantinedLineage] = await Promise.all([
+      const [sources, assets, items, repositories, lifecycle, jobs, answers, reports, agentRuns, actionResultImports, objectives, workItems, dependencies, planAudits, quarantinedLineage] = await Promise.all([
         tx.projectSource.findMany({
           where: { projectId: input.projectId, ...nonLegacyMcpProjectSourceLineageWhere },
           orderBy: [{ ingestedAt: "asc" }, { id: "asc" }],
@@ -196,7 +155,7 @@ export async function exportProjectData(
                     reviewedAt: true,
                     modelId: true,
                     projectSourceId: true,
-                    providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+                    providerConnection: { select: { name: true, kind: true, scope: true, ownerUserId: true, status: true } },
                     reviewedBy: { select: { username: true } },
                   },
                 },
@@ -292,40 +251,6 @@ export async function exportProjectData(
             },
           },
         }),
-        tx.projectAiRoute.findMany({
-          where: { projectId: input.projectId },
-          orderBy: [{ operation: "asc" }],
-          select: {
-            operation: true,
-            modelId: true,
-            embeddingDimensions: true,
-            maxOutputTokens: true,
-            createdAt: true,
-            updatedAt: true,
-            providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
-          },
-        }),
-        tx.projectAiRouteRevision.findMany({
-          where: { projectId: input.projectId },
-          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-          select: {
-            id: true,
-            operation: true,
-            oldModelId: true,
-            newModelId: true,
-            oldEmbeddingDimensions: true,
-            newEmbeddingDimensions: true,
-            oldMaxOutputTokens: true,
-            newMaxOutputTokens: true,
-            onlyFutureRuns: true,
-            indexInvalidated: true,
-            activeIndexGenerationId: true,
-            createdAt: true,
-            oldProviderConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
-            newProviderConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
-            actor: { select: { username: true } },
-          },
-        }),
         tx.projectLifecycleRevision.findMany({
           where: { projectId: input.projectId },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -372,7 +297,7 @@ export async function exportProjectData(
             inputTokens: true,
             outputTokens: true,
             createdAt: true,
-            providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+            providerConnection: { select: { name: true, kind: true, scope: true, ownerUserId: true, status: true } },
           },
         }),
         tx.projectIntelligenceReport.findMany({
@@ -389,7 +314,7 @@ export async function exportProjectData(
             inputTokens: true,
             outputTokens: true,
             createdAt: true,
-            providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+            providerConnection: { select: { name: true, kind: true, scope: true, ownerUserId: true, status: true } },
           },
         }),
         tx.projectAgentRun.findMany({
@@ -411,7 +336,7 @@ export async function exportProjectData(
             inputTokens: true,
             outputTokens: true,
             createdAt: true,
-            providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+            providerConnection: { select: { name: true, kind: true, scope: true, ownerUserId: true, status: true } },
           },
         }),
         tx.projectActionResultImport.findMany({
@@ -528,63 +453,6 @@ export async function exportProjectData(
             lastVerifiedAt: link.githubRepository.lastVerifiedAt.toISOString(),
           },
         })),
-        aiRoutes: routes.map((route) => {
-          const config = publicRouteConfig(
-            route.providerConnection,
-            route.modelId,
-            route.embeddingDimensions,
-            route.maxOutputTokens,
-            visibility,
-          );
-          return {
-            operation: route.operation,
-            modelId: config.modelId,
-            embeddingDimensions: config.embeddingDimensions,
-            maxOutputTokens: config.maxOutputTokens,
-            createdAt: route.createdAt.toISOString(),
-            updatedAt: route.updatedAt.toISOString(),
-            providerConnection: route.providerConnection === null
-              ? null
-              : projectAiProviderProjection(route.providerConnection, visibility),
-          };
-        }),
-        aiRouteRevisions: routeRevisions.map((revision) => {
-          const oldConfig = revision.oldProviderConnection === null || revision.oldModelId === null
-            ? null
-            : publicRouteConfig(
-              revision.oldProviderConnection,
-              revision.oldModelId,
-              revision.oldEmbeddingDimensions,
-              revision.oldMaxOutputTokens,
-              visibility,
-            );
-          const newConfig = publicRouteConfig(
-            revision.newProviderConnection,
-            revision.newModelId,
-            revision.newEmbeddingDimensions,
-            revision.newMaxOutputTokens,
-            visibility,
-          );
-          return {
-            id: revision.id,
-            operation: revision.operation,
-            oldModelId: oldConfig?.modelId ?? null,
-            newModelId: newConfig.modelId,
-            oldEmbeddingDimensions: oldConfig?.embeddingDimensions ?? null,
-            newEmbeddingDimensions: newConfig.embeddingDimensions,
-            oldMaxOutputTokens: oldConfig?.maxOutputTokens ?? null,
-            newMaxOutputTokens: newConfig.maxOutputTokens,
-            onlyFutureRuns: revision.onlyFutureRuns,
-            indexInvalidated: revision.indexInvalidated,
-            activeIndexGenerationId: revision.activeIndexGenerationId,
-            createdAt: revision.createdAt.toISOString(),
-            oldProviderConnection: revision.oldProviderConnection === null
-              ? null
-              : projectAiProviderProjection(revision.oldProviderConnection, visibility),
-            newProviderConnection: projectAiProviderProjection(revision.newProviderConnection, visibility),
-            actor: revision.actor,
-          };
-        }),
         lifecycle: lifecycle.map((revision) => ({
           ...revision,
           previousArchivedAt: iso(revision.previousArchivedAt),

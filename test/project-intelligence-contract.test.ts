@@ -4,8 +4,6 @@ import { join } from "node:path";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
 import { getPlatformTokenAdvisory } from "../src/lib/ai-entitlements";
-import { EffectiveAiRouteError } from "../src/lib/effective-ai-route";
-import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import {
   PROJECT_AGENT_TOOLS,
   ProjectIntelligenceError,
@@ -14,8 +12,6 @@ import {
   parseProjectIntelligenceReport,
   listProjectIntelligence,
   publicRouteSource,
-  runProjectAgentJob,
-  runProjectBriefJob,
 } from "../src/lib/web-project-intelligence";
 import { decideProjectIntelligenceRuntime } from "../src/lib/project-intelligence-runtime-decision";
 
@@ -58,7 +54,6 @@ test("project intelligence runtime decision preserves payer and one next action"
     projectId,
     permission: "edit" as const,
     archived: false,
-    legacyRouteConflict: false,
     embeddingRoute: platformRoute,
     projectAnalysisRoute: platformRoute,
   };
@@ -119,10 +114,6 @@ test("project intelligence runtime decision preserves payer and one next action"
   });
   assert.equal(personalBlocked.code, "personal_route_blocked");
   assert.equal(personalBlocked.payer, "personal_connection_owner");
-
-  const legacy = decideProjectIntelligenceRuntime({ ...base, legacyRouteConflict: true, indexState: "ready" });
-  assert.equal(legacy.code, "legacy_route_conflict");
-  assert.equal(legacy.nextAction.kind, "contact_platform_admin");
 
   const viewer = decideProjectIntelligenceRuntime({ ...base, permission: "view", indexState: "ready" });
   assert.equal(viewer.code, "run_forbidden");
@@ -186,73 +177,6 @@ test("platform quota advisory is read-only and does not recover reservations", a
   assert.equal(reservationReads, 1);
 });
 
-function legacyRuntimeDb() {
-  let projectReads = 0;
-  const calls: string[] = [];
-  const db = {
-    appUser: {
-      findUnique: async () => {
-        calls.push("actor");
-        return { id: projectId, role: "user", disabledAt: null, accountAccessVersion: 1 };
-      },
-    },
-    project: {
-      findUnique: async () => {
-        projectReads += 1;
-        calls.push("project");
-        return { membershipInheritanceMode: "projectOnly", workspaceId: "33333333-3333-4333-8333-333333333333", archivedAt: null };
-      },
-    },
-    projectMembership: {
-      findMany: async () => {
-        calls.push("membership");
-        return [{
-          id: "44444444-4444-4444-8444-444444444444",
-          projectId,
-          userId: projectId,
-          role: "editor",
-          accessState: "confirmed",
-          createdAt: new Date("2026-01-01T00:00:00.000Z"),
-          updatedAt: new Date("2026-01-01T00:00:00.000Z"),
-        }];
-      },
-    },
-    projectAiRoute: {
-      findFirst: async () => {
-        calls.push("legacy-route");
-        return { projectId, operation: "generateWithContext" };
-      },
-    },
-  } as unknown as PrismaClient;
-  return { db, calls, projectReads: () => projectReads };
-}
-
-test("brief and agent reject any legacy ProjectAiRoute before runtime reads", async () => {
-  for (const operation of ["brief", "agent"] as const) {
-    const runtime = legacyRuntimeDb();
-    const run = operation === "brief"
-      ? runProjectBriefJob({
-        projectId,
-        requestedBy: { id: projectId, role: "user", accountAccessVersion: 1 },
-        clientKey: `legacy-${operation}`,
-        consent: { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION },
-      }, runtime.db)
-      : runProjectAgentJob({
-        projectId,
-        requestedBy: { id: projectId, role: "user", accountAccessVersion: 1 },
-        clientKey: `legacy-${operation}`,
-        consent: { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION },
-        question: "当前状态如何？",
-      }, runtime.db);
-    await assert.rejects(
-      () => run,
-      (error: unknown) => error instanceof EffectiveAiRouteError && error.code === "PROJECT_ROUTE_INVALID",
-    );
-    assert.deepEqual(runtime.calls, ["actor", "actor", "actor", "project", "membership", "project", "legacy-route"]);
-    assert.equal(runtime.projectReads(), 2);
-  }
-});
-
 function statusTransactionDb() {
   const workspaceId = "33333333-3333-4333-8333-333333333333";
   const now = new Date("2026-01-01T00:00:00.000Z");
@@ -314,7 +238,6 @@ function statusTransactionDb() {
     project,
     projectMembership,
     workspaceMembership: emptyModel(),
-    projectAiRoute: emptyModel(),
     projectAiEffectiveRouteSelection: emptyModel(),
     platformDefaultAiRoute: emptyModel(),
     projectIntelligenceReport: emptyModel(),

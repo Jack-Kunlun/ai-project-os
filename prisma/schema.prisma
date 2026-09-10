@@ -165,7 +165,6 @@ enum EmbeddingProvider {
 
 enum AppUserRole {
   admin
-  member
   user
 }
 
@@ -420,7 +419,6 @@ enum AiProviderKind {
 
 enum AiProviderScope {
   platform
-  workspace
   user
 }
 
@@ -1035,10 +1033,6 @@ enum PlatformDefaultAiRouteAuditAction {
   retired      @map("retired")
 }
 
-enum AiProviderOwnershipAuditAction {
-  legacyOwnershipConfirmed @map("legacy_ownership_confirmed")
-}
-
 enum PlatformTokenGrantKind {
   signup
   manual
@@ -1334,8 +1328,6 @@ model Project {
   codeSnapshots                        ProjectCodeSnapshot[]
   codeSnapshotEntries                  ProjectCodeSnapshotEntry[]
   codeSnapshotPointer                  ProjectCodeSnapshotPointer?
-  webAiRoutes                          ProjectAiRoute[]
-  aiRouteRevisions                     ProjectAiRouteRevision[]
   aiProviderDelegations                 ProjectAiProviderDelegation[]
   gitRepositoryDelegations              ProjectGitRepositoryDelegation[]
   aiEffectiveRouteSelections            ProjectAiEffectiveRouteSelection[]
@@ -4173,7 +4165,6 @@ model AppUser {
   sessions                     AppSession[]
   webAiGrants                  WebAiGrant[]
   backgroundJobs               BackgroundJob[]
-  aiRouteRevisions             ProjectAiRouteRevision[]
   githubSyncReconciliations    ProjectGitHubSyncReconciliation[]
   memoryIndexReconciliations   MemoryIndexReconciliation[]
   backgroundJobReconciliations BackgroundJobReconciliation[]
@@ -4259,7 +4250,6 @@ model AppUser {
   createdPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteCreatedBy")
   updatedPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteUpdatedBy")
   platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[]    @relation("PlatformDefaultAiRouteAuditActor")
-  aiProviderOwnershipAudits    AiProviderOwnershipAudit[]       @relation("AiProviderOwnershipAuditActor")
   projectAiProviderDelegationConnectionOwners ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationConnectionOwner")
   projectAiProviderDelegationProposers        ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProposer")
   projectAiProviderDelegationOwnerConfirmations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationOwnerConfirmer")
@@ -4556,7 +4546,6 @@ model Workspace {
   invitations   WorkspaceInvitation[]
   oidcProviders OidcProvider[]
   projectDeletionReceipts ProjectDeletionReceipt[]
-  aiProviderConnections AiProviderConnection[]
 
   @@index([createdById, createdAt])
 }
@@ -5432,9 +5421,7 @@ model AiProviderConnection {
   name                     String                      @db.VarChar(80)
   kind                     AiProviderKind
   scope                    AiProviderScope              @default(platform)
-  workspaceId              String?                     @db.Uuid
   ownerUserId              String?                     @db.Uuid
-  ownershipState           ResourceOwnershipState       @default(legacyPending)
   protocol                 AiProviderProtocol          @default(chatCompletions)
   baseUrl                  String                      @db.VarChar(512)
   credentialId             String                      @unique @db.Uuid
@@ -5451,11 +5438,7 @@ model AiProviderConnection {
   createdAt                DateTime                    @default(now())
   updatedAt                DateTime                    @updatedAt
   credential               ExternalCredential          @relation(fields: [credentialId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  workspace                Workspace?                  @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   ownerUser                AppUser?                    @relation("AiProviderConnectionOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  projectRoutes            ProjectAiRoute[]
-  aiRouteRevisionsOld      ProjectAiRouteRevision[]    @relation("ProjectAiRouteRevisionOldProvider")
-  aiRouteRevisionsNew      ProjectAiRouteRevision[]    @relation("ProjectAiRouteRevisionNewProvider")
   webAiGrants              WebAiGrant[]
   memoryIndexGenerations   MemoryIndexGeneration[]
   ragAnswers               RagAnswer[]
@@ -5468,15 +5451,12 @@ model AiProviderConnection {
   tokenReservations         PlatformTokenReservation[]
   platformDefaultAiRoutes  PlatformDefaultAiRoute[]    @relation("PlatformDefaultAiRouteProvider")
   platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[] @relation("PlatformDefaultAiRouteAuditProvider")
-  ownershipAudits          AiProviderOwnershipAudit[]  @relation("AiProviderOwnershipAuditProvider")
   projectAiProviderDelegations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProvider")
 
   @@index([kind, status])
-  @@index([scope, workspaceId, status])
   @@index([scope, name])
   @@index([ownerUserId, updatedAt])
   @@index([ownerUserId, name])
-  @@index([ownerUserId, ownershipState, updatedAt])
 }
 
 model PlatformGrantOfferPolicy {
@@ -5544,49 +5524,8 @@ model PlatformDefaultAiRouteAudit {
   @@index([actorId, createdAt])
 }
 
-model AiProviderOwnershipAudit {
-  id                   String                         @id @default(uuid()) @db.Uuid
-  providerConnectionId String                         @db.Uuid
-  actorId              String                         @db.Uuid
-  action               AiProviderOwnershipAuditAction
-  reason               String                         @db.VarChar(500)
-  oldScope             AiProviderScope
-  newScope             AiProviderScope
-  oldOwnershipState    ResourceOwnershipState
-  newOwnershipState    ResourceOwnershipState
-  oldWorkspacePresent  Boolean
-  newWorkspacePresent  Boolean
-  oldOwnerPresent      Boolean
-  newOwnerPresent      Boolean
-  createdAt            DateTime                       @default(now())
-  providerConnection   AiProviderConnection           @relation("AiProviderOwnershipAuditProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  actor                AppUser                       @relation("AiProviderOwnershipAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-
-  @@index([providerConnectionId, createdAt])
-  @@index([actorId, createdAt])
-  @@index([action, createdAt])
-}
-
-model ProjectAiRoute {
-  projectId            String               @db.Uuid
-  operation            AiOperation
-  providerConnectionId String               @db.Uuid
-  modelId              String               @db.VarChar(128)
-  embeddingDimensions  Int?
-  maxOutputTokens      Int                  @default(2048)
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
-  project              Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  providerConnection   AiProviderConnection @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-
-  @@id([projectId, operation])
-  @@index([providerConnectionId])
-}
-
 // Personal model use is represented by an explicit, two-step project
-// delegation.  This database foundation is intentionally separate from the
-// legacy ProjectAiRoute and WebAiGrant runtime paths; runtime adoption is a
-// later, independently gated change.
+// delegation and is selected through the effective-route control plane.
 model ProjectAiProviderDelegation {
   id                         String                              @id @default(uuid()) @db.Uuid
   projectId                  String                              @db.Uuid
@@ -5716,37 +5655,6 @@ model ProjectAiProviderDelegationAudit {
   @@index([delegationId, delegationVersion, createdAt])
   @@index([selectionId, selectionVersion, createdAt])
   @@index([transactionId, createdAt])
-}
-
-model ProjectAiRouteRevision {
-  id                      String                 @id @default(uuid()) @db.Uuid
-  projectId               String                 @db.Uuid
-  operation               AiOperation
-  oldProviderConnectionId String?                @db.Uuid
-  oldModelId              String?                @db.VarChar(128)
-  oldEmbeddingDimensions  Int?
-  oldMaxOutputTokens      Int?
-  newProviderConnectionId String                 @db.Uuid
-  newModelId              String                 @db.VarChar(128)
-  newEmbeddingDimensions  Int?
-  newMaxOutputTokens      Int
-  onlyFutureRuns          Boolean                @default(false)
-  indexInvalidated        Boolean                @default(false)
-  activeIndexGenerationId String?                @db.Uuid
-  actorId                 String?                @db.Uuid
-  createdAt               DateTime               @default(now())
-  project                 Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  oldProviderConnection   AiProviderConnection?  @relation("ProjectAiRouteRevisionOldProvider", fields: [oldProviderConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  newProviderConnection   AiProviderConnection   @relation("ProjectAiRouteRevisionNewProvider", fields: [newProviderConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  activeIndexGeneration   MemoryIndexGeneration? @relation(fields: [projectId, activeIndexGenerationId], references: [projectId, id], onDelete: NoAction, onUpdate: Cascade)
-  actor                   AppUser?               @relation(fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-
-  @@index([projectId, operation, createdAt])
-  @@index([projectId, createdAt])
-  @@index([newProviderConnectionId])
-  @@index([oldProviderConnectionId])
-  @@index([activeIndexGenerationId])
-  @@index([projectId, activeIndexGenerationId])
 }
 
 model WebAiGrant {
@@ -6385,7 +6293,6 @@ model MemoryIndexGeneration {
   ragAnswers                      RagAnswer[]
   intelligenceReports             ProjectIntelligenceReport[]
   projectAgentRuns                ProjectAgentRun[]
-  aiRouteRevisions                ProjectAiRouteRevision[]
   reconciliations                 MemoryIndexReconciliation[]
   expectedByIndexGenerations      MemoryIndexGeneration[]     @relation("MemoryIndexGenerationExpectedActive")
 

@@ -77,7 +77,7 @@ test("C2 candidate projection recursively removes secret-bearing remote metadata
 test("C2 create and revoke inputs are strict before any database access", async () => {
   const noDb = {} as PrismaClient;
   await assert.rejects(
-    () => createMcpControlPlaneAttestation({ id: actorId, role: "member" }, {
+    () => createMcpControlPlaneAttestation({ id: actorId, role: "user" }, {
       toolDefinitionId,
       expectedConnectionConfigurationRevision: 1,
       expectedDefinitionFingerprint: fingerprint,

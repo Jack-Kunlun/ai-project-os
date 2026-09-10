@@ -269,10 +269,11 @@ function hasCompleteRouteSnapshot(route: RuntimeRoute): boolean {
       && route.quotaMultiplierBps === 10_000
       && hasCompletePersonalEvidence(route);
   }
-  return (route.source === "project_override" || route.source === "platform_default")
-    && (route.source === "platform_default"
-      ? typeof route.routeId === "string" && route.routeId.length > 0 && Number.isSafeInteger(route.routeVersion) && (route.routeVersion ?? 0) > 0
-      : route.routeId === null && route.routeVersion === null);
+  return route.source === "platform_default"
+    && typeof route.routeId === "string"
+    && route.routeId.length > 0
+    && Number.isSafeInteger(route.routeVersion)
+    && (route.routeVersion ?? 0) > 0;
 }
 
 function assertRuntimeRoute(route: RuntimeRoute): void {
@@ -282,8 +283,6 @@ function assertRuntimeRoute(route: RuntimeRoute): void {
   if (isPersonalRuntimeRoute(route)) {
     if (
       route.providerConnection.scope !== "user"
-      || route.providerConnection.ownershipState !== "confirmed"
-      || route.providerConnection.workspaceId !== null
       || route.providerConnection.ownerUserId !== route.personalEvidence.connectionOwnerId
       || route.personalEvidence.payerProviderConnectionId !== route.providerConnectionId
     ) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
@@ -291,8 +290,6 @@ function assertRuntimeRoute(route: RuntimeRoute): void {
   }
   if (
     route.providerConnection.scope !== "platform"
-    || route.providerConnection.ownershipState !== "confirmed"
-    || route.providerConnection.workspaceId !== null
     || route.providerConnection.ownerUserId !== null
   ) throw new AiEntitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN");
 }
@@ -494,9 +491,7 @@ async function reloadRuntimeRoute(
     provider === null
     || provider.id !== input.route.providerConnectionId
     || provider.scope !== input.route.providerConnection.scope
-    || provider.workspaceId !== input.route.providerConnection.workspaceId
     || provider.ownerUserId !== input.route.providerConnection.ownerUserId
-    || provider.ownershipState !== input.route.providerConnection.ownershipState
     || provider.configurationVersion !== input.route.providerConnection.configurationVersion
   ) {
     throw new AiEntitlementError("AI_PROVIDER_CONNECTION_UNAVAILABLE");
@@ -530,16 +525,13 @@ async function reloadDispatchProvider(
     provider === null
     || provider.id !== expected.providerConnectionId
     || provider.scope !== expected.providerConnection.scope
-    || provider.workspaceId !== expected.providerConnection.workspaceId
     || provider.ownerUserId !== expected.providerConnection.ownerUserId
-    || provider.ownershipState !== expected.providerConnection.ownershipState
   ) {
     throw new AiEntitlementError("AI_PROVIDER_CONNECTION_UNAVAILABLE");
   }
   if (
     provider.status !== "verified"
     || provider.disabledAt !== null
-    || provider.ownershipState !== "confirmed"
     || provider.configurationVersion !== expected.providerConnection.configurationVersion
   ) {
     throw new AiEntitlementError("AI_PROVIDER_CONNECTION_UNAVAILABLE");

@@ -272,8 +272,8 @@ export default defineConfig({
       );
       await raw.query(
         `INSERT INTO "AiProviderConnection"
-          ("id", "name", "kind", "scope", "workspaceId", "ownerUserId", "ownershipState", "protocol", "baseUrl", "credentialId", "defaultGenerationModelId", "defaultEmbeddingModelId", "embeddingDimensions", "configurationVersion", "status", "createdAt", "updatedAt")
-         VALUES ($1, $2, 'openai', 'platform', NULL, NULL, 'legacy_pending', 'chat_completions', 'https://api.openai.com/v1', $3,
+          ("id", "name", "kind", "scope", "ownerUserId", "protocol", "baseUrl", "credentialId", "defaultGenerationModelId", "defaultEmbeddingModelId", "embeddingDimensions", "configurationVersion", "status", "createdAt", "updatedAt")
+         VALUES ($1, $2, 'openai', 'platform', NULL, 'chat_completions', 'https://api.openai.com/v1', $3,
                  'generation-background-reconciliation', 'embedding-background-reconciliation', 8, 1, 'verified', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [memoryProviderId, `Background reconciliation provider ${projectId.slice(0, 8)}`, memoryCredentialId],
       );
@@ -295,10 +295,10 @@ export default defineConfig({
       db = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
       const historicalProvider = await db.aiProviderConnection.findUniqueOrThrow({
         where: { id: memoryProviderId },
-        select: { scope: true, ownershipState: true, ownerAccountAccessVersion: true },
+        select: { scope: true, ownerUserId: true, ownerAccountAccessVersion: true },
       });
       assert.equal(historicalProvider.scope, "platform");
-      assert.equal(historicalProvider.ownershipState, "legacyPending");
+      assert.equal(historicalProvider.ownerUserId, null);
       assert.equal(historicalProvider.ownerAccountAccessVersion, null);
       const historicalGeneration = await db.memoryIndexGeneration.findUniqueOrThrow({
         where: { projectId_id: { projectId, id: memoryGenerationId } },

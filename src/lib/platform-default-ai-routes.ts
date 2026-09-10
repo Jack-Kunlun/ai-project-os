@@ -94,9 +94,7 @@ const providerForRouteSelect = {
   name: true,
   kind: true,
   scope: true,
-  workspaceId: true,
   ownerUserId: true,
-  ownershipState: true,
   status: true,
   disabledAt: true,
   configurationVersion: true,
@@ -130,7 +128,6 @@ const providerListSelect = {
   name: true,
   kind: true,
   scope: true,
-  ownershipState: true,
   status: true,
   disabledAt: true,
   configurationVersion: true,
@@ -140,7 +137,6 @@ const providerListSelect = {
   embeddingDimensions: true,
   _count: {
     select: {
-      projectRoutes: true,
       platformDefaultAiRoutes: { where: { status: "active" } },
     },
   },
@@ -265,9 +261,7 @@ function assertProviderStructure(provider: ProviderForRoute | null): asserts pro
   if (
     provider === null
     || provider.scope !== "platform"
-    || provider.workspaceId !== null
     || provider.ownerUserId !== null
-    || provider.ownershipState !== "confirmed"
   ) return fail("PLATFORM_AI_ROUTE_PROVIDER_INVALID");
 }
 
@@ -700,9 +694,7 @@ function readinessForOperation(
   let code: PlatformDefaultAiRouteReadinessCode = "ready";
   if (
     provider.scope !== "platform"
-    || provider.workspaceId !== null
     || provider.ownerUserId !== null
-    || provider.ownershipState !== "confirmed"
   ) code = "provider-invalid";
   else if (provider.disabledAt !== null || provider.status === "disabled") code = "provider-disabled";
   else if (

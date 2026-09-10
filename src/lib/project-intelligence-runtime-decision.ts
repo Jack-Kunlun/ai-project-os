@@ -1,6 +1,5 @@
 export const PROJECT_INTELLIGENCE_RUNTIME_DECISION_CODES = [
   "run_forbidden",
-  "legacy_route_conflict",
   "platform_route_blocked",
   "personal_route_blocked",
   "platform_quota_advisory_blocked",
@@ -73,14 +72,6 @@ export type ProjectIntelligenceRuntimeDecision =
     nextAction: Extract<ProjectIntelligenceNextAction, { kind: "request_edit_access" | "contact_project_admin" }>;
   }>)
   | (RuntimeDecisionBase & Readonly<{
-    code: "legacy_route_conflict";
-    canRun: false;
-    routeSource: null;
-    payer: null;
-    payerLabel: null;
-    nextAction: Extract<ProjectIntelligenceNextAction, { kind: "contact_platform_admin" }>;
-  }>)
-  | (RuntimeDecisionBase & Readonly<{
     code: "platform_route_blocked";
     canRun: false;
     routeSource: "platform_default";
@@ -124,7 +115,6 @@ export type ProjectIntelligenceRuntimeDecisionInput = Readonly<{
   projectId: string;
   permission: ProjectIntelligencePermission | null;
   archived: boolean;
-  legacyRouteConflict: boolean;
   embeddingRoute: ProjectIntelligenceRuntimeRoute;
   projectAnalysisRoute: ProjectIntelligenceRuntimeRoute;
   indexState: ProjectIntelligenceIndexState;
@@ -231,18 +221,6 @@ export function decideProjectIntelligenceRuntime(
   }
   if (input.archived) {
     return forbiddenDecision("archived");
-  }
-  if (input.legacyRouteConflict) {
-    return Object.freeze({
-      code: "legacy_route_conflict",
-      canRun: false,
-      title: "发现旧的项目模型配置",
-      detail: "当前项目仍有旧路由记录，平台默认模型不会被静默替代。请联系平台管理员清理或迁移该记录。",
-      routeSource: null,
-      payer: null,
-      payerLabel: null,
-      nextAction: Object.freeze({ kind: "contact_platform_admin", label: "联系平台管理员", href: null }),
-    });
   }
   const meta = routeMeta(input);
   if (hasPlatformRouteBlock(input) || ["routeMissing", "providerUnavailable", "generationProviderUnavailable"].includes(input.indexState)) {

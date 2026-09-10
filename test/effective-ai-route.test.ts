@@ -21,9 +21,7 @@ function provider(overrides: Record<string, unknown> = {}) {
     name: "Runtime provider",
     kind: "openai",
     scope: "platform",
-    workspaceId: null,
     ownerUserId: null,
-    ownershipState: "confirmed",
     protocol: "chatCompletions",
     baseUrl: "https://api.openai.com/v1",
     credentialId: randomUUID(),
@@ -39,21 +37,6 @@ function provider(overrides: Record<string, unknown> = {}) {
     disabledAt: null,
     createdAt: NOW,
     updatedAt: NOW,
-    ...overrides,
-  };
-}
-
-function projectRoute(overrides: Record<string, unknown> = {}) {
-  return {
-    projectId: PROJECT_ID,
-    operation: "autoExtract",
-    providerConnectionId: PROVIDER_ID,
-    modelId: "gpt-4.1-mini",
-    embeddingDimensions: null,
-    maxOutputTokens: 512,
-    createdAt: NOW,
-    updatedAt: NOW,
-    providerConnection: provider(),
     ...overrides,
   };
 }
@@ -81,7 +64,6 @@ function defaultRoute(overrides: Record<string, unknown> = {}) {
 }
 
 function fakeDb(input: Readonly<{
-  route?: unknown;
   defaultRoute?: unknown;
   providerOverride?: Record<string, unknown>;
   selection?: unknown;
@@ -94,9 +76,6 @@ function fakeDb(input: Readonly<{
   const db = {
     project: {
       findUnique: async () => ({ id: PROJECT_ID, workspaceId: WORKSPACE_ID, archivedAt: input.projectArchivedAt ?? null }),
-    },
-    projectAiRoute: {
-      findUnique: async () => input.route ?? null,
     },
     projectAiEffectiveRouteSelection: {
       findUnique: async () => input.selection ?? null,
@@ -129,27 +108,6 @@ function fakeDb(input: Readonly<{
 function routeError(code: string) {
   return (error: unknown) => error instanceof EffectiveAiRouteError && error.code === code;
 }
-
-test("a legacy project route blocks fallback and fails closed", async () => {
-  const fixture = fakeDb({ route: projectRoute(), defaultRoute: defaultRoute({ operation: "autoExtract" }) });
-  await assert.rejects(
-    () => resolveEffectiveAiRoute(PROJECT_ID, "autoExtract", fixture.db),
-    routeError("PROJECT_ROUTE_INVALID"),
-  );
-  assert.equal(fixture.defaultLookups, 0);
-});
-
-test("an invalid explicit override fails closed without consulting the default", async () => {
-  const fixture = fakeDb({
-    route: projectRoute({ providerConnection: provider({ status: "disabled" }) }),
-    defaultRoute: defaultRoute({ operation: "autoExtract" }),
-  });
-  await assert.rejects(
-    () => resolveEffectiveAiRoute(PROJECT_ID, "autoExtract", fixture.db),
-    routeError("PROJECT_ROUTE_INVALID"),
-  );
-  assert.equal(fixture.defaultLookups, 0);
-});
 
 test("an active default returns its versioned route fence and quota snapshot", async () => {
   const fixture = fakeDb({ defaultRoute: defaultRoute() });
@@ -228,8 +186,6 @@ test("an active personal selection resolves a complete internal route without pl
     ...provider({
       scope: "user",
       ownerUserId: ownerId,
-      workspaceId: null,
-      ownershipState: "confirmed",
       status: "verified",
       baseUrl: "https://api.openai.com/v1",
     }),
@@ -277,7 +233,6 @@ test("an active personal selection resolves a complete internal route without pl
   let defaultLookups = 0;
   const db = {
     project: { findUnique: async () => ({ id: PROJECT_ID, workspaceId: WORKSPACE_ID, archivedAt: null }) },
-    projectAiRoute: { findUnique: async () => null },
     projectAiEffectiveRouteSelection: { findUnique: async () => selection },
     projectAiProviderDelegation: { findUnique: async () => ({ providerConnectionId: PROVIDER_ID }), findFirst: async () => delegation },
     appUser: { findUnique: async () => ({ disabledAt: null }) },

@@ -81,12 +81,12 @@ test(
       try {
       await db.appUser.createMany({ data: [
         { id: adminId, username: `mcp_grant_owner_${suffix}`, role: "admin" },
-        { id: editorId, username: `mcp_grant_editor_${suffix}`, role: "member" },
-        { id: viewerId, username: `mcp_grant_viewer_${suffix}`, role: "member" },
+        { id: editorId, username: `mcp_grant_editor_${suffix}`, role: "user" },
+        { id: viewerId, username: `mcp_grant_viewer_${suffix}`, role: "user" },
         { id: workspaceAdminId, username: `mcp_grant_workspace_admin_${suffix}`, role: "admin" },
         { id: systemAdminId, username: `mcp_grant_system_admin_${suffix}`, role: "admin" },
-        { id: nonmemberId, username: `mcp_grant_nonmember_${suffix}`, role: "member" },
-        { id: disabledOwnerId, username: `mcp_grant_disabled_owner_${suffix}`, role: "member" },
+        { id: nonmemberId, username: `mcp_grant_nonmember_${suffix}`, role: "user" },
+        { id: disabledOwnerId, username: `mcp_grant_disabled_owner_${suffix}`, role: "user" },
       ] });
       await db.workspace.create({ data: { id: workspaceId, name: `MCP grant ${suffix}`, slug: `mcp-grant-${suffix}`, createdById: adminId } });
       const project = await db.project.create({ data: { id: projectId, workspaceId, name: `MCP grant ${suffix}`, slug: `mcp-grant-project-${suffix}` } });
@@ -136,18 +136,18 @@ test(
       const concurrentInput = { ...createInput, toolDefinitionId: definition2Id, attestationId: attestation2.id };
 
       await assert.rejects(() => createProjectMcpToolGrantV2(projectId, { ...createInput, extra: true }, actor, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_INVALID_INPUT");
-      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: editorId, role: "member", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED");
-      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: viewerId, role: "member", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED");
+      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: editorId, role: "user", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED");
+      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: viewerId, role: "user", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED");
       for (const unauthorized of [workspaceAdminId, systemAdminId, nonmemberId]) {
         await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: unauthorized, role: "admin", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_FORBIDDEN");
       }
-      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: disabledOwnerId, role: "member", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_ACCOUNT_DISABLED");
+      await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: disabledOwnerId, role: "user", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_ACCOUNT_DISABLED");
 
       const supersededAt = new Date();
       await db.mcpToolDefinition.update({ where: { id: definitionId }, data: { current: false, supersededAt } });
       await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, actor, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_STALE");
       await db.mcpToolDefinition.update({ where: { id: definitionId }, data: { current: true, supersededAt: null } });
-      await db.appUser.update({ where: { id: adminId }, data: { role: "member" } });
+      await db.appUser.update({ where: { id: adminId }, data: { role: "user" } });
       await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, actor, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_STALE");
       await db.appUser.update({ where: { id: adminId }, data: { role: "admin" } });
 

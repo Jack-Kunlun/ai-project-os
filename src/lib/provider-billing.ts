@@ -66,19 +66,13 @@ async function readBoundedJson(response: Response): Promise<unknown> {
 
 function isAllowedProjectProviderScope(
   scope: unknown,
-  providerWorkspaceId: unknown,
   providerOwnerUserId: unknown,
-  projectWorkspaceId: unknown,
 ): boolean {
-  if (scope === "platform") return providerWorkspaceId === null && providerOwnerUserId === null;
-  if (scope === "workspace") {
-    return typeof providerWorkspaceId === "string" &&
-      typeof projectWorkspaceId === "string" &&
-      providerWorkspaceId === projectWorkspaceId &&
-      typeof providerOwnerUserId === "string" &&
-      providerOwnerUserId.length > 0;
-  }
-  return false;
+  // Balance lookup is an external billing read and is only supported for the
+  // platform-owned connection selected by an active default route. Personal
+  // connections are never eligible for this platform billing endpoint.
+  return scope === "platform"
+    && providerOwnerUserId === null;
 }
 
 export async function readProviderBalance(
@@ -91,33 +85,31 @@ export async function readProviderBalance(
     now?: () => Date;
   }> = {},
 ) {
-  const route = await db.projectAiRoute.findFirst({
-    where: { projectId, providerConnectionId },
-    select: {
-      project: { select: { workspaceId: true } },
-      providerConnection: {
-        select: {
-          id: true,
-          name: true,
-          kind: true,
-          scope: true,
-          workspaceId: true,
-          ownerUserId: true,
-          status: true,
-          disabledAt: true,
-          credentialId: true,
-        },
+  const [project, activeRoute, connection] = await Promise.all([
+    db.project.findUnique({ where: { id: projectId }, select: { id: true } }),
+    db.platformDefaultAiRoute.findFirst({
+      where: { providerConnectionId, status: "active" },
+      select: { id: true },
+    }),
+    db.aiProviderConnection.findUnique({
+      where: { id: providerConnectionId },
+      select: {
+        id: true,
+        name: true,
+        kind: true,
+        scope: true,
+        ownerUserId: true,
+        status: true,
+        disabledAt: true,
+        credentialId: true,
       },
-    },
-  });
-  if (route === null) return fail("PROVIDER_BILLING_CONNECTION_NOT_ROUTED");
-
-  const connection = route.providerConnection;
+    }),
+  ]);
   if (
-    connection === null ||
-    connection === undefined ||
-    route.project?.workspaceId === undefined ||
-    !isAllowedProjectProviderScope(connection.scope, connection.workspaceId, connection.ownerUserId, route.project.workspaceId)
+    project === null
+    || activeRoute === null
+    || connection === null
+    || !isAllowedProjectProviderScope(connection.scope, connection.ownerUserId)
   ) return fail("PROVIDER_BILLING_CONNECTION_NOT_ROUTED");
   if (connection.kind !== "deepseek") return fail("PROVIDER_BILLING_UNSUPPORTED");
   if (connection.status !== "verified" || connection.disabledAt !== null) return fail("PROVIDER_BILLING_UNAVAILABLE");

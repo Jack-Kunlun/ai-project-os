@@ -60,8 +60,6 @@ test("delegation migration is additive and leaves legacy routes untouched", () =
   assert.match(migration, /system_expiry/u);
   assert.match(migration, /clock_timestamp\(\)/u);
   assert.match(migration, /PAD_A_actor_kind_check/u);
-  assert.doesNotMatch(migration, /UPDATE\s+"ProjectAiRoute"/u);
-  assert.doesNotMatch(migration, /INSERT\s+INTO\s+"ProjectAiRoute"/u);
   assert.doesNotMatch(migration, /INSERT\s+INTO\s+"ProjectAiProviderDelegation"[\s\S]*SELECT/u);
 });
 

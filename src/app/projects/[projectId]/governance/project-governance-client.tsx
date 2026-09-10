@@ -39,18 +39,6 @@ type Operation = {
   };
 };
 
-type RouteRevision = {
-  id: string;
-  operation: string;
-  previous: null | { providerName: string | null; providerKind: string | null; modelId: string; embeddingDimensions: number | null; maxOutputTokens: number | null };
-  current: { providerName: string; providerKind: string; modelId: string; embeddingDimensions: number | null; maxOutputTokens: number };
-  onlyFutureRuns: boolean;
-  indexInvalidated: boolean;
-  activeIndexGenerationId: string | null;
-  actor: string;
-  createdAt: string;
-};
-
 type Page<T> = { items: T[]; nextCursor: string | null };
 
 type UsageBreakdown = {
@@ -170,14 +158,6 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
   const [operationKind, setOperationKind] = useState("all");
   const [operationStatus, setOperationStatus] = useState("all");
   const [operationsLoading, setOperationsLoading] = useState(true);
-  const [routes, setRoutes] = useState<RouteRevision[]>([]);
-  const [routeCursor, setRouteCursor] = useState<string | null>(null);
-  const [routeNextCursor, setRouteNextCursor] = useState<string | null>(null);
-  const [routeHistory, setRouteHistory] = useState<Array<string | null>>([]);
-  const [routeSearch, setRouteSearch] = useState("");
-  const deferredRouteSearch = useDeferredValue(routeSearch);
-  const [routeOperation, setRouteOperation] = useState("all");
-  const [routesLoading, setRoutesLoading] = useState(true);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [usageDays, setUsageDays] = useState<7 | 30 | 90>(30);
   const [canReadProviderBalance, setCanReadProviderBalance] = useState(false);
@@ -210,21 +190,6 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
     }
   }, [deferredOperationSearch, operationCursor, operationKind, operationStatus, projectId]);
 
-  const fetchRoutes = useCallback(async () => {
-    setRoutesLoading(true);
-    const query = new URLSearchParams({ limit: "20" });
-    if (routeCursor) query.set("cursor", routeCursor);
-    if (deferredRouteSearch.trim()) query.set("search", deferredRouteSearch.trim());
-    if (routeOperation !== "all") query.set("operation", routeOperation);
-    try {
-      const page = await readJson<Page<RouteRevision>>(await fetch(`/api/projects/${projectId}/governance/routes?${query}`, { cache: "no-store" }));
-      setRoutes(page.items);
-      setRouteNextCursor(page.nextCursor);
-    } finally {
-      setRoutesLoading(false);
-    }
-  }, [deferredRouteSearch, projectId, routeCursor, routeOperation]);
-
   const fetchUsage = useCallback(async (days: 7 | 30 | 90) => {
     const payload = await readJson<{ usage: Usage; permissions: { readProviderBalance: boolean } }>(await fetch(`/api/projects/${projectId}/governance/usage?days=${days}`, { cache: "no-store" }));
     setUsage(payload.usage);
@@ -249,7 +214,6 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
   }, [reload]);
 
   useEffect(() => { const timer = window.setTimeout(() => void fetchOperations().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "任务记录加载失败")), 0); return () => window.clearTimeout(timer); }, [fetchOperations]);
-  useEffect(() => { const timer = window.setTimeout(() => void fetchRoutes().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "路由记录加载失败")), 0); return () => window.clearTimeout(timer); }, [fetchRoutes]);
 
   async function actOnJob(operation: Operation) {
     if (operation.capability.action === null) return;
@@ -303,7 +267,7 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目管理</h1>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">这里只处理状态治理、权限、动作审批、任务运行与模型路由等管理工作。项目计划和资料审核分别归入对应的独立入口。</p>
           </div>
-          <button type="button" onClick={() => void Promise.all([reload(), fetchOperations(), fetchRoutes()])} disabled={loading || operationsLoading || routesLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button>
+          <button type="button" onClick={() => void Promise.all([reload(), fetchOperations()])} disabled={loading || operationsLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button>
         </section>
 
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
@@ -402,21 +366,6 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
               </div>
             </details>
 
-            <details id="route-history" open className="group mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white shadow-sm">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>模型路由变更记录</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开低频审计</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
-              <div className="border-t border-slate-100 p-6 sm:p-8">
-              <SectionHeader eyebrow="Immutable audit" title="模型路由变更记录" description="这里只显示已发生的路由修订，不提供编辑或回滚动作。切换模型不会改写历史记忆。" />
-              <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_220px]"><label><span className="sr-only">搜索模型路由变更</span><input value={routeSearch} onChange={(event) => { setRouteSearch(event.target.value); setRouteCursor(null); setRouteHistory([]); }} placeholder="搜索供应商或模型 ID" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only">按 AI 能力筛选</span><select value={routeOperation} onChange={(event) => { setRouteOperation(event.target.value); setRouteCursor(null); setRouteHistory([]); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部 AI 能力</option>{Object.entries(operationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
-              {routesLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : routes.length === 0 ? <Empty text="当前筛选条件下没有模型路由变更记录。" /> : <div className="mt-6 space-y-3">{routes.map((route) => (
-                <article key={route.id} className="rounded-2xl border border-slate-200 p-5">
-                  <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{route.operation}</span>{route.indexInvalidated ? <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[12px] font-semibold text-amber-800">索引已失效</span> : null}</div><span className="text-xs text-slate-400">{formatDate(route.createdAt)} · {route.actor}</span></div>
-                  <div className="mt-4 grid gap-3 text-xs sm:grid-cols-[1fr_auto_1fr]"><RouteBox label="原路由" route={route.previous} /><span className="hidden self-center text-slate-300 sm:block">→</span><RouteBox label="新路由" route={route.current} /></div>
-                  {route.indexInvalidated ? <p className="mt-3 text-xs text-amber-800">现有索引未被改写；请前往 <Link href={`/projects/${projectId}/memory`} className="font-semibold underline">智能记忆</Link> 显式重建。</p> : null}
-                </article>
-              ))}</div>}
-              <CursorPagination page={routeHistory.length + 1} hasPrevious={routeHistory.length > 0} hasNext={routeNextCursor !== null} disabled={routesLoading} onPrevious={() => { const previous = routeHistory.at(-1) ?? null; setRouteHistory((current) => current.slice(0, -1)); setRouteCursor(previous); }} onNext={() => { if (!routeNextCursor) return; setRouteHistory((current) => [...current, routeCursor]); setRouteCursor(routeNextCursor); }} />
-              </div>
-            </details>
           </>
         )}
       </div>
@@ -443,9 +392,4 @@ function UsageList({ title, empty, items }: { title: string; empty: string; item
 
 function Empty({ text }: { text: string }) {
   return <p className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">{text}</p>;
-}
-
-function RouteBox({ label, route }: { label: string; route: RouteRevision["previous"] | RouteRevision["current"] }) {
-  if (route === null) return <div className="rounded-xl bg-slate-50 p-4"><p className="font-semibold text-slate-500">{label}</p><p className="mt-2 text-slate-400">首次配置</p></div>;
-  return <div className="rounded-xl bg-slate-50 p-4"><p className="font-semibold text-slate-500">{label}</p><p className="mt-2 font-semibold text-slate-700">{route.providerName ?? route.providerKind ?? "已移除供应商"}</p><p className="mt-1 break-all text-slate-500">{route.modelId}{route.embeddingDimensions ? ` · ${route.embeddingDimensions} 维` : ""}</p></div>;
 }

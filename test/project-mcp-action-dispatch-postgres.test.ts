@@ -201,7 +201,7 @@ test(
     const bearerDefinitionId = randomUUID();
     const definitionFingerprint = fingerprint("a");
     let actor: { readonly id: string; readonly role: "admin"; readonly accountAccessVersion: number } = { id: ownerId, role: "admin", accountAccessVersion: 1 };
-    let dispatchActor: { readonly id: string; readonly role: "member"; readonly accountAccessVersion: number } = { id: approvingOwnerId, role: "member", accountAccessVersion: 1 };
+    let dispatchActor: { readonly id: string; readonly role: "user"; readonly accountAccessVersion: number } = { id: approvingOwnerId, role: "user", accountAccessVersion: 1 };
     let activeBearerToken = `dispatch-gate-token-${suffix}`;
     const sensitiveResponseText = [
       "Authorization=Bearer persisted-bearer-marker; Authorization: Basic persisted-basic-marker; access_token: Bearer persisted-access-marker; Authorization: Bearer \"persisted-quoted-marker with space\"; Bearer \"persisted-standalone-marker nested\"; token: \"persisted-token-marker with space\"",
@@ -399,7 +399,7 @@ test(
       const resolved = await resolveSecureEndpointFingerprint({ url: endpoint, allowPrivateNetwork: true });
       await db.appUser.createMany({ data: [
         { id: ownerId, username: `dispatch_owner_${suffix}`, role: "admin" },
-        { id: approvingOwnerId, username: `dispatch_approver_${suffix}`, role: "member" },
+        { id: approvingOwnerId, username: `dispatch_approver_${suffix}`, role: "user" },
         { id: lifecycleAdminId, username: `dispatch_lifecycle_admin_${suffix}`, role: "admin" },
       ] });
       const project = await db.workspace.create({ data: { id: workspaceId, name: `dispatch gate ${suffix}`, slug: `dispatch-gate-${suffix}`, createdById: ownerId, projects: { create: { id: projectId, name: `dispatch project ${suffix}`, slug: `dispatch-project-${suffix}` } } }, select: { id: true } });

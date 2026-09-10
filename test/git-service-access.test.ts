@@ -18,7 +18,7 @@ const OTHER_PROJECT_ID = "33333333-3333-4333-8333-333333333333";
 const LINK_ID = "44444444-4444-4444-8444-444444444444";
 const CONNECTION_ID = "55555555-5555-4555-8555-555555555555";
 
-const actor = (role: AppUserRole = "member"): WebAiActor => ({ id: ACTOR_ID, role, accountAccessVersion: 1 });
+const actor = (role: AppUserRole = "user"): WebAiActor => ({ id: ACTOR_ID, role, accountAccessVersion: 1 });
 
 const repositoryInput = {
   gitConnectionId: CONNECTION_ID,
@@ -57,7 +57,7 @@ function fakeDb(options: FakeOptions = {}) {
         actorLookups += 1;
         return {
           id: ACTOR_ID,
-          role: options.storedRoleSequence?.[actorLookups - 1] ?? options.storedRole ?? "member",
+          role: options.storedRoleSequence?.[actorLookups - 1] ?? options.storedRole ?? "user",
           disabledAt: options.disabledAtSequence?.[actorLookups - 1] ?? options.disabledAt ?? null,
           accountAccessVersion: 1,
         };
@@ -176,7 +176,7 @@ function repositorySyncFixture() {
         actorLookups += 1;
         return {
           id: ACTOR_ID,
-          role: "member" as const,
+          role: "user" as const,
           disabledAt: null,
           accountAccessVersion: 1,
         };
@@ -315,14 +315,14 @@ test("Git repository disable enforces edit and active access before writes", asy
 
 test("legacy project Git connect is frozen before metadata for every actor", async () => {
   const fixtures = [
-    fakeDb({ storedRole: "member", projectRole: "owner" }),
+    fakeDb({ storedRole: "user", projectRole: "owner" }),
     fakeDb({ storedRole: "admin" }),
     fakeDb({ storedRole: "admin", projectRole: "owner", archivedAt: new Date("2026-09-04T00:00:00.000Z") }),
     fakeDb({ storedRole: "admin", projectRole: "owner", connectionStatus: "verified" }),
   ];
   for (const [index, fixture] of fixtures.entries()) {
     await assert.rejects(
-      () => connectProjectGitRepository(PROJECT_ID, repositoryInput, actor(index === 0 ? "member" : "admin"), fixture.db),
+      () => connectProjectGitRepository(PROJECT_ID, repositoryInput, actor(index === 0 ? "user" : "admin"), fixture.db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_LEGACY_PROJECT_CONNECT_FROZEN",
     );
     assert.equal(fixture.projectLookups, 0);

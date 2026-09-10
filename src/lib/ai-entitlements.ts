@@ -979,17 +979,7 @@ export async function assertAiOutboundEntitlement(input: Readonly<{
   if (project === null) return fail("AI_ROUTE_CONFIGURATION_FORBIDDEN");
   const provider = input.route.providerConnection;
   if (provider.status !== "verified" || provider.disabledAt !== null) return fail("AI_PROVIDER_CONNECTION_UNAVAILABLE");
-  // Workspace connections remain configurable for the future paid-member
-  // surface, but they are deliberately unreachable from this runtime
-  // admission boundary until that entitlement is implemented.  In
-  // particular, a free user (or a system admin) cannot turn a legacy
-  // workspace BYOK row into an outbound platform call.
-  if (
-    provider.scope !== "platform"
-    || provider.ownershipState !== "confirmed"
-    || provider.workspaceId !== null
-    || provider.ownerUserId !== null
-  ) {
+  if (provider.scope !== "platform" || provider.ownerUserId !== null) {
     return fail("AI_PROVIDER_SCOPE_FORBIDDEN");
   }
   const user = await db.appUser.findUnique({ where: { id: input.requestedById }, select: { id: true, role: true } });

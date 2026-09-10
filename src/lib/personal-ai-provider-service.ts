@@ -114,7 +114,6 @@ const mutationProviderSelect = {
   ...internalProviderSelect,
   _count: {
     select: {
-      projectRoutes: true,
       projectAiProviderDelegations: {
         where: { status: { in: liveDelegationStatuses } },
       },
@@ -126,9 +125,6 @@ const deleteProviderSelect = {
   ...internalProviderSelect,
   _count: {
     select: {
-      projectRoutes: true,
-      aiRouteRevisionsOld: true,
-      aiRouteRevisionsNew: true,
       webAiGrants: true,
       memoryIndexGenerations: true,
       ragAnswers: true,
@@ -141,7 +137,6 @@ const deleteProviderSelect = {
       tokenReservations: true,
       platformDefaultAiRoutes: true,
       platformDefaultAiRouteAudits: true,
-      ownershipAudits: true,
       projectAiProviderDelegations: true,
     },
   },
@@ -409,9 +404,7 @@ export async function createPersonalProviderConnection(
           name: parsed.data.name,
           kind: parsed.data.kind,
           scope: "user",
-          workspaceId: null,
           ownerUserId: actorHint.id,
-          ownershipState: "confirmed",
           protocol: "chatCompletions",
           baseUrl: canonicalProviderBaseUrl(parsed.data.kind),
           credentialId: credential.id,
@@ -490,7 +483,6 @@ export async function updatePersonalProviderConnection(
         && parsed.enabled === undefined
         && parsed.name === undefined;
       if (configurationChanged && current._count.projectAiProviderDelegations > 0 && !credentialRotationOnly) return fail("AI_PROVIDER_IN_USE");
-      if (parsed.enabled === false && current._count.projectRoutes > 0) return fail("AI_PROVIDER_IN_USE");
       if (parsed.apiKey !== undefined) {
         await tx.$executeRaw`SELECT set_config('app.personal_ai_credential_rotation_context', '1', true)`;
         await tx.$executeRaw`SELECT set_config('app.personal_ai_credential_rotation_owner_id', ${actorHint.id}, true)`;

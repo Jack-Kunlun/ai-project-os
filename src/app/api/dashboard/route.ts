@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     const db = getDb();
     const projectWhere = { AND: [accessibleProjectWhere(user), { archivedAt: null }] };
 
-    const [projects, activeJobCount, pendingAssetReviews, recentJobs] = await Promise.all([
+    const [projects, activeJobCount, pendingAssetReviews, recentJobs, activePlatformRouteCount] = await Promise.all([
       db.project.findMany({
         where: projectWhere,
         orderBy: { updatedAt: "desc" },
@@ -39,7 +39,6 @@ export async function GET(request: Request) {
               items: { where: { reviewStatus: "confirmed", ...nonLegacyMcpProjectItemWhere } },
               snapshots: true,
               repositoryLinks: { where: { status: "active" } },
-              webAiRoutes: true,
               projectAgentRuns: { where: { indexGeneration: { is: nonLegacyMcpMemoryGenerationWhere } } },
             },
           },
@@ -111,6 +110,7 @@ export async function GET(request: Request) {
           project: { select: { id: true, name: true } },
         },
       }),
+      db.platformDefaultAiRoute.count({ where: { status: "active" } }),
     ]);
 
     const projectOperations = await getProjectOperationsSummaries(projects.map((project) => project.id), 3, db);
@@ -130,11 +130,12 @@ export async function GET(request: Request) {
         confirmedItems: current.confirmedItems + project._count.items,
         repositories: current.repositories + project._count.repositoryLinks,
         indexedProjects: current.indexedProjects + (project.memoryIndexPointer ? 1 : 0),
-        routedProjects: current.routedProjects + (project._count.webAiRoutes === 4 ? 1 : 0),
+        routedProjects: current.routedProjects,
         assets: current.assets + project._count.assets,
       }),
       { confirmedItems: 0, repositories: 0, indexedProjects: 0, routedProjects: 0, assets: 0 },
     );
+    summary.routedProjects = activePlatformRouteCount === 6 ? projects.length : 0;
     const worldSummary = worlds.reduce((current, entry) => ({
       atRiskWorlds: current.atRiskWorlds + (entry.world.status === "at_risk" ? 1 : 0),
       attentionWorlds: current.attentionWorlds + (entry.world.status === "needs_attention" ? 1 : 0),

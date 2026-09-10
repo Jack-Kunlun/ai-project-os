@@ -2,43 +2,12 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { ProjectIntelligenceParentLink } from "@/components/project-parent-link";
 import { projectJobFailurePresentation } from "@/lib/project-job-failure";
 import { jobStatusLabels, type JobAttemptSummary } from "@/lib/workspace-summary";
 
-type Provider = {
-  id: string;
-  name: string;
-  kind: "openai" | "deepseek" | "qwen" | "glm";
-  status: "configured" | "verified" | "error";
-  defaultGenerationModelId: string | null;
-  defaultEmbeddingModelId: string | null;
-  defaultVisionModelId: string | null;
-  embeddingDimensions: number | null;
-};
-type AiRoute = {
-  operation: "embedding" | "visionExtract" | "autoExtract" | "generateWithContext";
-  providerConnectionId: string;
-  modelId: string;
-  embeddingDimensions: number | null;
-  maxOutputTokens: number;
-  updatedAt: string;
-};
-type RouteImpact = {
-  changed: boolean;
-  onlyFutureRuns: boolean;
-  indexInvalidated: boolean;
-  requiresIndexRebuildAcknowledgement: boolean;
-  activeIndexGenerationId: string | null;
-  activeIndex: { indexGenerationId: string; providerConnectionId: string; providerName: string; providerKind: string; modelId: string; dimensions: number } | null;
-};
-type RoutePreview = {
-  current: AiRoute | null;
-  next: Omit<AiRoute, "updatedAt">;
-  impact: RouteImpact;
-};
 type Job = {
   id: string;
   kind: "assetExtract" | "githubScan" | "githubMaterialSync" | "githubProjectSync" | "memoryIndex" | "autoExtract" | "semanticSearch" | "ragAnswer" | "projectBrief" | "projectAgent";
@@ -82,8 +51,6 @@ function formatDate(value: string): string {
 export function ProjectControlClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
   const [projectName, setProjectName] = useState("项目");
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [routes, setRoutes] = useState<AiRoute[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,21 +58,17 @@ export function ProjectControlClient({ username }: { username: string }) {
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
     try {
-      const [projectResponse, routeResponse, jobResponse] = await Promise.all([
+      const [projectResponse, jobResponse] = await Promise.all([
         fetch(`/api/projects/${projectId}`, { cache: "no-store" }),
-        fetch(`/api/projects/${projectId}/ai-routes`, { cache: "no-store" }),
         fetch(`/api/projects/${projectId}/jobs`, { cache: "no-store" }),
       ]);
-      if (!projectResponse.ok || !routeResponse.ok || !jobResponse.ok) {
-        const failed = [projectResponse, routeResponse, jobResponse].find((response) => !response.ok)!;
+      if (!projectResponse.ok || !jobResponse.ok) {
+        const failed = [projectResponse, jobResponse].find((response) => !response.ok)!;
         throw new Error(await readError(failed, "控制台加载失败"));
       }
       const projectPayload = await projectResponse.json() as { project: { name: string } };
-      const routePayload = await routeResponse.json() as { providers: Provider[]; routes: AiRoute[] };
       const jobPayload = await jobResponse.json() as { jobs: Job[] };
       setProjectName(projectPayload.project.name);
-      setProviders(routePayload.providers);
-      setRoutes(routePayload.routes);
       setJobs(jobPayload.jobs);
       setError(null);
     } catch (loadError) {
@@ -125,11 +88,11 @@ export function ProjectControlClient({ username }: { username: string }) {
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="control" />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div>
-        <section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Control plane</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">选择每项 AI 能力使用的供应商。旧项目级 GitHub 连接和自动同步继续冻结；一次性手动只读委托已迁移到<Link href={`/projects/${projectId}/repositories`} className="font-semibold text-indigo-700 underline">项目 Git 页面</Link>，需要个人连接与项目双重授权。</p></section>
+        <section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Control plane</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">项目不再维护独立模型路由。普通用户使用平台默认免费模型；会员用户可在个人账号配置模型，并通过个人双确认委托在项目中使用。旧项目级 GitHub 连接和自动同步继续冻结；一次性手动只读委托已迁移到<Link href={`/projects/${projectId}/repositories`} className="font-semibold text-indigo-700 underline">项目 Git 页面</Link>。</p></section>
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {loading ? <div className="h-40 animate-pulse rounded-3xl bg-slate-200" /> : (
           <>
-            <AiRouteSection projectId={projectId} providers={providers} routes={routes} onChanged={setRoutes} />
+            <ModelAccessSection />
             <FrozenRepositorySection projectId={projectId} />
             <JobSection projectId={projectId} jobs={jobs} onReload={reload} />
           </>
@@ -139,137 +102,8 @@ export function ProjectControlClient({ username }: { username: string }) {
   );
 }
 
-const operationInfo = {
-  embedding: { title: "语义向量", description: "为项目资料和仓库内容建立语义索引。" },
-  visionExtract: { title: "图片识别", description: "识别图片和扫描 PDF，并生成待人工核对的文字与视觉描述。" },
-  autoExtract: { title: "自动抽取", description: "从原始资料抽取待人工审核的决策、进展、问题和风险。" },
-  generateWithContext: { title: "引用式问答", description: "只基于检索到的项目证据生成带引用回答。" },
-} as const;
-
-function AiRouteSection({ projectId, providers, routes, onChanged }: { projectId: string; providers: Provider[]; routes: AiRoute[]; onChanged: (routes: AiRoute[]) => void }) {
-  return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
-      <div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Capability routing</p><h2 className="mt-2 text-2xl font-semibold">项目模型路由</h2><p className="mt-2 text-sm leading-6 text-slate-500">仅能选择已通过连接测试且已配置对应模型的供应商。图片识别、自动抽取、向量索引与引用式生成可分别使用不同的国内外服务。</p></div>
-      {providers.length === 0 ? <p className="mt-6 rounded-2xl bg-amber-50 px-5 py-4 text-sm text-amber-800">当前没有可用的项目模型路由，请联系系统管理员完成平台模型配置，或由工作区 Owner/Admin 配置有效的工作区连接。</p> : <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">{(["embedding", "visionExtract", "autoExtract", "generateWithContext"] as const).map((operation) => <RouteCard key={operation} operation={operation} projectId={projectId} providers={providers} current={routes.find((route) => route.operation === operation)} onSaved={(route) => onChanged([...routes.filter((item) => item.operation !== operation), route])} />)}</div>}
-    </section>
-  );
-}
-
-function RouteCard({ operation, projectId, providers, current, onSaved }: { operation: keyof typeof operationInfo; projectId: string; providers: Provider[]; current?: AiRoute; onSaved: (route: AiRoute) => void }) {
-  const eligible = useMemo(() => providers.filter((provider) => {
-    if (provider.status !== "verified") return false;
-    if (operation === "embedding") return provider.defaultEmbeddingModelId !== null;
-    if (operation === "visionExtract") return provider.defaultVisionModelId !== null;
-    return provider.defaultGenerationModelId !== null;
-  }), [providers, operation]);
-  const deepSeekConfigured = providers.some((provider) => provider.kind === "deepseek");
-  const [providerId, setProviderId] = useState(current?.providerConnectionId ?? eligible[0]?.id ?? "");
-  const [pending, setPending] = useState(false);
-  const [previewPending, setPreviewPending] = useState(false);
-  const [preview, setPreview] = useState<RoutePreview | null>(null);
-  const [previewForKey, setPreviewForKey] = useState("");
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [acknowledgeIndexRebuild, setAcknowledgeIndexRebuild] = useState(false);
-  const [message, setMessage] = useState<ReactNode>(null);
-  const provider = eligible.find((entry) => entry.id === providerId);
-
-  const target = useMemo(() => {
-    if (!provider) return null;
-    const isEmbedding = operation === "embedding";
-    return {
-      operation,
-      providerConnectionId: provider.id,
-      modelId: isEmbedding ? provider.defaultEmbeddingModelId : operation === "visionExtract" ? provider.defaultVisionModelId : provider.defaultGenerationModelId,
-      embeddingDimensions: isEmbedding ? provider.embeddingDimensions : null,
-      maxOutputTokens: isEmbedding ? 128 : 2048,
-      ...(current ? { expectedUpdatedAt: current.updatedAt } : { expectedUpdatedAt: null }),
-    };
-  }, [current, operation, provider]);
-
-  const targetKey = JSON.stringify(target);
-
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      await Promise.resolve();
-      if (!active) return;
-      setPreviewPending(Boolean(target));
-      setPreviewError(null);
-      setPreview(null);
-      setPreviewForKey("");
-      setAcknowledgeIndexRebuild(false);
-      if (!target) return;
-      try {
-        const response = await fetch(`/api/projects/${projectId}/ai-routes`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(target),
-        });
-        if (!response.ok) throw new Error(await readError(response, "无法检查路由切换影响"));
-        const nextPreview = await response.json() as RoutePreview;
-        if (active) {
-          setPreview(nextPreview);
-          setPreviewForKey(targetKey);
-        }
-      } catch (previewLoadError: unknown) {
-        if (active) setPreviewError(previewLoadError instanceof Error ? previewLoadError.message : "无法检查路由切换影响");
-      } finally {
-        if (active) setPreviewPending(false);
-      }
-    })();
-    return () => { active = false; };
-  }, [projectId, target, targetKey]);
-
-  async function refreshPreviewAfterConflict(): Promise<void> {
-    if (!target) return;
-    setPreviewPending(true);
-    setPreviewError(null);
-    setPreview(null);
-    setPreviewForKey("");
-    setAcknowledgeIndexRebuild(false);
-    try {
-      const response = await fetch(`/api/projects/${projectId}/ai-routes`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(target),
-      });
-      if (!response.ok) throw new Error(await readError(response, "无法重新检查路由切换影响"));
-      const refreshed = await response.json() as RoutePreview;
-      if (refreshed.current) onSaved(refreshed.current);
-      setPreview(refreshed);
-      setPreviewForKey(targetKey);
-      setMessage("路由状态已变化，影响预览已刷新；请重新确认后再次保存。");
-    } catch (refreshError: unknown) {
-      setPreviewError(refreshError instanceof Error ? refreshError.message : "无法重新检查路由切换影响");
-      setMessage("路由状态已变化，重新获取影响预览失败，请刷新页面后重试。");
-    } finally {
-      setPreviewPending(false);
-    }
-  }
-
-  async function save() {
-    if (!provider || !target || previewPending || previewError || previewForKey !== targetKey) return;
-    setPending(true); setMessage(null);
-    try {
-      const response = await fetch(`/api/projects/${projectId}/ai-routes`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...target, acknowledgeIndexRebuild }) });
-      if (!response.ok) {
-        if (response.status === 409) {
-          await refreshPreviewAfterConflict();
-          return;
-        }
-        throw new Error(await readError(response, "路由保存失败"));
-      }
-      const result = await response.json() as { route: AiRoute; impact: RouteImpact };
-      onSaved(result.route);
-      setMessage(result.impact.indexInvalidated
-        ? <span>已保存；语义搜索、RAG 和项目智能体已暂停。请前往 <Link href={`/projects/${projectId}/memory`} className="font-semibold underline">智能记忆重建索引</Link>。</span>
-        : "已保存；本次切换只影响后续任务，历史结果和向量索引保留。");
-    } catch (saveError) { setMessage(saveError instanceof Error ? saveError.message : "路由保存失败"); }
-    finally { setPending(false); }
-  }
-
-  const activePreview = previewForKey === targetKey ? preview : null;
-  return <article className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><h3 className="font-semibold">{operationInfo[operation].title}</h3><p className="mt-2 min-h-12 text-xs leading-5 text-slate-500">{operationInfo[operation].description}</p><select value={providerId} onChange={(event) => setProviderId(event.target.value)} className="mt-4 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"><option value="">选择已验证供应商</option>{eligible.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {operation === "embedding" ? entry.defaultEmbeddingModelId : operation === "visionExtract" ? entry.defaultVisionModelId : entry.defaultGenerationModelId}</option>)}</select>{operation === "embedding" && deepSeekConfigured ? <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-800">DeepSeek 不会出现在这里：当前仅用于自动抽取和问答，不提供项目语义向量。请选 OpenAI、Qwen 或 GLM 的向量模型。</p> : null}{previewPending ? <p className="mt-3 text-xs text-slate-400">正在检查切换影响…</p> : null}{previewError ? <p role="alert" className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{previewError}</p> : null}{activePreview?.impact.onlyFutureRuns ? <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">只影响后续任务；历史结果和向量索引保留。</p> : null}{activePreview?.impact.indexInvalidated ? <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs leading-5 text-amber-900"><p>当前索引将变为不兼容，语义搜索、RAG 和项目智能体会暂停。</p>{activePreview.impact.activeIndex ? <p className="mt-1 text-amber-800">旧索引：{activePreview.impact.activeIndex.providerName} · {activePreview.impact.activeIndex.modelId} · {activePreview.impact.activeIndex.dimensions} 维</p> : null}<p className="mt-1 text-amber-800">新配置：{provider?.name ?? "所选供应商"} · {target?.modelId ?? "所选模型"} · {target?.embeddingDimensions ?? "未知"} 维</p><label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={acknowledgeIndexRebuild} onChange={(event) => setAcknowledgeIndexRebuild(event.target.checked)} className="mt-1" /><span>我确认保存后前往智能记忆重建索引</span></label></div> : null}<button type="button" onClick={() => void save()} disabled={pending || previewPending || !activePreview || Boolean(previewError) || Boolean(activePreview?.impact.requiresIndexRebuildAcknowledgement && !acknowledgeIndexRebuild)} className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2.5 text-xs font-semibold text-white disabled:opacity-40">{pending ? "保存中…" : current ? "更新路由" : "保存路由"}</button>{message ? <p role="status" className="mt-2 text-xs text-slate-500">{message}</p> : null}</article>;
+function ModelAccessSection() {
+  return <section className="rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7 shadow-sm sm:p-8"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Model access</p><h2 className="mt-2 text-2xl font-semibold">项目模型使用方式</h2><p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">项目内不再配置独立模型路由。普通用户使用管理员维护的平台默认免费托管模型；会员用户可在<a href="/profile/models" className="font-semibold text-indigo-700 underline">个人模型设置</a>中配置自己的模型，并在项目 AI 能力使用前完成个人连接所有者与项目 Owner 的双确认委托。</p><p className="mt-4 rounded-xl bg-white/80 px-4 py-3 text-xs leading-5 text-slate-600">当前页面只保留项目任务状态和 Git 委托入口。没有可用模型时，系统会返回明确的能力不可用状态，不会回退到已删除的项目路由。</p></section>;
 }
 
 function FrozenRepositorySection({ projectId }: { projectId: string }) {

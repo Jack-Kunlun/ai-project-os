@@ -126,7 +126,7 @@ class FakeEntitlementDb {
   readonly reservations = new Map<string, FakeReservation>();
   readonly ledgerEntries = new Map<string, Record<string, unknown>>();
   readonly subscriptions = new Map<string, { status: "active" | "revoked"; startsAt: Date; expiresAt: Date; version: number }>();
-  readonly users = new Map<string, { id: string; role: "admin" | "member" | "user" }>();
+  readonly users = new Map<string, { id: string; role: "admin" | "user" }>();
   readonly workspaceMembers = new Map<string, "owner" | "admin" | "member" | "viewer">();
   readonly jobs: Array<{ requestedById: string; status: string; reconciliationRequired?: boolean }> = [];
   readonly providerAudits = new Set<string>();
@@ -498,18 +498,18 @@ test("reconciled unknown jobs release the concurrency slot while open reconcilia
   );
 });
 
-test("workspace BYOK is unreachable while platform admins follow platform entitlement gates", async () => {
+test("personal BYOK is unreachable while platform admins follow platform entitlement gates", async () => {
   const fake = new FakeEntitlementDb();
   const ownerId = randomUUID();
   const workspaceId = fake.projectWorkspaceId;
   const workspaceProjectId = randomUUID();
-  fake.users.set(ownerId, { id: ownerId, role: "member" });
+  fake.users.set(ownerId, { id: ownerId, role: "user" });
   fake.workspaceMembers.set(`${workspaceId}:${ownerId}`, "owner");
   fake.subscriptions.set(ownerId, { status: "active", startsAt: new Date("2026-08-01T00:00:00.000Z"), expiresAt: new Date("2026-10-01T00:00:00.000Z"), version: 1 });
   const providerConnectionId = randomUUID();
   const workspaceRoute = {
     projectId: workspaceProjectId, operation: "autoExtract", providerConnectionId, modelId: "custom-deepseek-model", embeddingDimensions: null, maxOutputTokens: 256,
-    providerConnection: { id: providerConnectionId, kind: "deepseek", status: "verified", disabledAt: null, scope: "workspace", workspaceId, ownerUserId: ownerId, defaultGenerationModelId: "custom-deepseek-model", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
+    providerConnection: { id: providerConnectionId, kind: "deepseek", status: "verified", disabledAt: null, scope: "user", ownerUserId: ownerId, defaultGenerationModelId: "custom-deepseek-model", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
   };
   await assert.rejects(
     () => assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: ownerId, route: workspaceRoute as never, db: fake as never, now: new Date("2026-09-02T00:00:00.000Z"), enforceConcurrency: false }),
@@ -524,7 +524,7 @@ test("workspace BYOK is unreachable while platform admins follow platform entitl
   const platformProviderId = randomUUID();
   const platformRoute = {
     projectId: workspaceProjectId, operation: "autoExtract", providerConnectionId: platformProviderId, modelId: "deepseek-v4-flash", embeddingDimensions: null, maxOutputTokens: 256,
-    providerConnection: { id: platformProviderId, kind: "deepseek", status: "verified", disabledAt: null, scope: "platform", ownershipState: "confirmed", workspaceId: null, ownerUserId: null, defaultGenerationModelId: "deepseek-v4-flash", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
+    providerConnection: { id: platformProviderId, kind: "deepseek", status: "verified", disabledAt: null, scope: "platform", ownerUserId: null, defaultGenerationModelId: "deepseek-v4-flash", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
   } as never;
   const adminWithoutGrant = await assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: adminId, route: platformRoute, db: fake as never, enforceConcurrency: false });
   assert.deepEqual(adminWithoutGrant, { billingMode: "platform", billingUserId: adminId, reservationRequired: true });
@@ -539,7 +539,7 @@ test("workspace BYOK is unreachable while platform admins follow platform entitl
       requestedById: adminId,
       route: {
         projectId: workspaceProjectId, operation: "autoExtract", providerConnectionId: platformProviderId, modelId: "admin-custom-model", embeddingDimensions: null, maxOutputTokens: 256,
-        providerConnection: { id: platformProviderId, kind: "deepseek", status: "verified", disabledAt: null, scope: "platform", ownershipState: "confirmed", workspaceId: null, ownerUserId: null, defaultGenerationModelId: "deepseek-v4-flash", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
+        providerConnection: { id: platformProviderId, kind: "deepseek", status: "verified", disabledAt: null, scope: "platform", ownerUserId: null, defaultGenerationModelId: "deepseek-v4-flash", defaultEmbeddingModelId: null, defaultVisionModelId: null, embeddingDimensions: null },
       } as never,
       db: fake as never,
       enforceConcurrency: false,
@@ -559,7 +559,7 @@ test("workspace BYOK is unreachable while platform admins follow platform entitl
   const adminReservation = await reservePlatformTokens({ userId: adminId, callKey: stableAiCallKey("admin-with-grant", "autoExtract", "source"), operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 64 }, fake as never);
   assert.equal(adminReservation.created, true);
 
-  for (const role of ["member", "user"] as const) {
+  for (const role of ["user"] as const) {
     const userId = randomUUID();
     fake.users.set(userId, { id: userId, role });
     const userEntitlement = await assertAiOutboundEntitlement({ projectId: workspaceProjectId, requestedById: userId, route: platformRoute, db: fake as never, enforceConcurrency: false });
@@ -595,8 +595,6 @@ test("effective platform routes use the configured model for every supported ope
       status: "verified",
       disabledAt: null,
       scope: "platform",
-      ownershipState: "confirmed",
-      workspaceId: null,
       ownerUserId: null,
       defaultGenerationModelId: "gpt-4.1-mini",
       defaultEmbeddingModelId: "text-embedding-3-small",

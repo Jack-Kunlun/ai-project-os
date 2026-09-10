@@ -13,7 +13,7 @@ type FakeSessionDb = {
     findUnique: (args: unknown) => Promise<Readonly<{
       id: string;
       username: string;
-      role: "member";
+      role: "user";
       disabledAt: Date | null;
       accountAccessVersion: number;
     }> | null>;
@@ -36,7 +36,7 @@ test("createSession opens one transaction even when its transaction client expos
       findUnique: async () => ({
         id: "22222222-2222-4222-8222-222222222222",
         username: "account-user",
-        role: "member",
+        role: "user",
         disabledAt: null,
         accountAccessVersion: 7,
       }),
@@ -51,7 +51,7 @@ test("createSession opens one transaction even when its transaction client expos
 
   const session = await createSession(
     fakeDb as unknown as Parameters<typeof createSession>[0],
-    { id: "22222222-2222-4222-8222-222222222222", username: "account-user", role: "member" },
+    { id: "22222222-2222-4222-8222-222222222222", username: "account-user", role: "user" },
     new Date("2026-09-08T10:00:00.000Z"),
   );
 
@@ -75,7 +75,7 @@ test("createSession fails closed when a direct caller omits the account epoch", 
     () => createSession(fakeDb, {
       id: "22222222-2222-4222-8222-222222222222",
       username: "account-user",
-      role: "member",
+      role: "user",
     }),
     (error: unknown) => error instanceof AuthError && error.code === "AUTH_REQUIRED",
   );

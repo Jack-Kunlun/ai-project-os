@@ -39,10 +39,6 @@ test("governance cursors are typed, canonical, and route-bound", () => {
     id: candidateId,
   });
   assert.equal(decodeGovernanceListCursor("operations", operations).kind, "operations");
-  assert.throws(
-    () => decodeGovernanceListCursor("routes", operations),
-    (error: unknown) => error instanceof ProjectGovernanceError && error.code === "GOVERNANCE_CURSOR_INVALID",
-  );
   assert.throws(() => decodeGovernanceReviewCursor(`${review}=`), ProjectGovernanceError);
   assert.throws(() => decodeGovernanceReviewCursor("not-json"), ProjectGovernanceError);
 });
@@ -122,9 +118,7 @@ test("governance web reviews redact personal provider metadata by visibility", (
       name: "私有连接名称",
       kind: "openai",
       scope: "user",
-      workspaceId: null,
       ownerUserId: "00000000-0000-4000-8000-000000000001",
-      ownershipState: "confirmed",
       status: "verified",
     },
     source: { id: projectId, kind: "manual", contentHash: "b".repeat(64) },
@@ -180,7 +174,6 @@ test("governance routes are authenticated no-store reads and UI reuses bounded a
     "src/app/api/projects/[projectId]/governance/route.ts",
     "src/app/api/projects/[projectId]/governance/reviews/route.ts",
     "src/app/api/projects/[projectId]/governance/operations/route.ts",
-    "src/app/api/projects/[projectId]/governance/routes/route.ts",
   ];
   for (const path of routes) {
     const source = await readFile(path, "utf8");

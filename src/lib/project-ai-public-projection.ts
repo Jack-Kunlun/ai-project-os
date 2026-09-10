@@ -13,8 +13,6 @@ export type ProjectAiPublicVisibility = Readonly<{
 
 export type ProjectAiProviderSnapshot = Readonly<{
   scope?: string | null;
-  workspaceId?: string | null;
-  ownershipState?: string | null;
   ownerUserId: string | null;
   name: string;
   kind: string;
@@ -28,11 +26,11 @@ export type ProjectAiProviderProjection = Readonly<{
 }>;
 
 export function isProjectAiPlatformProvider(provider: ProjectAiProviderSnapshot): boolean {
-  return provider.scope === "platform" && provider.ownerUserId === null && provider.workspaceId === null && provider.ownershipState === "confirmed";
+  return provider.scope === "platform" && provider.ownerUserId === null;
 }
 
 export function isProjectAiPersonalProvider(provider: ProjectAiProviderSnapshot): boolean {
-  return provider.scope === "user" && provider.ownerUserId !== null && provider.workspaceId === null && provider.ownershipState === "confirmed";
+  return provider.scope === "user" && provider.ownerUserId !== null;
 }
 
 export function canSeeProjectAiPersonalModel(

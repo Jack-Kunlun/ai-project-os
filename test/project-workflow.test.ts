@@ -127,7 +127,7 @@ type FakeNotification = {
 };
 
 type FakeActorState = {
-  role: "admin" | "member" | "user";
+  role: "admin" | "user";
   disabledAt: Date | null;
   accountAccessVersion: number;
 };

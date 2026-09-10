@@ -100,7 +100,6 @@ function makeRows(): Readonly<Record<string, FakeRow[]>> {
   const base = { createdAt: at, actorId: ADMIN_ID, reason: "do not expose this text" };
   return {
     platformDefaultAiRouteAudit: [{ ...base, id: "51111111-1111-4111-8111-111111111111", action: "activated", routeId: "61111111-1111-4111-8111-111111111111", operation: "chat", routeVersion: 2, providerConnectionId: "71111111-1111-4111-8111-111111111111", providerConfigurationVersion: 3 }],
-    aiProviderOwnershipAudit: [{ ...base, id: "52111111-1111-4111-8111-111111111111", providerConnectionId: "72111111-1111-4111-8111-111111111111", action: "legacyOwnershipConfirmed", oldScope: "platform", newScope: "platform", oldOwnershipState: "legacyPending", newOwnershipState: "confirmed", oldWorkspacePresent: false, newWorkspacePresent: false, oldOwnerPresent: false, newOwnerPresent: false }],
     membershipSubscriptionAudit: [{ ...base, id: "53111111-1111-4111-8111-111111111111", subscriptionId: "63111111-1111-4111-8111-111111111111", userId: USER_ID, actorId: ADMIN_ID, eventKind: "grant", versionBefore: null, versionAfter: 1, statusBefore: null, statusAfter: "active" }],
     accountAccessAudit: [{ ...base, id: "54111111-1111-4111-8111-111111111111", userId: USER_ID, actorId: ADMIN_ID, event: "disabled", versionBefore: 1, versionAfter: 2, disabledAtBefore: null, disabledAtAfter: at, previewId: "64111111-1111-4111-8111-111111111111" }],
     membershipAccessAudit: [{ ...base, id: "55111111-1111-4111-8111-111111111111", membershipKind: "project", membershipId: "65111111-1111-4111-8111-111111111111", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, userId: USER_ID, action: "confirmed", previousState: "pending", newState: "confirmed", roleSnapshot: "viewer" }],
@@ -132,7 +131,6 @@ function makeDenseRows(): Readonly<Record<string, FakeRow[]>> {
 const PRIVATE_RESOURCE_IDS = [
   "61111111-1111-4111-8111-111111111111",
   "71111111-1111-4111-8111-111111111111",
-  "72111111-1111-4111-8111-111111111111",
   "63111111-1111-4111-8111-111111111111",
   "64111111-1111-4111-8111-111111111111",
   "65111111-1111-4111-8111-111111111111",
@@ -154,7 +152,7 @@ const PRIVATE_RESOURCE_IDS = [
 
 function fakeDb(
   rows: Readonly<Record<string, FakeRow[]>>,
-  role: "admin" | "member" = "admin",
+  role: "admin" | "user" = "admin",
   calls: Map<string, number> = new Map(),
   disabledAdmin = false,
 ): PrismaClient {
@@ -171,7 +169,6 @@ function fakeDb(
     appUser,
     appSession,
     platformDefaultAiRouteAudit: delegate("platformDefaultAiRoute", rows.platformDefaultAiRouteAudit, calls),
-    aiProviderOwnershipAudit: delegate("aiProviderOwnership", rows.aiProviderOwnershipAudit, calls),
     membershipSubscriptionAudit: delegate("membershipSubscription", rows.membershipSubscriptionAudit, calls),
     accountAccessAudit: delegate("accountAccess", rows.accountAccessAudit, calls),
     membershipAccessAudit: delegate("membershipAccess", rows.membershipAccessAudit, calls),
@@ -184,8 +181,8 @@ function fakeDb(
   } as unknown as PrismaClient;
 }
 
-test("registry covers exactly the eleven safe control-plane sources", () => {
-  assert.equal(SYSTEM_AUDIT_SOURCES.length, 11);
+test("registry covers exactly the ten safe control-plane sources", () => {
+  assert.equal(SYSTEM_AUDIT_SOURCES.length, 10);
   assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
   for (const source of SYSTEM_AUDIT_SOURCES) {
     const registry = SYSTEM_AUDIT_REGISTRY[source];
@@ -300,7 +297,7 @@ test("actor and subject lookups accept only exact UUID or unique username", asyn
   const db = fakeDb(rows, "admin", calls);
   const now = new Date("2026-09-09T02:00:00.000Z");
   const byUsername = await listSystemAudit({ actor: "admin", pageSize: 50 }, db, now);
-  assert.equal(byUsername.events.length, 11);
+  assert.equal(byUsername.events.length, 10);
   const byDisplayName = await listSystemAudit({ actor: "平台管理员", pageSize: 50 }, db, now);
   assert.deepEqual(byDisplayName.events, []);
 });
@@ -340,7 +337,7 @@ test("cursor and query filters reject malformed or non-whitelisted input", () =>
 });
 
 test("system audit API fails closed for non-admin sessions", async () => {
-  const db = fakeDb(makeRows(), "member");
+  const db = fakeDb(makeRows(), "user");
   const response = await handleSystemAuditGet(new Request("http://127.0.0.1:3000/api/system/audit", { headers: { cookie: `${SESSION_COOKIE_NAME}=${sessionToken}` } }), { db });
   assert.equal(response.status, 403);
   const body = await response.json() as { error: { code: string } };
@@ -356,7 +353,7 @@ test("system audit API fails closed for disabled administrators", async () => {
 });
 
 test("system audit detail hides record existence from non-admin sessions", async () => {
-  const db = fakeDb(makeRows(), "member");
+  const db = fakeDb(makeRows(), "user");
   const response = await handleSystemAuditDetailGet(
     new Request("http://127.0.0.1:3000/api/system/audit/mcpToolAttestation/57111111-1111-4111-8111-111111111111", { headers: { cookie: `${SESSION_COOKIE_NAME}=${sessionToken}` } }),
     { params: Promise.resolve({ source: "mcpToolAttestation", auditId: "57111111-1111-4111-8111-111111111111" }) },

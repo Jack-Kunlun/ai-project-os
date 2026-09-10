@@ -25,7 +25,7 @@ function digest(value: string) { return createHash("sha256").update(value, "utf8
 async function createAutomationRuleWithPreview(
   projectId: string,
   input: Readonly<{ name: string; kind: AutomationRuleKind; intervalMinutes: number; config: unknown; startAt: string }>,
-  actor: Readonly<{ id: string; role: "admin" | "member" | "user" }>,
+  actor: Readonly<{ id: string; role: "admin" | "user" }>,
   db: PrismaClient,
 ) {
   const preview = await previewProjectAutomationRule(projectId, input, actor, db);
@@ -103,7 +103,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   try {
     const admin = await db.appUser.findFirstOrThrow({ where: { role: "admin" } });
     const memberEmail = `v3-member-${suffix}@example.com`;
-    await db.appUser.create({ data: { id: memberId, username: `v3_member_${suffix}`, email: memberEmail, emailVerifiedAt: new Date(), role: "member", passwordHash: null, passwordSalt: null } });
+    await db.appUser.create({ data: { id: memberId, username: `v3_member_${suffix}`, email: memberEmail, emailVerifiedAt: new Date(), role: "user", passwordHash: null, passwordSalt: null } });
     await db.appUser.create({ data: { id: outsiderAdminId, username: `v3_outsider_admin_${suffix}`, role: "admin", passwordHash: null, passwordSalt: null } });
     await db.workspace.create({ data: { id: roleWorkspaceId, name: `Role safety ${suffix}`, slug: `role-safety-${suffix}`, createdById: admin.id } });
     await db.project.createMany({ data: [
@@ -118,7 +118,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       await grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "editor", actorId: admin.id, reason: "v3_gate_fixture_project_b" });
     });
 
-    const member = { id: memberId, role: "member" as const, accountAccessVersion: 1 };
+    const member = { id: memberId, role: "user" as const, accountAccessVersion: 1 };
     const visible = await db.project.findMany({ where: accessibleProjectWhere(member), select: { id: true } });
     assert.deepEqual(new Set(visible.map((project) => project.id)), new Set([projectA, projectB]));
     await authorizeApiRequest(member, new Request(`http://localhost/api/projects/${projectA}`, { method: "GET" }), db);
@@ -270,7 +270,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
 
     tokenEmail = `collision-${suffix}@example.com`;
     tokenSubject = `collision-subject-${suffix}`;
-    const collisionUser = await db.appUser.create({ data: { username: `collision_${suffix}`, email: tokenEmail, role: "member", passwordHash: null, passwordSalt: null } });
+    const collisionUser = await db.appUser.create({ data: { username: `collision_${suffix}`, email: tokenEmail, role: "user", passwordHash: null, passwordSalt: null } });
     collisionUserId = collisionUser.id;
     const collisionFlow = await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/dashboard" }, db);
     const collisionAuthorization = new URL(collisionFlow.authorizationUrl);

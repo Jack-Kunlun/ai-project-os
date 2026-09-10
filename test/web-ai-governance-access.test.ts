@@ -26,7 +26,7 @@ function governanceFixture() {
         actorLookups += 1;
         return {
           id: ACTOR_ID,
-          role: "member" as const,
+          role: "user" as const,
           disabledAt: actorLookups >= 5 ? new Date("2026-09-04T00:00:00.000Z") : null,
           accountAccessVersion: 1,
         };
@@ -155,8 +155,6 @@ test("auditedProviderCall releases a reservation when the actor is revoked befor
       status: "verified",
       disabledAt: null,
       scope: "platform",
-      ownershipState: "confirmed",
-      workspaceId: null,
       ownerUserId: null,
       kind: "deepseek",
       defaultGenerationModelId: "deepseek-v4-flash",
@@ -167,7 +165,7 @@ test("auditedProviderCall releases a reservation when the actor is revoked befor
     () => auditedProviderCall({
       jobId: JOB_ID,
       attempt: { attemptId: ATTEMPT_ID, claimToken: "claim-token" },
-      actor: { id: ACTOR_ID, role: "member", accountAccessVersion: 1 },
+      actor: { id: ACTOR_ID, role: "user", accountAccessVersion: 1 },
       route: route as never,
       grantId: "88888888-8888-4888-8888-888888888888",
       callKey: "ai-governance-revoke-test",

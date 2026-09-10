@@ -26,13 +26,13 @@ test("project world persists version-bound relations, supersession and immutable
   const workspaceId = randomUUID();
   const projectId = randomUUID();
   const otherProjectId = randomUUID();
-  const editor = { id: editorId, username: `world_editor_${suffix}`, role: "member" as const, accountAccessVersion: 1 };
-  const viewer = { id: viewerId, username: `world_viewer_${suffix}`, role: "member" as const, accountAccessVersion: 1 };
+  const editor = { id: editorId, username: `world_editor_${suffix}`, role: "user" as const, accountAccessVersion: 1 };
+  const viewer = { id: viewerId, username: `world_viewer_${suffix}`, role: "user" as const, accountAccessVersion: 1 };
 
   await db.appUser.createMany({ data: [
     { id: adminId, username: `world_admin_${suffix}`, role: "admin" },
-    { id: editorId, username: editor.username, role: "member" },
-    { id: viewerId, username: viewer.username, role: "member" },
+    { id: editorId, username: editor.username, role: "user" },
+    { id: viewerId, username: viewer.username, role: "user" },
   ] });
   await db.workspace.create({ data: { id: workspaceId, name: `World ${suffix}`, slug: `world-${suffix}`, createdById: adminId } });
   await db.$transaction((tx) => grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "project_world_fixture" }));

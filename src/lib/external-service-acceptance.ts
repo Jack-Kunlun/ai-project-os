@@ -113,7 +113,11 @@ function afterProbe(value: Date | null, probe: Date | null, cutoff: Date): boole
 
 async function readModelEvidence(db: PrismaClient, cutoff: Date): Promise<ExternalServiceEvidenceCounts> {
   const providers = await db.aiProviderConnection.findMany({
-    where: { disabledAt: null },
+    where: {
+      disabledAt: null,
+      scope: "platform",
+      ownerUserId: null,
+    },
     select: {
       status: true,
       lastTestedAt: true,

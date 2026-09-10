@@ -1,6 +1,6 @@
 import { Prisma, type AiProviderKind, type AiProviderScope, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { getMembershipStatus, lockMembershipUser } from "@/lib/ai-entitlements";
+import { lockMembershipUser } from "@/lib/ai-entitlements";
 import { createCredential, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import {
@@ -18,7 +18,6 @@ import {
   invokeVisionCompletion,
 } from "./transport";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
-import { findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 import { AccountAccessGuardError, assertAccountAccessForActor, requireAccountAccessVersion } from "@/lib/account-access-guard";
 
 export type ProviderServiceErrorCode =
@@ -29,7 +28,6 @@ export type ProviderServiceErrorCode =
   | "AI_PROVIDER_IN_USE"
   | "AI_PROVIDER_DELETE_REQUIRES_DISABLED"
   | "AI_PROVIDER_CONFIRMATION_MISMATCH"
-  | "AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE"
   | "AI_PROVIDER_CONNECTION_UNAVAILABLE"
   | "AI_PROVIDER_CONFLICT";
 
@@ -83,11 +81,6 @@ const deleteSchema = z.object({
   confirmationName: z.string().min(1).max(80),
 }).strict();
 
-const ownershipConfirmationSchema = z.object({
-  confirmationName: z.string().trim().min(1).max(80),
-  reason: z.string().trim().min(1).max(500),
-}).strict();
-
 // A deterministic 1x1 PNG keeps the vision probe bounded and avoids sending
 // user/project content merely to establish that the configured capability is
 // reachable. A vision capability is not marked verified unless this probe
@@ -102,7 +95,6 @@ const providerSelect = {
   name: true,
   kind: true,
   scope: true,
-  ownershipState: true,
   protocol: true,
   baseUrl: true,
   defaultGenerationModelId: true,
@@ -119,7 +111,6 @@ const providerSelect = {
   credential: { select: { maskedSuffix: true, rotatedAt: true, updatedAt: true } },
   _count: {
     select: {
-      projectRoutes: true,
       platformDefaultAiRoutes: { where: { status: "active" } },
     },
   },
@@ -131,21 +122,6 @@ function fail(code: ProviderServiceErrorCode): never {
 
 function isKnown(error: unknown, code: string): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
-}
-
-const PROVIDER_SERIALIZABLE_RETRY_LIMIT = 3;
-
-async function withProviderSerializableRetry<T>(operation: () => Promise<T>): Promise<T> {
-  let attempt = 0;
-  while (attempt < PROVIDER_SERIALIZABLE_RETRY_LIMIT) {
-    try {
-      return await operation();
-    } catch (error) {
-      attempt += 1;
-      if (!isSerializationConflict(error) || attempt >= PROVIDER_SERIALIZABLE_RETRY_LIMIT) throw error;
-    }
-  }
-  throw new Error("AI_PROVIDER_SERIALIZABLE_RETRY_EXHAUSTED");
 }
 
 // Provider configuration writes and default-route lifecycle transitions share
@@ -290,11 +266,7 @@ export async function createProviderConnection(
           name: parsed.name,
           kind: parsed.kind,
           scope: "platform",
-          workspaceId: null,
           ownerUserId: null,
-          // New platform connections are explicitly platform-owned. Existing
-          // legacy_pending rows remain unchanged until separately reviewed.
-          ownershipState: "confirmed",
           baseUrl: canonicalProviderBaseUrl(parsed.kind),
           credentialId: credential.id,
           defaultGenerationModelId: parsed.generationModelId ?? null,
@@ -327,11 +299,10 @@ export async function updateProviderConnection(
       const existing = await tx.aiProviderConnection.findFirst({ where: { id: providerId, scope: "platform" } });
       if (existing === null) return fail("AI_PROVIDER_NOT_FOUND");
       if (parsed.enabled === false) {
-        const routeCount = await tx.projectAiRoute.count({ where: { providerConnectionId: providerId } });
         const activeDefaultRouteCount = await tx.platformDefaultAiRoute.count({
           where: { providerConnectionId: providerId, status: "active" },
         });
-        if (routeCount > 0 || activeDefaultRouteCount > 0) return fail("AI_PROVIDER_IN_USE");
+        if (activeDefaultRouteCount > 0) return fail("AI_PROVIDER_IN_USE");
       }
       const nextModel = parsed.embeddingModelId === undefined
         ? existing.defaultEmbeddingModelId
@@ -412,14 +383,13 @@ export async function disableProviderConnection(
           id: true,
           status: true,
           disabledAt: true,
-          _count: { select: { projectRoutes: true } },
         },
       });
       if (provider === null) return fail("AI_PROVIDER_NOT_FOUND");
       const activeDefaultRouteCount = await tx.platformDefaultAiRoute.count({
         where: { providerConnectionId: providerId, status: "active" },
       });
-      if (provider._count.projectRoutes > 0 || activeDefaultRouteCount > 0) return fail("AI_PROVIDER_IN_USE");
+      if (activeDefaultRouteCount > 0) return fail("AI_PROVIDER_IN_USE");
       if (provider.status === "disabled" && provider.disabledAt !== null) {
         return tx.aiProviderConnection.findFirst({ where: { id: providerId, scope: "platform" }, select: providerSelect });
       }
@@ -457,9 +427,6 @@ export async function deleteProviderConnection(
           credentialId: true,
           _count: {
             select: {
-              projectRoutes: true,
-              aiRouteRevisionsOld: true,
-              aiRouteRevisionsNew: true,
               webAiGrants: true,
               memoryIndexGenerations: true,
               ragAnswers: true,
@@ -489,85 +456,8 @@ export async function deleteProviderConnection(
   }
 }
 
-export type ProviderOwnershipConfirmationActor = PlatformProviderActor;
-
-/**
- * Confirm a legacy platform connection after an explicit administrator review.
- * This transition never assigns a workspace or user owner. The audit stores
- * only safe before/after state facts and the administrator's reason.
- */
-export async function confirmPlatformProviderOwnership(
-  providerId: string,
-  input: unknown,
-  actor: ProviderOwnershipConfirmationActor,
-  db: PrismaClient = getDb(),
-) {
-  const actorHint = assertPlatformProviderAdminHint(actor);
-  const parsedProviderId = z.string().uuid().safeParse(providerId);
-  if (!parsedProviderId.success) return fail("AI_PROVIDER_INVALID_INPUT");
-  try {
-    return await withProviderSerializableRetry(() => db.$transaction(async (tx) => {
-      await lockMembershipUser(tx, actorHint.id);
-      await assertPlatformProviderAdminRecord(actorHint, tx);
-      const parsed = ownershipConfirmationSchema.safeParse(input);
-      if (!parsed.success) return fail("AI_PROVIDER_INVALID_INPUT");
-      await lockProviderConfiguration(tx, parsedProviderId.data);
-      const existing = await tx.aiProviderConnection.findUnique({
-        where: { id: parsedProviderId.data },
-        select: {
-          id: true,
-          name: true,
-          scope: true,
-          workspaceId: true,
-          ownerUserId: true,
-          ownershipState: true,
-        },
-      });
-      if (existing === null) return fail("AI_PROVIDER_NOT_FOUND");
-      if (existing.scope !== "platform" || existing.workspaceId !== null || existing.ownerUserId !== null) {
-        return fail("AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE");
-      }
-      if (existing.name !== parsed.data.confirmationName) {
-        return fail("AI_PROVIDER_CONFIRMATION_MISMATCH");
-      }
-      if (existing.ownershipState === "confirmed") {
-        return tx.aiProviderConnection.findUnique({ where: { id: parsedProviderId.data }, select: providerSelect });
-      }
-      if (existing.ownershipState !== "legacyPending") {
-        return fail("AI_PROVIDER_OWNERSHIP_NOT_CONFIRMABLE");
-      }
-      const updated = await tx.aiProviderConnection.update({
-        where: { id: parsedProviderId.data },
-        data: { ownershipState: "confirmed" },
-        select: providerSelect,
-      });
-      await tx.aiProviderOwnershipAudit.create({
-        data: {
-          providerConnectionId: existing.id,
-          actorId: actor.id,
-          action: "legacyOwnershipConfirmed",
-          reason: parsed.data.reason,
-          oldScope: existing.scope,
-          newScope: existing.scope,
-          oldOwnershipState: existing.ownershipState,
-          newOwnershipState: updated.ownershipState,
-          oldWorkspacePresent: existing.workspaceId !== null,
-          newWorkspacePresent: false,
-          oldOwnerPresent: existing.ownerUserId !== null,
-          newOwnerPresent: false,
-        },
-      });
-      return updated;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
-  } catch (error) {
-    if (isSerializationConflict(error)) return fail("AI_PROVIDER_CONFLICT");
-    throw error;
-  }
-}
-
 export type ProviderTestOptions = Readonly<{
   expectedUpdatedAt?: Date;
-  expectedWorkspaceId?: string;
   expectedOwnerUserId?: string | null;
 }>;
 
@@ -578,30 +468,12 @@ async function commitVerifiedProviderInTransaction(
   db: ProviderDb,
   options: ProviderTestOptions = {},
 ) {
-  if (scope === "workspace") {
+  if (options.expectedOwnerUserId !== undefined) {
     const current = await db.aiProviderConnection.findFirst({
-        where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
-        select: { workspaceId: true, ownerUserId: true },
-      });
-    if (current === null || current.workspaceId === null || current.ownerUserId === null) {
-      return fail("AI_PROVIDER_CONFLICT");
-    }
-    if (options.expectedWorkspaceId !== undefined && current.workspaceId !== options.expectedWorkspaceId) {
-      return fail("AI_PROVIDER_CONFLICT");
-    }
-    if (options.expectedOwnerUserId !== undefined && current.ownerUserId !== options.expectedOwnerUserId) {
-      return fail("AI_PROVIDER_CONFLICT");
-    }
-    // The workspace caller already holds this owner lock for the full probe;
-    // direct callers use the wrapper below, which acquires it for this short
-    // final check.
-    await lockMembershipUser(db, current.ownerUserId);
-    const ownerMembership = await findConfirmedWorkspaceMembership(db, current.workspaceId, current.ownerUserId);
-    if (ownerMembership === null || (ownerMembership.role !== "owner" && ownerMembership.role !== "admin")) {
-      return fail("AI_PROVIDER_CONFLICT");
-    }
-    const membership = await getMembershipStatus(current.ownerUserId, db);
-    if (membership.status !== "active") return fail("AI_PROVIDER_CONFLICT");
+      where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
+      select: { ownerUserId: true },
+    });
+    if (current === null || current.ownerUserId !== options.expectedOwnerUserId) return fail("AI_PROVIDER_CONFLICT");
   }
   const updated = await db.aiProviderConnection.updateMany({
     where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
@@ -630,21 +502,12 @@ async function markProviderTestErrorInTransaction(
   db: ProviderDb,
   options: ProviderTestOptions,
 ): Promise<boolean> {
-  if (scope === "workspace") {
+  if (options.expectedOwnerUserId !== undefined) {
     const current = await db.aiProviderConnection.findFirst({
-        where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
-        select: { workspaceId: true, ownerUserId: true },
-      });
-    if (current === null || current.workspaceId === null || current.ownerUserId === null) return false;
-    if (options.expectedWorkspaceId !== undefined && current.workspaceId !== options.expectedWorkspaceId) return false;
-    if (options.expectedOwnerUserId !== undefined && current.ownerUserId !== options.expectedOwnerUserId) return false;
-    // A failed probe must not overwrite the provider after a membership
-    // revoke won the same owner lock. This mirrors the verified CAS path.
-    await lockMembershipUser(db, current.ownerUserId);
-    const ownerMembership = await findConfirmedWorkspaceMembership(db, current.workspaceId, current.ownerUserId);
-    if (ownerMembership === null || (ownerMembership.role !== "owner" && ownerMembership.role !== "admin")) return false;
-    const membership = await getMembershipStatus(current.ownerUserId, db);
-    if (membership.status !== "active") return false;
+      where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
+      select: { ownerUserId: true },
+    });
+    if (current === null || current.ownerUserId !== options.expectedOwnerUserId) return false;
   }
   const marked = await db.aiProviderConnection.updateMany({
     where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
@@ -676,9 +539,6 @@ async function testProviderConnectionInScope(
   const provider = await db.aiProviderConnection.findFirst({ where: { id: providerId, scope } });
   if (provider === null) return fail("AI_PROVIDER_NOT_FOUND");
   if (options.expectedUpdatedAt !== undefined && provider.updatedAt.getTime() !== options.expectedUpdatedAt.getTime()) {
-    return fail("AI_PROVIDER_CONFLICT");
-  }
-  if (options.expectedWorkspaceId !== undefined && provider.workspaceId !== options.expectedWorkspaceId) {
     return fail("AI_PROVIDER_CONFLICT");
   }
   if (options.expectedOwnerUserId !== undefined && provider.ownerUserId !== options.expectedOwnerUserId) {
@@ -747,21 +607,6 @@ async function testProviderConnectionInScope(
     if (!markedError) return fail("AI_PROVIDER_CONFLICT");
     throw error;
   }
-}
-
-/**
- * Workspace-only raw probe used by the already-authorized workspace service.
- * The literal scope parameter is intentionally required and restricted to
- * "workspace"; this function is not a platform-provider authorization API.
- */
-export async function testProviderConnection(
-  providerId: string,
-  db: ProviderDb,
-  scope: "workspace",
-  options: ProviderTestOptions = {},
-) {
-  if (scope !== "workspace") return fail("AI_PROVIDER_ADMIN_REQUIRED");
-  return testProviderConnectionInScope(providerId, db, scope, options);
 }
 
 /**

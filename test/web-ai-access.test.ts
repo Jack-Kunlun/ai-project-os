@@ -5,7 +5,7 @@ import test from "node:test";
 import type { AppUserRole, PrismaClient } from "@prisma/client";
 import { mapApiError } from "../src/lib/api-errors";
 import { listAutoExtractSources, reviewWebAiCandidate, runAutoExtractJob } from "../src/lib/web-auto-extract";
-import { listGovernanceOperations, listGovernanceReviews, listGovernanceRouteRevisions } from "../src/lib/project-governance";
+import { listGovernanceOperations, listGovernanceReviews } from "../src/lib/project-governance";
 import { listProjectJobs } from "../src/lib/background-jobs";
 import { runGitHubCodeScanJob, runGitHubMaterialSyncJob } from "../src/lib/background-jobs";
 import { cancelProjectJob, reconcileProjectJob } from "../src/lib/project-workflow";
@@ -104,7 +104,6 @@ function fakeDb(options: FakeOptions) {
     workspaceMembership: {
       findMany: async () => [],
     },
-    projectAiRoute: { findUnique: sensitiveRead },
     projectSource: { findMany: sensitiveRead },
     webAiCandidate: { findMany: sensitiveRead },
     ragAnswer: { findMany: sensitiveRead },
@@ -270,7 +269,6 @@ test("governance and job list services authorize before their queries", async ()
   const calls = [
     () => listGovernanceReviews(PROJECT_ID, actor, {}, fixture.db),
     () => listGovernanceOperations(PROJECT_ID, actor, {}, fixture.db),
-    () => listGovernanceRouteRevisions(PROJECT_ID, actor, {}, fixture.db),
     () => listProjectJobs(PROJECT_ID, actor, fixture.db),
   ];
   for (const call of calls) await assert.rejects(call, hasCode("ACCESS_FORBIDDEN"));
@@ -591,8 +589,6 @@ test("governance transport binds the current actor to the same project job", asy
           providerConnection: {
             id: "55555555-5555-4555-8555-555555555555",
             scope: "platform",
-            ownershipState: "confirmed",
-            workspaceId: null,
             ownerUserId: null,
           },
         } as never,

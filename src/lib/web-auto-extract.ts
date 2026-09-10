@@ -565,7 +565,7 @@ const candidateListSelect = {
   reviewStatus: true,
   modelId: true,
   createdAt: true,
-  providerConnection: { select: { name: true, kind: true, scope: true, workspaceId: true, ownershipState: true, ownerUserId: true, status: true } },
+  providerConnection: { select: { name: true, kind: true, scope: true, ownerUserId: true, status: true } },
   source: { select: { id: true, kind: true, externalRef: true, contentHash: true } },
   projectItem: {
     select: {

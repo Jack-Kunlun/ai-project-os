@@ -13,18 +13,14 @@ const ownerId = "00000000-0000-4000-8000-000000000001";
 const viewerId = "00000000-0000-4000-8000-000000000002";
 const personalProvider = {
   scope: "user",
-  workspaceId: null,
   ownerUserId: ownerId,
-  ownershipState: "confirmed",
   name: "私有连接名称",
   kind: "openai",
   status: "verified",
 } as const;
 const platformProvider = {
   scope: "platform",
-  workspaceId: null,
   ownerUserId: null,
-  ownershipState: "confirmed",
   name: "平台托管连接",
   kind: "openai",
   status: "verified",
@@ -55,7 +51,7 @@ test("platform projection preserves product metadata without a connection identi
 });
 
 test("unknown provider ownership fails closed", () => {
-  const unknown = { ...personalProvider, scope: "workspace", workspaceId: "workspace-id" };
+  const unknown = { ...personalProvider, scope: "legacy" };
   const projection = projectAiProviderProjection(unknown, { actorId: ownerId, projectOwner: true });
   assert.equal(projection, null);
   assert.equal(projectAiModelProjection("gpt-4.1-mini", unknown, { actorId: ownerId, projectOwner: true }), null);

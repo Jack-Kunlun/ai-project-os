@@ -1,33 +1,35 @@
 import assert from "node:assert/strict";
-import { execFile as execFileCallback } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
 import { Client } from "pg";
-import { INVENTORY_TABLES, parseOwnershipInventoryDatabaseUrl } from "../scripts/0.2x-migration-inventory-contract";
-import { main, runOwnershipInventory } from "../scripts/0.2x-migration-inventory";
-import { getDb } from "../src/lib/db";
-import { createMcpControlPlaneAttestation } from "../src/lib/mcp";
 import {
-  confirmProjectMcpConnectionDelegationOwner,
-  confirmProjectMcpConnectionDelegationProject,
-  proposeProjectMcpConnectionDelegation,
-} from "../src/lib/project-mcp-connection-delegation-service";
-import { grantProjectMembership } from "../src/lib/membership-governance";
-import { createProjectMcpToolGrantV2 } from "../src/lib/project-mcp-tool-grant-service";
+  CLEAN_SLATE_REMOVED_PROVIDER_COLUMNS,
+  CLEAN_SLATE_REMOVED_RELATIONS,
+  CLEAN_SLATE_REMOVED_TRIGGERS,
+  INVENTORY_TABLES,
+  parseOwnershipInventoryDatabaseUrl,
+} from "../scripts/0.2x-migration-inventory-contract";
+import { runOwnershipInventory } from "../scripts/0.2x-migration-inventory";
 
-const shouldRun = process.env.OWNERSHIP_INVENTORY_POSTGRES_GATE === "1";
+const shouldRun = process.env.CLEAN_SLATE_SCHEMA_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_ownership_inventory_test";
 const readerRole = "ai_project_os_inventory_reader";
-const execFile = promisify(execFileCallback);
-const NO_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
 
-function adminDatabaseUrl(): string {
-  const value = process.env.OWNERSHIP_INVENTORY_TEST_DATABASE_URL;
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error("OWNERSHIP_INVENTORY_TEST_DATABASE_URL_REQUIRED");
-  }
+interface PublicAclEntry {
+  privilege_type: string;
+  is_grantable: boolean;
+}
+
+interface PublicAccessSnapshot {
+  database: PublicAclEntry[];
+  schema: PublicAclEntry[];
+  tables: Map<string, PublicAclEntry[]>;
+  databaseReadOnlySetting: string | undefined;
+}
+
+function adminDatabaseConfig() {
+  const value = process.env.CLEAN_SLATE_SCHEMA_TEST_DATABASE_URL;
+  if (typeof value !== "string" || value.length === 0) throw new Error("CLEAN_SLATE_SCHEMA_TEST_DATABASE_URL_REQUIRED");
   const parsed = new URL(value);
   if (
     !["postgres:", "postgresql:"].includes(parsed.protocol)
@@ -38,742 +40,30 @@ function adminDatabaseUrl(): string {
     || parsed.password.length === 0
     || parsed.search !== ""
     || parsed.hash !== ""
-  ) {
-    throw new Error("OWNERSHIP_INVENTORY_TEST_DATABASE_URL_INVALID");
-  }
+  ) throw new Error("CLEAN_SLATE_SCHEMA_TEST_DATABASE_URL_INVALID");
   parsed.searchParams.set("sslmode", "disable");
-  return parsed.toString();
+  return { connectionString: parsed.toString() };
 }
 
-function adminDatabaseConfig() {
-  const config = parseOwnershipInventoryDatabaseUrl(adminDatabaseUrl());
-  return { ...config, options: "-c default_transaction_read_only=off" };
-}
-
-function readerDatabaseConfig(adminConfig: ReturnType<typeof adminDatabaseConfig>, password: string) {
-  return { ...adminConfig, user: readerRole, password, options: "-c default_transaction_read_only=on" };
-}
-
-function readerDatabaseUrl(password: string): string {
-  const parsed = new URL(adminDatabaseUrl());
+function readerConfig(adminConfig: ReturnType<typeof adminDatabaseConfig>, password: string) {
+  const parsed = new URL(adminConfig.connectionString);
   parsed.username = readerRole;
   parsed.password = password;
-  return parsed.toString();
+  return parseOwnershipInventoryDatabaseUrl(parsed.toString());
 }
 
 function errorCode(error: unknown): string | undefined {
-  return typeof error === "object" && error !== null && "code" in error
-    ? String((error as { code?: unknown }).code)
-    : undefined;
+  return typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : undefined;
 }
 
 async function removeReaderRole(admin: Client): Promise<void> {
-  await admin.query(`
-    SELECT pg_terminate_backend(pid)
-    FROM pg_stat_activity
-    WHERE usename = '${readerRole}' AND pid <> pg_backend_pid()
-  `);
+  await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = $1 AND pid <> pg_backend_pid()", [readerRole]);
   const existing = await admin.query<{ exists: boolean }>("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists", [readerRole]);
   if (existing.rows[0]?.exists === true) {
-    try {
-      await admin.query(`DROP OWNED BY "${readerRole}"`);
-    } finally {
-      await admin.query(`DROP ROLE IF EXISTS "${readerRole}"`);
-    }
+    await admin.query(`DROP OWNED BY "${readerRole}"`);
+    await admin.query(`DROP ROLE IF EXISTS "${readerRole}"`);
   }
 }
-
-async function assertReadOnlyWriteRejected(client: Client): Promise<void> {
-  await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-  try {
-    const setting = await client.query<{ transaction_read_only: string }>("SELECT current_setting('transaction_read_only') AS transaction_read_only");
-    assert.equal(setting.rows[0]?.transaction_read_only, "on");
-    await assert.rejects(
-      () => client.query("INSERT INTO \"GitConnection\" (\"id\") VALUES ('00000000-0000-4000-8000-000000000099')"),
-      (error: unknown) => errorCode(error) === "25006" || errorCode(error) === "42501",
-    );
-  } finally {
-    await client.query("ROLLBACK");
-  }
-
-  await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-  try {
-    await assert.rejects(
-      () => client.query("CREATE TABLE \"inventory_ddl_probe\" (\"id\" integer)"),
-      (error: unknown) => errorCode(error) === "25006" || errorCode(error) === "42501",
-    );
-  } finally {
-    await client.query("ROLLBACK");
-  }
-}
-
-async function assertInventoryPreflightFailure(config: ReturnType<typeof readerDatabaseConfig>): Promise<void> {
-  const reader = new Client(config);
-  await reader.connect();
-  try {
-    await assert.rejects(
-      () => runOwnershipInventory(readerAdapter(reader)),
-      /OWNERSHIP_INVENTORY_PREFLIGHT_FAILED/,
-    );
-  } finally {
-    await reader.end();
-  }
-}
-
-test(
-  "restricted ownership inventory produces only the approved aggregate report",
-  { skip: !shouldRun ? "OWNERSHIP_INVENTORY_POSTGRES_GATE=1 is required" : false },
-  async () => {
-    const adminConfig = adminDatabaseConfig();
-    const admin = new Client(adminConfig);
-    const password = `InventoryReader_${randomUUID().replaceAll("-", "")}`;
-    const readerConfig = readerDatabaseConfig(adminConfig, password);
-    const suffix = randomUUID().slice(0, 8);
-    const userOwnerId = randomUUID();
-    const userAdminId = randomUUID();
-    const userMemberId = randomUUID();
-    const userViewerId = randomUUID();
-    const userProviderId = randomUUID();
-    const userDisabledId = randomUUID();
-    const workspaceId = randomUUID();
-    const projectId = randomUUID();
-    const activeOfferPolicyId = randomUUID();
-    const gitLegacyId = randomUUID();
-    const gitConfirmedId = randomUUID();
-    const gitAmbiguousId = randomUUID();
-    const gitRepositoryId = randomUUID();
-    const gitConfirmedRepositoryId = randomUUID();
-    const gitLinkId = randomUUID();
-    const gitConfirmedLinkId = randomUUID();
-    const mcpLegacyId = randomUUID();
-    const mcpConfirmedId = randomUUID();
-    const mcpAmbiguousId = randomUUID();
-    const mcpDefinitionId = randomUUID();
-    const mcpConfirmedDefinitionId = randomUUID();
-    const platformProviderId = randomUUID();
-    const workspaceOwnerProviderId = randomUUID();
-    const workspaceAdminProviderId = randomUUID();
-    const workspaceMemberProviderId = randomUUID();
-    const workspaceViewerProviderId = randomUUID();
-    const userProviderConnectionId = randomUUID();
-    const routeProviderCredentialId = randomUUID();
-    const workspaceOwnerCredentialId = randomUUID();
-    const workspaceAdminCredentialId = randomUUID();
-    const workspaceMemberCredentialId = randomUUID();
-    const workspaceViewerCredentialId = randomUUID();
-    const userProviderCredentialId = randomUUID();
-    const tokenGrantId = randomUUID();
-    const expiredGrantId = randomUUID();
-    const revokedGrantId = randomUUID();
-    const reservationId = randomUUID();
-    const auditId = randomUUID();
-    const personalWebGrantId = randomUUID();
-    const personalJobId = randomUUID();
-    const automationRuleId = randomUUID();
-    const activeGenerationId = randomUUID();
-    const activeDefaultRouteId = randomUUID();
-    const draftEmbeddingRouteId = randomUUID();
-    const draftGenerationRouteId = randomUUID();
-    let roleCreated = false;
-
-    await admin.connect();
-    try {
-      await removeReaderRole(admin);
-      await admin.query(`CREATE ROLE "${readerRole}" LOGIN PASSWORD '${password}'`);
-      roleCreated = true;
-      await admin.query(`ALTER ROLE "${readerRole}" SET default_transaction_read_only = 'on'`);
-      await admin.query(`REVOKE TEMPORARY, CREATE ON DATABASE "${testDatabaseName}" FROM PUBLIC`);
-      await admin.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
-      await admin.query(`REVOKE SELECT ON TABLE "ExternalCredential" FROM PUBLIC`);
-      for (const table of INVENTORY_TABLES) {
-        await admin.query(`REVOKE ALL PRIVILEGES ON TABLE "${table}" FROM PUBLIC`);
-      }
-      await admin.query(`GRANT CONNECT ON DATABASE "${testDatabaseName}" TO "${readerRole}"`);
-      await admin.query(`GRANT USAGE ON SCHEMA public TO "${readerRole}"`);
-      for (const table of INVENTORY_TABLES) {
-        await admin.query(`GRANT SELECT ON TABLE "${table}" TO "${readerRole}"`);
-      }
-
-      await admin.query("BEGIN");
-      await admin.query(`
-        INSERT INTO "AppUser" ("id", "username", "role", "disabledAt", "disabledReason", "updatedAt") VALUES
-          ($1, $2, 'member', NULL, NULL, CURRENT_TIMESTAMP),
-          ($3, $4, 'admin', NULL, NULL, CURRENT_TIMESTAMP),
-          ($5, $6, 'member', NULL, NULL, CURRENT_TIMESTAMP),
-          ($7, $8, 'user', NULL, NULL, CURRENT_TIMESTAMP),
-          ($9, $10, 'user', NULL, NULL, CURRENT_TIMESTAMP),
-          ($11, $12, 'user', CURRENT_TIMESTAMP, 'inventory test account disabled', CURRENT_TIMESTAMP)
-      `, [
-        userOwnerId, `inventory_owner_${suffix}`,
-        userAdminId, `inventory_admin_${suffix}`,
-        userMemberId, `inventory_member_${suffix}`,
-        userViewerId, `inventory_viewer_${suffix}`,
-        userProviderId, `inventory_provider_${suffix}`,
-        userDisabledId, `inventory_disabled_${suffix}`,
-      ]);
-      await admin.query(`
-        INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt")
-        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-      `, [workspaceId, `Inventory ${suffix}`, `inventory-${suffix}`, userOwnerId]);
-      await admin.query(`
-        WITH memberships AS (
-          INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "updatedAt") VALUES
-            (gen_random_uuid(), $1, $2, 'owner', 'confirmed', CURRENT_TIMESTAMP),
-            (gen_random_uuid(), $1, $3, 'admin', 'confirmed', CURRENT_TIMESTAMP),
-            (gen_random_uuid(), $1, $4, 'member', 'confirmed', CURRENT_TIMESTAMP),
-            (gen_random_uuid(), $1, $5, 'viewer', 'confirmed', CURRENT_TIMESTAMP)
-          RETURNING "id", "workspaceId", "userId", "role", "accessState", "createdAt", "updatedAt"
-        )
-        INSERT INTO "MembershipAccessAudit"
-          ("id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId", "action", "previousState", "newState", "roleSnapshot", "actorId", "reason", "membershipFingerprint")
-        SELECT gen_random_uuid(), 'workspace', membership."id", membership."workspaceId", NULL, membership."userId",
-               'confirmed', NULL, membership."accessState", membership."role", NULL,
-               'ownership inventory confirmed workspace membership',
-               encode(digest(convert_to(concat_ws(E'\\x1f', membership."id"::text, membership."workspaceId"::text, membership."userId"::text, membership."role"::text, to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS'), to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS')), 'UTF8'), 'sha256'), 'hex')
-          FROM memberships AS membership
-      `, [workspaceId, userOwnerId, userAdminId, userMemberId, userViewerId]);
-      await admin.query(`
-        INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt")
-        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-      `, [projectId, workspaceId, `Inventory project ${suffix}`, `inventory-project-${suffix}`]);
-      await admin.query(`
-        INSERT INTO "PlatformGrantOfferPolicy"
-          ("id", "offerVersion", "status", "amount", "validForDays", "eligibilityKey", "createdById", "updatedById", "updatedAt")
-        VALUES ($1, $2, 'active', 100, 30, 'inventory-test', $3, $3, CURRENT_TIMESTAMP)
-      `, [activeOfferPolicyId, `inventory-offer-${suffix}`, userAdminId]);
-
-      await admin.query(`
-        INSERT INTO "GitConnection"
-          ("id", "name", "providerKind", "transport", "baseUrl", "authKind", "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt")
-        VALUES
-          ($1, $2, 'generic', 'https', $3, 'none', 'configured', $4, NULL, NULL, 'legacy_pending', CURRENT_TIMESTAMP),
-          ($5, $6, 'generic', 'https', $3, 'none', 'verified', $7, $7, 1, 'confirmed', CURRENT_TIMESTAMP),
-          ($8, $9, 'generic', 'https', $3, 'none', 'configured', $4, NULL, NULL, 'ambiguous', CURRENT_TIMESTAMP)
-      `, [
-        gitLegacyId, `inventory_git_legacy_${suffix}`, `https://sentinel.invalid/${suffix}`, userProviderId,
-        gitConfirmedId, `inventory_git_confirmed_${suffix}`,
-        userOwnerId, gitAmbiguousId, `inventory_git_ambiguous_${suffix}`,
-      ]);
-      await admin.query(`
-        INSERT INTO "GitRepository"
-          ("id", "gitConnectionId", "repositoryPath", "displayName", "defaultBranch", "updatedAt")
-        VALUES ($1, $2, $3, $4, 'main', CURRENT_TIMESTAMP),
-               ($5, $6, $7, $8, 'main', CURRENT_TIMESTAMP)
-      `, [
-        gitRepositoryId, gitLegacyId, `sentinel/${suffix}`, `Sentinel repository ${suffix}`,
-        gitConfirmedRepositoryId, gitConfirmedId, `confirmed/${suffix}`, `Confirmed repository ${suffix}`,
-      ]);
-      await admin.query(`
-        INSERT INTO "ProjectGitRepositoryLink"
-          ("id", "projectId", "gitRepositoryId", "role", "trackedRef", "createdById", "updatedAt")
-        VALUES ($1, $2, $3, 'primary', 'main', $4, CURRENT_TIMESTAMP),
-               ($5, $2, $6, 'application', 'main', $7, CURRENT_TIMESTAMP)
-      `, [gitLinkId, projectId, gitRepositoryId, userOwnerId, gitConfirmedLinkId, gitConfirmedRepositoryId, userAdminId]);
-
-      await admin.query(`
-        INSERT INTO "McpConnection"
-          ("id", "name", "endpointUrl", "authKind", "resolvedAddressFingerprint", "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt")
-        VALUES
-          ($1, $2, $3, 'none', NULL, 'configured', $4, NULL, NULL, 'legacy_pending', CURRENT_TIMESTAMP),
-          ($5, $6, $3, 'none', repeat('b', 64), 'verified', $7, $7, 1, 'confirmed', CURRENT_TIMESTAMP),
-          ($8, $9, $3, 'none', NULL, 'configured', $4, NULL, NULL, 'ambiguous', CURRENT_TIMESTAMP)
-      `, [
-        mcpLegacyId, `inventory_mcp_legacy_${suffix}`, `https://sentinel-mcp.invalid/${suffix}`, userProviderId,
-        mcpConfirmedId, `inventory_mcp_confirmed_${suffix}`,
-        userOwnerId, mcpAmbiguousId, `inventory_mcp_ambiguous_${suffix}`,
-      ]);
-      await admin.query(`
-        INSERT INTO "McpToolDefinition"
-          ("id", "connectionId", "name", "inputSchema", "readOnlyEligible", "definitionFingerprint")
-        VALUES ($1, $2, 'sentinel_tool', '{}'::jsonb, true, repeat('a', 64)),
-               ($3, $4, 'sentinel_tool_secondary', '{}'::jsonb, true, repeat('c', 64))
-      `, [mcpDefinitionId, mcpConfirmedId, mcpConfirmedDefinitionId, mcpConfirmedId]);
-
-      const credentialIds = [
-        routeProviderCredentialId, workspaceOwnerCredentialId, workspaceAdminCredentialId,
-        workspaceMemberCredentialId, workspaceViewerCredentialId, userProviderCredentialId,
-      ];
-      await admin.query(`
-        INSERT INTO "ExternalCredential"
-          ("id", "kind", "ciphertext", "nonce", "authTag", "maskedSuffix", "secretFingerprint", "updatedAt")
-        SELECT value, 'ai_provider', decode('00', 'hex'), decode('01', 'hex'), decode('02', 'hex'), 'sentinel', repeat('b', 64), CURRENT_TIMESTAMP
-        FROM unnest($1::uuid[]) AS ids(value)
-      `, [credentialIds]);
-      await admin.query(`
-        INSERT INTO "AiProviderConnection"
-          ("id", "name", "kind", "scope", "workspaceId", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "baseUrl", "credentialId", "status", "updatedAt")
-        VALUES
-          ($1, $2, 'deepseek', 'platform', NULL, NULL, NULL, 'legacy_pending', 'https://sentinel-provider.invalid', $3, 'verified', CURRENT_TIMESTAMP),
-          ($4, $5, 'deepseek', 'workspace', $6, $7, NULL, 'legacy_pending', 'https://sentinel-provider.invalid', $8, 'verified', CURRENT_TIMESTAMP),
-          ($9, $10, 'deepseek', 'workspace', $6, $11, NULL, 'legacy_pending', 'https://sentinel-provider.invalid', $12, 'verified', CURRENT_TIMESTAMP),
-          ($13, $14, 'deepseek', 'workspace', $6, $15, NULL, 'ambiguous', 'https://sentinel-provider.invalid', $16, 'disabled', CURRENT_TIMESTAMP),
-          ($17, $18, 'deepseek', 'workspace', $6, $19, NULL, 'ambiguous', 'https://sentinel-provider.invalid', $20, 'disabled', CURRENT_TIMESTAMP),
-          ($21, $22, 'deepseek', 'user', NULL, $23, 1, 'confirmed', 'https://api.deepseek.com', $24, 'verified', CURRENT_TIMESTAMP)
-      `, [
-        platformProviderId, `inventory_provider_platform_${suffix}`, routeProviderCredentialId,
-        workspaceOwnerProviderId, `inventory_provider_owner_${suffix}`, workspaceId, userOwnerId, workspaceOwnerCredentialId,
-        workspaceAdminProviderId, `inventory_provider_admin_${suffix}`, userAdminId, workspaceAdminCredentialId,
-        workspaceMemberProviderId, `inventory_provider_member_${suffix}`, userMemberId, workspaceMemberCredentialId,
-        workspaceViewerProviderId, `inventory_provider_viewer_${suffix}`, userViewerId, workspaceViewerCredentialId,
-        userProviderConnectionId, `inventory_provider_user_${suffix}`, userProviderId, userProviderCredentialId,
-      ]);
-      await admin.query(`
-        UPDATE "AiProviderConnection"
-           SET "defaultGenerationModelId" = 'generation-default',
-               "defaultEmbeddingModelId" = 'embedding-default',
-               "defaultVisionModelId" = 'vision-default',
-               "embeddingDimensions" = 1536
-         WHERE "id" = $1
-      `, [platformProviderId]);
-      await admin.query(`
-        INSERT INTO "ProjectAiRoute" ("projectId", "operation", "providerConnectionId", "modelId", "maxOutputTokens", "updatedAt")
-        VALUES ($1, 'projectAnalysis', $2, 'generation-default', 1024, CURRENT_TIMESTAMP),
-               ($1, 'sourceSummary', $3, 'personal-model', 1024, CURRENT_TIMESTAMP)
-      `, [projectId, platformProviderId, userProviderConnectionId]);
-      await admin.query(`
-        INSERT INTO "WebAiGrant"
-          ("id", "projectId", "operation", "scopeKind", "scopeIds", "manifestFingerprint", "providerConnectionId", "modelId", "consentVersion", "issuedById", "billingMode", "billingUserId", "expiresAt")
-        VALUES ($1, $2, 'sourceSummary', 'query', '{}'::jsonb, repeat('d', 64), $3, 'personal-model', 'inventory-consent', $4, 'byok', $4, CURRENT_TIMESTAMP + INTERVAL '1 day')
-      `, [personalWebGrantId, projectId, userProviderConnectionId, userProviderId]);
-      await admin.query(`
-        INSERT INTO "BackgroundJob"
-          ("id", "projectId", "kind", "status", "idempotencyKey", "requestedById", "webAiGrantId", "createdAt")
-        VALUES ($1, $2, 'project_agent', 'waitingConsent', repeat('e', 64), $3, $4, CURRENT_TIMESTAMP)
-      `, [personalJobId, projectId, userProviderId, personalWebGrantId]);
-      await admin.query(`
-        INSERT INTO "AutomationRule"
-          ("id", "projectId", "name", "kind", "status", "intervalMinutes", "config", "nextRunAt", "createdById", "updatedAt")
-        VALUES ($1, $2, 'inventory-personal-automation', 'memory_index', 'active', 60, '{}'::jsonb, CURRENT_TIMESTAMP + INTERVAL '1 hour', $3, CURRENT_TIMESTAMP)
-      `, [automationRuleId, projectId, userProviderId]);
-      await admin.query(`
-        INSERT INTO "PlatformDefaultAiRoute"
-          ("id", "operation", "version", "status", "providerConnectionId", "modelId", "embeddingDimensions", "maxOutputTokens", "createdById", "updatedById", "updatedAt")
-        VALUES
-          ($1, 'embedding', 1, 'active', $4, 'embedding-default', 1536, NULL, $5, $5, CURRENT_TIMESTAMP),
-          ($2, 'embedding', 2, 'draft', $4, 'embedding-default', 1536, NULL, $5, $5, CURRENT_TIMESTAMP),
-          ($3, 'projectAnalysis', 1, 'draft', $4, 'generation-default', NULL, 1024, $5, $5, CURRENT_TIMESTAMP)
-      `, [activeDefaultRouteId, draftEmbeddingRouteId, draftGenerationRouteId, platformProviderId, userAdminId]);
-      await admin.query(`
-        INSERT INTO "MemoryIndexGeneration"
-          ("id", "projectId", "providerConnectionId", "modelId", "dimensions", "inputManifestFingerprint", "status", "recordCount")
-        VALUES ($1, $2, $3, 'embedding-default', 1536, repeat('f', 64), 'complete', 0)
-      `, [activeGenerationId, projectId, platformProviderId]);
-      await admin.query(`
-        INSERT INTO "MemoryIndexPointer" ("projectId", "indexGenerationId")
-        VALUES ($1, $2)
-      `, [projectId, activeGenerationId]);
-
-      const grantRows = [
-        [tokenGrantId, userOwnerId, 100, 80, "2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z", null],
-        [expiredGrantId, userAdminId, 100, 20, "2025-01-01T00:00:00Z", "2026-01-01T00:00:00Z", null],
-        [revokedGrantId, userMemberId, 100, 50, "2026-01-01T00:00:00Z", "2030-01-01T00:00:00Z", "2026-02-01T00:00:00Z"],
-      ];
-      for (const [id, userId, amount, remainingTokens, issuedAt, expiresAt, revokedAt] of grantRows) {
-        await admin.query(`
-          INSERT INTO "PlatformTokenGrant"
-            ("id", "userId", "kind", "amount", "remainingTokens", "offerVersion", "issuedAt", "expiresAt", "revokedAt", "createdAt", "updatedAt")
-          VALUES ($1, $2, 'signup', $3, $4, 'inventory-sentinel', $5, $6, $7, $5, $5)
-        `, [id, userId, amount, remainingTokens, issuedAt, expiresAt, revokedAt]);
-      }
-      await admin.query(`
-        INSERT INTO "PlatformTokenReservation"
-          ("id", "userId", "grantId", "providerConnectionId", "callKey", "operation", "modelId", "status", "reservedTokens", "rawEstimatedTokens", "quotaMultiplierBps", "expiresAt")
-        VALUES ($1, $2, $3, $4, 'inventory-sentinel-call', 'projectAnalysis', 'sentinel-model', 'reserved', 1, 1, 10000, CURRENT_TIMESTAMP + INTERVAL '1 day')
-      `, [reservationId, userOwnerId, tokenGrantId, platformProviderId]);
-      await admin.query(`
-        INSERT INTO "ProviderCallAudit"
-          ("id", "providerConnectionId", "operation", "modelId", "billingUserId", "callKey", "reservationId", "status")
-        VALUES ($1, $2, 'projectAnalysis', 'sentinel-model', $3, 'inventory-sentinel-call', $4, 'succeeded')
-      `, [auditId, platformProviderId, userOwnerId, reservationId]);
-      await admin.query("COMMIT");
-
-      // V2 grants are created through the production attestation, delegation,
-      // and grant services. The inventory database is already at the latest
-      // schema, so a raw legacy-shaped insert would correctly trip the
-      // immutable V2 grant guard instead of representing historical data.
-      const db = getDb();
-      const ownerActor = { id: userOwnerId, role: "user" as const, accountAccessVersion: 1 };
-      const adminActor = { id: userAdminId, role: "admin" as const, accountAccessVersion: 1 };
-      await db.$transaction(async (tx) => {
-        await grantProjectMembership(tx, {
-          projectId,
-          workspaceId,
-          userId: userOwnerId,
-          role: "owner",
-          actorId: userAdminId,
-          reason: "ownership inventory MCP project owner",
-        });
-        await grantProjectMembership(tx, {
-          projectId,
-          workspaceId,
-          userId: userAdminId,
-          role: "owner",
-          actorId: userOwnerId,
-          reason: "ownership inventory MCP grant manager",
-        });
-      });
-      const definitionFingerprint = "a".repeat(64);
-      const secondaryDefinitionFingerprint = "c".repeat(64);
-      const networkFingerprint = "b".repeat(64);
-      const attestation = await createMcpControlPlaneAttestation(adminActor, {
-        toolDefinitionId: mcpDefinitionId,
-        expectedConnectionConfigurationRevision: 1,
-        expectedDefinitionFingerprint: definitionFingerprint,
-        expectedNetworkFingerprint: networkFingerprint,
-        expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
-        conclusion: "read_only_verified",
-        riskLevel: "low",
-        evidenceNote: "manual_read_only_review",
-      }, db);
-      const secondaryAttestation = await createMcpControlPlaneAttestation(adminActor, {
-        toolDefinitionId: mcpConfirmedDefinitionId,
-        expectedConnectionConfigurationRevision: 1,
-        expectedDefinitionFingerprint: secondaryDefinitionFingerprint,
-        expectedNetworkFingerprint: networkFingerprint,
-        expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
-        conclusion: "read_only_verified",
-        riskLevel: "low",
-        evidenceNote: "manual_read_only_review",
-      }, db);
-      const delegationDraft = await proposeProjectMcpConnectionDelegation(
-        projectId,
-        { mcpConnectionId: mcpConfirmedId, expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString() },
-        ownerActor,
-        db,
-      );
-      if (!("id" in delegationDraft)) throw new Error("OWNERSHIP_INVENTORY_MCP_DELEGATION_CREATE_FAILED");
-      await confirmProjectMcpConnectionDelegationOwner(
-        projectId,
-        delegationDraft.id,
-        { expectedVersion: 1, acknowledgeCredentialUse: true },
-        ownerActor,
-        db,
-      );
-      const activeDelegation = await confirmProjectMcpConnectionDelegationProject(
-        projectId,
-        delegationDraft.id,
-        { expectedVersion: 2, acknowledgeProjectScope: true, acknowledgeDataEgress: true },
-        ownerActor,
-        db,
-      );
-      if (!("id" in activeDelegation)) throw new Error("OWNERSHIP_INVENTORY_MCP_DELEGATION_ACTIVATE_FAILED");
-      const activeDelegationRow = await db.projectMcpConnectionDelegation.findUniqueOrThrow({
-        where: { id: activeDelegation.id },
-        select: { id: true, version: true },
-      });
-      for (const [toolDefinitionId, attestationId] of [
-        [mcpDefinitionId, attestation.id],
-        [mcpConfirmedDefinitionId, secondaryAttestation.id],
-      ] as const) {
-        const createdGrant = await createProjectMcpToolGrantV2(projectId, {
-          delegationId: activeDelegationRow.id,
-          toolDefinitionId,
-          attestationId,
-          expectedDelegationVersion: activeDelegationRow.version,
-          expectedAttestationVersion: 1,
-          acknowledgeReadOnly: true,
-        }, adminActor, db);
-        assert.equal(createdGrant.created, true);
-      }
-
-      await admin.query(`GRANT SELECT ON TABLE "ExternalCredential" TO "${readerRole}"`);
-      try {
-        await assertInventoryPreflightFailure(readerConfig);
-      } finally {
-        await admin.query(`REVOKE SELECT ON TABLE "ExternalCredential" FROM "${readerRole}"`);
-      }
-
-      await admin.query(`ALTER ROLE "${readerRole}" REPLICATION`);
-      try {
-        await assertInventoryPreflightFailure(readerConfig);
-      } finally {
-        await admin.query(`ALTER ROLE "${readerRole}" NOREPLICATION`);
-      }
-
-      await admin.query(`ALTER ROLE "${readerRole}" RESET default_transaction_read_only`);
-      try {
-        await assertInventoryPreflightFailure(readerConfig);
-      } finally {
-        await admin.query(`ALTER ROLE "${readerRole}" SET default_transaction_read_only = 'on'`);
-      }
-
-      await admin.query(`ALTER DATABASE "${testDatabaseName}" SET default_transaction_read_only = 'on'`);
-      try {
-        await assertInventoryPreflightFailure(readerConfig);
-      } finally {
-        await admin.query(`ALTER DATABASE "${testDatabaseName}" RESET default_transaction_read_only`);
-      }
-
-      await admin.query(`ALTER ROLE "${readerRole}" IN DATABASE "${testDatabaseName}" SET default_transaction_read_only = 'on'`);
-      try {
-        await assertInventoryPreflightFailure(readerConfig);
-      } finally {
-        await admin.query(`ALTER ROLE "${readerRole}" IN DATABASE "${testDatabaseName}" RESET default_transaction_read_only`);
-      }
-
-      const reader = new Client(readerConfig);
-      await reader.connect();
-      try {
-        const report = await runOwnershipInventory(readerAdapter(reader));
-        assert.deepEqual(report.resources.accounts, {
-          total: 6,
-          systemRole: { admin: 1, legacyMember: 2, user: 3, invalid: 0 },
-          accountState: { enabled: 5, disabled: 1 },
-          grantCoverage: {
-            activeOfferPolicies: 1,
-            enabledWithoutAnyGrant: 2,
-            enabledWithoutSignupGrant: 2,
-            enabledWithoutAvailableGrant: 4,
-            eligibleWithoutGrantKnown: 0,
-            eligibilityNotEvaluable: 2,
-          },
-        });
-        assert.deepEqual(report.resources.git, {
-          total: 3,
-          ownership: { confirmed: 1, legacyPending: 1, ambiguous: 1, invalid: 0 },
-          createdByCandidateOnly: 2,
-          references: { repositories: 2, projectRepositoryLinks: 2, activeProjectRepositoryLinks: 2 },
-          referencesWithDifferentActor: 2,
-          activeReferencesWithDifferentActor: 2,
-          connectionsWithDifferentReferenceActor: 2,
-          connectionsWithCreatorOutsideProjectAccess: 1,
-          activeConnectionsWithCreatorOutsideProjectAccess: 1,
-          ownerCandidateExactNameConflictGroups: 0,
-          connectionsInOwnerCandidateExactNameConflicts: 0,
-          personalReferences: {
-            directReferences: 1,
-            activeDirectReferences: 1,
-            distinctProjects: 1,
-            potentialNonTerminalJobsInReferencedProjects: 1,
-            potentialActiveAutomationsInReferencedProjects: 1,
-            automationDirectBinding: "not_evaluable_without_typed_delegation",
-          },
-        });
-        assert.deepEqual(report.resources.mcp, {
-          total: 3,
-          ownership: { confirmed: 1, legacyPending: 1, ambiguous: 1, invalid: 0 },
-          createdByCandidateOnly: 2,
-          references: { toolDefinitions: 2, currentToolDefinitions: 2, projectToolGrants: 2, activeProjectToolGrants: 2 },
-          referencesWithDifferentActor: 2,
-          activeReferencesWithDifferentActor: 2,
-          connectionsWithDifferentReferenceActor: 1,
-          connectionsWithCreatorOutsideProjectAccess: 0,
-          activeConnectionsWithCreatorOutsideProjectAccess: 0,
-          ownerCandidateExactNameConflictGroups: 0,
-          connectionsInOwnerCandidateExactNameConflicts: 0,
-          personalReferences: {
-            directReferences: 2,
-            activeDirectReferences: 2,
-            distinctProjects: 1,
-            potentialNonTerminalJobsInReferencedProjects: 1,
-            potentialActiveAutomationsInReferencedProjects: 1,
-            automationDirectBinding: "not_evaluable_without_typed_delegation",
-          },
-        });
-        assert.deepEqual(report.resources.aiProvider, {
-          total: 6,
-          scope: { platform: 1, workspace: 4, user: 1 },
-          ownership: { confirmed: 1, legacyPending: 3, ambiguous: 2, invalid: 0 },
-          workspaceOwnerMembership: { owner: 1, admin: 1, member: 1, viewer: 1, missing: 0, notEvaluable: 2 },
-          references: {
-            projectAiRoutes: 2,
-            routeRevisionsOld: 0,
-            routeRevisionsNew: 0,
-            webAiGrants: 1,
-            openWebAiGrants: 1,
-            platformTokenReservations: 1,
-            openTokenReservations: 1,
-            providerCallAudits: 1,
-            memoryIndexGenerations: 1,
-            derivedAiArtifacts: 0,
-            platformDefaultRoutes: 3,
-          },
-          consistency: {
-            structurallyValid: 6,
-            structurallyInvalid: 0,
-            workspaceWithMembership: 4,
-            workspaceWithoutMembership: 0,
-            workspaceNotEvaluable: 2,
-          },
-          personalReferences: {
-            directProjectRoutes: 1,
-            distinctProjects: 1,
-            openWebAiGrants: 1,
-            directNonTerminalJobs: 1,
-            potentialActiveAutomationsInReferencedProjects: 1,
-            automationDirectBinding: "not_evaluable_without_typed_delegation",
-          },
-        });
-        assert.deepEqual(report.resources.githubConnectionLegacy, {
-          projectScopedTotal: 0,
-          configured: 0,
-          verified: 0,
-          disabled: 0,
-          accessUnknown: 0,
-          invalidStatus: 0,
-          credentialAttached: 0,
-          projectRepositoryLinks: 0,
-          githubSyncEntries: 0,
-        });
-        assert.deepEqual(report.resources.platformTokenGrants, { total: 3, available: 1, expired: 1, revoked: 1 });
-        assert.deepEqual(report.resources.platformDefaultRoutes, {
-          total: 3,
-          status: { draft: 2, verified: 0, active: 1, retired: 0, invalid: 0 },
-          candidate: { total: 2, usable: 2, unusable: 0 },
-          active: { total: 1, usable: 1, unusable: 0 },
-          providerCapabilities: { generation: 1, vision: 1, embedding: 1 },
-        });
-        assert.deepEqual(report.resources.activeVectorIndex, {
-          total: 1,
-          matchesActiveDefaultEmbeddingRoute: 1,
-          differsFromActiveDefaultEmbeddingRoute: 0,
-          noActiveDefaultEmbeddingRoute: 0,
-          matchesDraftOrVerifiedCandidateTuple: 1,
-        });
-        assert.equal(report.snapshot.readOnly, true);
-        assert.equal(report.snapshot.isolation, "repeatable_read");
-        assert.equal(report.snapshot.migrations.m300, "applied");
-        assert.ok(report.snapshot.appliedMigrationCount >= 57);
-        const publicReport = JSON.stringify(report);
-        for (const sentinel of [
-          suffix, "sentinel.invalid", "sentinel-mcp.invalid", "sentinel-provider.invalid", "sentinel-model", "inventory_owner_",
-          workspaceId, projectId, platformProviderId, "inventory-sentinel-call",
-        ]) {
-          assert.equal(publicReport.includes(sentinel), false, `report leaked sentinel ${sentinel}`);
-        }
-      } finally {
-        try {
-          await assertReadOnlyWriteRejected(reader);
-        } finally {
-          await reader.end();
-        }
-      }
-
-      const output: string[] = [];
-      const originalLog = console.log;
-      console.log = (...values: unknown[]) => output.push(values.map(String).join(" "));
-      try {
-        const exitCode = await main([], {
-          OWNERSHIP_INVENTORY_DATABASE_URL: readerDatabaseUrl(password),
-          PGHOST: "malicious.invalid",
-          PGUSER: "malicious-user",
-          PGPORT: "1",
-          PGPASSWORD: "malicious-password",
-          PGOPTIONS: "-c default_transaction_read_only=off",
-          PGSSLMODE: "require",
-          PGREPLICATION: "database",
-          PGCLIENT_ENCODING: "SQL_ASCII",
-          PGAPPNAME: "malicious-app",
-          PGCONNECT_TIMEOUT: "1",
-          PGBINARY: "",
-        });
-        assert.equal(exitCode, 0);
-      } finally {
-        console.log = originalLog;
-      }
-      assert.equal(output.length, 1);
-      const mainReport = JSON.parse(output[0] ?? "{}") as {
-        ok: boolean;
-        kind: string;
-        snapshot: { readOnly: boolean; isolation: string };
-        resources: { accounts: { total: number } };
-      };
-      assert.equal(mainReport.ok, true);
-      assert.equal(mainReport.kind, "ownership-migration-inventory");
-      assert.equal(mainReport.snapshot.readOnly, true);
-      assert.equal(mainReport.snapshot.isolation, "repeatable_read");
-      assert.equal(mainReport.resources.accounts.total, 6);
-      const mainPublicReport = JSON.stringify(mainReport);
-      for (const sentinel of [suffix, "sentinel.invalid", workspaceId, projectId, platformProviderId, "malicious-password"]) {
-        assert.equal(mainPublicReport.includes(sentinel), false, `main report leaked sentinel ${sentinel}`);
-      }
-
-      const childEnv: NodeJS.ProcessEnv = {
-        ...process.env,
-        OWNERSHIP_INVENTORY_DATABASE_URL: readerDatabaseUrl(password),
-        PGHOST: "malicious.invalid",
-        PGPORT: "1",
-        PGUSER: "malicious-user",
-        PGDATABASE: "malicious-database",
-        PGPASSWORD: "malicious-password",
-        PGOPTIONS: "-c default_transaction_read_only=off",
-        PGSSLMODE: "require",
-        PGREPLICATION: "database",
-        PGCLIENT_ENCODING: "SQL_ASCII",
-        PGAPPNAME: "malicious-app",
-        PGCONNECT_TIMEOUT: "1",
-        PGBINARY: "",
-      };
-      delete childEnv.NODE_PG_FORCE_NATIVE;
-      const childResult = await execFile(
-        process.execPath,
-        ["--import", "tsx", resolve(process.cwd(), "scripts/0.2x-migration-inventory.ts")],
-        {
-          cwd: process.cwd(),
-          env: childEnv,
-          encoding: "utf8",
-          timeout: 20_000,
-          maxBuffer: 1_024 * 1_024,
-        },
-      );
-      assert.equal(childResult.stderr, "");
-      const childLines = childResult.stdout.trim().split(/\r?\n/u);
-      assert.equal(childLines.length, 1);
-      const childReport = JSON.parse(childLines[0] ?? "{}") as {
-        ok: boolean;
-        kind: string;
-        snapshot: { readOnly: boolean; isolation: string };
-        resources: { accounts: { total: number } };
-      };
-      assert.equal(childReport.ok, true);
-      assert.equal(childReport.kind, "ownership-migration-inventory");
-      assert.equal(childReport.snapshot.readOnly, true);
-      assert.equal(childReport.snapshot.isolation, "repeatable_read");
-      assert.equal(childReport.resources.accounts.total, 6);
-      const childPublicReport = JSON.stringify(childReport);
-      for (const sentinel of [suffix, "sentinel.invalid", workspaceId, projectId, platformProviderId, "malicious-password", "malicious-database"]) {
-        assert.equal(childPublicReport.includes(sentinel), false, `child report leaked sentinel ${sentinel}`);
-      }
-
-      let unsafeBinaryError: unknown;
-      try {
-        await execFile(
-          process.execPath,
-          ["--import", "tsx", resolve(process.cwd(), "scripts/0.2x-migration-inventory.ts")],
-          {
-            cwd: process.cwd(),
-            env: { ...childEnv, PGBINARY: "true" },
-            encoding: "utf8",
-            timeout: 20_000,
-            maxBuffer: 1_024 * 1_024,
-          },
-        );
-      } catch (error) {
-        unsafeBinaryError = error;
-      }
-      assert.ok(unsafeBinaryError !== undefined);
-      const unsafeBinaryResult = unsafeBinaryError as { code?: unknown; stdout?: unknown; stderr?: unknown };
-      assert.equal(unsafeBinaryResult.code, 1);
-      assert.equal(String(unsafeBinaryResult.stderr ?? ""), "");
-      assert.deepEqual(JSON.parse(String(unsafeBinaryResult.stdout ?? "").trim()), {
-        ok: false,
-        error: { code: "OWNERSHIP_INVENTORY_DATABASE_URL_INVALID" },
-      });
-    } catch (error) {
-      try {
-        await admin.query("ROLLBACK");
-      } catch {
-        // The database runner removes the disposable database after the gate.
-      }
-      throw error;
-    } finally {
-      if (roleCreated) {
-        await removeReaderRole(admin);
-      }
-      await admin.end();
-    }
-  },
-);
 
 function readerAdapter(client: Client) {
   return {
@@ -783,3 +73,248 @@ function readerAdapter(client: Client) {
     },
   };
 }
+
+function quoteIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function quoteLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function aclEntries<Row extends { privilege_type: string; is_grantable: boolean }>(rows: readonly Row[]): PublicAclEntry[] {
+  return rows.map((row) => ({ privilege_type: row.privilege_type, is_grantable: row.is_grantable }));
+}
+
+async function capturePublicAccessSnapshot(admin: Client): Promise<PublicAccessSnapshot> {
+  const database = await admin.query<{ privilege_type: string; is_grantable: boolean }>(`
+    SELECT access.privilege_type, access.is_grantable
+      FROM pg_database AS database_meta
+      CROSS JOIN LATERAL aclexplode(COALESCE(database_meta.datacl, acldefault('d', database_meta.datdba))) AS access
+     WHERE database_meta.datname = current_database()
+       AND access.grantee = 0
+     ORDER BY access.privilege_type
+  `);
+  const schema = await admin.query<{ privilege_type: string; is_grantable: boolean }>(`
+    SELECT access.privilege_type, access.is_grantable
+      FROM pg_namespace AS namespace_meta
+      CROSS JOIN LATERAL aclexplode(COALESCE(namespace_meta.nspacl, acldefault('n', namespace_meta.nspowner))) AS access
+     WHERE namespace_meta.nspname = 'public'
+       AND access.grantee = 0
+     ORDER BY access.privilege_type
+  `);
+  const tables = await admin.query<{ relation_name: string; privilege_type: string; is_grantable: boolean }>(`
+    SELECT relation_meta.relname AS relation_name, access.privilege_type, access.is_grantable
+      FROM pg_class AS relation_meta
+      JOIN pg_namespace AS namespace_meta ON namespace_meta.oid = relation_meta.relnamespace
+      CROSS JOIN LATERAL aclexplode(COALESCE(relation_meta.relacl, acldefault('r', relation_meta.relowner))) AS access
+     WHERE namespace_meta.nspname = 'public'
+       AND relation_meta.relkind IN ('r', 'p')
+       AND relation_meta.relname = ANY($1::text[])
+       AND access.grantee = 0
+     ORDER BY array_position($1::text[], relation_meta.relname), access.privilege_type
+  `, [INVENTORY_TABLES]);
+  const databaseSetting = await admin.query<{ setting: string }>(`
+    SELECT config.setting
+      FROM pg_db_role_setting AS setting_meta
+      JOIN pg_database AS database_meta ON database_meta.oid = setting_meta.setdatabase
+      CROSS JOIN LATERAL unnest(COALESCE(setting_meta.setconfig, ARRAY[]::text[])) AS config(setting)
+     WHERE database_meta.datname = current_database()
+       AND setting_meta.setrole = 0
+       AND split_part(config.setting, '=', 1) = 'default_transaction_read_only'
+  `);
+  const tablePrivileges = new Map<string, PublicAclEntry[]>(INVENTORY_TABLES.map((table) => [table, []]));
+  for (const row of tables.rows) tablePrivileges.set(row.relation_name, [...(tablePrivileges.get(row.relation_name) ?? []), { privilege_type: row.privilege_type, is_grantable: row.is_grantable }]);
+  return {
+    database: aclEntries(database.rows),
+    schema: aclEntries(schema.rows),
+    tables: tablePrivileges,
+    databaseReadOnlySetting: databaseSetting.rows[0]?.setting,
+  };
+}
+
+async function restorePublicAcl(admin: Client, objectType: "DATABASE" | "SCHEMA" | "TABLE", objectName: string, entries: readonly PublicAclEntry[]): Promise<void> {
+  const object = `${objectType} ${quoteIdentifier(objectName)}`;
+  await admin.query(`REVOKE ALL PRIVILEGES ON ${object} FROM PUBLIC`);
+  for (const entry of entries) {
+    if (!/^[A-Z_]+$/u.test(entry.privilege_type)) throw new Error("CLEAN_SLATE_SCHEMA_POSTGRES_GATE_ACL_INVALID");
+    await admin.query(`GRANT ${entry.privilege_type} ON ${object} TO PUBLIC${entry.is_grantable ? " WITH GRANT OPTION" : ""}`);
+  }
+}
+
+async function restorePublicAccessSnapshot(admin: Client, snapshot: PublicAccessSnapshot): Promise<void> {
+  await restorePublicAcl(admin, "DATABASE", testDatabaseName, snapshot.database);
+  await restorePublicAcl(admin, "SCHEMA", "public", snapshot.schema);
+  for (const table of INVENTORY_TABLES) await restorePublicAcl(admin, "TABLE", table, snapshot.tables.get(table) ?? []);
+  await admin.query(`ALTER DATABASE ${quoteIdentifier(testDatabaseName)} RESET default_transaction_read_only`);
+  if (snapshot.databaseReadOnlySetting !== undefined) {
+    const separator = snapshot.databaseReadOnlySetting.indexOf("=");
+    const value = separator < 0 ? snapshot.databaseReadOnlySetting : snapshot.databaseReadOnlySetting.slice(separator + 1);
+    await admin.query(`ALTER DATABASE ${quoteIdentifier(testDatabaseName)} SET default_transaction_read_only = ${quoteLiteral(value)}`);
+  }
+}
+
+async function assertInventoryPreflightFailure(config: ReturnType<typeof readerConfig>): Promise<void> {
+  const reader = new Client(config);
+  await reader.connect();
+  try {
+    await assert.rejects(
+      () => runOwnershipInventory(readerAdapter(reader)),
+      /OWNERSHIP_INVENTORY_PREFLIGHT_FAILED/u,
+    );
+  } finally {
+    await reader.end();
+  }
+}
+
+async function assertPreflightFailureAfterMutation(
+  admin: Client,
+  config: ReturnType<typeof readerConfig>,
+  apply: () => Promise<void>,
+  reset: () => Promise<void>,
+): Promise<void> {
+  await apply();
+  try {
+    await assertInventoryPreflightFailure(config);
+  } finally {
+    await reset();
+  }
+}
+
+test(
+  "clean-slate PostgreSQL gate contains only canonical roles and provider scopes",
+  { skip: !shouldRun ? "CLEAN_SLATE_SCHEMA_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const admin = new Client(adminDatabaseConfig());
+    const password = `InventoryReader_${randomUUID().replaceAll("-", "")}`;
+    let publicAccessSnapshot: PublicAccessSnapshot | undefined;
+    await admin.connect();
+    try {
+      publicAccessSnapshot = await capturePublicAccessSnapshot(admin);
+      const roles = await admin.query<{ enum_name: string; enum_value: string }>(`
+        SELECT type_meta.typname AS enum_name, enum_meta.enumlabel AS enum_value
+          FROM pg_type AS type_meta
+          JOIN pg_enum AS enum_meta ON enum_meta.enumtypid = type_meta.oid
+          JOIN pg_namespace AS namespace_meta ON namespace_meta.oid = type_meta.typnamespace
+         WHERE namespace_meta.nspname = 'public'
+           AND type_meta.typname IN ('AppUserRole', 'AiProviderScope')
+         ORDER BY type_meta.typname, enum_meta.enumsortorder
+      `);
+      assert.deepEqual(roles.rows, [
+        { enum_name: "AiProviderScope", enum_value: "platform" },
+        { enum_name: "AiProviderScope", enum_value: "user" },
+        { enum_name: "AppUserRole", enum_value: "admin" },
+        { enum_name: "AppUserRole", enum_value: "user" },
+      ]);
+
+      const removedRelations = await admin.query<{ relation_name: string }>(
+        "SELECT relname AS relation_name FROM pg_class WHERE relnamespace = 'public'::regnamespace AND relname = ANY($1::text[])",
+        [CLEAN_SLATE_REMOVED_RELATIONS],
+      );
+      assert.deepEqual(removedRelations.rows, []);
+
+      const removedColumns = await admin.query<{ column_name: string }>(
+        `SELECT attribute_meta.attname AS column_name
+           FROM pg_attribute AS attribute_meta
+           JOIN pg_class AS relation_meta ON relation_meta.oid = attribute_meta.attrelid
+          WHERE relation_meta.relnamespace = 'public'::regnamespace
+            AND relation_meta.relname = 'AiProviderConnection'
+            AND attribute_meta.attname = ANY($1::text[])
+            AND attribute_meta.attnum > 0
+            AND NOT attribute_meta.attisdropped`,
+        [CLEAN_SLATE_REMOVED_PROVIDER_COLUMNS],
+      );
+      assert.deepEqual(removedColumns.rows, []);
+
+      const removedTriggers = await admin.query<{ trigger_name: string }>(
+        `SELECT trigger_meta.tgname AS trigger_name
+           FROM pg_trigger AS trigger_meta
+           JOIN pg_class AS relation_meta ON relation_meta.oid = trigger_meta.tgrelid
+          WHERE relation_meta.relnamespace = 'public'::regnamespace
+            AND trigger_meta.tgname = ANY($1::text[])
+            AND NOT trigger_meta.tgisinternal`,
+        [CLEAN_SLATE_REMOVED_TRIGGERS],
+      );
+      assert.deepEqual(removedTriggers.rows, []);
+
+      await removeReaderRole(admin);
+      await admin.query(`CREATE ROLE "${readerRole}" LOGIN PASSWORD '${password}'`);
+      await admin.query(`ALTER ROLE "${readerRole}" SET default_transaction_read_only = 'on'`);
+      await admin.query(`ALTER DATABASE "${testDatabaseName}" SET default_transaction_read_only = 'on'`);
+      await admin.query(`REVOKE TEMPORARY, CREATE ON DATABASE "${testDatabaseName}" FROM PUBLIC`);
+      await admin.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
+      await admin.query(`GRANT CONNECT ON DATABASE "${testDatabaseName}" TO "${readerRole}"`);
+      await admin.query(`GRANT USAGE ON SCHEMA public TO "${readerRole}"`);
+      for (const table of INVENTORY_TABLES) {
+        await admin.query(`REVOKE ALL PRIVILEGES ON TABLE "${table}" FROM PUBLIC`);
+        await admin.query(`GRANT SELECT ON TABLE "${table}" TO "${readerRole}"`);
+      }
+
+      const readerDatabaseConfig = readerConfig(adminDatabaseConfig(), password);
+      await assertPreflightFailureAfterMutation(
+        admin,
+        readerDatabaseConfig,
+        async () => { await admin.query(`ALTER ROLE "${readerRole}" IN DATABASE "${testDatabaseName}" SET default_transaction_read_only = 'on'`); },
+        async () => { await admin.query(`ALTER ROLE "${readerRole}" IN DATABASE "${testDatabaseName}" RESET default_transaction_read_only`); },
+      );
+      await assertPreflightFailureAfterMutation(
+        admin,
+        readerDatabaseConfig,
+        async () => { await admin.query(`ALTER ROLE "${readerRole}" IN DATABASE "${testDatabaseName}" SET default_transaction_read_only = 'off'`); },
+        async () => { await admin.query(`ALTER ROLE "${readerRole}" IN DATABASE "${testDatabaseName}" RESET default_transaction_read_only`); },
+      );
+      await assertPreflightFailureAfterMutation(
+        admin,
+        readerDatabaseConfig,
+        async () => { await admin.query(`ALTER ROLE "${readerRole}" SET default_transaction_read_only = 'off'`); },
+        async () => { await admin.query(`ALTER ROLE "${readerRole}" SET default_transaction_read_only = 'on'`); },
+      );
+      await assertPreflightFailureAfterMutation(
+        admin,
+        readerDatabaseConfig,
+        async () => { await admin.query(`GRANT CREATE ON DATABASE "${testDatabaseName}" TO "${readerRole}"`); },
+        async () => { await admin.query(`REVOKE CREATE ON DATABASE "${testDatabaseName}" FROM "${readerRole}"`); },
+      );
+      await assertPreflightFailureAfterMutation(
+        admin,
+        readerDatabaseConfig,
+        async () => { await admin.query(`GRANT CREATE ON SCHEMA public TO "${readerRole}"`); },
+        async () => { await admin.query(`REVOKE CREATE ON SCHEMA public FROM "${readerRole}"`); },
+      );
+
+      const reader = new Client(readerDatabaseConfig);
+      await reader.connect();
+      try {
+        const report = await runOwnershipInventory(readerAdapter(reader));
+        assert.equal(report.ok, true);
+        assert.equal(report.snapshot.readOnly, true);
+        assert.equal(report.snapshot.isolation, "repeatable_read");
+        assert.equal(report.resources.accounts.total, 0);
+        assert.equal(report.resources.aiProvider.total, 0);
+        assert.deepEqual(report.resources.legacyArtifacts, { removedRelations: 0, removedProviderColumns: 0, removedTriggers: 0 });
+
+        await reader.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+        try {
+          await assert.rejects(
+            () => reader.query("INSERT INTO \"AppUser\" (\"id\", \"username\") VALUES (gen_random_uuid(), 'should-fail')"),
+            (error: unknown) => errorCode(error) === "25006" || errorCode(error) === "42501",
+          );
+        } finally {
+          await reader.query("ROLLBACK");
+        }
+      } finally {
+        await reader.end();
+      }
+    } finally {
+      try {
+        await removeReaderRole(admin);
+      } finally {
+        try {
+          if (publicAccessSnapshot !== undefined) await restorePublicAccessSnapshot(admin, publicAccessSnapshot);
+        } finally {
+          await admin.end();
+        }
+      }
+    }
+  },
+);

@@ -72,7 +72,7 @@ function fakeDb() {
   const credentials = new Map<string, ExternalCredential>();
   const attempts = new Map<string, Attempt>();
   const identities = new Map<string, { id: string; userId: string; githubUserId: bigint; login: string; email: string; displayName: string | null; lastLoginAt: Date }>();
-  const users = new Map<string, { id: string; username: string; role: "admin" | "member" | "user"; displayName?: string | null; email?: string | null; emailVerifiedAt?: Date | null; disabledAt: Date | null; accountAccessVersion: number }>();
+  const users = new Map<string, { id: string; username: string; role: "admin" | "user"; displayName?: string | null; email?: string | null; emailVerifiedAt?: Date | null; disabledAt: Date | null; accountAccessVersion: number }>();
   const emailVerificationAudits: Array<Record<string, unknown>> = [];
   const memberships: Array<{
     id: string;
@@ -328,7 +328,7 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     existingEmailStore.users.set("66666666-6666-4666-8666-666666666666", {
       id: "66666666-6666-4666-8666-666666666666",
       username: "existing-member",
-      role: "member",
+      role: "user",
       email: "octocat@github.test",
       disabledAt: null,
       accountAccessVersion: 1,

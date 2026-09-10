@@ -41,7 +41,6 @@ export type WorkspaceProject = {
     items: number;
     snapshots: number;
     repositoryLinks: number;
-    webAiRoutes: number;
     projectAgentRuns: number;
   };
   memoryIndexPointer: { publishedAt: string } | null;

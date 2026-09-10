@@ -56,6 +56,7 @@ import { ProjectMcpActionServiceError } from "@/lib/project-mcp-action-service";
 import { ProjectMcpActionDispatchError } from "@/lib/project-mcp-action-dispatch-service";
 import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-runtime-service";
 import { PlatformProviderProbeServiceError } from "@/lib/platform-provider-probe-service";
+import { PlatformGrantOfferPolicyError } from "@/lib/platform-grant-offer-policy-service";
 
 export type ApiErrorBody = {
   error: {
@@ -757,8 +758,24 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_PROVIDER_CONNECTION_UNAVAILABLE: [409, "模型连接当前不可用，请先完成验证"],
       AI_PROVIDER_CALL_RECONCILIATION_REQUIRED: [409, "上一次模型调用需要先完成账务核对"],
       AI_PLATFORM_TOKEN_USAGE_UNVERIFIED: [409, "模型用量未能验证，需要完成账务核对"],
+      AI_SIGNUP_ELIGIBILITY_REQUIRED: [403, "该注册入口不具备已验证身份资格"],
     } as const;
     const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof PlatformGrantOfferPolicyError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PLATFORM_GRANT_OFFER_POLICY_INVALID_INPUT: [400, "平台赠送策略请求无效"],
+      PLATFORM_GRANT_OFFER_POLICY_ADMIN_REQUIRED: [403, "只有系统管理员可以管理平台赠送策略"],
+      PLATFORM_GRANT_OFFER_POLICY_NOT_FOUND: [404, "平台赠送策略不存在"],
+      PLATFORM_GRANT_OFFER_POLICY_CONFLICT: [409, "平台赠送策略已被其他请求更新，请刷新后重试"],
+      PLATFORM_GRANT_OFFER_POLICY_STALE: [409, "平台赠送策略已变化，请刷新后重试"],
+      PLATFORM_GRANT_OFFER_POLICY_INVALID_TRANSITION: [409, "当前平台赠送策略状态不能执行该操作"],
+      PLATFORM_GRANT_OFFER_POLICY_REASON_REQUIRED: [400, "平台赠送策略变更必须填写原因"],
+      PLATFORM_GRANT_OFFER_POLICY_BOOTSTRAP_CONFLICT: [409, "平台赠送策略已存在，不能重复初始化"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "平台赠送策略处理失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

@@ -576,7 +576,7 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
         });
       }
       if (newlyCreated && invitation === null && emailVerified) {
-        await issueVerifiedSignupGrant(user.id, { issuedById: null, now: new Date() }, tx);
+        await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedOidc", issuedById: null, now: new Date() }, tx);
       }
     }
     if (user.disabledAt !== null) return fail("OIDC_ACCOUNT_DISABLED");

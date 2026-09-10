@@ -29,6 +29,7 @@ import {
 } from "../src/lib/project-assets/vision";
 import { collectProjectMemoryInputs } from "../src/lib/web-memory-index";
 import { createControlledMembership } from "./membership-fixture";
+import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 
 const shouldRun = process.env.PROJECT_ASSET_POSTGRES_GATE === "1";
 
@@ -96,6 +97,7 @@ test(
       const platformAdmin = await db.appUser.create({
         data: { id: randomUUID(), username: `asset_platform_admin_${suffix}`, role: "admin" },
       });
+      await createSignupOfferFixture(db, platformAdmin.id);
       const workspaceId = randomUUID();
       await db.workspace.create({
         data: { id: workspaceId, name: `Asset workspace ${suffix}`, slug: `asset-workspace-${suffix}`, createdById: user.id },
@@ -114,7 +116,7 @@ test(
         startsAt: new Date(membershipNow.getTime() - 60_000),
         expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
-      await issueVerifiedSignupGrant(user.id, { issuedById: platformAdmin.id }, db);
+      await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedGithub", issuedById: platformAdmin.id }, db);
       await db.project.create({ data: { id: projectId, workspaceId, name: `Asset ${suffix}`, slug: `asset-${suffix}` } });
       await db.$transaction((tx) => grantProjectMembership(tx, {
         projectId,

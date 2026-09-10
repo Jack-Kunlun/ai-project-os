@@ -13,6 +13,7 @@ import { finishWebAiJob, stableAiCallKey, auditedProviderCall } from "../src/lib
 import { WebAiAccessError, type WebAiActor } from "../src/lib/web-ai-access";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 import { createConfirmedWebAiJobForPostgresGate } from "./web-ai-confirmation-fixture";
+import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 
 const shouldRun = process.env.WEB_AI_GOVERNANCE_POSTGRES_GATE === "1";
 
@@ -42,13 +43,15 @@ async function createDispatchFixture() {
   const platformAdmin = await db.appUser.create({
     data: { id: randomUUID(), username: `dispatch_admin_${suffix}`, role: "admin" },
   });
+  await createSignupOfferFixture(db, platformAdmin.id);
   await db.workspace.create({ data: { id: workspaceId, name: `Dispatch ${suffix}`, slug: `dispatch-${suffix}`, createdById: userId } });
   await db.project.create({ data: { id: projectId, workspaceId, name: `Dispatch project ${suffix}`, slug: `dispatch-project-${suffix}` } });
   await db.$transaction(async (tx) => {
     await grantWorkspaceMembership(tx, { workspaceId, userId, role: "owner", actorId: userId, reason: "web_ai_governance_fixture_workspace" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId, role: "owner", actorId: userId, reason: "web_ai_governance_fixture_project" });
   });
-  const platformGrant = await issueVerifiedSignupGrant(userId, { issuedById: platformAdmin.id, now }, db);
+  const platformGrant = await issueVerifiedSignupGrant(userId, { eligibilitySource: "verifiedGithub", issuedById: platformAdmin.id, now }, db);
+  if (platformGrant === null) throw new Error("WEB_AI_GOVERNANCE_PLATFORM_GRANT_UNAVAILABLE");
   await db.externalCredential.create({
     data: {
       id: credentialId,

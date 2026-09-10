@@ -22,6 +22,7 @@ import {
   runSemanticSearchJob,
 } from "../src/lib/web-rag";
 import { createControlledMembership } from "./membership-fixture";
+import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 
 const shouldRun = process.env.WEB_AI_POSTGRES_GATE === "1";
 
@@ -103,6 +104,7 @@ test(
       const platformAdmin = await db.appUser.create({
         data: { id: randomUUID(), username: `v2_platform_admin_${suffix}`, role: "admin" },
       });
+      await createSignupOfferFixture(db, platformAdmin.id);
       const workspaceId = randomUUID();
       await db.workspace.create({
         data: { id: workspaceId, name: `V2 workflow workspace ${suffix}`, slug: `v2-workflow-workspace-${suffix}`, createdById: user.id },
@@ -121,7 +123,7 @@ test(
         startsAt: new Date(membershipNow.getTime() - 60_000),
         expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
-      await issueVerifiedSignupGrant(user.id, { issuedById: platformAdmin.id }, db);
+      await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedGithub", issuedById: platformAdmin.id }, db);
 
       await db.project.create({
         data: { id: projectId, workspaceId, name: `V2 workflow ${suffix}`, slug: `v2-workflow-${suffix}` },

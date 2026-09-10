@@ -175,6 +175,15 @@ class FakeEntitlementDb {
     },
   };
 
+  readonly platformGrantOfferPolicy = {
+    findFirst: async () => ({
+      offerVersion: SIGNUP_OFFER_VERSION,
+      amount: SIGNUP_TOKEN_AMOUNT,
+      validForDays: SIGNUP_TOKEN_TTL_DAYS,
+      eligibilityKey: "verified_identity_v1",
+    }),
+  };
+
   readonly platformTokenReservation = {
     findUnique: async ({ where, include }: { where: { userId_callKey: { userId: string; callKey: string } }; include?: { grant: unknown } }) => {
       const reservation = [...this.reservations.values()].find((candidate) => candidate.userId === where.userId_callKey.userId && candidate.callKey === where.userId_callKey.callKey);
@@ -297,8 +306,10 @@ test("signup grant is idempotent and has one auditable ledger entry", async () =
   const fake = new FakeEntitlementDb();
   const userId = randomUUID();
   const now = new Date("2026-09-02T00:00:00.000Z");
-  const first = await issueVerifiedSignupGrant(userId, { now }, fake as never);
-  const second = await issueVerifiedSignupGrant(userId, { now: new Date(now.getTime() + 1_000) }, fake as never);
+  const first = await issueVerifiedSignupGrant(userId, { eligibilitySource: "verifiedGithub", now }, fake as never);
+  const second = await issueVerifiedSignupGrant(userId, { eligibilitySource: "verifiedGithub", now: new Date(now.getTime() + 1_000) }, fake as never);
+  assert.ok(first);
+  assert.ok(second);
   assert.equal(first.id, second.id);
   assert.equal(first.amount, SIGNUP_TOKEN_AMOUNT);
   assert.equal(first.remainingTokens, SIGNUP_TOKEN_AMOUNT);

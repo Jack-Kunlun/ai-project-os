@@ -262,6 +262,19 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.platformProviderProbe,
     resultMap: resultMapping({ applied: ["settled", "released"], pending: ["reserved", "dispatched"], rejected: ["rejected"], unknown: ["held"] }),
   },
+  platformGrantOfferPolicy: {
+    source: "platformGrantOfferPolicy",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.platformGrantOfferPolicy,
+    table: "PlatformGrantOfferPolicyAudit",
+    selectedFields: ["id", "action", "statusBefore", "statusAfter", "offerVersion", "amount", "validForDays", "eligibilityKey", "reasonRecorded", "actorId", "createdAt"],
+    referenceFields: [],
+    actionField: "action",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.platformGrantOfferPolicy,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.platformGrantOfferPolicy),
+    resultField: "action",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.platformGrantOfferPolicy,
+    resultMap: resultMapping({ applied: ["activated"], pending: ["created"], revoked: ["retired"] }),
+  },
 };
 
 export type SystemAuditFilters = Readonly<{
@@ -817,6 +830,21 @@ const platformProviderProbeSelect = {
   createdAt: true,
 } as const;
 
+type PlatformGrantOfferPolicyAuditRow = Prisma.PlatformGrantOfferPolicyAuditGetPayload<{ select: typeof platformGrantOfferPolicyAuditSelect }>;
+const platformGrantOfferPolicyAuditSelect = {
+  id: true,
+  action: true,
+  statusBefore: true,
+  statusAfter: true,
+  offerVersion: true,
+  amount: true,
+  validForDays: true,
+  eligibilityKey: true,
+  reasonRecorded: true,
+  actorId: true,
+  createdAt: true,
+} as const;
+
 type QueryContext = Readonly<{
   db: PrismaClient;
   filters: SystemAuditFilters;
@@ -913,6 +941,27 @@ function sourceWhere(context: QueryContext, source: SystemAuditSource, options: 
           ],
         },
       ];
+    } else where.id = impossible;
+  } else if (filters.result !== undefined && source === "platformGrantOfferPolicy") {
+    if (filters.result === "pending") {
+      if (filters.action !== undefined && filters.action !== "created") where.id = impossible;
+      else {
+        where.action = "created";
+        where.statusAfter = "draft";
+      }
+    } else if (filters.result === "applied") {
+      if (filters.action === undefined) {
+        where.OR = [
+          { action: "created", statusAfter: "active" },
+          { action: "activated" },
+        ];
+      } else if (filters.action === "created") {
+        where.action = "created";
+        where.statusAfter = "active";
+      } else if (filters.action !== "activated") where.id = impossible;
+    } else if (filters.result === "revoked") {
+      if (filters.action !== undefined && filters.action !== "retired") where.id = impossible;
+      else where.action = "retired";
     } else where.id = impossible;
   } else if (filters.result !== undefined) {
     const mappedResults = registry.resultMap[filters.result];
@@ -1314,6 +1363,42 @@ function platformProviderProbeProjection(row: PlatformProviderProbeRow): RawAudi
   });
 }
 
+function platformGrantOfferPolicyResult(action: string, statusAfter: string | null | undefined): SystemAuditResult {
+  if (action === "created" && statusAfter === "draft") return "pending";
+  if (action === "created" && statusAfter === "active") return "applied";
+  if (action === "activated") return "applied";
+  if (action === "retired") return "revoked";
+  return "unknown";
+}
+
+function platformGrantOfferPolicyProjection(row: PlatformGrantOfferPolicyAuditRow): RawAuditEvent {
+  const action = String(row.action);
+  return rawEvent({
+    id: row.id,
+    source: "platformGrantOfferPolicy",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind: "user",
+    subjectId: null,
+    references: safeReferences({ categories: ["platformGrantOfferPolicy"] }),
+    evidence: evidence(
+      { status: row.statusBefore === null ? null : String(row.statusBefore) },
+      {
+        status: String(row.statusAfter),
+        offerVersion: row.offerVersion,
+        amount: row.amount,
+        validForDays: row.validForDays,
+        eligibilityKey: row.eligibilityKey,
+        reasonRecorded: row.reasonRecorded,
+      },
+      {},
+      row.reasonRecorded,
+    ),
+    result: platformGrantOfferPolicyResult(action, String(row.statusAfter)),
+  });
+}
+
 async function fetchPlatform(context: QueryContext): Promise<RawAuditEvent[]> {
   const rows = await context.db.platformDefaultAiRouteAudit.findMany({
     where: sourceWhere(context, "platformDefaultAiRoute", { actorField: "actorId" }) as Prisma.PlatformDefaultAiRouteAuditWhereInput,
@@ -1474,6 +1559,16 @@ async function fetchPlatformProviderProbe(context: QueryContext): Promise<RawAud
   return rows.map(platformProviderProbeProjection);
 }
 
+async function fetchPlatformGrantOfferPolicy(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.platformGrantOfferPolicyAudit.findMany({
+    where: sourceWhere(context, "platformGrantOfferPolicy", { actorField: "actorId" }) as Prisma.PlatformGrantOfferPolicyAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: platformGrantOfferPolicyAuditSelect,
+  });
+  return rows.map(platformGrantOfferPolicyProjection);
+}
+
 async function fetchSource(context: QueryContext, source: SystemAuditSource): Promise<RawAuditEvent[]> {
   switch (source) {
     case "platformDefaultAiRoute": return fetchPlatform(context);
@@ -1492,6 +1587,7 @@ async function fetchSource(context: QueryContext, source: SystemAuditSource): Pr
     case "aiRuntime": return fetchAiRuntime(context);
     case "webAiConfirmation": return fetchWebAiConfirmation(context);
     case "platformProviderProbe": return fetchPlatformProviderProbe(context);
+    case "platformGrantOfferPolicy": return fetchPlatformGrantOfferPolicy(context);
   }
 }
 

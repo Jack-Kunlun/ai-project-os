@@ -1048,6 +1048,12 @@ enum PlatformGrantOfferPolicyStatus {
   retired
 }
 
+enum PlatformGrantOfferPolicyAuditAction {
+  created
+  activated
+  retired
+}
+
 enum PlatformDefaultAiRouteStatus {
   draft
   verified
@@ -4277,6 +4283,9 @@ model AppUser {
   ownedAiProviderConnections   AiProviderConnection[]          @relation("AiProviderConnectionOwner")
   createdPlatformGrantOfferPolicies PlatformGrantOfferPolicy[]  @relation("PlatformGrantOfferPolicyCreatedBy")
   updatedPlatformGrantOfferPolicies PlatformGrantOfferPolicy[]  @relation("PlatformGrantOfferPolicyUpdatedBy")
+  activatedPlatformGrantOfferPolicies PlatformGrantOfferPolicy[] @relation("PlatformGrantOfferPolicyActivatedBy")
+  retiredPlatformGrantOfferPolicies PlatformGrantOfferPolicy[]  @relation("PlatformGrantOfferPolicyRetiredBy")
+  platformGrantOfferPolicyAudits PlatformGrantOfferPolicyAudit[] @relation("PlatformGrantOfferPolicyAuditActor")
   createdPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteCreatedBy")
   updatedPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteUpdatedBy")
   platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[]    @relation("PlatformDefaultAiRouteAuditActor")
@@ -4467,6 +4476,10 @@ model PlatformTokenGrant {
   amount          Int
   remainingTokens Int
   offerVersion    String                 @db.VarChar(64)
+  offerAmount     Int?
+  offerValidForDays Int?
+  eligibilityKey  String?                @db.VarChar(64)
+  eligibilitySource String?              @db.VarChar(32)
   issuedById      String?                @db.Uuid
   issuedAt        DateTime               @default(now())
   expiresAt       DateTime
@@ -5590,12 +5603,43 @@ model PlatformGrantOfferPolicy {
   eligibilityKey String                       @db.VarChar(64)
   createdById String                          @db.Uuid
   updatedById String                          @db.Uuid
+  activatedById String?                       @db.Uuid
+  retiredById String?                          @db.Uuid
+  mutationTransactionId String?                @db.Uuid
   createdAt   DateTime                        @default(now())
   updatedAt   DateTime                        @updatedAt
+  activatedAt DateTime?
+  retiredAt   DateTime?
   createdBy   AppUser                         @relation("PlatformGrantOfferPolicyCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   updatedBy   AppUser                         @relation("PlatformGrantOfferPolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  activatedBy AppUser?                        @relation("PlatformGrantOfferPolicyActivatedBy", fields: [activatedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  retiredBy   AppUser?                        @relation("PlatformGrantOfferPolicyRetiredBy", fields: [retiredById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audits      PlatformGrantOfferPolicyAudit[]
 
   @@index([status, updatedAt])
+}
+
+model PlatformGrantOfferPolicyAudit {
+  id             String                              @id @default(uuid()) @db.Uuid
+  policyId       String                              @db.Uuid
+  action         PlatformGrantOfferPolicyAuditAction
+  statusBefore   PlatformGrantOfferPolicyStatus?
+  statusAfter    PlatformGrantOfferPolicyStatus
+  offerVersion   String                              @db.VarChar(64)
+  amount         Int
+  validForDays   Int
+  eligibilityKey String                              @db.VarChar(64)
+  reasonRecorded Boolean
+  reason         String?                             @db.VarChar(500)
+  actorId        String                              @db.Uuid
+  transactionId  String                              @db.Uuid
+  createdAt      DateTime                            @default(now())
+  policy         PlatformGrantOfferPolicy            @relation(fields: [policyId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor          AppUser                             @relation("PlatformGrantOfferPolicyAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([policyId, createdAt])
+  @@index([actorId, createdAt])
+  @@unique([policyId, transactionId])
 }
 
 model PlatformDefaultAiRoute {

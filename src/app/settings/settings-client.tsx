@@ -5,6 +5,7 @@ import { AppHeader } from "@/components/app-header";
 import { AdminShell } from "@/components/admin-shell";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { PlatformDefaultRoutesPanel } from "./platform-default-routes-client";
+import { PlatformGrantOfferPolicyPanel } from "@/app/admin/models/platform-grant-offer-policy-client";
 
 type ProviderKind = "openai" | "deepseek" | "qwen" | "glm";
 type ProviderCatalogEntry = {
@@ -160,6 +161,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
 
         {canManageProviders ? <ProviderCapabilityMatrix catalog={catalog} /> : null}
         {adminMode ? <PlatformProviderProbeBudgetPanel /> : null}
+        {adminMode ? <PlatformGrantOfferPolicyPanel /> : null}
 
         {canManageProviders ? <section className="mt-8 grid gap-6 lg:grid-cols-[0.72fr_1.28fr]">
           <ProviderCreateForm catalog={catalog} onCreated={handleProviderCreated} />

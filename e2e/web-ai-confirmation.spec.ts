@@ -109,7 +109,8 @@ async function seedPlatformEmbeddingRoute(username: string): Promise<{
     select: { id: true },
   });
   const existingGrant = await db.platformTokenGrant.findUnique({ where: { userId_kind: { userId: admin.id, kind: "signup" } }, select: { id: true } });
-  const grant = await issueVerifiedSignupGrant(admin.id, { issuedById: admin.id, now }, db);
+  const grant = await issueVerifiedSignupGrant(admin.id, { eligibilitySource: "verifiedGithub", issuedById: admin.id, now }, db);
+  if (grant === null) throw new Error("BROWSER_CONFIRMATION_SIGNUP_GRANT_UNAVAILABLE");
   return { providerId, credentialId, routeId: route.id, grantId: existingGrant === null ? grant.id : null };
 }
 

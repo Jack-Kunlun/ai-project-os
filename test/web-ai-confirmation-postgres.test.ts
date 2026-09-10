@@ -30,6 +30,7 @@ import {
   prepareConfirmedWebAiJobForPostgresGate,
   type ConfirmedWebAiJobInput,
 } from "./web-ai-confirmation-fixture";
+import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 
 const databaseUrl = process.env.DATABASE_URL;
 const shouldRun = process.env.WEB_AI_CONFIRMATION_POSTGRES_GATE === "1"
@@ -119,6 +120,7 @@ async function createWebAiServiceFixture(): Promise<WebAiServiceFixture> {
       { id: adminId, username: `web_ai_service_admin_${suffix}`, role: "admin" },
     ],
   });
+  await createSignupOfferFixture(db, adminId);
   await db.workspace.create({
     data: { id: workspaceId, name: `Web AI service ${suffix}`, slug: `web-ai-service-${suffix}`, createdById: actorId },
   });
@@ -129,7 +131,7 @@ async function createWebAiServiceFixture(): Promise<WebAiServiceFixture> {
     await grantWorkspaceMembership(tx, { workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
   });
-  await issueVerifiedSignupGrant(actorId, { issuedById: adminId, now }, db);
+  await issueVerifiedSignupGrant(actorId, { eligibilitySource: "verifiedGithub", issuedById: adminId, now }, db);
   await db.externalCredential.create({
     data: {
       id: credentialId,

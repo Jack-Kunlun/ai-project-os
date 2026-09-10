@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { Client } from "pg";
 import { getDb } from "@/lib/db";
+import { createBootstrapSignupOfferPolicy, createPlatformGrantOfferPolicy } from "@/lib/platform-grant-offer-policy-service";
 import { grantProjectMembership, grantWorkspaceMembership } from "@/lib/membership-governance";
 import { consumeWebAiConfirmation } from "@/lib/web-ai-confirmation";
 import {
@@ -53,6 +54,7 @@ const expectedEnums: Readonly<Record<string, readonly string[]>> = {
   PlatformProviderProbeAttemptStatus: ["rejected", "reserved", "running", "settled", "released", "held"],
   PlatformProviderProbeLedgerEvent: ["rejected", "reserved", "dispatched", "settled", "released", "held"],
   PlatformProviderProbeCapability: ["generation", "embedding", "vision"],
+  PlatformGrantOfferPolicyAuditAction: ["created", "activated", "retired"],
 };
 
 function assertLocalDatabaseUrl(value: string | undefined): string {
@@ -108,7 +110,7 @@ test(
     const page = await listSystemAudit({ pageSize: 50 }, database, new Date());
     assert.equal(page.pageSize, 50);
     assert.ok(page.events.every((event) => SYSTEM_AUDIT_SOURCES.includes(event.source)));
-    assert.equal(SYSTEM_AUDIT_SOURCES.length, 16);
+    assert.equal(SYSTEM_AUDIT_SOURCES.length, 17);
     assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
     assertSafePublicProjection(page);
 
@@ -154,6 +156,11 @@ test(
     await database.appUser.create({
       data: { id: userId, username: `system-audit-${suffix}`, role: "admin" },
     });
+    await database.$transaction((tx) => createBootstrapSignupOfferPolicy(tx, userId));
+    const policyAuditId = (await database.platformGrantOfferPolicyAudit.findFirstOrThrow({
+      where: { action: "created" },
+      select: { id: true },
+    })).id;
     await database.workspace.create({
       data: { id: workspaceId, name: `System audit ${suffix}`, slug: `system-audit-${suffix}` },
     });
@@ -227,6 +234,16 @@ test(
 
     const projectOwnerActor = { id: userId, role: "user" as const, accountAccessVersion: 1 };
     const platformAdminActor = { id: userId, role: "admin" as const, accountAccessVersion: 1 };
+    const draftPolicy = await createPlatformGrantOfferPolicy({
+      offerVersion: `system-audit-draft-${suffix}`,
+      amount: 600_000,
+      validForDays: 45,
+      reason: "system audit draft projection",
+    }, platformAdminActor, database);
+    const draftPolicyAuditId = (await database.platformGrantOfferPolicyAudit.findFirstOrThrow({
+      where: { policyId: draftPolicy.id, action: "created" },
+      select: { id: true },
+    })).id;
     let manualAuditId: string | null = null;
     let manualRecoveryAuditId: string | null = null;
     let approvalAuditId: string | null = null;
@@ -730,6 +747,38 @@ test(
       const detail = await getSystemAuditDetail("webAiConfirmation", pendingChallengeId, database);
       assert.equal(detail.result, "applied");
       assertSafePublicProjection(detail);
+
+      const policyPage = await listSystemAudit({ source: "platformGrantOfferPolicy", pageSize: 50 }, database, now);
+      const policyEvent = policyPage.events.find((event) => event.id === policyAuditId);
+      assert.ok(policyEvent);
+      assert.equal(policyEvent.action, "created");
+      assert.equal(policyEvent.result, "applied");
+      assert.equal(policyEvent.actor.id, userId);
+      assert.equal(policyEvent.evidence.after.offerVersion, "signup-500k-v1");
+      assert.equal(policyEvent.evidence.after.amount, 500000);
+      assert.equal(policyEvent.evidence.reasonRecorded, true);
+      assert.deepEqual(await getSystemAuditDetail("platformGrantOfferPolicy", policyAuditId, database), policyEvent);
+      assertSafePublicProjection(policyEvent);
+
+      const draftPolicyEvent = policyPage.events.find((event) => event.id === draftPolicyAuditId);
+      assert.ok(draftPolicyEvent);
+      assert.equal(draftPolicyEvent.action, "created");
+      assert.equal(draftPolicyEvent.result, "pending");
+      assert.equal(draftPolicyEvent.evidence.after.status, "draft");
+      assert.deepEqual(await getSystemAuditDetail("platformGrantOfferPolicy", draftPolicyAuditId, database), draftPolicyEvent);
+      assertSafePublicProjection(draftPolicyEvent);
+      assert.deepEqual(
+        (await listSystemAudit({ source: "platformGrantOfferPolicy", result: "pending", pageSize: 50 }, database, now)).events.map((event) => event.id),
+        [draftPolicyAuditId],
+      );
+      assert.deepEqual(
+        (await listSystemAudit({ source: "platformGrantOfferPolicy", result: "applied", pageSize: 50 }, database, now)).events.map((event) => event.id),
+        [policyAuditId],
+      );
+      assert.deepEqual(
+        (await listSystemAudit({ source: "platformGrantOfferPolicy", result: "revoked", pageSize: 50 }, database, now)).events,
+        [],
+      );
 
       const invitationAuditRows = await database.workspaceInvitationAudit.findMany({
         where: { workspaceId },

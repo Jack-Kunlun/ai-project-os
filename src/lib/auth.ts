@@ -7,6 +7,7 @@ import { authorizeApiRequest } from "@/lib/access-control";
 import { lockActorAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import { appendWorkspaceMembershipAudit } from "@/lib/membership-governance";
 import { toSystemRole, type SystemRole } from "@/lib/system-role";
+import { createBootstrapSignupOfferPolicy } from "@/lib/platform-grant-offer-policy-service";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
 export const SESSION_LIFETIME_DAYS = 14 as const;
@@ -358,6 +359,7 @@ export async function initializeAdmin(
       actorId: user.id,
       reason: "fresh_application_bootstrap",
     });
+    await createBootstrapSignupOfferPolicy(tx, user.id);
     return createSessionInTransaction(tx, user);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

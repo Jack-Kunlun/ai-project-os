@@ -130,6 +130,7 @@ function makeRows(): Readonly<Record<string, FakeRow[]>> {
       { ...base, id: "60311111-1111-4111-8111-111111111111", projectId: PROJECT_ID, actorId: ADMIN_ID, actorAccountAccessVersion: 1, targetAction: "memoryAnswer", issuedAt: new Date("2026-09-09T01:00:02.000Z"), expiresAt: new Date("2026-09-09T03:00:00.000Z"), consumedAt: at },
     ],
     platformProviderProbe: [{ ...base, id: "6e111111-1111-4111-8111-111111111111", event: "settled", capability: "generation", units: 1, safeErrorCode: null }],
+    platformGrantOfferPolicy: [{ ...base, id: "6f111111-1111-4111-8111-111111111111", action: "created", statusBefore: null, statusAfter: "active", offerVersion: "signup-500k-v1", amount: 500000, validForDays: 30, eligibilityKey: "verified_identity_v1", reasonRecorded: true }],
   };
 }
 
@@ -212,17 +213,18 @@ function fakeDb(
     aiAuditEvent: delegate("aiRuntime", rows.aiAuditEvent, calls),
     webAiConfirmationChallenge: delegate("webAiConfirmation", rows.webAiConfirmationChallenge, calls),
     platformProviderProbeLedger: delegate("platformProviderProbe", rows.platformProviderProbe, calls),
+    platformGrantOfferPolicyAudit: delegate("platformGrantOfferPolicy", rows.platformGrantOfferPolicy, calls),
   } as unknown as PrismaClient;
 }
 
-test("registry covers exactly the sixteen safe control-plane sources", () => {
-  assert.equal(SYSTEM_AUDIT_SOURCES.length, 16);
+test("registry covers exactly the seventeen safe control-plane sources", () => {
+  assert.equal(SYSTEM_AUDIT_SOURCES.length, 17);
   assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
   for (const source of SYSTEM_AUDIT_SOURCES) {
     const registry = SYSTEM_AUDIT_REGISTRY[source];
     assert.ok(registry.selectedFields.includes("id"));
     assert.ok(registry.selectedFields.includes("createdAt") || registry.selectedFields.includes("issuedAt"));
-    if (source === "platformProviderProbe") assert.deepEqual(registry.referenceFields, []);
+    if (source === "platformProviderProbe" || source === "platformGrantOfferPolicy") assert.deepEqual(registry.referenceFields, []);
     else assert.ok(registry.referenceFields.length > 0);
     assert.deepEqual(Object.keys(registry.actionMap).sort(), [...registry.allowedActions].sort());
     for (const field of registry.selectedFields) assert.doesNotMatch(field, /fingerprint|token/iu, `${source}.${field}`);
@@ -343,6 +345,46 @@ test("new audit adapters preserve source-specific results and safe principals", 
   assert.equal(probe[0]?.result, "applied");
   assert.deepEqual(probe[0]?.references, { categories: "platformProviderProbe" });
   assert.equal(probe[0]?.evidence.safeErrorCode, null);
+
+  const policy = (await listSystemAudit({ source: "platformGrantOfferPolicy", pageSize: 50 }, db, now)).events;
+  assert.equal(policy.length, 1);
+  assert.equal(policy[0]?.action, "created");
+  assert.equal(policy[0]?.result, "applied");
+  assert.equal(policy[0]?.evidence.after.offerVersion, "signup-500k-v1");
+  assert.equal(policy[0]?.evidence.after.amount, 500000);
+  assert.equal(policy[0]?.evidence.reasonRecorded, true);
+});
+
+test("platform grant offer created result follows the resulting policy status", async () => {
+  const baseRows = makeRows();
+  const basePolicy = baseRows.platformGrantOfferPolicy[0]!;
+  const rows = {
+    ...baseRows,
+    platformGrantOfferPolicy: [
+      { ...basePolicy, id: "6f211111-1111-4111-8111-111111111111", action: "created", statusBefore: null, statusAfter: "draft" },
+      { ...basePolicy, id: "6f311111-1111-4111-8111-111111111111", action: "created", statusBefore: null, statusAfter: "active" },
+      { ...basePolicy, id: "6f411111-1111-4111-8111-111111111111", action: "activated", statusBefore: "draft", statusAfter: "active" },
+      { ...basePolicy, id: "6f511111-1111-4111-8111-111111111111", action: "retired", statusBefore: "active", statusAfter: "retired" },
+      { ...basePolicy, id: "6f611111-1111-4111-8111-111111111111", action: "unrecognized", statusBefore: null, statusAfter: "draft" },
+    ],
+  };
+  const db = fakeDb(rows);
+  const events = (await listSystemAudit({ source: "platformGrantOfferPolicy", pageSize: 50 }, db, new Date("2026-09-09T02:00:00.000Z"))).events;
+  assert.deepEqual(new Map(events.map((event) => [event.id, event.result])), new Map([
+    ["6f211111-1111-4111-8111-111111111111", "pending"],
+    ["6f311111-1111-4111-8111-111111111111", "applied"],
+    ["6f411111-1111-4111-8111-111111111111", "applied"],
+    ["6f511111-1111-4111-8111-111111111111", "revoked"],
+    ["6f611111-1111-4111-8111-111111111111", "unknown"],
+  ]));
+  const pending = await listSystemAudit({ source: "platformGrantOfferPolicy", result: "pending", pageSize: 50 }, db, new Date("2026-09-09T02:00:00.000Z"));
+  assert.deepEqual(pending.events.map((event) => event.id), ["6f211111-1111-4111-8111-111111111111"]);
+  const applied = await listSystemAudit({ source: "platformGrantOfferPolicy", result: "applied", pageSize: 50 }, db, new Date("2026-09-09T02:00:00.000Z"));
+  assert.deepEqual(applied.events.map((event) => event.id), ["6f411111-1111-4111-8111-111111111111", "6f311111-1111-4111-8111-111111111111"]);
+  const revoked = await listSystemAudit({ source: "platformGrantOfferPolicy", result: "revoked", pageSize: 50 }, db, new Date("2026-09-09T02:00:00.000Z"));
+  assert.deepEqual(revoked.events.map((event) => event.id), ["6f511111-1111-4111-8111-111111111111"]);
+  assert.deepEqual((await listSystemAudit({ source: "platformGrantOfferPolicy", action: "created", result: "revoked", pageSize: 50 }, db, new Date("2026-09-09T02:00:00.000Z"))).events, []);
+  assert.deepEqual((await listSystemAudit({ source: "platformGrantOfferPolicy", action: "retired", result: "pending", pageSize: 50 }, db, new Date("2026-09-09T02:00:00.000Z"))).events, []);
 });
 
 test("workspace invitation results follow audit actions rather than status text", async () => {
@@ -406,6 +448,7 @@ test("new audit adapter details reuse the exact safe list projection", async () 
     ["aiRuntime", "5f111111-1111-4111-8111-111111111111"],
     ["webAiConfirmation", "60311111-1111-4111-8111-111111111111"],
     ["platformProviderProbe", "6e111111-1111-4111-8111-111111111111"],
+    ["platformGrantOfferPolicy", "6f111111-1111-4111-8111-111111111111"],
   ] as const;
   for (const [source, id] of cases) {
     const listed = (await listSystemAudit({ source, pageSize: 50 }, db, now)).events.find((event) => event.id === id);
@@ -468,7 +511,7 @@ test("actor and subject lookups accept only exact UUID or unique username", asyn
   const db = fakeDb(rows, "admin", calls);
   const now = new Date("2026-09-09T02:00:00.000Z");
   const byUsername = await listSystemAudit({ actor: "admin", pageSize: 50 }, db, now);
-  assert.equal(byUsername.events.length, 19);
+  assert.equal(byUsername.events.length, 20);
   const byDisplayName = await listSystemAudit({ actor: "平台管理员", pageSize: 50 }, db, now);
   assert.deepEqual(byDisplayName.events, []);
 });

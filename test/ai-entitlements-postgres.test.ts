@@ -16,6 +16,7 @@ import {
   settlePlatformTokenReservation,
 } from "../src/lib/ai-entitlements";
 import { getDb } from "../src/lib/db";
+import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 
 const shouldRun = process.env.AI_ENTITLEMENTS_POSTGRES_GATE === "1";
 
@@ -45,12 +46,15 @@ test("AI entitlements enforce signup-compatible scope and project cleanup retent
         { id: ownerId, username: `entitlement_owner_${suffix}`, role: "user" },
       ],
     });
+    await createSignupOfferFixture(db, adminId);
     await db.workspace.create({ data: { id: workspaceId, name: `Entitlements ${suffix}`, slug: `entitlements-${suffix}`, createdById: adminId } });
     // Exercise the actual serializable signup grant and billing ledger path,
     // including the retry/idempotency boundary used by verified auth flows.
     const entitlementNow = new Date("2026-09-02T00:00:00.000Z");
-    const signupGrant = await issueVerifiedSignupGrant(ownerId, { now: entitlementNow }, db);
-    const signupReplay = await issueVerifiedSignupGrant(ownerId, { now: new Date(entitlementNow.getTime() + 1_000) }, db);
+    const signupGrant = await issueVerifiedSignupGrant(ownerId, { eligibilitySource: "verifiedGithub", now: entitlementNow }, db);
+    const signupReplay = await issueVerifiedSignupGrant(ownerId, { eligibilitySource: "verifiedGithub", now: new Date(entitlementNow.getTime() + 1_000) }, db);
+    assert.ok(signupGrant);
+    assert.ok(signupReplay);
     assert.equal(signupReplay.id, signupGrant.id);
     assert.equal(signupReplay.amount, 500_000);
     const signupLedger = await db.platformTokenLedgerEntry.findUnique({ where: { idempotencyKey: `grant:signup:${ownerId}` }, select: { id: true, amount: true } });

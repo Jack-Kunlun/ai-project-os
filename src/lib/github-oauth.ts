@@ -423,7 +423,7 @@ export async function completeGitHubOAuth(
         data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "member", accessState: "confirmed" },
       });
       await appendWorkspaceMembershipAudit(tx, workspaceMembership, { action: "confirmed", previousState: null, actorId: user.id, reason: "github_oauth_membership_created" });
-      await issueVerifiedSignupGrant(user.id, { issuedById: null, now }, tx);
+      await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedGithub", issuedById: null, now }, tx);
       identity = await tx.gitHubIdentity.create({
         data: { userId: user.id, ...profile, lastLoginAt: now },
         include: { user: true },

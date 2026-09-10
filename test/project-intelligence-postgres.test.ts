@@ -30,6 +30,7 @@ import {
   runProjectBriefJob,
 } from "../src/lib/web-project-intelligence";
 import { createControlledMembership } from "./membership-fixture";
+import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 
 const shouldRun = process.env.PROJECT_INTELLIGENCE_POSTGRES_GATE === "1";
 
@@ -137,6 +138,7 @@ test(
       const platformAdmin = await db.appUser.create({
         data: { id: randomUUID(), username: `v2_1_platform_admin_${suffix}`, role: "admin" },
       });
+      await createSignupOfferFixture(db, platformAdmin.id);
       const workspaceId = randomUUID();
       await db.workspace.create({
         data: { id: workspaceId, name: `Intelligence workspace ${suffix}`, slug: `intelligence-workspace-${suffix}`, createdById: user.id },
@@ -155,7 +157,7 @@ test(
         startsAt: new Date(membershipNow.getTime() - 60_000),
         expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
-      await issueVerifiedSignupGrant(user.id, { issuedById: platformAdmin.id }, db);
+      await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedGithub", issuedById: platformAdmin.id }, db);
 
       await db.project.create({
         data: { id: projectId, workspaceId, name: `Intelligence ${suffix}`, slug: `intelligence-${suffix}` },

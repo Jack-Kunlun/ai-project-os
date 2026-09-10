@@ -142,6 +142,9 @@ function fakeDb() {
         return grant;
       },
     },
+    platformGrantOfferPolicy: {
+      findFirst: async () => ({ offerVersion: "signup-500k-v1", amount: 500_000, validForDays: 30, eligibilityKey: "verified_identity_v1" }),
+    },
     platformTokenLedgerEntry: {
       createMany: async ({ data, skipDuplicates }: { data: Omit<PlatformTokenLedgerEntryRecord, "createdAt"> | Array<Omit<PlatformTokenLedgerEntryRecord, "createdAt">>; skipDuplicates?: boolean }) => {
         const rows = Array.isArray(data) ? data : [data];
@@ -156,6 +159,11 @@ function fakeDb() {
           count += 1;
         }
         return { count };
+      },
+      create: async ({ data }: { data: PlatformTokenLedgerEntryRecord }) => {
+        if ([...platformTokenLedgerEntries.values()].some((entry) => entry.idempotencyKey === data.idempotencyKey)) throw new Error("FAKE_PLATFORM_TOKEN_LEDGER_UNIQUE");
+        platformTokenLedgerEntries.set(data.id, data);
+        return data;
       },
     },
     appSession: {

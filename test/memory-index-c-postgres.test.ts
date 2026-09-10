@@ -32,6 +32,7 @@ import {
   runProjectMemoryIndexJob,
 } from "../src/lib/web-memory-index";
 import type { WebAiActor } from "../src/lib/web-ai-access";
+import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 import { createControlledMembership } from "./membership-fixture";
 
 const execFile = promisify(execFileCallback);
@@ -347,6 +348,7 @@ test(
           role: "admin",
         },
       });
+      await createSignupOfferFixture(db, adminId);
       await db.workspace.create({
         data: { id: workspaceId, name: `Memory index C workspace ${randomUUID().slice(0, 8)}`, slug: `memory-index-c-workspace-${randomUUID()}`, createdById: userId },
       });
@@ -364,7 +366,7 @@ test(
         startsAt: new Date(membershipNow.getTime() - 60_000),
         expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
-      await issueVerifiedSignupGrant(userId, { issuedById: adminId }, db);
+      await issueVerifiedSignupGrant(userId, { eligibilitySource: "verifiedGithub", issuedById: adminId }, db);
       await db.project.createMany({
         data: [
           { id: projectId, workspaceId, name: "Memory index C", slug: `memory-index-c-${randomUUID()}` },

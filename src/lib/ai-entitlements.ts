@@ -8,11 +8,18 @@ import {
 } from "@prisma/client";
 import { getDb } from "@/lib/db";
 import type { EffectiveAiRoute } from "@/lib/effective-ai-route";
+import {
+  issueVerifiedSignupGrantFromActivePolicy,
+  PLATFORM_GRANT_OFFER_DEFAULT_AMOUNT,
+  PLATFORM_GRANT_OFFER_DEFAULT_VALID_FOR_DAYS,
+  PLATFORM_GRANT_OFFER_DEFAULT_VERSION,
+  type SignupEligibilitySource,
+} from "@/lib/platform-grant-offer-policy-service";
 
-/** The signup offer is a product constant, not a value supplied by a client. */
-export const SIGNUP_TOKEN_AMOUNT = 500_000;
-export const SIGNUP_TOKEN_TTL_DAYS = 30;
-export const SIGNUP_OFFER_VERSION = "signup-500k-v1";
+/** Compatibility aliases; issuance reads the active policy, never these values. */
+export const SIGNUP_TOKEN_AMOUNT = PLATFORM_GRANT_OFFER_DEFAULT_AMOUNT;
+export const SIGNUP_TOKEN_TTL_DAYS = PLATFORM_GRANT_OFFER_DEFAULT_VALID_FOR_DAYS;
+export const SIGNUP_OFFER_VERSION = PLATFORM_GRANT_OFFER_DEFAULT_VERSION;
 
 const LEDGER_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
 const RESERVATION_TTL_MS = 60 * 60 * 1_000;
@@ -34,7 +41,8 @@ export type AiEntitlementErrorCode =
   | "AI_MODEL_CAPABILITY_MISMATCH"
   | "AI_PROVIDER_CONNECTION_UNAVAILABLE"
   | "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED"
-  | "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED";
+  | "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED"
+  | "AI_SIGNUP_ELIGIBILITY_REQUIRED";
 
 export class AiEntitlementError extends Error {
   constructor(readonly code: AiEntitlementErrorCode) {
@@ -161,74 +169,16 @@ export async function assertActiveMembership(
   if (status.status !== "active") return fail("AI_MEMBERSHIP_EXPIRED");
 }
 
-/**
- * Issue the verified-identity signup grant from inside the identity creation
- * transaction. The user/kind ledger key makes retries and concurrent
- * callbacks idempotent; no caller should invoke this for invitations or local
- * members.
- */
-async function issueVerifiedSignupGrantInTransaction(
-  userId: string,
-  options: Readonly<{ issuedById?: string | null; now?: Date }>,
-  db: EntitlementDb,
-) {
-  const now = options.now ?? new Date();
-  const existing = await db.platformTokenGrant.findUnique({
-    where: { userId_kind: { userId, kind: "signup" } },
-  });
-  if (existing !== null) return existing;
-
-  const expiresAt = new Date(now.getTime() + SIGNUP_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1_000);
-  // `skipDuplicates` turns a concurrent callback into the same idempotent
-  // result without raising a unique violation inside the surrounding login
-  // transaction (which must remain usable for session creation).
-  const grantId = randomUUID();
-  const inserted = await db.platformTokenGrant.createMany({
-    data: {
-      id: grantId,
-      userId,
-      kind: "signup",
-      amount: SIGNUP_TOKEN_AMOUNT,
-      remainingTokens: SIGNUP_TOKEN_AMOUNT,
-      offerVersion: SIGNUP_OFFER_VERSION,
-      issuedById: options.issuedById ?? null,
-      issuedAt: now,
-      expiresAt,
-    },
-    skipDuplicates: true,
-  });
-  if (inserted.count === 1) {
-    await db.platformTokenLedgerEntry.createMany({
-      data: {
-        id: randomUUID(),
-        userId,
-        grantId,
-        entryKind: "grant",
-        amount: SIGNUP_TOKEN_AMOUNT,
-        reasonCode: "AI_SIGNUP_GRANT",
-        callKey: null,
-        idempotencyKey: `grant:signup:${userId}`,
-        metadata: { offerVersion: SIGNUP_OFFER_VERSION },
-        createdAt: now,
-      },
-      skipDuplicates: true,
-    });
-  }
-  return db.platformTokenGrant.findUniqueOrThrow({
-    where: { userId_kind: { userId, kind: "signup" } },
-  });
-}
-
 export async function issueVerifiedSignupGrant(
   userId: string,
-  options: Readonly<{ issuedById?: string | null; now?: Date }> = {},
+  options: Readonly<{ eligibilitySource?: SignupEligibilitySource; issuedById?: string | null; now?: Date }> = {},
   db: EntitlementDb = getDb(),
 ) {
-  // Auth callbacks pass a transaction client and therefore stay inside the
-  // surrounding serializable identity-creation transaction. Direct callers
-  // get the same isolation guarantee instead of relying on the unique index
-  // alone for concurrent first-login callbacks.
-  return serializable(db, (tx) => issueVerifiedSignupGrantInTransaction(userId, options, tx));
+  if (options.eligibilitySource === undefined) return fail("AI_SIGNUP_ELIGIBILITY_REQUIRED");
+  return issueVerifiedSignupGrantFromActivePolicy(userId, options.eligibilitySource, {
+    issuedById: options.issuedById,
+    now: options.now,
+  }, db);
 }
 
 export type PlatformTokenReservationResult = Readonly<{

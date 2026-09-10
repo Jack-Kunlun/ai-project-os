@@ -25,9 +25,9 @@ import {
   disableProviderConnection,
   listProviderConnections,
   ProviderServiceError,
-  testPlatformProviderConnection,
   updateProviderConnection,
 } from "../src/lib/ai-providers";
+import { runPlatformProviderProbe } from "../src/lib/platform-provider-probe-service";
 import { isSerializationConflict } from "../src/lib/project-snapshot-errors";
 
 const admin = { id: "11111111-1111-4111-8111-111111111111", role: "admin", accountAccessVersion: 1 } as const;
@@ -323,7 +323,7 @@ test("platform provider services fail before provider or credential access for n
     () => updateProviderConnection(providerId, {}, member, fake as unknown as PrismaClient),
     () => disableProviderConnection(providerId, member, fake as unknown as PrismaClient),
     () => deleteProviderConnection(providerId, {}, member, fake as unknown as PrismaClient),
-    () => testPlatformProviderConnection(providerId, member, fake as unknown as PrismaClient),
+    () => runPlatformProviderProbe(providerId, member, { clientRequestKey: "55555555-5555-4555-8555-555555555555", expectedConfigurationVersion: 1 }, fake as unknown as PrismaClient),
   ];
   for (const operation of operations) {
     await assert.rejects(
@@ -367,10 +367,11 @@ test("platform provider services reject an administrator actor from a prior acco
 });
 
 test("platform provider routes retain the authenticated actor through every mutation and probe", async () => {
-  const [collectionRoute, itemRoute, testRoute] = await Promise.all([
+  const [collectionRoute, itemRoute, testRoute, providerService] = await Promise.all([
     readFile("src/app/api/settings/providers/route.ts", "utf8"),
     readFile("src/app/api/settings/providers/[providerId]/route.ts", "utf8"),
     readFile("src/app/api/settings/providers/[providerId]/test/route.ts", "utf8"),
+    readFile("src/lib/ai-providers/service.ts", "utf8"),
   ]);
   assert.equal(collectionRoute.match(/const actor = await requireApiSession\(request\)/gu)?.length, 2);
   assert.match(collectionRoute, /listProviderConnections\(actor\)/u);
@@ -378,7 +379,8 @@ test("platform provider routes retain the authenticated actor through every muta
   assert.equal(itemRoute.match(/const actor = await requireApiSession\(request\)/gu)?.length, 2);
   assert.match(itemRoute, /await readJsonBody\(request\),\s*actor,/u);
   assert.match(testRoute, /const actor = await requireApiSession\(request\)/u);
-  assert.match(testRoute, /testPlatformProviderConnection\(providerId, actor\)/u);
+  assert.match(testRoute, /runPlatformProviderProbe\(providerId, actor,/u);
+  assert.doesNotMatch(providerService, /testPlatformProviderConnection/u);
 });
 
 test("platform default routes reject an administrator actor from a prior account epoch", async () => {

@@ -55,6 +55,7 @@ import { ProjectMcpToolGrantServiceError } from "@/lib/project-mcp-tool-grant-se
 import { ProjectMcpActionServiceError } from "@/lib/project-mcp-action-service";
 import { ProjectMcpActionDispatchError } from "@/lib/project-mcp-action-dispatch-service";
 import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-runtime-service";
+import { PlatformProviderProbeServiceError } from "@/lib/platform-provider-probe-service";
 
 export type ApiErrorBody = {
   error: {
@@ -560,6 +561,35 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_PROVIDER_CONFLICT: [409, "供应商连接已被其他操作更新，请刷新后重试"],
     } as const;
     const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof PlatformProviderProbeServiceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PLATFORM_PROVIDER_PROBE_INVALID_INPUT: [400, "平台连接探测请求无效"],
+      PLATFORM_PROVIDER_PROBE_ADMIN_REQUIRED: [403, "只有系统管理员可以执行平台连接探测"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_NOT_FOUND: [404, "平台供应商连接不存在"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_DISABLED: [409, "平台供应商连接已停用"],
+      PLATFORM_PROVIDER_PROBE_CANONICAL_ENDPOINT_REQUIRED: [409, "平台供应商地址或协议未通过安全校验"],
+      PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT: [409, "平台供应商配置已变化，请刷新后重试"],
+      PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED: [409, "尚未启用平台连接探测预算"],
+      PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED: [409, "平台连接探测预算不足"],
+      PLATFORM_PROVIDER_PROBE_IDEMPOTENCY_CONFLICT: [409, "请求标识已用于不同的探测请求"],
+      PLATFORM_PROVIDER_PROBE_IN_PROGRESS: [409, "平台连接探测正在进行中"],
+      PLATFORM_PROVIDER_PROBE_RECONCILIATION_REQUIRED: [409, "上一次平台连接探测需要人工核对，不能自动重试"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_UNAVAILABLE: [502, "平台供应商当前不可用"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_AUTH_FAILED: [422, "平台供应商凭据无效或权限不足"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_RATE_LIMITED: [429, "平台供应商请求频率受限"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_REJECTED: [422, "平台供应商拒绝了探测请求"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_INVALID_RESPONSE: [502, "平台供应商返回了无法验证的响应"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_RESPONSE_TOO_LARGE: [413, "平台供应商响应超过安全上限"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_TIMEOUT: [504, "平台供应商连接超时"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_EMBEDDING_UNSUPPORTED: [422, "平台供应商不支持向量探测"],
+      PLATFORM_PROVIDER_PROBE_PROVIDER_VISION_UNSUPPORTED: [422, "平台供应商不支持图片探测"],
+      PLATFORM_PROVIDER_PROBE_RECONCILED_NO_DISPATCH: [409, "平台连接探测已安全收口，请重新发起"],
+      PLATFORM_PROVIDER_PROBE_RECONCILIATION_HOLD: [409, "平台连接探测需要人工核对，不能自动重试"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "平台连接探测失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

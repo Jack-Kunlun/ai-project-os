@@ -14,6 +14,7 @@ export const SYSTEM_AUDIT_SOURCES = [
   "projectMcpActionRuntime",
   "aiRuntime",
   "webAiConfirmation",
+  "platformProviderProbe",
 ] as const;
 
 export type SystemAuditSource = (typeof SYSTEM_AUDIT_SOURCES)[number];
@@ -34,6 +35,7 @@ export const SYSTEM_AUDIT_SOURCE_LABELS: Readonly<Record<SystemAuditSource, stri
   projectMcpActionRuntime: "项目 MCP 动作运行",
   aiRuntime: "AI 运行时",
   webAiConfirmation: "Web AI 确认",
+  platformProviderProbe: "平台连接探测",
 };
 
 export const SYSTEM_AUDIT_ACTIONS = [
@@ -98,6 +100,9 @@ export const SYSTEM_AUDIT_ACTIONS = [
   "assetRecognize",
   "intelligenceBrief",
   "intelligenceAgent",
+  "settled",
+  "released",
+  "held",
 ] as const;
 
 export type SystemAuditAction = (typeof SYSTEM_AUDIT_ACTIONS)[number];
@@ -138,6 +143,9 @@ export const SYSTEM_AUDIT_ACTION_LABELS: Readonly<Record<SystemAuditAction, stri
   approved: "批准",
   cancelled: "已取消",
   reserved: "预留",
+  settled: "已结算",
+  released: "已释放",
+  held: "待人工核对",
   invalidated: "已失效",
   policyCreated: "创建策略",
   policyAdvanced: "推进策略",
@@ -227,6 +235,7 @@ export const SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE: Readonly<Record<SystemAudit
   projectMcpActionRuntime: ["reserved", "succeeded", "failed", "unknown", "expired", "invalidated"],
   aiRuntime: ["policyCreated", "policyAdvanced", "grantIssued", "grantRevoked", "preflightRejected", "scannerRejected", "budgetRejected", "runCreated", "runClaimed", "dispatchSent", "runSucceeded", "runFailed", "runUnknown", "runCancelled", "attemptSucceeded", "attemptFailed", "attemptUnknown", "attemptCancelled"],
   webAiConfirmation: ["memoryExtract", "memoryIndex", "memorySearch", "memoryAnswer", "assetRecognize", "intelligenceBrief", "intelligenceAgent"],
+  platformProviderProbe: ["reserved", "dispatched", "settled", "released", "held", "rejected"],
 };
 
 export const SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE: Readonly<Record<SystemAuditSource, readonly SystemAuditResult[]>> = {
@@ -245,4 +254,5 @@ export const SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE: Readonly<Record<SystemAudit
   projectMcpActionRuntime: ["applied", "pending", "failed", "unknown", "expired", "invalidated"],
   aiRuntime: ["applied", "pending", "rejected", "revoked", "failed", "cancelled", "unknown"],
   webAiConfirmation: ["applied", "pending", "expired"],
+  platformProviderProbe: ["applied", "pending", "rejected", "unknown"],
 };

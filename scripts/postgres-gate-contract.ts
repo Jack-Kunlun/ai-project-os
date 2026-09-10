@@ -52,6 +52,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "project-mcp-grant-retention", file: "test/project-mcp-grant-retention-postgres.test.ts", database: "ai_project_os_project_mcp_grant_retention_test", gateEnv: "PROJECT_MCP_GRANT_RETENTION_POSTGRES_GATE", setup: "migrate" },
   { id: "project-mcp-tool-grant", file: "test/project-mcp-tool-grant-postgres.test.ts", database: "ai_project_os_project_mcp_tool_grant_test", gateEnv: "PROJECT_MCP_TOOL_GRANT_POSTGRES_GATE", setup: "migrate" },
   { id: "system-audit", file: "test/system-audit-postgres.test.ts", database: "ai_project_os_system_audit_test", gateEnv: "SYSTEM_AUDIT_POSTGRES_GATE", setup: "migrate" },
+  { id: "platform-provider-probe", file: "test/platform-provider-probe-postgres.test.ts", database: "ai_project_os_platform_provider_probe_test", gateEnv: "PLATFORM_PROVIDER_PROBE_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
   { id: "project-mcp-action", file: "test/project-mcp-action-postgres.test.ts", database: "ai_project_os_project_mcp_action_test", gateEnv: "PROJECT_MCP_ACTION_POSTGRES_GATE", setup: "migrate" },
   { id: "project-mcp-action-dispatch", file: "test/project-mcp-action-dispatch-postgres.test.ts", database: "ai_project_os_project_mcp_action_dispatch_test", gateEnv: "PROJECT_MCP_ACTION_DISPATCH_POSTGRES_GATE", setup: "migrate" },
   { id: "project-plan", file: "test/project-plan-postgres.test.ts", database: "ai_project_os_project_plan_test", gateEnv: "PROJECT_PLAN_POSTGRES_GATE", setup: "migrate" },

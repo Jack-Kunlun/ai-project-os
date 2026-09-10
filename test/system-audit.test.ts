@@ -129,6 +129,7 @@ function makeRows(): Readonly<Record<string, FakeRow[]>> {
       { ...base, id: "60211111-1111-4111-8111-111111111111", projectId: PROJECT_ID, actorId: ADMIN_ID, actorAccountAccessVersion: 1, targetAction: "memorySearch", issuedAt: new Date("2026-09-09T01:00:01.000Z"), expiresAt: new Date("2026-09-09T03:00:00.000Z"), consumedAt: null },
       { ...base, id: "60311111-1111-4111-8111-111111111111", projectId: PROJECT_ID, actorId: ADMIN_ID, actorAccountAccessVersion: 1, targetAction: "memoryAnswer", issuedAt: new Date("2026-09-09T01:00:02.000Z"), expiresAt: new Date("2026-09-09T03:00:00.000Z"), consumedAt: at },
     ],
+    platformProviderProbe: [{ ...base, id: "6e111111-1111-4111-8111-111111111111", event: "settled", capability: "generation", units: 1, safeErrorCode: null }],
   };
 }
 
@@ -210,17 +211,19 @@ function fakeDb(
     projectMcpActionRuntimeLedger: delegate("projectMcpActionRuntime", rows.projectMcpActionRuntimeLedger, calls),
     aiAuditEvent: delegate("aiRuntime", rows.aiAuditEvent, calls),
     webAiConfirmationChallenge: delegate("webAiConfirmation", rows.webAiConfirmationChallenge, calls),
+    platformProviderProbeLedger: delegate("platformProviderProbe", rows.platformProviderProbe, calls),
   } as unknown as PrismaClient;
 }
 
-test("registry covers exactly the fifteen safe control-plane sources", () => {
-  assert.equal(SYSTEM_AUDIT_SOURCES.length, 15);
+test("registry covers exactly the sixteen safe control-plane sources", () => {
+  assert.equal(SYSTEM_AUDIT_SOURCES.length, 16);
   assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
   for (const source of SYSTEM_AUDIT_SOURCES) {
     const registry = SYSTEM_AUDIT_REGISTRY[source];
     assert.ok(registry.selectedFields.includes("id"));
     assert.ok(registry.selectedFields.includes("createdAt") || registry.selectedFields.includes("issuedAt"));
-    assert.ok(registry.referenceFields.length > 0);
+    if (source === "platformProviderProbe") assert.deepEqual(registry.referenceFields, []);
+    else assert.ok(registry.referenceFields.length > 0);
     assert.deepEqual(Object.keys(registry.actionMap).sort(), [...registry.allowedActions].sort());
     for (const field of registry.selectedFields) assert.doesNotMatch(field, /fingerprint|token/iu, `${source}.${field}`);
     for (const action of registry.allowedActions) assert.ok(SYSTEM_AUDIT_ACTIONS.includes(action as (typeof SYSTEM_AUDIT_ACTIONS)[number]));
@@ -334,6 +337,12 @@ test("new audit adapters preserve source-specific results and safe principals", 
   assert.deepEqual((await listSystemAudit({ source: "webAiConfirmation", result: "expired", pageSize: 50 }, db, now)).events.map((event) => event.id), ["60111111-1111-4111-8111-111111111111"]);
   assert.deepEqual((await listSystemAudit({ source: "webAiConfirmation", result: "pending", pageSize: 50 }, db, now)).events.map((event) => event.id), ["60211111-1111-4111-8111-111111111111"]);
   assert.deepEqual((await listSystemAudit({ source: "webAiConfirmation", result: "applied", pageSize: 50 }, db, now)).events.map((event) => event.id), ["60311111-1111-4111-8111-111111111111"]);
+
+  const probe = (await listSystemAudit({ source: "platformProviderProbe", pageSize: 50 }, db, now)).events;
+  assert.equal(probe.length, 1);
+  assert.equal(probe[0]?.result, "applied");
+  assert.deepEqual(probe[0]?.references, { categories: "platformProviderProbe" });
+  assert.equal(probe[0]?.evidence.safeErrorCode, null);
 });
 
 test("workspace invitation results follow audit actions rather than status text", async () => {
@@ -396,6 +405,7 @@ test("new audit adapter details reuse the exact safe list projection", async () 
     ["projectMcpActionRuntime", "5e111111-1111-4111-8111-111111111111"],
     ["aiRuntime", "5f111111-1111-4111-8111-111111111111"],
     ["webAiConfirmation", "60311111-1111-4111-8111-111111111111"],
+    ["platformProviderProbe", "6e111111-1111-4111-8111-111111111111"],
   ] as const;
   for (const [source, id] of cases) {
     const listed = (await listSystemAudit({ source, pageSize: 50 }, db, now)).events.find((event) => event.id === id);
@@ -458,7 +468,7 @@ test("actor and subject lookups accept only exact UUID or unique username", asyn
   const db = fakeDb(rows, "admin", calls);
   const now = new Date("2026-09-09T02:00:00.000Z");
   const byUsername = await listSystemAudit({ actor: "admin", pageSize: 50 }, db, now);
-  assert.equal(byUsername.events.length, 18);
+  assert.equal(byUsername.events.length, 19);
   const byDisplayName = await listSystemAudit({ actor: "平台管理员", pageSize: 50 }, db, now);
   assert.deepEqual(byDisplayName.events, []);
 });

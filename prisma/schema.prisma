@@ -433,6 +433,36 @@ enum AiProviderConnectionStatus {
   disabled
 }
 
+enum PlatformProviderProbeBudgetStatus {
+  draft
+  active
+  retired
+}
+
+enum PlatformProviderProbeAttemptStatus {
+  rejected
+  reserved
+  running
+  settled
+  released
+  held
+}
+
+enum PlatformProviderProbeLedgerEvent {
+  rejected
+  reserved
+  dispatched
+  settled
+  released
+  held
+}
+
+enum PlatformProviderProbeCapability {
+  generation
+  embedding
+  vision
+}
+
 enum AiBillingMode {
   platform
   byok
@@ -4250,6 +4280,11 @@ model AppUser {
   createdPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteCreatedBy")
   updatedPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteUpdatedBy")
   platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[]    @relation("PlatformDefaultAiRouteAuditActor")
+  createdPlatformProviderProbeBudgets PlatformProviderProbeBudget[] @relation("PlatformProviderProbeBudgetCreatedBy")
+  activatedPlatformProviderProbeBudgets PlatformProviderProbeBudget[] @relation("PlatformProviderProbeBudgetActivatedBy")
+  retiredPlatformProviderProbeBudgets PlatformProviderProbeBudget[] @relation("PlatformProviderProbeBudgetRetiredBy")
+  platformProviderProbeAttempts PlatformProviderProbeAttempt[] @relation("PlatformProviderProbeAttemptActor")
+  platformProviderProbeLedgerEvents PlatformProviderProbeLedger[] @relation("PlatformProviderProbeLedgerActor")
   projectAiProviderDelegationConnectionOwners ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationConnectionOwner")
   projectAiProviderDelegationProposers        ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProposer")
   projectAiProviderDelegationOwnerConfirmations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationOwnerConfirmer")
@@ -5452,11 +5487,98 @@ model AiProviderConnection {
   platformDefaultAiRoutes  PlatformDefaultAiRoute[]    @relation("PlatformDefaultAiRouteProvider")
   platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[] @relation("PlatformDefaultAiRouteAuditProvider")
   projectAiProviderDelegations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProvider")
+  platformProviderProbeAttempts PlatformProviderProbeAttempt[] @relation("PlatformProviderProbeAttemptProvider")
 
   @@index([kind, status])
   @@index([scope, name])
   @@index([ownerUserId, updatedAt])
   @@index([ownerUserId, name])
+}
+
+// Platform provider connectivity probes are an operations-only consumption
+// domain. They intentionally have no payer, project, workspace, token, or
+// ProviderCallAudit relation. The ledger is the only durable dispatch evidence
+// and is projected through the system-audit adapter without private fields.
+model PlatformProviderProbeBudget {
+  id                String                            @id @default(uuid()) @db.Uuid
+  version           Int                               @unique
+  status            PlatformProviderProbeBudgetStatus @default(draft)
+  unitLimit         Int
+  alertThresholdUnits Int
+  reservedUnits     Int                               @default(0)
+  settledUnits      Int                               @default(0)
+  heldUnits         Int                               @default(0)
+  startsAt          DateTime
+  expiresAt         DateTime
+  createdById       String                            @db.Uuid
+  activatedById     String?                           @db.Uuid
+  retiredById       String?                           @db.Uuid
+  createdAt         DateTime                          @default(now())
+  activatedAt       DateTime?
+  retiredAt         DateTime?
+  updatedAt         DateTime                          @updatedAt
+  createdBy         AppUser                           @relation("PlatformProviderProbeBudgetCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  activatedBy       AppUser?                          @relation("PlatformProviderProbeBudgetActivatedBy", fields: [activatedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  retiredBy         AppUser?                          @relation("PlatformProviderProbeBudgetRetiredBy", fields: [retiredById], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  attempts          PlatformProviderProbeAttempt[]
+  ledgerEvents      PlatformProviderProbeLedger[]
+
+  @@index([status, startsAt, expiresAt])
+}
+
+model PlatformProviderProbeAttempt {
+  id                         String                              @id @default(uuid()) @db.Uuid
+  budgetId                   String?                             @db.Uuid
+  providerConnectionId       String                              @db.Uuid
+  actorId                    String                              @db.Uuid
+  actorAccountAccessVersion  Int
+  providerConfigurationVersion Int
+  credentialSecretFingerprint String?                            @db.Char(64)
+  clientRequestKeyHash       String                              @db.Char(64)
+  requestFingerprint         String                              @db.Char(64)
+  status                     PlatformProviderProbeAttemptStatus
+  safeErrorCode              String?                             @db.VarChar(64)
+  plannedUnits               Int
+  dispatchedUnits            Int                               @default(0)
+  settledUnits               Int                               @default(0)
+  releasedUnits              Int                               @default(0)
+  heldUnits                  Int                               @default(0)
+  leaseExpiresAt             DateTime
+  createdAt                  DateTime                          @default(now())
+  startedAt                  DateTime?
+  terminalAt                 DateTime?
+  updatedAt                  DateTime                          @updatedAt
+  budget                     PlatformProviderProbeBudget?       @relation(fields: [budgetId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection         AiProviderConnection                @relation("PlatformProviderProbeAttemptProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                      AppUser                             @relation("PlatformProviderProbeAttemptActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  ledgerEvents               PlatformProviderProbeLedger[]
+
+  @@unique([providerConnectionId, actorId, clientRequestKeyHash])
+  @@index([providerConnectionId, status, updatedAt])
+  @@index([actorId, createdAt])
+  @@index([leaseExpiresAt, status])
+}
+
+model PlatformProviderProbeLedger {
+  id                String                         @id @default(uuid()) @db.Uuid
+  budgetId          String?                        @db.Uuid
+  attemptId         String                         @db.Uuid
+  actorId           String                         @db.Uuid
+  ordinal           Int
+  event             PlatformProviderProbeLedgerEvent
+  capability        PlatformProviderProbeCapability?
+  units             Int
+  safeErrorCode     String?                        @db.VarChar(64)
+  dimensions        Int?
+  createdAt         DateTime                       @default(now())
+  budget            PlatformProviderProbeBudget?   @relation(fields: [budgetId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  attempt           PlatformProviderProbeAttempt  @relation(fields: [attemptId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor             AppUser                        @relation("PlatformProviderProbeLedgerActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([attemptId, ordinal, event])
+  @@index([actorId, createdAt])
+  @@index([budgetId, createdAt])
+  @@index([attemptId, ordinal])
 }
 
 model PlatformGrantOfferPolicy {

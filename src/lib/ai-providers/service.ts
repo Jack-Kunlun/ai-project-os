@@ -1,4 +1,4 @@
-import { Prisma, type AiProviderKind, type AiProviderScope, type PrismaClient } from "@prisma/client";
+import { Prisma, type AiProviderKind, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { lockMembershipUser } from "@/lib/ai-entitlements";
 import { createCredential, rotateCredential } from "@/lib/credential-vault";
@@ -9,14 +9,6 @@ import {
   getProviderDefinition,
   isSafeModelId,
 } from "./registry";
-import {
-  PROVIDER_CONNECTION_TEST_TRANSACTION_TIMEOUT_MS,
-  PROVIDER_REQUEST_TIMEOUT_MS,
-  ProviderTransportError,
-  invokeChatCompletion,
-  invokeEmbeddings,
-  invokeVisionCompletion,
-} from "./transport";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 import { AccountAccessGuardError, assertAccountAccessForActor, requireAccountAccessVersion } from "@/lib/account-access-guard";
 
@@ -47,10 +39,6 @@ export type ProviderDb = PrismaClient | Prisma.TransactionClient;
  */
 export type PlatformProviderActor = Readonly<{ id: string; role: string; accountAccessVersion?: number }>;
 
-function isPrismaClient(db: ProviderDb): db is PrismaClient {
-  return typeof (db as unknown as { $transaction?: unknown }).$transaction === "function";
-}
-
 const modelIdSchema = z.string().trim().min(1).max(128).refine(isSafeModelId);
 const providerKindSchema = z.enum(["openai", "deepseek", "qwen", "glm"]);
 const createSchema = z.object({
@@ -80,15 +68,6 @@ const updateSchema = z.object({
 const deleteSchema = z.object({
   confirmationName: z.string().min(1).max(80),
 }).strict();
-
-// A deterministic 1x1 PNG keeps the vision probe bounded and avoids sending
-// user/project content merely to establish that the configured capability is
-// reachable. A vision capability is not marked verified unless this probe
-// succeeds alongside the other configured capability probes.
-const VISION_PROBE_IMAGE = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-  "base64",
-);
 
 const providerSelect = {
   id: true,
@@ -437,6 +416,7 @@ export async function deleteProviderConnection(
               assetExtractionRuns: true,
               assetSegments: true,
               platformDefaultAiRoutes: true,
+              platformProviderProbeAttempts: true,
             },
           },
         },
@@ -454,187 +434,4 @@ export async function deleteProviderConnection(
     if (isSerializationConflict(error)) return fail("AI_PROVIDER_CONFLICT");
     throw error;
   }
-}
-
-export type ProviderTestOptions = Readonly<{
-  expectedUpdatedAt?: Date;
-  expectedOwnerUserId?: string | null;
-}>;
-
-async function commitVerifiedProviderInTransaction(
-  providerId: string,
-  scope: AiProviderScope,
-  startedUpdatedAt: Date,
-  db: ProviderDb,
-  options: ProviderTestOptions = {},
-) {
-  if (options.expectedOwnerUserId !== undefined) {
-    const current = await db.aiProviderConnection.findFirst({
-      where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
-      select: { ownerUserId: true },
-    });
-    if (current === null || current.ownerUserId !== options.expectedOwnerUserId) return fail("AI_PROVIDER_CONFLICT");
-  }
-  const updated = await db.aiProviderConnection.updateMany({
-    where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
-    data: { status: "verified", lastTestedAt: new Date(), lastErrorCode: null, disabledAt: null },
-  });
-  if (updated.count !== 1) return fail("AI_PROVIDER_CONFLICT");
-  return db.aiProviderConnection.findFirst({ where: { id: providerId, scope }, select: providerSelect });
-}
-
-async function commitVerifiedProvider(
-  providerId: string,
-  scope: AiProviderScope,
-  startedUpdatedAt: Date,
-  db: ProviderDb,
-  options: ProviderTestOptions = {},
-) {
-  if (!isPrismaClient(db)) return commitVerifiedProviderInTransaction(providerId, scope, startedUpdatedAt, db, options);
-  return db.$transaction((tx) => commitVerifiedProviderInTransaction(providerId, scope, startedUpdatedAt, tx, options));
-}
-
-async function markProviderTestErrorInTransaction(
-  providerId: string,
-  scope: AiProviderScope,
-  startedUpdatedAt: Date,
-  code: string,
-  db: ProviderDb,
-  options: ProviderTestOptions,
-): Promise<boolean> {
-  if (options.expectedOwnerUserId !== undefined) {
-    const current = await db.aiProviderConnection.findFirst({
-      where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
-      select: { ownerUserId: true },
-    });
-    if (current === null || current.ownerUserId !== options.expectedOwnerUserId) return false;
-  }
-  const marked = await db.aiProviderConnection.updateMany({
-    where: { id: providerId, scope, status: { not: "disabled" }, updatedAt: startedUpdatedAt },
-    data: { status: "error", lastTestedAt: new Date(), lastErrorCode: code },
-  });
-  return marked.count === 1;
-}
-
-async function markProviderTestError(
-  providerId: string,
-  scope: AiProviderScope,
-  startedUpdatedAt: Date,
-  code: string,
-  db: ProviderDb,
-  options: ProviderTestOptions,
-): Promise<boolean> {
-  if (!isPrismaClient(db)) {
-    return markProviderTestErrorInTransaction(providerId, scope, startedUpdatedAt, code, db, options);
-  }
-  return db.$transaction((tx) => markProviderTestErrorInTransaction(providerId, scope, startedUpdatedAt, code, tx, options));
-}
-
-async function testProviderConnectionInScope(
-  providerId: string,
-  db: ProviderDb = getDb(),
-  scope: AiProviderScope = "platform",
-  options: ProviderTestOptions = {},
-) {
-  const provider = await db.aiProviderConnection.findFirst({ where: { id: providerId, scope } });
-  if (provider === null) return fail("AI_PROVIDER_NOT_FOUND");
-  if (options.expectedUpdatedAt !== undefined && provider.updatedAt.getTime() !== options.expectedUpdatedAt.getTime()) {
-    return fail("AI_PROVIDER_CONFLICT");
-  }
-  if (options.expectedOwnerUserId !== undefined && provider.ownerUserId !== options.expectedOwnerUserId) {
-    return fail("AI_PROVIDER_CONFLICT");
-  }
-  if (provider.status === "disabled" || provider.disabledAt !== null) return fail("AI_PROVIDER_CONNECTION_UNAVAILABLE");
-  const startedUpdatedAt = provider.updatedAt;
-  const absoluteDeadlineAt = new Date(Date.now() + PROVIDER_REQUEST_TIMEOUT_MS);
-  try {
-    const generation = provider.defaultGenerationModelId === null
-      ? null
-      : await invokeChatCompletion({
-          connection: provider,
-          operation: "projectAnalysis",
-          modelId: provider.defaultGenerationModelId,
-          messages: [
-            { role: "system", content: "You are a connectivity probe. Follow the exact reply constraint." },
-            { role: "user", content: "Reply with exactly: OK" },
-          ],
-          maxOutputTokens: 8,
-          temperature: 0,
-          absoluteDeadlineAt,
-        });
-    const embedding = provider.defaultEmbeddingModelId === null
-      ? null
-      : await invokeEmbeddings({
-          connection: provider,
-          modelId: provider.defaultEmbeddingModelId,
-          texts: ["AI Project OS provider connectivity test"],
-          expectedDimensions: provider.embeddingDimensions,
-          absoluteDeadlineAt,
-        });
-    const vision = provider.defaultVisionModelId === null
-      ? null
-      : await invokeVisionCompletion({
-          connection: provider,
-          modelId: provider.defaultVisionModelId,
-          image: VISION_PROBE_IMAGE,
-          mimeType: "image/png",
-          prompt: "Return exactly: OK",
-          maxOutputTokens: 8,
-          absoluteDeadlineAt,
-        });
-    const updated = await commitVerifiedProvider(providerId, scope, startedUpdatedAt, db, options);
-    if (updated === null) return fail("AI_PROVIDER_CONFLICT");
-    return Object.freeze({
-      provider: updated,
-      check: {
-        generation: generation?.content.trim().slice(0, 32) ?? null,
-        embeddingDimensions: embedding?.dimensions ?? null,
-        vision: vision?.content.trim().slice(0, 32) ?? null,
-      },
-    });
-  } catch (error) {
-    // A failed final membership/CAS re-check is a conflict, not a provider
-    // probe failure. Never overwrite the connection with an error state after
-    // another operation changed its authorization or lifecycle state.
-    if (error instanceof ProviderServiceError && error.code === "AI_PROVIDER_CONFLICT") throw error;
-    const code = error instanceof ProviderTransportError ? error.code : "AI_PROVIDER_UNAVAILABLE";
-    let markedError = false;
-    try {
-      markedError = await markProviderTestError(providerId, scope, startedUpdatedAt, code, db, options);
-    } catch {
-      return fail("AI_PROVIDER_CONFLICT");
-    }
-    if (!markedError) return fail("AI_PROVIDER_CONFLICT");
-    throw error;
-  }
-}
-
-/**
- * Explicit platform probe entry point. Authorization is performed before the
- * provider row, credential vault, or transport can be touched.
- */
-export async function testPlatformProviderConnection(
-  providerId: string,
-  actor: PlatformProviderActor,
-  db: ProviderDb = getDb(),
-) {
-  const actorHint = assertPlatformProviderAdminHint(actor);
-  if (!isPrismaClient(db)) {
-    await lockMembershipUser(db, actorHint.id);
-    await assertPlatformProviderAdminRecord(actorHint, db);
-    await lockProviderConfiguration(db, providerId);
-    return testProviderConnectionInScope(providerId, db, "platform");
-  }
-  return db.$transaction(
-    async (tx) => {
-      await lockMembershipUser(tx, actorHint.id);
-      await assertPlatformProviderAdminRecord(actorHint, tx);
-      await lockProviderConfiguration(tx, providerId);
-      return testProviderConnectionInScope(providerId, tx, "platform");
-    },
-    {
-      isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
-      timeout: PROVIDER_CONNECTION_TEST_TRANSACTION_TIMEOUT_MS,
-    },
-  );
 }

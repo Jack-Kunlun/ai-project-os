@@ -30,6 +30,8 @@ export class ProviderTransportError extends Error {
     readonly status: number = 502,
     /** Whether the provider request may already have reached the network. */
     readonly requestDispatched = true,
+    /** Whether a provider response was received before the error was raised. */
+    readonly responseReceived = false,
   ) {
     super(code);
     this.name = "ProviderTransportError";
@@ -73,8 +75,8 @@ type RuntimeConnection = Pick<
   onBeforeRequest?: () => void | boolean | Promise<void | boolean>;
 }>;
 
-function fail(code: ProviderTransportErrorCode, status = 502): never {
-  throw new ProviderTransportError(code, status);
+function fail(code: ProviderTransportErrorCode, status = 502, responseReceived = false): never {
+  throw new ProviderTransportError(code, status, true, responseReceived);
 }
 
 function safeRequestId(response: Response): string | null {
@@ -87,23 +89,23 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   if (lengthHeader !== null) {
     const length = Number(lengthHeader);
     if (!Number.isFinite(length) || length < 0 || length > MAX_RESPONSE_BYTES) {
-      return fail("AI_PROVIDER_RESPONSE_TOO_LARGE");
+      return fail("AI_PROVIDER_RESPONSE_TOO_LARGE", 502, true);
     }
   }
   const body = await response.arrayBuffer();
-  if (body.byteLength > MAX_RESPONSE_BYTES) return fail("AI_PROVIDER_RESPONSE_TOO_LARGE");
+  if (body.byteLength > MAX_RESPONSE_BYTES) return fail("AI_PROVIDER_RESPONSE_TOO_LARGE", 502, true);
   try {
     return JSON.parse(new TextDecoder().decode(body)) as unknown;
   } catch {
-    return fail("AI_PROVIDER_INVALID_RESPONSE");
+    return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   }
 }
 
 function mapHttpError(status: number): never {
-  if (status === 401 || status === 403) return fail("AI_PROVIDER_AUTH_FAILED", 422);
-  if (status === 429) return fail("AI_PROVIDER_RATE_LIMITED", 429);
-  if (status >= 400 && status < 500) return fail("AI_PROVIDER_REJECTED", 422);
-  return fail("AI_PROVIDER_UNAVAILABLE", 502);
+  if (status === 401 || status === 403) return fail("AI_PROVIDER_AUTH_FAILED", 422, true);
+  if (status === 429) return fail("AI_PROVIDER_RATE_LIMITED", 429, true);
+  if (status >= 400 && status < 500) return fail("AI_PROVIDER_REJECTED", 422, true);
+  return fail("AI_PROVIDER_UNAVAILABLE", 502, true);
 }
 
 async function providerPost(
@@ -159,7 +161,7 @@ async function providerPost(
     if (!response.ok) return mapHttpError(response.status);
     const payload = await readBoundedJson(response);
     if (absoluteDeadlineAt !== undefined && absoluteDeadlineAt.getTime() <= Date.now()) {
-      return fail("AI_PROVIDER_TIMEOUT", 504);
+      return fail("AI_PROVIDER_TIMEOUT", 504, true);
     }
     return Object.freeze({ payload, requestId });
   } catch (error) {
@@ -245,17 +247,17 @@ export async function invokeChatCompletion(input: Readonly<{
     temperature: input.temperature ?? 0,
     stream: false,
   }, input.absoluteDeadlineAt);
-  if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const record = payload as Record<string, unknown>;
   const choices = record.choices;
-  if (!Array.isArray(choices) || choices.length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (!Array.isArray(choices) || choices.length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const first = choices[0];
-  if (typeof first !== "object" || first === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (typeof first !== "object" || first === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const message = (first as Record<string, unknown>).message;
-  if (typeof message !== "object" || message === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (typeof message !== "object" || message === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const content = (message as Record<string, unknown>).content;
   if (typeof content !== "string" || content.trim().length === 0 || content.length > 1_000_000) {
-    return fail("AI_PROVIDER_INVALID_RESPONSE");
+    return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   }
   const usage = usageCounts(record);
   return Object.freeze({
@@ -313,10 +315,10 @@ export async function invokeVisionCompletion(input: Readonly<{
       max_output_tokens: input.maxOutputTokens,
       store: false,
     }, input.absoluteDeadlineAt);
-    if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+    if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
     const record = payload as Record<string, unknown>;
     const content = responseText(record);
-    if (content === null || content.length > 1_000_000) return fail("AI_PROVIDER_INVALID_RESPONSE");
+    if (content === null || content.length > 1_000_000) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
     const usage = usageCounts(record);
     return Object.freeze({
       content,
@@ -339,17 +341,17 @@ export async function invokeVisionCompletion(input: Readonly<{
     temperature: 0,
     stream: false,
   }, input.absoluteDeadlineAt);
-  if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const record = payload as Record<string, unknown>;
   const choices = record.choices;
-  if (!Array.isArray(choices) || choices.length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (!Array.isArray(choices) || choices.length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const first = choices[0];
-  if (typeof first !== "object" || first === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (typeof first !== "object" || first === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const message = (first as Record<string, unknown>).message;
-  if (typeof message !== "object" || message === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (typeof message !== "object" || message === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const content = (message as Record<string, unknown>).content;
   if (typeof content !== "string" || content.trim().length === 0 || content.length > 1_000_000) {
-    return fail("AI_PROVIDER_INVALID_RESPONSE");
+    return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   }
   const usage = usageCounts(record);
   return Object.freeze({
@@ -383,19 +385,19 @@ export async function invokeEmbeddings(input: Readonly<{
       ? { dimensions: input.expectedDimensions }
       : {}),
   }, input.absoluteDeadlineAt);
-  if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const record = payload as Record<string, unknown>;
   const data = record.data;
-  if (!Array.isArray(data) || data.length !== input.texts.length) return fail("AI_PROVIDER_INVALID_RESPONSE");
+  if (!Array.isArray(data) || data.length !== input.texts.length) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const ordered = data
     .map((entry, fallbackIndex) => {
-      if (typeof entry !== "object" || entry === null) return fail("AI_PROVIDER_INVALID_RESPONSE");
+      if (typeof entry !== "object" || entry === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
       const candidate = entry as Record<string, unknown>;
       const index = candidate.index;
       const embedding = candidate.embedding;
-      if (!Array.isArray(embedding) || embedding.length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE");
+      if (!Array.isArray(embedding) || embedding.length === 0) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
       if (embedding.some((value) => typeof value !== "number" || !Number.isFinite(value))) {
-        return fail("AI_PROVIDER_INVALID_RESPONSE");
+        return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
       }
       return {
         index: typeof index === "number" && Number.isSafeInteger(index) ? index : fallbackIndex,
@@ -409,7 +411,7 @@ export async function invokeEmbeddings(input: Readonly<{
     ordered.some((entry, index) => entry.index !== index || entry.vector.length !== dimensions) ||
     (input.expectedDimensions != null && dimensions !== input.expectedDimensions)
   ) {
-    return fail("AI_PROVIDER_INVALID_RESPONSE");
+    return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   }
   const usage = usageCounts(record, false);
   return Object.freeze({

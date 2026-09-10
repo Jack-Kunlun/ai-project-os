@@ -249,6 +249,19 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.webAiConfirmation,
     resultMap: resultMapping({ applied: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.webAiConfirmation, pending: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.webAiConfirmation, expired: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.webAiConfirmation }),
   },
+  platformProviderProbe: {
+    source: "platformProviderProbe",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.platformProviderProbe,
+    table: "PlatformProviderProbeLedger",
+    selectedFields: ["id", "actorId", "event", "capability", "units", "safeErrorCode", "createdAt"],
+    referenceFields: [],
+    actionField: "event",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.platformProviderProbe,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.platformProviderProbe),
+    resultField: "event",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.platformProviderProbe,
+    resultMap: resultMapping({ applied: ["settled", "released"], pending: ["reserved", "dispatched"], rejected: ["rejected"], unknown: ["held"] }),
+  },
 };
 
 export type SystemAuditFilters = Readonly<{
@@ -793,6 +806,17 @@ const webAiConfirmationSelect = {
   consumedAt: true,
 } as const;
 
+type PlatformProviderProbeRow = Prisma.PlatformProviderProbeLedgerGetPayload<{ select: typeof platformProviderProbeSelect }>;
+const platformProviderProbeSelect = {
+  id: true,
+  actorId: true,
+  event: true,
+  capability: true,
+  units: true,
+  safeErrorCode: true,
+  createdAt: true,
+} as const;
+
 type QueryContext = Readonly<{
   db: PrismaClient;
   filters: SystemAuditFilters;
@@ -1243,6 +1267,53 @@ function webAiConfirmationProjection(row: WebAiConfirmationRow, snapshotAt: Date
   });
 }
 
+const PLATFORM_PROBE_SAFE_ERROR_CODES = new Set([
+  "PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED",
+  "PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED",
+  "PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT",
+  "PLATFORM_PROVIDER_PROBE_CANONICAL_ENDPOINT_REQUIRED",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_UNAVAILABLE",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_AUTH_FAILED",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_RATE_LIMITED",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_REJECTED",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_INVALID_RESPONSE",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_RESPONSE_TOO_LARGE",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_TIMEOUT",
+  "PLATFORM_PROVIDER_PROBE_RECONCILIATION_HOLD",
+  "PLATFORM_PROVIDER_PROBE_RECONCILED_NO_DISPATCH",
+]);
+
+function safePlatformProbeErrorCode(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value);
+  return PLATFORM_PROBE_SAFE_ERROR_CODES.has(normalized) ? normalized : "PLATFORM_PROVIDER_PROBE_PROVIDER_UNAVAILABLE";
+}
+
+function platformProviderProbeResult(action: string): SystemAuditResult {
+  if (action === "rejected") return "rejected";
+  if (action === "held") return "unknown";
+  if (action === "reserved" || action === "dispatched") return "pending";
+  return "applied";
+}
+
+function platformProviderProbeProjection(row: PlatformProviderProbeRow): RawAuditEvent {
+  const action = String(row.event);
+  const capability = row.capability === null ? null : String(row.capability);
+  const safeErrorCode = safePlatformProbeErrorCode(row.safeErrorCode);
+  return rawEvent({
+    id: row.id,
+    source: "platformProviderProbe",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind: row.actorId === null ? "unrecorded" : "user",
+    subjectId: null,
+    references: safeReferences({ categories: ["platformProviderProbe"] }),
+    evidence: evidence({}, { capability, units: row.units }, {}, false, safeErrorCode),
+    result: platformProviderProbeResult(action),
+  });
+}
+
 async function fetchPlatform(context: QueryContext): Promise<RawAuditEvent[]> {
   const rows = await context.db.platformDefaultAiRouteAudit.findMany({
     where: sourceWhere(context, "platformDefaultAiRoute", { actorField: "actorId" }) as Prisma.PlatformDefaultAiRouteAuditWhereInput,
@@ -1393,6 +1464,16 @@ async function fetchWebAiConfirmation(context: QueryContext): Promise<RawAuditEv
   return rows.map((row) => webAiConfirmationProjection(row, context.snapshotAt));
 }
 
+async function fetchPlatformProviderProbe(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.platformProviderProbeLedger.findMany({
+    where: sourceWhere(context, "platformProviderProbe", { actorField: "actorId" }) as Prisma.PlatformProviderProbeLedgerWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: platformProviderProbeSelect,
+  });
+  return rows.map(platformProviderProbeProjection);
+}
+
 async function fetchSource(context: QueryContext, source: SystemAuditSource): Promise<RawAuditEvent[]> {
   switch (source) {
     case "platformDefaultAiRoute": return fetchPlatform(context);
@@ -1410,6 +1491,7 @@ async function fetchSource(context: QueryContext, source: SystemAuditSource): Pr
     case "projectMcpActionRuntime": return fetchMcpActionRuntime(context);
     case "aiRuntime": return fetchAiRuntime(context);
     case "webAiConfirmation": return fetchWebAiConfirmation(context);
+    case "platformProviderProbe": return fetchPlatformProviderProbe(context);
   }
 }
 

@@ -4,6 +4,7 @@ import { runAutomationWorkerCycle } from "@/lib/automation";
 import { getDb } from "@/lib/db";
 import { reconcileProjectDeletionStorage } from "@/lib/project-lifecycle";
 import { reconcileStaleProjectMcpActionDispatchReservations } from "@/lib/project-mcp-action-dispatch-service";
+import { reconcilePlatformProviderProbeAttempts } from "@/lib/platform-provider-probe-service";
 import { reconcileStaleProjectAssetUploadReservations } from "@/lib/project-assets/quota";
 import { runProjectAssetParsingWorkerCycle } from "@/lib/project-assets/service";
 import {
@@ -100,6 +101,16 @@ async function main() {
       } catch {
         cycleFailures += 1;
         writeLog("error", "worker.mcp_dispatch_reservation_reconciliation_failed", { errorCode: "MCP_DISPATCH_RECONCILIATION_FAILED" });
+      }
+
+      try {
+        const reconciled = await reconcilePlatformProviderProbeAttempts(db);
+        if (reconciled > 0) {
+          writeLog("info", "worker.platform_provider_probe_reconciliation_completed", { reconciled });
+        }
+      } catch {
+        cycleFailures += 1;
+        writeLog("error", "worker.platform_provider_probe_reconciliation_failed", { errorCode: "PLATFORM_PROVIDER_PROBE_RECONCILIATION_FAILED" });
       }
 
       try {

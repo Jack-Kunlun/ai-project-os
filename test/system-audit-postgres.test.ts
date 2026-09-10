@@ -49,6 +49,10 @@ const expectedEnums: Readonly<Record<string, readonly string[]>> = {
   ProjectMcpActionRuntimeLedgerEvent: ["reserved", "succeeded", "failed", "unknown", "expired", "invalidated"],
   AiAuditEventType: ["policyCreated", "policyAdvanced", "grantIssued", "grantRevoked", "preflightRejected", "scannerRejected", "budgetRejected", "runCreated", "runClaimed", "dispatchSent", "runSucceeded", "runFailed", "runUnknown", "runCancelled", "attemptSucceeded", "attemptFailed", "attemptUnknown", "attemptCancelled"],
   WebAiConfirmationAction: ["memory_extract", "memory_index", "memory_search", "memory_answer", "asset_recognize", "intelligence_brief", "intelligence_agent"],
+  PlatformProviderProbeBudgetStatus: ["draft", "active", "retired"],
+  PlatformProviderProbeAttemptStatus: ["rejected", "reserved", "running", "settled", "released", "held"],
+  PlatformProviderProbeLedgerEvent: ["rejected", "reserved", "dispatched", "settled", "released", "held"],
+  PlatformProviderProbeCapability: ["generation", "embedding", "vision"],
 };
 
 function assertLocalDatabaseUrl(value: string | undefined): string {
@@ -104,7 +108,7 @@ test(
     const page = await listSystemAudit({ pageSize: 50 }, database, new Date());
     assert.equal(page.pageSize, 50);
     assert.ok(page.events.every((event) => SYSTEM_AUDIT_SOURCES.includes(event.source)));
-    assert.equal(SYSTEM_AUDIT_SOURCES.length, 15);
+    assert.equal(SYSTEM_AUDIT_SOURCES.length, 16);
     assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
     assertSafePublicProjection(page);
 

@@ -5,12 +5,14 @@ import test from "node:test";
 const read = (path: string) => readFile(path, "utf8");
 
 test("browser gate stays isolated and exercises the production server", async () => {
-  const [packageJson, config, runner, smoke, webAiConfirmation] = await Promise.all([
+  const [packageJson, config, runner, smoke, webAiConfirmation, systemAudit, gitConnections] = await Promise.all([
     read("package.json"),
     read("playwright.config.ts"),
     read("scripts/run-browser-e2e.ts"),
     read("e2e/smoke.spec.ts"),
     read("e2e/web-ai-confirmation.spec.ts"),
+    read("e2e/system-audit.spec.ts"),
+    read("src/app/profile/connections/git/git-connections-client.tsx"),
   ]);
   const manifest = JSON.parse(packageJson) as {
     devDependencies: Record<string, string>;
@@ -42,6 +44,23 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(webAiConfirmation, /executeRequests\)\.toHaveLength\(1\)/u);
   assert.match(webAiConfirmation, /consumedAt: null, consumedJobId: null/u);
   assert.doesNotMatch(webAiConfirmation, /route\.(?:fetch|fulfill)/u);
+  assert.match(systemAudit, /administrator audit center exposes new safe sources/u);
+  assert.match(systemAudit, /projectGitManualRun/u);
+  assert.match(systemAudit, /projectMcpActionApproval/u);
+  assert.match(systemAudit, /projectMcpActionRuntime/u);
+  assert.match(systemAudit, /AxeBuilder/u);
+  assert.match(systemAudit, /wcag22aa/u);
+  assert.match(systemAudit, /getByRole\("combobox", \{ name: "来源", exact: true \}\)/u);
+  assert.match(systemAudit, /getByRole\("combobox", \{ name: "动作", exact: true \}\)/u);
+  assert.match(systemAudit, /option\[value="projectGitManualRun"\]/u);
+  assert.match(systemAudit, /option\[value="runFailed"\]/u);
+  assert.match(systemAudit, /expect\(sourceValues\)\.not\.toContain\("aiProviderOwnership"\)/u);
+  assert.match(systemAudit, /expect\(actionValues\)\.not\.toContain\("legacyOwnershipConfirmed"\)/u);
+  assert.match(systemAudit, /记录 ID：\$\{fixture\.auditId\}/u);
+  assert.match(systemAudit, /assertForbiddenAuditApis/u);
+  assert.doesNotMatch(systemAudit, /route\.(?:fetch|fulfill)/u);
+  assert.match(gitConnections, /role="status" aria-label="正在加载项目委托安全记录"/u);
+  assert.match(gitConnections, /role="status" aria-label="正在加载 Git 连接"/u);
 });
 
 test("CI uses pinned least-privilege actions and runs all bounded gates", async () => {

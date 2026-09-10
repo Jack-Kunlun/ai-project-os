@@ -1,91 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  SYSTEM_AUDIT_ACTION_OPTIONS,
+  SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE,
+  SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE,
+  SYSTEM_AUDIT_RESULT_OPTIONS,
+  SYSTEM_AUDIT_SOURCE_LABELS,
+  SYSTEM_AUDIT_SOURCE_OPTIONS,
+  type SystemAuditSource,
+} from "@/lib/system-audit-catalog";
 
-const sources = [
-  ["", "全部来源"],
-  ["platformDefaultAiRoute", "平台默认路由"],
-  ["aiProviderOwnership", "AI 供应商归属"],
-  ["membershipSubscription", "会员资格"],
-  ["accountAccess", "账号状态"],
-  ["membershipAccess", "成员访问"],
-  ["workspaceInvitation", "工作区邀请"],
-  ["mcpToolAttestation", "MCP 工具认证"],
-  ["projectAiProviderDelegation", "项目 AI 委托"],
-  ["projectGitRepositoryDelegation", "项目 Git 委托"],
-  ["projectMcpConnectionDelegation", "项目 MCP 委托"],
-  ["projectMcpToolGrantLedger", "项目 MCP 工具授权"],
-] as const;
-
-const actions = [
-  ["", "全部动作"],
-  ["draftCreated", "创建草稿"],
-  ["draftUpdated", "更新草稿"],
-  ["validated", "验证"],
-  ["activated", "启用"],
-  ["retired", "退役"],
-  ["legacyOwnershipConfirmed", "确认归属"],
-  ["grant", "发放"],
-  ["extend", "延期"],
-  ["revoke", "撤销"],
-  ["disabled", "已停用"],
-  ["restored", "已恢复"],
-  ["migrationQuarantined", "迁移隔离"],
-  ["confirmed", "确认"],
-  ["bootstrapConfirmed", "引导确认"],
-  ["created", "创建"],
-  ["accepted", "接受"],
-  ["attested", "认证"],
-  ["proposed", "提议"],
-  ["ownerConfirmed", "所有者确认"],
-  ["rejected", "拒绝"],
-  ["revoked", "撤销"],
-  ["expired", "过期"],
-  ["platformSelected", "选择平台路由"],
-  ["personalSelected", "选择个人路由"],
-  ["selectionUpdated", "更新路由选择"],
-  ["granted", "授权"],
-] as const;
-
-const results = [
-  ["", "全部结果"],
-  ["applied", "已生效"],
-  ["pending", "待处理"],
-  ["disabled", "已停用"],
-  ["restored", "已恢复"],
-  ["rejected", "已拒绝"],
-  ["revoked", "已撤销"],
-  ["expired", "已过期"],
-  ["unknown", "未分类"],
-] as const;
-
-const allowedActionsBySource: Readonly<Record<string, readonly string[]>> = {
-  platformDefaultAiRoute: ["draftCreated", "draftUpdated", "validated", "activated", "retired"],
-  aiProviderOwnership: ["legacyOwnershipConfirmed"],
-  membershipSubscription: ["grant", "extend", "revoke"],
-  accountAccess: ["disabled", "restored"],
-  membershipAccess: ["migrationQuarantined", "confirmed", "revoked", "bootstrapConfirmed"],
-  workspaceInvitation: ["created", "accepted", "revoked"],
-  mcpToolAttestation: ["attested", "revoked"],
-  projectAiProviderDelegation: ["proposed", "ownerConfirmed", "activated", "rejected", "revoked", "expired", "platformSelected", "personalSelected", "selectionUpdated"],
-  projectGitRepositoryDelegation: ["proposed", "ownerConfirmed", "activated", "rejected", "revoked", "expired"],
-  projectMcpConnectionDelegation: ["proposed", "ownerConfirmed", "activated", "rejected", "revoked", "expired"],
-  projectMcpToolGrantLedger: ["granted", "revoked"],
-};
-
-const allowedResultsBySource: Readonly<Record<string, readonly string[]>> = {
-  platformDefaultAiRoute: ["applied"],
-  aiProviderOwnership: ["applied"],
-  membershipSubscription: ["applied", "revoked"],
-  accountAccess: ["disabled", "restored"],
-  membershipAccess: ["applied", "pending", "revoked"],
-  workspaceInvitation: ["applied", "revoked"],
-  mcpToolAttestation: ["applied", "revoked"],
-  projectAiProviderDelegation: ["applied", "pending", "rejected", "revoked", "expired"],
-  projectGitRepositoryDelegation: ["applied", "pending", "rejected", "revoked", "expired"],
-  projectMcpConnectionDelegation: ["applied", "pending", "rejected", "revoked", "expired"],
-  projectMcpToolGrantLedger: ["applied", "revoked"],
-};
+const sources = SYSTEM_AUDIT_SOURCE_OPTIONS;
+const actions = SYSTEM_AUDIT_ACTION_OPTIONS;
+const results = SYSTEM_AUDIT_RESULT_OPTIONS;
+const allowedActionsBySource = SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE;
+const allowedResultsBySource = SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE;
 
 type AuditEvent = {
   id: string;
@@ -108,10 +38,18 @@ type AuditEvent = {
 type AuditList = { events: AuditEvent[]; nextCursor: string | null; snapshotAt: string; pageSize: number };
 type FilterValues = Readonly<Record<string, string>>;
 
-const sourceLabels: ReadonlyMap<string, string> = new Map(sources.filter(([value]) => value !== "").map(([value, label]) => [value, label]));
+const sourceLabels: ReadonlyMap<string, string> = new Map(Object.entries(SYSTEM_AUDIT_SOURCE_LABELS));
 
 function optionLabel(options: ReadonlyArray<readonly [string, string]>, value: string): string {
   return options.find(([key]) => key === value)?.[1] ?? value;
+}
+
+function sourceActions(value: string): readonly string[] {
+  return value === "" ? [] : allowedActionsBySource[value as SystemAuditSource] ?? [];
+}
+
+function sourceResults(value: string): readonly string[] {
+  return value === "" ? [] : allowedResultsBySource[value as SystemAuditSource] ?? [];
 }
 
 function dateLabel(value: string): string {
@@ -134,7 +72,7 @@ function valuesLabel(values: Record<string, string | number | boolean | null>): 
 function resultClass(value: string): string {
   if (value === "applied" || value === "restored") return "bg-emerald-50 text-emerald-700";
   if (value === "pending") return "bg-amber-50 text-amber-700";
-  if (value === "rejected" || value === "revoked" || value === "disabled") return "bg-rose-50 text-rose-700";
+  if (value === "rejected" || value === "revoked" || value === "disabled" || value === "failed") return "bg-rose-50 text-rose-700";
   return "bg-slate-100 text-slate-600";
 }
 
@@ -171,10 +109,10 @@ export function AdminAuditClient() {
 
   const visibleActions = source === ""
     ? actions
-    : actions.filter(([value]) => value === "" || allowedActionsBySource[source]?.includes(value) === true);
+    : actions.filter(([value]) => value === "" || sourceActions(source).includes(value) === true);
   const visibleResults = source === ""
     ? results
-    : results.filter(([value]) => value === "" || allowedResultsBySource[source]?.includes(value) === true);
+    : results.filter(([value]) => value === "" || sourceResults(source).includes(value) === true);
 
   useEffect(() => () => {
     detailRequestRef.current?.abort();
@@ -231,8 +169,8 @@ export function AdminAuditClient() {
 
   function changeSource(value: string) {
     setSource(value);
-    if (value !== "" && action !== "" && !allowedActionsBySource[value]?.includes(action)) setAction("");
-    if (value !== "" && result !== "" && !allowedResultsBySource[value]?.includes(result)) setResult("");
+    if (value !== "" && action !== "" && !sourceActions(value).includes(action)) setAction("");
+    if (value !== "" && result !== "" && !sourceResults(value).includes(result)) setResult("");
   }
 
   function goNext() {

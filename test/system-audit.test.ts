@@ -45,11 +45,13 @@ function matches(where: FakeWhere | undefined, row: FakeRow): boolean {
   if (where === undefined) return true;
   if (where.AND !== undefined && Array.isArray(where.AND) && !where.AND.every((item) => matches(item as FakeWhere, row))) return false;
   if (where.OR !== undefined && Array.isArray(where.OR) && !where.OR.some((item) => matches(item as FakeWhere, row))) return false;
-  const createdAt = where.createdAt;
-  if (createdAt !== undefined) {
-    const value = asDate(row.createdAt);
-    if (value === null) return false;
-    if (createdAt instanceof Date ? value.getTime() !== createdAt.getTime() : !matchesDate(value, createdAt as FakeWhere)) return false;
+  for (const dateKey of ["createdAt", "issuedAt", "expiresAt"]) {
+    const dateCondition = where[dateKey];
+    if (dateCondition !== undefined) {
+      const value = asDate(row[dateKey]);
+      if (value === null) return false;
+      if (dateCondition instanceof Date ? value.getTime() !== dateCondition.getTime() : !matchesDate(value, dateCondition as FakeWhere)) return false;
+    }
   }
   if (typeof where.id === "string" && row.id !== where.id) return false;
   if (where.id !== undefined && typeof where.id === "object" && where.id !== null) {
@@ -58,12 +60,17 @@ function matches(where: FakeWhere | undefined, row: FakeRow): boolean {
     if (Array.isArray(idFilter.in) && !idFilter.in.includes(row.id)) return false;
   }
   for (const [key, expected] of Object.entries(where)) {
-    if (key === "AND" || key === "OR" || key === "createdAt" || key === "id") continue;
+    if (key === "AND" || key === "OR" || key === "createdAt" || key === "issuedAt" || key === "expiresAt" || key === "id") continue;
     const actual = row[key];
     if (expected !== null && typeof expected === "object") {
       const filter = expected as FakeWhere;
       if (Array.isArray(filter.in) && !filter.in.includes(actual)) return false;
       if ("equals" in filter && filter.equals !== actual) return false;
+      if ("not" in filter && filter.not === actual) return false;
+      if ("gt" in filter && !(actual instanceof Date) && !(typeof actual === "number" && typeof filter.gt === "number" && actual > filter.gt)) return false;
+      if ("gt" in filter && actual instanceof Date && !(filter.gt instanceof Date && actual > filter.gt)) return false;
+      if ("gte" in filter && actual instanceof Date && !(filter.gte instanceof Date && actual >= filter.gte)) return false;
+      if ("lte" in filter && actual instanceof Date && !(filter.lte instanceof Date && actual <= filter.lte)) return false;
     } else if (actual !== expected) {
       return false;
     }
@@ -86,8 +93,8 @@ function delegate(source: (typeof SYSTEM_AUDIT_SOURCES)[number], rows: FakeRow[]
       return rows
         .filter((row) => matches(where, row))
         .sort((left, right) => {
-        const leftDate = asDate(left.createdAt)?.getTime() ?? 0;
-        const rightDate = asDate(right.createdAt)?.getTime() ?? 0;
+        const leftDate = (asDate(left.createdAt) ?? asDate(left.issuedAt))?.getTime() ?? 0;
+        const rightDate = (asDate(right.createdAt) ?? asDate(right.issuedAt))?.getTime() ?? 0;
         return rightDate - leftDate || String(right.id).localeCompare(String(left.id));
         })
         .slice(0, take ?? rows.length);
@@ -103,12 +110,25 @@ function makeRows(): Readonly<Record<string, FakeRow[]>> {
     membershipSubscriptionAudit: [{ ...base, id: "53111111-1111-4111-8111-111111111111", subscriptionId: "63111111-1111-4111-8111-111111111111", userId: USER_ID, actorId: ADMIN_ID, eventKind: "grant", versionBefore: null, versionAfter: 1, statusBefore: null, statusAfter: "active" }],
     accountAccessAudit: [{ ...base, id: "54111111-1111-4111-8111-111111111111", userId: USER_ID, actorId: ADMIN_ID, event: "disabled", versionBefore: 1, versionAfter: 2, disabledAtBefore: null, disabledAtAfter: at, previewId: "64111111-1111-4111-8111-111111111111" }],
     membershipAccessAudit: [{ ...base, id: "55111111-1111-4111-8111-111111111111", membershipKind: "project", membershipId: "65111111-1111-4111-8111-111111111111", workspaceId: WORKSPACE_ID, projectId: PROJECT_ID, userId: USER_ID, action: "confirmed", previousState: "pending", newState: "confirmed", roleSnapshot: "viewer" }],
-    workspaceInvitationAudit: [{ ...base, id: "56111111-1111-4111-8111-111111111111", invitationId: "66111111-1111-4111-8111-111111111111", workspaceId: WORKSPACE_ID, event: "created", versionBefore: null, versionAfter: 1, statusBefore: null, statusAfter: "pending", actorId: ADMIN_ID }],
+    workspaceInvitationAudit: [
+      { ...base, id: "56111111-1111-4111-8111-111111111111", invitationId: "66111111-1111-4111-8111-111111111111", workspaceId: WORKSPACE_ID, event: "created", versionBefore: null, versionAfter: 1, statusBefore: null, statusAfter: "pending", actorId: ADMIN_ID },
+      { ...base, id: "56211111-1111-4111-8111-111111111111", invitationId: "66211111-1111-4111-8111-111111111111", workspaceId: WORKSPACE_ID, event: "accepted", versionBefore: 1, versionAfter: 2, statusBefore: "pending", statusAfter: "accepted", actorId: ADMIN_ID },
+      { ...base, id: "56311111-1111-4111-8111-111111111111", invitationId: "66311111-1111-4111-8111-111111111111", workspaceId: WORKSPACE_ID, event: "revoked", versionBefore: 1, versionAfter: 2, statusBefore: "pending", statusAfter: "revoked", actorId: ADMIN_ID },
+    ],
     mcpToolAttestationAudit: [{ ...base, id: "57111111-1111-4111-8111-111111111111", attestationId: "67111111-1111-4111-8111-111111111111", connectionId: "77111111-1111-4111-8111-111111111111", toolDefinitionId: "87111111-1111-4111-8111-111111111111", event: "attested", controlPlaneVersion: 2, attestationVersion: 1, statusBefore: null, statusAfter: "active", connectionConfigurationRevision: 4, details: { metadata: "secret" }, definitionFingerprint: "fingerprint" }],
     projectAiProviderDelegationAudit: [{ ...base, id: "58111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, operation: "chat", entity: "delegation", action: "activated", delegationId: "68111111-1111-4111-8111-111111111111", selectionId: null, delegationVersion: 1, selectionVersion: null, statusBefore: "ownerConfirmed", statusAfter: "active", selectionSource: null, selectedDelegationId: null, selectedByProjectMembershipId: null, providerConnectionId: "78111111-1111-4111-8111-111111111111", connectionOwnerId: USER_ID, providerConfigurationVersion: 2, connectionOwnerAccountAccessVersion: 1, actorKind: "user", actorProjectMembershipId: null }],
     projectGitRepositoryDelegationAudit: [{ ...base, id: "59111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, gitConnectionId: "79111111-1111-4111-8111-111111111111", delegationId: "69111111-1111-4111-8111-111111111111", connectionOwnerId: USER_ID, action: "activated", delegationVersion: 1, statusBefore: "ownerConfirmed", statusAfter: "active", actorKind: "user", actorProjectMembershipId: null, ownerProjectMembershipId: "65111111-1111-4111-8111-111111111111", connectionConfigurationVersion: 2, connectionOwnerAccountAccessVersion: 1 }],
     projectMcpConnectionDelegationAudit: [{ ...base, id: "5a111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, mcpConnectionId: "7a111111-1111-4111-8111-111111111111", delegationId: "6a111111-1111-4111-8111-111111111111", connectionOwnerId: USER_ID, action: "activated", delegationVersion: 1, statusBefore: "ownerConfirmed", statusAfter: "active", actorKind: "user", actorProjectMembershipId: null, ownerProjectMembershipId: "65111111-1111-4111-8111-111111111111", connectionConfigurationRevision: 2, connectionOwnerAccountAccessVersion: 1 }],
     projectMcpToolGrantLedger: [{ ...base, id: "5b111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, grantId: "6b111111-1111-4111-8111-111111111111", connectionId: "7b111111-1111-4111-8111-111111111111", delegationId: "6c111111-1111-4111-8111-111111111111", toolDefinitionId: "8b111111-1111-4111-8111-111111111111", attestationId: "6d111111-1111-4111-8111-111111111111", connectionOwnerId: USER_ID, controlPlaneVersion: 2, grantVersion: 1, event: "granted", statusBefore: null, statusAfter: "active", actorProjectMembershipId: "65111111-1111-4111-8111-111111111111", delegationVersion: 1, connectionConfigurationRevision: 2, grantorProjectMembershipId: "65111111-1111-4111-8111-111111111111", revokerProjectMembershipId: null, acknowledgedAt: at, transactionId: BigInt(1), transitionAt: at }],
+    projectGitRepositoryManualRunAudit: [{ ...base, id: "5c111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, action: "succeeded", statusBefore: "running", statusAfter: "succeeded", dispatchState: "acknowledged", actorId: ADMIN_ID, connectionOwnerId: USER_ID, delegationVersion: 1, connectionConfigurationVersion: 2, role: "primary", requiredForProjectSnapshot: true, codeEnabled: true, metadataEnabled: true, manualSyncAllowed: true, automationAllowed: false }],
+    projectMcpActionLedger: [{ ...base, id: "5d111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, event: "approved", statusBefore: "waitingApproval", statusAfter: "approved", stateVersion: 2, actorId: ADMIN_ID, connectionOwnerId: USER_ID, grantVersion: 1, delegationVersion: 1, attestationVersion: 1 }],
+    projectMcpActionRuntimeLedger: [{ ...base, id: "5e111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, event: "failed", statusBefore: "dispatchReserved", statusAfter: "failed", stateVersion: 3, actorKind: "owner", actorId: ADMIN_ID, connectionOwnerId: USER_ID, safeErrorCode: "MCP_PRIVATE_ERROR", resultBytes: 10, resultNodes: 2, resultDepth: 1 }],
+    aiAuditEvent: [{ ...base, id: "5f111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, eventType: "runFailed", safeCode: "not-a-real-code" }],
+    webAiConfirmationChallenge: [
+      { ...base, id: "60111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, actorId: ADMIN_ID, actorAccountAccessVersion: 1, targetAction: "memoryIndex", issuedAt: at, expiresAt: new Date("2026-09-09T01:30:00.000Z"), consumedAt: null },
+      { ...base, id: "60211111-1111-4111-8111-111111111111", projectId: PROJECT_ID, actorId: ADMIN_ID, actorAccountAccessVersion: 1, targetAction: "memorySearch", issuedAt: new Date("2026-09-09T01:00:01.000Z"), expiresAt: new Date("2026-09-09T03:00:00.000Z"), consumedAt: null },
+      { ...base, id: "60311111-1111-4111-8111-111111111111", projectId: PROJECT_ID, actorId: ADMIN_ID, actorAccountAccessVersion: 1, targetAction: "memoryAnswer", issuedAt: new Date("2026-09-09T01:00:02.000Z"), expiresAt: new Date("2026-09-09T03:00:00.000Z"), consumedAt: at },
+    ],
   };
 }
 
@@ -155,11 +175,17 @@ function fakeDb(
   role: "admin" | "user" = "admin",
   calls: Map<string, number> = new Map(),
   disabledAdmin = false,
+  workspaceProjects: readonly FakeRow[] = [{ id: PROJECT_ID, workspaceId: WORKSPACE_ID }],
 ): PrismaClient {
   const users = [{ id: ADMIN_ID, username: "admin", displayName: "平台管理员", disabledAt: disabledAdmin ? new Date("2026-09-08T00:00:00.000Z") : null, accountAccessVersion: 1, role }, { id: USER_ID, username: "member", displayName: "普通用户", disabledAt: null, accountAccessVersion: 1, role: "user" }];
   const appUser = {
     findUnique: async () => users[0],
     findMany: async ({ where }: { where?: FakeWhere }) => users.filter((user) => matches(where, user)),
+  };
+  const project = {
+    findMany: async ({ where, take }: { where?: FakeWhere; take?: number }) => workspaceProjects
+      .filter((row) => matches(where, row))
+      .slice(0, take ?? 1000),
   };
   const appSession = {
     findUnique: async () => ({ id: "91111111-1111-4111-8111-111111111111", accountAccessVersion: 1, revokedAt: null, expiresAt: new Date("2030-01-01T00:00:00.000Z"), lastSeenAt: new Date("2026-09-09T00:00:00.000Z"), user: users[0] }),
@@ -168,6 +194,7 @@ function fakeDb(
   return {
     appUser,
     appSession,
+    project,
     platformDefaultAiRouteAudit: delegate("platformDefaultAiRoute", rows.platformDefaultAiRouteAudit, calls),
     membershipSubscriptionAudit: delegate("membershipSubscription", rows.membershipSubscriptionAudit, calls),
     accountAccessAudit: delegate("accountAccess", rows.accountAccessAudit, calls),
@@ -178,21 +205,28 @@ function fakeDb(
     projectGitRepositoryDelegationAudit: delegate("projectGitRepositoryDelegation", rows.projectGitRepositoryDelegationAudit, calls),
     projectMcpConnectionDelegationAudit: delegate("projectMcpConnectionDelegation", rows.projectMcpConnectionDelegationAudit, calls),
     projectMcpToolGrantLedger: delegate("projectMcpToolGrantLedger", rows.projectMcpToolGrantLedger, calls),
+    projectGitRepositoryManualRunAudit: delegate("projectGitManualRun", rows.projectGitRepositoryManualRunAudit, calls),
+    projectMcpActionLedger: delegate("projectMcpActionApproval", rows.projectMcpActionLedger, calls),
+    projectMcpActionRuntimeLedger: delegate("projectMcpActionRuntime", rows.projectMcpActionRuntimeLedger, calls),
+    aiAuditEvent: delegate("aiRuntime", rows.aiAuditEvent, calls),
+    webAiConfirmationChallenge: delegate("webAiConfirmation", rows.webAiConfirmationChallenge, calls),
   } as unknown as PrismaClient;
 }
 
-test("registry covers exactly the ten safe control-plane sources", () => {
-  assert.equal(SYSTEM_AUDIT_SOURCES.length, 10);
+test("registry covers exactly the fifteen safe control-plane sources", () => {
+  assert.equal(SYSTEM_AUDIT_SOURCES.length, 15);
   assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
   for (const source of SYSTEM_AUDIT_SOURCES) {
     const registry = SYSTEM_AUDIT_REGISTRY[source];
     assert.ok(registry.selectedFields.includes("id"));
-    assert.ok(registry.selectedFields.includes("createdAt"));
+    assert.ok(registry.selectedFields.includes("createdAt") || registry.selectedFields.includes("issuedAt"));
     assert.ok(registry.referenceFields.length > 0);
     assert.deepEqual(Object.keys(registry.actionMap).sort(), [...registry.allowedActions].sort());
+    for (const field of registry.selectedFields) assert.doesNotMatch(field, /fingerprint|token/iu, `${source}.${field}`);
     for (const action of registry.allowedActions) assert.ok(SYSTEM_AUDIT_ACTIONS.includes(action as (typeof SYSTEM_AUDIT_ACTIONS)[number]));
     for (const [result, mappedActions] of Object.entries(registry.resultMap)) {
       assert.ok(SYSTEM_AUDIT_RESULTS.includes(result as (typeof SYSTEM_AUDIT_RESULTS)[number]));
+      assert.ok(registry.allowedResults.includes(result as (typeof SYSTEM_AUDIT_RESULTS)[number]));
       for (const action of mappedActions ?? []) assert.ok(registry.allowedActions.includes(action));
     }
   }
@@ -271,6 +305,133 @@ test("source-specific action/result filters only invoke delegates with real sour
   }
 });
 
+test("new audit adapters preserve source-specific results and safe principals", async () => {
+  const db = fakeDb(makeRows());
+  const now = new Date("2026-09-09T02:00:00.000Z");
+
+  const manual = (await listSystemAudit({ source: "projectGitManualRun", pageSize: 50 }, db, now)).events;
+  assert.equal(manual.length, 1);
+  assert.equal(manual[0]?.result, "applied");
+  assert.equal(manual[0]?.references.projectId, PROJECT_ID);
+
+  const approval = (await listSystemAudit({ source: "projectMcpActionApproval", pageSize: 50 }, db, now)).events;
+  assert.equal(approval[0]?.result, "applied");
+  assert.equal(approval[0]?.subject?.id, USER_ID);
+
+  const runtime = (await listSystemAudit({ source: "projectMcpActionRuntime", pageSize: 50 }, db, now)).events;
+  assert.equal(runtime[0]?.result, "failed");
+  assert.equal(runtime[0]?.evidence.safeErrorCode, "MCP_DISPATCH_UNKNOWN");
+
+  const ai = (await listSystemAudit({ source: "aiRuntime", pageSize: 50 }, db, now)).events;
+  assert.equal(ai[0]?.result, "failed");
+  assert.equal(ai[0]?.evidence.safeErrorCode, "AI_PROVIDER_UNKNOWN");
+  assert.equal(ai[0]?.actor.kind, "unrecorded");
+  assert.equal(ai[0]?.subject, null);
+  for (const key of Object.keys(ai[0]?.evidence ?? {})) assert.doesNotMatch(key, /fingerprint|token/iu, key);
+
+  const web = (await listSystemAudit({ source: "webAiConfirmation", pageSize: 50 }, db, now)).events;
+  assert.deepEqual(web.map((event) => event.result), ["applied", "pending", "expired"]);
+  assert.deepEqual((await listSystemAudit({ source: "webAiConfirmation", result: "expired", pageSize: 50 }, db, now)).events.map((event) => event.id), ["60111111-1111-4111-8111-111111111111"]);
+  assert.deepEqual((await listSystemAudit({ source: "webAiConfirmation", result: "pending", pageSize: 50 }, db, now)).events.map((event) => event.id), ["60211111-1111-4111-8111-111111111111"]);
+  assert.deepEqual((await listSystemAudit({ source: "webAiConfirmation", result: "applied", pageSize: 50 }, db, now)).events.map((event) => event.id), ["60311111-1111-4111-8111-111111111111"]);
+});
+
+test("workspace invitation results follow audit actions rather than status text", async () => {
+  const db = fakeDb(makeRows());
+  const now = new Date("2026-09-09T02:00:00.000Z");
+  const events = (await listSystemAudit({ source: "workspaceInvitation", pageSize: 50 }, db, now)).events;
+  assert.deepEqual(events.map((event) => [event.action, event.result]), [
+    ["revoked", "revoked"],
+    ["accepted", "applied"],
+    ["created", "pending"],
+  ]);
+  assert.deepEqual((await listSystemAudit({ source: "workspaceInvitation", result: "pending", pageSize: 50 }, db, now)).events.map((event) => event.id), ["56111111-1111-4111-8111-111111111111"]);
+  assert.deepEqual((await listSystemAudit({ source: "workspaceInvitation", result: "applied", pageSize: 50 }, db, now)).events.map((event) => event.id), ["56211111-1111-4111-8111-111111111111"]);
+  assert.deepEqual((await listSystemAudit({ source: "workspaceInvitation", result: "revoked", pageSize: 50 }, db, now)).events.map((event) => event.id), ["56311111-1111-4111-8111-111111111111"]);
+});
+
+test("web confirmation cursor keeps the snapshot result after a later consumption", async () => {
+  const rows = makeRows();
+  const db = fakeDb(rows);
+  const snapshot = new Date("2026-09-09T02:00:00.000Z");
+  const first = await listSystemAudit({ source: "webAiConfirmation", pageSize: 1 }, db, snapshot);
+  assert.equal(first.events[0]?.id, "60311111-1111-4111-8111-111111111111");
+  assert.ok(first.nextCursor);
+
+  const pendingRow = rows.webAiConfirmationChallenge.find((row) => row.id === "60211111-1111-4111-8111-111111111111");
+  assert.ok(pendingRow);
+  pendingRow.consumedAt = new Date("2026-09-09T02:30:00.000Z");
+
+  const second = await listSystemAudit({ source: "webAiConfirmation", pageSize: 1, cursor: first.nextCursor ?? undefined }, db, new Date("2026-09-09T04:00:00.000Z"));
+  assert.equal(second.events[0]?.id, pendingRow.id);
+  assert.equal(second.events[0]?.result, "pending");
+});
+
+test("Git manual unknown recovery with no actor is a system principal only for that action", async () => {
+  const rows = makeRows();
+  rows.projectGitRepositoryManualRunAudit.push(
+    { ...rows.projectGitRepositoryManualRunAudit[0], id: "5c111111-1111-4111-8111-111111111112", action: "unknown", actorId: null },
+    { ...rows.projectGitRepositoryManualRunAudit[0], id: "5c111111-1111-4111-8111-111111111113", action: "failed", actorId: null },
+  );
+  const db = fakeDb(rows);
+  const now = new Date("2026-09-09T02:00:00.000Z");
+  const events = (await listSystemAudit({ source: "projectGitManualRun", pageSize: 50 }, db, now)).events;
+  const recovery = events.find((event) => event.action === "unknown");
+  const failed = events.find((event) => event.action === "failed");
+  assert.ok(recovery);
+  assert.equal(recovery.actor.kind, "system");
+  assert.equal(recovery.actor.id, null);
+  assert.ok(failed);
+  assert.equal(failed.actor.kind, "unrecorded");
+  assert.equal(failed.actor.id, null);
+  assert.equal((await listSystemAudit({ source: "projectGitManualRun", actor: ADMIN_ID, pageSize: 50 }, db, now)).events.some((event) => event.id === recovery.id), false);
+});
+
+test("new audit adapter details reuse the exact safe list projection", async () => {
+  const db = fakeDb(makeRows());
+  const now = new Date("2026-09-09T02:00:00.000Z");
+  const cases = [
+    ["projectGitManualRun", "5c111111-1111-4111-8111-111111111111"],
+    ["projectMcpActionApproval", "5d111111-1111-4111-8111-111111111111"],
+    ["projectMcpActionRuntime", "5e111111-1111-4111-8111-111111111111"],
+    ["aiRuntime", "5f111111-1111-4111-8111-111111111111"],
+    ["webAiConfirmation", "60311111-1111-4111-8111-111111111111"],
+  ] as const;
+  for (const [source, id] of cases) {
+    const listed = (await listSystemAudit({ source, pageSize: 50 }, db, now)).events.find((event) => event.id === id);
+    assert.ok(listed, `${source} row was not listed`);
+    const detail = await getSystemAuditDetail(source, id, db);
+    assert.deepEqual(detail, listed, `${source} detail diverged from list projection`);
+    const keys = Object.keys(detail).flatMap((key) => [key, ...Object.keys(detail.evidence), ...Object.keys(detail.references)]);
+    for (const key of keys) assert.doesNotMatch(key, /fingerprint|token/iu, `${source}.${key}`);
+  }
+});
+
+test("workspace scope resolves project-backed sources without widening direct workspace sources", async () => {
+  const db = fakeDb(makeRows());
+  const now = new Date("2026-09-09T02:00:00.000Z");
+  const page = await listSystemAudit({ workspaceId: WORKSPACE_ID, pageSize: 50 }, db, now);
+  assert.ok(page.events.some((event) => event.source === "membershipAccess"));
+  assert.ok(page.events.some((event) => event.source === "workspaceInvitation"));
+  for (const event of page.events) {
+    assert.notEqual(event.source, "platformDefaultAiRoute");
+    assert.notEqual(event.source, "membershipSubscription");
+    assert.notEqual(event.source, "accountAccess");
+    assert.notEqual(event.source, "mcpToolAttestation");
+  }
+  assert.deepEqual((await listSystemAudit({ workspaceId: WORKSPACE_ID, projectId: "99999999-9999-4999-8999-999999999999", pageSize: 50 }, db, now)).events, []);
+  assert.deepEqual((await listSystemAudit({ workspaceId: WORKSPACE_ID, source: "projectAiProviderDelegation", pageSize: 50 }, db, now)).events.map((event) => event.source), ["projectAiProviderDelegation"]);
+});
+
+test("workspace project scope fails closed above its explicit limit", async () => {
+  const workspaceProjects = Array.from({ length: 1_001 }, (_, index) => ({ id: uuidFor(0x2000 + index), workspaceId: WORKSPACE_ID }));
+  const db = fakeDb(makeRows(), "admin", new Map(), false, workspaceProjects);
+  await assert.rejects(
+    () => listSystemAudit({ workspaceId: WORKSPACE_ID, pageSize: 1 }, db, new Date("2026-09-09T02:00:00.000Z")),
+    (error: unknown) => error instanceof ApiError && error.code === "SYSTEM_AUDIT_WORKSPACE_SCOPE_TOO_LARGE" && error.status === 422,
+  );
+});
+
 test("cursor integrity, filter binding, time bounds and resource limits fail closed", async () => {
   const db = fakeDb(makeRows());
   const now = new Date("2026-09-09T02:00:00.000Z");
@@ -297,7 +458,7 @@ test("actor and subject lookups accept only exact UUID or unique username", asyn
   const db = fakeDb(rows, "admin", calls);
   const now = new Date("2026-09-09T02:00:00.000Z");
   const byUsername = await listSystemAudit({ actor: "admin", pageSize: 50 }, db, now);
-  assert.equal(byUsername.events.length, 10);
+  assert.equal(byUsername.events.length, 18);
   const byDisplayName = await listSystemAudit({ actor: "平台管理员", pageSize: 50 }, db, now);
   assert.deepEqual(byDisplayName.events, []);
 });
@@ -309,9 +470,22 @@ test("safe projection omits denylisted payload keys and values", async () => {
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   const payload = await response.json() as unknown;
   const text = JSON.stringify(payload).toLowerCase();
-  for (const key of SYSTEM_AUDIT_DENYLIST_KEYS) assert.equal(text.includes(key.toLowerCase()), false, key);
+  const keys = new Set<string>();
+  const collectKeys = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) collectKeys(item);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      keys.add(key);
+      collectKeys(child);
+    }
+  };
+  collectKeys(payload);
+  for (const key of SYSTEM_AUDIT_DENYLIST_KEYS) assert.equal(keys.has(key), false, key);
+  for (const key of keys) assert.doesNotMatch(key, /fingerprint|token/iu, key);
   assert.equal(text.includes("do not expose this text"), false);
-  assert.equal(text.includes("fingerprint"), false);
   for (const privateId of PRIVATE_RESOURCE_IDS) assert.equal(text.includes(privateId), false, privateId);
 });
 
@@ -379,10 +553,18 @@ test("system audit API error responses do not expose validation detail objects",
 
 test("system audit UI consumes only safe references and protects detail request ordering", async () => {
   const source = await readFile(new URL("../src/app/admin/audit/audit-client.tsx", import.meta.url), "utf8");
+  const catalog = await readFile(new URL("../src/lib/system-audit-catalog.ts", import.meta.url), "utf8");
   for (const privateField of ["routeId", "providerConnectionId", "subscriptionId", "previewId", "invitationId", "attestationId", "connectionId", "toolDefinitionId", "delegationId", "gitConnectionId", "mcpConnectionId", "grantId"]) {
     assert.equal(source.includes(privateField), false, privateField);
   }
   assert.match(source, /allowedActionsBySource/u);
   assert.match(source, /allowedResultsBySource/u);
   assert.match(source, /AbortController/u);
+  assert.doesNotMatch(source, /aiProviderOwnership|legacyOwnershipConfirmed/u);
+  assert.match(catalog, /projectGitManualRun/u);
+  assert.match(catalog, /projectMcpActionApproval/u);
+  assert.match(catalog, /projectMcpActionRuntime/u);
+  assert.match(catalog, /aiRuntime/u);
+  assert.match(catalog, /webAiConfirmation/u);
+  assert.doesNotMatch(catalog, /aiProviderOwnership|legacyOwnershipConfirmed|@prisma|node:|credential-vault|from "\.\/db"/u);
 });

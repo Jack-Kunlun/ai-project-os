@@ -4,77 +4,27 @@ import { z } from "zod";
 import { ApiError } from "@/lib/api-errors";
 import { loadOrCreateMasterKey } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
+import {
+  SYSTEM_AUDIT_ACTIONS,
+  SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE,
+  SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE,
+  SYSTEM_AUDIT_RESULTS,
+  SYSTEM_AUDIT_SOURCES,
+  SYSTEM_AUDIT_SOURCE_LABELS,
+  type SystemAuditAction,
+  type SystemAuditResult,
+  type SystemAuditSource,
+} from "@/lib/system-audit-catalog";
 
-export const SYSTEM_AUDIT_SOURCES = [
-  "platformDefaultAiRoute",
-  "membershipSubscription",
-  "accountAccess",
-  "membershipAccess",
-  "workspaceInvitation",
-  "mcpToolAttestation",
-  "projectAiProviderDelegation",
-  "projectGitRepositoryDelegation",
-  "projectMcpConnectionDelegation",
-  "projectMcpToolGrantLedger",
-] as const;
-
-export type SystemAuditSource = (typeof SYSTEM_AUDIT_SOURCES)[number];
-
-export const SYSTEM_AUDIT_SOURCE_LABELS: Readonly<Record<SystemAuditSource, string>> = {
-  platformDefaultAiRoute: "平台默认路由",
-  membershipSubscription: "会员资格",
-  accountAccess: "账号状态",
-  membershipAccess: "成员访问",
-  workspaceInvitation: "工作区邀请",
-  mcpToolAttestation: "MCP 工具认证",
-  projectAiProviderDelegation: "项目 AI 委托",
-  projectGitRepositoryDelegation: "项目 Git 委托",
-  projectMcpConnectionDelegation: "项目 MCP 委托",
-  projectMcpToolGrantLedger: "项目 MCP 工具授权",
-};
-
-export const SYSTEM_AUDIT_ACTIONS = [
-  "draftCreated",
-  "draftUpdated",
-  "validated",
-  "activated",
-  "retired",
-  "grant",
-  "extend",
-  "revoke",
-  "disabled",
-  "restored",
-  "migrationQuarantined",
-  "confirmed",
-  "bootstrapConfirmed",
-  "created",
-  "accepted",
-  "attested",
-  "proposed",
-  "ownerConfirmed",
-  "rejected",
-  "revoked",
-  "expired",
-  "platformSelected",
-  "personalSelected",
-  "selectionUpdated",
-  "granted",
-] as const;
-
-export type SystemAuditAction = (typeof SYSTEM_AUDIT_ACTIONS)[number];
-
-export const SYSTEM_AUDIT_RESULTS = [
-  "applied",
-  "pending",
-  "disabled",
-  "restored",
-  "rejected",
-  "revoked",
-  "expired",
-  "unknown",
-] as const;
-
-export type SystemAuditResult = (typeof SYSTEM_AUDIT_RESULTS)[number];
+export {
+  SYSTEM_AUDIT_ACTIONS,
+  SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE,
+  SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE,
+  SYSTEM_AUDIT_RESULTS,
+  SYSTEM_AUDIT_SOURCES,
+  SYSTEM_AUDIT_SOURCE_LABELS,
+} from "@/lib/system-audit-catalog";
+export type { SystemAuditAction, SystemAuditResult, SystemAuditSource } from "@/lib/system-audit-catalog";
 
 export type SystemAuditRegistryEntry = Readonly<{
   source: SystemAuditSource;
@@ -86,6 +36,7 @@ export type SystemAuditRegistryEntry = Readonly<{
   allowedActions: readonly string[];
   actionMap: Readonly<Record<string, string>>;
   resultField: string;
+  allowedResults: readonly SystemAuditResult[];
   resultMap: Readonly<Partial<Record<SystemAuditResult, readonly string[]>>>;
 }>;
 
@@ -107,121 +58,196 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     source: "platformDefaultAiRoute",
     label: SYSTEM_AUDIT_SOURCE_LABELS.platformDefaultAiRoute,
     table: "PlatformDefaultAiRouteAudit",
-    selectedFields: ["id", "action", "routeId", "operation", "routeVersion", "providerConnectionId", "providerConfigurationVersion", "actorId", "reason", "createdAt"],
+    selectedFields: ["id", "action", "routeVersion", "providerConfigurationVersion", "actorId", "reason", "createdAt"],
     referenceFields: ["routeId", "providerConnectionId"],
     actionField: "action",
-    allowedActions: ["draftCreated", "draftUpdated", "validated", "activated", "retired"],
-    actionMap: actionMapping(["draftCreated", "draftUpdated", "validated", "activated", "retired"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.platformDefaultAiRoute,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.platformDefaultAiRoute),
     resultField: "action",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.platformDefaultAiRoute,
     resultMap: resultMapping({ applied: ["draftCreated", "draftUpdated", "validated", "activated", "retired"] }),
   },
   membershipSubscription: {
     source: "membershipSubscription",
     label: SYSTEM_AUDIT_SOURCE_LABELS.membershipSubscription,
     table: "MembershipSubscriptionAudit",
-    selectedFields: ["id", "subscriptionId", "userId", "actorId", "eventKind", "versionBefore", "versionAfter", "statusBefore", "statusAfter", "reason", "createdAt"],
+    selectedFields: ["id", "userId", "actorId", "eventKind", "versionBefore", "versionAfter", "statusBefore", "statusAfter", "reason", "createdAt"],
     referenceFields: ["subscriptionId", "userId"],
     actionField: "eventKind",
-    allowedActions: ["grant", "extend", "revoke"],
-    actionMap: actionMapping(["grant", "extend", "revoke"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.membershipSubscription,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.membershipSubscription),
     resultField: "eventKind",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.membershipSubscription,
     resultMap: resultMapping({ applied: ["grant", "extend"], revoked: ["revoke"] }),
   },
   accountAccess: {
     source: "accountAccess",
     label: SYSTEM_AUDIT_SOURCE_LABELS.accountAccess,
     table: "AccountAccessAudit",
-    selectedFields: ["id", "userId", "actorId", "event", "versionBefore", "versionAfter", "disabledAtBefore", "disabledAtAfter", "previewId", "reason", "createdAt"],
+    selectedFields: ["id", "userId", "actorId", "event", "versionBefore", "versionAfter", "disabledAtBefore", "disabledAtAfter", "reason", "createdAt"],
     referenceFields: ["userId", "previewId"],
     actionField: "event",
-    allowedActions: ["disabled", "restored"],
-    actionMap: actionMapping(["disabled", "restored"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.accountAccess,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.accountAccess),
     resultField: "event",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.accountAccess,
     resultMap: resultMapping({ disabled: ["disabled"], restored: ["restored"] }),
   },
   membershipAccess: {
     source: "membershipAccess",
     label: SYSTEM_AUDIT_SOURCE_LABELS.membershipAccess,
     table: "MembershipAccessAudit",
-    selectedFields: ["id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId", "action", "previousState", "newState", "roleSnapshot", "actorId", "reason", "createdAt"],
+    selectedFields: ["id", "workspaceId", "projectId", "userId", "action", "previousState", "newState", "roleSnapshot", "actorId", "createdAt"],
     referenceFields: ["membershipId", "workspaceId", "projectId", "userId"],
     actionField: "action",
-    allowedActions: ["migrationQuarantined", "confirmed", "revoked", "bootstrapConfirmed"],
-    actionMap: actionMapping(["migrationQuarantined", "confirmed", "revoked", "bootstrapConfirmed"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.membershipAccess,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.membershipAccess),
     resultField: "action",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.membershipAccess,
     resultMap: resultMapping({ applied: ["confirmed", "bootstrapConfirmed"], pending: ["migrationQuarantined"], revoked: ["revoked"] }),
   },
   workspaceInvitation: {
     source: "workspaceInvitation",
     label: SYSTEM_AUDIT_SOURCE_LABELS.workspaceInvitation,
     table: "WorkspaceInvitationAudit",
-    selectedFields: ["id", "invitationId", "workspaceId", "event", "versionBefore", "versionAfter", "statusBefore", "statusAfter", "actorId", "reason", "createdAt"],
+    selectedFields: ["id", "workspaceId", "event", "versionBefore", "versionAfter", "statusBefore", "statusAfter", "actorId", "createdAt"],
     referenceFields: ["invitationId", "workspaceId"],
     actionField: "event",
-    allowedActions: ["created", "accepted", "revoked"],
-    actionMap: actionMapping(["created", "accepted", "revoked"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.workspaceInvitation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.workspaceInvitation),
     resultField: "event",
-    resultMap: resultMapping({ applied: ["created", "accepted"], revoked: ["revoked"] }),
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.workspaceInvitation,
+    resultMap: resultMapping({ pending: ["created"], applied: ["accepted"], revoked: ["revoked"] }),
   },
   mcpToolAttestation: {
     source: "mcpToolAttestation",
     label: SYSTEM_AUDIT_SOURCE_LABELS.mcpToolAttestation,
     table: "McpToolAttestationAudit",
-    selectedFields: ["id", "attestationId", "connectionId", "toolDefinitionId", "event", "actorId", "controlPlaneVersion", "attestationVersion", "statusBefore", "statusAfter", "connectionConfigurationRevision", "createdAt"],
+    selectedFields: ["id", "event", "actorId", "controlPlaneVersion", "attestationVersion", "statusBefore", "statusAfter", "connectionConfigurationRevision", "createdAt"],
     referenceFields: ["attestationId", "connectionId", "toolDefinitionId"],
     actionField: "event",
-    allowedActions: ["attested", "revoked"],
-    actionMap: actionMapping(["attested", "revoked"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.mcpToolAttestation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.mcpToolAttestation),
     resultField: "event",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.mcpToolAttestation,
     resultMap: resultMapping({ applied: ["attested"], revoked: ["revoked"] }),
   },
   projectAiProviderDelegation: {
     source: "projectAiProviderDelegation",
     label: SYSTEM_AUDIT_SOURCE_LABELS.projectAiProviderDelegation,
     table: "ProjectAiProviderDelegationAudit",
-    selectedFields: ["id", "projectId", "operation", "entity", "action", "delegationId", "selectionId", "delegationVersion", "selectionVersion", "statusBefore", "statusAfter", "selectionSource", "selectedDelegationId", "selectedByProjectMembershipId", "providerConnectionId", "connectionOwnerId", "providerConfigurationVersion", "connectionOwnerAccountAccessVersion", "actorKind", "actorId", "actorProjectMembershipId", "reason", "createdAt"],
+    selectedFields: ["id", "projectId", "entity", "action", "delegationVersion", "selectionVersion", "statusBefore", "statusAfter", "selectionSource", "connectionOwnerId", "providerConfigurationVersion", "connectionOwnerAccountAccessVersion", "actorKind", "actorId", "createdAt"],
     referenceFields: ["projectId", "delegationId", "selectionId", "providerConnectionId", "connectionOwnerId"],
     actionField: "action",
-    allowedActions: ["proposed", "ownerConfirmed", "activated", "rejected", "revoked", "expired", "platformSelected", "personalSelected", "selectionUpdated"],
-    actionMap: actionMapping(["proposed", "ownerConfirmed", "activated", "rejected", "revoked", "expired", "platformSelected", "personalSelected", "selectionUpdated"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectAiProviderDelegation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectAiProviderDelegation),
     resultField: "action",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.projectAiProviderDelegation,
     resultMap: resultMapping({ applied: ["activated", "platformSelected", "personalSelected", "selectionUpdated"], pending: ["proposed", "ownerConfirmed"], rejected: ["rejected"], revoked: ["revoked"], expired: ["expired"] }),
   },
   projectGitRepositoryDelegation: {
     source: "projectGitRepositoryDelegation",
     label: SYSTEM_AUDIT_SOURCE_LABELS.projectGitRepositoryDelegation,
     table: "ProjectGitRepositoryDelegationAudit",
-    selectedFields: ["id", "projectId", "gitConnectionId", "delegationId", "connectionOwnerId", "action", "delegationVersion", "statusBefore", "statusAfter", "actorKind", "actorId", "actorProjectMembershipId", "ownerProjectMembershipId", "connectionConfigurationVersion", "connectionOwnerAccountAccessVersion", "reason", "createdAt"],
+    selectedFields: ["id", "projectId", "connectionOwnerId", "action", "delegationVersion", "statusBefore", "statusAfter", "actorKind", "actorId", "connectionConfigurationVersion", "connectionOwnerAccountAccessVersion", "createdAt"],
     referenceFields: ["projectId", "gitConnectionId", "delegationId", "connectionOwnerId"],
     actionField: "action",
-    allowedActions: ["proposed", "ownerConfirmed", "activated", "rejected", "revoked", "expired"],
-    actionMap: actionMapping(["proposed", "ownerConfirmed", "activated", "rejected", "revoked", "expired"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectGitRepositoryDelegation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectGitRepositoryDelegation),
     resultField: "action",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.projectGitRepositoryDelegation,
     resultMap: resultMapping({ applied: ["activated"], pending: ["proposed", "ownerConfirmed"], rejected: ["rejected"], revoked: ["revoked"], expired: ["expired"] }),
   },
   projectMcpConnectionDelegation: {
     source: "projectMcpConnectionDelegation",
     label: SYSTEM_AUDIT_SOURCE_LABELS.projectMcpConnectionDelegation,
     table: "ProjectMcpConnectionDelegationAudit",
-    selectedFields: ["id", "projectId", "mcpConnectionId", "delegationId", "connectionOwnerId", "action", "delegationVersion", "statusBefore", "statusAfter", "actorKind", "actorId", "actorProjectMembershipId", "ownerProjectMembershipId", "connectionConfigurationRevision", "connectionOwnerAccountAccessVersion", "reason", "createdAt"],
+    selectedFields: ["id", "projectId", "connectionOwnerId", "action", "delegationVersion", "statusBefore", "statusAfter", "actorKind", "actorId", "connectionConfigurationRevision", "connectionOwnerAccountAccessVersion", "createdAt"],
     referenceFields: ["projectId", "mcpConnectionId", "delegationId", "connectionOwnerId"],
     actionField: "action",
-    allowedActions: ["proposed", "ownerConfirmed", "activated", "rejected", "revoked", "expired"],
-    actionMap: actionMapping(["proposed", "ownerConfirmed", "activated", "rejected", "revoked", "expired"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectMcpConnectionDelegation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectMcpConnectionDelegation),
     resultField: "action",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.projectMcpConnectionDelegation,
     resultMap: resultMapping({ applied: ["activated"], pending: ["proposed", "ownerConfirmed"], rejected: ["rejected"], revoked: ["revoked"], expired: ["expired"] }),
   },
   projectMcpToolGrantLedger: {
     source: "projectMcpToolGrantLedger",
     label: SYSTEM_AUDIT_SOURCE_LABELS.projectMcpToolGrantLedger,
     table: "ProjectMcpToolGrantLedger",
-    selectedFields: ["id", "projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "connectionOwnerId", "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "actorProjectMembershipId", "delegationVersion", "connectionConfigurationRevision", "grantorProjectMembershipId", "revokerProjectMembershipId", "acknowledgedAt", "transactionId", "transitionAt", "createdAt"],
+    selectedFields: ["id", "projectId", "connectionOwnerId", "controlPlaneVersion", "grantVersion", "event", "statusBefore", "statusAfter", "actorId", "delegationVersion", "connectionConfigurationRevision", "createdAt"],
     referenceFields: ["projectId", "grantId", "connectionId", "delegationId", "toolDefinitionId", "attestationId", "connectionOwnerId"],
     actionField: "event",
-    allowedActions: ["granted", "revoked"],
-    actionMap: actionMapping(["granted", "revoked"]),
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectMcpToolGrantLedger,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectMcpToolGrantLedger),
     resultField: "event",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.projectMcpToolGrantLedger,
     resultMap: resultMapping({ applied: ["granted"], revoked: ["revoked"] }),
+  },
+  projectGitManualRun: {
+    source: "projectGitManualRun",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.projectGitManualRun,
+    table: "ProjectGitRepositoryManualRunAudit",
+    selectedFields: ["id", "projectId", "action", "statusBefore", "statusAfter", "dispatchState", "actorId", "connectionOwnerId", "delegationVersion", "connectionConfigurationVersion", "role", "createdAt"],
+    referenceFields: ["projectId"],
+    actionField: "action",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectGitManualRun,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectGitManualRun),
+    resultField: "action",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.projectGitManualRun,
+    resultMap: resultMapping({ applied: ["succeeded"], pending: ["requested", "admitted", "dispatched"], rejected: ["conflict"], failed: ["failed"], unknown: ["unknown"] }),
+  },
+  projectMcpActionApproval: {
+    source: "projectMcpActionApproval",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.projectMcpActionApproval,
+    table: "ProjectMcpActionLedger",
+    selectedFields: ["id", "projectId", "event", "statusBefore", "statusAfter", "stateVersion", "actorId", "connectionOwnerId", "grantVersion", "delegationVersion", "attestationVersion", "createdAt"],
+    referenceFields: ["projectId"],
+    actionField: "event",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectMcpActionApproval,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectMcpActionApproval),
+    resultField: "event",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.projectMcpActionApproval,
+    resultMap: resultMapping({ applied: ["approved"], pending: ["proposed"], rejected: ["rejected"], cancelled: ["cancelled"] }),
+  },
+  projectMcpActionRuntime: {
+    source: "projectMcpActionRuntime",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.projectMcpActionRuntime,
+    table: "ProjectMcpActionRuntimeLedger",
+    selectedFields: ["id", "projectId", "event", "statusBefore", "statusAfter", "stateVersion", "actorKind", "actorId", "connectionOwnerId", "safeErrorCode", "resultBytes", "resultNodes", "resultDepth", "createdAt"],
+    referenceFields: ["projectId"],
+    actionField: "event",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectMcpActionRuntime,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectMcpActionRuntime),
+    resultField: "event",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.projectMcpActionRuntime,
+    resultMap: resultMapping({ applied: ["succeeded"], pending: ["reserved"], failed: ["failed"], unknown: ["unknown"], expired: ["expired"], invalidated: ["invalidated"] }),
+  },
+  aiRuntime: {
+    source: "aiRuntime",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.aiRuntime,
+    table: "AiAuditEvent",
+    selectedFields: ["id", "projectId", "eventType", "safeCode", "createdAt"],
+    referenceFields: ["projectId"],
+    actionField: "eventType",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.aiRuntime,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.aiRuntime),
+    resultField: "eventType",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.aiRuntime,
+    resultMap: resultMapping({ applied: ["policyCreated", "policyAdvanced", "grantIssued", "runClaimed", "dispatchSent", "runSucceeded", "attemptSucceeded"], revoked: ["grantRevoked"], pending: ["runCreated"], rejected: ["preflightRejected", "scannerRejected", "budgetRejected"], failed: ["runFailed", "attemptFailed"], cancelled: ["runCancelled", "attemptCancelled"], unknown: ["runUnknown", "attemptUnknown"] }),
+  },
+  webAiConfirmation: {
+    source: "webAiConfirmation",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.webAiConfirmation,
+    table: "WebAiConfirmationChallenge",
+    selectedFields: ["id", "projectId", "actorId", "actorAccountAccessVersion", "targetAction", "issuedAt", "expiresAt", "consumedAt"],
+    referenceFields: ["projectId"],
+    actionField: "targetAction",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.webAiConfirmation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.webAiConfirmation),
+    resultField: "targetAction",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.webAiConfirmation,
+    resultMap: resultMapping({ applied: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.webAiConfirmation, pending: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.webAiConfirmation, expired: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.webAiConfirmation }),
   },
 };
 
@@ -250,6 +276,7 @@ const SYSTEM_AUDIT_FILTER_CONTEXT = "ai-project-os:system-audit-filter:v1";
 export const SYSTEM_AUDIT_MAX_PAGE_SIZE = 50;
 const MAX_USER_LOOKUP_RESULTS = 2;
 const MAX_HYDRATED_USER_IDS = SYSTEM_AUDIT_MAX_PAGE_SIZE * 2;
+export const SYSTEM_AUDIT_MAX_WORKSPACE_PROJECTS = 1_000;
 
 export type SystemAuditPrincipal = Readonly<{
   kind: "user" | "system" | "unrecorded";
@@ -445,17 +472,102 @@ function statusResult(action: string, statusAfter: string | null | undefined): S
   return "unknown";
 }
 
+function manualRunResult(action: string, statusAfter: string): SystemAuditResult {
+  if (action === "succeeded" || statusAfter === "succeeded") return "applied";
+  if (action === "failed" || statusAfter === "failed") return "failed";
+  if (action === "unknown" || statusAfter === "unknown") return "unknown";
+  if (action === "conflict") return "rejected";
+  return "pending";
+}
+
+function aiRuntimeResult(action: string): SystemAuditResult {
+  if (["preflightRejected", "scannerRejected", "budgetRejected"].includes(action)) return "rejected";
+  if (["runFailed", "attemptFailed"].includes(action)) return "failed";
+  if (["runCancelled", "attemptCancelled"].includes(action)) return "cancelled";
+  if (["runUnknown", "attemptUnknown"].includes(action)) return "unknown";
+  if (action === "grantRevoked") return "revoked";
+  if (action === "runCreated") return "pending";
+  return "applied";
+}
+
+const AI_SAFE_ERROR_CODES: Readonly<Record<string, string>> = {
+  aiDisabled: "AI_DISABLED",
+  AI_DISABLED: "AI_DISABLED",
+  aiProviderDisabled: "AI_PROVIDER_DISABLED",
+  AI_PROVIDER_DISABLED: "AI_PROVIDER_DISABLED",
+  aiInvalidOperationKeyInput: "AI_INVALID_OPERATION_KEY_INPUT",
+  AI_INVALID_OPERATION_KEY_INPUT: "AI_INVALID_OPERATION_KEY_INPUT",
+  aiInvalidStateTransition: "AI_INVALID_STATE_TRANSITION",
+  AI_INVALID_STATE_TRANSITION: "AI_INVALID_STATE_TRANSITION",
+  aiRedispatchForbidden: "AI_REDISPATCH_FORBIDDEN",
+  AI_REDISPATCH_FORBIDDEN: "AI_REDISPATCH_FORBIDDEN",
+  aiProviderIncomplete: "AI_PROVIDER_INCOMPLETE",
+  AI_PROVIDER_INCOMPLETE: "AI_PROVIDER_INCOMPLETE",
+  aiProviderUnknown: "AI_PROVIDER_UNKNOWN",
+  AI_PROVIDER_UNKNOWN: "AI_PROVIDER_UNKNOWN",
+  aiProviderFailed: "AI_PROVIDER_FAILED",
+  AI_PROVIDER_FAILED: "AI_PROVIDER_FAILED",
+  aiProviderCancelled: "AI_PROVIDER_CANCELLED",
+  AI_PROVIDER_CANCELLED: "AI_PROVIDER_CANCELLED",
+  aiDispatchNotSent: "AI_DISPATCH_NOT_SENT",
+  AI_DISPATCH_NOT_SENT: "AI_DISPATCH_NOT_SENT",
+  aiPolicyDenied: "AI_POLICY_DENIED",
+  AI_POLICY_DENIED: "AI_POLICY_DENIED",
+  aiGrantDenied: "AI_GRANT_DENIED",
+  AI_GRANT_DENIED: "AI_GRANT_DENIED",
+  aiScannerDenied: "AI_SCANNER_DENIED",
+  AI_SCANNER_DENIED: "AI_SCANNER_DENIED",
+  aiBudgetDenied: "AI_BUDGET_DENIED",
+  AI_BUDGET_DENIED: "AI_BUDGET_DENIED",
+  aiInvalidProviderResponse: "AI_INVALID_PROVIDER_RESPONSE",
+  AI_INVALID_PROVIDER_RESPONSE: "AI_INVALID_PROVIDER_RESPONSE",
+  sourceInUse: "SOURCE_IN_USE",
+  SOURCE_IN_USE: "SOURCE_IN_USE",
+};
+
+const MCP_SAFE_ERROR_CODES = new Set([
+  "MCP_NETWORK_BLOCKED",
+  "MCP_NETWORK_CHANGED",
+  "MCP_TRANSPORT_FAILED",
+  "MCP_PROTOCOL_UNSUPPORTED",
+  "MCP_RESPONSE_INVALID",
+  "MCP_RESPONSE_TOO_LARGE",
+  "MCP_TOOL_INPUT_REQUIRED_UNSUPPORTED",
+  "MCP_TOOL_OUTPUT_INVALID",
+  "MCP_TOOL_CALL_FAILED",
+  "MCP_DISPATCH_APPROVAL_EXPIRED",
+  "MCP_DISPATCH_SOURCE_DRIFT",
+  "MCP_DISPATCH_OWNER_DRIFT",
+  "MCP_DISPATCH_OWNER_EPOCH_DRIFT",
+  "MCP_DISPATCH_RESERVATION_STALE",
+  "MCP_AUTH_UNAVAILABLE",
+  "MCP_DISPATCH_FAILED",
+  "MCP_DISPATCH_UNKNOWN",
+]);
+
+function safeAiErrorCode(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  return AI_SAFE_ERROR_CODES[String(value)] ?? "AI_PROVIDER_UNKNOWN";
+}
+
+function safeMcpErrorCode(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value);
+  return MCP_SAFE_ERROR_CODES.has(normalized) ? normalized : "MCP_DISPATCH_UNKNOWN";
+}
+
 function evidence(
   before: Readonly<Record<string, AuditValue>> = {},
   after: Readonly<Record<string, AuditValue>> = {},
   versions: Readonly<Record<string, number | null>> = {},
   reasonRecorded = false,
+  safeErrorCode: string | null = null,
 ): SystemAuditEvidence {
   return Object.freeze({
     before: Object.freeze(before),
     after: Object.freeze(after),
     versions: Object.freeze(versions),
-    safeErrorCode: null,
+    safeErrorCode,
     reasonRecorded,
   });
 }
@@ -468,10 +580,7 @@ type PlatformRow = Prisma.PlatformDefaultAiRouteAuditGetPayload<{ select: typeof
 const platformSelect = {
   id: true,
   action: true,
-  routeId: true,
-  operation: true,
   routeVersion: true,
-  providerConnectionId: true,
   providerConfigurationVersion: true,
   actorId: true,
   reason: true,
@@ -481,7 +590,6 @@ const platformSelect = {
 type SubscriptionRow = Prisma.MembershipSubscriptionAuditGetPayload<{ select: typeof subscriptionSelect }>;
 const subscriptionSelect = {
   id: true,
-  subscriptionId: true,
   userId: true,
   actorId: true,
   eventKind: true,
@@ -503,7 +611,6 @@ const accountAccessSelect = {
   versionAfter: true,
   disabledAtBefore: true,
   disabledAtAfter: true,
-  previewId: true,
   reason: true,
   createdAt: true,
 } as const;
@@ -511,8 +618,6 @@ const accountAccessSelect = {
 type MembershipAccessRow = Prisma.MembershipAccessAuditGetPayload<{ select: typeof membershipAccessSelect }>;
 const membershipAccessSelect = {
   id: true,
-  membershipKind: true,
-  membershipId: true,
   workspaceId: true,
   projectId: true,
   userId: true,
@@ -521,14 +626,12 @@ const membershipAccessSelect = {
   newState: true,
   roleSnapshot: true,
   actorId: true,
-  reason: true,
   createdAt: true,
 } as const;
 
 type InvitationRow = Prisma.WorkspaceInvitationAuditGetPayload<{ select: typeof invitationSelect }>;
 const invitationSelect = {
   id: true,
-  invitationId: true,
   workspaceId: true,
   event: true,
   versionBefore: true,
@@ -536,16 +639,12 @@ const invitationSelect = {
   statusBefore: true,
   statusAfter: true,
   actorId: true,
-  reason: true,
   createdAt: true,
 } as const;
 
 type AttestationRow = Prisma.McpToolAttestationAuditGetPayload<{ select: typeof attestationSelect }>;
 const attestationSelect = {
   id: true,
-  attestationId: true,
-  connectionId: true,
-  toolDefinitionId: true,
   event: true,
   actorId: true,
   controlPlaneVersion: true,
@@ -560,26 +659,18 @@ type ProjectAiRow = Prisma.ProjectAiProviderDelegationAuditGetPayload<{ select: 
 const projectAiSelect = {
   id: true,
   projectId: true,
-  operation: true,
   entity: true,
   action: true,
-  delegationId: true,
-  selectionId: true,
   delegationVersion: true,
   selectionVersion: true,
   statusBefore: true,
   statusAfter: true,
   selectionSource: true,
-  selectedDelegationId: true,
-  selectedByProjectMembershipId: true,
-  providerConnectionId: true,
   connectionOwnerId: true,
   providerConfigurationVersion: true,
   connectionOwnerAccountAccessVersion: true,
   actorKind: true,
   actorId: true,
-  actorProjectMembershipId: true,
-  reason: true,
   createdAt: true,
 } as const;
 
@@ -587,8 +678,6 @@ type GitRow = Prisma.ProjectGitRepositoryDelegationAuditGetPayload<{ select: typ
 const gitSelect = {
   id: true,
   projectId: true,
-  gitConnectionId: true,
-  delegationId: true,
   connectionOwnerId: true,
   action: true,
   delegationVersion: true,
@@ -596,11 +685,8 @@ const gitSelect = {
   statusAfter: true,
   actorKind: true,
   actorId: true,
-  actorProjectMembershipId: true,
-  ownerProjectMembershipId: true,
   connectionConfigurationVersion: true,
   connectionOwnerAccountAccessVersion: true,
-  reason: true,
   createdAt: true,
 } as const;
 
@@ -608,8 +694,6 @@ type McpDelegationRow = Prisma.ProjectMcpConnectionDelegationAuditGetPayload<{ s
 const mcpDelegationSelect = {
   id: true,
   projectId: true,
-  mcpConnectionId: true,
-  delegationId: true,
   connectionOwnerId: true,
   action: true,
   delegationVersion: true,
@@ -617,11 +701,8 @@ const mcpDelegationSelect = {
   statusAfter: true,
   actorKind: true,
   actorId: true,
-  actorProjectMembershipId: true,
-  ownerProjectMembershipId: true,
   connectionConfigurationRevision: true,
   connectionOwnerAccountAccessVersion: true,
-  reason: true,
   createdAt: true,
 } as const;
 
@@ -629,11 +710,6 @@ type GrantRow = Prisma.ProjectMcpToolGrantLedgerGetPayload<{ select: typeof gran
 const grantSelect = {
   id: true,
   projectId: true,
-  grantId: true,
-  connectionId: true,
-  delegationId: true,
-  toolDefinitionId: true,
-  attestationId: true,
   connectionOwnerId: true,
   controlPlaneVersion: true,
   grantVersion: true,
@@ -641,15 +717,80 @@ const grantSelect = {
   statusBefore: true,
   statusAfter: true,
   actorId: true,
-  actorProjectMembershipId: true,
   delegationVersion: true,
   connectionConfigurationRevision: true,
-  grantorProjectMembershipId: true,
-  revokerProjectMembershipId: true,
-  acknowledgedAt: true,
-  transactionId: true,
-  transitionAt: true,
   createdAt: true,
+} as const;
+
+type GitManualRunRow = Prisma.ProjectGitRepositoryManualRunAuditGetPayload<{ select: typeof gitManualRunSelect }>;
+const gitManualRunSelect = {
+  id: true,
+  projectId: true,
+  action: true,
+  statusBefore: true,
+  statusAfter: true,
+  dispatchState: true,
+  actorId: true,
+  connectionOwnerId: true,
+  delegationVersion: true,
+  connectionConfigurationVersion: true,
+  role: true,
+  createdAt: true,
+} as const;
+
+type McpActionApprovalRow = Prisma.ProjectMcpActionLedgerGetPayload<{ select: typeof mcpActionApprovalSelect }>;
+const mcpActionApprovalSelect = {
+  id: true,
+  projectId: true,
+  event: true,
+  statusBefore: true,
+  statusAfter: true,
+  stateVersion: true,
+  actorId: true,
+  connectionOwnerId: true,
+  grantVersion: true,
+  delegationVersion: true,
+  attestationVersion: true,
+  createdAt: true,
+} as const;
+
+type McpActionRuntimeRow = Prisma.ProjectMcpActionRuntimeLedgerGetPayload<{ select: typeof mcpActionRuntimeSelect }>;
+const mcpActionRuntimeSelect = {
+  id: true,
+  projectId: true,
+  event: true,
+  statusBefore: true,
+  statusAfter: true,
+  stateVersion: true,
+  actorKind: true,
+  actorId: true,
+  connectionOwnerId: true,
+  safeErrorCode: true,
+  resultBytes: true,
+  resultNodes: true,
+  resultDepth: true,
+  createdAt: true,
+} as const;
+
+type AiRuntimeRow = Prisma.AiAuditEventGetPayload<{ select: typeof aiRuntimeSelect }>;
+const aiRuntimeSelect = {
+  id: true,
+  projectId: true,
+  eventType: true,
+  safeCode: true,
+  createdAt: true,
+} as const;
+
+type WebAiConfirmationRow = Prisma.WebAiConfirmationChallengeGetPayload<{ select: typeof webAiConfirmationSelect }>;
+const webAiConfirmationSelect = {
+  id: true,
+  projectId: true,
+  actorId: true,
+  actorAccountAccessVersion: true,
+  targetAction: true,
+  issuedAt: true,
+  expiresAt: true,
+  consumedAt: true,
 } as const;
 
 type QueryContext = Readonly<{
@@ -657,6 +798,7 @@ type QueryContext = Readonly<{
   filters: SystemAuditFilters;
   actorIds?: readonly string[];
   subjectIds?: readonly string[];
+  workspaceProjectIds?: readonly string[];
   snapshotAt: Date;
   cursor: CursorPayload | null;
   auditId?: string;
@@ -668,28 +810,29 @@ type SourceWhereOptions = Readonly<{
   subjectField?: string;
   projectField?: string;
   workspaceField?: string;
+  actorKindField?: string;
 }>;
 
-function temporalWhere(context: QueryContext, source: SystemAuditSource): Record<string, unknown> {
+function temporalWhere(context: QueryContext, source: SystemAuditSource, dateField = "createdAt"): Record<string, unknown> {
   const dateRange: Record<string, Date> = { lte: context.snapshotAt };
   if (context.filters.from !== undefined) dateRange.gte = context.filters.from;
   if (context.filters.to !== undefined) dateRange.lte = context.filters.to;
   const cursor = context.cursor;
-  if (cursor === null) return { createdAt: dateRange };
-  if (source < cursor.source) return { createdAt: { ...dateRange, lt: new Date(cursor.createdAt) } };
-  if (source > cursor.source) return { createdAt: { ...dateRange, lte: new Date(cursor.createdAt) } };
+  if (cursor === null) return { [dateField]: dateRange };
+  if (source < cursor.source) return { [dateField]: { ...dateRange, lt: new Date(cursor.createdAt) } };
+  if (source > cursor.source) return { [dateField]: { ...dateRange, lte: new Date(cursor.createdAt) } };
   return {
     AND: [{
       OR: [
-        { createdAt: { ...dateRange, lt: new Date(cursor.createdAt) } },
-        { createdAt: { ...dateRange, equals: new Date(cursor.createdAt) }, id: { lt: cursor.id } },
+        { [dateField]: { ...dateRange, lt: new Date(cursor.createdAt) } },
+        { [dateField]: { ...dateRange, equals: new Date(cursor.createdAt) }, id: { lt: cursor.id } },
       ],
     }],
   };
 }
 
 function sourceWhere(context: QueryContext, source: SystemAuditSource, options: SourceWhereOptions): Record<string, unknown> {
-  const where: Record<string, unknown> = { ...temporalWhere(context, source) };
+  const where: Record<string, unknown> = { ...temporalWhere(context, source, source === "webAiConfirmation" ? "issuedAt" : "createdAt") };
   const filters = context.filters;
   const impossible = { in: [] as string[] };
   const registry = SYSTEM_AUDIT_REGISTRY[source];
@@ -704,8 +847,15 @@ function sourceWhere(context: QueryContext, source: SystemAuditSource, options: 
     else where[options.projectField] = filters.projectId;
   }
   if (filters.workspaceId !== undefined) {
-    if (options.workspaceField === undefined) where.id = impossible;
-    else where[options.workspaceField] = filters.workspaceId;
+    if (options.workspaceField !== undefined) where[options.workspaceField] = filters.workspaceId;
+    else if (options.projectField !== undefined) {
+      const projectIds = context.workspaceProjectIds ?? [];
+      if (filters.projectId !== undefined) {
+        where[options.projectField] = projectIds.includes(filters.projectId) ? filters.projectId : impossible;
+      } else {
+        where[options.projectField] = { in: [...projectIds] };
+      }
+    } else where.id = impossible;
   }
   if (filters.userId !== undefined) {
     if (options.subjectField === undefined) where.id = impossible;
@@ -713,13 +863,34 @@ function sourceWhere(context: QueryContext, source: SystemAuditSource, options: 
   }
   if (context.actorIds !== undefined) {
     if (options.actorField === undefined) where.id = impossible;
-    else where[options.actorField] = { in: context.actorIds };
+    else {
+      where[options.actorField] = { in: context.actorIds };
+      if (options.actorKindField !== undefined) where[options.actorKindField] = "owner";
+    }
   }
   if (context.subjectIds !== undefined) {
     if (options.subjectField === undefined) where.id = impossible;
     else where[options.subjectField] = { in: context.subjectIds };
   }
-  if (filters.result !== undefined) {
+  if (filters.result !== undefined && source === "webAiConfirmation") {
+    if (filters.result === "applied") {
+      where.consumedAt = { lte: context.snapshotAt };
+    } else if (filters.result === "expired" || filters.result === "pending") {
+      const existingAnd = Array.isArray(where.AND) ? where.AND : [];
+      const expiresAt = filters.result === "expired"
+        ? { lte: context.snapshotAt }
+        : { gt: context.snapshotAt };
+      where.AND = [
+        ...existingAnd,
+        {
+          OR: [
+            { consumedAt: null, expiresAt },
+            { consumedAt: { gt: context.snapshotAt }, expiresAt },
+          ],
+        },
+      ];
+    } else where.id = impossible;
+  } else if (filters.result !== undefined) {
     const mappedResults = registry.resultMap[filters.result];
     if (mappedResults === undefined || mappedResults.length === 0) where.id = impossible;
     else if (filters.action === undefined) where[registry.resultField] = { in: mappedResults };
@@ -733,6 +904,10 @@ function sourceWhere(context: QueryContext, source: SystemAuditSource, options: 
 
 function orderBy(): Array<{ createdAt: "desc" } | { id: "desc" }> {
   return [{ createdAt: "desc" }, { id: "desc" }];
+}
+
+function orderByIssuedAt(): Array<{ issuedAt: "desc" } | { id: "desc" }> {
+  return [{ issuedAt: "desc" }, { id: "desc" }];
 }
 
 function platformProjection(row: PlatformRow): RawAuditEvent {
@@ -831,7 +1006,7 @@ function invitationProjection(row: InvitationRow): RawAuditEvent {
       { before: row.versionBefore, after: row.versionAfter },
       true,
     ),
-    result: statusResult(action, row.statusAfter),
+    result: action === "created" ? "pending" : action === "accepted" ? "applied" : action === "revoked" ? "revoked" : "unknown",
   });
 }
 
@@ -940,6 +1115,134 @@ function grantProjection(row: GrantRow): RawAuditEvent {
   });
 }
 
+function gitManualRunProjection(row: GitManualRunRow): RawAuditEvent {
+  const action = String(row.action);
+  const statusAfter = String(row.statusAfter);
+  const isSystemRecovery = action === "unknown" && row.actorId === null;
+  return rawEvent({
+    id: row.id,
+    source: "projectGitManualRun",
+    action,
+    createdAt: row.createdAt,
+    actorId: isSystemRecovery ? null : row.actorId,
+    actorKind: isSystemRecovery ? "system" : row.actorId === null ? "unrecorded" : "user",
+    subjectId: row.connectionOwnerId,
+    references: safeReferences({ categories: ["gitManualRun"], projectId: row.projectId }),
+    evidence: evidence(
+      { status: row.statusBefore === null ? null : String(row.statusBefore) },
+      { status: statusAfter, dispatch: String(row.dispatchState), role: String(row.role) },
+      { delegation: row.delegationVersion, connectionConfiguration: row.connectionConfigurationVersion },
+      true,
+    ),
+    result: manualRunResult(action, statusAfter),
+  });
+}
+
+function mcpActionApprovalProjection(row: McpActionApprovalRow): RawAuditEvent {
+  const action = String(row.event);
+  return rawEvent({
+    id: row.id,
+    source: "projectMcpActionApproval",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind: "user",
+    subjectId: row.connectionOwnerId,
+    references: safeReferences({ categories: ["mcpActionApproval"], projectId: row.projectId }),
+    evidence: evidence(
+      { status: row.statusBefore === null ? null : String(row.statusBefore) },
+      { status: String(row.statusAfter) },
+      { state: row.stateVersion, grant: row.grantVersion, delegation: row.delegationVersion, attestation: row.attestationVersion },
+      false,
+    ),
+    result: action === "approved" ? "applied" : action === "rejected" ? "rejected" : action === "cancelled" ? "cancelled" : "pending",
+  });
+}
+
+function mcpActionRuntimeProjection(row: McpActionRuntimeRow): RawAuditEvent {
+  const action = String(row.event);
+  const result = action === "succeeded"
+    ? "applied"
+    : action === "reserved"
+      ? "pending"
+      : action === "failed"
+        ? "failed"
+        : action === "unknown"
+          ? "unknown"
+          : action === "expired"
+            ? "expired"
+            : "invalidated";
+  const actorKind = String(row.actorKind) === "systemRecovery" ? "system" : "user";
+  return rawEvent({
+    id: row.id,
+    source: "projectMcpActionRuntime",
+    action,
+    createdAt: row.createdAt,
+    actorId: actorKind === "system" ? null : row.actorId,
+    actorKind,
+    subjectId: row.connectionOwnerId,
+    references: safeReferences({ categories: ["mcpActionRuntime"], projectId: row.projectId }),
+    evidence: evidence(
+      { status: row.statusBefore === null ? null : String(row.statusBefore) },
+      { status: String(row.statusAfter), resultBytes: row.resultBytes, resultNodes: row.resultNodes, resultDepth: row.resultDepth },
+      { state: row.stateVersion },
+      false,
+      safeMcpErrorCode(row.safeErrorCode),
+    ),
+    result,
+  });
+}
+
+function aiRuntimeProjection(row: AiRuntimeRow): RawAuditEvent {
+  const action = String(row.eventType);
+  const safeCode = safeAiErrorCode(row.safeCode);
+  return rawEvent({
+    id: row.id,
+    source: "aiRuntime",
+    action,
+    createdAt: row.createdAt,
+    actorId: null,
+    actorKind: "unrecorded",
+    subjectId: null,
+    references: safeReferences({ categories: ["aiRuntime"], projectId: row.projectId }),
+    evidence: evidence(
+      {},
+      { event: action, safeCode },
+      {},
+      false,
+      safeCode,
+    ),
+    result: aiRuntimeResult(action),
+  });
+}
+
+function webAiConfirmationProjection(row: WebAiConfirmationRow, snapshotAt: Date): RawAuditEvent {
+  const action = String(row.targetAction);
+  const consumedAtAtSnapshot = row.consumedAt !== null && row.consumedAt <= snapshotAt;
+  const result: SystemAuditResult = consumedAtAtSnapshot
+    ? "applied"
+    : row.expiresAt <= snapshotAt
+      ? "expired"
+      : "pending";
+  return rawEvent({
+    id: row.id,
+    source: "webAiConfirmation",
+    action,
+    createdAt: row.issuedAt,
+    actorId: row.actorId,
+    actorKind: "user",
+    subjectId: null,
+    references: safeReferences({ categories: ["webAiConfirmation"], projectId: row.projectId }),
+    evidence: evidence(
+      {},
+      { result },
+      { actorAccountAccess: row.actorAccountAccessVersion },
+      false,
+    ),
+    result,
+  });
+}
+
 async function fetchPlatform(context: QueryContext): Promise<RawAuditEvent[]> {
   const rows = await context.db.platformDefaultAiRouteAudit.findMany({
     where: sourceWhere(context, "platformDefaultAiRoute", { actorField: "actorId" }) as Prisma.PlatformDefaultAiRouteAuditWhereInput,
@@ -1040,6 +1343,56 @@ async function fetchGrant(context: QueryContext): Promise<RawAuditEvent[]> {
   return rows.map(grantProjection);
 }
 
+async function fetchGitManualRun(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.projectGitRepositoryManualRunAudit.findMany({
+    where: sourceWhere(context, "projectGitManualRun", { actorField: "actorId", subjectField: "connectionOwnerId", projectField: "projectId" }) as Prisma.ProjectGitRepositoryManualRunAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: gitManualRunSelect,
+  });
+  return rows.map(gitManualRunProjection);
+}
+
+async function fetchMcpActionApproval(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.projectMcpActionLedger.findMany({
+    where: sourceWhere(context, "projectMcpActionApproval", { actorField: "actorId", subjectField: "connectionOwnerId", projectField: "projectId" }) as Prisma.ProjectMcpActionLedgerWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: mcpActionApprovalSelect,
+  });
+  return rows.map(mcpActionApprovalProjection);
+}
+
+async function fetchMcpActionRuntime(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.projectMcpActionRuntimeLedger.findMany({
+    where: sourceWhere(context, "projectMcpActionRuntime", { actorField: "actorId", subjectField: "connectionOwnerId", projectField: "projectId", actorKindField: "actorKind" }) as Prisma.ProjectMcpActionRuntimeLedgerWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: mcpActionRuntimeSelect,
+  });
+  return rows.map(mcpActionRuntimeProjection);
+}
+
+async function fetchAiRuntime(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.aiAuditEvent.findMany({
+    where: sourceWhere(context, "aiRuntime", { projectField: "projectId" }) as Prisma.AiAuditEventWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: aiRuntimeSelect,
+  });
+  return rows.map(aiRuntimeProjection);
+}
+
+async function fetchWebAiConfirmation(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.webAiConfirmationChallenge.findMany({
+    where: sourceWhere(context, "webAiConfirmation", { actorField: "actorId", projectField: "projectId" }) as Prisma.WebAiConfirmationChallengeWhereInput,
+    orderBy: orderByIssuedAt(),
+    take: context.take,
+    select: webAiConfirmationSelect,
+  });
+  return rows.map((row) => webAiConfirmationProjection(row, context.snapshotAt));
+}
+
 async function fetchSource(context: QueryContext, source: SystemAuditSource): Promise<RawAuditEvent[]> {
   switch (source) {
     case "platformDefaultAiRoute": return fetchPlatform(context);
@@ -1050,8 +1403,13 @@ async function fetchSource(context: QueryContext, source: SystemAuditSource): Pr
     case "mcpToolAttestation": return fetchAttestation(context);
     case "projectAiProviderDelegation": return fetchProjectAi(context);
     case "projectGitRepositoryDelegation": return fetchGit(context);
+    case "projectGitManualRun": return fetchGitManualRun(context);
     case "projectMcpConnectionDelegation": return fetchMcpDelegation(context);
     case "projectMcpToolGrantLedger": return fetchGrant(context);
+    case "projectMcpActionApproval": return fetchMcpActionApproval(context);
+    case "projectMcpActionRuntime": return fetchMcpActionRuntime(context);
+    case "aiRuntime": return fetchAiRuntime(context);
+    case "webAiConfirmation": return fetchWebAiConfirmation(context);
   }
 }
 
@@ -1064,6 +1422,19 @@ async function resolveUserIds(db: PrismaClient, value: string): Promise<readonly
   });
   if (users.length !== 1) return [];
   return [users[0]!.id];
+}
+
+async function resolveWorkspaceProjectIds(db: PrismaClient, workspaceId: string): Promise<readonly string[]> {
+  const projects = await db.project.findMany({
+    where: { workspaceId },
+    select: { id: true },
+    orderBy: { id: "asc" },
+    take: SYSTEM_AUDIT_MAX_WORKSPACE_PROJECTS + 1,
+  });
+  if (projects.length > SYSTEM_AUDIT_MAX_WORKSPACE_PROJECTS) {
+    return auditError("SYSTEM_AUDIT_WORKSPACE_SCOPE_TOO_LARGE", "工作区项目范围超过安全上限", 422);
+  }
+  return projects.map((project) => project.id);
 }
 
 function normalizeFilters(input: SystemAuditQuery, snapshotAt: Date, now: Date): SystemAuditFilters {
@@ -1103,7 +1474,7 @@ function normalizeFilters(input: SystemAuditQuery, snapshotAt: Date, now: Date):
 function sourceSupportsFilters(source: SystemAuditSource, filters: SystemAuditFilters): boolean {
   const registry = SYSTEM_AUDIT_REGISTRY[source];
   if (filters.action !== undefined && registry.actionMap[filters.action] === undefined) return false;
-  if (filters.result !== undefined && registry.resultMap[filters.result] === undefined) return false;
+  if (filters.result !== undefined && !registry.allowedResults.includes(filters.result)) return false;
   return true;
 }
 
@@ -1178,9 +1549,13 @@ export async function listSystemAudit(
   if ((actorIds !== undefined && actorIds.length === 0) || (subjectIds !== undefined && subjectIds.length === 0)) {
     return emptyList(snapshotAt, pageSize);
   }
+  const workspaceProjectIds = filters.workspaceId === undefined ? undefined : await resolveWorkspaceProjectIds(db, filters.workspaceId);
+  if (filters.workspaceId !== undefined && filters.projectId !== undefined && !workspaceProjectIds!.includes(filters.projectId)) {
+    return emptyList(snapshotAt, pageSize);
+  }
   const sources = (input.source === undefined ? SYSTEM_AUDIT_SOURCES : [input.source]).filter((source) => sourceSupportsFilters(source, filters));
   if (sources.length === 0) return emptyList(snapshotAt, pageSize);
-  const rows = await Promise.all(sources.map((source) => fetchSource({ db, filters, actorIds, subjectIds, snapshotAt, cursor, take: pageSize + 1 }, source)));
+  const rows = await Promise.all(sources.map((source) => fetchSource({ db, filters, actorIds, subjectIds, workspaceProjectIds, snapshotAt, cursor, take: pageSize + 1 }, source)));
   const merged = rows.flat().filter((event) => input.result === undefined || event.result === input.result).sort(compareEvents);
   const page = merged.slice(0, pageSize);
   const hasMore = merged.length > pageSize;
@@ -1200,7 +1575,7 @@ export async function getSystemAuditDetail(
 ): Promise<SystemAuditEvent> {
   if (!z.string().uuid().safeParse(auditId).success) auditError("SYSTEM_AUDIT_NOT_FOUND", "审计记录不存在", 404);
   const now = new Date();
-  const rows = await fetchSource({ db, filters: { source }, actorIds: undefined, subjectIds: undefined, snapshotAt: now, cursor: null, auditId, take: 1 }, source);
+  const rows = await fetchSource({ db, filters: { source }, actorIds: undefined, subjectIds: undefined, workspaceProjectIds: undefined, snapshotAt: now, cursor: null, auditId, take: 1 }, source);
   const event = rows[0];
   if (event === undefined || event.id !== auditId) auditError("SYSTEM_AUDIT_NOT_FOUND", "审计记录不存在", 404);
   const users = await hydrateUsers(db, [event]);
@@ -1217,9 +1592,39 @@ export const SYSTEM_AUDIT_DENYLIST_KEYS = [
   "repositoryPath",
   "trackedRef",
   "canonicalArguments",
+  "canonicalArgumentsHash",
   "sanitizedPayload",
   "providerRequestId",
   "emailFingerprint",
+  "safeSummary",
+  "routeSnapshot",
+  "fingerprint",
+  "eventFingerprint",
+  "resolvedAddressFingerprint",
+  "credentialFingerprint",
+  "definitionFingerprint",
+  "actionFingerprint",
+  "resultFingerprint",
+  "preparedClientKeyHash",
+  "consumedClientKeyHash",
+  "clientKey",
+  "consumedJobId",
+  "body",
+  "payload",
+  "reason",
+  "actionId",
+  "attemptId",
+  "runId",
+  "rpcRequestId",
+  "transactionId",
+  "grantId",
+  "delegationId",
+  "connectionId",
+  "toolDefinitionId",
+  "attestationId",
+  "providerConnectionId",
+  "tokenCount",
+  "networkFingerprint",
   "details",
   "metadata",
 ] as const;

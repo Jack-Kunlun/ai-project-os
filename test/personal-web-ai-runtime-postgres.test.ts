@@ -56,6 +56,15 @@ function errorText(error: unknown): string {
 
 type TestRuntimeRoute = NonNullable<Awaited<ReturnType<typeof resolveEffectiveAiRoute>>>;
 
+function generationConfirmationRoutes(
+  routeByOperation: ReadonlyMap<string, Awaited<ReturnType<typeof resolveEffectiveAiRoute>>>,
+  generationRoute: TestRuntimeRoute,
+) {
+  const embeddingRoute = routeByOperation.get("embedding");
+  assert.ok(embeddingRoute);
+  return { embedding: embeddingRoute, generation: generationRoute };
+}
+
 async function createTestMemoryGeneration(
   db: PrismaClient,
   input: Readonly<{
@@ -235,6 +244,9 @@ test(
           projectId,
           kind: item.kind,
           route,
+          confirmationRoutes: item.operation === "projectAnalysis" || item.operation === "generateWithContext"
+            ? generationConfirmationRoutes(routeByOperation, route)
+            : undefined,
           requestedBy: ownerActor,
           clientKey: `personal-web-runtime-${item.operation}-${suffix}`,
           scopeKind: item.scopeKind,
@@ -699,6 +711,7 @@ test(
         projectId,
         kind: "ragAnswer",
         route: driftRoute,
+        confirmationRoutes: generationConfirmationRoutes(routeByOperation, driftRoute),
         requestedBy: ownerActor,
         clientKey: `personal-web-runtime-credential-drift-${suffix}`,
         scopeKind: "query",
@@ -852,6 +865,7 @@ test(
         projectId,
         kind: "ragAnswer",
         route: consumeRoute,
+        confirmationRoutes: generationConfirmationRoutes(routeByOperation, consumeRoute),
         requestedBy: ownerActor,
         clientKey: `personal-web-runtime-consume-${suffix}`,
         scopeKind: "query",
@@ -926,6 +940,7 @@ test(
         projectId,
         kind: "ragAnswer",
         route: consumeRoute,
+        confirmationRoutes: generationConfirmationRoutes(routeByOperation, consumeRoute),
         requestedBy: ownerActor,
         clientKey: `personal-web-runtime-nonpointer-consume-${suffix}`,
         scopeKind: "query",
@@ -1009,6 +1024,7 @@ test(
         projectId,
         kind: "ragAnswer",
         route: staleGenerationRoute,
+        confirmationRoutes: generationConfirmationRoutes(routeByOperation, staleGenerationRoute),
         requestedBy: ownerActor,
         clientKey: `personal-web-runtime-stale-generation-${suffix}`,
         scopeKind: "query",

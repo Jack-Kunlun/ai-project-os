@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma, type BackgroundJobKind, type PrismaClient } from "@prisma/client";
+import { z } from "zod";
 import { loadOrCreateMasterKey } from "@/lib/credential-vault";
 import { effectiveAiRouteSnapshot, type EffectiveAiRoute } from "@/lib/effective-ai-route";
 import { getDb } from "@/lib/db";
@@ -31,6 +32,25 @@ export const WEB_AI_CONFIRMATION_ACTIONS = {
 
 export type WebAiConfirmationAction = typeof WEB_AI_CONFIRMATION_ACTIONS[keyof typeof WEB_AI_CONFIRMATION_ACTIONS];
 
+/**
+ * The seven public Web AI jobs are the only jobs that can consume a browser
+ * confirmation. Keep this mapping in production code so runners and gates
+ * cannot silently maintain divergent action tables.
+ */
+export const WEB_AI_CONFIRMATION_ACTION_BY_JOB_KIND = Object.freeze({
+  autoExtract: WEB_AI_CONFIRMATION_ACTIONS.memoryExtract,
+  memoryIndex: WEB_AI_CONFIRMATION_ACTIONS.memoryIndex,
+  semanticSearch: WEB_AI_CONFIRMATION_ACTIONS.memorySearch,
+  ragAnswer: WEB_AI_CONFIRMATION_ACTIONS.memoryAnswer,
+  assetExtract: WEB_AI_CONFIRMATION_ACTIONS.assetRecognize,
+  projectBrief: WEB_AI_CONFIRMATION_ACTIONS.intelligenceBrief,
+  projectAgent: WEB_AI_CONFIRMATION_ACTIONS.intelligenceAgent,
+} as const satisfies Readonly<Partial<Record<BackgroundJobKind, WebAiConfirmationAction>>>);
+
+export function confirmationActionForBackgroundJobKind(kind: BackgroundJobKind): WebAiConfirmationAction | null {
+  return WEB_AI_CONFIRMATION_ACTION_BY_JOB_KIND[kind as keyof typeof WEB_AI_CONFIRMATION_ACTION_BY_JOB_KIND] ?? null;
+}
+
 /** Prisma maps these public action names to snake_case PostgreSQL enum values. */
 const actionDatabaseValues: Readonly<Record<WebAiConfirmationAction, string>> = Object.freeze({
   memoryExtract: "memory_extract",
@@ -52,13 +72,105 @@ const sensitiveKeyPattern = /(?:^|_)(?:body|content|prompt|secret|credential|tok
 const confirmationTtlMs = 10 * 60 * 1_000;
 const HMAC_CONTEXT = "ai-project-os:web-ai-confirmation:v1";
 
+const summaryTextSchema = z.string()
+  .trim()
+  .min(1)
+  .max(256)
+  .refine((value) => !/[\u0000-\u001f\u007f]/u.test(value));
+const providerKindSchema = z.enum(["openai", "deepseek", "qwen", "glm"]);
+const personalRouteProviderSchema = z.object({
+  name: summaryTextSchema.optional(),
+  kind: providerKindSchema,
+}).strict();
+const platformRouteProviderSchema = z.object({
+  name: summaryTextSchema,
+  kind: providerKindSchema,
+}).strict();
+const routeDimensionsSchema = z.number().int().min(1).max(1_000_000);
+const platformRouteDisplaySchema = z.object({
+  source: z.literal("platform_default"),
+  provider: platformRouteProviderSchema,
+  model: summaryTextSchema,
+  dimensions: routeDimensionsSchema.optional(),
+}).strict();
+const personalRouteDisplaySchema = z.object({
+  source: z.literal("personal_delegation"),
+  provider: personalRouteProviderSchema,
+  model: summaryTextSchema.optional(),
+  dimensions: routeDimensionsSchema.optional(),
+}).strict();
+const routeDisplaySchema = z.discriminatedUnion("source", [platformRouteDisplaySchema, personalRouteDisplaySchema]);
+const embeddingRouteDisplaySchema = z.discriminatedUnion("source", [
+  platformRouteDisplaySchema.required({ dimensions: true }),
+  personalRouteDisplaySchema.required({ dimensions: true }),
+]);
+const generationRouteDisplaySchema = z.discriminatedUnion("source", [
+  platformRouteDisplaySchema.omit({ dimensions: true }),
+  personalRouteDisplaySchema.omit({ dimensions: true }),
+]);
+const scopeIdSchema = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
+const nonNegativeCountSchema = z.number().int().min(0).max(100_000);
+const mimeTypeSchema = z.string()
+  .trim()
+  .min(3)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u);
+
+const webAiConfirmationSafeSummarySchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.memoryExtract),
+    route: generationRouteDisplaySchema,
+    scope: z.object({ sourceCount: z.number().int().min(1).max(10) }).strict(),
+  }).strict(),
+  z.object({
+    action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.memoryIndex),
+    route: embeddingRouteDisplaySchema,
+    scope: z.object({
+      mode: z.enum(["full", "incremental"]),
+      inputCount: nonNegativeCountSchema,
+      generateCount: nonNegativeCountSchema,
+      reuseCount: nonNegativeCountSchema,
+      deleteCount: nonNegativeCountSchema,
+      estimatedProviderCalls: nonNegativeCountSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.memorySearch),
+    route: z.object({ embedding: embeddingRouteDisplaySchema }).strict(),
+    scope: z.object({ indexGenerationId: scopeIdSchema }).strict(),
+  }).strict(),
+  z.object({
+    action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.memoryAnswer),
+    route: z.object({ embedding: embeddingRouteDisplaySchema, generation: generationRouteDisplaySchema }).strict(),
+    scope: z.object({ indexGenerationId: scopeIdSchema }).strict(),
+  }).strict(),
+  z.object({
+    action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.assetRecognize),
+    route: generationRouteDisplaySchema,
+    scope: z.object({ segmentCount: nonNegativeCountSchema, mimeType: mimeTypeSchema }).strict(),
+  }).strict(),
+  z.object({
+    action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.intelligenceBrief),
+    route: z.object({ embedding: embeddingRouteDisplaySchema, generation: generationRouteDisplaySchema }).strict(),
+    scope: z.object({ indexGenerationId: scopeIdSchema }).strict(),
+  }).strict(),
+  z.object({
+    action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.intelligenceAgent),
+    route: z.object({ embedding: embeddingRouteDisplaySchema, generation: generationRouteDisplaySchema }).strict(),
+    scope: z.object({ indexGenerationId: scopeIdSchema, questionProvided: z.literal(true) }).strict(),
+  }).strict(),
+]);
+
+export type WebAiConfirmationRouteDisplay = z.infer<typeof routeDisplaySchema>;
+export type WebAiConfirmationSafeSummary = z.infer<typeof webAiConfirmationSafeSummarySchema>;
+
 export type WebAiConfirmationPreparation = Readonly<{
   contentVersion: string;
   inputFingerprintPayload: unknown;
   /** A normalized route snapshot. It is never returned to the browser. */
   routeSnapshot: unknown;
   /** Only action, route display, scope/count and expiry may be exposed. */
-  safeSummary: Readonly<Record<string, unknown>>;
+  safeSummary: WebAiConfirmationSafeSummary;
 }>;
 
 export type WebAiConfirmationView = Readonly<{
@@ -66,7 +178,7 @@ export type WebAiConfirmationView = Readonly<{
   targetAction: WebAiConfirmationAction;
   issuedAt: string;
   expiresAt: string;
-  safeSummary: Readonly<Record<string, unknown>>;
+  safeSummary: WebAiConfirmationSafeSummary;
 }>;
 
 export type WebAiConfirmationExecuteInput = Readonly<{
@@ -116,28 +228,30 @@ export function confirmationRouteSnapshot(route: EffectiveAiRoute): Readonly<Rec
 export function confirmationRouteDisplay(
   route: EffectiveAiRoute,
   visibility: ProjectAiPublicVisibility,
-): Readonly<Record<string, unknown>> {
+): WebAiConfirmationRouteDisplay {
   const provider = route.providerConnection;
   const platform = isProjectAiPlatformProvider(provider);
   const connectionOwner = provider.scope === "user" && provider.ownerUserId === visibility.actorId;
   const projectedProvider = projectAiProviderProjection(provider, visibility);
   const routeDisplay = {
     source: route.source,
-    ...(route.operation === "embedding" ? { dimensions: route.embeddingDimensions } : {}),
+    ...(route.operation === "embedding"
+      ? { dimensions: route.embeddingDimensions ?? fail("WEB_AI_CONFIRMATION_STALE") }
+      : {}),
   };
   if (platform || connectionOwner) {
-    return Object.freeze({
+    return parseWebAiConfirmationRouteDisplay({
       ...routeDisplay,
       provider: {
         name: projectedProvider?.name ?? provider.name,
-        kind: projectedProvider?.kind ?? provider.kind,
+        kind: provider.kind,
       },
       model: route.modelId,
     });
   }
   // Non-owners may see only the safe provider category/source, never the
   // personal connection name, model identifier, or connection ID.
-  return Object.freeze({
+  return parseWebAiConfirmationRouteDisplay({
     ...routeDisplay,
     provider: { kind: provider.kind },
   });
@@ -145,6 +259,12 @@ export function confirmationRouteDisplay(
 
 function fail(code: WebAiConfirmationErrorCode): never {
   throw new WebAiConfirmationError(code);
+}
+
+function parseWebAiConfirmationRouteDisplay(value: unknown): WebAiConfirmationRouteDisplay {
+  const parsed = routeDisplaySchema.safeParse(value);
+  if (!parsed.success) return fail("WEB_AI_CONFIRMATION_STALE");
+  return Object.freeze(parsed.data);
 }
 
 function assertAction(value: unknown): asserts value is WebAiConfirmationAction {
@@ -210,19 +330,35 @@ function assertNoSensitiveKeys(value: unknown, path = "root"): void {
   }
 }
 
-function validatePreparation(material: WebAiConfirmationPreparation): void {
+/**
+ * Parse the persisted/public summary through the action discriminator. Zod's
+ * strict objects reject extra and cross-action fields; callers receive one
+ * stable error instead of a schema detail that could disclose row contents.
+ */
+export function parseWebAiConfirmationSafeSummary(
+  value: unknown,
+  targetAction: WebAiConfirmationAction,
+): WebAiConfirmationSafeSummary {
+  const parsed = webAiConfirmationSafeSummarySchema.safeParse(value);
+  if (!parsed.success || parsed.data.action !== targetAction) return fail("WEB_AI_CONFIRMATION_STALE");
+  return parsed.data;
+}
+
+function validatePreparation(
+  targetAction: WebAiConfirmationAction,
+  material: WebAiConfirmationPreparation,
+): WebAiConfirmationSafeSummary {
   if (
     typeof material.contentVersion !== "string"
     || material.contentVersion.length < 1
     || material.contentVersion.length > 128
     || /[\u0000-\u001f\u007f]/u.test(material.contentVersion)
   ) return fail("WEB_AI_CONFIRMATION_STALE");
-  if (typeof material.safeSummary !== "object" || material.safeSummary === null || Array.isArray(material.safeSummary)) {
-    return fail("WEB_AI_CONFIRMATION_STALE");
-  }
-  assertNoSensitiveKeys(material.safeSummary);
+  const safeSummary = parseWebAiConfirmationSafeSummary(material.safeSummary, targetAction);
+  assertNoSensitiveKeys(safeSummary);
   assertNoSensitiveKeys(material.inputFingerprintPayload);
   assertNoSensitiveKeys(material.routeSnapshot);
+  return safeSummary;
 }
 
 async function hmacFingerprint(value: unknown): Promise<string> {
@@ -258,9 +394,16 @@ export function toPublicWebAiConfirmationView(row: Readonly<{
   safeSummary: unknown;
 }>): WebAiConfirmationView {
   assertAction(row.targetAction);
-  const safeSummary = row.safeSummary as Readonly<Record<string, unknown>>;
+  const challengeId = assertUuid(row.id);
+  if (
+    !(row.issuedAt instanceof Date)
+    || !Number.isFinite(row.issuedAt.getTime())
+    || !(row.expiresAt instanceof Date)
+    || !Number.isFinite(row.expiresAt.getTime())
+  ) return fail("WEB_AI_CONFIRMATION_STALE");
+  const safeSummary = parseWebAiConfirmationSafeSummary(row.safeSummary, row.targetAction);
   return Object.freeze({
-    challengeId: row.id,
+    challengeId,
     targetAction: row.targetAction,
     issuedAt: row.issuedAt.toISOString(),
     expiresAt: row.expiresAt.toISOString(),
@@ -285,7 +428,7 @@ export async function prepareWebAiConfirmation(input: Readonly<{
     required: "edit",
   }, async (tx, admission) => {
     const material = await input.resolve(tx, admission);
-    validatePreparation(material);
+    const safeSummary = validatePreparation(input.targetAction, material);
     const routeSnapshot = canonicalConfirmationValue(material.routeSnapshot);
     const inputFingerprint = await hmacFingerprint({
       projectId: admission.project.id,
@@ -306,7 +449,7 @@ export async function prepareWebAiConfirmation(input: Readonly<{
         contentVersion: material.contentVersion,
         inputFingerprint,
         routeSnapshot: routeSnapshot as Prisma.InputJsonValue,
-        safeSummary: canonicalConfirmationValue(material.safeSummary) as Prisma.InputJsonValue,
+        safeSummary: canonicalConfirmationValue(safeSummary) as Prisma.InputJsonValue,
         preparedClientKeyHash,
         issuedAt: now,
         expiresAt: new Date(now.getTime() + confirmationTtlMs),

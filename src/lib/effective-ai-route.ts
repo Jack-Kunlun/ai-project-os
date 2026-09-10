@@ -417,6 +417,7 @@ async function resolvePersonalRoute(
           id: true,
           name: true,
           kind: true,
+          scope: true,
           ownerUserId: true,
           protocol: true,
           baseUrl: true,

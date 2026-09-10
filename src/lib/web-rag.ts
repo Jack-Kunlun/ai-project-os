@@ -28,6 +28,7 @@ import {
 import {
   confirmationRouteDisplay,
   confirmationRouteSnapshot,
+  parseWebAiConfirmationSafeSummary,
   prepareWebAiConfirmation,
 } from "@/lib/web-ai-confirmation";
 import {
@@ -431,14 +432,14 @@ function ragConfirmationMaterial(
       embedding: confirmationRouteSnapshot(material.embeddingRoute),
       ...(action === "memoryAnswer" ? { generation: confirmationRouteSnapshot(material.generationRoute) } : {}),
     },
-    safeSummary: {
+    safeSummary: parseWebAiConfirmationSafeSummary({
       action,
       route: {
         embedding: confirmationRouteDisplay(material.embeddingRoute, visibility),
         ...(action === "memoryAnswer" ? { generation: confirmationRouteDisplay(material.generationRoute, visibility) } : {}),
       },
       scope: { indexGenerationId: material.index.id },
-    },
+    }, action),
   });
 }
 

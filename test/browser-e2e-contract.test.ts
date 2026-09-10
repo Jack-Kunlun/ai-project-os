@@ -5,11 +5,12 @@ import test from "node:test";
 const read = (path: string) => readFile(path, "utf8");
 
 test("browser gate stays isolated and exercises the production server", async () => {
-  const [packageJson, config, runner, smoke] = await Promise.all([
+  const [packageJson, config, runner, smoke, webAiConfirmation] = await Promise.all([
     read("package.json"),
     read("playwright.config.ts"),
     read("scripts/run-browser-e2e.ts"),
     read("e2e/smoke.spec.ts"),
+    read("e2e/web-ai-confirmation.spec.ts"),
   ]);
   const manifest = JSON.parse(packageJson) as {
     devDependencies: Record<string, string>;
@@ -36,6 +37,11 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(smoke, /wcag22aa/u);
   assert.match(smoke, /expectNoAccessibilityViolations/u);
   assert.match(smoke, /expect\(browserErrors\)\.toEqual\(\[\]\)/u);
+  assert.match(webAiConfirmation, /button\.click\(\);[\s\S]*button\.click\(\);/u);
+  assert.match(webAiConfirmation, /prepareRequests\)\.toHaveLength\(1\)/u);
+  assert.match(webAiConfirmation, /executeRequests\)\.toHaveLength\(1\)/u);
+  assert.match(webAiConfirmation, /consumedAt: null, consumedJobId: null/u);
+  assert.doesNotMatch(webAiConfirmation, /route\.(?:fetch|fulfill)/u);
 });
 
 test("CI uses pinned least-privilege actions and runs all bounded gates", async () => {

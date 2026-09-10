@@ -25,6 +25,7 @@ import {
 import {
   confirmationRouteDisplay,
   confirmationRouteSnapshot,
+  parseWebAiConfirmationSafeSummary,
   prepareWebAiConfirmation,
 } from "@/lib/web-ai-confirmation";
 
@@ -168,11 +169,11 @@ export async function prepareProjectAssetVisionConfirmation(input: Readonly<{
           segmentIds: material.segments.map((segment) => segment.id),
         },
         routeSnapshot: confirmationRouteSnapshot(material.route),
-        safeSummary: {
+        safeSummary: parseWebAiConfirmationSafeSummary({
           action: "assetRecognize",
           route: confirmationRouteDisplay(material.route, visibility),
           scope: { segmentCount: material.segments.length, mimeType: material.version.mimeType },
-        },
+        }, "assetRecognize"),
       };
     },
   });

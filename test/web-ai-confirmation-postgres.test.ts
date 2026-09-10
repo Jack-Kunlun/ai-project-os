@@ -4,17 +4,32 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import test from "node:test";
 import { Client, type QueryResult, type QueryResultRow } from "pg";
+import type { AiOperation, PrismaClient } from "@prisma/client";
+import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { getDb } from "../src/lib/db";
+import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
+import { cancelMemoryIndexJob } from "../src/lib/web-memory-index";
 import {
   consumeWebAiConfirmation,
+  confirmationActionForBackgroundJobKind,
   confirmationRouteDisplay,
+  parseWebAiConfirmationSafeSummary,
   prepareWebAiConfirmation,
   toPublicWebAiConfirmationView,
   validateWebAiConfirmation,
+  WEB_AI_CONFIRMATION_ACTION_BY_JOB_KIND,
   WebAiConfirmationError,
 } from "../src/lib/web-ai-confirmation";
+import {
+  createGrantedWebAiJob,
+} from "../src/lib/web-ai-governance";
 import { withWebAiProjectAccessTransaction } from "../src/lib/access-linearization";
+import {
+  createConfirmedWebAiJobForPostgresGate,
+  prepareConfirmedWebAiJobForPostgresGate,
+  type ConfirmedWebAiJobInput,
+} from "./web-ai-confirmation-fixture";
 
 const databaseUrl = process.env.DATABASE_URL;
 const shouldRun = process.env.WEB_AI_CONFIRMATION_POSTGRES_GATE === "1"
@@ -36,6 +51,341 @@ type ConfirmationFixture = Readonly<{
 }>;
 
 type FixtureOptions = Readonly<{ ttlMs?: number }>;
+
+type WebAiServiceFixture = Readonly<{
+  db: PrismaClient;
+  actor: Readonly<{ id: string; role: "user"; accountAccessVersion: 1 }>;
+  projectId: string;
+  embeddingRoute: NonNullable<Awaited<ReturnType<typeof resolveEffectiveAiRoute>>>;
+  generationRoute: NonNullable<Awaited<ReturnType<typeof resolveEffectiveAiRoute>>>;
+}>;
+
+async function createActiveGateRoute(
+  db: PrismaClient,
+  adminId: string,
+  providerId: string,
+  operation: AiOperation,
+  modelId: string,
+  options: Readonly<{ embeddingDimensions: number | null; maxOutputTokens: number | null }>,
+) {
+  const activeRoute = await db.platformDefaultAiRoute.findFirst({
+    where: { operation, status: "active" },
+    orderBy: [{ version: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  if (activeRoute !== null) {
+    await db.platformDefaultAiRoute.update({
+      where: { id: activeRoute.id },
+      data: { status: "retired", updatedById: adminId },
+    });
+  }
+  const latest = await db.platformDefaultAiRoute.findFirst({
+    where: { operation },
+    orderBy: { version: "desc" },
+    select: { version: true },
+  });
+  return db.platformDefaultAiRoute.create({
+    data: {
+      operation,
+      version: (latest?.version ?? 0) + 1,
+      status: "active",
+      providerConnectionId: providerId,
+      modelId,
+      embeddingDimensions: options.embeddingDimensions,
+      maxOutputTokens: options.maxOutputTokens,
+      quotaMultiplierBps: 10_000,
+      validatedProviderConfigurationVersion: 1,
+      validatedAt: new Date(),
+      createdById: adminId,
+      updatedById: adminId,
+    },
+  });
+}
+
+async function createWebAiServiceFixture(): Promise<WebAiServiceFixture> {
+  const db = getDb();
+  const suffix = randomUUID().slice(0, 8);
+  const actorId = randomUUID();
+  const adminId = randomUUID();
+  const workspaceId = randomUUID();
+  const projectId = randomUUID();
+  const providerId = randomUUID();
+  const credentialId = randomUUID();
+  const now = new Date();
+
+  await db.appUser.createMany({
+    data: [
+      { id: actorId, username: `web_ai_service_actor_${suffix}`, role: "user" },
+      { id: adminId, username: `web_ai_service_admin_${suffix}`, role: "admin" },
+    ],
+  });
+  await db.workspace.create({
+    data: { id: workspaceId, name: `Web AI service ${suffix}`, slug: `web-ai-service-${suffix}`, createdById: actorId },
+  });
+  await db.project.create({
+    data: { id: projectId, workspaceId, name: `Web AI service project ${suffix}`, slug: `web-ai-service-project-${suffix}` },
+  });
+  await db.$transaction(async (tx) => {
+    await grantWorkspaceMembership(tx, { workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
+    await grantProjectMembership(tx, { projectId, workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
+  });
+  await issueVerifiedSignupGrant(actorId, { issuedById: adminId, now }, db);
+  await db.externalCredential.create({
+    data: {
+      id: credentialId,
+      kind: "aiProvider",
+      ciphertext: Buffer.from([1]),
+      nonce: Buffer.from([2]),
+      authTag: Buffer.from([3]),
+      maskedSuffix: "gate",
+      secretFingerprint: "9".repeat(64),
+    },
+  });
+  await db.aiProviderConnection.create({
+    data: {
+      id: providerId,
+      name: `Web AI service provider ${suffix}`,
+      kind: "glm",
+      scope: "platform",
+      ownerUserId: null,
+      protocol: "chatCompletions",
+      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+      credentialId,
+      defaultGenerationModelId: "glm-4-flash",
+      defaultEmbeddingModelId: "embedding-3",
+      embeddingDimensions: 1024,
+      status: "verified",
+      lastTestedAt: now,
+    },
+  });
+  await createActiveGateRoute(db, adminId, providerId, "embedding", "embedding-3", { embeddingDimensions: 1024, maxOutputTokens: null });
+  await createActiveGateRoute(db, adminId, providerId, "projectAnalysis", "glm-4-flash", { embeddingDimensions: null, maxOutputTokens: 128 });
+  const embeddingRoute = await resolveEffectiveAiRoute(projectId, "embedding", db);
+  const generationRoute = await resolveEffectiveAiRoute(projectId, "projectAnalysis", db);
+  assert.ok(embeddingRoute);
+  assert.ok(generationRoute);
+  return Object.freeze({
+    db,
+    actor: { id: actorId, role: "user" as const, accountAccessVersion: 1 as const },
+    projectId,
+    embeddingRoute,
+    generationRoute,
+  });
+}
+
+test("R-11 safe summaries are strict, action-discriminated, and mapped once", () => {
+  const generationRoute = { source: "platform_default", provider: { name: "Platform", kind: "glm" }, model: "platform-model" } as const;
+  const embeddingRoute = { ...generationRoute, dimensions: 1536 } as const;
+  const summaries = [
+    { action: "memoryExtract", route: generationRoute, scope: { sourceCount: 1 } },
+    { action: "memoryIndex", route: embeddingRoute, scope: { mode: "full", inputCount: 1, generateCount: 1, reuseCount: 0, deleteCount: 0, estimatedProviderCalls: 1 } },
+    { action: "memorySearch", route: { embedding: embeddingRoute }, scope: { indexGenerationId: "generation-1" } },
+    { action: "memoryAnswer", route: { embedding: embeddingRoute, generation: generationRoute }, scope: { indexGenerationId: "generation-1" } },
+    { action: "assetRecognize", route: generationRoute, scope: { segmentCount: 1, mimeType: "image/png" } },
+    { action: "intelligenceBrief", route: { embedding: embeddingRoute, generation: generationRoute }, scope: { indexGenerationId: "generation-1" } },
+    { action: "intelligenceAgent", route: { embedding: embeddingRoute, generation: generationRoute }, scope: { indexGenerationId: "generation-1", questionProvided: true } },
+  ] as const;
+  for (const summary of summaries) {
+    assert.equal(parseWebAiConfirmationSafeSummary(summary, summary.action).action, summary.action);
+  }
+  const extract = summaries[0];
+  assert.throws(
+    () => parseWebAiConfirmationSafeSummary({ ...extract, question: "不应进入摘要" }, "memoryExtract"),
+    (error: unknown) => error instanceof WebAiConfirmationError && error.code === "WEB_AI_CONFIRMATION_STALE",
+  );
+  assert.throws(
+    () => parseWebAiConfirmationSafeSummary({ ...extract, action: "memoryIndex" }, "memoryIndex"),
+    (error: unknown) => error instanceof WebAiConfirmationError && error.code === "WEB_AI_CONFIRMATION_STALE",
+  );
+  assert.throws(
+    () => parseWebAiConfirmationSafeSummary({ ...summaries[1], route: generationRoute }, "memoryIndex"),
+    (error: unknown) => error instanceof WebAiConfirmationError && error.code === "WEB_AI_CONFIRMATION_STALE",
+  );
+  assert.throws(
+    () => parseWebAiConfirmationSafeSummary({ ...extract, route: embeddingRoute }, "memoryExtract"),
+    (error: unknown) => error instanceof WebAiConfirmationError && error.code === "WEB_AI_CONFIRMATION_STALE",
+  );
+  assert.throws(
+    () => parseWebAiConfirmationSafeSummary({ ...extract, route: { ...generationRoute, modelId: "enumeration-leak" } }, "memoryExtract"),
+    (error: unknown) => error instanceof WebAiConfirmationError && error.code === "WEB_AI_CONFIRMATION_STALE",
+  );
+  assert.deepEqual(WEB_AI_CONFIRMATION_ACTION_BY_JOB_KIND, {
+    autoExtract: "memoryExtract",
+    memoryIndex: "memoryIndex",
+    semanticSearch: "memorySearch",
+    ragAnswer: "memoryAnswer",
+    assetExtract: "assetRecognize",
+    projectBrief: "intelligenceBrief",
+    projectAgent: "intelligenceAgent",
+  });
+  assert.equal(confirmationActionForBackgroundJobKind("githubScan"), null);
+});
+
+test(
+  "R-11 production execute is exactly once and queued memory-index jobs require cancel then reprepare",
+  { skip: !shouldRun ? "WEB_AI_CONFIRMATION_POSTGRES_GATE=1 and DATABASE_URL are required" : false },
+  async () => {
+    const fixture = await createWebAiServiceFixture();
+    const { db, actor, projectId, embeddingRoute } = fixture;
+    const reservationCountBefore = await db.platformTokenReservation.count();
+    const ledgerCountBefore = await db.platformTokenLedgerEntry.count();
+    let afterCreateCount = 0;
+    const productionInput: ConfirmedWebAiJobInput = {
+      projectId,
+      kind: "memoryIndex" as const,
+      route: embeddingRoute,
+      requestedBy: actor,
+      clientKey: `service-concurrent-${randomUUID()}`,
+      scopeKind: "projectMemory" as const,
+      scopeIds: { projectId, sourceCount: 1 },
+      manifestFingerprint: "a".repeat(64),
+      payload: { operation: "memory-index" },
+      afterCreate: async (tx, jobId, grantId) => {
+        afterCreateCount += 1;
+        const grant = await tx.webAiGrant.findUniqueOrThrow({
+          where: { id: grantId },
+          select: { manifestFingerprint: true },
+        });
+        await tx.memoryIndexGeneration.create({
+          data: {
+            projectId,
+            jobId,
+            providerConnectionId: embeddingRoute.providerConnectionId,
+            modelId: embeddingRoute.modelId,
+            dimensions: embeddingRoute.embeddingDimensions!,
+            status: "staging",
+            buildMode: "full",
+            inputManifestFingerprint: grant.manifestFingerprint,
+            expectedInputCount: 1,
+            expectedEmbeddingRouteUpdatedAt: embeddingRoute.routeUpdatedAt,
+            expectedEmbeddingRouteSource: embeddingRoute.source,
+            expectedEmbeddingRouteId: embeddingRoute.routeId,
+            expectedEmbeddingRouteVersion: embeddingRoute.routeVersion,
+            expectedEmbeddingProviderConfigurationVersion: embeddingRoute.providerConfigurationVersion,
+            expectedEmbeddingConnectionOwnerAccountAccessVersion: embeddingRoute.source === "personal_delegation"
+              ? embeddingRoute.personalEvidence?.connectionOwnerAccountAccessVersion ?? null
+              : null,
+            expectedEmbeddingRouteFenceFingerprint: embeddingRoute.routeFenceFingerprint,
+            embeddingWebAiGrantId: embeddingRoute.source === "personal_delegation" ? grantId : null,
+          },
+        });
+      },
+    };
+    const prepared = await prepareConfirmedWebAiJobForPostgresGate(productionInput, db);
+    const execute = () => createGrantedWebAiJob({ ...prepared.input, confirmation: prepared.confirmation }, db);
+    const outcomes = await Promise.all([execute(), execute()]);
+    assert.deepEqual(outcomes.map((outcome) => outcome.created).sort(), [false, true]);
+    assert.equal(outcomes[0]?.jobId, outcomes[1]?.jobId);
+    assert.equal(outcomes[0]?.grantId, outcomes[1]?.grantId);
+    assert.equal(afterCreateCount, 1);
+    const jobId = outcomes[0]!.jobId;
+    const grantId = outcomes[0]!.grantId;
+    assert.equal(await db.backgroundJob.count({ where: { projectId, id: jobId, kind: "memoryIndex" } }), 1);
+    assert.equal(await db.webAiGrant.count({ where: { projectId, boundJobId: jobId } }), 1);
+    assert.equal(await db.backgroundJobAttempt.count({ where: { jobId } }), 0);
+    assert.equal(await db.providerCallAudit.count({ where: { jobId } }), 0);
+    const consumedChallenge = await db.webAiConfirmationChallenge.findUniqueOrThrow({ where: { id: prepared.confirmation.challengeId } });
+    assert.equal(consumedChallenge.consumedJobId, jobId);
+    assert.equal(consumedChallenge.consumedClientKeyHash?.length, 64);
+
+    const cancelled = await cancelMemoryIndexJob(projectId, jobId, actor, db);
+    assert.equal(cancelled.status, "cancelled");
+    const cancelledGeneration = await db.memoryIndexGeneration.findUniqueOrThrow({ where: { projectId_jobId: { projectId, jobId } } });
+    assert.equal(cancelledGeneration.status, "failed");
+    assert.equal(cancelledGeneration.failureCode, "MEMORY_INDEX_CANCELLED");
+    assert.equal(await db.backgroundJobAttempt.count({ where: { jobId } }), 0, "cancelled queued work was never claimed");
+    const cancelledReplay = await execute();
+    assert.deepEqual(cancelledReplay, { jobId, grantId, created: false });
+    assert.equal(await db.backgroundJobAttempt.count({ where: { jobId } }), 0, "replaying a consumed challenge cannot claim cancelled work");
+    assert.equal(await db.providerCallAudit.count({ where: { jobId } }), 0, "replaying a consumed challenge cannot dispatch a provider call");
+
+    const reprepared = await createConfirmedWebAiJobForPostgresGate({
+      ...productionInput,
+      clientKey: `service-reprepare-${randomUUID()}`,
+      scopeIds: { projectId, sourceCount: 1, reprepare: true },
+      manifestFingerprint: "b".repeat(64),
+    }, db);
+    assert.equal(reprepared.created, true);
+    assert.notEqual(reprepared.jobId, jobId);
+    assert.equal(await db.backgroundJob.count({ where: { projectId, kind: "memoryIndex" } }), 2);
+    const reprepareChallenge = await db.webAiConfirmationChallenge.findFirstOrThrow({ where: { consumedJobId: reprepared.jobId } });
+    assert.notEqual(reprepareChallenge.id, prepared.confirmation.challengeId);
+    assert.equal(await db.backgroundJobAttempt.count({ where: { jobId: reprepared.jobId } }), 0);
+    assert.equal(await db.providerCallAudit.count({ where: { jobId: reprepared.jobId } }), 0);
+    assert.equal(await db.platformTokenReservation.count(), reservationCountBefore);
+    assert.equal(await db.platformTokenLedgerEntry.count(), ledgerCountBefore);
+    assert.equal(grantId.length, 36);
+  },
+);
+
+test(
+  "R-11 job, supplemental grant, staging resource, ledger, and challenge roll back together on afterCreate failure",
+  { skip: !shouldRun ? "WEB_AI_CONFIRMATION_POSTGRES_GATE=1 and DATABASE_URL are required" : false },
+  async () => {
+    const fixture = await createWebAiServiceFixture();
+    const { db, actor, projectId, embeddingRoute, generationRoute } = fixture;
+    const reservationCountBefore = await db.platformTokenReservation.count();
+    const ledgerCountBefore = await db.platformTokenLedgerEntry.count();
+    const manifestFingerprint = "c".repeat(64);
+    const prepared = await prepareConfirmedWebAiJobForPostgresGate({
+      projectId,
+      kind: "memoryIndex",
+      route: embeddingRoute,
+      requestedBy: actor,
+      clientKey: `service-after-create-failure-${randomUUID()}`,
+      scopeKind: "projectMemory",
+      scopeIds: { projectId, rollback: true },
+      manifestFingerprint,
+      payload: { operation: "memory-index-rollback" },
+      supplemental: {
+        route: generationRoute,
+        scopeKind: "projectIntelligence",
+        scopeIds: { projectId, supplemental: true },
+        manifestFingerprint: "d".repeat(64),
+      },
+      afterCreate: async (tx, jobId, grantId) => {
+        await tx.memoryIndexGeneration.create({
+          data: {
+            projectId,
+            jobId,
+            providerConnectionId: embeddingRoute.providerConnectionId,
+            modelId: embeddingRoute.modelId,
+            dimensions: embeddingRoute.embeddingDimensions!,
+            status: "staging",
+            buildMode: "full",
+            inputManifestFingerprint: manifestFingerprint,
+            expectedInputCount: 1,
+            expectedEmbeddingRouteUpdatedAt: embeddingRoute.routeUpdatedAt,
+            expectedEmbeddingRouteSource: embeddingRoute.source,
+            expectedEmbeddingRouteId: embeddingRoute.routeId,
+            expectedEmbeddingRouteVersion: embeddingRoute.routeVersion,
+            expectedEmbeddingProviderConfigurationVersion: embeddingRoute.providerConfigurationVersion,
+            expectedEmbeddingConnectionOwnerAccountAccessVersion: embeddingRoute.source === "personal_delegation"
+              ? embeddingRoute.personalEvidence?.connectionOwnerAccountAccessVersion ?? null
+              : null,
+            expectedEmbeddingRouteFenceFingerprint: embeddingRoute.routeFenceFingerprint,
+            embeddingWebAiGrantId: embeddingRoute.source === "personal_delegation" ? grantId : null,
+          },
+        });
+        throw new Error("R11_AFTER_CREATE_ROLLBACK");
+      },
+    }, db);
+
+    await assert.rejects(
+      () => createGrantedWebAiJob({ ...prepared.input, confirmation: prepared.confirmation }, db),
+      /R11_AFTER_CREATE_ROLLBACK/u,
+    );
+    assert.equal(await db.backgroundJob.count({ where: { projectId } }), 0);
+    assert.equal(await db.webAiGrant.count({ where: { projectId } }), 0);
+    assert.equal(await db.memoryIndexGeneration.count({ where: { projectId } }), 0);
+    const challenge = await db.webAiConfirmationChallenge.findUniqueOrThrow({ where: { id: prepared.confirmation.challengeId } });
+    assert.equal(challenge.consumedAt, null);
+    assert.equal(challenge.consumedJobId, null);
+    assert.equal(challenge.consumedClientKeyHash, null);
+    assert.equal(await db.platformTokenReservation.count(), reservationCountBefore);
+    assert.equal(await db.platformTokenLedgerEntry.count(), ledgerCountBefore);
+  },
+);
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -135,8 +485,8 @@ async function createFixture(client: Client, options: FixtureOptions = {}): Prom
     INSERT INTO "WebAiConfirmationChallenge"
       ("id", "projectId", "actorId", "actorAccountAccessVersion", "actorAccessFingerprint", "targetAction", "contentVersion", "inputFingerprint", "routeSnapshot", "safeSummary", "preparedClientKeyHash", "issuedAt", "expiresAt")
     VALUES
-      ($1::uuid, $2::uuid, $3::uuid, 1, $4, 'memory_extract', 'content-v1', $5, '{"routeVersion":1,"modelId":"glm-4-flash"}'::jsonb, '{"action":"memoryExtract","count":1}'::jsonb, $8, clock_timestamp(), clock_timestamp() + ($9::double precision * INTERVAL '1 millisecond')),
-      ($6::uuid, $2::uuid, $3::uuid, 1, $4, 'memory_extract', 'content-v1', $7, '{"routeVersion":1,"modelId":"glm-4-flash"}'::jsonb, '{"action":"memoryExtract","count":1}'::jsonb, $8, clock_timestamp(), clock_timestamp() + ($9::double precision * INTERVAL '1 millisecond'))
+      ($1::uuid, $2::uuid, $3::uuid, 1, $4, 'memory_extract', 'content-v1', $5, '{"routeVersion":1,"modelId":"glm-4-flash"}'::jsonb, '{"action":"memoryExtract","route":{"source":"platform_default","provider":{"name":"Confirmation provider","kind":"glm"},"model":"glm-4-flash"},"scope":{"sourceCount":1}}'::jsonb, $8, clock_timestamp(), clock_timestamp() + ($9::double precision * INTERVAL '1 millisecond')),
+      ($6::uuid, $2::uuid, $3::uuid, 1, $4, 'memory_extract', 'content-v1', $7, '{"routeVersion":1,"modelId":"glm-4-flash"}'::jsonb, '{"action":"memoryExtract","route":{"source":"platform_default","provider":{"name":"Confirmation provider","kind":"glm"},"model":"glm-4-flash"},"scope":{"sourceCount":1}}'::jsonb, $8, clock_timestamp(), clock_timestamp() + ($9::double precision * INTERVAL '1 millisecond'))
     `, [challengeId, projectId, actorId, "d".repeat(64), inputFingerprint, driftChallengeId, "e".repeat(64), clientKeyHash, ttlMs]);
   await query(client, `
     INSERT INTO "BackgroundJob"
@@ -518,7 +868,7 @@ test(
           contentVersion: "memory-extract:v1:service-fixture",
           inputFingerprintPayload: { sourceIds: [sourceId] },
           routeSnapshot: { source: "platform_default", model: "platform-model" },
-          safeSummary: { action: "memoryExtract", route: { source: "platform_default", provider: { kind: "glm" }, model: "platform-model" }, scope: { sourceCount: 1 } },
+          safeSummary: { action: "memoryExtract", route: { source: "platform_default", provider: { name: "Platform", kind: "glm" }, model: "platform-model" }, scope: { sourceCount: 1 } },
         }),
       });
       assert.equal(confirmation.targetAction, "memoryExtract");

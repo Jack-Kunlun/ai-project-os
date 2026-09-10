@@ -28,6 +28,7 @@ import {
 import {
   confirmationRouteDisplay,
   confirmationRouteSnapshot,
+  parseWebAiConfirmationSafeSummary,
   prepareWebAiConfirmation,
 } from "@/lib/web-ai-confirmation";
 import {
@@ -540,7 +541,7 @@ function intelligenceConfirmationMaterial(
       embedding: confirmationRouteSnapshot(runtime.embeddingRoute),
       generation: confirmationRouteSnapshot(runtime.generationRoute),
     },
-    safeSummary: {
+    safeSummary: parseWebAiConfirmationSafeSummary({
       action,
       route: {
         embedding: confirmationRouteDisplay(runtime.embeddingRoute, visibility ?? { actorId: "", projectOwner: false }),
@@ -550,7 +551,7 @@ function intelligenceConfirmationMaterial(
         indexGenerationId: runtime.index.id,
         ...(question === undefined ? {} : { questionProvided: true }),
       },
-    },
+    }, action),
   });
 }
 

@@ -107,6 +107,17 @@ function summaryText(value: unknown): string {
   return "—";
 }
 
+function beginAssetFlight(ref: { current: Record<string, symbol | undefined> }, assetId: string): symbol | null {
+  if (ref.current[assetId] !== undefined) return null;
+  const token = Symbol("web-ai-flight");
+  ref.current[assetId] = token;
+  return token;
+}
+
+function endAssetFlight(ref: { current: Record<string, symbol | undefined> }, assetId: string, token: symbol): void {
+  if (ref.current[assetId] === token) delete ref.current[assetId];
+}
+
 function ConfirmationCard({ confirmation, pending, executeLabel, onExecute }: { confirmation: Confirmation; pending: boolean; executeLabel: string; onExecute: () => void }) {
   return <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4" role="status">
     <p className="text-sm font-semibold text-indigo-900">本次外发摘要</p>
@@ -155,6 +166,7 @@ export function ProjectAssetsClient({ username }: { username: string }) {
   const [clientKeys, setClientKeys] = useState<Record<string, string | undefined>>({});
   const prepareSequences = useRef<Record<string, number>>({});
   const prepareControllers = useRef<Record<string, AbortController | undefined>>({});
+  const flightRef = useRef<Record<string, symbol | undefined>>({});
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [policy, setPolicy] = useState<PublicUploadPolicy>(DEFAULT_UPLOAD_POLICY);
   const [usage, setUsage] = useState<UploadUsage>({ projectBytes: "0", activeAssetCount: 0, retainedObjectCount: 0, activeUploads: 0 });
@@ -248,11 +260,13 @@ export function ProjectAssetsClient({ username }: { username: string }) {
   }
 
   async function prepareRecognition(asset: Asset) {
+    const preparedClientKey = crypto.randomUUID();
+    const flightToken = beginAssetFlight(flightRef, asset.id);
+    if (flightToken === null) return;
     invalidatePrepareRequest(asset.id);
     const sequence = prepareSequences.current[asset.id]!;
     const controller = new AbortController();
     prepareControllers.current[asset.id] = controller;
-    const preparedClientKey = crypto.randomUUID();
     setRecognizing(asset.id);
     setMessage(null);
     setError(null);
@@ -280,6 +294,7 @@ export function ProjectAssetsClient({ username }: { username: string }) {
         setRecognizing(null);
         if (prepareControllers.current[asset.id] === controller) prepareControllers.current[asset.id] = undefined;
       }
+      endAssetFlight(flightRef, asset.id, flightToken);
     }
   }
 
@@ -290,6 +305,8 @@ export function ProjectAssetsClient({ username }: { username: string }) {
       setMessage("请先读取本次外发摘要。");
       return;
     }
+    const flightToken = beginAssetFlight(flightRef, asset.id);
+    if (flightToken === null) return;
     setRecognizing(asset.id);
     setMessage(null);
     try {
@@ -321,6 +338,7 @@ export function ProjectAssetsClient({ username }: { username: string }) {
       await reload();
     } finally {
       setRecognizing(null);
+      endAssetFlight(flightRef, asset.id, flightToken);
     }
   }
 

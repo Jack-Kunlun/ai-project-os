@@ -41,6 +41,7 @@ import {
 import {
   confirmationRouteDisplay,
   confirmationRouteSnapshot,
+  parseWebAiConfirmationSafeSummary,
   prepareWebAiConfirmation,
 } from "@/lib/web-ai-confirmation";
 import type { EffectiveAiRoute } from "@/lib/effective-ai-route";
@@ -989,7 +990,7 @@ export async function prepareProjectMemoryIndexConfirmation(input: Readonly<{
           inputManifestFingerprint: plan.currentInputManifestFingerprint,
         },
         routeSnapshot: confirmationRouteSnapshot(plan.route),
-        safeSummary: {
+        safeSummary: parseWebAiConfirmationSafeSummary({
           action: "memoryIndex",
           route: confirmationRouteDisplay(plan.route, visibility),
           scope: {
@@ -1000,7 +1001,7 @@ export async function prepareProjectMemoryIndexConfirmation(input: Readonly<{
             deleteCount: plan.deleteCount,
             estimatedProviderCalls: plan.estimatedProviderCalls,
           },
-        },
+        }, "memoryIndex"),
       };
     },
   });

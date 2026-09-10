@@ -92,7 +92,11 @@ test("confirmation serialization exposes only the safe browser view", () => {
     // These are deliberately not part of the serializer input. The actual
     // challenge row keeps them internal, so this cast proves the whitelist
     // does not accidentally spread internal evidence into the response.
-    safeSummary: { action: "memorySearch", scope: { indexGenerationId: "generation-1" } },
+    safeSummary: {
+      action: "memorySearch",
+      route: { embedding: { source: "platform_default", provider: { name: "Platform", kind: "glm" }, model: "platform-model", dimensions: 1536 } },
+      scope: { indexGenerationId: "generation-1" },
+    },
     contentVersion: "semantic-search:v1:private",
     inputFingerprint: "a".repeat(64),
     routeSnapshot: { modelId: "private-model" },
@@ -103,7 +107,11 @@ test("confirmation serialization exposes only the safe browser view", () => {
     targetAction: "memorySearch",
     issuedAt: "2026-09-09T00:00:00.000Z",
     expiresAt: "2026-09-09T00:10:00.000Z",
-    safeSummary: { action: "memorySearch", scope: { indexGenerationId: "generation-1" } },
+    safeSummary: {
+      action: "memorySearch",
+      route: { embedding: { source: "platform_default", provider: { name: "Platform", kind: "glm" }, model: "platform-model", dimensions: 1536 } },
+      scope: { indexGenerationId: "generation-1" },
+    },
   });
   const serialized = JSON.stringify(view);
   assert.doesNotMatch(serialized, /contentVersion|inputFingerprint|routeSnapshot|private-model|用户问题/u);

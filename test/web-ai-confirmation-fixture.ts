@@ -1,7 +1,10 @@
 import type { BackgroundJobKind, PrismaClient } from "@prisma/client";
 import { getDb } from "../src/lib/db";
 import {
+  confirmationActionForBackgroundJobKind,
   confirmationRouteSnapshot,
+  confirmationRouteDisplay,
+  parseWebAiConfirmationSafeSummary,
   prepareWebAiConfirmation,
   type WebAiConfirmationAction,
 } from "../src/lib/web-ai-confirmation";
@@ -9,24 +12,9 @@ import { createGrantedWebAiJob } from "../src/lib/web-ai-governance";
 
 type CreateGrantedWebAiJobInput = Parameters<typeof createGrantedWebAiJob>[0];
 
-/**
- * The Web AI gate deliberately exercises the same browser confirmation
- * boundary as production. Keep this mapping explicit so a newly added job
- * kind cannot silently fall back to an unrelated confirmation action.
- */
-const confirmationActionByJobKind: Readonly<Partial<Record<BackgroundJobKind, WebAiConfirmationAction>>> = Object.freeze({
-  autoExtract: "memoryExtract",
-  memoryIndex: "memoryIndex",
-  semanticSearch: "memorySearch",
-  ragAnswer: "memoryAnswer",
-  assetExtract: "assetRecognize",
-  projectBrief: "intelligenceBrief",
-  projectAgent: "intelligenceAgent",
-});
-
 function confirmationActionForJobKind(kind: BackgroundJobKind): WebAiConfirmationAction {
-  const action = confirmationActionByJobKind[kind];
-  if (action === undefined) throw new Error(`WEB_AI_GATE_CONFIRMATION_ACTION_UNMAPPED:${kind}`);
+  const action = confirmationActionForBackgroundJobKind(kind);
+  if (action === null) throw new Error(`WEB_AI_GATE_CONFIRMATION_ACTION_UNMAPPED:${kind}`);
   return action;
 }
 
@@ -36,18 +24,57 @@ function safeScopeItemCount(scopeIds: unknown): number {
   return 0;
 }
 
-export type ConfirmedWebAiJobInput = Omit<CreateGrantedWebAiJobInput, "confirmation" | "refreshConfirmation">;
+type ConfirmationRouteContext = Readonly<{
+  embedding?: CreateGrantedWebAiJobInput["route"];
+  generation?: CreateGrantedWebAiJobInput["route"];
+}>;
 
-/**
- * Create a test job through the real prepare -> execute confirmation protocol.
- * The returned browser view is intentionally not trusted for execution: the
- * exact material used during preparation is passed to createGrantedWebAiJob.
- */
-export async function createConfirmedWebAiJobForPostgresGate(
+function confirmationRouteDisplayFor(
+  route: CreateGrantedWebAiJobInput["route"],
+  actorId: string,
+) {
+  return confirmationRouteDisplay(route, { actorId, projectOwner: false });
+}
+
+function safeSummaryForAction(
+  input: ConfirmedWebAiJobInput,
+  targetAction: WebAiConfirmationAction,
+) {
+  const route = confirmationRouteDisplayFor(input.route, input.requestedBy.id);
+  const embeddingRoute = input.confirmationRoutes?.embedding === undefined
+    ? route
+    : confirmationRouteDisplayFor(input.confirmationRoutes.embedding, input.requestedBy.id);
+  const generationRoute = input.confirmationRoutes?.generation === undefined
+    ? route
+    : confirmationRouteDisplayFor(input.confirmationRoutes.generation, input.requestedBy.id);
+  const count = Math.max(1, Math.min(10, safeScopeItemCount(input.scopeIds)));
+  const summary = targetAction === "memoryExtract"
+    ? { action: targetAction, route, scope: { sourceCount: count } }
+    : targetAction === "memoryIndex"
+      ? { action: targetAction, route, scope: { mode: "full" as const, inputCount: count, generateCount: count, reuseCount: 0, deleteCount: 0, estimatedProviderCalls: count } }
+      : targetAction === "memorySearch"
+        ? { action: targetAction, route: { embedding: embeddingRoute }, scope: { indexGenerationId: input.projectId } }
+        : targetAction === "memoryAnswer"
+          ? { action: targetAction, route: { embedding: embeddingRoute, generation: generationRoute }, scope: { indexGenerationId: input.projectId } }
+          : targetAction === "assetRecognize"
+            ? { action: targetAction, route, scope: { segmentCount: count, mimeType: "application/octet-stream" } }
+            : targetAction === "intelligenceBrief"
+              ? { action: targetAction, route: { embedding: embeddingRoute, generation: generationRoute }, scope: { indexGenerationId: input.projectId } }
+              : { action: targetAction, route: { embedding: embeddingRoute, generation: generationRoute }, scope: { indexGenerationId: input.projectId, questionProvided: true as const } };
+  return parseWebAiConfirmationSafeSummary(summary, targetAction);
+}
+
+export type ConfirmedWebAiJobInput = Omit<CreateGrantedWebAiJobInput, "confirmation" | "refreshConfirmation"> & Readonly<{
+  /** Test-only route context for actions that dispatch both embedding and generation. */
+  confirmationRoutes?: ConfirmationRouteContext;
+}>;
+
+export async function prepareConfirmedWebAiJobForPostgresGate(
   input: ConfirmedWebAiJobInput,
   db: PrismaClient = getDb(),
-): ReturnType<typeof createGrantedWebAiJob> {
+) {
   const targetAction = confirmationActionForJobKind(input.kind);
+  const { confirmationRoutes, ...productionInput } = input;
   const confirmationMaterial = Object.freeze({
     contentVersion: `postgres-gate:web-ai:${targetAction}:${input.manifestFingerprint}`,
     inputFingerprintPayload: Object.freeze({
@@ -66,20 +93,30 @@ export async function createConfirmedWebAiJobForPostgresGate(
     db,
     resolve: async () => ({
       ...confirmationMaterial,
-      safeSummary: Object.freeze({
-        action: targetAction,
-        scopeKind: input.scopeKind,
-        scopeItemCount: safeScopeItemCount(input.scopeIds),
-      }),
+      safeSummary: safeSummaryForAction({ ...productionInput, confirmationRoutes }, targetAction),
     }),
   });
-  return createGrantedWebAiJob({
-    ...input,
-    confirmation: {
+  return Object.freeze({
+    input: productionInput,
+    confirmation: Object.freeze({
       challengeId: prepared.challengeId,
       clientKey: input.clientKey,
       targetAction,
       ...confirmationMaterial,
-    },
-  }, db);
+    }),
+    targetAction,
+  });
+}
+
+/**
+ * Create a test job through the real prepare -> execute confirmation protocol.
+ * The returned browser view is intentionally not trusted for execution: the
+ * exact material used during preparation is passed to createGrantedWebAiJob.
+ */
+export async function createConfirmedWebAiJobForPostgresGate(
+  input: ConfirmedWebAiJobInput,
+  db: PrismaClient = getDb(),
+): ReturnType<typeof createGrantedWebAiJob> {
+  const prepared = await prepareConfirmedWebAiJobForPostgresGate(input, db);
+  return createGrantedWebAiJob({ ...prepared.input, confirmation: prepared.confirmation }, db);
 }

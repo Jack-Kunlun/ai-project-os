@@ -138,6 +138,17 @@ function summaryText(value: unknown): string {
   return "—";
 }
 
+function beginFlight(ref: { current: symbol | null }): symbol | null {
+  if (ref.current !== null) return null;
+  const token = Symbol("web-ai-flight");
+  ref.current = token;
+  return token;
+}
+
+function endFlight(ref: { current: symbol | null }, token: symbol): void {
+  if (ref.current === token) ref.current = null;
+}
+
 function ConfirmationCard({ confirmation, pending, executeLabel, onExecute }: { confirmation: Confirmation; pending: boolean; executeLabel: string; onExecute: () => void }) {
   return <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4" role="status">
     <p className="text-sm font-semibold text-indigo-900">本次外发摘要</p>
@@ -188,6 +199,7 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
   const [clientKey, setClientKey] = useState<string | null>(null);
   const prepareSequence = useRef(0);
   const prepareController = useRef<AbortController | null>(null);
+  const flightRef = useRef<symbol | null>(null);
   const [pending, setPending] = useState(false);
   const [mode, setMode] = useState<"full" | "incremental">("full");
   const [plan, setPlan] = useState<IndexPlan | null>(null);
@@ -223,11 +235,13 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
       setMessage("当前索引计划不可执行，请重新读取计划或先建立全量基线");
       return;
     }
+    const preparedClientKey = crypto.randomUUID();
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     invalidatePrepareRequest();
     const sequence = prepareSequence.current;
     const controller = new AbortController();
     prepareController.current = controller;
-    const preparedClientKey = crypto.randomUUID();
     setPending(true);
     setMessage(null);
     try {
@@ -254,6 +268,7 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
         setPending(false);
         if (prepareController.current === controller) prepareController.current = null;
       }
+      endFlight(flightRef, flightToken);
     }
   }
 
@@ -262,6 +277,8 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
       setMessage("请先读取本次外发摘要。");
       return;
     }
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     setPending(true);
     setMessage(null);
     try {
@@ -296,11 +313,16 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
           : `索引任务状态：${payload.job.status}，旧索引保持不变`);
     } catch (buildError) {
       setMessage(buildError instanceof Error ? buildError.message : "索引构建失败");
-    } finally { setPending(false); }
+    } finally {
+      setPending(false);
+      endFlight(flightRef, flightToken);
+    }
   }
 
   async function reconcile() {
     if (!index.latestJob || index.latestJob.status !== "unknown" || !index.latestJob.reconciliationRequired) return;
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     setPending(true); setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/jobs/${index.latestJob.id}`, {
@@ -315,7 +337,10 @@ function IndexPanel({ projectId, index, onReload }: { projectId: string; index: 
         : "已放弃本次未知索引结果；旧活动索引保持不变，不会自动重试模型。 ");
       await onReload();
     } catch (reconcileError) { setMessage(reconcileError instanceof Error ? reconcileError.message : "索引结果协调失败"); }
-    finally { setPending(false); }
+    finally {
+      setPending(false);
+      endFlight(flightRef, flightToken);
+    }
   }
 
   const readinessLabels: Record<IndexStatus["readiness"], string> = {
@@ -344,6 +369,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
   const [clientKey, setClientKey] = useState<string | null>(null);
   const prepareSequence = useRef(0);
   const prepareController = useRef<AbortController | null>(null);
+  const flightRef = useRef<symbol | null>(null);
   const [pending, setPending] = useState(false);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [batchReviewAction, setBatchReviewAction] = useState<"accept" | "dismiss" | null>(null);
@@ -407,11 +433,13 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       setMessage("请先选择要分析的资料。");
       return;
     }
+    const preparedClientKey = crypto.randomUUID();
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     invalidatePrepareRequest();
     const sequence = prepareSequence.current;
     const controller = new AbortController();
     prepareController.current = controller;
-    const preparedClientKey = crypto.randomUUID();
     setPending(true);
     setMessage(null);
     try {
@@ -438,6 +466,7 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
         setPending(false);
         if (prepareController.current === controller) prepareController.current = null;
       }
+      endFlight(flightRef, flightToken);
     }
   }
 
@@ -446,6 +475,8 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       setMessage("请先读取本次外发摘要。");
       return;
     }
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     setPending(true);
     setMessage(null);
     try {
@@ -496,7 +527,10 @@ function ExtractPanel({ projectId, sources, candidates, onReload }: { projectId:
       await onReload();
     } catch (extractError) {
       setMessage(extractError instanceof Error ? extractError.message : "自动抽取失败");
-    } finally { setPending(false); }
+    } finally {
+      setPending(false);
+      endFlight(flightRef, flightToken);
+    }
   }
 
   async function submitReview(candidate: Candidate, action: "accept" | "dismiss") {
@@ -631,6 +665,7 @@ function QueryPanel({ projectId, indexReady, answers, onReload }: { projectId: s
   const [clientKey, setClientKey] = useState<string | null>(null);
   const prepareSequence = useRef(0);
   const prepareController = useRef<AbortController | null>(null);
+  const flightRef = useRef<symbol | null>(null);
   const [preparedMode, setPreparedMode] = useState<"search" | "answer" | null>(null);
   const [pending, setPending] = useState<"prepare" | "search" | "answer" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -648,12 +683,14 @@ function QueryPanel({ projectId, indexReady, answers, onReload }: { projectId: s
   async function prepare(mode: "search" | "answer", event?: FormEvent) {
     event?.preventDefault();
     if (!indexReady || !question.trim()) return;
+    const preparedClientKey = crypto.randomUUID();
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     prepareSequence.current += 1;
     prepareController.current?.abort();
     const sequence = prepareSequence.current;
     const controller = new AbortController();
     prepareController.current = controller;
-    const preparedClientKey = crypto.randomUUID();
     setPending("prepare");
     setMessage(null);
     try {
@@ -682,6 +719,7 @@ function QueryPanel({ projectId, indexReady, answers, onReload }: { projectId: s
         setPending(null);
         if (prepareController.current === controller) prepareController.current = null;
       }
+      endFlight(flightRef, flightToken);
     }
   }
 
@@ -690,6 +728,8 @@ function QueryPanel({ projectId, indexReady, answers, onReload }: { projectId: s
       setMessage("请先读取本次外发摘要。");
       return;
     }
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     const mode = preparedMode;
     setPending(mode);
     setMessage(null);
@@ -712,7 +752,10 @@ function QueryPanel({ projectId, indexReady, answers, onReload }: { projectId: s
       else { await onReload(); setMessage("回答已生成并保存；每条引用都来自当前索引。"); }
     } catch (runError) {
       setMessage(runError instanceof Error ? runError.message : "请求失败");
-    } finally { setPending(null); }
+    } finally {
+      setPending(null);
+      endFlight(flightRef, flightToken);
+    }
   }
 
   return <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Semantic search & grounded RAG</p><h2 className="mt-2 text-2xl font-semibold">检索与引用式问答</h2><p className="mt-2 text-sm leading-6 text-slate-500">语义分数与关键词分数混合排序；生成回答只能引用本次检索命中的记录 ID。</p></div><form onSubmit={(event) => void prepare("answer", event)} className="mt-6"><label className="text-sm font-semibold" htmlFor="memory-question">你想了解什么？</label><textarea id="memory-question" value={question} onChange={(event) => { setQuestion(event.target.value); resetConfirmation(); }} rows={3} maxLength={2000} required className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="例如：当前项目最重要的技术风险是什么？哪些代码和资料支持这个判断？" />{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending !== null} executeLabel={preparedMode === "search" ? "仅做语义检索" : "生成带引用回答"} onExecute={() => void run()} /> : <div className="mt-4 flex gap-3"><button type="button" onClick={() => void prepare("search")} disabled={!indexReady || !question.trim() || pending !== null} className="rounded-xl border border-indigo-200 px-5 py-3 text-sm font-semibold text-indigo-700 disabled:opacity-40">{pending === "prepare" ? "读取摘要中…" : "仅做语义检索"}</button><button type="submit" disabled={!indexReady || !question.trim() || pending !== null} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending === "prepare" ? "读取摘要中…" : "生成带引用回答"}</button></div>}</form>{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{results.length > 0 ? <div className="mt-7"><h3 className="text-sm font-semibold">语义检索结果</h3><div className="mt-3 space-y-3">{results.map((result, index) => <article key={result.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5"><div className="flex items-center justify-between gap-4"><span className="text-xs font-semibold text-indigo-700">#{index + 1} · {result.scope}{result.path ? ` · ${result.path}` : ""}</span><span className="text-xs text-slate-400">综合 {result.score.toFixed(3)}</span></div><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">{result.contentText}</p></article>)}</div></div> : null}<div className="mt-9 border-t border-slate-100 pt-7"><h3 className="text-sm font-semibold">回答历史</h3>{answers.length === 0 ? <p className="mt-3 text-sm text-slate-500">还没有引用式回答。</p> : <div className="mt-3 space-y-5">{answers.map((answer) => <article key={answer.id} className="rounded-2xl border border-slate-200 p-6"><p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">{answer.question}</p><p className="mt-4 whitespace-pre-wrap text-sm leading-7 text-slate-700">{answer.answer}</p><div className="mt-5 space-y-2 border-t border-slate-100 pt-4"><p className="text-xs font-semibold text-slate-500">引用证据</p>{Array.isArray(answer.citations) ? answer.citations.map((citation) => <details key={citation.id} className="rounded-xl bg-slate-50 px-4 py-3"><summary className="cursor-pointer text-xs font-medium text-slate-600">{citation.scope}{citation.path ? ` · ${citation.path}` : ""}{citation.frozenCommitSha ? ` @ ${citation.frozenCommitSha.slice(0, 8)}` : ""}</summary><blockquote className="mt-3 border-l-2 border-indigo-200 pl-3 text-xs leading-5 text-slate-500">{citation.excerpt}</blockquote></details>) : null}</div><p className="mt-4 text-[12px] text-slate-400">{answer.providerConnection?.name ?? answer.providerConnection?.kind ?? "个人连接"} · {answer.modelId ?? "模型信息受限"} · {dateLabel(answer.createdAt)}</p></article>)}</div>}</div></section>;

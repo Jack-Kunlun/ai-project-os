@@ -282,7 +282,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
       focusCancelledRef.current = null;
       return;
     }
-    if (isSourcesLoading || focusRestoredRef.current === focusSourceId || focusCancelledRef.current === focusSourceId || !sources.some((source) => source.id === focusSourceId)) return;
+    if (isSourcesLoading || !project || focusRestoredRef.current === focusSourceId || focusCancelledRef.current === focusSourceId || !sources.some((source) => source.id === focusSourceId)) return;
     const sourceId = focusSourceId;
     const initialTarget = document.getElementById(`source-link-${sourceId}`);
     if (!(initialTarget instanceof HTMLAnchorElement) || !initialTarget.isConnected) return;
@@ -324,7 +324,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
       window.cancelAnimationFrame(secondFrame);
       removeFocusListeners();
     };
-  }, [focusSourceId, isSourcesLoading, sources]);
+  }, [focusSourceId, isSourcesLoading, project, sources]);
 
   function replaceMaterialsQuery(input: { view?: "add" | null; search?: string; kind?: MaterialKind; page?: number }): void {
     const params = new URLSearchParams();

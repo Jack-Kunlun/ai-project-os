@@ -30,6 +30,7 @@ import {
 import {
   confirmationRouteDisplay,
   confirmationRouteSnapshot,
+  parseWebAiConfirmationSafeSummary,
   prepareWebAiConfirmation,
   type WebAiConfirmationAction,
 } from "@/lib/web-ai-confirmation";
@@ -309,11 +310,11 @@ function autoExtractConfirmationMaterial(material: AutoExtractMaterial, visibili
       sourceManifest: material.sources.map((source) => ({ id: source.id, contentHash: source.contentHash })),
     },
     routeSnapshot: confirmationRouteSnapshot(material.route),
-    safeSummary: {
+    safeSummary: parseWebAiConfirmationSafeSummary({
       action: "memoryExtract",
       route: confirmationRouteDisplay(material.route, visibility),
       scope: { sourceCount: material.sources.length },
-    },
+    }, "memoryExtract"),
   });
 }
 

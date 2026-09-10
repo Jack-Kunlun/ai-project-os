@@ -160,6 +160,17 @@ function summaryText(value: unknown): string {
   return "—";
 }
 
+function beginFlight(ref: { current: symbol | null }): symbol | null {
+  if (ref.current !== null) return null;
+  const token = Symbol("web-ai-flight");
+  ref.current = token;
+  return token;
+}
+
+function endFlight(ref: { current: symbol | null }, token: symbol): void {
+  if (ref.current === token) ref.current = null;
+}
+
 function ConfirmationCard({ confirmation, pending, executeLabel, onExecute }: { confirmation: Confirmation; pending: boolean; executeLabel: string; onExecute: () => void }) {
   return <div className="mt-4 rounded-2xl border border-indigo-200 bg-indigo-50 p-4" role="status">
     <p className="text-sm font-semibold text-indigo-900">本次外发摘要</p>
@@ -269,6 +280,7 @@ function BriefPanel({ projectId, report, canRun, onReload }: { projectId: string
   const [clientKey, setClientKey] = useState<string | null>(null);
   const prepareSequence = useRef(0);
   const prepareController = useRef<AbortController | null>(null);
+  const flightRef = useRef<symbol | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -279,11 +291,13 @@ function BriefPanel({ projectId, report, canRun, onReload }: { projectId: string
   }
 
   async function prepare() {
+    const preparedClientKey = crypto.randomUUID();
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     invalidatePrepareRequest();
     const sequence = prepareSequence.current;
     const controller = new AbortController();
     prepareController.current = controller;
-    const preparedClientKey = crypto.randomUUID();
     setPending(true); setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/intelligence/brief`, {
@@ -309,6 +323,7 @@ function BriefPanel({ projectId, report, canRun, onReload }: { projectId: string
         setPending(false);
         if (prepareController.current === controller) prepareController.current = null;
       }
+      endFlight(flightRef, flightToken);
     }
   }
 
@@ -317,6 +332,8 @@ function BriefPanel({ projectId, report, canRun, onReload }: { projectId: string
       setMessage("请先读取本次外发摘要。");
       return;
     }
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     setPending(true); setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/intelligence/brief`, {
@@ -334,7 +351,10 @@ function BriefPanel({ projectId, report, canRun, onReload }: { projectId: string
       setMessage("当前状态简报已生成并保存"); await onReload();
     } catch (generateError) {
       setMessage(generateError instanceof Error ? generateError.message : "项目简报生成失败");
-    } finally { setPending(false); }
+    } finally {
+      setPending(false);
+      endFlight(flightRef, flightToken);
+    }
   }
 
   function actionButton() {
@@ -359,6 +379,7 @@ function AgentPanel({ projectId, runs, tools, canRun, onReload }: { projectId: s
   const [clientKey, setClientKey] = useState<string | null>(null);
   const prepareSequence = useRef(0);
   const prepareController = useRef<AbortController | null>(null);
+  const flightRef = useRef<symbol | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -375,12 +396,14 @@ function AgentPanel({ projectId, runs, tools, canRun, onReload }: { projectId: s
   async function prepare(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
     if (question.trim().length < 2) return;
+    const preparedClientKey = crypto.randomUUID();
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     prepareSequence.current += 1;
     prepareController.current?.abort();
     const sequence = prepareSequence.current;
     const controller = new AbortController();
     prepareController.current = controller;
-    const preparedClientKey = crypto.randomUUID();
     setPending(true); setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/intelligence/agent`, {
@@ -406,6 +429,7 @@ function AgentPanel({ projectId, runs, tools, canRun, onReload }: { projectId: s
         setPending(false);
         if (prepareController.current === controller) prepareController.current = null;
       }
+      endFlight(flightRef, flightToken);
     }
   }
 
@@ -414,6 +438,8 @@ function AgentPanel({ projectId, runs, tools, canRun, onReload }: { projectId: s
       setMessage("请先读取本次外发摘要。");
       return;
     }
+    const flightToken = beginFlight(flightRef);
+    if (flightToken === null) return;
     setPending(true); setMessage(null);
     try {
       const response = await fetch(`/api/projects/${projectId}/intelligence/agent`, {
@@ -431,7 +457,10 @@ function AgentPanel({ projectId, runs, tools, canRun, onReload }: { projectId: s
       setQuestion(""); setSelectedRunId(null); setMessage("只读调查已完成"); await onReload();
     } catch (askError) {
       setMessage(askError instanceof Error ? askError.message : "项目调查失败");
-    } finally { setPending(false); }
+    } finally {
+      setPending(false);
+      endFlight(flightRef, flightToken);
+    }
   }
 
   return <section id="agent-investigation" className="scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8"><div className="border-b border-slate-100 pb-6"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Read-only investigation</p><h2 className="mt-2 text-2xl font-semibold">向项目智能体提问</h2><p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">模型只能从固定工具中规划调查；服务端逐项校验并执行只读查询，最终回答只能引用本次工具取得的证据。</p><div className="mt-4 flex flex-wrap gap-2">{tools.map((tool) => <span key={tool} className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">{toolLabels[tool]}</span>)}</div></div>{canRun ? <form onSubmit={(event) => void prepare(event)} className="mt-6"><label className="block text-sm font-semibold text-slate-700">你想了解什么？<textarea value={question} onChange={(event) => { setQuestion(event.target.value); resetConfirmation(); }} minLength={2} maxLength={2_000} rows={4} placeholder="例如：目前最需要关注的风险是什么？哪些关键决策仍缺少证据？" className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-400 focus:bg-white" /></label>{confirmation ? <ConfirmationCard confirmation={confirmation} pending={pending} executeLabel="开始只读调查" onExecute={() => void ask()} /> : <div className="mt-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">不提供 Shell、文件系统、代码修改或 GitHub 写入工具。</p><button disabled={pending || question.trim().length < 2} className="shrink-0 rounded-xl border border-slate-300 px-5 py-3 text-xs font-semibold text-slate-800 hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-40">{pending ? "读取摘要中…" : "读取本次外发摘要"}</button></div>}</form> : null}{message ? <p role="status" className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{message}</p> : null}{runs.length > 1 ? <div className="mt-7 flex gap-2 overflow-x-auto pb-2">{runs.slice(0, 10).map((run) => <button key={run.id} type="button" onClick={() => setSelectedRunId(run.id)} className={`shrink-0 rounded-full px-3 py-2 text-xs font-semibold ${selectedRun?.id === run.id ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{formatDate(run.createdAt)}</button>)}</div> : null}{selectedRun ? <AgentRunView run={selectedRun} /> : <div className="mt-7 rounded-2xl border border-dashed border-slate-200 px-6 py-12 text-center text-sm text-slate-500">还没有调查记录。完成上方下一步后，可提交一个只读问题并保存证据轨迹。</div>}</section>;

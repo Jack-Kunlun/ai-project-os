@@ -50,6 +50,7 @@ import {
 import { isProjectAiRuntimeOperation } from "@/lib/project-ai-runtime-capabilities";
 import {
   consumeWebAiConfirmation,
+  confirmationActionForBackgroundJobKind,
   normalizeWebAiConfirmationId,
   validateWebAiConfirmation,
   type WebAiConfirmationExecuteInput,
@@ -937,6 +938,10 @@ export async function createGrantedWebAiJob(input: Readonly<{
       ? input.confirmation
       : await input.refreshConfirmation(tx, admission, route);
     if (confirmationInput === undefined) throw new WebAiConfirmationError("WEB_AI_CONFIRMATION_REQUIRED");
+    const expectedConfirmationAction = confirmationActionForBackgroundJobKind(input.kind);
+    if (expectedConfirmationAction === null || confirmationInput.targetAction !== expectedConfirmationAction) {
+      throw new WebAiConfirmationError("WEB_AI_CONFIRMATION_REQUIRED");
+    }
     const confirmation = await validateWebAiConfirmation(tx, admission, confirmationInput);
     if (confirmation.row.consumedJobId !== null) {
       const recovered = await tx.backgroundJob.findUnique({

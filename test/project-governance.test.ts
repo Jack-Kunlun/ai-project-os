@@ -140,8 +140,26 @@ test("governance web reviews redact personal provider metadata by visibility", (
   assert.deepEqual(connectionOwner.model, { providerName: "私有连接名称", providerKind: "openai", modelId: "private-model" });
 });
 
+test("all Web AI job kinds expose the queued, consent, and unknown recovery matrix", () => {
+  const webAiJobKinds = ["autoExtract", "memoryIndex", "semanticSearch", "ragAnswer", "assetExtract", "projectBrief", "projectAgent"] as const;
+  for (const kind of webAiJobKinds) {
+    assert.deepEqual(governanceJobCapability({ kind, status: "queued", reconciliationRequired: false }), {
+      action: "cancel",
+      reason: "available",
+    });
+    assert.deepEqual(governanceJobCapability({ kind, status: "waitingConsent", reconciliationRequired: false }), {
+      action: "cancel",
+      reason: "available",
+    });
+    assert.deepEqual(governanceJobCapability({ kind, status: "unknown", reconciliationRequired: true }), {
+      action: "reconcile",
+      reason: "available",
+    });
+  }
+});
+
 test("job capabilities preserve specialized reconciliation and terminal semantics", () => {
-  for (const kind of ["autoExtract", "semanticSearch", "ragAnswer", "projectBrief", "projectAgent", "memoryIndex", "githubProjectSync"] as const) {
+  for (const kind of ["githubProjectSync"] as const) {
     assert.deepEqual(governanceJobCapability({ kind, status: "unknown", reconciliationRequired: true }), {
       action: "reconcile",
       reason: "available",

@@ -210,6 +210,115 @@ async function lockUser(db: EntitlementDb, userId: string): Promise<void> {
   await lockMembershipUser(db, userId);
 }
 
+type AllocationDelegate = {
+  create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+  findMany: (args: Record<string, unknown>) => Promise<ReadonlyArray<Record<string, unknown>>>;
+  update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+};
+
+function allocationDelegate(db: EntitlementDb): AllocationDelegate | null {
+  const delegate = (db as unknown as { platformTokenReservationAllocation?: AllocationDelegate }).platformTokenReservationAllocation;
+  return delegate === undefined ? null : delegate;
+}
+
+async function setRuntimeMutationContext(db: EntitlementDb): Promise<void> {
+  // The runtime principal is granted only the allocation/reservation lifecycle
+  // tables.  This transaction-local marker lets the database trigger
+  // distinguish that narrow balance transition from a governance mutation.
+  await db.$executeRaw`SELECT set_config('app.platform_token_runtime_context', '1', true)`;
+}
+
+type RuntimeAllocationMutation = Readonly<{
+  id: string;
+  grantId: string;
+  ordinal: number;
+  reservedTokens: number;
+  settledTokens: number;
+  releasedTokens: number;
+}>;
+
+type RuntimeLedgerMutation = Readonly<{
+  id: string;
+  userId: string;
+  grantId: string;
+  reservationId: string;
+  entryKind: "reserve" | "settle" | "release" | "hold";
+  amount: number;
+  usageTokens: number | null;
+  reasonCode: string;
+  idempotencyKey: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}>;
+
+async function applyRuntimeMutation(
+  db: EntitlementDb,
+  action: "reserve" | "settle" | "release" | "hold",
+  reservation: Record<string, unknown>,
+  allocations: readonly RuntimeAllocationMutation[],
+  ledger: readonly RuntimeLedgerMutation[],
+): Promise<void> {
+  await db.$executeRaw`SELECT "platform_token_runtime_apply"(
+    ${action},
+    ${JSON.stringify(reservation)}::jsonb,
+    ${JSON.stringify(allocations)}::jsonb,
+    ${JSON.stringify(ledger)}::jsonb
+  )`;
+}
+
+async function applyTerminalRuntimeMutation(
+  db: EntitlementDb,
+  action: "settle" | "release" | "hold",
+  reservation: AllocationReservationRow,
+  allocations: readonly RuntimeAllocationMutation[],
+  ledger: readonly RuntimeLedgerMutation[],
+  now: Date,
+  terminal: Readonly<{ settledTokens?: number; rawSettledTokens?: number; safeErrorCode?: string }>,
+): Promise<PlatformTokenReservationResult> {
+  await applyRuntimeMutation(db, action, {
+    id: reservation.id, userId: reservation.userId, callKey: reservation.callKey,
+    reservedTokens: reservation.reservedTokens,
+    ...(action === "settle" ? { settledTokens: terminal.settledTokens, rawSettledTokens: terminal.rawSettledTokens, settledAt: now.toISOString() } : {}),
+    ...(action === "release" ? { releasedAt: now.toISOString() } : {}),
+    ...(action === "hold" ? { safeErrorCode: terminal.safeErrorCode } : {}),
+  }, allocations, ledger);
+  const row = await db.platformTokenReservation.findUniqueOrThrow({ where: { id: reservation.id }, select: {
+    id: true, status: true, reservedTokens: true, settledTokens: true, rawEstimatedTokens: true,
+    rawSettledTokens: true, quotaMultiplierBps: true, webAiGrantId: true, routeFenceFingerprint: true,
+  } });
+  return reservationResult(row);
+}
+
+function runtimeLedger(input: Omit<RuntimeLedgerMutation, "id" | "createdAt">, now: Date): RuntimeLedgerMutation {
+  return Object.freeze({ id: randomUUID(), ...input, createdAt: now.toISOString() });
+}
+
+function allocationRows(value: unknown): Array<{
+  id: string;
+  grantId: string;
+  ordinal: number;
+  reservedTokens: number;
+  settledTokens: number;
+  releasedTokens: number;
+}> {
+  if (!Array.isArray(value)) return [];
+  return value.map((row) => {
+    const item = row as Record<string, unknown>;
+    return {
+      id: String(item.id),
+      grantId: String(item.grantId),
+      ordinal: Number(item.ordinal),
+      reservedTokens: Number(item.reservedTokens),
+      settledTokens: Number(item.settledTokens ?? 0),
+      releasedTokens: Number(item.releasedTokens ?? 0),
+    };
+  }).sort((left, right) => left.ordinal - right.ordinal);
+}
+
+function allocationLedgerKey(kind: string, userId: string, callKey: string, ordinal: number): string {
+  return ordinal === 1 ? `${kind}:${userId}:${callKey}` : `${kind}:${userId}:${callKey}:allocation:${ordinal}`;
+}
+
 const DISPATCH_EVIDENCE_STATES = ["dispatched", "acknowledged"] as const;
 
 async function recoverExpiredPlatformTokenReservationsInTransaction(
@@ -224,13 +333,19 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
     take: limit,
     select: {
       id: true,
+      userId: true,
       grantId: true,
       jobId: true,
       callKey: true,
       reservedTokens: true,
       providerCallAudit: { select: { id: true } },
+      allocations: {
+        orderBy: [{ ordinal: "asc" as const }],
+        select: { id: true, grantId: true, ordinal: true, reservedTokens: true, settledTokens: true, releasedTokens: true },
+      },
     },
   });
+  const allocations = allocationDelegate(db);
   let released = 0;
   let held = 0;
   for (const reservation of reservations) {
@@ -242,55 +357,101 @@ async function recoverExpiredPlatformTokenReservationsInTransaction(
         });
     const hasDispatchEvidence = reservation.providerCallAudit !== null || dispatchedAttempt !== null;
     if (hasDispatchEvidence) {
+      const exactAllocations = allocationRows((reservation as unknown as { allocations?: unknown }).allocations);
+      if (isPrismaClient(db) && exactAllocations.length > 0) {
+        const current = await db.platformTokenReservation.findUnique({ where: { id: reservation.id }, select: { status: true } });
+        if (current?.status !== "reserved") continue;
+        await applyTerminalRuntimeMutation(db, "hold", reservation as unknown as AllocationReservationRow, exactAllocations,
+          exactAllocations.map((allocation) => runtimeLedger({ userId, grantId: allocation.grantId, reservationId: reservation.id,
+            entryKind: "hold", amount: 0, usageTokens: null, reasonCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED",
+            idempotencyKey: allocationLedgerKey("hold", userId, reservation.callKey, allocation.ordinal),
+            metadata: { recovery: "expired-reservation", allocationOrdinal: allocation.ordinal } }, now)),
+          now, { safeErrorCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED" });
+        held += 1;
+        continue;
+      }
       const transitioned = await db.platformTokenReservation.updateMany({
         where: { id: reservation.id, status: "reserved" },
         data: { status: "held", reconciliationRequired: true, safeErrorCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED" },
       });
       if (transitioned.count !== 1) continue;
-      await db.platformTokenLedgerEntry.createMany({
-        data: {
-          id: randomUUID(),
-          userId,
-          grantId: reservation.grantId,
-          reservationId: reservation.id,
-          entryKind: "hold",
-          amount: 0,
-          usageTokens: null,
-          reasonCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED",
-          callKey: reservation.callKey,
-          idempotencyKey: `hold:${userId}:${reservation.callKey}`,
-          metadata: { recovery: "expired-reservation" },
-          createdAt: now,
-        },
-        skipDuplicates: true,
-      });
+      if (allocations !== null && exactAllocations.length > 0) {
+        for (const allocation of exactAllocations) {
+          await db.platformTokenLedgerEntry.createMany({
+            data: {
+              id: randomUUID(), userId, grantId: allocation.grantId, reservationId: reservation.id,
+              entryKind: "hold", amount: 0, usageTokens: null,
+              reasonCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED", callKey: reservation.callKey,
+              idempotencyKey: allocationLedgerKey("hold", userId, reservation.callKey, allocation.ordinal),
+              metadata: { recovery: "expired-reservation", allocationOrdinal: allocation.ordinal }, createdAt: now,
+            }, skipDuplicates: true,
+          });
+        }
+      } else {
+        await db.platformTokenLedgerEntry.createMany({
+          data: {
+            id: randomUUID(), userId, grantId: reservation.grantId, reservationId: reservation.id,
+            entryKind: "hold", amount: 0, usageTokens: null,
+            reasonCode: "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED", callKey: reservation.callKey,
+            idempotencyKey: `hold:${userId}:${reservation.callKey}`,
+            metadata: { recovery: "expired-reservation" }, createdAt: now,
+          }, skipDuplicates: true,
+        });
+      }
       held += 1;
       continue;
     }
 
-    const transitioned = await db.platformTokenReservation.updateMany({
-      where: { id: reservation.id, status: "reserved" },
-      data: { status: "released", releasedAt: now, reconciliationRequired: false, safeErrorCode: null },
-    });
-    if (transitioned.count !== 1) continue;
-    await db.platformTokenGrant.update({ where: { id: reservation.grantId }, data: { remainingTokens: { increment: reservation.reservedTokens } } });
-    await db.platformTokenLedgerEntry.createMany({
-      data: {
-        id: randomUUID(),
-        userId,
-        grantId: reservation.grantId,
-        reservationId: reservation.id,
-        entryKind: "release",
-        amount: reservation.reservedTokens,
-        usageTokens: null,
-        reasonCode: "AI_PLATFORM_TOKEN_EXPIRED_RESERVATION_RELEASED",
-        callKey: reservation.callKey,
-        idempotencyKey: `release:${userId}:${reservation.callKey}`,
-        metadata: { recovery: "expired-reservation" },
-        createdAt: now,
-      },
-      skipDuplicates: true,
-    });
+      const exactAllocations = allocationRows((reservation as unknown as { allocations?: unknown }).allocations);
+      if (isPrismaClient(db) && exactAllocations.length > 0) {
+        const current = await db.platformTokenReservation.findUnique({ where: { id: reservation.id }, select: { status: true } });
+        if (current?.status !== "reserved") continue;
+        const releasedAllocations = exactAllocations.map((allocation) => ({ ...allocation, releasedTokens: allocation.reservedTokens }));
+        await applyTerminalRuntimeMutation(db, "release", reservation as unknown as AllocationReservationRow, releasedAllocations,
+          releasedAllocations.flatMap((allocation) => {
+            const original = exactAllocations.find((row) => row.id === allocation.id)!;
+            const amount = allocation.reservedTokens - original.settledTokens - original.releasedTokens;
+            return amount > 0 ? [runtimeLedger({ userId, grantId: allocation.grantId, reservationId: reservation.id,
+              entryKind: "release", amount, usageTokens: null, reasonCode: "AI_PLATFORM_TOKEN_EXPIRED_RESERVATION_RELEASED",
+              idempotencyKey: allocationLedgerKey("release", userId, reservation.callKey, allocation.ordinal),
+              metadata: { recovery: "expired-reservation", allocationOrdinal: allocation.ordinal } }, now)] : [];
+          }), now, {});
+        released += 1;
+        continue;
+      }
+      const transitioned = await db.platformTokenReservation.updateMany({
+        where: { id: reservation.id, status: "reserved" },
+        data: { status: "released", releasedAt: now, reconciliationRequired: false, safeErrorCode: null },
+      });
+      if (transitioned.count !== 1) continue;
+      if (allocations !== null && exactAllocations.length > 0) {
+        await setRuntimeMutationContext(db);
+        for (const allocation of exactAllocations) {
+          await db.platformTokenGrant.update({ where: { id: allocation.grantId }, data: { remainingTokens: { increment: allocation.reservedTokens - allocation.settledTokens - allocation.releasedTokens } } });
+          await allocations.update({ where: { id: allocation.id }, data: { releasedTokens: allocation.reservedTokens } });
+          await db.platformTokenLedgerEntry.createMany({
+            data: {
+              id: randomUUID(), userId, grantId: allocation.grantId, reservationId: reservation.id,
+              entryKind: "release", amount: allocation.reservedTokens - allocation.settledTokens - allocation.releasedTokens,
+              usageTokens: null, reasonCode: "AI_PLATFORM_TOKEN_EXPIRED_RESERVATION_RELEASED", callKey: reservation.callKey,
+              idempotencyKey: allocationLedgerKey("release", userId, reservation.callKey, allocation.ordinal),
+              metadata: { recovery: "expired-reservation", allocationOrdinal: allocation.ordinal }, createdAt: now,
+            }, skipDuplicates: true,
+          });
+        }
+      } else {
+        await setRuntimeMutationContext(db);
+        await db.platformTokenGrant.update({ where: { id: reservation.grantId }, data: { remainingTokens: { increment: reservation.reservedTokens } } });
+        await db.platformTokenLedgerEntry.createMany({
+          data: {
+            id: randomUUID(), userId, grantId: reservation.grantId, reservationId: reservation.id,
+            entryKind: "release", amount: reservation.reservedTokens, usageTokens: null,
+            reasonCode: "AI_PLATFORM_TOKEN_EXPIRED_RESERVATION_RELEASED", callKey: reservation.callKey,
+            idempotencyKey: `release:${userId}:${reservation.callKey}`,
+            metadata: { recovery: "expired-reservation" }, createdAt: now,
+          }, skipDuplicates: true,
+        });
+      }
     released += 1;
   }
   return Object.freeze({ inspected: reservations.length, released, held });
@@ -406,16 +567,24 @@ export async function reservePlatformTokens(input: Readonly<{
       const expiredGrantCount = await tx.platformTokenGrant.count({ where: { userId: input.userId, expiresAt: { lte: now } } });
       return fail(expiredGrantCount > 0 ? "AI_PLATFORM_TOKEN_EXPIRED" : "AI_PLATFORM_TOKEN_EXHAUSTED");
     }
-    const grant = grants.find((candidate) => candidate.remainingTokens >= reservedTokens);
+    const allocationsToCreate: Array<{ grantId: string; ordinal: number; reservedTokens: number; expiresAt: Date }> = [];
+    let remainingToAllocate = reservedTokens;
+    for (const candidate of grants) {
+      if (remainingToAllocate <= 0) break;
+      const amount = Math.min(candidate.remainingTokens, remainingToAllocate);
+      if (amount <= 0) continue;
+      allocationsToCreate.push({ grantId: candidate.id, ordinal: allocationsToCreate.length + 1, reservedTokens: amount, expiresAt: candidate.expiresAt });
+      remainingToAllocate -= amount;
+    }
+    if (remainingToAllocate !== 0) return fail("AI_PLATFORM_TOKEN_EXHAUSTED");
+    const grant = grants.find((candidate) => candidate.id === allocationsToCreate[0]?.grantId);
     if (grant === undefined) return fail("AI_PLATFORM_TOKEN_EXHAUSTED");
-    const updated = await tx.platformTokenGrant.updateMany({
-      where: { id: grant.id, remainingTokens: { gte: reservedTokens }, revokedAt: null, expiresAt: { gt: now } },
-      data: { remainingTokens: { decrement: reservedTokens } },
-    });
-    if (updated.count !== 1) return fail("AI_PLATFORM_TOKEN_EXHAUSTED");
     const reservationId = randomUUID();
-    const reservation = await tx.platformTokenReservation.create({
-      data: {
+    const reservationExpiresAt = new Date(Math.min(
+      ...allocationsToCreate.map((allocation) => allocation.expiresAt.getTime()),
+      now.getTime() + RESERVATION_TTL_MS,
+    ));
+    const reservationData = {
         id: reservationId,
         userId: input.userId,
         grantId: grant.id,
@@ -436,29 +605,43 @@ export async function reservePlatformTokens(input: Readonly<{
         routeUpdatedAt: snapshot.routeUpdatedAt,
         providerConfigurationVersion: snapshot.providerConfigurationVersion,
         routeFenceFingerprint: snapshot.routeFenceFingerprint,
-        expiresAt: new Date(Math.min(grant.expiresAt.getTime(), now.getTime() + RESERVATION_TTL_MS)),
+        expiresAt: reservationExpiresAt,
         createdAt: now,
-        ledgerEntries: {
-          create: {
-            id: randomUUID(),
-            userId: input.userId,
-            grantId: grant.id,
-            entryKind: "reserve",
-            amount: -reservedTokens,
-            reasonCode: "AI_PLATFORM_TOKEN_RESERVED",
-            callKey,
-            idempotencyKey: `reserve:${input.userId}:${callKey}`,
-            metadata: {
-              operation: input.operation,
-              modelId: input.modelId,
-              rawEstimatedTokens,
-              quotaMultiplierBps: snapshot.quotaMultiplierBps,
-              routeFenceFingerprint: snapshot.routeFenceFingerprint,
-            },
-            createdAt: now,
-          },
-        },
-      },
+      };
+    const allocationDelegateForCreate = allocationDelegate(tx);
+    if (isPrismaClient(db) && allocationDelegateForCreate !== null) {
+      const runtimeAllocations = allocationsToCreate.map((allocation) => ({
+        id: randomUUID(), grantId: allocation.grantId, ordinal: allocation.ordinal,
+        reservedTokens: allocation.reservedTokens, settledTokens: 0, releasedTokens: 0,
+      }));
+      await applyRuntimeMutation(tx, "reserve", {
+        ...reservationData, status: "reserved", webAiGrantReferenceId: input.webAiGrantId ?? null,
+        expiresAt: reservationExpiresAt.toISOString(), createdAt: now.toISOString(),
+        routeUpdatedAt: snapshot.routeUpdatedAt?.toISOString() ?? null,
+      }, runtimeAllocations, runtimeAllocations.map((allocation) => runtimeLedger({
+        userId: input.userId, grantId: allocation.grantId, reservationId, entryKind: "reserve",
+        amount: -allocation.reservedTokens, usageTokens: null, reasonCode: "AI_PLATFORM_TOKEN_RESERVED",
+        idempotencyKey: allocationLedgerKey("reserve", input.userId, callKey, allocation.ordinal),
+        metadata: { operation: input.operation, modelId: input.modelId, rawEstimatedTokens, quotaMultiplierBps: snapshot.quotaMultiplierBps, routeFenceFingerprint: snapshot.routeFenceFingerprint, allocationOrdinal: allocation.ordinal },
+      }, now)));
+    } else {
+      await setRuntimeMutationContext(tx);
+      for (const allocation of allocationsToCreate) {
+        const updated = await tx.platformTokenGrant.updateMany({
+          where: { id: allocation.grantId, remainingTokens: { gte: allocation.reservedTokens }, revokedAt: null, expiresAt: { gt: now } },
+          data: { remainingTokens: { decrement: allocation.reservedTokens } },
+        });
+        if (updated.count !== 1) return fail("AI_PLATFORM_TOKEN_EXHAUSTED");
+      }
+    }
+    const reservation = isPrismaClient(db) && allocationDelegateForCreate !== null
+      ? await tx.platformTokenReservation.findUniqueOrThrow({ where: { id: reservationId },
+      select: {
+        id: true, status: true, reservedTokens: true, settledTokens: true, rawEstimatedTokens: true,
+        rawSettledTokens: true, quotaMultiplierBps: true, webAiGrantId: true, routeFenceFingerprint: true,
+      } })
+      : await tx.platformTokenReservation.create({
+      data: reservationData,
       select: {
         id: true,
         status: true,
@@ -471,6 +654,42 @@ export async function reservePlatformTokens(input: Readonly<{
         routeFenceFingerprint: true,
       },
     });
+    if (!isPrismaClient(db) && allocationDelegateForCreate === null) {
+      // Compatibility path for isolated contract fakes and pre-ENT-010
+      // callers.  Real Prisma clients always have the allocation delegate.
+      const legacyReservation = await tx.platformTokenReservation.update({
+        where: { id: reservation.id },
+        data: {
+          ledgerEntries: {
+            create: {
+              id: randomUUID(), userId: input.userId, grantId: grant.id,
+              entryKind: "reserve", amount: -reservedTokens, reasonCode: "AI_PLATFORM_TOKEN_RESERVED",
+              callKey, idempotencyKey: `reserve:${input.userId}:${callKey}`,
+              metadata: { operation: input.operation, modelId: input.modelId, rawEstimatedTokens, quotaMultiplierBps: snapshot.quotaMultiplierBps, routeFenceFingerprint: snapshot.routeFenceFingerprint },
+              createdAt: now,
+            },
+          },
+        },
+      });
+      void legacyReservation;
+    } else if (!isPrismaClient(db) && allocationDelegateForCreate !== null) {
+      for (const allocation of allocationsToCreate) {
+        const allocationId = randomUUID();
+        await allocationDelegateForCreate.create({ data: {
+          id: allocationId, reservationId, grantId: allocation.grantId, ordinal: allocation.ordinal,
+          reservedTokens: allocation.reservedTokens, settledTokens: 0, releasedTokens: 0, createdAt: now,
+        } });
+        await tx.platformTokenLedgerEntry.create({
+          data: {
+            id: randomUUID(), userId: input.userId, grantId: allocation.grantId, reservationId,
+            entryKind: "reserve", amount: -allocation.reservedTokens, reasonCode: "AI_PLATFORM_TOKEN_RESERVED",
+            callKey, idempotencyKey: allocationLedgerKey("reserve", input.userId, callKey, allocation.ordinal),
+            metadata: { operation: input.operation, modelId: input.modelId, rawEstimatedTokens, quotaMultiplierBps: snapshot.quotaMultiplierBps, routeFenceFingerprint: snapshot.routeFenceFingerprint, allocationOrdinal: allocation.ordinal },
+            createdAt: now,
+          },
+        });
+      }
+    }
     return Object.freeze({
       reservationId: reservation.id,
       status: reservation.status,
@@ -541,8 +760,240 @@ async function reservationForCall(
 ) {
   return db.platformTokenReservation.findUnique({
     where: { userId_callKey: { userId, callKey: assertLedgerKey(callKey) } },
-    include: { grant: { select: { id: true, remainingTokens: true } } },
+    include: {
+      grant: { select: { id: true, remainingTokens: true } },
+      allocations: {
+        orderBy: [{ ordinal: "asc" as const }],
+        select: { id: true, grantId: true, ordinal: true, reservedTokens: true, settledTokens: true, releasedTokens: true },
+      },
+    },
   });
+}
+
+type AllocationReservationRow = Readonly<{
+  id: string;
+  grantId: string;
+  userId: string;
+  callKey: string;
+  status: PlatformTokenReservationStatus;
+  reservedTokens: number;
+  settledTokens: number | null;
+  rawEstimatedTokens: number;
+  rawSettledTokens: number | null;
+  quotaMultiplierBps: number;
+  webAiGrantId: string | null;
+  routeFenceFingerprint: string | null;
+  allocations?: unknown;
+}>;
+
+function reservationResult(row: Readonly<{
+  id: string;
+  status: PlatformTokenReservationStatus;
+  reservedTokens: number;
+  settledTokens: number | null;
+  rawEstimatedTokens: number;
+  rawSettledTokens: number | null;
+  quotaMultiplierBps: number;
+  webAiGrantId: string | null;
+  routeFenceFingerprint: string | null;
+}>): PlatformTokenReservationResult {
+  return Object.freeze({
+    reservationId: row.id,
+    status: row.status,
+    reservedTokens: row.reservedTokens,
+    settledTokens: row.settledTokens,
+    rawEstimatedTokens: row.rawEstimatedTokens,
+    rawSettledTokens: row.rawSettledTokens,
+    quotaMultiplierBps: row.quotaMultiplierBps,
+    webAiGrantId: row.webAiGrantId,
+    routeFenceFingerprint: row.routeFenceFingerprint,
+    billingMode: "platform" as const,
+    created: false,
+  });
+}
+
+async function settleAllocationAware(
+  db: EntitlementDb,
+  reservation: AllocationReservationRow,
+  input: Readonly<{ actualTokens?: number; usageKnown: boolean }>,
+  now: Date,
+): Promise<PlatformTokenReservationResult> {
+  const allocations = allocationRows(reservation.allocations);
+  const allocationDb = allocationDelegate(db);
+  if (allocationDb === null || allocations.length === 0) {
+    throw new Error("PLATFORM_TOKEN_ALLOCATION_MISSING");
+  }
+  const hold = async (safeErrorCode: "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED" | "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED", usageTokens: number | null) => {
+    if (isPrismaClient(db)) {
+      const runtimeAllocations = allocations.map((allocation) => ({ ...allocation }));
+      return applyTerminalRuntimeMutation(db, "hold", reservation, runtimeAllocations,
+        runtimeAllocations.map((allocation) => runtimeLedger({
+          userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+          entryKind: "hold", amount: 0, usageTokens: allocation.ordinal === 1 ? usageTokens : null,
+          reasonCode: safeErrorCode, idempotencyKey: allocationLedgerKey("hold", reservation.userId, reservation.callKey, allocation.ordinal),
+          metadata: { allocationOrdinal: allocation.ordinal },
+        }, now)), now, { safeErrorCode });
+    }
+    const held = await db.platformTokenReservation.update({
+      where: { id: reservation.id },
+      data: { status: "held", reconciliationRequired: true, safeErrorCode },
+      select: { id: true, status: true, reservedTokens: true, settledTokens: true, rawEstimatedTokens: true, rawSettledTokens: true, quotaMultiplierBps: true, webAiGrantId: true, routeFenceFingerprint: true },
+    });
+    for (const allocation of allocations) {
+      await db.platformTokenLedgerEntry.create({
+        data: {
+          id: randomUUID(), userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+          entryKind: "hold", amount: 0, usageTokens: allocation.ordinal === 1 ? usageTokens : null, reasonCode: safeErrorCode,
+          callKey: reservation.callKey, idempotencyKey: allocationLedgerKey("hold", reservation.userId, reservation.callKey, allocation.ordinal),
+          metadata: { allocationOrdinal: allocation.ordinal }, createdAt: now,
+        },
+      });
+    }
+    return reservationResult(held);
+  };
+  if (!input.usageKnown || typeof input.actualTokens !== "number" || !Number.isSafeInteger(input.actualTokens) || input.actualTokens < 0) {
+    return hold("AI_PLATFORM_TOKEN_USAGE_UNVERIFIED", null);
+  }
+  let chargedActual: number;
+  try {
+    chargedActual = calculateChargedPlatformTokens(input.actualTokens, reservation.quotaMultiplierBps);
+  } catch {
+    chargedActual = Number.POSITIVE_INFINITY;
+  }
+  if (!Number.isSafeInteger(chargedActual) || chargedActual > reservation.reservedTokens) {
+    const safeUsageTokens = Number.isSafeInteger(input.actualTokens) && input.actualTokens >= 0 && input.actualTokens <= PLATFORM_RAW_TOKEN_LIMIT ? input.actualTokens : null;
+    return hold("AI_PROVIDER_CALL_RECONCILIATION_REQUIRED", safeUsageTokens);
+  }
+
+  let remainingSettled = chargedActual;
+  if (isPrismaClient(db)) {
+    const runtimeAllocations = allocations.map((allocation) => {
+      const settledTokens = Math.min(allocation.reservedTokens, remainingSettled);
+      remainingSettled -= settledTokens;
+      return { ...allocation, settledTokens, releasedTokens: allocation.reservedTokens - settledTokens };
+    });
+    return applyTerminalRuntimeMutation(db, "settle", reservation, runtimeAllocations,
+      runtimeAllocations.flatMap((allocation) => {
+        const released = allocation.releasedTokens - allocations.find((row) => row.id === allocation.id)!.releasedTokens;
+        return [
+          ...(released > 0 ? [runtimeLedger({ userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+            entryKind: "release", amount: released, usageTokens: null, reasonCode: "AI_PLATFORM_TOKEN_SETTLE_RELEASE",
+            idempotencyKey: allocationLedgerKey("release", reservation.userId, reservation.callKey, allocation.ordinal), metadata: { allocationOrdinal: allocation.ordinal } }, now)] : []),
+          runtimeLedger({ userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+            entryKind: "settle", amount: 0, usageTokens: allocation.ordinal === 1 ? input.actualTokens! : null,
+            reasonCode: "AI_PLATFORM_TOKEN_SETTLED", idempotencyKey: allocationLedgerKey("settle", reservation.userId, reservation.callKey, allocation.ordinal), metadata: { allocationOrdinal: allocation.ordinal } }, now),
+        ];
+      }), now, { settledTokens: chargedActual, rawSettledTokens: input.actualTokens });
+  }
+  await setRuntimeMutationContext(db);
+  for (const allocation of allocations) {
+    const settledTokens = Math.min(allocation.reservedTokens, remainingSettled);
+    remainingSettled -= settledTokens;
+    const releasedTokens = allocation.reservedTokens - settledTokens - allocation.releasedTokens;
+    if (releasedTokens > 0) {
+      await db.platformTokenGrant.update({ where: { id: allocation.grantId }, data: { remainingTokens: { increment: releasedTokens } } });
+      await db.platformTokenLedgerEntry.create({
+        data: {
+          id: randomUUID(), userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+          entryKind: "release", amount: releasedTokens, usageTokens: null, reasonCode: "AI_PLATFORM_TOKEN_SETTLE_RELEASE",
+          callKey: reservation.callKey, idempotencyKey: allocationLedgerKey("release", reservation.userId, reservation.callKey, allocation.ordinal),
+          metadata: { allocationOrdinal: allocation.ordinal }, createdAt: now,
+        },
+      });
+    }
+    await allocationDb.update({ where: { id: allocation.id }, data: { settledTokens, releasedTokens: allocation.releasedTokens + releasedTokens } });
+    await db.platformTokenLedgerEntry.create({
+      data: {
+        id: randomUUID(), userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+        entryKind: "settle", amount: 0, usageTokens: allocation.ordinal === 1 ? input.actualTokens : null,
+        reasonCode: "AI_PLATFORM_TOKEN_SETTLED", callKey: reservation.callKey,
+        idempotencyKey: allocationLedgerKey("settle", reservation.userId, reservation.callKey, allocation.ordinal),
+        metadata: { allocationOrdinal: allocation.ordinal }, createdAt: now,
+      },
+    });
+  }
+  const settled = await db.platformTokenReservation.update({
+    where: { id: reservation.id },
+    data: { status: "settled", settledTokens: chargedActual, rawSettledTokens: input.actualTokens, settledAt: now, reconciliationRequired: false, safeErrorCode: null },
+    select: { id: true, status: true, reservedTokens: true, settledTokens: true, rawEstimatedTokens: true, rawSettledTokens: true, quotaMultiplierBps: true, webAiGrantId: true, routeFenceFingerprint: true },
+  });
+  return reservationResult(settled);
+}
+
+async function releaseAllocationAware(
+  db: EntitlementDb,
+  reservation: AllocationReservationRow,
+  now: Date,
+): Promise<PlatformTokenReservationResult> {
+  const allocations = allocationRows(reservation.allocations);
+  const allocationDb = allocationDelegate(db);
+  if (allocationDb === null || allocations.length === 0) throw new Error("PLATFORM_TOKEN_ALLOCATION_MISSING");
+  if (isPrismaClient(db)) {
+    const runtimeAllocations = allocations.map((allocation) => ({ ...allocation, releasedTokens: allocation.reservedTokens }));
+    return applyTerminalRuntimeMutation(db, "release", reservation, runtimeAllocations,
+      runtimeAllocations.flatMap((allocation) => {
+        const amount = allocation.reservedTokens - allocation.settledTokens
+          - allocations.find((row) => row.id === allocation.id)!.releasedTokens;
+        return amount > 0 ? [runtimeLedger({ userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+          entryKind: "release", amount, usageTokens: null, reasonCode: "AI_PLATFORM_TOKEN_RELEASED",
+          idempotencyKey: allocationLedgerKey("release", reservation.userId, reservation.callKey, allocation.ordinal), metadata: { allocationOrdinal: allocation.ordinal } }, now)] : [];
+      }), now, {});
+  }
+  await setRuntimeMutationContext(db);
+  for (const allocation of allocations) {
+    const unreleased = allocation.reservedTokens - allocation.settledTokens - allocation.releasedTokens;
+    if (unreleased > 0) {
+      await db.platformTokenGrant.update({ where: { id: allocation.grantId }, data: { remainingTokens: { increment: unreleased } } });
+      await db.platformTokenLedgerEntry.create({
+        data: {
+          id: randomUUID(), userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+          entryKind: "release", amount: unreleased, usageTokens: null, reasonCode: "AI_PLATFORM_TOKEN_RELEASED",
+          callKey: reservation.callKey, idempotencyKey: allocationLedgerKey("release", reservation.userId, reservation.callKey, allocation.ordinal),
+          metadata: { allocationOrdinal: allocation.ordinal }, createdAt: now,
+        },
+      });
+    }
+    await allocationDb.update({ where: { id: allocation.id }, data: { releasedTokens: allocation.reservedTokens } });
+  }
+  const released = await db.platformTokenReservation.update({
+    where: { id: reservation.id },
+    data: { status: "released", releasedAt: now, reconciliationRequired: false, safeErrorCode: null },
+    select: { id: true, status: true, reservedTokens: true, settledTokens: true, rawEstimatedTokens: true, rawSettledTokens: true, quotaMultiplierBps: true, webAiGrantId: true, routeFenceFingerprint: true },
+  });
+  return reservationResult(released);
+}
+
+async function holdAllocationAware(
+  db: EntitlementDb,
+  reservation: AllocationReservationRow,
+  safeErrorCode: "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED" | "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED",
+  now: Date,
+): Promise<PlatformTokenReservationResult> {
+  const allocations = allocationRows(reservation.allocations);
+  if (allocationDelegate(db) === null || allocations.length === 0) throw new Error("PLATFORM_TOKEN_ALLOCATION_MISSING");
+  if (isPrismaClient(db)) {
+    return applyTerminalRuntimeMutation(db, "hold", reservation, allocations,
+      allocations.map((allocation) => runtimeLedger({ userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+        entryKind: "hold", amount: 0, usageTokens: null, reasonCode: safeErrorCode,
+        idempotencyKey: allocationLedgerKey("hold", reservation.userId, reservation.callKey, allocation.ordinal), metadata: { allocationOrdinal: allocation.ordinal } }, now)),
+      now, { safeErrorCode });
+  }
+  const held = await db.platformTokenReservation.update({
+    where: { id: reservation.id },
+    data: { status: "held", reconciliationRequired: true, safeErrorCode },
+    select: { id: true, status: true, reservedTokens: true, settledTokens: true, rawEstimatedTokens: true, rawSettledTokens: true, quotaMultiplierBps: true, webAiGrantId: true, routeFenceFingerprint: true },
+  });
+  for (const allocation of allocations) {
+    await db.platformTokenLedgerEntry.create({
+      data: {
+        id: randomUUID(), userId: reservation.userId, grantId: allocation.grantId, reservationId: reservation.id,
+        entryKind: "hold", amount: 0, usageTokens: null, reasonCode: safeErrorCode, callKey: reservation.callKey,
+        idempotencyKey: allocationLedgerKey("hold", reservation.userId, reservation.callKey, allocation.ordinal),
+        metadata: { allocationOrdinal: allocation.ordinal }, createdAt: now,
+      },
+    });
+  }
+  return reservationResult(held);
 }
 
 export async function settlePlatformTokenReservation(input: Readonly<{
@@ -571,6 +1022,9 @@ export async function settlePlatformTokenReservation(input: Readonly<{
         billingMode: "platform" as const,
         created: false,
       });
+    }
+    if (allocationDelegate(tx) !== null && allocationRows((reservation as unknown as { allocations?: unknown }).allocations).length > 0) {
+      return settleAllocationAware(tx, reservation as unknown as AllocationReservationRow, input, now);
     }
     const quotaMultiplierBps = reservation.quotaMultiplierBps ?? 10_000;
     const actual = input.actualTokens;
@@ -736,6 +1190,10 @@ export async function releasePlatformTokenReservation(input: Readonly<{
         created: false,
       });
     }
+    if (allocationDelegate(tx) !== null && allocationRows((reservation as unknown as { allocations?: unknown }).allocations).length > 0) {
+      return releaseAllocationAware(tx, reservation as unknown as AllocationReservationRow, now);
+    }
+    await setRuntimeMutationContext(tx);
     await tx.platformTokenGrant.update({ where: { id: reservation.grantId }, data: { remainingTokens: { increment: reservation.reservedTokens } } });
     const released = await tx.platformTokenReservation.update({
       where: { id: reservation.id },
@@ -798,6 +1256,12 @@ export async function holdPlatformTokenReservation(
         billingMode: "platform" as const,
         created: false,
       });
+    }
+    if (allocationDelegate(tx) !== null && allocationRows((reservation as unknown as { allocations?: unknown }).allocations).length > 0) {
+      const safeErrorCode = input.errorCode === "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED"
+        ? input.errorCode
+        : "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED";
+      return holdAllocationAware(tx, reservation as unknown as AllocationReservationRow, safeErrorCode, now);
     }
     const safeErrorCode = input.errorCode === "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED"
       ? input.errorCode

@@ -150,6 +150,7 @@ function makeRows(): Readonly<Record<string, FakeRow[]>> {
         expiresAt: new Date("2026-09-09T01:30:00.000Z"),
       },
     }],
+    platformTokenGrantAudit: [{ ...base, id: "73111111-1111-4111-8111-111111111111", userId: USER_ID, actorId: ADMIN_ID, event: "grant", versionBefore: 0, versionAfter: 1, statusBefore: "absent", statusAfter: "active" }],
   };
 }
 
@@ -235,17 +236,18 @@ function fakeDb(
     platformGrantOfferPolicyAudit: delegate("platformGrantOfferPolicy", rows.platformGrantOfferPolicy, calls),
     accountEntitlementActivationAudit: delegate("accountEntitlementActivation", rows.accountEntitlementActivationAudit, calls),
     accountEntitlementBackfillAudit: delegate("accountEntitlementBackfill", rows.accountEntitlementBackfillAudit, calls),
+    platformTokenGrantAudit: delegate("platformCreditGovernance", rows.platformTokenGrantAudit, calls),
   } as unknown as PrismaClient;
 }
 
-test("registry covers exactly the nineteen safe control-plane sources", () => {
-  assert.equal(SYSTEM_AUDIT_SOURCES.length, 19);
+test("registry covers exactly the twenty safe control-plane sources", () => {
+  assert.equal(SYSTEM_AUDIT_SOURCES.length, 20);
   assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
   for (const source of SYSTEM_AUDIT_SOURCES) {
     const registry = SYSTEM_AUDIT_REGISTRY[source];
     assert.ok(registry.selectedFields.includes("id"));
     assert.ok(registry.selectedFields.includes("createdAt") || registry.selectedFields.includes("issuedAt"));
-    if (source === "platformProviderProbe" || source === "platformGrantOfferPolicy" || source === "accountEntitlementBackfill") assert.deepEqual(registry.referenceFields, []);
+    if (source === "platformProviderProbe" || source === "platformGrantOfferPolicy" || source === "accountEntitlementBackfill" || source === "platformCreditGovernance") assert.deepEqual(registry.referenceFields, []);
     else assert.ok(registry.referenceFields.length > 0);
     assert.deepEqual(Object.keys(registry.actionMap).sort(), [...registry.allowedActions].sort());
     for (const field of registry.selectedFields) assert.doesNotMatch(field, /fingerprint|token/iu, `${source}.${field}`);
@@ -389,6 +391,15 @@ test("new audit adapters preserve source-specific results and safe principals", 
   assert.equal(backfill[0]?.subject, null);
   assert.equal(backfill[0]?.evidence.after.grantedCount, 1);
   assert.equal(backfill[0]?.evidence.after.skippedCount, 1);
+
+  const credit = (await listSystemAudit({ source: "platformCreditGovernance", pageSize: 50 }, db, now)).events;
+  assert.equal(credit.length, 1);
+  assert.equal(credit[0]?.action, "grant");
+  assert.equal(credit[0]?.result, "applied");
+  assert.equal(credit[0]?.subject?.id, USER_ID);
+  assert.equal(credit[0]?.evidence.before.version, 0);
+  assert.equal(credit[0]?.evidence.after.status, "active");
+  assert.deepEqual(credit[0]?.references, { categories: "platformCreditGovernance" });
 });
 
 test("platform grant offer created result follows the resulting policy status", async () => {
@@ -549,7 +560,7 @@ test("actor and subject lookups accept only exact UUID or unique username", asyn
   const db = fakeDb(rows, "admin", calls);
   const now = new Date("2026-09-09T02:00:00.000Z");
   const byUsername = await listSystemAudit({ actor: "admin", pageSize: 50 }, db, now);
-  assert.equal(byUsername.events.length, 22);
+  assert.equal(byUsername.events.length, 23);
   const byDisplayName = await listSystemAudit({ actor: "平台管理员", pageSize: 50 }, db, now);
   assert.deepEqual(byDisplayName.events, []);
 });

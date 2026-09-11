@@ -6,6 +6,9 @@ import {
   runtimeMutableRelations,
   SIGNUP_GRANT_RELATION,
   TOKEN_LEDGER_RELATION,
+  PLATFORM_TOKEN_RUNTIME_FUNCTION,
+  PLATFORM_TOKEN_GOVERNANCE_FUNCTION,
+  PLATFORM_TOKEN_PREVIEW_FUNCTION,
 } from "../src/lib/database-principal-catalog";
 import {
   ENTITLEMENT_WRITER_DATABASE_PRINCIPAL,
@@ -1014,20 +1017,22 @@ async function ensureAllowedExtensions(client: Client): Promise<void> {
   for (const extension of REQUIRED_EXTENSIONS.filter((value) => value !== "plpgsql")) {
     await client.query(`CREATE EXTENSION IF NOT EXISTS ${quoteIdentifier(extension)} WITH SCHEMA public`);
   }
-  const result = await client.query<{ extname: string; schema_name: string; owner: string }>(`
+  const result = await client.query<{ extname: string; schema_name: string; owner: string; owner_oid: string }>(`
     SELECT extension_row.extname,
            namespace.nspname AS schema_name,
-           pg_get_userbyid(extension_row.extowner) AS owner
+           pg_get_userbyid(extension_row.extowner) AS owner,
+           extension_row.extowner::text AS owner_oid
       FROM pg_extension extension_row
       JOIN pg_namespace namespace ON namespace.oid = extension_row.extnamespace
   `);
   const actual = result.rows.map((row) => row.extname).sort();
   const expected = [...REQUIRED_EXTENSIONS].sort();
   if (actual.length !== expected.length || actual.some((value, index) => value !== expected[index])) return fail("DATABASE_PRINCIPAL_EXTENSION_INVENTORY_INVALID");
-  const sealedLegacy = await client.query<{ oid: string }>("SELECT oid::text FROM pg_roles WHERE rolname = $1 AND rolsuper AND NOT rolcanlogin", [LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL]);
-  const allowedOwners = new Set<string>([CLUSTER_ADMIN_DATABASE_PRINCIPAL]);
-  if (sealedLegacy.rows[0]?.oid === "10") allowedOwners.add(LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL);
-  if (result.rows.some((row) => (row.extname !== "plpgsql" && row.schema_name !== "public") || !allowedOwners.has(row.owner))) return fail("DATABASE_PRINCIPAL_EXTENSION_OWNER_INVALID");
+  if (result.rows.some((row) => row.extname === "plpgsql"
+    ? row.owner !== CLUSTER_ADMIN_DATABASE_PRINCIPAL && row.owner_oid !== "10"
+    : row.schema_name !== "public" || row.owner !== CLUSTER_ADMIN_DATABASE_PRINCIPAL)) {
+    return fail("DATABASE_PRINCIPAL_EXTENSION_OWNER_INVALID");
+  }
 }
 
 async function setOwners(client: Client): Promise<void> {
@@ -1227,17 +1232,25 @@ async function grantTablePrivileges(client: Client): Promise<void> {
   }
   for (const relation of DATABASE_PRINCIPAL_RELATIONS) {
     const quoted = relationIdentifier(relation);
-    await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.${quoted} TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+    const governedTokenRelation = ["PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenGrantMutationPreview", "PlatformTokenGrantAudit", "PlatformTokenGrantLegacyNullIssuerSnapshot"].includes(relation);
+    await client.query(`GRANT SELECT${governedTokenRelation ? "" : ", INSERT, UPDATE, DELETE"} ON TABLE public.${quoted} TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
     if ((ENTITLEMENT_PROTECTED_RELATIONS as readonly string[]).includes(relation)) {
       await client.query(`GRANT SELECT ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
-    } else if (relation === SIGNUP_GRANT_RELATION) {
-      await client.query(`GRANT SELECT, UPDATE ("remainingTokens", "updatedAt") ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
-    } else if (relation === TOKEN_LEDGER_RELATION) {
-      await client.query(`GRANT SELECT, INSERT ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
+    } else if ([SIGNUP_GRANT_RELATION, TOKEN_LEDGER_RELATION, "PlatformTokenReservation", "PlatformTokenReservationAllocation"].includes(relation)) {
+      await client.query(`GRANT SELECT ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
     } else if (runtimeMutable.includes(relation)) {
       await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
     }
   }
+  const runtimeFunction = quoteIdentifier(PLATFORM_TOKEN_RUNTIME_FUNCTION);
+  const previewFunction = quoteIdentifier(PLATFORM_TOKEN_PREVIEW_FUNCTION);
+  const governanceFunction = quoteIdentifier(PLATFORM_TOKEN_GOVERNANCE_FUNCTION);
+  await client.query(`ALTER FUNCTION public.${runtimeFunction}(TEXT, JSONB, JSONB, JSONB) OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
+  await client.query(`ALTER FUNCTION public.${previewFunction}(JSONB) OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
+  await client.query(`ALTER FUNCTION public.${governanceFunction}(JSONB) OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
+  await client.query(`REVOKE ALL ON FUNCTION public.${runtimeFunction}(TEXT, JSONB, JSONB, JSONB), public.${previewFunction}(JSONB), public.${governanceFunction}(JSONB) FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+  await client.query(`GRANT EXECUTE ON FUNCTION public.${runtimeFunction}(TEXT, JSONB, JSONB, JSONB) TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
+  await client.query(`GRANT EXECUTE ON FUNCTION public.${previewFunction}(JSONB), public.${governanceFunction}(JSONB) TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
   await client.query(`REVOKE ALL ON SCHEMA public FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
   await client.query(`GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
   const sequences = await client.query<{ relname: string }>("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S'");
@@ -1298,6 +1311,35 @@ async function verifyAcl(client: Client): Promise<void> {
     const protectedRow = protectedRelation.rows[0];
     if (protectedRow === undefined || protectedRow.runtime_insert || protectedRow.runtime_update || protectedRow.runtime_delete) return fail("DATABASE_PRINCIPAL_ACL_INVALID");
   }
+  const allocationPrivileges = await client.query<{ runtime_insert: boolean; runtime_update: boolean; runtime_delete: boolean }>(`
+    SELECT has_table_privilege($1, 'public."PlatformTokenReservationAllocation"', 'INSERT') AS runtime_insert,
+           has_table_privilege($1, 'public."PlatformTokenReservationAllocation"', 'UPDATE') AS runtime_update,
+           has_table_privilege($1, 'public."PlatformTokenReservationAllocation"', 'DELETE') AS runtime_delete
+  `, [RUNTIME_DATABASE_PRINCIPAL]);
+  const allocationRow = allocationPrivileges.rows[0];
+  if (allocationRow === undefined || allocationRow.runtime_insert || allocationRow.runtime_update || allocationRow.runtime_delete) return fail("DATABASE_PRINCIPAL_ACL_INVALID");
+  for (const relation of [SIGNUP_GRANT_RELATION, TOKEN_LEDGER_RELATION, "PlatformTokenReservation", "PlatformTokenReservationAllocation"] as const) {
+    const dml = await client.query<{ insert: boolean; update: boolean; delete: boolean }>(`
+      SELECT has_table_privilege($1, $2, 'INSERT') AS insert,
+             has_table_privilege($1, $2, 'UPDATE') AS update,
+             has_table_privilege($1, $2, 'DELETE') AS delete
+    `, [RUNTIME_DATABASE_PRINCIPAL, `public.${relationIdentifier(relation)}`]);
+    if (dml.rows[0]?.insert || dml.rows[0]?.update || dml.rows[0]?.delete) return fail("DATABASE_PRINCIPAL_ACL_INVALID");
+  }
+  const functionAcl = await client.query<{ runtime_apply: boolean; runtime_preview: boolean; writer_apply: boolean; writer_preview: boolean; public_apply: boolean; definitions: number }>(`
+    SELECT has_function_privilege($1, 'public.platform_token_runtime_apply(text,jsonb,jsonb,jsonb)', 'EXECUTE') AS runtime_apply,
+           has_function_privilege($1, 'public.platform_token_governance_preview(jsonb)', 'EXECUTE') AS runtime_preview,
+           has_function_privilege($2, 'public.platform_token_governance_apply(jsonb)', 'EXECUTE') AS writer_apply,
+           has_function_privilege($2, 'public.platform_token_governance_preview(jsonb)', 'EXECUTE') AS writer_preview,
+           EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) privilege
+             WHERE p.oid='public.platform_token_governance_apply(jsonb)'::regprocedure AND privilege.grantee=0 AND privilege.privilege_type='EXECUTE') AS public_apply,
+           (SELECT count(*)::integer FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+             WHERE n.nspname='public' AND p.proname IN ('platform_token_runtime_apply','platform_token_governance_preview','platform_token_governance_apply')
+               AND p.prosecdef AND p.proowner=(SELECT oid FROM pg_roles WHERE rolname=$3)
+               AND p.proconfig @> ARRAY['search_path=pg_catalog, public']) AS definitions
+  `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, MIGRATOR_DATABASE_PRINCIPAL]);
+  const functionRow = functionAcl.rows[0];
+  if (functionRow === undefined || !functionRow.runtime_apply || functionRow.runtime_preview || !functionRow.writer_apply || !functionRow.writer_preview || functionRow.public_apply || functionRow.definitions !== 3) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
   const publicPrivileges = await client.query<{ database_public: boolean; schema_public: boolean }>(`
     SELECT EXISTS (
              SELECT 1

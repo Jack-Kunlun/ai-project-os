@@ -58,6 +58,7 @@ import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-run
 import { PlatformProviderProbeServiceError } from "@/lib/platform-provider-probe-service";
 import { PlatformGrantOfferPolicyError } from "@/lib/platform-grant-offer-policy-service";
 import { AccountEntitlementBackfillError } from "@/lib/account-entitlement-backfill-service";
+import { PlatformCreditGovernanceError } from "@/lib/platform-credit-governance-service";
 
 export type ApiErrorBody = {
   error: {
@@ -762,6 +763,31 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_SIGNUP_ELIGIBILITY_REQUIRED: [403, "该注册入口不具备已验证身份资格"],
     } as const;
     const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof PlatformCreditGovernanceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PLATFORM_CREDIT_GOVERNANCE_INVALID_INPUT: [400, "平台额度治理请求无效"],
+      PLATFORM_CREDIT_GOVERNANCE_ADMIN_REQUIRED: [403, "只有系统管理员可以管理平台额度"],
+      PLATFORM_CREDIT_GOVERNANCE_USER_NOT_FOUND: [404, "目标用户不存在"],
+      PLATFORM_CREDIT_GOVERNANCE_USER_DISABLED: [409, "目标用户已停用，不能补发平台额度"],
+      PLATFORM_CREDIT_GOVERNANCE_GRANT_NOT_FOUND: [404, "平台额度记录不存在"],
+      PLATFORM_CREDIT_GOVERNANCE_GRANT_NOT_MANUAL: [409, "只有人工补发的额度可以撤销"],
+      PLATFORM_CREDIT_GOVERNANCE_GRANT_REVOKED: [409, "平台额度已经撤销"],
+      PLATFORM_CREDIT_GOVERNANCE_ALLOCATION_BLOCKED: [409, "该额度仍有进行中的预留，暂不能撤销"],
+      PLATFORM_CREDIT_GOVERNANCE_CONFIRMATION_REQUIRED: [400, "请完成确认后再执行平台额度变更"],
+      PLATFORM_CREDIT_GOVERNANCE_CONFIRMATION_MISMATCH: [400, "目标用户名确认不一致，未执行变更"],
+      PLATFORM_CREDIT_GOVERNANCE_PREVIEW_STALE: [409, "预览已变化，请重新预览后执行"],
+      PLATFORM_CREDIT_GOVERNANCE_PREVIEW_EXPIRED: [410, "预览已经过期，请重新预览"],
+      PLATFORM_CREDIT_GOVERNANCE_PREVIEW_CONSUMED: [409, "预览已经执行过，不能重复使用"],
+      PLATFORM_CREDIT_GOVERNANCE_IDEMPOTENCY_CONFLICT: [409, "同一请求标识的内容已变化"],
+      PLATFORM_CREDIT_GOVERNANCE_REQUEST_KEY_CONFLICT: [409, "同一请求标识已经用于另一项平台额度变更"],
+      PLATFORM_CREDIT_GOVERNANCE_UNSAFE_REASON: [400, "原因不能包含凭据、令牌或敏感字符串"],
+      PLATFORM_CREDIT_GOVERNANCE_TRANSACTION_CONFLICT: [409, "平台额度变更事务状态异常，请重新预览"],
+      PLATFORM_CREDIT_GOVERNANCE_WRITER_REQUIRED: [500, "平台额度治理写入通道不可用"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "平台额度治理处理失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

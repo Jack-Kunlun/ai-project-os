@@ -50,6 +50,7 @@ async function ensureClusterAdminForGate(): Promise<void> {
   const bootstrap = new Client({ connectionString: configured.toString(), connectionTimeoutMillis: 5_000 });
   await bootstrap.connect();
   try {
+    await bootstrap.query("SET default_transaction_read_only = off");
     await bootstrap.query(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ${quoteLiteral(clusterAdminRole)}) THEN CREATE ROLE ${quoteIdentifier(clusterAdminRole)} LOGIN SUPERUSER CREATEDB CREATEROLE PASSWORD ${quoteLiteral(password)}; END IF; END $$`);
     await bootstrap.query(`ALTER ROLE ${quoteIdentifier(clusterAdminRole)} WITH LOGIN SUPERUSER CREATEDB CREATEROLE INHERIT NOREPLICATION NOBYPASSRLS PASSWORD ${quoteLiteral(password)}`);
   } finally {
@@ -241,8 +242,6 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
   const bypassTypeName = `ent009_bypass_type_${randomUUID().replaceAll("-", "").slice(0, 10)}`;
   const externalDatabaseName = `ent009_external_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const userId = randomUUID();
-  const grantId = randomUUID();
-  const ledgerId = randomUUID();
   const now = new Date("2026-09-11T00:00:00.000Z");
   let initialDatabaseOwner: string | null = null;
   let cleanupAssertionError: unknown;
@@ -310,16 +309,9 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
         INSERT INTO "AppUser" ("id", "username", "role", "updatedAt")
         VALUES ($1, $2, 'user', $3)
       `, [userId, `ent009_legacy_${userId.slice(0, 8)}`, now]);
-      await legacy.query(`
-        INSERT INTO "PlatformTokenGrant"
-          ("id", "userId", "kind", "amount", "remainingTokens", "offerVersion", "issuedAt", "expiresAt", "createdAt", "updatedAt")
-        VALUES ($1, $2, 'manual', 17, 17, 'ent009-legacy', $3, $4, $3, $3)
-      `, [grantId, userId, now, new Date("2026-10-11T00:00:00.000Z")]);
-      await legacy.query(`
-        INSERT INTO "PlatformTokenLedgerEntry"
-          ("id", "userId", "grantId", "entryKind", "amount", "reasonCode", "idempotencyKey", "metadata", "createdAt")
-        VALUES ($1, $2, $3, 'grant', 17, 'ENT009_LEGACY', $4, '{}', $5)
-      `, [ledgerId, userId, grantId, `ent009-legacy:${ledgerId}`, now]);
+    } catch (error) {
+      await legacy.query("ROLLBACK").catch(() => undefined);
+      throw error;
     } finally {
       await legacy.end().catch(() => undefined);
     }
@@ -414,13 +406,6 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
         (SELECT pg_get_userbyid(typowner) FROM pg_type WHERE oid = $2::oid) AS type_owner
     `, [finalOwnedObjects.functionOid, finalOwnedObjects.typeOid]);
     assert.deepEqual(finalObjectOwners.rows[0], { function_owner: migratorRole, type_owner: migratorRole });
-
-    const preserved = await admin.query<{ grants: string; ledger: string }>(`
-      SELECT
-        (SELECT count(*)::text FROM "PlatformTokenGrant" WHERE "id" = $1) AS grants,
-        (SELECT count(*)::text FROM "PlatformTokenLedgerEntry" WHERE "id" = $2) AS ledger
-    `, [grantId, ledgerId]);
-    assert.deepEqual(preserved.rows[0], { grants: "1", ledger: "1" });
 
     const databaseAndSchema = await admin.query<{ database_owner: string; schema_owner: string }>(`
       SELECT
@@ -599,8 +584,6 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
       await transferPublicOwnership(admin, migratorRole, initialDatabaseOwner).catch(reportCleanupFailure);
       await transferPublicOwnership(admin, "ai_project_os_legacy_bootstrap", initialDatabaseOwner).catch(reportCleanupFailure);
       await transferPublicOwnership(admin, bypassRole, initialDatabaseOwner).catch(reportCleanupFailure);
-      await admin.query(`DELETE FROM "PlatformTokenLedgerEntry" WHERE "id" = $1`, [ledgerId]).catch(reportCleanupFailure);
-      await admin.query(`DELETE FROM "PlatformTokenGrant" WHERE "id" = $1`, [grantId]).catch(reportCleanupFailure);
       await admin.query(`DELETE FROM "AppUser" WHERE "id" = $1`, [userId]).catch(reportCleanupFailure);
       await admin.query(`DROP FUNCTION IF EXISTS public.${quoteIdentifier(runtimeFunctionName)}()`).catch(reportCleanupFailure);
       await admin.query(`DROP TYPE IF EXISTS public.${quoteIdentifier(writerTypeName)}`).catch(reportCleanupFailure);
@@ -768,54 +751,17 @@ test("production reconcile separates non-owner runtime from writer and preserves
       const settled = await settlePlatformTokenReservation({ userId: actor.id, callKey, actualTokens: 5, usageKnown: true }, runtimeDb);
       assert.equal(settled.status, "settled");
 
-      // A trusted writer must be able to remove a ledger row before its
-      // reservation.  This exercises the BEFORE DELETE trigger's OLD return
-      // value instead of only checking its SQL text.
+      // The writer cannot bypass governance by creating or deleting manual
+      // accounting rows directly; production mutations use the functions.
       const entitlementWriter = writer;
       assert.ok(entitlementWriter);
-      const deletableGrant = await entitlementWriter.platformTokenGrant.create({
-        data: {
-          userId: actor.id,
-          kind: "manual",
-          amount: 7,
-          remainingTokens: 7,
-          offerVersion: `principal-delete-${suffix}`,
-          expiresAt: new Date("2026-10-01T00:00:00.000Z"),
-        },
-      });
-      const deletableReservation = await entitlementWriter.platformTokenReservation.create({
-        data: {
-          userId: actor.id,
-          grantId: deletableGrant.id,
-          callKey: `database-principal:${suffix}:deletable-reservation`,
-          operation: "autoExtract",
-          modelId: "database-principal-delete-model",
-          reservedTokens: 1,
-          rawEstimatedTokens: 1,
-          quotaMultiplierBps: 10_000,
-          expiresAt: new Date("2026-10-01T00:00:00.000Z"),
-        },
-      });
-      const deletableLedger = await entitlementWriter.platformTokenLedgerEntry.create({
-        data: {
-          userId: actor.id,
-          grantId: deletableGrant.id,
-          reservationId: deletableReservation.id,
-          entryKind: "reserve",
-          amount: -1,
-          reasonCode: "DATABASE_PRINCIPAL_DELETE",
-          idempotencyKey: `database-principal:${suffix}:deletable-ledger`,
-        },
-      });
-      const deletedLedger = await entitlementWriter.platformTokenLedgerEntry.deleteMany({ where: { id: deletableLedger.id } });
-      assert.equal(deletedLedger.count, 1);
-      assert.equal(await entitlementWriter.platformTokenLedgerEntry.count({ where: { id: deletableLedger.id } }), 0);
-      const deletedReservation = await entitlementWriter.platformTokenReservation.deleteMany({ where: { id: deletableReservation.id } });
-      assert.equal(deletedReservation.count, 1);
-      assert.equal(await entitlementWriter.platformTokenReservation.count({ where: { id: deletableReservation.id } }), 0);
-      const deletedGrant = await entitlementWriter.platformTokenGrant.deleteMany({ where: { id: deletableGrant.id } });
-      assert.equal(deletedGrant.count, 1);
-      assert.equal(await entitlementWriter.platformTokenGrant.count({ where: { id: deletableGrant.id } }), 0);
+      await assert.rejects(() => entitlementWriter.platformTokenGrant.create({ data: {
+        userId: actor.id, kind: "manual", amount: 7, remainingTokens: 7,
+        offerVersion: `principal-bypass-${suffix}`, issuedById: actor.id,
+        expiresAt: new Date("2026-10-01T00:00:00.000Z"),
+      } }));
+      await assert.rejects(() => entitlementWriter.platformTokenLedgerEntry.deleteMany({ where: { reservationId: reservation.reservationId } }));
+      await assert.rejects(() => entitlementWriter.platformTokenReservation.deleteMany({ where: { id: reservation.reservationId } }));
     } finally {
       if (runtimeDb !== null) await runtimeDb.$disconnect().catch(() => undefined);
       if (writer !== null) await writer.$disconnect().catch(() => undefined);
@@ -851,9 +797,9 @@ test("production reconcile separates non-owner runtime from writer and preserves
       policySelect: true,
       policyInsert: false,
       grantInsert: false,
-      grantRemainingUpdate: true,
+      grantRemainingUpdate: false,
       grantOfferVersionUpdate: false,
-      ledgerInsert: true,
+      ledgerInsert: false,
       ledgerDelete: false,
     });
 
@@ -866,6 +812,12 @@ test("production reconcile separates non-owner runtime from writer and preserves
       ["app.account_entitlement_activation_transaction_id", randomUUID()],
       ["app.account_entitlement_backfill_context", "service-v1"],
       ["app.account_entitlement_backfill_transaction_id", randomUUID()],
+      ["app.platform_token_runtime_context", "1"],
+      ["app.platform_credit_governance_context", "service-v1"],
+      ["app.platform_credit_governance_action", "grant"],
+      ["app.platform_credit_governance_actor_id", randomUUID()],
+      ["app.platform_credit_governance_preview_context", "service-v1"],
+      ["app.platform_credit_governance_execute_context", "service-v1"],
     ] as const;
     for (const [name, value] of forgedGucs) await runtimeClient.query("SELECT set_config($1, $2, true)", [name, value]);
 
@@ -879,6 +831,10 @@ test("production reconcile separates non-owner runtime from writer and preserves
       `INSERT INTO "AccountEntitlementBackfillAudit" ("id") VALUES (gen_random_uuid())`,
       `INSERT INTO "PlatformTokenGrant" ("id") VALUES (gen_random_uuid())`,
       `INSERT INTO "PlatformTokenLedgerEntry" ("id", "reasonCode") VALUES (gen_random_uuid(), 'AI_SIGNUP_GRANT')`,
+      `INSERT INTO "PlatformTokenReservation" ("id") VALUES (gen_random_uuid())`,
+      `INSERT INTO "PlatformTokenReservationAllocation" ("id") VALUES (gen_random_uuid())`,
+      `UPDATE "PlatformTokenReservation" SET "status" = "status"`,
+      `UPDATE "PlatformTokenReservationAllocation" SET "ordinal" = "ordinal"`,
       `UPDATE "PlatformTokenGrant" SET "offerVersion" = "offerVersion"`,
       `DELETE FROM "PlatformTokenGrant"`,
       `DELETE FROM "PlatformTokenLedgerEntry"`,

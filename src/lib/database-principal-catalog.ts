@@ -35,8 +35,9 @@ export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
   "ProjectAiPolicy", "ModelProcessingGrant", "ModelProcessingGrantSource", "ModelProcessingGrantOperation",
   "AiRun", "AiRunAttempt", "AiRunInputSource", "AiAuditEvent", "AiCandidateBatch", "AiCandidateClaim",
   "AppUser", "AppUserEmailVerificationAudit", "AccountAccessMutationPreview", "AccountAccessAudit",
-  "MembershipSubscription", "MembershipMutationPreview", "MembershipSubscriptionAudit", "PlatformTokenGrant",
-  "PlatformTokenReservation", "PlatformTokenLedgerEntry", "AppSession", "Workspace", "WorkspaceMembership",
+  "MembershipSubscription", "MembershipMutationPreview", "MembershipSubscriptionAudit", "PlatformTokenGrant", "PlatformTokenGrantLegacyNullIssuerSnapshot",
+  "PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenLedgerEntry",
+  "PlatformTokenGrantMutationPreview", "PlatformTokenGrantAudit", "AppSession", "Workspace", "WorkspaceMembership",
   "ProjectMembership", "MembershipAccessAudit", "MembershipGovernanceExecution", "MembershipGovernanceApproval",
   "WorkspaceInvitation", "WorkspaceInvitationAudit", "OidcProvider", "OidcIdentity", "OidcLoginAttempt",
   "GitHubIdentity", "GitHubOauthAttempt", "ExternalCredential", "McpConnection", "McpToolDefinition",
@@ -68,10 +69,17 @@ export const ENTITLEMENT_PROTECTED_RELATIONS = Object.freeze([
   "AccountEntitlementBackfillRun",
   "AccountEntitlementBackfillItem",
   "AccountEntitlementBackfillAudit",
+  "PlatformTokenGrantLegacyNullIssuerSnapshot",
+  "PlatformTokenGrantMutationPreview",
+  "PlatformTokenGrantAudit",
 ] as const);
 
 export const SIGNUP_GRANT_RELATION = "PlatformTokenGrant" as const;
 export const TOKEN_LEDGER_RELATION = "PlatformTokenLedgerEntry" as const;
+
+export const PLATFORM_TOKEN_RUNTIME_FUNCTION = "platform_token_runtime_apply" as const;
+export const PLATFORM_TOKEN_GOVERNANCE_FUNCTION = "platform_token_governance_apply" as const;
+export const PLATFORM_TOKEN_PREVIEW_FUNCTION = "platform_token_governance_preview" as const;
 
 export function isKnownDatabasePrincipalRelation(value: string): boolean {
   return (DATABASE_PRINCIPAL_RELATIONS as readonly string[]).includes(value);
@@ -81,6 +89,9 @@ export function runtimeMutableRelations(): readonly string[] {
   const protectedSet = new Set<string>([
     ...ENTITLEMENT_PROTECTED_RELATIONS,
     SIGNUP_GRANT_RELATION,
+    "PlatformTokenReservation",
+    "PlatformTokenReservationAllocation",
+    TOKEN_LEDGER_RELATION,
   ]);
   return Object.freeze(DATABASE_PRINCIPAL_RELATIONS.filter((relation) => !protectedSet.has(relation)));
 }

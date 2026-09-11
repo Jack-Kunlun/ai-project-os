@@ -16,6 +16,7 @@ export const SYSTEM_AUDIT_SOURCES = [
   "webAiConfirmation",
   "platformProviderProbe",
   "platformGrantOfferPolicy",
+  "platformCreditGovernance",
   "accountEntitlementActivation",
   "accountEntitlementBackfill",
 ] as const;
@@ -40,6 +41,7 @@ export const SYSTEM_AUDIT_SOURCE_LABELS: Readonly<Record<SystemAuditSource, stri
   webAiConfirmation: "Web AI 确认",
   platformProviderProbe: "平台连接探测",
   platformGrantOfferPolicy: "平台赠送策略",
+  platformCreditGovernance: "平台额度治理",
   accountEntitlementActivation: "账号权益激活",
   accountEntitlementBackfill: "账号权益历史回填",
 };
@@ -251,6 +253,7 @@ export const SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE: Readonly<Record<SystemAudit
   webAiConfirmation: ["memoryExtract", "memoryIndex", "memorySearch", "memoryAnswer", "assetRecognize", "intelligenceBrief", "intelligenceAgent"],
   platformProviderProbe: ["reserved", "dispatched", "settled", "released", "held", "rejected"],
   platformGrantOfferPolicy: ["created", "activated", "retired"],
+  platformCreditGovernance: ["grant", "revoke"],
   accountEntitlementActivation: ["created", "linked"],
   accountEntitlementBackfill: ["previewed", "confirmed", "executed", "stale", "expired", "failed"],
 };
@@ -273,6 +276,7 @@ export const SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE: Readonly<Record<SystemAudit
   webAiConfirmation: ["applied", "pending", "expired"],
   platformProviderProbe: ["applied", "pending", "rejected", "unknown"],
   platformGrantOfferPolicy: ["applied", "pending", "revoked"],
+  platformCreditGovernance: ["applied", "revoked"],
   accountEntitlementActivation: ["applied", "rejected"],
   accountEntitlementBackfill: ["pending", "applied", "rejected", "expired", "failed"],
 };

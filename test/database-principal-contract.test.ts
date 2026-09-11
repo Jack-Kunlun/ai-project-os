@@ -88,7 +88,8 @@ test("ACL reconcile rejects drift and does not widen ordinary roles with DDL pri
   assert.match(reconcile, /GRANT EXECUTE ON FUNCTIONS TO PUBLIC/u);
   assert.match(reconcile, /hardenedMigrator/u);
   assert.match(reconcile, /privilege\.object_type !== "f"/u);
-  assert.match(reconcile, /sealedLegacy\.rows\[0\]\?\.oid === "10"/u);
+  assert.match(reconcile, /row\.extname === "plpgsql"[\s\S]*row\.owner_oid !== "10"/u);
+  assert.match(reconcile, /row\.schema_name !== "public" \|\| row\.owner !== CLUSTER_ADMIN_DATABASE_PRINCIPAL/u);
   assert.doesNotMatch(reconcile, /ALTER EXTENSION[^\n]*OWNER TO/u);
   assert.match(reconcile, /NOLOGIN[\s\S]*NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS/u);
   assert.match(reconcile, /DATABASE_PRINCIPAL_BOOTSTRAP_ROLE_RESERVED/u);
@@ -176,7 +177,9 @@ test("protected entitlement relations require the real session principal", () =>
   assert.match(migration, /pg_get_userbyid\(c\.relowner\)/u);
   assert.match(migration, /ERRCODE = '42501'/u);
   assert.match(migration, /IF TG_OP = 'DELETE'\s+THEN\s+RETURN OLD;\s+END IF;\s+RETURN NEW;/u);
-  assert.doesNotMatch(migration, /SECURITY DEFINER/u);
+  const entitlementMigration = readFileSync("prisma/migrations/20260911010000_add_platform_token_governance/migration.sql", "utf8");
+  assert.match(entitlementMigration, /CREATE OR REPLACE FUNCTION "platform_token_runtime_apply"[\s\S]*SECURITY DEFINER[\s\S]*SET search_path = pg_catalog, public/u);
+  assert.match(entitlementMigration, /CREATE OR REPLACE FUNCTION "platform_token_governance_apply"[\s\S]*SECURITY DEFINER[\s\S]*SET search_path = pg_catalog, public/u);
   for (const relation of [
     "PlatformGrantOfferPolicy",
     "AccountEntitlementActivation",
@@ -199,9 +202,6 @@ test("the PostgreSQL gate exercises production reconcile and both real principal
   assert.match(postgresGate, /SET SESSION AUTHORIZATION/u);
   assert.match(postgresGate, /AI_SIGNUP_GRANT/u);
   assert.match(postgresGate, /AccountEntitlementBackfillRun/u);
-  assert.match(postgresGate, /deletableLedger/u);
-  assert.match(postgresGate, /deletedLedger\.count, 1/u);
-  assert.match(postgresGate, /platformTokenLedgerEntry\.count\(\{ where: \{ id: deletableLedger\.id \} \}\), 0/u);
   assert.match(postgresGate, /DELETE FROM "PlatformTokenLedgerEntry"/u);
   assert.match(postgresGate, /runPrincipalBootstrap\(runtimePassword, migratorPassword, writerPassword(?:, [^)]*)?\)/u);
   assert.match(postgresGate, /await runProductionReconcile\(runtimePassword, migratorPassword, writerPassword\)/u);

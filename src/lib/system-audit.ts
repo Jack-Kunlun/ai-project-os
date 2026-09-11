@@ -275,6 +275,19 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.platformGrantOfferPolicy,
     resultMap: resultMapping({ applied: ["activated"], pending: ["created"], revoked: ["retired"] }),
   },
+  platformCreditGovernance: {
+    source: "platformCreditGovernance",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.platformCreditGovernance,
+    table: "PlatformTokenGrantAudit",
+    selectedFields: ["id", "event", "versionBefore", "versionAfter", "statusBefore", "statusAfter", "userId", "actorId", "reason", "createdAt"],
+    referenceFields: [],
+    actionField: "event",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.platformCreditGovernance,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.platformCreditGovernance),
+    resultField: "event",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.platformCreditGovernance,
+    resultMap: resultMapping({ applied: ["grant"], revoked: ["revoke"] }),
+  },
   accountEntitlementActivation: {
     source: "accountEntitlementActivation",
     label: SYSTEM_AUDIT_SOURCE_LABELS.accountEntitlementActivation,
@@ -918,6 +931,20 @@ const accountEntitlementBackfillAuditSelect = {
       activeOfferValidForDays: true,
     },
   },
+} as const;
+
+type PlatformCreditGovernanceAuditRow = Prisma.PlatformTokenGrantAuditGetPayload<{ select: typeof platformCreditGovernanceAuditSelect }>;
+const platformCreditGovernanceAuditSelect = {
+  id: true,
+  event: true,
+  versionBefore: true,
+  versionAfter: true,
+  statusBefore: true,
+  statusAfter: true,
+  userId: true,
+  actorId: true,
+  reason: true,
+  createdAt: true,
 } as const;
 
 type QueryContext = Readonly<{
@@ -1566,6 +1593,32 @@ function accountEntitlementBackfillProjection(row: AccountEntitlementBackfillAud
   });
 }
 
+function platformCreditGovernanceProjection(row: PlatformCreditGovernanceAuditRow): RawAuditEvent {
+  const action = String(row.event);
+  const result: SystemAuditResult = action === "grant"
+    ? "applied"
+    : action === "revoke"
+      ? "revoked"
+      : "unknown";
+  return rawEvent({
+    id: row.id,
+    source: "platformCreditGovernance",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind: "user",
+    subjectId: row.userId,
+    references: safeReferences({ categories: ["platformCreditGovernance"] }),
+    evidence: evidence(
+      { status: row.statusBefore, version: row.versionBefore },
+      { status: row.statusAfter, version: row.versionAfter },
+      { before: row.versionBefore, after: row.versionAfter },
+      row.reason.trim().length > 0,
+    ),
+    result,
+  });
+}
+
 async function fetchPlatform(context: QueryContext): Promise<RawAuditEvent[]> {
   const rows = await context.db.platformDefaultAiRouteAudit.findMany({
     where: sourceWhere(context, "platformDefaultAiRoute", { actorField: "actorId" }) as Prisma.PlatformDefaultAiRouteAuditWhereInput,
@@ -1756,6 +1809,16 @@ async function fetchAccountEntitlementBackfill(context: QueryContext): Promise<R
   return rows.map(accountEntitlementBackfillProjection);
 }
 
+async function fetchPlatformCreditGovernance(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.platformTokenGrantAudit.findMany({
+    where: sourceWhere(context, "platformCreditGovernance", { actorField: "actorId", subjectField: "userId" }) as Prisma.PlatformTokenGrantAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: platformCreditGovernanceAuditSelect,
+  });
+  return rows.map(platformCreditGovernanceProjection);
+}
+
 async function fetchSource(context: QueryContext, source: SystemAuditSource): Promise<RawAuditEvent[]> {
   switch (source) {
     case "platformDefaultAiRoute": return fetchPlatform(context);
@@ -1775,6 +1838,7 @@ async function fetchSource(context: QueryContext, source: SystemAuditSource): Pr
     case "webAiConfirmation": return fetchWebAiConfirmation(context);
     case "platformProviderProbe": return fetchPlatformProviderProbe(context);
     case "platformGrantOfferPolicy": return fetchPlatformGrantOfferPolicy(context);
+    case "platformCreditGovernance": return fetchPlatformCreditGovernance(context);
     case "accountEntitlementActivation": return fetchAccountEntitlementActivation(context);
     case "accountEntitlementBackfill": return fetchAccountEntitlementBackfill(context);
   }

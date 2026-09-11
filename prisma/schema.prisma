@@ -1153,6 +1153,16 @@ enum PlatformTokenLedgerEntryKind {
   adjustment
 }
 
+enum PlatformTokenGrantMutationAction {
+  grant
+  revoke
+}
+
+enum PlatformTokenGrantAuditEvent {
+  grant
+  revoke
+}
+
 enum MembershipAuditEventKind {
   grant
   extend
@@ -4343,6 +4353,10 @@ model AppUser {
   issuedPlatformTokenGrants    PlatformTokenGrant[]            @relation("PlatformTokenGrantIssuedBy")
   platformTokenReservations    PlatformTokenReservation[]
   platformTokenLedgerEntries   PlatformTokenLedgerEntry[]
+  platformTokenGrantMutationPreviewsAsActor PlatformTokenGrantMutationPreview[] @relation("PlatformTokenGrantMutationPreviewActor")
+  platformTokenGrantMutationPreviewsAsUser  PlatformTokenGrantMutationPreview[] @relation("PlatformTokenGrantMutationPreviewUser")
+  platformTokenGrantAuditEventsAsActor     PlatformTokenGrantAudit[] @relation("PlatformTokenGrantAuditActor")
+  platformTokenGrantAuditEventsAsUser      PlatformTokenGrantAudit[] @relation("PlatformTokenGrantAuditUser")
   ownedAiProviderConnections   AiProviderConnection[]          @relation("AiProviderConnectionOwner")
   createdPlatformGrantOfferPolicies PlatformGrantOfferPolicy[]  @relation("PlatformGrantOfferPolicyCreatedBy")
   updatedPlatformGrantOfferPolicies PlatformGrantOfferPolicy[]  @relation("PlatformGrantOfferPolicyUpdatedBy")
@@ -4552,16 +4566,30 @@ model PlatformTokenGrant {
   issuedAt        DateTime               @default(now())
   expiresAt       DateTime
   revokedAt       DateTime?
+  version         Int                    @default(1)
   createdAt       DateTime               @default(now())
   updatedAt       DateTime               @updatedAt
   user            AppUser                @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   issuedBy        AppUser?               @relation("PlatformTokenGrantIssuedBy", fields: [issuedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   reservations    PlatformTokenReservation[]
+  allocations      PlatformTokenReservationAllocation[]
   ledgerEntries   PlatformTokenLedgerEntry[]
+  mutationPreviews PlatformTokenGrantMutationPreview[]
+  auditEvents     PlatformTokenGrantAudit[]
+  legacyNullIssuerSnapshot PlatformTokenGrantLegacyNullIssuerSnapshot?
   accountEntitlementActivation AccountEntitlementActivation?
 
   @@index([userId, offerVersion])
   @@index([userId, expiresAt, revokedAt])
+}
+
+// Explicit migration-time compatibility evidence for pre-ENT-010 manual
+// grants that had no issuer.  This relation is append-only and cannot be used
+// to authorize a newly-created grant.
+model PlatformTokenGrantLegacyNullIssuerSnapshot {
+  grantId    String            @id @db.Uuid
+  capturedAt DateTime          @default(now())
+  grant      PlatformTokenGrant @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
 }
 
 model PlatformTokenReservation {
@@ -4601,6 +4629,7 @@ model PlatformTokenReservation {
   providerConnection    AiProviderConnection?           @relation(fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   providerCallAudit      ProviderCallAudit?
   ledgerEntries         PlatformTokenLedgerEntry[]
+  allocations           PlatformTokenReservationAllocation[]
 
   @@unique([userId, callKey])
   @@index([userId, status, expiresAt])
@@ -4608,6 +4637,94 @@ model PlatformTokenReservation {
   @@index([webAiGrantId, createdAt])
   @@index([webAiGrantReferenceId, createdAt])
   @@index([providerConnectionId, createdAt])
+}
+
+// One reservation can span several grants.  The legacy reservation.grantId
+// remains the first allocation for compatibility; allocation rows are the
+// accounting source of truth for all new lifecycle transitions.
+model PlatformTokenReservationAllocation {
+  id              String                  @id @default(uuid()) @db.Uuid
+  reservationId   String                  @db.Uuid
+  grantId         String                  @db.Uuid
+  ordinal         Int
+  reservedTokens  Int
+  settledTokens   Int                     @default(0)
+  releasedTokens  Int                     @default(0)
+  createdAt       DateTime                @default(now())
+  reservation     PlatformTokenReservation @relation(fields: [reservationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  grant           PlatformTokenGrant       @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([reservationId, ordinal])
+  @@unique([reservationId, grantId])
+  @@index([grantId, createdAt])
+  @@index([reservationId, createdAt])
+}
+
+// Short-lived, single-use administrator previews.  A grant preview has no
+// grantId yet; a revoke preview always snapshots one immutable grant version.
+model PlatformTokenGrantMutationPreview {
+  id                    String                         @id @default(uuid()) @db.Uuid
+  actorId               String                         @db.Uuid
+  userId                String                         @db.Uuid
+  grantId               String?                        @db.Uuid
+  action                PlatformTokenGrantMutationAction
+  amount                Int?
+  expiresAt             DateTime?
+  reclaimableTokens     Int?
+  expectedVersion       Int
+  expectedRemainingTokens Int?
+  requestKey            String                         @db.VarChar(180)
+  reason                String                         @db.VarChar(500)
+  impactFingerprint     String                         @db.Char(64)
+  requestFingerprint    String                         @db.Char(64)
+  issuedAt              DateTime
+  previewExpiresAt      DateTime
+  consumedAt            DateTime?
+  createdAt             DateTime                       @default(now())
+  actor                 AppUser                        @relation("PlatformTokenGrantMutationPreviewActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  user                  AppUser                        @relation("PlatformTokenGrantMutationPreviewUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  grant                 PlatformTokenGrant?             @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audits                PlatformTokenGrantAudit[]
+
+  @@unique([actorId, requestKey])
+  @@index([userId, createdAt])
+  @@index([grantId, createdAt])
+  @@index([previewExpiresAt, consumedAt])
+}
+
+// Append-only, safe audit evidence for manual platform-credit governance.
+// It deliberately contains no provider, route, raw usage, ledger metadata or
+// fingerprints in public projections.
+model PlatformTokenGrantAudit {
+  id                    String                         @id @default(uuid()) @db.Uuid
+  grantId               String                         @db.Uuid
+  userId                String                         @db.Uuid
+  actorId               String                         @db.Uuid
+  event                 PlatformTokenGrantAuditEvent
+  versionBefore         Int
+  versionAfter          Int
+  statusBefore          String                         @db.VarChar(16)
+  statusAfter           String                         @db.VarChar(16)
+  amount                Int
+  remainingBefore       Int
+  remainingAfter        Int
+  previewId             String                         @db.Uuid
+  reason                String                         @db.VarChar(500)
+  requestKey            String                         @db.VarChar(180)
+  requestFingerprint    String                         @db.Char(64)
+  impactFingerprint     String                         @db.Char(64)
+  transactionId         BigInt                         @default(dbgenerated("txid_current()")) @db.BigInt
+  transitionAt          DateTime                       @default(now())
+  createdAt             DateTime                       @default(now())
+  grant                 PlatformTokenGrant             @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  user                  AppUser                        @relation("PlatformTokenGrantAuditUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                 AppUser                        @relation("PlatformTokenGrantAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  preview               PlatformTokenGrantMutationPreview @relation(fields: [previewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([actorId, requestKey])
+  @@index([userId, createdAt])
+  @@index([grantId, createdAt])
+  @@index([previewId, createdAt])
 }
 
 model PlatformTokenLedgerEntry {

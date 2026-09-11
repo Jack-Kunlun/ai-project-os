@@ -105,12 +105,31 @@ test("workspace member list/create/update use a minimal DTO without system crede
   );
 
   let createdData: Record<string, unknown> | undefined;
+  let activationData: Record<string, unknown> | undefined;
+  let activationAuditData: Record<string, unknown> | undefined;
+  const actorSnapshot = { id: adminId, disabledAt: null, accountAccessVersion: 1 };
+  const createdUserSnapshot = { id: memberId, disabledAt: null, accountAccessVersion: 1 };
   const createTx = {
     appUser: {
-      findUnique: async () => ({ id: adminId, disabledAt: null, accountAccessVersion: 1 }),
+      findUnique: async ({ where }: { where: { id: string } }) => where.id === memberId ? createdUserSnapshot : actorSnapshot,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         createdData = data;
-        return { ...data, id: memberId };
+        return { ...data, ...createdUserSnapshot };
+      },
+    },
+    accountEntitlementActivation: {
+      findUnique: async () => null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        activationData = data;
+        return { ...data };
+      },
+    },
+    platformGrantOfferPolicy: { findFirst: async () => null },
+    platformTokenGrant: { findFirst: async () => null },
+    accountEntitlementActivationAudit: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        activationAuditData = data;
+        return data;
       },
     },
     workspaceMembership: {
@@ -135,6 +154,12 @@ test("workspace member list/create/update use a minimal DTO without system crede
     createDb,
   );
   assert.equal(createdData?.role, "user");
+  assert.equal(activationData?.userId, memberId);
+  assert.equal(activationData?.source, "localProvisioning");
+  assert.equal(activationData?.decision, "no_active_offer");
+  assert.equal(activationData?.status, "no_active_offer");
+  assert.equal(activationAuditData?.activationId, activationData?.id);
+  assert.equal(activationAuditData?.decision, "no_active_offer");
   assert.equal("passwordHash" in created.user, false);
   assert.equal("passwordSalt" in created.user, false);
   assert.equal("role" in created.user, false);

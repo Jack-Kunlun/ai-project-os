@@ -1054,6 +1054,69 @@ enum PlatformGrantOfferPolicyAuditAction {
   retired
 }
 
+enum AccountEntitlementActivationSource {
+  bootstrap
+  localProvisioning
+  githubRegistration
+  oidcRegistration
+  oidcInvitationRegistration
+  historicalBackfill
+}
+
+enum AccountEntitlementActivationActorKind {
+  user
+  system
+}
+
+enum AccountEntitlementActivationDecision {
+  granted
+  no_active_offer
+  already_issued
+}
+
+enum AccountEntitlementActivationStatus {
+  granted
+  no_active_offer
+  already_issued
+}
+
+enum AccountEntitlementActivationAuditAction {
+  created
+  linked
+}
+
+enum AccountEntitlementBackfillRunStatus {
+  previewed
+  executing
+  completed
+  stale
+  expired
+  failed
+}
+
+enum AccountEntitlementBackfillItemClassification {
+  already_issued
+  eligible_missing
+  legacy_ambiguous
+  granted
+  skipped
+}
+
+enum AccountEntitlementBackfillItemStatus {
+  pending
+  applied
+  skipped
+}
+
+enum AccountEntitlementBackfillAuditAction {
+  previewed
+  confirmed
+  executed
+  stale
+  expired
+  failed
+}
+
 enum PlatformDefaultAiRouteStatus {
   draft
   verified
@@ -4286,6 +4349,11 @@ model AppUser {
   activatedPlatformGrantOfferPolicies PlatformGrantOfferPolicy[] @relation("PlatformGrantOfferPolicyActivatedBy")
   retiredPlatformGrantOfferPolicies PlatformGrantOfferPolicy[]  @relation("PlatformGrantOfferPolicyRetiredBy")
   platformGrantOfferPolicyAudits PlatformGrantOfferPolicyAudit[] @relation("PlatformGrantOfferPolicyAuditActor")
+  accountEntitlementActivations AccountEntitlementActivation[] @relation("AccountEntitlementActivationUser")
+  actorAccountEntitlementActivations AccountEntitlementActivation[] @relation("AccountEntitlementActivationActor")
+  accountEntitlementActivationAudits AccountEntitlementActivationAudit[] @relation("AccountEntitlementActivationAuditActor")
+  accountEntitlementBackfillRuns AccountEntitlementBackfillRun[] @relation("AccountEntitlementBackfillRunActor")
+  accountEntitlementBackfillAudits AccountEntitlementBackfillAudit[] @relation("AccountEntitlementBackfillAuditActor")
   createdPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteCreatedBy")
   updatedPlatformDefaultAiRoutes PlatformDefaultAiRoute[]       @relation("PlatformDefaultAiRouteUpdatedBy")
   platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[]    @relation("PlatformDefaultAiRouteAuditActor")
@@ -4490,8 +4558,9 @@ model PlatformTokenGrant {
   issuedBy        AppUser?               @relation("PlatformTokenGrantIssuedBy", fields: [issuedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   reservations    PlatformTokenReservation[]
   ledgerEntries   PlatformTokenLedgerEntry[]
+  accountEntitlementActivation AccountEntitlementActivation?
 
-  @@unique([userId, kind])
+  @@index([userId, offerVersion])
   @@index([userId, expiresAt, revokedAt])
 }
 
@@ -5615,6 +5684,7 @@ model PlatformGrantOfferPolicy {
   activatedBy AppUser?                        @relation("PlatformGrantOfferPolicyActivatedBy", fields: [activatedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   retiredBy   AppUser?                        @relation("PlatformGrantOfferPolicyRetiredBy", fields: [retiredById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   audits      PlatformGrantOfferPolicyAudit[]
+  accountEntitlementActivations AccountEntitlementActivation[]
 
   @@index([status, updatedAt])
 }
@@ -5640,6 +5710,150 @@ model PlatformGrantOfferPolicyAudit {
   @@index([policyId, createdAt])
   @@index([actorId, createdAt])
   @@unique([policyId, transactionId])
+}
+
+// One immutable decision is recorded for every account lifecycle.  The row
+// intentionally stores only bounded, hashed evidence; identity subjects,
+// emails, credentials and invitation tokens never cross this boundary.
+model AccountEntitlementActivation {
+  id                    String                                      @id @default(uuid()) @db.Uuid
+  userId                String                                      @db.Uuid
+  lifecycleKey          String                                      @db.VarChar(64)
+  source                AccountEntitlementActivationSource
+  actorKind             AccountEntitlementActivationActorKind
+  actorId               String?                                     @db.Uuid
+  actorAccountAccessVersion Int?
+  accountAccessVersion  Int
+  evidenceKind          String?                                     @db.VarChar(32)
+  evidenceRefDigest     String?                                     @db.Char(64)
+  policyId              String?                                     @db.Uuid
+  policyRevision        Int?
+  policyFingerprint     String?                                     @db.Char(64)
+  offerVersion          String?                                     @db.VarChar(64)
+  offerAmount           Int?
+  offerValidForDays     Int?
+  eligibilityKey        String?                                     @db.VarChar(64)
+  grantId               String?                                     @unique @db.Uuid
+  decision              AccountEntitlementActivationDecision
+  status                AccountEntitlementActivationStatus
+  mutationTransactionId String                                      @db.Uuid
+  createdAt             DateTime                                    @default(now())
+  user                  AppUser                                    @relation("AccountEntitlementActivationUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                 AppUser?                                   @relation("AccountEntitlementActivationActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  policy                PlatformGrantOfferPolicy?                  @relation(fields: [policyId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  grant                 PlatformTokenGrant?                        @relation(fields: [grantId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audit                 AccountEntitlementActivationAudit?
+
+  @@unique([userId, lifecycleKey])
+  @@index([source, createdAt])
+  @@index([decision, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model AccountEntitlementActivationAudit {
+  id                    String                                      @id @default(uuid()) @db.Uuid
+  activationId          String                                      @unique @db.Uuid
+  userId                String                                      @db.Uuid
+  source                AccountEntitlementActivationSource
+  action                AccountEntitlementActivationAuditAction
+  decision              AccountEntitlementActivationDecision
+  statusAfter           AccountEntitlementActivationStatus
+  actorKind             AccountEntitlementActivationActorKind
+  actorId               String?                                     @db.Uuid
+  actorAccountAccessVersion Int?
+  offerVersion          String?                                     @db.VarChar(64)
+  offerAmount           Int?
+  offerValidForDays     Int?
+  eligibilityKey        String?                                     @db.VarChar(64)
+  policyRevision        Int?
+  mutationTransactionId String                                      @db.Uuid
+  transactionId          BigInt                                     @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt             DateTime                                    @default(now())
+  activation            AccountEntitlementActivation               @relation(fields: [activationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                 AppUser?                                   @relation("AccountEntitlementActivationAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([source, createdAt])
+  @@index([actorId, createdAt])
+}
+
+// Preview/execute records freeze the candidate set and policy snapshot. The
+// candidate user ids are server-only item data and are never returned by the
+// public preview DTO.
+model AccountEntitlementBackfillRun {
+  id                    String                                @id @default(uuid()) @db.Uuid
+  actorId               String                                @db.Uuid
+  actorAccountAccessVersion Int
+  status                AccountEntitlementBackfillRunStatus
+  snapshotAt            DateTime
+  expiresAt             DateTime
+  candidateCount        Int
+  alreadyIssuedCount    Int
+  eligibleMissingCount  Int
+  legacyAmbiguousCount  Int
+  grantedCount          Int                                     @default(0)
+  skippedCount          Int                                     @default(0)
+  activePolicyId        String?                               @db.Uuid
+  activePolicyRevision  Int?
+  activePolicyFingerprint String?                             @db.Char(64)
+  activeOfferVersion    String?                               @db.VarChar(64)
+  activeOfferAmount     Int?
+  activeOfferValidForDays Int?
+  requestKey            String?                               @db.Char(36)
+  impactFingerprint     String                                @db.Char(64)
+  reason                String?                               @db.VarChar(500)
+  confirmedAt           DateTime?
+  consumedAt            DateTime?
+  executedAt            DateTime?
+  mutationTransactionId String?                               @db.Uuid
+  transitionAt          DateTime
+  createdAt             DateTime                              @default(now())
+  actor                 AppUser                               @relation("AccountEntitlementBackfillRunActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  items                 AccountEntitlementBackfillItem[]
+  audits                AccountEntitlementBackfillAudit[]
+
+  @@index([actorId, createdAt])
+  @@index([status, expiresAt])
+  @@unique([actorId, requestKey])
+}
+
+model AccountEntitlementBackfillItem {
+  id                    String                                      @id @default(uuid()) @db.Uuid
+  runId                 String                                      @db.Uuid
+  userId                String                                      @db.Uuid
+  accountAccessVersion  Int
+  classification        AccountEntitlementBackfillItemClassification
+  status                AccountEntitlementBackfillItemStatus        @default(pending)
+  evidenceKind          String?                                     @db.VarChar(32)
+  evidenceRefDigest     String?                                     @db.Char(64)
+  existingGrantId       String?                                     @db.Uuid
+  resultGrantId         String?                                     @db.Uuid
+  activationId          String?                                     @db.Uuid
+  skipCode              String?                                     @db.VarChar(64)
+  createdAt             DateTime                                    @default(now())
+  run                   AccountEntitlementBackfillRun              @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([runId, userId])
+  @@index([runId, classification, status])
+  @@index([userId, createdAt])
+}
+
+model AccountEntitlementBackfillAudit {
+  id                    String                                  @id @default(uuid()) @db.Uuid
+  runId                 String                                  @db.Uuid
+  action                AccountEntitlementBackfillAuditAction
+  statusBefore          AccountEntitlementBackfillRunStatus?
+  statusAfter           AccountEntitlementBackfillRunStatus
+  actorId               String                                  @db.Uuid
+  reasonRecorded        Boolean                                 @default(false)
+  transactionId         BigInt                                  @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt             DateTime                                @default(now())
+  run                   AccountEntitlementBackfillRun            @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  actor                 AppUser                                 @relation("AccountEntitlementBackfillAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([runId, action, transactionId])
+  @@index([actorId, createdAt])
+  @@index([runId, createdAt])
 }
 
 model PlatformDefaultAiRoute {

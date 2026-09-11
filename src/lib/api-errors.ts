@@ -57,6 +57,7 @@ import { ProjectMcpActionDispatchError } from "@/lib/project-mcp-action-dispatch
 import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-runtime-service";
 import { PlatformProviderProbeServiceError } from "@/lib/platform-provider-probe-service";
 import { PlatformGrantOfferPolicyError } from "@/lib/platform-grant-offer-policy-service";
+import { AccountEntitlementBackfillError } from "@/lib/account-entitlement-backfill-service";
 
 export type ApiErrorBody = {
   error: {
@@ -776,6 +777,22 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PLATFORM_GRANT_OFFER_POLICY_BOOTSTRAP_CONFLICT: [409, "平台赠送策略已存在，不能重复初始化"],
     };
     const [status, message] = mapping[error.code] ?? [500, "平台赠送策略处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof AccountEntitlementBackfillError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      ACCOUNT_ENTITLEMENT_BACKFILL_INVALID_INPUT: [400, "账号权益回填请求无效"],
+      ACCOUNT_ENTITLEMENT_BACKFILL_ADMIN_REQUIRED: [403, "只有系统管理员可以执行账号权益回填"],
+      ACCOUNT_ENTITLEMENT_BACKFILL_NOT_FOUND: [404, "账号权益回填预览不存在"],
+      ACCOUNT_ENTITLEMENT_BACKFILL_EXPIRED: [409, "账号权益回填预览已过期，请重新预览"],
+      ACCOUNT_ENTITLEMENT_BACKFILL_STALE: [409, "账号权益回填预览已变化，请重新预览"],
+      ACCOUNT_ENTITLEMENT_BACKFILL_IDEMPOTENCY_CONFLICT: [409, "该请求标识已用于另一项账号权益回填"],
+      ACCOUNT_ENTITLEMENT_BACKFILL_EPOCH_STALE: [409, "管理员会话版本已变化，请刷新后重试"],
+      ACCOUNT_ENTITLEMENT_BACKFILL_CONFLICT: [409, "账号权益回填正在变化，请刷新后重试"],
+      ACCOUNT_ENTITLEMENT_BACKFILL_SERVICE_CONTEXT_REQUIRED: [500, "账号权益回填服务暂不可用"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "账号权益回填处理失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

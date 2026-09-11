@@ -5,7 +5,7 @@ import test from "node:test";
 import { getDb } from "../src/lib/db";
 import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { invokeChatCompletion, ProviderTransportError } from "../src/lib/ai-providers";
-import { issueVerifiedSignupGrant, lockMembershipUser, reservePlatformTokens } from "../src/lib/ai-entitlements";
+import { lockMembershipUser, reservePlatformTokens } from "../src/lib/ai-entitlements";
 import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
 import { deleteArchivedProject, updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { claimProjectJob } from "../src/lib/project-workflow";
@@ -14,6 +14,7 @@ import { WebAiAccessError, type WebAiActor } from "../src/lib/web-ai-access";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 import { createConfirmedWebAiJobForPostgresGate } from "./web-ai-confirmation-fixture";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
+import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
 
 const shouldRun = process.env.WEB_AI_GOVERNANCE_POSTGRES_GATE === "1";
 
@@ -50,8 +51,7 @@ async function createDispatchFixture() {
     await grantWorkspaceMembership(tx, { workspaceId, userId, role: "owner", actorId: userId, reason: "web_ai_governance_fixture_workspace" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId, role: "owner", actorId: userId, reason: "web_ai_governance_fixture_project" });
   });
-  const platformGrant = await issueVerifiedSignupGrant(userId, { eligibilitySource: "verifiedGithub", issuedById: platformAdmin.id, now }, db);
-  if (platformGrant === null) throw new Error("WEB_AI_GOVERNANCE_PLATFORM_GRANT_UNAVAILABLE");
+  const platformGrant = await activateCanonicalSignupGrant(db, { userId, actorId: platformAdmin.id, now });
   await db.externalCredential.create({
     data: {
       id: credentialId,

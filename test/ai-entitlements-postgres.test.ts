@@ -9,7 +9,6 @@ import { createProviderConnection } from "../src/lib/ai-providers";
 import {
   AiEntitlementError,
   holdPlatformTokenReservation,
-  issueVerifiedSignupGrant,
   recoverExpiredPlatformTokenReservations,
   releasePlatformTokenReservation,
   reservePlatformTokens,
@@ -17,6 +16,7 @@ import {
 } from "../src/lib/ai-entitlements";
 import { getDb } from "../src/lib/db";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
+import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
 
 const shouldRun = process.env.AI_ENTITLEMENTS_POSTGRES_GATE === "1";
 
@@ -51,13 +51,11 @@ test("AI entitlements enforce signup-compatible scope and project cleanup retent
     // Exercise the actual serializable signup grant and billing ledger path,
     // including the retry/idempotency boundary used by verified auth flows.
     const entitlementNow = new Date("2026-09-02T00:00:00.000Z");
-    const signupGrant = await issueVerifiedSignupGrant(ownerId, { eligibilitySource: "verifiedGithub", now: entitlementNow }, db);
-    const signupReplay = await issueVerifiedSignupGrant(ownerId, { eligibilitySource: "verifiedGithub", now: new Date(entitlementNow.getTime() + 1_000) }, db);
-    assert.ok(signupGrant);
-    assert.ok(signupReplay);
+    const signupGrant = await activateCanonicalSignupGrant(db, { userId: ownerId, actorId: adminId, now: entitlementNow });
+    const signupReplay = await activateCanonicalSignupGrant(db, { userId: ownerId, actorId: adminId, now: new Date(entitlementNow.getTime() + 1_000) });
     assert.equal(signupReplay.id, signupGrant.id);
     assert.equal(signupReplay.amount, 500_000);
-    const signupLedger = await db.platformTokenLedgerEntry.findUnique({ where: { idempotencyKey: `grant:signup:${ownerId}` }, select: { id: true, amount: true } });
+    const signupLedger = await db.platformTokenLedgerEntry.findUnique({ where: { idempotencyKey: `grant:signup:${ownerId}:signup-500k-v1` }, select: { id: true, amount: true } });
     assert.ok(signupLedger);
     assert.equal(signupLedger.amount, 500_000);
     grantIds.push(signupGrant.id);
@@ -117,11 +115,14 @@ test("AI entitlements enforce signup-compatible scope and project cleanup retent
     if (auditIds.length > 0) await db.providerCallAudit.deleteMany({ where: { id: { in: auditIds } } });
     if (jobIds.length > 0) await db.backgroundJob.deleteMany({ where: { id: { in: jobIds } } });
     await db.project.deleteMany({ where: { id: projectId } });
-    // The owner is a fresh gate fixture, so deleting by its user id also
-    // removes signup/settlement/release/hold entries created above.
-    await db.platformTokenLedgerEntry.deleteMany({ where: { userId: ownerId } });
-    if (reservationIds.length > 0) await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
-    if (grantIds.length > 0) await db.platformTokenGrant.deleteMany({ where: { id: { in: grantIds } } });
+    // Keep the canonical signup grant, activation, and grant ledger intact.
+    // Only remove ledger entries attached to reservations created by this test;
+    // the isolated gate runner owns final database teardown.
+    if (reservationIds.length > 0) {
+      await db.platformTokenLedgerEntry.deleteMany({ where: { reservationId: { in: reservationIds } } });
+      await db.platformTokenReservation.deleteMany({ where: { id: { in: reservationIds } } });
+    }
+    if (grantIds.length > 0) await db.platformTokenGrant.deleteMany({ where: { id: { in: grantIds }, kind: "manual" } });
     if (createdProviderIds.length > 0) await db.aiProviderConnection.deleteMany({ where: { id: { in: createdProviderIds } } });
     if (createdCredentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: createdCredentialIds } } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });

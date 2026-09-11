@@ -80,9 +80,9 @@ test("platform provider form keeps GLM embedding-only defaults optional", async 
   assert.doesNotMatch(settings, /label="图片识别模型（可选）"><input[^>]*required/u);
   assert.doesNotMatch(settings, /label="生成模型（可选）"><input[^>]*required/u);
   assert.match(settings, /defaultGenerationModelId \?\? "未配置"/u);
-  assert.match(settings, /check\.generation !== null/u);
-  assert.match(settings, /check\.embeddingDimensions !== null/u);
-  assert.match(settings, /check\.vision !== null/u);
+  assert.match(settings, /check\.attempt\.capabilities\.generation === "passed"/u);
+  assert.match(settings, /check\.attempt\.embeddingDimensions === null \? "" :/u);
+  assert.match(settings, /check\.attempt\.capabilities\.vision === "passed"/u);
   assert.match(settings, /生成连接通过/u);
   assert.match(settings, /向量连接通过/u);
   assert.match(settings, /图片识别连接通过/u);

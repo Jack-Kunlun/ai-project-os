@@ -6,7 +6,7 @@ import test from "node:test";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { initializeAdmin } from "../src/lib/auth";
 import { getDb } from "../src/lib/db";
-import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
+import { activateAccountEntitlements } from "../src/lib/account-entitlement-activation-service";
 import {
   changePlatformGrantOfferPolicyLifecycle,
   createPlatformGrantOfferPolicy,
@@ -14,6 +14,7 @@ import {
   PLATFORM_GRANT_OFFER_ELIGIBILITY_KEY,
   type PlatformGrantOfferPolicyActor,
 } from "../src/lib/platform-grant-offer-policy-service";
+import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
 
 const shouldRun = process.env.PLATFORM_GRANT_OFFER_POLICY_POSTGRES_GATE === "1";
 
@@ -104,8 +105,9 @@ test("versioned signup offer policy bootstraps, rotates atomically, and fails cl
   const bootstrap = await initializeAdmin({ username: `policy_admin_${suffix}`, password: "PolicyGatePassword_2026" }, db);
   const actor: PlatformGrantOfferPolicyActor = bootstrap.user;
 
-  assert.equal(await db.platformTokenGrant.count({ where: { userId: actor.id } }), 0);
-  assert.equal(await db.platformTokenLedgerEntry.count({ where: { userId: actor.id } }), 0);
+  assert.equal(await db.platformTokenGrant.count({ where: { userId: actor.id } }), 1);
+  assert.equal(await db.platformTokenLedgerEntry.count({ where: { userId: actor.id } }), 1);
+  assert.equal(await db.accountEntitlementActivation.count({ where: { userId: actor.id } }), 1);
 
   await runLegacyPreflightCase(db, {
     offerVersion: "legacy-draft-v1",
@@ -445,16 +447,15 @@ test("versioned signup offer policy bootstraps, rotates atomically, and fails cl
   assert.equal(policies.find((policy) => policy.offerVersion === "signup-600k-v2")?.audits.some((audit) => audit.action === "activated"), true);
 
   const eligibleUser = await db.appUser.create({ data: { id: randomUUID(), username: `policy_user_${suffix}`, role: "user" } });
-  const grant = await issueVerifiedSignupGrant(eligibleUser.id, { eligibilitySource: "verifiedGithub", now: new Date("2026-09-10T00:00:00.000Z") }, db);
-  assert.ok(grant);
+  const grant = await activateCanonicalSignupGrant(db, { userId: eligibleUser.id, actorId: actor.id, now: new Date("2026-09-10T00:00:00.000Z") });
   assert.equal(grant.amount, 600_000);
   assert.equal(grant.offerVersion, "signup-600k-v2");
   assert.equal(grant.offerAmount, 600_000);
   assert.equal(grant.offerValidForDays, 45);
   assert.equal(grant.eligibilityKey, PLATFORM_GRANT_OFFER_ELIGIBILITY_KEY);
-  assert.equal(grant.eligibilitySource, "verifiedGithub");
+  assert.equal(grant.eligibilitySource, "githubRegistration");
   assert.equal(grant.expiresAt.getTime(), new Date("2026-09-10T00:00:00.000Z").getTime() + 45 * 86_400_000);
-  assert.equal(await db.platformTokenLedgerEntry.count({ where: { idempotencyKey: `grant:signup:${eligibleUser.id}` } }), 1);
+  assert.equal(await db.platformTokenLedgerEntry.count({ where: { idempotencyKey: `grant:signup:${eligibleUser.id}:signup-600k-v2` } }), 1);
 
   await assert.rejects(
     () => changePlatformGrantOfferPolicyLifecycle(active.id, { action: "activate", expectedUpdatedAt: active.updatedAt.toISOString(), reason: "invalid" }, actor, db),
@@ -480,6 +481,15 @@ test("versioned signup offer policy bootstraps, rotates atomically, and fails cl
   }, actor, db);
   assert.equal(retired.status, "retired");
   const noActiveUser = await db.appUser.create({ data: { id: randomUUID(), username: `policy_no_active_${suffix}`, role: "user" } });
-  assert.equal(await issueVerifiedSignupGrant(noActiveUser.id, { eligibilitySource: "verifiedOidc" }, db), null);
+  const noActiveActivation = await activateAccountEntitlements({
+    userId: noActiveUser.id,
+    source: "oidcRegistration",
+    actorId: actor.id,
+    actorAccountAccessVersion: actor.accountAccessVersion,
+    accountAccessVersion: noActiveUser.accountAccessVersion,
+    evidenceKind: "oidc",
+    evidenceRef: `no-active:${noActiveUser.id}`,
+  }, db);
+  assert.equal(noActiveActivation.decision, "no_active_offer");
   assert.equal(await db.platformTokenGrant.count({ where: { userId: noActiveUser.id, kind: "signup" } }), 0);
 });

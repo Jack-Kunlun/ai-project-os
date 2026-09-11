@@ -11,7 +11,9 @@ export type CandidateIdentity = {
     uploads: string;
   };
   images: {
+    principalBootstrap: string;
     migrate: string;
+    reconcile: string;
     app: string;
     worker: string;
   };
@@ -33,6 +35,7 @@ export type CandidateReadiness = {
 const TOKEN_PATTERN = /^[a-z0-9]{12,24}$/u;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 const RUNNING_SERVICES = ["postgres", "app", "worker"] as const;
+const ONE_SHOT_SERVICES = ["principal-bootstrap", "migrate", "reconcile"] as const;
 
 export function createCandidateIdentity(token: string, version: string): CandidateIdentity {
   if (!TOKEN_PATTERN.test(token)) throw new Error("LOCAL_RELEASE_TOKEN_INVALID");
@@ -49,7 +52,9 @@ export function createCandidateIdentity(token: string, version: string): Candida
       uploads: `${projectName}-uploads`,
     },
     images: {
+      principalBootstrap: `${projectName}-principal-bootstrap:${version}`,
       migrate: `${projectName}-migrate:${version}`,
+      reconcile: `${projectName}-reconcile:${version}`,
       app: `${projectName}-app:${version}`,
       worker: `${projectName}-worker:${version}`,
     },
@@ -70,7 +75,9 @@ export function assertSafeCandidateIdentity(identity: CandidateIdentity): void {
     `${expected}-pgdata`,
     `${expected}-secrets`,
     `${expected}-uploads`,
+    `${expected}-principal-bootstrap:${identity.version}`,
     `${expected}-migrate:${identity.version}`,
+    `${expected}-reconcile:${identity.version}`,
     `${expected}-app:${identity.version}`,
     `${expected}-worker:${identity.version}`,
   ];
@@ -78,7 +85,9 @@ export function assertSafeCandidateIdentity(identity: CandidateIdentity): void {
     identity.volumes.postgres,
     identity.volumes.secrets,
     identity.volumes.uploads,
+    identity.images.principalBootstrap,
     identity.images.migrate,
+    identity.images.reconcile,
     identity.images.app,
     identity.images.worker,
   ];
@@ -135,11 +144,13 @@ export function evaluateCandidateReadiness(entries: ComposeServiceState[]): Cand
     byService.set(entry.service, entry);
   }
   const summary: Record<string, ComposeServiceState | null> = {};
-  for (const service of [...RUNNING_SERVICES, "migrate"]) summary[service] = byService.get(service) ?? null;
+  for (const service of [...RUNNING_SERVICES, ...ONE_SHOT_SERVICES]) summary[service] = byService.get(service) ?? null;
 
-  const migrate = byService.get("migrate");
-  if (migrate?.state === "exited" && migrate.exitCode !== 0) {
-    return { ready: false, fatal: `migrate exited ${migrate.exitCode ?? "unknown"}`, summary };
+  for (const service of ONE_SHOT_SERVICES) {
+    const entry = byService.get(service);
+    if (entry?.state === "exited" && entry.exitCode !== 0) {
+      return { ready: false, fatal: `${service} exited ${entry.exitCode ?? "unknown"}`, summary };
+    }
   }
   for (const service of RUNNING_SERVICES) {
     const entry = byService.get(service);
@@ -151,8 +162,11 @@ export function evaluateCandidateReadiness(entries: ComposeServiceState[]): Cand
     const entry = byService.get(service);
     return entry?.state === "running" && entry.health === "healthy";
   });
-  const migrationReady = migrate?.state === "exited" && migrate.exitCode === 0;
-  return { ready: runningReady && migrationReady, fatal: null, summary };
+  const oneShotReady = ONE_SHOT_SERVICES.every((service) => {
+    const entry = byService.get(service);
+    return entry?.state === "exited" && entry.exitCode === 0;
+  });
+  return { ready: runningReady && oneShotReady, fatal: null, summary };
 }
 
 export function readCoherentVersion(

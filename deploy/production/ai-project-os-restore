@@ -176,20 +176,25 @@ restore_volume_archive() {
 }
 
 wait_for_standby() {
-  local attempt postgres_id migrate_id app_id worker_id
-  local postgres_state migrate_state app_state health_body
+  local attempt postgres_id bootstrap_id migrate_id reconcile_id app_id worker_id
+  local postgres_state bootstrap_state migrate_state reconcile_state app_state worker_state health_body
 
   for attempt in $(seq 1 60); do
     postgres_id=$(compose ps -q postgres)
+    bootstrap_id=$(compose ps -aq principal-bootstrap)
     migrate_id=$(compose ps -aq migrate)
+    reconcile_id=$(compose ps -aq reconcile)
     app_id=$(compose ps -q app)
     worker_id=$(compose ps -q worker)
-    if [[ -n "$postgres_id" && -n "$migrate_id" && -n "$app_id" && -z "$worker_id" ]]; then
+    if [[ -n "$postgres_id" && -n "$bootstrap_id" && -n "$migrate_id" && -n "$reconcile_id" && -n "$app_id" && -n "$worker_id" ]]; then
       postgres_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$postgres_id")
+      bootstrap_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$bootstrap_id")
       migrate_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$migrate_id")
+      reconcile_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$reconcile_id")
       app_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$app_id")
-      if [[ "$postgres_state" == healthy && "$migrate_state" == exited:0 &&
-        "$app_state" == healthy ]]; then
+      worker_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id")
+      if [[ "$postgres_state" == healthy && "$bootstrap_state" == exited:0 && "$migrate_state" == exited:0 &&
+        "$reconcile_state" == exited:0 && "$app_state" == healthy && "$worker_state" == healthy ]]; then
         health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)
         grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body"
         grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${RELEASE_TAG#v}"'"' <<<"$health_body"
@@ -305,7 +310,12 @@ install -o root -g root -m 0644 "$HOST_CONFIG_ROOT/etc/ai-project-os/production-
 install -o root -g root -m 0644 "$HOST_CONFIG_ROOT/etc/nginx/ssl/ai-project-os.com/fullchain.crt" /etc/nginx/ssl/ai-project-os.com/fullchain.crt
 install -o root -g root -m 0600 "$HOST_CONFIG_ROOT/etc/nginx/ssl/ai-project-os.com/privkey.key" /etc/nginx/ssl/ai-project-os.com/privkey.key
 
-grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
+grep -qx 'POSTGRES_USER=ai_project_os_cluster_admin' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
+grep -Eq '^POSTGRES_CLUSTER_ADMIN_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
+grep -Eq '^POSTGRES_MIGRATOR_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
+grep -Eq '^POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
+grep -Eq '^POSTGRES_RUNTIME_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
+grep -Eq '^POSTGRES_ENTITLEMENT_WRITER_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
 grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$ENV_FILE" || fail 'RESTORE_PRODUCTION_ENV_INVALID' 71
 openssl x509 -in /etc/nginx/ssl/ai-project-os.com/fullchain.crt -checkend 86400 -noout >/dev/null ||
   fail 'RESTORE_TLS_CERTIFICATE_INVALID' 71
@@ -329,7 +339,7 @@ install -o root -g root -m 0600 "$HOST_CONFIG_ROOT/bootstrap/github-actions.pub"
 verify_release
 compose config --quiet
 
-POSTGRES_USER=$(read_env_value POSTGRES_USER ai_project_os)
+POSTGRES_USER=$(read_env_value POSTGRES_USER ai_project_os_cluster_admin)
 POSTGRES_DB=$(read_env_value POSTGRES_DB ai_project_os)
 PGDATA_VOLUME=$(read_env_value AI_PROJECT_OS_PGDATA_VOLUME ai-project-os-pgdata)
 SECRETS_VOLUME=$(read_env_value AI_PROJECT_OS_SECRETS_VOLUME ai-project-os-secrets)
@@ -356,8 +366,11 @@ secrets_mountpoint=$(docker volume inspect --format '{{.Mountpoint}}' "$SECRETS_
 [[ "$(stat -c %a "$secrets_mountpoint/master.key")" == 600 ]] ||
   fail 'RESTORE_MASTER_KEY_MODE_INVALID' 73
 
-compose build migrate app worker
-compose up -d --no-build --force-recreate migrate app
+compose build principal-bootstrap migrate reconcile app worker
+compose up -d --no-build --force-recreate principal-bootstrap
+compose up -d --no-build --force-recreate migrate
+compose up -d --no-build --force-recreate reconcile
+compose up -d --no-build --force-recreate app worker
 standby_health=$(wait_for_standby)
 
 install -d -o root -g root -m 0700 "$(dirname -- "$RESULT_FILE")"

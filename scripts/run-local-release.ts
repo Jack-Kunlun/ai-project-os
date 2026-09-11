@@ -143,7 +143,7 @@ async function verifyMigrations(composeArgs: string[], expected: number): Promis
     "postgres",
     "psql",
     "-U",
-    "ai_project_os_candidate",
+    "ai_project_os_migrator",
     "-d",
     "ai_project_os_candidate",
     "-At",
@@ -158,7 +158,7 @@ async function verifyMigrations(composeArgs: string[], expected: number): Promis
 }
 
 async function verifyImageLabels(composeArgs: string[], version: string): Promise<void> {
-  for (const service of ["migrate", "app", "worker"]) {
+  for (const service of ["principal-bootstrap", "migrate", "reconcile", "app", "worker"]) {
     const container = await runProcess("docker", [...composeArgs, "ps", "--all", "--quiet", service]);
     const containerId = container.stdout.trim();
     if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
@@ -243,14 +243,24 @@ async function main(): Promise<void> {
   const token = `${Date.now().toString(36)}${randomBytes(4).toString("hex")}`.slice(-20);
   const identity = createCandidateIdentity(token, version);
   const [postgresPort, appPort] = await reserveLoopbackPorts();
-  const password = `candidate_${randomBytes(24).toString("hex")}`;
+  const clusterAdminPassword = `admin_${randomBytes(24).toString("hex")}`;
+  const migratorPassword = `migrator_${randomBytes(24).toString("hex")}`;
+  const runtimePassword = `runtime_${randomBytes(24).toString("hex")}`;
+  const entitlementWriterPassword = `writer_${randomBytes(24).toString("hex")}`;
+  const inventoryReaderPassword = `inventory_${randomBytes(24).toString("hex")}`;
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-local-release-"));
   const envFile = join(temporaryDirectory, "candidate.env");
   const overrideFile = join(temporaryDirectory, "compose.candidate.yaml");
   const envSource = [
-    "POSTGRES_USER=ai_project_os_candidate",
-    `POSTGRES_PASSWORD=${password}`,
+    "POSTGRES_USER=ai_project_os_cluster_admin",
+    `POSTGRES_CLUSTER_ADMIN_PASSWORD=${clusterAdminPassword}`,
+    `POSTGRES_MIGRATOR_PASSWORD=${migratorPassword}`,
     "POSTGRES_DB=ai_project_os_candidate",
+    "POSTGRES_RUNTIME_USER=ai_project_os_runtime",
+    `POSTGRES_RUNTIME_PASSWORD=${runtimePassword}`,
+    "POSTGRES_ENTITLEMENT_WRITER_USER=ai_project_os_entitlement_writer",
+    `POSTGRES_ENTITLEMENT_WRITER_PASSWORD=${entitlementWriterPassword}`,
+    `POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD=${inventoryReaderPassword}`,
     `POSTGRES_PORT=${postgresPort}`,
     `APP_PORT=${appPort}`,
     `AI_PROJECT_OS_PGDATA_VOLUME=${identity.volumes.postgres}`,
@@ -264,8 +274,12 @@ async function main(): Promise<void> {
   ].join("\n");
   const overrideSource = [
     "services:",
+    "  principal-bootstrap:",
+    '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-principal-bootstrap:${LOCAL_RELEASE_VERSION}"',
     "  migrate:",
     '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-migrate:${LOCAL_RELEASE_VERSION}"',
+    "  reconcile:",
+    '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-reconcile:${LOCAL_RELEASE_VERSION}"',
     "  app:",
     '    image: "${LOCAL_RELEASE_IMAGE_PREFIX}-app:${LOCAL_RELEASE_VERSION}"',
     "  worker:",
@@ -301,7 +315,7 @@ async function main(): Promise<void> {
     console.log(`[local-release] validating isolated candidate ${identity.projectName}`);
     await runProcess("docker", [...composeArgs, "config", "--quiet"]);
     candidateTouched = true;
-    console.log("[local-release] building app, worker, and migration images");
+    console.log("[local-release] building app, worker, principal bootstrap, migration, and reconcile images");
     await runProcess("docker", [...composeArgs, "build"], { inherit: true });
     console.log("[local-release] starting isolated candidate");
     await runProcess("docker", [...composeArgs, "up", "--detach"], { inherit: true });

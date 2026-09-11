@@ -6,13 +6,13 @@
 
 ## 配置与凭据边界
 
-`.env.example` 仅保留非敏感的用户/数据库名；`POSTGRES_PASSWORD` 与 `DATABASE_URL` 为空，复制后必须由开发者在被 Git 忽略的 `.env` 中自行填写。Compose 使用 `${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}`，缺少或为空时明确失败。
+`.env.example` 仅保留非敏感的用户/数据库名；cluster-admin、migrator、runtime、writer 和 inventory-reader 密码为空，复制后必须由开发者在被 Git 忽略的 `.env` 中自行填写。Compose 对 `POSTGRES_CLUSTER_ADMIN_PASSWORD`、`POSTGRES_MIGRATOR_PASSWORD`、runtime/writer 和 inventory-reader 密码逐项 fail closed，缺少或为空时明确失败。
 
 ```text
 docker compose config --quiet
 # exit 0（只记录状态，不输出展开后的配置）
 
-POSTGRES_PASSWORD= docker compose config --quiet
+POSTGRES_CLUSTER_ADMIN_PASSWORD= docker compose config --quiet
 # non-zero（缺少必填密码；错误输出未写入验收记录）
 
 git check-ignore -v .env
@@ -30,7 +30,7 @@ docker compose ps
 pnpm exec prisma migrate status --config prisma.config.ts
 # 1 migration found; Database schema is up to date!
 
-docker compose exec -T postgres psql -U ai_project_os -d ai_project_os -X -A -t -c 'SELECT (SELECT count(*) FROM "ProjectItem") AS items, (SELECT count(*) FROM "ProjectItem" WHERE "sourceId" IS NULL) AS items_without_source, (SELECT count(*) FROM "ProjectSource") AS sources, (SELECT count(*) FROM "ProjectScan") AS scans;'
+docker compose exec -T postgres psql -U ai_project_os_cluster_admin -d ai_project_os -X -A -t -c 'SELECT (SELECT count(*) FROM "ProjectItem") AS items, (SELECT count(*) FROM "ProjectItem" WHERE "sourceId" IS NULL) AS items_without_source, (SELECT count(*) FROM "ProjectSource") AS sources, (SELECT count(*) FROM "ProjectScan") AS scans;'
 # 0|0|0|0
 ```
 
@@ -52,7 +52,7 @@ pnpm exec prisma migrate deploy --config prisma.config.ts
 ## 数据库 catalog 断言
 
 ```text
-docker compose exec -T postgres psql -U ai_project_os -d ai_project_os -X -f - < test/catalog-assertions.sql
+docker compose exec -T postgres psql -U ai_project_os_cluster_admin -d ai_project_os -X -f - < test/catalog-assertions.sql
 # root Cascade foreign keys: PASS (4)
 # deferred NoAction foreign keys: PASS (3)
 # ProjectItem.sourceId NOT NULL: PASS
@@ -64,7 +64,7 @@ docker compose exec -T postgres psql -U ai_project_os -d ai_project_os -X -f - <
 ## 事务完整性 smoke
 
 ```text
-docker compose exec -T postgres psql -U ai_project_os -d ai_project_os -X -f - < test/integrity-smoke.sql
+docker compose exec -T postgres psql -U ai_project_os_cluster_admin -d ai_project_os -X -f - < test/integrity-smoke.sql
 # same-project relationships: PASS
 # cross-project source/supersession/scan: PASS (23503)
 # referenced source/prior item/scan delete: PASS (23503)

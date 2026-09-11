@@ -28,13 +28,14 @@ Docker Desktop 与本地 Compose：
 
 ```bash
 cp .env.example .env
-# 在未提交的 .env 中设置 POSTGRES_PASSWORD 等基础设施值
+# 在未提交的 .env 中设置 cluster-admin、migrator、runtime、writer
+# 和 inventory-reader 密码等基础设施值
 docker compose config --quiet
 docker compose up -d --build
 docker compose ps --all
 ```
 
-预期状态：`postgres` 为 `healthy`，`migrate` 为 `Exited (0)`，`app` 与 `worker` 为 `healthy`。检查应用和 Worker 是两个独立信号：
+预期状态：`postgres` 为 `healthy`，`principal-bootstrap`、`migrate`、`reconcile` 为 `Exited (0)`，`app` 与 `worker` 为 `healthy`。检查应用和 Worker 是两个独立信号：
 
 ```bash
 curl --fail http://127.0.0.1:3000/api/health
@@ -59,7 +60,24 @@ docker compose ps --all
 curl --fail http://127.0.0.1:3000/api/health
 ```
 
-Compose 会先执行未应用迁移，再启动应用和 Worker。禁止 `docker compose down -v`、删除正式卷或用 `prisma migrate dev` 代替部署迁移。若迁移失败，保留现场、收集不含秘密的迁移/容器日志并停止，不手工降级数据库。
+Compose 会按 `principal-bootstrap → migrate → reconcile → app/worker` 执行。cluster-admin 只用于 initdb/维护窗口和两个 one-shot 阶段，migrate 只使用非超级用户 migrator；inventory reader 是独立的本机/SSH tunnel 只读维护入口。bootstrap 阶段检查并修复数据库/schema/对象 owner，未完成时在迁移前 fail closed。禁止 `docker compose down -v`、删除正式卷或用 `prisma migrate dev` 代替部署迁移。若 bootstrap 或迁移失败，保留现场、收集不含秘密的迁移/容器日志并停止，不手工降级数据库。
+
+#### 现有卷的账号拓扑升级
+
+这不是在线或滚动升级。先在一致维护窗口完成备份并停止旧 app/worker。设置 `POSTGRES_USER=ai_project_os_cluster_admin`、`POSTGRES_CLUSTER_ADMIN_PASSWORD`、`POSTGRES_MIGRATOR_PASSWORD`，并将旧 owner（例如 `ai_project_os`）的凭据只写入临时 `DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL`。启动 Compose 后确认 `principal-bootstrap`、`migrate`、`reconcile` 全部成功；bootstrap 会先创建 cluster-admin，再在当前数据库转移旧 owner 的受支持对象、清理成员关系并封存旧角色。普通旧 owner 变为 `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`；官方 initdb OID10 不能降级为 `NOSUPERUSER`，只保留不可避免的 `SUPERUSER`，同时设置 `NOLOGIN`、清除密码、清除成员关系并终止其他会话。随后删除并轮换 legacy URL；它不能出现在 app/worker/migrate 环境、提交文件或日志中。封存角色仍保留以便依赖审查，只有检查外部依赖和成员关系后才可在单独维护窗口受控地 `DROP ROLE`。bootstrap 缺失、owner 不支持或凭据错误时必须在迁移前 fail closed。升级会保留业务数据并转移当前数据库的受支持关系、序列、函数、过程和类型；不要删除正式卷。
+
+连接 URL 中的密码必须按 URL 规则编码；生产部署的五个 PostgreSQL 密码使用 64 位十六进制值。若 bootstrap URL 中含旧 owner 密码，升级完成后应立即轮换旧 owner 凭据。
+
+#### Entitlement 只读盘点
+
+`db:account-entitlement-inventory` 使用独立的 `ai_project_os_entitlement_inventory_reader`，只允许执行 migrator-owned 的聚合函数，不授予四张基础表的 `SELECT`。生产执行必须通过本机回环或 SSH tunnel，把 `ACCOUNT_ENTITLEMENT_INVENTORY_DATABASE_URL` 指向 `127.0.0.1`；不要把 reader URL、cluster-admin 或 migrator 凭据放入 app/worker：
+
+```bash
+ACCOUNT_ENTITLEMENT_INVENTORY_DATABASE_URL='postgresql://ai_project_os_entitlement_inventory_reader:<password>@127.0.0.1:5433/ai_project_os' \
+  pnpm db:account-entitlement-inventory
+```
+
+输出仅包含 eligible/issued/ambiguous/missing 计数，不返回 userId、余额、原因或 digest。若盘点命令报告 raw-table ACL、函数权限或 read-only preflight 失败，应停止并重新运行 `principal-bootstrap → migrate → reconcile`，不要手工授予表权限。
 
 ### 2.4 局域网、公网与 CI
 
@@ -182,7 +200,7 @@ http://127.0.0.1:3000/api/auth/oidc/callback
 示例（数据库连接参数应从受保护配置读取，不要把值写入命令历史）：
 
 ```bash
-docker compose exec -T postgres pg_dump -U ai_project_os -d ai_project_os -Fc > ai-project-os.dump
+docker compose exec -T postgres pg_dump -U ai_project_os_cluster_admin -d ai_project_os -Fc > ai-project-os.dump
 pg_restore -l ai-project-os.dump
 ```
 

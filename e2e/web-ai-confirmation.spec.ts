@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { issueVerifiedSignupGrant } from "@/lib/ai-entitlements";
+import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
 import { getDb } from "@/lib/db";
 
 const BROWSER_ADMIN_PASSWORD = "BrowserGate2026Password!";
@@ -50,7 +50,7 @@ async function seedPlatformEmbeddingRoute(username: string): Promise<{
   grantId: string | null;
 }> {
   const db = getDb();
-  const admin = await db.appUser.findUniqueOrThrow({ where: { username }, select: { id: true } });
+  const admin = await db.appUser.findUniqueOrThrow({ where: { username }, select: { id: true, accountAccessVersion: true } });
   const providerId = randomUUID();
   const credentialId = randomUUID();
   const now = new Date();
@@ -108,10 +108,19 @@ async function seedPlatformEmbeddingRoute(username: string): Promise<{
     },
     select: { id: true },
   });
-  const existingGrant = await db.platformTokenGrant.findUnique({ where: { userId_kind: { userId: admin.id, kind: "signup" } }, select: { id: true } });
-  const grant = await issueVerifiedSignupGrant(admin.id, { eligibilitySource: "verifiedGithub", issuedById: admin.id, now }, db);
-  if (grant === null) throw new Error("BROWSER_CONFIRMATION_SIGNUP_GRANT_UNAVAILABLE");
-  return { providerId, credentialId, routeId: route.id, grantId: existingGrant === null ? grant.id : null };
+  const existingGrant = await db.platformTokenGrant.findFirst({ where: { userId: admin.id, kind: "signup" }, select: { id: true } });
+  const activation = await activateAccountEntitlements({
+    userId: admin.id,
+    source: "githubRegistration",
+    actorId: admin.id,
+    actorAccountAccessVersion: admin.accountAccessVersion,
+    accountAccessVersion: admin.accountAccessVersion,
+    evidenceKind: "browser-gate",
+    evidenceRef: `browser:${admin.id}`,
+    now,
+  });
+  if (activation.grantId === null) throw new Error("BROWSER_CONFIRMATION_SIGNUP_GRANT_UNAVAILABLE");
+  return { providerId, credentialId, routeId: route.id, grantId: existingGrant === null ? activation.grantId : null };
 }
 
 async function cleanupPlatformEmbeddingFixture(projectId: string, fixture: Awaited<ReturnType<typeof seedPlatformEmbeddingRoute>>): Promise<void> {

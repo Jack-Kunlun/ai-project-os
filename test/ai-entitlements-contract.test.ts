@@ -11,7 +11,6 @@ import {
   calculateChargedPlatformTokens,
   estimatePlatformTokens,
   holdPlatformTokenReservation,
-  issueVerifiedSignupGrant,
   recoverExpiredPlatformTokenReservations,
   releasePlatformTokenReservation,
   reservePlatformTokens,
@@ -142,6 +141,18 @@ class FakeEntitlementDb {
     },
     findUniqueOrThrow: async ({ where }: { where: { userId_kind: { userId: string; kind: FakeGrant["kind"] } } }) => {
       const grant = [...this.grants.values()].find((candidate) => candidate.userId === where.userId_kind.userId && candidate.kind === where.userId_kind.kind);
+      if (grant === undefined) throw new Error("FAKE_GRANT_NOT_FOUND");
+      return grant;
+    },
+    findFirst: async ({ where }: { where: { userId?: string; kind?: FakeGrant["kind"] } }) => [...this.grants.values()].find((grant) =>
+      (where.userId === undefined || grant.userId === where.userId) &&
+      (where.kind === undefined || grant.kind === where.kind),
+    ) ?? null,
+    findFirstOrThrow: async ({ where }: { where: { userId?: string; kind?: FakeGrant["kind"] } }) => {
+      const grant = [...this.grants.values()].find((candidate) =>
+        (where.userId === undefined || candidate.userId === where.userId) &&
+        (where.kind === undefined || candidate.kind === where.kind),
+      );
       if (grant === undefined) throw new Error("FAKE_GRANT_NOT_FOUND");
       return grant;
     },
@@ -301,23 +312,6 @@ class FakeEntitlementDb {
 function entitlementError(code: string) {
   return (error: unknown) => error instanceof AiEntitlementError && error.code === code;
 }
-
-test("signup grant is idempotent and has one auditable ledger entry", async () => {
-  const fake = new FakeEntitlementDb();
-  const userId = randomUUID();
-  const now = new Date("2026-09-02T00:00:00.000Z");
-  const first = await issueVerifiedSignupGrant(userId, { eligibilitySource: "verifiedGithub", now }, fake as never);
-  const second = await issueVerifiedSignupGrant(userId, { eligibilitySource: "verifiedGithub", now: new Date(now.getTime() + 1_000) }, fake as never);
-  assert.ok(first);
-  assert.ok(second);
-  assert.equal(first.id, second.id);
-  assert.equal(first.amount, SIGNUP_TOKEN_AMOUNT);
-  assert.equal(first.remainingTokens, SIGNUP_TOKEN_AMOUNT);
-  assert.equal(first.expiresAt.getTime(), now.getTime() + SIGNUP_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1_000);
-  assert.equal(fake.grants.size, 1);
-  assert.equal(fake.ledgerEntries.size, 1);
-  assert.ok(fake.transactions >= 2);
-});
 
 test("reservation settles known usage, refunds the difference, and is idempotent", async () => {
   const fake = new FakeEntitlementDb();

@@ -23,7 +23,9 @@ test("candidate identity scopes every destructive target to one generated projec
 test("candidate readiness requires healthy runtime services and a successful migration", () => {
   const entries = parseComposePs(JSON.stringify([
     { Service: "postgres", State: "running", Health: "healthy", ExitCode: 0 },
+    { Service: "principal-bootstrap", State: "exited", Health: "", ExitCode: 0 },
     { Service: "migrate", State: "exited", Health: "", ExitCode: 0 },
+    { Service: "reconcile", State: "exited", Health: "", ExitCode: 0 },
     { Service: "app", State: "running", Health: "healthy", ExitCode: 0 },
     { Service: "worker", State: "running", Health: "healthy", ExitCode: 0 },
   ]));
@@ -31,6 +33,10 @@ test("candidate readiness requires healthy runtime services and a successful mig
 
   const failedMigration = entries.map((entry) => entry.service === "migrate" ? { ...entry, exitCode: 1 } : entry);
   assert.match(evaluateCandidateReadiness(failedMigration).fatal ?? "", /migrate exited 1/u);
+  const failedBootstrap = entries.map((entry) => entry.service === "principal-bootstrap" ? { ...entry, exitCode: 1 } : entry);
+  assert.match(evaluateCandidateReadiness(failedBootstrap).fatal ?? "", /principal-bootstrap exited 1/u);
+  const failedReconcile = entries.map((entry) => entry.service === "reconcile" ? { ...entry, exitCode: 1 } : entry);
+  assert.match(evaluateCandidateReadiness(failedReconcile).fatal ?? "", /reconcile exited 1/u);
   const missingWorker = entries.filter((entry) => entry.service !== "worker");
   assert.equal(evaluateCandidateReadiness(missingWorker).ready, false);
 });
@@ -60,6 +66,7 @@ test("local release command is wired to CI without tag, push, or broad cleanup",
   assert.match(workflow, /pnpm release:local/u);
   assert.match(runner, /LOCAL_RELEASE_WORKTREE_DIRTY/u);
   assert.match(runner, /restart", "postgres", "app", "worker/u);
+  assert.match(runner, /LOCAL_RELEASE_IMAGE_PREFIX\}-reconcile/u);
   assert.match(runner, /verifyMigrations/u);
   assert.match(runner, /verifyImageLabels/u);
   assert.match(runner, /cleanupCandidate/u);

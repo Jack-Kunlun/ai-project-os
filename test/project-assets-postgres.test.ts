@@ -7,8 +7,8 @@ import { createCanvas } from "@napi-rs/canvas";
 import { invokeVisionCompletion } from "../src/lib/ai-providers";
 import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
-import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
+import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
 import {
   activatePlatformDefaultAiRoute,
   createPlatformDefaultAiRoute,
@@ -116,7 +116,7 @@ test(
         startsAt: new Date(membershipNow.getTime() - 60_000),
         expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
-      await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedGithub", issuedById: platformAdmin.id }, db);
+      await activateCanonicalSignupGrant(db, { userId: user.id, actorId: platformAdmin.id });
       await db.project.create({ data: { id: projectId, workspaceId, name: `Asset ${suffix}`, slug: `asset-${suffix}` } });
       await db.$transaction((tx) => grantProjectMembership(tx, {
         projectId,

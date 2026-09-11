@@ -5,7 +5,7 @@ import { z } from "zod";
 import { assertWorkspaceAdmin, type AccessUser } from "@/lib/access-control";
 import { appendEmailVerificationAudit, createSessionInTransaction, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
 import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
-import { getDb } from "@/lib/db";
+import { assertEntitlementWriterSession, getDb, getEntitlementDb, isEntitlementDatabase } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
 import { lockActorsAccess, lockProjectAccess, lockWorkspaceAccess, lockWorkspaceInvitationAccess } from "@/lib/access-linearization";
 import {
@@ -17,7 +17,7 @@ import {
   hasRevokedWorkspaceMembership,
 } from "@/lib/membership-governance";
 import { resolveSecureEndpointFingerprint, securePinnedJsonRequest, WebSourceError } from "@/lib/web-sources";
-import { issueVerifiedSignupGrant } from "@/lib/ai-entitlements";
+import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
 
 export const OIDC_STATE_COOKIE_NAME = "ai_project_os_oidc_state" as const;
 const OIDC_ATTEMPT_LIFETIME_MS = 10 * 60 * 1_000;
@@ -512,7 +512,7 @@ async function fetchVerifiedIdToken(input: Readonly<{
   }
 }
 
-export async function completeOidcLogin(input: Readonly<{ code: unknown; state: unknown; cookieState: unknown }>, db: PrismaClient = getDb()): Promise<Readonly<{ session: CreatedSession; returnTo: string }>> {
+export async function completeOidcLogin(input: Readonly<{ code: unknown; state: unknown; cookieState: unknown }>, db: PrismaClient = getEntitlementDb()): Promise<Readonly<{ session: CreatedSession; returnTo: string }>> {
   if (typeof input.code !== "string" || input.code.length < 4 || input.code.length > 4096 || typeof input.state !== "string" || !/^[A-Za-z0-9_-]{40,128}$/u.test(input.state) || input.cookieState !== input.state) return fail("OIDC_FLOW_INVALID");
   const attempt = await db.oidcLoginAttempt.findUnique({ where: { stateHash: sha256(input.state) }, include: { provider: true } });
   if (attempt === null || attempt.consumedAt !== null) return fail("OIDC_FLOW_INVALID");
@@ -531,6 +531,7 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
   const preferredUsername = safeClaim(payload.preferred_username, 64) ?? claimedEmail?.split("@")[0] ?? subject;
 
   return db.$transaction(async (tx) => {
+    if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
     let provider = await tx.oidcProvider.findUnique({ where: { id: attempt.providerId } });
     if (provider === null || provider.status !== "verified" || provider.disabledAt !== null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
     let identity = await tx.oidcIdentity.findUnique({ where: { providerId_subject: { providerId: provider.id, subject } }, include: { user: true } });
@@ -575,8 +576,18 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
           reason: "oidc_email_claim_verified",
         });
       }
-      if (newlyCreated && invitation === null && emailVerified) {
-        await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedOidc", issuedById: null, now: new Date() }, tx);
+      if (newlyCreated) {
+        const activationNow = new Date();
+        await activateAccountEntitlements({
+          userId: user.id,
+          source: invitation === null ? "oidcRegistration" : "oidcInvitationRegistration",
+          actorId: user.id,
+          accountAccessVersion: user.accountAccessVersion,
+          actorAccountAccessVersion: user.accountAccessVersion,
+          evidenceKind: invitation === null ? "oidc" : "oidc-invitation",
+          evidenceRef: provider.id,
+          now: activationNow,
+        }, tx);
       }
     }
     if (user.disabledAt !== null) return fail("OIDC_ACCOUNT_DISABLED");

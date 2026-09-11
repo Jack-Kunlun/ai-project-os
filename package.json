@@ -44,8 +44,11 @@
     "db:migrations:validate": "tsx scripts/validate-migrations.ts",
     "db:generate": "prisma generate --config prisma.config.ts",
     "db:ownership-inventory": "tsx scripts/0.2x-migration-inventory.ts",
+    "db:account-entitlement-inventory": "tsx scripts/account-entitlement-inventory.ts",
     "db:membership-governance-inventory": "tsx scripts/membership-governance-inventory.ts",
     "db:membership-governance-apply": "tsx scripts/membership-governance-apply.ts",
+    "db:principals:reconcile": "tsx scripts/reconcile-database-principals.ts",
+    "db:principals:bootstrap": "tsx scripts/reconcile-database-principals.ts --bootstrap-if-needed",
     "db:migrate": "prisma migrate dev --config prisma.config.ts",
     "db:studio": "prisma studio --config prisma.config.ts"
   },

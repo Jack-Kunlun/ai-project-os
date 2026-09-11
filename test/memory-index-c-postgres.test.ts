@@ -16,7 +16,6 @@ import {
   type GitHubReadOnlyClient,
   type VerifiedGitHubRepository,
 } from "../src/lib/github";
-import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
 import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import {
@@ -34,6 +33,7 @@ import {
 import type { WebAiActor } from "../src/lib/web-ai-access";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 import { createControlledMembership } from "./membership-fixture";
+import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -366,7 +366,7 @@ test(
         startsAt: new Date(membershipNow.getTime() - 60_000),
         expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
-      await issueVerifiedSignupGrant(userId, { eligibilitySource: "verifiedGithub", issuedById: adminId }, db);
+      await activateCanonicalSignupGrant(db, { userId, actorId: adminId });
       await db.project.createMany({
         data: [
           { id: projectId, workspaceId, name: "Memory index C", slug: `memory-index-c-${randomUUID()}` },

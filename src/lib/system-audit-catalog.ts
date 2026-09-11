@@ -16,6 +16,8 @@ export const SYSTEM_AUDIT_SOURCES = [
   "webAiConfirmation",
   "platformProviderProbe",
   "platformGrantOfferPolicy",
+  "accountEntitlementActivation",
+  "accountEntitlementBackfill",
 ] as const;
 
 export type SystemAuditSource = (typeof SYSTEM_AUDIT_SOURCES)[number];
@@ -38,6 +40,8 @@ export const SYSTEM_AUDIT_SOURCE_LABELS: Readonly<Record<SystemAuditSource, stri
   webAiConfirmation: "Web AI 确认",
   platformProviderProbe: "平台连接探测",
   platformGrantOfferPolicy: "平台赠送策略",
+  accountEntitlementActivation: "账号权益激活",
+  accountEntitlementBackfill: "账号权益历史回填",
 };
 
 export const SYSTEM_AUDIT_ACTIONS = [
@@ -55,6 +59,9 @@ export const SYSTEM_AUDIT_ACTIONS = [
   "confirmed",
   "bootstrapConfirmed",
   "created",
+  "linked",
+  "previewed",
+  "executed",
   "accepted",
   "attested",
   "proposed",
@@ -71,6 +78,7 @@ export const SYSTEM_AUDIT_ACTIONS = [
   "dispatched",
   "succeeded",
   "failed",
+  "stale",
   "unknown",
   "conflict",
   "approved",
@@ -124,6 +132,9 @@ export const SYSTEM_AUDIT_ACTION_LABELS: Readonly<Record<SystemAuditAction, stri
   confirmed: "确认",
   bootstrapConfirmed: "引导确认",
   created: "创建",
+  linked: "关联",
+  previewed: "生成预览",
+  executed: "执行回填",
   accepted: "接受",
   attested: "认证",
   proposed: "提议",
@@ -140,6 +151,7 @@ export const SYSTEM_AUDIT_ACTION_LABELS: Readonly<Record<SystemAuditAction, stri
   dispatched: "已派发",
   succeeded: "成功",
   failed: "失败",
+  stale: "已失效",
   unknown: "未知",
   conflict: "冲突",
   approved: "批准",
@@ -239,6 +251,8 @@ export const SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE: Readonly<Record<SystemAudit
   webAiConfirmation: ["memoryExtract", "memoryIndex", "memorySearch", "memoryAnswer", "assetRecognize", "intelligenceBrief", "intelligenceAgent"],
   platformProviderProbe: ["reserved", "dispatched", "settled", "released", "held", "rejected"],
   platformGrantOfferPolicy: ["created", "activated", "retired"],
+  accountEntitlementActivation: ["created", "linked"],
+  accountEntitlementBackfill: ["previewed", "confirmed", "executed", "stale", "expired", "failed"],
 };
 
 export const SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE: Readonly<Record<SystemAuditSource, readonly SystemAuditResult[]>> = {
@@ -259,4 +273,6 @@ export const SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE: Readonly<Record<SystemAudit
   webAiConfirmation: ["applied", "pending", "expired"],
   platformProviderProbe: ["applied", "pending", "rejected", "unknown"],
   platformGrantOfferPolicy: ["applied", "pending", "revoked"],
+  accountEntitlementActivation: ["applied", "rejected"],
+  accountEntitlementBackfill: ["pending", "applied", "rejected", "expired", "failed"],
 };

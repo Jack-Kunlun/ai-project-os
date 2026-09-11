@@ -116,6 +116,15 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   assert.match(deployment, /DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND/u);
   assert.match(deployment, /python3 -c/u);
   assert.match(deployment, /production\.env/u);
+  assert.match(deployment, /POSTGRES_USER=ai_project_os_cluster_admin/u);
+  assert.match(deployment, /POSTGRES_CLUSTER_ADMIN_PASSWORD/u);
+  assert.match(deployment, /POSTGRES_MIGRATOR_PASSWORD/u);
+  assert.match(deployment, /POSTGRES_RUNTIME_USER=ai_project_os_runtime/u);
+  assert.match(deployment, /POSTGRES_RUNTIME_PASSWORD/u);
+  assert.match(deployment, /POSTGRES_ENTITLEMENT_WRITER_USER=ai_project_os_entitlement_writer/u);
+  assert.match(deployment, /POSTGRES_ENTITLEMENT_WRITER_PASSWORD/u);
+  assert.match(deployment, /DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL/u);
+  assert.match(deployment, /POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD/u);
   assert.match(deployment, /AI_PROJECT_OS_SECURE_COOKIES=true/u);
   assert.match(deployment, /AI_PROJECT_OS_PUBLIC_ORIGIN=https:\/\/ai-project-os\.com/u);
   assert.match(deployment, /DEPLOY_PUBLIC_ORIGIN_INVALID/u);
@@ -128,7 +137,11 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   assert.match(deployment, /pre-deploy "\$RELEASE_TAG"/u);
   assert.match(deployment, /DEPLOY_PRE_BACKUP_RESULT_INVALID/u);
   assert.match(deployment, /backup_object/u);
-  assert.match(deployment, /--force-recreate migrate app worker/u);
+  assert.match(deployment, /--force-recreate principal-bootstrap migrate reconcile app worker/u);
+  assert.match(deployment, /principal_bootstrap_state/u);
+  assert.match(deployment, /reconcile_state/u);
+  assert.match(deployment, /compose stop app worker/u);
+  assert.ok(deployment.indexOf("compose stop app worker") < deployment.indexOf("compose up -d --build --force-recreate principal-bootstrap"));
   assert.match(deployment, /consecutiveFailures/u);
   assert.match(deployment, /https:\/\/ai-project-os\.com\/api\/health/u);
   assert.doesNotMatch(deployment, /\bcompose down\b|down[^\n]*-v/u);

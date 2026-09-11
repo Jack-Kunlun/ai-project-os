@@ -53,7 +53,16 @@ test("Compose wires every upload policy override to app and worker as strings", 
   let rendered: string;
   try {
     const result = await execFileAsync("docker", ["compose", "-f", "compose.yaml", "config", "--format", "json"], {
-      env: { ...process.env, POSTGRES_PASSWORD: "compose-contract", ...uploadEnv },
+      env: {
+        ...process.env,
+        POSTGRES_USER: "ai_project_os_cluster_admin",
+        POSTGRES_CLUSTER_ADMIN_PASSWORD: "compose-contract",
+        POSTGRES_MIGRATOR_PASSWORD: "compose-contract",
+        POSTGRES_RUNTIME_PASSWORD: "compose-contract",
+        POSTGRES_ENTITLEMENT_WRITER_PASSWORD: "compose-contract",
+        POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: "compose-contract",
+        ...uploadEnv,
+      },
       maxBuffer: 2 * 1024 * 1024,
     });
     rendered = result.stdout;
@@ -73,7 +82,17 @@ test("Compose wires every upload policy override to app and worker as strings", 
   }
 
   const invalidResult = await execFileAsync("docker", ["compose", "-f", "compose.yaml", "config", "--format", "json"], {
-    env: { ...process.env, POSTGRES_PASSWORD: "compose-contract", ...uploadEnv, AI_PROJECT_OS_UPLOAD_MAX_FILES: "not-a-number" },
+    env: {
+      ...process.env,
+      POSTGRES_USER: "ai_project_os_cluster_admin",
+      POSTGRES_CLUSTER_ADMIN_PASSWORD: "compose-contract",
+      POSTGRES_MIGRATOR_PASSWORD: "compose-contract",
+      POSTGRES_RUNTIME_PASSWORD: "compose-contract",
+      POSTGRES_ENTITLEMENT_WRITER_PASSWORD: "compose-contract",
+      POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: "compose-contract",
+      ...uploadEnv,
+      AI_PROJECT_OS_UPLOAD_MAX_FILES: "not-a-number",
+    },
     maxBuffer: 2 * 1024 * 1024,
   });
   const invalidConfig = JSON.parse(invalidResult.stdout) as { services?: Record<string, { environment?: Record<string, string | number> }> };

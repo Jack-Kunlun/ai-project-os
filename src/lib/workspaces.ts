@@ -4,7 +4,7 @@ import { z } from "zod";
 import { AccessControlError, assertWorkspaceAdmin, type AccessUser } from "@/lib/access-control";
 import { createPasswordRecord } from "@/lib/auth";
 import { lockActorsAccess, lockProjectAccess, lockWorkspaceAccess, lockWorkspaceInvitationAccess } from "@/lib/access-linearization";
-import { getDb } from "@/lib/db";
+import { assertEntitlementWriterSession, getDb, getEntitlementDb, isEntitlementDatabase } from "@/lib/db";
 import {
   appendProjectMembershipAudit,
   appendWorkspaceMembershipAudit,
@@ -18,6 +18,7 @@ import {
   revokeProjectMembership,
 } from "@/lib/membership-governance";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
+import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
@@ -239,7 +240,7 @@ export async function listWorkspaceMembers(workspaceIdInput: unknown, actor: Acc
   });
 }
 
-export async function createLocalWorkspaceMember(workspaceIdInput: unknown, input: unknown, actor: AccessUser, db: PrismaClient = getDb()) {
+export async function createLocalWorkspaceMember(workspaceIdInput: unknown, input: unknown, actor: AccessUser, db: PrismaClient = getEntitlementDb()) {
   const workspaceId = uuid(workspaceIdInput);
   await assertWorkspaceAdmin(actor, workspaceId, db);
   const parsed = createMemberSchema.parse(input);
@@ -248,15 +249,25 @@ export async function createLocalWorkspaceMember(workspaceIdInput: unknown, inpu
   await assertProjectsInWorkspace(workspaceId, parsed.projectGrants, db);
   try {
     return await db.$transaction(async (tx) => {
+      if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
       await lockActorsAccess(tx, [actor.id]);
       await lockWorkspaceAccess(tx, workspaceId);
-      const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
+      const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true, accountAccessVersion: true } });
       const actingMembership = await findConfirmedWorkspaceMembership(tx, workspaceId, actor.id);
       if (currentActor === null || currentActor.disabledAt !== null || actingMembership === null || (actingMembership.role !== "owner" && actingMembership.role !== "admin")) {
         throw new AccessControlError("ACCESS_FORBIDDEN");
       }
       await assertProjectsInWorkspace(workspaceId, parsed.projectGrants, tx);
       const user = await tx.appUser.create({ data: { username: parsed.username, displayName: parsed.displayName ?? null, email: normalizedEmail, role: "user", ...password } });
+      await activateAccountEntitlements({
+        userId: user.id,
+        source: "localProvisioning",
+        actorId: actor.id,
+        accountAccessVersion: user.accountAccessVersion,
+        actorAccountAccessVersion: currentActor.accountAccessVersion,
+        evidenceKind: "local-provisioning",
+        evidenceRef: workspaceId,
+      }, tx);
       const createdWorkspaceMembership = await tx.workspaceMembership.create({ data: { workspaceId, userId: user.id, role: parsed.workspaceRole, accessState: MembershipAccessState.confirmed } });
       await appendWorkspaceMembershipAudit(tx, createdWorkspaceMembership, {
         action: "confirmed",

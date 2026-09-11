@@ -9,7 +9,9 @@ AI Project OS V1 把网页人工工作台与本机受控编排分开：网页不
 ```bash
 pnpm install
 cp .env.example .env
-# 设置 POSTGRES_PASSWORD 和宿主机 DATABASE_URL，保持 AI/GitHub 默认关闭
+# 设置 POSTGRES_CLUSTER_ADMIN_PASSWORD、POSTGRES_MIGRATOR_PASSWORD、
+# POSTGRES_RUNTIME_PASSWORD、POSTGRES_ENTITLEMENT_WRITER_PASSWORD 和
+# POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD，保持 AI/GitHub 默认关闭
 docker compose config --quiet
 docker compose up -d --build
 docker compose ps --all

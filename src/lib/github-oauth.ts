@@ -3,7 +3,7 @@ import { Prisma, type GitHubOauthIntent, type PrismaClient } from "@prisma/clien
 import { z } from "zod";
 import { appendEmailVerificationAudit, createSessionInTransaction, DEFAULT_WORKSPACE_ID, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
 import { createCredential, readCredentialSecret } from "@/lib/credential-vault";
-import { getDb } from "@/lib/db";
+import { assertEntitlementWriterSession, getDb, getEntitlementDb, isEntitlementDatabase } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
 import { lockActorAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import {
@@ -12,7 +12,7 @@ import {
   hasRevokedWorkspaceMembership,
   grantWorkspaceMembership,
 } from "@/lib/membership-governance";
-import { issueVerifiedSignupGrant } from "@/lib/ai-entitlements";
+import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
 
 export const GITHUB_OAUTH_STATE_COOKIE_NAME = "ai_project_os_github_oauth_state" as const;
 
@@ -338,7 +338,7 @@ async function availableGitHubUsername(login: string, db: Prisma.TransactionClie
 
 export async function completeGitHubOAuth(
   input: Readonly<{ code: unknown; state: unknown; cookieState: unknown; sessionUserId?: unknown }>,
-  db: PrismaClient = getDb(),
+  db: PrismaClient = getEntitlementDb(),
 ): Promise<Readonly<{ session: CreatedSession | null; returnTo: string; intent: GitHubOauthIntent; remember: boolean }>> {
   const config = readConfig();
   if (
@@ -364,6 +364,7 @@ export async function completeGitHubOAuth(
   const profile = await fetchVerifiedGitHubProfile({ config, code: input.code, redirectUri: attempt.redirectUri, verifier });
 
   return db.$transaction(async (tx) => {
+    if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
     const now = new Date();
     let existingIdentity = await tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId }, include: { user: true } });
     const actorId = attempt.intent === "link" ? attempt.linkUserId : existingIdentity?.userId;
@@ -423,7 +424,16 @@ export async function completeGitHubOAuth(
         data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "member", accessState: "confirmed" },
       });
       await appendWorkspaceMembershipAudit(tx, workspaceMembership, { action: "confirmed", previousState: null, actorId: user.id, reason: "github_oauth_membership_created" });
-      await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedGithub", issuedById: null, now }, tx);
+      await activateAccountEntitlements({
+        userId: user.id,
+        source: "githubRegistration",
+        actorId: user.id,
+        accountAccessVersion: user.accountAccessVersion,
+        actorAccountAccessVersion: user.accountAccessVersion,
+        evidenceKind: "github",
+        evidenceRef: profile.githubUserId.toString(),
+        now,
+      }, tx);
       identity = await tx.gitHubIdentity.create({
         data: { userId: user.id, ...profile, lastLoginAt: now },
         include: { user: true },

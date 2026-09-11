@@ -156,7 +156,8 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ```bash
 cp .env.example .env
-# 编辑 .env，至少设置 POSTGRES_PASSWORD；不要提交 .env
+# 编辑 .env，至少设置 cluster-admin、migrator、runtime、writer 和
+# inventory-reader 密码；不要提交 .env
 docker compose config --quiet
 docker compose up -d --build
 docker compose ps --all
@@ -165,7 +166,9 @@ docker compose ps --all
 打开 <http://127.0.0.1:3000>。正常状态应为：
 
 - `postgres`：healthy
+- `principal-bootstrap`：Exited (0)
 - `migrate`：Exited (0)
+- `reconcile`：Exited (0)
 - `app`：healthy
 - `worker`：healthy
 
@@ -173,7 +176,15 @@ docker compose ps --all
 
 Compose 默认使用三个命名卷：`ai-project-os-pgdata`、`ai-project-os-secrets`、`ai-project-os-uploads`。不要执行 `docker compose down -v`，该命令会删除数据库、凭据主密钥和上传文件。需要并行运行一次性候选验收时，必须同时改用独立 `POSTGRES_PORT`、`APP_PORT`、`AI_PROJECT_OS_PGDATA_VOLUME`、`AI_PROJECT_OS_SECRETS_VOLUME` 和 `AI_PROJECT_OS_UPLOADS_VOLUME`；不要让候选栈复用正式卷。
 
-面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true` 与实际 HTTPS `AI_PROJECT_OS_PUBLIC_ORIGIN`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。当前生产部署入口仍为未来能力，首个正式 `v1.0.0` 前不可执行；`POSTGRES_PASSWORD` 若包含 URL 保留字符，需要先进行 URL 编码。
+面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true` 与实际 HTTPS `AI_PROJECT_OS_PUBLIC_ORIGIN`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。当前生产部署入口仍为未来能力，首个正式 `v1.0.0` 前不可执行；cluster-admin、migrator、runtime、writer 和 inventory-reader 密码若包含 URL 保留字符，需要先进行 URL 编码。
+
+### 现有卷的数据库账号升级
+
+ENT-009 的 Compose 顺序是 `principal-bootstrap → migrate → reconcile → app/worker`。`ai_project_os_cluster_admin` 是 initdb/维护窗口专用的超级用户，`ai_project_os_migrator` 是实际迁移 owner；runtime、writer 和 inventory-reader 只获得各自最小权限。迁移不会在线滚动执行，必须先停止旧 app/worker 并在维护窗口完成。
+
+如果现有卷仍由旧 owner 持有，请先备份并停止旧 app/worker。在未提交的 `.env` 中保留 `POSTGRES_USER=ai_project_os_cluster_admin`、设置新的 `POSTGRES_CLUSTER_ADMIN_PASSWORD`/`POSTGRES_MIGRATOR_PASSWORD`，并临时设置 `DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL` 为旧 owner 的 owner-only PostgreSQL URL。启动并确认 `principal-bootstrap`、`migrate`、`reconcile` 均为 `Exited (0)` 后，bootstrap 会先创建独立 cluster-admin，再把旧 owner 的当前数据库对象迁移到 migrator。普通旧 owner 会在事务内封存为 `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`；官方 initdb 的 OID10 旧超级用户不能安全降级为 `NOSUPERUSER`，会保留 `SUPERUSER` 但设置 `NOLOGIN`、清除密码/成员关系并终止其会话。确认升级成功后从 `.env` 删除并轮换一次性 legacy URL（即使暂时保留，后续 admin-ready 重启也不会再次连接它）；不要把它放入 app/worker/migrate 环境、日志或仓库。只有在检查完外部依赖、成员关系和审计要求后，才可在单独维护窗口受控地 `DROP ROLE`；bootstrap 不会自动删除封存角色。若 bootstrap 缺失或凭据错误，流程会在迁移前 fail closed 并保留数据现场。
+
+需要运行 entitlement 历史盘点时，使用独立 reader URL 通过 `127.0.0.1` 或 SSH tunnel 执行 `pnpm db:account-entitlement-inventory`；该 reader 只能执行聚合函数，不能读取基础表，输出也不含用户标识或额度明细。详见[管理员操作指南](docs/admin-operation-guide.md)。
 
 ## 本地开发
 

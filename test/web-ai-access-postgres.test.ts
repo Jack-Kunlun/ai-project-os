@@ -571,7 +571,6 @@ test(
       await db.platformTokenReservation.deleteMany({ where: { userId } });
       await db.webAiGrant.deleteMany({ where: { providerConnectionId: providerId } });
       await db.platformDefaultAiRoute.deleteMany({ where: { id: platformRouteId } });
-      await db.platformTokenGrant.deleteMany({ where: { id: grantId } });
       await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
       await db.externalCredential.deleteMany({ where: { id: credentialId } });
       await db.workspace.deleteMany({ where: { id: workspaceId } });

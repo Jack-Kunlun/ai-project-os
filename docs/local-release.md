@@ -12,13 +12,13 @@
 
 ## 自动执行的检查
 
-运行器会为每次执行生成唯一、受限的 Compose project，并使用两个临时 loopback 端口、三个候选专用卷、三张候选专用镜像和随机数据库密码。随后按顺序：
+运行器会为每次执行生成唯一、受限的 Compose project，并使用两个临时 loopback 端口、三个候选专用卷、五张候选专用镜像和随机数据库凭据。随后按顺序：
 
 1. 执行 `docker compose config --quiet`。
-2. 构建 migrate、app 和 worker 镜像。
-3. 启动隔离的 PostgreSQL、迁移任务、应用和 Worker。
-4. 要求 PostgreSQL、app、worker 为 `healthy`，migrate 以 0 退出。
-5. 比对 Prisma 迁移目录与数据库已完成迁移数，检查三张镜像的 OCI 版本标签。
+2. 构建 principal-bootstrap、migrate、reconcile、app 和 worker 镜像。
+3. 启动隔离的 PostgreSQL、bootstrap/reconcile 任务、应用和 Worker。
+4. 要求 PostgreSQL、app、worker 为 `healthy`，principal-bootstrap、migrate、reconcile 以 0 退出。
+5. 比对 Prisma 迁移目录与数据库已完成迁移数，检查五张镜像的 OCI 版本标签。
 6. 检查 `/api/health` 的版本、数据库、Worker 状态和连续失败数。
 7. 重启 PostgreSQL、app 和 worker，再次核对容器、迁移账本和健康接口。
 8. 只删除本次候选的容器、网络、卷和镜像，并验证这些精确资源均已消失。

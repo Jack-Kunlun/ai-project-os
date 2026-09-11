@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import test from "node:test";
-import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
 import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
+import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import {
   activatePlatformDefaultAiRoute,
@@ -123,7 +123,7 @@ test(
         startsAt: new Date(membershipNow.getTime() - 60_000),
         expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
-      await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedGithub", issuedById: platformAdmin.id }, db);
+      await activateCanonicalSignupGrant(db, { userId: user.id, actorId: platformAdmin.id });
 
       await db.project.create({
         data: { id: projectId, workspaceId, name: `V2 workflow ${suffix}`, slug: `v2-workflow-${suffix}` },

@@ -9,11 +9,9 @@ import {
 import { getDb } from "@/lib/db";
 import type { EffectiveAiRoute } from "@/lib/effective-ai-route";
 import {
-  issueVerifiedSignupGrantFromActivePolicy,
   PLATFORM_GRANT_OFFER_DEFAULT_AMOUNT,
   PLATFORM_GRANT_OFFER_DEFAULT_VALID_FOR_DAYS,
   PLATFORM_GRANT_OFFER_DEFAULT_VERSION,
-  type SignupEligibilitySource,
 } from "@/lib/platform-grant-offer-policy-service";
 
 /** Compatibility aliases; issuance reads the active policy, never these values. */
@@ -167,18 +165,6 @@ export async function assertActiveMembership(
   const status = await getMembershipStatus(userId, db, now);
   if (status.status === "none" || status.status === "revoked") return fail("AI_MEMBERSHIP_REQUIRED");
   if (status.status !== "active") return fail("AI_MEMBERSHIP_EXPIRED");
-}
-
-export async function issueVerifiedSignupGrant(
-  userId: string,
-  options: Readonly<{ eligibilitySource?: SignupEligibilitySource; issuedById?: string | null; now?: Date }> = {},
-  db: EntitlementDb = getDb(),
-) {
-  if (options.eligibilitySource === undefined) return fail("AI_SIGNUP_ELIGIBILITY_REQUIRED");
-  return issueVerifiedSignupGrantFromActivePolicy(userId, options.eligibilitySource, {
-    issuedById: options.issuedById,
-    now: options.now,
-  }, db);
 }
 
 export type PlatformTokenReservationResult = Readonly<{

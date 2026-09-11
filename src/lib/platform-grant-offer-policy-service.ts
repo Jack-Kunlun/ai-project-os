@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type PlatformGrantOfferPolicyStatus, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { assertAccountAccessForActor, requireAccountAccessVersion } from "@/lib/account-access-guard";
-import { getDb } from "@/lib/db";
+import { assertEntitlementWriterSession, getDb, getEntitlementDb, isEntitlementDatabase } from "@/lib/db";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 
 export const PLATFORM_GRANT_OFFER_ELIGIBILITY_KEY = "verified_identity_v1" as const;
@@ -18,9 +18,6 @@ const POLICY_CONTEXT = "service-v1";
 const POLICY_RETRY_LIMIT = 3;
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 const OFFER_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{2,63}$/u;
-const SIGNUP_ELIGIBILITY_SOURCES = ["verifiedGithub", "verifiedOidc"] as const;
-
-export type SignupEligibilitySource = "verifiedGithub" | "verifiedOidc";
 export type PlatformGrantOfferPolicyDb = PrismaClient | Prisma.TransactionClient;
 export type PlatformGrantOfferPolicyActor = Readonly<{
   id: string;
@@ -222,7 +219,10 @@ export function parsePlatformGrantOfferPolicyLifecycleInput(input: unknown): Lif
 async function withSerializableRetry<T>(db: PrismaClient, callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   for (let attempt = 0; attempt < POLICY_RETRY_LIMIT; attempt += 1) {
     try {
-      return await db.$transaction(callback, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      return await db.$transaction(async (tx) => {
+        if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
+        return callback(tx);
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       if (!isSerializationConflict(error) || attempt + 1 >= POLICY_RETRY_LIMIT) throw error;
     }
@@ -304,7 +304,7 @@ export async function getPlatformGrantOfferPolicy(policyId: string, actor: Platf
   return publicPolicy(row);
 }
 
-export async function createPlatformGrantOfferPolicy(input: unknown, actor: PlatformGrantOfferPolicyActor, db: PrismaClient = getDb()): Promise<PlatformGrantOfferPolicyPublic> {
+export async function createPlatformGrantOfferPolicy(input: unknown, actor: PlatformGrantOfferPolicyActor, db: PrismaClient = getEntitlementDb()): Promise<PlatformGrantOfferPolicyPublic> {
   const parsed = parsePolicyInput(input);
   const hint = canonicalActorHint(actor);
   try {
@@ -325,7 +325,7 @@ export async function changePlatformGrantOfferPolicyLifecycle(
   policyId: string,
   input: unknown,
   actor: PlatformGrantOfferPolicyActor,
-  db: PrismaClient = getDb(),
+  db: PrismaClient = getEntitlementDb(),
 ): Promise<PlatformGrantOfferPolicyPublic> {
   if (!z.string().uuid().safeParse(policyId).success) return fail("PLATFORM_GRANT_OFFER_POLICY_NOT_FOUND");
   const parsed = parseLifecycleInput(input);
@@ -418,72 +418,4 @@ export async function createBootstrapSignupOfferPolicy(
     status: "active",
   }, now);
   return publicPolicy(policy);
-}
-
-/**
- * Called only by verified GitHub/OIDC identity creation paths.  It returns
- * null when an initialized upgrade has no active policy; the account flow is
- * still allowed to complete and no entitlement rows are written.
- */
-export async function issueVerifiedSignupGrantFromActivePolicy(
-  userId: string,
-  eligibilitySource: SignupEligibilitySource,
-  options: Readonly<{ issuedById?: string | null; now?: Date }> = {},
-  db: PlatformGrantOfferPolicyDb = getDb(),
-) {
-  if (!z.string().uuid().safeParse(userId).success) return fail("PLATFORM_GRANT_OFFER_POLICY_INVALID_INPUT");
-  if (!SIGNUP_ELIGIBILITY_SOURCES.includes(eligibilitySource)) return fail("PLATFORM_GRANT_OFFER_POLICY_INVALID_INPUT");
-  const now = options.now ?? new Date();
-  const run = async (tx: PlatformGrantOfferPolicyDb) => {
-    const existing = await tx.platformTokenGrant.findUnique({ where: { userId_kind: { userId, kind: "signup" } } });
-    if (existing !== null) return existing;
-    await lockActor(tx, userId);
-    await lockPolicyDomain(tx);
-    const rechecked = await tx.platformTokenGrant.findUnique({ where: { userId_kind: { userId, kind: "signup" } } });
-    if (rechecked !== null) return rechecked;
-    const policy = await tx.platformGrantOfferPolicy.findFirst({
-      where: { status: "active" },
-      orderBy: [{ activatedAt: "desc" }, { id: "desc" }],
-      select: { offerVersion: true, amount: true, validForDays: true, eligibilityKey: true },
-    });
-    if (policy === null) return null;
-    if (policy.eligibilityKey !== PLATFORM_GRANT_OFFER_ELIGIBILITY_KEY) return fail("PLATFORM_GRANT_OFFER_POLICY_CONFLICT");
-    const grantId = randomUUID();
-    const inserted = await tx.platformTokenGrant.createMany({
-      data: {
-        id: grantId,
-        userId,
-        kind: "signup",
-        amount: policy.amount,
-        remainingTokens: policy.amount,
-        offerVersion: policy.offerVersion,
-        offerAmount: policy.amount,
-        offerValidForDays: policy.validForDays,
-        eligibilityKey: policy.eligibilityKey,
-        eligibilitySource,
-        issuedById: options.issuedById ?? null,
-        issuedAt: now,
-        expiresAt: new Date(now.getTime() + policy.validForDays * 86_400_000),
-      },
-      skipDuplicates: true,
-    });
-    if (inserted.count === 1) {
-      await tx.platformTokenLedgerEntry.create({
-        data: {
-          id: randomUUID(),
-          userId,
-          grantId,
-          entryKind: "grant",
-          amount: policy.amount,
-          reasonCode: "AI_SIGNUP_GRANT",
-          callKey: null,
-          idempotencyKey: `grant:signup:${userId}`,
-          metadata: { offerVersion: policy.offerVersion, eligibilityKey: policy.eligibilityKey, eligibilitySource },
-          createdAt: now,
-        },
-      });
-    }
-    return tx.platformTokenGrant.findUniqueOrThrow({ where: { userId_kind: { userId, kind: "signup" } } });
-  };
-  return policyTransaction(db, run);
 }

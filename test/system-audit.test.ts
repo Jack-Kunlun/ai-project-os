@@ -131,6 +131,25 @@ function makeRows(): Readonly<Record<string, FakeRow[]>> {
     ],
     platformProviderProbe: [{ ...base, id: "6e111111-1111-4111-8111-111111111111", event: "settled", capability: "generation", units: 1, safeErrorCode: null }],
     platformGrantOfferPolicy: [{ ...base, id: "6f111111-1111-4111-8111-111111111111", action: "created", statusBefore: null, statusAfter: "active", offerVersion: "signup-500k-v1", amount: 500000, validForDays: 30, eligibilityKey: "verified_identity_v1", reasonRecorded: true }],
+    accountEntitlementActivationAudit: [{ ...base, id: "70111111-1111-4111-8111-111111111111", userId: USER_ID, source: "githubRegistration", action: "created", decision: "granted", statusAfter: "granted", actorKind: "user", actorId: ADMIN_ID, offerVersion: "signup-500k-v1", offerAmount: 500000, offerValidForDays: 30, eligibilityKey: "verified_identity_v1", policyRevision: 1 }],
+    accountEntitlementBackfillAudit: [{
+      ...base,
+      id: "72111111-1111-4111-8111-111111111111",
+      action: "executed",
+      statusBefore: "executing",
+      statusAfter: "completed",
+      actorId: ADMIN_ID,
+      reasonRecorded: true,
+      run: {
+        candidateCount: 3,
+        alreadyIssuedCount: 1,
+        eligibleMissingCount: 1,
+        legacyAmbiguousCount: 1,
+        grantedCount: 1,
+        skippedCount: 1,
+        expiresAt: new Date("2026-09-09T01:30:00.000Z"),
+      },
+    }],
   };
 }
 
@@ -214,17 +233,19 @@ function fakeDb(
     webAiConfirmationChallenge: delegate("webAiConfirmation", rows.webAiConfirmationChallenge, calls),
     platformProviderProbeLedger: delegate("platformProviderProbe", rows.platformProviderProbe, calls),
     platformGrantOfferPolicyAudit: delegate("platformGrantOfferPolicy", rows.platformGrantOfferPolicy, calls),
+    accountEntitlementActivationAudit: delegate("accountEntitlementActivation", rows.accountEntitlementActivationAudit, calls),
+    accountEntitlementBackfillAudit: delegate("accountEntitlementBackfill", rows.accountEntitlementBackfillAudit, calls),
   } as unknown as PrismaClient;
 }
 
-test("registry covers exactly the seventeen safe control-plane sources", () => {
-  assert.equal(SYSTEM_AUDIT_SOURCES.length, 17);
+test("registry covers exactly the nineteen safe control-plane sources", () => {
+  assert.equal(SYSTEM_AUDIT_SOURCES.length, 19);
   assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
   for (const source of SYSTEM_AUDIT_SOURCES) {
     const registry = SYSTEM_AUDIT_REGISTRY[source];
     assert.ok(registry.selectedFields.includes("id"));
     assert.ok(registry.selectedFields.includes("createdAt") || registry.selectedFields.includes("issuedAt"));
-    if (source === "platformProviderProbe" || source === "platformGrantOfferPolicy") assert.deepEqual(registry.referenceFields, []);
+    if (source === "platformProviderProbe" || source === "platformGrantOfferPolicy" || source === "accountEntitlementBackfill") assert.deepEqual(registry.referenceFields, []);
     else assert.ok(registry.referenceFields.length > 0);
     assert.deepEqual(Object.keys(registry.actionMap).sort(), [...registry.allowedActions].sort());
     for (const field of registry.selectedFields) assert.doesNotMatch(field, /fingerprint|token/iu, `${source}.${field}`);
@@ -353,6 +374,21 @@ test("new audit adapters preserve source-specific results and safe principals", 
   assert.equal(policy[0]?.evidence.after.offerVersion, "signup-500k-v1");
   assert.equal(policy[0]?.evidence.after.amount, 500000);
   assert.equal(policy[0]?.evidence.reasonRecorded, true);
+
+  const activation = (await listSystemAudit({ source: "accountEntitlementActivation", pageSize: 50 }, db, now)).events;
+  assert.equal(activation.length, 1);
+  assert.equal(activation[0]?.result, "applied");
+  assert.equal(activation[0]?.subject?.id, USER_ID);
+  assert.equal(activation[0]?.actor.id, ADMIN_ID);
+  assert.equal(activation[0]?.evidence.after.offerVersion, "signup-500k-v1");
+
+  const backfill = (await listSystemAudit({ source: "accountEntitlementBackfill", pageSize: 50 }, db, now)).events;
+  assert.equal(backfill.length, 1);
+  assert.equal(backfill[0]?.action, "executed");
+  assert.equal(backfill[0]?.result, "applied");
+  assert.equal(backfill[0]?.subject, null);
+  assert.equal(backfill[0]?.evidence.after.grantedCount, 1);
+  assert.equal(backfill[0]?.evidence.after.skippedCount, 1);
 });
 
 test("platform grant offer created result follows the resulting policy status", async () => {
@@ -449,6 +485,8 @@ test("new audit adapter details reuse the exact safe list projection", async () 
     ["webAiConfirmation", "60311111-1111-4111-8111-111111111111"],
     ["platformProviderProbe", "6e111111-1111-4111-8111-111111111111"],
     ["platformGrantOfferPolicy", "6f111111-1111-4111-8111-111111111111"],
+    ["accountEntitlementActivation", "70111111-1111-4111-8111-111111111111"],
+    ["accountEntitlementBackfill", "72111111-1111-4111-8111-111111111111"],
   ] as const;
   for (const [source, id] of cases) {
     const listed = (await listSystemAudit({ source, pageSize: 50 }, db, now)).events.find((event) => event.id === id);
@@ -511,7 +549,7 @@ test("actor and subject lookups accept only exact UUID or unique username", asyn
   const db = fakeDb(rows, "admin", calls);
   const now = new Date("2026-09-09T02:00:00.000Z");
   const byUsername = await listSystemAudit({ actor: "admin", pageSize: 50 }, db, now);
-  assert.equal(byUsername.events.length, 20);
+  assert.equal(byUsername.events.length, 22);
   const byDisplayName = await listSystemAudit({ actor: "平台管理员", pageSize: 50 }, db, now);
   assert.deepEqual(byDisplayName.events, []);
 });

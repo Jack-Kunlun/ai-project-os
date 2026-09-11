@@ -32,6 +32,10 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(runner, /\["build"\]/u);
   assert.match(runner, /\.next\/standalone\/server\.js/u);
   assert.match(runner, /\.next\/standalone\/\.next\/static/u);
+  assert.match(runner, /delete appEnvironment\.DATABASE_PRINCIPAL_ADMIN_URL/u);
+  assert.match(runner, /delete appEnvironment\.MIGRATOR_DATABASE_URL/u);
+  assert.match(runner, /delete appEnvironment\.DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL/u);
+  assert.match(runner, /delete workerEnvironment\.ENTITLEMENT_DATABASE_URL/u);
   assert.match(runner, /DROP DATABASE IF EXISTS/u);
   assert.match(smoke, /content-security-policy/u);
   assert.match(smoke, /worker: \{ status: "up"/u);

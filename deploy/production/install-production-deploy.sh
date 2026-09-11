@@ -128,7 +128,10 @@ fi
 test "$(stat -c %U:%G "$PRODUCTION_ENV")" = root:root
 test "$(stat -c %a "$PRODUCTION_ENV")" = 600
 test ! -L "$PRODUCTION_ENV"
-grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$PRODUCTION_ENV"
+grep -Eq '^POSTGRES_CLUSTER_ADMIN_PASSWORD=[0-9a-f]{64}$' "$PRODUCTION_ENV"
+grep -Eq '^POSTGRES_MIGRATOR_PASSWORD=[0-9a-f]{64}$' "$PRODUCTION_ENV"
+grep -Eq '^POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD=[0-9a-f]{64}$' "$PRODUCTION_ENV"
+grep -qx 'POSTGRES_USER=ai_project_os_cluster_admin' "$PRODUCTION_ENV"
 grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$PRODUCTION_ENV"
 
 if [[ -e "$LEGACY_ENV" ]]; then

@@ -3,28 +3,66 @@ services:
     image: pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-ai_project_os}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_USER: ${POSTGRES_USER:-ai_project_os_cluster_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_CLUSTER_ADMIN_PASSWORD:?POSTGRES_CLUSTER_ADMIN_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-ai_project_os}
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - ai_project_os_pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      # Readiness must not depend on the desired migrator login: an existing
+      # volume may still have only the legacy owner until principal-bootstrap
+      # adopts it.
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 12
+
+  principal-bootstrap:
+    build:
+      context: .
+      target: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_PRINCIPAL_ADMIN_URL: "postgresql://${POSTGRES_USER:-ai_project_os_cluster_admin}:${POSTGRES_CLUSTER_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      DATABASE_URL: "postgresql://${POSTGRES_RUNTIME_USER:-ai_project_os_runtime}:${POSTGRES_RUNTIME_PASSWORD:?POSTGRES_RUNTIME_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      ENTITLEMENT_DATABASE_URL: "postgresql://${POSTGRES_ENTITLEMENT_WRITER_USER:-ai_project_os_entitlement_writer}:${POSTGRES_ENTITLEMENT_WRITER_PASSWORD:?POSTGRES_ENTITLEMENT_WRITER_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      MIGRATOR_DATABASE_URL: "postgresql://ai_project_os_migrator:${POSTGRES_MIGRATOR_PASSWORD:?POSTGRES_MIGRATOR_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: "${POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD:?POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD must be set}"
+      DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL: "${DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL:-}"
+    command: ["node", "node_modules/tsx/dist/cli.mjs", "scripts/reconcile-database-principals.ts", "--bootstrap-if-needed"]
+    restart: "no"
 
   migrate:
     build:
       context: .
       target: migrate
     depends_on:
-      postgres:
-        condition: service_healthy
+      principal-bootstrap:
+        condition: service_completed_successfully
     environment:
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      DATABASE_URL: "postgresql://ai_project_os_migrator:${POSTGRES_MIGRATOR_PASSWORD:?POSTGRES_MIGRATOR_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      MIGRATOR_DATABASE_URL: "postgresql://ai_project_os_migrator:${POSTGRES_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+    restart: "no"
+
+  reconcile:
+    build:
+      context: .
+      target: worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_PRINCIPAL_ADMIN_URL: "postgresql://${POSTGRES_USER:-ai_project_os_cluster_admin}:${POSTGRES_CLUSTER_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      DATABASE_URL: "postgresql://${POSTGRES_RUNTIME_USER:-ai_project_os_runtime}:${POSTGRES_RUNTIME_PASSWORD:?POSTGRES_RUNTIME_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      ENTITLEMENT_DATABASE_URL: "postgresql://${POSTGRES_ENTITLEMENT_WRITER_USER:-ai_project_os_entitlement_writer}:${POSTGRES_ENTITLEMENT_WRITER_PASSWORD:?POSTGRES_ENTITLEMENT_WRITER_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      MIGRATOR_DATABASE_URL: "postgresql://ai_project_os_migrator:${POSTGRES_MIGRATOR_PASSWORD:?POSTGRES_MIGRATOR_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: "${POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD:?POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD must be set}"
+    command: ["node", "node_modules/tsx/dist/cli.mjs", "scripts/reconcile-database-principals.ts"]
     restart: "no"
 
   app:
@@ -32,11 +70,12 @@ services:
       context: .
       target: runner
     depends_on:
-      migrate:
+      reconcile:
         condition: service_completed_successfully
     environment:
       NODE_ENV: production
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      DATABASE_URL: "postgresql://${POSTGRES_RUNTIME_USER:-ai_project_os_runtime}:${POSTGRES_RUNTIME_PASSWORD:?POSTGRES_RUNTIME_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      ENTITLEMENT_DATABASE_URL: "postgresql://${POSTGRES_ENTITLEMENT_WRITER_USER:-ai_project_os_entitlement_writer}:${POSTGRES_ENTITLEMENT_WRITER_PASSWORD:?POSTGRES_ENTITLEMENT_WRITER_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       AI_PROJECT_OS_MASTER_KEY_FILE: /var/lib/ai-project-os-secrets/master.key
       AI_PROJECT_OS_SECURE_COOKIES: "${AI_PROJECT_OS_SECURE_COOKIES:-false}"
       AI_PROJECT_OS_PUBLIC_ORIGIN: "${AI_PROJECT_OS_PUBLIC_ORIGIN:-http://127.0.0.1:3000}"
@@ -87,11 +126,11 @@ services:
       context: .
       target: worker
     depends_on:
-      migrate:
+      reconcile:
         condition: service_completed_successfully
     environment:
       NODE_ENV: production
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      DATABASE_URL: "postgresql://${POSTGRES_RUNTIME_USER:-ai_project_os_runtime}:${POSTGRES_RUNTIME_PASSWORD:?POSTGRES_RUNTIME_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       AI_PROJECT_OS_MASTER_KEY_FILE: /var/lib/ai-project-os-secrets/master.key
       AI_PROJECT_OS_WORKER_NAME: ${AI_PROJECT_OS_WORKER_NAME:-automation-primary}
       AI_PROJECT_OS_UPLOAD_MAX_FILES: "${AI_PROJECT_OS_UPLOAD_MAX_FILES:-10}"

@@ -275,6 +275,37 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.platformGrantOfferPolicy,
     resultMap: resultMapping({ applied: ["activated"], pending: ["created"], revoked: ["retired"] }),
   },
+  accountEntitlementActivation: {
+    source: "accountEntitlementActivation",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.accountEntitlementActivation,
+    table: "AccountEntitlementActivationAudit",
+    selectedFields: ["id", "userId", "source", "action", "decision", "statusAfter", "actorKind", "actorId", "offerVersion", "offerAmount", "offerValidForDays", "eligibilityKey", "policyRevision", "createdAt"],
+    referenceFields: ["userId"],
+    actionField: "action",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.accountEntitlementActivation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.accountEntitlementActivation),
+    resultField: "action",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.accountEntitlementActivation,
+    resultMap: resultMapping({ applied: ["created", "linked"], rejected: ["created", "linked"] }),
+  },
+  accountEntitlementBackfill: {
+    source: "accountEntitlementBackfill",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.accountEntitlementBackfill,
+    table: "AccountEntitlementBackfillAudit",
+    selectedFields: [
+      "id", "action", "statusBefore", "statusAfter", "actorId", "reasonRecorded", "createdAt",
+      "run.candidateCount", "run.alreadyIssuedCount", "run.eligibleMissingCount", "run.legacyAmbiguousCount",
+      "run.grantedCount", "run.skippedCount", "run.expiresAt",
+      "run.confirmedAt", "run.activeOfferVersion", "run.activeOfferAmount", "run.activeOfferValidForDays",
+    ],
+    referenceFields: [],
+    actionField: "action",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.accountEntitlementBackfill,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.accountEntitlementBackfill),
+    resultField: "action",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.accountEntitlementBackfill,
+    resultMap: resultMapping({ pending: ["previewed", "confirmed"], applied: ["executed"], rejected: ["stale"], expired: ["expired"], failed: ["failed"] }),
+  },
 };
 
 export type SystemAuditFilters = Readonly<{
@@ -845,6 +876,50 @@ const platformGrantOfferPolicyAuditSelect = {
   createdAt: true,
 } as const;
 
+type AccountEntitlementActivationAuditRow = Prisma.AccountEntitlementActivationAuditGetPayload<{ select: typeof accountEntitlementActivationAuditSelect }>;
+const accountEntitlementActivationAuditSelect = {
+  id: true,
+  userId: true,
+  source: true,
+  action: true,
+  decision: true,
+  statusAfter: true,
+  actorKind: true,
+  actorId: true,
+  offerVersion: true,
+  offerAmount: true,
+  offerValidForDays: true,
+  eligibilityKey: true,
+  policyRevision: true,
+  createdAt: true,
+} as const;
+
+type AccountEntitlementBackfillAuditRow = Prisma.AccountEntitlementBackfillAuditGetPayload<{ select: typeof accountEntitlementBackfillAuditSelect }>;
+const accountEntitlementBackfillAuditSelect = {
+  id: true,
+  action: true,
+  statusBefore: true,
+  statusAfter: true,
+  actorId: true,
+  reasonRecorded: true,
+  createdAt: true,
+  run: {
+    select: {
+      candidateCount: true,
+      alreadyIssuedCount: true,
+      eligibleMissingCount: true,
+      legacyAmbiguousCount: true,
+      grantedCount: true,
+      skippedCount: true,
+      expiresAt: true,
+      confirmedAt: true,
+      activeOfferVersion: true,
+      activeOfferAmount: true,
+      activeOfferValidForDays: true,
+    },
+  },
+} as const;
+
 type QueryContext = Readonly<{
   db: PrismaClient;
   filters: SystemAuditFilters;
@@ -963,6 +1038,14 @@ function sourceWhere(context: QueryContext, source: SystemAuditSource, options: 
       if (filters.action !== undefined && filters.action !== "retired") where.id = impossible;
       else where.action = "retired";
     } else where.id = impossible;
+  } else if (filters.result !== undefined && source === "accountEntitlementActivation") {
+    const decisions = filters.result === "applied"
+      ? ["granted", "already_issued"]
+      : filters.result === "rejected"
+        ? ["no_active_offer"]
+        : [];
+    if (decisions === undefined || decisions.length === 0) where.id = impossible;
+    else where.decision = { in: decisions };
   } else if (filters.result !== undefined) {
     const mappedResults = registry.resultMap[filters.result];
     if (mappedResults === undefined || mappedResults.length === 0) where.id = impossible;
@@ -1399,6 +1482,90 @@ function platformGrantOfferPolicyProjection(row: PlatformGrantOfferPolicyAuditRo
   });
 }
 
+function accountEntitlementActivationProjection(row: AccountEntitlementActivationAuditRow): RawAuditEvent {
+  const action = String(row.action);
+  const decision = String(row.decision);
+  const actorKind = row.actorKind === "system" ? "system" : "user";
+  const result: SystemAuditResult = decision === "no_active_offer"
+    ? "rejected"
+    : decision === "granted" || decision === "already_issued"
+      ? "applied"
+      : "unknown";
+  return rawEvent({
+    id: row.id,
+    source: "accountEntitlementActivation",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind,
+    subjectId: row.userId,
+    references: safeReferences({ categories: ["accountEntitlementActivation"], userId: row.userId }),
+    evidence: evidence({}, {
+      decision,
+      status: String(row.statusAfter),
+      source: String(row.source),
+      offerVersion: row.offerVersion,
+      offerAmount: row.offerAmount,
+      offerValidForDays: row.offerValidForDays,
+      eligibilityKey: row.eligibilityKey,
+      policyRevision: row.policyRevision,
+    }),
+    result,
+  });
+}
+
+function accountEntitlementBackfillResult(action: string): SystemAuditResult {
+  if (action === "previewed" || action === "confirmed") return "pending";
+  if (action === "executed") return "applied";
+  if (action === "stale") return "rejected";
+  if (action === "expired") return "expired";
+  if (action === "failed") return "failed";
+  return "unknown";
+}
+
+function accountEntitlementBackfillProjection(row: AccountEntitlementBackfillAuditRow): RawAuditEvent {
+  const action = String(row.action);
+  const confirmedAt = row.run.confirmedAt instanceof Date
+    ? row.run.confirmedAt
+    : typeof row.run.confirmedAt === "string" && !Number.isNaN(Date.parse(row.run.confirmedAt))
+      ? new Date(row.run.confirmedAt)
+      : null;
+  const offerValidForDays = typeof row.run.activeOfferValidForDays === "number" ? row.run.activeOfferValidForDays : null;
+  const grantExpiresAt = confirmedAt !== null && offerValidForDays !== null
+    ? new Date(confirmedAt.getTime() + offerValidForDays * 86_400_000).toISOString()
+    : null;
+  return rawEvent({
+    id: row.id,
+    source: "accountEntitlementBackfill",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind: "user",
+    subjectId: null,
+    references: safeReferences({ categories: ["accountEntitlementBackfill"] }),
+    evidence: evidence(
+      { status: row.statusBefore },
+      {
+        status: String(row.statusAfter),
+        candidateCount: row.run.candidateCount,
+        alreadyIssuedCount: row.run.alreadyIssuedCount,
+        eligibleMissingCount: row.run.eligibleMissingCount,
+        legacyAmbiguousCount: row.run.legacyAmbiguousCount,
+        grantedCount: row.run.grantedCount,
+        skippedCount: row.run.skippedCount,
+        expiresAt: row.run.expiresAt instanceof Date ? row.run.expiresAt.toISOString() : String(row.run.expiresAt ?? ""),
+        offerVersion: row.run.activeOfferVersion,
+        offerAmount: row.run.activeOfferAmount,
+        offerValidForDays: row.run.activeOfferValidForDays,
+        grantExpiresAt,
+      },
+      {},
+      row.reasonRecorded,
+    ),
+    result: accountEntitlementBackfillResult(action),
+  });
+}
+
 async function fetchPlatform(context: QueryContext): Promise<RawAuditEvent[]> {
   const rows = await context.db.platformDefaultAiRouteAudit.findMany({
     where: sourceWhere(context, "platformDefaultAiRoute", { actorField: "actorId" }) as Prisma.PlatformDefaultAiRouteAuditWhereInput,
@@ -1569,6 +1736,26 @@ async function fetchPlatformGrantOfferPolicy(context: QueryContext): Promise<Raw
   return rows.map(platformGrantOfferPolicyProjection);
 }
 
+async function fetchAccountEntitlementActivation(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.accountEntitlementActivationAudit.findMany({
+    where: sourceWhere(context, "accountEntitlementActivation", { actorField: "actorId", subjectField: "userId" }) as Prisma.AccountEntitlementActivationAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: accountEntitlementActivationAuditSelect,
+  });
+  return rows.map(accountEntitlementActivationProjection);
+}
+
+async function fetchAccountEntitlementBackfill(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.accountEntitlementBackfillAudit.findMany({
+    where: sourceWhere(context, "accountEntitlementBackfill", { actorField: "actorId" }) as Prisma.AccountEntitlementBackfillAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: accountEntitlementBackfillAuditSelect,
+  });
+  return rows.map(accountEntitlementBackfillProjection);
+}
+
 async function fetchSource(context: QueryContext, source: SystemAuditSource): Promise<RawAuditEvent[]> {
   switch (source) {
     case "platformDefaultAiRoute": return fetchPlatform(context);
@@ -1588,6 +1775,8 @@ async function fetchSource(context: QueryContext, source: SystemAuditSource): Pr
     case "webAiConfirmation": return fetchWebAiConfirmation(context);
     case "platformProviderProbe": return fetchPlatformProviderProbe(context);
     case "platformGrantOfferPolicy": return fetchPlatformGrantOfferPolicy(context);
+    case "accountEntitlementActivation": return fetchAccountEntitlementActivation(context);
+    case "accountEntitlementBackfill": return fetchAccountEntitlementBackfill(context);
   }
 }
 

@@ -45,6 +45,10 @@ type PlatformTokenGrantRecord = {
   amount: number;
   remainingTokens: number;
   offerVersion: string;
+  offerAmount?: number | null;
+  offerValidForDays?: number | null;
+  eligibilityKey?: string | null;
+  eligibilitySource?: string | null;
   issuedById: string | null;
   issuedAt: Date;
   expiresAt: Date;
@@ -85,6 +89,8 @@ function fakeDb() {
   }> = [];
   const platformTokenGrants = new Map<string, PlatformTokenGrantRecord>();
   const platformTokenLedgerEntries = new Map<string, PlatformTokenLedgerEntryRecord>();
+  const accountEntitlementActivations = new Map<string, Record<string, unknown>>();
+  const accountEntitlementActivationAudits: Array<Record<string, unknown>> = [];
   let sequence = 0;
   const user = { id: USER_ID, username: "admin", role: "admin" as const, emailVerifiedAt: null, disabledAt: null, accountAccessVersion: 1 };
   users.set(user.id, user);
@@ -125,7 +131,13 @@ function fakeDb() {
       create: async ({ data }: { data: Record<string, unknown> }) => { emailVerificationAudits.push(data); return data; },
     },
     platformTokenGrant: {
-      findUnique: async ({ where }: { where: { userId_kind: { userId: string; kind: PlatformTokenGrantRecord["kind"] } } }) => [...platformTokenGrants.values()].find((grant) => grant.userId === where.userId_kind.userId && grant.kind === where.userId_kind.kind) ?? null,
+      findUnique: async ({ where }: { where: { userId_kind?: { userId: string; kind: PlatformTokenGrantRecord["kind"] } } }) => where.userId_kind === undefined ? null : [...platformTokenGrants.values()].find((grant) => grant.userId === where.userId_kind!.userId && grant.kind === where.userId_kind!.kind) ?? null,
+      findFirst: async ({ where }: { where: { userId: string; kind: PlatformTokenGrantRecord["kind"] } }) => [...platformTokenGrants.values()].find((grant) => grant.userId === where.userId && grant.kind === where.kind) ?? null,
+      create: async ({ data }: { data: PlatformTokenGrantRecord }) => {
+        const created = { ...data, revokedAt: data.revokedAt ?? null, createdAt: data.createdAt ?? new Date(), updatedAt: data.updatedAt ?? new Date() };
+        platformTokenGrants.set(created.id, created);
+        return created;
+      },
       createMany: async ({ data, skipDuplicates }: { data: Omit<PlatformTokenGrantRecord, "revokedAt" | "createdAt" | "updatedAt">; skipDuplicates?: boolean }) => {
         const duplicate = [...platformTokenGrants.values()].some((grant) => grant.userId === data.userId && grant.kind === data.kind);
         if (duplicate) {
@@ -143,7 +155,8 @@ function fakeDb() {
       },
     },
     platformGrantOfferPolicy: {
-      findFirst: async () => ({ offerVersion: "signup-500k-v1", amount: 500_000, validForDays: 30, eligibilityKey: "verified_identity_v1" }),
+      findFirst: async () => ({ id: "77777777-7777-4777-8777-777777777777", offerVersion: "signup-500k-v1", amount: 500_000, validForDays: 30, eligibilityKey: "verified_identity_v1" }),
+      findUnique: async () => null,
     },
     platformTokenLedgerEntry: {
       createMany: async ({ data, skipDuplicates }: { data: Omit<PlatformTokenLedgerEntryRecord, "createdAt"> | Array<Omit<PlatformTokenLedgerEntryRecord, "createdAt">>; skipDuplicates?: boolean }) => {
@@ -165,6 +178,17 @@ function fakeDb() {
         platformTokenLedgerEntries.set(data.id, data);
         return data;
       },
+    },
+    accountEntitlementActivation: {
+      findUnique: async ({ where }: { where: { userId_lifecycleKey: { userId: string; lifecycleKey: string } } }) => accountEntitlementActivations.get(`${where.userId_lifecycleKey.userId}:${where.userId_lifecycleKey.lifecycleKey}`) ?? null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const created: Record<string, unknown> = { ...data, createdAt: data.createdAt ?? new Date(), mutationTransactionId: data.mutationTransactionId ?? "88888888-8888-4888-8888-888888888888" };
+        accountEntitlementActivations.set(`${String(created.userId)}:${String(created.lifecycleKey)}`, created);
+        return created;
+      },
+    },
+    accountEntitlementActivationAudit: {
+      create: async ({ data }: { data: Record<string, unknown> }) => { accountEntitlementActivationAudits.push(data); return data; },
     },
     appSession: {
       create: async ({ data }: { data: Record<string, unknown> }) => ({ id: `session-${++sequence}`, ...data }),
@@ -233,7 +257,7 @@ function fakeDb() {
     ...tx,
     $transaction: async (callback: (client: typeof tx) => unknown) => callback(tx),
   } as unknown as PrismaClient;
-  return { db, credentials, attempts, identities, users, memberships, platformTokenGrants, platformTokenLedgerEntries, emailVerificationAudits };
+  return { db, credentials, attempts, identities, users, memberships, platformTokenGrants, platformTokenLedgerEntries, accountEntitlementActivations, accountEntitlementActivationAudits, emailVerificationAudits };
 }
 
 test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient token revocation", async () => {
@@ -316,7 +340,7 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     assert.equal(registrationStore.platformTokenLedgerEntries.size, 1);
     const signupLedger = [...registrationStore.platformTokenLedgerEntries.values()][0];
     assert.equal(signupLedger?.amount, 500_000);
-    assert.equal(signupLedger?.idempotencyKey, `grant:signup:${registered.session?.user.id}`);
+    assert.equal(signupLedger?.idempotencyKey, `grant:signup:${registered.session?.user.id}:signup-500k-v1`);
 
     const registeredUserId = registered.session?.user.id;
     const returning = await beginGitHubOAuth({

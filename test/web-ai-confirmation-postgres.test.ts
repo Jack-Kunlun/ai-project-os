@@ -5,7 +5,6 @@ import { unlink } from "node:fs/promises";
 import test from "node:test";
 import { Client, type QueryResult, type QueryResultRow } from "pg";
 import type { AiOperation, PrismaClient } from "@prisma/client";
-import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { getDb } from "../src/lib/db";
 import { resolveEffectiveAiRoute } from "../src/lib/effective-ai-route";
@@ -31,6 +30,7 @@ import {
   type ConfirmedWebAiJobInput,
 } from "./web-ai-confirmation-fixture";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
+import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
 
 const databaseUrl = process.env.DATABASE_URL;
 const shouldRun = process.env.WEB_AI_CONFIRMATION_POSTGRES_GATE === "1"
@@ -131,7 +131,7 @@ async function createWebAiServiceFixture(): Promise<WebAiServiceFixture> {
     await grantWorkspaceMembership(tx, { workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
   });
-  await issueVerifiedSignupGrant(actorId, { eligibilitySource: "verifiedGithub", issuedById: adminId, now }, db);
+  await activateCanonicalSignupGrant(db, { userId: actorId, actorId: adminId, now });
   await db.externalCredential.create({
     data: {
       id: credentialId,

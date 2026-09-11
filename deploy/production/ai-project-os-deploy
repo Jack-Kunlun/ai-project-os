@@ -43,7 +43,51 @@ done
 test -r "$ENV_FILE"
 test "$(stat -c %U:%G "$ENV_FILE")" = root:root
 test "$(stat -c %a "$ENV_FILE")" = 600
-grep -Eq '^POSTGRES_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE"
+grep -qx 'POSTGRES_USER=ai_project_os_cluster_admin' "$ENV_FILE" || {
+  printf 'DEPLOY_POSTGRES_USER_INVALID\n' >&2
+  exit 70
+}
+grep -Eq '^POSTGRES_CLUSTER_ADMIN_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || {
+  printf 'DEPLOY_POSTGRES_CLUSTER_ADMIN_PASSWORD_INVALID\n' >&2
+  exit 70
+}
+grep -Eq '^POSTGRES_MIGRATOR_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || {
+  printf 'DEPLOY_POSTGRES_MIGRATOR_PASSWORD_INVALID\n' >&2
+  exit 70
+}
+grep -qx 'POSTGRES_RUNTIME_USER=ai_project_os_runtime' "$ENV_FILE" || {
+  printf 'DEPLOY_POSTGRES_RUNTIME_USER_INVALID\n' >&2
+  exit 70
+}
+grep -Eq '^POSTGRES_RUNTIME_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || {
+  printf 'DEPLOY_POSTGRES_RUNTIME_PASSWORD_INVALID\n' >&2
+  exit 70
+}
+grep -qx 'POSTGRES_ENTITLEMENT_WRITER_USER=ai_project_os_entitlement_writer' "$ENV_FILE" || {
+  printf 'DEPLOY_POSTGRES_ENTITLEMENT_WRITER_USER_INVALID\n' >&2
+  exit 70
+}
+grep -Eq '^POSTGRES_ENTITLEMENT_WRITER_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || {
+  printf 'DEPLOY_POSTGRES_ENTITLEMENT_WRITER_PASSWORD_INVALID\n' >&2
+  exit 70
+}
+grep -Eq '^POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || {
+  printf 'DEPLOY_POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD_INVALID\n' >&2
+  exit 70
+}
+validate_optional_bootstrap_url() {
+  local value
+  local -a matches=()
+  mapfile -t matches < <(grep -E '^DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL=' "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || return 1
+  if (( ${#matches[@]} == 0 )); then return 0; fi
+  value=${matches[0]#*=}
+  [[ -z "$value" || "$value" =~ ^postgres(ql)?://[^[:space:]?\#]+$ ]]
+}
+validate_optional_bootstrap_url || {
+  printf 'DEPLOY_DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL_INVALID\n' >&2
+  exit 70
+}
 grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$ENV_FILE"
 grep -qx 'AI_PROJECT_OS_PUBLIC_ORIGIN=https://ai-project-os.com' "$ENV_FILE" || {
   printf 'DEPLOY_PUBLIC_ORIGIN_INVALID\n' >&2
@@ -168,22 +212,26 @@ fi
 readonly backup_path backup_object
 
 wait_for_stack() {
-  local attempt postgres_id migrate_id app_id worker_id
-  local postgres_state migrate_state app_state worker_state health_body
+  local attempt postgres_id principal_bootstrap_id migrate_id reconcile_id app_id worker_id
+  local postgres_state principal_bootstrap_state migrate_state reconcile_state app_state worker_state health_body
 
   for attempt in $(seq 1 60); do
     postgres_id=$(compose ps -q postgres)
+    principal_bootstrap_id=$(compose ps -aq principal-bootstrap)
     migrate_id=$(compose ps -aq migrate)
+    reconcile_id=$(compose ps -aq reconcile)
     app_id=$(compose ps -q app)
     worker_id=$(compose ps -q worker)
 
-    if [[ -n "$postgres_id" && -n "$migrate_id" && -n "$app_id" && -n "$worker_id" ]]; then
+    if [[ -n "$postgres_id" && -n "$principal_bootstrap_id" && -n "$migrate_id" && -n "$reconcile_id" && -n "$app_id" && -n "$worker_id" ]]; then
       postgres_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$postgres_id")
+      principal_bootstrap_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$principal_bootstrap_id")
       migrate_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$migrate_id")
+      reconcile_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$reconcile_id")
       app_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$app_id")
       worker_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$worker_id")
 
-      if [[ "$postgres_state" == healthy && "$migrate_state" == exited:0 && "$app_state" == healthy && "$worker_state" == healthy ]]; then
+      if [[ "$postgres_state" == healthy && "$principal_bootstrap_state" == exited:0 && "$migrate_state" == exited:0 && "$reconcile_state" == exited:0 && "$app_state" == healthy && "$worker_state" == healthy ]]; then
         health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)
         grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body"
         grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${RELEASE_TAG#v}"'"' <<<"$health_body"
@@ -191,7 +239,7 @@ wait_for_stack() {
         grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
         grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$health_body"
         STACK_HEALTH=$health_body
-        STACK_STATES="postgres=$postgres_state migrate=$migrate_state app=$app_state worker=$worker_state"
+        STACK_STATES="postgres=$postgres_state principal-bootstrap=$principal_bootstrap_state migrate=$migrate_state reconcile=$reconcile_state app=$app_state worker=$worker_state"
         return 0
       fi
     fi
@@ -204,8 +252,11 @@ wait_for_stack() {
   return 1
 }
 
+# ENT-009 is a maintenance-window migration: the old application and worker
+# must not write while principal-bootstrap/migrate/reconcile run.
+compose stop app worker
 compose up -d postgres
-compose up -d --build --force-recreate migrate app worker
+compose up -d --build --force-recreate principal-bootstrap migrate reconcile app worker
 wait_for_stack
 
 public_health=$(curl --fail --silent --show-error https://ai-project-os.com/api/health)

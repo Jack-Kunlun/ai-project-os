@@ -2,12 +2,13 @@ import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } fr
 import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getDb } from "@/lib/db";
+import { assertEntitlementWriterSession, getDb, getEntitlementDb, isEntitlementDatabase } from "@/lib/db";
 import { authorizeApiRequest } from "@/lib/access-control";
 import { lockActorAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import { appendWorkspaceMembershipAudit } from "@/lib/membership-governance";
 import { toSystemRole, type SystemRole } from "@/lib/system-role";
 import { createBootstrapSignupOfferPolicy } from "@/lib/platform-grant-offer-policy-service";
+import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
 export const SESSION_LIFETIME_DAYS = 14 as const;
@@ -329,11 +330,12 @@ export async function isApplicationInitialized(db: PrismaClient = getDb()): Prom
 
 export async function initializeAdmin(
   input: Readonly<{ username: unknown; password: unknown }>,
-  db: PrismaClient = getDb(),
+  db: PrismaClient = getEntitlementDb(),
 ): Promise<CreatedSession> {
   const username = canonicalUsername(input.username);
   const password = await createPasswordRecord(input.password);
   return db.$transaction(async (tx) => {
+    if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(781452903)`;
     await lockWorkspaceAccess(tx, DEFAULT_WORKSPACE_ID);
     if ((await tx.appUser.count({ where: { role: "admin" } })) > 0) {
@@ -360,6 +362,13 @@ export async function initializeAdmin(
       reason: "fresh_application_bootstrap",
     });
     await createBootstrapSignupOfferPolicy(tx, user.id);
+    await activateAccountEntitlements({
+      userId: user.id,
+      source: "bootstrap",
+      actorId: user.id,
+      accountAccessVersion: user.accountAccessVersion,
+      evidenceKind: "setup",
+    }, tx);
     return createSessionInTransaction(tx, user);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

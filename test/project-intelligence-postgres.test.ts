@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import test from "node:test";
 import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
-import { issueVerifiedSignupGrant } from "../src/lib/ai-entitlements";
 import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
@@ -31,6 +30,7 @@ import {
 } from "../src/lib/web-project-intelligence";
 import { createControlledMembership } from "./membership-fixture";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
+import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
 
 const shouldRun = process.env.PROJECT_INTELLIGENCE_POSTGRES_GATE === "1";
 
@@ -157,7 +157,7 @@ test(
         startsAt: new Date(membershipNow.getTime() - 60_000),
         expiresAt: new Date(membershipNow.getTime() + 86_400_000),
       });
-      await issueVerifiedSignupGrant(user.id, { eligibilitySource: "verifiedGithub", issuedById: platformAdmin.id }, db);
+      await activateCanonicalSignupGrant(db, { userId: user.id, actorId: platformAdmin.id });
 
       await db.project.create({
         data: { id: projectId, workspaceId, name: `Intelligence ${suffix}`, slug: `intelligence-${suffix}` },

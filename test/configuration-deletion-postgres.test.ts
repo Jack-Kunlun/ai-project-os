@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import type { PrismaClient } from "@prisma/client";
 import {
   createProviderConnection,
   deleteProviderConnection,
@@ -14,24 +15,159 @@ import {
 import { getDb } from "../src/lib/db";
 import {
   createGitConnection,
-  deleteGitConnection,
+  executeGitConnectionMutation,
   getGitConnection,
   GitServiceError,
   listGitConnections,
-  testGitConnection,
-  updateGitConnection,
+  previewGitConnectionMutation,
 } from "../src/lib/git";
 import {
   createMcpConnection,
-  deleteMcpConnection,
-  discoverMcpConnectionTools,
+  executeMcpConnectionMutation,
   getMcpConnection,
   listMcpConnections,
   McpCapabilityError,
-  updateMcpConnection,
+  previewMcpConnectionMutation,
 } from "../src/lib/mcp";
 
 const shouldRun = process.env.CONFIGURATION_DELETION_POSTGRES_GATE === "1";
+
+type GovernanceActor = Readonly<{ id: string; accountAccessVersion?: number }>;
+type GitMutationAction = "rotateCredential" | "retrust" | "retest" | "disable" | "enable" | "delete";
+type McpMutationAction = "rotateCredential" | "retrust" | "rediscover" | "disable" | "enable" | "delete";
+
+function compactRequestKey(prefix: string, suffix: string, connectionId?: string): string {
+  const key = `${prefix}-${suffix}${connectionId === undefined ? "" : `-${connectionId.slice(0, 8)}`}`;
+  assert.ok(key.length < 40, `request key must stay below 40 characters: ${key}`);
+  return key;
+}
+
+async function expectDatabaseGuard(action: () => Promise<unknown>, phrase: string): Promise<void> {
+  await assert.rejects(action, (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes(phrase);
+  });
+}
+
+async function governGitMutation(
+  connectionId: string,
+  current: Readonly<{ name: string; updatedAt: Date }>,
+  action: GitMutationAction,
+  requestKey: string,
+  reason: string,
+  actor: GovernanceActor,
+  db: PrismaClient,
+  options: Readonly<{ secret?: string; confirmationName?: string }> = {},
+) {
+  const preview = await previewGitConnectionMutation(connectionId, {
+    action,
+    requestKey,
+    reason,
+    expectedUpdatedAt: current.updatedAt.toISOString(),
+    ...(options.secret === undefined ? {} : { secret: options.secret }),
+    ...(options.confirmationName === undefined ? {} : { confirmationName: options.confirmationName }),
+  }, actor, db);
+  const result = await executeGitConnectionMutation(connectionId, {
+    previewId: preview.id,
+    requestKey: preview.requestKey,
+    requestFingerprint: preview.requestFingerprint,
+    impactFingerprint: preview.impactFingerprint,
+    expectedUpdatedAt: preview.connection.updatedAt,
+    ...(options.secret === undefined ? {} : { secret: options.secret }),
+    ...(options.confirmationName === undefined ? {} : { confirmationName: options.confirmationName }),
+  }, actor, db);
+  return { preview, result };
+}
+
+async function governMcpMutation(
+  connectionId: string,
+  current: Readonly<{ name: string; updatedAt: Date }>,
+  action: McpMutationAction,
+  requestKey: string,
+  reason: string,
+  actor: GovernanceActor,
+  db: PrismaClient,
+  options: Readonly<{ secret?: string; confirmationName?: string }> = {},
+) {
+  const preview = await previewMcpConnectionMutation(connectionId, {
+    action,
+    requestKey,
+    reason,
+    expectedUpdatedAt: current.updatedAt.toISOString(),
+    ...(options.secret === undefined ? {} : { secret: options.secret }),
+    ...(options.confirmationName === undefined ? {} : { confirmationName: options.confirmationName }),
+  }, actor, db);
+  const result = await executeMcpConnectionMutation(connectionId, {
+    previewId: preview.id,
+    requestKey: preview.requestKey,
+    requestFingerprint: preview.requestFingerprint,
+    impactFingerprint: preview.impactFingerprint,
+    expectedUpdatedAt: preview.connection.updatedAt,
+    ...(options.secret === undefined ? {} : { secret: options.secret }),
+    ...(options.confirmationName === undefined ? {} : { confirmationName: options.confirmationName }),
+  }, actor, db);
+  return { preview, result };
+}
+
+async function cleanupGitConnection(connectionId: string, actor: GovernanceActor, suffix: string, db: PrismaClient): Promise<void> {
+  const existing = await db.gitConnection.findUnique({ where: { id: connectionId }, select: { id: true, status: true, name: true, updatedAt: true } });
+  if (existing === null) return;
+  await db.projectGitRepositoryLink.deleteMany({ where: { repository: { gitConnectionId: connectionId } } });
+  await db.gitRepository.deleteMany({ where: { gitConnectionId: connectionId } });
+  let current = await db.gitConnection.findUnique({ where: { id: connectionId }, select: { id: true, status: true, name: true, updatedAt: true } });
+  if (current === null) return;
+  if (current.status !== "disabled") {
+    await governGitMutation(connectionId, current, "disable", compactRequestKey("g-cln-x", suffix, connectionId), "test fixture cleanup", actor, db);
+    current = await db.gitConnection.findUnique({ where: { id: connectionId }, select: { id: true, status: true, name: true, updatedAt: true } });
+  }
+  if (current !== null) {
+    const deletion = await previewGitConnectionMutation(connectionId, {
+      action: "delete",
+      requestKey: compactRequestKey("g-cln-d", suffix, connectionId),
+      reason: "test fixture cleanup",
+      expectedUpdatedAt: current.updatedAt.toISOString(),
+      confirmationName: current.name,
+    }, actor, db);
+    if (deletion.canExecute) {
+      await executeGitConnectionMutation(connectionId, {
+        previewId: deletion.id,
+        requestKey: deletion.requestKey,
+        requestFingerprint: deletion.requestFingerprint,
+        impactFingerprint: deletion.impactFingerprint,
+        expectedUpdatedAt: deletion.connection.updatedAt,
+        confirmationName: current.name,
+      }, actor, db);
+    }
+  }
+}
+
+async function cleanupMcpConnection(connectionId: string, actor: GovernanceActor, suffix: string, db: PrismaClient): Promise<void> {
+  let current = await db.mcpConnection.findUnique({ where: { id: connectionId }, select: { id: true, status: true, name: true, updatedAt: true } });
+  if (current === null) return;
+  if (current.status !== "disabled") {
+    await governMcpMutation(connectionId, current, "disable", compactRequestKey("m-cln-x", suffix, connectionId), "test fixture cleanup", actor, db);
+    current = await db.mcpConnection.findUnique({ where: { id: connectionId }, select: { id: true, status: true, name: true, updatedAt: true } });
+  }
+  if (current !== null) {
+    const deletion = await previewMcpConnectionMutation(connectionId, {
+      action: "delete",
+      requestKey: compactRequestKey("m-cln-d", suffix, connectionId),
+      reason: "test fixture cleanup",
+      expectedUpdatedAt: current.updatedAt.toISOString(),
+      confirmationName: current.name,
+    }, actor, db);
+    if (deletion.canExecute) {
+      await executeMcpConnectionMutation(connectionId, {
+        previewId: deletion.id,
+        requestKey: deletion.requestKey,
+        requestFingerprint: deletion.requestFingerprint,
+        impactFingerprint: deletion.impactFingerprint,
+        expectedUpdatedAt: deletion.connection.updatedAt,
+        confirmationName: current.name,
+      }, actor, db);
+    }
+  }
+}
 
 test("unused model and Git connections can be permanently deleted while historical Git links stay protected", {
   skip: !shouldRun ? "CONFIGURATION_DELETION_POSTGRES_GATE=1 is required" : false,
@@ -44,6 +180,8 @@ test("unused model and Git connections can be permanently deleted while historic
   const projectId = randomUUID();
   const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-configuration-delete-"));
   const previousKeyFile = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+  const gitActor = { id: userId, accountAccessVersion: 1 };
+  const otherActor = { id: otherUserId, accountAccessVersion: 1 };
   process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
   let providerId: string | null = null;
   let providerCredentialId: string | null = null;
@@ -87,7 +225,7 @@ test("unused model and Git connections can be permanently deleted while historic
     providerId = null;
     providerCredentialId = null;
 
-    let gitConnection = await createGitConnection({
+    const createdGitConnection = await createGitConnection({
       name: `Disposable Git ${suffix}`,
       providerKind: "github",
       transport: "https",
@@ -96,73 +234,159 @@ test("unused model and Git connections can be permanently deleted while historic
       secret: `github-test-${suffix}`,
       allowPrivateNetwork: false,
     }, adminActor, db);
-    gitConnectionId = gitConnection.id;
-    gitCredentialId = (await db.gitConnection.findUniqueOrThrow({ where: { id: gitConnection.id }, select: { credentialId: true } })).credentialId;
-    const verifiedGit = await db.gitConnection.update({
-      where: { id: gitConnection.id },
-      data: { status: "verified", resolvedAddressFingerprint: "d".repeat(64), lastTestedAt: new Date(), lastErrorCode: null },
-    });
-    const usernameChangedGit = await updateGitConnection(gitConnection.id, {
-      username: `git-user-${suffix}`,
-      expectedUpdatedAt: verifiedGit.updatedAt.toISOString(),
-    }, adminActor, db);
-    const usernameChangedDetails = await db.gitConnection.findUniqueOrThrow({
-      where: { id: gitConnection.id },
-      select: { status: true, configurationVersion: true, resolvedAddressFingerprint: true },
-    });
-    assert.equal(usernameChangedGit.status, "configured");
-    assert.equal(usernameChangedDetails.status, "configured");
-    assert.equal(usernameChangedDetails.configurationVersion, verifiedGit.configurationVersion + 1);
-    assert.equal(usernameChangedDetails.resolvedAddressFingerprint, null);
-    gitConnection = usernameChangedGit;
-    const gitActor = { id: userId, accountAccessVersion: 1 };
-    const otherActor = { id: otherUserId, accountAccessVersion: 1 };
+    gitConnectionId = createdGitConnection.id;
+    gitCredentialId = (await db.gitConnection.findUniqueOrThrow({ where: { id: createdGitConnection.id }, select: { credentialId: true } })).credentialId;
+    let gitConnection = await db.gitConnection.findUniqueOrThrow({ where: { id: createdGitConnection.id } });
+    await expectDatabaseGuard(
+      () => db.gitConnection.update({ where: { id: gitConnection.id }, data: { username: `git-user-${suffix}` } }),
+      "security fields require governance context",
+    );
     assert.deepEqual(await listGitConnections(otherActor, db), []);
     await assert.rejects(
       () => getGitConnection(gitConnection.id, otherActor, db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_FOUND",
     );
     await assert.rejects(
-      () => updateGitConnection(gitConnection.id, { secret: `cross-owner-${suffix}`, expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, otherActor, db),
+      () => previewGitConnectionMutation(gitConnection.id, {
+        action: "rotateCredential",
+        requestKey: compactRequestKey("g-xo-r", suffix),
+        reason: "cross-owner mutation must be hidden",
+        expectedUpdatedAt: gitConnection.updatedAt.toISOString(),
+        secret: `cross-owner-${suffix}`,
+      }, otherActor, db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_FOUND",
     );
     await assert.rejects(
-      () => deleteGitConnection(gitConnection.id, { confirmationName: gitConnection.name, expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, otherActor, db),
+      () => previewGitConnectionMutation(gitConnection.id, {
+        action: "delete",
+        requestKey: compactRequestKey("g-xo-d", suffix),
+        reason: "cross-owner deletion must be hidden",
+        expectedUpdatedAt: gitConnection.updatedAt.toISOString(),
+        confirmationName: gitConnection.name,
+      }, otherActor, db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_FOUND",
     );
     await assert.rejects(
-      () => testGitConnection(gitConnection.id, { repositoryPath: "owner/private", trackedRef: "main", expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, otherActor, db),
-      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_FOUND",
+      () => db.gitConnection.delete({ where: { id: gitConnection.id } }),
+      (error: unknown) => error instanceof Error && error.message.includes("delete requires governance context"),
     );
-    await assert.rejects(
-      () => deleteGitConnection(gitConnection.id, { confirmationName: gitConnection.name, expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, gitActor, db),
-      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_DELETE_REQUIRES_DISABLED",
+    const connectionBeforeRotation = await db.gitConnection.findUniqueOrThrow({ where: { id: gitConnection.id } });
+    const credentialBeforeRotation = await db.externalCredential.findUniqueOrThrow({ where: { id: gitCredentialId! }, select: { secretFingerprint: true } });
+    const rotatedSecret = `github-rotated-${suffix}`;
+    const rotation = await governGitMutation(
+      gitConnection.id,
+      connectionBeforeRotation,
+      "rotateCredential",
+      compactRequestKey("g-rot", suffix),
+      "rotate Git credential through governed preview",
+      gitActor,
+      db,
+      { secret: rotatedSecret },
     );
-    const disabledGit = await updateGitConnection(gitConnection.id, { enabled: false, expectedUpdatedAt: gitConnection.updatedAt.toISOString() }, gitActor, db);
-    const disabledWithExplicitSecret = await updateGitConnection(gitConnection.id, { secret: `github-explicit-disabled-${suffix}`, enabled: false, expectedUpdatedAt: disabledGit.updatedAt.toISOString() }, gitActor, db);
-    assert.equal(disabledWithExplicitSecret.status, "disabled");
-    const disabledWithImplicitSecret = await updateGitConnection(gitConnection.id, { secret: `github-implicit-disabled-${suffix}`, expectedUpdatedAt: disabledWithExplicitSecret.updatedAt.toISOString() }, gitActor, db);
-    assert.equal(disabledWithImplicitSecret.status, "disabled");
-    assert.equal(disabledWithImplicitSecret.configurationVersion, disabledWithExplicitSecret.configurationVersion);
-    const renamedDisabled = await updateGitConnection(gitConnection.id, { name: `Renamed Git ${suffix}`, expectedUpdatedAt: disabledWithImplicitSecret.updatedAt.toISOString() }, gitActor, db);
-    assert.equal(renamedDisabled.status, "disabled");
-    assert.equal(renamedDisabled.configurationVersion, disabledWithImplicitSecret.configurationVersion);
-    const disabledNoOp = await updateGitConnection(gitConnection.id, { allowPrivateNetwork: false, expectedUpdatedAt: renamedDisabled.updatedAt.toISOString() }, gitActor, db);
-    assert.equal(disabledNoOp.configurationVersion, renamedDisabled.configurationVersion);
-    const disabledConfigurationChange = await updateGitConnection(gitConnection.id, { allowPrivateNetwork: true, expectedUpdatedAt: disabledNoOp.updatedAt.toISOString() }, gitActor, db);
-    assert.equal(disabledConfigurationChange.configurationVersion, disabledNoOp.configurationVersion + 1);
-    const reenabledGit = await updateGitConnection(gitConnection.id, { enabled: true, expectedUpdatedAt: disabledConfigurationChange.updatedAt.toISOString() }, gitActor, db);
-    assert.equal(reenabledGit.status, "configured");
-    const disabledForConfirmation = await updateGitConnection(gitConnection.id, { enabled: false, expectedUpdatedAt: reenabledGit.updatedAt.toISOString() }, gitActor, db);
+    assert.equal(rotation.preview.canExecute, true);
+    assert.equal(rotation.result.status, "completed");
+    gitConnection = await db.gitConnection.findUniqueOrThrow({ where: { id: gitConnection.id } });
+    assert.equal(gitConnection.status, "configured");
+    assert.equal(gitConnection.configurationVersion, connectionBeforeRotation.configurationVersion + 1);
+    assert.equal(gitConnection.resolvedAddressFingerprint, null);
+    assert.equal(gitConnection.lastTestedAt, null);
+    const credentialAfterRotation = await db.externalCredential.findUniqueOrThrow({ where: { id: gitCredentialId! }, select: { secretFingerprint: true } });
+    assert.notEqual(credentialAfterRotation.secretFingerprint, credentialBeforeRotation.secretFingerprint);
+
+    const blockedDeletePreview = await previewGitConnectionMutation(gitConnection.id, {
+      action: "delete",
+      requestKey: compactRequestKey("g-pre-d", suffix),
+      reason: "preview delete must require disabled state",
+      expectedUpdatedAt: gitConnection.updatedAt.toISOString(),
+      confirmationName: gitConnection.name,
+    }, gitActor, db);
+    assert.equal(blockedDeletePreview.canExecute, false);
+    assert.equal(blockedDeletePreview.blockers.includes("connection_must_be_disabled"), true);
+
+    const disable = await governGitMutation(
+      gitConnection.id,
+      gitConnection,
+      "disable",
+      compactRequestKey("g-dis", suffix),
+      "disable Git connection through governed preview",
+      gitActor,
+      db,
+    );
+    assert.equal(disable.preview.canExecute, true);
+    assert.equal(disable.result.status, "completed");
+    const disabledGit = await db.gitConnection.findUniqueOrThrow({ where: { id: gitConnection.id } });
+    assert.equal(disabledGit.status, "disabled");
+    assert.equal(disabledGit.configurationVersion, gitConnection.configurationVersion + 1);
+    assert.ok(disabledGit.disabledAt);
+
+    const enable = await governGitMutation(
+      gitConnection.id,
+      disabledGit,
+      "enable",
+      compactRequestKey("g-en", suffix),
+      "enable Git connection through governed preview",
+      gitActor,
+      db,
+    );
+    assert.equal(enable.preview.canExecute, true);
+    assert.equal(enable.result.status, "completed");
+    gitConnection = await db.gitConnection.findUniqueOrThrow({ where: { id: gitConnection.id } });
+    assert.equal(gitConnection.status, "configured");
+
+    const stalePreview = previewGitConnectionMutation(gitConnection.id, {
+      action: "disable",
+      requestKey: compactRequestKey("g-stale", suffix),
+      reason: "stale CAS must fail",
+      expectedUpdatedAt: new Date(0).toISOString(),
+    }, gitActor, db);
     await assert.rejects(
-      () => deleteGitConnection(gitConnection.id, { confirmationName: disabledForConfirmation.name, expectedUpdatedAt: new Date(0).toISOString() }, gitActor, db),
+      () => stalePreview,
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_CONFLICT",
     );
-    await assert.rejects(
-      () => deleteGitConnection(gitConnection.id, { confirmationName: "wrong name", expectedUpdatedAt: disabledForConfirmation.updatedAt.toISOString() }, gitActor, db),
-      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_CONFIRMATION_MISMATCH",
+
+    const disabledForConfirmationResult = await governGitMutation(
+      gitConnection.id,
+      gitConnection,
+      "disable",
+      compactRequestKey("g-dis-confirm", suffix),
+      "disable before deletion confirmation",
+      gitActor,
+      db,
     );
-    await deleteGitConnection(gitConnection.id, { confirmationName: disabledForConfirmation.name, expectedUpdatedAt: disabledForConfirmation.updatedAt.toISOString() }, gitActor, db);
+    assert.equal(disabledForConfirmationResult.result.status, "completed");
+    const disabledForConfirmation = await db.gitConnection.findUniqueOrThrow({ where: { id: gitConnection.id } });
+    const wrongDeletePreview = await previewGitConnectionMutation(gitConnection.id, {
+      action: "delete",
+      requestKey: compactRequestKey("g-wrong", suffix),
+      reason: "wrong confirmation must remain blocked",
+      expectedUpdatedAt: disabledForConfirmation.updatedAt.toISOString(),
+      confirmationName: "wrong name",
+    }, gitActor, db);
+    assert.equal(wrongDeletePreview.canExecute, false);
+    assert.equal(wrongDeletePreview.blockers.includes("confirmation_name_mismatch"), true);
+    await assert.rejects(
+      () => executeGitConnectionMutation(gitConnection.id, {
+        previewId: wrongDeletePreview.id,
+        requestKey: wrongDeletePreview.requestKey,
+        requestFingerprint: wrongDeletePreview.requestFingerprint,
+        impactFingerprint: wrongDeletePreview.impactFingerprint,
+        expectedUpdatedAt: wrongDeletePreview.connection.updatedAt,
+        confirmationName: "wrong name",
+      }, gitActor, db),
+      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_IN_USE",
+    );
+    const deletion = await governGitMutation(
+      gitConnection.id,
+      disabledForConfirmation,
+      "delete",
+      compactRequestKey("g-del", suffix),
+      "delete unused Git connection through governed preview",
+      gitActor,
+      db,
+      { confirmationName: disabledForConfirmation.name },
+    );
+    assert.equal(deletion.preview.canExecute, true);
+    assert.equal(deletion.result.status, "completed");
     assert.equal(await db.gitConnection.count({ where: { id: gitConnection.id } }), 0);
     assert.equal(await db.externalCredential.count({ where: { id: gitCredentialId! } }), 0);
     gitConnectionId = null;
@@ -187,7 +411,7 @@ test("unused model and Git connections can be permanently deleted while historic
         defaultBranch: "main",
       },
     });
-    const link = await db.projectGitRepositoryLink.create({
+    await db.projectGitRepositoryLink.create({
       data: {
         projectId,
         gitRepositoryId: repository.id,
@@ -196,13 +420,35 @@ test("unused model and Git connections can be permanently deleted while historic
         createdById: userId,
       },
     });
-    await db.projectGitRepositoryLink.update({
-      where: { id: link.id },
-      data: { status: "disabled", disabledAt: new Date() },
-    });
-    const disabledHistorical = await updateGitConnection(historicalConnection.id, { enabled: false, expectedUpdatedAt: historicalConnection.updatedAt.toISOString() }, gitActor, db);
+    const disabledHistoricalResult = await governGitMutation(
+      historicalConnection.id,
+      historicalConnection,
+      "disable",
+      compactRequestKey("g-hist-dis", suffix),
+      "disable Git connection with legacy project reference",
+      gitActor,
+      db,
+    );
+    assert.equal(disabledHistoricalResult.result.status, "completed");
+    const disabledHistorical = await db.gitConnection.findUniqueOrThrow({ where: { id: historicalConnection.id } });
+    const historicalDeletePreview = await previewGitConnectionMutation(historicalConnection.id, {
+      action: "delete",
+      requestKey: compactRequestKey("g-hist-del", suffix),
+      reason: "legacy project reference must be retained",
+      expectedUpdatedAt: disabledHistorical.updatedAt.toISOString(),
+      confirmationName: historicalConnection.name,
+    }, gitActor, db);
+    assert.equal(historicalDeletePreview.canExecute, false);
+    assert.equal(historicalDeletePreview.blockers.includes("legacy_project_link"), true);
     await assert.rejects(
-      () => deleteGitConnection(historicalConnection.id, { confirmationName: historicalConnection.name, expectedUpdatedAt: disabledHistorical.updatedAt.toISOString() }, gitActor, db),
+      () => executeGitConnectionMutation(historicalConnection.id, {
+        previewId: historicalDeletePreview.id,
+        requestKey: historicalDeletePreview.requestKey,
+        requestFingerprint: historicalDeletePreview.requestFingerprint,
+        impactFingerprint: historicalDeletePreview.impactFingerprint,
+        expectedUpdatedAt: historicalDeletePreview.connection.updatedAt,
+        confirmationName: historicalConnection.name,
+      }, gitActor, db),
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_IN_USE",
     );
 
@@ -221,29 +467,120 @@ test("unused model and Git connections can be permanently deleted while historic
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_FOUND",
     );
     await assert.rejects(
-      () => updateMcpConnection(mcpConnection.id, { bearerToken: `cross-owner-${suffix}`, expectedUpdatedAt: mcpConnection.updatedAt.toISOString() }, otherActor, db),
+      () => previewMcpConnectionMutation(mcpConnection.id, {
+        action: "rotateCredential",
+        requestKey: compactRequestKey("m-xo-r", suffix),
+        reason: "cross-owner mutation must be hidden",
+        expectedUpdatedAt: mcpConnection.updatedAt.toISOString(),
+        secret: `cross-owner-${suffix}`,
+      }, otherActor, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_FOUND",
     );
     await assert.rejects(
-      () => deleteMcpConnection(mcpConnection.id, { confirmationName: mcpConnection.name, expectedUpdatedAt: mcpConnection.updatedAt.toISOString() }, otherActor, db),
+      () => previewMcpConnectionMutation(mcpConnection.id, {
+        action: "delete",
+        requestKey: compactRequestKey("m-xo-d", suffix),
+        reason: "cross-owner deletion must be hidden",
+        expectedUpdatedAt: mcpConnection.updatedAt.toISOString(),
+        confirmationName: mcpConnection.name,
+      }, otherActor, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_FOUND",
     );
     await assert.rejects(
-      () => discoverMcpConnectionTools(mcpConnection.id, { expectedUpdatedAt: mcpConnection.updatedAt.toISOString() }, otherActor, db),
+      () => db.mcpConnection.update({ where: { id: mcpConnection.id }, data: { endpointUrl: "https://cross-owner.example.test/mcp" } }),
+      (error: unknown) => error instanceof Error && error.message.includes("security fields require governance context"),
+    );
+    await assert.rejects(
+      () => db.mcpConnection.delete({ where: { id: mcpConnection.id } }),
+      (error: unknown) => error instanceof Error && error.message.includes("delete requires governance context"),
+    );
+    const mcpBeforeRotation = await db.mcpConnection.findUniqueOrThrow({ where: { id: mcpConnection.id } });
+    const rotatedToken = `mcp-rotated-token-${suffix}`;
+    const mcpRotation = await governMcpMutation(
+      mcpConnection.id,
+      mcpBeforeRotation,
+      "rotateCredential",
+      compactRequestKey("m-rot", suffix),
+      "rotate MCP credential through governed preview",
+      gitActor,
+      db,
+      { secret: rotatedToken },
+    );
+    assert.equal(mcpRotation.preview.canExecute, true);
+    assert.equal(mcpRotation.result.status, "completed");
+    let currentMcp = await db.mcpConnection.findUniqueOrThrow({ where: { id: mcpConnection.id } });
+    assert.equal(currentMcp.status, "configured");
+    assert.equal(currentMcp.configurationRevision, mcpBeforeRotation.configurationRevision + 1);
+    assert.equal(currentMcp.protocolVersion, null);
+    assert.equal(currentMcp.catalogFingerprint, null);
+    assert.equal(currentMcp.lastDiscoveredAt, null);
+
+    const mcpDisable = await governMcpMutation(
+      mcpConnection.id,
+      currentMcp,
+      "disable",
+      compactRequestKey("m-dis", suffix),
+      "disable MCP connection through governed preview",
+      gitActor,
+      db,
+    );
+    assert.equal(mcpDisable.preview.canExecute, true);
+    assert.equal(mcpDisable.result.status, "completed");
+    currentMcp = await db.mcpConnection.findUniqueOrThrow({ where: { id: mcpConnection.id } });
+    assert.equal(currentMcp.status, "disabled");
+    assert.equal(currentMcp.configurationRevision, mcpBeforeRotation.configurationRevision + 2);
+
+    const disabledRediscoverPreview = await previewMcpConnectionMutation(mcpConnection.id, {
+      action: "rediscover",
+      requestKey: compactRequestKey("m-dis-redisc", suffix),
+      reason: "rediscovery remains held while disabled",
+      expectedUpdatedAt: currentMcp.updatedAt.toISOString(),
+    }, gitActor, db);
+    assert.equal(disabledRediscoverPreview.canExecute, false);
+    assert.equal(disabledRediscoverPreview.blockers.includes("connection_disabled"), true);
+    assert.equal(disabledRediscoverPreview.blockers.includes("external_io_planned_not_dispatched"), true);
+
+    const mcpEnable = await governMcpMutation(
+      mcpConnection.id,
+      currentMcp,
+      "enable",
+      compactRequestKey("m-en", suffix),
+      "enable MCP connection through governed preview",
+      gitActor,
+      db,
+    );
+    assert.equal(mcpEnable.preview.canExecute, true);
+    assert.equal(mcpEnable.result.status, "completed");
+    currentMcp = await db.mcpConnection.findUniqueOrThrow({ where: { id: mcpConnection.id } });
+    assert.equal(currentMcp.status, "configured");
+    const rediscoverPreview = await previewMcpConnectionMutation(mcpConnection.id, {
+      action: "rediscover",
+      requestKey: compactRequestKey("m-redisc", suffix),
+      reason: "rediscovery must remain fail-closed until external dispatch is implemented",
+      expectedUpdatedAt: currentMcp.updatedAt.toISOString(),
+    }, gitActor, db);
+    assert.equal(rediscoverPreview.canExecute, false);
+    assert.equal(rediscoverPreview.blockers.includes("external_io_planned_not_dispatched"), true);
+    await assert.rejects(
+      () => previewMcpConnectionMutation(mcpConnection.id, {
+        action: "rediscover",
+        requestKey: compactRequestKey("m-xo-redisc", suffix),
+        reason: "cross-owner discovery must be hidden",
+        expectedUpdatedAt: currentMcp.updatedAt.toISOString(),
+      }, otherActor, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_FOUND",
     );
   } finally {
     await db.project.deleteMany({ where: { id: projectId } });
     if (providerId !== null) await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
-    if (gitConnectionId !== null) await db.gitConnection.deleteMany({ where: { id: gitConnectionId } });
     if (historicalConnectionId !== null) {
-      await db.gitRepository.deleteMany({ where: { gitConnectionId: historicalConnectionId } });
-      await db.gitConnection.deleteMany({ where: { id: historicalConnectionId } });
+      await cleanupGitConnection(historicalConnectionId, gitActor, suffix, db);
     }
-    if (mcpConnectionId !== null) await db.mcpConnection.deleteMany({ where: { id: mcpConnectionId } });
+    if (gitConnectionId !== null) await cleanupGitConnection(gitConnectionId, gitActor, suffix, db);
+    if (mcpConnectionId !== null) await cleanupMcpConnection(mcpConnectionId, gitActor, suffix, db);
     const credentialIds = [providerCredentialId, gitCredentialId, historicalCredentialId, mcpCredentialId].filter((id): id is string => id !== null);
     if (credentialIds.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: credentialIds } } });
-    await db.appUser.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
+    // Immutable governance previews/audits retain actor FKs; the disposable gate runner drops this database.
     if (previousKeyFile === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyFile;
     await rm(keyDirectory, { recursive: true, force: true });

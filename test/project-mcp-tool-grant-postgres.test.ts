@@ -4,7 +4,18 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { getDb } from "../src/lib/db";
-import { buildMcpActionSnapshot, createMcpControlPlaneAttestation, executeMcpActionSnapshot, getProjectMcpToolCenter, grantProjectMcpTool, McpCapabilityError, revokeProjectMcpToolGrant } from "../src/lib/mcp";
+import {
+  buildMcpActionSnapshot,
+  createMcpControlPlaneAttestation,
+  createMcpToolReview,
+  executeMcpActionSnapshot,
+  executeMcpConnectionMutation,
+  getProjectMcpToolCenter,
+  grantProjectMcpTool,
+  McpCapabilityError,
+  previewMcpConnectionMutation,
+  revokeProjectMcpToolGrant,
+} from "../src/lib/mcp";
 import {
   confirmProjectMcpConnectionDelegationOwner,
   confirmProjectMcpConnectionDelegationProject,
@@ -18,7 +29,7 @@ import {
   revokeProjectMcpToolGrantV2,
 } from "../src/lib/project-mcp-tool-grant-service";
 import { deleteArchivedProject } from "../src/lib/project-lifecycle";
-import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
+import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.PROJECT_MCP_TOOL_GRANT_POSTGRES_GATE === "1";
 const NO_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
@@ -45,6 +56,7 @@ test(
     const connectionId = randomUUID();
     const definitionId = randomUUID();
     const definition2Id = randomUUID();
+    const definition3Id = randomUUID();
     const fingerprint = "a".repeat(64);
     const fingerprint2 = "d".repeat(64);
     const networkFingerprint = "b".repeat(64);
@@ -117,16 +129,32 @@ test(
         inputSchema: { type: "object" }, outputSchema: { type: "object" }, annotations: { readOnlyHint: true },
         remoteReadOnlyHint: true, definitionFingerprint: fingerprint2, current: true,
       } });
-      const attestation = await createMcpControlPlaneAttestation(actor, {
-        toolDefinitionId: definitionId, expectedConnectionConfigurationRevision: 1, expectedDefinitionFingerprint: fingerprint,
-        expectedNetworkFingerprint: networkFingerprint, expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
-        conclusion: "read_only_verified", riskLevel: "low", evidenceNote: "manual_read_only_review",
-      }, db);
-      const attestation2 = await createMcpControlPlaneAttestation(actor, {
-        toolDefinitionId: definition2Id, expectedConnectionConfigurationRevision: 1, expectedDefinitionFingerprint: fingerprint2,
-        expectedNetworkFingerprint: networkFingerprint, expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
-        conclusion: "read_only_verified", riskLevel: "low", evidenceNote: "manual_read_only_review",
-      }, db);
+      await db.mcpToolDefinition.create({ data: {
+        id: definition3Id, connectionId, name: "project.lookup.unreviewed", title: "Unreviewed lookup", description: "Legacy unreviewed lookup",
+        inputSchema: { type: "object" }, outputSchema: { type: "object" }, annotations: { readOnlyHint: true },
+        remoteReadOnlyHint: true, definitionFingerprint: "e".repeat(64), current: true,
+      } });
+      const reviewInput = async (toolDefinitionId: string, definitionFingerprint: string, requestKey: string) => {
+        const connection = await db.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { updatedAt: true } });
+        const result = await createMcpToolReview(actor, {
+          connectionId,
+          toolDefinitionId,
+          expectedConnectionConfigurationRevision: 1,
+          expectedConnectionUpdatedAt: connection.updatedAt.toISOString(),
+          expectedDefinitionFingerprint: definitionFingerprint,
+          expectedNetworkFingerprint: networkFingerprint,
+          expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
+          conclusion: "read_only_verified",
+          riskLevel: "low",
+          riskReasonCode: "read_only_eligible",
+          evidenceNote: "只读声明已审阅",
+          requestKey,
+        }, db);
+        if (result.review.attestationId === null) throw new Error("MCP_GRANT_GATE_REVIEW_ATTESTATION_MISSING");
+        return { id: result.review.attestationId };
+      };
+      const attestation = await reviewInput(definitionId, fingerprint, `mcpgrant-review-${suffix}`);
+      const attestation2 = await reviewInput(definition2Id, fingerprint2, `mcpgrant-review2-${suffix}`);
       const draft = await proposeProjectMcpConnectionDelegation(projectId, { mcpConnectionId: connectionId, expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString() }, actor, db);
       if (!("id" in draft)) throw new Error("MCP_GRANT_GATE_DELEGATION_CREATE_FAILED");
       await confirmProjectMcpConnectionDelegationOwner(projectId, draft.id, { expectedVersion: 1, acknowledgeCredentialUse: true }, actor, db);
@@ -135,6 +163,15 @@ test(
       const delegation = await db.projectMcpConnectionDelegation.findUniqueOrThrow({ where: { id: activeDelegation.id }, select: { id: true, version: true } });
       const createInput = { delegationId: delegation.id, toolDefinitionId: definitionId, attestationId: attestation.id, expectedDelegationVersion: delegation.version, expectedAttestationVersion: 1 as const, acknowledgeReadOnly: true as const };
       const concurrentInput = { ...createInput, toolDefinitionId: definition2Id, attestationId: attestation2.id };
+      const unreviewedAttestation = await createMcpControlPlaneAttestation(actor, {
+        toolDefinitionId: definition3Id, expectedConnectionConfigurationRevision: 1, expectedDefinitionFingerprint: "e".repeat(64),
+        expectedNetworkFingerprint: networkFingerprint, expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
+        conclusion: "read_only_verified", riskLevel: "low", evidenceNote: "manual_read_only_review",
+      }, db);
+      await assert.rejects(
+        () => createProjectMcpToolGrantV2(projectId, { ...createInput, toolDefinitionId: definition3Id, attestationId: unreviewedAttestation.id }, actor, db),
+        (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_STALE",
+      );
 
       await assert.rejects(() => createProjectMcpToolGrantV2(projectId, { ...createInput, extra: true }, actor, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_INVALID_INPUT");
       await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, { id: editorId, role: "user", accountAccessVersion: 1 }, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_OWNER_REQUIRED");
@@ -175,6 +212,27 @@ test(
       const first = await createProjectMcpToolGrantV2(projectId, createInput, actor, db);
       assert.equal(first.created, true);
       const firstId = first.grant.id as string;
+      const beforeRepeatReview = await db.mcpToolAttestation.findUniqueOrThrow({ where: { id: attestation.id }, select: { status: true, version: true } });
+      const repeatConnection = await db.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { updatedAt: true } });
+      await assert.rejects(
+        () => createMcpToolReview(actor, {
+          connectionId,
+          toolDefinitionId: definitionId,
+          expectedConnectionConfigurationRevision: 1,
+          expectedConnectionUpdatedAt: repeatConnection.updatedAt.toISOString(),
+          expectedDefinitionFingerprint: fingerprint,
+          expectedNetworkFingerprint: networkFingerprint,
+          expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
+          conclusion: "read_only_verified",
+          riskLevel: "low",
+          riskReasonCode: "read_only_eligible",
+          evidenceNote: "重复审核应保持旧授权",
+          requestKey: `mcpgrant-repeat-${suffix}`,
+        }, db),
+        (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_TOOL_REVIEW_ATTESTATION_CONFLICT",
+      );
+      const afterRepeatReview = await db.mcpToolAttestation.findUniqueOrThrow({ where: { id: attestation.id }, select: { status: true, version: true } });
+      assert.deepEqual(afterRepeatReview, beforeRepeatReview);
       const firstCounts = await db.$queryRaw<Array<{ audits: bigint; ledgers: bigint }>>`
         SELECT
           (SELECT COUNT(*) FROM "ProjectMcpToolGrantAudit" WHERE "grantId" = ${firstId}::uuid) AS audits,
@@ -231,18 +289,81 @@ test(
       const secondId = second.grant.id as string;
       const concurrentGrant = await db.projectMcpToolGrant.findFirstOrThrow({ where: { projectId, toolDefinitionId: definition2Id, status: "active" }, select: { id: true } });
       await revokeProjectMcpToolGrantV2(projectId, concurrentGrant.id, { expectedGrantVersion: 1 }, actor, db);
+      const disabledOwner = await db.appUser.findUniqueOrThrow({ where: { id: disabledOwnerId }, select: { accountAccessVersion: true } });
+      const restorePreview = await previewAccountAccess({
+        adminUserId: adminId,
+        adminAccountAccessVersion: 1,
+        userId: disabledOwnerId,
+        action: "restore",
+        reason: "MCP grant gate membership drift fixture",
+        expectedVersion: disabledOwner.accountAccessVersion,
+      }, db);
+      assert.equal(restorePreview.canExecute, true);
+      await executeAccountAccess({
+        adminUserId: adminId,
+        adminAccountAccessVersion: 1,
+        userId: disabledOwnerId,
+        action: "restore",
+        reason: "MCP grant gate membership drift fixture",
+        expectedVersion: restorePreview.current.accountAccessVersion,
+        expectedImpactFingerprint: restorePreview.impactFingerprint,
+        requestKey: `mcp-grant-restore-${suffix}`,
+        requestFingerprint: restorePreview.requestFingerprint,
+        previewId: restorePreview.previewId,
+        previewIssuedAt: restorePreview.previewIssuedAt,
+        previewExpiresAt: restorePreview.previewExpiresAt,
+        confirmation: true,
+        confirmationUsername: restorePreview.user.username,
+      }, db);
+      await db.$transaction(async (tx) => {
+        await revokeProjectMembership(tx, projectId, adminId, workspaceId, { actorId: disabledOwnerId, reason: "MCP grant gate membership drift fixture" });
+      });
+      const restoredOwner = await db.appUser.findUniqueOrThrow({ where: { id: disabledOwnerId }, select: { accountAccessVersion: true } });
+      const restoredOwnerActor = { id: disabledOwnerId, role: "user", accountAccessVersion: restoredOwner.accountAccessVersion } as const;
+      const driftedGrantList = await listProjectMcpToolGrantsV2(projectId, restoredOwnerActor, db);
+      const driftedGrant = driftedGrantList.grants.find((grant) => grant.id === secondId) as { effective?: boolean; effectiveReason?: string } | undefined;
+      assert.equal(driftedGrant?.effective, false);
+      assert.equal(driftedGrant?.effectiveReason, "owner_membership_drift");
+      await db.$transaction(async (tx) => {
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: adminId, role: "owner", actorId: disabledOwnerId, reason: "MCP grant gate membership drift recovery" });
+      });
       const archived = await db.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
       const archivedList = await listProjectMcpToolGrantsV2(projectId, actor, db);
       assert.equal(archivedList.archived, true);
       assert.deepEqual(archivedList.candidates, []);
       await assert.rejects(() => createProjectMcpToolGrantV2(projectId, createInput, actor, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_TOOL_GRANT_PROJECT_ARCHIVED");
-      await db.mcpConnection.update({ where: { id: connectionId }, data: { status: "configured" } });
+      const blockedDisableConnection = await db.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { updatedAt: true } });
+      const blockedDisablePreview = await previewMcpConnectionMutation(connectionId, {
+        action: "disable",
+        requestKey: `mcpgrant-block-${suffix}`,
+        reason: "active grant and delegation block connection disable",
+        expectedUpdatedAt: blockedDisableConnection.updatedAt.toISOString(),
+      }, actor, db);
+      assert.equal(blockedDisablePreview.canExecute, false);
+      assert.ok(blockedDisablePreview.blockers.includes("active_tool_grant"));
+      assert.ok(blockedDisablePreview.blockers.includes("live_delegation"));
       const archivedRevoke = await revokeProjectMcpToolGrantV2(projectId, secondId, { expectedGrantVersion: 1 }, actor, db);
       assert.equal(archivedRevoke.created, true);
-      await db.mcpConnection.update({ where: { id: connectionId }, data: { status: "verified" } });
       const terminalDelegation = await revokeProjectMcpConnectionDelegation(projectId, delegation.id, { expectedVersion: delegation.version, reason: "grant cleanup" }, actor, db);
       assert.ok("recordStatus" in terminalDelegation);
       assert.equal(terminalDelegation.recordStatus, "revoked");
+      const disableConnection = await db.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { updatedAt: true } });
+      const disablePreview = await previewMcpConnectionMutation(connectionId, {
+        action: "disable",
+        requestKey: `mcpgrant-off-${suffix}`,
+        reason: "retire grant gate connection after project cleanup",
+        expectedUpdatedAt: disableConnection.updatedAt.toISOString(),
+      }, actor, db);
+      assert.equal(disablePreview.canExecute, true);
+      const disabled = await executeMcpConnectionMutation(connectionId, {
+        previewId: disablePreview.id,
+        requestKey: disablePreview.requestKey,
+        requestFingerprint: disablePreview.requestFingerprint,
+        impactFingerprint: disablePreview.impactFingerprint,
+        expectedUpdatedAt: disablePreview.connection.updatedAt,
+      }, actor, db);
+      assert.equal(disabled.status, "completed");
+      assert.equal((await db.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { status: true } })).status, "disabled");
       const deleted = await deleteArchivedProject({ projectId, actor, confirmationName: project.name, expectedUpdatedAt: archived.updatedAt }, db);
       assert.equal(deleted.projectId, projectId);
       const retained = await db.projectMcpToolGrantLedger.count({ where: { projectId } });

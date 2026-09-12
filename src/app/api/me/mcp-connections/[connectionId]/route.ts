@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
-import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { deleteMcpConnection, getMcpConnection, updateMcpConnection } from "@/lib/mcp";
+import { handleApiError } from "@/lib/api-response";
+import { getMcpConnection, McpCapabilityError } from "@/lib/mcp";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
@@ -22,12 +22,9 @@ export async function GET(request: Request, context: { params: Promise<{ connect
 export async function PATCH(request: Request, context: { params: Promise<{ connectionId: string }> }) {
   try {
     assertSameOrigin(request);
-    const actor = await requireApiSession(request);
-    const connectionId = idSchema.parse((await context.params).connectionId);
-    return NextResponse.json(
-      { connection: await updateMcpConnection(connectionId, await readJsonBody(request), actor) },
-      { headers: noStore },
-    );
+    await requireApiSession(request);
+    idSchema.parse((await context.params).connectionId);
+    throw new McpCapabilityError("MCP_CONNECTION_GOVERNANCE_REQUIRED");
   } catch (error) {
     return handleApiError(error);
   }
@@ -36,12 +33,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ conne
 export async function DELETE(request: Request, context: { params: Promise<{ connectionId: string }> }) {
   try {
     assertSameOrigin(request);
-    const actor = await requireApiSession(request);
-    const connectionId = idSchema.parse((await context.params).connectionId);
-    return NextResponse.json(
-      { deleted: await deleteMcpConnection(connectionId, await readJsonBody(request), actor) },
-      { headers: noStore },
-    );
+    await requireApiSession(request);
+    idSchema.parse((await context.params).connectionId);
+    throw new McpCapabilityError("MCP_CONNECTION_GOVERNANCE_REQUIRED");
   } catch (error) {
     return handleApiError(error);
   }

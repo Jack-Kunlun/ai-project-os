@@ -4,6 +4,7 @@ import { z } from "zod";
 import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import { getDb } from "@/lib/db";
 import { McpCapabilityError, failMcp } from "@/lib/mcp/errors";
+import { hasApprovedMcpToolReview } from "@/lib/mcp-tool-review-service";
 
 const UUID = z.string().uuid();
 const FINGERPRINT = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -44,6 +45,7 @@ type ConnectionSnapshot = Readonly<{
   credentialFingerprint: string;
   ownerAccountAccessVersion: number | null;
   configurationRevision: number;
+  updatedAt: Date;
   resolvedAddressFingerprint: string | null;
   status: "configured" | "verified" | "error" | "disabled";
   disabledAt: Date | null;
@@ -448,7 +450,7 @@ function assertExpectedSnapshot(definition: DefinitionSnapshot, input: z.infer<t
 
 type ProjectedAttestation = Readonly<Record<string, unknown> & { id: string }>;
 
-function projectAttestation(row: AttestationSnapshot, assessment?: ActiveAssessment): ProjectedAttestation {
+function projectAttestation(row: AttestationSnapshot, assessment?: ActiveAssessment, reviewStatus?: "approved"): ProjectedAttestation {
   return Object.freeze({
     id: row.id,
     status: row.status,
@@ -465,6 +467,7 @@ function projectAttestation(row: AttestationSnapshot, assessment?: ActiveAssessm
       effectiveReason: assessment.reason,
       requiresRevocation: !assessment.effective,
     }),
+    ...(reviewStatus === undefined ? {} : { reviewStatus }),
     connection: { id: row.connection.id, name: safeText(row.connection.name) },
     tool: {
       id: row.toolDefinition.id,
@@ -479,6 +482,7 @@ function projectAttestation(row: AttestationSnapshot, assessment?: ActiveAssessm
     },
     snapshots: {
       connectionConfigurationRevision: row.connectionConfigurationRevision,
+      connectionUpdatedAt: row.connection.updatedAt.toISOString(),
       connectionOwnerAccountAccessVersion: row.connectionOwnerAccountAccessVersion,
       definitionFingerprint: row.definitionFingerprint,
       networkFingerprint: row.networkFingerprint,
@@ -510,6 +514,7 @@ async function loadDefinition(tx: Tx, toolDefinitionId: string): Promise<Definit
           credentialId: true,
           credentialFingerprint: true,
           configurationRevision: true,
+          updatedAt: true,
           resolvedAddressFingerprint: true,
           status: true,
           disabledAt: true,
@@ -560,6 +565,7 @@ async function loadAttestation(tx: Tx, attestationId: string): Promise<Attestati
           credentialId: true,
           credentialFingerprint: true,
           configurationRevision: true,
+          updatedAt: true,
           resolvedAddressFingerprint: true,
           status: true,
           disabledAt: true,
@@ -636,25 +642,25 @@ export async function listMcpControlPlaneAttestationCandidates(
     const start = (parsed.data.page - 1) * parsed.data.pageSize;
     if (parsed.data.state === "active") {
       const where = { controlPlaneVersion: 2, status: "active" } as const;
-      const [total, activeIds] = await Promise.all([
-        tx.mcpToolAttestation.count({ where }),
-        tx.mcpToolAttestation.findMany({
-          where,
-          skip: start,
-          take: parsed.data.pageSize,
-          orderBy: [{ connectionId: "asc" }, { toolName: "asc" }, { id: "asc" }],
-          select: { id: true },
-        }),
-      ]);
-      const activeAttestations = (await Promise.all(activeIds.map((row) => loadAttestation(tx, row.id)))).filter(
+      const activeIds = await tx.mcpToolAttestation.findMany({
+        where,
+        orderBy: [{ connectionId: "asc" }, { toolName: "asc" }, { id: "asc" }],
+        select: { id: true },
+      });
+      const activeAttestations = (await Promise.all(activeIds.map(async (row) => {
+        const attestation = await loadAttestation(tx, row.id);
+        if (attestation === null || !(await hasApprovedMcpToolReview(tx, attestation))) return null;
+        return attestation;
+      }))).filter(
         (row): row is AttestationSnapshot => row !== null,
       );
+      const pageAttestations = activeAttestations.slice(start, start + parsed.data.pageSize);
       return Object.freeze({
         state: parsed.data.state,
         page: parsed.data.page,
         pageSize: parsed.data.pageSize,
-        total,
-        candidates: activeAttestations.map((row) => projectAttestation(row, assessActiveAttestation(row, definitionFromAttestation(row)))),
+        total: activeAttestations.length,
+        candidates: pageAttestations.map((row) => projectAttestation(row, assessActiveAttestation(row, definitionFromAttestation(row)), "approved")),
       });
     }
 
@@ -687,6 +693,7 @@ export async function listMcpControlPlaneAttestationCandidates(
               credentialId: true,
               credentialFingerprint: true,
               configurationRevision: true,
+              updatedAt: true,
               resolvedAddressFingerprint: true,
               status: true,
               disabledAt: true,
@@ -750,12 +757,18 @@ export async function listMcpControlPlaneAttestationCandidates(
       const activeByKey = new Map(activeRows.map((row) => [activeTupleKey(row), row]));
       for (const { definition, tuple } of prepared) {
         const active = activeByKey.get(activeTupleKey(tuple));
-        const assessment = active === undefined ? undefined : assessActiveAttestation(active, definition);
+        const reviewed = active === undefined ? false : await hasApprovedMcpToolReview(tx, active);
+        const assessment = active === undefined
+          ? undefined
+          : reviewed
+            ? assessActiveAttestation(active, definition)
+            : { effective: false, reason: "review_required" };
         if (assessment?.effective === true) continue;
         total += 1;
         if (total > start && candidates.length < parsed.data.pageSize) {
           candidates.push(Object.freeze({
             state: "eligible",
+            reviewStatus: reviewed ? "approved" : "unreviewed",
             ...(active === undefined || assessment === undefined ? {} : {
               effective: false,
               effectiveReason: assessment.reason,
@@ -776,6 +789,8 @@ export async function listMcpControlPlaneAttestationCandidates(
             },
             snapshots: {
               connectionConfigurationRevision: tuple.connectionConfigurationRevision,
+              connectionUpdatedAt: definition.connection.updatedAt.toISOString(),
+              connectionOwnerAccountAccessVersion: definition.connection.ownerAccountAccessVersion,
               definitionFingerprint: tuple.definitionFingerprint,
               networkFingerprint: tuple.networkFingerprint,
               credentialFingerprint: tuple.credentialFingerprint,

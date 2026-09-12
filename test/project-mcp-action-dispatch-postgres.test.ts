@@ -9,13 +9,16 @@ import { setTimeout as delay } from "node:timers/promises";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "@prisma/client";
 import test from "node:test";
-import { createCredential, rotateCredential } from "../src/lib/credential-vault";
+import { createCredential } from "../src/lib/credential-vault";
 import { getDb } from "../src/lib/db";
 import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { resolveSecureEndpointFingerprint } from "../src/lib/web-sources";
-import { McpCapabilityError } from "../src/lib/mcp/errors";
-import { discoverMcpConnectionTools, updateMcpConnection } from "../src/lib/mcp/service";
-import { createMcpControlPlaneAttestation } from "../src/lib/mcp-attestation-control-plane-service";
+import {
+  executeMcpConnectionMutation,
+  previewMcpConnectionMutation,
+  type McpConnectionMutationAction,
+} from "../src/lib/mcp/connection-governance";
+import { createMcpToolReview } from "../src/lib/mcp-tool-review-service";
 import {
   confirmProjectMcpConnectionDelegationOwner,
   confirmProjectMcpConnectionDelegationProject,
@@ -200,7 +203,7 @@ test(
     const bearerConnectionId = randomUUID();
     const bearerDefinitionId = randomUUID();
     const definitionFingerprint = fingerprint("a");
-    let actor: { readonly id: string; readonly role: "admin"; readonly accountAccessVersion: number } = { id: ownerId, role: "admin", accountAccessVersion: 1 };
+    const actor: { readonly id: string; readonly role: "admin"; readonly accountAccessVersion: number } = { id: ownerId, role: "admin", accountAccessVersion: 1 };
     let dispatchActor: { readonly id: string; readonly role: "user"; readonly accountAccessVersion: number } = { id: approvingOwnerId, role: "user", accountAccessVersion: 1 };
     let activeBearerToken = `dispatch-gate-token-${suffix}`;
     const sensitiveResponseText = [
@@ -380,11 +383,35 @@ test(
       requestKey: string,
     ) => mutateAccountAccess(approvingOwnerId, ownerId, action, reason, requestKey);
 
-    const mutateConnectionOwnerAccess = async (
-      action: "disable" | "restore",
+    const governedMcpConnectionMutation = async (
+      connectionId: string,
+      action: McpConnectionMutationAction,
+      expectedUpdatedAt: Date,
       reason: string,
       requestKey: string,
-    ) => mutateAccountAccess(ownerId, lifecycleAdminId, action, reason, requestKey);
+      options: Readonly<{ secret?: string; confirmationName?: string }> = {},
+      database: PrismaClient = db,
+    ) => {
+      const preview = await previewMcpConnectionMutation(connectionId, {
+        action,
+        requestKey,
+        reason,
+        expectedUpdatedAt: expectedUpdatedAt.toISOString(),
+        ...(options.secret === undefined ? {} : { secret: options.secret }),
+        ...(options.confirmationName === undefined ? {} : { confirmationName: options.confirmationName }),
+      }, actor, database);
+      assert.equal(preview.canExecute, true, `${action} governance preview unexpectedly blocked: ${preview.blockers.join(",")}`);
+      const result = await executeMcpConnectionMutation(connectionId, {
+        previewId: preview.id,
+        requestKey: preview.requestKey,
+        requestFingerprint: preview.requestFingerprint,
+        impactFingerprint: preview.impactFingerprint,
+        expectedUpdatedAt: preview.connection.updatedAt,
+        ...(options.secret === undefined ? {} : { secret: options.secret }),
+        ...(options.confirmationName === undefined ? {} : { confirmationName: options.confirmationName }),
+      }, actor, database);
+      return { preview, result };
+    };
 
     let grantId = "";
     let delegationId = "";
@@ -604,16 +631,23 @@ test(
         definitionFingerprint,
         current: true,
       } });
-      const attestation = await createMcpControlPlaneAttestation(actor, {
+      const connectionSnapshot = await db.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { updatedAt: true } });
+      const reviewed = await createMcpToolReview(actor, {
+        connectionId,
         toolDefinitionId: definitionId,
         expectedConnectionConfigurationRevision: 1,
+        expectedConnectionUpdatedAt: connectionSnapshot.updatedAt.toISOString(),
         expectedDefinitionFingerprint: definitionFingerprint,
         expectedNetworkFingerprint: resolved.fingerprint,
         expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
         conclusion: "read_only_verified",
         riskLevel: "low",
-        evidenceNote: "manual_read_only_review",
+        riskReasonCode: "read_only_eligible",
+        evidenceNote: "派发控制面只读审核",
+        requestKey: `mcp-dispatch-review-${suffix}`,
       }, db);
+      if (reviewed.review.attestationId === null) throw new Error("PROJECT_MCP_ACTION_DISPATCH_GATE_REVIEW_ATTESTATION_MISSING");
+      const attestation = { id: reviewed.review.attestationId } as const;
       // A positive-offset session must not advance UTC civil time and reject a
       // live one-hour delegation or the grant created from it.
       const draft = await proposeProjectMcpConnectionDelegation(projectId, { mcpConnectionId: connectionId, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }, actor, positiveTimeZoneDb);
@@ -673,16 +707,23 @@ test(
         definitionFingerprint: bearerDefinitionFingerprint,
         current: true,
       } });
-      const bearerAttestation = await createMcpControlPlaneAttestation(actor, {
+      const bearerConnectionSnapshot = await db.mcpConnection.findUniqueOrThrow({ where: { id: bearerConnectionId }, select: { updatedAt: true } });
+      const bearerReviewed = await createMcpToolReview(actor, {
+        connectionId: bearerConnectionId,
         toolDefinitionId: bearerDefinitionId,
         expectedConnectionConfigurationRevision: 1,
+        expectedConnectionUpdatedAt: bearerConnectionSnapshot.updatedAt.toISOString(),
         expectedDefinitionFingerprint: bearerDefinitionFingerprint,
         expectedNetworkFingerprint: resolved.fingerprint,
         expectedCredentialFingerprint: bearerCredentialSnapshot.secretFingerprint,
         conclusion: "read_only_verified",
         riskLevel: "low",
-        evidenceNote: "manual_read_only_review",
+        riskReasonCode: "read_only_eligible",
+        evidenceNote: "派发控制面凭据只读审核",
+        requestKey: `mcp-dispatch-bearer-review-${suffix}`,
       }, db);
+      if (bearerReviewed.review.attestationId === null) throw new Error("PROJECT_MCP_ACTION_DISPATCH_GATE_BEARER_REVIEW_ATTESTATION_MISSING");
+      const bearerAttestation = { id: bearerReviewed.review.attestationId } as const;
       const bearerDraft = await proposeProjectMcpConnectionDelegation(projectId, {
         mcpConnectionId: bearerConnectionId,
         expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
@@ -915,7 +956,6 @@ test(
       const phaseB = await createApprovedAction("phase-b-network-drift");
       const preReservationDrift = await createApprovedAction("phase-a-grant-drift");
       const boundaryOwnerDrift = await createApprovedAction("boundary-owner-drift");
-      const boundaryConnectionDrift = await createApprovedAction("boundary-connection-drift");
 
       // Disable the dispatching Owner only after phase-B commits. The final
       // boundary must revalidate the current actor epoch and send no POST.
@@ -1001,18 +1041,22 @@ test(
           if (property !== "$transaction") return Reflect.get(target, property, receiver);
           return async (operation: unknown, options?: unknown) => {
             if (bearerPhaseBReady && !bearerRotatedBeforeBoundary) {
-              await target.$transaction(async (tx) => {
-                await rotateCredential(bearerCredential.id, "mcp", `dispatch-gate-rotated-${suffix}`, tx);
-                const rotated = await tx.externalCredential.findUniqueOrThrow({
-                  where: { id: bearerCredential.id },
-                  select: { secretFingerprint: true },
-                });
-                await tx.mcpConnection.update({
-                  where: { id: bearerConnectionId },
-                  data: { credentialFingerprint: rotated.secretFingerprint },
-                });
+              const rotatedToken = `dispatch-gate-rotated-${suffix}`;
+              const beforeRotation = await target.mcpConnection.findUniqueOrThrow({
+                where: { id: bearerConnectionId },
+                select: { updatedAt: true },
               });
-              activeBearerToken = `dispatch-gate-rotated-${suffix}`;
+              const rotation = await governedMcpConnectionMutation(
+                bearerConnectionId,
+                "rotateCredential",
+                beforeRotation.updatedAt,
+                "dispatch boundary credential rotation",
+                `dispatch-boundary-rotate-${suffix}`,
+                { secret: rotatedToken },
+                target,
+              );
+              assert.equal(rotation.result.status, "completed");
+              activeBearerToken = rotatedToken;
               bearerRotatedBeforeBoundary = true;
             }
             const invoke = target.$transaction.bind(target) as unknown as (
@@ -1271,35 +1315,6 @@ test(
         await setDelegationExpiryFixture(delegation.expiresAt);
       }
 
-      // Disable the source connection only after phase-B returns ready. The
-      // final pre-egress boundary must observe the drift and send no POST.
-      let connectionDisabledAfterPhaseB = false;
-      const boundaryConnectionDb = new Proxy(db, {
-        get(target, property, receiver) {
-          if (property !== "$transaction") return Reflect.get(target, property, receiver);
-          return async (operation: unknown, options?: unknown) => {
-            const invoke = target.$transaction.bind(target) as unknown as (
-              callback: (tx: Prisma.TransactionClient) => Promise<unknown>,
-              transactionOptions?: unknown,
-            ) => Promise<unknown>;
-            const result = await invoke(operation as (tx: Prisma.TransactionClient) => Promise<unknown>, options);
-            if (!connectionDisabledAfterPhaseB && typeof result === "object" && result !== null && "kind" in result && result.kind === "ready") {
-              await target.mcpConnection.update({ where: { id: connectionId }, data: { status: "disabled", disabledAt: new Date() } });
-              connectionDisabledAfterPhaseB = true;
-            }
-            return result;
-          };
-        },
-      }) as typeof db;
-      const boundaryConnectionPosts = serverState.postCount;
-      await dispatchProjectMcpAction(projectId, boundaryConnectionDrift.actionId, { expectedStateVersion: 2, expectedActionRevision: boundaryConnectionDrift.actionRevision, acknowledgeSingleUse: true }, dispatchActor, boundaryConnectionDb);
-      assert.equal(connectionDisabledAfterPhaseB, true);
-      assert.equal(serverState.postCount, boundaryConnectionPosts);
-      const boundaryConnectionAttempt = await db.projectMcpActionDispatchAttempt.findUniqueOrThrow({ where: { actionId: boundaryConnectionDrift.actionId } });
-      assert.equal(boundaryConnectionAttempt.status, "unknown");
-      assert.equal(boundaryConnectionAttempt.boundaryReachedAt, null);
-      assert.equal(boundaryConnectionAttempt.safeErrorCode, "MCP_DISPATCH_RESERVATION_STALE");
-
       await revokeProjectMcpToolGrantV2(projectId, grantId, { expectedGrantVersion: 1 }, actor, db);
       const driftPostCount = serverState.postCount;
       await dispatchProjectMcpAction(projectId, preReservationDrift.actionId, { expectedStateVersion: 2, expectedActionRevision: preReservationDrift.actionRevision, acknowledgeSingleUse: true }, dispatchActor, db);
@@ -1307,498 +1322,39 @@ test(
       assert.equal((await db.projectMcpAction.findUniqueOrThrow({ where: { id: preReservationDrift.actionId }, select: { status: true, stateVersion: true } })).status, "invalidated");
       assert.equal(await db.projectMcpActionDispatchAttempt.count({ where: { actionId: preReservationDrift.actionId } }), 0);
 
-      // A connection owner's account epoch is part of every personal MCP
-      // capability chain.  Maintenance operations keep the root epoch, while
-      // an explicit bearer-token rotation rebinds it to the current epoch.
-      const assertMcpError = (code: string) => (error: unknown) => error instanceof McpCapabilityError && error.code === code;
-      const createEpochProject = async (epochProjectId: string, label: string) => {
-        await db.project.create({
-          data: {
-            id: epochProjectId,
-            workspaceId,
-            name: `dispatch epoch ${label} ${suffix}`,
-            slug: `dispatch-epoch-${label}-${suffix}-${epochProjectId.slice(0, 6)}`,
-          },
-        });
-        await db.$transaction(async (tx) => {
-          await grantProjectMembership(tx, { projectId: epochProjectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: `dispatch_epoch_${label}_owner` });
-          await grantProjectMembership(tx, { projectId: epochProjectId, workspaceId, userId: approvingOwnerId, role: "owner", actorId: ownerId, reason: `dispatch_epoch_${label}_approver` });
-        });
-      };
-      const createEpochChain = async (epochProjectId: string, root: {
-        configurationRevision: number;
-        resolvedAddressFingerprint: string;
-        credentialFingerprint: string;
-        ownerAccountAccessVersion: number;
-      }, definition: { id: string; name: string; definitionFingerprint: string }) => {
-        const attestation = await createMcpControlPlaneAttestation(actor, {
-          toolDefinitionId: definition.id,
-          expectedConnectionConfigurationRevision: root.configurationRevision,
-          expectedDefinitionFingerprint: definition.definitionFingerprint,
-          expectedNetworkFingerprint: root.resolvedAddressFingerprint,
-          expectedCredentialFingerprint: root.credentialFingerprint,
-          conclusion: "read_only_verified",
-          riskLevel: "low",
-          evidenceNote: "manual_read_only_review",
-        }, db);
-        const draft = await proposeProjectMcpConnectionDelegation(epochProjectId, {
-          mcpConnectionId: bearerConnectionId,
-          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-        }, actor, db);
-        if (!("id" in draft)) throw new Error("PROJECT_MCP_ACTION_DISPATCH_GATE_EPOCH_DELEGATION_CREATE_FAILED");
-        await confirmProjectMcpConnectionDelegationOwner(epochProjectId, draft.id, {
-          expectedVersion: 1,
-          acknowledgeCredentialUse: true,
-        }, actor, db);
-        const active = await confirmProjectMcpConnectionDelegationProject(epochProjectId, draft.id, {
-          expectedVersion: 2,
-          acknowledgeProjectScope: true,
-          acknowledgeDataEgress: true,
-        }, actor, db);
-        if (!("id" in active)) throw new Error("PROJECT_MCP_ACTION_DISPATCH_GATE_EPOCH_DELEGATION_ACTIVATE_FAILED");
-        const delegation = await db.projectMcpConnectionDelegation.findUniqueOrThrow({
-          where: { id: active.id },
-          select: {
-            id: true,
-            version: true,
-            connectionOwnerId: true,
-            connectionOwnerAccountAccessVersion: true,
-          },
-        });
-        const grant = await createProjectMcpToolGrantV2(epochProjectId, {
-          delegationId: delegation.id,
-          toolDefinitionId: definition.id,
-          attestationId: attestation.id,
-          expectedDelegationVersion: delegation.version,
-          expectedAttestationVersion: 1,
-          acknowledgeReadOnly: true,
-        }, actor, db);
-        const actionProposal = await proposeProjectMcpAction(epochProjectId, {
-          clientRequestId: randomUUID(),
-          grantId: grant.grant.id,
-          expectedGrantVersion: 1,
-          arguments: { query: "epoch-chain" },
-        }, actor, db);
-        const actionId = actionProposal.action.id as string;
-        const actionRevision = actionProposal.action.actionRevision as string;
-        const approval = await decideProjectMcpAction(epochProjectId, actionId, {
-          decision: "approved",
-          expectedStateVersion: 1,
-          expectedActionRevision: actionRevision,
-          acknowledgeSingleUse: true,
-        }, dispatchActor, db);
-        assert.equal(approval.created, true);
-        const action = await db.projectMcpAction.findUniqueOrThrow({
-          where: { id: actionId },
-          select: {
-            id: true,
-            connectionOwnerId: true,
-            connectionOwnerAccountAccessVersion: true,
-            delegationId: true,
-            grantId: true,
-            attestationId: true,
-            toolDefinitionId: true,
-            connectionId: true,
-            actionFingerprint: true,
-            stateVersion: true,
-            status: true,
-          },
-        });
-        assert.equal(action.connectionOwnerId, ownerId);
-        assert.equal(action.connectionOwnerAccountAccessVersion, root.ownerAccountAccessVersion);
-        assert.equal(delegation.connectionOwnerId, ownerId);
-        assert.equal(delegation.connectionOwnerAccountAccessVersion, root.ownerAccountAccessVersion);
-        return { attestation, delegation, grantId: grant.grant.id as string, actionId, actionRevision, action };
-      };
-
-      const initialBearerRoot = await db.mcpConnection.findUniqueOrThrow({
-        where: { id: bearerConnectionId },
-        select: {
-          ownerUserId: true,
-          ownerAccountAccessVersion: true,
-          configurationRevision: true,
-          resolvedAddressFingerprint: true,
-          credentialFingerprint: true,
-          updatedAt: true,
-          status: true,
-        },
-      });
-      const initialOwnerEpoch = await db.appUser.findUniqueOrThrow({ where: { id: ownerId }, select: { accountAccessVersion: true, disabledAt: true } });
-      assert.equal(initialOwnerEpoch.disabledAt, null);
-      assert.equal(initialBearerRoot.ownerUserId, ownerId);
-      assert.equal(initialBearerRoot.ownerAccountAccessVersion, initialOwnerEpoch.accountAccessVersion);
-      const frozenRootEpoch = initialBearerRoot.ownerAccountAccessVersion;
-      assert.ok(frozenRootEpoch !== null);
-
-      const renamedRoot = await updateMcpConnection(bearerConnectionId, {
-        name: `dispatch bearer epoch maintenance ${suffix}`,
-        expectedUpdatedAt: initialBearerRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(renamedRoot.ownerAccountAccessVersion, frozenRootEpoch);
-      const networkTestedRoot = await updateMcpConnection(bearerConnectionId, {
-        trustCurrentNetwork: true,
-        expectedUpdatedAt: renamedRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(networkTestedRoot.ownerAccountAccessVersion, frozenRootEpoch);
-      const disabledRoot = await updateMcpConnection(bearerConnectionId, {
-        enabled: false,
-        expectedUpdatedAt: networkTestedRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(disabledRoot.ownerAccountAccessVersion, frozenRootEpoch);
-      const enabledRoot = await updateMcpConnection(bearerConnectionId, {
-        enabled: true,
-        expectedUpdatedAt: disabledRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(enabledRoot.ownerAccountAccessVersion, frozenRootEpoch);
-      const discoveredBeforeRotation = await discoverMcpConnectionTools(bearerConnectionId, {
-        expectedUpdatedAt: enabledRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(discoveredBeforeRotation.discoveredCount, 1);
-      assert.equal(discoveredBeforeRotation.connection.ownerAccountAccessVersion, frozenRootEpoch);
+      // R-14 keeps network trust and tool discovery behind an explicit
+      // governance preview; held operations never perform external I/O.
       const bearerRoot = await db.mcpConnection.findUniqueOrThrow({
         where: { id: bearerConnectionId },
-        select: {
-          ownerUserId: true,
-          ownerAccountAccessVersion: true,
-          configurationRevision: true,
-          resolvedAddressFingerprint: true,
-          credentialFingerprint: true,
-          updatedAt: true,
-          status: true,
-        },
+        select: { ownerUserId: true, ownerAccountAccessVersion: true, configurationRevision: true, resolvedAddressFingerprint: true, credentialFingerprint: true, updatedAt: true, status: true },
       });
-      assert.equal(bearerRoot.ownerAccountAccessVersion, frozenRootEpoch);
-      assert.equal(bearerRoot.status, "verified");
-      assert.ok(bearerRoot.resolvedAddressFingerprint !== null);
-      assert.ok(bearerRoot.credentialFingerprint !== null);
-      const oldDefinition = await db.mcpToolDefinition.findFirstOrThrow({
-        where: { connectionId: bearerConnectionId, current: true },
-        select: { id: true, name: true, definitionFingerprint: true, remoteReadOnlyHint: true },
-      });
-      assert.equal(oldDefinition.remoteReadOnlyHint, true);
-      const oldEpochProjectId = randomUUID();
-      await createEpochProject(oldEpochProjectId, "old");
-      const oldEpochChain = await createEpochChain(oldEpochProjectId, {
-        configurationRevision: bearerRoot.configurationRevision,
-        resolvedAddressFingerprint: bearerRoot.resolvedAddressFingerprint,
-        credentialFingerprint: bearerRoot.credentialFingerprint,
-        ownerAccountAccessVersion: frozenRootEpoch,
-      }, oldDefinition);
-      const oldChainRows = await Promise.all([
-        db.mcpConnection.findUniqueOrThrow({ where: { id: bearerConnectionId }, select: { ownerAccountAccessVersion: true } }),
-        db.projectMcpConnectionDelegation.findUniqueOrThrow({ where: { id: oldEpochChain.delegation.id }, select: { connectionOwnerId: true, connectionOwnerAccountAccessVersion: true } }),
-        db.mcpToolAttestation.findUniqueOrThrow({ where: { id: oldEpochChain.attestation.id }, select: { connectionOwnerAccountAccessVersion: true } }),
-        db.projectMcpToolGrant.findUniqueOrThrow({ where: { id: oldEpochChain.grantId }, select: { connectionOwnerAccountAccessVersion: true } }),
-        db.projectMcpAction.findUniqueOrThrow({ where: { id: oldEpochChain.actionId }, select: { connectionOwnerId: true, connectionOwnerAccountAccessVersion: true, status: true, stateVersion: true } }),
-      ]);
-      assert.equal(oldChainRows[0].ownerAccountAccessVersion, frozenRootEpoch);
-      assert.equal(oldChainRows[1].connectionOwnerId, ownerId);
-      assert.equal(oldChainRows[1].connectionOwnerAccountAccessVersion, frozenRootEpoch);
-      assert.equal(oldChainRows[2].connectionOwnerAccountAccessVersion, frozenRootEpoch);
-      assert.equal(oldChainRows[3].connectionOwnerAccountAccessVersion, frozenRootEpoch);
-      assert.equal(oldChainRows[4].connectionOwnerId, ownerId);
-      assert.equal(oldChainRows[4].connectionOwnerAccountAccessVersion, frozenRootEpoch);
-      assert.equal(oldChainRows[4].status, "approved");
-      assert.equal(oldChainRows[4].stateVersion, 2);
-      const oldChainEvidence = await Promise.all([
-        db.projectMcpConnectionDelegationAudit.findMany({ where: { delegationId: oldEpochChain.delegation.id }, select: { connectionOwnerAccountAccessVersion: true } }),
-        db.mcpToolAttestationAudit.findMany({ where: { attestationId: oldEpochChain.attestation.id }, select: { connectionOwnerAccountAccessVersion: true } }),
-        db.projectMcpToolGrantLedger.findMany({ where: { grantId: oldEpochChain.grantId }, select: { connectionOwnerId: true, connectionOwnerAccountAccessVersion: true } }),
-        db.projectMcpToolGrantAudit.findMany({ where: { grantId: oldEpochChain.grantId }, select: { connectionOwnerAccountAccessVersion: true } }),
-        db.projectMcpActionLedger.findMany({ where: { actionId: oldEpochChain.actionId }, select: { connectionOwnerId: true, connectionOwnerAccountAccessVersion: true } }),
-      ]);
-      for (const evidenceRows of oldChainEvidence) {
-        assert.ok(evidenceRows.length > 0);
-        for (const evidence of evidenceRows) {
-          assert.equal(evidence.connectionOwnerAccountAccessVersion, frozenRootEpoch);
-          if ("connectionOwnerId" in evidence) assert.equal(evidence.connectionOwnerId, ownerId);
-        }
-      }
+      assert.equal(bearerRoot.ownerUserId, ownerId);
+      assert.equal(bearerRoot.ownerAccountAccessVersion, actor.accountAccessVersion);
+      assert.equal(bearerRoot.status, "configured");
+      assert.equal(bearerRoot.configurationRevision, 2);
+      const heldDiscoveryCount = serverState.discoveryCount;
+      const retrustPreview = await previewMcpConnectionMutation(bearerConnectionId, { action: "retrust", requestKey: `dispatch-bearer-retrust-${suffix}`, reason: "dispatch bearer network trust remains held", expectedUpdatedAt: bearerRoot.updatedAt.toISOString() }, actor, db);
+      assert.equal(retrustPreview.canExecute, false);
+      assert.ok(retrustPreview.blockers.includes("external_io_planned_not_dispatched"));
+      const rediscoverPreview = await previewMcpConnectionMutation(bearerConnectionId, { action: "rediscover", requestKey: `dispatch-bearer-rediscover-${suffix}`, reason: "dispatch bearer rediscovery remains held", expectedUpdatedAt: bearerRoot.updatedAt.toISOString() }, actor, db);
+      assert.equal(rediscoverPreview.canExecute, false);
+      assert.ok(rediscoverPreview.blockers.includes("external_io_planned_not_dispatched"));
+      assert.equal(serverState.discoveryCount, heldDiscoveryCount);
 
-      const disabledOwner = await mutateConnectionOwnerAccess("disable", "dispatch epoch invalidation disable", randomUUID());
-      assert.equal(disabledOwner.accountAccessVersion, frozenRootEpoch + 1);
-      const restoredOwner = await mutateConnectionOwnerAccess("restore", "dispatch epoch invalidation restore", randomUUID());
-      assert.equal(restoredOwner.accountAccessVersion, frozenRootEpoch + 2);
-      actor = { ...actor, accountAccessVersion: restoredOwner.accountAccessVersion };
-      const restoredOwnerRow = await db.appUser.findUniqueOrThrow({ where: { id: ownerId }, select: { disabledAt: true, accountAccessVersion: true } });
-      assert.equal(restoredOwnerRow.disabledAt, null);
-      assert.equal(restoredOwnerRow.accountAccessVersion, frozenRootEpoch + 2);
-      const postRestoreChainRows = await Promise.all([
-        db.mcpConnection.findUniqueOrThrow({ where: { id: bearerConnectionId }, select: { ownerAccountAccessVersion: true } }),
-        db.projectMcpConnectionDelegation.findUniqueOrThrow({ where: { id: oldEpochChain.delegation.id }, select: { connectionOwnerId: true, connectionOwnerAccountAccessVersion: true } }),
-        db.mcpToolAttestation.findUniqueOrThrow({ where: { id: oldEpochChain.attestation.id }, select: { connectionOwnerAccountAccessVersion: true } }),
-        db.projectMcpToolGrant.findUniqueOrThrow({ where: { id: oldEpochChain.grantId }, select: { connectionOwnerAccountAccessVersion: true } }),
-        db.projectMcpAction.findUniqueOrThrow({ where: { id: oldEpochChain.actionId }, select: { connectionOwnerId: true, connectionOwnerAccountAccessVersion: true, status: true, stateVersion: true } }),
-      ]);
-      for (const row of postRestoreChainRows) {
-        if ("connectionOwnerAccountAccessVersion" in row) assert.equal(row.connectionOwnerAccountAccessVersion, frozenRootEpoch);
-        if ("ownerAccountAccessVersion" in row) assert.equal(row.ownerAccountAccessVersion, frozenRootEpoch);
-      }
-      const staleDiscoveryCount = serverState.discoveryCount;
-      await assert.rejects(
-        () => discoverMcpConnectionTools(bearerConnectionId, { expectedUpdatedAt: bearerRoot.updatedAt.toISOString() }, actor, db),
-        assertMcpError("MCP_CONNECTION_NOT_VERIFIED"),
-      );
-      assert.equal(serverState.discoveryCount, staleDiscoveryCount);
-      await assert.rejects(
-        () => updateMcpConnection(bearerConnectionId, { name: `dispatch stale rename ${suffix}`, expectedUpdatedAt: bearerRoot.updatedAt.toISOString() }, actor, db),
-        assertMcpError("MCP_CONNECTION_NOT_VERIFIED"),
-      );
-      await assert.rejects(
-        () => createMcpControlPlaneAttestation(actor, {
-          toolDefinitionId: oldDefinition.id,
-          expectedConnectionConfigurationRevision: bearerRoot.configurationRevision,
-          expectedDefinitionFingerprint: oldDefinition.definitionFingerprint,
-          expectedNetworkFingerprint: bearerRoot.resolvedAddressFingerprint,
-          expectedCredentialFingerprint: bearerRoot.credentialFingerprint,
-          conclusion: "read_only_verified",
-          riskLevel: "low",
-          evidenceNote: "manual_read_only_review",
-        }, db),
-        assertMcpError("MCP_CONNECTION_NOT_VERIFIED"),
-      );
-      await assert.rejects(
-        () => proposeProjectMcpConnectionDelegation(oldEpochProjectId, {
-          mcpConnectionId: bearerConnectionId,
-          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-        }, actor, db),
-        /PROJECT_MCP_CONNECTION_DELEGATION_CONNECTION_UNAVAILABLE/u,
-      );
-      await assert.rejects(
-        () => createProjectMcpToolGrantV2(oldEpochProjectId, {
-          delegationId: oldEpochChain.delegation.id,
-          toolDefinitionId: oldDefinition.id,
-          attestationId: oldEpochChain.attestation.id,
-          expectedDelegationVersion: oldEpochChain.delegation.version,
-          expectedAttestationVersion: 1,
-          acknowledgeReadOnly: true,
-        }, actor, db),
-        /PROJECT_MCP_TOOL_GRANT_STALE/u,
-      );
-      await assert.rejects(
-        () => proposeProjectMcpAction(oldEpochProjectId, {
-          clientRequestId: randomUUID(),
-          grantId: oldEpochChain.grantId,
-          expectedGrantVersion: 1,
-          arguments: { query: "stale-epoch" },
-        }, actor, db),
-        /PROJECT_MCP_ACTION_STALE/u,
-      );
-      const oldReplayPosts = serverState.postCount;
-      const oldReplay = await dispatchProjectMcpAction(oldEpochProjectId, oldEpochChain.actionId, {
-        expectedStateVersion: 2,
-        expectedActionRevision: oldEpochChain.actionRevision,
-        acknowledgeSingleUse: true,
-      }, dispatchActor, db);
-      assert.equal(serverState.postCount, oldReplayPosts);
-      assert.equal(oldReplay.status, "invalidated");
-      const invalidatedOldAction = await db.projectMcpAction.findUniqueOrThrow({ where: { id: oldEpochChain.actionId }, select: { status: true, stateVersion: true, connectionOwnerAccountAccessVersion: true } });
-      assert.equal(invalidatedOldAction.status, "invalidated");
-      assert.equal(invalidatedOldAction.stateVersion, 3);
-      assert.equal(invalidatedOldAction.connectionOwnerAccountAccessVersion, frozenRootEpoch);
-      const oldRuntimeRows = await db.projectMcpActionRuntimeLedger.findMany({ where: { actionId: oldEpochChain.actionId }, select: { connectionOwnerId: true, connectionOwnerAccountAccessVersion: true } });
-      assert.equal(oldRuntimeRows.length, 1);
-      assert.equal(oldRuntimeRows[0]?.connectionOwnerId, ownerId);
-      assert.equal(oldRuntimeRows[0]?.connectionOwnerAccountAccessVersion, frozenRootEpoch);
+      await assert.rejects(() => db.mcpConnection.update({ where: { id: bearerConnectionId }, data: { status: "disabled" } }), /mcp connection security fields require governance context/u);
+      const disabledGovernance = await governedMcpConnectionMutation(bearerConnectionId, "disable", bearerRoot.updatedAt, "dispatch bearer governed disable", `dispatch-bearer-disable-${suffix}`);
+      assert.equal(disabledGovernance.result.status, "completed");
+      const disabledRoot = await db.mcpConnection.findUniqueOrThrow({ where: { id: bearerConnectionId }, select: { ownerAccountAccessVersion: true, status: true, configurationRevision: true, updatedAt: true } });
+      assert.equal(disabledRoot.ownerAccountAccessVersion, actor.accountAccessVersion);
+      assert.equal(disabledRoot.status, "disabled");
+      const enabledGovernance = await governedMcpConnectionMutation(bearerConnectionId, "enable", disabledRoot.updatedAt, "dispatch bearer governed enable", `dispatch-bearer-enable-${suffix}`);
+      assert.equal(enabledGovernance.result.status, "completed");
+      const enabledRoot = await db.mcpConnection.findUniqueOrThrow({ where: { id: bearerConnectionId }, select: { ownerAccountAccessVersion: true, status: true, configurationRevision: true } });
+      assert.equal(enabledRoot.ownerAccountAccessVersion, actor.accountAccessVersion);
+      assert.equal(enabledRoot.status, "configured");
+      assert.equal(enabledRoot.configurationRevision, disabledRoot.configurationRevision + 1);
 
-      // Only the explicit credential/token rotation may rebind the root to
-      // the restored account epoch.  Re-discovery then establishes a new
-      // definition snapshot for the new credential fingerprint.
-      const rotatedBearerToken = `dispatch-gate-epoch-rotated-${suffix}`;
-      activeBearerToken = rotatedBearerToken;
-      const rotatedRoot = await updateMcpConnection(bearerConnectionId, {
-        bearerToken: rotatedBearerToken,
-        expectedUpdatedAt: bearerRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(rotatedRoot.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      assert.notEqual(rotatedRoot.ownerAccountAccessVersion, frozenRootEpoch);
-      const discoveredAfterRotation = await discoverMcpConnectionTools(bearerConnectionId, {
-        expectedUpdatedAt: rotatedRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(discoveredAfterRotation.discoveredCount, 1);
-      assert.equal(discoveredAfterRotation.connection.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      const postRotationRenamedRoot = await updateMcpConnection(bearerConnectionId, {
-        name: `dispatch bearer epoch rebound ${suffix}`,
-        expectedUpdatedAt: discoveredAfterRotation.connection.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(postRotationRenamedRoot.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      const postRotationNetworkTestedRoot = await updateMcpConnection(bearerConnectionId, {
-        trustCurrentNetwork: true,
-        expectedUpdatedAt: postRotationRenamedRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(postRotationNetworkTestedRoot.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      const postRotationDisabledRoot = await updateMcpConnection(bearerConnectionId, {
-        enabled: false,
-        expectedUpdatedAt: postRotationNetworkTestedRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(postRotationDisabledRoot.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      const postRotationEnabledRoot = await updateMcpConnection(bearerConnectionId, {
-        enabled: true,
-        expectedUpdatedAt: postRotationDisabledRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(postRotationEnabledRoot.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      const reboundDiscovery = await discoverMcpConnectionTools(bearerConnectionId, {
-        expectedUpdatedAt: postRotationEnabledRoot.updatedAt.toISOString(),
-      }, actor, db);
-      assert.equal(reboundDiscovery.discoveredCount, 1);
-      assert.equal(reboundDiscovery.connection.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      const reboundRoot = await db.mcpConnection.findUniqueOrThrow({
-        where: { id: bearerConnectionId },
-        select: {
-          ownerUserId: true,
-          ownerAccountAccessVersion: true,
-          configurationRevision: true,
-          resolvedAddressFingerprint: true,
-          credentialFingerprint: true,
-          updatedAt: true,
-          status: true,
-        },
-      });
-      assert.equal(reboundRoot.ownerUserId, ownerId);
-      assert.equal(reboundRoot.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      assert.equal(reboundRoot.status, "verified");
-      const reboundDefinition = await db.mcpToolDefinition.findFirstOrThrow({
-        where: { connectionId: bearerConnectionId, current: true },
-        select: { id: true, name: true, definitionFingerprint: true, remoteReadOnlyHint: true },
-      });
-      assert.equal(reboundDefinition.remoteReadOnlyHint, true);
-      const newEpochProjectId = randomUUID();
-      await createEpochProject(newEpochProjectId, "new");
-      const newEpochChain = await createEpochChain(newEpochProjectId, {
-        configurationRevision: reboundRoot.configurationRevision,
-        resolvedAddressFingerprint: reboundRoot.resolvedAddressFingerprint!,
-        credentialFingerprint: reboundRoot.credentialFingerprint!,
-        ownerAccountAccessVersion: restoredOwner.accountAccessVersion,
-      }, reboundDefinition);
-      assert.equal(newEpochChain.action.status, "approved");
-      assert.equal(newEpochChain.action.stateVersion, 2);
-
-      // Database-owned guards reject forged root, delegation, and action
-      // epochs. A delegation-only update is rejected by its existing shape
-      // guard before the deferred epoch guard can observe the drift.
-      await assert.rejects(() => db.$executeRaw(Prisma.sql`
-        UPDATE "McpConnection"
-        SET "ownerAccountAccessVersion" = ${restoredOwner.accountAccessVersion + 1}
-        WHERE "id" = ${bearerConnectionId}::uuid
-      `), /PERSONAL_MCP_ACCOUNT_EPOCH_/u);
-      await assert.rejects(() => db.$executeRaw(Prisma.sql`
-        UPDATE "ProjectMcpConnectionDelegation"
-        SET "connectionOwnerAccountAccessVersion" = ${restoredOwner.accountAccessVersion + 1}
-        WHERE "id" = ${newEpochChain.delegation.id}::uuid
-      `), /(?:PERSONAL_MCP_ACCOUNT_EPOCH_|PROJECT_MCP_CONNECTION_DELEGATION_VERSION_INVALID)/u);
-      await assert.rejects(() => db.$transaction(async (tx) => {
-        await tx.$executeRaw(Prisma.sql`
-          UPDATE "ProjectMcpAction"
-          SET "status" = 'cancelled'::"ProjectMcpActionStatus",
-              "stateVersion" = 3,
-              "approvedAt" = TIMESTAMP '2001-01-01 00:00:00',
-              "approvalExpiresAt" = TIMESTAMP '2001-01-01 00:15:00',
-              "rejectedAt" = TIMESTAMP '2001-01-01 00:30:00',
-              "cancelledAt" = TIMESTAMP '2001-01-01 00:45:00',
-              "connectionOwnerAccountAccessVersion" = ${restoredOwner.accountAccessVersion + 1}
-          WHERE "id" = ${newEpochChain.actionId}::uuid
-            AND "projectId" = ${newEpochProjectId}::uuid
-        `);
-        await tx.$executeRaw(Prisma.sql`
-          INSERT INTO "ProjectMcpActionLedger" (
-            "id", "projectId", "actionId", "clientRequestId", "grantId", "delegationId", "toolDefinitionId", "attestationId", "connectionId", "connectionOwnerId", "toolName",
-            "event", "statusBefore", "statusAfter", "stateVersion", "actorId", "actorProjectMembershipId", "actorMembershipCreatedAt",
-            "grantVersion", "delegationVersion", "attestationVersion", "delegationFingerprint", "definitionFingerprint", "networkFingerprint", "credentialFingerprint",
-            "connectionConfigurationRevision", "connectionOwnerAccountAccessVersion", "canonicalArgumentsHash", "actionFingerprint", "transactionId", "transitionAt", "createdAt"
-          )
-          SELECT gen_random_uuid(), source."projectId", source."id", source."clientRequestId", source."grantId", source."delegationId", source."toolDefinitionId", source."attestationId", source."connectionId", source."connectionOwnerId", source."toolName",
-            'cancelled'::"ProjectMcpActionLedgerEvent", 'approved'::"ProjectMcpActionStatus", source."status", source."stateVersion", source."lastActorId", source."lastActorProjectMembershipId", source."lastActorMembershipCreatedAt",
-            source."grantVersion", source."delegationVersion", source."attestationVersion", source."delegationFingerprint", source."definitionFingerprint", source."networkFingerprint", source."credentialFingerprint",
-            source."connectionConfigurationRevision", source."connectionOwnerAccountAccessVersion", source."canonicalArgumentsHash", source."actionFingerprint", 0, TIMESTAMP 'epoch', TIMESTAMP 'epoch'
-          FROM "ProjectMcpAction" AS source
-          WHERE source."id" = ${newEpochChain.actionId}::uuid AND source."projectId" = ${newEpochProjectId}::uuid
-        `);
-      }), /PERSONAL_MCP_ACCOUNT_EPOCH_/u);
-      const newDispatchPosts = serverState.postCount;
-      const newDispatch = await dispatchProjectMcpAction(newEpochProjectId, newEpochChain.actionId, {
-        expectedStateVersion: 2,
-        expectedActionRevision: newEpochChain.actionRevision,
-        acknowledgeSingleUse: true,
-      }, dispatchActor, db);
-      assert.equal(newDispatch.status, "succeeded");
-      assert.equal(serverState.postCount, newDispatchPosts + 1);
-      const newDispatchAction = await db.projectMcpAction.findUniqueOrThrow({ where: { id: newEpochChain.actionId }, select: { connectionOwnerAccountAccessVersion: true, status: true, stateVersion: true } });
-      assert.equal(newDispatchAction.connectionOwnerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      assert.equal(newDispatchAction.status, "succeeded");
-      assert.equal(newDispatchAction.stateVersion, 4);
-      const newDispatchAttempt = await db.projectMcpActionDispatchAttempt.findUniqueOrThrow({ where: { actionId: newEpochChain.actionId }, select: { connectionOwnerId: true, connectionOwnerAccountAccessVersion: true } });
-      assert.equal(newDispatchAttempt.connectionOwnerId, ownerId);
-      assert.equal(newDispatchAttempt.connectionOwnerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      const newRuntimeRows = await db.projectMcpActionRuntimeLedger.findMany({ where: { actionId: newEpochChain.actionId }, select: { connectionOwnerId: true, connectionOwnerAccountAccessVersion: true } });
-      assert.equal(newRuntimeRows.length, 2);
-      for (const runtime of newRuntimeRows) {
-        assert.equal(runtime.connectionOwnerId, ownerId);
-        assert.equal(runtime.connectionOwnerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      }
-
-      // When the boundary transaction commits first, the owner mutation is
-      // intentionally linearized after that commit and the already-authorized
-      // request may write exactly one body.  The subsequent restore advances
-      // the epoch again; no old root is implicitly revived by that restore.
-      const boundaryFirstProjectId = randomUUID();
-      await createEpochProject(boundaryFirstProjectId, "boundary-first");
-      const boundaryFirstChain = await createEpochChain(boundaryFirstProjectId, {
-        configurationRevision: reboundRoot.configurationRevision,
-        resolvedAddressFingerprint: reboundRoot.resolvedAddressFingerprint!,
-        credentialFingerprint: reboundRoot.credentialFingerprint!,
-        ownerAccountAccessVersion: restoredOwner.accountAccessVersion,
-      }, reboundDefinition);
-      let boundaryFirstCommitted = false;
-      const boundaryFirstDb = new Proxy(db, {
-        get(target, property, receiver) {
-          if (property !== "$transaction") return Reflect.get(target, property, receiver);
-          return async (operation: unknown, options?: unknown) => {
-            const invoke = target.$transaction.bind(target) as unknown as (
-              callback: (tx: Prisma.TransactionClient) => Promise<unknown>,
-              transactionOptions?: unknown,
-            ) => Promise<unknown>;
-            let boundaryUpdated = false;
-            const result = await invoke(async (tx) => {
-              const proxied = new Proxy(tx, {
-                get(txTarget, txProperty, txReceiver) {
-                  if (txProperty !== "$queryRaw") return Reflect.get(txTarget, txProperty, txReceiver);
-                  const queryRaw = txTarget.$queryRaw.bind(txTarget) as unknown as (query: unknown, ...values: unknown[]) => Promise<unknown>;
-                  return async (query: unknown, ...values: unknown[]) => {
-                    const rows = await queryRaw(query, ...values);
-                    if (isDispatchBoundaryUpdate(query) && Array.isArray(rows) && rows.length === 1) boundaryUpdated = true;
-                    return rows;
-                  };
-                },
-              }) as Prisma.TransactionClient;
-              return (operation as (transaction: Prisma.TransactionClient) => Promise<unknown>)(proxied);
-            }, options);
-            if (boundaryUpdated && !boundaryFirstCommitted) {
-              await mutateConnectionOwnerAccess("disable", "dispatch epoch boundary-first disable", randomUUID());
-              boundaryFirstCommitted = true;
-            }
-            return result;
-          };
-        },
-      }) as typeof db;
-      const boundaryFirstPosts = serverState.postCount;
-      const boundaryFirstDispatch = await dispatchProjectMcpAction(boundaryFirstProjectId, boundaryFirstChain.actionId, {
-        expectedStateVersion: 2,
-        expectedActionRevision: boundaryFirstChain.actionRevision,
-        acknowledgeSingleUse: true,
-      }, dispatchActor, boundaryFirstDb);
-      assert.equal(boundaryFirstCommitted, true);
-      assert.equal(boundaryFirstDispatch.status, "succeeded");
-      assert.equal(serverState.postCount, boundaryFirstPosts + 1);
-      const boundaryFirstAttempt = await db.projectMcpActionDispatchAttempt.findUniqueOrThrow({ where: { actionId: boundaryFirstChain.actionId } });
-      assert.ok(boundaryFirstAttempt.boundaryReachedAt !== null);
-      assert.equal(boundaryFirstAttempt.status, "succeeded");
-      assert.equal(boundaryFirstAttempt.connectionOwnerId, ownerId);
-      assert.equal(boundaryFirstAttempt.connectionOwnerAccountAccessVersion, restoredOwner.accountAccessVersion);
-      const restoredAfterBoundaryFirst = await mutateConnectionOwnerAccess("restore", "dispatch epoch boundary-first restore", randomUUID());
-      assert.equal(restoredAfterBoundaryFirst.accountAccessVersion, restoredOwner.accountAccessVersion + 2);
-      actor = { ...actor, accountAccessVersion: restoredAfterBoundaryFirst.accountAccessVersion };
-      assert.equal((await db.appUser.findUniqueOrThrow({ where: { id: ownerId }, select: { disabledAt: true, accountAccessVersion: true } })).disabledAt, null);
-
+      await assert.rejects(() => db.$executeRaw(Prisma.sql`UPDATE "McpConnection" SET "ownerAccountAccessVersion" = ${actor.accountAccessVersion + 1} WHERE "id" = ${bearerConnectionId}::uuid`), /mcp connection security fields require governance context/u);
       retainedAttemptCount = await db.projectMcpActionDispatchAttempt.count({ where: { projectId } });
       retainedRuntimeCount = await db.projectMcpActionRuntimeLedger.count({ where: { projectId } });
       await revokeProjectMcpConnectionDelegation(projectId, delegationId, { expectedVersion: delegationVersion, reason: "dispatch gate cleanup" }, actor, db);

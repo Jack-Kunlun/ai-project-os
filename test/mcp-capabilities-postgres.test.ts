@@ -12,16 +12,80 @@ import {
   McpCapabilityError,
   buildMcpActionSnapshot,
   createMcpConnection,
-  discoverMcpConnectionTools,
+  executeMcpConnectionMutation,
   executeMcpActionSnapshot,
   getProjectMcpToolCenter,
   grantProjectMcpTool,
-  updateMcpConnection,
+  previewMcpConnectionMutation,
 } from "../src/lib/mcp";
 
 const shouldRun = process.env.MCP_CAPABILITIES_POSTGRES_GATE === "1";
 
-test("MCP personal discovery remains available while project runtime is fail-closed", { skip: !shouldRun ? "MCP_CAPABILITIES_POSTGRES_GATE=1 is required" : false }, async () => {
+type GovernanceActor = Readonly<{ id: string; accountAccessVersion?: number }>;
+
+function compactRequestKey(prefix: string, suffix: string): string {
+  const key = `${prefix}-${suffix}`;
+  assert.ok(key.length < 40, `request key must stay below 40 characters: ${key}`);
+  return key;
+}
+
+async function governMcpMutation(
+  connectionId: string,
+  current: Readonly<{ updatedAt: Date }>,
+  action: "rotateCredential" | "retrust" | "rediscover" | "disable" | "enable" | "delete",
+  requestKey: string,
+  reason: string,
+  actor: GovernanceActor,
+  db: ReturnType<typeof getDb>,
+  options: Readonly<{ secret?: string; confirmationName?: string }> = {},
+) {
+  const preview = await previewMcpConnectionMutation(connectionId, {
+    action,
+    requestKey,
+    reason,
+    expectedUpdatedAt: current.updatedAt.toISOString(),
+    ...(options.secret === undefined ? {} : { secret: options.secret }),
+    ...(options.confirmationName === undefined ? {} : { confirmationName: options.confirmationName }),
+  }, actor, db);
+  const result = await executeMcpConnectionMutation(connectionId, {
+    previewId: preview.id,
+    requestKey: preview.requestKey,
+    requestFingerprint: preview.requestFingerprint,
+    impactFingerprint: preview.impactFingerprint,
+    expectedUpdatedAt: preview.connection.updatedAt,
+    ...(options.secret === undefined ? {} : { secret: options.secret }),
+    ...(options.confirmationName === undefined ? {} : { confirmationName: options.confirmationName }),
+  }, actor, db);
+  return { preview, result };
+}
+
+async function cleanupMcpConnection(connectionId: string, actor: GovernanceActor, suffix: string, db: ReturnType<typeof getDb>): Promise<void> {
+  let current = await db.mcpConnection.findUnique({ where: { id: connectionId }, select: { id: true, name: true, status: true, updatedAt: true } });
+  if (current === null) return;
+  if (current.status !== "disabled") {
+    await governMcpMutation(connectionId, current, "disable", compactRequestKey("m-cln-x", suffix), "test fixture cleanup", actor, db);
+    current = await db.mcpConnection.findUnique({ where: { id: connectionId }, select: { id: true, name: true, status: true, updatedAt: true } });
+  }
+  if (current === null) return;
+  const deletion = await previewMcpConnectionMutation(connectionId, {
+    action: "delete",
+    requestKey: compactRequestKey("m-cln-d", suffix),
+    reason: "test fixture cleanup",
+    expectedUpdatedAt: current.updatedAt.toISOString(),
+    confirmationName: current.name,
+  }, actor, db);
+  if (!deletion.canExecute) return;
+  await executeMcpConnectionMutation(connectionId, {
+    previewId: deletion.id,
+    requestKey: deletion.requestKey,
+    requestFingerprint: deletion.requestFingerprint,
+    impactFingerprint: deletion.impactFingerprint,
+    expectedUpdatedAt: deletion.connection.updatedAt,
+    confirmationName: current.name,
+  }, actor, db);
+}
+
+test("MCP personal rediscovery stays held while project runtime is fail-closed", { skip: !shouldRun ? "MCP_CAPABILITIES_POSTGRES_GATE=1 is required" : false }, async () => {
   const db = getDb();
   const suffix = randomUUID().slice(0, 8);
   const adminId = randomUUID();
@@ -83,30 +147,96 @@ test("MCP personal discovery remains available while project runtime is fail-clo
     connectionId = connection.id;
     credentialId = (await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id }, select: { credentialId: true } })).credentialId;
     await assert.rejects(
-      () => updateMcpConnection(connection.id, { enabled: true, expectedUpdatedAt: new Date(0).toISOString() }, admin, db),
+      () => previewMcpConnectionMutation(connection.id, {
+        action: "enable",
+        requestKey: compactRequestKey("m-stale-en", suffix),
+        reason: "stale CAS must fail",
+        expectedUpdatedAt: new Date(0).toISOString(),
+      }, admin, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_CONFLICT",
     );
-    const disabled = await updateMcpConnection(connection.id, { bearerToken: token, enabled: false, expectedUpdatedAt: connection.updatedAt.toISOString() }, admin, db);
-    assert.equal(disabled.status, "disabled");
-    const disabledWithImplicitSecret = await updateMcpConnection(connection.id, { bearerToken: token, expectedUpdatedAt: disabled.updatedAt.toISOString() }, admin, db);
-    assert.equal(disabledWithImplicitSecret.status, "disabled");
-    const enabled = await updateMcpConnection(connection.id, { enabled: true, expectedUpdatedAt: disabledWithImplicitSecret.updatedAt.toISOString() }, admin, db);
-    assert.equal(enabled.status, "configured");
     await assert.rejects(
-      () => discoverMcpConnectionTools(connection.id, { expectedUpdatedAt: new Date(0).toISOString() }, admin, db),
-      (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_CONFLICT",
+      () => db.mcpConnection.update({ where: { id: connection.id }, data: { endpointUrl: `https://direct-write.example.test/${suffix}` } }),
+      (error: unknown) => error instanceof Error && error.message.includes("security fields require governance context"),
     );
+    await assert.rejects(
+      () => db.mcpConnection.delete({ where: { id: connection.id } }),
+      (error: unknown) => error instanceof Error && error.message.includes("delete requires governance context"),
+    );
+    const beforeRotation = await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id } });
+    const rotatedToken = `mcp-rotated-token-${suffix}`;
+    const rotation = await governMcpMutation(
+      connection.id,
+      beforeRotation,
+      "rotateCredential",
+      compactRequestKey("m-rot", suffix),
+      "rotate MCP credential through governed preview",
+      admin,
+      db,
+      { secret: rotatedToken },
+    );
+    assert.equal(rotation.preview.canExecute, true);
+    assert.equal(rotation.result.status, "completed");
+    let current = await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id } });
+    assert.equal(current.status, "configured");
+    assert.equal(current.configurationRevision, beforeRotation.configurationRevision + 1);
+    assert.notEqual(current.credentialFingerprint, beforeRotation.credentialFingerprint);
+    assert.equal(current.protocolVersion, null);
+    assert.equal(current.catalogFingerprint, null);
+    assert.equal(current.lastDiscoveredAt, null);
+
+    const disable = await governMcpMutation(
+      connection.id,
+      current,
+      "disable",
+      compactRequestKey("m-dis", suffix),
+      "disable MCP connection through governed preview",
+      admin,
+      db,
+    );
+    assert.equal(disable.preview.canExecute, true);
+    assert.equal(disable.result.status, "completed");
+    current = await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id } });
+    assert.equal(current.status, "disabled");
+    assert.equal(current.configurationRevision, beforeRotation.configurationRevision + 2);
+    const disabledRediscover = await previewMcpConnectionMutation(connection.id, {
+      action: "rediscover",
+      requestKey: compactRequestKey("m-dis-redisc", suffix),
+      reason: "disabled connection cannot rediscover",
+      expectedUpdatedAt: current.updatedAt.toISOString(),
+    }, admin, db);
+    assert.equal(disabledRediscover.canExecute, false);
+    assert.equal(disabledRediscover.blockers.includes("connection_disabled"), true);
+    assert.equal(disabledRediscover.blockers.includes("external_io_planned_not_dispatched"), true);
+
+    const enable = await governMcpMutation(
+      connection.id,
+      current,
+      "enable",
+      compactRequestKey("m-en", suffix),
+      "enable MCP connection through governed preview",
+      admin,
+      db,
+    );
+    assert.equal(enable.preview.canExecute, true);
+    assert.equal(enable.result.status, "completed");
+    current = await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id } });
+    assert.equal(current.status, "configured");
+    const rediscover = await previewMcpConnectionMutation(connection.id, {
+      action: "rediscover",
+      requestKey: compactRequestKey("m-redisc", suffix),
+      reason: "rediscovery is held until external dispatch is implemented",
+      expectedUpdatedAt: current.updatedAt.toISOString(),
+    }, admin, db);
+    assert.equal(rediscover.canExecute, false);
+    assert.equal(rediscover.blockers.includes("external_io_planned_not_dispatched"), true);
     assert.deepEqual(requests, []);
-    const discovery = await discoverMcpConnectionTools(connection.id, { expectedUpdatedAt: enabled.updatedAt.toISOString() }, admin, db);
-    assert.equal(discovery.discoveredCount, 1);
-    assert.equal(discovery.eligibleCount, 1);
-    const definition = await db.mcpToolDefinition.findFirstOrThrow({ where: { connectionId: connection.id, current: true } });
     await assert.rejects(
       () => getProjectMcpToolCenter(projectId, admin, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",
     );
     await assert.rejects(
-      () => grantProjectMcpTool(projectId, { toolDefinitionId: definition.id, acknowledgeReadOnly: true, expectedUpdatedAt: null }, admin, db),
+      () => grantProjectMcpTool(projectId, { toolDefinitionId: randomUUID(), acknowledgeReadOnly: true, expectedUpdatedAt: null }, admin, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",
     );
     await assert.rejects(
@@ -118,7 +248,7 @@ test("MCP personal discovery remains available while project runtime is fail-clo
         grantId: randomUUID(),
         connectionId: connection.id,
         toolName: "project.lookup",
-        toolDefinitionId: definition.id,
+        toolDefinitionId: randomUUID(),
         attestationId: randomUUID(),
         toolDefinitionFingerprint: "a".repeat(64),
         networkFingerprint: "b".repeat(64),
@@ -127,13 +257,12 @@ test("MCP personal discovery remains available while project runtime is fail-clo
       }, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",
     );
-    assert.deepEqual(requests, ["tools/list"]);
   } finally {
     await db.project.deleteMany({ where: { id: projectId } });
-    if (connectionId !== null) await db.mcpConnection.deleteMany({ where: { id: connectionId } });
+    if (connectionId !== null) await cleanupMcpConnection(connectionId, admin, suffix, db);
     if (credentialId !== null) await db.externalCredential.deleteMany({ where: { id: credentialId } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });
-    await db.appUser.deleteMany({ where: { id: { in: [adminId, editorId] } } });
+    // Immutable governance previews/audits retain actor FKs; the disposable gate runner drops this database.
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     if (previousKeyFile === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyFile;

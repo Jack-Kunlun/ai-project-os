@@ -5,7 +5,7 @@ import { Client } from "pg";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
 import {
-  createMcpControlPlaneAttestation,
+  createMcpToolReview,
 } from "../src/lib/mcp";
 import {
   confirmProjectMcpConnectionDelegationOwner,
@@ -92,16 +92,24 @@ test(
           current: true,
         },
       });
-      const attestation = await createMcpControlPlaneAttestation(actor, {
+      const connectionSnapshot = await db.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { updatedAt: true } });
+      const reviewed = await createMcpToolReview(actor, {
+        connectionId,
         toolDefinitionId: definitionId,
         expectedConnectionConfigurationRevision: 1,
+        expectedConnectionUpdatedAt: connectionSnapshot.updatedAt.toISOString(),
         expectedDefinitionFingerprint: definitionFingerprint,
         expectedNetworkFingerprint: networkFingerprint,
         expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
         conclusion: "read_only_verified",
         riskLevel: "medium",
-        evidenceNote: "manual_read_only_review",
+        riskReasonCode: "read_only_eligible",
+        evidenceNote: "保留测试审核",
+        requestKey: `mcp-retention-review-${suffix}`,
       }, db);
+      assert.equal(reviewed.created, true);
+      if (reviewed.review.attestationId === null) throw new Error("PROJECT_MCP_GRANT_RETENTION_ATTESTATION_MISSING");
+      const attestation = { id: reviewed.review.attestationId } as const;
       const expiry = new Date(Date.now() + 60 * 60 * 1_000).toISOString();
       const draft = await proposeProjectMcpConnectionDelegation(projectId, { mcpConnectionId: connectionId, expiresAt: expiry }, actor, db);
       if (!("id" in draft)) throw new Error("PROJECT_MCP_GRANT_RETENTION_DELEGATION_CREATE_FAILED");

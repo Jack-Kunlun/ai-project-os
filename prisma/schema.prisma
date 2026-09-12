@@ -279,6 +279,56 @@ enum McpConnectionStatus {
   disabled
 }
 
+enum GitConnectionMutationAction {
+  rotateCredential @map("rotate_credential")
+  retrust
+  retest
+  disable
+  enable
+  delete
+}
+
+enum McpConnectionMutationAction {
+  rotateCredential @map("rotate_credential")
+  retrust
+  rediscover
+  disable
+  enable
+  delete
+}
+
+enum ConnectionMutationExecutionStatus {
+  previewed
+  dispatched
+  completed
+  failed
+  unknown
+  held
+}
+
+enum McpToolReviewConclusion {
+  readOnlyVerified @map("read_only_verified")
+  readOnlyRejected @map("read_only_rejected")
+  needsResearch @map("needs_research")
+}
+
+enum McpToolReviewRiskLevel {
+  low
+  medium
+  high
+}
+
+enum McpToolReviewRiskReasonCode {
+  readOnlyEligible @map("read_only_eligible")
+  writeCapability @map("write_capability")
+  destructiveCapability @map("destructive_capability")
+  untrustedRemoteText @map("untrusted_remote_text")
+  schemaInvalid @map("schema_invalid")
+  networkUnverified @map("network_unverified")
+  credentialScopeUnknown @map("credential_scope_unknown")
+  insufficientEvidence @map("insufficient_evidence")
+}
+
 enum McpToolAttestationAuditEvent {
   attested
   revoked
@@ -1643,6 +1693,73 @@ model GitConnection {
   @@index([createdById, createdAt])
   @@index([ownerUserId, ownershipState, updatedAt])
   @@unique([ownerUserId, name])
+}
+
+// Personal Git connection governance is a durable preview/execute control
+// plane.  The candidate secret fingerprint is an intent only; plaintext and
+// ciphertext never leave the credential vault boundary.
+model GitConnectionMutationPreview {
+  id                           String                         @id @default(uuid()) @db.Uuid
+  connectionId                String                         @db.Uuid
+  actorId                     String                         @db.Uuid
+  ownerUserId                 String                         @db.Uuid
+  action                      GitConnectionMutationAction
+  actorAccountAccessVersion   Int
+  connectionConfigurationVersion Int
+  connectionUpdatedAt         DateTime
+  connectionStatus            GitConnectionStatus
+  candidateSecretFingerprint  String?                        @db.Char(64)
+  confirmationName            String?                        @db.VarChar(80)
+  reason                      String                         @db.VarChar(500)
+  requestKey                  String                         @db.VarChar(180)
+  requestFingerprint          String                         @db.Char(64)
+  impactFingerprint           String                         @db.Char(64)
+  impactSnapshot              Json                           @db.JsonB
+  impactCount                 Int
+  blockers                    Json                           @db.JsonB
+  canExecute                  Boolean
+  issuedAt                    DateTime
+  expiresAt                   DateTime
+  consumedAt                  DateTime?
+  executionStatus             ConnectionMutationExecutionStatus @default(previewed)
+  createdAt                   DateTime                       @default(now())
+  actor                       AppUser                        @relation("GitConnectionMutationPreviewActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audits                      GitConnectionMutationAudit[]
+
+  @@unique([actorId, requestKey])
+  @@index([connectionId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([expiresAt, consumedAt])
+}
+
+// Append-only lifecycle evidence.  It has no relation to the connection so a
+// successful delete cannot erase the security history.
+model GitConnectionMutationAudit {
+  id                              String                         @id @default(uuid()) @db.Uuid
+  connectionId                   String                         @db.Uuid
+  actorId                        String                         @db.Uuid
+  ownerUserId                    String                         @db.Uuid
+  previewId                      String                         @db.Uuid
+  action                         GitConnectionMutationAction
+  statusBefore                   GitConnectionStatus?
+  statusAfter                    GitConnectionStatus?
+  connectionConfigurationVersion Int
+  impactCount                    Int
+  requestKey                     String                         @db.VarChar(180)
+  requestFingerprint              String                         @db.Char(64)
+  impactFingerprint               String                         @db.Char(64)
+  executionStatus                 ConnectionMutationExecutionStatus
+  safeErrorCode                   String?                        @db.VarChar(64)
+  resultId                        String?                        @db.Uuid
+  transitionAt                   DateTime                       @default(now())
+  transactionId                  BigInt                         @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt                      DateTime                       @default(now())
+  actor                           AppUser                        @relation("GitConnectionMutationAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  preview                         GitConnectionMutationPreview   @relation(fields: [previewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([connectionId, createdAt])
+  @@index([actorId, requestKey, createdAt])
+  @@index([previewId, createdAt])
 }
 
 model GitRepository {
@@ -4314,6 +4431,8 @@ model AppUser {
   reviewedProjectAssetSegments ProjectAssetSegment[]             @relation("ProjectAssetSegmentReviewedBy")
   createdGitConnections        GitConnection[]                  @relation("GitConnectionCreatedBy")
   ownedGitConnections          GitConnection[]                  @relation("GitConnectionOwner")
+  gitConnectionMutationPreviews GitConnectionMutationPreview[]   @relation("GitConnectionMutationPreviewActor")
+  gitConnectionMutationAudits   GitConnectionMutationAudit[]     @relation("GitConnectionMutationAuditActor")
   createdGitRepositoryLinks    ProjectGitRepositoryLink[]
   projectGitRepositoryDelegationConnectionOwners ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationConnectionOwner")
   projectGitRepositoryDelegationProposers       ProjectGitRepositoryDelegation[] @relation("ProjectGitRepositoryDelegationProposer")
@@ -4327,6 +4446,10 @@ model AppUser {
   projectMcpConnectionDelegationTerminalActors  ProjectMcpConnectionDelegation[] @relation("ProjectMcpConnectionDelegationTerminalActor")
   createdMcpConnections        McpConnection[]                  @relation("McpConnectionCreatedBy")
   ownedMcpConnections          McpConnection[]                  @relation("McpConnectionOwner")
+  mcpConnectionMutationPreviews McpConnectionMutationPreview[]   @relation("McpConnectionMutationPreviewActor")
+  mcpConnectionMutationAudits   McpConnectionMutationAudit[]     @relation("McpConnectionMutationAuditActor")
+  mcpToolReviews                McpToolReview[]                  @relation("McpToolReviewReviewer")
+  mcpToolReviewAudits           McpToolReviewAudit[]             @relation("McpToolReviewAuditReviewer")
   verifiedMcpToolAttestations  McpToolAttestation[]
   revokedMcpToolAttestations    McpToolAttestation[]             @relation("McpToolAttestationRevokedBy")
   mcpToolAttestationAudits     McpToolAttestationAudit[]
@@ -5381,6 +5504,147 @@ model McpToolDefinition {
   @@unique([connectionId, name, definitionFingerprint])
   @@unique([id, connectionId, name])
   @@index([connectionId, current, name])
+}
+
+// Administrator-only MCP review evidence.  These rows freeze the complete
+// candidate tuple and reviewer epoch; the remote note is deliberately stored
+// only after strict local redaction and is never projected by system audit.
+model McpToolReview {
+  id                              String                    @id @default(uuid()) @db.Uuid
+  connectionId                   String                    @db.Uuid
+  toolDefinitionId               String                    @db.Uuid
+  toolName                       String                    @db.VarChar(128)
+  definitionFingerprint          String                    @db.Char(64)
+  networkFingerprint             String                    @db.Char(64)
+  credentialFingerprint          String                    @db.Char(64)
+  connectionConfigurationRevision Int
+  connectionUpdatedAt            DateTime
+  connectionOwnerAccountAccessVersion Int
+  reviewerId                     String                    @db.Uuid
+  reviewerAccountAccessVersion   Int
+  conclusion                     McpToolReviewConclusion
+  riskLevel                      McpToolReviewRiskLevel
+  riskReasonCode                 McpToolReviewRiskReasonCode
+  evidenceNote                   String                    @db.VarChar(240)
+  noteFingerprint                String                    @db.Char(64)
+  requestKey                     String                    @db.VarChar(180)
+  requestFingerprint             String                    @db.Char(64)
+  attestationId                 String?                   @db.Uuid
+  reviewedAt                     DateTime                  @default(now())
+  transactionId                  BigInt                    @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt                      DateTime                  @default(now())
+  reviewer                       AppUser                   @relation("McpToolReviewReviewer", fields: [reviewerId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audits                         McpToolReviewAudit[]
+
+  @@unique([reviewerId, requestKey])
+  @@index([connectionId, toolDefinitionId, createdAt])
+  @@index([toolDefinitionId, createdAt])
+  @@index([reviewerId, createdAt])
+  @@index([attestationId])
+}
+
+// Immutable, scalar review ledger.  It intentionally has no connection or
+// tool foreign key so cleanup cannot erase a rejected or historical review.
+model McpToolReviewAudit {
+  id                              String                    @id @default(uuid()) @db.Uuid
+  reviewId                        String                    @db.Uuid
+  connectionId                   String                    @db.Uuid
+  toolDefinitionId               String                    @db.Uuid
+  toolName                       String                    @db.VarChar(128)
+  definitionFingerprint          String                    @db.Char(64)
+  networkFingerprint             String                    @db.Char(64)
+  credentialFingerprint          String                    @db.Char(64)
+  connectionConfigurationRevision Int
+  connectionUpdatedAt            DateTime
+  connectionOwnerAccountAccessVersion Int
+  reviewerId                     String                    @db.Uuid
+  reviewerAccountAccessVersion   Int
+  conclusion                     McpToolReviewConclusion
+  riskLevel                      McpToolReviewRiskLevel
+  riskReasonCode                 McpToolReviewRiskReasonCode
+  evidenceNotePresent            Boolean
+  noteFingerprint                String                    @db.Char(64)
+  requestKey                     String                    @db.VarChar(180)
+  requestFingerprint             String                    @db.Char(64)
+  attestationId                 String?                   @db.Uuid
+  reviewedAt                     DateTime
+  transactionId                  BigInt                    @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt                      DateTime                  @default(now())
+  review                          McpToolReview              @relation(fields: [reviewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  reviewer                        AppUser                   @relation("McpToolReviewAuditReviewer", fields: [reviewerId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([reviewId, createdAt])
+  @@index([connectionId, createdAt])
+  @@index([toolDefinitionId, createdAt])
+  @@index([reviewerId, createdAt])
+  @@index([transactionId, createdAt])
+}
+
+// Personal MCP connection governance.  Rediscovery/retrust records the
+// external I/O dispatch intent outside the database transaction and settles
+// as held/unknown when no exactly-once transport result is available.
+model McpConnectionMutationPreview {
+  id                              String                         @id @default(uuid()) @db.Uuid
+  connectionId                   String                         @db.Uuid
+  actorId                        String                         @db.Uuid
+  ownerUserId                    String                         @db.Uuid
+  action                         McpConnectionMutationAction
+  actorAccountAccessVersion      Int
+  configurationRevision           Int
+  connectionUpdatedAt             DateTime
+  connectionStatus                McpConnectionStatus
+  candidateSecretFingerprint      String?                        @db.Char(64)
+  confirmationName                String?                        @db.VarChar(80)
+  reason                          String                         @db.VarChar(500)
+  requestKey                      String                         @db.VarChar(180)
+  requestFingerprint              String                         @db.Char(64)
+  impactFingerprint               String                         @db.Char(64)
+  impactSnapshot                  Json                           @db.JsonB
+  impactCount                     Int
+  blockers                        Json                           @db.JsonB
+  canExecute                      Boolean
+  issuedAt                        DateTime
+  expiresAt                       DateTime
+  consumedAt                      DateTime?
+  executionStatus                 ConnectionMutationExecutionStatus @default(previewed)
+  createdAt                       DateTime                       @default(now())
+  actor                           AppUser                        @relation("McpConnectionMutationPreviewActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audits                          McpConnectionMutationAudit[]
+
+  @@unique([actorId, requestKey])
+  @@index([connectionId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([expiresAt, consumedAt])
+}
+
+// Append-only scalar lifecycle evidence. It deliberately has no connection
+// foreign key so deletion never removes the audit trail.
+model McpConnectionMutationAudit {
+  id                              String                         @id @default(uuid()) @db.Uuid
+  connectionId                   String                         @db.Uuid
+  actorId                        String                         @db.Uuid
+  ownerUserId                    String                         @db.Uuid
+  previewId                      String                         @db.Uuid
+  action                         McpConnectionMutationAction
+  statusBefore                   McpConnectionStatus?
+  statusAfter                    McpConnectionStatus?
+  configurationRevision           Int
+  impactCount                     Int
+  requestKey                      String                         @db.VarChar(180)
+  requestFingerprint              String                         @db.Char(64)
+  impactFingerprint               String                         @db.Char(64)
+  executionStatus                 ConnectionMutationExecutionStatus
+  safeErrorCode                   String?                        @db.VarChar(64)
+  resultId                        String?                        @db.Uuid
+  transitionAt                   DateTime                       @default(now())
+  transactionId                  BigInt                         @default(dbgenerated("txid_current()")) @db.BigInt
+  createdAt                      DateTime                       @default(now())
+  actor                           AppUser                        @relation("McpConnectionMutationAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  preview                         McpConnectionMutationPreview   @relation(fields: [previewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([connectionId, createdAt])
+  @@index([actorId, requestKey, createdAt])
+  @@index([previewId, createdAt])
 }
 
 model ProjectMcpToolGrant {

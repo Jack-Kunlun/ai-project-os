@@ -25,6 +25,7 @@ import {
 } from "../src/lib/workspace-role-governance-service";
 import {
   DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX,
+  DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX,
   DATABASE_PRINCIPAL_RELATIONS,
 } from "../src/lib/database-principal-catalog";
 
@@ -182,8 +183,81 @@ async function assertInvokerHelperAcls(admin: Client): Promise<void> {
     assert.equal(row.writer_direct, helper.entitlementWriter, signature);
   }
   assert.ok(rows.rows.every((row) => expectedOids.has(row.oid)));
-  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 42);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 43);
   assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.entitlementWriter).length, 8);
+}
+
+async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
+  const triggerNames = [...new Set(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.map((trigger) => trigger.name))];
+  const expectedOids = new Set<string>();
+  const rows = await admin.query<{ oid: string; name: string }>(`
+    SELECT p.oid::text AS oid, p.proname AS name
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.prokind = 'f'
+       AND p.proname = ANY($1::text[])
+  `, [triggerNames]);
+  assert.equal(rows.rows.length, DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length);
+  for (const trigger of DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX) {
+    const signature = `public.${quoteIdentifier(trigger.name)}(${trigger.identityArguments})`;
+    const result = await admin.query<{
+      oid: string;
+      identity_arguments: string;
+      runtime_execute: boolean;
+      runtime_direct: boolean;
+      writer_execute: boolean;
+      writer_direct: boolean;
+      public_execute: boolean;
+      owner: string | null;
+      prosecdef: boolean;
+    }>(`
+      SELECT p.oid::text AS oid,
+             pg_get_function_identity_arguments(p.oid) AS identity_arguments,
+             has_function_privilege($1, $3, 'EXECUTE') AS runtime_execute,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS runtime_direct,
+             has_function_privilege($2, $3, 'EXECUTE') AS writer_execute,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS writer_direct,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = 0::oid
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS public_execute,
+             pg_get_userbyid(p.proowner) AS owner,
+             p.prosecdef
+        FROM pg_proc p
+       WHERE p.oid = pg_catalog.to_regprocedure($3)
+    `, [runtimeRole, writerRole, signature]);
+    const row = result.rows[0];
+    assert.ok(row, `missing guarded trigger function ${signature}`);
+    expectedOids.add(row.oid);
+    assert.equal(row.identity_arguments, trigger.identityArguments, signature);
+    assert.equal(row.owner, migratorRole, signature);
+    assert.equal(row.prosecdef, false, signature);
+    assert.equal(row.public_execute, false, signature);
+    assert.equal(row.runtime_execute, false, signature);
+    assert.equal(row.runtime_direct, false, signature);
+    assert.equal(row.writer_execute, false, signature);
+    assert.equal(row.writer_direct, false, signature);
+  }
+  assert.ok(rows.rows.every((row) => expectedOids.has(row.oid)));
 }
 
 async function runPrincipalBootstrap(
@@ -418,6 +492,7 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
     await runMigrations(migratorPassword);
     await runProductionReconcile(runtimePassword, migratorPassword, writerPassword);
     await assertInvokerHelperAcls(admin);
+    await assertGuardedTriggerFunctionAcls(admin);
     // A rerun with the retained legacy URL must self-heal/verify through the
     // cluster-admin path after the sealed role has replaced the source OID.
     await runPrincipalBootstrap(runtimePassword, migratorPassword, writerPassword, roleUrl(legacyRole, legacyPassword));
@@ -740,6 +815,7 @@ test("production reconcile separates non-owner runtime from writer and preserves
     // no longer depends on CREATEROLE.
     await runProductionReconcile(runtimePassword, migratorPassword, writerPassword);
     await assertInvokerHelperAcls(admin);
+    await assertGuardedTriggerFunctionAcls(admin);
 
     const relationRows = await admin.query<{ relname: string; owner: string; relkind: string }>(`
       SELECT c.relname, pg_get_userbyid(c.relowner) AS owner, c.relkind

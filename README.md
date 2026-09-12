@@ -8,7 +8,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 正式发布基线：无。已发布的内部 prerelease 基线为 `v0.1.0-dev.1`，当前开发版本为 `0.2.0-dev.1`；首个正式公开版本计划为 `1.0.0`，在此之前生产部署入口静态禁用，任何内部开发版本都不得进入生产 tag 通道。
 
-0.2.x 当前仅表示内部开发版本。会员个人模型与平台默认模型路由已按现行页面和服务端权限开放；Git 用户私有连接与双确认后的一次性手动只读读取已按当前页面开放。MCP 的精确授权、一次性只读 Streamable HTTP 派发和结果留存目前只完成后端/API 控制面，项目页面入口尚未开放，不构成当前用户可用能力，第三方现场能力也仍未验证。
+0.2.x 当前仅表示内部开发版本。会员个人模型与平台默认模型路由已按现行页面和服务端权限开放；Git 用户私有连接与双确认后的一次性手动只读读取已按当前页面开放。MCP 管理员不可变审核与项目 delegation/grant 控制面已开放；发现、重新信任、外部动作、自动化、派发和结果导入仍冻结或未现场验证，不构成已验证的第三方实时能力。
 
 ## 从哪里开始
 
@@ -42,7 +42,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 1. 启动 Docker Compose，初始化本地管理员。
 2. 由系统管理员在“管理工作台 → 平台模型”（`/admin/models`）添加并测试 OpenAI、DeepSeek、Qwen 或 GLM。
 3. 进入项目仓库页查看已有安全摘要；旧版项目 Git 连接、首次关联和同步入口已冻结。个人 Git 连接可在个人中心配置，项目页支持完成双确认后发起一次性手动只读读取；自动化、写入/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准。
-4. 项目 MCP 页面当前仅显示未开放状态，不提供工具发现、授权、动作创建、派发或结果查看。对应后端/API 控制面仍处于内部门禁验证：管理员安全审查和项目授权要求精确指纹与当前 Owner，预约和最后一次外发前检查阶段若发现撤销或漂移会在 POST 前阻止请求；外发边界之后无法追溯撤销，超时、断连或响应歧义进入 `unknown` 且不会重试。
+4. 项目 MCP 页面提供连接委托和只读工具授权控制面，不提供工具发现、动作调用、审批、派发或结果查看。管理员不可变审核和项目授权要求精确指纹与当前 Owner；发现、重新信任、外部动作和结果留存仍冻结或未现场验证。
 5. 创建项目，在项目“智能控制台”分配视觉、抽取、向量与生成模型。
 6. 上传文件，或添加网页、本地文件夹；历史仓库资料仅保留迁移期安全摘要，不启动新的外发同步。
 7. 审核 AI 候选并建立语义索引。
@@ -68,7 +68,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 | 文件与图片识别 | TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP；本地解析文本，图片和扫描 PDF 经当次授权后调用视觉模型并逐片段审核 |
 | 外部资料 | 抓取公开网页或经明确授权的内网页面；浏览器选择本地文件夹后按文件批量导入；来源版本原子发布 |
 | 多 Git 连接 | 个人 Git 连接、项目双确认委托和一次性手动只读读取已开放；自动化、写入/提交、旧版项目/管理员入口和旧 PAT 路径保持关闭，目标 Git 服务是否可用以连接测试和单次读取结果为准，页面不暴露凭据、CA 或 known_hosts |
-| 受控 MCP 连接与结果留存 | 精确授权、一次性只读派发和结果留存仅完成后端/API 控制面并处于内部门禁验证；项目页面入口、Editor 纳入、资料导入和第三方现场验证均未开放，不能视为当前用户能力 |
+| 受控 MCP 连接与结果留存 | 管理员不可变审核与项目 delegation/grant 控制面已开放；发现、重新信任、外部动作、自动化、派发、结果导入和第三方现场能力仍冻结或未验证 |
 | 多仓库记忆 | 已关联仓库的历史资料保留安全边界；项目页可对已双确认委托发起一次性手动只读读取，自动同步和写入仍冻结 |
 | GitHub 扩展资料 | 既有 GitHub 专用项目连接、CLI 和同步入口在迁移期间冻结；个人连接委托仅支持当前项目页的一次性手动只读范围 |
 | 自动抽取与审核 | 从明确选择的资料抽取 decision、progress、issue、risk；结构与连续原文验证通过后进入人工审核 |
@@ -90,7 +90,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 - `/admin/models`：平台模型、能力、自定义模型 ID 与 API Key（system admin）。
 - `/admin/connectors/git`：Git 连接迁移/冻结说明（system admin），不接收用户凭据。
-- `/admin/connectors/mcp`：MCP 连接迁移/冻结说明（system admin），不接收用户 Bearer Token。
+- `/admin/connectors/mcp`：MCP 候选、净化详情与管理员不可变审核工作台（system admin），不接收用户 Bearer Token。
 - `/admin/users/memberships`：用户会员资格（system admin）。
 - `/admin/operations/backups`：备份/运维状态（按初始超级管理员规则）。
 - `/team`：成员、邀请和 OIDC。
@@ -100,7 +100,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - `/projects/:projectId/external-sources`：网页与本地文件夹资料。
 - `/projects/:projectId/automations`：自动化规则与运行记录。
 - `/projects/:projectId/actions`：动作策略、审批与执行审计。
-- `/projects/:projectId/tools`：项目 MCP 未开放状态页；当前不提供工具授权、调用动作或结果入口。
+- `/projects/:projectId/tools`：项目 MCP 连接委托与只读工具授权控制面；不提供发现、调用动作、审批、派发或结果入口。
 - `/projects/:projectId/plan`：目标、负责人、期限、验收标准、证据、仓库变化、健康、依赖和审计。
 
 `.env` 只承载部署基础设施参数，例如数据库连接、端口和安全 Cookie 开关；模型 API Key、Git Token、SSH Key、MCP Bearer Token 与 OIDC Client Secret 不写入环境变量。
@@ -134,7 +134,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 当前限制
 
-- 当前 `0.2.0-dev.1` 内部开发版本承接 `v0.1.0-dev.1` 的默认工作区；数据模型支持多个工作区，但页面尚未提供工作区创建和切换。会员个人模型与平台默认模型路由按现行页面和服务端权限提供；旧版项目 GitHub、管理员连接和 MCP attestation 入口保持冻结。
+- 当前 `0.2.0-dev.1` 内部开发版本承接 `v0.1.0-dev.1` 的默认工作区；数据模型支持多个工作区，但页面尚未提供工作区创建和切换。会员个人模型与平台默认模型路由按现行页面和服务端权限提供；旧版项目 GitHub、管理员 Git 连接和旧 MCP attestation 直写入口保持冻结，管理员 MCP review 与项目 delegation/grant 控制面已开放。
 - 数据库 trigger 只约束正常应用写入的一致性，不是抵抗已取得应用数据库凭据或任意 SQL 能力的独立授权边界；生产需隔离 runtime 与 migrator 角色并限制网络访问。账号访问代次迁移不支持旧、新应用滚动并存，部署必须在维护窗口停止旧 app/worker、执行迁移，再启动新版本。
 - OIDC 不提供“按邮箱自动合并已有本地账户”。已有账户需要未来的显式身份绑定流程；当前遇到相同邮箱会拒绝登录，避免账户劫持。
 - Git 通用连接器和 GitHub 扩展资料的既有外发入口在迁移期间冻结；Issue、PR、Release 等扩展资料的个人连接能力属于 planned 范围。
@@ -239,7 +239,7 @@ pnpm exec prisma migrate status --config prisma.config.ts
 - `/admin`：system admin 管理工作台总览。
 - `/admin/models`：system admin 平台模型。
 - `/admin/connectors/git`：system admin Git 连接迁移/冻结说明，不接收凭据。
-- `/admin/connectors/mcp`：system admin MCP 连接迁移/冻结说明，不接收凭据。
+- `/admin/connectors/mcp`：system admin MCP 候选与不可变审核工作台，不接收凭据。
 - `/admin/users/memberships`：system admin 用户与会员。
 - `/admin/operations/backups`：system admin 备份/运维状态。
 - `/settings`、`/connections`、`/connections/mcp`：兼容跳转，非 admin 返回用户工作台。
@@ -253,7 +253,7 @@ pnpm exec prisma migrate status --config prisma.config.ts
 - `/projects/:projectId/world`：时态项目状态、事实关系、替代链、冲突、快照与审计。
 - `/projects/:projectId/automations`：自动化。
 - `/projects/:projectId/actions`：动作策略、审批和审计。
-- `/projects/:projectId/tools`：MCP 未开放状态页，当前不提供授权、调用或结果入口。
+- `/projects/:projectId/tools`：MCP 连接委托与只读工具授权控制面；当前不提供发现、调用、审批、派发或结果入口。
 - `/projects/:projectId/plan`：目标、负责人、期限、验收标准、证据、仓库变化、工作项、依赖、健康与计划审计。
 - `/projects/:projectId/control`：AI 路由。
 - `/projects/:projectId/memory`：抽取、索引、搜索和 RAG。

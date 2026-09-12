@@ -24,7 +24,7 @@ import {
   listProjectGitRepositoryDelegations,
   proposeProjectGitRepositoryDelegation,
 } from "../src/lib/project-git-repository-delegation-service";
-import { deleteGitConnection, GitServiceError, updateGitConnection } from "../src/lib/git";
+import { executeGitConnectionMutation, previewGitConnectionMutation, updateGitConnection } from "../src/lib/git";
 import { updateProjectLifecycle } from "../src/lib/project-lifecycle";
 
 const shouldRun = process.env.PROJECT_GIT_REPOSITORY_DELEGATION_POSTGRES_GATE === "1";
@@ -404,20 +404,29 @@ test(
     const suffix = randomUUID().slice(0, 8);
     const connectionOwnerId = randomUUID();
     const projectOwnerId = randomUUID();
+    const parityConnectionOwnerId = randomUUID();
     const viewerId = randomUUID();
     const projectId = randomUUID();
     const connectionId = randomUUID();
     const foreignConnectionId = randomUUID();
+    const parityConnectionId = randomUUID();
     const credentialId = randomUUID();
     const foreignCredentialId = randomUUID();
+    const parityCredentialId = randomUUID();
     const now = new Date();
     const connectionFingerprint = "a".repeat(64);
     const addressFingerprint = "b".repeat(64);
     let connectionOwnerAccountAccessVersion = 1;
+    let parityConnectionOwnerAccountAccessVersion = 1;
     const connectionOwnerActor = () => ({
       id: connectionOwnerId,
       role: "user" as const,
       accountAccessVersion: connectionOwnerAccountAccessVersion,
+    });
+    const parityConnectionOwnerActor = () => ({
+      id: parityConnectionOwnerId,
+      role: "user" as const,
+      accountAccessVersion: parityConnectionOwnerAccountAccessVersion,
     });
     const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
     const viewerActor = { id: viewerId, role: "user" as const, accountAccessVersion: 1 };
@@ -426,6 +435,7 @@ test(
       data: [
         { id: connectionOwnerId, username: `git_delegation_owner_${suffix}`, role: "user" },
         { id: projectOwnerId, username: `git_delegation_project_owner_${suffix}`, role: "user" },
+        { id: parityConnectionOwnerId, username: `git_delegation_parity_owner_${suffix}`, role: "user" },
         { id: viewerId, username: `git_delegation_viewer_${suffix}`, role: "user" },
       ],
     });
@@ -433,9 +443,11 @@ test(
     await db.$transaction(async (tx) => {
       await grantWorkspaceMembership(tx, { workspaceId, userId: connectionOwnerId, role: "member", actorId: seededAdminId, reason: "git_delegation_gate_owner" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: projectOwnerId, role: "member", actorId: seededAdminId, reason: "git_delegation_gate_project_owner" });
+      await grantWorkspaceMembership(tx, { workspaceId, userId: parityConnectionOwnerId, role: "member", actorId: seededAdminId, reason: "git_delegation_gate_parity_owner" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: viewerId, role: "member", actorId: seededAdminId, reason: "git_delegation_gate_viewer" });
       await grantProjectMembership(tx, { projectId: project.id, workspaceId, userId: connectionOwnerId, role: "editor", actorId: seededAdminId, reason: "git_delegation_gate_owner" });
       await grantProjectMembership(tx, { projectId: project.id, workspaceId, userId: projectOwnerId, role: "owner", actorId: seededAdminId, reason: "git_delegation_gate_project_owner" });
+      await grantProjectMembership(tx, { projectId: project.id, workspaceId, userId: parityConnectionOwnerId, role: "editor", actorId: seededAdminId, reason: "git_delegation_gate_parity_owner" });
       await grantProjectMembership(tx, { projectId: project.id, workspaceId, userId: viewerId, role: "viewer", actorId: seededAdminId, reason: "git_delegation_gate_viewer" });
     });
     const [connectionOwnerMembership, projectOwnerMembership, viewerMembership] = await Promise.all([
@@ -456,6 +468,7 @@ test(
       data: [
         { id: credentialId, kind: "git", ciphertext: Buffer.from([1]), nonce: Buffer.from([2]), authTag: Buffer.from([3]), maskedSuffix: "gate", secretFingerprint: connectionFingerprint },
         { id: foreignCredentialId, kind: "git", ciphertext: Buffer.from([4]), nonce: Buffer.from([5]), authTag: Buffer.from([6]), maskedSuffix: "foreign", secretFingerprint: "c".repeat(64) },
+        { id: parityCredentialId, kind: "git", ciphertext: Buffer.from([7]), nonce: Buffer.from([8]), authTag: Buffer.from([9]), maskedSuffix: "parity", secretFingerprint: "d".repeat(64) },
       ],
     });
     const common = {
@@ -473,6 +486,7 @@ test(
     };
     await db.gitConnection.create({ data: { ...common, id: connectionId, name: `Own Git ${suffix}` } });
     await db.gitConnection.create({ data: { ...common, id: foreignConnectionId, name: `Foreign Git ${suffix}`, ownerUserId: projectOwnerId, createdById: projectOwnerId, credentialId: foreignCredentialId } });
+    await db.gitConnection.create({ data: { ...common, id: parityConnectionId, name: `Parity Git ${suffix}`, ownerUserId: parityConnectionOwnerId, createdById: parityConnectionOwnerId, credentialId: parityCredentialId } });
 
     await assert.rejects(
       () => proposeProjectGitRepositoryDelegation(projectId, {
@@ -592,29 +606,6 @@ test(
     const ownerSafetyBeforeMembershipDrift = await listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db);
     assert.equal(ownerSafetyBeforeMembershipDrift.some((item) => item.id === draft.id && item.capabilities.canRevoke), true);
     assert.deepEqual(await listConnectionOwnerProjectGitRepositoryDelegations(projectOwnerActor, db), []);
-    const disabledOwner = await setAccountAccessState(db, {
-      adminUserId: seededAdminId,
-      userId: connectionOwnerId,
-      action: "disable",
-      reason: "delegation safety list gate",
-      requestKey: `git-delegation-disable-${suffix}`,
-    });
-    assert.equal(disabledOwner.state, "disabled");
-    await assert.rejects(
-      () => listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db),
-      /PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN/u,
-    );
-    const restoredOwner = await setAccountAccessState(db, {
-      adminUserId: seededAdminId,
-      userId: connectionOwnerId,
-      action: "restore",
-      reason: "delegation safety list gate restored",
-      requestKey: `git-delegation-restore-${suffix}`,
-    });
-    assert.equal(restoredOwner.state, "enabled");
-    connectionOwnerAccountAccessVersion = restoredOwner.accountAccessVersion;
-    assert.deepEqual(await listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db), []);
-    assert.equal((await getProjectGitRepositoryDelegationLiveEligibility(projectId, draft.id, db)).eligible, false);
     await assert.rejects(
       () => revokeProjectGitRepositoryDelegation(projectId, draft.id, {
         expectedVersion: active.version,
@@ -629,26 +620,6 @@ test(
       }, viewerActor, db),
       /PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN/u,
     );
-
-    const connectionBeforeCredentialRotation = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId } });
-    const rotatedConnection = await updateGitConnection(connectionId, {
-      secret: `rotated-git-secret-${suffix}`,
-      expectedUpdatedAt: connectionBeforeCredentialRotation.updatedAt.toISOString(),
-    }, connectionOwnerActor(), db);
-    assert.equal(rotatedConnection.status, "configured");
-    // The gate does not contact a real forge.  This database write represents
-    // the successful, separately governed probe after the explicit rotation.
-    const reverifiedConnection = await db.gitConnection.update({
-      where: { id: connectionId },
-      data: {
-        status: "verified",
-        resolvedAddressFingerprint: addressFingerprint,
-        lastTestedAt: new Date(),
-        lastErrorCode: null,
-        disabledAt: null,
-      },
-    });
-    assert.equal(reverifiedConnection.ownerAccountAccessVersion, restoredOwner.accountAccessVersion);
 
     const forgedDraft = await proposeProjectGitRepositoryDelegation(projectId, {
       gitConnectionId: connectionId,
@@ -760,57 +731,147 @@ test(
     );
 
     const parityDraft = await proposeProjectGitRepositoryDelegation(projectId, {
-      gitConnectionId: connectionId,
+      gitConnectionId: parityConnectionId,
       repositoryPath: "org/capability-parity",
       trackedRef: "main",
       includeRoots: ["."],
       softExcludePatterns: [],
       role: "library",
       expiresAt: new Date(now.getTime() + 60 * 60 * 1_000).toISOString(),
-    }, connectionOwnerActor(), db);
+    }, parityConnectionOwnerActor(), db);
     const parityOwnerConfirmed = await confirmProjectGitRepositoryDelegationOwner(projectId, parityDraft.id, {
       expectedVersion: parityDraft.version,
       acknowledgeReadOnlyCredentialUse: true,
-    }, connectionOwnerActor(), db);
+    }, parityConnectionOwnerActor(), db);
     const parityBeforeDrift = await listProjectGitRepositoryDelegations(projectId, projectOwnerActor, db);
     assert.equal(parityBeforeDrift.delegations.find((item) => item.id === parityDraft.id)?.capabilities.canProjectConfirm, true);
+    const parityOwnerSafetyBeforeDrift = await listConnectionOwnerProjectGitRepositoryDelegations(parityConnectionOwnerActor(), db);
+    assert.equal(parityOwnerSafetyBeforeDrift.some((item) => item.id === parityDraft.id && item.capabilities.canReject), true);
     const parityDisabledOwner = await setAccountAccessState(db, {
       adminUserId: seededAdminId,
-      userId: connectionOwnerId,
+      userId: parityConnectionOwnerId,
       action: "disable",
       reason: "capability parity disabled owner",
       requestKey: `git-delegation-parity-disable-${suffix}`,
     });
     assert.equal(parityDisabledOwner.state, "disabled");
+    await assert.rejects(
+      () => listConnectionOwnerProjectGitRepositoryDelegations(parityConnectionOwnerActor(), db),
+      /PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN/u,
+    );
     const parityAfterOwnerDisabled = await listProjectGitRepositoryDelegations(projectId, projectOwnerActor, db);
     assert.equal(parityAfterOwnerDisabled.delegations.find((item) => item.id === parityDraft.id)?.capabilities.canProjectConfirm, false);
     const parityRestoredOwner = await setAccountAccessState(db, {
       adminUserId: seededAdminId,
-      userId: connectionOwnerId,
+      userId: parityConnectionOwnerId,
       action: "restore",
       reason: "capability parity owner restored",
       requestKey: `git-delegation-parity-restore-${suffix}`,
     });
     assert.equal(parityRestoredOwner.state, "enabled");
-    connectionOwnerAccountAccessVersion = parityRestoredOwner.accountAccessVersion;
+    parityConnectionOwnerAccountAccessVersion = parityRestoredOwner.accountAccessVersion;
+    const parityOwnerSafetyAfterRestore = await listConnectionOwnerProjectGitRepositoryDelegations(parityConnectionOwnerActor(), db);
+    assert.deepEqual(parityOwnerSafetyAfterRestore, []);
     assert.equal((await getProjectGitRepositoryDelegationLiveEligibility(projectId, parityDraft.id, db)).eligible, false);
     await db.$transaction(async (tx) => {
-      await revokeProjectMembership(tx, projectId, connectionOwnerId, workspaceId, { actorId: seededAdminId, reason: "git_delegation_gate_capability_owner_epoch" });
-      await grantProjectMembership(tx, { projectId, workspaceId, userId: connectionOwnerId, role: "editor", actorId: seededAdminId, reason: "git_delegation_gate_capability_owner_epoch_readd" });
+      await revokeProjectMembership(tx, projectId, parityConnectionOwnerId, workspaceId, { actorId: seededAdminId, reason: "git_delegation_gate_capability_owner_epoch" });
+      await grantProjectMembership(tx, { projectId, workspaceId, userId: parityConnectionOwnerId, role: "editor", actorId: seededAdminId, reason: "git_delegation_gate_capability_owner_epoch_readd" });
     });
     const parityAfterOwnerDrift = await listProjectGitRepositoryDelegations(projectId, projectOwnerActor, db);
     assert.equal(parityAfterOwnerDrift.delegations.find((item) => item.id === parityDraft.id)?.capabilities.canProjectConfirm, false);
-    const parityRejected = await rejectProjectGitRepositoryDelegation(projectId, parityDraft.id, { expectedVersion: parityOwnerConfirmed.version, reason: "capability parity owner epoch drift" }, connectionOwnerActor(), db);
+    const parityRejected = await rejectProjectGitRepositoryDelegation(projectId, parityDraft.id, { expectedVersion: parityOwnerConfirmed.version, reason: "capability parity owner epoch drift" }, parityConnectionOwnerActor(), db);
     assert.equal(parityRejected.status, "rejected");
 
-    const disabledConnection = await db.gitConnection.update({ where: { id: connectionId }, data: { status: "disabled", disabledAt: new Date() } });
-    await assert.rejects(
-      () => deleteGitConnection(connectionId, {
-        confirmationName: `Own Git ${suffix}`,
-        expectedUpdatedAt: disabledConnection.updatedAt.toISOString(),
-      }, connectionOwnerActor(), db),
-      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_IN_USE",
+    const connectionBeforeCredentialRotation = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId } });
+    const rotationSecret = `rotated-git-secret-${suffix}`;
+    const rotationPreview = await previewGitConnectionMutation(connectionId, {
+      action: "rotateCredential",
+      requestKey: `git-delegation-rotate-${suffix}`,
+      reason: "governed credential rotation invalidates delegation evidence",
+      expectedUpdatedAt: connectionBeforeCredentialRotation.updatedAt.toISOString(),
+      secret: rotationSecret,
+    }, connectionOwnerActor(), db);
+    assert.equal(rotationPreview.canExecute, true);
+    const rotationResult = await executeGitConnectionMutation(connectionId, {
+      previewId: rotationPreview.id,
+      requestKey: rotationPreview.requestKey,
+      requestFingerprint: rotationPreview.requestFingerprint,
+      impactFingerprint: rotationPreview.impactFingerprint,
+      expectedUpdatedAt: rotationPreview.connection.updatedAt,
+      secret: rotationSecret,
+    }, connectionOwnerActor(), db);
+    assert.equal(rotationResult.status, "completed");
+    const rotatedConnection = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId } });
+    assert.equal(rotatedConnection.status, "configured");
+    assert.equal(rotatedConnection.configurationVersion, connectionBeforeCredentialRotation.configurationVersion + 1);
+    assert.equal(rotatedConnection.resolvedAddressFingerprint, null);
+    const rotatedEligibility = await getProjectGitRepositoryDelegationLiveEligibility(projectId, draft.id, db);
+    assert.equal(rotatedEligibility.eligible, false);
+    assert.equal(rotatedEligibility.reason, "CONNECTION_DRIFT");
+
+    const disablePreview = await previewGitConnectionMutation(connectionId, {
+      action: "disable",
+      requestKey: `git-delegation-disable-${suffix}`,
+      reason: "governed disable retains delegation evidence for review",
+      expectedUpdatedAt: rotatedConnection.updatedAt.toISOString(),
+    }, connectionOwnerActor(), db);
+    assert.equal(disablePreview.canExecute, true);
+    const disableResult = await executeGitConnectionMutation(connectionId, {
+      previewId: disablePreview.id,
+      requestKey: disablePreview.requestKey,
+      requestFingerprint: disablePreview.requestFingerprint,
+      impactFingerprint: disablePreview.impactFingerprint,
+      expectedUpdatedAt: disablePreview.connection.updatedAt,
+    }, connectionOwnerActor(), db);
+    assert.equal(disableResult.status, "completed");
+    const disabledConnection = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId } });
+
+    const blockedDeletePreview = await previewGitConnectionMutation(connectionId, {
+      action: "delete",
+      requestKey: `git-delegation-delete-blocked-${suffix}`,
+      reason: "deletion remains blocked while historical delegation evidence is retained",
+      expectedUpdatedAt: disabledConnection.updatedAt.toISOString(),
+      confirmationName: `Own Git ${suffix}`,
+    }, connectionOwnerActor(), db);
+    assert.equal(blockedDeletePreview.canExecute, false);
+    assert.equal(blockedDeletePreview.blockers.includes("live_delegation"), true);
+    assert.equal(
+      blockedDeletePreview.blockers.includes("historical_reference") || blockedDeletePreview.blockers.includes("live_delegation"),
+      true,
     );
+    await assert.rejects(
+      () => executeGitConnectionMutation(connectionId, {
+        previewId: blockedDeletePreview.id,
+        requestKey: blockedDeletePreview.requestKey,
+        requestFingerprint: blockedDeletePreview.requestFingerprint,
+        impactFingerprint: blockedDeletePreview.impactFingerprint,
+        expectedUpdatedAt: blockedDeletePreview.connection.updatedAt,
+        confirmationName: `Own Git ${suffix}`,
+      }, connectionOwnerActor(), db),
+      (error: unknown) => errorText(error).includes("GIT_CONNECTION_IN_USE"),
+    );
+    const disabledOwner = await setAccountAccessState(db, {
+      adminUserId: seededAdminId,
+      userId: connectionOwnerId,
+      action: "disable",
+      reason: "delegation safety list gate",
+      requestKey: `git-delegation-owner-disable-${suffix}`,
+    });
+    assert.equal(disabledOwner.state, "disabled");
+    await assert.rejects(
+      () => listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db),
+      /PROJECT_GIT_REPOSITORY_DELEGATION_FORBIDDEN/u,
+    );
+    const restoredOwner = await setAccountAccessState(db, {
+      adminUserId: seededAdminId,
+      userId: connectionOwnerId,
+      action: "restore",
+      reason: "delegation safety list gate restored",
+      requestKey: `git-delegation-owner-restore-${suffix}`,
+    });
+    assert.equal(restoredOwner.state, "enabled");
+    connectionOwnerAccountAccessVersion = restoredOwner.accountAccessVersion;
+    assert.deepEqual(await listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db), []);
     const drifted = await getProjectGitRepositoryDelegationLiveEligibility(projectId, draft.id, db);
     assert.equal(drifted.eligible, false);
     assert.equal(drifted.reason, "CONNECTION_DRIFT");
@@ -873,13 +934,11 @@ test(
     });
     assert.equal(forgedAudit?.action, "rejected");
     const activeAuditCount = await db.projectGitRepositoryDelegationAudit.count({ where: { delegationId: draft.id } });
-    await deleteGitConnection(connectionId, {
-      confirmationName: `Own Git ${suffix}`,
-      expectedUpdatedAt: disabledConnection.updatedAt.toISOString(),
-    }, connectionOwnerActor(), db);
-    assert.equal(await db.projectGitRepositoryDelegation.count({ where: { gitConnectionId: connectionId } }), 0);
-    assert.equal(await db.gitConnection.count({ where: { id: connectionId } }), 0);
-    assert.equal(await db.externalCredential.count({ where: { id: credentialId } }), 0);
+    const retainedConnection = await db.gitConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { status: true } });
+    assert.equal(retainedConnection.status, "disabled");
+    assert.equal(await db.projectGitRepositoryDelegation.count({ where: { gitConnectionId: connectionId } }) > 0, true);
+    assert.equal(await db.gitConnection.count({ where: { id: connectionId } }), 1);
+    assert.equal(await db.externalCredential.count({ where: { id: credentialId } }), 1);
     assert.equal(await db.projectGitRepositoryDelegationAudit.count({ where: { delegationId: draft.id } }), auditCount);
     assert.equal(await db.projectGitRepositoryDelegationAudit.count({ where: { delegationId: draft.id } }), activeAuditCount);
     assert.equal(await db.projectGitRepositoryDelegationAudit.count({ where: { delegationId: forgedDraft.id } }), 2);

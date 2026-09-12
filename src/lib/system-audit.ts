@@ -119,6 +119,32 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.workspaceInvitation,
     resultMap: resultMapping({ pending: ["created"], applied: ["accepted"], revoked: ["revoked"] }),
   },
+  gitConnectionMutation: {
+    source: "gitConnectionMutation",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.gitConnectionMutation,
+    table: "GitConnectionMutationAudit",
+    selectedFields: ["id", "connectionId", "ownerUserId", "action", "statusBefore", "statusAfter", "connectionConfigurationVersion", "impactCount", "executionStatus", "safeErrorCode", "actorId", "createdAt"],
+    referenceFields: ["connectionId", "ownerUserId"],
+    actionField: "action",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.gitConnectionMutation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.gitConnectionMutation),
+    resultField: "executionStatus",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.gitConnectionMutation,
+    resultMap: resultMapping({ pending: ["previewed", "dispatched"], applied: ["completed"], disabled: ["completed"], failed: ["failed"], unknown: ["unknown", "held"] }),
+  },
+  mcpConnectionMutation: {
+    source: "mcpConnectionMutation",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.mcpConnectionMutation,
+    table: "McpConnectionMutationAudit",
+    selectedFields: ["id", "connectionId", "ownerUserId", "action", "statusBefore", "statusAfter", "configurationRevision", "impactCount", "executionStatus", "safeErrorCode", "actorId", "createdAt"],
+    referenceFields: ["connectionId", "ownerUserId"],
+    actionField: "action",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.mcpConnectionMutation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.mcpConnectionMutation),
+    resultField: "executionStatus",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.mcpConnectionMutation,
+    resultMap: resultMapping({ pending: ["previewed", "dispatched"], applied: ["completed"], disabled: ["completed"], failed: ["failed"], unknown: ["unknown", "held"] }),
+  },
   mcpToolAttestation: {
     source: "mcpToolAttestation",
     label: SYSTEM_AUDIT_SOURCE_LABELS.mcpToolAttestation,
@@ -131,6 +157,21 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     resultField: "event",
     allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.mcpToolAttestation,
     resultMap: resultMapping({ applied: ["attested"], revoked: ["revoked"] }),
+  },
+  mcpToolReview: {
+    source: "mcpToolReview",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.mcpToolReview,
+    table: "McpToolReviewAudit",
+    // The review note is intentionally absent.  Only its presence, controlled
+    // conclusion and risk enums are projected into system audit.
+    selectedFields: ["id", "reviewerId", "conclusion", "riskLevel", "riskReasonCode", "evidenceNotePresent", "connectionConfigurationRevision", "reviewerAccountAccessVersion", "transactionId", "createdAt"],
+    referenceFields: ["reviewId", "connectionId", "toolDefinitionId"],
+    actionField: "conclusion",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.mcpToolReview,
+    actionMap: Object.freeze({ attested: "read_only_verified", rejected: "read_only_rejected", reviewed: "needs_research" }),
+    resultField: "conclusion",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.mcpToolReview,
+    resultMap: resultMapping({ applied: ["read_only_verified"], rejected: ["read_only_rejected"], pending: ["needs_research"] }),
   },
   projectAiProviderDelegation: {
     source: "projectAiProviderDelegation",
@@ -642,6 +683,7 @@ const MCP_SAFE_ERROR_CODES = new Set([
   "MCP_AUTH_UNAVAILABLE",
   "MCP_DISPATCH_FAILED",
   "MCP_DISPATCH_UNKNOWN",
+  "MCP_EXTERNAL_IO_PLANNED_NOT_DISPATCHED",
 ]);
 
 function safeAiErrorCode(value: unknown): string | null {
@@ -741,6 +783,38 @@ const invitationSelect = {
   createdAt: true,
 } as const;
 
+type GitConnectionMutationAuditRow = Prisma.GitConnectionMutationAuditGetPayload<{ select: typeof gitConnectionMutationAuditSelect }>;
+const gitConnectionMutationAuditSelect = {
+  id: true,
+  connectionId: true,
+  ownerUserId: true,
+  action: true,
+  statusBefore: true,
+  statusAfter: true,
+  connectionConfigurationVersion: true,
+  impactCount: true,
+  executionStatus: true,
+  safeErrorCode: true,
+  actorId: true,
+  createdAt: true,
+} as const;
+
+type McpConnectionMutationAuditRow = Prisma.McpConnectionMutationAuditGetPayload<{ select: typeof mcpConnectionMutationAuditSelect }>;
+const mcpConnectionMutationAuditSelect = {
+  id: true,
+  connectionId: true,
+  ownerUserId: true,
+  action: true,
+  statusBefore: true,
+  statusAfter: true,
+  configurationRevision: true,
+  impactCount: true,
+  executionStatus: true,
+  safeErrorCode: true,
+  actorId: true,
+  createdAt: true,
+} as const;
+
 type AttestationRow = Prisma.McpToolAttestationAuditGetPayload<{ select: typeof attestationSelect }>;
 const attestationSelect = {
   id: true,
@@ -751,6 +825,23 @@ const attestationSelect = {
   statusBefore: true,
   statusAfter: true,
   connectionConfigurationRevision: true,
+  createdAt: true,
+} as const;
+
+type McpToolReviewAuditRow = Prisma.McpToolReviewAuditGetPayload<{ select: typeof mcpToolReviewAuditSelect }>;
+const mcpToolReviewAuditSelect = {
+  id: true,
+  reviewId: true,
+  connectionId: true,
+  toolDefinitionId: true,
+  reviewerId: true,
+  conclusion: true,
+  riskLevel: true,
+  riskReasonCode: true,
+  evidenceNotePresent: true,
+  connectionConfigurationRevision: true,
+  reviewerAccountAccessVersion: true,
+  transactionId: true,
   createdAt: true,
 } as const;
 
@@ -1250,6 +1341,62 @@ function invitationProjection(row: InvitationRow): RawAuditEvent {
   });
 }
 
+function connectionMutationResult(executionStatus: string, statusAfter: string | null): SystemAuditResult {
+  if (executionStatus === "failed") return "failed";
+  if (executionStatus === "unknown") return "unknown";
+  if (executionStatus === "held") return "unknown";
+  if (executionStatus === "previewed" || executionStatus === "dispatched") return "pending";
+  if (statusAfter === "disabled") return "disabled";
+  return executionStatus === "completed" ? "applied" : "unknown";
+}
+
+function gitConnectionMutationProjection(row: GitConnectionMutationAuditRow): RawAuditEvent {
+  const action = String(row.action);
+  const statusAfter = row.statusAfter === null ? null : String(row.statusAfter);
+  const safeErrorCode = row.safeErrorCode === "GIT_EXTERNAL_IO_PLANNED_NOT_DISPATCHED" ? row.safeErrorCode : null;
+  return rawEvent({
+    id: row.id,
+    source: "gitConnectionMutation",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind: "user",
+    subjectId: row.ownerUserId,
+    references: safeReferences({ categories: ["gitConnection", "connectionGovernance"], userId: row.ownerUserId }),
+    evidence: evidence(
+      { status: row.statusBefore === null ? null : String(row.statusBefore) },
+      { status: statusAfter, impactCount: row.impactCount },
+      { connectionConfiguration: row.connectionConfigurationVersion },
+      false,
+      safeErrorCode,
+    ),
+    result: connectionMutationResult(String(row.executionStatus), statusAfter),
+  });
+}
+
+function mcpConnectionMutationProjection(row: McpConnectionMutationAuditRow): RawAuditEvent {
+  const action = String(row.action);
+  const statusAfter = row.statusAfter === null ? null : String(row.statusAfter);
+  return rawEvent({
+    id: row.id,
+    source: "mcpConnectionMutation",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind: "user",
+    subjectId: row.ownerUserId,
+    references: safeReferences({ categories: ["mcpConnection", "connectionGovernance"], userId: row.ownerUserId }),
+    evidence: evidence(
+      { status: row.statusBefore === null ? null : String(row.statusBefore) },
+      { status: statusAfter, impactCount: row.impactCount },
+      { connectionConfiguration: row.configurationRevision },
+      false,
+      safeMcpErrorCode(row.safeErrorCode),
+    ),
+    result: connectionMutationResult(String(row.executionStatus), statusAfter),
+  });
+}
+
 function attestationProjection(row: AttestationRow): RawAuditEvent {
   const action = String(row.event);
   return rawEvent({
@@ -1268,6 +1415,37 @@ function attestationProjection(row: AttestationRow): RawAuditEvent {
       false,
     ),
     result: statusResult(action, row.statusAfter === null ? null : String(row.statusAfter)),
+  });
+}
+
+function mcpToolReviewProjection(row: McpToolReviewAuditRow): RawAuditEvent {
+  const conclusion = String(row.conclusion);
+  const action = conclusion === "read_only_verified"
+    ? "attested"
+    : conclusion === "read_only_rejected"
+      ? "rejected"
+      : "reviewed";
+  const result: SystemAuditResult = conclusion === "read_only_verified"
+    ? "applied"
+    : conclusion === "read_only_rejected"
+      ? "rejected"
+      : "pending";
+  return rawEvent({
+    id: row.id,
+    source: "mcpToolReview",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.reviewerId,
+    actorKind: "user",
+    subjectId: null,
+    references: safeReferences({ categories: ["mcpConnection", "mcpTool", "mcpToolReview"] }),
+    evidence: evidence(
+      {},
+      { conclusion, riskLevel: String(row.riskLevel), riskReasonCode: String(row.riskReasonCode), evidenceNotePresent: row.evidenceNotePresent },
+      { connectionConfiguration: row.connectionConfigurationRevision, reviewerAccountAccess: row.reviewerAccountAccessVersion },
+      false,
+    ),
+    result,
   });
 }
 
@@ -1778,6 +1956,26 @@ async function fetchInvitation(context: QueryContext): Promise<RawAuditEvent[]> 
   return rows.map(invitationProjection);
 }
 
+async function fetchGitConnectionMutation(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.gitConnectionMutationAudit.findMany({
+    where: sourceWhere(context, "gitConnectionMutation", { actorField: "actorId", subjectField: "ownerUserId" }) as Prisma.GitConnectionMutationAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: gitConnectionMutationAuditSelect,
+  });
+  return rows.map(gitConnectionMutationProjection);
+}
+
+async function fetchMcpConnectionMutation(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.mcpConnectionMutationAudit.findMany({
+    where: sourceWhere(context, "mcpConnectionMutation", { actorField: "actorId", subjectField: "ownerUserId" }) as Prisma.McpConnectionMutationAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: mcpConnectionMutationAuditSelect,
+  });
+  return rows.map(mcpConnectionMutationProjection);
+}
+
 async function fetchAttestation(context: QueryContext): Promise<RawAuditEvent[]> {
   const rows = await context.db.mcpToolAttestationAudit.findMany({
     where: sourceWhere(context, "mcpToolAttestation", { actorField: "actorId" }) as Prisma.McpToolAttestationAuditWhereInput,
@@ -1786,6 +1984,16 @@ async function fetchAttestation(context: QueryContext): Promise<RawAuditEvent[]>
     select: attestationSelect,
   });
   return rows.map(attestationProjection);
+}
+
+async function fetchMcpToolReview(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.mcpToolReviewAudit.findMany({
+    where: sourceWhere(context, "mcpToolReview", { actorField: "reviewerId" }) as Prisma.McpToolReviewAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: mcpToolReviewAuditSelect,
+  });
+  return rows.map(mcpToolReviewProjection);
 }
 
 async function fetchProjectAi(context: QueryContext): Promise<RawAuditEvent[]> {
@@ -1957,7 +2165,10 @@ async function fetchSource(context: QueryContext, source: SystemAuditSource): Pr
     case "accountAccess": return fetchAccountAccess(context);
     case "membershipAccess": return fetchMembershipAccess(context);
     case "workspaceInvitation": return fetchInvitation(context);
+    case "gitConnectionMutation": return fetchGitConnectionMutation(context);
+    case "mcpConnectionMutation": return fetchMcpConnectionMutation(context);
     case "mcpToolAttestation": return fetchAttestation(context);
+    case "mcpToolReview": return fetchMcpToolReview(context);
     case "projectAiProviderDelegation": return fetchProjectAi(context);
     case "projectGitRepositoryDelegation": return fetchGit(context);
     case "projectGitManualRun": return fetchGitManualRun(context);

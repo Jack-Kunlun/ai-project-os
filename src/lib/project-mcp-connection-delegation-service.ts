@@ -639,7 +639,7 @@ export async function listConnectionOwnerProjectMcpConnectionDelegations(actor: 
     }
     const now = await databaseNow(db);
     const rows = await db.projectMcpConnectionDelegation.findMany({
-      where: { connectionOwnerId: actor.id, status: { in: ["draft", "ownerConfirmed", "active"] }, mcpConnection: { ownerUserId: actor.id, ownershipState: "confirmed" } },
+      where: { connectionOwnerId: actor.id, status: { in: ["draft", "ownerConfirmed", "active", "rejected", "revoked", "expired"] }, mcpConnection: { ownerUserId: actor.id, ownershipState: "confirmed" } },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       select: delegationSelect,
     });

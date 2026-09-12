@@ -65,7 +65,7 @@ test("MCP projections and owner discovery remain secret-free while retaining due
   assert.match(projection, /connection: ownerVisible \? \{ id: row\.mcpConnection\.id, name: row\.mcpConnection\.name \} : null/u);
   const meRoute = readSource("src/app/api/me/mcp-delegations/route.ts");
   assert.match(meRoute, /listConnectionOwnerProjectMcpConnectionDelegations/u);
-  assert.match(service, /status: \{ in: \["draft", "ownerConfirmed", "active"\] \}/u);
+  assert.match(service, /status: \{ in: \["draft", "ownerConfirmed", "active", "rejected", "revoked", "expired"\] \}/u);
   assert.doesNotMatch(service.slice(service.indexOf("export async function listConnectionOwnerProjectMcpConnectionDelegations"), service.indexOf("export async function proposeProjectMcpConnectionDelegation")), /\.filter\(\(row\) => row\.expiresAt/u);
   assert.match(service, /terminalOwnerSafe = ownerActor[\s\S]*row\.status !== "expired"/u);
 });

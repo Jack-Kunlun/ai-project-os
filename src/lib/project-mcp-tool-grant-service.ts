@@ -6,6 +6,7 @@ import { getDb } from "@/lib/db";
 import { lockActorWorkspaceProjectAccess } from "@/lib/access-linearization";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 import { sanitizeMcpAttestationJson } from "@/lib/mcp-attestation-control-plane-service";
+import { hasApprovedMcpToolReview } from "@/lib/mcp-tool-review-service";
 
 const UUID = z.string().uuid();
 const VERSION = z.number().int().positive();
@@ -191,6 +192,8 @@ function safeText(value: string | null | undefined): string | null {
 
 type GrantProjectionRow = {
   id: string;
+  projectId: string;
+  connectionId: string;
   delegationId: string | null;
   controlPlaneVersion: number | null;
   grantVersion: number | null;
@@ -211,10 +214,20 @@ type GrantProjectionRow = {
     outputSchema: unknown;
     annotations: unknown;
     remoteReadOnlyHint: boolean;
+    current: boolean;
+    definitionFingerprint: string;
   };
   delegation: { id: string; status: string; version: number; expiresAt: Date } | null;
   attestation: {
     id: string;
+    connectionId: string;
+    toolDefinitionId: string;
+    toolName: string;
+    definitionFingerprint: string;
+    networkFingerprint: string;
+    credentialFingerprint: string;
+    connectionConfigurationRevision: number | null;
+    connectionOwnerAccountAccessVersion: number | null;
     status: string | null;
     version: number | null;
     conclusion: string | null;
@@ -225,6 +238,8 @@ type GrantProjectionRow = {
 
 const grantProjectionSelect = {
   id: true,
+  projectId: true,
+  connectionId: true,
   delegationId: true,
   controlPlaneVersion: true,
   grantVersion: true,
@@ -236,18 +251,23 @@ const grantProjectionSelect = {
   acknowledgedAt: true,
   revokedAt: true,
   createdAt: true,
-  toolDefinition: { select: { id: true, name: true, title: true, description: true, inputSchema: true, outputSchema: true, annotations: true, remoteReadOnlyHint: true } },
+  toolDefinition: { select: { id: true, name: true, title: true, description: true, inputSchema: true, outputSchema: true, annotations: true, remoteReadOnlyHint: true, current: true, definitionFingerprint: true } },
   delegation: { select: { id: true, status: true, version: true, expiresAt: true } },
-  attestation: { select: { id: true, status: true, version: true, conclusion: true, riskLevel: true, evidenceNote: true } },
+  attestation: { select: { id: true, connectionId: true, toolDefinitionId: true, toolName: true, definitionFingerprint: true, networkFingerprint: true, credentialFingerprint: true, connectionConfigurationRevision: true, connectionOwnerAccountAccessVersion: true, status: true, version: true, conclusion: true, riskLevel: true, evidenceNote: true } },
 } satisfies Prisma.ProjectMcpToolGrantSelect;
 
-function projectGrant(row: GrantProjectionRow): Readonly<Record<string, unknown>> {
+type GrantAdmission = Readonly<{ effective: boolean; effectiveReason: string | null }>;
+
+function projectGrant(row: GrantProjectionRow, admission: GrantAdmission = { effective: row.status === "active", effectiveReason: null }): Readonly<Record<string, unknown>> {
   return Object.freeze({
     id: row.id,
     delegationId: row.delegationId,
     toolDefinitionId: row.toolDefinitionId,
     attestationId: row.attestationId,
     status: row.status,
+    effective: admission.effective,
+    ...(admission.effectiveReason === null ? {} : { effectiveReason: admission.effectiveReason }),
+    reviewRequired: admission.effectiveReason === "review_required",
     grantVersion: row.grantVersion,
     toolName: safeText(row.toolName),
     tool: {
@@ -440,6 +460,7 @@ async function validateCreateTuple(
     && attestation.verifiedBy.role === "admin"
     && attestation.verifiedBy.disabledAt === null;
   if (!valid) return fail("PROJECT_MCP_TOOL_GRANT_STALE");
+  if (!(await hasApprovedMcpToolReview(tx, attestation))) return fail("PROJECT_MCP_TOOL_GRANT_STALE");
   return { delegation, definition, attestation, networkFingerprint: delegation.resolvedAddressFingerprint, credentialFingerprint: currentCredentialFingerprint };
 }
 
@@ -466,6 +487,140 @@ async function loadProjectedGrant(tx: Tx, id: string): Promise<GrantProjectionRo
   return tx.projectMcpToolGrant.findUniqueOrThrow({ where: { id }, select: grantProjectionSelect }) as unknown as Promise<GrantProjectionRow>;
 }
 
+const grantAdmissionDelegationSelect = {
+  id: true,
+  projectId: true,
+  mcpConnectionId: true,
+  connectionOwnerId: true,
+  connectionOwnerAccountAccessVersion: true,
+  connectionConfigurationRevision: true,
+  resolvedAddressFingerprint: true,
+  credentialFingerprint: true,
+  expiresAt: true,
+  status: true,
+  ownerProjectMembershipId: true,
+  ownerMembershipCreatedAt: true,
+  projectConfirmedProjectMembershipId: true,
+  projectConfirmedMembershipCreatedAt: true,
+  projectConfirmedById: true,
+  project: { select: { id: true, archivedAt: true } },
+  mcpConnection: {
+    select: {
+      id: true,
+      authKind: true,
+      credentialId: true,
+      credentialFingerprint: true,
+      configurationRevision: true,
+      resolvedAddressFingerprint: true,
+      status: true,
+      disabledAt: true,
+      ownerUserId: true,
+      ownerAccountAccessVersion: true,
+      ownershipState: true,
+      credential: { select: { kind: true, secretFingerprint: true } },
+      ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } },
+    },
+  },
+  ownerProjectMembership: {
+    select: {
+      projectId: true,
+      userId: true,
+      role: true,
+      accessState: true,
+      createdAt: true,
+      user: { select: { disabledAt: true, accountAccessVersion: true } },
+    },
+  },
+  projectConfirmedProjectMembership: {
+    select: {
+      projectId: true,
+      userId: true,
+      role: true,
+      accessState: true,
+      createdAt: true,
+      user: { select: { disabledAt: true } },
+    },
+  },
+} satisfies Prisma.ProjectMcpConnectionDelegationSelect;
+
+function currentDelegationCredentialFingerprint(delegation: Prisma.ProjectMcpConnectionDelegationGetPayload<{ select: typeof grantAdmissionDelegationSelect }>): string | null {
+  const connection = delegation.mcpConnection;
+  if (connection.authKind === "none") {
+    return connection.credentialId === null && connection.credentialFingerprint === NO_CREDENTIAL_FINGERPRINT
+      ? NO_CREDENTIAL_FINGERPRINT
+      : null;
+  }
+  if (connection.authKind !== "bearer" || connection.credential?.kind !== "mcp" || connection.credential.secretFingerprint !== connection.credentialFingerprint) return null;
+  return connection.credentialFingerprint;
+}
+
+async function assessGrantAdmission(tx: Tx, row: GrantProjectionRow, projectArchivedAt: Date | null = null): Promise<GrantAdmission> {
+  if (row.status !== "active") return { effective: false, effectiveReason: "grant_revoked" };
+  if (projectArchivedAt !== null) return { effective: false, effectiveReason: "project_archived" };
+  if (row.delegationId === null) return { effective: false, effectiveReason: "delegation_missing" };
+  const delegation = await tx.projectMcpConnectionDelegation.findUnique({ where: { id: row.delegationId }, select: grantAdmissionDelegationSelect });
+  if (delegation === null || delegation.projectId !== row.projectId) return { effective: false, effectiveReason: "delegation_missing" };
+  const nowRows = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`);
+  const now = nowRows[0]?.now ?? new Date();
+  if (delegation.status !== "active") return { effective: false, effectiveReason: "delegation_not_active" };
+  if (delegation.expiresAt <= now) return { effective: false, effectiveReason: "delegation_expired" };
+  if (delegation.project.archivedAt !== null) return { effective: false, effectiveReason: "project_archived" };
+  const connection = delegation.mcpConnection;
+  const expectedCredential = currentDelegationCredentialFingerprint(delegation);
+  const connectionCurrent = connection.id === delegation.mcpConnectionId
+    && connection.ownerUserId === delegation.connectionOwnerId
+    && connection.ownerAccountAccessVersion === delegation.connectionOwnerAccountAccessVersion
+    && connection.ownerUser !== null
+    && connection.ownerUser.id === delegation.connectionOwnerId
+    && connection.ownerUser.disabledAt === null
+    && connection.ownerUser.accountAccessVersion === delegation.connectionOwnerAccountAccessVersion
+    && connection.ownershipState === "confirmed"
+    && connection.status === "verified"
+    && connection.disabledAt === null
+    && connection.configurationRevision === delegation.connectionConfigurationRevision
+    && connection.resolvedAddressFingerprint === delegation.resolvedAddressFingerprint
+    && expectedCredential !== null
+    && connection.credentialFingerprint === delegation.credentialFingerprint;
+  if (!connectionCurrent) return { effective: false, effectiveReason: "connection_evidence_drift" };
+  const ownerMembership = delegation.ownerProjectMembership;
+  const ownerMembershipCurrent = ownerMembership !== null
+    && ownerMembership.projectId === delegation.projectId
+    && ownerMembership.userId === delegation.connectionOwnerId
+    && (ownerMembership.role === "owner" || ownerMembership.role === "editor")
+    && ownerMembership.accessState === "confirmed"
+    && ownerMembership.createdAt.getTime() === delegation.ownerMembershipCreatedAt.getTime()
+    && ownerMembership.user.disabledAt === null
+    && delegation.connectionOwnerAccountAccessVersion !== null
+    && ownerMembership.user.accountAccessVersion === delegation.connectionOwnerAccountAccessVersion;
+  if (!ownerMembershipCurrent) return { effective: false, effectiveReason: "owner_membership_drift" };
+  const projectMembership = delegation.projectConfirmedProjectMembership;
+  const projectMembershipCurrent = delegation.projectConfirmedById !== null
+    && projectMembership !== null
+    && projectMembership.projectId === delegation.projectId
+    && projectMembership.userId === delegation.projectConfirmedById
+    && projectMembership.role === "owner"
+    && projectMembership.accessState === "confirmed"
+    && projectMembership.createdAt.getTime() === delegation.projectConfirmedMembershipCreatedAt?.getTime()
+    && projectMembership.user.disabledAt === null;
+  if (!projectMembershipCurrent) return { effective: false, effectiveReason: "project_owner_membership_drift" };
+  if (row.toolDefinition.current !== true || row.toolDefinition.remoteReadOnlyHint !== true || row.toolDefinition.definitionFingerprint !== row.attestation?.definitionFingerprint) return { effective: false, effectiveReason: "definition_drift" };
+  if (row.controlPlaneVersion !== 2 || row.attestation === null) return { effective: false, effectiveReason: "attestation_missing" };
+  if (row.attestation.status !== "active"
+    || row.attestation.version !== 1
+    || row.attestation.conclusion !== "read_only_verified"
+    || !["low", "medium", "high"].includes(row.attestation.riskLevel ?? "")
+    || row.attestation.evidenceNote !== "manual_read_only_review") return { effective: false, effectiveReason: "attestation_invalid" };
+  if (row.attestation.connectionId !== delegation.mcpConnectionId
+    || row.attestation.toolDefinitionId !== row.toolDefinitionId
+    || row.attestation.toolName !== row.toolName
+    || row.attestation.networkFingerprint !== connection.resolvedAddressFingerprint
+    || row.attestation.credentialFingerprint !== expectedCredential
+    || row.attestation.connectionConfigurationRevision !== connection.configurationRevision
+    || row.attestation.connectionOwnerAccountAccessVersion !== delegation.connectionOwnerAccountAccessVersion) return { effective: false, effectiveReason: "attestation_drift" };
+  if (!(await hasApprovedMcpToolReview(tx, row.attestation))) return { effective: false, effectiveReason: "review_required" };
+  return { effective: true, effectiveReason: null };
+}
+
 export async function listProjectMcpToolGrantsV2(projectIdInput: unknown, actor: Actor, db: PrismaClient = getDb()) {
   const projectId = parseUuid(projectIdInput);
   const actorId = parseActor(actor);
@@ -473,14 +628,25 @@ export async function listProjectMcpToolGrantsV2(projectIdInput: unknown, actor:
     await lockAdmission(tx, projectId, [actorId]);
     const { project } = await requireActorAndProject(tx, projectId, actorId, true, actor.accountAccessVersion);
     const rows = await tx.projectMcpToolGrant.findMany({ where: { projectId, controlPlaneVersion: 2 }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: grantProjectionSelect });
+    const projectedRows = await Promise.all(rows.map(async (row) => ({
+      row: row as unknown as GrantProjectionRow,
+      admission: await assessGrantAdmission(tx, row as unknown as GrantProjectionRow, project.archivedAt),
+    })));
     if (project.archivedAt !== null) {
-      return Object.freeze({ projectId, archived: true, grants: rows.map((row) => projectGrant(row as unknown as GrantProjectionRow)), candidates: [] });
+      return Object.freeze({ projectId, archived: true, grants: projectedRows.map(({ row, admission }) => projectGrant(row, admission)), candidates: [] });
     }
-    // Every active grant occupies its connection/tool slot, regardless of the
-    // control-plane version. Legacy rows stay hidden from the response, but
-    // must still prevent an unsafe candidate from being offered for re-grant.
+    // Only a grant backed by an immutable APPROVED review occupies a usable
+    // V2 slot. Legacy grants remain a compatibility blocker; an upgraded V2
+    // row without review is shown as ineffective and never as an active slot.
     const activeSlots = await tx.projectMcpToolGrant.findMany({ where: { projectId, status: "active" }, select: { connectionId: true, toolName: true } });
-    const activeSlotKeys = new Set(activeSlots.map((row) => `${row.connectionId}:${row.toolName}`));
+    const effectiveGrantSlotKeys = new Set(projectedRows
+      .filter(({ admission }) => admission.effective)
+      .map(({ row }) => `${row.connectionId}:${row.toolName}`));
+    const projectedV2SlotKeys = new Set(projectedRows.map(({ row }) => `${row.connectionId}:${row.toolName}`));
+    const activeSlotKeys = new Set(activeSlots
+      .filter((row) => !projectedV2SlotKeys.has(`${row.connectionId}:${row.toolName}`)
+        || effectiveGrantSlotKeys.has(`${row.connectionId}:${row.toolName}`))
+      .map((row) => `${row.connectionId}:${row.toolName}`));
     const nowRows = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`);
     const now = nowRows[0]?.now ?? new Date();
     const delegations = await tx.projectMcpConnectionDelegation.findMany({
@@ -512,15 +678,17 @@ export async function listProjectMcpToolGrantsV2(projectIdInput: unknown, actor:
         : connection.authKind === "bearer" && connection.credential?.kind === "mcp" && connection.credential.secretFingerprint === connection.credentialFingerprint ? connection.credentialFingerprint : null;
       if (connection.status !== "verified" || connection.disabledAt !== null || connection.ownerUserId !== delegation.connectionOwnerId || connection.ownerAccountAccessVersion !== delegation.connectionOwnerAccountAccessVersion || connection.ownerUser === null || connection.ownerUser.disabledAt !== null || connection.ownerUser.accountAccessVersion !== delegation.connectionOwnerAccountAccessVersion || connection.ownershipState !== "confirmed" || connection.resolvedAddressFingerprint === null || expectedCredential === null) continue;
       if (connection.configurationRevision !== delegation.connectionConfigurationRevision || connection.resolvedAddressFingerprint !== delegation.resolvedAddressFingerprint || expectedCredential !== delegation.credentialFingerprint) continue;
-      const attestation = await tx.mcpToolAttestation.findFirst({ where: { controlPlaneVersion: 2, status: "active", version: 1, connectionId: definition.connectionId, toolDefinitionId: definition.id, toolName: definition.name, definitionFingerprint: definition.definitionFingerprint, networkFingerprint: connection.resolvedAddressFingerprint, credentialFingerprint: expectedCredential, connectionConfigurationRevision: connection.configurationRevision, connectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion, audits: { none: { event: "revoked" } } }, select: { id: true, connectionOwnerAccountAccessVersion: true, conclusion: true, riskLevel: true, evidenceNote: true, note: true, evidence: true, verifiedBy: { select: { role: true, disabledAt: true } } } });
+      const attestation = await tx.mcpToolAttestation.findFirst({ where: { controlPlaneVersion: 2, status: "active", version: 1, connectionId: definition.connectionId, toolDefinitionId: definition.id, toolName: definition.name, definitionFingerprint: definition.definitionFingerprint, networkFingerprint: connection.resolvedAddressFingerprint, credentialFingerprint: expectedCredential, connectionConfigurationRevision: connection.configurationRevision, connectionOwnerAccountAccessVersion: delegation.connectionOwnerAccountAccessVersion, audits: { none: { event: "revoked" } } }, select: { id: true, connectionId: true, toolDefinitionId: true, toolName: true, definitionFingerprint: true, networkFingerprint: true, credentialFingerprint: true, connectionConfigurationRevision: true, connectionOwnerAccountAccessVersion: true, conclusion: true, riskLevel: true, evidenceNote: true, note: true, evidence: true, verifiedBy: { select: { role: true, disabledAt: true } } } });
       if (attestation === null) continue;
-      const effective = attestation.conclusion === "read_only_verified"
+      const reviewed = await hasApprovedMcpToolReview(tx, attestation);
+      const effective = reviewed && attestation.conclusion === "read_only_verified"
         && ["low", "medium", "high"].includes(attestation.riskLevel ?? "")
         && attestation.evidenceNote === "manual_read_only_review"
         && attestation.note === null
         && JSON.stringify(attestation.evidence) === "{}"
         && attestation.verifiedBy.role === "admin"
         && attestation.verifiedBy.disabledAt === null;
+      const effectiveReason = reviewed ? (effective ? null : "attestation_not_effective") : "review_required";
       candidates.push(Object.freeze({
         delegationId: delegation.id,
         toolDefinitionId: definition.id,
@@ -529,11 +697,11 @@ export async function listProjectMcpToolGrantsV2(projectIdInput: unknown, actor:
         expiresAt: safeDate(delegation.expiresAt),
         status: "eligible",
         effective,
-        ...(effective ? {} : { blockingAttestationId: attestation.id, requiresRevocation: true }),
+        ...(effective ? {} : { blockingAttestationId: attestation.id, requiresRevocation: true, effectiveReason }),
         tool: { id: definition.id, name: safeText(definition.name), title: safeText(definition.title), description: safeText(definition.description), inputSchema: sanitizeMcpAttestationJson(definition.inputSchema), outputSchema: sanitizeMcpAttestationJson(definition.outputSchema), annotations: sanitizeMcpAttestationJson(definition.annotations), remoteTextTrust: "untrusted" },
       }));
     }
-    return Object.freeze({ projectId, archived: project.archivedAt !== null, grants: rows.map((row) => projectGrant(row as unknown as GrantProjectionRow)), candidates });
+    return Object.freeze({ projectId, archived: project.archivedAt !== null, grants: projectedRows.map(({ row, admission }) => projectGrant(row, admission)), candidates });
   });
 }
 
@@ -632,7 +800,8 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
     const expected = { delegationId: tuple.delegation.id, toolDefinitionId: tuple.definition.id, attestationId: tuple.attestation.id, delegationVersion: tuple.delegation.version, grantorProjectMembershipId: membership.id, grantorMembershipCreatedAt: membership.createdAt, connectionConfigurationRevision: tuple.definition.connection.configurationRevision, definitionFingerprint: tuple.definition.definitionFingerprint, networkFingerprint: tuple.networkFingerprint, credentialFingerprint: tuple.credentialFingerprint, delegationFingerprint: tuple.delegation.delegationFingerprint, connectionOwnerAccountAccessVersion: tuple.delegation.connectionOwnerAccountAccessVersion! };
     if (existing !== null) {
       if (!isSameTuple(existing, expected, membership, actorId)) return fail("PROJECT_MCP_TOOL_GRANT_CONFLICT");
-      return { created: false, grant: projectGrant(await loadProjectedGrant(tx, existing.id)) };
+      const projected = await loadProjectedGrant(tx, existing.id);
+      return { created: false, grant: projectGrant(projected, await assessGrantAdmission(tx, projected)) };
     }
     const grantId = randomUUID();
     const grant = await tx.projectMcpToolGrant.create({ data: {
@@ -662,7 +831,8 @@ export async function createProjectMcpToolGrantV2(projectIdInput: unknown, input
       connectionOwnerId: tuple.delegation.connectionOwnerId, connectionOwnerAccountAccessVersion: tuple.delegation.connectionOwnerAccountAccessVersion,
       acknowledgedAt: grant.acknowledgedAt, transactionId: BigInt(0), transitionAt: new Date(0), createdAt: new Date(0),
     } });
-    return { created: true, grant: projectGrant(await loadProjectedGrant(tx, grant.id)) };
+    const projected = await loadProjectedGrant(tx, grant.id);
+    return { created: true, grant: projectGrant(projected, await assessGrantAdmission(tx, projected)) };
   });
 }
 
@@ -693,7 +863,8 @@ export async function revokeProjectMcpToolGrantV2(projectIdInput: unknown, grant
     const existing = await tx.projectMcpToolGrant.findFirst({ where: { id: scopedSeed.id, projectId, controlPlaneVersion: 2 }, select: { id: true, controlPlaneVersion: true, status: true, grantVersion: true, revokedById: true, revokerProjectMembershipId: true, revokerMembershipCreatedAt: true } });
     if (existing === null) return fail("PROJECT_MCP_TOOL_GRANT_NOT_FOUND");
     if (existing.status === "revoked" && existing.grantVersion === 2 && parsed.data.expectedGrantVersion === 1 && existing.revokedById === actorId && existing.revokerProjectMembershipId === membership.id && existing.revokerMembershipCreatedAt?.getTime() === membership.createdAt.getTime()) {
-      return { created: false, grant: projectGrant(await loadProjectedGrant(tx, grantId)) };
+      const projected = await loadProjectedGrant(tx, grantId);
+      return { created: false, grant: projectGrant(projected, await assessGrantAdmission(tx, projected)) };
     }
     if (existing.status !== "active" || existing.grantVersion !== parsed.data.expectedGrantVersion) return fail("PROJECT_MCP_TOOL_GRANT_CONFLICT");
     const cas = await tx.projectMcpToolGrant.updateMany({ where: { id: grantId, projectId, controlPlaneVersion: 2, status: "active", grantVersion: parsed.data.expectedGrantVersion }, data: { status: "revoked", grantVersion: 2, revokedById: actorId, revokerProjectMembershipId: membership.id, revokerMembershipCreatedAt: membership.createdAt } });
@@ -725,6 +896,7 @@ export async function revokeProjectMcpToolGrantV2(projectIdInput: unknown, grant
       connectionOwnerId: current.delegation.connectionOwnerId, connectionOwnerAccountAccessVersion: current.connectionOwnerAccountAccessVersion,
       acknowledgedAt: current.acknowledgedAt, transactionId: BigInt(0), transitionAt: new Date(0), createdAt: new Date(0),
     } });
-    return { created: true, grant: projectGrant(await loadProjectedGrant(tx, grantId)) };
+    const projected = await loadProjectedGrant(tx, grantId);
+    return { created: true, grant: projectGrant(projected, await assessGrantAdmission(tx, projected)) };
   });
 }

@@ -46,12 +46,16 @@ test("project Git page uses bounded manual delegation while remote writes stay f
   assert.doesNotMatch(source, /\/git-(?:push|commit)|\/pull-requests?/u, `${path} must not expose Git write operations`);
 });
 
-test("frozen project MCP page links to personal configuration without remote mutations", () => {
+test("project MCP page manages the control plane while remote actions stay frozen", () => {
   const path = "src/app/projects/[projectId]/tools/project-tools-client.tsx";
   const source = readFileSync(join(root, path), "utf8");
   assert.match(source, /\/profile\/connections\/mcp/u, `${path} must link to personal configuration`);
-  assert.match(source, /未开放/u, `${path} must describe the frozen capability`);
-  assert.doesNotMatch(source, /fetch\(|method:\s*"(?:POST|PATCH|DELETE)"/u, `${path} must not trigger frozen remote mutations`);
+  assert.match(source, /\/api\/projects\/\$\{projectId\}\/mcp-connection-delegations/u);
+  assert.match(source, /\/api\/projects\/\$\{projectId\}\/mcp-tool-grants/u);
+  assert.match(source, /控制面开放；动作调用冻结/u, `${path} must distinguish control-plane availability from action freeze`);
+  assert.match(source, /仅管理连接委托和只读工具授权/u, `${path} must state the current scope`);
+  assert.doesNotMatch(source, /mcp-actions|\/dispatch|result-import/u, `${path} must not enter the frozen action surface`);
+  assert.doesNotMatch(source, /\/tools\/call|mcp-actions|\/dispatch|result-import/u, `${path} must not expose an action call UI`);
 });
 
 test("profile updates its username locally without refreshing the current route", () => {

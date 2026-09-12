@@ -11,6 +11,7 @@ import {
   PLATFORM_TOKEN_GOVERNANCE_FUNCTION,
   PLATFORM_TOKEN_PREVIEW_FUNCTION,
   DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX,
+  DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX,
 } from "../src/lib/database-principal-catalog";
 import {
   ENTITLEMENT_WRITER_DATABASE_PRINCIPAL,
@@ -83,9 +84,17 @@ function relationIdentifier(relation: string): string {
   return quoteIdentifier(relation);
 }
 
+function databaseFunctionSignature(name: string, identityArguments: string): string {
+  if (!/^[A-Za-z0-9_.,()" ]*$/u.test(identityArguments)) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
+  return `public.${quoteIdentifier(name)}(${identityArguments})`;
+}
+
 function invokerFunctionSignature(helper: (typeof DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX)[number]): string {
-  if (!/^[A-Za-z0-9_.,()" ]+$/u.test(helper.identityArguments)) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
-  return `public.${quoteIdentifier(helper.name)}(${helper.identityArguments})`;
+  return databaseFunctionSignature(helper.name, helper.identityArguments);
+}
+
+function triggerFunctionSignature(helper: (typeof DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX)[number]): string {
+  return databaseFunctionSignature(helper.name, helper.identityArguments);
 }
 
 function rolePassword(url: URL): string {
@@ -1272,6 +1281,13 @@ async function grantTablePrivileges(client: Client): Promise<void> {
     if (helper.entitlementWriter) grantees.push(quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL));
     await client.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${grantees.join(", ")}`);
   }
+  const seenTriggerSignatures = new Set<string>();
+  for (const trigger of DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX) {
+    const signature = triggerFunctionSignature(trigger);
+    if (!seenTriggerSignatures.add(signature) || trigger.runtime || trigger.entitlementWriter) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
+    await client.query(`ALTER FUNCTION ${signature} OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
+    await client.query(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+  }
   await client.query(`REVOKE ALL ON SCHEMA public FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
   await client.query(`GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
   const sequences = await client.query<{ relname: string }>("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S'");
@@ -1450,8 +1466,82 @@ async function verifyAcl(client: Client): Promise<void> {
   }
   if (helperRows.rows.length !== DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.length
     || helperRows.rows.some((row) => !expectedHelperOids.has(row.oid))
-    || runtimeHelperCount !== 42
+    || runtimeHelperCount !== 43
     || writerHelperCount !== 8) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
+  const triggerNames = [...new Set(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.map((trigger) => trigger.name))];
+  const triggerRows = await client.query<{ oid: string; name: string }>(`
+    SELECT p.oid::text AS oid, p.proname AS name
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.prokind = 'f'
+       AND p.proname = ANY($1::text[])
+  `, [triggerNames]);
+  const expectedTriggerOids = new Set<string>();
+  const expectedTriggerSignatures = new Set<string>();
+  for (const trigger of DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX) {
+    const signature = triggerFunctionSignature(trigger);
+    if (!expectedTriggerSignatures.add(signature)) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
+    const triggerAcl = await client.query<{
+      oid: string;
+      identity_arguments: string;
+      owner: string | null;
+      prosecdef: boolean;
+      runtime_execute: boolean;
+      runtime_direct: boolean;
+      writer_execute: boolean;
+      writer_direct: boolean;
+      public_execute: boolean;
+    }>(`
+      SELECT p.oid::text AS oid,
+             pg_get_function_identity_arguments(p.oid) AS identity_arguments,
+             pg_get_userbyid(p.proowner) AS owner,
+             p.prosecdef,
+             has_function_privilege($1, $3, 'EXECUTE') AS runtime_execute,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS runtime_direct,
+             has_function_privilege($2, $3, 'EXECUTE') AS writer_execute,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS writer_direct,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = 0::oid
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS public_execute
+        FROM pg_proc p
+       WHERE p.oid = pg_catalog.to_regprocedure($3)
+    `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, signature]);
+    const triggerRow = triggerAcl.rows[0];
+    if (triggerRow === undefined) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
+    expectedTriggerOids.add(triggerRow.oid);
+    if (triggerRow.identity_arguments !== trigger.identityArguments
+      || triggerRow.owner !== MIGRATOR_DATABASE_PRINCIPAL
+      || triggerRow.prosecdef
+      || triggerRow.public_execute
+      || triggerRow.runtime_execute
+      || triggerRow.runtime_direct
+      || triggerRow.writer_execute
+      || triggerRow.writer_direct) {
+      return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
+    }
+  }
+  if (triggerRows.rows.length !== DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length
+    || triggerRows.rows.some((row) => !expectedTriggerOids.has(row.oid))) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
   const publicPrivileges = await client.query<{ database_public: boolean; schema_public: boolean }>(`
     SELECT EXISTS (
              SELECT 1

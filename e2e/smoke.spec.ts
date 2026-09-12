@@ -302,7 +302,11 @@ test("first-run administrator can reach protected pages with production security
 
   await page.goto("/profile/connections/mcp");
   await expect(page.getByRole("heading", { name: "我的 MCP 连接", exact: true })).toBeVisible();
-  await expect(page.getByText(/当前连接不能用于项目或自动化/u)).toBeVisible();
+  const mcpBoundary = page.locator("section").filter({ hasText: "当前使用边界" });
+  await expect(mcpBoundary).toHaveCount(1);
+  await expect(mcpBoundary.getByText(/项目委托控制面已开放/u)).toBeVisible();
+  await expect(mcpBoundary.getByText(/远端动作、自动化和调用审批仍未开放/u)).toBeVisible();
+  await expect(mcpBoundary.getByText(/MCP 连通性仍未验证/u)).toBeVisible();
   await expectNoAccessibilityViolations(page, "personal MCP connections");
   await page.goto("/profile");
 
@@ -413,8 +417,9 @@ test("first-run administrator can reach protected pages with production security
   await expectNoAccessibilityViolations(page, "admin overview");
 
   await page.goto("/admin/connectors/mcp");
-  await expect(page.getByRole("heading", { name: "MCP 连接配置已冻结", exact: true })).toBeVisible();
-  await expect(page.getByText(/管理员只负责后续安全证据审查与工具认证/u)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "MCP 工具安全审核", exact: true })).toBeVisible();
+  await expect(page.getByText(/管理员只审核已经净化的工具快照/u)).toBeVisible();
+  await expect(page.getByText(/不开放远端工具操作/u)).toBeVisible();
   await expect(page.getByLabel("Bearer Token", { exact: true })).toHaveCount(0);
   await expectNoAccessibilityViolations(page, "MCP connections");
   expect(browserErrors).toEqual([]);

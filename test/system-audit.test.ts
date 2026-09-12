@@ -88,7 +88,8 @@ function delegate(source: (typeof SYSTEM_AUDIT_SOURCES)[number], rows: FakeRow[]
         : actionFilter !== null && typeof actionFilter === "object" && Array.isArray((actionFilter as FakeWhere).in)
           ? (actionFilter as FakeWhere).in as string[]
           : [];
-      for (const value of actionValues) assert.ok(registry.allowedActions.includes(value), `${source} received an invalid action enum: ${value}`);
+      const persistedActions = new Set(Object.values(registry.actionMap));
+      for (const value of actionValues) assert.ok(persistedActions.has(value), `${source} received an invalid persisted action enum: ${value}`);
       calls.set(source, (calls.get(source) ?? 0) + 1);
       return rows
         .filter((row) => matches(where, row))
@@ -115,7 +116,10 @@ function makeRows(): Readonly<Record<string, FakeRow[]>> {
       { ...base, id: "56211111-1111-4111-8111-111111111111", invitationId: "66211111-1111-4111-8111-111111111111", workspaceId: WORKSPACE_ID, event: "accepted", versionBefore: 1, versionAfter: 2, statusBefore: "pending", statusAfter: "accepted", actorId: ADMIN_ID },
       { ...base, id: "56311111-1111-4111-8111-111111111111", invitationId: "66311111-1111-4111-8111-111111111111", workspaceId: WORKSPACE_ID, event: "revoked", versionBefore: 1, versionAfter: 2, statusBefore: "pending", statusAfter: "revoked", actorId: ADMIN_ID },
     ],
+    gitConnectionMutationAudit: [{ ...base, id: "75111111-1111-4111-8111-111111111111", connectionId: "7c111111-1111-4111-8111-111111111111", ownerUserId: USER_ID, action: "disable", statusBefore: "verified", statusAfter: "disabled", connectionConfigurationVersion: 4, impactCount: 0, executionStatus: "completed", safeErrorCode: null, actorId: ADMIN_ID }],
+    mcpConnectionMutationAudit: [{ ...base, id: "76111111-1111-4111-8111-111111111111", connectionId: "7d111111-1111-4111-8111-111111111111", ownerUserId: USER_ID, action: "rediscover", statusBefore: "verified", statusAfter: "verified", configurationRevision: 5, impactCount: 1, executionStatus: "held", safeErrorCode: "MCP_EXTERNAL_IO_PLANNED_NOT_DISPATCHED", actorId: ADMIN_ID }],
     mcpToolAttestationAudit: [{ ...base, id: "57111111-1111-4111-8111-111111111111", attestationId: "67111111-1111-4111-8111-111111111111", connectionId: "77111111-1111-4111-8111-111111111111", toolDefinitionId: "87111111-1111-4111-8111-111111111111", event: "attested", controlPlaneVersion: 2, attestationVersion: 1, statusBefore: null, statusAfter: "active", connectionConfigurationRevision: 4, details: { metadata: "secret" }, definitionFingerprint: "fingerprint" }],
+    mcpToolReviewAudit: [{ ...base, id: "7e111111-1111-4111-8111-111111111111", reviewId: "7f111111-1111-4111-8111-111111111111", connectionId: "8c111111-1111-4111-8111-111111111111", toolDefinitionId: "8d111111-1111-4111-8111-111111111111", reviewerId: ADMIN_ID, conclusion: "needs_research", riskLevel: "high", riskReasonCode: "insufficient_evidence", evidenceNotePresent: true, connectionConfigurationRevision: 5, reviewerAccountAccessVersion: 1, transactionId: BigInt(2) }],
     projectAiProviderDelegationAudit: [{ ...base, id: "58111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, operation: "chat", entity: "delegation", action: "activated", delegationId: "68111111-1111-4111-8111-111111111111", selectionId: null, delegationVersion: 1, selectionVersion: null, statusBefore: "ownerConfirmed", statusAfter: "active", selectionSource: null, selectedDelegationId: null, selectedByProjectMembershipId: null, providerConnectionId: "78111111-1111-4111-8111-111111111111", connectionOwnerId: USER_ID, providerConfigurationVersion: 2, connectionOwnerAccountAccessVersion: 1, actorKind: "user", actorProjectMembershipId: null }],
     projectGitRepositoryDelegationAudit: [{ ...base, id: "59111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, gitConnectionId: "79111111-1111-4111-8111-111111111111", delegationId: "69111111-1111-4111-8111-111111111111", connectionOwnerId: USER_ID, action: "activated", delegationVersion: 1, statusBefore: "ownerConfirmed", statusAfter: "active", actorKind: "user", actorProjectMembershipId: null, ownerProjectMembershipId: "65111111-1111-4111-8111-111111111111", connectionConfigurationVersion: 2, connectionOwnerAccountAccessVersion: 1 }],
     projectMcpConnectionDelegationAudit: [{ ...base, id: "5a111111-1111-4111-8111-111111111111", projectId: PROJECT_ID, mcpConnectionId: "7a111111-1111-4111-8111-111111111111", delegationId: "6a111111-1111-4111-8111-111111111111", connectionOwnerId: USER_ID, action: "activated", delegationVersion: 1, statusBefore: "ownerConfirmed", statusAfter: "active", actorKind: "user", actorProjectMembershipId: null, ownerProjectMembershipId: "65111111-1111-4111-8111-111111111111", connectionConfigurationRevision: 2, connectionOwnerAccountAccessVersion: 1 }],
@@ -191,6 +195,11 @@ const PRIVATE_RESOURCE_IDS = [
   "6c111111-1111-4111-8111-111111111111",
   "8b111111-1111-4111-8111-111111111111",
   "6d111111-1111-4111-8111-111111111111",
+  "7c111111-1111-4111-8111-111111111111",
+  "7d111111-1111-4111-8111-111111111111",
+  "7f111111-1111-4111-8111-111111111111",
+  "8c111111-1111-4111-8111-111111111111",
+  "8d111111-1111-4111-8111-111111111111",
 ];
 
 function fakeDb(
@@ -223,7 +232,10 @@ function fakeDb(
     accountAccessAudit: delegate("accountAccess", rows.accountAccessAudit, calls),
     membershipAccessAudit: delegate("membershipAccess", rows.membershipAccessAudit, calls),
     workspaceInvitationAudit: delegate("workspaceInvitation", rows.workspaceInvitationAudit, calls),
+    gitConnectionMutationAudit: delegate("gitConnectionMutation", rows.gitConnectionMutationAudit, calls),
+    mcpConnectionMutationAudit: delegate("mcpConnectionMutation", rows.mcpConnectionMutationAudit, calls),
     mcpToolAttestationAudit: delegate("mcpToolAttestation", rows.mcpToolAttestationAudit, calls),
+    mcpToolReviewAudit: delegate("mcpToolReview", rows.mcpToolReviewAudit, calls),
     projectAiProviderDelegationAudit: delegate("projectAiProviderDelegation", rows.projectAiProviderDelegationAudit, calls),
     projectGitRepositoryDelegationAudit: delegate("projectGitRepositoryDelegation", rows.projectGitRepositoryDelegationAudit, calls),
     projectMcpConnectionDelegationAudit: delegate("projectMcpConnectionDelegation", rows.projectMcpConnectionDelegationAudit, calls),
@@ -242,8 +254,8 @@ function fakeDb(
   } as unknown as PrismaClient;
 }
 
-test("registry covers exactly the twenty-two safe control-plane sources", () => {
-  assert.equal(SYSTEM_AUDIT_SOURCES.length, 22);
+test("registry covers exactly the twenty-five safe control-plane sources", () => {
+  assert.equal(SYSTEM_AUDIT_SOURCES.length, 25);
   assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
   for (const source of SYSTEM_AUDIT_SOURCES) {
     const registry = SYSTEM_AUDIT_REGISTRY[source];
@@ -257,8 +269,15 @@ test("registry covers exactly the twenty-two safe control-plane sources", () => 
     for (const [result, mappedActions] of Object.entries(registry.resultMap)) {
       assert.ok(SYSTEM_AUDIT_RESULTS.includes(result as (typeof SYSTEM_AUDIT_RESULTS)[number]));
       assert.ok(registry.allowedResults.includes(result as (typeof SYSTEM_AUDIT_RESULTS)[number]));
-      for (const action of mappedActions ?? []) assert.ok(registry.allowedActions.includes(action));
+      if (registry.resultField === registry.actionField) {
+        const persistedActions = new Set(Object.values(registry.actionMap));
+        for (const action of mappedActions ?? []) assert.ok(persistedActions.has(action));
+      }
     }
+  }
+  for (const source of ["gitConnectionMutation", "mcpConnectionMutation"] as const) {
+    const persistedResults = new Set(Object.values(SYSTEM_AUDIT_REGISTRY[source].resultMap).flatMap((values) => values ?? []));
+    assert.deepEqual([...persistedResults].sort(), ["completed", "dispatched", "failed", "held", "previewed", "unknown"]);
   }
   assert.ok(SYSTEM_AUDIT_ACTIONS.includes("revoked"));
   assert.ok(!SYSTEM_AUDIT_REGISTRY.projectMcpToolGrantLedger.table.includes("GrantAudit"));
@@ -338,6 +357,33 @@ test("source-specific action/result filters only invoke delegates with real sour
 test("new audit adapters preserve source-specific results and safe principals", async () => {
   const db = fakeDb(makeRows());
   const now = new Date("2026-09-09T02:00:00.000Z");
+
+  const git = (await listSystemAudit({ source: "gitConnectionMutation", pageSize: 50 }, db, now)).events;
+  assert.equal(git.length, 1);
+  assert.equal(git[0]?.action, "disable");
+  assert.equal(git[0]?.result, "disabled");
+  assert.equal(git[0]?.actor.id, ADMIN_ID);
+  assert.equal(git[0]?.subject?.id, USER_ID);
+  assert.equal(git[0]?.evidence.after.status, "disabled");
+  assert.equal(git[0]?.evidence.safeErrorCode, null);
+
+  const mcp = (await listSystemAudit({ source: "mcpConnectionMutation", pageSize: 50 }, db, now)).events;
+  assert.equal(mcp.length, 1);
+  assert.equal(mcp[0]?.action, "rediscover");
+  assert.equal(mcp[0]?.result, "unknown");
+  assert.equal(mcp[0]?.actor.id, ADMIN_ID);
+  assert.equal(mcp[0]?.subject?.id, USER_ID);
+  assert.equal(mcp[0]?.evidence.safeErrorCode, "MCP_EXTERNAL_IO_PLANNED_NOT_DISPATCHED");
+
+  const review = (await listSystemAudit({ source: "mcpToolReview", pageSize: 50 }, db, now)).events;
+  assert.equal(review.length, 1);
+  assert.equal(review[0]?.action, "reviewed");
+  assert.equal(review[0]?.result, "pending");
+  assert.equal(review[0]?.actor.id, ADMIN_ID);
+  assert.equal(review[0]?.subject, null);
+  assert.equal(review[0]?.evidence.after.conclusion, "needs_research");
+  assert.equal(review[0]?.evidence.after.riskLevel, "high");
+  assert.equal(review[0]?.evidence.after.riskReasonCode, "insufficient_evidence");
 
   const manual = (await listSystemAudit({ source: "projectGitManualRun", pageSize: 50 }, db, now)).events;
   assert.equal(manual.length, 1);
@@ -501,6 +547,9 @@ test("new audit adapter details reuse the exact safe list projection", async () 
   const db = fakeDb(makeRows());
   const now = new Date("2026-09-09T02:00:00.000Z");
   const cases = [
+    ["gitConnectionMutation", "75111111-1111-4111-8111-111111111111"],
+    ["mcpConnectionMutation", "76111111-1111-4111-8111-111111111111"],
+    ["mcpToolReview", "7e111111-1111-4111-8111-111111111111"],
     ["projectGitManualRun", "5c111111-1111-4111-8111-111111111111"],
     ["projectMcpActionApproval", "5d111111-1111-4111-8111-111111111111"],
     ["projectMcpActionRuntime", "5e111111-1111-4111-8111-111111111111"],
@@ -531,7 +580,10 @@ test("workspace scope resolves project-backed sources without widening direct wo
     assert.notEqual(event.source, "platformDefaultAiRoute");
     assert.notEqual(event.source, "membershipSubscription");
     assert.notEqual(event.source, "accountAccess");
+    assert.notEqual(event.source, "gitConnectionMutation");
+    assert.notEqual(event.source, "mcpConnectionMutation");
     assert.notEqual(event.source, "mcpToolAttestation");
+    assert.notEqual(event.source, "mcpToolReview");
   }
   assert.deepEqual((await listSystemAudit({ workspaceId: WORKSPACE_ID, projectId: "99999999-9999-4999-8999-999999999999", pageSize: 50 }, db, now)).events, []);
   assert.deepEqual((await listSystemAudit({ workspaceId: WORKSPACE_ID, source: "projectAiProviderDelegation", pageSize: 50 }, db, now)).events.map((event) => event.source), ["projectAiProviderDelegation"]);
@@ -572,7 +624,7 @@ test("actor and subject lookups accept only exact UUID or unique username", asyn
   const db = fakeDb(rows, "admin", calls);
   const now = new Date("2026-09-09T02:00:00.000Z");
   const byUsername = await listSystemAudit({ actor: "admin", pageSize: 50 }, db, now);
-  assert.equal(byUsername.events.length, 24);
+  assert.equal(byUsername.events.length, 27);
   const byDisplayName = await listSystemAudit({ actor: "平台管理员", pageSize: 50 }, db, now);
   assert.deepEqual(byDisplayName.events, []);
 });

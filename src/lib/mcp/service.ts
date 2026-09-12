@@ -54,14 +54,6 @@ const grantSchema = z.object({
 }).strict();
 
 const revokeSchema = z.object({ expectedUpdatedAt: z.string().datetime({ offset: true }) }).strict();
-const attestSchema = z.object({
-  note: z.string().trim().max(2_000).nullable().optional(),
-  evidence: z.record(z.string(), z.unknown()).default({}),
-}).strict();
-const revokeAttestationSchema = z.object({
-  expectedAttestedAt: z.string().datetime({ offset: true }),
-  note: z.string().trim().max(2_000).nullable().optional(),
-}).strict();
 const clientCallSchema = z.object({ grantId: z.string().uuid(), arguments: z.unknown() }).strict();
 const snapshotSchema = z.object({
   grantId: z.string().uuid(),
@@ -88,6 +80,10 @@ const connectionSelect = {
   lastDiscoveredAt: true,
   lastErrorCode: true,
   disabledAt: true,
+  configurationRevision: true,
+  resolvedAddressFingerprint: true,
+  credentialFingerprint: true,
+  ownerUserId: true,
   ownerAccountAccessVersion: true,
   createdAt: true,
   updatedAt: true,
@@ -111,8 +107,19 @@ const connectionSelect = {
         take: 1,
         select: {
           id: true,
+          connectionId: true,
+          toolDefinitionId: true,
           definitionFingerprint: true,
           networkFingerprint: true,
+          credentialFingerprint: true,
+          controlPlaneVersion: true,
+          status: true,
+          version: true,
+          conclusion: true,
+          riskLevel: true,
+          evidenceNote: true,
+          connectionConfigurationRevision: true,
+          connectionOwnerAccountAccessVersion: true,
           attestedAt: true,
           audits: { orderBy: [{ createdAt: "desc" as const }, { id: "desc" as const }], take: 8, select: { event: true } },
         },
@@ -120,6 +127,64 @@ const connectionSelect = {
     },
   },
 } satisfies Prisma.McpConnectionSelect;
+
+type PersonalMcpConnectionRecord = Prisma.McpConnectionGetPayload<{ select: typeof connectionSelect }>;
+
+function isEffectivePersonalMcpAttestation(
+  connection: PersonalMcpConnectionRecord,
+  tool: PersonalMcpConnectionRecord["toolDefinitions"][number],
+  attestation: PersonalMcpConnectionRecord["toolDefinitions"][number]["attestations"][number],
+): boolean {
+  return connection.status === "verified"
+    && connection.disabledAt === null
+    && connection.ownershipState === "confirmed"
+    && connection.ownerUserId !== null
+    && connection.ownerAccountAccessVersion !== null
+    && attestation.connectionId === connection.id
+    && attestation.toolDefinitionId === tool.id
+    && attestation.controlPlaneVersion === 2
+    && attestation.status === "active"
+    && attestation.version === 1
+    && attestation.conclusion === "read_only_verified"
+    && attestation.riskLevel !== null
+    && ["low", "medium", "high"].includes(attestation.riskLevel)
+    && attestation.evidenceNote === "manual_read_only_review"
+    && attestation.definitionFingerprint === tool.definitionFingerprint
+    && attestation.networkFingerprint === connection.resolvedAddressFingerprint
+    && attestation.credentialFingerprint === connection.credentialFingerprint
+    && attestation.connectionConfigurationRevision === connection.configurationRevision
+    && attestation.connectionOwnerAccountAccessVersion === connection.ownerAccountAccessVersion
+    && attestation.audits.some((audit) => audit.event === "attested")
+    && !attestation.audits.some((audit) => audit.event === "revoked");
+}
+
+function projectPersonalMcpConnection(connection: PersonalMcpConnectionRecord) {
+  const {
+    configurationRevision: _configurationRevision,
+    resolvedAddressFingerprint: _resolvedAddressFingerprint,
+    credentialFingerprint: _credentialFingerprint,
+    ownerUserId: _ownerUserId,
+    ...publicConnection
+  } = connection;
+  void _configurationRevision;
+  void _resolvedAddressFingerprint;
+  void _credentialFingerprint;
+  void _ownerUserId;
+  return Object.freeze({
+    ...publicConnection,
+    toolDefinitions: connection.toolDefinitions.map((tool) => ({
+      ...tool,
+      attestations: tool.attestations.map((attestation) => ({
+        id: attestation.id,
+        definitionFingerprint: attestation.definitionFingerprint,
+        networkFingerprint: attestation.networkFingerprint,
+        attestedAt: attestation.attestedAt,
+        effective: isEffectivePersonalMcpAttestation(connection, tool, attestation),
+        audits: attestation.audits,
+      })),
+    })),
+  });
+}
 
 type McpDb = PrismaClient | Prisma.TransactionClient;
 type McpConnectionActor = Readonly<{ id: string; accountAccessVersion?: number }>;
@@ -168,24 +233,6 @@ type McpFingerprintTuple = Readonly<{
   networkFingerprint: string;
   credentialFingerprint: string;
 }>;
-
-const attestationPublicSelect = {
-  id: true,
-  connectionId: true,
-  toolDefinitionId: true,
-  toolName: true,
-  definitionFingerprint: true,
-  networkFingerprint: true,
-  verifiedBy: { select: { id: true, username: true, displayName: true } },
-  note: true,
-  evidence: true,
-  attestedAt: true,
-  createdAt: true,
-  audits: {
-    orderBy: [{ createdAt: "asc" as const }, { id: "asc" as const }],
-    select: { id: true, event: true, actorId: true, details: true, createdAt: true },
-  },
-} satisfies Prisma.McpToolAttestationSelect;
 
 export type McpActionSnapshot = Readonly<{
   grantId: string;
@@ -240,169 +287,14 @@ async function activeMcpAttestation(db: McpDb, tuple: McpFingerprintTuple) {
   return latest !== undefined && latest.audits.some((audit) => audit.event === "attested") && !latest.audits.some((audit) => audit.event === "revoked") ? latest : null;
 }
 
-function assertMcpAdmin(actor: AccessUser): void {
-  if (actor.role !== "admin") return failMcp("MCP_ADMIN_REQUIRED");
-}
-
-function attestationEvidence(value: unknown): Prisma.InputJsonValue {
-  const normalized = stableMcpJson(value);
-  if (typeof normalized !== "object" || normalized === null || Array.isArray(normalized) || Buffer.byteLength(JSON.stringify(normalized), "utf8") > 16 * 1024) {
-    return failMcp("MCP_INVALID_INPUT");
-  }
-  return normalized as Prisma.InputJsonValue;
-}
-
-async function loadMcpAttestationDefinition(db: McpDb, toolDefinitionId: string) {
-  const definition = await db.mcpToolDefinition.findUnique({
-    where: { id: toolDefinitionId },
-    select: {
-      id: true,
-      connectionId: true,
-      name: true,
-      definitionFingerprint: true,
-      current: true,
-      remoteReadOnlyHint: true,
-      connection: {
-        select: {
-          id: true,
-          status: true,
-          ownerUserId: true,
-          ownerAccountAccessVersion: true,
-          resolvedAddressFingerprint: true,
-          ownerUser: { select: { id: true, disabledAt: true, accountAccessVersion: true } },
-          credential: { select: { secretFingerprint: true } },
-        },
-      },
-    },
-  });
-  if (definition === null) return failMcp("MCP_TOOL_NOT_FOUND");
-  if (!definition.current) return failMcp("MCP_TOOL_DEFINITION_STALE");
-  if (!definition.remoteReadOnlyHint) return failMcp("MCP_TOOL_NOT_READ_ONLY");
-  if (definition.connection.ownerUserId === null || definition.connection.ownerUser === null) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
-  if (definition.connection.ownerUser.disabledAt !== null
-    || definition.connection.ownerAccountAccessVersion === null
-    || definition.connection.ownerAccountAccessVersion !== definition.connection.ownerUser.accountAccessVersion) {
-    return failMcp("MCP_CONNECTION_NOT_VERIFIED");
-  }
-  if (definition.connection.status !== "verified" || definition.connection.resolvedAddressFingerprint === null) return failMcp("MCP_CONNECTION_NOT_VERIFIED");
-  return {
-    definition,
-    tuple: {
-      connectionId: definition.connectionId,
-      toolDefinitionId: definition.id,
-      toolName: definition.name,
-      definitionFingerprint: definition.definitionFingerprint,
-      networkFingerprint: definition.connection.resolvedAddressFingerprint,
-      credentialFingerprint: definition.connection.credential?.secretFingerprint ?? noCredentialFingerprint(),
-    } satisfies McpFingerprintTuple,
-  };
-}
-
-export async function attestMcpToolDefinition(
-  toolDefinitionIdInput: unknown,
-  input: unknown,
-  actor: AccessUser,
-  db: PrismaClient = getDb(),
-  connectionIdInput?: unknown,
-) {
-  assertMcpAdmin(actor);
-  await assertMcpActor(db, actor);
-  const toolDefinitionId = uuid(toolDefinitionIdInput);
-  const expectedConnectionId = connectionIdInput === undefined ? null : uuid(connectionIdInput);
-  const parsed = attestSchema.safeParse(input);
-  if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
-  const evidence = attestationEvidence(parsed.data.evidence);
-  const loaded = await loadMcpAttestationDefinition(db, toolDefinitionId);
-  if (expectedConnectionId !== null && loaded.tuple.connectionId !== expectedConnectionId) return failMcp("MCP_TOOL_NOT_FOUND");
-  return db.$transaction(async (tx) => {
-    await lockActorAccess(tx, actor.id);
-    await assertMcpActor(tx, actor);
-    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${loaded.tuple.connectionId}::text, 32010003))`);
-    const current = await loadMcpAttestationDefinition(tx, toolDefinitionId);
-    if (JSON.stringify(current.tuple) !== JSON.stringify(loaded.tuple)) return failMcp("MCP_TOOL_DEFINITION_STALE");
-    const now = new Date();
-    const attestation = await tx.mcpToolAttestation.create({
-      data: {
-        id: randomUUID(),
-        connectionId: current.tuple.connectionId,
-        toolDefinitionId: current.tuple.toolDefinitionId,
-        toolName: current.tuple.toolName,
-        definitionFingerprint: current.tuple.definitionFingerprint,
-        networkFingerprint: current.tuple.networkFingerprint,
-        credentialFingerprint: current.tuple.credentialFingerprint,
-        connectionOwnerAccountAccessVersion: current.definition.connection.ownerAccountAccessVersion,
-        verifiedById: actor.id,
-        note: parsed.data.note ?? null,
-        evidence,
-        attestedAt: now,
-        createdAt: now,
-      },
-    });
-    await tx.mcpToolAttestationAudit.create({
-      data: {
-        id: randomUUID(),
-        attestationId: attestation.id,
-        connectionId: current.tuple.connectionId,
-        toolDefinitionId: current.tuple.toolDefinitionId,
-        event: "attested",
-        actorId: actor.id,
-        definitionFingerprint: current.tuple.definitionFingerprint,
-        networkFingerprint: current.tuple.networkFingerprint,
-        credentialFingerprint: current.tuple.credentialFingerprint,
-        connectionOwnerAccountAccessVersion: current.definition.connection.ownerAccountAccessVersion,
-        details: { note: parsed.data.note ?? null, evidence },
-      },
-    });
-    return tx.mcpToolAttestation.findUniqueOrThrow({ where: { id: attestation.id }, select: attestationPublicSelect });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-}
-
-export async function revokeMcpToolAttestation(
-  attestationIdInput: unknown,
-  input: unknown,
-  actor: AccessUser,
-  db: PrismaClient = getDb(),
-) {
-  assertMcpAdmin(actor);
-  await assertMcpActor(db, actor);
-  const attestationId = uuid(attestationIdInput);
-  const parsed = revokeAttestationSchema.safeParse(input);
-  if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
-  return db.$transaction(async (tx) => {
-    await lockActorAccess(tx, actor.id);
-    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${attestationId}::text, 32010004))`);
-    await assertMcpActor(tx, actor);
-    const existing = await tx.mcpToolAttestation.findUnique({ where: { id: attestationId }, include: { audits: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] } } });
-    if (existing === null) return failMcp("MCP_ATTESTATION_NOT_FOUND");
-    if (existing.attestedAt.getTime() !== timestamp(parsed.data.expectedAttestedAt).getTime()) return failMcp("MCP_ATTESTATION_CONFLICT");
-    if (!existing.audits.some((audit) => audit.event === "revoked")) {
-      await tx.mcpToolAttestationAudit.create({
-        data: {
-          id: randomUUID(),
-          attestationId: existing.id,
-          connectionId: existing.connectionId,
-          toolDefinitionId: existing.toolDefinitionId,
-          event: "revoked",
-          actorId: actor.id,
-          definitionFingerprint: existing.definitionFingerprint,
-          networkFingerprint: existing.networkFingerprint,
-          credentialFingerprint: existing.credentialFingerprint,
-          connectionOwnerAccountAccessVersion: existing.connectionOwnerAccountAccessVersion,
-          details: { note: parsed.data.note ?? null },
-        },
-      });
-    }
-    return tx.mcpToolAttestation.findUniqueOrThrow({ where: { id: existing.id }, select: attestationPublicSelect });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-}
-
 export async function listMcpConnections(actor: McpConnectionActor, db: PrismaClient = getDb()) {
   await assertMcpActor(db, actor);
-  return db.mcpConnection.findMany({
+  const connections = await db.mcpConnection.findMany({
     where: { ownerUserId: actor.id, ownershipState: "confirmed" },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: connectionSelect,
   });
+  return connections.map(projectPersonalMcpConnection);
 }
 
 export async function getMcpConnection(connectionIdInput: unknown, actor: McpConnectionActor, db: PrismaClient = getDb()) {
@@ -413,7 +305,7 @@ export async function getMcpConnection(connectionIdInput: unknown, actor: McpCon
     select: connectionSelect,
   });
   if (connection === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
-  return connection;
+  return projectPersonalMcpConnection(connection);
 }
 
 export async function createMcpConnection(input: unknown, actor: McpConnectionActor, db: PrismaClient = getDb()) {
@@ -435,7 +327,7 @@ export async function createMcpConnection(input: unknown, actor: McpConnectionAc
       const credential = parsed.data.authKind === "bearer"
         ? await createCredential("mcp", parsed.data.bearerToken, tx)
         : null;
-      return tx.mcpConnection.create({
+      const connection = await tx.mcpConnection.create({
         data: {
           id: randomUUID(),
           name: parsed.data.name,
@@ -451,6 +343,7 @@ export async function createMcpConnection(input: unknown, actor: McpConnectionAc
         },
         select: connectionSelect,
       });
+      return projectPersonalMcpConnection(connection);
     });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return failMcp("MCP_CONNECTION_NAME_CONFLICT");
@@ -507,7 +400,7 @@ export async function updateMcpConnection(
           : securityChanged && current.status !== "disabled"
             ? { status: "configured" as const, disabledAt: null }
             : {};
-      return tx.mcpConnection.update({
+      const connection = await tx.mcpConnection.update({
         where: { id: connectionId },
         data: {
           ...(parsed.data.name === undefined ? {} : { name: parsed.data.name }),
@@ -518,6 +411,7 @@ export async function updateMcpConnection(
         },
         select: connectionSelect,
       });
+      return projectPersonalMcpConnection(connection);
     });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return failMcp("MCP_CONNECTION_NAME_CONFLICT");
@@ -707,7 +601,7 @@ export async function discoverMcpConnectionTools(
           await tx.mcpToolDefinition.update({ where: { id: existing.id }, data: { current: true, supersededAt: null } });
         }
       }
-      return tx.mcpConnection.update({
+      const connection = await tx.mcpConnection.update({
         where: { id: connectionId },
         data: {
           status: "verified", protocolVersion: MCP_PROTOCOL_VERSION, catalogFingerprint: discovery.catalogFingerprint,
@@ -715,6 +609,7 @@ export async function discoverMcpConnectionTools(
         },
         select: connectionSelect,
       });
+      return projectPersonalMcpConnection(connection);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return Object.freeze({ connection: stored, discoveredCount: discovery.tools.length, eligibleCount: discovery.tools.filter((tool) => tool.remoteReadOnlyHint).length, rejectedCount: discovery.rejectedCount });
   } catch (error) {

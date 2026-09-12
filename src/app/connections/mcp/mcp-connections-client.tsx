@@ -19,6 +19,14 @@ type ToolDefinition = {
     definitionFingerprint: string;
     networkFingerprint: string;
     credentialFingerprint: string;
+    effective?: boolean;
+    controlPlaneVersion?: number | null;
+    status?: "active" | "revoked" | null;
+    version?: number | null;
+    conclusion?: string | null;
+    evidenceNote?: string | null;
+    connectionConfigurationRevision?: number | null;
+    connectionOwnerAccountAccessVersion?: number | null;
     attestedAt: string;
     audits: Array<{ event: "attested" | "revoked" }>;
   }>;
@@ -58,9 +66,7 @@ async function responseError(response: Response, fallback: string) {
 function activeAttestation(tool: ToolDefinition) {
   const latest = tool.attestations[0];
   return latest !== undefined
-    && latest.definitionFingerprint === tool.definitionFingerprint
-    && latest.audits.some((audit) => audit.event === "attested")
-    && !latest.audits.some((audit) => audit.event === "revoked")
+    && latest.effective === true
     ? latest
     : null;
 }

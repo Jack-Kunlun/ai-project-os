@@ -105,7 +105,7 @@ test("C2 invalid active verifier maps to a stable reauthentication conflict", ()
   assert.equal(mapped.body.error.code, "MCP_ATTESTATION_REAUTHENTICATION_REQUIRED");
 });
 
-test("C2 API surface uses same-origin writes and the independent control-plane service", async () => {
+test("C2 API surface freezes legacy attestation writes behind the review workbench", async () => {
   const [candidates, createRoute, revokeRoute, service] = await Promise.all([
     readFile("src/app/api/system/mcp-tool-attestation-candidates/route.ts", "utf8"),
     readFile("src/app/api/system/mcp-tool-attestations/route.ts", "utf8"),
@@ -115,8 +115,9 @@ test("C2 API surface uses same-origin writes and the independent control-plane s
   assert.match(candidates, /requireApiSession/u);
   assert.match(candidates, /listMcpControlPlaneAttestationCandidates/u);
   assert.match(createRoute, /assertSameOrigin/u);
-  assert.match(createRoute, /createMcpControlPlaneAttestation/u);
-  assert.match(createRoute, /created \? 201 : 200/u);
+  assert.match(createRoute, /requireApiSession/u);
+  assert.match(createRoute, /MCP_TOOL_REVIEW_REQUIRED/u);
+  assert.doesNotMatch(createRoute, /createMcpControlPlaneAttestation/u);
   assert.match(revokeRoute, /assertSameOrigin/u);
   assert.match(revokeRoute, /revokeMcpControlPlaneAttestation/u);
   assert.match(service, /\.strict\(\)/u);
@@ -126,6 +127,9 @@ test("C2 API surface uses same-origin writes and the independent control-plane s
   assert.match(service, /32010003/u);
   assert.match(service, /32010004/u);
   assert.doesNotMatch(service, /endpointUrl|maskedSuffix|ciphertext|nonce|authTag/u);
+  const mapped = mapApiError(new McpCapabilityError("MCP_TOOL_REVIEW_REQUIRED"));
+  assert.equal(mapped.status, 409);
+  assert.equal(mapped.body.error.code, "MCP_TOOL_REVIEW_REQUIRED");
 });
 
 test("C2 eligible lookup sends every exact tuple in a batch instead of truncating at 64", async () => {
@@ -150,13 +154,15 @@ test("C2 eligible lookup sends every exact tuple in a batch instead of truncatin
       credentialId: null,
       credentialFingerprint: "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b",
       configurationRevision: 1,
+      updatedAt: new Date("2026-09-12T00:00:00.000Z"),
       resolvedAddressFingerprint: "b".repeat(64),
       status: "verified",
       disabledAt: null,
       ownerUserId: adminId,
+      ownerAccountAccessVersion: 1,
       ownershipState: "confirmed",
       credential: null,
-      ownerUser: { id: adminId, disabledAt: null },
+      ownerUser: { id: adminId, disabledAt: null, accountAccessVersion: 1 },
     },
   }));
   let definitionCalls = 0;

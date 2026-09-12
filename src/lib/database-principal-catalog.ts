@@ -7,7 +7,7 @@
  */
 export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
   "Project", "ProjectLifecycleRevision", "ProjectDataExportAudit", "ProjectDeletionReceipt",
-  "GitHubConnection", "GitHubRepository", "GitConnection", "GitRepository",
+  "GitHubConnection", "GitHubRepository", "GitConnection", "GitConnectionMutationPreview", "GitConnectionMutationAudit", "GitRepository",
   "ProjectGitRepositoryLink", "ProjectGitRepositoryDelegation", "ProjectGitRepositoryDelegationAudit",
   "ProjectGitRepositoryManualRun", "ProjectGitRepositoryManualRunEntry", "ProjectGitRepositoryManualPointer",
   "ProjectGitRepositoryManualRunAudit", "ProjectGitRepositoryManualRunReconciliation", "GitRepositorySnapshot",
@@ -42,11 +42,11 @@ export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
   "WorkspaceRoleMutationPreview", "WorkspaceRoleMutationAudit",
   "ProjectMembership", "MembershipAccessAudit", "MembershipGovernanceExecution", "MembershipGovernanceApproval",
   "WorkspaceInvitation", "WorkspaceInvitationAudit", "OidcProvider", "OidcIdentity", "OidcLoginAttempt",
-  "GitHubIdentity", "GitHubOauthAttempt", "ExternalCredential", "McpConnection", "McpToolDefinition",
+  "GitHubIdentity", "GitHubOauthAttempt", "ExternalCredential", "McpConnection", "McpConnectionMutationPreview", "McpConnectionMutationAudit", "McpToolDefinition",
   "ProjectMcpToolGrant", "ProjectMcpToolGrantLedger", "ProjectMcpAction", "ProjectMcpActionDispatchAttempt",
   "ProjectMcpActionRuntimeLedger", "ProjectMcpActionDispatchResult", "ProjectMcpActionDecision",
   "ProjectMcpActionLedger", "ProjectMcpConnectionDelegation", "ProjectMcpConnectionDelegationAudit",
-  "McpToolAttestation", "McpToolAttestationAudit", "ProjectMcpToolGrantAudit", "AiProviderConnection",
+  "McpToolAttestation", "McpToolAttestationAudit", "McpToolReview", "McpToolReviewAudit", "ProjectMcpToolGrantAudit", "AiProviderConnection",
   "PlatformProviderProbeBudget", "PlatformProviderProbeAttempt", "PlatformProviderProbeLedger",
   "PlatformGrantOfferPolicy", "PlatformGrantOfferPolicyAudit", "AccountEntitlementActivation",
   "AccountEntitlementActivationAudit", "AccountEntitlementBackfillRun", "AccountEntitlementBackfillItem",
@@ -86,6 +86,12 @@ export const RUNTIME_ONLY_CONTROL_PLANE_RELATIONS = Object.freeze([
   "MembershipApplicationAudit",
   "WorkspaceRoleMutationPreview",
   "WorkspaceRoleMutationAudit",
+  "GitConnectionMutationPreview",
+  "GitConnectionMutationAudit",
+  "McpConnectionMutationPreview",
+  "McpConnectionMutationAudit",
+  "McpToolReview",
+  "McpToolReviewAudit",
 ] as const);
 
 export const SIGNUP_GRANT_RELATION = "PlatformTokenGrant" as const;
@@ -114,6 +120,22 @@ function invokerFunction(
   return Object.freeze({ name, identityArguments, runtime, entitlementWriter, reason });
 }
 
+export type DatabasePrincipalTriggerFunction = Readonly<{
+  name: string;
+  identityArguments: string;
+  runtime: false;
+  entitlementWriter: false;
+  reason: string;
+}>;
+
+function triggerFunction(
+  name: string,
+  identityArguments: string,
+  reason: string,
+): DatabasePrincipalTriggerFunction {
+  return Object.freeze({ name, identityArguments, runtime: false, entitlementWriter: false, reason });
+}
+
 /**
  * Explicit SECURITY INVOKER helper ACLs required by runtime and entitlement
  * writer trigger paths.  Keep SECURITY DEFINER API functions out of this
@@ -139,6 +161,7 @@ export const DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX = Object.freeze([
   invokerFunction("assert_project_item_revision_evidence", "uuid, uuid, uuid", true, false, "project item revision evidence validation"),
   invokerFunction("assert_project_item_supersession_consistency", "uuid, uuid", true, false, "project item supersession consistency validation"),
   invokerFunction("mcp_tool_attestation_v2_tuple_valid", "\"McpToolAttestation\"", true, false, "MCP tool attestation tuple validation"),
+  invokerFunction("mcp_tool_attestation_review_eligible", "\"McpToolAttestation\"", true, false, "MCP attestation immutable-review eligibility validation"),
   invokerFunction("personal_ai_owner_account_access_epoch_valid", "uuid, integer", true, false, "personal AI owner access validation"),
   invokerFunction("personal_git_manual_run_legacy_chain_valid", "\"ProjectGitRepositoryManualRun\"", true, false, "personal Git legacy chain validation"),
   invokerFunction("personal_git_owner_account_access_epoch_valid", "uuid, integer", true, false, "personal Git owner access validation"),
@@ -168,6 +191,25 @@ export const DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX = Object.freeze([
   invokerFunction("repository_rag_snapshot_is_current", "uuid, uuid, uuid", true, false, "repository RAG scoped snapshot validation"),
   invokerFunction("personal_memory_dispatch_evidence_valid", "uuid, uuid, uuid, uuid, text", true, false, "personal memory dispatch validation"),
   invokerFunction("personal_memory_index_live_evidence_valid_without_epoch", "uuid, boolean", true, false, "personal memory legacy live evidence validation"),
+] as const);
+
+/**
+ * Trigger functions are invoked by PostgreSQL's trigger manager, never by an
+ * application principal.  They remain owned by the migrator and receive no
+ * EXECUTE privilege for PUBLIC, runtime, or entitlement-writer roles.
+ */
+export const DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX = Object.freeze([
+  triggerFunction("git_connection_governance_security_guard", "", "Git connection security-field governance trigger"),
+  triggerFunction("git_connection_configuration_version_guard", "", "Git connection configuration-version trigger"),
+  triggerFunction("mcp_connection_configuration_revision_guard", "", "MCP connection configuration-revision trigger"),
+  triggerFunction("mcp_connection_governance_security_guard", "", "MCP connection security-field governance trigger"),
+  triggerFunction("git_connection_mutation_preview_guard", "", "Git connection mutation-preview trigger"),
+  triggerFunction("mcp_connection_mutation_preview_guard", "", "MCP connection mutation-preview trigger"),
+  triggerFunction("connection_mutation_audit_guard", "", "connection mutation audit trigger"),
+  triggerFunction("mcp_tool_review_guard", "", "MCP tool review immutable trigger"),
+  triggerFunction("mcp_tool_review_audit_guard", "", "MCP tool review audit immutable trigger"),
+  triggerFunction("mcp_tool_review_audit_required", "", "MCP tool review audit completeness trigger"),
+  triggerFunction("project_mcp_tool_grant_review_guard", "", "project MCP grant immutable-review eligibility trigger"),
 ] as const);
 
 export function isKnownDatabasePrincipalRelation(value: string): boolean {

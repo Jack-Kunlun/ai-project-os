@@ -507,9 +507,11 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(repositories, /href="\/profile\/connections\/git"/u);
   assert.match(repositories, /资料已发布到项目/u);
   assert.doesNotMatch(guide, /新增模型、Git 或 MCP 连接/u);
-  assert.match(tools, /项目级 MCP 授权与动作调用当前未开放/u);
+  assert.match(tools, /控制面开放；动作调用冻结/u);
+  assert.match(tools, /仅管理连接委托和只读工具授权/u);
   assert.match(tools, /href="\/profile\/connections\/mcp"/u);
-  assert.doesNotMatch(tools, /MCP 连接由管理员维护|fetch\(|method:\s*"(?:POST|PATCH|DELETE)"|授权给项目|创建并请求审批/u);
+  assert.match(tools, /mcp-connection-delegations|mcp-tool-grants/u);
+  assert.doesNotMatch(tools, /MCP 连接由管理员维护|mcp-actions|dispatch|result-import|授权并调用|创建并请求审批/u);
   assert.doesNotMatch(repositoriesPage, /user\.role === "admin"/u);
   assert.doesNotMatch(repositoriesPage, /isSystemAdmin/u);
   assert.doesNotMatch(tools, /href="\/connections\/mcp"/u);

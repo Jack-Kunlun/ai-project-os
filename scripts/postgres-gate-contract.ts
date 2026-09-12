@@ -49,6 +49,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "configuration-deletion", file: "test/configuration-deletion-postgres.test.ts", database: "ai_project_os_configuration_deletion_test", gateEnv: "CONFIGURATION_DELETION_POSTGRES_GATE", setup: "migrate" },
   { id: "action-engine", file: "test/action-engine-postgres.test.ts", database: "ai_project_os_action_engine_test", gateEnv: "ACTION_ENGINE_POSTGRES_GATE", setup: "migrate" },
   { id: "mcp-capabilities", file: "test/mcp-capabilities-postgres.test.ts", database: "ai_project_os_mcp_capabilities_test", gateEnv: "MCP_CAPABILITIES_POSTGRES_GATE", setup: "migrate" },
+  { id: "connection-governance", file: "test/connection-governance-postgres.test.ts", database: "ai_project_os_connection_governance_test", gateEnv: "CONNECTION_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
   { id: "mcp-attestation-control-plane", file: "test/mcp-attestation-control-plane-postgres.test.ts", database: "ai_project_os_mcp_attestation_control_plane_test", gateEnv: "MCP_ATTESTATION_CONTROL_PLANE_POSTGRES_GATE", setup: "migrate" },
   { id: "project-mcp-delegation", file: "test/project-mcp-delegation-postgres.test.ts", database: "ai_project_os_project_mcp_delegation_test", gateEnv: "PROJECT_MCP_DELEGATION_POSTGRES_GATE", setup: "migrate" },
   { id: "project-mcp-grant-retention", file: "test/project-mcp-grant-retention-postgres.test.ts", database: "ai_project_os_project_mcp_grant_retention_test", gateEnv: "PROJECT_MCP_GRANT_RETENTION_POSTGRES_GATE", setup: "migrate" },

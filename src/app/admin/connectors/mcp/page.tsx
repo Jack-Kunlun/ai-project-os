@@ -1,7 +1,9 @@
-import { FrozenConnectorPage } from "@/app/admin/connectors/frozen-connector-page";
+import { McpReviewWorkbench } from "@/app/admin/connectors/mcp/mcp-review-workbench";
+import { AppHeader } from "@/components/app-header";
+import { AdminShell } from "@/components/admin-shell";
 import { requireSystemAdminPage } from "@/lib/system-admin";
 
 export default async function AdminMcpConnectionsPage() {
   const user = await requireSystemAdminPage();
-  return <FrozenConnectorPage active="mcp" username={user.username} title="MCP 连接配置已冻结" description="MCP 凭据属于连接所有者。管理员只负责后续安全证据审查与工具认证，不直接提交、轮换或读取用户的 Bearer Token。" />;
+  return <main className="min-h-screen bg-[#f4f6fb] text-slate-950"><AppHeader username={user.username} active="admin" isSystemAdmin /><AdminShell active="mcp" /><McpReviewWorkbench /></main>;
 }

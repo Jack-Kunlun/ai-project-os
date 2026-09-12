@@ -1,10 +1,15 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Prisma } from "@prisma/client";
 import test from "node:test";
+import { createCredential } from "../src/lib/credential-vault";
 import { getDb } from "../src/lib/db";
-import { createMcpControlPlaneAttestation } from "../src/lib/mcp-attestation-control-plane-service";
+import { executeMcpConnectionMutation, previewMcpConnectionMutation } from "../src/lib/mcp/connection-governance";
+import { createMcpToolReview } from "../src/lib/mcp-tool-review-service";
 import {
   confirmProjectMcpConnectionDelegationOwner,
   confirmProjectMcpConnectionDelegationProject,
@@ -37,6 +42,9 @@ test(
   "project MCP action approval control plane enforces Owner admission, CAS, TTL, drift, and retained evidence",
   { skip: !shouldRun ? "PROJECT_MCP_ACTION_POSTGRES_GATE=1 is required" : false },
   async () => {
+    const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-mcp-action-key-"));
+    const previousMasterKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+    process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const ownerId = randomUUID();
@@ -50,8 +58,12 @@ test(
     const projectId = randomUUID();
     const connectionId = randomUUID();
     const definitionId = randomUUID();
+    const bearerConnectionId = randomUUID();
+    const bearerDefinitionId = randomUUID();
     const networkFingerprint = "b".repeat(64);
     const definitionFingerprint = "a".repeat(64);
+    const bearerNetworkFingerprint = "e".repeat(64);
+    const bearerDefinitionFingerprint = "f".repeat(64);
     const actor = { id: ownerId, role: "admin", accountAccessVersion: 1 } as const;
     const approvingOwner = { id: secondOwnerId, role: "user", accountAccessVersion: 1 } as const;
     const createProposal = async (grantId: string, query: string) => proposeProjectMcpAction(projectId, { clientRequestId: randomUUID(), grantId, expectedGrantVersion: 1, arguments: { query } }, actor, db);
@@ -132,11 +144,23 @@ test(
         inputSchema: { type: "object", properties: { query: { type: "string", minLength: 1 } }, required: ["query"], additionalProperties: false },
         outputSchema: { type: "object" }, annotations: { readOnlyHint: true, destructiveHint: false }, remoteReadOnlyHint: true, definitionFingerprint, current: true,
       } });
-      const attestation = await createMcpControlPlaneAttestation(actor, {
-        toolDefinitionId: definitionId, expectedConnectionConfigurationRevision: 1, expectedDefinitionFingerprint: definitionFingerprint,
-        expectedNetworkFingerprint: networkFingerprint, expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
-        conclusion: "read_only_verified", riskLevel: "low", evidenceNote: "manual_read_only_review",
+      const connectionSnapshot = await db.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { updatedAt: true } });
+      const reviewed = await createMcpToolReview(actor, {
+        connectionId,
+        toolDefinitionId: definitionId,
+        expectedConnectionConfigurationRevision: 1,
+        expectedConnectionUpdatedAt: connectionSnapshot.updatedAt.toISOString(),
+        expectedDefinitionFingerprint: definitionFingerprint,
+        expectedNetworkFingerprint: networkFingerprint,
+        expectedCredentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
+        conclusion: "read_only_verified",
+        riskLevel: "low",
+        riskReasonCode: "read_only_eligible",
+        evidenceNote: "动作控制面只读审核",
+        requestKey: `mcp-action-review-${suffix}`,
       }, db);
+      if (reviewed.review.attestationId === null) throw new Error("MCP_ACTION_GATE_REVIEW_ATTESTATION_MISSING");
+      const attestation = { id: reviewed.review.attestationId } as const;
       const draft = await proposeProjectMcpConnectionDelegation(projectId, { mcpConnectionId: connectionId, expiresAt: new Date(Date.now() + 3_600_000).toISOString() }, actor, db);
       if (!("id" in draft)) throw new Error("MCP_ACTION_GATE_DELEGATION_CREATE_FAILED");
       await confirmProjectMcpConnectionDelegationOwner(projectId, draft.id, { expectedVersion: 1, acknowledgeCredentialUse: true }, actor, db);
@@ -145,6 +169,81 @@ test(
       const delegation = await db.projectMcpConnectionDelegation.findUniqueOrThrow({ where: { id: activeDelegation.id }, select: { id: true, version: true } });
       const grant = await createProjectMcpToolGrantV2(projectId, { delegationId: delegation.id, toolDefinitionId: definitionId, attestationId: attestation.id, expectedDelegationVersion: delegation.version, expectedAttestationVersion: 1 as const, acknowledgeReadOnly: true as const }, actor, db);
       const grantId = grant.grant.id as string;
+
+      // Keep the primary no-credential tuple unchanged.  This isolated
+      // bearer-backed tuple exists only to exercise governance rotation as a
+      // safe source-snapshot drift for the action approval assertions.
+      const bearerCredential = await createCredential("mcp", `action-rotation-${suffix}`, db);
+      const bearerCredentialSnapshot = await db.externalCredential.findUniqueOrThrow({
+        where: { id: bearerCredential.id },
+        select: { secretFingerprint: true },
+      });
+      await db.mcpConnection.create({ data: {
+        id: bearerConnectionId,
+        name: `MCP action drift connection ${suffix}`,
+        endpointUrl: "https://mcp.example.invalid/mcp",
+        authKind: "bearer",
+        credentialId: bearerCredential.id,
+        allowPrivateNetwork: false,
+        resolvedAddressFingerprint: bearerNetworkFingerprint,
+        protocolVersion: "2026-07-28",
+        catalogFingerprint: "d".repeat(64),
+        credentialFingerprint: bearerCredentialSnapshot.secretFingerprint,
+        configurationRevision: 1,
+        status: "verified",
+        createdById: ownerId,
+        ownerUserId: ownerId,
+        ownerAccountAccessVersion: 1,
+        ownershipState: "confirmed",
+      } });
+      await db.mcpToolDefinition.create({ data: {
+        id: bearerDefinitionId,
+        connectionId: bearerConnectionId,
+        name: "project.lookup.drift",
+        title: "Drift lookup",
+        description: "Governance drift fixture",
+        inputSchema: { type: "object", properties: { query: { type: "string", minLength: 1 } }, required: ["query"], additionalProperties: false },
+        outputSchema: { type: "object" },
+        annotations: { readOnlyHint: true, destructiveHint: false },
+        remoteReadOnlyHint: true,
+        definitionFingerprint: bearerDefinitionFingerprint,
+        current: true,
+      } });
+      const bearerConnectionSnapshot = await db.mcpConnection.findUniqueOrThrow({ where: { id: bearerConnectionId }, select: { updatedAt: true } });
+      const bearerReviewed = await createMcpToolReview(actor, {
+        connectionId: bearerConnectionId,
+        toolDefinitionId: bearerDefinitionId,
+        expectedConnectionConfigurationRevision: 1,
+        expectedConnectionUpdatedAt: bearerConnectionSnapshot.updatedAt.toISOString(),
+        expectedDefinitionFingerprint: bearerDefinitionFingerprint,
+        expectedNetworkFingerprint: bearerNetworkFingerprint,
+        expectedCredentialFingerprint: bearerCredentialSnapshot.secretFingerprint,
+        conclusion: "read_only_verified",
+        riskLevel: "low",
+        riskReasonCode: "read_only_eligible",
+        evidenceNote: "动作控制面凭据只读审核",
+        requestKey: `mcp-action-bearer-review-${suffix}`,
+      }, db);
+      if (bearerReviewed.review.attestationId === null) throw new Error("MCP_ACTION_GATE_BEARER_REVIEW_ATTESTATION_MISSING");
+      const bearerAttestation = { id: bearerReviewed.review.attestationId } as const;
+      const bearerDraft = await proposeProjectMcpConnectionDelegation(projectId, {
+        mcpConnectionId: bearerConnectionId,
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      }, actor, db);
+      if (!("id" in bearerDraft)) throw new Error("MCP_ACTION_GATE_BEARER_DELEGATION_CREATE_FAILED");
+      await confirmProjectMcpConnectionDelegationOwner(projectId, bearerDraft.id, { expectedVersion: 1, acknowledgeCredentialUse: true }, actor, db);
+      const activeBearerDelegation = await confirmProjectMcpConnectionDelegationProject(projectId, bearerDraft.id, { expectedVersion: 2, acknowledgeProjectScope: true, acknowledgeDataEgress: true }, actor, db);
+      if (!("id" in activeBearerDelegation)) throw new Error("MCP_ACTION_GATE_BEARER_DELEGATION_ACTIVATE_FAILED");
+      const bearerDelegation = await db.projectMcpConnectionDelegation.findUniqueOrThrow({ where: { id: activeBearerDelegation.id }, select: { id: true, version: true } });
+      const bearerGrant = await createProjectMcpToolGrantV2(projectId, {
+        delegationId: bearerDelegation.id,
+        toolDefinitionId: bearerDefinitionId,
+        attestationId: bearerAttestation.id,
+        expectedDelegationVersion: bearerDelegation.version,
+        expectedAttestationVersion: 1,
+        acknowledgeReadOnly: true,
+      }, actor, db);
+      const bearerGrantId = bearerGrant.grant.id as string;
 
       for (const unauthorized of [editorId, viewerId, workspaceAdminId, systemAdminId, nonmemberId]) {
         await assert.rejects(() => listProjectMcpActions(projectId, { id: unauthorized, role: "user" }, db), (error: unknown) => ["PROJECT_MCP_ACTION_PROJECT_OWNER_REQUIRED", "PROJECT_MCP_ACTION_FORBIDDEN"].includes(serviceCode(error)));
@@ -427,8 +526,28 @@ test(
       assert.equal(rawApprovedDecision.decidedAt.getTime(), rawApprovedLedger.transitionAt.getTime());
       assert.equal(rawApprovedDecision.createdAt.getTime(), rawApprovedLedger.createdAt.getTime());
 
-      const connectionDriftProposal = await createProposal(grantId, "connection-drift");
-      await db.mcpConnection.update({ where: { id: connectionId }, data: { lastDiscoveredAt: new Date() } });
+      const connectionDriftProposal = await createProposal(bearerGrantId, "connection-drift");
+      const driftConnectionBefore = await db.mcpConnection.findUniqueOrThrow({ where: { id: bearerConnectionId }, select: { updatedAt: true } });
+      const driftPreview = await previewMcpConnectionMutation(bearerConnectionId, {
+        action: "rotateCredential",
+        requestKey: `mcpa-rotate-${suffix}`,
+        reason: "rotate isolated action drift fixture credential",
+        expectedUpdatedAt: driftConnectionBefore.updatedAt.toISOString(),
+        secret: `action-rotation-next-${suffix}`,
+      }, actor, db);
+      assert.equal(driftPreview.canExecute, true);
+      const driftExecution = await executeMcpConnectionMutation(bearerConnectionId, {
+        previewId: driftPreview.id,
+        requestKey: driftPreview.requestKey,
+        requestFingerprint: driftPreview.requestFingerprint,
+        impactFingerprint: driftPreview.impactFingerprint,
+        expectedUpdatedAt: driftPreview.connection.updatedAt,
+        secret: `action-rotation-next-${suffix}`,
+      }, actor, db);
+      assert.equal(driftExecution.status, "completed");
+      const driftedConnection = await db.mcpConnection.findUniqueOrThrow({ where: { id: bearerConnectionId }, select: { status: true, configurationRevision: true } });
+      assert.equal(driftedConnection.status, "configured");
+      assert.equal(driftedConnection.configurationRevision, 2);
       await assert.rejects(() => db.$executeRaw(Prisma.sql`
         UPDATE "ProjectMcpAction"
         SET "status" = 'approved'::"ProjectMcpActionStatus", "stateVersion" = 2
@@ -436,6 +555,8 @@ test(
       `), /PROJECT_MCP_ACTION_SOURCE_TUPLE_INVALID/u);
       await assert.rejects(() => decideProjectMcpAction(projectId, connectionDriftProposal.action.id as string, { decision: "approved", expectedStateVersion: 1, expectedActionRevision: connectionDriftProposal.action.actionRevision, acknowledgeSingleUse: true }, actor, db), (error: unknown) => serviceCode(error) === "PROJECT_MCP_ACTION_STALE");
       await cancelProjectMcpAction(projectId, connectionDriftProposal.action.id as string, { expectedStateVersion: 1, expectedActionRevision: connectionDriftProposal.action.actionRevision }, actor, db);
+      await revokeProjectMcpToolGrantV2(projectId, bearerGrantId, { expectedGrantVersion: 1 }, actor, db);
+      await revokeProjectMcpConnectionDelegation(projectId, bearerDelegation.id, { expectedVersion: bearerDelegation.version, reason: "action drift fixture cleanup" }, actor, db);
 
       const driftProposal = await createProposal(grantId, "drift");
       const driftId = driftProposal.action.id as string;
@@ -470,6 +591,9 @@ test(
       assert.equal(await db.projectMcpActionDecision.count({ where: { projectId } }), decisionsBeforeDelete);
     } finally {
       await db.$disconnect();
+      if (previousMasterKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+      else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousMasterKeyPath;
+      await rm(keyDirectory, { recursive: true, force: true });
     }
   },
 );

@@ -9,6 +9,7 @@ export type McpToolDefinition = Readonly<{
   discoveredAt: string;
   attestations: ReadonlyArray<{
     attestedAt: string;
+    effective?: boolean;
     audits: ReadonlyArray<{ event: "attested" | "revoked" }>;
   }>;
 }>;
@@ -59,7 +60,7 @@ export function createDefaultMcpDraft(): McpConnectionDraft {
 
 export function isActiveMcpAttestation(tool: McpToolDefinition): boolean {
   const attestation = tool.attestations[0];
-  return attestation !== undefined && attestation.audits.some((audit) => audit.event === "attested") && !attestation.audits.some((audit) => audit.event === "revoked");
+  return attestation?.effective === true;
 }
 
 export function mcpCredentialLabel(connection: Pick<McpConnection, "authKind" | "credential">): string {

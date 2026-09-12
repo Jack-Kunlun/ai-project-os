@@ -18,7 +18,7 @@ import {
   confirmProjectMcpConnectionDelegationProject,
   proposeProjectMcpConnectionDelegation,
 } from "@/lib/project-mcp-connection-delegation-service";
-import { createMcpControlPlaneAttestation } from "@/lib/mcp-attestation-control-plane-service";
+import { createMcpToolReview } from "@/lib/mcp-tool-review-service";
 import { createProjectMcpToolGrantV2 } from "@/lib/project-mcp-tool-grant-service";
 import { cancelProjectMcpAction, decideProjectMcpAction, proposeProjectMcpAction } from "@/lib/project-mcp-action-service";
 import { reconcileStaleProjectMcpActionDispatchReservations } from "@/lib/project-mcp-action-dispatch-service";
@@ -40,7 +40,13 @@ const expectedEnums: Readonly<Record<string, readonly string[]>> = {
   AccountAccessAuditEvent: ["disabled", "restored"],
   MembershipAccessAuditAction: ["migration_quarantined", "confirmed", "revoked", "bootstrap_confirmed"],
   WorkspaceInvitationAuditEvent: ["created", "accepted", "revoked"],
+  GitConnectionMutationAction: ["rotate_credential", "retrust", "retest", "disable", "enable", "delete"],
+  McpConnectionMutationAction: ["rotate_credential", "retrust", "rediscover", "disable", "enable", "delete"],
+  ConnectionMutationExecutionStatus: ["previewed", "dispatched", "completed", "failed", "unknown", "held"],
   McpToolAttestationAuditEvent: ["attested", "revoked"],
+  McpToolReviewConclusion: ["read_only_verified", "read_only_rejected", "needs_research"],
+  McpToolReviewRiskLevel: ["low", "medium", "high"],
+  McpToolReviewRiskReasonCode: ["read_only_eligible", "write_capability", "destructive_capability", "untrusted_remote_text", "schema_invalid", "network_unverified", "credential_scope_unknown", "insufficient_evidence"],
   ProjectAiProviderDelegationAuditAction: ["proposed", "owner_confirmed", "activated", "rejected", "revoked", "expired", "platform_selected", "personal_selected", "selection_updated"],
   ProjectGitRepositoryDelegationAuditAction: ["proposed", "owner_confirmed", "activated", "rejected", "revoked", "expired"],
   ProjectGitRepositoryManualRunAuditAction: ["requested", "admitted", "dispatched", "succeeded", "failed", "unknown", "conflict"],
@@ -112,7 +118,7 @@ test(
     const page = await listSystemAudit({ pageSize: 50 }, database, new Date());
     assert.equal(page.pageSize, 50);
     assert.ok(page.events.every((event) => SYSTEM_AUDIT_SOURCES.includes(event.source)));
-    assert.equal(SYSTEM_AUDIT_SOURCES.length, 22);
+    assert.equal(SYSTEM_AUDIT_SOURCES.length, 25);
     assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
     assertSafePublicProjection(page);
 
@@ -575,16 +581,23 @@ test(
           current: true,
         },
       });
-      const attestation = await createMcpControlPlaneAttestation(platformAdminActor, {
+      const mcpConnectionSnapshot = await database.mcpConnection.findUniqueOrThrow({ where: { id: mcpConnectionId }, select: { updatedAt: true } });
+      const reviewed = await createMcpToolReview(platformAdminActor, {
+        connectionId: mcpConnectionId,
         toolDefinitionId: mcpDefinitionId,
         expectedConnectionConfigurationRevision: 1,
+        expectedConnectionUpdatedAt: mcpConnectionSnapshot.updatedAt.toISOString(),
         expectedDefinitionFingerprint: mcpDefinitionFingerprint,
         expectedNetworkFingerprint: mcpNetworkFingerprint,
         expectedCredentialFingerprint: noCredentialFingerprint,
         conclusion: "read_only_verified",
         riskLevel: "low",
-        evidenceNote: "manual_read_only_review",
+        riskReasonCode: "read_only_eligible",
+        evidenceNote: "系统审计只读审核",
+        requestKey: `system-audit-mcp-review-${suffix}`,
       }, database);
+      if (reviewed.review.attestationId === null) throw new Error("SYSTEM_AUDIT_MCP_REVIEW_ATTESTATION_MISSING");
+      const attestation = { id: reviewed.review.attestationId } as const;
       const mcpDraft = await proposeProjectMcpConnectionDelegation(projectId, {
         mcpConnectionId,
         expiresAt: new Date(now.getTime() + 3_600_000).toISOString(),

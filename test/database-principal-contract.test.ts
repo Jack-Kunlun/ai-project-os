@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX } from "../src/lib/database-principal-catalog";
+import {
+  DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX,
+  DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX,
+} from "../src/lib/database-principal-catalog";
 
 const compose = readFileSync("compose.yaml", "utf8");
 const envExample = readFileSync(".env.example", "utf8");
@@ -9,6 +12,7 @@ const db = readFileSync("src/lib/db.ts", "utf8");
 const reconcile = readFileSync("scripts/reconcile-database-principals.ts", "utf8");
 const postgresGate = readFileSync("test/database-principal-postgres.test.ts", "utf8");
 const migration = readFileSync("prisma/migrations/20260910050000_harden_account_entitlement_database_principals/migration.sql", "utf8");
+const connectionGovernanceMigration = readFileSync("prisma/migrations/20260912030000_add_connection_governance/migration.sql", "utf8");
 const catalog = readFileSync("src/lib/database-principal-catalog.ts", "utf8");
 const activation = readFileSync("src/lib/account-entitlement-activation-service.ts", "utf8");
 const backfill = readFileSync("src/lib/account-entitlement-backfill-service.ts", "utf8");
@@ -20,8 +24,8 @@ const workspaces = readFileSync("src/lib/workspaces.ts", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
 
 test("invoker helper ACL matrix is complete, immutable and uniquely signed", () => {
-  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.length, 43);
-  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 42);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.length, 44);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 43);
   assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.entitlementWriter).length, 8);
   assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime && helper.entitlementWriter).length, 7);
   const signatures = DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.map((helper) => `${helper.name}(${helper.identityArguments})`);
@@ -36,6 +40,14 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
     reason: "workspace enabled-owner invariant validation",
   });
   assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
+  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 11);
+  assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.every((trigger) => Object.isFrozen(trigger)
+    && trigger.identityArguments === ""
+    && trigger.runtime === false
+    && trigger.entitlementWriter === false
+    && trigger.reason.trim().length > 0));
+  assert.equal(new Set(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.map((trigger) => trigger.name)).size, DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length);
+  assert.ok(Object.isFrozen(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX));
 });
 
 test("database principals are explicit and separated across Compose services", () => {
@@ -187,12 +199,17 @@ test("ACL reconcile rejects drift and does not widen ordinary roles with DDL pri
   assert.match(catalog, /ACCOUNT_ENTITLEMENT_SIGNUP_GRANT_CLOSURE_FUNCTION/u);
   assert.match(catalog, /DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX/u);
   assert.match(reconcile, /DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX/u);
+  assert.match(catalog, /DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX/u);
+  assert.match(reconcile, /DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX/u);
   assert.match(reconcile, /invokerFunctionSignature/u);
+  assert.match(reconcile, /triggerFunctionSignature/u);
+  assert.match(connectionGovernanceMigration, /REVOKE ALL ON FUNCTION "git_connection_configuration_version_guard"\(\) FROM PUBLIC/u);
+  assert.match(connectionGovernanceMigration, /REVOKE ALL ON FUNCTION "mcp_connection_configuration_revision_guard"\(\) FROM PUBLIC/u);
   assert.match(reconcile, /REVOKE ALL ON FUNCTION \$\{signature\} FROM PUBLIC/u);
   assert.match(reconcile, /GRANT EXECUTE ON FUNCTION \$\{signature\} TO \$\{grantees\.join/u);
   assert.match(reconcile, /helperRow\.prosecdef/u);
   assert.match(reconcile, /helperRow\.public_execute/u);
-  assert.match(reconcile, /runtimeHelperCount !== 42/u);
+  assert.match(reconcile, /runtimeHelperCount !== 43/u);
   assert.match(reconcile, /writerHelperCount !== 8/u);
   assert.match(reconcile, /revokeRoleMembershipEdges\(admin, MIGRATOR_DATABASE_PRINCIPAL\)/u);
   assert.match(reconcile, /ALTER ROLE \$\{identifier\} WITH LOGIN SUPERUSER CREATEDB CREATEROLE/u);

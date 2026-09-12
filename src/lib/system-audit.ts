@@ -288,6 +288,19 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.platformCreditGovernance,
     resultMap: resultMapping({ applied: ["grant"], revoked: ["revoke"] }),
   },
+  membershipApplication: {
+    source: "membershipApplication",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.membershipApplication,
+    table: "MembershipApplicationAudit",
+    selectedFields: ["id", "event", "statusBefore", "statusAfter", "statusVersionBefore", "statusVersionAfter", "userId", "actorId", "reason", "createdAt"],
+    referenceFields: [],
+    actionField: "event",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.membershipApplication,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.membershipApplication),
+    resultField: "event",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.membershipApplication,
+    resultMap: resultMapping({ pending: ["requested"], applied: ["fulfilled"], rejected: ["rejected"], cancelled: ["cancelled"] }),
+  },
   accountEntitlementActivation: {
     source: "accountEntitlementActivation",
     label: SYSTEM_AUDIT_SOURCE_LABELS.accountEntitlementActivation,
@@ -941,6 +954,20 @@ const platformCreditGovernanceAuditSelect = {
   versionAfter: true,
   statusBefore: true,
   statusAfter: true,
+  userId: true,
+  actorId: true,
+  reason: true,
+  createdAt: true,
+} as const;
+
+type MembershipApplicationAuditRow = Prisma.MembershipApplicationAuditGetPayload<{ select: typeof membershipApplicationAuditSelect }>;
+const membershipApplicationAuditSelect = {
+  id: true,
+  event: true,
+  statusBefore: true,
+  statusAfter: true,
+  statusVersionBefore: true,
+  statusVersionAfter: true,
   userId: true,
   actorId: true,
   reason: true,
@@ -1619,6 +1646,28 @@ function platformCreditGovernanceProjection(row: PlatformCreditGovernanceAuditRo
   });
 }
 
+function membershipApplicationProjection(row: MembershipApplicationAuditRow): RawAuditEvent {
+  const action = row.event === "submitted" ? "requested" : row.event === "fulfilled" ? "fulfilled" : row.event === "rejected" ? "rejected" : "cancelled";
+  const result: SystemAuditResult = row.event === "submitted" ? "pending" : row.event === "fulfilled" ? "applied" : row.event === "rejected" ? "rejected" : "cancelled";
+  return rawEvent({
+    id: row.id,
+    source: "membershipApplication",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind: "user",
+    subjectId: row.userId,
+    references: safeReferences({ categories: ["membershipApplication"] }),
+    evidence: evidence(
+      { status: row.statusBefore, version: row.statusVersionBefore },
+      { status: row.statusAfter, version: row.statusVersionAfter },
+      { before: row.statusVersionBefore, after: row.statusVersionAfter },
+      row.reason !== null && row.reason.trim().length > 0,
+    ),
+    result,
+  });
+}
+
 async function fetchPlatform(context: QueryContext): Promise<RawAuditEvent[]> {
   const rows = await context.db.platformDefaultAiRouteAudit.findMany({
     where: sourceWhere(context, "platformDefaultAiRoute", { actorField: "actorId" }) as Prisma.PlatformDefaultAiRouteAuditWhereInput,
@@ -1819,6 +1868,18 @@ async function fetchPlatformCreditGovernance(context: QueryContext): Promise<Raw
   return rows.map(platformCreditGovernanceProjection);
 }
 
+async function fetchMembershipApplications(context: QueryContext): Promise<RawAuditEvent[]> {
+  const delegate = (context.db as unknown as { membershipApplicationAudit?: { findMany: (input: unknown) => Promise<MembershipApplicationAuditRow[]> } }).membershipApplicationAudit;
+  if (delegate === undefined) return [];
+  const rows = await delegate.findMany({
+    where: sourceWhere(context, "membershipApplication", { actorField: "actorId", subjectField: "userId" }) as Prisma.MembershipApplicationAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: membershipApplicationAuditSelect,
+  });
+  return rows.map(membershipApplicationProjection);
+}
+
 async function fetchSource(context: QueryContext, source: SystemAuditSource): Promise<RawAuditEvent[]> {
   switch (source) {
     case "platformDefaultAiRoute": return fetchPlatform(context);
@@ -1839,6 +1900,7 @@ async function fetchSource(context: QueryContext, source: SystemAuditSource): Pr
     case "platformProviderProbe": return fetchPlatformProviderProbe(context);
     case "platformGrantOfferPolicy": return fetchPlatformGrantOfferPolicy(context);
     case "platformCreditGovernance": return fetchPlatformCreditGovernance(context);
+    case "membershipApplication": return fetchMembershipApplications(context);
     case "accountEntitlementActivation": return fetchAccountEntitlementActivation(context);
     case "accountEntitlementBackfill": return fetchAccountEntitlementBackfill(context);
   }

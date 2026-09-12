@@ -40,6 +40,7 @@ export type AiEntitlementErrorCode =
   | "AI_PROVIDER_CONNECTION_UNAVAILABLE"
   | "AI_PROVIDER_CALL_RECONCILIATION_REQUIRED"
   | "AI_PLATFORM_TOKEN_USAGE_UNVERIFIED"
+  | "AI_PLATFORM_TOKEN_PROJECTION_INCONSISTENT"
   | "AI_SIGNUP_ELIGIBILITY_REQUIRED";
 
 export class AiEntitlementError extends Error {
@@ -1391,20 +1392,115 @@ export async function assertAiOutboundEntitlement(input: Readonly<{
   return Object.freeze({ billingMode: "platform", billingUserId: user.id, reservationRequired: true });
 }
 
-export async function getPlatformTokenSummary(userId: string, db: EntitlementDb = getDb(), now = new Date()) {
-  await recoverExpiredPlatformTokenReservations({ userId, now }, db);
-  const [grants, reservations, membership] = await Promise.all([
-    db.platformTokenGrant.findMany({ where: { userId, revokedAt: null }, select: { remainingTokens: true, expiresAt: true } }),
-    db.platformTokenReservation.findMany({ where: { userId, status: { in: ["reserved", "held"] } }, select: { reservedTokens: true, status: true } }),
-    getMembershipStatus(userId, db, now),
+export type PlatformCreditRouteSnapshot = Readonly<{
+  operation: AiOperation;
+  version: number;
+  quotaMultiplierBps: number;
+}>;
+
+export type PlatformCreditSummary = Readonly<{
+  unit: "platform_credit";
+  totalCredits: number;
+  availableCredits: number;
+  usedCredits: number;
+  reservedCredits: number;
+  heldCredits: number;
+  nextExpiryAt: Date | null;
+  routeSnapshots: readonly PlatformCreditRouteSnapshot[];
+  membership: MembershipPublicStatus;
+  // Server-internal compatibility aliases. The profile API exposes only the
+  // platform-credit names above.
+  availableTokens: number;
+  reservedTokens: number;
+}>;
+
+async function platformCreditSummaryInTransaction(
+  userId: string,
+  db: EntitlementDb,
+  fallbackNow: Date,
+  readDatabaseClock = true,
+): Promise<PlatformCreditSummary> {
+  const queryRaw = (db as unknown as { $queryRaw?: (query: Prisma.Sql) => Promise<unknown> }).$queryRaw;
+  let current = fallbackNow;
+  if (readDatabaseClock && typeof queryRaw === "function") {
+    const rows = await queryRaw.call(db, Prisma.sql`SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "now"`) as Array<{ now?: Date }>;
+    if (!(rows[0]?.now instanceof Date) || Number.isNaN(rows[0]!.now!.getTime())) return fail("AI_PLATFORM_TOKEN_PROJECTION_INCONSISTENT");
+    current = rows[0]!.now!;
+  }
+  const [grants, membership, routeSnapshots] = await Promise.all([
+    db.platformTokenGrant.findMany({
+      where: { userId, revokedAt: null, expiresAt: { gt: current } },
+      select: {
+        id: true,
+        amount: true,
+        remainingTokens: true,
+        expiresAt: true,
+        allocations: {
+          select: {
+            grantId: true,
+            ordinal: true,
+            reservedTokens: true,
+            settledTokens: true,
+            releasedTokens: true,
+            reservation: { select: { userId: true, grantId: true, status: true } },
+          },
+        },
+      },
+    }),
+    getMembershipStatus(userId, db, current),
+    db.platformDefaultAiRoute.findMany({
+      where: { status: "active" },
+      orderBy: [{ operation: "asc" }, { version: "asc" }],
+      select: { operation: true, version: true, quotaMultiplierBps: true },
+    }),
   ]);
-  const activeGrants = grants.filter((grant) => grant.expiresAt > now);
-  return Object.freeze({
-    availableTokens: activeGrants.reduce((sum, grant) => sum + grant.remainingTokens, 0),
-    reservedTokens: reservations.reduce((sum, reservation) => sum + reservation.reservedTokens, 0),
-    nextExpiryAt: activeGrants.map((grant) => grant.expiresAt).sort((left, right) => left.getTime() - right.getTime())[0] ?? null,
-    membership,
-  });
+  let totalCredits = 0;
+  let availableCredits = 0;
+  let usedCredits = 0;
+  let reservedCredits = 0;
+  let heldCredits = 0;
+  for (const grant of grants) {
+    if (!Number.isSafeInteger(grant.amount) || grant.amount < 0 || !Number.isSafeInteger(grant.remainingTokens) || grant.remainingTokens < 0 || grant.remainingTokens > grant.amount) return fail("AI_PLATFORM_TOKEN_PROJECTION_INCONSISTENT");
+    totalCredits += grant.amount;
+    availableCredits += grant.remainingTokens;
+    for (const allocation of grant.allocations) {
+      // reservation.grantId is the legacy first-allocation pointer.  A
+      // multi-grant reservation legitimately points every later allocation
+      // back to that first grant, so only ordinal 1 may be checked against
+      // the parent pointer; each allocation's own grantId remains mandatory.
+      if (allocation.grantId !== grant.id || allocation.reservation.userId !== userId || (allocation.ordinal === 1 && allocation.reservation.grantId !== grant.id) || !Number.isSafeInteger(allocation.reservedTokens) || allocation.reservedTokens <= 0 || allocation.settledTokens < 0 || allocation.releasedTokens < 0 || allocation.settledTokens + allocation.releasedTokens > allocation.reservedTokens) return fail("AI_PLATFORM_TOKEN_PROJECTION_INCONSISTENT");
+      if (allocation.reservation.status === "settled") usedCredits += allocation.settledTokens;
+      else if (allocation.reservation.status === "reserved") reservedCredits += allocation.reservedTokens;
+      else if (allocation.reservation.status === "held") heldCredits += allocation.reservedTokens;
+    }
+  }
+  const sum = availableCredits + usedCredits + reservedCredits + heldCredits;
+  if (![totalCredits, availableCredits, usedCredits, reservedCredits, heldCredits, sum].every((value) => Number.isSafeInteger(value) && value >= 0) || sum !== totalCredits) return fail("AI_PLATFORM_TOKEN_PROJECTION_INCONSISTENT");
+  const route = routeSnapshots.map((row) => Object.freeze({ operation: row.operation, version: row.version, quotaMultiplierBps: row.quotaMultiplierBps }));
+  const nextExpiryAt = grants.map((grant) => grant.expiresAt).sort((left, right) => left.getTime() - right.getTime())[0] ?? null;
+  return Object.freeze({ unit: "platform_credit", totalCredits, availableCredits, usedCredits, reservedCredits, heldCredits, nextExpiryAt, routeSnapshots: Object.freeze(route), membership, availableTokens: availableCredits, reservedTokens: reservedCredits });
+}
+
+export async function getPlatformTokenSummary(userId: string, db: EntitlementDb = getDb(), now = new Date()): Promise<PlatformCreditSummary> {
+  if (!isPrismaClient(db)) return platformCreditSummaryInTransaction(userId, db, now);
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw(Prisma.sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
+    await tx.$executeRaw(Prisma.sql`SET TRANSACTION READ ONLY`);
+    return platformCreditSummaryInTransaction(userId, tx, now);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+}
+
+/**
+ * Project entitlements inside a caller-owned transaction.  The caller must
+ * provide the clock value captured by that transaction; this helper never
+ * opens a nested transaction or reads a second, potentially different clock.
+ */
+export async function getPlatformTokenSummaryInTransaction(
+  userId: string,
+  db: EntitlementDb,
+  now: Date,
+): Promise<PlatformCreditSummary> {
+  return platformCreditSummaryInTransaction(userId, db, now, false);
 }
 
 /**

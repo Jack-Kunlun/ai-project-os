@@ -1169,6 +1169,26 @@ enum MembershipAuditEventKind {
   revoke
 }
 
+enum MembershipApplicationStatus {
+  pending
+  fulfilled
+  rejected
+  withdrawn
+}
+
+enum MembershipApplicationAction {
+  submit
+  withdraw
+  reject
+}
+
+enum MembershipApplicationAuditEvent {
+  submitted
+  fulfilled
+  rejected
+  withdrawn
+}
+
 enum WorkspaceInvitationAuditEvent {
   created
   accepted
@@ -4339,6 +4359,11 @@ model AppUser {
   githubIdentity               GitHubIdentity?
   githubOauthAttempts          GitHubOauthAttempt[]
   membershipSubscription       MembershipSubscription?
+  membershipApplications       MembershipApplication[]
+  membershipApplicationPreviewsAsActor MembershipApplicationPreview[] @relation("MembershipApplicationPreviewActor")
+  membershipApplicationPreviewsAsUser  MembershipApplicationPreview[] @relation("MembershipApplicationPreviewUser")
+  membershipApplicationAuditsAsUser MembershipApplicationAudit[] @relation("MembershipApplicationAuditUser")
+  membershipApplicationAuditActors MembershipApplicationAudit[] @relation("MembershipApplicationAuditActor")
   membershipMutationPreviewsAsActor MembershipMutationPreview[] @relation("MembershipMutationPreviewActor")
   membershipMutationPreviewsAsUser  MembershipMutationPreview[] @relation("MembershipMutationPreviewUser")
   grantedMemberships           MembershipSubscription[]       @relation("MembershipGrantedBy")
@@ -4479,6 +4504,8 @@ model MembershipSubscription {
   grantedBy   AppUser?                     @relation("MembershipGrantedBy", fields: [grantedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   revokedBy   AppUser?                     @relation("MembershipRevokedBy", fields: [revokedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   auditEvents MembershipSubscriptionAudit[]
+  fulfilledMembershipApplications MembershipApplication[] @relation("MembershipApplicationFulfilledSubscription")
+  applicationAudits MembershipApplicationAudit[] @relation("MembershipApplicationAuditSubscription")
 
   @@index([status, expiresAt])
   @@index([grantedById, updatedAt])
@@ -4496,9 +4523,13 @@ model MembershipMutationPreview {
   expiresAt          DateTime
   consumedAt         DateTime?
   createdAt          DateTime                  @default(now())
+  applicationId      String?                   @db.Uuid
   actor              AppUser                   @relation("MembershipMutationPreviewActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   user               AppUser                   @relation("MembershipMutationPreviewUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   auditEvents        MembershipSubscriptionAudit[]
+  application        MembershipApplication?    @relation("MembershipMutationPreviewApplication", fields: [applicationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  fulfilledMembershipApplications MembershipApplication[] @relation("MembershipApplicationFulfilledMembershipPreview")
+  applicationAudits  MembershipApplicationAudit[] @relation("MembershipApplicationAuditMembershipPreview")
 
   @@index([actorId, userId, createdAt])
   @@index([expiresAt, consumedAt])
@@ -4532,6 +4563,7 @@ model MembershipSubscriptionAudit {
   revokedByIdBefore        String?                      @db.Uuid
   revokedByIdAfter         String?                      @db.Uuid
   previewId                String?                      @db.Uuid
+  applicationId            String?                      @db.Uuid
   reason                   String?                      @db.VarChar(500)
   requestKey               String?                      @db.VarChar(180)
   requestFingerprint       String?                      @db.Char(64)
@@ -4544,11 +4576,121 @@ model MembershipSubscriptionAudit {
   preview                  MembershipMutationPreview?  @relation(fields: [previewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   user                     AppUser                     @relation("MembershipAuditUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   actor                    AppUser                     @relation("MembershipAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  application              MembershipApplication?      @relation("MembershipApplicationSubscriptionAudit", fields: [applicationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  fulfilledApplications     MembershipApplication[]     @relation("MembershipApplicationFulfilledSubscriptionAudit")
+  fulfillmentApplicationAudits MembershipApplicationAudit[] @relation("MembershipApplicationFulfilledSubscriptionAuditRecord")
 
   @@unique([actorId, requestKey])
   @@index([userId, createdAt])
   @@index([subscriptionId, createdAt])
   @@index([actorId, createdAt])
+  @@index([applicationId, createdAt])
+}
+
+model MembershipApplication {
+  id                         String                         @id @default(uuid()) @db.Uuid
+  userId                     String                         @db.Uuid
+  status                     MembershipApplicationStatus    @default(pending)
+  statusVersion              Int                            @default(1)
+  requestKey                 String                         @db.VarChar(180)
+  requestFingerprint         String                         @db.Char(64)
+  impactFingerprint          String                         @db.Char(64)
+  requestReason              String                         @db.VarChar(500)
+  rejectionReason            String?                        @db.VarChar(500)
+  accountAccessVersion      Int
+  membershipVersion         Int
+  membershipState            String                         @db.VarChar(16)
+  submittedAt               DateTime
+  fulfilledAt               DateTime?
+  rejectedAt                DateTime?
+  withdrawnAt               DateTime?
+  fulfilledSubscriptionId   String?                        @db.Uuid
+  fulfilledSubscriptionVersion Int?
+  fulfilledSubscriptionAuditId String?                     @db.Uuid
+  fulfilledMembershipPreviewId String?                     @db.Uuid
+  submitPreviewId           String                         @db.Uuid
+  createdAt                 DateTime                       @default(now())
+  updatedAt                 DateTime                       @updatedAt
+  user                       AppUser                        @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  submitPreview             MembershipApplicationPreview   @relation("MembershipApplicationSubmitPreview", fields: [submitPreviewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  previews                  MembershipApplicationPreview[] @relation("MembershipApplicationPreviewApplication")
+  membershipMutationPreviews MembershipMutationPreview[]   @relation("MembershipMutationPreviewApplication")
+  audits                    MembershipApplicationAudit[]   @relation("MembershipApplicationAuditApplication")
+  fulfilledSubscription     MembershipSubscription?       @relation("MembershipApplicationFulfilledSubscription", fields: [fulfilledSubscriptionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  fulfilledSubscriptionAudit MembershipSubscriptionAudit?  @relation("MembershipApplicationFulfilledSubscriptionAudit", fields: [fulfilledSubscriptionAuditId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  fulfilledMembershipPreview MembershipMutationPreview?   @relation("MembershipApplicationFulfilledMembershipPreview", fields: [fulfilledMembershipPreviewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  subscriptionAudits         MembershipSubscriptionAudit[] @relation("MembershipApplicationSubscriptionAudit")
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@unique([userId, requestKey])
+}
+
+model MembershipApplicationPreview {
+  id                         String                         @id @default(uuid()) @db.Uuid
+  actorId                    String                         @db.Uuid
+  userId                     String                         @db.Uuid
+  applicationId              String?                        @db.Uuid
+  action                     MembershipApplicationAction
+  expectedApplicationVersion Int
+  expectedAccountAccessVersion Int
+  expectedMembershipVersion  Int
+  expectedMembershipState    String                         @db.VarChar(16)
+  requestKey                 String                         @db.VarChar(180)
+  requestFingerprint         String                         @db.Char(64)
+  impactFingerprint          String                         @db.Char(64)
+  reason                     String?                        @db.VarChar(500)
+  issuedAt                   DateTime
+  expiresAt                  DateTime
+  consumedAt                 DateTime?
+  createdAt                  DateTime                       @default(now())
+  actor                      AppUser                        @relation("MembershipApplicationPreviewActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  user                       AppUser                        @relation("MembershipApplicationPreviewUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  application                MembershipApplication?        @relation("MembershipApplicationPreviewApplication", fields: [applicationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  submittedApplications      MembershipApplication[]       @relation("MembershipApplicationSubmitPreview")
+  audits                     MembershipApplicationAudit[]   @relation("MembershipApplicationAuditPreview")
+
+  @@unique([actorId, requestKey])
+  @@index([userId, createdAt])
+  @@index([applicationId, createdAt])
+  @@index([expiresAt, consumedAt])
+}
+
+model MembershipApplicationAudit {
+  id                         String                         @id @default(uuid()) @db.Uuid
+  applicationId              String                         @db.Uuid
+  userId                     String                         @db.Uuid
+  actorId                    String                         @db.Uuid
+  event                      MembershipApplicationAuditEvent
+  statusBefore               MembershipApplicationStatus?
+  statusAfter                MembershipApplicationStatus
+  statusVersionBefore       Int?
+  statusVersionAfter        Int
+  applicationPreviewId      String?                        @db.Uuid
+  membershipPreviewId       String?                        @db.Uuid
+  subscriptionId             String?                        @db.Uuid
+  subscriptionVersion        Int?
+  subscriptionAuditId        String?                        @db.Uuid
+  reason                     String?                        @db.VarChar(500)
+  requestKey                 String                         @db.VarChar(180)
+  requestFingerprint         String                         @db.Char(64)
+  impactFingerprint          String                         @db.Char(64)
+  transactionId              BigInt                         @default(dbgenerated("txid_current()")) @db.BigInt
+  transitionAt               DateTime                       @default(now())
+  createdAt                  DateTime                       @default(now())
+  application                MembershipApplication          @relation("MembershipApplicationAuditApplication", fields: [applicationId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  user                       AppUser                        @relation("MembershipApplicationAuditUser", fields: [userId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                      AppUser                        @relation("MembershipApplicationAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  applicationPreview         MembershipApplicationPreview?  @relation("MembershipApplicationAuditPreview", fields: [applicationPreviewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  membershipPreview          MembershipMutationPreview?    @relation("MembershipApplicationAuditMembershipPreview", fields: [membershipPreviewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  subscription               MembershipSubscription?       @relation("MembershipApplicationAuditSubscription", fields: [subscriptionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  subscriptionAudit          MembershipSubscriptionAudit?   @relation("MembershipApplicationFulfilledSubscriptionAuditRecord", fields: [subscriptionAuditId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([applicationId, createdAt])
+  @@index([userId, createdAt])
+  @@index([actorId, createdAt])
+  @@unique([actorId, requestKey])
+  @@unique([applicationId, statusVersionAfter])
 }
 
 model PlatformTokenGrant {

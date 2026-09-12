@@ -13,13 +13,14 @@ const previewSchema = z.object({
   note: z.string().max(500).nullable().optional(),
   reason: z.string().max(500).nullable().optional(),
   expectedVersion: z.number().int().min(0).optional(),
+  applicationId: z.string().uuid().nullable().optional(),
 }).strict();
 
 async function respond(input: unknown, request: Request): Promise<NextResponse> {
   assertSameOrigin(request);
   const admin = await requireApiSession(request);
   const parsed = previewSchema.parse(input);
-  const preview = await previewMembership({ ...parsed, adminUserId: admin.id, days: parsed.days ?? undefined }, undefined);
+  const preview = await previewMembership({ ...parsed, adminUserId: admin.id, days: parsed.days ?? undefined, applicationId: parsed.applicationId ?? undefined }, undefined);
   return NextResponse.json({ preview }, { headers: { "cache-control": "no-store" } });
 }
 

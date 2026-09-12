@@ -92,7 +92,11 @@ export function accessibleProjectWhere(user: AccessUser): Prisma.ProjectWhereInp
   };
 }
 
-export async function getProjectPermission(user: AccessUser, projectId: string, db: PrismaClient = getDb()): Promise<ProjectPermission | null> {
+export async function getProjectPermission(
+  user: AccessUser,
+  projectId: string,
+  db: PrismaClient | Prisma.TransactionClient = getDb(),
+): Promise<ProjectPermission | null> {
   const canonicalId = canonicalProjectId(projectId);
   const project = await db.project.findUnique({
     where: { id: canonicalId },
@@ -117,7 +121,12 @@ export async function getProjectPermission(user: AccessUser, projectId: string, 
   return projectPermission;
 }
 
-export async function assertProjectAccess(user: AccessUser, projectId: string, required: ProjectPermission, db: PrismaClient = getDb()): Promise<ProjectPermission> {
+export async function assertProjectAccess(
+  user: AccessUser,
+  projectId: string,
+  required: ProjectPermission,
+  db: PrismaClient | Prisma.TransactionClient = getDb(),
+): Promise<ProjectPermission> {
   await assertCurrentAccountAccess(user, db);
   const canonicalId = canonicalProjectId(projectId);
   const permission = await getProjectPermission(user, canonicalId, db);
@@ -156,7 +165,11 @@ export async function resolveProjectCreationWorkspace(user: AccessUser, db: Pris
   return membership.workspaceId;
 }
 
-export async function authorizeApiRequest(user: AccessUser, request: Request, db: PrismaClient = getDb()): Promise<void> {
+export async function authorizeApiRequest(
+  user: AccessUser,
+  request: Request,
+  db: PrismaClient | Prisma.TransactionClient = getDb(),
+): Promise<void> {
   await assertCurrentAccountAccess(user, db);
   const rawPath = new URL(request.url).pathname;
   const path = decodedApiPath(request);

@@ -240,14 +240,14 @@ function fakeDb(
   } as unknown as PrismaClient;
 }
 
-test("registry covers exactly the twenty safe control-plane sources", () => {
-  assert.equal(SYSTEM_AUDIT_SOURCES.length, 20);
+test("registry covers exactly the twenty-one safe control-plane sources", () => {
+  assert.equal(SYSTEM_AUDIT_SOURCES.length, 21);
   assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
   for (const source of SYSTEM_AUDIT_SOURCES) {
     const registry = SYSTEM_AUDIT_REGISTRY[source];
     assert.ok(registry.selectedFields.includes("id"));
     assert.ok(registry.selectedFields.includes("createdAt") || registry.selectedFields.includes("issuedAt"));
-    if (source === "platformProviderProbe" || source === "platformGrantOfferPolicy" || source === "accountEntitlementBackfill" || source === "platformCreditGovernance") assert.deepEqual(registry.referenceFields, []);
+    if (source === "platformProviderProbe" || source === "platformGrantOfferPolicy" || source === "accountEntitlementBackfill" || source === "platformCreditGovernance" || source === "membershipApplication") assert.deepEqual(registry.referenceFields, []);
     else assert.ok(registry.referenceFields.length > 0);
     assert.deepEqual(Object.keys(registry.actionMap).sort(), [...registry.allowedActions].sort());
     for (const field of registry.selectedFields) assert.doesNotMatch(field, /fingerprint|token/iu, `${source}.${field}`);

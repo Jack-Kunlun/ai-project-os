@@ -25,6 +25,17 @@ type Item = {
   role: "admin" | "user";
   disabledAt: string | null;
   membershipSubscription: Subscription | null;
+  membershipApplication: {
+    id: string;
+    status: "pending" | "fulfilled" | "rejected" | "withdrawn";
+    statusVersion: number;
+    requestReason: string | null;
+    rejectionReason: string | null;
+    submittedAt: string;
+    fulfilledAt: string | null;
+    rejectedAt: string | null;
+    withdrawnAt: string | null;
+  } | null;
 };
 type Action = "grant" | "extend" | "revoke";
 type Preview = {
@@ -56,6 +67,12 @@ type Preview = {
   expiresAt: string;
   previewIssuedAt: string;
   previewExpiresAt: string;
+  applicationId: string | null;
+};
+
+type ApplicationRejectPreview = {
+  application: Item["membershipApplication"];
+  preview: { id: string; applicationId: string; action: "reject"; requestKey: string; requestFingerprint: string; impactFingerprint: string; issuedAt: string; expiresAt: string; reason: string | null };
 };
 
 function newRequestKey(): string {
@@ -145,6 +162,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [rejectPreview, setRejectPreview] = useState<ApplicationRejectPreview | null>(null);
   const [confirmationUsername, setConfirmationUsername] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -198,6 +216,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
           note: action === "revoke" ? undefined : note || null,
           reason: action === "revoke" ? reason : undefined,
           expectedVersion: subscription?.version ?? 0,
+          applicationId: action === "grant" && item.membershipApplication?.status === "pending" ? item.membershipApplication.id : undefined,
         }),
       });
       if (!response.ok) throw new Error(await responseError(response, "会员影响预览失败"));
@@ -241,6 +260,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
           previewExpiresAt: preview.previewExpiresAt,
           confirmation: true,
           confirmationUsername: preview.action === "revoke" ? confirmationUsername : undefined,
+          applicationId: preview.applicationId ?? undefined,
         }),
       });
       if (!response.ok) throw new Error(await responseError(response, "会员状态更新失败"));
@@ -257,6 +277,43 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
     } finally {
       setPending(false);
     }
+  }
+
+  async function requestRejectPreview(): Promise<void> {
+    const application = item.membershipApplication;
+    if (application === null || application.status !== "pending") return;
+    if (reason.trim().length === 0) { setMessage("拒绝会员申请必须填写原因"); return; }
+    setPending(true); setMessage(null);
+    try {
+      const response = await fetch("/api/system/membership-applications/reject/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ applicationId: application.id, requestKey: newRequestKey(), reason }) });
+      if (!response.ok) throw new Error(await responseError(response, "拒绝申请预览失败"));
+      setRejectPreview(await response.json() as ApplicationRejectPreview);
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "拒绝申请预览失败"); }
+    finally { setPending(false); }
+  }
+
+  async function executeRejectPreview(): Promise<void> {
+    if (rejectPreview === null) return;
+    setPending(true); setMessage(null);
+    try {
+      const response = await fetch("/api/system/membership-applications/reject/execute", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          applicationId: rejectPreview.preview.applicationId,
+          requestKey: rejectPreview.preview.requestKey,
+          requestFingerprint: rejectPreview.preview.requestFingerprint,
+          impactFingerprint: rejectPreview.preview.impactFingerprint,
+          previewId: rejectPreview.preview.id,
+          previewIssuedAt: rejectPreview.preview.issuedAt,
+          previewExpiresAt: rejectPreview.preview.expiresAt,
+          confirmation: true,
+        }),
+      });
+      if (!response.ok) throw new Error(await responseError(response, "拒绝申请失败"));
+      setRejectPreview(null); onChanged();
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "拒绝申请失败"); }
+    finally { setPending(false); }
   }
 
   const canGrant = subscription === null || subscription.status !== "active" || new Date(subscription.expiresAt) <= new Date();
@@ -281,6 +338,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
         {subscription && subscription.status === "active" && new Date(subscription.expiresAt) > new Date() ? <button type="button" disabled={pending} onClick={() => void requestPreview("revoke")} className="rounded-xl border border-rose-200 px-4 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">预览撤销</button> : null}
       </div>
     </div>
+    {item.membershipApplication ? <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-xs leading-5 text-indigo-900"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">会员申请：{item.membershipApplication.status === "pending" ? "待处理" : item.membershipApplication.status === "fulfilled" ? "已完成" : item.membershipApplication.status === "rejected" ? "已拒绝" : "已撤回"}</span><span>提交于 {date(item.membershipApplication.submittedAt)}</span></div>{item.membershipApplication.requestReason ? <p className="mt-2 text-indigo-800">申请说明：{item.membershipApplication.requestReason}</p> : null}{item.membershipApplication.status === "pending" ? <button type="button" disabled={pending} onClick={() => void requestRejectPreview()} className="mt-3 rounded-xl border border-indigo-200 bg-white px-3 py-2 font-semibold text-indigo-700 disabled:opacity-50">预览拒绝申请</button> : item.membershipApplication.rejectionReason ? <p className="mt-2 text-rose-700">处理原因：{item.membershipApplication.rejectionReason}</p> : null}</div> : null}
     <label className="mt-4 block">
       <span className="mb-2 block text-xs font-semibold text-slate-500">授予 / 延期备注</span>
       <input value={note} onChange={(event) => changedNote(event.target.value)} placeholder="可选，仅用于审计" maxLength={500} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
@@ -315,6 +373,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
         <button type="button" disabled={pending || !preview.canExecute} onClick={() => void executePreview()} className="rounded-xl bg-indigo-700 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">确认并执行</button>
       </div>
     </div> : null}
+    {rejectPreview ? <div className="mt-5 rounded-2xl border border-rose-100 bg-rose-50 p-5" role="dialog" aria-label="拒绝会员申请确认"><p className="text-sm font-semibold text-rose-950">确认拒绝会员申请</p><p className="mt-2 text-xs leading-6 text-rose-800">该预览有效至 {dateTime(rejectPreview.preview.expiresAt)}，确认后申请将进入终态。</p><div className="mt-4 flex flex-wrap justify-end gap-3"><button type="button" disabled={pending} onClick={() => setRejectPreview(null)} className="rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-xs font-semibold text-rose-800">取消</button><button type="button" disabled={pending} onClick={() => void executeRejectPreview()} className="rounded-xl bg-rose-700 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">确认并执行</button></div></div> : null}
     {message ? <p role="alert" className="mt-4 text-xs leading-6 text-rose-600">{message}</p> : null}
   </article>;
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { LogoutButton } from "@/app/logout-button";
 import { AppHeader } from "@/components/app-header";
 
@@ -22,7 +22,27 @@ type Profile = {
   activeSessionCount: number;
   lastSeenAt: string | null;
   sessionExpiresAt: string | null;
-  entitlements: { availableTokens: number; reservedTokens: number; nextExpiryAt: string | null; membership: { status: "active" | "expired" | "revoked" | "none"; startsAt: string | null; expiresAt: string | null; version: number | null } };
+  entitlements: {
+    unit: "platform_credit";
+    totalCredits: number;
+    availableCredits: number;
+    usedCredits: number;
+    reservedCredits: number;
+    heldCredits: number;
+    nextExpiryAt: string | null;
+    routeSnapshots: Array<{ operation: string; version: number; quotaMultiplierBps: number }>;
+    membership: { status: "active" | "expired" | "revoked" | "none"; startsAt: string | null; expiresAt: string | null; version: number | null };
+    membershipApplication: {
+      id: string;
+      status: "pending" | "fulfilled" | "rejected" | "withdrawn";
+      statusVersion: number;
+      submittedAt: string;
+      fulfilledAt: string | null;
+      rejectedAt: string | null;
+      withdrawnAt: string | null;
+      rejectionReason?: string | null;
+    } | null;
+  };
 };
 
 async function readError(response: Response, fallback: string): Promise<string> {
@@ -37,6 +57,33 @@ async function readError(response: Response, fallback: string): Promise<string> 
 function formatDate(value: string | null): string {
   if (!value) return "暂无记录";
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "long", timeStyle: "short" }).format(new Date(value));
+}
+
+type ApplicationPreviewPayload = {
+  application: Profile["entitlements"]["membershipApplication"];
+  preview: {
+    id: string;
+    action: "submit" | "withdraw";
+    applicationId: string | null;
+    requestKey: string;
+    requestFingerprint: string;
+    impactFingerprint: string;
+    issuedAt: string;
+    expiresAt: string;
+    reason: string | null;
+  };
+};
+
+function profileRequestKey(): string {
+  try {
+    return globalThis.crypto.randomUUID();
+  } catch {
+    return `membership-application:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
+function applicationStatusLabel(status: Profile["entitlements"]["membershipApplication"] extends infer T ? T extends { status: infer S } ? S : never : never): string {
+  return status === "pending" ? "等待管理员处理" : status === "fulfilled" ? "申请已完成" : status === "rejected" ? "申请未通过" : "已撤回";
 }
 
 const githubStatusMessages: Record<string, { tone: "success" | "error"; text: string }> = {
@@ -141,12 +188,12 @@ export function ProfileClient({
         </section>
 
         {profile ? <>
-          <dl className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><StatusItem label="可用平台 Token" value={profile.entitlements.availableTokens.toLocaleString("zh-CN")} /><StatusItem label="预留中 Token" value={profile.entitlements.reservedTokens.toLocaleString("zh-CN")} /><StatusItem label="赠送额度到期" value={formatDate(profile.entitlements.nextExpiryAt)} /><StatusItem label="会员状态" value={profile.entitlements.membership.status === "active" ? `有效至 ${formatDate(profile.entitlements.membership.expiresAt)}` : profile.entitlements.membership.status === "none" ? "非会员" : profile.entitlements.membership.status === "expired" ? "已到期" : "已撤销"} tone={profile.entitlements.membership.status === "active" ? "success" : "default"} /></dl>
+          <PlatformCreditPanel profile={profile} onChanged={() => void load()} />
           <section className="mt-6 flex flex-col gap-4 rounded-3xl border border-indigo-100 bg-indigo-50/50 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Personal models</p>
               <h2 className="mt-1.5 text-lg font-semibold text-slate-900">我的模型</h2>
-              <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">{profile.entitlements.membership.status === "active" ? "会员可配置、测试和维护自己的模型连接。" : profile.entitlements.membership.status === "none" ? "普通用户使用平台赠送额度；如需配置个人模型，请联系管理员开通会员。" : "会员资格已失效，不能测试、启用或调用；仍可安全清理已有连接。"}</p>
+              <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">{profile.entitlements.membership.status === "active" ? "会员可配置、测试和维护自己的模型连接。" : profile.entitlements.membership.status === "none" ? "当前可以使用平台额度；如需配置个人模型，可在上方提交会员申请。" : "会员资格已失效，不能测试、启用或调用；仍可安全清理已有连接。"}</p>
             </div>
             <Link href="/profile/models" className="inline-flex shrink-0 items-center justify-center rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100">{profile.entitlements.membership.status === "active" ? "管理我的模型" : "查看我的模型"} <span aria-hidden="true" className="ml-1">→</span></Link>
           </section>
@@ -177,6 +224,86 @@ export function ProfileClient({
       </div>
     </main>
   );
+}
+
+function PlatformCreditPanel({ profile, onChanged }: { profile: Profile; onChanged: () => void }) {
+  const credits = profile.entitlements;
+  const application = credits.membershipApplication;
+  const [reason, setReason] = useState("");
+  const [preview, setPreview] = useState<ApplicationPreviewPayload | null>(null);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const requestKeyRef = useRef(profileRequestKey());
+
+  async function previewSubmit(): Promise<void> {
+    if (reason.trim().length === 0) {
+      setMessage({ tone: "error", text: "请填写申请说明" });
+      return;
+    }
+    setPending(true); setMessage(null);
+    try {
+      const response = await fetch("/api/profile/membership-applications/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ requestKey: requestKeyRef.current, reason }) });
+      if (!response.ok) throw new Error(await readError(response, "会员申请预览失败"));
+      setPreview(await response.json() as ApplicationPreviewPayload);
+    } catch (cause) {
+      setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "会员申请预览失败" });
+    } finally { setPending(false); }
+  }
+
+  async function previewWithdraw(): Promise<void> {
+    if (application === null) return;
+    requestKeyRef.current = profileRequestKey();
+    setPending(true); setMessage(null);
+    try {
+      const response = await fetch("/api/profile/membership-applications/withdraw/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ applicationId: application.id, requestKey: requestKeyRef.current }) });
+      if (!response.ok) throw new Error(await readError(response, "撤回申请预览失败"));
+      setPreview(await response.json() as ApplicationPreviewPayload);
+    } catch (cause) {
+      setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "撤回申请预览失败" });
+    } finally { setPending(false); }
+  }
+
+  async function execute(): Promise<void> {
+    if (preview === null) return;
+    setPending(true); setMessage(null);
+    try {
+      const endpoint = preview.preview.action === "submit" ? "/api/profile/membership-applications/execute" : "/api/profile/membership-applications/withdraw/execute";
+      const body = {
+        previewId: preview.preview.id,
+        requestKey: preview.preview.requestKey,
+        requestFingerprint: preview.preview.requestFingerprint,
+        impactFingerprint: preview.preview.impactFingerprint,
+        previewIssuedAt: preview.preview.issuedAt,
+        previewExpiresAt: preview.preview.expiresAt,
+        confirmation: true,
+        ...(preview.preview.action === "withdraw" ? { applicationId: preview.preview.applicationId } : {}),
+      };
+      const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error(await readError(response, "会员申请执行失败"));
+      setPreview(null); requestKeyRef.current = profileRequestKey(); onChanged();
+      setMessage({ tone: "success", text: preview.preview.action === "submit" ? "申请已提交，管理员会在平台内处理。" : "申请已撤回。" });
+    } catch (cause) {
+      setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "会员申请执行失败" });
+    } finally { setPending(false); }
+  }
+
+  const status = credits.membership.status;
+  const canApply = status !== "active" && (application === null || application.status !== "pending");
+  const progress = credits.totalCredits > 0 ? Math.min(100, Math.max(0, (credits.usedCredits / credits.totalCredits) * 100)) : 0;
+  return <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Platform credits</p><h2 className="mt-1.5 text-xl font-semibold">平台额度</h2><p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">当前有效额度池的守恒摘要；单位为平台额度，不是供应商原始 Token、充值余额，也不代表无限额度。</p></div>
+      <div className="text-right text-xs text-slate-500"><p>会员：{status === "active" ? `有效至 ${formatDate(credits.membership.expiresAt)}` : status === "none" ? "未开通" : status === "expired" ? "已到期" : "已撤销"}</p><p className="mt-1">最早到期：{formatDate(credits.nextExpiryAt)}</p></div>
+    </div>
+    <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/50 px-4 py-3 text-xs leading-5 text-indigo-900"><p className="font-semibold">当前等级：{status === "active" ? "平台会员" : "基础账户"}</p><p className="mt-1">会员权益：可配置、测试和使用个人模型，并按项目授权流程发起委托。</p><p className="mt-1 text-indigo-700">会员到期或撤销后，个人模型与项目委托能力会暂停；已保存配置保留，平台额度池不受影响。</p></div>
+    <dl className="mt-5 grid gap-px overflow-hidden rounded-2xl border border-slate-100 bg-slate-100 sm:grid-cols-2 lg:grid-cols-5"><StatusItem label="额度总量" value={credits.totalCredits.toLocaleString("zh-CN")} /><StatusItem label="已确认使用" value={credits.usedCredits.toLocaleString("zh-CN")} /><StatusItem label="预留中" value={credits.reservedCredits.toLocaleString("zh-CN")} /><StatusItem label="待核对" value={credits.heldCredits.toLocaleString("zh-CN")} /><StatusItem label="可用" value={credits.availableCredits.toLocaleString("zh-CN")} tone="success" /></dl>
+    <div className="mt-4"><div className="flex items-center justify-between text-xs text-slate-500"><span>已确认使用进度</span><span>{Math.round(progress)}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500 transition-[width]" style={{ width: `${progress}%` }} /></div></div>
+    <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600"><p className="font-semibold text-slate-700">当前模型规则快照</p><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">{credits.routeSnapshots.length === 0 ? <span>暂无已启用的默认路由规则</span> : credits.routeSnapshots.map((route) => <span key={`${route.operation}:${route.version}`}>{route.operation} · v{route.version} · {route.quotaMultiplierBps} bps</span>)}</div><p className="mt-2 text-slate-400">每次调用按当次有效规则结算，历史额度不会随规则展示变化。</p></div>
+    {application ? <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><span className="font-semibold text-indigo-900">会员申请：{applicationStatusLabel(application.status)}</span><span className="text-xs text-indigo-700">提交于 {formatDate(application.submittedAt)}</span></div>{application.status === "pending" ? <button type="button" disabled={pending} onClick={() => void previewWithdraw()} className="mt-3 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 disabled:opacity-50">预览撤回申请</button> : <p className="mt-2 text-xs text-indigo-700">状态更新时间：{formatDate(application.fulfilledAt ?? application.rejectedAt ?? application.withdrawnAt)}</p>}</div> : null}
+    {canApply ? <div className="mt-4 rounded-2xl border border-dashed border-slate-200 px-4 py-4"><p className="text-sm font-semibold text-slate-800">申请管理员开通</p><p className="mt-1 text-xs leading-5 text-slate-500">提交后只会生成可追踪申请，不包含支付、订单或自动开通承诺。</p><textarea value={reason} onChange={(event) => { setReason(event.target.value); setPreview(null); }} maxLength={500} rows={3} placeholder="请说明需要开通会员的原因" className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /><button type="button" disabled={pending} onClick={() => void previewSubmit()} className="mt-3 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">预览申请</button></div> : null}
+    {preview ? <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4"><p className="text-sm font-semibold text-amber-900">请确认{preview.preview.action === "submit" ? "提交会员申请" : "撤回会员申请"}</p><p className="mt-1 text-xs leading-5 text-amber-800">预览有效至 {formatDate(preview.preview.expiresAt)}。确认后将写入申请状态与审计记录。</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={pending} onClick={() => void execute()} className="rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-50">确认并执行</button><button type="button" disabled={pending} onClick={() => setPreview(null)} className="rounded-xl border border-amber-200 bg-white px-4 py-2.5 text-xs font-semibold text-amber-800">取消</button></div></div> : null}
+    {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-4 text-xs ${message.tone === "error" ? "text-rose-700" : "text-emerald-700"}`}>{message.text}</p> : null}
+  </section>;
 }
 
 function ProfileDetailsForm({ profile, onUpdated }: { profile: Profile | null; onUpdated: (value: { displayName: string | null; email: string | null; emailVerifiedAt: string | null }) => void }) {

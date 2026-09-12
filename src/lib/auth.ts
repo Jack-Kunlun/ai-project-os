@@ -51,6 +51,8 @@ export type SafeSessionUser = Readonly<{
   accountAccessVersion: number;
 }>;
 
+type SessionDb = PrismaClient | Prisma.TransactionClient;
+
 export type CreatedSession = Readonly<{
   token: string;
   expiresAt: Date;
@@ -517,12 +519,13 @@ function cookieToken(cookieHeader: string | null): string | null {
   return null;
 }
 
-export async function readSessionToken(
+async function readSessionTokenInternal(
   token: string | null,
-  db: PrismaClient = getDb(),
+  db: SessionDb,
+  now: Date,
+  touchLastSeen: boolean,
 ): Promise<SafeSessionUser | null> {
   if (token === null) return null;
-  const now = new Date();
   const session = await db.appSession.findUnique({
     where: { tokenHash: tokenHash(token) },
     include: { user: true },
@@ -534,7 +537,7 @@ export async function readSessionToken(
     || session.user.disabledAt !== null
     || session.accountAccessVersion !== session.user.accountAccessVersion
   ) return null;
-  if (now.getTime() - session.lastSeenAt.getTime() > 5 * 60 * 1_000) {
+  if (touchLastSeen && now.getTime() - session.lastSeenAt.getTime() > 5 * 60 * 1_000) {
     await db.appSession.updateMany({
       where: {
         id: session.id,
@@ -554,11 +557,43 @@ export async function readSessionToken(
   return safeUser(session.user);
 }
 
+export async function readSessionToken(
+  token: string | null,
+  db: PrismaClient = getDb(),
+): Promise<SafeSessionUser | null> {
+  return readSessionTokenInternal(token, db, new Date(), true);
+}
+
+/**
+ * Authenticate a request without touching session recency.  Read-only pages
+ * use this inside their snapshot transaction so authentication observes the
+ * same database state as the rest of the projection and cannot write through
+ * an otherwise read-only connection.
+ */
+export async function readSessionTokenReadOnly(
+  token: string | null,
+  db: SessionDb = getDb(),
+  now = new Date(),
+): Promise<SafeSessionUser | null> {
+  return readSessionTokenInternal(token, db, now, false);
+}
+
 export async function requireApiSession(
   request: Request,
   db: PrismaClient = getDb(),
 ): Promise<SafeSessionUser> {
   const user = await readSessionToken(cookieToken(request.headers.get("cookie")), db);
+  if (user === null) return fail("AUTH_REQUIRED");
+  await authorizeApiRequest(user, request, db);
+  return user;
+}
+
+export async function requireApiSessionReadOnly(
+  request: Request,
+  db: SessionDb = getDb(),
+  now = new Date(),
+): Promise<SafeSessionUser> {
+  const user = await readSessionTokenReadOnly(cookieToken(request.headers.get("cookie")), db, now);
   if (user === null) return fail("AUTH_REQUIRED");
   await authorizeApiRequest(user, request, db);
   return user;

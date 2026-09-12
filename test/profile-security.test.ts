@@ -1,20 +1,82 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
 import {
   AuthError,
   changeAccountPassword,
   createPasswordRecord,
+  readSessionTokenReadOnly,
+  requireApiSessionReadOnly,
   updateAccountProfile,
   updateAccountUsername,
   verifyPasswordRecord,
 } from "@/lib/auth";
 
 const userId = "52b01307-72b4-45e3-a57b-230bf5d036c8";
+const profileRouteSource = readFileSync(new URL("../src/app/api/profile/route.ts", import.meta.url), "utf8");
 
 function authError(code: string) {
   return (error: unknown) => error instanceof AuthError && error.code === code;
 }
+
+test("profile GET uses one read-only repeatable-read snapshot and read-only session authentication", () => {
+  const getSource = profileRouteSource.slice(
+    profileRouteSource.indexOf("export async function GET"),
+    profileRouteSource.indexOf("export async function PATCH"),
+  );
+  assert.match(getSource, /db\.\$transaction/u);
+  assert.match(getSource, /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ/u);
+  assert.match(getSource, /SET TRANSACTION READ ONLY/u);
+  assert.match(getSource, /clock_timestamp\(\) AT TIME ZONE 'UTC'/u);
+  assert.match(getSource, /requireApiSessionReadOnly\(request, tx, current\)/u);
+  assert.match(getSource, /getPlatformTokenSummaryInTransaction\(sessionUser\.id, tx, current\)/u);
+  assert.doesNotMatch(getSource, /requireApiSession\(request\)/u);
+  assert.doesNotMatch(getSource, /getPlatformTokenSummary\(/u);
+});
+
+test("read-only session authentication preserves validity checks without touching lastSeenAt", async () => {
+  const current = new Date("2026-09-12T00:00:00.000Z");
+  let updateCount = 0;
+  const db = {
+    appSession: {
+      findUnique: async () => ({
+        id: "00000000-0000-4000-8000-000000000041",
+        revokedAt: null,
+        expiresAt: new Date("2026-09-13T00:00:00.000Z"),
+        lastSeenAt: new Date("2026-09-01T00:00:00.000Z"),
+        accountAccessVersion: 1,
+        user: {
+          id: userId,
+          username: "owner",
+          role: "admin" as const,
+          disabledAt: null,
+          accountAccessVersion: 1,
+        },
+      }),
+      updateMany: async () => {
+        updateCount += 1;
+        throw new Error("read-only session authentication attempted a write");
+      },
+    },
+    appUser: {
+      findUnique: async () => ({ id: userId, disabledAt: null, accountAccessVersion: 1 }),
+    },
+  } as unknown as PrismaClient;
+  const token = "a".repeat(40);
+  const direct = await readSessionTokenReadOnly(token, db, current);
+  const required = await requireApiSessionReadOnly(
+    new Request("http://127.0.0.1:3000/api/profile", {
+      method: "GET",
+      headers: { cookie: `ai_project_os_session=${token}` },
+    }),
+    db,
+    current,
+  );
+  assert.equal(direct?.id, userId);
+  assert.equal(required.id, userId);
+  assert.equal(updateCount, 0);
+});
 
 test("password rotation verifies the current password, replaces the digest, and revokes all sessions", async () => {
   let password = await createPasswordRecord("CurrentPassword123");

@@ -59,7 +59,8 @@ test("personal models experience uses only the personal provider contract and ne
   assert.match(client, /状态已刷新，请重新打开编辑/u);
   assert.match(client, /await onReload\(\)[\s\S]*setEditing\(null\)[\s\S]*setDraft\(null\)/u);
   assert.match(profile, /href="\/profile\/models"/u);
-  assert.match(profile, /联系管理员开通会员/u);
+  assert.match(profile, /可在上方提交会员申请/u);
+  assert.doesNotMatch(profile, /联系管理员开通会员/u);
   assert.match(profile, /不能测试、启用或调用/u);
 });
 

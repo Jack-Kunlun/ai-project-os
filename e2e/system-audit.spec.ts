@@ -134,7 +134,9 @@ test("administrator audit center exposes new safe sources across viewports and d
     const auditTable = page.getByRole("table");
     await expect(auditTable.getByText("AI 运行时", { exact: true })).toBeVisible();
     await expect(auditTable.getByText("预检拒绝", { exact: true })).toBeVisible();
-    await auditTable.getByRole("button", { name: "查看详情", exact: true }).click();
+    const targetAuditRow = auditTable.getByRole("row").filter({ hasText: fixture.projectId });
+    await expect(targetAuditRow).toHaveCount(1);
+    await targetAuditRow.getByRole("button", { name: "查看详情", exact: true }).click();
     await expect(page.getByText("安全错误码：AI_PROVIDER_UNKNOWN", { exact: false })).toBeVisible();
     await expect(page.getByText(`记录 ID：${fixture.auditId}`, { exact: true })).toBeVisible();
 

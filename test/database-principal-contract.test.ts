@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX } from "../src/lib/database-principal-catalog";
 
 const compose = readFileSync("compose.yaml", "utf8");
 const envExample = readFileSync(".env.example", "utf8");
@@ -17,6 +18,17 @@ const github = readFileSync("src/lib/github-oauth.ts", "utf8");
 const oidc = readFileSync("src/lib/oidc.ts", "utf8");
 const workspaces = readFileSync("src/lib/workspaces.ts", "utf8");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { scripts?: Record<string, string> };
+
+test("invoker helper ACL matrix is complete, immutable and uniquely signed", () => {
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.length, 42);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 41);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.entitlementWriter).length, 7);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime && helper.entitlementWriter).length, 6);
+  const signatures = DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.map((helper) => `${helper.name}(${helper.identityArguments})`);
+  assert.equal(new Set(signatures).size, DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.length);
+  assert.ok(Object.isFrozen(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX));
+  assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
+});
 
 test("database principals are explicit and separated across Compose services", () => {
   assert.match(compose, /POSTGRES_USER:\s*\$\{POSTGRES_USER:-ai_project_os_cluster_admin\}/u);
@@ -164,6 +176,16 @@ test("ACL reconcile rejects drift and does not widen ordinary roles with DDL pri
   assert.match(reconcile, /verifyRetiredRoleCannotLogin/u);
   assert.match(reconcile, /transferCurrentOwnedObjects/u);
   assert.match(reconcile, /GRANT EXECUTE ON FUNCTION/u);
+  assert.match(catalog, /ACCOUNT_ENTITLEMENT_SIGNUP_GRANT_CLOSURE_FUNCTION/u);
+  assert.match(catalog, /DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX/u);
+  assert.match(reconcile, /DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX/u);
+  assert.match(reconcile, /invokerFunctionSignature/u);
+  assert.match(reconcile, /REVOKE ALL ON FUNCTION \$\{signature\} FROM PUBLIC/u);
+  assert.match(reconcile, /GRANT EXECUTE ON FUNCTION \$\{signature\} TO \$\{grantees\.join/u);
+  assert.match(reconcile, /helperRow\.prosecdef/u);
+  assert.match(reconcile, /helperRow\.public_execute/u);
+  assert.match(reconcile, /runtimeHelperCount !== 41/u);
+  assert.match(reconcile, /writerHelperCount !== 7/u);
   assert.match(reconcile, /revokeRoleMembershipEdges\(admin, MIGRATOR_DATABASE_PRINCIPAL\)/u);
   assert.match(reconcile, /ALTER ROLE \$\{identifier\} WITH LOGIN SUPERUSER CREATEDB CREATEROLE/u);
   assert.match(reconcile, /assertNoRoleMembership/u);
@@ -201,6 +223,9 @@ test("the PostgreSQL gate exercises production reconcile and both real principal
   assert.match(postgresGate, /reservePlatformTokens/u);
   assert.match(postgresGate, /SET SESSION AUTHORIZATION/u);
   assert.match(postgresGate, /AI_SIGNUP_GRANT/u);
+  assert.match(postgresGate, /DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX/u);
+  assert.match(postgresGate, /assertInvokerHelperAcls/u);
+  assert.match(postgresGate, /pg_get_function_identity_arguments/u);
   assert.match(postgresGate, /AccountEntitlementBackfillRun/u);
   assert.match(postgresGate, /DELETE FROM "PlatformTokenLedgerEntry"/u);
   assert.match(postgresGate, /runPrincipalBootstrap\(runtimePassword, migratorPassword, writerPassword(?:, [^)]*)?\)/u);

@@ -3,6 +3,7 @@ import { Prisma, type MembershipSubscription, type PrismaClient } from "@prisma/
 import { z } from "zod";
 import { lockActorsAccess } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
+import { fulfillMembershipApplicationInTransaction } from "@/lib/membership-application-service";
 import { toSystemRole } from "@/lib/system-role";
 
 export type MembershipLifecycleAction = "grant" | "extend" | "revoke";
@@ -176,7 +177,14 @@ export async function listMemberships(input: Readonly<{
     },
   });
   const hasNextPage = users.length > pageSize;
-  const items = users.slice(0, pageSize).map((user) => ({ ...user, role: toSystemRole(user.role) }));
+  const pageUsers = users.slice(0, pageSize);
+  const applicationDelegate = (db as unknown as { membershipApplication?: { findMany?: (input: unknown) => Promise<Array<{ userId: string; id: string; status: string; statusVersion: number; requestReason: string | null; rejectionReason: string | null; submittedAt: Date; fulfilledAt: Date | null; rejectedAt: Date | null; withdrawnAt: Date | null }>> } }).membershipApplication;
+  const applications = typeof applicationDelegate?.findMany === "function"
+    ? await applicationDelegate.findMany({ where: { userId: { in: pageUsers.map((user) => user.id) } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { userId: true, id: true, status: true, statusVersion: true, requestReason: true, rejectionReason: true, submittedAt: true, fulfilledAt: true, rejectedAt: true, withdrawnAt: true } })
+    : [];
+  const applicationByUser = new Map<string, (typeof applications)[number]>();
+  for (const application of applications) if (!applicationByUser.has(application.userId)) applicationByUser.set(application.userId, application);
+  const items = pageUsers.map((user) => ({ ...user, membershipApplication: applicationByUser.get(user.id) ?? null, role: toSystemRole(user.role) }));
   return Object.freeze({ items, page, pageSize, hasNextPage });
 }
 
@@ -218,6 +226,7 @@ type MembershipTarget = Readonly<{
   id: string;
   username: string;
   disabledAt: Date | null;
+  accountAccessVersion: number;
   membershipSubscription: MembershipSnapshot | null;
 }>;
 
@@ -229,6 +238,7 @@ type MembershipPreviewInput = Readonly<{
   note?: string | null;
   reason?: string | null;
   expectedVersion?: number;
+  applicationId?: string | null;
 }>;
 
 type MembershipExecuteInput = Readonly<MembershipPreviewInput & {
@@ -258,6 +268,7 @@ export type MembershipPreview = Readonly<{
   expiresAt: Date;
   previewIssuedAt: Date;
   previewExpiresAt: Date;
+  applicationId: string | null;
 }>;
 
 function membershipState(subscription: MembershipSnapshot | null, now: Date): MembershipState {
@@ -305,6 +316,7 @@ function buildRequestFingerprint(input: Readonly<{
   note: string | null;
   reason: string | null;
   expectedVersion: number;
+  applicationId?: string | null;
   impactFingerprint: string;
   previewIssuedAt: string | Date;
   previewExpiresAt: string | Date;
@@ -316,6 +328,7 @@ function buildRequestFingerprint(input: Readonly<{
     note: input.note,
     reason: input.reason,
     expectedVersion: input.expectedVersion,
+    applicationId: input.applicationId ?? null,
     impactFingerprint: input.impactFingerprint,
     previewIssuedAt: dateValue(input.previewIssuedAt).toISOString(),
     previewExpiresAt: dateValue(input.previewExpiresAt).toISOString(),
@@ -329,6 +342,7 @@ export function membershipRequestFingerprint(input: Readonly<{
   note?: string | null;
   reason?: string | null;
   expectedVersion: number;
+  applicationId?: string | null;
   impactFingerprint: string;
   previewIssuedAt: string | Date;
   previewExpiresAt: string | Date;
@@ -340,6 +354,7 @@ export function membershipRequestFingerprint(input: Readonly<{
     note: safeAuditText(input.note) ?? null,
     reason: safeAuditText(input.reason) ?? null,
     expectedVersion: expectedVersion(input.expectedVersion)!,
+    applicationId: input.applicationId ?? null,
     impactFingerprint: fingerprint(input.impactFingerprint),
     previewIssuedAt: dateValue(input.previewIssuedAt),
     previewExpiresAt: dateValue(input.previewExpiresAt),
@@ -361,6 +376,7 @@ async function loadTarget(db: MembershipDb, targetId: string): Promise<Membershi
       id: true,
       username: true,
       disabledAt: true,
+      accountAccessVersion: true,
       membershipSubscription: { select: publicSubscription },
     },
   }) as Promise<MembershipTarget | null>;
@@ -509,10 +525,11 @@ function blockingCategories(dependencies: MembershipDependencyStats): readonly s
   return Object.freeze(categories);
 }
 
-function impactFingerprint(input: Readonly<{ userId: string; action: MembershipLifecycleAction; subscription: MembershipSnapshot | null; state: MembershipState; dependencies: MembershipDependencyStats }>): string {
+function impactFingerprint(input: Readonly<{ userId: string; action: MembershipLifecycleAction; subscription: MembershipSnapshot | null; state: MembershipState; dependencies: MembershipDependencyStats; applicationId?: string | null }>): string {
   return hashFingerprint({
     userId: input.userId,
     action: input.action,
+    applicationId: input.applicationId ?? null,
     state: input.state,
     subscription: input.subscription === null ? null : {
       id: input.subscription.id,
@@ -550,15 +567,25 @@ function proposedSnapshot(input: Readonly<{ action: MembershipLifecycleAction; s
 async function previewMembershipInTransaction(db: MembershipDb, input: MembershipPreviewInput, now: Date): Promise<MembershipPreview> {
   const targetId = userId(input.userId);
   const action = assertLifecycleAction(input.action);
+  const applicationId = input.applicationId === undefined || input.applicationId === null ? null : userId(input.applicationId);
+  if (applicationId !== null && action !== "grant") return fail("MEMBERSHIP_INVALID_INPUT");
   const target = await loadTarget(db, targetId);
   if (target === null) return fail("MEMBERSHIP_USER_NOT_FOUND");
   const state = membershipState(target.membershipSubscription, now);
   assertActionAllowed(action, state);
+  if (action === "grant") {
+    const pendingApplication = await db.membershipApplication.findFirst({ where: { userId: targetId, status: "pending" }, select: { id: true } });
+    if ((pendingApplication?.id ?? null) !== applicationId) return fail("MEMBERSHIP_PREVIEW_STALE");
+  }
   const normalizedDays = action === "revoke" ? null : days(input.days);
   const note = safeAuditText(input.note);
   const reason = action === "revoke" ? requiredReason(input.reason) : safeAuditText(input.reason);
   const currentVersion = target.membershipSubscription?.version ?? 0;
   if (input.expectedVersion !== undefined && expectedVersion(input.expectedVersion)! !== currentVersion) return fail("MEMBERSHIP_PREVIEW_STALE");
+  if (applicationId !== null) {
+    const application = await db.membershipApplication.findUnique({ where: { id: applicationId }, select: { userId: true, status: true, statusVersion: true, accountAccessVersion: true, membershipVersion: true, membershipState: true } });
+    if (target.disabledAt !== null || application === null || application.userId !== targetId || application.status !== "pending" || application.accountAccessVersion !== target.accountAccessVersion || application.membershipVersion !== currentVersion || application.membershipState !== state) return fail("MEMBERSHIP_PREVIEW_STALE");
+  }
   const dependencies = await loadDependencies(db, targetId);
   const proposed = proposedSnapshot({ action, subscription: target.membershipSubscription, now, days: normalizedDays ?? 0, note, reason });
   const current = Object.freeze({
@@ -568,10 +595,10 @@ async function previewMembershipInTransaction(db: MembershipDb, input: Membershi
     expiresAt: target.membershipSubscription?.expiresAt ?? null,
     status: target.membershipSubscription?.status ?? null,
   });
-  const impact = impactFingerprint({ userId: targetId, action, subscription: target.membershipSubscription, state, dependencies });
+  const impact = impactFingerprint({ userId: targetId, action, subscription: target.membershipSubscription, state, dependencies, applicationId });
   const issuedAt = new Date(now.getTime());
   const expiry = new Date(issuedAt.getTime() + MEMBERSHIP_PREVIEW_TTL_MS);
-  const request = buildRequestFingerprint({ userId: targetId, action, days: normalizedDays, note, reason, expectedVersion: currentVersion, impactFingerprint: impact, previewIssuedAt: issuedAt, previewExpiresAt: expiry });
+  const request = buildRequestFingerprint({ userId: targetId, action, days: normalizedDays, note, reason, expectedVersion: currentVersion, applicationId, impactFingerprint: impact, previewIssuedAt: issuedAt, previewExpiresAt: expiry });
   const previewId = randomUUID();
   const previewContextDb = db as Prisma.TransactionClient;
   await setPreviewContext(previewContextDb, { previewId, actorId: input.adminUserId, userId: targetId });
@@ -586,6 +613,7 @@ async function previewMembershipInTransaction(db: MembershipDb, input: Membershi
       requestFingerprint: request,
       issuedAt,
       expiresAt: expiry,
+      applicationId,
     },
   });
   const categories = blockingCategories(dependencies);
@@ -604,6 +632,7 @@ async function previewMembershipInTransaction(db: MembershipDb, input: Membershi
     expiresAt: expiry,
     previewIssuedAt: issuedAt,
     previewExpiresAt: expiry,
+    applicationId,
   });
 }
 
@@ -665,7 +694,7 @@ async function setPreviewContext(tx: Prisma.TransactionClient, input: Readonly<{
   await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_preview_user_id', ${input.userId}, true)`);
 }
 
-async function setLifecycleContext(tx: Prisma.TransactionClient, input: Readonly<{ adminUserId: string; userId: string; action: MembershipLifecycleAction; requestKey: string; requestFingerprint: string; impactFingerprint: string; previewId: string }>): Promise<void> {
+async function setLifecycleContext(tx: Prisma.TransactionClient, input: Readonly<{ adminUserId: string; userId: string; action: MembershipLifecycleAction; requestKey: string; requestFingerprint: string; impactFingerprint: string; previewId: string; applicationId?: string | null }>): Promise<void> {
   await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_lifecycle_context', '1', true)`);
   await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_lifecycle_actor_id', ${input.adminUserId}, true)`);
   await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_lifecycle_user_id', ${input.userId}, true)`);
@@ -674,6 +703,11 @@ async function setLifecycleContext(tx: Prisma.TransactionClient, input: Readonly
   await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_lifecycle_request_fingerprint', ${input.requestFingerprint}, true)`);
   await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_lifecycle_impact_fingerprint', ${input.impactFingerprint}, true)`);
   await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_lifecycle_preview_id', ${input.previewId}, true)`);
+  if (input.applicationId !== undefined && input.applicationId !== null) {
+    await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_application_id', ${input.applicationId}, true)`);
+    await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_application_actor_id', ${input.adminUserId}, true)`);
+    await tx.$executeRaw(Prisma.sql`SELECT set_config('app.membership_application_user_id', ${input.userId}, true)`);
+  }
 }
 
 async function executeMembershipInTransaction(tx: Prisma.TransactionClient, input: MembershipExecuteInput, now: Date): Promise<PublicSubscription> {
@@ -681,6 +715,8 @@ async function executeMembershipInTransaction(tx: Prisma.TransactionClient, inpu
   const targetId = userId(input.userId);
   const previewId = userId(input.previewId);
   const action = assertLifecycleAction(input.action);
+  const applicationId = input.applicationId === undefined || input.applicationId === null ? null : userId(input.applicationId);
+  if (applicationId !== null && action !== "grant") return fail("MEMBERSHIP_INVALID_INPUT");
   const key = requestKey(input.requestKey);
   const suppliedRequestFingerprint = fingerprint(input.requestFingerprint);
   const expectedImpact = fingerprint(input.expectedImpactFingerprint);
@@ -691,6 +727,11 @@ async function executeMembershipInTransaction(tx: Prisma.TransactionClient, inpu
   if (target === null) return fail("MEMBERSHIP_USER_NOT_FOUND");
   const preview = await tx.membershipMutationPreview.findUnique({ where: { id: previewId } });
   if (preview === null || preview.actorId !== adminId || preview.userId !== targetId || preview.action !== action) return fail("MEMBERSHIP_PREVIEW_STALE");
+  if ((preview.applicationId ?? null) !== applicationId) return fail("MEMBERSHIP_PREVIEW_STALE");
+  if (action === "grant") {
+    const pendingApplication = await tx.membershipApplication.findFirst({ where: { userId: targetId, status: "pending" }, select: { id: true } });
+    if ((pendingApplication?.id ?? null) !== applicationId) return fail("MEMBERSHIP_PREVIEW_STALE");
+  }
   if (input.confirmation !== true) return fail("MEMBERSHIP_CONFIRMATION_REQUIRED");
   if (action === "revoke" && input.confirmationUsername !== target.username) return fail("MEMBERSHIP_CONFIRMATION_REQUIRED");
   const normalizedDays = action === "revoke" ? null : days(input.days);
@@ -707,6 +748,7 @@ async function executeMembershipInTransaction(tx: Prisma.TransactionClient, inpu
     note,
     reason,
     expectedVersion: version,
+    applicationId,
     impactFingerprint: expectedImpact,
     previewIssuedAt,
     previewExpiresAt,
@@ -736,13 +778,17 @@ async function executeMembershipInTransaction(tx: Prisma.TransactionClient, inpu
   const state = membershipState(existing, now);
   assertActionAllowed(action, state);
   const dependencies = await loadDependencies(tx, targetId);
-  const currentImpact = impactFingerprint({ userId: targetId, action, subscription: existing, state, dependencies });
+  if (applicationId !== null) {
+    const application = await tx.membershipApplication.findUnique({ where: { id: applicationId }, select: { userId: true, status: true, accountAccessVersion: true, membershipVersion: true, membershipState: true } });
+    if (target.disabledAt !== null || application === null || application.userId !== targetId || application.status !== "pending" || application.accountAccessVersion !== target.accountAccessVersion || application.membershipVersion !== version || application.membershipState !== state) return fail("MEMBERSHIP_PREVIEW_STALE");
+  }
+  const currentImpact = impactFingerprint({ userId: targetId, action, subscription: existing, state, dependencies, applicationId });
   if (version !== (existing?.version ?? 0) || expectedImpact !== currentImpact) return fail("MEMBERSHIP_PREVIEW_STALE");
-  const calculatedRequestFingerprint = buildRequestFingerprint({ userId: targetId, action, days: normalizedDays, note, reason, expectedVersion: version, impactFingerprint: currentImpact, previewIssuedAt, previewExpiresAt });
+  const calculatedRequestFingerprint = buildRequestFingerprint({ userId: targetId, action, days: normalizedDays, note, reason, expectedVersion: version, applicationId, impactFingerprint: currentImpact, previewIssuedAt, previewExpiresAt });
   if (calculatedRequestFingerprint !== suppliedRequestFingerprint) return fail("MEMBERSHIP_IDEMPOTENCY_CONFLICT");
   if (dependencies.nonTerminalPersonalDelegations > 0 || dependencies.effectivePersonalRouteSelections > 0 || dependencies.publishedPersonalIndexes > 0) return fail("MEMBERSHIP_DEPENDENCY_RESOLUTION_REQUIRED");
 
-  await setLifecycleContext(tx, { adminUserId: adminId, userId: targetId, action, requestKey: key, requestFingerprint: suppliedRequestFingerprint, impactFingerprint: currentImpact, previewId });
+  await setLifecycleContext(tx, { adminUserId: adminId, userId: targetId, action, requestKey: key, requestFingerprint: suppliedRequestFingerprint, impactFingerprint: currentImpact, previewId, applicationId });
   const before = existing === null ? null : snapshotFromRow(existing);
   let subscription: PublicSubscription;
   if (action === "revoke") {
@@ -768,7 +814,7 @@ async function executeMembershipInTransaction(tx: Prisma.TransactionClient, inpu
           select: publicSubscription,
         });
   }
-  await tx.membershipSubscriptionAudit.create({
+  const subscriptionAudit = await tx.membershipSubscriptionAudit.create({
     data: {
       id: randomUUID(),
       subscriptionId: subscription.id,
@@ -801,13 +847,33 @@ async function executeMembershipInTransaction(tx: Prisma.TransactionClient, inpu
       requestFingerprint: suppliedRequestFingerprint,
       impactFingerprint: currentImpact,
       previewId,
+      applicationId,
       transitionAt: now,
       createdAt: now,
       contractVersion: 2,
     },
   });
+  // The application-bound membership preview must be consumed while the
+  // application is still pending. Its database guard intentionally requires
+  // that state; the deferred closure checks below still see the complete
+  // subscription, audit, and fulfilled-application writes at COMMIT.
   const consumed = await tx.membershipMutationPreview.updateMany({ where: { id: previewId, consumedAt: null }, data: { consumedAt: now } });
   if (consumed.count !== 1) return fail("MEMBERSHIP_CONFLICT");
+  if (applicationId !== null) {
+    await fulfillMembershipApplicationInTransaction(tx, {
+      applicationId,
+      actorId: adminId,
+      userId: targetId,
+      membershipPreviewId: previewId,
+      subscriptionId: subscription.id,
+      subscriptionVersion: subscription.version,
+      subscriptionAuditId: subscriptionAudit.id,
+      requestKey: key,
+      requestFingerprint: suppliedRequestFingerprint,
+      impactFingerprint: currentImpact,
+      now,
+    });
+  }
   return Object.freeze(subscription);
 }
 

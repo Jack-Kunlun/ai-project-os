@@ -20,6 +20,7 @@ const baseSchema = z.object({
   previewExpiresAt: z.string().datetime({ offset: true }),
   confirmation: z.literal(true),
   confirmationUsername: z.string().max(64).optional(),
+  applicationId: z.string().uuid().nullable().optional(),
 }).strict();
 
 async function targetId(params: Promise<{ userId: string }>): Promise<string> {
@@ -55,6 +56,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ userI
       previewExpiresAt: input.previewExpiresAt,
       confirmation: true,
       confirmationUsername: input.confirmationUsername,
+      applicationId: input.applicationId ?? undefined,
     });
     return NextResponse.json({ subscription }, { headers: { "cache-control": "no-store" } });
   } catch (error) {

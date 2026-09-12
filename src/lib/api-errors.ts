@@ -59,6 +59,7 @@ import { PlatformProviderProbeServiceError } from "@/lib/platform-provider-probe
 import { PlatformGrantOfferPolicyError } from "@/lib/platform-grant-offer-policy-service";
 import { AccountEntitlementBackfillError } from "@/lib/account-entitlement-backfill-service";
 import { PlatformCreditGovernanceError } from "@/lib/platform-credit-governance-service";
+import { MembershipApplicationServiceError } from "@/lib/membership-application-service";
 
 export type ApiErrorBody = {
   error: {
@@ -753,13 +754,14 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AI_PROVIDER_SCOPE_FORBIDDEN: [403, "模型连接不属于当前工作区"],
       AI_PROVIDER_OWNER_REQUIRED: [403, "只有工作区 Owner 或 Admin 可以管理该模型连接"],
       AI_ROUTE_CONFIGURATION_FORBIDDEN: [403, "当前模型路由配置不允许使用该连接"],
-      AI_PLATFORM_TOKEN_EXHAUSTED: [402, "平台 Token 额度不足"],
-      AI_PLATFORM_TOKEN_EXPIRED: [410, "平台 Token 已过期"],
+      AI_PLATFORM_TOKEN_EXHAUSTED: [402, "平台额度不足"],
+      AI_PLATFORM_TOKEN_EXPIRED: [410, "平台额度已过期"],
       AI_PLATFORM_CONCURRENCY_LIMIT: [429, "当前已有一个平台 AI 任务在运行"],
       AI_MODEL_CAPABILITY_MISMATCH: [422, "模型与请求能力不匹配"],
       AI_PROVIDER_CONNECTION_UNAVAILABLE: [409, "模型连接当前不可用，请先完成验证"],
       AI_PROVIDER_CALL_RECONCILIATION_REQUIRED: [409, "上一次模型调用需要先完成账务核对"],
       AI_PLATFORM_TOKEN_USAGE_UNVERIFIED: [409, "模型用量未能验证，需要完成账务核对"],
+      AI_PLATFORM_TOKEN_PROJECTION_INCONSISTENT: [503, "平台额度账面正在核对，暂时无法显示额度"],
       AI_SIGNUP_ELIGIBILITY_REQUIRED: [403, "该注册入口不具备已验证身份资格"],
     } as const;
     const [status, message] = mapping[error.code];
@@ -840,6 +842,27 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       MEMBERSHIP_METHOD_NOT_ALLOWED: [405, "会员变更必须先预览，再通过用户详情 PATCH 确认"],
     } as const;
     const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof MembershipApplicationServiceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      MEMBERSHIP_APPLICATION_INVALID_INPUT: [400, "会员申请请求无效"],
+      MEMBERSHIP_APPLICATION_NOT_FOUND: [404, "会员申请不存在"],
+      MEMBERSHIP_APPLICATION_ADMIN_REQUIRED: [403, "只有系统管理员可以处理会员申请"],
+      MEMBERSHIP_APPLICATION_ACCOUNT_DISABLED: [409, "账号已停用，不能提交会员申请"],
+      MEMBERSHIP_APPLICATION_ACTIVE_MEMBERSHIP: [409, "当前已有有效会员资格，无需重复申请"],
+      MEMBERSHIP_APPLICATION_PENDING: [409, "已有一条待处理会员申请"],
+      MEMBERSHIP_APPLICATION_CONFLICT: [409, "会员申请状态已变化，请刷新后重试"],
+      MEMBERSHIP_APPLICATION_PREVIEW_STALE: [409, "会员申请预览已变化，请重新预览"],
+      MEMBERSHIP_APPLICATION_PREVIEW_EXPIRED: [410, "会员申请预览已过期，请重新预览"],
+      MEMBERSHIP_APPLICATION_CONFIRMATION_REQUIRED: [400, "请完成确认后再提交会员申请"],
+      MEMBERSHIP_APPLICATION_REASON_REQUIRED: [400, "会员申请必须填写说明"],
+      MEMBERSHIP_APPLICATION_UNSAFE_TEXT: [400, "申请说明不能包含邮箱、令牌或敏感字符串"],
+      MEMBERSHIP_APPLICATION_IDEMPOTENCY_CONFLICT: [409, "请求标识已用于其他会员申请操作"],
+      MEMBERSHIP_APPLICATION_METHOD_NOT_ALLOWED: [405, "会员申请必须先预览，再确认执行"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "会员申请处理失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

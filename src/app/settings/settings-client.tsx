@@ -157,7 +157,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
           </p>
         </section>
 
-        {!canManageProviders ? <section className="mt-7 rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7"><h2 className="text-xl font-semibold">平台免费模型由系统管理员管理</h2><p className="mt-3 text-sm leading-7 text-slate-600">普通用户只能使用平台赠送的免费额度和平台默认模型，不会请求或查看平台供应商接口。{activeMembership ? "当前会员有效，你可以在个人账号中配置自己的模型连接。" : membershipStatus === "expired" ? "会员资格已到期；续费后才可配置个人模型。" : membershipStatus === "revoked" ? "会员资格已撤销；重新获得资格后才可配置个人模型。" : "充值会员后才可配置个人模型。"}</p>{activeMembership ? <a href="/profile/models" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">配置个人模型</a> : null}</section> : null}
+        {!canManageProviders ? <section className="mt-7 rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7"><h2 className="text-xl font-semibold">平台模型由系统管理员管理</h2><p className="mt-3 text-sm leading-7 text-slate-600">普通用户可以使用平台额度和平台默认模型，不会请求或查看平台供应商接口。{activeMembership ? "当前会员有效，你可以在个人账号中配置自己的模型连接。" : membershipStatus === "expired" ? "会员资格已到期；重新获得资格后才可配置个人模型。" : membershipStatus === "revoked" ? "会员资格已撤销；重新获得资格后才可配置个人模型。" : "如需配置个人模型，请在个人中心提交会员申请。"}</p>{activeMembership ? <a href="/profile/models" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">配置个人模型</a> : null}</section> : null}
         {canManageProviders && error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
 
         {canManageProviders ? <ProviderCapabilityMatrix catalog={catalog} /> : null}

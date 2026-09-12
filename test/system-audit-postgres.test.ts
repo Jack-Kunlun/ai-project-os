@@ -110,7 +110,7 @@ test(
     const page = await listSystemAudit({ pageSize: 50 }, database, new Date());
     assert.equal(page.pageSize, 50);
     assert.ok(page.events.every((event) => SYSTEM_AUDIT_SOURCES.includes(event.source)));
-    assert.equal(SYSTEM_AUDIT_SOURCES.length, 20);
+    assert.equal(SYSTEM_AUDIT_SOURCES.length, 21);
     assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
     assertSafePublicProjection(page);
 

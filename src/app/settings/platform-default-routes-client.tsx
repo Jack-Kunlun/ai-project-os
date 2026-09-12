@@ -361,7 +361,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">Platform default routes</p>
           <h2 className="mt-2 text-2xl font-semibold text-slate-950">平台默认模型路由控制面</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">这里仅配置、验证和审计平台默认路由。已激活且通过门禁的 active 路由会被当前 Web AI 有效路由解析采用；本页不宣称真实模型调用已现场验证。普通用户按平台赠送额度使用这些默认路由。</p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">这里仅配置、验证和审计平台默认路由。已激活且通过门禁的 active 路由会被当前 Web AI 有效路由解析采用；本页不宣称真实模型调用已现场验证。普通用户按平台额度使用这些默认路由。</p>
         </div>
         <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-800">Web AI 路由解析已接入</span>
       </div>

@@ -6,6 +6,7 @@ import {
   changeAccountPassword,
   expiredSessionCookie,
   requireApiSession,
+  requireApiSessionReadOnly,
   setLocalAccountPassword,
   updateAccountProfile,
   updateAccountUsername,
@@ -13,7 +14,8 @@ import {
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
-import { getPlatformTokenSummary } from "@/lib/ai-entitlements";
+import { getPlatformTokenSummaryInTransaction } from "@/lib/ai-entitlements";
+import { getCurrentMembershipApplication } from "@/lib/membership-application-service";
 import { toSystemRole } from "@/lib/system-role";
 
 export const dynamic = "force-dynamic";
@@ -31,32 +33,73 @@ const profileUpdateSchema = z.discriminatedUnion("action", [
 
 export async function GET(request: Request) {
   try {
-    const sessionUser = await requireApiSession(request);
     const db = getDb();
-    const [user, activeSessionCount, latestSession, entitlements] = await Promise.all([
-      db.appUser.findUnique({
-        where: { id: sessionUser.id },
-        select: {
-          id: true, username: true, displayName: true, email: true, emailVerifiedAt: true, role: true, passwordHash: true, createdAt: true, updatedAt: true,
-          workspaceMemberships: { where: { accessState: "confirmed" }, select: { role: true, workspace: { select: { id: true, name: true } } } },
-          oidcIdentities: { select: { email: true, lastLoginAt: true, provider: { select: { id: true, name: true } } } },
-          githubIdentity: { select: { githubUserId: true, login: true, email: true, displayName: true, lastLoginAt: true } },
+    const profile = await db.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
+      await tx.$executeRaw(Prisma.sql`SET TRANSACTION READ ONLY`);
+      const clockRows = await tx.$queryRaw<Array<{ now?: Date | string }>>(Prisma.sql`SELECT clock_timestamp() AT TIME ZONE 'UTC' AS "now"`);
+      const clockValue = clockRows[0]?.now;
+      const current = clockValue instanceof Date ? clockValue : typeof clockValue === "string" ? new Date(clockValue) : null;
+      if (current === null || Number.isNaN(current.getTime())) {
+        throw new ApiError(503, "PROFILE_SNAPSHOT_UNAVAILABLE", "个人信息暂时无法读取");
+      }
+      const sessionUser = await requireApiSessionReadOnly(request, tx, current);
+      const [user, activeSessionCount, latestSession, entitlements, membershipApplication] = await Promise.all([
+        tx.appUser.findUnique({
+          where: { id: sessionUser.id },
+          select: {
+            id: true, username: true, displayName: true, email: true, emailVerifiedAt: true, role: true, passwordHash: true, createdAt: true, updatedAt: true,
+            workspaceMemberships: { where: { accessState: "confirmed" }, select: { role: true, workspace: { select: { id: true, name: true } } } },
+            oidcIdentities: { select: { email: true, lastLoginAt: true, provider: { select: { id: true, name: true } } } },
+            githubIdentity: { select: { githubUserId: true, login: true, email: true, displayName: true, lastLoginAt: true } },
+          },
+        }),
+        tx.appSession.count({
+          where: { userId: sessionUser.id, revokedAt: null, expiresAt: { gt: current } },
+        }),
+        tx.appSession.findFirst({
+          where: { userId: sessionUser.id, revokedAt: null, expiresAt: { gt: current } },
+          orderBy: { lastSeenAt: "desc" },
+          select: { lastSeenAt: true, expiresAt: true },
+        }),
+        getPlatformTokenSummaryInTransaction(sessionUser.id, tx, current),
+        getCurrentMembershipApplication(sessionUser.id, tx),
+      ]);
+      if (user === null) throw new ApiError(401, "AUTH_REQUIRED", "请先登录");
+      const { passwordHash, githubIdentity, role, ...safeUser } = user;
+      const safeMembershipApplication = membershipApplication === null ? null : {
+        id: membershipApplication.id,
+        status: membershipApplication.status,
+        statusVersion: membershipApplication.statusVersion,
+        submittedAt: membershipApplication.submittedAt,
+        fulfilledAt: membershipApplication.fulfilledAt,
+        rejectedAt: membershipApplication.rejectedAt,
+        withdrawnAt: membershipApplication.withdrawnAt,
+      };
+      return {
+        ...safeUser,
+        role: toSystemRole(role),
+        githubIdentity: githubIdentity ? { ...githubIdentity, githubUserId: githubIdentity.githubUserId.toString() } : null,
+        hasLocalPassword: passwordHash !== null,
+        activeSessionCount,
+        lastSeenAt: latestSession?.lastSeenAt ?? null,
+        sessionExpiresAt: latestSession?.expiresAt ?? null,
+        entitlements: {
+          unit: entitlements.unit,
+          totalCredits: entitlements.totalCredits,
+          availableCredits: entitlements.availableCredits,
+          usedCredits: entitlements.usedCredits,
+          reservedCredits: entitlements.reservedCredits,
+          heldCredits: entitlements.heldCredits,
+          nextExpiryAt: entitlements.nextExpiryAt,
+          routeSnapshots: entitlements.routeSnapshots,
+          membership: entitlements.membership,
+          membershipApplication: safeMembershipApplication,
         },
-      }),
-      db.appSession.count({
-        where: { userId: sessionUser.id, revokedAt: null, expiresAt: { gt: new Date() } },
-      }),
-      db.appSession.findFirst({
-        where: { userId: sessionUser.id, revokedAt: null, expiresAt: { gt: new Date() } },
-        orderBy: { lastSeenAt: "desc" },
-        select: { lastSeenAt: true, expiresAt: true },
-      }),
-      getPlatformTokenSummary(sessionUser.id, db),
-    ]);
-    if (user === null) throw new ApiError(401, "AUTH_REQUIRED", "请先登录");
-    const { passwordHash, githubIdentity, role, ...safeUser } = user;
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     return NextResponse.json(
-      { profile: { ...safeUser, role: toSystemRole(role), githubIdentity: githubIdentity ? { ...githubIdentity, githubUserId: githubIdentity.githubUserId.toString() } : null, hasLocalPassword: passwordHash !== null, activeSessionCount, lastSeenAt: latestSession?.lastSeenAt ?? null, sessionExpiresAt: latestSession?.expiresAt ?? null, entitlements: { availableTokens: entitlements.availableTokens, reservedTokens: entitlements.reservedTokens, nextExpiryAt: entitlements.nextExpiryAt, membership: entitlements.membership } } },
+      { profile },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {

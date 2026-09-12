@@ -3,12 +3,14 @@ import { Client } from "pg";
 import {
   DATABASE_PRINCIPAL_RELATIONS,
   ENTITLEMENT_PROTECTED_RELATIONS,
+  RUNTIME_ONLY_CONTROL_PLANE_RELATIONS,
   runtimeMutableRelations,
   SIGNUP_GRANT_RELATION,
   TOKEN_LEDGER_RELATION,
   PLATFORM_TOKEN_RUNTIME_FUNCTION,
   PLATFORM_TOKEN_GOVERNANCE_FUNCTION,
   PLATFORM_TOKEN_PREVIEW_FUNCTION,
+  DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX,
 } from "../src/lib/database-principal-catalog";
 import {
   ENTITLEMENT_WRITER_DATABASE_PRINCIPAL,
@@ -79,6 +81,11 @@ function quoteLiteral(value: string): string {
 function relationIdentifier(relation: string): string {
   if (!(DATABASE_PRINCIPAL_RELATIONS as readonly string[]).includes(relation)) return fail("DATABASE_PRINCIPAL_RELATION_NOT_CATALOGUED");
   return quoteIdentifier(relation);
+}
+
+function invokerFunctionSignature(helper: (typeof DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX)[number]): string {
+  if (!/^[A-Za-z0-9_.,()" ]+$/u.test(helper.identityArguments)) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
+  return `public.${quoteIdentifier(helper.name)}(${helper.identityArguments})`;
 }
 
 function rolePassword(url: URL): string {
@@ -1233,11 +1240,14 @@ async function grantTablePrivileges(client: Client): Promise<void> {
   for (const relation of DATABASE_PRINCIPAL_RELATIONS) {
     const quoted = relationIdentifier(relation);
     const governedTokenRelation = ["PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenGrantMutationPreview", "PlatformTokenGrantAudit", "PlatformTokenGrantLegacyNullIssuerSnapshot"].includes(relation);
-    await client.query(`GRANT SELECT${governedTokenRelation ? "" : ", INSERT, UPDATE, DELETE"} ON TABLE public.${quoted} TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+    const runtimeOnlyControlPlaneRelation = (RUNTIME_ONLY_CONTROL_PLANE_RELATIONS as readonly string[]).includes(relation);
+    await client.query(`GRANT SELECT${governedTokenRelation || runtimeOnlyControlPlaneRelation ? "" : ", INSERT, UPDATE, DELETE"} ON TABLE public.${quoted} TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
     if ((ENTITLEMENT_PROTECTED_RELATIONS as readonly string[]).includes(relation)) {
       await client.query(`GRANT SELECT ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
     } else if ([SIGNUP_GRANT_RELATION, TOKEN_LEDGER_RELATION, "PlatformTokenReservation", "PlatformTokenReservationAllocation"].includes(relation)) {
       await client.query(`GRANT SELECT ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
+    } else if (runtimeOnlyControlPlaneRelation) {
+      await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
     } else if (runtimeMutable.includes(relation)) {
       await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.${quoted} TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
     }
@@ -1251,6 +1261,17 @@ async function grantTablePrivileges(client: Client): Promise<void> {
   await client.query(`REVOKE ALL ON FUNCTION public.${runtimeFunction}(TEXT, JSONB, JSONB, JSONB), public.${previewFunction}(JSONB), public.${governanceFunction}(JSONB) FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
   await client.query(`GRANT EXECUTE ON FUNCTION public.${runtimeFunction}(TEXT, JSONB, JSONB, JSONB) TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}`);
   await client.query(`GRANT EXECUTE ON FUNCTION public.${previewFunction}(JSONB), public.${governanceFunction}(JSONB) TO ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+  const seenInvokerSignatures = new Set<string>();
+  for (const helper of DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX) {
+    const signature = invokerFunctionSignature(helper);
+    if (!seenInvokerSignatures.add(signature) || (!helper.runtime && !helper.entitlementWriter)) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
+    await client.query(`ALTER FUNCTION ${signature} OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
+    await client.query(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
+    const grantees: string[] = [];
+    if (helper.runtime) grantees.push(quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL));
+    if (helper.entitlementWriter) grantees.push(quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL));
+    await client.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${grantees.join(", ")}`);
+  }
   await client.query(`REVOKE ALL ON SCHEMA public FROM PUBLIC, ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
   await client.query(`GRANT USAGE ON SCHEMA public TO ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)}, ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)}`);
   const sequences = await client.query<{ relname: string }>("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='S'");
@@ -1311,6 +1332,18 @@ async function verifyAcl(client: Client): Promise<void> {
     const protectedRow = protectedRelation.rows[0];
     if (protectedRow === undefined || protectedRow.runtime_insert || protectedRow.runtime_update || protectedRow.runtime_delete) return fail("DATABASE_PRINCIPAL_ACL_INVALID");
   }
+  for (const relation of RUNTIME_ONLY_CONTROL_PLANE_RELATIONS) {
+    const controlPlane = await client.query<{ runtime_insert: boolean; runtime_update: boolean; runtime_delete: boolean; writer_insert: boolean; writer_update: boolean; writer_delete: boolean }>(`
+      SELECT has_table_privilege($1, $2, 'INSERT') AS runtime_insert,
+             has_table_privilege($1, $2, 'UPDATE') AS runtime_update,
+             has_table_privilege($1, $2, 'DELETE') AS runtime_delete,
+             has_table_privilege($3, $2, 'INSERT') AS writer_insert,
+             has_table_privilege($3, $2, 'UPDATE') AS writer_update,
+             has_table_privilege($3, $2, 'DELETE') AS writer_delete
+    `, [RUNTIME_DATABASE_PRINCIPAL, `public.${relationIdentifier(relation)}`, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL]);
+    const controlRow = controlPlane.rows[0];
+    if (controlRow === undefined || !controlRow.runtime_insert || !controlRow.runtime_update || !controlRow.runtime_delete || controlRow.writer_insert || controlRow.writer_update || controlRow.writer_delete) return fail("DATABASE_PRINCIPAL_ACL_INVALID");
+  }
   const allocationPrivileges = await client.query<{ runtime_insert: boolean; runtime_update: boolean; runtime_delete: boolean }>(`
     SELECT has_table_privilege($1, 'public."PlatformTokenReservationAllocation"', 'INSERT') AS runtime_insert,
            has_table_privilege($1, 'public."PlatformTokenReservationAllocation"', 'UPDATE') AS runtime_update,
@@ -1340,6 +1373,85 @@ async function verifyAcl(client: Client): Promise<void> {
   `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, MIGRATOR_DATABASE_PRINCIPAL]);
   const functionRow = functionAcl.rows[0];
   if (functionRow === undefined || !functionRow.runtime_apply || functionRow.runtime_preview || !functionRow.writer_apply || !functionRow.writer_preview || functionRow.public_apply || functionRow.definitions !== 3) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
+  const helperNames = [...new Set(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.map((helper) => helper.name))];
+  const helperRows = await client.query<{ oid: string; name: string }>(`
+    SELECT p.oid::text AS oid, p.proname AS name
+     FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.prokind = 'f'
+       AND p.proname = ANY($1::text[])
+  `, [helperNames]);
+  const expectedHelperOids = new Set<string>();
+  let runtimeHelperCount = 0;
+  let writerHelperCount = 0;
+  const expectedHelperSignatures = new Set<string>();
+  for (const helper of DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX) {
+    const signature = invokerFunctionSignature(helper);
+    if (!expectedHelperSignatures.add(signature)) return fail("DATABASE_PRINCIPAL_FUNCTION_SIGNATURE_INVALID");
+    const helperAcl = await client.query<{
+      oid: string;
+      identity_arguments: string;
+      owner: string | null;
+      prosecdef: boolean;
+      runtime_execute: boolean;
+      runtime_direct: boolean;
+      writer_execute: boolean;
+      writer_direct: boolean;
+      public_execute: boolean;
+    }>(`
+      SELECT p.oid::text AS oid,
+             pg_get_function_identity_arguments(p.oid) AS identity_arguments,
+             pg_get_userbyid(p.proowner) AS owner,
+             p.prosecdef,
+             has_function_privilege($1, $3, 'EXECUTE') AS runtime_execute,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS runtime_direct,
+             has_function_privilege($2, $3, 'EXECUTE') AS writer_execute,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS writer_direct,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = 0::oid
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS public_execute
+        FROM pg_proc p
+       WHERE p.oid = pg_catalog.to_regprocedure($3)
+    `, [RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, signature]);
+    const helperRow = helperAcl.rows[0];
+    if (helperRow === undefined) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
+    expectedHelperOids.add(helperRow.oid);
+    if (helperRow.owner !== MIGRATOR_DATABASE_PRINCIPAL
+      || helperRow.prosecdef
+      || helperRow.public_execute
+      || helperRow.runtime_execute !== helper.runtime
+      || helperRow.runtime_direct !== helper.runtime
+      || helperRow.writer_execute !== helper.entitlementWriter
+      || helperRow.writer_direct !== helper.entitlementWriter) {
+      return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
+    }
+    if (helper.runtime) runtimeHelperCount += 1;
+    if (helper.entitlementWriter) writerHelperCount += 1;
+  }
+  if (helperRows.rows.length !== DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.length
+    || helperRows.rows.some((row) => !expectedHelperOids.has(row.oid))
+    || runtimeHelperCount !== 41
+    || writerHelperCount !== 7) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
   const publicPrivileges = await client.query<{ database_public: boolean; schema_public: boolean }>(`
     SELECT EXISTS (
              SELECT 1

@@ -10,6 +10,7 @@ import {
   assertPlatformConcurrency,
   calculateChargedPlatformTokens,
   estimatePlatformTokens,
+  getPlatformTokenSummary,
   holdPlatformTokenReservation,
   recoverExpiredPlatformTokenReservations,
   releasePlatformTokenReservation,
@@ -663,4 +664,66 @@ test("personal control-plane routes fail before platform quota or database admis
     entitlementError("AI_ROUTE_CONFIGURATION_FORBIDDEN"),
   );
   assert.equal(databaseReads, 0);
+});
+
+test("platform credit projection accepts later allocations that retain the first grant pointer", async () => {
+  const userId = "00000000-0000-4000-8000-000000000031";
+  const now = new Date("2026-09-12T00:00:00.000Z");
+  const expiresAt = new Date("2026-10-12T00:00:00.000Z");
+  const firstGrantId = "00000000-0000-4000-8000-000000000032";
+  const secondGrantId = "00000000-0000-4000-8000-000000000033";
+  const reservedGrantId = "00000000-0000-4000-8000-000000000034";
+  const heldGrantId = "00000000-0000-4000-8000-000000000035";
+  const grants = [
+    {
+      id: firstGrantId,
+      amount: 40,
+      remainingTokens: 0,
+      expiresAt,
+      allocations: [{ grantId: firstGrantId, ordinal: 1, reservedTokens: 40, settledTokens: 40, releasedTokens: 0, reservation: { userId, grantId: firstGrantId, status: "settled" } }],
+    },
+    {
+      id: secondGrantId,
+      amount: 30,
+      remainingTokens: 20,
+      expiresAt,
+      // This is ordinal 2 of the same reservation: the legacy parent pointer
+      // remains firstGrantId, while this allocation owns secondGrantId.
+      allocations: [{ grantId: secondGrantId, ordinal: 2, reservedTokens: 30, settledTokens: 10, releasedTokens: 0, reservation: { userId, grantId: firstGrantId, status: "settled" } }],
+    },
+    {
+      id: reservedGrantId,
+      amount: 25,
+      remainingTokens: 15,
+      expiresAt,
+      allocations: [{ grantId: reservedGrantId, ordinal: 1, reservedTokens: 10, settledTokens: 0, releasedTokens: 0, reservation: { userId, grantId: reservedGrantId, status: "reserved" } }],
+    },
+    {
+      id: heldGrantId,
+      amount: 30,
+      remainingTokens: 0,
+      expiresAt,
+      allocations: [{ grantId: heldGrantId, ordinal: 1, reservedTokens: 30, settledTokens: 0, releasedTokens: 0, reservation: { userId, grantId: heldGrantId, status: "held" } }],
+    },
+  ];
+  const db = {
+    $queryRaw: async () => [{ now }],
+    platformTokenGrant: { findMany: async () => grants },
+    membershipSubscription: { findUnique: async () => null },
+    platformDefaultAiRoute: { findMany: async () => [] },
+  };
+
+  const summary = await getPlatformTokenSummary(userId, db as never, now);
+
+  assert.deepEqual(
+    {
+      totalCredits: summary.totalCredits,
+      availableCredits: summary.availableCredits,
+      usedCredits: summary.usedCredits,
+      reservedCredits: summary.reservedCredits,
+      heldCredits: summary.heldCredits,
+      nextExpiryAt: summary.nextExpiryAt,
+    },
+    { totalCredits: 125, availableCredits: 35, usedCredits: 50, reservedCredits: 10, heldCredits: 30, nextExpiryAt: expiresAt },
+  );
 });

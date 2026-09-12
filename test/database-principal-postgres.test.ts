@@ -17,7 +17,10 @@ import {
   reservePlatformTokens,
   settlePlatformTokenReservation,
 } from "../src/lib/ai-entitlements";
-import { DATABASE_PRINCIPAL_RELATIONS } from "../src/lib/database-principal-catalog";
+import {
+  DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX,
+  DATABASE_PRINCIPAL_RELATIONS,
+} from "../src/lib/database-principal-catalog";
 
 const execFile = promisify(execFileCallback);
 const shouldRun = process.env.DATABASE_PRINCIPAL_POSTGRES_GATE === "1";
@@ -101,6 +104,80 @@ async function dropRole(admin: Client, role: string): Promise<void> {
 
 async function expectPermissionDenied(action: () => Promise<unknown>): Promise<void> {
   await assert.rejects(action, (error: unknown) => ["42501", "55006"].includes(errorCode(error) ?? ""));
+}
+
+async function assertInvokerHelperAcls(admin: Client): Promise<void> {
+  const helperNames = [...new Set(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.map((helper) => helper.name))];
+  const expectedOids = new Set<string>();
+  const rows = await admin.query<{ oid: string; name: string }>(`
+    SELECT p.oid::text AS oid, p.proname AS name
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.prokind = 'f'
+       AND p.proname = ANY($1::text[])
+  `, [helperNames]);
+  assert.equal(rows.rows.length, DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.length);
+  for (const helper of DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX) {
+    const signature = `public.${quoteIdentifier(helper.name)}(${helper.identityArguments})`;
+    const result = await admin.query<{
+      oid: string;
+      identity_arguments: string;
+      runtime_execute: boolean;
+      runtime_direct: boolean;
+      writer_execute: boolean;
+      writer_direct: boolean;
+      public_execute: boolean;
+      owner: string | null;
+      prosecdef: boolean;
+    }>(`
+      SELECT p.oid::text AS oid,
+             pg_get_function_identity_arguments(p.oid) AS identity_arguments,
+             has_function_privilege($1, $3, 'EXECUTE') AS runtime_execute,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS runtime_direct,
+             has_function_privilege($2, $3, 'EXECUTE') AS writer_execute,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS writer_direct,
+             EXISTS (
+               SELECT 1
+                 FROM pg_proc acl_proc
+                 CROSS JOIN LATERAL aclexplode(COALESCE(acl_proc.proacl, acldefault('f', acl_proc.proowner))) privilege
+                WHERE acl_proc.oid = p.oid
+                  AND privilege.grantee = 0::oid
+                  AND privilege.privilege_type = 'EXECUTE'
+             ) AS public_execute,
+             pg_get_userbyid(p.proowner) AS owner,
+             p.prosecdef
+        FROM pg_proc p
+       WHERE p.oid = pg_catalog.to_regprocedure($3)
+    `, [runtimeRole, writerRole, signature]);
+    const row = result.rows[0];
+    assert.ok(row, `missing invoker helper ${signature}`);
+    expectedOids.add(row.oid);
+    assert.equal(row.owner, migratorRole, signature);
+    assert.equal(row.prosecdef, false, signature);
+    assert.equal(row.public_execute, false, signature);
+    assert.equal(row.runtime_execute, helper.runtime, signature);
+    assert.equal(row.runtime_direct, helper.runtime, signature);
+    assert.equal(row.writer_execute, helper.entitlementWriter, signature);
+    assert.equal(row.writer_direct, helper.entitlementWriter, signature);
+  }
+  assert.ok(rows.rows.every((row) => expectedOids.has(row.oid)));
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 41);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.entitlementWriter).length, 7);
 }
 
 async function runPrincipalBootstrap(
@@ -334,6 +411,7 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
     assert.deepEqual(currentOwnerAfterBootstrap.rows[0], { owner: migratorRole });
     await runMigrations(migratorPassword);
     await runProductionReconcile(runtimePassword, migratorPassword, writerPassword);
+    await assertInvokerHelperAcls(admin);
     // A rerun with the retained legacy URL must self-heal/verify through the
     // cluster-admin path after the sealed role has replaced the source OID.
     await runPrincipalBootstrap(runtimePassword, migratorPassword, writerPassword, roleUrl(legacyRole, legacyPassword));
@@ -655,6 +733,7 @@ test("production reconcile separates non-owner runtime from writer and preserves
     // the final migrator role is sufficient for owner/ACL reconciliation and
     // no longer depends on CREATEROLE.
     await runProductionReconcile(runtimePassword, migratorPassword, writerPassword);
+    await assertInvokerHelperAcls(admin);
 
     const relationRows = await admin.query<{ relname: string; owner: string; relkind: string }>(`
       SELECT c.relname, pg_get_userbyid(c.relowner) AS owner, c.relkind

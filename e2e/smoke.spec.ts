@@ -409,7 +409,7 @@ test("first-run administrator can reach protected pages with production security
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "管理员总览" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "管理工作台导航" })).toBeVisible();
-  await expect(page.getByText("平台 Token 总览", { exact: true })).toBeVisible();
+  await expect(page.getByText("平台额度总览", { exact: true })).toBeVisible();
   await expectNoAccessibilityViolations(page, "admin overview");
 
   await page.goto("/admin/connectors/mcp");

@@ -472,7 +472,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.doesNotMatch(userDocs, /迁移期间不启动新的外部仓库访问|个人连接开放后/u);
   assert.match(adminDocs, /管理工作台/u);
   assert.match(adminDocs, /管理员配置并验证平台托管模型，并为视觉、抽取、向量和生成能力维护默认路由/u);
-  assert.match(adminDocs, /普通用户不能配置个人模型，只能消费平台赠送额度；只有有效会员可以维护个人模型连接/u);
+  assert.match(adminDocs, /普通用户不能配置个人模型，只能消费平台额度；只有有效会员可以维护个人模型连接/u);
   assert.match(adminDocs, /`\/system\/memberships`[^。]*兼容跳转 `\/admin\/users\/memberships`/u);
   assert.match(adminDocs, /`\/system\/operations` 仅 initial super admin 可用[^。]*兼容跳转 `\/admin\/operations\/backups`/u);
   assert.match(adminDocs, /其他 system admin 按现有安全行为返回不可见页面/u);
@@ -483,7 +483,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(readme, /旧版项目 Git 连接、首次关联和同步入口已冻结/u);
   assert.match(readme, /进入项目仓库页查看已有安全摘要/u);
   assert.match(adminGuide, /管理员配置并验证平台托管模型，并为各项能力设置默认路由/u);
-  assert.match(adminGuide, /普通用户只能消费平台赠送额度，不能配置个人模型；有效会员才可维护自己的模型连接/u);
+  assert.match(adminGuide, /普通用户只能消费平台额度，不能配置个人模型；有效会员才可维护自己的模型连接/u);
   assert.match(readme, /\/admin\/models/u);
   assert.match(readme, /\/admin\/connectors\/git/u);
   assert.match(readme, /\/admin\/connectors\/mcp/u);

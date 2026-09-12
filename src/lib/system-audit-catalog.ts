@@ -17,6 +17,7 @@ export const SYSTEM_AUDIT_SOURCES = [
   "platformProviderProbe",
   "platformGrantOfferPolicy",
   "platformCreditGovernance",
+  "membershipApplication",
   "accountEntitlementActivation",
   "accountEntitlementBackfill",
 ] as const;
@@ -42,6 +43,7 @@ export const SYSTEM_AUDIT_SOURCE_LABELS: Readonly<Record<SystemAuditSource, stri
   platformProviderProbe: "平台连接探测",
   platformGrantOfferPolicy: "平台赠送策略",
   platformCreditGovernance: "平台额度治理",
+  membershipApplication: "会员申请",
   accountEntitlementActivation: "账号权益激活",
   accountEntitlementBackfill: "账号权益历史回填",
 };
@@ -115,6 +117,7 @@ export const SYSTEM_AUDIT_ACTIONS = [
   "settled",
   "released",
   "held",
+  "fulfilled",
 ] as const;
 
 export type SystemAuditAction = (typeof SYSTEM_AUDIT_ACTIONS)[number];
@@ -188,6 +191,7 @@ export const SYSTEM_AUDIT_ACTION_LABELS: Readonly<Record<SystemAuditAction, stri
   assetRecognize: "资产识别",
   intelligenceBrief: "项目简报",
   intelligenceAgent: "项目智能体",
+  fulfilled: "已完成",
 };
 
 export const SYSTEM_AUDIT_RESULTS = [
@@ -254,6 +258,7 @@ export const SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE: Readonly<Record<SystemAudit
   platformProviderProbe: ["reserved", "dispatched", "settled", "released", "held", "rejected"],
   platformGrantOfferPolicy: ["created", "activated", "retired"],
   platformCreditGovernance: ["grant", "revoke"],
+  membershipApplication: ["requested", "fulfilled", "rejected", "cancelled"],
   accountEntitlementActivation: ["created", "linked"],
   accountEntitlementBackfill: ["previewed", "confirmed", "executed", "stale", "expired", "failed"],
 };
@@ -277,6 +282,7 @@ export const SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE: Readonly<Record<SystemAudit
   platformProviderProbe: ["applied", "pending", "rejected", "unknown"],
   platformGrantOfferPolicy: ["applied", "pending", "revoked"],
   platformCreditGovernance: ["applied", "revoked"],
+  membershipApplication: ["pending", "applied", "rejected", "cancelled"],
   accountEntitlementActivation: ["applied", "rejected"],
   accountEntitlementBackfill: ["pending", "applied", "rejected", "expired", "failed"],
 };

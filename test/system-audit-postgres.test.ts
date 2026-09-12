@@ -55,6 +55,8 @@ const expectedEnums: Readonly<Record<string, readonly string[]>> = {
   PlatformProviderProbeLedgerEvent: ["rejected", "reserved", "dispatched", "settled", "released", "held"],
   PlatformProviderProbeCapability: ["generation", "embedding", "vision"],
   PlatformGrantOfferPolicyAuditAction: ["created", "activated", "retired"],
+  WorkspaceRoleMutationAction: ["role_change"],
+  WorkspaceRoleMutationAuditEvent: ["role_changed"],
 };
 
 function assertLocalDatabaseUrl(value: string | undefined): string {
@@ -110,7 +112,7 @@ test(
     const page = await listSystemAudit({ pageSize: 50 }, database, new Date());
     assert.equal(page.pageSize, 50);
     assert.ok(page.events.every((event) => SYSTEM_AUDIT_SOURCES.includes(event.source)));
-    assert.equal(SYSTEM_AUDIT_SOURCES.length, 21);
+    assert.equal(SYSTEM_AUDIT_SOURCES.length, 22);
     assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
     assertSafePublicProjection(page);
 
@@ -161,11 +163,15 @@ test(
       where: { action: "created" },
       select: { id: true },
     })).id;
-    await database.workspace.create({
-      data: { id: workspaceId, name: `System audit ${suffix}`, slug: `system-audit-${suffix}` },
-    });
-    await database.project.create({
-      data: { id: projectId, workspaceId, name: `System audit ${suffix}`, slug: `system-audit-${suffix}-project` },
+    await database.$transaction(async (tx) => {
+      await tx.workspace.create({
+        data: { id: workspaceId, name: `System audit ${suffix}`, slug: `system-audit-${suffix}`, createdById: userId },
+      });
+      await tx.project.create({
+        data: { id: projectId, workspaceId, name: `System audit ${suffix}`, slug: `system-audit-${suffix}-project` },
+      });
+      await grantWorkspaceMembership(tx, { workspaceId, userId, role: "owner", actorId: userId, reason: "system_audit_gate_workspace_owner" });
+      await grantProjectMembership(tx, { projectId, workspaceId, userId, role: "owner", actorId: userId, reason: "system_audit_gate_project_owner" });
     });
     await database.projectAiPolicyRevision.create({
       data: {
@@ -253,11 +259,6 @@ test(
     const manualClientRequestKey = randomUUID();
 
     try {
-      await database.$transaction(async (tx) => {
-        await grantWorkspaceMembership(tx, { workspaceId, userId, role: "owner", actorId: userId, reason: "system_audit_gate_workspace_owner" });
-        await grantProjectMembership(tx, { projectId, workspaceId, userId, role: "owner", actorId: userId, reason: "system_audit_gate_project_owner" });
-      });
-
       await database.externalCredential.create({
         data: {
           id: snapshotCredentialId,
@@ -350,7 +351,7 @@ test(
         requestKey: randomUUID(),
       }, projectOwnerActor, database);
       if (acceptedInvitation.token === null) throw new Error("SYSTEM_AUDIT_INVITATION_TOKEN_MISSING");
-      await acceptWorkspaceInvitation(acceptedInvitation.token, { id: acceptedInviteeId }, "/dashboard", database);
+      await acceptWorkspaceInvitation(acceptedInvitation.token, { id: acceptedInviteeId, accountAccessVersion: 1 }, "/dashboard", database);
       const revokedInvitation = await createWorkspaceInvitation(workspaceId, {
         email: `system-audit-revoked-${suffix}@example.com`,
         workspaceRole: "member",

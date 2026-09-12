@@ -377,9 +377,10 @@ test("membership lifecycle is preview-confirmed, idempotent, CAS protected, and 
     // blockers.  The gate resolves them through the delegation API before
     // retrying membership revoke, proving that the membership service never
     // silently cleans or switches personal configuration.
-    await db.workspace.create({ data: { id: dependencyWorkspaceId, name: `Membership lifecycle ${suffix}`, slug: `membership-lifecycle-${suffix}`, createdById: targetId } });
-    await db.project.create({ data: { id: dependencyProjectId, workspaceId: dependencyWorkspaceId, name: `Membership dependency ${suffix}`, slug: `membership-dependency-${suffix}` } });
     await db.$transaction(async (tx) => {
+      await tx.workspace.create({ data: { id: dependencyWorkspaceId, name: `Membership lifecycle ${suffix}`, slug: `membership-lifecycle-${suffix}`, createdById: targetId } });
+      await tx.project.create({ data: { id: dependencyProjectId, workspaceId: dependencyWorkspaceId, name: `Membership dependency ${suffix}`, slug: `membership-dependency-${suffix}` } });
+      await grantWorkspaceMembership(tx, { workspaceId: dependencyWorkspaceId, userId: secondAdminId, role: "owner", actorId: adminId, reason: "membership_lifecycle_gate_workspace_owner" });
       await grantWorkspaceMembership(tx, { workspaceId: dependencyWorkspaceId, userId: targetId, role: "member", actorId: adminId, reason: "membership_lifecycle_gate_workspace" });
       await grantProjectMembership(tx, { projectId: dependencyProjectId, workspaceId: dependencyWorkspaceId, userId: targetId, role: "owner", actorId: adminId, reason: "membership_lifecycle_gate_project" });
     });

@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
 import { getDb } from "../src/lib/db";
+import { grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { acquireUploadAdmission, releaseUploadAdmission, UploadAdmissionError } from "../src/lib/project-assets/admission";
 import { assetBlobStorageKey, assetContentHash, removeAssetBlob, writeAssetBlob } from "../src/lib/project-assets/storage";
 import {
@@ -23,6 +24,23 @@ import {
 } from "../src/lib/project-assets/service";
 
 const shouldRun = process.env.PROJECT_ASSET_UPLOAD_POSTGRES_GATE === "1";
+
+async function createWorkspaceWithOwner(
+  db: ReturnType<typeof getDb>,
+  data: { id?: string; name: string; slug: string; createdById: string },
+) {
+  return db.$transaction(async (tx) => {
+    const workspace = await tx.workspace.create({ data });
+    await grantWorkspaceMembership(tx, {
+      workspaceId: workspace.id,
+      userId: data.createdById,
+      role: "owner",
+      actorId: data.createdById,
+      reason: "project_asset_upload_gate_workspace_owner",
+    });
+    return workspace;
+  });
+}
 
 async function filesUnder(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -42,7 +60,7 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const user = await db.appUser.create({ data: { username: `upload_gate_${suffix}` } });
-    const workspace = await db.workspace.create({ data: { name: `Upload gate ${suffix}`, slug: `upload-gate-${suffix}`, createdById: user.id } });
+    const workspace = await createWorkspaceWithOwner(db, { name: `Upload gate ${suffix}`, slug: `upload-gate-${suffix}`, createdById: user.id });
     const project = await db.project.create({ data: { name: `Upload gate ${suffix}`, slug: `upload-project-${suffix}`, workspaceId: workspace.id } });
     const previousRate = process.env.AI_PROJECT_OS_UPLOAD_MAX_UPLOADS_PER_MINUTE;
     const previousConcurrent = process.env.AI_PROJECT_OS_UPLOAD_MAX_CONCURRENT;
@@ -88,7 +106,7 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const user = await db.appUser.create({ data: { username: `quota_gate_${suffix}` } });
-    const workspace = await db.workspace.create({ data: { name: `Quota gate ${suffix}`, slug: `quota-gate-${suffix}`, createdById: user.id } });
+    const workspace = await createWorkspaceWithOwner(db, { name: `Quota gate ${suffix}`, slug: `quota-gate-${suffix}`, createdById: user.id });
     const project = await db.project.create({ data: { name: `Quota gate ${suffix}`, slug: `quota-project-${suffix}`, workspaceId: workspace.id } });
     const assetRoot = await mkdtemp(path.join(os.tmpdir(), `ai-project-os-upload-quota-${suffix}-`));
     const previousRoot = process.env.AI_PROJECT_OS_ASSET_DIR;
@@ -147,7 +165,7 @@ test(
       db.appUser.create({ data: { username: `global_upload_a_${suffix}` } }),
       db.appUser.create({ data: { username: `global_upload_b_${suffix}` } }),
     ]);
-    const workspace = await db.workspace.create({ data: { name: `Global upload ${suffix}`, slug: `global-upload-${suffix}`, createdById: users[0]!.id } });
+    const workspace = await createWorkspaceWithOwner(db, { name: `Global upload ${suffix}`, slug: `global-upload-${suffix}`, createdById: users[0]!.id });
     const project = await db.project.create({ data: { name: `Global upload ${suffix}`, slug: `global-upload-project-${suffix}`, workspaceId: workspace.id } });
     const previousUserConcurrent = process.env.AI_PROJECT_OS_UPLOAD_MAX_CONCURRENT;
     const previousGlobalConcurrent = process.env.AI_PROJECT_OS_UPLOAD_MAX_GLOBAL_CONCURRENT;
@@ -184,7 +202,7 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const user = await db.appUser.create({ data: { username: `retained_gate_${suffix}` } });
-    const workspace = await db.workspace.create({ data: { name: `Retained gate ${suffix}`, slug: `retained-gate-${suffix}`, createdById: user.id } });
+    const workspace = await createWorkspaceWithOwner(db, { name: `Retained gate ${suffix}`, slug: `retained-gate-${suffix}`, createdById: user.id });
     const project = await db.project.create({ data: { name: `Retained gate ${suffix}`, slug: `retained-project-${suffix}`, workspaceId: workspace.id } });
     const assetRoot = await mkdtemp(path.join(os.tmpdir(), `ai-project-os-retained-${suffix}-`));
     const previous = {
@@ -248,7 +266,7 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const user = await db.appUser.create({ data: { username: `parse_queue_${suffix}` } });
-    const workspace = await db.workspace.create({ data: { name: `Parse queue ${suffix}`, slug: `parse-queue-${suffix}`, createdById: user.id } });
+    const workspace = await createWorkspaceWithOwner(db, { name: `Parse queue ${suffix}`, slug: `parse-queue-${suffix}`, createdById: user.id });
     const project = await db.project.create({ data: { name: `Parse queue ${suffix}`, slug: `parse-queue-project-${suffix}`, workspaceId: workspace.id } });
     const assetRoot = await mkdtemp(path.join(os.tmpdir(), `ai-project-os-parse-queue-${suffix}-`));
     const previousRoot = process.env.AI_PROJECT_OS_ASSET_DIR;
@@ -348,7 +366,7 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const user = await db.appUser.create({ data: { username: `reservation_gate_${suffix}` } });
-    const workspace = await db.workspace.create({ data: { name: `Reservation gate ${suffix}`, slug: `reservation-gate-${suffix}`, createdById: user.id } });
+    const workspace = await createWorkspaceWithOwner(db, { name: `Reservation gate ${suffix}`, slug: `reservation-gate-${suffix}`, createdById: user.id });
     const project = await db.project.create({ data: { name: `Reservation gate ${suffix}`, slug: `reservation-project-${suffix}`, workspaceId: workspace.id } });
     const assetRoot = await mkdtemp(path.join(os.tmpdir(), `ai-project-os-upload-reservation-${suffix}-`));
     const previousRoot = process.env.AI_PROJECT_OS_ASSET_DIR;
@@ -395,7 +413,7 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const user = await db.appUser.create({ data: { username: `reservation_fk_${suffix}` } });
-    const workspace = await db.workspace.create({ data: { name: `Reservation FK ${suffix}`, slug: `reservation-fk-${suffix}`, createdById: user.id } });
+    const workspace = await createWorkspaceWithOwner(db, { name: `Reservation FK ${suffix}`, slug: `reservation-fk-${suffix}`, createdById: user.id });
     const project = await db.project.create({ data: { name: `Reservation FK ${suffix}`, slug: `reservation-fk-project-${suffix}`, workspaceId: workspace.id } });
     const reservationId = randomUUID();
     try {
@@ -427,7 +445,7 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const user = await db.appUser.create({ data: { username: `stale_reservation_${suffix}` } });
-    const workspace = await db.workspace.create({ data: { name: `Stale reservation ${suffix}`, slug: `stale-reservation-${suffix}`, createdById: user.id } });
+    const workspace = await createWorkspaceWithOwner(db, { name: `Stale reservation ${suffix}`, slug: `stale-reservation-${suffix}`, createdById: user.id });
     const project = await db.project.create({ data: { name: `Stale reservation ${suffix}`, slug: `stale-project-${suffix}`, workspaceId: workspace.id } });
     const assetRoot = await mkdtemp(path.join(os.tmpdir(), `ai-project-os-upload-stale-${suffix}-`));
     const previousRoot = process.env.AI_PROJECT_OS_ASSET_DIR;
@@ -463,7 +481,7 @@ test(
     const suffix = randomUUID().slice(0, 8);
     const inactiveUser = await db.appUser.create({ data: { username: `inactive_upload_${suffix}` } });
     const activeUser = await db.appUser.create({ data: { username: `active_upload_${suffix}` } });
-    const workspace = await db.workspace.create({ data: { name: `Admission cleanup ${suffix}`, slug: `admission-cleanup-${suffix}`, createdById: activeUser.id } });
+    const workspace = await createWorkspaceWithOwner(db, { name: `Admission cleanup ${suffix}`, slug: `admission-cleanup-${suffix}`, createdById: activeUser.id });
     const project = await db.project.create({ data: { name: `Admission cleanup ${suffix}`, slug: `admission-cleanup-project-${suffix}`, workspaceId: workspace.id } });
     const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const recent = new Date(Date.now() - 2 * 60 * 1000);

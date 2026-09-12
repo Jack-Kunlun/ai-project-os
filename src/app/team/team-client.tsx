@@ -68,21 +68,128 @@ function MembersView({ workspaceId, members, projects, onReload }: { workspaceId
 }
 
 function MemberForm({ workspaceId, projects, onReload }: { workspaceId: string; projects: Project[]; onReload: () => Promise<void> }) {
-  const [username, setUsername] = useState(""); const [password, setPassword] = useState(""); const [displayName, setDisplayName] = useState(""); const [email, setEmail] = useState(""); const [role, setRole] = useState<"admin" | "member" | "viewer">("member"); const [projectId, setProjectId] = useState(""); const [projectRole, setProjectRole] = useState<ProjectRole>("editor"); const [pending, setPending] = useState(false); const [message, setMessage] = useState<string | null>(null);
+  const [username, setUsername] = useState(""); const [password, setPassword] = useState(""); const [displayName, setDisplayName] = useState(""); const [email, setEmail] = useState(""); const [role, setRole] = useState<"member" | "viewer">("member"); const [projectId, setProjectId] = useState(""); const [projectRole, setProjectRole] = useState<"editor" | "viewer">("editor"); const [pending, setPending] = useState(false); const [message, setMessage] = useState<string | null>(null);
   async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setPending(true); setMessage(null); try { const response = await fetch(`/api/workspaces/${workspaceId}/members`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password, displayName: displayName || null, email: email || null, workspaceRole: role, projectGrants: projectId ? [{ projectId, role: projectRole }] : [] }) }); if (!response.ok) throw new Error(await responseError(response, "成员创建失败")); setUsername(""); setPassword(""); setDisplayName(""); setEmail(""); setProjectId(""); setMessage("本地成员已创建，密码请通过安全渠道单独告知。"); await onReload(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "成员创建失败"); } finally { setPending(false); } }
-  return <form onSubmit={submit} autoComplete="off" className="h-fit rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Local account</p><h2 className="mt-2 text-2xl font-semibold">添加本地成员</h2><Input label="登录名" name="new-member-username" autoComplete="off" value={username} onChange={setUsername} required /><Input label="显示名称" name="new-member-display-name" autoComplete="off" value={displayName} onChange={setDisplayName} /><Input label="邮箱（用于邀请校验；OIDC 身份需单独绑定）" name="new-member-email" autoComplete="off" value={email} onChange={setEmail} type="email" /><Input label="初始密码（至少 12 位，含字母和数字）" name="new-member-password" autoComplete="new-password" value={password} onChange={setPassword} type="password" required /><Select label="工作区角色" value={role} onChange={(value) => setRole(value as typeof role)} options={[['admin','Admin：管理成员和所有项目'],['member','Member：仅访问授权项目'],['viewer','Viewer：仅访问授权项目']]} /><Select label="初始项目（可选）" value={projectId} onChange={setProjectId} options={[["","暂不授权项目"], ...projects.map((project) => [project.id, project.name])]} />{projectId ? <Select label="项目角色" value={projectRole} onChange={(value) => setProjectRole(value as ProjectRole)} options={[['owner','Owner'],['editor','Editor'],['viewer','Viewer']]} /> : null}{message ? <p role="status" className="mt-4 text-xs text-slate-600">{message}</p> : null}<button disabled={pending} className="mt-6 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? "创建中…" : "创建成员"}</button></form>;
+  return <form onSubmit={submit} autoComplete="off" className="h-fit rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Local account</p><h2 className="mt-2 text-2xl font-semibold">添加本地成员</h2><Input label="登录名" name="new-member-username" autoComplete="off" value={username} onChange={setUsername} required /><Input label="显示名称" name="new-member-display-name" autoComplete="off" value={displayName} onChange={setDisplayName} /><Input label="邮箱（用于邀请校验；OIDC 身份需单独绑定）" name="new-member-email" autoComplete="off" value={email} onChange={setEmail} type="email" /><Input label="初始密码（至少 12 位，含字母和数字）" name="new-member-password" autoComplete="new-password" value={password} onChange={setPassword} type="password" required /><Select label="工作区角色" value={role} onChange={(value) => setRole(value as typeof role)} options={[['member','Member：仅访问授权项目'],['viewer','Viewer：仅访问授权项目']]} /><Select label="初始项目（可选）" value={projectId} onChange={setProjectId} options={[["","暂不授权项目"], ...projects.map((project) => [project.id, project.name])]} />{projectId ? <Select label="项目角色" value={projectRole} onChange={(value) => setProjectRole(value as "editor" | "viewer")} options={[['editor','Editor'],['viewer','Viewer']]} /> : null}{message ? <p role="status" className="mt-4 text-xs text-slate-600">{message}</p> : null}<button disabled={pending} className="mt-6 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? "创建中…" : "创建成员"}</button></form>;
 }
 
 function MemberCard({ workspaceId, member, onReload }: { workspaceId: string; member: Member; onReload: () => Promise<void> }) {
-  const [pending, setPending] = useState(false); const [message, setMessage] = useState<string | null>(null);
-  async function patch(body: unknown) { setPending(true); setMessage(null); try { const response = await fetch(`/api/workspaces/${workspaceId}/members/${member.userId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); if (!response.ok) throw new Error(await responseError(response, "成员更新失败")); await onReload(); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "成员更新失败"); } finally { setPending(false); } }
-  return <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{member.user.displayName || member.user.username}</h3><span className="rounded-full bg-violet-50 px-2.5 py-1 text-[12px] font-semibold text-violet-700">{member.role}</span><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${member.accessState === "confirmed" ? "bg-emerald-50 text-emerald-700" : member.accessState === "pending" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{member.accessState === "confirmed" ? "已确认" : member.accessState === "pending" ? "待审核" : "已撤销"}</span>{member.user.disabledAt ? <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[12px] font-semibold text-rose-700">全局已停用</span> : null}</div><p className="mt-2 text-xs text-slate-500">@{member.user.username}{member.user.email ? ` · ${member.user.email}` : ""}</p><p className="mt-2 text-xs text-slate-400">{member.projectGrants.length > 0 ? `${member.projectGrants.length} 个项目授权` : "无单独项目授权"}{member.user.oidcIdentities.length > 0 ? ` · 已关联 ${member.user.oidcIdentities.map((identity) => identity.provider.name).join("、")}` : " · 本地账号"}</p></div><div className="flex gap-2"><select value={member.role} onChange={(event) => void patch({ workspaceRole: event.target.value })} disabled={pending || member.accessState !== "confirmed"} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold"><option value="owner">Owner</option><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select></div></div>{message ? <p className="mt-3 text-xs text-rose-600">{message}</p> : null}</article>;
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [targetRole, setTargetRole] = useState<WorkspaceRole>(member.role);
+  const [reason, setReason] = useState("");
+  const [confirmationUsername, setConfirmationUsername] = useState("");
+  const [preview, setPreview] = useState<Readonly<{
+    previewId: string;
+    current: { role: WorkspaceRole; membershipId: string };
+    target: { role: WorkspaceRole; ownerCount: number; projectGrantCount: number; permissionReduction: boolean };
+    ownerCount: number;
+    ownerCountAfter: number;
+    projectGrantCount: number;
+    projectGrantFingerprint: string;
+    membershipFingerprint: string;
+    requestFingerprint: string;
+    impactFingerprint: string;
+    requestKey: string;
+    issuedAt: string;
+    expiresAt: string;
+  }> | null>(null);
+  const requestRef = useRef<{ fingerprint: string; key: string } | null>(null);
+
+  function changeRole(role: WorkspaceRole) {
+    setTargetRole(role);
+    setPreview(null);
+    setConfirmationUsername("");
+    setMessage(null);
+  }
+
+  function changeReason(value: string) {
+    setReason(value);
+    setPreview(null);
+    setConfirmationUsername("");
+  }
+
+  async function createPreview() {
+    if (targetRole === member.role) {
+      setMessage("请选择与当前角色不同的目标角色。");
+      return;
+    }
+    if (reason.trim().length === 0) {
+      setMessage("角色变更必须填写独立原因。");
+      return;
+    }
+    const fingerprint = JSON.stringify([member.userId, targetRole, reason.trim()]);
+    if (requestRef.current === null || requestRef.current.fingerprint !== fingerprint) {
+      requestRef.current = { fingerprint, key: globalThis.crypto.randomUUID() };
+    }
+    setPending(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/members/${member.userId}/role/preview`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ targetRole, reason: reason.trim(), requestKey: requestRef.current.key }),
+      });
+      if (!response.ok) throw new Error(await responseError(response, "角色变更预览失败"));
+      const payload = await response.json() as { preview: typeof preview };
+      setPreview(payload.preview);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "角色变更预览失败");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function executePreview() {
+    if (preview === null || confirmationUsername !== member.user.username) {
+      setMessage("请输入目标用户名以确认执行。");
+      return;
+    }
+    setPending(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/workspaces/${workspaceId}/members/${member.userId}/role/execute`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          previewId: preview.previewId,
+          currentRole: preview.current.role,
+          targetRole: preview.target.role,
+          reason: reason.trim(),
+          requestKey: preview.requestKey,
+          requestFingerprint: preview.requestFingerprint,
+          expectedImpactFingerprint: preview.impactFingerprint,
+          expectedOwnerCount: preview.ownerCount,
+          expectedProjectGrantCount: preview.projectGrantCount,
+          expectedProjectGrantFingerprint: preview.projectGrantFingerprint,
+          expectedMembershipFingerprint: preview.membershipFingerprint,
+          previewIssuedAt: preview.issuedAt,
+          previewExpiresAt: preview.expiresAt,
+          confirmation: true,
+          confirmationUsername,
+        }),
+      });
+      if (!response.ok) throw new Error(await responseError(response, "角色变更执行失败"));
+      setPreview(null);
+      setReason("");
+      setConfirmationUsername("");
+      setTargetRole(member.role);
+      requestRef.current = null;
+      await onReload();
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "角色变更执行失败");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2"><h3 className="text-lg font-semibold">{member.user.displayName || member.user.username}</h3><span className="rounded-full bg-violet-50 px-2.5 py-1 text-[12px] font-semibold text-violet-700">{member.role}</span><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${member.accessState === "confirmed" ? "bg-emerald-50 text-emerald-700" : member.accessState === "pending" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{member.accessState === "confirmed" ? "已确认" : member.accessState === "pending" ? "待审核" : "已撤销"}</span>{member.user.disabledAt ? <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[12px] font-semibold text-rose-700">全局已停用</span> : null}</div><p className="mt-2 text-xs text-slate-500">@{member.user.username}{member.user.email ? ` · ${member.user.email}` : ""}</p><p className="mt-2 text-xs text-slate-400">{member.projectGrants.length > 0 ? `${member.projectGrants.length} 个项目授权` : "无单独项目授权"}{member.user.oidcIdentities.length > 0 ? ` · 已关联 ${member.user.oidcIdentities.map((identity) => identity.provider.name).join("、")}` : " · 本地账号"}</p></div><div className="flex gap-2"><select value={targetRole} onChange={(event) => changeRole(event.target.value as WorkspaceRole)} disabled={pending || member.accessState !== "confirmed"} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold"><option value="owner">Owner</option><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select></div></div>{targetRole !== member.role ? <div className="mt-4 rounded-2xl bg-slate-50 p-4"><label className="block text-xs font-semibold text-slate-600">变更原因（必填）<textarea value={reason} onChange={(event) => changeReason(event.target.value)} maxLength={500} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" rows={3} /></label><button type="button" onClick={() => void createPreview()} disabled={pending} className="mt-3 rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">{pending ? "生成中…" : "生成角色变更预览"}</button></div> : null}{preview ? <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4"><p className="text-xs font-semibold text-violet-900">{preview.current.role} → {preview.target.role} · Owner 数量 {preview.ownerCount} → {preview.ownerCountAfter}</p><p className="mt-1 text-xs text-violet-800">当前项目授权 {preview.projectGrantCount} 项{preview.target.permissionReduction ? "；权限将下降" : ""}</p><p className="mt-1 text-xs text-violet-700">预览有效至 {new Date(preview.expiresAt).toLocaleTimeString("zh-CN")}</p><label className="mt-3 block text-xs font-semibold text-violet-900">输入 @{member.user.username} 确认<input value={confirmationUsername} onChange={(event) => setConfirmationUsername(event.target.value)} className="mt-2 w-full rounded-xl border border-violet-200 bg-white px-3 py-2 text-sm" /></label><button type="button" onClick={() => void executePreview()} disabled={pending || confirmationUsername !== member.user.username} className="mt-3 rounded-xl bg-violet-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">{pending ? "执行中…" : "确认并执行"}</button></div> : null}{message ? <p className="mt-3 text-xs text-rose-600">{message}</p> : null}</article>;
 }
 
 function InvitationsGovernanceView({ workspaceId, invitations, projects, onReload }: { workspaceId: string; invitations: Invitation[]; projects: Project[]; onReload: () => Promise<void> }) {
   const { confirm, dialog } = useAppConfirmDialog();
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"member" | "viewer" | "admin">("member");
+  const [role, setRole] = useState<"member" | "viewer">("member");
   const [projectId, setProjectId] = useState("");
   const [link, setLink] = useState<string | null>(null);
  const [message, setMessage] = useState<string | null>(null);
@@ -144,7 +251,7 @@ function InvitationsGovernanceView({ workspaceId, invitations, projects, onReloa
     finally { setPendingRevokeId(null); }
   }
 
-  return <>{dialog}<div className="grid gap-7 xl:grid-cols-[.72fr_1.28fr]"><form onSubmit={(event) => void create(event)} className="h-fit rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Invitation</p><h2 className="mt-2 text-2xl font-semibold">创建邀请链接</h2><p className="mt-3 text-sm leading-6 text-slate-500">邀请必须绑定到邮箱。工作区 Admin/项目 Owner 是工作区权限，与系统管理员和会员资格无关。</p><Input label="邮箱（必填）" value={email} onChange={setEmail} type="email" required /><Select label="工作区角色" value={role} onChange={(value) => setRole(value as typeof role)} options={[['member','Member'],['viewer','Viewer'],['admin','Admin']]} /><Select label="同时授权项目（可选）" value={projectId} onChange={setProjectId} options={[["","无"], ...projects.map((project) => [project.id, project.name])]} /><button disabled={pending} className="mt-6 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? "创建中…" : "生成 7 天邀请"}</button>{link ? <div className="mt-4 rounded-xl bg-slate-50 p-3"><code className="break-all text-xs text-slate-600">{link}</code><button type="button" onClick={() => void navigator.clipboard.writeText(link)} className="mt-3 block text-xs font-semibold text-indigo-600">复制链接</button></div> : null}{message ? <p role="status" className="mt-3 text-xs text-slate-600">{message}</p> : null}</form><section><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Invitation lifecycle</p><h2 className="mt-2 text-2xl font-semibold">邀请记录</h2></div><span className="text-xs text-slate-400">{invitations.length} 条</span></div><div className="mt-4 space-y-3">{invitations.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-500">还没有邀请记录。</div> : invitations.map((invitation) => { const invitationStatus = status(invitation); return <div key={invitation.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap justify-between gap-4"><div><p className="font-semibold">{invitation.email ?? "历史未绑定邮箱邀请"}</p><p className="mt-1 text-xs text-slate-500">工作区 {invitation.workspaceRole}{invitation.project ? ` · 项目 ${invitation.project.name} / ${invitation.projectRole}` : ""}</p><p className="mt-1 text-xs text-slate-400">创建者 @{invitation.invitedBy.username} · 版本 {invitation.version}</p></div><div className="flex items-start gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${invitationStatus === "pending" ? "bg-amber-50 text-amber-700" : invitationStatus === "accepted" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{invitationStatus === "pending" ? "待使用" : invitationStatus === "accepted" ? "已接受" : invitationStatus === "revoked" ? "已撤销" : "已过期"}</span>{invitationStatus === "pending" ? <button type="button" onClick={() => void revoke(invitation)} disabled={pendingRevokeId !== null} className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">{pendingRevokeId === invitation.id ? "处理中…" : "撤销"}</button> : null}</div></div><p className="mt-3 text-xs text-slate-400">{new Date(invitation.expiresAt).toLocaleDateString("zh-CN")} 到期</p></div>; })}</div></section></div></>;
+  return <>{dialog}<div className="grid gap-7 xl:grid-cols-[.72fr_1.28fr]"><form onSubmit={(event) => void create(event)} className="h-fit rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Invitation</p><h2 className="mt-2 text-2xl font-semibold">创建邀请链接</h2><p className="mt-3 text-sm leading-6 text-slate-500">邀请必须绑定到邮箱。新邀请仅支持工作区 Member/Viewer，以及项目 Editor/Viewer；Owner/Admin 变更需走治理流程。</p><Input label="邮箱（必填）" value={email} onChange={setEmail} type="email" required /><Select label="工作区角色" value={role} onChange={(value) => setRole(value as typeof role)} options={[['member','Member'],['viewer','Viewer']]} /><Select label="同时授权项目（可选）" value={projectId} onChange={setProjectId} options={[["","无"], ...projects.map((project) => [project.id, project.name])]} /><button disabled={pending} className="mt-6 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50">{pending ? "创建中…" : "生成 7 天邀请"}</button>{link ? <div className="mt-4 rounded-xl bg-slate-50 p-3"><code className="break-all text-xs text-slate-600">{link}</code><button type="button" onClick={() => void navigator.clipboard.writeText(link)} className="mt-3 block text-xs font-semibold text-indigo-600">复制链接</button></div> : null}{message ? <p role="status" className="mt-3 text-xs text-slate-600">{message}</p> : null}</form><section><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Invitation lifecycle</p><h2 className="mt-2 text-2xl font-semibold">邀请记录</h2></div><span className="text-xs text-slate-400">{invitations.length} 条</span></div><div className="mt-4 space-y-3">{invitations.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-500">还没有邀请记录。</div> : invitations.map((invitation) => { const invitationStatus = status(invitation); return <div key={invitation.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap justify-between gap-4"><div><p className="font-semibold">{invitation.email ?? "历史未绑定邮箱邀请"}</p><p className="mt-1 text-xs text-slate-500">工作区 {invitation.workspaceRole}{invitation.project ? ` · 项目 ${invitation.project.name} / ${invitation.projectRole}` : ""}</p><p className="mt-1 text-xs text-slate-400">创建者 @{invitation.invitedBy.username} · 版本 {invitation.version}</p></div><div className="flex items-start gap-3"><span className={`rounded-full px-3 py-1 text-xs font-semibold ${invitationStatus === "pending" ? "bg-amber-50 text-amber-700" : invitationStatus === "accepted" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{invitationStatus === "pending" ? "待使用" : invitationStatus === "accepted" ? "已接受" : invitationStatus === "revoked" ? "已撤销" : "已过期"}</span>{invitationStatus === "pending" ? <button type="button" onClick={() => void revoke(invitation)} disabled={pendingRevokeId !== null} className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">{pendingRevokeId === invitation.id ? "处理中…" : "撤销"}</button> : null}</div></div><p className="mt-3 text-xs text-slate-400">{new Date(invitation.expiresAt).toLocaleDateString("zh-CN")} 到期</p></div>; })}</div></section></div></>;
 }
 
 function OidcView({ workspaceId, providers, onReload }: { workspaceId: string; providers: OidcProvider[]; onReload: () => Promise<void> }) {

@@ -51,9 +51,9 @@ test("project plan persists governed objectives, work items, dependencies and au
     { id: viewerId, username: `plan_viewer_${suffix}`, role: "user" },
     { id: outsiderId, username: `plan_outsider_${suffix}`, role: "user" },
   ] });
-  await db.workspace.create({ data: { id: workspaceId, name: `Plan ${suffix}`, slug: `plan-${suffix}`, createdById: adminId } });
-  await db.project.create({ data: { id: projectId, workspaceId, name: `Plan project ${suffix}`, slug: `plan-project-${suffix}` } });
   await db.$transaction(async (tx) => {
+    await tx.workspace.create({ data: { id: workspaceId, name: `Plan ${suffix}`, slug: `plan-${suffix}`, createdById: adminId } });
+    await tx.project.create({ data: { id: projectId, workspaceId, name: `Plan project ${suffix}`, slug: `plan-project-${suffix}` } });
     await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "project_plan_gate_fixture_workspace" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "project_plan_gate_fixture_admin_owner" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "owner", actorId: adminId, reason: "project_plan_gate_fixture_owner" });

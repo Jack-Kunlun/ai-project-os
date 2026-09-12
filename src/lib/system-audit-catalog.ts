@@ -17,6 +17,7 @@ export const SYSTEM_AUDIT_SOURCES = [
   "platformProviderProbe",
   "platformGrantOfferPolicy",
   "platformCreditGovernance",
+  "workspaceRoleMutation",
   "membershipApplication",
   "accountEntitlementActivation",
   "accountEntitlementBackfill",
@@ -43,6 +44,7 @@ export const SYSTEM_AUDIT_SOURCE_LABELS: Readonly<Record<SystemAuditSource, stri
   platformProviderProbe: "平台连接探测",
   platformGrantOfferPolicy: "平台赠送策略",
   platformCreditGovernance: "平台额度治理",
+  workspaceRoleMutation: "工作区角色治理",
   membershipApplication: "会员申请",
   accountEntitlementActivation: "账号权益激活",
   accountEntitlementBackfill: "账号权益历史回填",
@@ -118,6 +120,7 @@ export const SYSTEM_AUDIT_ACTIONS = [
   "released",
   "held",
   "fulfilled",
+  "roleChanged",
 ] as const;
 
 export type SystemAuditAction = (typeof SYSTEM_AUDIT_ACTIONS)[number];
@@ -192,6 +195,7 @@ export const SYSTEM_AUDIT_ACTION_LABELS: Readonly<Record<SystemAuditAction, stri
   intelligenceBrief: "项目简报",
   intelligenceAgent: "项目智能体",
   fulfilled: "已完成",
+  roleChanged: "角色已变更",
 };
 
 export const SYSTEM_AUDIT_RESULTS = [
@@ -258,6 +262,7 @@ export const SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE: Readonly<Record<SystemAudit
   platformProviderProbe: ["reserved", "dispatched", "settled", "released", "held", "rejected"],
   platformGrantOfferPolicy: ["created", "activated", "retired"],
   platformCreditGovernance: ["grant", "revoke"],
+  workspaceRoleMutation: ["roleChanged"],
   membershipApplication: ["requested", "fulfilled", "rejected", "cancelled"],
   accountEntitlementActivation: ["created", "linked"],
   accountEntitlementBackfill: ["previewed", "confirmed", "executed", "stale", "expired", "failed"],
@@ -282,6 +287,7 @@ export const SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE: Readonly<Record<SystemAudit
   platformProviderProbe: ["applied", "pending", "rejected", "unknown"],
   platformGrantOfferPolicy: ["applied", "pending", "revoked"],
   platformCreditGovernance: ["applied", "revoked"],
+  workspaceRoleMutation: ["applied"],
   membershipApplication: ["pending", "applied", "rejected", "cancelled"],
   accountEntitlementActivation: ["applied", "rejected"],
   accountEntitlementBackfill: ["pending", "applied", "rejected", "expired", "failed"],

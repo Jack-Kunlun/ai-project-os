@@ -25,11 +25,13 @@ test(
   async () => {
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
+    const workspaceId = randomUUID();
     const projectId = randomUUID();
     const assetDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-project-delete-"));
     const previousAssetDirectory = process.env.AI_PROJECT_OS_ASSET_DIR;
     process.env.AI_PROJECT_OS_ASSET_DIR = assetDirectory;
     let createdUserId: string | null = null;
+    let createdBackupOwnerId: string | null = null;
     const user = await db.appUser.create({
       data: {
         username: `lifecycle_${suffix}`,
@@ -40,27 +42,42 @@ test(
       },
     });
     createdUserId = user.id;
+    const backupOwner = await db.appUser.create({
+      data: { username: `lifecycle_backup_${suffix}`, role: "user" },
+    });
+    createdBackupOwnerId = backupOwner.id;
 
     try {
-      const created = await db.project.create({
-        data: { id: projectId, name: `Lifecycle ${suffix}`, slug: `lifecycle-${suffix}` },
-      });
-      await db.$transaction(async (tx) => {
+      const created = await db.$transaction(async (tx) => {
+        await tx.workspace.create({
+          data: { id: workspaceId, name: `Lifecycle workspace ${suffix}`, slug: `lifecycle-workspace-${suffix}`, createdById: backupOwner.id },
+        });
+        const project = await tx.project.create({
+          data: { id: projectId, workspaceId, name: `Lifecycle ${suffix}`, slug: `lifecycle-${suffix}` },
+        });
         await grantWorkspaceMembership(tx, {
-          workspaceId: created.workspaceId,
+          workspaceId,
           userId: user.id,
           role: "owner",
           actorId: user.id,
           reason: "project_lifecycle_gate_workspace_owner",
         });
+        await grantWorkspaceMembership(tx, {
+          workspaceId,
+          userId: backupOwner.id,
+          role: "owner",
+          actorId: user.id,
+          reason: "project_lifecycle_gate_backup_owner",
+        });
         await grantProjectMembership(tx, {
           projectId,
-          workspaceId: created.workspaceId,
+          workspaceId,
           userId: user.id,
           role: "owner",
           actorId: user.id,
           reason: "project_lifecycle_gate_project_owner",
         });
+        return project;
       });
       await assert.rejects(
         () => updateProjectLifecycle({
@@ -228,9 +245,14 @@ test(
       await db.appUser.delete({ where: { id: user.id } });
       createdUserId = null;
       assert.equal((await db.projectDeletionReceipt.findUniqueOrThrow({ where: { id: receipt.id } })).requestedById, null);
+      await db.workspace.delete({ where: { id: workspaceId } });
+      await db.appUser.delete({ where: { id: backupOwner.id } });
+      createdBackupOwnerId = null;
     } finally {
       await db.project.deleteMany({ where: { id: projectId } });
+      await db.workspace.deleteMany({ where: { id: workspaceId } });
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
+      if (createdBackupOwnerId !== null) await db.appUser.deleteMany({ where: { id: createdBackupOwnerId } });
       if (previousAssetDirectory === undefined) delete process.env.AI_PROJECT_OS_ASSET_DIR;
       else process.env.AI_PROJECT_OS_ASSET_DIR = previousAssetDirectory;
       await rm(assetDirectory, { recursive: true, force: true });

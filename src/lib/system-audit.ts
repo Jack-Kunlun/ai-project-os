@@ -288,6 +288,22 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.platformCreditGovernance,
     resultMap: resultMapping({ applied: ["grant"], revoked: ["revoke"] }),
   },
+  workspaceRoleMutation: {
+    source: "workspaceRoleMutation",
+    label: SYSTEM_AUDIT_SOURCE_LABELS.workspaceRoleMutation,
+    table: "WorkspaceRoleMutationAudit",
+    // Keep this registry projection deliberately narrower than the durable
+    // audit row: reason, request keys, fingerprints and membership IDs are
+    // governance evidence, not user-facing system-audit data.
+    selectedFields: ["id", "event", "oldRole", "newRole", "ownerCountBefore", "ownerCountAfter", "projectGrantCount", "actorId", "subjectId", "createdAt"],
+    referenceFields: [],
+    actionField: "event",
+    allowedActions: SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.workspaceRoleMutation,
+    actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.workspaceRoleMutation),
+    resultField: "event",
+    allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.workspaceRoleMutation,
+    resultMap: resultMapping({ applied: ["roleChanged"] }),
+  },
   membershipApplication: {
     source: "membershipApplication",
     label: SYSTEM_AUDIT_SOURCE_LABELS.membershipApplication,
@@ -957,6 +973,20 @@ const platformCreditGovernanceAuditSelect = {
   userId: true,
   actorId: true,
   reason: true,
+  createdAt: true,
+} as const;
+
+type WorkspaceRoleMutationAuditRow = Prisma.WorkspaceRoleMutationAuditGetPayload<{ select: typeof workspaceRoleMutationAuditSelect }>;
+const workspaceRoleMutationAuditSelect = {
+  id: true,
+  event: true,
+  oldRole: true,
+  newRole: true,
+  ownerCountBefore: true,
+  ownerCountAfter: true,
+  projectGrantCount: true,
+  actorId: true,
+  subjectId: true,
   createdAt: true,
 } as const;
 
@@ -1646,6 +1676,36 @@ function platformCreditGovernanceProjection(row: PlatformCreditGovernanceAuditRo
   });
 }
 
+function workspaceRoleMutationProjection(row: WorkspaceRoleMutationAuditRow): RawAuditEvent {
+  const action = String(row.event) === "roleChanged" || String(row.event) === "role_changed"
+    ? "roleChanged"
+    : String(row.event);
+  return rawEvent({
+    id: row.id,
+    source: "workspaceRoleMutation",
+    action,
+    createdAt: row.createdAt,
+    actorId: row.actorId,
+    actorKind: "user",
+    subjectId: row.subjectId,
+    references: safeReferences({ categories: ["workspaceRoleMutation"] }),
+    evidence: evidence(
+      {
+        role: String(row.oldRole),
+        ownerCount: row.ownerCountBefore,
+      },
+      {
+        role: String(row.newRole),
+        ownerCount: row.ownerCountAfter,
+        projectGrantCount: row.projectGrantCount,
+      },
+      {},
+      false,
+    ),
+    result: action === "roleChanged" ? "applied" : "unknown",
+  });
+}
+
 function membershipApplicationProjection(row: MembershipApplicationAuditRow): RawAuditEvent {
   const action = row.event === "submitted" ? "requested" : row.event === "fulfilled" ? "fulfilled" : row.event === "rejected" ? "rejected" : "cancelled";
   const result: SystemAuditResult = row.event === "submitted" ? "pending" : row.event === "fulfilled" ? "applied" : row.event === "rejected" ? "rejected" : "cancelled";
@@ -1868,6 +1928,16 @@ async function fetchPlatformCreditGovernance(context: QueryContext): Promise<Raw
   return rows.map(platformCreditGovernanceProjection);
 }
 
+async function fetchWorkspaceRoleMutation(context: QueryContext): Promise<RawAuditEvent[]> {
+  const rows = await context.db.workspaceRoleMutationAudit.findMany({
+    where: sourceWhere(context, "workspaceRoleMutation", { actorField: "actorId", subjectField: "subjectId" }) as Prisma.WorkspaceRoleMutationAuditWhereInput,
+    orderBy: orderBy(),
+    take: context.take,
+    select: workspaceRoleMutationAuditSelect,
+  });
+  return rows.map(workspaceRoleMutationProjection);
+}
+
 async function fetchMembershipApplications(context: QueryContext): Promise<RawAuditEvent[]> {
   const delegate = (context.db as unknown as { membershipApplicationAudit?: { findMany: (input: unknown) => Promise<MembershipApplicationAuditRow[]> } }).membershipApplicationAudit;
   if (delegate === undefined) return [];
@@ -1900,6 +1970,7 @@ async function fetchSource(context: QueryContext, source: SystemAuditSource): Pr
     case "platformProviderProbe": return fetchPlatformProviderProbe(context);
     case "platformGrantOfferPolicy": return fetchPlatformGrantOfferPolicy(context);
     case "platformCreditGovernance": return fetchPlatformCreditGovernance(context);
+    case "workspaceRoleMutation": return fetchWorkspaceRoleMutation(context);
     case "membershipApplication": return fetchMembershipApplications(context);
     case "accountEntitlementActivation": return fetchAccountEntitlementActivation(context);
     case "accountEntitlementBackfill": return fetchAccountEntitlementBackfill(context);

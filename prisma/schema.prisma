@@ -207,6 +207,14 @@ enum MembershipAccessAuditAction {
   bootstrapConfirmed  @map("bootstrap_confirmed")
 }
 
+enum WorkspaceRoleMutationAction {
+  roleChange @map("role_change")
+}
+
+enum WorkspaceRoleMutationAuditEvent {
+  roleChanged @map("role_changed")
+}
+
 enum WorkspaceMembershipRole {
   owner
   admin
@@ -4351,6 +4359,10 @@ model AppUser {
   createdWorkspaces            Workspace[]                       @relation("WorkspaceCreatedBy")
   workspaceMemberships         WorkspaceMembership[]
   projectMemberships           ProjectMembership[]
+  workspaceRoleMutationPreviewsAsActor WorkspaceRoleMutationPreview[] @relation("WorkspaceRoleMutationPreviewActor")
+  workspaceRoleMutationPreviewsAsSubject WorkspaceRoleMutationPreview[] @relation("WorkspaceRoleMutationPreviewSubject")
+  workspaceRoleMutationAuditsAsActor WorkspaceRoleMutationAudit[] @relation("WorkspaceRoleMutationAuditActor")
+  workspaceRoleMutationAuditsAsSubject WorkspaceRoleMutationAudit[] @relation("WorkspaceRoleMutationAuditSubject")
   sentWorkspaceInvitations     WorkspaceInvitation[]             @relation("WorkspaceInvitationInvitedBy")
   acceptedWorkspaceInvitations WorkspaceInvitation[]             @relation("WorkspaceInvitationAcceptedBy")
   revokedWorkspaceInvitations  WorkspaceInvitation[]             @relation("WorkspaceInvitationRevokedBy")
@@ -4922,6 +4934,8 @@ model Workspace {
   invitations   WorkspaceInvitation[]
   oidcProviders OidcProvider[]
   projectDeletionReceipts ProjectDeletionReceipt[]
+  workspaceRoleMutationPreviews WorkspaceRoleMutationPreview[]
+  workspaceRoleMutationAudits WorkspaceRoleMutationAudit[]
 
   @@index([createdById, createdAt])
 }
@@ -4942,6 +4956,86 @@ model WorkspaceMembership {
   // that predicate, so application code must use the governance helpers.
   @@index([userId, role])
   @@index([userId, workspaceId, accessState])
+}
+
+// Workspace role changes are short-lived, single-use control-plane actions.
+// The project grant snapshot is explanatory evidence only; current grants are
+// re-read under the workspace/project locks before execution.
+model WorkspaceRoleMutationPreview {
+  id                       String                       @id @default(uuid()) @db.Uuid
+  workspaceId              String                       @db.Uuid
+  actorId                  String                       @db.Uuid
+  subjectId                String                       @db.Uuid
+  membershipId             String                       @db.Uuid
+  action                   WorkspaceRoleMutationAction  @default(roleChange)
+  currentRole              WorkspaceMembershipRole
+  targetRole               WorkspaceMembershipRole
+  actorAccountAccessVersion   Int
+  subjectAccountAccessVersion Int
+  ownerCount               Int
+  projectGrantCount        Int
+  projectGrantSnapshot     Json                         @db.JsonB
+  projectGrantFingerprint  String                       @db.Char(64)
+  membershipFingerprint    String                       @db.Char(64)
+  reason                   String                       @db.VarChar(500)
+  requestKey               String                       @db.VarChar(180)
+  requestFingerprint       String                       @db.Char(64)
+  impactFingerprint        String                       @db.Char(64)
+  issuedAt                 DateTime
+  expiresAt                DateTime
+  consumedAt               DateTime?
+  createdAt                DateTime                     @default(now())
+  workspace                Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                    AppUser                      @relation("WorkspaceRoleMutationPreviewActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  subject                  AppUser                      @relation("WorkspaceRoleMutationPreviewSubject", fields: [subjectId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audits                  WorkspaceRoleMutationAudit[]
+
+  @@unique([actorId, requestKey])
+  @@index([workspaceId, createdAt])
+  @@index([subjectId, createdAt])
+  @@index([expiresAt, consumedAt])
+}
+
+// Immutable old-role -> new-role evidence. Membership IDs are intentionally
+// scalar snapshots because role replacement revokes the old row and creates a
+// new authorization epoch; the trigger verifies both rows in the transaction.
+model WorkspaceRoleMutationAudit {
+  id                       String                       @id @default(uuid()) @db.Uuid
+  workspaceId              String                       @db.Uuid
+  actorId                  String                       @db.Uuid
+  subjectId                String                       @db.Uuid
+  previewId                String                       @db.Uuid
+  event                    WorkspaceRoleMutationAuditEvent @default(roleChanged)
+  oldMembershipId          String                       @db.Uuid
+  newMembershipId          String                       @db.Uuid
+  oldRole                  WorkspaceMembershipRole
+  newRole                  WorkspaceMembershipRole
+  actorAccountAccessVersion Int
+  subjectAccountAccessVersionBefore Int
+  subjectAccountAccessVersionAfter  Int
+  ownerCountBefore         Int
+  ownerCountAfter          Int
+  projectGrantCount        Int
+  projectGrantFingerprint  String                       @db.Char(64)
+  reason                   String                       @db.VarChar(500)
+  requestKey               String                       @db.VarChar(180)
+  requestFingerprint       String                       @db.Char(64)
+  impactFingerprint        String                       @db.Char(64)
+  transactionId            BigInt                       @default(dbgenerated("txid_current()")) @db.BigInt
+  transitionAt             DateTime                     @default(now())
+  contractVersion          Int                          @default(1)
+  createdAt                DateTime                     @default(now())
+  workspace                Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  actor                    AppUser                      @relation("WorkspaceRoleMutationAuditActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  subject                  AppUser                      @relation("WorkspaceRoleMutationAuditSubject", fields: [subjectId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  preview                  WorkspaceRoleMutationPreview @relation(fields: [previewId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([previewId])
+  @@unique([actorId, requestKey])
+  @@index([workspaceId, createdAt])
+  @@index([subjectId, createdAt])
+  @@index([oldMembershipId, createdAt])
+  @@index([newMembershipId, createdAt])
 }
 
 model ProjectMembership {

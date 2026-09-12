@@ -556,6 +556,11 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     const invitation = invitationCandidate === null ? null : await tx.workspaceInvitation.findUnique({ where: { id: invitationCandidate.id } });
     if (invitation !== null && (invitation.acceptedAt !== null || invitation.revokedAt !== null || invitation.expiresAt <= new Date())) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     if (invitation !== null && invitation.workspaceId !== provider.workspaceId) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+    // Invitation schema now permits only member/viewer + project
+    // editor/viewer, but historical rows may still contain elevated roles.
+    // Reject them before creating an OIDC user or activating entitlements so
+    // this callback cannot become a role-governance bypass.
+    if (invitation !== null && (invitation.workspaceRole === "owner" || invitation.workspaceRole === "admin" || invitation.projectRole === "owner")) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     const lockedEmailOwner = claimedEmail !== null && emailVerified ? await tx.appUser.findUnique({ where: { email: claimedEmail }, select: { id: true } }) : null;
     if (lockedEmailOwner !== null && (user === null || lockedEmailOwner.id !== user.id)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     const domains = provider.allowedEmailDomains as string[];

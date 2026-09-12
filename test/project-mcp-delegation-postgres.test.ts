@@ -377,8 +377,8 @@ test("MCP Package A PostgreSQL control plane enforces ownership, epochs, fingerp
       [ownerId, `mcp_owner_${suffix}`, projectOwnerId, `mcp_project_owner_${suffix}`],
     );
     await client.query(
-      `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, $4::uuid, CURRENT_TIMESTAMP)`,
-      [workspaceId, `MCP ${suffix}`, `mcp-${suffix}`, ownerId],
+      `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, NULL, CURRENT_TIMESTAMP)`,
+      [workspaceId, `MCP ${suffix}`, `mcp-${suffix}`],
     );
     await client.query(
       `INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt") VALUES ($1::uuid, $2::uuid, $3, $4, CURRENT_TIMESTAMP)`,
@@ -400,6 +400,7 @@ test("MCP Package A PostgreSQL control plane enforces ownership, epochs, fingerp
 
     const db = getDb();
     const memberships = await db.$transaction(async (tx) => {
+      await tx.workspace.update({ where: { id: workspaceId }, data: { createdById: ownerId } });
       await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "mcp delegation fixture owner" });
       const owner = await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "mcp delegation fixture owner" });
       const projectOwner = await grantProjectMembership(tx, { projectId, workspaceId, userId: projectOwnerId, role: "owner", actorId: ownerId, reason: "mcp delegation fixture project owner" });
@@ -829,8 +830,8 @@ test(
         ],
       );
       await client.query(
-        `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, $4::uuid, CURRENT_TIMESTAMP)`,
-        [workspaceId, `MCP C1 ${suffix}`, `mcp-c1-${suffix}`, ownerId],
+        `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, NULL, CURRENT_TIMESTAMP)`,
+        [workspaceId, `MCP C1 ${suffix}`, `mcp-c1-${suffix}`],
       );
       await client.query(
         `INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt") VALUES ($1::uuid, $2::uuid, $3, $4, CURRENT_TIMESTAMP)`,
@@ -840,6 +841,7 @@ test(
 
       const db = getDb();
       const memberships = await db.$transaction(async (tx) => {
+        await tx.workspace.update({ where: { id: workspaceId }, data: { createdById: ownerId } });
         await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "MCP C1 owner fixture" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "MCP C1 owner fixture" });
         const projectOwner = await grantProjectMembership(tx, { projectId, workspaceId, userId: projectOwnerId, role: "owner", actorId: ownerId, reason: "MCP C1 project owner fixture" });
@@ -1421,8 +1423,8 @@ test(
         [ownerId, `mcp_terminal_owner_${suffix}`, projectOwnerId, `mcp_terminal_project_owner_${suffix}`, workspaceOnlyId, `mcp_terminal_workspace_only_${suffix}`],
       );
       await client.query(
-        `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, $4::uuid, CURRENT_TIMESTAMP)`,
-        [workspaceId, `MCP terminal ${suffix}`, `mcp-terminal-${suffix}`, ownerId],
+        `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, NULL, CURRENT_TIMESTAMP)`,
+        [workspaceId, `MCP terminal ${suffix}`, `mcp-terminal-${suffix}`],
       );
       await client.query(
         `INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt") VALUES ($1::uuid, $2::uuid, $3, $4, CURRENT_TIMESTAMP)`,
@@ -1441,6 +1443,7 @@ test(
 
       const db = getDb();
       const memberships = await db.$transaction(async (tx) => {
+        await tx.workspace.update({ where: { id: workspaceId }, data: { createdById: ownerId } });
         await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "MCP terminal owner fixture" });
         await grantWorkspaceMembership(tx, { workspaceId, userId: workspaceOnlyId, role: "member", actorId: ownerId, reason: "MCP terminal workspace-only fixture" });
         const owner = await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "MCP terminal owner fixture" });
@@ -1655,8 +1658,8 @@ test(
         ],
       );
       await client.query(
-        `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, $4::uuid, CURRENT_TIMESTAMP)`,
-        [workspaceId, `MCP Package B ${suffix}`, `mcp-package-b-${suffix}`, ownerId],
+        `INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1::uuid, $2, $3, NULL, CURRENT_TIMESTAMP)`,
+        [workspaceId, `MCP Package B ${suffix}`, `mcp-package-b-${suffix}`],
       );
       await client.query(
         `INSERT INTO "Project" ("id", "workspaceId", "membershipInheritanceMode", "name", "slug", "updatedAt") VALUES ($1::uuid, $2::uuid, 'workspace_inherited', $3, $4, CURRENT_TIMESTAMP)`,
@@ -1681,6 +1684,7 @@ test(
       await client.query("COMMIT");
 
       const memberships = await db.$transaction(async (tx) => {
+        await tx.workspace.update({ where: { id: workspaceId }, data: { createdById: ownerId } });
         await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "MCP Package B owner fixture" });
         await grantWorkspaceMembership(tx, { workspaceId, userId: projectOwnerId, role: "owner", actorId: ownerId, reason: "MCP Package B project owner fixture" });
         await grantWorkspaceMembership(tx, { workspaceId, userId: viewerId, role: "member", actorId: ownerId, reason: "MCP Package B viewer fixture" });

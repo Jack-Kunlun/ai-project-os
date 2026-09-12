@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { lockActorsAccess } from "@/lib/access-linearization";
+import { lockActorsAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 
 export type AccountAccessAction = "disable" | "restore";
@@ -18,6 +18,7 @@ export type AccountAccessServiceErrorCode =
   | "ACCOUNT_ACCESS_PREVIEW_STALE"
   | "ACCOUNT_ACCESS_PREVIEW_EXPIRED"
   | "ACCOUNT_ACCESS_LAST_ADMIN_REQUIRED"
+  | "ACCOUNT_ACCESS_LAST_OWNER_REQUIRED"
   | "ACCOUNT_ACCESS_REASON_REQUIRED"
   | "ACCOUNT_ACCESS_UNSAFE_AUDIT_TEXT"
   | "ACCOUNT_ACCESS_IDEMPOTENCY_CONFLICT"
@@ -207,6 +208,36 @@ async function activeSessionCount(db: AccountAccessDb, targetId: string): Promis
 
 async function enabledAdminCount(db: AccountAccessDb): Promise<number> {
   return db.appUser.count({ where: { role: "admin", disabledAt: null } });
+}
+
+/**
+ * Account disable is serialized with role governance for every workspace in
+ * which the target is currently an Owner.  The workspace locks are acquired
+ * only after the actor locks, matching the global actor -> workspace order.
+ */
+async function ownerWorkspaceIds(db: AccountAccessDb, targetId: string): Promise<string[]> {
+  const rows = await db.workspaceMembership.findMany({
+    where: { userId: targetId, role: "owner", accessState: "confirmed" },
+    orderBy: [{ workspaceId: "asc" }, { id: "asc" }],
+    select: { workspaceId: true },
+  });
+  return [...new Set(rows.map((row) => row.workspaceId))].sort();
+}
+
+async function lastOwnerWorkspaceCount(db: AccountAccessDb, workspaceIds: readonly string[]): Promise<number> {
+  let blockers = 0;
+  for (const workspaceId of workspaceIds) {
+    const count = await db.workspaceMembership.count({
+      where: {
+        workspaceId,
+        role: "owner",
+        accessState: "confirmed",
+        user: { disabledAt: null },
+      },
+    });
+    if (count <= 1) blockers += 1;
+  }
+  return blockers;
 }
 
 function targetState(target: AccountTarget): AccountAccessState {
@@ -406,6 +437,12 @@ async function previewInTransaction(
   if (nextAction === "disable" && target.role === "admin" && await enabledAdminCount(tx) <= 1) {
     categories.push("last_enabled_system_admin");
   }
+  if (nextAction === "disable") {
+    const ownerWorkspaces = await ownerWorkspaceIds(tx, targetId);
+    if (await lastOwnerWorkspaceCount(tx, ownerWorkspaces) > 0) {
+      categories.push("last_enabled_workspace_owner");
+    }
+  }
   const previewId = randomUUID();
   await setPreviewContext(tx, {
     previewId,
@@ -468,6 +505,8 @@ export async function previewAccountAccess(
   try {
     return await db.$transaction(async (tx) => {
       await lockActorsAccess(tx, [adminId, targetId]);
+      const targetOwnerWorkspaces = await ownerWorkspaceIds(tx, targetId);
+      for (const workspaceId of targetOwnerWorkspaces) await lockWorkspaceAccess(tx, workspaceId);
       assertAdminSnapshot(await loadAdmin(tx, adminId), expectedAdminVersion);
       return previewInTransaction(tx, { ...input, adminUserId: adminId, userId: targetId }, await databaseNow(tx));
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: MUTATION_TRANSACTION_TIMEOUT_MS });
@@ -583,6 +622,10 @@ async function executeInTransaction(
   const currentImpact = impactFingerprint({ target, action: nextAction, sessionCount: currentSessionCount });
   if (target.accountAccessVersion !== version || currentImpact !== expectedImpact) return fail("ACCOUNT_ACCESS_PREVIEW_STALE");
   if (nextAction === "disable" && target.role === "admin" && await enabledAdminCount(tx) <= 1) return fail("ACCOUNT_ACCESS_LAST_ADMIN_REQUIRED");
+  if (nextAction === "disable") {
+    const ownerWorkspaces = await ownerWorkspaceIds(tx, targetId);
+    if (await lastOwnerWorkspaceCount(tx, ownerWorkspaces) > 0) return fail("ACCOUNT_ACCESS_LAST_OWNER_REQUIRED");
+  }
   const event = nextAction === "disable" ? "disabled" : "restored";
   const nextVersion = target.accountAccessVersion + 1;
   await setLifecycleContext(tx, {
@@ -655,6 +698,8 @@ export async function executeAccountAccess(
   try {
     return await db.$transaction(async (tx) => {
       await lockActorsAccess(tx, [adminId, targetId]);
+      const targetOwnerWorkspaces = await ownerWorkspaceIds(tx, targetId);
+      for (const workspaceId of targetOwnerWorkspaces) await lockWorkspaceAccess(tx, workspaceId);
       assertAdminSnapshot(await loadAdmin(tx, adminId), expectedAdminVersion);
       return executeInTransaction(tx, { ...input, adminUserId: adminId, userId: targetId }, await databaseNow(tx));
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: MUTATION_TRANSACTION_TIMEOUT_MS });

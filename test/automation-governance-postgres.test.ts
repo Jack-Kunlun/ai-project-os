@@ -128,12 +128,12 @@ test(
       { id: editorId, username: `automation_editor_${suffix}`, role: "user" },
       { id: viewerId, username: `automation_viewer_${suffix}`, role: "user" },
     ] });
-    await db.workspace.create({ data: { id: workspaceId, name: `Automation governance ${suffix}`, slug: `automation-governance-${suffix}`, createdById: adminId } });
-    await db.project.createMany({ data: [
-      { id: projectId, workspaceId, name: `Automation project ${suffix}`, slug: `automation-project-${suffix}` },
-      { id: secondProjectId, workspaceId, name: `Automation second project ${suffix}`, slug: `automation-second-${suffix}` },
-    ] });
     await db.$transaction(async (tx) => {
+      await tx.workspace.create({ data: { id: workspaceId, name: `Automation governance ${suffix}`, slug: `automation-governance-${suffix}`, createdById: adminId } });
+      await tx.project.createMany({ data: [
+        { id: projectId, workspaceId, name: `Automation project ${suffix}`, slug: `automation-project-${suffix}` },
+        { id: secondProjectId, workspaceId, name: `Automation second project ${suffix}`, slug: `automation-second-${suffix}` },
+      ] });
       await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "automation_governance_fixture_admin" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "member", actorId: adminId, reason: "automation_governance_fixture_owner" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: editorId, role: "member", actorId: adminId, reason: "automation_governance_fixture_editor" });

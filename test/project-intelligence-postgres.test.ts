@@ -140,16 +140,18 @@ test(
       });
       await createSignupOfferFixture(db, platformAdmin.id);
       const workspaceId = randomUUID();
-      await db.workspace.create({
-        data: { id: workspaceId, name: `Intelligence workspace ${suffix}`, slug: `intelligence-workspace-${suffix}`, createdById: user.id },
+      await db.$transaction(async (tx) => {
+        await tx.workspace.create({
+          data: { id: workspaceId, name: `Intelligence workspace ${suffix}`, slug: `intelligence-workspace-${suffix}`, createdById: user.id },
+        });
+        await grantWorkspaceMembership(tx, {
+          workspaceId,
+          userId: user.id,
+          role: "owner",
+          actorId: user.id,
+          reason: "project_intelligence_fixture",
+        });
       });
-      await db.$transaction((tx) => grantWorkspaceMembership(tx, {
-        workspaceId,
-        userId: user.id,
-        role: "owner",
-        actorId: user.id,
-        reason: "project_intelligence_fixture",
-      }));
       const membershipNow = new Date();
       await createControlledMembership(db, {
         adminId: platformAdmin.id,

@@ -402,8 +402,14 @@ test(
         { id: approvingOwnerId, username: `dispatch_approver_${suffix}`, role: "user" },
         { id: lifecycleAdminId, username: `dispatch_lifecycle_admin_${suffix}`, role: "admin" },
       ] });
-      const project = await db.workspace.create({ data: { id: workspaceId, name: `dispatch gate ${suffix}`, slug: `dispatch-gate-${suffix}`, createdById: ownerId, projects: { create: { id: projectId, name: `dispatch project ${suffix}`, slug: `dispatch-project-${suffix}` } } }, select: { id: true } });
-      assert.equal(project.id, workspaceId);
+      await db.$transaction(async (tx) => {
+        const project = await tx.workspace.create({ data: { id: workspaceId, name: `dispatch gate ${suffix}`, slug: `dispatch-gate-${suffix}`, createdById: ownerId, projects: { create: { id: projectId, name: `dispatch project ${suffix}`, slug: `dispatch-project-${suffix}` } } }, select: { id: true } });
+        assert.equal(project.id, workspaceId);
+        await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_workspace_owner" });
+        await grantWorkspaceMembership(tx, { workspaceId, userId: approvingOwnerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_workspace_approver" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_project_owner" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: approvingOwnerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_project_approver" });
+      });
       await assert.rejects(
         () => db.projectSource.create({
           data: {
@@ -416,13 +422,6 @@ test(
         }),
         /LEGACY_MCP_SOURCE_CREATION_FROZEN/u,
       );
-      await db.$transaction(async (tx) => {
-        await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_workspace_owner" });
-        await grantWorkspaceMembership(tx, { workspaceId, userId: approvingOwnerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_workspace_approver" });
-        await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_project_owner" });
-        await grantProjectMembership(tx, { projectId, workspaceId, userId: approvingOwnerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_project_approver" });
-      });
-
       // Model a historical successful row that predates the database freeze.
       // Replica mode is limited to fixture creation; every production read and
       // intake assertion below runs with normal triggers and access checks.

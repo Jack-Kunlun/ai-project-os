@@ -1450,8 +1450,8 @@ async function verifyAcl(client: Client): Promise<void> {
   }
   if (helperRows.rows.length !== DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.length
     || helperRows.rows.some((row) => !expectedHelperOids.has(row.oid))
-    || runtimeHelperCount !== 41
-    || writerHelperCount !== 7) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
+    || runtimeHelperCount !== 42
+    || writerHelperCount !== 8) return fail("DATABASE_PRINCIPAL_FUNCTION_ACL_INVALID");
   const publicPrivileges = await client.query<{ database_public: boolean; schema_public: boolean }>(`
     SELECT EXISTS (
              SELECT 1

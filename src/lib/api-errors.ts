@@ -60,6 +60,7 @@ import { PlatformGrantOfferPolicyError } from "@/lib/platform-grant-offer-policy
 import { AccountEntitlementBackfillError } from "@/lib/account-entitlement-backfill-service";
 import { PlatformCreditGovernanceError } from "@/lib/platform-credit-governance-service";
 import { MembershipApplicationServiceError } from "@/lib/membership-application-service";
+import { WorkspaceRoleGovernanceError } from "@/lib/workspace-role-governance-service";
 
 export type ApiErrorBody = {
   error: {
@@ -245,6 +246,37 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     return { status, body: { error: { code: error.code, message } } };
   }
 
+  if (error instanceof WorkspaceRoleGovernanceError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      WORKSPACE_ROLE_GOVERNANCE_INVALID_INPUT: [400, "工作区角色治理请求无效"],
+      WORKSPACE_ROLE_GOVERNANCE_REASON_REQUIRED: [400, "角色变更必须填写独立原因"],
+      WORKSPACE_ROLE_GOVERNANCE_UNSAFE_TEXT: [400, "原因不能包含邮箱、令牌或敏感字符串"],
+      WORKSPACE_ROLE_GOVERNANCE_ACTOR_REQUIRED: [403, "当前账号无权管理该工作区成员"],
+      WORKSPACE_ROLE_GOVERNANCE_ACTOR_STALE: [409, "当前账号权限版本已变化，请刷新后重试"],
+      WORKSPACE_ROLE_GOVERNANCE_WORKSPACE_NOT_FOUND: [404, "工作区不存在"],
+      WORKSPACE_ROLE_GOVERNANCE_SUBJECT_NOT_FOUND: [404, "成员不存在"],
+      WORKSPACE_ROLE_GOVERNANCE_SUBJECT_MEMBERSHIP_REQUIRED: [409, "成员关系尚未完成治理确认"],
+      WORKSPACE_ROLE_GOVERNANCE_SUBJECT_DISABLED: [409, "停用账号不能被授予 Owner 或 Admin"],
+      WORKSPACE_ROLE_GOVERNANCE_ROLE_FORBIDDEN: [403, "当前账号无权执行该角色变更"],
+      WORKSPACE_ROLE_GOVERNANCE_OWNER_REQUIRED: [403, "只有 Owner 可以管理 Owner 角色"],
+      WORKSPACE_ROLE_GOVERNANCE_LAST_OWNER_REQUIRED: [409, "工作区必须至少保留一位启用的 Owner"],
+      WORKSPACE_ROLE_GOVERNANCE_ACTION_CONFLICT: [409, "当前角色不能执行该变更，请刷新后重试"],
+      WORKSPACE_ROLE_GOVERNANCE_PREVIEW_NOT_FOUND: [404, "角色变更预览不存在"],
+      WORKSPACE_ROLE_GOVERNANCE_PREVIEW_STALE: [409, "角色变更预览已变化，请重新预览"],
+      WORKSPACE_ROLE_GOVERNANCE_PREVIEW_EXPIRED: [410, "角色变更预览已过期，请重新预览"],
+      WORKSPACE_ROLE_GOVERNANCE_PREVIEW_CONSUMED: [409, "角色变更预览已经执行过"],
+      WORKSPACE_ROLE_GOVERNANCE_CONFIRMATION_REQUIRED: [400, "请完成确认后再执行角色变更"],
+      WORKSPACE_ROLE_GOVERNANCE_CONFIRMATION_MISMATCH: [400, "目标用户名确认不一致，未执行变更"],
+      WORKSPACE_ROLE_GOVERNANCE_IDEMPOTENCY_CONFLICT: [409, "同一请求标识的内容已变化"],
+      WORKSPACE_ROLE_GOVERNANCE_REQUEST_KEY_CONFLICT: [409, "同一请求标识已经用于其他角色变更"],
+      WORKSPACE_ROLE_GOVERNANCE_PROJECT_GRANTS_FROZEN: [409, "成员角色和项目权限变更必须使用治理预览入口"],
+      WORKSPACE_ROLE_GOVERNANCE_TRANSACTION_CONFLICT: [409, "角色变更事务状态异常，请重新预览"],
+      WORKSPACE_ROLE_GOVERNANCE_WRITER_REQUIRED: [500, "角色治理写入通道不可用"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "工作区角色治理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof WorkspaceError) {
     const mapping: Record<string, readonly [number, string]> = {
       WORKSPACE_INVALID_INPUT: [400, "工作区请求无效"],
@@ -263,6 +295,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       WORKSPACE_INVITATION_STATE_CONFLICT: [409, "邀请已经进入终态，不能再次撤销"],
       WORKSPACE_INVITATION_EXISTING_MEMBER: [409, "已有成员不能通过邀请提升权限，请直接管理成员授权"],
       WORKSPACE_LAST_OWNER_REQUIRED: [409, "工作区必须至少保留一位所有者"],
+      WORKSPACE_ROLE_GOVERNANCE_REQUIRED: [409, "工作区角色变更必须先预览，再确认执行"],
     };
     const [status, message] = mapping[error.code] ?? [500, "工作区操作失败"];
     return { status, body: { error: { code: error.code, message } } };
@@ -878,6 +911,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       ACCOUNT_ACCESS_PREVIEW_STALE: [409, "账号状态预览已过期或状态已变化，请重新预览"],
       ACCOUNT_ACCESS_PREVIEW_EXPIRED: [409, "账号状态预览已过期，请重新预览"],
       ACCOUNT_ACCESS_LAST_ADMIN_REQUIRED: [409, "平台必须至少保留一位启用的系统管理员"],
+      ACCOUNT_ACCESS_LAST_OWNER_REQUIRED: [409, "停用该账号会移除工作区最后一位启用的 Owner"],
       ACCOUNT_ACCESS_REASON_REQUIRED: [400, "停用或恢复账号必须填写原因"],
       ACCOUNT_ACCESS_UNSAFE_AUDIT_TEXT: [400, "请求文本不能包含邮箱、令牌或凭据指纹"],
       ACCOUNT_ACCESS_IDEMPOTENCY_CONFLICT: [409, "请求标识已用于其他账号变更，请更换请求标识"],

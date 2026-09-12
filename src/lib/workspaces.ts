@@ -41,7 +41,8 @@ export type WorkspaceErrorCode =
   | "WORKSPACE_INVITATION_UNSAFE_AUDIT_TEXT"
   | "WORKSPACE_INVITATION_STATE_CONFLICT"
   | "WORKSPACE_INVITATION_EXISTING_MEMBER"
-  | "WORKSPACE_LAST_OWNER_REQUIRED";
+  | "WORKSPACE_LAST_OWNER_REQUIRED"
+  | "WORKSPACE_ROLE_GOVERNANCE_REQUIRED";
 
 export class WorkspaceError extends Error {
   constructor(readonly code: WorkspaceErrorCode) {
@@ -52,13 +53,19 @@ export class WorkspaceError extends Error {
 
 const roleSchema = z.enum(["owner", "admin", "member", "viewer"]);
 const projectRoleSchema = z.enum(["owner", "editor", "viewer"]);
-const projectGrantSchema = z.object({ projectId: z.string().uuid(), role: projectRoleSchema }).strict();
+// Provisioning and invitation inputs may only grant project Editor/Viewer.
+// Project Owner remains a governance-only transition and historical elevated
+// invitation rows are rejected during acceptance.
+const projectProvisioningRoleSchema = projectRoleSchema.exclude(["owner"]);
+const projectGrantSchema = z.object({ projectId: z.string().uuid(), role: projectProvisioningRoleSchema }).strict();
 const createMemberSchema = z.object({
   username: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/u),
   password: z.string().min(12).max(128),
   displayName: z.string().trim().min(1).max(160).nullable().optional(),
   email: z.string().trim().toLowerCase().max(320).nullable().optional(),
-  workspaceRole: roleSchema.exclude(["owner"]).default("member"),
+  // Creation is intentionally a narrow provisioning path.  Owner/Admin role
+  // changes use the dedicated preview -> confirm -> execute governance API.
+  workspaceRole: roleSchema.exclude(["owner", "admin"]).default("member"),
   projectGrants: z.array(projectGrantSchema).max(100).default([]),
 }).strict();
 const updateMemberSchema = z.object({
@@ -67,9 +74,9 @@ const updateMemberSchema = z.object({
 }).strict();
 const invitationSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(320),
-  workspaceRole: roleSchema.exclude(["owner"]).default("member"),
+  workspaceRole: roleSchema.exclude(["owner", "admin"]).default("member"),
   projectId: z.string().uuid().nullable().optional(),
-  projectRole: projectRoleSchema.nullable().optional(),
+  projectRole: projectProvisioningRoleSchema.nullable().optional(),
   expiresInDays: z.number().int().min(1).max(30).default(7),
   requestKey: z.string().trim().min(8).max(180),
 }).strict();
@@ -254,9 +261,8 @@ export async function createLocalWorkspaceMember(workspaceIdInput: unknown, inpu
       await lockWorkspaceAccess(tx, workspaceId);
       const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true, accountAccessVersion: true } });
       const actingMembership = await findConfirmedWorkspaceMembership(tx, workspaceId, actor.id);
-      if (currentActor === null || currentActor.disabledAt !== null || actingMembership === null || (actingMembership.role !== "owner" && actingMembership.role !== "admin")) {
-        throw new AccessControlError("ACCESS_FORBIDDEN");
-      }
+      if (currentActor === null || currentActor.disabledAt !== null || actingMembership === null || (actingMembership.role !== "owner" && actingMembership.role !== "admin")) throw new AccessControlError("ACCESS_FORBIDDEN");
+      if (currentActor.accountAccessVersion !== actor.accountAccessVersion) throw new AccessControlError("ACCOUNT_ACCESS_STALE");
       await assertProjectsInWorkspace(workspaceId, parsed.projectGrants, tx);
       const user = await tx.appUser.create({ data: { username: parsed.username, displayName: parsed.displayName ?? null, email: normalizedEmail, role: "user", ...password } });
       await activateAccountEntitlements({
@@ -305,14 +311,17 @@ export async function updateWorkspaceMember(
   const workspaceId = uuid(workspaceIdInput);
   const userId = uuid(userIdInput);
   const parsed = updateMemberSchema.parse(input);
+  if (parsed.workspaceRole !== undefined || parsed.projectGrants !== undefined) {
+    return fail("WORKSPACE_ROLE_GOVERNANCE_REQUIRED");
+  }
   return db.$transaction(async (tx) => {
     // Keep the lock order identical to project admission.  In particular,
     // target actor is locked before the workspace so a downgrade/removal and
     // a dispatch for that user cannot both pass their final checks.
     await lockActorsAccess(tx, [actor.id, userId]);
     await lockWorkspaceAccess(tx, workspaceId);
-    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
-    if (currentActor === null || currentActor.disabledAt !== null) throw new AccessControlError("ACCESS_FORBIDDEN");
+    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true, accountAccessVersion: true } });
+    if (currentActor === null || currentActor.disabledAt !== null || currentActor.accountAccessVersion !== actor.accountAccessVersion) throw new AccessControlError("ACCOUNT_ACCESS_STALE");
     const actingMembership = await findConfirmedWorkspaceMembership(tx, workspaceId, actor.id);
     if (actingMembership === null || (actingMembership.role !== "owner" && actingMembership.role !== "admin")) {
       throw new AccessControlError("ACCESS_FORBIDDEN");
@@ -388,8 +397,8 @@ export async function createWorkspaceInvitation(workspaceIdInput: unknown, input
     const projectIds = [...new Set([projectId, located?.projectId].filter((value): value is string => typeof value === "string" && UUID_PATTERN.test(value)))].sort();
     for (const candidateProjectId of projectIds) await lockProjectAccess(tx, candidateProjectId);
     if (located !== null) await lockWorkspaceInvitationAccess(tx, located.id);
-    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
-    if (currentActor === null || currentActor.disabledAt !== null) throw new AccessControlError("ACCESS_FORBIDDEN");
+    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true, accountAccessVersion: true } });
+    if (currentActor === null || currentActor.disabledAt !== null || currentActor.accountAccessVersion !== actor.accountAccessVersion) throw new AccessControlError("ACCOUNT_ACCESS_STALE");
     await assertWorkspaceAdmin(actor, workspaceId, tx);
     if (projectId !== null) await assertProjectsInWorkspace(workspaceId, [{ projectId }], tx);
     const existing = await tx.workspaceInvitation.findFirst({ where: { workspaceId, invitedById: actor.id, requestKey: parsed.requestKey }, select: { id: true, email: true, workspaceRole: true, projectId: true, projectRole: true, expiresAt: true, acceptedAt: true, revokedAt: true, version: true, createdAt: true, requestFingerprint: true } });
@@ -427,7 +436,7 @@ export async function listWorkspaceInvitations(workspaceIdInput: unknown, actor:
 
 export async function acceptWorkspaceInvitation(
   tokenInput: unknown,
-  actor: Pick<AppUser, "id"> & Partial<Pick<AppUser, "email">>,
+  actor: Pick<AppUser, "id" | "accountAccessVersion"> & Partial<Pick<AppUser, "email">>,
   returnToInput: unknown,
   db: PrismaClient = getDb(),
 ) {
@@ -447,8 +456,13 @@ export async function acceptWorkspaceInvitation(
     const invitation = await tx.workspaceInvitation.findUnique({ where: { id: locatedInvitation.id } });
     if (invitation === null || invitation.revokedAt !== null || invitation.acceptedAt !== null) return fail("WORKSPACE_INVITATION_NOT_FOUND");
     if (invitation.expiresAt <= new Date()) return fail("WORKSPACE_INVITATION_EXPIRED");
-    const currentActor = await tx.appUser.findUnique({ where: { id: actorId }, select: { id: true, email: true, emailVerifiedAt: true, disabledAt: true } });
+    // Historical invitations may still carry an elevated workspace role even
+    // though new invitations are schema-restricted to member/viewer. They
+    // must be closed rather than becoming an implicit role-mutation bypass.
+    if (invitation.workspaceRole === "owner" || invitation.workspaceRole === "admin" || invitation.projectRole === "owner") return fail("WORKSPACE_ROLE_GOVERNANCE_REQUIRED");
+    const currentActor = await tx.appUser.findUnique({ where: { id: actorId }, select: { id: true, email: true, emailVerifiedAt: true, disabledAt: true, accountAccessVersion: true } });
     if (currentActor === null || currentActor.disabledAt !== null) throw new AccessControlError("ACCESS_FORBIDDEN");
+    if (currentActor.accountAccessVersion !== actor.accountAccessVersion) throw new AccessControlError("ACCOUNT_ACCESS_STALE");
     if (currentActor.emailVerifiedAt === null) return fail("WORKSPACE_INVITATION_EMAIL_UNVERIFIED");
     if (invitation.email === null || invitation.email !== currentActor.email?.toLowerCase()) return fail("WORKSPACE_INVITATION_EMAIL_MISMATCH");
     if (invitation.projectId !== null) {
@@ -510,8 +524,8 @@ export async function getWorkspaceInvitationImpact(
     if (located === null || located.workspaceId !== workspaceId) return fail("WORKSPACE_INVITATION_NOT_FOUND");
     if (located.projectId !== null) await lockProjectAccess(tx, located.projectId);
     await lockWorkspaceInvitationAccess(tx, invitationId);
-    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
-    if (currentActor === null || currentActor.disabledAt !== null) throw new AccessControlError("ACCESS_FORBIDDEN");
+    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true, accountAccessVersion: true } });
+    if (currentActor === null || currentActor.disabledAt !== null || currentActor.accountAccessVersion !== actor.accountAccessVersion) throw new AccessControlError("ACCOUNT_ACCESS_STALE");
     await assertWorkspaceAdmin(actor, workspaceId, tx);
     const invitation = await tx.workspaceInvitation.findUnique({ where: { id: invitationId }, select: { id: true, workspaceId: true, email: true, workspaceRole: true, projectId: true, projectRole: true, acceptedAt: true, revokedAt: true, expiresAt: true, version: true } });
     if (invitation === null || invitation.workspaceId !== workspaceId) return fail("WORKSPACE_INVITATION_NOT_FOUND");
@@ -543,8 +557,8 @@ export async function revokeWorkspaceInvitation(
     if (located === null || located.workspaceId !== workspaceId) return fail("WORKSPACE_INVITATION_NOT_FOUND");
     if (located.projectId !== null) await lockProjectAccess(tx, located.projectId);
     await lockWorkspaceInvitationAccess(tx, invitationId);
-    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true } });
-    if (currentActor === null || currentActor.disabledAt !== null) throw new AccessControlError("ACCESS_FORBIDDEN");
+    const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true, accountAccessVersion: true } });
+    if (currentActor === null || currentActor.disabledAt !== null || currentActor.accountAccessVersion !== actor.accountAccessVersion) throw new AccessControlError("ACCOUNT_ACCESS_STALE");
     await assertWorkspaceAdmin(actor, workspaceId, tx);
     const existing = await tx.workspaceInvitation.findUnique({ where: { id: invitationId }, select: { id: true, workspaceId: true, email: true, workspaceRole: true, projectId: true, projectRole: true, acceptedAt: true, revokedAt: true, expiresAt: true, version: true, revocationRequestKey: true, revocationRequestFingerprint: true } });
     if (existing === null || existing.workspaceId !== workspaceId) return fail("WORKSPACE_INVITATION_NOT_FOUND");

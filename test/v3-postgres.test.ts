@@ -105,12 +105,12 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     const memberEmail = `v3-member-${suffix}@example.com`;
     await db.appUser.create({ data: { id: memberId, username: `v3_member_${suffix}`, email: memberEmail, emailVerifiedAt: new Date(), role: "user", passwordHash: null, passwordSalt: null } });
     await db.appUser.create({ data: { id: outsiderAdminId, username: `v3_outsider_admin_${suffix}`, role: "admin", passwordHash: null, passwordSalt: null } });
-    await db.workspace.create({ data: { id: roleWorkspaceId, name: `Role safety ${suffix}`, slug: `role-safety-${suffix}`, createdById: admin.id } });
     await db.project.createMany({ data: [
       { id: projectA, workspaceId: DEFAULT_WORKSPACE_ID, name: `V3 A ${suffix}`, slug: `v3-a-${suffix}` },
       { id: projectB, workspaceId: DEFAULT_WORKSPACE_ID, name: `V3 B ${suffix}`, slug: `v3-b-${suffix}` },
     ] });
     await db.$transaction(async (tx) => {
+      await tx.workspace.create({ data: { id: roleWorkspaceId, name: `Role safety ${suffix}`, slug: `role-safety-${suffix}`, createdById: admin.id } });
       await grantWorkspaceMembership(tx, { workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "member", actorId: admin.id, reason: "v3_gate_fixture_default_workspace" });
       await grantWorkspaceMembership(tx, { workspaceId: roleWorkspaceId, userId: memberId, role: "owner", actorId: admin.id, reason: "v3_gate_fixture_role_workspace" });
       await grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: admin.id, role: "owner", actorId: admin.id, reason: "v3_gate_fixture_admin_direct_access_for_automation_and_web_source" });
@@ -173,9 +173,9 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       () => openNotification(outsiderAdminId, projectNotification.id, db),
       (error: unknown) => error instanceof AutomationError && error.code === "NOTIFICATION_NOT_FOUND",
     );
-    await assert.rejects(() => updateWorkspaceMember(roleWorkspaceId, memberId, { workspaceRole: "viewer" }, member, db), (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_LAST_OWNER_REQUIRED");
+    await assert.rejects(() => updateWorkspaceMember(roleWorkspaceId, memberId, { workspaceRole: "viewer" }, member, db), (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_ROLE_GOVERNANCE_REQUIRED");
     const invitation = await createWorkspaceInvitation(DEFAULT_WORKSPACE_ID, { email: memberEmail, workspaceRole: "viewer", projectId: projectB, projectRole: "viewer", expiresInDays: 7, requestKey: randomUUID() }, admin, db);
-    await acceptWorkspaceInvitation(invitation.token, { id: memberId, email: memberEmail }, "/dashboard", db);
+    await acceptWorkspaceInvitation(invitation.token, { id: memberId, email: memberEmail, accountAccessVersion: member.accountAccessVersion }, "/dashboard", db);
     assert.equal((await findConfirmedWorkspaceMembership(db, DEFAULT_WORKSPACE_ID, memberId))?.role, "member");
     assert.equal((await findConfirmedProjectMembership(db, projectB, memberId))?.role, "editor");
 

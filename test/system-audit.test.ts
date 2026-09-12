@@ -151,6 +151,7 @@ function makeRows(): Readonly<Record<string, FakeRow[]>> {
       },
     }],
     platformTokenGrantAudit: [{ ...base, id: "73111111-1111-4111-8111-111111111111", userId: USER_ID, actorId: ADMIN_ID, event: "grant", versionBefore: 0, versionAfter: 1, statusBefore: "absent", statusAfter: "active" }],
+    workspaceRoleMutationAudit: [{ ...base, id: "74111111-1111-4111-8111-111111111111", actorId: ADMIN_ID, subjectId: USER_ID, event: "roleChanged", oldRole: "member", newRole: "admin", ownerCountBefore: 1, ownerCountAfter: 1, projectGrantCount: 2 }],
   };
 }
 
@@ -237,17 +238,18 @@ function fakeDb(
     accountEntitlementActivationAudit: delegate("accountEntitlementActivation", rows.accountEntitlementActivationAudit, calls),
     accountEntitlementBackfillAudit: delegate("accountEntitlementBackfill", rows.accountEntitlementBackfillAudit, calls),
     platformTokenGrantAudit: delegate("platformCreditGovernance", rows.platformTokenGrantAudit, calls),
+    workspaceRoleMutationAudit: delegate("workspaceRoleMutation", rows.workspaceRoleMutationAudit, calls),
   } as unknown as PrismaClient;
 }
 
-test("registry covers exactly the twenty-one safe control-plane sources", () => {
-  assert.equal(SYSTEM_AUDIT_SOURCES.length, 21);
+test("registry covers exactly the twenty-two safe control-plane sources", () => {
+  assert.equal(SYSTEM_AUDIT_SOURCES.length, 22);
   assert.deepEqual(Object.keys(SYSTEM_AUDIT_REGISTRY).sort(), [...SYSTEM_AUDIT_SOURCES].sort());
   for (const source of SYSTEM_AUDIT_SOURCES) {
     const registry = SYSTEM_AUDIT_REGISTRY[source];
     assert.ok(registry.selectedFields.includes("id"));
     assert.ok(registry.selectedFields.includes("createdAt") || registry.selectedFields.includes("issuedAt"));
-    if (source === "platformProviderProbe" || source === "platformGrantOfferPolicy" || source === "accountEntitlementBackfill" || source === "platformCreditGovernance" || source === "membershipApplication") assert.deepEqual(registry.referenceFields, []);
+    if (source === "platformProviderProbe" || source === "platformGrantOfferPolicy" || source === "accountEntitlementBackfill" || source === "platformCreditGovernance" || source === "workspaceRoleMutation" || source === "membershipApplication") assert.deepEqual(registry.referenceFields, []);
     else assert.ok(registry.referenceFields.length > 0);
     assert.deepEqual(Object.keys(registry.actionMap).sort(), [...registry.allowedActions].sort());
     for (const field of registry.selectedFields) assert.doesNotMatch(field, /fingerprint|token/iu, `${source}.${field}`);
@@ -400,6 +402,16 @@ test("new audit adapters preserve source-specific results and safe principals", 
   assert.equal(credit[0]?.evidence.before.version, 0);
   assert.equal(credit[0]?.evidence.after.status, "active");
   assert.deepEqual(credit[0]?.references, { categories: "platformCreditGovernance" });
+
+  const roleMutation = (await listSystemAudit({ source: "workspaceRoleMutation", pageSize: 50 }, db, now)).events;
+  assert.equal(roleMutation.length, 1);
+  assert.equal(roleMutation[0]?.action, "roleChanged");
+  assert.equal(roleMutation[0]?.result, "applied");
+  assert.equal(roleMutation[0]?.evidence.before.role, "member");
+  assert.equal(roleMutation[0]?.evidence.after.role, "admin");
+  assert.equal(roleMutation[0]?.evidence.after.projectGrantCount, 2);
+  assert.equal(roleMutation[0]?.evidence.reasonRecorded, false);
+  assert.deepEqual(roleMutation[0]?.references, { categories: "workspaceRoleMutation" });
 });
 
 test("platform grant offer created result follows the resulting policy status", async () => {
@@ -560,7 +572,7 @@ test("actor and subject lookups accept only exact UUID or unique username", asyn
   const db = fakeDb(rows, "admin", calls);
   const now = new Date("2026-09-09T02:00:00.000Z");
   const byUsername = await listSystemAudit({ actor: "admin", pageSize: 50 }, db, now);
-  assert.equal(byUsername.events.length, 23);
+  assert.equal(byUsername.events.length, 24);
   const byDisplayName = await listSystemAudit({ actor: "平台管理员", pageSize: 50 }, db, now);
   assert.deepEqual(byDisplayName.events, []);
 });

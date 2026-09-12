@@ -223,16 +223,19 @@ test(
     const client = new Client({ connectionString: databaseUrl });
     const suffix = randomUUID().replaceAll("-", "");
     const userId = randomUUID();
+    const bootstrapOwnerId = randomUUID();
     const workspaceId = randomUUID();
     const projectId = randomUUID();
     const workspaceMembershipId = randomUUID();
+    const bootstrapWorkspaceMembershipId = randomUUID();
     const projectMembershipId = randomUUID();
     await client.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`INSERT INTO "AppUser" ("id", "username", "role", "updatedAt") VALUES ($1, $2, 'user', CURRENT_TIMESTAMP)`, [userId, `manifest_gate_${suffix}`]);
+      await client.query(`INSERT INTO "AppUser" ("id", "username", "role", "updatedAt") VALUES ($1, $2, 'user', CURRENT_TIMESTAMP), ($3, $4, 'user', CURRENT_TIMESTAMP)`, [userId, `manifest_gate_${suffix}`, bootstrapOwnerId, `manifest_gate_bootstrap_owner_${suffix}`]);
       await client.query(`INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [workspaceId, `Manifest gate ${suffix}`, `manifest-gate-${suffix}`, userId]);
       await client.query(`INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [projectId, workspaceId, `Manifest project ${suffix}`, `manifest-project-${suffix}`]);
+      await insertConfirmedMembershipWithAudit(client, { kind: "workspace", membershipId: bootstrapWorkspaceMembershipId, workspaceId, projectId: null, userId: bootstrapOwnerId, role: "owner" });
       await insertPendingMembershipWithAudit(client, { kind: "workspace", membershipId: workspaceMembershipId, workspaceId, projectId: null, userId, role: "owner" });
       await insertPendingMembershipWithAudit(client, { kind: "project", membershipId: projectMembershipId, workspaceId, projectId, userId, role: "owner" });
       await client.query("COMMIT");
@@ -807,10 +810,12 @@ test(
       const raceWorkspaceId = randomUUID();
       const raceProjectId = randomUUID();
       const raceWorkspaceMembershipId = randomUUID();
+      const raceBootstrapWorkspaceMembershipId = randomUUID();
       const raceProjectMembershipId = randomUUID();
       await client.query("BEGIN");
       await client.query(`INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [raceWorkspaceId, `Manifest race workspace ${suffix}`, `manifest-race-${suffix}`, userId]);
       await client.query(`INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "membershipInheritanceMode", "updatedAt") VALUES ($1, $2, $3, $4, 'workspace_inherited', CURRENT_TIMESTAMP)`, [raceProjectId, raceWorkspaceId, `Manifest race project ${suffix}`, `manifest-race-project-${suffix}`]);
+      await insertConfirmedMembershipWithAudit(client, { kind: "workspace", membershipId: raceBootstrapWorkspaceMembershipId, workspaceId: raceWorkspaceId, projectId: null, userId: bootstrapOwnerId, role: "owner" });
       await insertPendingMembershipWithAudit(client, { kind: "workspace", membershipId: raceWorkspaceMembershipId, workspaceId: raceWorkspaceId, projectId: null, userId, role: "owner" });
       await insertPendingMembershipWithAudit(client, { kind: "project", membershipId: raceProjectMembershipId, workspaceId: raceWorkspaceId, projectId: raceProjectId, userId, role: "viewer" });
       await client.query("COMMIT");
@@ -887,42 +892,23 @@ test(
       const disabledWorkspaceOwnerMembershipId = randomUUID();
       const disabledProjectOwnerMembershipId = randomUUID();
       const pendingWorkspaceOwnerMembershipId = randomUUID();
-      await client.query("BEGIN");
+      // The final owner invariant now rejects this deliberately invalid seed
+      // before the manifest layer can observe it: a disabled confirmed owner
+      // plus a pending replacement is not a committable initialized state.
       await client.query(`INSERT INTO "AppUser" ("id", "username", "role", "disabledAt", "updatedAt") VALUES ($1, $2, 'user', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, [disabledOwnerId, `manifest_disabled_owner_${suffix}`]);
-      await client.query(`INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [disabledWorkspaceId, `Manifest disabled workspace ${suffix}`, `manifest-disabled-${suffix}`, userId]);
-      await client.query(`INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "membershipInheritanceMode", "updatedAt") VALUES ($1, $2, $3, $4, 'workspace_inherited', CURRENT_TIMESTAMP)`, [disabledProjectId, disabledWorkspaceId, `Manifest disabled project ${suffix}`, `manifest-disabled-project-${suffix}`]);
-      await insertConfirmedMembershipWithAudit(client, { kind: "workspace", membershipId: disabledWorkspaceOwnerMembershipId, workspaceId: disabledWorkspaceId, projectId: null, userId: disabledOwnerId, role: "owner" });
-      await insertConfirmedMembershipWithAudit(client, { kind: "project", membershipId: disabledProjectOwnerMembershipId, workspaceId: disabledWorkspaceId, projectId: disabledProjectId, userId: disabledOwnerId, role: "owner" });
-      await insertPendingMembershipWithAudit(client, { kind: "workspace", membershipId: pendingWorkspaceOwnerMembershipId, workspaceId: disabledWorkspaceId, projectId: null, userId, role: "owner" });
-      await client.query("COMMIT");
-      const disabledWorkspaceInventory = (await client.query<InventoryRow>(inventorySql)).rows;
-      const disabledWorkspaceManifest = buildManifest(disabledWorkspaceInventory, randomUUID(), new Map([
-        [`workspace:${pendingWorkspaceOwnerMembershipId}`, "revoke"],
-      ]));
-      const disabledWorkspaceSigned = signedApprovals(disabledWorkspaceManifest, "disabled_workspace");
-      const previousDisabledWorkspaceRegistry = process.env[MEMBERSHIP_GOVERNANCE_TRUSTED_SIGNERS_ENV];
-      process.env[MEMBERSHIP_GOVERNANCE_TRUSTED_SIGNERS_ENV] = registryTextFor(disabledWorkspaceSigned);
-      try {
-        await assert.rejects(
-          () => applyMembershipGovernanceManifest(
-            client as unknown as MembershipGovernanceQueryClient,
-            canonicalMembershipGovernanceManifest(disabledWorkspaceManifest),
-            disabledWorkspaceSigned.approvalTexts,
-            "postgres-disabled-workspace",
-          ),
-          (error: unknown) => error instanceof MembershipGovernanceManifestError && error.code === "MEMBERSHIP_GOVERNANCE_OWNER_LOCKOUT",
-        );
-      } finally {
-        restoreTrustedRegistry(previousDisabledWorkspaceRegistry);
-      }
-      const disabledWorkspaceState = await client.query<{ access_state: string; audits: string; executions: string; approvals: string }>(`
-        SELECT
-          (SELECT "accessState"::text FROM "WorkspaceMembership" WHERE "id" = $1) AS access_state,
-          (SELECT COUNT(*)::text FROM "MembershipAccessAudit" WHERE "membershipId" = $1 AND "manifestFingerprint" = $2) AS audits,
-          (SELECT COUNT(*)::text FROM "MembershipGovernanceExecution" WHERE "manifestFingerprint" = $2) AS executions,
-          (SELECT COUNT(*)::text FROM "MembershipGovernanceApproval" approval JOIN "MembershipGovernanceExecution" execution ON execution."id" = approval."executionId" WHERE execution."manifestFingerprint" = $2) AS approvals
-      `, [pendingWorkspaceOwnerMembershipId, membershipGovernanceManifestFingerprint(disabledWorkspaceManifest)]);
-      assert.deepEqual(disabledWorkspaceState.rows[0], { access_state: "pending", audits: "0", executions: "0", approvals: "0" });
+      await assert.rejects(
+        async () => {
+          await client.query("BEGIN");
+          await client.query(`INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [disabledWorkspaceId, `Manifest disabled workspace ${suffix}`, `manifest-disabled-${suffix}`, userId]);
+          await client.query(`INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "membershipInheritanceMode", "updatedAt") VALUES ($1, $2, $3, $4, 'workspace_inherited', CURRENT_TIMESTAMP)`, [disabledProjectId, disabledWorkspaceId, `Manifest disabled project ${suffix}`, `manifest-disabled-project-${suffix}`]);
+          await insertConfirmedMembershipWithAudit(client, { kind: "workspace", membershipId: disabledWorkspaceOwnerMembershipId, workspaceId: disabledWorkspaceId, projectId: null, userId: disabledOwnerId, role: "owner" });
+          await insertConfirmedMembershipWithAudit(client, { kind: "project", membershipId: disabledProjectOwnerMembershipId, workspaceId: disabledWorkspaceId, projectId: disabledProjectId, userId: disabledOwnerId, role: "owner" });
+          await insertPendingMembershipWithAudit(client, { kind: "workspace", membershipId: pendingWorkspaceOwnerMembershipId, workspaceId: disabledWorkspaceId, projectId: null, userId, role: "owner" });
+          await client.query("COMMIT");
+        },
+        (error: unknown) => typeof error === "object" && error !== null && "code" in error && String((error as { code?: unknown }).code) === "23514",
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
 
       // A project-only project likewise cannot retain a disabled confirmed
       // project owner after its only enabled pending owner is revoked.
@@ -959,7 +945,7 @@ test(
       } finally {
         restoreTrustedRegistry(previousDisabledProjectRegistry);
       }
-      const disabledProjectState = await client.query<{ workspace_state: string; project_state: string; workspace_audits: string; project_audits: string; executions: string; approvals: string }>(`
+      const disabledProjectState = await client.query<{ workspace_state: string | null; project_state: string; workspace_audits: string; project_audits: string; executions: string; approvals: string }>(`
         SELECT
           (SELECT "accessState"::text FROM "WorkspaceMembership" WHERE "id" = $1) AS workspace_state,
           (SELECT "accessState"::text FROM "ProjectMembership" WHERE "id" = $2) AS project_state,
@@ -968,15 +954,17 @@ test(
           (SELECT COUNT(*)::text FROM "MembershipGovernanceExecution" WHERE "manifestFingerprint" = $3) AS executions,
           (SELECT COUNT(*)::text FROM "MembershipGovernanceApproval" approval JOIN "MembershipGovernanceExecution" execution ON execution."id" = approval."executionId" WHERE execution."manifestFingerprint" = $3) AS approvals
       `, [pendingWorkspaceOwnerMembershipId, pendingProjectOnlyOwnerMembershipId, membershipGovernanceManifestFingerprint(disabledProjectManifest)]);
-      assert.deepEqual(disabledProjectState.rows[0], { workspace_state: "pending", project_state: "pending", workspace_audits: "0", project_audits: "0", executions: "0", approvals: "0" });
+      assert.deepEqual(disabledProjectState.rows[0], { workspace_state: null, project_state: "pending", workspace_audits: "0", project_audits: "0", executions: "0", approvals: "0" });
 
       // Expiry is checked against clock_timestamp() only after all relation
       // and row locks. Holding a conflicting table lock here proves that a
       // manifest which expires while waiting cannot mutate any membership.
       const expiryWorkspaceId = randomUUID();
+      const expiryBootstrapWorkspaceMembershipId = randomUUID();
       const expiryMembershipId = randomUUID();
       await client.query("BEGIN");
       await client.query(`INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [expiryWorkspaceId, `Manifest expiry workspace ${suffix}`, `manifest-expiry-${suffix}`, userId]);
+      await insertConfirmedMembershipWithAudit(client, { kind: "workspace", membershipId: expiryBootstrapWorkspaceMembershipId, workspaceId: expiryWorkspaceId, projectId: null, userId: bootstrapOwnerId, role: "owner" });
       await insertPendingMembershipWithAudit(client, { kind: "workspace", membershipId: expiryMembershipId, workspaceId: expiryWorkspaceId, projectId: null, userId, role: "owner" });
       await client.query("COMMIT");
       const expiryInventory = (await client.query<InventoryRow>(inventorySql)).rows;
@@ -1030,37 +1018,19 @@ test(
       // is pending: revoking that row must fail before any state or audit write.
       const lockoutWorkspaceId = randomUUID();
       const lockoutMembershipId = randomUUID();
-      await client.query("BEGIN");
-      await client.query(`INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [lockoutWorkspaceId, `Manifest lockout workspace ${suffix}`, `manifest-lockout-${suffix}`, userId]);
-      await insertPendingMembershipWithAudit(client, { kind: "workspace", membershipId: lockoutMembershipId, workspaceId: lockoutWorkspaceId, projectId: null, userId, role: "owner" });
-      await client.query("COMMIT");
-      const lockoutInventory = (await client.query<InventoryRow>(inventorySql)).rows;
-      const lockoutManifest = buildManifest(lockoutInventory, randomUUID(), new Map([
-        [`workspace:${lockoutMembershipId}`, "revoke"],
-      ]));
-      const lockoutSigned = signedApprovals(lockoutManifest, "lockout");
-      const previousLockoutTrustedRegistry = process.env[MEMBERSHIP_GOVERNANCE_TRUSTED_SIGNERS_ENV];
-      process.env[MEMBERSHIP_GOVERNANCE_TRUSTED_SIGNERS_ENV] = registryTextFor(lockoutSigned);
-      try {
-        await assert.rejects(
-          () => applyMembershipGovernanceManifest(
-            client as unknown as MembershipGovernanceQueryClient,
-            canonicalMembershipGovernanceManifest(lockoutManifest),
-            lockoutSigned.approvalTexts,
-            "postgres-lockout",
-          ),
-          (error: unknown) => error instanceof MembershipGovernanceManifestError && error.code === "MEMBERSHIP_GOVERNANCE_OWNER_LOCKOUT",
-        );
-      } finally {
-        restoreTrustedRegistry(previousLockoutTrustedRegistry);
-      }
-      const lockoutState = await client.query<{ access_state: string; audits: string; executions: string }>(`
-        SELECT
-          (SELECT "accessState"::text FROM "WorkspaceMembership" WHERE "id" = $1) AS access_state,
-          (SELECT COUNT(*)::text FROM "MembershipAccessAudit" WHERE "manifestFingerprint" = $2) AS audits,
-          (SELECT COUNT(*)::text FROM "MembershipGovernanceExecution" WHERE "manifestFingerprint" = $2) AS executions
-      `, [lockoutMembershipId, membershipGovernanceManifestFingerprint(lockoutManifest)]);
-      assert.deepEqual(lockoutState.rows[0], { access_state: "pending", audits: "0", executions: "0" });
+      // Likewise, a workspace whose only membership history is pending is no
+      // longer a legal initialized fixture.  Keep this as an explicit DB
+      // negative rather than bypassing the invariant to reach the manifest.
+      await assert.rejects(
+        async () => {
+          await client.query("BEGIN");
+          await client.query(`INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [lockoutWorkspaceId, `Manifest lockout workspace ${suffix}`, `manifest-lockout-${suffix}`, userId]);
+          await insertPendingMembershipWithAudit(client, { kind: "workspace", membershipId: lockoutMembershipId, workspaceId: lockoutWorkspaceId, projectId: null, userId, role: "owner" });
+          await client.query("COMMIT");
+        },
+        (error: unknown) => typeof error === "object" && error !== null && "code" in error && String((error as { code?: unknown }).code) === "23514",
+      );
+      await client.query("ROLLBACK").catch(() => undefined);
 
       // Ordinary SQL that appears to provide a correctly shaped audit still
       // cannot finalize a pending row.  The deferred transition evidence
@@ -1069,12 +1039,14 @@ test(
       const directPendingUserId = randomUUID();
       const directPendingWorkspaceId = randomUUID();
       const directPendingProjectId = randomUUID();
+      const directPendingBootstrapWorkspaceMembershipId = randomUUID();
       const directPendingWorkspaceMembershipId = randomUUID();
       const directPendingProjectMembershipId = randomUUID();
       await client.query("BEGIN");
       await client.query(`INSERT INTO "AppUser" ("id", "username", "role", "updatedAt") VALUES ($1, $2, 'user', CURRENT_TIMESTAMP)`, [directPendingUserId, `manifest_direct_pending_${suffix}`]);
       await client.query(`INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [directPendingWorkspaceId, `Manifest direct pending workspace ${suffix}`, `manifest-direct-pending-${suffix}`, userId]);
       await client.query(`INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt") VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)`, [directPendingProjectId, directPendingWorkspaceId, `Manifest direct pending project ${suffix}`, `manifest-direct-pending-project-${suffix}`]);
+      await insertConfirmedMembershipWithAudit(client, { kind: "workspace", membershipId: directPendingBootstrapWorkspaceMembershipId, workspaceId: directPendingWorkspaceId, projectId: null, userId: bootstrapOwnerId, role: "owner" });
       await insertPendingMembershipWithAudit(client, { kind: "workspace", membershipId: directPendingWorkspaceMembershipId, workspaceId: directPendingWorkspaceId, projectId: null, userId: directPendingUserId, role: "owner" });
       await insertPendingMembershipWithAudit(client, { kind: "project", membershipId: directPendingProjectMembershipId, workspaceId: directPendingWorkspaceId, projectId: directPendingProjectId, userId: directPendingUserId, role: "viewer" });
       await client.query("COMMIT");

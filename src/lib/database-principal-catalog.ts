@@ -39,6 +39,7 @@ export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
   "MembershipApplication", "MembershipApplicationPreview", "MembershipApplicationAudit",
   "PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenLedgerEntry",
   "PlatformTokenGrantMutationPreview", "PlatformTokenGrantAudit", "AppSession", "Workspace", "WorkspaceMembership",
+  "WorkspaceRoleMutationPreview", "WorkspaceRoleMutationAudit",
   "ProjectMembership", "MembershipAccessAudit", "MembershipGovernanceExecution", "MembershipGovernanceApproval",
   "WorkspaceInvitation", "WorkspaceInvitationAudit", "OidcProvider", "OidcIdentity", "OidcLoginAttempt",
   "GitHubIdentity", "GitHubOauthAttempt", "ExternalCredential", "McpConnection", "McpToolDefinition",
@@ -83,6 +84,8 @@ export const RUNTIME_ONLY_CONTROL_PLANE_RELATIONS = Object.freeze([
   "MembershipApplication",
   "MembershipApplicationPreview",
   "MembershipApplicationAudit",
+  "WorkspaceRoleMutationPreview",
+  "WorkspaceRoleMutationAudit",
 ] as const);
 
 export const SIGNUP_GRANT_RELATION = "PlatformTokenGrant" as const;
@@ -124,6 +127,7 @@ export const DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX = Object.freeze([
   invokerFunction("personal_memory_scope_has_stale_evidence", "uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid", true, true, "personal memory stale evidence validation"),
   invokerFunction("project_ai_require_dependent_invalidation", "uuid, uuid, uuid, uuid, uuid, uuid", true, true, "project AI dependent invalidation validation"),
   invokerFunction("personal_memory_frozen_evidence_valid_without_epoch", "uuid, boolean", true, true, "personal memory legacy evidence validation"),
+  invokerFunction("workspace_role_check_owner", "uuid", true, true, "workspace enabled-owner invariant validation"),
 
   // Signup closure is invoked by the entitlement-writer activation path only.
   invokerFunction(ACCOUNT_ENTITLEMENT_SIGNUP_GRANT_CLOSURE_FUNCTION, "uuid", false, true, "signup grant activation closure validation"),

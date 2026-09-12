@@ -121,13 +121,13 @@ async function createWebAiServiceFixture(): Promise<WebAiServiceFixture> {
     ],
   });
   await createSignupOfferFixture(db, adminId);
-  await db.workspace.create({
-    data: { id: workspaceId, name: `Web AI service ${suffix}`, slug: `web-ai-service-${suffix}`, createdById: actorId },
-  });
-  await db.project.create({
-    data: { id: projectId, workspaceId, name: `Web AI service project ${suffix}`, slug: `web-ai-service-project-${suffix}` },
-  });
   await db.$transaction(async (tx) => {
+    await tx.workspace.create({
+      data: { id: workspaceId, name: `Web AI service ${suffix}`, slug: `web-ai-service-${suffix}`, createdById: actorId },
+    });
+    await tx.project.create({
+      data: { id: projectId, workspaceId, name: `Web AI service project ${suffix}`, slug: `web-ai-service-project-${suffix}` },
+    });
     await grantWorkspaceMembership(tx, { workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
   });
@@ -450,6 +450,7 @@ async function createFixture(client: Client, options: FixtureOptions = {}): Prom
   const actorId = randomUUID();
   const workspaceId = randomUUID();
   const projectId = randomUUID();
+  const workspaceOwnerMembershipId = randomUUID();
   const providerId = randomUUID();
   const routeId = randomUUID();
   const credentialId = randomUUID();
@@ -461,6 +462,7 @@ async function createFixture(client: Client, options: FixtureOptions = {}): Prom
   const clientKeyHash = "b".repeat(64);
   const ttlMs = options.ttlMs ?? 10 * 60 * 1_000;
 
+  await query(client, "BEGIN");
   await query(client, `
     INSERT INTO "AppUser" ("id", "username", "role", "updatedAt")
     VALUES ($1::uuid, $2, 'user', CURRENT_TIMESTAMP)
@@ -469,6 +471,19 @@ async function createFixture(client: Client, options: FixtureOptions = {}): Prom
     INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt")
     VALUES ($1::uuid, $2, $3, $4::uuid, CURRENT_TIMESTAMP)
   `, [workspaceId, `Web AI confirmation ${suffix}`, `web-ai-confirmation-${suffix}`, actorId]);
+  await query(client, `
+    INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "createdAt", "updatedAt")
+    VALUES ($1::uuid, $2::uuid, $3::uuid, 'owner', 'confirmed', clock_timestamp() AT TIME ZONE 'UTC', clock_timestamp() AT TIME ZONE 'UTC')
+  `, [workspaceOwnerMembershipId, workspaceId, actorId]);
+  await query(client, `
+    INSERT INTO "MembershipAccessAudit"
+      ("id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId", "action", "previousState", "newState", "roleSnapshot", "actorId", "reason", "membershipFingerprint", "transactionId", "createdAt")
+    SELECT $1::uuid, 'workspace', membership."id", membership."workspaceId", NULL, membership."userId", 'confirmed', NULL, 'confirmed', membership."role"::text, membership."userId", 'web_ai_confirmation_fixture_workspace_owner',
+      encode(digest(convert_to(concat_ws(E'\\x1f', membership."id"::text, membership."workspaceId"::text, membership."userId"::text, membership."role"::text, to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS'), to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS')), 'UTF8'), 'sha256'), 'hex'),
+      txid_current(), clock_timestamp() AT TIME ZONE 'UTC'
+    FROM "WorkspaceMembership" AS membership
+    WHERE membership."id" = $2::uuid
+  `, [randomUUID(), workspaceOwnerMembershipId]);
   await query(client, `
     INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt")
     VALUES ($1::uuid, $2::uuid, $3, $4, CURRENT_TIMESTAMP)
@@ -501,6 +516,7 @@ async function createFixture(client: Client, options: FixtureOptions = {}): Prom
     VALUES ($1::uuid, $2::uuid, 'autoExtract', 'project_sources', '{}'::jsonb, $3, $4::uuid, 'glm-4-flash', 'web-ai-transfer-consent:v1', $5::uuid, 'platform', $5::uuid, $6::uuid, $7::uuid, 'platform_default', $8::uuid, 1, CURRENT_TIMESTAMP, 1, 10000, $9, $10, 'platform_caller', $11::uuid, 128, CURRENT_TIMESTAMP + INTERVAL '1 day')
   `, [grantId, projectId, "f".repeat(64), providerId, actorId, jobId, challengeId, routeId, "7".repeat(64), "c".repeat(64), providerId]);
   await query(client, `UPDATE "BackgroundJob" SET "webAiGrantId" = $2::uuid WHERE "id" = $1::uuid`, [jobId, grantId]);
+  await query(client, "COMMIT");
 
   return Object.freeze({
     workspaceId,
@@ -851,9 +867,9 @@ test(
 
     try {
       await db.appUser.create({ data: { id: actorId, username: `web_ai_confirmation_service_${suffix}`, role: "user" } });
-      await db.workspace.create({ data: { id: workspaceId, name: `Confirmation service ${suffix}`, slug: `confirmation-service-${suffix}`, createdById: actorId } });
-      await db.project.create({ data: { id: projectId, workspaceId, name: `Confirmation service project ${suffix}`, slug: `confirmation-service-project-${suffix}` } });
       await db.$transaction(async (tx) => {
+        await tx.workspace.create({ data: { id: workspaceId, name: `Confirmation service ${suffix}`, slug: `confirmation-service-${suffix}`, createdById: actorId } });
+        await tx.project.create({ data: { id: projectId, workspaceId, name: `Confirmation service project ${suffix}`, slug: `confirmation-service-project-${suffix}` } });
         await grantWorkspaceMembership(tx, { workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: actorId, role: "owner", actorId, reason: "web_ai_confirmation_service_fixture" });
       });

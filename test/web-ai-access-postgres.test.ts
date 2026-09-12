@@ -13,6 +13,10 @@ import { WebAiAccessError, type WebAiActor } from "../src/lib/web-ai-access";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { prepareAutoExtractConfirmation, runAutoExtractJob } from "../src/lib/web-auto-extract";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
+import {
+  executePlatformTokenGrantMutation,
+  previewPlatformTokenGrantMutation,
+} from "../src/lib/platform-credit-governance-service";
 
 const shouldRun = process.env.WEB_AI_ACCESS_POSTGRES_GATE === "1";
 const consent = { acknowledged: true, version: WEB_AI_TRANSFER_CONSENT_VERSION } as const;
@@ -76,21 +80,21 @@ test(
         { id: outsiderAdminId, username: `web_access_outsider_admin_${suffix}`, role: "admin" },
       ],
     });
-    await db.workspace.createMany({
-      data: [
-        { id: workspaceId, name: `Web access ${suffix}`, slug: `web-access-${suffix}`, createdById: ownerId },
-        { id: otherWorkspaceId, name: `Web access other ${suffix}`, slug: `web-access-other-${suffix}` },
-      ],
-    });
-    await db.project.createMany({
-      data: [
-        { id: projectId, workspaceId, name: `Web access project ${suffix}`, slug: `web-access-project-${suffix}` },
-        { id: archivedProjectId, workspaceId, name: `Web access archived ${suffix}`, slug: `web-access-archived-${suffix}` },
-        { id: otherProjectId, workspaceId: otherWorkspaceId, name: `Web access private ${suffix}`, slug: `web-access-private-${suffix}` },
-        { id: githubProjectId, workspaceId, name: `Web access GitHub ${suffix}`, slug: `web-access-github-${suffix}` },
-      ],
-    });
     await db.$transaction(async (tx) => {
+      await tx.workspace.create({
+        data: { id: workspaceId, name: `Web access ${suffix}`, slug: `web-access-${suffix}`, createdById: ownerId },
+      });
+      await tx.workspace.create({
+        data: { id: otherWorkspaceId, name: `Web access other ${suffix}`, slug: `web-access-other-${suffix}` },
+      });
+      await tx.project.createMany({
+        data: [
+          { id: projectId, workspaceId, name: `Web access project ${suffix}`, slug: `web-access-project-${suffix}` },
+          { id: archivedProjectId, workspaceId, name: `Web access archived ${suffix}`, slug: `web-access-archived-${suffix}` },
+          { id: otherProjectId, workspaceId: otherWorkspaceId, name: `Web access private ${suffix}`, slug: `web-access-private-${suffix}` },
+          { id: githubProjectId, workspaceId, name: `Web access GitHub ${suffix}`, slug: `web-access-github-${suffix}` },
+        ],
+      });
       await grantWorkspaceMembership(tx, {
         workspaceId,
         userId: ownerId,
@@ -364,7 +368,6 @@ test(
     const projectId = randomUUID();
     const providerId = randomUUID();
     const credentialId = randomUUID();
-    const grantId = randomUUID();
     const sourceId = randomUUID();
     const platformRouteId = randomUUID();
     const actor: WebAiActor = { id: userId, role: "user", accountAccessVersion: 1 };
@@ -378,13 +381,13 @@ test(
     await db.appUser.create({
       data: { id: adminId, username: `web_ai_post_claim_admin_${suffix}`, role: "admin" },
     });
-    await db.workspace.create({
-      data: { id: workspaceId, name: `Web AI post claim ${suffix}`, slug: `web-ai-post-claim-${suffix}`, createdById: userId },
-    });
-    await db.project.create({
-      data: { id: projectId, workspaceId, name: `Web AI post claim ${suffix}`, slug: `web-ai-post-claim-project-${suffix}` },
-    });
     await db.$transaction(async (tx) => {
+      await tx.workspace.create({
+        data: { id: workspaceId, name: `Web AI post claim ${suffix}`, slug: `web-ai-post-claim-${suffix}`, createdById: userId },
+      });
+      await tx.project.create({
+        data: { id: projectId, workspaceId, name: `Web AI post claim ${suffix}`, slug: `web-ai-post-claim-project-${suffix}` },
+      });
       await grantWorkspaceMembership(tx, {
         workspaceId,
         userId,
@@ -457,17 +460,32 @@ test(
         updatedById: adminId,
       },
     });
-    await db.platformTokenGrant.create({
-      data: {
-        id: grantId,
-        userId,
-        kind: "manual",
-        amount: 1_000_000,
-        remainingTokens: 1_000_000,
-        offerVersion: "web-ai-access-gate",
-        expiresAt: new Date(Date.now() + 86_400_000),
-      },
-    });
+    const grantPreview = await previewPlatformTokenGrantMutation({
+      action: "grant",
+      userId,
+      amount: 1_000_000,
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      requestKey: `web-ai-access-${suffix}`,
+      reason: "post-claim access revocation gate",
+    }, { id: adminId, role: "admin", accountAccessVersion: 1 }, db);
+    await executePlatformTokenGrantMutation({
+      action: grantPreview.action,
+      userId: grantPreview.target.id,
+      grantId: grantPreview.grant.id,
+      amount: grantPreview.grant.amount,
+      expiresAt: grantPreview.grant.expiresAt?.toISOString() ?? null,
+      previewId: grantPreview.previewId,
+      expectedVersion: grantPreview.expectedVersion,
+      expectedRemainingTokens: grantPreview.expectedRemainingTokens,
+      impactFingerprint: grantPreview.impactFingerprint,
+      requestFingerprint: grantPreview.requestFingerprint,
+      requestKey: grantPreview.requestKey,
+      reason: grantPreview.reason,
+      previewIssuedAt: grantPreview.issuedAt.toISOString(),
+      previewExpiresAt: grantPreview.expiresAt.toISOString(),
+      confirmation: true,
+      confirmationUsername: `web_ai_post_claim_${suffix}`,
+    }, { id: adminId, role: "admin", accountAccessVersion: 1 }, db);
 
     const clientKey = `post-claim-${suffix}`;
     const confirmation = await prepareAutoExtractConfirmation({
@@ -567,14 +585,14 @@ test(
         }, db);
       }
       await db.providerCallAudit.deleteMany({ where: { providerConnectionId: providerId } });
-      await db.platformTokenLedgerEntry.deleteMany({ where: { userId } });
       await db.platformTokenReservation.deleteMany({ where: { userId } });
       await db.webAiGrant.deleteMany({ where: { providerConnectionId: providerId } });
       await db.platformDefaultAiRoute.deleteMany({ where: { id: platformRouteId } });
       await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
       await db.externalCredential.deleteMany({ where: { id: credentialId } });
       await db.workspace.deleteMany({ where: { id: workspaceId } });
-      await db.appUser.deleteMany({ where: { id: { in: [userId, adminId] } } });
+      // Governed grant and audit evidence intentionally retain both principals
+      // until this disposable gate database is dropped by the runner.
     }
   },
 );

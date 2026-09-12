@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
 import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
-import { initializeAdmin } from "../src/lib/auth";
+import { DEFAULT_WORKSPACE_ID, initializeAdmin } from "../src/lib/auth";
 import { activateAccountEntitlements } from "../src/lib/account-entitlement-activation-service";
 import {
   changePlatformGrantOfferPolicyLifecycle,
@@ -18,6 +18,7 @@ import {
   previewAccountEntitlementBackfill,
 } from "../src/lib/account-entitlement-backfill-service";
 import { getDb } from "../src/lib/db";
+import { grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { getSystemAuditDetail, listSystemAudit } from "../src/lib/system-audit";
 
 const shouldRun = process.env.ACCOUNT_ENTITLEMENT_ACTIVATION_POSTGRES_GATE === "1";
@@ -695,6 +696,13 @@ test(
       const secondAdmin = await db.appUser.create({
         data: { id: randomUUID(), username: `entitlement_epoch_admin_${suffix}`, role: "admin" },
       });
+      await db.$transaction((tx) => grantWorkspaceMembership(tx, {
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        userId: secondAdmin.id,
+        role: "owner",
+        actorId: actor.id,
+        reason: "account_entitlement_activation_epoch_backup_owner",
+      }));
       const disableActorPreview = await previewAccountAccess({
         adminUserId: secondAdmin.id,
         adminAccountAccessVersion: secondAdmin.accountAccessVersion,

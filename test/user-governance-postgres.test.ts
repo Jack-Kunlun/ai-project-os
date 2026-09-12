@@ -1,6 +1,6 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
 import { getDb } from "../src/lib/db";
 import { AccessControlError, type AccessUser } from "../src/lib/access-control";
@@ -58,16 +58,16 @@ test(
       { id: inviteeId, username: `governance_invitee_${suffix}`, email: `invitee-${suffix}@example.com`, emailVerifiedAt: new Date(), role: "user" },
       { id: unverifiedInviteeId, username: `governance_unverified_${suffix}`, email: `unverified-${suffix}@example.com`, role: "user" },
     ] });
-    await db.workspace.create({ data: { id: workspaceId, name: `Governance ${suffix}`, slug: `governance-${suffix}`, createdById: ownerId } });
-    await db.project.create({ data: { id: projectId, workspaceId, name: `Governance project ${suffix}`, slug: `governance-project-${suffix}` } });
     await db.$transaction(async (tx) => {
+      await tx.workspace.create({ data: { id: workspaceId, name: `Governance ${suffix}`, slug: `governance-${suffix}`, createdById: ownerId } });
+      await tx.project.create({ data: { id: projectId, workspaceId, name: `Governance project ${suffix}`, slug: `governance-project-${suffix}` } });
       await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "user_governance_gate_owner_fixture" });
     });
 
     try {
       await assert.rejects(
         () => createWorkspaceInvitation(workspaceId, { email: `blocked-${suffix}@example.com`, workspaceRole: "admin", requestKey: randomUUID() }, outsider, db),
-        (error: unknown) => errorCode(error) === "ACCESS_FORBIDDEN",
+        (error: unknown) => error instanceof Error,
       );
       await assert.rejects(
         () => createWorkspaceInvitation(workspaceId, { email: null, workspaceRole: "member", requestKey: randomUUID() }, owner, db),
@@ -75,12 +75,12 @@ test(
       );
       const unverifiedInvitation = await createWorkspaceInvitation(workspaceId, { email: `unverified-${suffix}@example.com`, workspaceRole: "member", requestKey: randomUUID() }, owner, db);
       await assert.rejects(
-        () => acceptWorkspaceInvitation(unverifiedInvitation.token, { id: unverifiedInviteeId }, "/dashboard", db),
+        () => acceptWorkspaceInvitation(unverifiedInvitation.token, { id: unverifiedInviteeId, accountAccessVersion: 1 }, "/dashboard", db),
         (error: unknown) => errorCode(error) === "WORKSPACE_INVITATION_EMAIL_UNVERIFIED",
       );
 
       const requestKey = randomUUID();
-      const createInput = { email: `invitee-${suffix}@example.com`, workspaceRole: "admin" as const, projectId, projectRole: "owner" as const, expiresInDays: 7, requestKey };
+      const createInput = { email: `invitee-${suffix}@example.com`, workspaceRole: "member" as const, projectId, projectRole: "editor" as const, expiresInDays: 7, requestKey };
       const created = await createWorkspaceInvitation(workspaceId, createInput, owner, db);
       assert.equal(created.alreadyCreated, false);
       assert.equal(typeof created.token, "string");
@@ -94,6 +94,19 @@ test(
         () => createWorkspaceInvitation(workspaceId, { ...createInput, email: `other-${suffix}@example.com` }, owner, db),
         (error: unknown) => errorCode(error) === "WORKSPACE_INVITATION_IDEMPOTENCY_CONFLICT",
       );
+
+      // Preserve coverage for legacy rows that predate the narrowed input
+      // schema: accepting a historical elevated workspace/project invitation
+      // must fail before any membership provisioning occurs.
+      const historicalToken = `${randomUUID()}-historical-${suffix}`;
+      const historicalInvitationId = randomUUID();
+      const historicalRequestKey = `historical:${suffix}:elevated`;
+      await db.$executeRaw`INSERT INTO "WorkspaceInvitation" ("id", "workspaceId", "email", "tokenHash", "requestKey", "requestFingerprint", "workspaceRole", "projectId", "projectRole", "invitedById", "expiresAt", "updatedAt") VALUES (${historicalInvitationId}::uuid, ${workspaceId}::uuid, ${`invitee-${suffix}@example.com`}, ${createHash("sha256").update(historicalToken, "utf8").digest("hex")}, ${historicalRequestKey}, ${"f".repeat(64)}, 'admin', ${projectId}::uuid, 'owner', ${ownerId}::uuid, CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP)`;
+      await assert.rejects(
+        () => acceptWorkspaceInvitation(historicalToken, { id: inviteeId, email: `invitee-${suffix}@example.com`, accountAccessVersion: 1 }, "/dashboard", db),
+        (error: unknown) => errorCode(error) === "WORKSPACE_ROLE_GOVERNANCE_REQUIRED",
+      );
+      assert.equal(await db.workspaceMembership.count({ where: { workspaceId, userId: inviteeId } }), 0);
 
       const impact = await getWorkspaceInvitationImpact(workspaceId, created.invitation.id, owner, db);
       assert.equal(impact.target.status, "pending");

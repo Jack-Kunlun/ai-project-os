@@ -109,9 +109,10 @@ test(
         { id: systemAdminId, username: `mcp_action_system_admin_${suffix}`, role: "admin" },
         { id: nonmemberId, username: `mcp_action_nonmember_${suffix}`, role: "user" },
       ] });
-      await db.workspace.create({ data: { id: workspaceId, name: `MCP action ${suffix}`, slug: `mcp-action-${suffix}`, createdById: ownerId } });
-      const project = await db.project.create({ data: { id: projectId, workspaceId, name: `MCP action ${suffix}`, slug: `mcp-action-project-${suffix}` } });
-      await db.$transaction(async (tx) => {
+      const project = await db.$transaction(async (tx) => {
+        await tx.workspace.create({ data: { id: workspaceId, name: `MCP action ${suffix}`, slug: `mcp-action-${suffix}`, createdById: ownerId } });
+        const createdProject = await tx.project.create({ data: { id: projectId, workspaceId, name: `MCP action ${suffix}`, slug: `mcp-action-project-${suffix}` } });
+        assert.equal(createdProject.id, projectId);
         await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "mcp_action_gate_workspace_owner" });
         await grantWorkspaceMembership(tx, { workspaceId, userId: secondOwnerId, role: "owner", actorId: ownerId, reason: "mcp_action_gate_second_workspace_owner" });
         await grantWorkspaceMembership(tx, { workspaceId, userId: workspaceAdminId, role: "admin", actorId: ownerId, reason: "mcp_action_gate_workspace_admin" });
@@ -119,6 +120,7 @@ test(
         await grantProjectMembership(tx, { projectId, workspaceId, userId: secondOwnerId, role: "owner", actorId: ownerId, reason: "mcp_action_gate_second_project_owner" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: ownerId, reason: "mcp_action_gate_project_editor" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: ownerId, reason: "mcp_action_gate_project_viewer" });
+        return createdProject;
       });
       await db.mcpConnection.create({ data: {
         id: connectionId, name: `MCP action connection ${suffix}`, endpointUrl: "https://mcp.example.invalid/mcp", authKind: "none", credentialId: null,

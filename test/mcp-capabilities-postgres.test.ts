@@ -68,8 +68,10 @@ test("MCP personal discovery remains available while project runtime is fail-clo
     { id: adminId, username: `mcp_admin_${suffix}`, role: "admin" },
     { id: editorId, username: `mcp_editor_${suffix}`, role: "user" },
   ] });
-  await db.workspace.create({ data: { id: workspaceId, name: `MCP ${suffix}`, slug: `mcp-${suffix}`, createdById: adminId } });
-  await db.$transaction((tx) => grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "mcp_capabilities_fixture" }));
+  await db.$transaction(async (tx) => {
+    await tx.workspace.create({ data: { id: workspaceId, name: `MCP ${suffix}`, slug: `mcp-${suffix}`, createdById: adminId } });
+    await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "mcp_capabilities_fixture" });
+  });
   await db.project.create({ data: { id: projectId, workspaceId, name: `MCP project ${suffix}`, slug: `mcp-project-${suffix}` } });
   await db.$transaction(async (tx) => {
     await grantProjectMembership(tx, { projectId, workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "mcp_capabilities_fixture" });

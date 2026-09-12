@@ -349,16 +349,18 @@ test(
         },
       });
       await createSignupOfferFixture(db, adminId);
-      await db.workspace.create({
-        data: { id: workspaceId, name: `Memory index C workspace ${randomUUID().slice(0, 8)}`, slug: `memory-index-c-workspace-${randomUUID()}`, createdById: userId },
+      await db.$transaction(async (tx) => {
+        await tx.workspace.create({
+          data: { id: workspaceId, name: `Memory index C workspace ${randomUUID().slice(0, 8)}`, slug: `memory-index-c-workspace-${randomUUID()}`, createdById: userId },
+        });
+        await grantWorkspaceMembership(tx, {
+          workspaceId,
+          userId,
+          role: "owner",
+          actorId: userId,
+          reason: "memory_index_c_fixture",
+        });
       });
-      await db.$transaction((tx) => grantWorkspaceMembership(tx, {
-        workspaceId,
-        userId,
-        role: "owner",
-        actorId: userId,
-        reason: "memory_index_c_fixture",
-      }));
       const membershipNow = new Date();
       await createControlledMembership(db, {
         adminId,

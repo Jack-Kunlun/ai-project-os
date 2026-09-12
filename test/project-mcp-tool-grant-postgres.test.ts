@@ -88,15 +88,16 @@ test(
         { id: nonmemberId, username: `mcp_grant_nonmember_${suffix}`, role: "user" },
         { id: disabledOwnerId, username: `mcp_grant_disabled_owner_${suffix}`, role: "user" },
       ] });
-      await db.workspace.create({ data: { id: workspaceId, name: `MCP grant ${suffix}`, slug: `mcp-grant-${suffix}`, createdById: adminId } });
-      const project = await db.project.create({ data: { id: projectId, workspaceId, name: `MCP grant ${suffix}`, slug: `mcp-grant-project-${suffix}` } });
-      await db.$transaction(async (tx) => {
+      const project = await db.$transaction(async (tx) => {
+        await tx.workspace.create({ data: { id: workspaceId, name: `MCP grant ${suffix}`, slug: `mcp-grant-${suffix}`, createdById: adminId } });
+        const createdProject = await tx.project.create({ data: { id: projectId, workspaceId, name: `MCP grant ${suffix}`, slug: `mcp-grant-project-${suffix}` } });
         await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "mcp_grant_gate_workspace_owner" });
         await grantWorkspaceMembership(tx, { workspaceId, userId: workspaceAdminId, role: "admin", actorId: adminId, reason: "mcp_grant_gate_workspace_admin" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "mcp_grant_gate_project_owner" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: adminId, reason: "mcp_grant_gate_project_editor" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: adminId, reason: "mcp_grant_gate_project_viewer" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: disabledOwnerId, role: "owner", actorId: adminId, reason: "mcp_grant_gate_disabled_owner" });
+        return createdProject;
       });
       await disableUser();
       await db.mcpConnection.create({ data: {

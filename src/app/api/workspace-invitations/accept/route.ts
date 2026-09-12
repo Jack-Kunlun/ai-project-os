@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
     const session = await requireApiSession(request);
-    const user = await getDb().appUser.findUniqueOrThrow({ where: { id: session.id }, select: { id: true, email: true } });
+    const user = await getDb().appUser.findUniqueOrThrow({ where: { id: session.id }, select: { id: true, email: true, accountAccessVersion: true } });
     const body = await readJsonBody(request) as { token?: unknown; returnTo?: unknown };
     return NextResponse.json(await acceptWorkspaceInvitation(body.token, user, body.returnTo));
   } catch (error) { return handleApiError(error); }

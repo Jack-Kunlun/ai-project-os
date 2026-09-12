@@ -5,7 +5,7 @@ import type { PrismaClient } from "@prisma/client";
 import { AccessControlError } from "../src/lib/access-control";
 import { createSession } from "../src/lib/auth";
 import { listMemberships } from "../src/lib/membership-service";
-import { createLocalWorkspaceMember, listWorkspaceMembers, updateWorkspaceMember } from "../src/lib/workspaces";
+import { WorkspaceError, createLocalWorkspaceMember, listWorkspaceMembers, updateWorkspaceMember } from "../src/lib/workspaces";
 import { toSystemRole } from "../src/lib/system-role";
 
 const adminId = "11111111-1111-4111-8111-111111111111";
@@ -194,13 +194,13 @@ test("workspace member list/create/update use a minimal DTO without system crede
     workspaceMembership: { findMany: async () => [{ role: "admin" as const, accessState: "confirmed" as const }] },
     $transaction: async (callback: (tx: typeof updateTx) => unknown) => callback(updateTx),
   } as unknown as PrismaClient;
-  const updated = await updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "viewer" }, { id: adminId, role: "admin", accountAccessVersion: 1 }, updateDb);
+  const updated = await updateWorkspaceMember(workspaceId, memberId, {}, { id: adminId, role: "admin", accountAccessVersion: 1 }, updateDb);
   assert.equal("passwordHash" in updated.user, false);
   assert.equal("passwordSalt" in updated.user, false);
   assert.equal("role" in updated.user, false);
   await assert.rejects(
-    () => updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "owner" }, { id: adminId, role: "admin", accountAccessVersion: 1 }, updateDb),
-    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    () => updateWorkspaceMember(workspaceId, memberId, { workspaceRole: "viewer" }, { id: adminId, role: "admin", accountAccessVersion: 1 }, updateDb),
+    (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_ROLE_GOVERNANCE_REQUIRED",
   );
 
   const source = await readFile("src/lib/workspaces.ts", "utf8");

@@ -17,6 +17,12 @@ import {
   reservePlatformTokens,
   settlePlatformTokenReservation,
 } from "../src/lib/ai-entitlements";
+import { grantWorkspaceMembership } from "../src/lib/membership-governance";
+import {
+  executeWorkspaceRoleMutation,
+  previewWorkspaceRoleMutation,
+  WorkspaceRoleGovernanceError,
+} from "../src/lib/workspace-role-governance-service";
 import {
   DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX,
   DATABASE_PRINCIPAL_RELATIONS,
@@ -176,8 +182,8 @@ async function assertInvokerHelperAcls(admin: Client): Promise<void> {
     assert.equal(row.writer_direct, helper.entitlementWriter, signature);
   }
   assert.ok(rows.rows.every((row) => expectedOids.has(row.oid)));
-  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 41);
-  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.entitlementWriter).length, 7);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 42);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.entitlementWriter).length, 8);
 }
 
 async function runPrincipalBootstrap(
@@ -829,6 +835,64 @@ test("production reconcile separates non-owner runtime from writer and preserves
       assert.equal(reservation.created, true);
       const settled = await settlePlatformTokenReservation({ userId: actor.id, callKey, actualTokens: 5, usageKnown: true }, runtimeDb);
       assert.equal(settled.status, "settled");
+
+      // Exercise the newly reconciled SECURITY INVOKER owner helper through
+      // the real runtime role.  The fixture itself is created by the
+      // entitlement writer, then preview is retried with the same stable
+      // request key before the runtime execute path replaces the membership.
+      assert.equal(typeof actor.accountAccessVersion, "number");
+      const actorVersion = actor.accountAccessVersion as number;
+      const roleSubject = await writer.appUser.create({
+        data: {
+          id: randomUUID(),
+          username: `database_principal_subject_${suffix}`,
+          email: `database-principal-subject-${suffix}@example.com`,
+          emailVerifiedAt: new Date(),
+          role: "user",
+        },
+        select: { id: true, username: true, accountAccessVersion: true },
+      });
+      const roleWorkspaceId = randomUUID();
+      await writer.$transaction(async (tx) => {
+        await tx.workspace.create({ data: { id: roleWorkspaceId, name: `Principal role ${suffix}`, slug: `principal-role-${suffix}`, createdById: actor.id } });
+        await grantWorkspaceMembership(tx, { workspaceId: roleWorkspaceId, userId: actor.id, role: "owner", actorId: actor.id, reason: "principal_role_owner_fixture" });
+        await grantWorkspaceMembership(tx, { workspaceId: roleWorkspaceId, userId: roleSubject.id, role: "member", actorId: actor.id, reason: "principal_role_subject_fixture" });
+      });
+      const rolePreviewInput = {
+        workspaceId: roleWorkspaceId,
+        subjectId: roleSubject.id,
+        actorId: actor.id,
+        actorAccountAccessVersion: actorVersion,
+        targetRole: "admin" as const,
+        reason: "principal role mutation",
+        requestKey: `database-principal:${suffix}:role`,
+      };
+      const roleRuntimeDb = runtimeDb;
+      assert.ok(roleRuntimeDb);
+      const rolePreview = await previewWorkspaceRoleMutation(rolePreviewInput, roleRuntimeDb);
+      const rolePreviewRetry = await previewWorkspaceRoleMutation(rolePreviewInput, roleRuntimeDb);
+      assert.equal(rolePreviewRetry.previewId, rolePreview.previewId);
+      await assert.rejects(
+        () => previewWorkspaceRoleMutation({ ...rolePreviewInput, reason: "changed reason" }, roleRuntimeDb),
+        (error: unknown) => error instanceof WorkspaceRoleGovernanceError && error.code === "WORKSPACE_ROLE_GOVERNANCE_IDEMPOTENCY_CONFLICT",
+      );
+      const roleResult = await executeWorkspaceRoleMutation({
+        ...rolePreviewInput,
+        previewId: rolePreview.previewId,
+        currentRole: rolePreview.current.role,
+        expectedTargetRole: rolePreview.target.role,
+        expectedOwnerCount: rolePreview.ownerCount,
+        expectedProjectGrantCount: rolePreview.projectGrantCount,
+        expectedProjectGrantFingerprint: rolePreview.projectGrantFingerprint,
+        expectedMembershipFingerprint: rolePreview.membershipFingerprint,
+        expectedImpactFingerprint: rolePreview.impactFingerprint,
+        requestFingerprint: rolePreview.requestFingerprint,
+        previewIssuedAt: rolePreview.issuedAt,
+        previewExpiresAt: rolePreview.expiresAt,
+        confirmation: true,
+        confirmationUsername: roleSubject.username,
+      }, roleRuntimeDb);
+      assert.equal(roleResult.newRole, "admin");
 
       // The writer cannot bypass governance by creating or deleting manual
       // accounting rows directly; production mutations use the functions.

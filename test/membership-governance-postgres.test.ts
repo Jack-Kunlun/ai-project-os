@@ -21,10 +21,13 @@ test(
     }
 
     const client = new Client({ connectionString: databaseUrl });
-    const suffix = randomUUID().replaceAll("-", "");
+    const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
     const userId = randomUUID();
     const workspaceId = randomUUID();
     const secondaryWorkspaceId = randomUUID();
+    const secondaryOwnerId = randomUUID();
+    const secondaryOwnerMembershipId = randomUUID();
+    const primaryBackupOwnerMembershipId = randomUUID();
     const projectId = randomUUID();
     const workspaceMembershipId = randomUUID();
     const projectMembershipId = randomUUID();
@@ -211,8 +214,8 @@ test(
       await client.query("BEGIN");
       await client.query(`
         INSERT INTO "AppUser" ("id", "username", "role", "updatedAt")
-        VALUES ($1, $2, 'user', CURRENT_TIMESTAMP)
-      `, [userId, `membership_governance_runtime_${suffix}`]);
+        VALUES ($1, $2, 'user', CURRENT_TIMESTAMP), ($3, $4, 'user', CURRENT_TIMESTAMP)
+      `, [userId, `membership_governance_runtime_${suffix}`, secondaryOwnerId, `membership_governance_secondary_owner_${suffix}`]);
       await client.query(`
         INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt")
         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
@@ -220,7 +223,17 @@ test(
       await client.query(`
         INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt")
         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-      `, [secondaryWorkspaceId, `Governance secondary ${suffix}`, `governance-secondary-${suffix}`, userId]);
+      `, [secondaryWorkspaceId, `Governance secondary ${suffix}`, `governance-secondary-${suffix}`, secondaryOwnerId]);
+      await client.query(`
+        INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
+        VALUES ($1, $2, $3, 'owner', 'confirmed', CURRENT_TIMESTAMP)
+      `, [secondaryOwnerMembershipId, secondaryWorkspaceId, secondaryOwnerId]);
+      await insertWorkspaceAudit({ membershipId: secondaryOwnerMembershipId, action: "confirmed", newState: "confirmed", workspaceId: secondaryWorkspaceId, userId: secondaryOwnerId });
+      await client.query(`
+        INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
+        VALUES ($1, $2, $3, 'owner', 'confirmed', CURRENT_TIMESTAMP)
+      `, [primaryBackupOwnerMembershipId, workspaceId, secondaryOwnerId]);
+      await insertWorkspaceAudit({ membershipId: primaryBackupOwnerMembershipId, action: "confirmed", newState: "confirmed", workspaceId, userId: secondaryOwnerId });
       await client.query(`
         INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt")
         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
@@ -513,17 +526,24 @@ test(
       assert.deepEqual(projectCascade.rows[0], { memberships: "0", audits: "1" });
 
       const cascadeUserId = randomUUID();
+      const cascadeOwnerId = randomUUID();
       const cascadeWorkspaceId = randomUUID();
+      const cascadeOwnerMembershipId = randomUUID();
       const cascadeMembershipId = randomUUID();
       await client.query("BEGIN");
       await client.query(`
         INSERT INTO "AppUser" ("id", "username", "role", "updatedAt")
-        VALUES ($1, $2, 'user', CURRENT_TIMESTAMP)
-      `, [cascadeUserId, `membership_governance_cascade_${suffix}`]);
+        VALUES ($1, $2, 'user', CURRENT_TIMESTAMP), ($3, $4, 'user', CURRENT_TIMESTAMP)
+      `, [cascadeUserId, `membership_governance_cascade_${suffix}`, cascadeOwnerId, `membership_governance_cascade_owner_${suffix}`]);
       await client.query(`
         INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt")
         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-      `, [cascadeWorkspaceId, `Governance cascade ${suffix}`, `governance-cascade-${suffix}`, cascadeUserId]);
+      `, [cascadeWorkspaceId, `Governance cascade ${suffix}`, `governance-cascade-${suffix}`, cascadeOwnerId]);
+      await client.query(`
+        INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
+        VALUES ($1, $2, $3, 'owner', 'confirmed', CURRENT_TIMESTAMP)
+      `, [cascadeOwnerMembershipId, cascadeWorkspaceId, cascadeOwnerId]);
+      await insertWorkspaceAudit({ membershipId: cascadeOwnerMembershipId, action: "confirmed", newState: "confirmed", workspaceId: cascadeWorkspaceId, userId: cascadeOwnerId });
       await client.query(`
         INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
         VALUES ($1, $2, $3, 'member', 'confirmed', CURRENT_TIMESTAMP)

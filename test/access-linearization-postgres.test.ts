@@ -139,14 +139,15 @@ test(
       { id: memberId, username: `linearization_member_${suffix}`, role: "user" },
       { id: ownerId, username: `linearization_owner_${suffix}`, role: "user" },
     ] });
-    await db.workspace.create({ data: { id: workspaceId, name: `Linearization ${suffix}`, slug: `linearization-${suffix}`, createdById: ownerId } });
-    await db.project.createMany({ data: [
-      { id: membershipProjectId, workspaceId, name: `Membership ${suffix}`, slug: `linearization-membership-${suffix}` },
-      { id: archiveProjectId, workspaceId, name: `Archive ${suffix}`, slug: `linearization-archive-${suffix}` },
-      { id: legacyProjectOnlyId, workspaceId, name: `Legacy project only ${suffix}`, slug: `linearization-legacy-${suffix}` },
-    ] });
     await db.$transaction(async (tx) => {
+      await tx.workspace.create({ data: { id: workspaceId, name: `Linearization ${suffix}`, slug: `linearization-${suffix}`, createdById: ownerId } });
+      await tx.project.createMany({ data: [
+        { id: membershipProjectId, workspaceId, name: `Membership ${suffix}`, slug: `linearization-membership-${suffix}` },
+        { id: archiveProjectId, workspaceId, name: `Archive ${suffix}`, slug: `linearization-archive-${suffix}` },
+        { id: legacyProjectOnlyId, workspaceId, name: `Legacy project only ${suffix}`, slug: `linearization-legacy-${suffix}` },
+      ] });
       await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "access_linearization_fixture_owner" });
+      await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: ownerId, reason: "access_linearization_fixture_backup_owner" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: memberId, role: "member", actorId: ownerId, reason: "access_linearization_fixture_member" });
       await grantProjectMembership(tx, { projectId: membershipProjectId, workspaceId, userId: memberId, role: "editor", actorId: ownerId, reason: "access_linearization_fixture_project" });
       await grantProjectMembership(tx, { projectId: archiveProjectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "access_linearization_fixture_archive" });

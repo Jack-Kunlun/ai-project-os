@@ -50,11 +50,12 @@ test(
       const actor = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
     try {
       await db.appUser.create({ data: { id: adminId, username: `grant_retention_${suffix}`, role: "admin" } });
-      await db.workspace.create({ data: { id: workspaceId, name: `Grant retention ${suffix}`, slug: `grant-retention-${suffix}`, createdById: adminId } });
-      const project = await db.project.create({ data: { id: projectId, workspaceId, name: `Grant retention ${suffix}`, slug: `grant-retention-${suffix}` } });
-      await db.$transaction(async (tx) => {
+      const project = await db.$transaction(async (tx) => {
+        await tx.workspace.create({ data: { id: workspaceId, name: `Grant retention ${suffix}`, slug: `grant-retention-${suffix}`, createdById: adminId } });
+        const createdProject = await tx.project.create({ data: { id: projectId, workspaceId, name: `Grant retention ${suffix}`, slug: `grant-retention-${suffix}` } });
         await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "grant_retention_gate_workspace_owner" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "grant_retention_gate_project_owner" });
+        return createdProject;
       });
       await db.mcpConnection.create({
         data: {

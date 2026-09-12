@@ -36,8 +36,8 @@ test("Action Engine persists policy, approval, execution, recovery and archive b
     { id: editorId, username: `action_editor_${suffix}`, role: "user" },
     { id: viewerId, username: `action_viewer_${suffix}`, role: "user" },
   ] });
-  await db.workspace.create({ data: { id: workspaceId, name: `Action ${suffix}`, slug: `action-${suffix}`, createdById: adminId } });
   await db.$transaction(async (tx) => {
+    await tx.workspace.create({ data: { id: workspaceId, name: `Action ${suffix}`, slug: `action-${suffix}`, createdById: adminId } });
     await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "action_engine_fixture" });
     await grantWorkspaceMembership(tx, { workspaceId, userId: editorId, role: "member", actorId: adminId, reason: "action_engine_fixture" });
     await grantWorkspaceMembership(tx, { workspaceId, userId: viewerId, role: "viewer", actorId: adminId, reason: "action_engine_fixture" });

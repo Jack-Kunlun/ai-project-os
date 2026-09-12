@@ -15,6 +15,7 @@ import {
   settlePlatformTokenReservation,
 } from "../src/lib/ai-entitlements";
 import { getDb } from "../src/lib/db";
+import { grantWorkspaceMembership } from "../src/lib/membership-governance";
 import {
   executePlatformTokenGrantMutation,
   previewPlatformTokenGrantMutation,
@@ -67,7 +68,16 @@ test("AI entitlements enforce signup-compatible scope and project cleanup retent
       ],
     });
     await createSignupOfferFixture(db, adminId);
-    await db.workspace.create({ data: { id: workspaceId, name: `Entitlements ${suffix}`, slug: `entitlements-${suffix}`, createdById: adminId } });
+    await db.$transaction(async (tx) => {
+      await tx.workspace.create({ data: { id: workspaceId, name: `Entitlements ${suffix}`, slug: `entitlements-${suffix}`, createdById: adminId } });
+      await grantWorkspaceMembership(tx, {
+        workspaceId,
+        userId: adminId,
+        role: "owner",
+        actorId: adminId,
+        reason: "ai_entitlements_gate_workspace_owner",
+      });
+    });
     // Exercise the actual serializable signup grant and billing ledger path,
     // including the retry/idempotency boundary used by verified auth flows.
     const entitlementNow = new Date();

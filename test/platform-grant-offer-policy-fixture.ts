@@ -7,5 +7,12 @@ import { createBootstrapSignupOfferPolicy } from "../src/lib/platform-grant-offe
  * fixtures must opt in through the same bootstrap service used by setup.
  */
 export async function createSignupOfferFixture(db: PrismaClient, actorId: string): Promise<void> {
-  await db.$transaction((tx) => createBootstrapSignupOfferPolicy(tx, actorId));
+  await db.$transaction(async (tx) => {
+    const activePolicy = await tx.platformGrantOfferPolicy.findFirst({
+      where: { status: "active" },
+      select: { id: true },
+    });
+    if (activePolicy !== null) return;
+    await createBootstrapSignupOfferPolicy(tx, actorId);
+  });
 }

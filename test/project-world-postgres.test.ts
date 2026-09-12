@@ -34,13 +34,13 @@ test("project world persists version-bound relations, supersession and immutable
     { id: editorId, username: editor.username, role: "user" },
     { id: viewerId, username: viewer.username, role: "user" },
   ] });
-  await db.workspace.create({ data: { id: workspaceId, name: `World ${suffix}`, slug: `world-${suffix}`, createdById: adminId } });
-  await db.$transaction((tx) => grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "project_world_fixture" }));
-  await db.project.createMany({ data: [
-    { id: projectId, workspaceId, name: `World project ${suffix}`, slug: `world-project-${suffix}` },
-    { id: otherProjectId, workspaceId, name: `Other project ${suffix}`, slug: `other-project-${suffix}` },
-  ] });
   await db.$transaction(async (tx) => {
+    await tx.workspace.create({ data: { id: workspaceId, name: `World ${suffix}`, slug: `world-${suffix}`, createdById: adminId } });
+    await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "project_world_fixture" });
+    await tx.project.createMany({ data: [
+      { id: projectId, workspaceId, name: `World project ${suffix}`, slug: `world-project-${suffix}` },
+      { id: otherProjectId, workspaceId, name: `Other project ${suffix}`, slug: `other-project-${suffix}` },
+    ] });
     await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: adminId, reason: "project_world_fixture" });
     await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: adminId, reason: "project_world_fixture" });
   });

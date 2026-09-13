@@ -50,12 +50,18 @@ function fixtureDigest(value: string): string {
 
 async function seedBrowserSmokeFixtures(projectId: string): Promise<{
   jobId: string;
+  pendingJobId: string;
   unreadTitle: string;
+  pendingTitle: string;
+  automationTitle: string;
+  automationRunId: string;
   systemTitle: string;
 }> {
   const db = getDb();
   const suffix = fixtureDigest(`browser-smoke:${projectId}:${Date.now()}`).slice(0, 12);
   const unreadTitle = `Browser smoke unread activity ${suffix}`;
+  const pendingTitle = `Browser smoke pending activity ${suffix}`;
+  const automationTitle = `Browser smoke automation failure ${suffix}`;
   const systemTitle = `Browser smoke system history ${suffix}`;
   const now = new Date();
   try {
@@ -77,16 +83,89 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
       },
       select: { id: true },
     });
+    const pendingJob = await db.backgroundJob.create({
+      data: {
+        projectId,
+        kind: "projectBrief",
+        status: "failed",
+        stage: "terminal",
+        payload: {},
+        failureCode: "BROWSER_SMOKE_PENDING",
+        idempotencyKey: fixtureDigest(`browser-smoke-pending-job:${projectId}:${suffix}`),
+        requestedById: admin.id,
+        completedAt: now,
+      },
+      select: { id: true },
+    });
+    const automationRule = await db.automationRule.create({
+      data: {
+        projectId,
+        name: `Browser smoke automation ${suffix}`,
+        kind: "projectBrief",
+        intervalMinutes: 60,
+        config: {},
+        nextRunAt: new Date(now.getTime() + 60 * 60_000),
+        createdById: admin.id,
+      },
+      select: { id: true },
+    });
+    const failedRun = await db.automationRun.create({
+      data: {
+        automationRuleId: automationRule.id,
+        projectId,
+        status: "failed",
+        scheduledFor: now,
+        completedAt: now,
+        failureCode: "BROWSER_SMOKE_AUTOMATION_FAILED",
+        jobIds: [],
+      },
+      select: { id: true },
+    });
     await db.notification.create({
       data: {
         userId: admin.id,
         projectId,
+        subjectKind: "backgroundJob",
+        subjectId: job.id,
+        attentionIntent: "informational",
         kind: "actionCompleted",
         severity: "info",
         title: unreadTitle,
         body: "Browser smoke disposable unread notification.",
         actionHref: `/projects/${projectId}/jobs/${job.id}`,
         dedupeKey: fixtureDigest(`browser-smoke-unread:${projectId}:${suffix}`),
+        readAt: null,
+      },
+    });
+    await db.notification.create({
+      data: {
+        userId: admin.id,
+        projectId,
+        subjectKind: "backgroundJob",
+        subjectId: pendingJob.id,
+        attentionIntent: "requiresAttention",
+        kind: "system",
+        severity: "error",
+        title: pendingTitle,
+        body: "Browser smoke disposable pending notification.",
+        actionHref: `/projects/${projectId}/jobs/${pendingJob.id}`,
+        dedupeKey: fixtureDigest(`browser-smoke-pending:${projectId}:${suffix}`),
+        readAt: null,
+      },
+    });
+    await db.notification.create({
+      data: {
+        userId: admin.id,
+        projectId,
+        subjectKind: "automationRun",
+        subjectId: failedRun.id,
+        attentionIntent: "requiresAttention",
+        kind: "automationFailed",
+        severity: "error",
+        title: automationTitle,
+        body: "Browser smoke disposable failed automation notification.",
+        actionHref: `/projects/${projectId}/automations?run=${failedRun.id}`,
+        dedupeKey: fixtureDigest(`browser-smoke-automation:${projectId}:${suffix}`),
         readAt: null,
       },
     });
@@ -103,7 +182,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
         readAt: new Date(now.getTime() - 2_000),
       },
     });
-    return { jobId: job.id, unreadTitle, systemTitle };
+    return { jobId: job.id, pendingJobId: pendingJob.id, unreadTitle, pendingTitle, automationTitle, automationRunId: failedRun.id, systemTitle };
   } finally {
     await db.$disconnect();
   }
@@ -266,10 +345,43 @@ test("first-run administrator can reach protected pages with production security
   await expect(page).toHaveURL(/\/notifications$/u);
   await expect(page.getByRole("heading", { name: "活动记录", exact: true })).toBeVisible();
   const unreadActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.unreadTitle });
+  const pendingActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.pendingTitle });
+  const automationActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.automationTitle });
   const systemHistory = page.locator("article").filter({ hasText: browserSmokeFixtures.systemTitle });
   await expect(unreadActivity).toBeVisible();
+  await expect(pendingActivity).toBeVisible();
+  await expect(automationActivity).toBeVisible();
   await expect(systemHistory).toBeVisible();
   await expectNoAccessibilityViolations(page, "notifications");
+
+  await page.getByRole("button", { name: /待处理/u }).click();
+  await expect(page.getByText(browserSmokeFixtures.pendingTitle, { exact: true })).toBeVisible();
+  const pendingFilteredActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.pendingTitle });
+  await pendingFilteredActivity.getByRole("button", { name: "查看详情", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/jobs/${browserSmokeFixtures.pendingJobId}\\?from=notifications&view=pending&focus=[0-9a-f-]+$`, "iu"));
+  await expect(page.getByRole("heading", { name: "项目简报", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: /返回通知中心/u }).click();
+  await expect(page).toHaveURL(/\/notifications\?view=pending&focus=[0-9a-f-]+$/iu);
+  const returnedPendingActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.pendingTitle });
+  await expect(returnedPendingActivity).toBeVisible();
+  await expect(returnedPendingActivity.getByText("待处理", { exact: true })).toBeVisible();
+  await expect(returnedPendingActivity.getByText("已读", { exact: true })).toBeVisible();
+  await page.goto("/notifications");
+
+  await page.getByRole("button", { name: /待处理/u }).click();
+  const pendingAutomationActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.automationTitle });
+  await expect(pendingAutomationActivity).toBeVisible();
+  await pendingAutomationActivity.getByRole("button", { name: "查看详情", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/automations\\?run=${browserSmokeFixtures.automationRunId}&from=notifications&view=pending&focus=[0-9a-f-]+$`, "iu"));
+  await expect(page.getByText("运行详情", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "返回活动记录", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "返回活动记录", exact: true }).click();
+  await expect(page).toHaveURL(/\/notifications\?view=pending&focus=[0-9a-f-]+$/iu);
+  const returnedAutomationActivity = page.locator("article").filter({ hasText: browserSmokeFixtures.automationTitle });
+  await expect(returnedAutomationActivity).toBeVisible();
+  await expect(returnedAutomationActivity.getByText("待处理", { exact: true })).toBeVisible();
+  await expect(returnedAutomationActivity.getByText("已读", { exact: true })).toBeVisible();
+  await page.goto("/notifications");
 
   await unreadActivity.getByRole("button", { name: "查看详情", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/jobs/${browserSmokeFixtures.jobId}\\?from=notifications&view=all&focus=[0-9a-f-]+$`, "iu"));

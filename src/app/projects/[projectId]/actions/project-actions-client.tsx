@@ -76,8 +76,8 @@ function mcpInput(value: unknown): { toolName: string; arguments: unknown } | nu
   return typeof input.toolName === "string" ? { toolName: input.toolName, arguments: input.arguments } : null;
 }
 
-function notificationView(value: string | null): "all" | "unread" | "system" {
-  return value === "unread" || value === "system" ? value : "all";
+function notificationView(value: string | null): "all" | "unread" | "pending" | "system" {
+  return value === "unread" || value === "pending" || value === "system" ? value : "all";
 }
 
 function notificationCursor(value: string | null): string | null {

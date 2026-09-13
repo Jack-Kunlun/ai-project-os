@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { automationFailurePresentation } from "@/lib/automation-failure-presentation";
@@ -80,6 +81,34 @@ const kindLabels: Record<RuleKind, string> = {
   projectPlanHealth: "项目计划健康提醒",
 };
 const runStatusLabels: Record<string, string> = { queued: "排队中", running: "运行中", waitingConsent: "等待确认", succeeded: "已完成", failed: "失败", skipped: "已跳过" };
+type NotificationFilter = "all" | "unread" | "pending" | "system";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const CURSOR_PATTERN = /^[A-Za-z0-9_-]{1,2048}$/u;
+
+function parseNotificationFilter(value: string | null): NotificationFilter {
+  return value === "unread" || value === "pending" || value === "system" ? value : "all";
+}
+
+function parseNotificationCursor(value: string | null): string | null {
+  return value !== null && CURSOR_PATTERN.test(value) ? value : null;
+}
+
+function parseNotificationFocus(value: string | null): string | null {
+  return value !== null && UUID_PATTERN.test(value) ? value : null;
+}
+
+function buildNotificationReturnHref(
+  from: string | null,
+  filter: NotificationFilter,
+  cursor: string | null,
+  focus: string | null,
+): string | null {
+  if (from !== "notifications") return null;
+  const params = new URLSearchParams({ view: filter });
+  if (cursor !== null) params.set("cursor", cursor);
+  if (focus !== null) params.set("focus", focus);
+  return `/notifications?${params.toString()}`;
+}
 
 async function responseError(response: Response, fallback: string) {
   try {
@@ -98,7 +127,12 @@ function intervalLabel(value: number) {
 
 export function ProjectAutomationsClient({ username, projectId }: { username: string; projectId: string }) {
   const searchParams = useSearchParams();
-  const runQuery = searchParams.get("run");
+  const runCandidate = searchParams.get("run");
+  const runQuery = runCandidate !== null && UUID_PATTERN.test(runCandidate) ? runCandidate : null;
+  const notificationFilter = parseNotificationFilter(searchParams.get("view"));
+  const notificationCursor = parseNotificationCursor(searchParams.get("cursor"));
+  const notificationFocus = parseNotificationFocus(searchParams.get("focus"));
+  const notificationReturnHref = buildNotificationReturnHref(searchParams.get("from"), notificationFilter, notificationCursor, notificationFocus);
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [capabilities, setCapabilities] = useState<AutomationCapabilities | null>(null);
   const [focusedRun, setFocusedRun] = useState<AutomationRun | null>(null);
@@ -147,7 +181,7 @@ export function ProjectAutomationsClient({ username, projectId }: { username: st
         {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         <div className="mt-8 grid gap-7 xl:grid-cols-[.75fr_1.25fr]">
           {effectiveCapabilities.canCreate ? <AutomationForm projectId={projectId} onCreated={(rule) => setRules((current) => [...current, rule])} /> : <section className="h-fit rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">只读访问</p><h2 className="mt-2 text-2xl font-semibold">自动化由项目 Owner 管理</h2><p className="mt-4 text-sm leading-6 text-slate-600">你当前是{effectiveCapabilities.permission === "edit" ? " Editor" : " Viewer"}。可以查看规则、运行时间和失败建议，但创建、启用、暂停与立即运行仅对项目 Owner 开放。</p></section>}
-          <section><div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Rules</p><h2 className="mt-2 text-2xl font-semibold">运行规则</h2></div><span className="text-xs text-slate-400">{loading ? "读取中…" : `${rules.length} 条`}</span></div>{focusedRun ? <AutomationRunDetail projectId={projectId} run={focusedRun} /> : null}<div className="space-y-4">{!loading && rules.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">还没有可运行的自动化规则。Git 自动化尚未开放；可先预览网页来源、记忆质量或项目计划提醒。</div> : rules.map((rule) => <AutomationCard key={rule.id} projectId={projectId} rule={rule} capabilities={effectiveCapabilities} focusedRunId={focusedRun?.id ?? runQuery} onReload={reload} />)}</div></section>
+          <section><div className="mb-4 flex items-end justify-between px-1"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Rules</p><h2 className="mt-2 text-2xl font-semibold">运行规则</h2></div><span className="text-xs text-slate-400">{loading ? "读取中…" : `${rules.length} 条`}</span></div>{focusedRun ? <AutomationRunDetail projectId={projectId} run={focusedRun} returnHref={notificationReturnHref} /> : null}<div className="space-y-4">{!loading && rules.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">还没有可运行的自动化规则。Git 自动化尚未开放；可先预览网页来源、记忆质量或项目计划提醒。</div> : rules.map((rule) => <AutomationCard key={rule.id} projectId={projectId} rule={rule} capabilities={effectiveCapabilities} focusedRunId={focusedRun?.id ?? runQuery} onReload={reload} />)}</div></section>
         </div>
       </div>
     </main>
@@ -246,9 +280,9 @@ function AutomationRunResultView({ result }: { result: AutomationRunResult | nul
   return <p className="mt-4 text-xs text-indigo-800">运行结果已完成。</p>;
 }
 
-function AutomationRunDetail({ projectId, run }: { projectId: string; run: AutomationRun }) {
+function AutomationRunDetail({ projectId, run, returnHref }: { projectId: string; run: AutomationRun; returnHref: string | null }) {
   const failure = run.status === "failed" ? automationFailurePresentation(run.failureCode) : null;
-  return <section id={`automation-run-${run.id}`} tabIndex={-1} aria-labelledby={`automation-run-title-${run.id}`} className="mb-5 scroll-mt-28 rounded-2xl border border-indigo-200 bg-indigo-50 p-5 outline-none focus:ring-4 focus:ring-indigo-100"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">运行详情</p><h3 id={`automation-run-title-${run.id}`} className="mt-2 text-base font-semibold text-indigo-950">{run.rule?.name ?? "自动化运行"}</h3></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-800">{runStatusLabels[run.status] ?? run.status}</span></div><p className="mt-3 text-xs text-indigo-800">计划时间：{new Date(run.scheduledFor).toISOString()} · 浏览器时间：{new Date(run.scheduledFor).toLocaleString("zh-CN")} · 仅用于本次查看</p>{failure ? <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-xs leading-5 text-indigo-950"><p className="font-semibold">{failure.title}</p><p className="mt-1">{failure.reason}</p><p className="mt-1">下一步：{failure.nextStep}</p><p className="mt-1 font-mono text-[12px]">错误代码：{failure.code ?? "AUTOMATION_EXECUTION_FAILED"}</p></div> : <p className="mt-4 text-xs text-indigo-800">该运行没有失败建议。</p>}<AutomationRunResultView result={run.result} /><a href={`/projects/${projectId}/automations?run=${run.id}`} className="mt-4 inline-flex rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-800">保留此运行上下文</a></section>;
+  return <section id={`automation-run-${run.id}`} tabIndex={-1} aria-labelledby={`automation-run-title-${run.id}`} className="mb-5 scroll-mt-28 rounded-2xl border border-indigo-200 bg-indigo-50 p-5 outline-none focus:ring-4 focus:ring-indigo-100"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">运行详情</p><h3 id={`automation-run-title-${run.id}`} className="mt-2 text-base font-semibold text-indigo-950">{run.rule?.name ?? "自动化运行"}</h3></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-800">{runStatusLabels[run.status] ?? run.status}</span></div><p className="mt-3 text-xs text-indigo-800">计划时间：{new Date(run.scheduledFor).toISOString()} · 浏览器时间：{new Date(run.scheduledFor).toLocaleString("zh-CN")} · 仅用于本次查看</p>{failure ? <div className="mt-4 rounded-xl bg-white/70 px-4 py-3 text-xs leading-5 text-indigo-950"><p className="font-semibold">{failure.title}</p><p className="mt-1">{failure.reason}</p><p className="mt-1">下一步：{failure.nextStep}</p><p className="mt-1 font-mono text-[12px]">错误代码：{failure.code ?? "AUTOMATION_EXECUTION_FAILED"}</p></div> : <p className="mt-4 text-xs text-indigo-800">该运行没有失败建议。</p>}<AutomationRunResultView result={run.result} /><div className="mt-4 flex flex-wrap gap-2">{returnHref ? <Link href={returnHref} className="inline-flex rounded-xl bg-indigo-700 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-600">返回活动记录</Link> : null}<a href={`/projects/${projectId}/automations?run=${run.id}`} className="inline-flex rounded-xl border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-800">保留此运行上下文</a></div></section>;
 }
 
 function AutomationCard({ projectId, rule, capabilities, focusedRunId, onReload }: { projectId: string; rule: AutomationRule; capabilities: AutomationCapabilities; focusedRunId: string | null; onReload: () => Promise<void> }) {

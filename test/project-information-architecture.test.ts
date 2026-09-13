@@ -140,7 +140,7 @@ test("AI workbench spacing and project management keep AI usage visible", async 
 });
 
 test("project source lists stay compact while detail and notification opens keep server boundaries", async () => {
-  const [sourceListRoute, sourceDetailRoute, sourceDetailPage, materials, notifications, bell, automation, openRoute, transport] = await Promise.all([
+  const [sourceListRoute, sourceDetailRoute, sourceDetailPage, materials, notifications, bell, automation, notificationService, openRoute, transport] = await Promise.all([
     readFile("src/app/api/projects/[projectId]/sources/route.ts", "utf8"),
     readFile("src/app/api/projects/[projectId]/sources/[sourceId]/route.ts", "utf8"),
     readFile("src/app/projects/[projectId]/materials/sources/[sourceId]/source-detail-client.tsx", "utf8"),
@@ -148,6 +148,7 @@ test("project source lists stay compact while detail and notification opens keep
     readFile("src/app/notifications/notifications-client.tsx", "utf8"),
     readFile("src/components/notification-bell.tsx", "utf8"),
     readFile("src/lib/automation.ts", "utf8"),
+    readFile("src/lib/notification-service.ts", "utf8"),
     readFile("src/app/api/notifications/[notificationId]/open/route.ts", "utf8"),
     readFile("src/lib/ai-providers/transport.ts", "utf8"),
   ]);
@@ -164,10 +165,15 @@ test("project source lists stay compact while detail and notification opens keep
   assert.match(notifications, /\/open/u);
   assert.match(notifications, /dispatchEvent\(new CustomEvent\("ai-project-os:notifications-changed"\)/u);
   assert.match(bell, /notifications-changed/u);
-  assert.match(automation, /const visibleWhere = notificationVisibilityWhere\(userId\)/u);
-  assert.match(automation, /where: \{ \.\.\.visibleWhere, readAt: null \}/u);
-  assert.match(automation, /where: \{ \.\.\.visibleWhere, id: notificationId \}/u);
-  assert.match(automation, /COALESCE/u);
+  assert.match(automation, /listUserNotifications as listNotificationService/u);
+  assert.match(automation, /openNotification as openNotificationService/u);
+  assert.match(automation, /markNotificationRead as markNotificationService/u);
+  assert.match(notificationService, /function visibilityWhere\(userId: string\)/u);
+  assert.match(notificationService, /db\.notification\.count\(\{ where: \{ \.\.\.visibilityWhere\(userId\), readAt: null \} \}\)/u);
+  assert.match(notificationService, /const visible = visibilityWhere\(userId\)/u);
+  assert.match(notificationService, /where: \{ \.\.\.visible, id: notificationId, readAt: null \}/u);
+  assert.match(notificationService, /data: \{ readAt: new Date\(\) \}/u);
+  assert.match(notificationService, /SELECT CURRENT_TIMESTAMP AS "now"/u);
   assert.match(openRoute, /export async function POST/u);
   assert.match(openRoute, /assertSameOrigin\(request\)/u);
   assert.match(transport, /input\.connection\.kind === "glm"/u);

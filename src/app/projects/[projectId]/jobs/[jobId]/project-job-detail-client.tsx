@@ -103,8 +103,8 @@ function safeCount(value: unknown): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
-function notificationView(value: string | null): "all" | "unread" | "system" {
-  return value === "unread" || value === "system" ? value : "all";
+function notificationView(value: string | null): "all" | "unread" | "pending" | "system" {
+  return value === "unread" || value === "pending" || value === "system" ? value : "all";
 }
 
 function notificationCursor(value: string | null): string | null {

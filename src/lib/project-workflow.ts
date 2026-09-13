@@ -14,6 +14,7 @@ import {
 import type { ProjectPermission } from "@/lib/access-control";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { projectJobFailurePresentation } from "@/lib/project-job-failure";
+import { persistNotification } from "@/lib/notification-service";
 
 const JOB_LOCK_NAMESPACE = 23082026;
 // The current monolith executes a job in one request. Keep enough headroom for
@@ -164,28 +165,20 @@ async function tryCreateProjectJobNotification(input: Readonly<{
   if (content === null) return;
   const notificationClient = (db as WorkflowDb & { notification?: PrismaClient["notification"] }).notification;
   if (!notificationClient) return;
-  const dedupeKey = createHash("sha256").update(`project-job:${input.id}:${status}`, "utf8").digest("hex");
   try {
-    await notificationClient.upsert({
-      where: { userId_dedupeKey: { userId: input.requestedById, dedupeKey } },
-      create: {
-        userId: input.requestedById,
-        projectId: input.projectId,
-        kind: "system",
-        severity: content.severity,
-        title: content.title,
-        body: content.body,
-        actionHref: content.actionHref,
-        dedupeKey,
-      },
-      update: {
-        severity: content.severity,
-        title: content.title,
-        body: content.body,
-        actionHref: content.actionHref,
-        readAt: null,
-      },
-    });
+    await persistNotification({
+      userId: input.requestedById,
+      projectId: input.projectId,
+      subjectKind: "backgroundJob",
+      subjectId: input.id,
+      attentionIntent: status === "succeeded" ? "informational" : "requiresAttention",
+      kind: "system",
+      severity: content.severity,
+      title: content.title,
+      body: content.body,
+      actionHref: content.actionHref,
+      dedupeKey: `project-job:${input.id}:${status}`,
+    }, db as PrismaClient);
   } catch {
     console.error("Project job notification could not be persisted");
   }

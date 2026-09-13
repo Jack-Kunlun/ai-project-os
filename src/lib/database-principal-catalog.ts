@@ -92,6 +92,7 @@ export const RUNTIME_ONLY_CONTROL_PLANE_RELATIONS = Object.freeze([
   "McpConnectionMutationAudit",
   "McpToolReview",
   "McpToolReviewAudit",
+  "Notification",
 ] as const);
 
 export const SIGNUP_GRANT_RELATION = "PlatformTokenGrant" as const;
@@ -200,6 +201,7 @@ export const DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX = Object.freeze([
  */
 export const DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX = Object.freeze([
   triggerFunction("first_admin_onboarding_completion_guard", "", "first-admin onboarding one-way completion trigger"),
+  triggerFunction("notification_subject_context_guard", "", "notification subject and intent immutability trigger"),
   triggerFunction("git_connection_governance_security_guard", "", "Git connection security-field governance trigger"),
   triggerFunction("git_connection_configuration_version_guard", "", "Git connection configuration-version trigger"),
   triggerFunction("mcp_connection_configuration_revision_guard", "", "MCP connection configuration-revision trigger"),

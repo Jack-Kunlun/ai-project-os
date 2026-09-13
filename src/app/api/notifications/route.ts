@@ -7,7 +7,7 @@ import { z } from "zod";
 export const dynamic = "force-dynamic";
 
 const querySchema = z.object({
-  filter: z.enum(["all", "unread", "system"]).default("all"),
+  filter: z.enum(["all", "unread", "pending", "system"]).default("all"),
   cursor: z.string().trim().min(1).max(2048).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
 }).strict();

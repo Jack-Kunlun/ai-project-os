@@ -22,6 +22,7 @@ import {
 } from "@/lib/ai-providers/transport";
 import { canonicalProviderBaseUrl, getProviderDefinition } from "@/lib/ai-providers/registry";
 import { getDb } from "@/lib/db";
+import { persistNotification } from "@/lib/notification-service";
 
 export type PlatformProviderProbeServiceErrorCode =
   | "PLATFORM_PROVIDER_PROBE_INVALID_INPUT"
@@ -615,13 +616,21 @@ async function createThresholdNotifications(tx: Prisma.TransactionClient, budget
   const budget = await tx.platformProviderProbeBudget.findUnique({ where: { id: budgetId }, select: { alertThresholdUnits: true, settledUnits: true, heldUnits: true, version: true } });
   if (budget === null || budget.alertThresholdUnits <= 0 || budget.settledUnits + budget.heldUnits < budget.alertThresholdUnits) return;
   const admins = await tx.appUser.findMany({ where: { role: "admin", disabledAt: null }, select: { id: true } });
-  const dedupeKey = hashValue(`ai-project-os:platform-provider-probe:threshold:v1:${budget.version}:${budget.alertThresholdUnits}`);
+  const dedupeMaterial = `ai-project-os:platform-provider-probe:threshold:v1:${budget.version}:${budget.alertThresholdUnits}`;
   for (const admin of admins) {
-    await tx.notification.upsert({
-      where: { userId_dedupeKey: { userId: admin.id, dedupeKey } },
-      create: { userId: admin.id, kind: "system", severity: "warning", title: "平台连接探测预算已达到告警阈值", body: "平台连接探测需要管理员关注预算摘要；未知外发不会自动重试。", dedupeKey },
-      update: {},
-    });
+    await persistNotification({
+      userId: admin.id,
+      projectId: null,
+      subjectKind: "legacy",
+      subjectId: null,
+      attentionIntent: "informational",
+      kind: "system",
+      severity: "warning",
+      title: "平台连接探测预算已达到告警阈值",
+      body: "平台连接探测需要管理员关注预算摘要；未知外发不会自动重试。",
+      actionHref: null,
+      dedupeKey: dedupeMaterial,
+    }, tx as unknown as PrismaClient);
   }
 }
 

@@ -5,11 +5,12 @@ import test from "node:test";
 const read = (path: string) => readFile(path, "utf8");
 
 test("browser gate stays isolated and exercises the production server", async () => {
-  const [packageJson, config, runner, smoke, webAiConfirmation, systemAudit, gitConnections] = await Promise.all([
+  const [packageJson, config, runner, smoke, automation, webAiConfirmation, systemAudit, gitConnections] = await Promise.all([
     read("package.json"),
     read("playwright.config.ts"),
     read("scripts/run-browser-e2e.ts"),
     read("e2e/smoke.spec.ts"),
+    read("src/app/projects/[projectId]/automations/project-automations-client.tsx"),
     read("e2e/web-ai-confirmation.spec.ts"),
     read("e2e/system-audit.spec.ts"),
     read("src/app/profile/connections/git/git-connections-client.tsx"),
@@ -43,6 +44,20 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(smoke, /wcag22aa/u);
   assert.match(smoke, /expectNoAccessibilityViolations/u);
   assert.match(smoke, /expect\(browserErrors\)\.toEqual\(\[\]\)/u);
+  assert.match(smoke, /subjectKind: "backgroundJob"/u);
+  assert.match(smoke, /attentionIntent: "requiresAttention"/u);
+  assert.match(smoke, /subjectKind: "automationRun"/u);
+  assert.match(smoke, /automationFailed/u);
+  assert.match(smoke, /automationRunId/u);
+  assert.equal(smoke.includes("automations\\\\?run="), true);
+  assert.match(smoke, /待处理/u);
+  assert.match(smoke, /view=pending/u);
+  assert.match(smoke, /返回活动记录/u);
+  assert.match(automation, /parseNotificationFilter/u);
+  assert.match(automation, /parseNotificationCursor/u);
+  assert.match(automation, /parseNotificationFocus/u);
+  assert.match(automation, /buildNotificationReturnHref/u);
+  assert.match(automation, /返回活动记录/u);
   assert.match(webAiConfirmation, /button\.click\(\);[\s\S]*button\.click\(\);/u);
   assert.match(webAiConfirmation, /prepareRequests\)\.toHaveLength\(1\)/u);
   assert.match(webAiConfirmation, /executeRequests\)\.toHaveLength\(1\)/u);

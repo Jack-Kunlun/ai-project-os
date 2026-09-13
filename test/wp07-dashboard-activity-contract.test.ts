@@ -100,7 +100,7 @@ test("notification return context restores the fetched page cursor for an append
 });
 
 test("Dashboard, deep links, return context and mobile admin entry are bounded contracts", async () => {
-  const [dashboardRoute, dashboardClient, actionClient, actionRoute, actionEngine, notifications, notificationsRoute, header] = await Promise.all([
+  const [dashboardRoute, dashboardClient, actionClient, actionRoute, actionEngine, notifications, notificationsRoute, notificationService, header] = await Promise.all([
     readFile("src/app/api/dashboard/route.ts", "utf8"),
     readFile("src/app/dashboard/dashboard-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/actions/project-actions-client.tsx", "utf8"),
@@ -108,6 +108,7 @@ test("Dashboard, deep links, return context and mobile admin entry are bounded c
     readFile("src/lib/action-engine.ts", "utf8"),
     readFile("src/app/notifications/notifications-client.tsx", "utf8"),
     readFile("src/app/api/notifications/route.ts", "utf8"),
+    readFile("src/lib/notification-service.ts", "utf8"),
     readFile("src/components/app-header.tsx", "utf8"),
   ]);
   assert.match(dashboardRoute, /state = projects\.length === 0/u);
@@ -134,7 +135,10 @@ test("Dashboard, deep links, return context and mobile admin entry are bounded c
   assert.match(notifications, /cursor/u);
   assert.match(notifications, /notificationCursorForId\(notificationCursorByIdRef\.current/u);
   assert.match(notifications, /target\.focus/u);
-  assert.match(notifications, /typeof opened\.actionHref === "string" \? opened\.actionHref : item\.actionHref/u);
+  assert.match(notifications, /opened\.destination/u);
+  assert.match(notifications, /filter === "pending"/u);
+  assert.match(notificationService, /CURRENT_TIMESTAMP/u);
+  assert.match(notificationService, /actionState === "pending"/u);
   assert.match(notifications, /<time className="text-xs text-slate-600">/u);
   assert.match(notifications, /<span className="text-xs text-slate-600">已读<\/span>/u);
   assert.match(notifications, /"text-slate-700 hover:bg-white\/70"/u);

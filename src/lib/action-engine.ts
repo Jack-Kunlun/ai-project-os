@@ -7,13 +7,14 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 import { assertProjectAccess, getProjectPermission, type AccessUser } from "@/lib/access-control";
-import { admitWebAiProjectAccess, lockActorsAccess, lockProjectAccess, lockWorkspaceAccess, WebAiAccessError } from "@/lib/access-linearization";
+import { admitWebAiProjectAccess, WebAiAccessError } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
 import { runGitRepositorySyncJob } from "@/lib/git";
 import { listPagination } from "@/lib/list-pagination";
 import {
   canonicalMcpActionSnapshot,
 } from "@/lib/mcp";
+import { persistNotification } from "@/lib/notification-service";
 
 const ACTION_LEASE_MS = 10 * 60_000;
 const ACTION_HEARTBEAT_MS = 60_000;
@@ -22,7 +23,6 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const WORKER_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/u;
 const CLIENT_REQUEST_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/u;
 const SAFE_FAILURE_CODE = /^[A-Z][A-Z0-9_]{2,63}$/u;
-const SAFE_ACTION_HREF = /^\/[A-Za-z0-9/_?=&.-]{1,1023}$/u;
 const LEGACY_MCP_ACTION_CAPABILITY = "project.mcp.read-tool.invoke";
 
 export const PROJECT_ACTION_CAPABILITIES = [
@@ -202,10 +202,6 @@ function hash(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function notificationKey(value: string): string {
-  return hash(`action-notification:v1:${value}`);
-}
-
 export function projectActionCapabilityCatalog(): readonly CapabilityDefinition[] {
   return Object.freeze(PROJECT_ACTION_CAPABILITIES.map((id) => CAPABILITY_CATALOG[id]));
 }
@@ -257,45 +253,19 @@ async function createActionNotification(input: Readonly<{
   dedupeSuffix: string;
 }>, db: PrismaClient): Promise<void> {
   const actionHref = `/projects/${input.projectId}/actions?action=${input.actionId}`;
-  if (!SAFE_ACTION_HREF.test(actionHref)) return fail("ACTION_INVALID_INPUT");
-  // Notification producers run after the action transaction.  Recheck the
-  // recipient under the same actor -> workspace -> project access fence used
-  // by membership revocation so a pending/revoked recipient cannot receive a
-  // project notification after losing access.
-  const project = await db.project.findUnique({ where: { id: input.projectId }, select: { workspaceId: true } });
-  if (project === null) return;
-  await db.$transaction(async (tx) => {
-    await lockActorsAccess(tx, [input.userId]);
-    await lockWorkspaceAccess(tx, project.workspaceId);
-    await lockProjectAccess(tx, input.projectId);
-    const visibleProject = await tx.project.findUnique({
-      where: { id: input.projectId },
-      select: {
-        membershipInheritanceMode: true,
-        memberships: { where: { userId: input.userId, accessState: "confirmed", user: { disabledAt: null } }, select: { userId: true } },
-        workspace: { select: { memberships: { where: { userId: input.userId, accessState: "confirmed", role: { in: ["owner", "admin"] }, user: { disabledAt: null } }, select: { userId: true } } } },
-      },
-    });
-    if (visibleProject === null) return;
-    const canSeeProject = visibleProject.memberships.length > 0 || (
-      visibleProject.membershipInheritanceMode === "workspaceInherited" && visibleProject.workspace.memberships.length > 0
-    );
-    if (!canSeeProject) return;
-    await tx.notification.upsert({
-      where: { userId_dedupeKey: { userId: input.userId, dedupeKey: notificationKey(`${input.actionId}:${input.dedupeSuffix}`) } },
-      create: {
-        userId: input.userId,
-        projectId: input.projectId,
-        kind: input.kind,
-        severity: input.severity,
-        title: input.title,
-        body: input.body,
-        actionHref,
-        dedupeKey: notificationKey(`${input.actionId}:${input.dedupeSuffix}`),
-      },
-      update: { title: input.title, body: input.body, severity: input.severity, actionHref, readAt: null },
-    });
-  });
+  await persistNotification({
+    userId: input.userId,
+    projectId: input.projectId,
+    subjectKind: "projectAction",
+    subjectId: input.actionId,
+    attentionIntent: input.kind === "actionApprovalRequired" || input.kind === "actionFailed" ? "requiresAttention" : "informational",
+    kind: input.kind,
+    severity: input.severity,
+    title: input.title,
+    body: input.body,
+    actionHref,
+    dedupeKey: `${input.actionId}:${input.dedupeSuffix}`,
+  }, db);
 }
 
 async function tryCreateActionNotification(

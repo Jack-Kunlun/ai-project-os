@@ -788,6 +788,7 @@ test("production reconcile separates non-owner runtime from writer and preserves
   let runtime: Client | null = null;
   let runtimeDb: PrismaClient | null = null;
   let initialDatabaseOwner: string | null = null;
+  let notificationUserId: string | null = null;
   let cleanupAssertionError: unknown;
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
   try {
@@ -880,6 +881,7 @@ test("production reconcile separates non-owner runtime from writer and preserves
       writer = getEntitlementDb();
       const bootstrap = await initializeAdmin({ username: `database_principal_admin_${suffix}`, password: "DatabasePrincipalGatePassword_2026" }, writer);
       const actor: PlatformGrantOfferPolicyActor = bootstrap.user;
+      notificationUserId = actor.id;
       assert.equal(actor.role, "admin");
       assert.equal(await writer.accountEntitlementActivation.count({ where: { userId: actor.id, lifecycleKey: "initial_account_v1" } }), 1);
       assert.equal(await writer.platformTokenGrant.count({ where: { userId: actor.id, kind: "signup" } }), 1);
@@ -1003,6 +1005,16 @@ test("production reconcile separates non-owner runtime from writer and preserves
       grantOfferVersionUpdate: boolean;
       ledgerInsert: boolean;
       ledgerDelete: boolean;
+      notificationSelect: boolean;
+      notificationInsert: boolean;
+      notificationUpdate: boolean;
+      notificationDelete: boolean;
+      writerNotificationInsert: boolean;
+      writerNotificationUpdate: boolean;
+      writerNotificationDelete: boolean;
+      publicNotificationInsert: boolean;
+      publicNotificationUpdate: boolean;
+      publicNotificationDelete: boolean;
     }>(`
       SELECT has_table_privilege(current_user, 'public."PlatformGrantOfferPolicy"', 'SELECT') AS "policySelect",
              has_table_privilege(current_user, 'public."PlatformGrantOfferPolicy"', 'INSERT') AS "policyInsert",
@@ -1010,8 +1022,45 @@ test("production reconcile separates non-owner runtime from writer and preserves
              has_column_privilege(current_user, 'public."PlatformTokenGrant"', 'remainingTokens', 'UPDATE') AS "grantRemainingUpdate",
              has_column_privilege(current_user, 'public."PlatformTokenGrant"', 'offerVersion', 'UPDATE') AS "grantOfferVersionUpdate",
              has_table_privilege(current_user, 'public."PlatformTokenLedgerEntry"', 'INSERT') AS "ledgerInsert",
-             has_table_privilege(current_user, 'public."PlatformTokenLedgerEntry"', 'DELETE') AS "ledgerDelete"
-    `);
+             has_table_privilege(current_user, 'public."PlatformTokenLedgerEntry"', 'DELETE') AS "ledgerDelete",
+             has_table_privilege(current_user, 'public."Notification"', 'SELECT') AS "notificationSelect",
+             has_table_privilege(current_user, 'public."Notification"', 'INSERT') AS "notificationInsert",
+             has_table_privilege(current_user, 'public."Notification"', 'UPDATE') AS "notificationUpdate",
+             has_table_privilege(current_user, 'public."Notification"', 'DELETE') AS "notificationDelete",
+             has_table_privilege($1, 'public."Notification"', 'INSERT') AS "writerNotificationInsert",
+             has_table_privilege($1, 'public."Notification"', 'UPDATE') AS "writerNotificationUpdate",
+             has_table_privilege($1, 'public."Notification"', 'DELETE') AS "writerNotificationDelete",
+             EXISTS (
+               SELECT 1
+                 FROM pg_class relation_row
+                 JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+                 CROSS JOIN LATERAL aclexplode(COALESCE(relation_row.relacl, acldefault('r', relation_row.relowner))) privilege
+                WHERE namespace_row.nspname = 'public'
+                  AND relation_row.relname = 'Notification'
+                  AND privilege.grantee = 0::oid
+                  AND privilege.privilege_type = 'INSERT'
+             ) AS "publicNotificationInsert",
+             EXISTS (
+               SELECT 1
+                 FROM pg_class relation_row
+                 JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+                 CROSS JOIN LATERAL aclexplode(COALESCE(relation_row.relacl, acldefault('r', relation_row.relowner))) privilege
+                WHERE namespace_row.nspname = 'public'
+                  AND relation_row.relname = 'Notification'
+                  AND privilege.grantee = 0::oid
+                  AND privilege.privilege_type = 'UPDATE'
+             ) AS "publicNotificationUpdate",
+             EXISTS (
+               SELECT 1
+                 FROM pg_class relation_row
+                 JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+                 CROSS JOIN LATERAL aclexplode(COALESCE(relation_row.relacl, acldefault('r', relation_row.relowner))) privilege
+                WHERE namespace_row.nspname = 'public'
+                  AND relation_row.relname = 'Notification'
+                  AND privilege.grantee = 0::oid
+                  AND privilege.privilege_type = 'DELETE'
+             ) AS "publicNotificationDelete"
+    `, [writerRole]);
     assert.deepEqual(runtimePrivileges.rows[0], {
       policySelect: true,
       policyInsert: false,
@@ -1020,7 +1069,42 @@ test("production reconcile separates non-owner runtime from writer and preserves
       grantOfferVersionUpdate: false,
       ledgerInsert: false,
       ledgerDelete: false,
+      notificationSelect: true,
+      notificationInsert: true,
+      notificationUpdate: true,
+      notificationDelete: true,
+      writerNotificationInsert: false,
+      writerNotificationUpdate: false,
+      writerNotificationDelete: false,
+      publicNotificationInsert: false,
+      publicNotificationUpdate: false,
+      publicNotificationDelete: false,
     });
+
+    // Notification is a runtime-only control-plane relation: the runtime
+    // principal can perform its ordinary read/write lifecycle, while the
+    // entitlement writer is denied at PostgreSQL ACL level.
+    assert.ok(notificationUserId);
+    const runtimeNotificationId = randomUUID();
+    const runtimeNotificationKey = randomUUID().replaceAll("-", "").padEnd(64, "0").slice(0, 64);
+    await runtimeClient.query(`
+      INSERT INTO "Notification" ("id", "userId", "kind", "severity", "title", "body", "dedupeKey")
+      VALUES ($1, $2, 'system', 'info', 'runtime notification', 'runtime notification body', $3)
+    `, [runtimeNotificationId, notificationUserId, runtimeNotificationKey]);
+    assert.deepEqual((await runtimeClient.query<{ id: string }>(`SELECT "id" FROM "Notification" WHERE "id" = $1`, [runtimeNotificationId])).rows[0], { id: runtimeNotificationId });
+    await runtimeClient.query(`UPDATE "Notification" SET "body" = 'updated runtime notification' WHERE "id" = $1`, [runtimeNotificationId]);
+    await runtimeClient.query(`DELETE FROM "Notification" WHERE "id" = $1`, [runtimeNotificationId]);
+    const writerClient = new Client({ connectionString: writerUrl, connectionTimeoutMillis: 5_000 });
+    await writerClient.connect();
+    try {
+      for (const statement of [
+        `INSERT INTO "Notification" ("id", "userId", "kind", "severity", "title", "body", "dedupeKey") VALUES (gen_random_uuid(), '${notificationUserId}', 'system', 'info', 'writer notification', 'writer notification body', repeat('c', 64))`,
+        `UPDATE "Notification" SET "body" = "body"`,
+        `DELETE FROM "Notification"`,
+      ]) await expectPermissionDenied(() => writerClient.query(statement));
+    } finally {
+      await writerClient.end();
+    }
 
     // Setting every known application context does not elevate the runtime
     // session; only PostgreSQL session_user is authoritative in the guard.

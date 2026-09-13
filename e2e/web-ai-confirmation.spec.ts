@@ -6,20 +6,33 @@ import { getDb } from "@/lib/db";
 
 const BROWSER_ADMIN_PASSWORD = "BrowserGate2026Password!";
 
+async function settleBrowserAdmin(page: Page): Promise<void> {
+  await expect(page).toHaveURL(/\/(?:onboarding|dashboard)$/u);
+  if (new URL(page.url()).pathname === "/onboarding") {
+    const completionButton = page.getByRole("button", { name: "我已查看，进入日常工作区", exact: true });
+    await expect(completionButton).toBeVisible();
+    await completionButton.click();
+  }
+  await expect(page).toHaveURL(/\/dashboard$/u);
+}
+
 async function signInBrowserAdmin(page: Page): Promise<void> {
   await page.goto("/setup");
-  if (/\/setup$/u.test(page.url())) {
+  await expect(page).toHaveURL(/\/(?:setup|login|onboarding|dashboard)$/u);
+  const landingPath = new URL(page.url()).pathname;
+  if (landingPath === "/setup") {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
     await page.getByLabel("密码", { exact: true }).fill(BROWSER_ADMIN_PASSWORD);
     await page.getByLabel("再次输入密码", { exact: true }).fill(BROWSER_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "创建管理员并进入" }).click();
-  } else {
-    await expect(page).toHaveURL(/\/login$/u);
+  } else if (landingPath === "/login") {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
     await page.getByLabel("密码", { exact: true }).fill(BROWSER_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "登 录", exact: true }).click();
+  } else {
+    expect(["/onboarding", "/dashboard"]).toContain(landingPath);
   }
-  await expect(page).toHaveURL(/\/dashboard$/u);
+  await settleBrowserAdmin(page);
 }
 
 async function createProject(page: Page, name: string): Promise<string> {

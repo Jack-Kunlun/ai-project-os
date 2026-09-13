@@ -131,6 +131,17 @@ test("first-run administrator can reach protected pages with production security
   await page.getByLabel("再次输入密码", { exact: true }).fill("BrowserGate2026Password!");
   await page.getByRole("button", { name: "创建管理员并进入" }).click();
 
+  await expect(page).toHaveURL(/\/onboarding$/u);
+  await expect(page.getByRole("heading", { name: "管理工作台首次就绪", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "平台首次就绪清单", exact: true })).toBeVisible();
+  await expect(page.getByText("清单不要求全部变绿。完成引导只记录你已查看管理工作台，不等于模型、Git、MCP 或其他外部服务已经现场验证。", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page).toHaveURL(/\/onboarding$/u);
+  await expect(page.getByRole("heading", { name: "管理工作台首次就绪", exact: true })).toBeVisible();
+  await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/onboarding$/u);
+  await expect(page.getByRole("heading", { name: "平台首次就绪清单", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "我已查看，进入日常工作区", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
   await expect(page.getByRole("heading", { name: "欢迎回来，browser_admin" })).toBeVisible();
   await expect(page.getByText("内部开发版 · 0.2.0-dev.1", { exact: true })).toBeVisible();

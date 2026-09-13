@@ -9,10 +9,12 @@ import { appendWorkspaceMembershipAudit } from "@/lib/membership-governance";
 import { toSystemRole, type SystemRole } from "@/lib/system-role";
 import { createBootstrapSignupOfferPolicy } from "@/lib/platform-grant-offer-policy-service";
 import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
+import { getFirstAdminOnboardingState } from "@/lib/first-admin-onboarding-service";
+import { DEFAULT_WORKSPACE_ID } from "@/lib/workspace-constants";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
 export const SESSION_LIFETIME_DAYS = 14 as const;
-export const DEFAULT_WORKSPACE_ID = "00000000-0000-4000-8000-000000000001" as const;
+export { DEFAULT_WORKSPACE_ID } from "@/lib/workspace-constants";
 
 const PASSWORD_VERSION = 1;
 const SCRYPT_KEY_BYTES = 32;
@@ -602,8 +604,26 @@ export async function requireApiSessionReadOnly(
 export async function requirePageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
   const store = await cookies();
   const user = await readSessionToken(store.get(SESSION_COOKIE_NAME)?.value ?? null, db);
-  if (user !== null) return user;
+  if (user !== null) {
+    if (await getFirstAdminOnboardingState(user.id, db) === "pending") redirect("/onboarding");
+    return user;
+  }
   redirect((await isApplicationInitialized(db)) ? "/login" : "/setup");
+}
+
+/**
+ * The onboarding page intentionally lives outside the admin layout. Keep a
+ * dedicated guard here so the normal page gate can redirect pending sessions
+ * without making /onboarding redirect back to itself.
+ */
+export async function requireFirstAdminOnboardingPage(
+  db: PrismaClient = getDb(),
+): Promise<SafeSessionUser> {
+  const store = await cookies();
+  const user = await readSessionToken(store.get(SESSION_COOKIE_NAME)?.value ?? null, db);
+  if (user === null) redirect((await isApplicationInitialized(db)) ? "/login" : "/setup");
+  if (await getFirstAdminOnboardingState(user.id, db) !== "pending") redirect("/dashboard");
+  return user;
 }
 
 export async function getPageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser | null> {

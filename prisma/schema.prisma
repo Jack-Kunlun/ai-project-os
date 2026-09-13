@@ -5047,6 +5047,7 @@ model Workspace {
   name          String                @db.VarChar(160)
   slug          String                @unique @db.VarChar(80)
   createdById   String?               @db.Uuid
+  initialAdminOnboardingCompletedAt DateTime? @db.Timestamp(3)
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   createdBy     AppUser?              @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)

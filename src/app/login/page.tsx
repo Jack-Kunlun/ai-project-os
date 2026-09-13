@@ -4,6 +4,7 @@ import { LoginForm } from "./login-form";
 import { listPublicOidcProviders } from "@/lib/oidc";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
 import { isGitHubOAuthConfigured } from "@/lib/github-oauth";
+import { getFirstAdminOnboardingState } from "@/lib/first-admin-onboarding-service";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,8 @@ const githubFailureMessages: Record<string, string> = {
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ password?: string; oidc?: string; github?: string; returnTo?: string }> }) {
   if (!(await isApplicationInitialized())) redirect("/setup");
-  if ((await getPageSession()) !== null) redirect("/dashboard");
+  const existingSession = await getPageSession();
+  if (existingSession !== null) redirect(await getFirstAdminOnboardingState(existingSession.id) === "pending" ? "/onboarding" : "/dashboard");
   const params = await searchParams;
   const notice = params.password === "updated"
     ? "密码已更新，请使用新密码重新登录。"

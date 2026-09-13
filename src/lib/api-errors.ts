@@ -61,6 +61,7 @@ import { AccountEntitlementBackfillError } from "@/lib/account-entitlement-backf
 import { PlatformCreditGovernanceError } from "@/lib/platform-credit-governance-service";
 import { MembershipApplicationServiceError } from "@/lib/membership-application-service";
 import { WorkspaceRoleGovernanceError } from "@/lib/workspace-role-governance-service";
+import { FirstAdminOnboardingError } from "@/lib/first-admin-onboarding-service";
 
 export type ApiErrorBody = {
   error: {
@@ -587,6 +588,17 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AUTH_CSRF_REJECTED: [403, "请求来源校验失败"],
     } as const;
     const [status, message] = mapping[error.code];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof FirstAdminOnboardingError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      FIRST_ADMIN_ONBOARDING_INVALID_INPUT: [400, "首次管理员引导请求无效"],
+      FIRST_ADMIN_ONBOARDING_FORBIDDEN: [403, "只有默认工作区的首位管理员可以完成首次引导"],
+      FIRST_ADMIN_ONBOARDING_ACCOUNT_STALE: [409, "账号状态已变化，请重新登录后重试"],
+      FIRST_ADMIN_ONBOARDING_CONFLICT: [409, "首次管理员引导状态已变化，请刷新后重试"],
+    };
+    const [status, message] = mapping[error.code] ?? [409, "首次管理员引导未完成"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

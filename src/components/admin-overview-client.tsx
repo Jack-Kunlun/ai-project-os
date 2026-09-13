@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { PlatformDefaultAiOperation } from "@/lib/platform-default-ai-routes";
 import type { SystemOverview, SystemOverviewFailureAggregate, SystemOverviewRoute } from "@/lib/system-overview";
@@ -133,7 +134,7 @@ export function AdminOverviewClient() {
 
     <section className="mt-6 grid gap-6 lg:grid-cols-3" aria-label="安全与恢复状态">
       <EvidenceCard title="MCP 认证队列" eyebrow="Connection safety" value={overview ? valueLabel(pendingMcp ?? null) : "读取中…"} detail={pendingMcp === null || pendingMcp === undefined ? "未取得待认证数量；不会暴露个人连接或工具正文。" : "符合安全条件但尚未取得有效管理员认证的只读工具数量。"} tone={pendingMcp === null || pendingMcp === undefined ? "unknown" : pendingMcp > 0 ? "attention" : "ready"} />
-      <EvidenceCard title="调度/控制面失败聚合" eyebrow="Safe failures" value={failureTotal === null || failureTotal === undefined ? "—" : valueLabel(failureTotal)} detail={overview ? failureDetail(overview) : "不会显示调用正文，只读取安全错误码聚合。"} tone={failureTotal === null || failureTotal === undefined ? "unknown" : failureTotal > 0 ? "attention" : "ready"} />
+      <EvidenceCard title="调度/控制面失败聚合" eyebrow="Safe failures" value={failureTotal === null || failureTotal === undefined ? "—" : valueLabel(failureTotal)} detail={overview ? failureDetail(overview) : "不会显示调用正文，只读取安全错误码聚合。"} tone={failureTotal === null || failureTotal === undefined ? "unknown" : failureTotal > 0 ? "attention" : "ready"} href="/admin/operations/failures" linkLabel="打开失败收件箱" />
       <BackupCard backup={overview?.backup} />
     </section>
 
@@ -184,8 +185,8 @@ function BackupCard({ backup }: { backup?: SystemOverview["backup"] }) {
   return <EvidenceCard title="备份证据" eyebrow="Recovery" value={value} detail={`状态源 ${backup.sourceStatus} · 状态读取 ${backup.snapshotRead} · 最新记录 ${recordState} · 新鲜度 ${backup.freshness.status}（阈值 ${Math.round(backup.freshness.thresholdMs / (60 * 60 * 1_000))} 小时） · 恢复演练 ${backup.recoveryDrill.status}`} tone={tone} />;
 }
 
-function EvidenceCard({ title, eyebrow, value, detail, tone }: { title: string; eyebrow: string; value: string; detail: string; tone: "ready" | "attention" | "unknown" | "restricted" }) {
-  return <article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{eyebrow}</p><h2 className="mt-2 text-lg font-semibold text-slate-950">{title}</h2><p className={`mt-4 inline-flex rounded-full px-3 py-1.5 text-sm font-semibold ${statusTone(tone)}`}>{value}</p><p className="mt-3 text-xs leading-5 text-slate-500">{detail}</p></article>;
+function EvidenceCard({ title, eyebrow, value, detail, tone, href, linkLabel }: { title: string; eyebrow: string; value: string; detail: string; tone: "ready" | "attention" | "unknown" | "restricted"; href?: string; linkLabel?: string }) {
+  return <article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{eyebrow}</p><h2 className="mt-2 text-lg font-semibold text-slate-950">{title}</h2><p className={`mt-4 inline-flex rounded-full px-3 py-1.5 text-sm font-semibold ${statusTone(tone)}`}>{value}</p><p className="mt-3 text-xs leading-5 text-slate-500">{detail}</p>{href && linkLabel ? <Link href={href} className="mt-4 inline-flex rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{linkLabel}</Link> : null}</article>;
 }
 
 function StatusCard({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: "emerald" | "cyan" | "violet" }) {

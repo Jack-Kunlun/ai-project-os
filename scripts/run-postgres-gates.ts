@@ -106,6 +106,7 @@ async function runGate(
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     DATABASE_URL: databaseUrl,
+    ENTITLEMENT_DATABASE_URL: databaseUrl,
     [gate.gateEnv]: "1",
   };
   if (gate.databaseUrlEnv !== undefined) env[gate.databaseUrlEnv] = databaseUrl;

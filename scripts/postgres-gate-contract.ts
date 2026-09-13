@@ -55,6 +55,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "project-mcp-grant-retention", file: "test/project-mcp-grant-retention-postgres.test.ts", database: "ai_project_os_project_mcp_grant_retention_test", gateEnv: "PROJECT_MCP_GRANT_RETENTION_POSTGRES_GATE", setup: "migrate" },
   { id: "project-mcp-tool-grant", file: "test/project-mcp-tool-grant-postgres.test.ts", database: "ai_project_os_project_mcp_tool_grant_test", gateEnv: "PROJECT_MCP_TOOL_GRANT_POSTGRES_GATE", setup: "migrate" },
   { id: "system-audit", file: "test/system-audit-postgres.test.ts", database: "ai_project_os_system_audit_test", gateEnv: "SYSTEM_AUDIT_POSTGRES_GATE", setup: "migrate" },
+  { id: "system-failure-inbox", file: "test/system-failure-inbox-postgres.test.ts", database: "ai_project_os_system_failure_inbox_test", gateEnv: "SYSTEM_FAILURE_INBOX_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
   { id: "workspace-role-governance", file: "test/workspace-role-governance-postgres.test.ts", database: "ai_project_os_workspace_role_governance_test", gateEnv: "WORKSPACE_ROLE_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
   { id: "first-admin-onboarding", file: "test/first-admin-onboarding-postgres.test.ts", database: "ai_project_os_first_admin_onboarding_test", gateEnv: "FIRST_ADMIN_ONBOARDING_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
   { id: "database-principals", file: "test/database-principal-postgres.test.ts", database: "ai_project_os_database_principals_test", gateEnv: "DATABASE_PRINCIPAL_POSTGRES_GATE", setup: "migrate" },

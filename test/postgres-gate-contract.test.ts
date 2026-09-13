@@ -26,7 +26,7 @@ test("PostgreSQL gate manifest covers every opt-in postgres test exactly once", 
   assert.equal(new Set(POSTGRES_GATES.map((gate) => gate.id)).size, POSTGRES_GATES.length);
   assert.deepEqual(
     POSTGRES_GATES.filter((gate) => gate.seedAdmin === true).map((gate) => gate.id),
-    ["v3", "membership-governance-manifest", "project-ai-provider-delegation", "project-git-repository-delegation", "project-delegated-git-runtime", "personal-runtime-evidence", "personal-web-ai-runtime", "first-admin-onboarding", "platform-provider-probe", "notification-subjects"],
+    ["v3", "membership-governance-manifest", "project-ai-provider-delegation", "project-git-repository-delegation", "project-delegated-git-runtime", "personal-runtime-evidence", "personal-web-ai-runtime", "system-failure-inbox", "first-admin-onboarding", "platform-provider-probe", "notification-subjects"],
   );
 });
 
@@ -69,4 +69,10 @@ test("PostgreSQL gate filters preserve manifest order and reject ambiguity", () 
   );
   assert.throws(() => selectPostgresGates("ai-runtime,ai-runtime"), /POSTGRES_GATE_FILTER_DUPLICATE/);
   assert.throws(() => selectPostgresGates("unknown"), /POSTGRES_GATE_FILTER_INVALID/);
+});
+
+test("PostgreSQL gate runner binds every database client to the disposable gate database", async () => {
+  const runner = await readFile("scripts/run-postgres-gates.ts", "utf8");
+  assert.match(runner, /DATABASE_URL: databaseUrl,/u);
+  assert.match(runner, /ENTITLEMENT_DATABASE_URL: databaseUrl,/u);
 });

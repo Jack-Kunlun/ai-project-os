@@ -3,5 +3,5 @@ import { requireSystemAdminPage } from "@/lib/system-admin";
 
 export default async function AdminModelsPage() {
   const user = await requireSystemAdminPage();
-  return <SettingsClient username={user.username} canManageProviders activeMembership membershipStatus="active" adminMode />;
+  return <SettingsClient username={user.username} canManageProviders activeMembership membershipStatus="active" adminMode={user.role === "admin"} />;
 }

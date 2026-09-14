@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 
 export default async function ProjectMemoryQualityPage({ params }: { params: Promise<{ projectId: string }> }) {
   const user = await requirePageSession();
-  return <ProjectMemoryQualityClient username={user.username} projectId={(await params).projectId} />;
+  return <ProjectMemoryQualityClient username={user.username} projectId={(await params).projectId} isSystemAdmin={user.role === "admin"} />;
 }

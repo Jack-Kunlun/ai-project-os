@@ -7,7 +7,7 @@ import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ProjectManagementParentLink } from "@/components/project-parent-link";
 import { connectionErrorText, connectionFieldClass, readConnectionError } from "@/app/profile/connections/connection-ui";
 
-type ProjectToolsClientProps = Readonly<{ username: string; projectId: string }>;
+type ProjectToolsClientProps = Readonly<{ username: string; projectId: string; isSystemAdmin: boolean }>;
 type ConnectionOption = Readonly<{ id: string; name: string }>;
 type Delegation = Readonly<{
   id: string;
@@ -150,7 +150,7 @@ function jsonPreview(value: unknown): string {
   }
 }
 
-export function ProjectToolsClient({ username, projectId }: ProjectToolsClientProps) {
+export function ProjectToolsClient({ username, projectId, isSystemAdmin }: ProjectToolsClientProps) {
   const [delegationState, setDelegationState] = useState<DelegationPayload | null>(null);
   const [grantState, setGrantState] = useState<GrantPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -291,7 +291,7 @@ export function ProjectToolsClient({ username, projectId }: ProjectToolsClientPr
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="tools" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="tools" isSystemAdmin={isSystemAdmin} />
       {dialog}
       <div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10">
         <div className="mb-5"><ProjectManagementParentLink projectId={projectId} /></div>

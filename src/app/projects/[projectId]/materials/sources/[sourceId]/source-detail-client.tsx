@@ -30,7 +30,7 @@ async function getSource(projectId: string, sourceId: string): Promise<ProjectSo
   return payload.source;
 }
 
-export function ProjectSourceDetailClient({ username }: { username: string }) {
+export function ProjectSourceDetailClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId, sourceId } = useParams<{ projectId: string; sourceId: string }>();
   const searchParams = useSearchParams();
   const fromNotifications = searchParams.get("from") === "notifications";
@@ -58,7 +58,7 @@ export function ProjectSourceDetailClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-5xl px-6 py-8 sm:px-10 lg:px-12">
         <div className="mb-6">{fromNotifications ? <ParentPageLink href="/notifications" label="返回通知中心" /> : safeReturnTo ? <ParentPageLink href={safeReturnTo} label="返回原始资料" scroll={false} /> : <ProjectMaterialsParentLink projectId={projectId} />}</div>
         <section className="pb-8">

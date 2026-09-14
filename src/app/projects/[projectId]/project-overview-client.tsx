@@ -66,7 +66,7 @@ const worldStatusMeta: Record<WorldStatus, { label: string; detail: string; tone
   insufficient_data: { label: "资料不足", detail: "当前还没有足够的已确认事实来判断项目状态。", tone: "bg-slate-100 text-slate-600" },
 };
 
-export function ProjectOverviewClient({ username }: { username: string }) {
+export function ProjectOverviewClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId } = useParams<{ projectId: string }>();
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("overview", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
@@ -160,7 +160,7 @@ export function ProjectOverviewClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="overview" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="overview" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
         {loading ? (
           <div className="space-y-5" aria-label="正在加载项目概览"><div className="h-64 animate-pulse rounded-[2rem] bg-slate-200" /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{[1, 2, 3, 4].map((item) => <div key={item} className="h-32 animate-pulse rounded-2xl bg-slate-200" />)}</div></div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
-import { AdminShell } from "@/components/admin-shell";
+import { AdminPageFrame } from "@/components/admin-shell";
 import { ConnectionTabs } from "@/components/connection-tabs";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 
@@ -75,8 +75,7 @@ export function ConnectionsClient({ username, adminMode = false }: { username: s
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="connections" isSystemAdmin={adminMode} />
-      {adminMode ? <AdminShell active="git" /> : null}
-      <div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
+      <AdminPageFrame active="git" showSidebar={adminMode}><div className="mx-auto max-w-7xl px-6 py-10 sm:px-10 lg:px-12">
         <section className="grid gap-8 rounded-[2rem] bg-slate-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 lg:grid-cols-[1.2fr_.8fr] lg:px-10">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Source connections</p>
@@ -107,7 +106,7 @@ export function ConnectionsClient({ username, adminMode = false }: { username: s
             </div>
           </section>
         </div>
-      </div>
+      </div></AdminPageFrame>
     </main>
   );
 }

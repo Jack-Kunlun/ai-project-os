@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function FirstAdminOnboardingPage() {
   const user = await requireFirstAdminOnboardingPage();
   return <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
-    <AppHeader username={user.username} active="admin" isSystemAdmin />
+    <AppHeader username={user.username} active="admin" isSystemAdmin={user.role === "admin"} />
     <section className="mx-auto max-w-7xl px-4 pb-2 pt-8 sm:px-8 lg:px-10">
       <div className="rounded-[2rem] bg-slate-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-10 sm:py-10">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">First administrator onboarding</p>

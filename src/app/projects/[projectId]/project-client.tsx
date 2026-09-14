@@ -217,7 +217,7 @@ function itemActionText(action: ItemAction): string {
   }
 }
 
-export function ProjectDetailClient({ username }: { username: string }) {
+export function ProjectDetailClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -647,15 +647,15 @@ export function ProjectDetailClient({ username }: { username: string }) {
   });
 
   if (error) {
-    return <ProjectShell username={username} projectId={projectId}><div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</div></ProjectShell>;
+    return <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}><div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</div></ProjectShell>;
   }
 
   if (!project) {
-    return <ProjectShell username={username} projectId={projectId}><div className="h-40 animate-pulse rounded-3xl bg-slate-100" aria-label="正在加载项目" /></ProjectShell>;
+    return <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}><div className="h-40 animate-pulse rounded-3xl bg-slate-100" aria-label="正在加载项目" /></ProjectShell>;
   }
 
   return (
-    <ProjectShell username={username} projectId={projectId}>
+    <ProjectShell username={username} projectId={projectId} isSystemAdmin={isSystemAdmin}>
       {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
       <div className="border-b border-slate-200/80 pb-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
@@ -1074,10 +1074,10 @@ function ItemCard({
   );
 }
 
-function ProjectShell({ children, username, projectId }: { children: ReactNode; username: string; projectId: string }) {
+function ProjectShell({ children, username, projectId, isSystemAdmin }: { children: ReactNode; username: string; projectId: string; isSystemAdmin: boolean }) {
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="materials" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-6xl px-6 pb-16 pt-10 sm:px-10 lg:px-12">{children}</div>
     </main>
   );

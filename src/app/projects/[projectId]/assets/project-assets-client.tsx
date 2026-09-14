@@ -144,7 +144,7 @@ function statusTone(status: AssetStatus): string {
   return "bg-slate-100 text-slate-600 ring-slate-200";
 }
 
-export function ProjectAssetsClient({ username }: { username: string }) {
+export function ProjectAssetsClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId } = useParams<{ projectId: string }>();
   const [projectName, setProjectName] = useState("项目");
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -404,7 +404,7 @@ export function ProjectAssetsClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="assets" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="assets" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <ProjectMaterialsParentLink projectId={projectId} />
         <section className="pb-8 pt-10">

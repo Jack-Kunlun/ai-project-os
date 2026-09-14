@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 
 export default async function ProjectMemoryPage() {
   const user = await requirePageSession();
-  return <ProjectMemoryClient username={user.username} />;
+  return <ProjectMemoryClient username={user.username} isSystemAdmin={user.role === "admin"} />;
 }

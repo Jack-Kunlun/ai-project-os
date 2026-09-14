@@ -184,7 +184,7 @@ function shortHash(value: string): string {
   return value.length > 12 ? value.slice(0, 12) : value;
 }
 
-export function ProjectIntelligenceClient({ username }: { username: string }) {
+export function ProjectIntelligenceClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId } = useParams<{ projectId: string }>();
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("intelligence", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
@@ -236,7 +236,7 @@ export function ProjectIntelligenceClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="intelligence" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="intelligence" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-6xl px-6 pb-16 pt-10 sm:px-10 lg:px-12">
         <section className="pb-8">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project AI workspace</p>

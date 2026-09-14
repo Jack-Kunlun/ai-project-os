@@ -138,7 +138,7 @@ test("Git project repository routes pass the session actor to the service author
   assert.doesNotMatch(deleteRoute, /assertProjectActive/u);
   assert.match(deleteRoute, /disableProjectGitRepository\(projectId, idSchema\.parse\(params\.linkId\), user\)/u);
   assert.doesNotMatch(client, /api\/projects\/\$\{projectId\}\/git-connections/u);
-  assert.doesNotMatch(client, /api\/settings\/git-connections|api\/me\/git-connections|isSystemAdmin|RepositoryForm/u);
+  assert.doesNotMatch(client, /api\/settings\/git-connections|api\/me\/git-connections|RepositoryForm/u);
   assert.match(client, /api\/projects\/\$\{projectId\}\/git-repository-delegations/u);
   assert.match(client, /manual-sync/u);
   assert.match(client, /manual-runs/u);
@@ -178,7 +178,7 @@ test("admin workbench and overview are server protected and dashboard has no glo
   ]);
 
   assert.match(layout, /requireSystemAdminPage\(\)/u);
-  assert.match(page, /AdminShell active="overview"/u);
+  assert.match(page, /AdminPageFrame active="overview"/u);
   assert.match(overviewRoute, /user\.role !== "admin"/u);
   assert.match(overviewRoute, /status: 403/u);
   assert.doesNotMatch(overviewService, /getPlatformTokenSummary/u);
@@ -571,7 +571,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(manual, /user-operation-guide\.md/u);
   assert.match(manual, /admin-operation-guide\.md/u);
   assert.doesNotMatch(repositories, /api\/projects\/\$\{projectId\}\/git-connections/u);
-  assert.doesNotMatch(repositories, /api\/settings\/git-connections|api\/me\/git-connections|isSystemAdmin|RepositoryForm/u);
+  assert.doesNotMatch(repositories, /api\/settings\/git-connections|api\/me\/git-connections|RepositoryForm/u);
   assert.match(repositories, /api\/projects\/\$\{projectId\}\/git-repository-delegations/u);
   assert.match(repositories, /manual-sync/u);
   assert.match(repositories, /manual-runs/u);
@@ -591,8 +591,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(tools, /href="\/profile\/connections\/mcp"/u);
   assert.match(tools, /mcp-connection-delegations|mcp-tool-grants/u);
   assert.doesNotMatch(tools, /MCP 连接由管理员维护|mcp-actions|dispatch|result-import|授权并调用|创建并请求审批/u);
-  assert.doesNotMatch(repositoriesPage, /user\.role === "admin"/u);
-  assert.doesNotMatch(repositoriesPage, /isSystemAdmin/u);
+  assert.match(repositoriesPage, /isSystemAdmin=\{user\.role === "admin"\}/u);
   assert.doesNotMatch(tools, /href="\/connections\/mcp"/u);
   assert.match(projects, /payload\.pagination\.totalPages > 1 \?/u);
   assert.match(materials, /items-stretch/u);

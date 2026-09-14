@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 
 export default async function TeamPage() {
   const user = await requirePageSession();
-  return <TeamClient username={user.username} currentUserId={user.id} />;
+  return <TeamClient username={user.username} currentUserId={user.id} isSystemAdmin={user.role === "admin"} />;
 }

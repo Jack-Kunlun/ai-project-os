@@ -78,7 +78,7 @@ export default async function ProjectGitHubSyncPage({
   const nextOffset = sync.changeOffset + sync.changes.length;
 
   return <main className="min-h-screen bg-slate-50 text-slate-950">
-    <AppHeader username={user.username} active="projects" projectId={projectId} projectSection="repositories" />
+    <AppHeader username={user.username} active="projects" projectId={projectId} projectSection="repositories" isSystemAdmin={user.role === "admin"} />
     <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8">
       <Link href={backHref} className="text-sm font-semibold text-indigo-700 hover:underline">← {fromNotifications ? "返回通知中心" : "返回上一级"}</Link>
       <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-9">

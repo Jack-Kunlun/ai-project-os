@@ -5,7 +5,7 @@ import test from "node:test";
 const read = (path: string) => readFile(path, "utf8");
 
 test("browser gate stays isolated and exercises the production server", async () => {
-  const [packageJson, config, runner, smoke, automation, webAiConfirmation, systemAudit, gitConnections, failureInbox] = await Promise.all([
+  const [packageJson, config, runner, smoke, automation, webAiConfirmation, systemAudit, gitConnections, failureInbox, r02Spec, r02Support] = await Promise.all([
     read("package.json"),
     read("playwright.config.ts"),
     read("scripts/run-browser-e2e.ts"),
@@ -15,6 +15,8 @@ test("browser gate stays isolated and exercises the production server", async ()
     read("e2e/system-audit.spec.ts"),
     read("src/app/profile/connections/git/git-connections-client.tsx"),
     read("e2e/system-failure-inbox.spec.ts"),
+    read("e2e/z-r02-admin-navigation.spec.ts"),
+    read("e2e/support/r02-admin-navigation.ts"),
   ]);
   const manifest = JSON.parse(packageJson) as {
     devDependencies: Record<string, string>;
@@ -86,6 +88,23 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(failureInbox, /requires_owner_review/u);
   assert.match(failureInbox, /重试\|恢复\|重新执行\|关闭异常\|确认处理/u);
   assert.match(failureInbox, /browser\.newContext/u);
+  assert.match(r02Spec, /R02 production pages preserve the trusted admin entry/u);
+  assert.match(r02Spec, /test\.setTimeout\(360_000\)/u);
+  assert.match(r02Spec, /R02_PUBLIC_ROUTE_EXPECTATIONS/u);
+  assert.match(r02Spec, /r02ProjectGuardRoutes/u);
+  assert.match(r02Spec, /createControlledMembership/u);
+  assert.match(r02Spec, /R02ActorKind/u);
+  assert.match(r02Spec, /用户名或密码错误/u);
+  assert.match(r02Spec, /goBack\(\)/u);
+  assert.match(r02Spec, /projects\?focus=r02-header/u);
+  assert.match(r02Spec, /expectR02NoAccessibilityViolations/u);
+  assert.match(r02Spec, /R02_ADMIN_ROUTES/u);
+  assert.match(r02Spec, /r02ProjectRoutes/u);
+  assert.match(r02Spec, /expectR02MobileDrawer/u);
+  assert.doesNotMatch(r02Spec, /route\.(?:fetch|fulfill)/u);
+  assert.match(r02Support, /R02_VIEWPORTS/u);
+  assert.match(r02Support, /keyboard\.press\("Escape"\)/u);
+  assert.match(r02Support, /getByRole\("link"\).*toHaveCount\(10\)/u);
 });
 
 test("CI uses pinned least-privilege actions and runs all bounded gates", async () => {

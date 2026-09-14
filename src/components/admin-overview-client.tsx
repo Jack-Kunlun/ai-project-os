@@ -92,12 +92,6 @@ export function AdminOverviewClient() {
 
     {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}
 
-    <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="应用服务状态">
-      <StatusCard label="应用服务" value={overview ? "正常" : "读取中…"} detail={overview ? `版本 ${overview.service.version}` : "等待安全读取"} tone="emerald" />
-      <StatusCard label="数据库" value={overview?.service.database === "up" ? "可用" : "读取中…"} detail="只读健康检查" tone="cyan" />
-      <StatusCard label="Worker" value={worker ? workerLabel(worker.status) : "读取中…"} detail={worker ? workerDetail(worker) : "等待安全读取"} tone="violet" />
-    </section>
-
     <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-labelledby="admin-readiness-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -111,6 +105,12 @@ export function AdminOverviewClient() {
         {(overview?.setupChecklist ?? []).map((item) => <article key={item.key} className="rounded-2xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">{item.label}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(item.status)}`}>{checklistStatusLabel(item.status)}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{item.detail}</p></article>)}
         {!overview ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">正在读取就绪证据…</div> : null}
       </div>
+    </section>
+
+    <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="应用服务状态">
+      <StatusCard label="应用服务" value={overview ? "正常" : "读取中…"} detail={overview ? `版本 ${overview.service.version}` : "等待安全读取"} tone="emerald" />
+      <StatusCard label="数据库" value={overview?.service.database === "up" ? "可用" : "读取中…"} detail="只读健康检查" tone="cyan" />
+      <StatusCard label="Worker" value={worker ? workerLabel(worker.status) : "读取中…"} detail={worker ? workerDetail(worker) : "等待安全读取"} tone="violet" />
     </section>
 
     <section className="mt-6 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-6 shadow-sm sm:p-7" aria-labelledby="default-route-title">

@@ -54,7 +54,7 @@ function statusTone(status: ObjectiveStatus | WorkItemStatus): string {
   return "bg-sky-100 text-sky-700";
 }
 
-export function ProjectPlanClient({ username, projectId }: { username: string; projectId: string }) {
+export function ProjectPlanClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("plan", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
@@ -122,7 +122,7 @@ export function ProjectPlanClient({ username, projectId }: { username: string; p
   };
 
   return <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-    <AppHeader username={username} active="projects" projectId={projectId} projectSection="plan" />
+    <AppHeader username={username} active="projects" projectId={projectId} projectSection="plan" isSystemAdmin={isSystemAdmin} />
     <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
       <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">
         <div className="flex flex-wrap items-end justify-between gap-6">

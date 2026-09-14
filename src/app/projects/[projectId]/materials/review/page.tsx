@@ -15,7 +15,7 @@ export default async function ProjectMaterialReviewPage({ params }: { params: Pr
   const { projectId } = await params;
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={user.username} active="projects" projectId={projectId} projectSection="materials" />
+      <AppHeader username={user.username} active="projects" projectId={projectId} projectSection="materials" isSystemAdmin={user.role === "admin"} />
       <div className="mx-auto max-w-6xl px-6 pb-16 pt-8 sm:px-10 lg:px-12">
         <ProjectMaterialsParentLink projectId={projectId} />
         <section className="mt-8 border-b border-slate-200/80 pb-8">

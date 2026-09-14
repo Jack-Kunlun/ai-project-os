@@ -147,7 +147,7 @@ function statusTone(status: string): string {
   return "bg-indigo-50 text-indigo-700";
 }
 
-export function ProjectGovernanceClient({ username }: { username: string }) {
+export function ProjectGovernanceClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const pathname = usePathname();
@@ -288,7 +288,7 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="governance" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="governance" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-10 sm:px-8 lg:px-10">
         <section className="flex flex-wrap items-end justify-between gap-5 pb-8">
           <div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
-import { AdminShell } from "@/components/admin-shell";
+import { AdminPageFrame } from "@/components/admin-shell";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
@@ -156,8 +156,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
       <AppHeader username={username} active="settings" isSystemAdmin={adminMode} />
-      {adminMode ? <AdminShell active="models" /> : null}
-      <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
+      <AdminPageFrame active="models" showSidebar={adminMode}><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
         <section className="pb-10 pt-12">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI connections</p>
           <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">模型供应商</h1>
@@ -198,7 +197,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
           </div>
         </section> : null}
         {adminMode ? <PlatformDefaultRoutesPanel refreshToken={routeRefreshToken} onRouteMutation={() => { void reload(); }} /> : null}
-      </div>
+      </div></AdminPageFrame>
     </main>
   );
 }

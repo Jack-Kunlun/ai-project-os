@@ -136,7 +136,7 @@ function automationSuccessEvidence(rule: AutomationRule): string {
     : `最近成功运行：${formatDateTime(new Date(latestSuccessfulRun.completedAt))}`;
 }
 
-export function ProjectAutomationsClient({ username, projectId }: { username: string; projectId: string }) {
+export function ProjectAutomationsClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
   const searchParams = useSearchParams();
   const navigation = useMemo(() => parseProjectPageState("automations", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
   const runQuery = navigation.run;
@@ -184,7 +184,7 @@ export function ProjectAutomationsClient({ username, projectId }: { username: st
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="automations" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="automations" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
         <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Persistent worker</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目自动化</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">规则和运行记录保存在数据库，由独立 Worker 领取并带租约执行。网页来源刷新与本地治理任务可自动完成；Git 自动化尚未开放。向模型发送内容的任务只会准备边界并通知你确认，不会静默外传。</p>

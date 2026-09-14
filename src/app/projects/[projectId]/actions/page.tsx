@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 
 export default async function ProjectActionsPage({ params }: { params: Promise<{ projectId: string }> }) {
   const user = await requirePageSession();
-  return <ProjectActionsClient username={user.username} projectId={(await params).projectId} />;
+  return <ProjectActionsClient username={user.username} projectId={(await params).projectId} isSystemAdmin={user.role === "admin"} />;
 }

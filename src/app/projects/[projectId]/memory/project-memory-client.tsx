@@ -162,7 +162,7 @@ function dateLabel(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-export function ProjectMemoryClient({ username }: { username: string }) {
+export function ProjectMemoryClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId } = useParams<{ projectId: string }>();
   const [projectName, setProjectName] = useState("项目");
   const [index, setIndex] = useState<IndexStatus | null>(null);
@@ -191,7 +191,7 @@ export function ProjectMemoryClient({ username }: { username: string }) {
 
   useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
 
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" /><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI memory workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">从可追溯原文自动抽取候选，建立跨人工资料与多仓库代码的向量记忆，并通过语义检索和引用式问答找到项目答案。</p></section>{error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading || !index ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : <><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} indexReady={index.activeIndex !== null && index.compatible} answers={answers} onReload={reload} /></>}</div></main>;
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="projects" projectId={projectId} projectSection="memory" isSystemAdmin={isSystemAdmin} /><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12"><div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div><section className="pb-10 pt-12"><p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI memory workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{projectName}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">从可追溯原文自动抽取候选，建立跨人工资料与多仓库代码的向量记忆，并通过语义检索和引用式问答找到项目答案。</p></section>{error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading || !index ? <div className="h-48 animate-pulse rounded-3xl bg-slate-200" /> : <><IndexPanel projectId={projectId} index={index} onReload={reload} /><ExtractPanel projectId={projectId} sources={sources} candidates={candidates} onReload={reload} /><QueryPanel projectId={projectId} indexReady={index.activeIndex !== null && index.compatible} answers={answers} onReload={reload} /></>}</div></main>;
 }
 
 function IndexPanel({ projectId, index, onReload }: { projectId: string; index: IndexStatus; onReload: () => Promise<IndexStatus | null> }) {

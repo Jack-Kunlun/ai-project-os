@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
-import { AdminShell } from "@/components/admin-shell";
+import { AdminPageFrame } from "@/components/admin-shell";
 
 type Subscription = {
   id: string;
@@ -130,8 +130,7 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
 
   return <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
     <AppHeader username={username} active={adminMode ? "admin" : "profile"} isSystemAdmin={adminMode} />
-    {adminMode ? <AdminShell active="memberships" /> : null}
-    <div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
+    <AdminPageFrame active="memberships" showSidebar={adminMode}><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Membership operations</p>
@@ -152,7 +151,7 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
       <section className="mt-6 space-y-4">
         {loading ? <div className="rounded-3xl border border-slate-200 bg-white p-10 text-sm text-slate-500">读取中…</div> : items.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-500">没有匹配的用户。</div> : items.map((item) => <MembershipCard key={item.id} item={item} onChanged={() => void load()} />)}
       </section>
-    </div>
+    </div></AdminPageFrame>
   </main>;
 }
 

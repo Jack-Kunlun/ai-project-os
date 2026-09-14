@@ -6,7 +6,7 @@ test("管理员 MCP 页面由服务器守住权限并挂载审核工作台", asy
   const page = await readFile("src/app/admin/connectors/mcp/page.tsx", "utf8");
   assert.match(page, /requireSystemAdminPage/u);
   assert.match(page, /McpReviewWorkbench/u);
-  assert.match(page, /AdminShell active="mcp"/u);
+  assert.match(page, /AdminPageFrame active="mcp"/u);
 });
 
 test("MCP 审核工作台只消费净化候选 API，不暴露连接材料或动作入口", async () => {

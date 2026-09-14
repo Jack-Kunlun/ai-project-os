@@ -88,14 +88,14 @@ function notificationFocus(value: string | null): string | null {
   return value !== null && UUID_PATTERN.test(value) ? value : null;
 }
 
-type ProjectActionsClientProps = { username: string; projectId: string };
+type ProjectActionsClientProps = { username: string; projectId: string; isSystemAdmin: boolean };
 
 export function ProjectActionsClient(props: ProjectActionsClientProps) {
   const { confirm, dialog } = useAppConfirmDialog();
   return <>{dialog}<ProjectActionsContent {...props} confirm={confirm} /></>;
 }
 
-function ProjectActionsContent({ username, projectId, confirm }: ProjectActionsClientProps & { confirm: ReturnType<typeof useAppConfirmDialog>["confirm"] }) {
+function ProjectActionsContent({ username, projectId, isSystemAdmin, confirm }: ProjectActionsClientProps & { confirm: ReturnType<typeof useAppConfirmDialog>["confirm"] }) {
   const searchParams = useSearchParams();
   const requestedActionId = searchParams.get("action");
   const focusActionId = requestedActionId !== null && UUID_PATTERN.test(requestedActionId) ? requestedActionId : null;
@@ -214,7 +214,7 @@ function ProjectActionsContent({ username, projectId, confirm }: ProjectActionsC
   const catalogById = new Map(center?.catalog.map((capability) => [capability.id, capability]) ?? []);
 
   return <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-    <AppHeader username={username} active="projects" projectId={projectId} projectSection="actions" />
+    <AppHeader username={username} active="projects" projectId={projectId} projectSection="actions" isSystemAdmin={isSystemAdmin} />
     <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
       <div className="mb-5 flex flex-wrap items-center gap-3">{fromNotifications ? <Link href={`/notifications?view=${notificationFilter}${notificationPageCursor ? `&cursor=${encodeURIComponent(notificationPageCursor)}` : ""}${notificationFocusId ? `&focus=${encodeURIComponent(notificationFocusId)}` : ""}`} className="inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">返回活动记录</Link> : null}<ProjectManagementParentLink projectId={projectId} /></div>
       <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">

@@ -28,7 +28,7 @@ function formatDate(value: string | null) {
   return value === null ? "尚未抓取" : new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-export function ProjectExternalSourcesClient({ username, projectId }: { username: string; projectId: string }) {
+export function ProjectExternalSourcesClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
   const [sources, setSources] = useState<WebSource[]>([]);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -76,7 +76,7 @@ export function ProjectExternalSourcesClient({ username, projectId }: { username
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="externalSources" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="externalSources" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
         <div className="mb-5"><ProjectMaterialsParentLink projectId={projectId} /></div>
         <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">

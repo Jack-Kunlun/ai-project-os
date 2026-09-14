@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import { AdminShell } from "@/components/admin-shell";
+import { AdminPageFrame } from "@/components/admin-shell";
 import { ParentPageLink } from "@/components/parent-page-link";
 
 type AccountAccessState = "enabled" | "disabled";
@@ -71,7 +71,7 @@ function formatDate(value: string | null): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-export function AccountAccessClient({ username }: { username: string }) {
+export function AccountAccessClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const [items, setItems] = useState<Item[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -98,8 +98,8 @@ export function AccountAccessClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f4f6fb] text-slate-950">
-      <AppHeader username={username} active="admin" isSystemAdmin />
-      <AdminShell active="accountAccess" />
+      <AppHeader username={username} active="admin" isSystemAdmin={isSystemAdmin} />
+      <AdminPageFrame active="accountAccess">
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
         <div className="mb-5"><ParentPageLink href="/admin" label="返回管理总览" /></div>
         <section className="rounded-[2rem] bg-slate-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10">
@@ -126,6 +126,7 @@ export function AccountAccessClient({ username }: { username: string }) {
           {loading ? <div className="rounded-3xl border border-slate-200 bg-white px-6 py-14 text-center text-sm text-slate-500">读取账号状态…</div> : items.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-sm text-slate-500">没有匹配的用户。</div> : items.map((item) => <AccountCard key={item.id} item={item} currentUsername={username} onChanged={() => void load()} />)}
         </section>
       </div>
+      </AdminPageFrame>
     </main>
   );
 }

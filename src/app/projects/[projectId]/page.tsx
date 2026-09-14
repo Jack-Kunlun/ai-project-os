@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 
 export default async function ProjectDetailPage() {
   const user = await requirePageSession();
-  return <ProjectOverviewClient username={user.username} />;
+  return <ProjectOverviewClient username={user.username} isSystemAdmin={user.role === "admin"} />;
 }

@@ -53,7 +53,7 @@ async function responseError(response: Response, fallback: string) {
   }
 }
 
-export function ProjectMemoryQualityClient({ username, projectId }: { username: string; projectId: string }) {
+export function ProjectMemoryQualityClient({ username, projectId, isSystemAdmin }: { username: string; projectId: string; isSystemAdmin: boolean }) {
   const [quality, setQuality] = useState<QualitySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -90,7 +90,7 @@ export function ProjectMemoryQualityClient({ username, projectId }: { username: 
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="memoryQuality" />
+      <AppHeader username={username} active="projects" projectId={projectId} projectSection="memoryQuality" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
         <div className="mb-5"><ProjectIntelligenceParentLink projectId={projectId} /></div>
         <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">

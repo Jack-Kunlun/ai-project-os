@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 
 export default async function ProjectExternalSourcesPage({ params }: { params: Promise<{ projectId: string }> }) {
   const user = await requirePageSession();
-  return <ProjectExternalSourcesClient username={user.username} projectId={(await params).projectId} />;
+  return <ProjectExternalSourcesClient username={user.username} projectId={(await params).projectId} isSystemAdmin={user.role === "admin"} />;
 }

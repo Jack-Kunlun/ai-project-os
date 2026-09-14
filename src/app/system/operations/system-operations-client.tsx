@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import { AdminShell } from "@/components/admin-shell";
+import { AdminPageFrame } from "@/components/admin-shell";
 import { ParentPageLink } from "@/components/parent-page-link";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import type {
@@ -132,8 +132,7 @@ export function SystemOperationsClient({
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
       <AppHeader username={username} active={adminMode ? "admin" : "profile"} isSystemAdmin={adminMode} />
-      {adminMode ? <AdminShell active="operations" /> : null}
-      <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
+      <AdminPageFrame active="operations" showSidebar={adminMode}><div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
         <div className="mb-5"><ParentPageLink href={adminMode ? "/admin" : "/profile"} label={adminMode ? "返回管理总览" : "返回个人中心"} /></div>
         <section className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10">
           <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-indigo-500/25 blur-3xl" />
@@ -194,7 +193,7 @@ export function SystemOperationsClient({
           <h2 className="font-semibold">只读安全边界</h2>
           <p className="mt-1 text-indigo-800">备份服务只向专用目录原子写入状态、时间、对象路径、大小、校验摘要和安全错误码；应用仅以只读挂载读取该目录。任何控制操作仍必须在服务器受限流程中执行。</p>
         </section>
-      </div>
+      </div></AdminPageFrame>
     </main>
   );
 }

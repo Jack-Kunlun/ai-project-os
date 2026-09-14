@@ -51,7 +51,7 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
-export function ProjectsClient({ username }: { username: string }) {
+export function ProjectsClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const [payload, setPayload] = useState<ProjectsPayload>(emptyPayload);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +88,7 @@ export function ProjectsClient({ username }: { username: string }) {
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
-      <AppHeader username={username} active="projects" />
+      <AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-9 sm:px-8 lg:px-10">
         <section className="flex flex-col gap-5 border-b border-slate-200 pb-8 sm:flex-row sm:items-end sm:justify-between">
           <div>

@@ -210,7 +210,7 @@ pg_restore -l ai-project-os.dump
 
 ### 7.2 恢复核对
 
-恢复后依次确认迁移账本无失败/回滚、postgres/app/worker healthy、`migrate` 成功退出、`/api/health` 显示数据库和 Worker 正常、三个持久卷仍挂载。再核对项目/连接/上传等安全计数没有下降，抽样验证凭据可以解密但绝不输出其内容。恢复演练应使用隔离卷和端口，不要直接覆盖正式数据。
+恢复后依次确认迁移账本无失败/回滚、postgres/app/worker healthy、`migrate` 成功退出、`/api/health` 显示数据库和 Worker 正常、三个持久卷仍挂载。再核对项目/连接/上传等安全计数没有下降，抽样验证凭据可以解密但绝不输出其内容。恢复演练应使用隔离卷和端口，不要直接覆盖正式数据。可执行的本地步骤与生产独立主机边界见[恢复演练 Runbook](./recovery-drill.md)。
 
 ## 8. 管理员故障排查与验收
 

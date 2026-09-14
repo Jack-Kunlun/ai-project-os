@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
@@ -24,6 +25,23 @@ const repositoryLinkInput = {
   metadataEnabled: true,
   includeRoots: ["."],
   softExcludePatterns: [],
+};
+
+const localRecoveryDrill = {
+  formatVersion: 1 as const,
+  drillId: "20260902T035000Z-overview",
+  environment: "local" as const,
+  scope: "isolated-local" as const,
+  status: "verified" as const,
+  startedAt: "2026-09-02T03:50:00.000Z",
+  completedAt: "2026-09-02T03:51:00.000Z",
+  durationSeconds: 60,
+  sourceArtifact: { name: "20260901T192205Z-daily.ov1234", sha256: "c".repeat(64), kind: "production-backup" as const },
+  checks: { pgRestore: "passed" as const, migrationLedger: "passed" as const, securityCounts: "passed" as const, masterKeyVolume: "passed" as const, uploadsManifest: "passed" as const, serviceHealth: "passed" as const },
+  validationSha256: "d".repeat(64),
+  migrationCount: 101,
+  securityCounts: { users: 1, workspaces: 1, projects: 0, credentials: 0, projectAssets: 0 },
+  errorCode: null,
 };
 
 test("workspace member API rejects a direct global disable payload before opening a write transaction", async () => {
@@ -258,6 +276,67 @@ test("admin overview keeps control-plane readiness separate from live-call evide
   assert.equal(overview.backup.recoveryDrill.status, "not_obtained");
   assert.equal(overview.setupChecklist.find((item) => item.key === "backup-source")?.status, "unknown");
   assert.equal(overview.setupChecklist.find((item) => item.key === "default-routes")?.status, "attention");
+});
+
+test("admin overview never treats a local recovery drill as production backup readiness", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "ai-project-os-overview-recovery-"));
+  context.after(async () => rm(root, { force: true, recursive: true }));
+  const previousRoot = process.env.AI_PROJECT_OS_OPERATIONS_STATUS_ROOT;
+  process.env.AI_PROJECT_OS_OPERATIONS_STATUS_ROOT = root;
+  try {
+    const now = new Date("2026-09-03T00:00:00.000Z");
+    const currentRun = {
+      formatVersion: 1,
+      runId: "20260902T032000Z-overview",
+      state: "succeeded" as const,
+      trigger: "daily" as const,
+      targetTag: null,
+      startedAt: "2026-09-02T03:20:00.000Z",
+      completedAt: "2026-09-02T03:20:42.000Z",
+      durationSeconds: 42,
+      backupName: "20260901T192205Z-daily.ov1234",
+      archiveObject: "cos://redacted/overview.tar.age",
+      archiveSha256: "c".repeat(64),
+      archiveBytes: 1,
+      retentionRemoved: 0,
+      verificationAttempts: 1,
+      errorCode: null,
+      nextRunAt: null,
+    };
+    await writeFile(join(root, "current.json"), JSON.stringify(currentRun));
+    await writeFile(join(root, "recovery-drill.json"), JSON.stringify({
+      ...localRecoveryDrill,
+      sourceArtifact: { name: currentRun.backupName, sha256: currentRun.archiveSha256, kind: "production-backup" },
+    }));
+    const db = {
+      $queryRaw: async () => [],
+      appUser: {
+        findUnique: async () => ({ id: actorId, role: "admin" as const, disabledAt: null, accountAccessVersion: 1 }),
+        count: async () => 1,
+      },
+      membershipSubscription: { count: async () => 0 },
+      aiProviderConnection: { count: async () => 0 },
+      platformTokenGrant: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where ? { remainingTokens: 0 } : { amount: 0 } }) },
+      platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 0 } : { reservedTokens: 0 } }) },
+      workerRuntime: { findUnique: async () => null },
+      platformDefaultAiRoute: { findMany: async () => [] },
+      project: { count: async () => 0 },
+      workspace: { findUnique: async () => ({ createdById: actorId }) },
+      providerCallAudit: { groupBy: async () => [] },
+      projectMcpActionDispatchAttempt: { groupBy: async () => [] },
+      backgroundJob: { groupBy: async () => [] },
+      automationRun: { groupBy: async () => [] },
+      projectAction: { groupBy: async () => [] },
+    } as unknown as PrismaClient;
+
+    const overview = await getSystemOverview(currentAdminActor, db, now);
+    assert.equal(overview.backup.recoveryDrill.environment, "local");
+    assert.equal(overview.backup.recoveryDrill.matchingBackup, "unknown");
+    assert.notEqual(overview.setupChecklist.find((item) => item.key === "backup-source")?.status, "ready");
+  } finally {
+    if (previousRoot === undefined) delete process.env.AI_PROJECT_OS_OPERATIONS_STATUS_ROOT;
+    else process.env.AI_PROJECT_OS_OPERATIONS_STATUS_ROOT = previousRoot;
+  }
 });
 
 test("MCP overview queue requires the same owner, verifier, and V2 attestation shape as the control plane", async () => {

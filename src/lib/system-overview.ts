@@ -9,12 +9,14 @@ import {
 } from "@/lib/platform-default-ai-routes";
 import { AuthError } from "@/lib/auth";
 import { isInitialSuperAdmin, readBackupOperationsSnapshot } from "@/lib/system-operations";
+import { RECOVERY_DRILL_FRESHNESS_THRESHOLD_MS, RECOVERY_DRILL_RUNBOOK_HREF, type PublicRecoveryDrill } from "@/lib/system-operations-types";
 import { readWorkerHealth, type WorkerHealthSummary } from "@/lib/worker-health";
 
 const NO_MCP_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
 const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{2,127}$/u;
 export const SYSTEM_OVERVIEW_FAILURE_WINDOW_DAYS = 7;
 export const SYSTEM_OVERVIEW_BACKUP_FRESHNESS_THRESHOLD_MS = 48 * 60 * 60 * 1_000;
+export const SYSTEM_OVERVIEW_RECOVERY_DRILL_FRESHNESS_THRESHOLD_MS = RECOVERY_DRILL_FRESHNESS_THRESHOLD_MS;
 
 type OverviewActor = Readonly<{ id: string; role: AppUserRole }>;
 type FailureGroup = Readonly<{ code: string; count: number }>;
@@ -57,8 +59,20 @@ export type SystemOverviewBackup = Readonly<{
     sourceTimestamp: string | null;
   }>;
   recoveryDrill: Readonly<{
-    status: "verified" | "not_obtained" | "error" | "restricted";
-    verifiedAt: string | null;
+    status: "verified" | "failed" | "not_obtained" | "error" | "restricted";
+    environment: PublicRecoveryDrill["environment"] | null;
+    scope: PublicRecoveryDrill["scope"] | null;
+    completedAt: string | null;
+    freshness: "fresh" | "stale" | "unknown" | "restricted" | "not_obtained";
+    sourceArtifactName: string | null;
+    sourceArtifactSha256: string | null;
+    sourceArtifactKind: "local-consistent-snapshot" | "production-backup" | null;
+    validationSha256: string | null;
+    checks: PublicRecoveryDrill["checks"] | null;
+    migrationCount: number | null;
+    securityCounts: PublicRecoveryDrill["securityCounts"] | null;
+    matchingBackup: "matched" | "mismatch" | "unknown";
+    runbookHref: typeof RECOVERY_DRILL_RUNBOOK_HREF;
   }>;
 }>;
 
@@ -186,8 +200,22 @@ function emptyBackupProjection(access: SystemOverviewBackup["access"], snapshotR
     sourceStatus: "not_obtained",
     latestValidRecord: Object.freeze({ status: unavailable ? "not_obtained" : "none", state: null, startedAt: null, completedAt: null, safeErrorCode: null }),
     freshness: Object.freeze({ status: access === "restricted" ? "restricted" : access === "not_obtained" ? "not_obtained" : "unknown", thresholdMs: SYSTEM_OVERVIEW_BACKUP_FRESHNESS_THRESHOLD_MS, readAt: null, sourceTimestamp: null }),
-    // The status directory has no recovery-drill contract. Do not infer one from a successful backup task.
-    recoveryDrill: Object.freeze({ status: access === "restricted" ? "restricted" : "not_obtained", verifiedAt: null }),
+    recoveryDrill: Object.freeze({
+      status: access === "restricted" ? "restricted" : "not_obtained",
+      environment: null,
+      scope: null,
+      completedAt: null,
+      freshness: access === "restricted" ? "restricted" : "not_obtained",
+      sourceArtifactName: null,
+      sourceArtifactSha256: null,
+      sourceArtifactKind: null,
+      validationSha256: null,
+      checks: null,
+      migrationCount: null,
+      securityCounts: null,
+      matchingBackup: access === "restricted" ? "unknown" : "unknown",
+      runbookHref: RECOVERY_DRILL_RUNBOOK_HREF,
+    }),
   });
 }
 
@@ -196,6 +224,7 @@ function backupProjection(result: BackupReadResult, now: Date): SystemOverviewBa
 
   const snapshot = result.snapshot;
   const latest = [snapshot.current, ...snapshot.history].find((run): run is NonNullable<typeof run> => run !== null) ?? null;
+  const latestSuccessful = [snapshot.current, ...snapshot.history].find((run): run is NonNullable<typeof run> => run?.state === "succeeded" && run.backupName !== null && run.archiveSha256 !== null) ?? null;
   const sourceTimestamp = snapshot.current?.completedAt
     ?? snapshot.current?.startedAt
     ?? snapshot.history[0]?.completedAt
@@ -223,8 +252,62 @@ function backupProjection(result: BackupReadResult, now: Date): SystemOverviewBa
       readAt: snapshot.readAt,
       sourceTimestamp,
     }),
-    // The status directory has no recovery-drill contract. Do not infer one from a successful backup task.
-    recoveryDrill: Object.freeze({ status: "not_obtained", verifiedAt: null }),
+    recoveryDrill: recoveryDrillProjection(snapshot, latestSuccessful, now),
+  });
+}
+
+function recoveryDrillProjection(
+  snapshot: BackupSnapshot,
+  latestSuccessful: NonNullable<BackupSnapshot["current"]> | null,
+  now: Date,
+): SystemOverviewBackup["recoveryDrill"] {
+  const drill = snapshot.recoveryDrill;
+  if (drill === null) {
+    return Object.freeze({
+      status: snapshot.recoveryDrillSourceStatus === "invalid" ? "error" : "not_obtained",
+      environment: null,
+      scope: null,
+      completedAt: null,
+      freshness: snapshot.recoveryDrillSourceStatus === "invalid" ? "unknown" : "not_obtained",
+      sourceArtifactName: null,
+      sourceArtifactSha256: null,
+      sourceArtifactKind: null,
+      validationSha256: null,
+      checks: null,
+      migrationCount: null,
+      securityCounts: null,
+      matchingBackup: "unknown",
+      runbookHref: RECOVERY_DRILL_RUNBOOK_HREF,
+    });
+  }
+  const completedTime = Date.parse(drill.completedAt);
+  const freshness = !Number.isFinite(completedTime) || completedTime > now.getTime()
+    ? "unknown"
+    : now.getTime() - completedTime <= SYSTEM_OVERVIEW_RECOVERY_DRILL_FRESHNESS_THRESHOLD_MS ? "fresh" : "stale";
+  const productionRecoveryEvidence = drill.status === "verified"
+    && drill.environment === "production"
+    && drill.scope === "isolated-host"
+    && drill.sourceArtifact?.kind === "production-backup";
+  const matchingBackup = !productionRecoveryEvidence || latestSuccessful === null || drill.sourceArtifact === null
+    ? "unknown"
+    : drill.sourceArtifact.name === latestSuccessful.backupName && drill.sourceArtifact.sha256 === latestSuccessful.archiveSha256
+      ? "matched"
+      : "mismatch";
+  return Object.freeze({
+    status: drill.status,
+    environment: drill.environment,
+    scope: drill.scope,
+    completedAt: drill.completedAt,
+    freshness,
+    sourceArtifactName: drill.sourceArtifact?.name ?? null,
+    sourceArtifactSha256: drill.sourceArtifact?.sha256 ?? null,
+    sourceArtifactKind: drill.sourceArtifact?.kind ?? null,
+    validationSha256: drill.validationSha256,
+    checks: drill.checks,
+    migrationCount: drill.migrationCount,
+    securityCounts: drill.securityCounts,
+    matchingBackup,
+    runbookHref: RECOVERY_DRILL_RUNBOOK_HREF,
   });
 }
 
@@ -441,7 +524,12 @@ export async function getSystemOverview(
     && backup.latestValidRecord.status === "available"
     && backup.latestValidRecord.state === "succeeded"
     && backup.freshness.status === "fresh"
-    && backup.recoveryDrill.status === "verified";
+    && backup.recoveryDrill.status === "verified"
+    && backup.recoveryDrill.environment === "production"
+    && backup.recoveryDrill.scope === "isolated-host"
+    && backup.recoveryDrill.sourceArtifactKind === "production-backup"
+    && backup.recoveryDrill.freshness === "fresh"
+    && backup.recoveryDrill.matchingBackup === "matched";
   const backupChecklistStatus = backup.access === "restricted"
     ? "restricted" as const
     : backup.access === "not_obtained"

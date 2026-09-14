@@ -7,7 +7,7 @@ import type { AppUserRole, PrismaClient } from "@prisma/client";
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import { readBackupOperationsSnapshot } from "@/lib/system-operations";
 import { handleBackupOperationsGet } from "@/lib/system-operations-route";
-import type { BackupOperationsSnapshot, PublicBackupRun } from "@/lib/system-operations-types";
+import type { BackupOperationsSnapshot, PublicBackupRun, PublicRecoveryDrill } from "@/lib/system-operations-types";
 
 const initialAdminId = "d348244a-24b9-4893-9afb-164f3618d93e";
 const otherAdminId = "b04f05ab-5567-4e9c-b0cd-5d9e0c3e5608";
@@ -30,6 +30,23 @@ const successfulRun: PublicBackupRun = {
   verificationAttempts: 4,
   errorCode: null,
   nextRunAt: "2026-09-03T03:24:00+08:00",
+};
+
+const successfulDrill: PublicRecoveryDrill = {
+  formatVersion: 1,
+  drillId: "20260902T035000Z-abcdef1234567890",
+  environment: "local",
+  scope: "isolated-local",
+  status: "verified",
+  startedAt: "2026-09-02T03:50:00.000Z",
+  completedAt: "2026-09-02T03:51:00.000Z",
+  durationSeconds: 60,
+  sourceArtifact: { name: successfulRun.backupName!, sha256: successfulRun.archiveSha256!, kind: "production-backup" },
+  checks: { pgRestore: "passed", migrationLedger: "passed", securityCounts: "passed", masterKeyVolume: "passed", uploadsManifest: "passed", serviceHealth: "passed" },
+  validationSha256: "b".repeat(64),
+  migrationCount: 101,
+  securityCounts: { users: 0, workspaces: 1, projects: 0, credentials: 0, projectAssets: 0 },
+  errorCode: null,
 };
 
 function fakeSessionDb(user: Readonly<{ id: string; role: AppUserRole }>, creatorId = initialAdminId): PrismaClient {
@@ -76,6 +93,7 @@ test("backup status reader accepts only bounded validated records and ignores ma
   context.after(async () => rm(path.dirname(root), { force: true, recursive: true }));
   await mkdir(path.join(root, "history"), { recursive: true });
   await writeFile(path.join(root, "current.json"), JSON.stringify(successfulRun));
+  await writeFile(path.join(root, "recovery-drill.json"), JSON.stringify(successfulDrill));
   await writeFile(path.join(root, "history", `${successfulRun.runId}.json`), JSON.stringify(successfulRun));
   await writeFile(path.join(root, "history", "20260901T032000Z-9999.json"), "not-json");
   await writeFile(path.join(root, "history", "unexpected.json"), JSON.stringify({ secret: "not-readable" }));
@@ -88,6 +106,8 @@ test("backup status reader accepts only bounded validated records and ignores ma
   assert.equal(snapshot.sourceStatus, "ready");
   assert.deepEqual(snapshot.current, successfulRun);
   assert.deepEqual(snapshot.history, [successfulRun]);
+  assert.equal(snapshot.recoveryDrillSourceStatus, "ready");
+  assert.deepEqual(snapshot.recoveryDrill, successfulDrill);
   assert.equal(snapshot.readAt, "2026-09-02T04:00:00.000Z");
 });
 
@@ -114,11 +134,56 @@ test("backup status reader fails closed for missing, invalid, and symlinked stat
   assert.equal(symlinkedCurrent.current, null);
 });
 
+test("recovery drill evidence is independent, strict, bounded, and fails closed", async (context) => {
+  const temporaryRoot = await mkdtemp(path.join(tmpdir(), "ai-project-os-recovery-drill-"));
+  context.after(async () => rm(temporaryRoot, { force: true, recursive: true }));
+  await mkdir(path.join(temporaryRoot, "history"));
+  await writeFile(path.join(temporaryRoot, "current.json"), JSON.stringify(successfulRun));
+
+  const missing = await readBackupOperationsSnapshot({ root: temporaryRoot, now: new Date("2026-09-03T00:00:00.000Z") });
+  assert.equal(missing.recoveryDrillSourceStatus, "not_configured");
+  assert.equal(missing.recoveryDrill, null);
+  assert.equal(missing.current?.state, "succeeded");
+
+  await writeFile(path.join(temporaryRoot, "recovery-drill.json"), JSON.stringify({ ...successfulDrill, errorCode: "DRILL_SHOULD_FAIL" }));
+  const malformed = await readBackupOperationsSnapshot({ root: temporaryRoot, now: new Date("2026-09-03T00:00:00.000Z") });
+  assert.equal(malformed.recoveryDrillSourceStatus, "invalid");
+  assert.equal(malformed.recoveryDrill, null);
+
+  await writeFile(path.join(temporaryRoot, "recovery-drill.json"), JSON.stringify({
+    ...successfulDrill,
+    status: "failed",
+    checks: { pgRestore: "failed", migrationLedger: "failed", securityCounts: "failed", masterKeyVolume: "failed", uploadsManifest: "failed", serviceHealth: "failed" },
+    validationSha256: null,
+    errorCode: "RECOVERY_DRILL_PRIMARY_FAILED",
+    cleanupErrorCode: "RECOVERY_DRILL_CLEANUP_FAILED",
+  }));
+  const dualFailure = await readBackupOperationsSnapshot({ root: temporaryRoot, now: new Date("2026-09-03T00:00:00.000Z") });
+  assert.equal(dualFailure.recoveryDrillSourceStatus, "ready");
+  assert.equal(dualFailure.recoveryDrill?.errorCode, "RECOVERY_DRILL_PRIMARY_FAILED");
+  assert.equal(dualFailure.recoveryDrill?.cleanupErrorCode, "RECOVERY_DRILL_CLEANUP_FAILED");
+
+  await writeFile(path.join(temporaryRoot, "recovery-drill.json"), JSON.stringify({ ...successfulDrill, completedAt: "2026-09-04T00:00:00.000Z" }));
+  const future = await readBackupOperationsSnapshot({ root: temporaryRoot, now: new Date("2026-09-03T00:00:00.000Z") });
+  assert.equal(future.recoveryDrillSourceStatus, "invalid");
+  assert.equal(future.recoveryDrill, null);
+
+  const outside = path.join(temporaryRoot, "drill-outside.json");
+  await writeFile(outside, JSON.stringify(successfulDrill));
+  await rm(path.join(temporaryRoot, "recovery-drill.json"), { force: true });
+  await symlink(outside, path.join(temporaryRoot, "recovery-drill.json"));
+  const linked = await readBackupOperationsSnapshot({ root: temporaryRoot, now: new Date("2026-09-03T00:00:00.000Z") });
+  assert.equal(linked.recoveryDrillSourceStatus, "invalid");
+  assert.equal(linked.recoveryDrill, null);
+});
+
 test("system backup API permits only the initial super administrator and never reads host status for denied users", async () => {
   const snapshot: BackupOperationsSnapshot = {
     sourceStatus: "ready",
     current: successfulRun,
     history: [successfulRun],
+    recoveryDrillSourceStatus: "not_configured",
+    recoveryDrill: null,
     schedule: { localTime: "03:20", randomizedDelayMinutes: 20, persistent: true },
     readAt: "2026-09-02T04:00:00.000Z",
   };

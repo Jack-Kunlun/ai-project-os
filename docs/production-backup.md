@@ -71,7 +71,7 @@ sudo cat /var/lib/ai-project-os-operations/backups/current.json
 
 `current.json` 与 `history/*.json` 是供系统运维页面读取的脱敏副本，保持 `root:root 0644` 并位于专用 `0755` 目录。页面仅对初始化应用时创建的首位超级管理员开放；其他系统管理员、工作区管理员和普通成员均不能通过受保护 API 读取。状态目录不包含 COS Secret、COSCLI 配置、age 私钥、数据库密码、原始日志或备份正文。
 
-不要仅凭 `systemctl start` 返回成功或 COS 中出现对象就宣称备份可恢复。管理员仍需下载归档、校验 sidecar、使用异地 age 私钥解密，并在 UUID 隔离数据库和卷中完成恢复演练。
+不要仅凭 `systemctl start` 返回成功或 COS 中出现对象就宣称备份可恢复。管理员仍需下载归档、校验 sidecar、使用异地 age 私钥解密，并在 UUID 隔离数据库和卷中完成恢复演练。完整的本地隔离命令、停止条件和证据边界见[恢复演练 Runbook](./recovery-drill.md)。
 
 首次手工备份和独立恢复均通过后再启用每日 timer：
 

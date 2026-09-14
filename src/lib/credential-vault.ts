@@ -123,6 +123,15 @@ export async function loadOrCreateMasterKey(): Promise<Buffer> {
   }
 }
 
+/**
+ * Recovery verification must never create a key while checking an existing
+ * database.  Keep this read-only counterpart separate from the normal
+ * application bootstrap path so a missing key fails closed.
+ */
+export async function readExistingMasterKey(): Promise<Buffer> {
+  return readSecureMasterKey(masterKeyPath());
+}
+
 function canonicalSecret(kind: ExternalCredentialKind, value: unknown): string {
   const maximumLength = kind === "git" ? 32_768 : kind === "mcp" || kind === "oidcClient" || kind === "oidcFlow" || kind === "githubOauthFlow" ? 4_096 : 512;
   if (

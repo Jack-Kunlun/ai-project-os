@@ -4,12 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { AdminShell } from "@/components/admin-shell";
 import { ParentPageLink } from "@/components/parent-page-link";
+import { safeResponseError } from "@/lib/safe-error-presentation";
 import type {
   BackupOperationsSnapshot,
   BackupRunState,
   BackupRunTrigger,
+  PublicRecoveryDrill,
   PublicBackupRun,
 } from "@/lib/system-operations-types";
+import { RECOVERY_DRILL_FRESHNESS_THRESHOLD_MS, RECOVERY_DRILL_RUNBOOK_HREF } from "@/lib/system-operations-types";
 
 const stateMetadata: Record<BackupRunState, Readonly<{ label: string; tone: string; dot: string }>> = {
   running: { label: "执行中", tone: "bg-indigo-50 text-indigo-700", dot: "animate-pulse bg-indigo-500" },
@@ -22,6 +25,20 @@ const triggerLabels: Record<BackupRunTrigger, string> = {
   daily: "每日计划",
   manual: "手动演练",
   "pre-deploy": "部署前门禁",
+};
+
+const recoveryDrillStatusMetadata: Record<PublicRecoveryDrill["status"], Readonly<{ label: string; tone: string }>> = {
+  verified: { label: "已验证", tone: "bg-emerald-50 text-emerald-700" },
+  failed: { label: "失败", tone: "bg-rose-50 text-rose-700" },
+};
+
+const recoveryDrillCheckLabels: Record<keyof PublicRecoveryDrill["checks"], string> = {
+  pgRestore: "pg_restore 可解析",
+  migrationLedger: "迁移账本",
+  securityCounts: "安全计数",
+  masterKeyVolume: "凭据主密钥卷",
+  uploadsManifest: "uploads 清单",
+  serviceHealth: "应用 / Worker 健康",
 };
 
 const safeFailureMessages: Readonly<Record<string, string>> = {
@@ -37,15 +54,6 @@ const safeFailureMessages: Readonly<Record<string, string>> = {
   BACKUP_ALREADY_RUNNING: "另一项备份任务仍在执行。",
   BACKUP_UNEXPECTED_FAILURE: "任务发生未分类的安全失败。",
 };
-
-async function readError(response: Response, fallback: string): Promise<string> {
-  try {
-    const body = await response.json() as { error?: { message?: string } };
-    return body.error?.message ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 function formatDate(value: string | null): string {
   if (value === null) return "暂无";
@@ -98,7 +106,7 @@ export function SystemOperationsClient({
     if (showProgress) setRefreshing(true);
     try {
       const response = await fetch("/api/system/operations/backups", { cache: "no-store" });
-      if (!response.ok) throw new Error(await readError(response, "生产备份状态读取失败"));
+      if (!response.ok) throw new Error((await safeResponseError(response, "生产备份状态读取失败")).message);
       setSnapshot(await response.json() as BackupOperationsSnapshot);
       setError(null);
     } catch (cause) {
@@ -180,6 +188,8 @@ export function SystemOperationsClient({
           </div>
         </section>
 
+        <RecoveryDrillPanel drill={snapshot.recoveryDrill} sourceStatus={snapshot.recoveryDrillSourceStatus} />
+
         <section className="mt-6 rounded-3xl border border-indigo-100 bg-indigo-50/70 px-6 py-5 text-sm leading-6 text-indigo-950">
           <h2 className="font-semibold">只读安全边界</h2>
           <p className="mt-1 text-indigo-800">备份服务只向专用目录原子写入状态、时间、对象路径、大小、校验摘要和安全错误码；应用仅以只读挂载读取该目录。任何控制操作仍必须在服务器受限流程中执行。</p>
@@ -187,6 +197,46 @@ export function SystemOperationsClient({
       </div>
     </main>
   );
+}
+
+function recoveryDrillFreshness(completedAt: string, now = Date.now()): "fresh" | "stale" | "unknown" {
+  const timestamp = Date.parse(completedAt);
+  if (!Number.isFinite(timestamp) || timestamp > now) return "unknown";
+  return now - timestamp <= RECOVERY_DRILL_FRESHNESS_THRESHOLD_MS ? "fresh" : "stale";
+}
+
+function RecoveryDrillPanel({ drill, sourceStatus }: { drill: PublicRecoveryDrill | null; sourceStatus: BackupOperationsSnapshot["recoveryDrillSourceStatus"] }) {
+  const metadata = drill ? recoveryDrillStatusMetadata[drill.status] : null;
+  const freshness = drill ? recoveryDrillFreshness(drill.completedAt) : "unknown";
+  const checks = drill ? Object.entries(drill.checks) as Array<[keyof PublicRecoveryDrill["checks"], PublicRecoveryDrill["checks"][keyof PublicRecoveryDrill["checks"]]]> : [];
+  return <section id="recovery-drill" className="mt-6 overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-sm" aria-labelledby="recovery-drill-title">
+    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-6 py-6 sm:px-7">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Recovery drill</p>
+        <h2 id="recovery-drill-title" className="mt-2 text-xl font-semibold">恢复演练证据</h2>
+        <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500">恢复演练与备份任务完全独立；备份成功不会推断可恢复。本机隔离演练不等同生产异地主机恢复。</p>
+      </div>
+      {metadata ? <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${metadata.tone}`}>{metadata.label}</span> : <span className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold ${sourceStatus === "invalid" ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"}`}>{sourceStatus === "invalid" ? "读取失败" : "未取得"}</span>}
+    </div>
+    {drill === null ? <div className="px-6 py-10 text-sm text-slate-500 sm:px-7">{sourceStatus === "invalid" ? "恢复演练状态文件未通过安全校验，原始内容不会展示。" : "尚未取得独立恢复演练证据；不能以备份任务成功替代恢复验证。"}</div> : <>
+      <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-4">
+        <RunDetail label="环境" value={drill.environment === "local" ? "本机隔离" : "生产异地主机"} />
+        <RunDetail label="作用域" value={drill.scope} mono />
+        <RunDetail label="完成时间" value={formatDate(drill.completedAt)} />
+        <RunDetail label="证据新鲜度" value={freshness === "fresh" ? "新鲜" : freshness === "stale" ? "陈旧" : "未知"} />
+        <RunDetail label="演练 ID" value={drill.drillId} mono />
+        <RunDetail label="持续时间" value={`${drill.durationSeconds} 秒`} />
+        <RunDetail label="迁移数" value={String(drill.migrationCount)} />
+        <RunDetail label="验证摘要 SHA-256" value={drill.validationSha256 ?? "尚未生成"} mono />
+        <RunDetail label="源快照" value={drill.sourceArtifact?.name ?? "尚未绑定"} mono />
+        <RunDetail label="源快照类型" value={drill.sourceArtifact?.kind ?? "尚未绑定"} mono />
+        <RunDetail label="源快照 SHA-256" value={drill.sourceArtifact?.sha256 ?? "尚未绑定"} mono />
+        <dl className="min-w-0 bg-white px-5 py-4 sm:col-span-2"><dt className="text-xs font-semibold text-slate-400">固定检查</dt><dd className="mt-2 grid gap-2 sm:grid-cols-2">{checks.map(([key, state]) => <span key={key} className={`rounded-lg px-3 py-2 text-xs font-semibold ${state === "passed" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{recoveryDrillCheckLabels[key]}：{state === "passed" ? "通过" : "失败"}</span>)}</dd></dl>
+        {drill.errorCode ? <div className="bg-rose-50 px-5 py-4 sm:col-span-2 lg:col-span-4"><p className="text-xs font-semibold text-rose-800">{drill.errorCode}</p><p className="mt-1 text-xs text-rose-700">恢复演练未通过，安全错误码是唯一公开失败原因。</p></div> : null}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-6 py-5 sm:px-7"><p className="text-xs leading-5 text-slate-500">验证结果仅证明当前记录的固定检查；生产恢复仍需独立空主机、窗口和证据。</p><a href={RECOVERY_DRILL_RUNBOOK_HREF} className="inline-flex rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700">打开恢复演练 Runbook</a></div>
+    </>}
+  </section>;
 }
 
 function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {

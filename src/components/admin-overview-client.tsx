@@ -171,18 +171,27 @@ function failureSummary(label: string, aggregate: SystemOverviewFailureAggregate
 }
 
 function BackupCard({ backup }: { backup?: SystemOverview["backup"] }) {
-  if (backup === undefined) return <EvidenceCard title="备份证据" eyebrow="Recovery" value="读取中…" detail="等待安全读取" tone="unknown" />;
-  if (backup.access === "restricted") return <EvidenceCard title="备份证据" eyebrow="Recovery" value="受限" detail="仅初始超级管理员可读取备份任务详情；当前未取得状态新鲜度和恢复演练证据。" tone="restricted" />;
-  if (backup.access === "not_obtained") return <EvidenceCard title="备份证据" eyebrow="Recovery" value="未取得" detail={`权限检查未完成；状态源 ${backup.sourceStatus}，任务记录、新鲜度和恢复演练均未取得。`} tone="unknown" />;
+  if (backup === undefined) return <EvidenceCard title="备份与恢复证据" eyebrow="Recovery" value="读取中…" detail="等待安全读取" tone="unknown" />;
+  if (backup.access === "restricted") return <EvidenceCard title="备份与恢复证据" eyebrow="Recovery" value="受限" detail="仅初始超级管理员可读取备份任务详情；当前未取得状态新鲜度和恢复演练证据。" tone="restricted" />;
+  if (backup.access === "not_obtained") return <EvidenceCard title="备份与恢复证据" eyebrow="Recovery" value="未取得" detail={`权限检查未完成；状态源 ${backup.sourceStatus}，任务记录、新鲜度和恢复演练均未取得。`} tone="unknown" />;
   const recordState = backup.latestValidRecord.state ?? "未取得";
   const value = backup.snapshotRead === "error" ? "读取失败" : backup.latestValidRecord.status === "none" ? "无记录" : recordState;
   const completeEvidence = backup.snapshotRead === "read"
     && backup.latestValidRecord.status === "available"
     && backup.latestValidRecord.state === "succeeded"
     && backup.freshness.status === "fresh"
-    && backup.recoveryDrill.status === "verified";
+    && backup.recoveryDrill.status === "verified"
+    && backup.recoveryDrill.environment === "production"
+    && backup.recoveryDrill.scope === "isolated-host"
+    && backup.recoveryDrill.sourceArtifactKind === "production-backup"
+    && backup.recoveryDrill.freshness === "fresh"
+    && backup.recoveryDrill.matchingBackup === "matched";
   const tone = completeEvidence ? "ready" : backup.snapshotRead === "error" ? "attention" : backup.latestValidRecord.status === "none" || backup.freshness.status === "unknown" ? "unknown" : "attention";
-  return <EvidenceCard title="备份证据" eyebrow="Recovery" value={value} detail={`状态源 ${backup.sourceStatus} · 状态读取 ${backup.snapshotRead} · 最新记录 ${recordState} · 新鲜度 ${backup.freshness.status}（阈值 ${Math.round(backup.freshness.thresholdMs / (60 * 60 * 1_000))} 小时） · 恢复演练 ${backup.recoveryDrill.status}`} tone={tone} />;
+  const drill = backup.recoveryDrill;
+  const drillDetail = drill.status === "verified"
+    ? `恢复演练已验证（${drill.environment === "local" ? "本机隔离，不作为生产就绪" : "生产异地主机"}）· 新鲜度 ${drill.freshness} · 生产备份绑定 ${drill.matchingBackup} · 完成于 ${formatDate(drill.completedAt)} · 摘要 ${drill.validationSha256?.slice(0, 12) ?? "未取得"}…`
+    : drill.status === "failed" ? `恢复演练失败；新鲜度 ${drill.freshness}，不把备份成功显示为可恢复。` : `恢复演练 ${drill.status}；不把备份成功显示为可恢复。`;
+  return <EvidenceCard title="备份与恢复证据" eyebrow="Recovery" value={completeEvidence ? "已就绪" : value} detail={`备份：状态源 ${backup.sourceStatus} · 任务读取 ${backup.snapshotRead} · 最新记录 ${recordState} · 新鲜度 ${backup.freshness.status}（阈值 ${Math.round(backup.freshness.thresholdMs / (60 * 60 * 1_000))} 小时）。${drillDetail}`} tone={tone} href={drill.runbookHref} linkLabel="打开恢复演练 Runbook" />;
 }
 
 function EvidenceCard({ title, eyebrow, value, detail, tone, href, linkLabel }: { title: string; eyebrow: string; value: string; detail: string; tone: "ready" | "attention" | "unknown" | "restricted"; href?: string; linkLabel?: string }) {

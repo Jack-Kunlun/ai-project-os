@@ -49,6 +49,7 @@
     "db:membership-governance-apply": "tsx scripts/membership-governance-apply.ts",
     "db:principals:reconcile": "tsx scripts/reconcile-database-principals.ts",
     "db:principals:bootstrap": "tsx scripts/reconcile-database-principals.ts --bootstrap-if-needed",
+    "recovery:drill:local": "tsx scripts/recovery-drill-local.ts",
     "db:migrate": "prisma migrate dev --config prisma.config.ts",
     "db:studio": "prisma studio --config prisma.config.ts"
   },

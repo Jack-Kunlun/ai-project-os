@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import type { PrismaClient } from "@prisma/client";
 import { POSTGRES_GATES } from "../scripts/postgres-gate-contract";
 import {
   ProjectGitRepositoryDelegationServiceError,
   proposeProjectGitRepositoryDelegation,
 } from "../src/lib/project-git-repository-delegation-service";
-import { GitRunnerError, GitServiceError, isDefinitelyPreDispatchGitSyncFailure } from "../src/lib/git";
+import {
+  GitRunnerError,
+  GitServiceError,
+  isDefinitelyPreDispatchGitSyncFailure,
+  readGitRepositoryFilesForDelegation,
+  type GitConnectionWithSecret,
+} from "../src/lib/git";
 
 const schema = readFileSync("prisma/schema.prisma", "utf8");
 const migration = readFileSync(
@@ -223,6 +230,48 @@ test("Git connection probes re-admit immediately before ls-remote", () => {
   assert.match(gitService, /onDispatchBoundary: \(\) => acceptGitProbeDispatchBoundary/u);
 });
 
+test("delegated Git reader performs no credential read after the final fence rejects", async () => {
+  let databaseTouched = false;
+  let boundaryCalls = 0;
+  const db = new Proxy({}, {
+    get() {
+      databaseTouched = true;
+      throw new Error("DATABASE_TOUCHED_AFTER_FINAL_FENCE");
+    },
+  }) as PrismaClient;
+  const connection = {
+    id: "00000000-0000-4000-8000-000000000101",
+    baseUrl: "https://127.0.0.1",
+    transport: "https",
+    authKind: "token",
+    username: null,
+    allowPrivateNetwork: false,
+    tlsCaCertificate: null,
+    sshKnownHost: null,
+    resolvedAddressFingerprint: "a".repeat(64),
+    credential: { secretFingerprint: "b".repeat(64) },
+  } as unknown as GitConnectionWithSecret;
+
+  await assert.rejects(
+    () => readGitRepositoryFilesForDelegation({
+      connection,
+      repositoryPath: "org/repository",
+      trackedRef: "main",
+      includeRoots: ["."],
+      softExcludePatterns: [],
+      db,
+      pinnedResolution: { addresses: ["127.0.0.1"], fingerprint: "a".repeat(64) },
+      onDispatchBoundary: async () => {
+        boundaryCalls += 1;
+        return false;
+      },
+    }),
+    (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_VERIFIED",
+  );
+  assert.equal(boundaryCalls, 1);
+  assert.equal(databaseTouched, false);
+});
+
 test("Git delegation API uses same-origin writes and no external runtime dispatch", () => {
   const route = readFileSync("src/app/api/projects/[projectId]/git-repository-delegations/route.ts", "utf8");
   const manualSyncRoute = readFileSync("src/app/api/projects/[projectId]/git-repository-delegations/[delegationId]/manual-sync/route.ts", "utf8");
@@ -259,6 +308,12 @@ test("Git delegation workbench exposes server capabilities and safe run projecti
   assert.match(runtimeService, /acknowledgeProjectDelegatedGitManualRun/u);
   assert.match(runtimeService, /dispatched && !isDefinitelyPreDispatchGitSyncFailure\(error\)[\s\S]*?"unknown"[\s\S]*?"failed"/u);
   assert.match(runtimeService, /terminalizeRun\(admitted\.id, snapshot, "unknown", safeFailureCode\(error\), db\)/u);
+  const finalFence = runtimeService.slice(runtimeService.indexOf("async function rejectGitDispatchBoundary"), runtimeService.indexOf("async function loadFreshConnection"));
+  assert.match(finalFence, /PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED[\s\S]*appendAudit\([\s\S]*null,[\s\S]*PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED_REASON/u);
+  assert.match(finalFence, /rejectGitDispatchBoundary\(tx, runId\)[\s\S]*manual_sync_dispatch_boundary_committed/u);
+  assert.match(runtimeService, /finalFenceTerminal = boundary\.run[\s\S]*if \(finalFenceTerminal !== null\) return publicRun\(finalFenceTerminal\)/u);
+  assert.match(runtimeService, /if \(isSerializationConflict\(error\) && attempt < 2\) continue;[\s\S]*throw error;/u);
+  assert.match(runtimeService, /finalFenceUnavailable = true;[\s\S]*if \(finalFenceUnavailable\) throw error;/u);
   assert.match(runtimeService, /capabilities: Object\.freeze\(\{ canAcknowledge \}\)/u);
   assert.match(runtimeService, /orderBy: \[\{ createdAt: "desc" \}, \{ id: "desc" \}\]/u);
   assert.match(repositoriesClient, /crypto\.randomUUID/u);

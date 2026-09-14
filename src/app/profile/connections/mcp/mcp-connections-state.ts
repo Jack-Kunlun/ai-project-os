@@ -1,4 +1,5 @@
 export type McpConnectionStatus = "configured" | "verified" | "error" | "disabled";
+export type McpConnectionRecoveryState = "ready" | "credentialRebindRequired" | "rebuildRequired";
 
 export type McpToolDefinition = Readonly<{
   id: string;
@@ -23,6 +24,7 @@ export type McpConnection = Readonly<{
   protocolVersion: string | null;
   catalogFingerprint: string | null;
   status: McpConnectionStatus;
+  recoveryState: McpConnectionRecoveryState;
   ownershipState: "legacyPending" | "confirmed" | "ambiguous";
   lastDiscoveredAt: string | null;
   lastErrorCode: string | null;

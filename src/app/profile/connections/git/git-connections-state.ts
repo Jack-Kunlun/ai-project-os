@@ -2,6 +2,7 @@ export type GitProviderKind = "github" | "gitee" | "gitlab" | "gitea" | "forgejo
 export type GitTransport = "https" | "ssh";
 export type GitAuthKind = "none" | "token" | "basic" | "sshKey";
 export type GitConnectionStatus = "configured" | "verified" | "error" | "disabled";
+export type GitConnectionRecoveryState = "ready" | "credentialRebindRequired" | "rebuildRequired";
 
 export type GitCatalogEntry = Readonly<{
   kind: GitProviderKind;
@@ -22,6 +23,7 @@ export type GitConnection = Readonly<{
   tlsCaCertificate: string | null;
   sshKnownHost: string | null;
   status: GitConnectionStatus;
+  recoveryState: GitConnectionRecoveryState;
   ownershipState: "legacyPending" | "confirmed" | "ambiguous";
   lastTestedAt: string | null;
   lastErrorCode: string | null;

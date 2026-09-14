@@ -2,15 +2,20 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
 import { createCredential } from "../src/lib/credential-vault";
 import { getDb } from "../src/lib/db";
 import {
   encodeGitCredential,
   executeGitConnectionMutation,
+  GitServiceError,
+  listGitConnections,
   previewGitConnectionMutation,
 } from "../src/lib/git";
 import {
   executeMcpConnectionMutation,
+  listMcpConnections,
+  McpCapabilityError,
   previewMcpConnectionMutation,
 } from "../src/lib/mcp";
 
@@ -282,4 +287,238 @@ test("connection governance rotates credentials exactly once and is the only Pos
     confirmationName: disabledMcp.name,
   }, currentActor, db);
   assert.equal(mcpDeleteReplay.auditId, mcpDeleteResult.auditId);
+});
+
+test("account recovery exposes safe connection states and only permits credential rebind", { skip: !shouldRun ? "CONNECTION_GOVERNANCE_POSTGRES_GATE=1 is required" : false }, async () => {
+  const db = getDb();
+  const suffix = randomUUID().slice(0, 8);
+  const adminId = randomUUID();
+  const targetId = randomUUID();
+  const gitCredential = await createCredential("git", encodeGitCredential("token", `git-recovery-before-${suffix}`), db);
+  const mcpCredential = await createCredential("mcp", `mcp-recovery-before-${suffix}`, db);
+  const gitCredentialId = gitCredential.id;
+  const mcpCredentialId = mcpCredential.id;
+  const gitCredentialConnectionId = randomUUID();
+  const gitNoCredentialConnectionId = randomUUID();
+  const mcpCredentialConnectionId = randomUUID();
+  const mcpNoCredentialConnectionId = randomUUID();
+
+  await db.appUser.createMany({
+    data: [
+      { id: adminId, username: `connection_recovery_admin_${suffix}`, role: "admin", accountAccessVersion: 1 },
+      { id: targetId, username: `connection_recovery_${suffix}`, accountAccessVersion: 1 },
+    ],
+  });
+  await db.gitConnection.createMany({
+    data: [
+      {
+        id: gitCredentialConnectionId,
+        name: `Git recovery credential ${suffix}`,
+        providerKind: "generic",
+        transport: "https",
+        baseUrl: "https://git.example.test",
+        authKind: "token",
+        credentialId: gitCredentialId,
+        status: "verified",
+        resolvedAddressFingerprint: "a".repeat(64),
+        createdById: targetId,
+        ownerUserId: targetId,
+        ownerAccountAccessVersion: 1,
+        ownershipState: "confirmed",
+      },
+      {
+        id: gitNoCredentialConnectionId,
+        name: `Git recovery rebuild ${suffix}`,
+        providerKind: "generic",
+        transport: "https",
+        baseUrl: "https://git.example.test",
+        authKind: "none",
+        status: "configured",
+        createdById: targetId,
+        ownerUserId: targetId,
+        ownerAccountAccessVersion: 1,
+        ownershipState: "confirmed",
+      },
+    ],
+  });
+  await db.mcpConnection.createMany({
+    data: [
+      {
+        id: mcpCredentialConnectionId,
+        name: `MCP recovery credential ${suffix}`,
+        endpointUrl: "https://mcp.example.test/mcp",
+        authKind: "bearer",
+        credentialId: mcpCredentialId,
+        status: "configured",
+        createdById: targetId,
+        ownerUserId: targetId,
+        ownerAccountAccessVersion: 1,
+        ownershipState: "confirmed",
+      },
+      {
+        id: mcpNoCredentialConnectionId,
+        name: `MCP recovery rebuild ${suffix}`,
+        endpointUrl: "https://mcp.example.test/mcp",
+        authKind: "none",
+        status: "configured",
+        createdById: targetId,
+        ownerUserId: targetId,
+        ownerAccountAccessVersion: 1,
+        ownershipState: "confirmed",
+      },
+    ],
+  });
+
+  const disablePreview = await previewAccountAccess({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: targetId,
+    action: "disable",
+    reason: "recovery test disable",
+    expectedVersion: 1,
+  }, db);
+  const disable = await executeAccountAccess({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: targetId,
+    action: "disable",
+    reason: "recovery test disable",
+    expectedVersion: disablePreview.current.accountAccessVersion,
+    expectedImpactFingerprint: disablePreview.impactFingerprint,
+    requestKey: `recovery-disable-${suffix}`,
+    requestFingerprint: disablePreview.requestFingerprint,
+    previewId: disablePreview.previewId,
+    previewIssuedAt: disablePreview.previewIssuedAt,
+    previewExpiresAt: disablePreview.previewExpiresAt,
+    confirmation: true,
+    confirmationUsername: `connection_recovery_${suffix}`,
+  }, db);
+  assert.equal(disable.state, "disabled");
+
+  const restorePreview = await previewAccountAccess({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: targetId,
+    action: "restore",
+    reason: "recovery test restore",
+    expectedVersion: disable.accountAccessVersion,
+  }, db);
+  const restore = await executeAccountAccess({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: targetId,
+    action: "restore",
+    reason: "recovery test restore",
+    expectedVersion: restorePreview.current.accountAccessVersion,
+    expectedImpactFingerprint: restorePreview.impactFingerprint,
+    requestKey: `recovery-restore-${suffix}`,
+    requestFingerprint: restorePreview.requestFingerprint,
+    previewId: restorePreview.previewId,
+    previewIssuedAt: restorePreview.previewIssuedAt,
+    previewExpiresAt: restorePreview.previewExpiresAt,
+    confirmation: true,
+    confirmationUsername: `connection_recovery_${suffix}`,
+  }, db);
+  assert.equal(restore.state, "enabled");
+  assert.equal(restore.accountAccessVersion, 3);
+
+  const currentActor = { id: targetId, accountAccessVersion: restore.accountAccessVersion };
+  const gitConnections = await listGitConnections(currentActor, db);
+  const gitRecovery = new Map(gitConnections.map((connection) => [connection.id, connection.recoveryState]));
+  assert.equal(gitRecovery.get(gitCredentialConnectionId), "credentialRebindRequired");
+  assert.equal(gitRecovery.get(gitNoCredentialConnectionId), "rebuildRequired");
+  const mcpConnections = await listMcpConnections(currentActor, db);
+  const mcpRecovery = new Map(mcpConnections.map((connection) => [connection.id, connection.recoveryState]));
+  assert.equal(mcpRecovery.get(mcpCredentialConnectionId), "credentialRebindRequired");
+  assert.equal(mcpRecovery.get(mcpNoCredentialConnectionId), "rebuildRequired");
+  const serializedConnections = stringifyForLeakCheck({ gitConnections, mcpConnections });
+  assert.doesNotMatch(serializedConnections, /ownerAccountAccessVersion|credentialFingerprint|ownerUserId/u);
+
+  const staleGitNone = await db.gitConnection.findUniqueOrThrow({ where: { id: gitNoCredentialConnectionId }, select: { name: true, updatedAt: true } });
+  await assert.rejects(
+    () => previewGitConnectionMutation(gitNoCredentialConnectionId, {
+      action: "rotateCredential",
+      requestKey: `recovery-git-none-${suffix}`,
+      reason: "must rebuild without credential",
+      expectedUpdatedAt: staleGitNone.updatedAt.toISOString(),
+      secret: `git-invalid-rebind-${suffix}`,
+    }, currentActor, db),
+    (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_VERIFIED",
+  );
+
+  const staleGitCredential = await db.gitConnection.findUniqueOrThrow({ where: { id: gitCredentialConnectionId }, select: { updatedAt: true } });
+  await assert.rejects(
+    () => previewGitConnectionMutation(gitCredentialConnectionId, {
+      action: "disable",
+      requestKey: `recovery-git-disable-${suffix}`,
+      reason: "stale roots may only rotate credentials",
+      expectedUpdatedAt: staleGitCredential.updatedAt.toISOString(),
+    }, currentActor, db),
+    (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_NOT_VERIFIED",
+  );
+  const gitRotationPreview = await previewGitConnectionMutation(gitCredentialConnectionId, {
+    action: "rotateCredential",
+    requestKey: `recovery-git-credential-${suffix}`,
+    reason: "rebind rotated credential",
+    expectedUpdatedAt: staleGitCredential.updatedAt.toISOString(),
+    secret: `git-recovery-after-${suffix}`,
+  }, currentActor, db);
+  assert.equal(gitRotationPreview.canExecute, true);
+  const gitRotation = await executeGitConnectionMutation(gitCredentialConnectionId, {
+    previewId: gitRotationPreview.id,
+    requestKey: gitRotationPreview.requestKey,
+    requestFingerprint: gitRotationPreview.requestFingerprint,
+    impactFingerprint: gitRotationPreview.impactFingerprint,
+    expectedUpdatedAt: gitRotationPreview.connection.updatedAt,
+    secret: `git-recovery-after-${suffix}`,
+  }, currentActor, db);
+  assert.equal(gitRotation.status, "completed");
+  const reboundGit = await db.gitConnection.findUniqueOrThrow({ where: { id: gitCredentialConnectionId }, select: { status: true, ownerAccountAccessVersion: true } });
+  assert.deepEqual(reboundGit, { status: "configured", ownerAccountAccessVersion: 3 });
+
+  const staleMcpNone = await db.mcpConnection.findUniqueOrThrow({ where: { id: mcpNoCredentialConnectionId }, select: { updatedAt: true } });
+  await assert.rejects(
+    () => previewMcpConnectionMutation(mcpNoCredentialConnectionId, {
+      action: "rotateCredential",
+      requestKey: `recovery-mcp-none-${suffix}`,
+      reason: "must rebuild without credential",
+      expectedUpdatedAt: staleMcpNone.updatedAt.toISOString(),
+      secret: `mcp-invalid-rebind-${suffix}`,
+    }, currentActor, db),
+    (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_VERIFIED",
+  );
+
+  const staleMcpCredential = await db.mcpConnection.findUniqueOrThrow({ where: { id: mcpCredentialConnectionId }, select: { updatedAt: true } });
+  await assert.rejects(
+    () => previewMcpConnectionMutation(mcpCredentialConnectionId, {
+      action: "disable",
+      requestKey: `recovery-mcp-disable-${suffix}`,
+      reason: "stale roots may only rotate credentials",
+      expectedUpdatedAt: staleMcpCredential.updatedAt.toISOString(),
+    }, currentActor, db),
+    (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_VERIFIED",
+  );
+  const mcpRotationPreview = await previewMcpConnectionMutation(mcpCredentialConnectionId, {
+    action: "rotateCredential",
+    requestKey: `recovery-mcp-credential-${suffix}`,
+    reason: "rebind rotated credential",
+    expectedUpdatedAt: staleMcpCredential.updatedAt.toISOString(),
+    secret: `mcp-recovery-after-${suffix}`,
+  }, currentActor, db);
+  assert.equal(mcpRotationPreview.canExecute, true);
+  const mcpRotation = await executeMcpConnectionMutation(mcpCredentialConnectionId, {
+    previewId: mcpRotationPreview.id,
+    requestKey: mcpRotationPreview.requestKey,
+    requestFingerprint: mcpRotationPreview.requestFingerprint,
+    impactFingerprint: mcpRotationPreview.impactFingerprint,
+    expectedUpdatedAt: mcpRotationPreview.connection.updatedAt,
+    secret: `mcp-recovery-after-${suffix}`,
+  }, currentActor, db);
+  assert.equal(mcpRotation.status, "completed");
+  const reboundMcp = await db.mcpConnection.findUniqueOrThrow({ where: { id: mcpCredentialConnectionId }, select: { status: true, ownerAccountAccessVersion: true } });
+  assert.deepEqual(reboundMcp, { status: "configured", ownerAccountAccessVersion: 3 });
+  const recoveredGit = await listGitConnections(currentActor, db);
+  const recoveredMcp = await listMcpConnections(currentActor, db);
+  assert.equal(recoveredGit.find((connection) => connection.id === gitCredentialConnectionId)?.recoveryState, "ready");
+  assert.equal(recoveredMcp.find((connection) => connection.id === mcpCredentialConnectionId)?.recoveryState, "ready");
 });

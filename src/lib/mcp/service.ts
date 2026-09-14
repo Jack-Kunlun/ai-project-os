@@ -7,6 +7,7 @@ import { lockActorAccess } from "@/lib/access-linearization";
 import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { assertProjectActive } from "@/lib/project-lifecycle";
+import { deriveConnectionRecoveryState } from "@/lib/connection-recovery";
 import { resolveSecureEndpointFingerprint } from "@/lib/web-sources";
 import { callMcpTool, discoverMcpTools, MCP_PROTOCOL_VERSION, type McpToolCallResult } from "./client";
 import { McpCapabilityError, failMcp } from "./errors";
@@ -158,20 +159,28 @@ function isEffectivePersonalMcpAttestation(
     && !attestation.audits.some((audit) => audit.event === "revoked");
 }
 
-function projectPersonalMcpConnection(connection: PersonalMcpConnectionRecord) {
+function projectPersonalMcpConnection(connection: PersonalMcpConnectionRecord, currentAccountAccessVersion?: number) {
   const {
     configurationRevision: _configurationRevision,
     resolvedAddressFingerprint: _resolvedAddressFingerprint,
     credentialFingerprint: _credentialFingerprint,
     ownerUserId: _ownerUserId,
+    ownerAccountAccessVersion: _ownerAccountAccessVersion,
     ...publicConnection
   } = connection;
   void _configurationRevision;
   void _resolvedAddressFingerprint;
   void _credentialFingerprint;
   void _ownerUserId;
+  void _ownerAccountAccessVersion;
   return Object.freeze({
     ...publicConnection,
+    recoveryState: deriveConnectionRecoveryState({
+      ownerAccountAccessVersion: connection.ownerAccountAccessVersion,
+      currentAccountAccessVersion: currentAccountAccessVersion ?? connection.ownerAccountAccessVersion ?? 0,
+      authKind: connection.authKind,
+      credentialPresent: connection.credential !== null,
+    }),
     toolDefinitions: connection.toolDefinitions.map((tool) => ({
       ...tool,
       attestations: tool.attestations.map((attestation) => ({
@@ -201,9 +210,9 @@ async function loadMcpOwner(db: McpDb, ownerId: string): Promise<McpOwnerEpoch> 
   return owner;
 }
 
-async function assertMcpActor(db: McpDb, actor: McpConnectionActor): Promise<void> {
+async function assertMcpActor(db: McpDb, actor: McpConnectionActor): Promise<number> {
   try {
-    await assertAccountAccessForActor(db, actor);
+    return (await assertAccountAccessForActor(db, actor)).accountAccessVersion;
   } catch (error) {
     if (error instanceof AccountAccessGuardError) {
       if (error.code === "ACCOUNT_DISABLED") return failMcp("MCP_CONNECTION_DISABLED");
@@ -288,24 +297,24 @@ async function activeMcpAttestation(db: McpDb, tuple: McpFingerprintTuple) {
 }
 
 export async function listMcpConnections(actor: McpConnectionActor, db: PrismaClient = getDb()) {
-  await assertMcpActor(db, actor);
+  const currentAccountAccessVersion = await assertMcpActor(db, actor);
   const connections = await db.mcpConnection.findMany({
     where: { ownerUserId: actor.id, ownershipState: "confirmed" },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: connectionSelect,
   });
-  return connections.map(projectPersonalMcpConnection);
+  return connections.map((connection) => projectPersonalMcpConnection(connection, currentAccountAccessVersion));
 }
 
 export async function getMcpConnection(connectionIdInput: unknown, actor: McpConnectionActor, db: PrismaClient = getDb()) {
-  await assertMcpActor(db, actor);
+  const currentAccountAccessVersion = await assertMcpActor(db, actor);
   const connectionId = uuid(connectionIdInput);
   const connection = await db.mcpConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
     select: connectionSelect,
   });
   if (connection === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
-  return projectPersonalMcpConnection(connection);
+  return projectPersonalMcpConnection(connection, currentAccountAccessVersion);
 }
 
 export async function createMcpConnection(input: unknown, actor: McpConnectionActor, db: PrismaClient = getDb()) {
@@ -343,7 +352,7 @@ export async function createMcpConnection(input: unknown, actor: McpConnectionAc
         },
         select: connectionSelect,
       });
-      return projectPersonalMcpConnection(connection);
+      return projectPersonalMcpConnection(connection, currentOwner.accountAccessVersion);
     });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return failMcp("MCP_CONNECTION_NAME_CONFLICT");
@@ -368,7 +377,7 @@ export async function updateMcpConnection(
   if (parsed.data.bearerToken !== undefined && (existing.authKind !== "bearer" || existing.credentialId === null)) return failMcp("MCP_INVALID_INPUT");
   const existingOwner = await loadMcpOwner(db, actor.id);
   const rotatesCredential = parsed.data.bearerToken !== undefined;
-  if (!rotatesCredential) assertMcpConnectionEpoch(existing, existingOwner);
+  assertMcpConnectionEpoch(existing, existingOwner);
   const trusted = parsed.data.trustCurrentNetwork === true
     ? await resolveSecureEndpointFingerprint({ url: existing.endpointUrl, allowPrivateNetwork: existing.allowPrivateNetwork }).catch(() => failMcp("MCP_TRANSPORT_FAILED"))
     : null;
@@ -385,7 +394,7 @@ export async function updateMcpConnection(
       if (current === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
       if (current.updatedAt.getTime() !== timestamp(parsed.data.expectedUpdatedAt).getTime()) return failMcp("MCP_CONNECTION_CONFLICT");
       if (parsed.data.bearerToken !== undefined && (current.authKind !== "bearer" || current.credentialId === null)) return failMcp("MCP_INVALID_INPUT");
-      if (!rotatesCredential) assertMcpConnectionEpoch(current, currentOwner);
+      assertMcpConnectionEpoch(current, currentOwner);
       if (rotatesCredential) {
         await tx.$executeRaw`SELECT set_config('app.personal_mcp_credential_rotation_context', '1', true)`;
         await tx.$executeRaw`SELECT set_config('app.personal_mcp_credential_rotation_owner_id', ${actor.id}, true)`;
@@ -411,7 +420,7 @@ export async function updateMcpConnection(
         },
         select: connectionSelect,
       });
-      return projectPersonalMcpConnection(connection);
+      return projectPersonalMcpConnection(connection, currentOwner.accountAccessVersion);
     });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return failMcp("MCP_CONNECTION_NAME_CONFLICT");
@@ -609,7 +618,7 @@ export async function discoverMcpConnectionTools(
         },
         select: connectionSelect,
       });
-      return projectPersonalMcpConnection(connection);
+      return projectPersonalMcpConnection(connection, currentOwner.accountAccessVersion);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return Object.freeze({ connection: stored, discoveredCount: discovery.tools.length, eligibleCount: discovery.tools.filter((tool) => tool.remoteReadOnlyHint).length, rejectedCount: discovery.rejectedCount });
   } catch (error) {

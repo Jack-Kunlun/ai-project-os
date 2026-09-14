@@ -10,6 +10,7 @@ import { lockActorAccess } from "@/lib/access-linearization";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
+import { deriveConnectionRecoveryState } from "@/lib/connection-recovery";
 import {
   claimProjectJob,
   failProjectJob,
@@ -185,6 +186,33 @@ const connectionSelect = {
   _count: { select: { repositories: true } },
 } satisfies Prisma.GitConnectionSelect;
 
+const connectionWithRecoverySelect = {
+  ...connectionSelect,
+  ownerAccountAccessVersion: true,
+} satisfies Prisma.GitConnectionSelect;
+
+type PersonalGitConnectionRecord = Prisma.GitConnectionGetPayload<{ select: typeof connectionSelect }> & {
+  ownerAccountAccessVersion?: number | null;
+};
+
+function projectPersonalGitConnection(
+  connection: PersonalGitConnectionRecord,
+  currentAccountAccessVersion?: number,
+) {
+  const { ownerAccountAccessVersion, ...publicConnection } = connection;
+  return Object.freeze({
+    ...publicConnection,
+    recoveryState: currentAccountAccessVersion === undefined || ownerAccountAccessVersion === undefined
+      ? "ready" as const
+      : deriveConnectionRecoveryState({
+          ownerAccountAccessVersion,
+          currentAccountAccessVersion,
+          authKind: connection.authKind,
+          credentialPresent: connection.credential !== null,
+        }),
+  });
+}
+
 const linkSelect = {
   id: true,
   projectId: true,
@@ -323,9 +351,9 @@ function defaultUsername(connection: Pick<GitConnectionWithSecret, "providerKind
   return connection.authKind === "none" ? null : "git";
 }
 
-async function assertGitActor(db: PrismaClient | Prisma.TransactionClient, actor: GitConnectionActor): Promise<void> {
+async function assertGitActor(db: PrismaClient | Prisma.TransactionClient, actor: GitConnectionActor): Promise<number> {
   try {
-    await assertAccountAccessForActor(db, actor);
+    return (await assertAccountAccessForActor(db, actor)).accountAccessVersion;
   } catch (error) {
     if (error instanceof AccountAccessGuardError) {
       if (error.code === "ACCOUNT_DISABLED") return fail("GIT_CONNECTION_DISABLED");
@@ -639,23 +667,24 @@ export function gitConnectionCatalog() {
 }
 
 export async function listGitConnections(actor: GitConnectionActor, db: PrismaClient = getDb()) {
-  await assertGitActor(db, actor);
-  return db.gitConnection.findMany({
+  const currentAccountAccessVersion = await assertGitActor(db, actor);
+  const connections = await db.gitConnection.findMany({
     where: { ownerUserId: actor.id, ownershipState: "confirmed" },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: connectionSelect,
+    select: connectionWithRecoverySelect,
   });
+  return connections.map((connection) => projectPersonalGitConnection(connection, currentAccountAccessVersion));
 }
 
 export async function getGitConnection(connectionIdInput: unknown, actor: GitConnectionActor, db: PrismaClient = getDb()) {
-  await assertGitActor(db, actor);
+  const currentAccountAccessVersion = await assertGitActor(db, actor);
   const connectionId = uuid(connectionIdInput);
   const connection = await db.gitConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
-    select: connectionSelect,
+    select: connectionWithRecoverySelect,
   });
   if (connection === null) return fail("GIT_CONNECTION_NOT_FOUND");
-  return connection;
+  return projectPersonalGitConnection(connection, currentAccountAccessVersion);
 }
 
 export async function createGitConnection(input: unknown, actor: GitConnectionActor, db: PrismaClient = getDb()) {
@@ -676,7 +705,7 @@ export async function createGitConnection(input: unknown, actor: GitConnectionAc
       const credential = parsed.authKind === "none"
         ? null
         : await createCredential("git", encodeGitCredential(credentialAuthKind(parsed.authKind), parsed.secret), tx);
-      return tx.gitConnection.create({
+      const connection = await tx.gitConnection.create({
         data: {
           name: parsed.name,
           providerKind: parsed.providerKind,
@@ -695,6 +724,7 @@ export async function createGitConnection(input: unknown, actor: GitConnectionAc
         },
         select: connectionSelect,
       });
+      return projectPersonalGitConnection(connection, owner.accountAccessVersion);
     });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return fail("GIT_CONNECTION_NAME_CONFLICT");
@@ -746,8 +776,8 @@ export async function updateGitConnection(
       });
       if (currentOwner === null || currentOwner.disabledAt !== null) return fail("GIT_CONNECTION_DISABLED");
       const rotatesCredential = parsed.secret !== undefined;
-      if (!rotatesCredential && (current.ownerAccountAccessVersion === null
-        || current.ownerAccountAccessVersion !== currentOwner.accountAccessVersion)) {
+      if (current.ownerAccountAccessVersion === null
+        || current.ownerAccountAccessVersion !== currentOwner.accountAccessVersion) {
         return fail("GIT_CONNECTION_NOT_VERIFIED");
       }
       if (parsed.secret !== undefined) {
@@ -773,7 +803,7 @@ export async function updateGitConnection(
           : securityChanged && current.status !== "disabled"
             ? { status: "configured" as const, disabledAt: null }
             : {};
-      return tx.gitConnection.update({
+      const connection = await tx.gitConnection.update({
         where: { id: connectionId },
         data: {
           ...(parsed.name === undefined ? {} : { name: parsed.name }),
@@ -789,6 +819,7 @@ export async function updateGitConnection(
         },
         select: connectionSelect,
       });
+      return projectPersonalGitConnection(connection, currentOwner.accountAccessVersion);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
     if (isPrismaCode(error, "P2002")) return fail("GIT_CONNECTION_NAME_CONFLICT");
@@ -807,18 +838,18 @@ export async function disableGitConnection(connectionIdInput: unknown, actor: Gi
   if (connection.repositories.some((repository) => repository.projectLinks.length > 0)) return fail("GIT_CONNECTION_IN_USE");
   return db.$transaction(async (tx) => {
     await lockActorAccess(tx, actor.id);
-    await assertGitActor(tx, actor);
+    const currentActorVersion = await assertGitActor(tx, actor);
     await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
     const current = await tx.gitConnection.findFirst({
       where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
     });
     if (current === null) return fail("GIT_CONNECTION_NOT_FOUND");
-    if (current.status === "disabled") return tx.gitConnection.findUniqueOrThrow({ where: { id: connectionId }, select: connectionSelect });
-    return tx.gitConnection.update({
+    if (current.status === "disabled") return projectPersonalGitConnection(await tx.gitConnection.findUniqueOrThrow({ where: { id: connectionId }, select: connectionSelect }), currentActorVersion);
+    return projectPersonalGitConnection(await tx.gitConnection.update({
       where: { id: connectionId },
       data: { status: "disabled", disabledAt: new Date() },
       select: connectionSelect,
-    });
+    }), currentActorVersion);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -941,7 +972,7 @@ export async function testGitConnection(
         || current.ownerAccountAccessVersion !== currentOwner.accountAccessVersion) {
         return fail("GIT_CONNECTION_CONFLICT");
       }
-      return tx.gitConnection.update({
+      return projectPersonalGitConnection(await tx.gitConnection.update({
         where: { id: connection.id },
         data: {
           status: "verified",
@@ -951,7 +982,7 @@ export async function testGitConnection(
           disabledAt: null,
         },
         select: connectionSelect,
-      });
+      }), currentOwner.accountAccessVersion);
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return Object.freeze({ connection: updated, probe: { repositoryPath, trackedRef, commitSha: probe.commitSha } });
   } catch (error) {

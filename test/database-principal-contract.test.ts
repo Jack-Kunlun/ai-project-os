@@ -13,6 +13,7 @@ const reconcile = readFileSync("scripts/reconcile-database-principals.ts", "utf8
 const postgresGate = readFileSync("test/database-principal-postgres.test.ts", "utf8");
 const migration = readFileSync("prisma/migrations/20260910050000_harden_account_entitlement_database_principals/migration.sql", "utf8");
 const connectionGovernanceMigration = readFileSync("prisma/migrations/20260912030000_add_connection_governance/migration.sql", "utf8");
+const gitManualRuntimeRecoveryMigration = readFileSync("prisma/migrations/20260914010000_harden_git_manual_final_fence_and_connection_recovery/migration.sql", "utf8");
 const catalog = readFileSync("src/lib/database-principal-catalog.ts", "utf8");
 const activation = readFileSync("src/lib/account-entitlement-activation-service.ts", "utf8");
 const backfill = readFileSync("src/lib/account-entitlement-backfill-service.ts", "utf8");
@@ -40,7 +41,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
     reason: "workspace enabled-owner invariant validation",
   });
   assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
-  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 13);
+  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 15);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.every((trigger) => Object.isFrozen(trigger)
     && trigger.identityArguments === ""
     && trigger.runtime === false
@@ -205,6 +206,13 @@ test("ACL reconcile rejects drift and does not widen ordinary roles with DDL pri
   assert.match(reconcile, /triggerFunctionSignature/u);
   assert.match(connectionGovernanceMigration, /REVOKE ALL ON FUNCTION "git_connection_configuration_version_guard"\(\) FROM PUBLIC/u);
   assert.match(connectionGovernanceMigration, /REVOKE ALL ON FUNCTION "mcp_connection_configuration_revision_guard"\(\) FROM PUBLIC/u);
+  assert.match(gitManualRuntimeRecoveryMigration, /CREATE OR REPLACE FUNCTION "project_git_manual_runtime_audit_guard"\(\)/u);
+  assert.match(gitManualRuntimeRecoveryMigration, /SET search_path = pg_catalog, public/u);
+  assert.match(gitManualRuntimeRecoveryMigration, /PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED/u);
+  assert.match(gitManualRuntimeRecoveryMigration, /ProjectGitRepositoryManualRunAudit_system_final_fence_key/u);
+  assert.match(gitManualRuntimeRecoveryMigration, /PROJECT_GIT_MANUAL_FINAL_FENCE_EVIDENCE_STILL_VALID/u);
+  assert.match(gitManualRuntimeRecoveryMigration, /PROJECT_GIT_MANUAL_FINAL_FENCE_PRE_DISPATCH_REQUIRED/u);
+  assert.match(gitManualRuntimeRecoveryMigration, /REVOKE ALL ON FUNCTION "project_git_manual_runtime_audit_guard"\(\) FROM PUBLIC/u);
   assert.match(reconcile, /REVOKE ALL ON FUNCTION \$\{signature\} FROM PUBLIC/u);
   assert.match(reconcile, /GRANT EXECUTE ON FUNCTION \$\{signature\} TO \$\{grantees\.join/u);
   assert.match(reconcile, /helperRow\.prosecdef/u);

@@ -32,6 +32,8 @@ const GLOBAL_LOCK_SQL = "ai-project-git-repository-delegation-global";
 export const PROJECT_GIT_MANUAL_STALE_AFTER_MS = 5 * 60 * 1000;
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 const PROJECT_GIT_MANUAL_LEGACY_EPOCH_INVALIDATED = "PROJECT_GIT_MANUAL_LEGACY_EPOCH_INVALIDATED";
+export const PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED = "PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED";
+export const PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED_REASON = "manual_sync_final_admission_rejected";
 type DelegationDb = PrismaClient | Prisma.TransactionClient;
 
 export type ProjectDelegatedGitRuntimeErrorCode =
@@ -48,7 +50,8 @@ export type ProjectDelegatedGitRuntimeErrorCode =
   | "PROJECT_GIT_MANUAL_RECONCILIATION_STATE_CONFLICT"
   | "PROJECT_GIT_MANUAL_RECONCILIATION_CONFLICT"
   | "PROJECT_GIT_MANUAL_RUN_FAILED"
-  | "PROJECT_GIT_MANUAL_RUN_UNKNOWN";
+  | "PROJECT_GIT_MANUAL_RUN_UNKNOWN"
+  | "PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED";
 
 export class ProjectDelegatedGitRuntimeError extends Error {
   constructor(readonly code: ProjectDelegatedGitRuntimeErrorCode) {
@@ -451,6 +454,7 @@ async function appendAudit(
   statusBefore: ProjectGitRepositoryManualRunStatus | null,
   actorId: string | null,
   reason: string,
+  auditTime?: Date,
 ): Promise<void> {
   await tx.projectGitRepositoryManualRunAudit.create({
     data: {
@@ -487,6 +491,7 @@ async function appendAudit(
       automationAllowed: row.automationAllowed,
       commitSha: row.frozenCommitSha ?? null,
       manifestFingerprint: row.manifestFingerprint ?? null,
+      ...(auditTime === undefined ? {} : { transitionAt: auditTime, createdAt: auditTime }),
     },
   });
 }
@@ -1176,11 +1181,46 @@ async function admitRun(snapshot: AdmissionSnapshot, clientRequestKey: string, d
  * `running/admitted/pending`; this second transaction is the only operation
  * that may move it to `running/fetching/dispatched`.
  */
+type GitDispatchBoundaryResult = Readonly<
+  | { outcome: "accepted"; run: RunRow }
+  | { outcome: "rejected"; run: RunRow }
+  | { outcome: "settled"; run: RunRow }
+>;
+
+async function rejectGitDispatchBoundary(
+  tx: Prisma.TransactionClient,
+  runId: string,
+): Promise<GitDispatchBoundaryResult> {
+  const completedAt = await databaseNow(tx);
+  const terminal = await tx.projectGitRepositoryManualRun.update({
+    where: { id: runId },
+    data: {
+      status: "failed",
+      stage: "terminal",
+      dispatchState: "acknowledged",
+      failureCode: PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED,
+      completedAt,
+    },
+    select: runSelect,
+  });
+  await setAuditContext(tx);
+  await appendAudit(
+    tx,
+    terminal,
+    "failed",
+    "running",
+    null,
+    PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED_REASON,
+    completedAt,
+  );
+  return Object.freeze({ outcome: "rejected", run: terminal });
+}
+
 async function markGitDispatchBoundary(
   runId: string,
   snapshot: AdmissionSnapshot,
   db: PrismaClient,
-): Promise<boolean> {
+): Promise<GitDispatchBoundaryResult> {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
       return await db.$transaction(async (tx) => {
@@ -1190,9 +1230,9 @@ async function markGitDispatchBoundary(
           actorIds: [snapshot.requestedById, snapshot.connectionOwnerId, snapshot.projectConfirmedById],
         });
         const current = await readRunForUpdate(tx, runId);
-        if (current === null
-          || current.status !== "running"
-          || current.stage !== "admitted"
+        if (current === null) throw new Error("PROJECT_GIT_MANUAL_FINAL_FENCE_RUN_MISSING");
+        if (current.status !== "running") return Object.freeze({ outcome: "settled", run: current });
+        if (current.stage !== "admitted"
           || current.dispatchState !== "pending"
           || current.projectId !== snapshot.projectId
           || current.delegationId !== snapshot.delegationId
@@ -1201,7 +1241,7 @@ async function markGitDispatchBoundary(
           || current.connectionOwnerId !== snapshot.connectionOwnerId
           || current.connectionOwnerAccountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
           || current.requestedByAccountAccessVersion !== snapshot.requestedByAccountAccessVersion) {
-          return false;
+          throw new Error("PROJECT_GIT_MANUAL_FINAL_FENCE_STATE_CHANGED");
         }
         const project = await tx.project.findUnique({
           where: { id: snapshot.projectId },
@@ -1218,7 +1258,7 @@ async function markGitDispatchBoundary(
           || connectionOwner === null || connectionOwner.disabledAt !== null
           || connectionOwner.accountAccessVersion !== snapshot.connectionOwnerAccountAccessVersion
           || projectConfirmer === null || projectConfirmer.disabledAt !== null) {
-          return false;
+          return rejectGitDispatchBoundary(tx, runId);
         }
         const requesterMembership = await tx.projectMembership.findFirst({
           where: {
@@ -1256,7 +1296,7 @@ async function markGitDispatchBoundary(
           || ownerMembership.createdAt.getTime() !== snapshot.ownerMembershipCreatedAt.getTime()
           || projectOwnerMembership === null
           || projectOwnerMembership.createdAt.getTime() !== snapshot.projectConfirmedMembershipCreatedAt.getTime()) {
-          return false;
+          return rejectGitDispatchBoundary(tx, runId);
         }
 
         // Keep the same global -> connection -> credential -> membership lock
@@ -1325,7 +1365,7 @@ async function markGitDispatchBoundary(
           || connection.resolvedAddressFingerprint !== snapshot.resolvedAddressFingerprint
           || connection.credential?.kind !== "git"
           || connection.credential.secretFingerprint !== snapshot.credentialFingerprint) {
-          return false;
+          return rejectGitDispatchBoundary(tx, runId);
         }
         const dispatched = await tx.projectGitRepositoryManualRun.update({
           where: { id: runId },
@@ -1334,15 +1374,14 @@ async function markGitDispatchBoundary(
         });
         await setAuditContext(tx);
         await appendAudit(tx, dispatched, "dispatched", "running", null, "manual_sync_dispatch_boundary_committed");
-        return true;
+        return Object.freeze({ outcome: "accepted", run: dispatched });
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     } catch (error) {
       if (isSerializationConflict(error) && attempt < 2) continue;
-      if (isSerializationConflict(error)) return false;
       throw error;
     }
   }
-  return false;
+  throw new Error("PROJECT_GIT_MANUAL_FINAL_FENCE_UNREACHABLE");
 }
 
 async function loadFreshConnection(snapshot: AdmissionSnapshot, db: PrismaClient): Promise<GitConnectionWithSecret> {
@@ -1520,6 +1559,8 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
   const admitted = admission.run;
   if (!admission.claimed || admitted.status !== "running") return publicRun(admitted);
   let dispatched = false;
+  let finalFenceTerminal: RunRow | null = null;
+  let finalFenceUnavailable = false;
   let result: Readonly<{ commitSha: string; addressFingerprint: string; files: readonly GitScannedFile[] }>;
   try {
     const connection = await loadFreshConnection(snapshot, db);
@@ -1532,12 +1573,25 @@ export async function runProjectDelegatedGitManualSync(input: Readonly<{
       db,
       pinnedResolution: snapshot.pinnedResolution,
       onDispatchBoundary: async () => {
-        const accepted = await markGitDispatchBoundary(admitted.id, snapshot, db);
-        dispatched = accepted;
-        return accepted;
+        let boundary: GitDispatchBoundaryResult;
+        try {
+          boundary = await markGitDispatchBoundary(admitted.id, snapshot, db);
+        } catch (error) {
+          finalFenceUnavailable = true;
+          throw error;
+        }
+        if (boundary.outcome !== "accepted") finalFenceTerminal = boundary.run;
+        dispatched = boundary.outcome === "accepted";
+        return boundary.outcome === "accepted";
       },
     });
   } catch (error) {
+    if (finalFenceTerminal !== null) return publicRun(finalFenceTerminal);
+    // The database never admitted dispatch, so do not fabricate a requester-
+    // or system-attributed terminal for a control-plane failure that the
+    // database cannot independently prove.  The durable admitted/pending run
+    // remains available for stale-run reconciliation and no secret is read.
+    if (finalFenceUnavailable) throw error;
     const terminal = await terminalizeRun(
       admitted.id,
       snapshot,

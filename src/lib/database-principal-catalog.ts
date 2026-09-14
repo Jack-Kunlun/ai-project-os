@@ -213,6 +213,8 @@ export const DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX = Object.freeze([
   triggerFunction("mcp_tool_review_audit_guard", "", "MCP tool review audit immutable trigger"),
   triggerFunction("mcp_tool_review_audit_required", "", "MCP tool review audit completeness trigger"),
   triggerFunction("project_mcp_tool_grant_review_guard", "", "project MCP grant immutable-review eligibility trigger"),
+  triggerFunction("project_git_manual_runtime_transition_audit_guard", "", "project Git manual runtime transition audit completeness trigger"),
+  triggerFunction("project_git_manual_runtime_audit_guard", "", "project Git manual runtime audit and final-fence trigger"),
 ] as const);
 
 export function isKnownDatabasePrincipalRelation(value: string): boolean {

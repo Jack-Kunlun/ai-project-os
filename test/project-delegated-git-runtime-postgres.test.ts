@@ -118,6 +118,21 @@ test("manual delegated Git runtime migration installs independent guarded tables
       text: `SELECT pg_get_functiondef('project_git_manual_runtime_transition_audit_guard'::regproc) AS value`,
     });
     assert.match(transitionGuard.rows[0]?.value ?? "", /OLD\."status" = 'queued' AND NEW\."status" = 'failed'/u);
+    assert.match(transitionGuard.rows[0]?.value ?? "", /PROJECT_GIT_MANUAL_FINAL_FENCE_PRE_DISPATCH_REQUIRED/u);
+    assert.match(transitionGuard.rows[0]?.value ?? "", /OLD\."stage" <> 'admitted'/u);
+
+    const auditGuard = await client.query<{ value: string }>({
+      text: `SELECT pg_get_functiondef('project_git_manual_runtime_audit_guard'::regproc) AS value`,
+    });
+    assert.match(auditGuard.rows[0]?.value ?? "", /PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED/u);
+    assert.match(auditGuard.rows[0]?.value ?? "", /PROJECT_GIT_MANUAL_FINAL_FENCE_EVIDENCE_STILL_VALID/u);
+    assert.match(auditGuard.rows[0]?.value ?? "", /PROJECT_GIT_MANUAL_FINAL_FENCE_AUDIT_INVALID/u);
+
+    const finalFenceIndex = await client.query<{ value: string }>({
+      text: `SELECT indexdef AS value FROM pg_indexes WHERE indexname = 'ProjectGitRepositoryManualRunAudit_system_final_fence_key'`,
+    });
+    assert.equal(finalFenceIndex.rowCount, 1);
+    assert.match(finalFenceIndex.rows[0]?.value ?? "", /manual_sync_final_admission_rejected/u);
   } finally {
     await client.end();
   }
@@ -132,6 +147,7 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
   const connectionOwnerId = randomUUID();
   const projectOwnerId = randomUUID();
   const requesterId = randomUUID();
+  const finalFenceRequesterId = randomUUID();
   const viewerId = randomUUID();
   const revokedActorId = randomUUID();
   const projectId = randomUUID();
@@ -165,7 +181,7 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
         "projectConfirmedMembershipCreatedAt", "reason", "delegationVersion", "delegationFingerprint",
         "connectionConfigurationVersion", "resolvedAddressFingerprint", "credentialFingerprint", "role",
         "requiredForProjectSnapshot", "codeEnabled", "metadataEnabled", "manualSyncAllowed", "automationAllowed",
-        "commitSha", "manifestFingerprint", "requestedByAccountAccessVersion"
+        "commitSha", "manifestFingerprint", "requestedByAccountAccessVersion", "transitionAt", "createdAt"
       )
       SELECT
         $1::uuid,
@@ -201,7 +217,9 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
         run."automationAllowed",
         $9,
         $10,
-        run."requestedByAccountAccessVersion"
+        run."requestedByAccountAccessVersion",
+        COALESCE(run."completedAt", statement_timestamp()),
+        COALESCE(run."completedAt", statement_timestamp())
       FROM "ProjectGitRepositoryManualRun" run
       WHERE run."id" = $2::uuid`,
       [
@@ -225,6 +243,7 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
         { id: connectionOwnerId, username: `manual_runtime_owner_${suffix}`, role: "user" },
         { id: projectOwnerId, username: `manual_runtime_project_owner_${suffix}`, role: "user" },
         { id: requesterId, username: `manual_runtime_requester_${suffix}`, role: "user" },
+        { id: finalFenceRequesterId, username: `manual_runtime_final_fence_${suffix}`, role: "user" },
         { id: viewerId, username: `manual_runtime_viewer_${suffix}`, role: "user" },
         { id: revokedActorId, username: `manual_runtime_revoked_${suffix}`, role: "user" },
       ],
@@ -234,17 +253,20 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
       await grantWorkspaceMembership(tx, { workspaceId, userId: connectionOwnerId, role: "member", actorId: seededAdminId, reason: "manual_runtime_gate_owner" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: projectOwnerId, role: "member", actorId: seededAdminId, reason: "manual_runtime_gate_project_owner" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: requesterId, role: "member", actorId: seededAdminId, reason: "manual_runtime_gate_requester" });
+      await grantWorkspaceMembership(tx, { workspaceId, userId: finalFenceRequesterId, role: "member", actorId: seededAdminId, reason: "manual_runtime_gate_final_fence_requester" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: viewerId, role: "member", actorId: seededAdminId, reason: "manual_runtime_gate_viewer" });
       await grantWorkspaceMembership(tx, { workspaceId, userId: revokedActorId, role: "admin", actorId: seededAdminId, reason: "manual_runtime_gate_revoked_actor" });
       await grantProjectMembership(tx, { projectId, workspaceId, userId: connectionOwnerId, role: "editor", actorId: seededAdminId, reason: "manual_runtime_gate_connection_owner" });
       await grantProjectMembership(tx, { projectId, workspaceId, userId: projectOwnerId, role: "owner", actorId: seededAdminId, reason: "manual_runtime_gate_project_owner" });
       await grantProjectMembership(tx, { projectId, workspaceId, userId: requesterId, role: "editor", actorId: seededAdminId, reason: "manual_runtime_gate_requester" });
+      await grantProjectMembership(tx, { projectId, workspaceId, userId: finalFenceRequesterId, role: "editor", actorId: seededAdminId, reason: "manual_runtime_gate_final_fence_requester" });
       await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: seededAdminId, reason: "manual_runtime_gate_viewer" });
       await grantProjectMembership(tx, { projectId, workspaceId, userId: revokedActorId, role: "viewer", actorId: seededAdminId, reason: "manual_runtime_gate_revoked_actor" });
     });
     const ownerMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: connectionOwnerId }, select: { id: true, createdAt: true } });
     const projectOwnerMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: projectOwnerId }, select: { id: true, createdAt: true } });
     const requesterMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: requesterId }, select: { id: true, createdAt: true } });
+    const finalFenceRequesterMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: finalFenceRequesterId }, select: { id: true, createdAt: true } });
     await db.externalCredential.create({ data: { id: credentialId, kind: "git", ciphertext: Buffer.from([1]), nonce: Buffer.from([2]), authTag: Buffer.from([3]), maskedSuffix: "gate", secretFingerprint: credentialFingerprint } });
     await db.gitConnection.create({
       data: {
@@ -317,6 +339,12 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
       accountAccessVersion: requesterActor.accountAccessVersion,
       membershipId: requesterMembership.id,
       membershipCreatedAt: requesterMembership.createdAt,
+    };
+    const finalFenceRequesterEvidence = {
+      id: finalFenceRequesterId,
+      accountAccessVersion: 1,
+      membershipId: finalFenceRequesterMembership.id,
+      membershipCreatedAt: finalFenceRequesterMembership.createdAt,
     };
     const createRun = async (
       runId: string,
@@ -416,6 +444,209 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
         throw error;
       }
     };
+
+    const { executeAccountAccess, previewAccountAccess } = await import("../src/lib/account-access-service");
+    const seededAdmin = await db.appUser.findUniqueOrThrow({ where: { id: seededAdminId }, select: { accountAccessVersion: true } });
+    const finalFenceRunId = randomUUID();
+    await createRun(finalFenceRunId, randomUUID(), "database-current", finalFenceRequesterEvidence, false);
+    const finalFenceDisablePreview = await previewAccountAccess({
+      adminUserId: seededAdminId,
+      adminAccountAccessVersion: seededAdmin.accountAccessVersion,
+      userId: finalFenceRequesterId,
+      action: "disable",
+      reason: "manual runtime final fence rejection",
+      expectedVersion: 1,
+    }, db);
+    await executeAccountAccess({
+      adminUserId: seededAdminId,
+      adminAccountAccessVersion: seededAdmin.accountAccessVersion,
+      userId: finalFenceRequesterId,
+      action: "disable",
+      reason: "manual runtime final fence rejection",
+      expectedVersion: finalFenceDisablePreview.current.accountAccessVersion,
+      expectedImpactFingerprint: finalFenceDisablePreview.impactFingerprint,
+      requestKey: `manual fence disable ${suffix}`,
+      requestFingerprint: finalFenceDisablePreview.requestFingerprint,
+      previewId: finalFenceDisablePreview.previewId,
+      previewIssuedAt: finalFenceDisablePreview.previewIssuedAt,
+      previewExpiresAt: finalFenceDisablePreview.previewExpiresAt,
+      confirmation: true,
+      confirmationUsername: `manual_runtime_final_fence_${suffix}`,
+    }, db);
+    await client.query("BEGIN");
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+            SET "status" = 'failed', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+                "failureCode" = 'PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED', "completedAt" = clock_timestamp()
+          WHERE "id" = $1::uuid`,
+        [finalFenceRunId],
+      );
+      await insertAudit({
+        runId: finalFenceRunId,
+        action: "failed",
+        statusBefore: "running",
+        statusAfter: "failed",
+        dispatchState: "acknowledged",
+        actorId: null,
+        commitSha: null,
+        manifestFingerprint: null,
+        reason: "manual_sync_final_admission_rejected",
+      });
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+    assert.deepEqual(
+      await db.projectGitRepositoryManualRunAudit.findMany({
+        where: { runId: finalFenceRunId, action: "failed" },
+        select: { actorId: true, reason: true },
+      }),
+      [{ actorId: null, reason: "manual_sync_final_admission_rejected" }],
+    );
+    await client.query("BEGIN");
+    let finalFenceReplayError: unknown;
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await insertAudit({
+        runId: finalFenceRunId,
+        action: "failed",
+        statusBefore: "running",
+        statusAfter: "failed",
+        dispatchState: "acknowledged",
+        actorId: null,
+        commitSha: null,
+        manifestFingerprint: null,
+        reason: "manual_sync_final_admission_rejected",
+      });
+    } catch (error) {
+      finalFenceReplayError = error;
+    } finally {
+      await client.query("ROLLBACK");
+    }
+    assert.match(String(finalFenceReplayError), /ProjectGitRepositoryManualRunAudit_system_final_fence_key/u);
+
+    const malformedFinalFenceRunId = randomUUID();
+    await createRun(malformedFinalFenceRunId, randomUUID(), "database-current", defaultRequester, false);
+    await client.query("BEGIN");
+    let malformedFinalFenceError: unknown;
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+            SET "status" = 'failed', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+                "failureCode" = 'PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED', "completedAt" = clock_timestamp()
+          WHERE "id" = $1::uuid`,
+        [malformedFinalFenceRunId],
+      );
+      await insertAudit({
+        runId: malformedFinalFenceRunId,
+        action: "failed",
+        statusBefore: "queued",
+        statusAfter: "failed",
+        dispatchState: "acknowledged",
+        actorId: null,
+        commitSha: null,
+        manifestFingerprint: null,
+        reason: "manual_sync_final_admission_rejected",
+      });
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    } catch (error) {
+      malformedFinalFenceError = error;
+    } finally {
+      await client.query("ROLLBACK");
+    }
+    assert.match(String(malformedFinalFenceError), /PROJECT_GIT_MANUAL_FINAL_FENCE_EVIDENCE_STILL_VALID/u);
+    await client.query("BEGIN");
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+            SET "status" = 'failed', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+                "failureCode" = 'MANUAL_RUNTIME_MALFORMED_FENCE_CLEANUP', "completedAt" = clock_timestamp()
+          WHERE "id" = $1::uuid`,
+        [malformedFinalFenceRunId],
+      );
+      await insertAudit({
+        runId: malformedFinalFenceRunId,
+        action: "failed",
+        statusBefore: "running",
+        statusAfter: "failed",
+        dispatchState: "acknowledged",
+        actorId: connectionOwnerId,
+        commitSha: null,
+        manifestFingerprint: null,
+        reason: "manual_runtime_malformed_fence_cleanup",
+      });
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+
+    const dispatchedForgeryRunId = randomUUID();
+    await createRun(dispatchedForgeryRunId, randomUUID(), "database-current", defaultRequester, true);
+    await client.query("BEGIN");
+    let dispatchedForgeryError: unknown;
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await client.query(`UPDATE "Project" SET "archivedAt" = clock_timestamp() WHERE "id" = $1::uuid`, [projectId]);
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+            SET "status" = 'failed', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+                "failureCode" = 'PROJECT_GIT_MANUAL_FINAL_ADMISSION_REJECTED', "completedAt" = clock_timestamp()
+          WHERE "id" = $1::uuid`,
+        [dispatchedForgeryRunId],
+      );
+      await insertAudit({
+        runId: dispatchedForgeryRunId,
+        action: "failed",
+        statusBefore: "running",
+        statusAfter: "failed",
+        dispatchState: "acknowledged",
+        actorId: null,
+        commitSha: null,
+        manifestFingerprint: null,
+        reason: "manual_sync_final_admission_rejected",
+      });
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+    } catch (error) {
+      dispatchedForgeryError = error;
+    } finally {
+      await client.query("ROLLBACK");
+    }
+    assert.match(String(dispatchedForgeryError), /PROJECT_GIT_MANUAL_FINAL_FENCE_PRE_DISPATCH_REQUIRED/u);
+    await client.query("BEGIN");
+    try {
+      await client.query(`SELECT set_config('ai.project_git_manual_runtime_audit', '1', true)`);
+      await client.query(
+        `UPDATE "ProjectGitRepositoryManualRun"
+            SET "status" = 'failed', "stage" = 'terminal', "dispatchState" = 'acknowledged',
+                "failureCode" = 'MANUAL_RUNTIME_DISPATCHED_FORGERY_CLEANUP', "completedAt" = clock_timestamp()
+          WHERE "id" = $1::uuid`,
+        [dispatchedForgeryRunId],
+      );
+      await insertAudit({
+        runId: dispatchedForgeryRunId,
+        action: "failed",
+        statusBefore: "running",
+        statusAfter: "failed",
+        dispatchState: "acknowledged",
+        actorId: defaultRequester.id,
+        commitSha: null,
+        manifestFingerprint: null,
+        reason: "manual_runtime_dispatched_forgery_cleanup",
+      });
+      await client.query("SET CONSTRAINTS ALL IMMEDIATE");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
 
     const runId = randomUUID();
     const clientRequestKey = randomUUID();
@@ -755,8 +986,6 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     const requesterRunKey = randomUUID();
     const requesterSourceCountBefore = await db.projectSource.count({ where: { projectId } });
     await createRun(requesterRunId, requesterRunKey, "database-current", requesterEvidence, false);
-    const { executeAccountAccess, previewAccountAccess } = await import("../src/lib/account-access-service");
-    const seededAdmin = await db.appUser.findUniqueOrThrow({ where: { id: seededAdminId }, select: { accountAccessVersion: true } });
     const requesterDisableReason = "manual runtime requester epoch test";
     const requesterDisablePreview = await previewAccountAccess({
       adminUserId: seededAdminId,

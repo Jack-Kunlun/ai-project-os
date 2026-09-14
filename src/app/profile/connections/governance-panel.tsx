@@ -53,6 +53,7 @@ type GovernedConnection = Readonly<{
   status: string;
   updatedAt: string;
   authKind: string;
+  recoveryState: "ready" | "credentialRebindRequired" | "rebuildRequired";
 }>;
 
 type ConnectionGovernancePanelProps = Readonly<{
@@ -203,7 +204,14 @@ function defaultAction(kind: PersonalGovernanceKind, status: string): PersonalGo
   return kind === "git" ? "disable" : "disable";
 }
 
-function actionIsAvailable(kind: PersonalGovernanceKind, action: PersonalGovernanceAction, authKind: string): boolean {
+function actionIsAvailable(
+  kind: PersonalGovernanceKind,
+  action: PersonalGovernanceAction,
+  authKind: string,
+  recoveryState: GovernedConnection["recoveryState"],
+): boolean {
+  if (recoveryState === "rebuildRequired") return false;
+  if (recoveryState === "credentialRebindRequired") return action === "rotateCredential" && authKind !== "none";
   if (action === "retest" || action === "rediscover") return kind === "git" ? action === "retest" : action === "rediscover";
   if (action === "retrust") return true;
   if (action === "rotateCredential") return authKind !== "none";
@@ -279,8 +287,7 @@ function ImpactRow({ label, item }: Readonly<{ label: string; item: Record<strin
 
 export function ConnectionGovernancePanel({ kind, connection, onReload, onRemoved }: ConnectionGovernancePanelProps) {
   const { confirm, dialog } = useAppConfirmDialog();
-  const actions = useMemo(() => Object.entries(actionLabels[kind]).filter(([action]) => actionIsAvailable(kind, action as PersonalGovernanceAction, connection.authKind)) as Array<[PersonalGovernanceAction, string]>, [connection.authKind, kind]);
-  const [action, setAction] = useState<PersonalGovernanceAction>(() => defaultAction(kind, connection.status));
+  const [selectedAction, setSelectedAction] = useState<PersonalGovernanceAction>(() => defaultAction(kind, connection.status));
   const [reason, setReason] = useState("");
   const [secret, setSecret] = useState("");
   const [confirmationName, setConfirmationName] = useState("");
@@ -289,9 +296,11 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
   const [preview, setPreview] = useState<GovernancePreview | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
   const [message, setMessage] = useState<ConnectionMessage | null>(null);
+  const actions = useMemo(() => Object.entries(actionLabels[kind]).filter(([value]) => actionIsAvailable(kind, value as PersonalGovernanceAction, connection.authKind, connection.recoveryState)) as Array<[PersonalGovernanceAction, string]>, [connection.authKind, connection.recoveryState, kind]);
+  const action = actions.some(([value]) => value === selectedAction) ? selectedAction : actions[0]?.[0] ?? selectedAction;
 
   function chooseAction(next: PersonalGovernanceAction) {
-    setAction(next);
+    setSelectedAction(next);
     setPreview(null);
     setMessage(null);
     if (next !== "rotateCredential") setSecret("");
@@ -431,7 +440,9 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
         </div>
         <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">scope personal · owner pays</span>
       </div>
-      <form onSubmit={createPreview} className="mt-4 grid gap-3">
+      {connection.recoveryState === "rebuildRequired" ? <p role="status" className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">账号恢复后，该无凭据连接仅保留历史配置，不能补凭据或复活。请使用新名称新建连接并重新验证/发现、重新配置项目委托及必要审核；旧项目授权不会自动恢复。</p> : null}
+      {connection.recoveryState === "credentialRebindRequired" ? <p role="status" className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">账号恢复后，该连接仅可填写新凭据并执行轮换重绑；其他治理动作、测试、发现和重信任都不能作为恢复通道。</p> : null}
+      {actions.length > 0 ? <form onSubmit={createPreview} className="mt-4 grid gap-3">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-semibold text-slate-700">变更类型<select className={connectionFieldClass} value={action} onChange={(event) => chooseAction(event.target.value as PersonalGovernanceAction)} disabled={pending !== null || preview !== null}>{actions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span className="mt-1 block text-xs font-normal leading-5 text-slate-500">{actionDescription(kind, action)}</span></label>
           <label className="block text-xs font-semibold text-slate-700">变更原因<input className={connectionFieldClass} value={reason} onChange={(event) => { setReason(event.target.value); setPreview(null); }} maxLength={500} placeholder="例如：凭据轮换或项目范围调整" required disabled={pending !== null || preview !== null} /></label>
@@ -440,7 +451,7 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
         {action === "delete" ? <label className="block text-xs font-semibold text-slate-700">删除预览确认名称<input className={connectionFieldClass} value={confirmationName} onChange={(event) => { setConfirmationName(event.target.value); setPreview(null); }} maxLength={80} placeholder={connection.name} required disabled={pending !== null || preview !== null} /></label> : null}
         {kind === "git" && action === "retest" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs font-semibold text-slate-700">只读仓库路径<input className={connectionFieldClass} value={repositoryPath} onChange={(event) => { setRepositoryPath(event.target.value); setPreview(null); }} maxLength={768} placeholder="owner/repository" disabled={pending !== null || preview !== null} /></label><label className="block text-xs font-semibold text-slate-700">分支 / ref<input className={connectionFieldClass} value={trackedRef} onChange={(event) => { setTrackedRef(event.target.value); setPreview(null); }} maxLength={255} placeholder="main" disabled={pending !== null || preview !== null} /></label></div> : null}
         {preview === null ? <button type="submit" disabled={pending !== null} className={`${connectionButtonClass} min-h-11 w-fit bg-indigo-600 px-4 text-white hover:bg-indigo-500`}>{pending === "preview" ? "生成预览中…" : `生成${actionLabel}预览`}</button> : <div className="flex flex-wrap gap-2"><button type="button" onClick={() => { setPreview(null); setMessage(null); }} disabled={pending !== null} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-white`}>重新生成预览</button>{preview.canExecute ? <button type="button" onClick={() => void executePreview()} disabled={pending !== null} className={`${connectionButtonClass} bg-slate-950 px-4 text-white hover:bg-indigo-700`}>{pending === "confirm" ? "等待确认…" : pending === "execute" ? "执行中…" : `继续${actionLabel}`}</button> : null}</div>}
-      </form>
+      </form> : null}
       {preview !== null ? <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4" aria-live="polite"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Preview issued</p><p className="mt-1 text-sm font-semibold text-slate-900">{actionLabel} · 配置版本 {preview.connection.configurationVersion}</p><p className="mt-1 text-xs text-slate-500">作用域：{preview.scope} · 费用承担者：{preview.owner.feePayer === "connection_owner" ? "连接所有者" : "未定义"}</p><p className="mt-1 text-xs text-slate-500">签发于 {formatConnectionDate(preview.issuedAt)}，有效至 {formatConnectionDate(preview.expiresAt)}</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${preview.canExecute ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{preview.canExecute ? "可在确认后执行" : "阻断，不能执行"}</span></div><p className="mt-3 text-xs leading-5 text-slate-600">费用承担者为连接所有者。第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p>{totals !== null ? <ImpactDetails kind={kind} impact={preview.impact} /> : null}{preview.blockers.length > 0 ? <div className="mt-4 rounded-2xl bg-rose-50 p-4"><p className="text-xs font-semibold text-rose-800">安全阻断</p><ul className="mt-2 space-y-1 text-xs leading-5 text-rose-700">{preview.blockers.map((blocker) => <li key={blocker}>· {blockerText(blocker)}</li>)}</ul></div> : null}{action === "retest" || action === "rediscover" || action === "retrust" ? <p className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{unavailableActionNote(kind)}</p> : null}</div> : null}
       {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-3 text-xs leading-5 ${message.tone === "error" ? "text-rose-700" : message.tone === "success" ? "text-emerald-700" : "text-slate-600"}`}>{message.text}</p> : null}
     </section>

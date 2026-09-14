@@ -134,7 +134,7 @@ test("AI workbench spacing and project management keep AI usage visible", async 
   assert.match(governance, /当前 AI 路由/u);
   assert.match(governance, /读取账户余额/u);
   assert.doesNotMatch(governance, /<summary[^>]*>[^<]*模型用量/u);
-  assert.match(governance, /<details id="task-runs" open/u);
+  assert.match(governance, /<details id="task-runs"[^>]*open/u);
   assert.doesNotMatch(governance, /route-history|模型路由变更|governance\/routes/u);
   assert.doesNotMatch(governance, /待审核候选/u);
 });

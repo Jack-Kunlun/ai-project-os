@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { AdminShell } from "@/components/admin-shell";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
+import { safeResponseError } from "@/lib/safe-error-presentation";
 import { PlatformDefaultRoutesPanel } from "./platform-default-routes-client";
 import { PlatformGrantOfferPolicyPanel } from "@/app/admin/models/platform-grant-offer-policy-client";
 import { PlatformCreditGovernancePanel } from "@/app/admin/models/platform-credit-governance-client";
@@ -63,12 +65,7 @@ type ProbeBudgetSummary = Readonly<{
 }>;
 
 async function readError(response: Response, fallback: string): Promise<string> {
-  try {
-    const payload = await response.json() as { error?: { message?: string } };
-    return payload.error?.message ?? fallback;
-  } catch {
-    return fallback;
-  }
+  return (await safeResponseError(response, fallback)).message;
 }
 
 function dateLabel(value: string | null): string {
@@ -76,6 +73,18 @@ function dateLabel(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+const probeBudgetStatusLabel: Record<ProbeBudgetSummary["status"], string> = {
+  active: "已启用",
+  scheduled: "待生效",
+  expired: "已过期",
+};
+
+function probeBudgetEvidence(budget: ProbeBudgetSummary | null, loading: boolean): string {
+  if (loading) return "正在读取预算状态";
+  if (budget === null) return "尚未启用预算；暂无探测预算状态证据";
+  return `预算状态证据：版本 ${budget.version} · ${probeBudgetStatusLabel[budget.status]} · 有效期 ${dateLabel(budget.startsAt)} — ${dateLabel(budget.expiresAt)}`;
 }
 
 function describeProviderCheck(check: ProviderCheck): string {
@@ -259,6 +268,7 @@ function PlatformProviderProbeBudgetPanel() {
         </div>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{loading ? "读取中…" : budget === null ? "未启用" : budget.status === "active" ? "已启用" : budget.status === "scheduled" ? "待生效" : "已过期"}</span>
       </div>
+      <div className="mt-6"><ScopeEvidenceCard title="平台探测预算边界" evidence={{ scope: "平台 · 供应商连通性探测", owner: "平台管理员", payer: "平台探测预算", affectedProjects: "项目不适用 · 仅平台供应商连通性探测", latestSuccess: probeBudgetEvidence(budget, loading) }} /></div>
       {budget ? <dl className="mt-6 grid gap-4 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-4"><div><dt className="text-slate-400">版本</dt><dd className="mt-1 font-medium text-slate-700">{budget.version}</dd></div><div><dt className="text-slate-400">可用单位</dt><dd className="mt-1 font-medium text-slate-700">{budget.availableUnits} / {budget.unitLimit}</dd></div><div><dt className="text-slate-400">已结算 / 待核对</dt><dd className="mt-1 font-medium text-slate-700">{budget.settledUnits} / {budget.heldUnits}</dd></div><div><dt className="text-slate-400">有效期</dt><dd className="mt-1 font-medium text-slate-700">{dateLabel(budget.startsAt)} — {dateLabel(budget.expiresAt)}</dd></div></dl> : null}
       <form onSubmit={activate} className="mt-6 grid gap-4 border-t border-slate-100 pt-6 sm:grid-cols-4">
         <label className="text-xs font-medium text-slate-600">单位上限<input type="number" min={1} max={10_000} value={unitLimit} onChange={(event) => setUnitLimit(event.target.value)} required className="edit-field" /></label>
@@ -515,8 +525,9 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved }: { provider: P
         <div className="flex gap-2"><button type="button" onClick={() => setEditing((value) => !value)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">{editing ? "收起" : "编辑"}</button><button type="button" onClick={() => void testConnection()} disabled={testing || provider.status === "disabled"} className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">{testing ? "测试中…" : "测试连接"}</button></div>
       </div>
       <dl className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-400">生成模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultGenerationModelId ?? "未配置"}</dd></div><div><dt className="text-slate-400">图片识别</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultVisionModelId ?? "未配置"}</dd></div><div><dt className="text-slate-400">向量模型</dt><dd className="mt-1 font-medium text-slate-700">{provider.defaultEmbeddingModelId ? `${provider.defaultEmbeddingModelId} · ${provider.embeddingDimensions} 维` : "未配置"}</dd></div></dl>
+      <div className="mt-5"><ScopeEvidenceCard title="供应商配置边界" evidence={{ scope: "平台供应商连接", owner: "平台管理员", payer: "使用平台默认路由时由当前发起人扣减平台额度", affectedProjects: provider._count.platformDefaultAiRoutes > 0 ? `项目影响需经活动默认路由影响预览核实；当前有 ${provider._count.platformDefaultAiRoutes} 条活动默认路由引用` : "尚无活动默认路由引用；暂无项目影响证据", latestSuccess: provider.lastTestedAt ? `最近连接测试：${dateLabel(provider.lastTestedAt)}` : "尚未完成连接测试" }} /></div>
       {editing ? <form onSubmit={save} className="mt-5 grid gap-4 border-t border-slate-100 pt-5 sm:grid-cols-2"><EditField label="连接名称"><input value={name} onChange={(event) => setName(event.target.value)} required className="edit-field" /></EditField><EditField label="生成模型（可选）"><input value={generationModelId} onChange={(event) => setGenerationModelId(event.target.value)} className="edit-field" /></EditField>{catalog?.supportsVision ? <EditField label="图片识别模型（可选）"><input value={visionModelId} onChange={(event) => setVisionModelId(event.target.value)} className="edit-field" /></EditField> : null}{catalog?.supportsEmbeddings ? <><EditField label="向量模型（留空即关闭）"><input value={embeddingModelId} onChange={(event) => setEmbeddingModelId(event.target.value)} className="edit-field" /></EditField><EditField label="向量维度"><input type="number" value={embeddingDimensions} onChange={(event) => setEmbeddingDimensions(event.target.value)} disabled={!embeddingModelId} className="edit-field" /></EditField></> : null}<EditField label="替换 API Key（可选）"><input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="new-password" className="edit-field" /></EditField><div className="flex items-end gap-2"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">保存变更</button><button type="button" onClick={() => void toggleEnabled()} disabled={pending || disableBlocked} title={disableBlocked ? `无法停用：${disableBlockReasons}仍在使用该连接` : undefined} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-600 disabled:opacity-40">{provider.status === "disabled" ? "重新启用" : "停用连接"}</button></div>{disableBlocked ? <p className="text-xs leading-5 text-amber-700 sm:col-span-2">无法停用：{disableBlockReasons}仍在使用该连接。请先移除项目路由或退役活动默认路由。</p> : null}<style jsx>{`.edit-field{margin-top:.4rem;width:100%;border-radius:.75rem;border:1px solid #e2e8f0;padding:.7rem .85rem;font-size:.8rem;outline:none}.edit-field:focus{border-color:#818cf8;box-shadow:0 0 0 2px #e0e7ff}`}</style></form> : null}
-      {provider.status === "disabled" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3"><p className="text-xs leading-5 text-rose-700">永久删除仅适用于没有项目路由或历史审计引用的连接，并会同时删除加密凭据。</p><button type="button" onClick={() => void removeConnection()} disabled={pending} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">永久删除</button></div> : null}
+      {provider.status === "disabled" ? <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3"><p className="text-xs leading-5 text-rose-700">永久删除仅适用于没有活动平台默认路由或历史审计引用的连接，并会同时删除加密凭据。</p><button type="button" onClick={() => void removeConnection()} disabled={pending} className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">永久删除</button></div> : null}
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}
       {provider.lastErrorCode ? <p className="mt-2 text-xs text-rose-600">安全错误码：{provider.lastErrorCode}</p> : null}
     </article>{dialog}</>

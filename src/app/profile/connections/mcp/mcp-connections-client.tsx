@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
+import { safeResponseError } from "@/lib/safe-error-presentation";
 import {
   connectionButtonClass,
   connectionErrorText,
   connectionFieldClass,
+  ConnectionRequestError,
   type ConnectionMessage,
   formatConnectionDate,
-  readConnectionError,
 } from "../connection-ui";
 import { ConnectionGovernancePanel } from "../governance-panel";
 import {
@@ -61,6 +63,11 @@ const ownerDelegationReasonLabels: Record<string, string> = {
   NOT_ACTIVE: "委托尚未生效",
 };
 
+async function readSafeConnectionError(response: Response, fallback: string): Promise<ConnectionRequestError> {
+  const safe = await safeResponseError(response, fallback);
+  return new ConnectionRequestError(safe.message, safe.code ?? "CONNECTION_REQUEST_FAILED", response.status);
+}
+
 export function McpConnectionsClient() {
   const [connections, setConnections] = useState<McpConnection[]>([]);
   const [ownerDelegations, setOwnerDelegations] = useState<readonly OwnerDelegation[]>([]);
@@ -74,7 +81,7 @@ export function McpConnectionsClient() {
     setLoading(true);
     try {
       const response = await fetch("/api/me/mcp-connections", { cache: "no-store" });
-      if (!response.ok) throw await readConnectionError(response, "个人 MCP 连接加载失败");
+      if (!response.ok) throw await readSafeConnectionError(response, "个人 MCP 连接加载失败");
       const payload = await response.json() as { connections: McpConnection[] };
       setConnections(payload.connections);
       setLoadError(null);
@@ -89,7 +96,7 @@ export function McpConnectionsClient() {
     setOwnerDelegationsLoading(true);
     try {
       const response = await fetch("/api/me/mcp-delegations", { cache: "no-store" });
-      if (!response.ok) throw await readConnectionError(response, "MCP 委托安全记录加载失败");
+      if (!response.ok) throw await readSafeConnectionError(response, "MCP 委托安全记录加载失败");
       const payload = await response.json() as OwnerDelegationPayload;
       setOwnerDelegations(payload.delegations);
       setOwnerDelegationsError(null);
@@ -166,7 +173,7 @@ function McpOwnerDelegationCard({ delegation, onReload, onMessage }: { delegatio
     setPending("owner-confirmation");
     try {
       const response = await fetch(`/api/projects/${delegation.projectId}/mcp-connection-delegations/${delegation.id}/owner-confirmation`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedVersion: delegation.version, acknowledgeCredentialUse: true }) });
-      if (!response.ok) throw await readConnectionError(response, "连接所有者确认失败");
+      if (!response.ok) throw await readSafeConnectionError(response, "连接所有者确认失败");
       onMessage({ tone: "success", text: "MCP 连接所有者确认已记录。" });
       await onReload();
     } catch (error) {
@@ -184,7 +191,7 @@ function McpOwnerDelegationCard({ delegation, onReload, onMessage }: { delegatio
     setPending(action);
     try {
       const response = await fetch(`/api/projects/${delegation.projectId}/mcp-connection-delegations/${delegation.id}/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedVersion: delegation.version, reason: result.value.trim() }) });
-      if (!response.ok) throw await readConnectionError(response, action === "rejection" ? "拒绝 MCP 委托失败" : "撤销 MCP 委托失败");
+      if (!response.ok) throw await readSafeConnectionError(response, action === "rejection" ? "拒绝 MCP 委托失败" : "撤销 MCP 委托失败");
       onMessage({ tone: "success", text: action === "rejection" ? "MCP 委托已拒绝。" : "MCP 委托已撤销。" });
       await onReload();
     } catch (error) {
@@ -209,7 +216,7 @@ function McpCreateForm({ onCreated }: { onCreated: (connection: McpConnection) =
     event.preventDefault(); setPending(true); setMessage(null);
     try {
       const response = await fetch("/api/me/mcp-connections", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: draft.name, endpointUrl: draft.endpointUrl, authKind: draft.authKind, bearerToken: draft.authKind === "bearer" ? draft.bearerToken : null, allowPrivateNetwork: draft.allowPrivateNetwork }) });
-      if (!response.ok) throw await readConnectionError(response, "MCP 连接保存失败");
+      if (!response.ok) throw await readSafeConnectionError(response, "MCP 连接保存失败");
       const connection = (await response.json() as { connection: McpConnection }).connection;
       onCreated(connection); setDraft(createDefaultMcpDraft()); setMessage({ tone: "success", text: "已加密保存。Token 输入框已清空；后续变更请在连接卡片中通过安全治理预览管理。保存时已执行受限 DNS/地址安全解析；未发起 MCP 协议请求或向远端发送凭据，MCP 连通性仍未验证。" });
     } catch (error) { setMessage({ tone: "error", text: connectionErrorText(error, "MCP 连接保存失败") }); }
@@ -221,7 +228,7 @@ function McpCreateForm({ onCreated }: { onCreated: (connection: McpConnection) =
 
 function McpConnectionCard({ connection, onRemoved, onReload }: { connection: McpConnection; onRemoved: () => void; onReload: () => Promise<void> }) {
   const activeTools = connection.toolDefinitions.filter((tool) => isActiveMcpAttestation(tool)).length;
-  return <article className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5"><div className="flex min-w-0 flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><h3 className="max-w-full break-words text-base font-semibold text-slate-900">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{mcpStatusLabels[connection.status]}</span></div><p className="mt-2 break-all text-xs text-slate-500">{connection.endpointUrl}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p>{connection.authKind === "none" ? "无凭据" : "Bearer（已加密）"}</p><p className="mt-1">更新于 {formatConnectionDate(connection.updatedAt)}</p></div></div>{connection.lastErrorCode ? <p role="status" className="mt-3 break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">最近错误：{connection.lastErrorCode}。请通过安全治理预览管理后续变更；治理动作不会发起 MCP 协议请求或向远端发送凭据，MCP 连通性仍未验证。</p> : null}<dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><dt className="text-slate-400">协议</dt><dd className="mt-1 font-medium">{connection.protocolVersion ?? "待发现"}</dd></div><div><dt className="text-slate-400">工具目录</dt><dd className="mt-1 font-medium">{connection.toolDefinitions.length} 个，当前 V2 审核 {activeTools} 个</dd></div><div><dt className="text-slate-400">最近发现</dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastDiscoveredAt)}</dd></div></dl>{connection.toolDefinitions.length > 0 ? <details className="mt-4 rounded-xl bg-white p-4"><summary className="cursor-pointer text-xs font-semibold text-slate-700">查看工具安全摘要（只读展示）</summary><div className="mt-3 space-y-2">{connection.toolDefinitions.map((tool) => { const attested = isActiveMcpAttestation(tool); return <div key={tool.id} className="min-w-0 rounded-xl border border-slate-100 px-3 py-3 text-xs"><div className="flex min-w-0 flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="break-words font-semibold text-slate-800">{tool.title || tool.name}</p><p className="mt-1 break-all font-mono text-[10px] text-slate-400">{tool.name}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${attested ? "bg-emerald-50 text-emerald-700" : tool.remoteReadOnlyHint ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>{attested ? "当前 V2 已审核" : tool.remoteReadOnlyHint ? "仅远端声明" : "声明不足"}</span></div>{tool.description ? <p className="mt-2 break-words leading-5 text-slate-500">{tool.description}</p> : null}<p className="mt-2 text-[12px] leading-5 text-slate-400">远端声明不具备授权资格；管理员审核与项目授权由平台流程负责。</p></div>; })}</div></details> : null}<p className="mt-3 text-xs leading-5 text-slate-500">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p><ConnectionGovernancePanel key={`${connection.id}:${connection.updatedAt}`} kind="mcp" connection={{ id: connection.id, name: connection.name, status: connection.status, updatedAt: connection.updatedAt, authKind: connection.authKind, recoveryState: connection.recoveryState }} onReload={onReload} onRemoved={onRemoved} />{connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">连接已停用；重新启用后必须重新发现。治理动作不会发起 MCP 协议请求或向远端发送凭据，MCP 连通性仍未验证。</p> : null}</article>;
+  return <article className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5"><div className="flex min-w-0 flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><h3 className="max-w-full break-words text-base font-semibold text-slate-900">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{mcpStatusLabels[connection.status]}</span></div><p className="mt-2 break-all text-xs text-slate-500">{connection.endpointUrl}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p>{connection.authKind === "none" ? "无凭据" : "Bearer（已加密）"}</p><p className="mt-1">更新于 {formatConnectionDate(connection.updatedAt)}</p></div></div>{connection.lastErrorCode ? <p role="status" className="mt-3 break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">最近错误：{connection.lastErrorCode}。请通过安全治理预览管理后续变更；治理动作不会发起 MCP 协议请求或向远端发送凭据，MCP 连通性仍未验证。</p> : null}<dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><dt className="text-slate-400">协议</dt><dd className="mt-1 font-medium">{connection.protocolVersion ?? "待发现"}</dd></div><div><dt className="text-slate-400">工具目录</dt><dd className="mt-1 font-medium">{connection.toolDefinitions.length} 个，当前 V2 审核 {activeTools} 个</dd></div><div><dt className="text-slate-400">最近发现</dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastDiscoveredAt)}</dd></div></dl><div className="mt-4"><ScopeEvidenceCard title="个人 MCP 连接边界" evidence={{ scope: "个人连接", owner: "当前账户", payer: "第三方费用由连接所有者承担或按其与服务商约定", affectedProjects: "尚未取得项目委托证据；仅按项目权限与明确委托判断，不展示项目标识或数量", latestSuccess: connection.lastDiscoveredAt ? `最近发现（不是调用成功）：${formatConnectionDate(connection.lastDiscoveredAt)}` : "尚未完成工具发现（不是调用成功）" }} /></div>{connection.toolDefinitions.length > 0 ? <details className="mt-4 rounded-xl bg-white p-4"><summary className="cursor-pointer text-xs font-semibold text-slate-700">查看工具安全摘要（只读展示）</summary><div className="mt-3 space-y-2">{connection.toolDefinitions.map((tool) => { const attested = isActiveMcpAttestation(tool); return <div key={tool.id} className="min-w-0 rounded-xl border border-slate-100 px-3 py-3 text-xs"><div className="flex min-w-0 flex-wrap items-start justify-between gap-2"><div className="min-w-0"><p className="break-words font-semibold text-slate-800">{tool.title || tool.name}</p><p className="mt-1 break-all font-mono text-[10px] text-slate-400">{tool.name}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold ${attested ? "bg-emerald-50 text-emerald-700" : tool.remoteReadOnlyHint ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}>{attested ? "当前 V2 已审核" : tool.remoteReadOnlyHint ? "仅远端声明" : "声明不足"}</span></div>{tool.description ? <p className="mt-2 break-words leading-5 text-slate-500">{tool.description}</p> : null}<p className="mt-2 text-[12px] leading-5 text-slate-400">远端声明不具备授权资格；管理员审核与项目授权由平台流程负责。</p></div>; })}</div></details> : null}<p className="mt-3 text-xs leading-5 text-slate-500">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p><ConnectionGovernancePanel key={`${connection.id}:${connection.updatedAt}`} kind="mcp" connection={{ id: connection.id, name: connection.name, status: connection.status, updatedAt: connection.updatedAt, authKind: connection.authKind, recoveryState: connection.recoveryState }} onReload={onReload} onRemoved={onRemoved} />{connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">连接已停用；重新启用后必须重新发现。治理动作不会发起 MCP 协议请求或向远端发送凭据，MCP 连通性仍未验证。</p> : null}</article>;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

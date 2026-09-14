@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useCallback, useDeferredValue, useEffect, useState } from "react";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { CursorPagination } from "@/components/list-pagination";
+import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
+import { safeResponseError } from "@/lib/safe-error-presentation";
 
 type Summary = {
   project: { id: string; name: string };
@@ -75,7 +77,7 @@ type ProviderBalance = {
 type Usage = {
   period: { days: 7 | 30 | 90; start: string; end: string };
   totals: UsageBreakdown;
-  routes: CurrentRoute[];
+  routes?: CurrentRoute[];
   byProvider: Array<UsageBreakdown & { providerName: string; providerKind: string; modelId: string; source: "current" | "legacy" }>;
   byOperation: Array<UsageBreakdown & { operation: string }>;
   pricing: { available: false; reason: string };
@@ -124,9 +126,8 @@ const operationLabels: Record<string, string> = {
 };
 
 async function readJson<T>(response: Response): Promise<T> {
-  const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-  if (!response.ok) throw new Error(payload?.error?.message ?? `请求失败（${response.status}）`);
-  return payload as T;
+  if (!response.ok) throw new Error((await safeResponseError(response, `请求失败（${response.status}）`)).message);
+  return await response.json() as T;
 }
 
 function formatDate(value: string | null): string {
@@ -148,15 +149,19 @@ function statusTone(status: string): string {
 
 export function ProjectGovernanceClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const navigation = useMemo(() => parseProjectPageState("governance", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
-  const [operationCursor, setOperationCursor] = useState<string | null>(null);
+  const [operationCursor, setOperationCursor] = useState<string | null>(navigation.cursor);
   const [operationNextCursor, setOperationNextCursor] = useState<string | null>(null);
   const [operationHistory, setOperationHistory] = useState<Array<string | null>>([]);
-  const [operationSearch, setOperationSearch] = useState("");
+  const [operationSearch, setOperationSearch] = useState(navigation.search ?? "");
   const deferredOperationSearch = useDeferredValue(operationSearch);
-  const [operationKind, setOperationKind] = useState("all");
-  const [operationStatus, setOperationStatus] = useState("all");
+  const [operationKind, setOperationKind] = useState(navigation.kind ?? "all");
+  const [operationStatus, setOperationStatus] = useState(navigation.status ?? "all");
   const [operationsLoading, setOperationsLoading] = useState(true);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [usageDays, setUsageDays] = useState<7 | 30 | 90>(30);
@@ -168,6 +173,19 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  const replaceOperationQuery = useCallback((input: Readonly<{ search?: string; kind?: string; status?: string; cursor?: string | null }>) => {
+    const href = buildProjectHref(projectId, "governance", {
+      search: input.search ?? operationSearch,
+      kind: input.kind ?? operationKind,
+      status: input.status ?? operationStatus,
+      cursor: input.cursor === undefined ? operationCursor : input.cursor,
+      focus: "task-runs",
+      from: navigation.from,
+      returnTo: navigation.returnTo,
+    });
+    router.replace(href === pathname ? pathname : href, { scroll: false });
+  }, [navigation.from, navigation.returnTo, operationCursor, operationKind, operationSearch, operationStatus, pathname, projectId, router]);
 
   const fetchSummary = useCallback(async () => {
     const payload = await readJson<{ summary: Summary }>(await fetch(`/api/projects/${projectId}/governance`, { cache: "no-store" }));
@@ -215,6 +233,16 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
 
   useEffect(() => { const timer = window.setTimeout(() => void fetchOperations().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "任务记录加载失败")), 0); return () => window.clearTimeout(timer); }, [fetchOperations]);
 
+  useEffect(() => {
+    if (navigation.focus !== "task-runs" || operationsLoading || loading || summary === null) return;
+    const timer = window.setTimeout(() => {
+      const target = document.getElementById("task-runs");
+      target?.scrollIntoView({ block: "start" });
+      if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loading, navigation.focus, operationsLoading, summary]);
+
   async function actOnJob(operation: Operation) {
     if (operation.capability.action === null) return;
     const action = operation.capability.action;
@@ -255,7 +283,8 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
 
   const routedProviders = usage === null
     ? []
-    : [...new Map(usage.routes.map((route) => [route.providerConnectionId, route])).values()];
+    : [...new Map((usage.routes ?? []).map((route) => [route.providerConnectionId, route])).values()];
+  const currentRoutes = usage?.routes ?? [];
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
@@ -269,6 +298,8 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
           </div>
           <button type="button" onClick={() => void Promise.all([reload(), fetchOperations()])} disabled={loading || operationsLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button>
         </section>
+
+        {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
 
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}
@@ -294,7 +325,7 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
                 <>
                   <div className="mt-6">
                     <h3 className="text-sm font-semibold text-slate-800">当前 AI 路由</h3>
-                    {usage.routes.length === 0 ? <p className="mt-3 rounded-2xl bg-slate-50 px-4 py-5 text-xs text-slate-500">当前项目尚未配置模型路由。</p> : <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{usage.routes.map((route) => (
+                    {currentRoutes.length === 0 ? <p className="mt-3 rounded-2xl bg-slate-50 px-4 py-5 text-xs text-slate-500">当前用量接口不返回实时路由；请前往 AI 工作台查看路由来源、承担方与就绪状态。</p> : <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{currentRoutes.map((route) => (
                       <article key={`${route.operation}:${route.providerConnectionId}`} className="rounded-2xl border border-slate-200 p-4">
                         <div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-800">{operationLabels[route.operation] ?? route.operation}</p><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${route.providerStatus === "verified" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>{route.providerStatus === "verified" ? "已验证" : route.providerStatus}</span></div>
                         <p className="mt-3 text-sm font-semibold text-slate-700">{route.providerName}</p>
@@ -310,7 +341,7 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
                         <p className="mt-2 text-xs leading-5 text-slate-600">本页的请求数与 Token 来自应用审计；实际扣费由供应商根据当次价格、缓存命中和计费时段结算。读取余额只会使用已保存的供应商凭据查询账户余额，不会发送项目资料。</p>
                       </div>
                       <div className="space-y-3">
-                        {routedProviders.length === 0 ? <p className="text-xs text-slate-500">配置模型路由后，可在这里查看对应供应商的计费入口。</p> : routedProviders.map((provider) => {
+                        {routedProviders.length === 0 ? <p className="text-xs text-slate-500">当前接口未返回可用于余额查询的连接；实际账单请在对应供应商控制台核对。</p> : routedProviders.map((provider) => {
                           const balance = providerBalances[provider.providerConnectionId];
                           return (
                             <article key={provider.providerConnectionId} className="rounded-xl border border-indigo-100 bg-white p-4">
@@ -342,11 +373,11 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
               )}
             </section>
 
-            <details id="task-runs" open className="group mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <details id="task-runs" tabIndex={-1} open className="group mt-8 scroll-mt-44 rounded-3xl border border-slate-200 bg-white shadow-sm outline-none focus:ring-4 focus:ring-indigo-100">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>任务运行记录</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开记录</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
               <div className="border-t border-slate-100 p-6 sm:p-8">
               <SectionHeader eyebrow="Recoverable operations" title="任务异常与人工收口" description="未知结果不会自动重试。只有具备对应不可变证据的任务才显示人工收口动作。" />
-              <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only">搜索任务记录</span><input value={operationSearch} onChange={(event) => { setOperationSearch(event.target.value); setOperationCursor(null); setOperationHistory([]); }} placeholder="搜索执行阶段或错误代码" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only">按任务类型筛选</span><select value={operationKind} onChange={(event) => { setOperationKind(event.target.value); setOperationCursor(null); setOperationHistory([]); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部任务类型</option>{Object.entries(jobLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="sr-only">按任务状态筛选</span><select value={operationStatus} onChange={(event) => { setOperationStatus(event.target.value); setOperationCursor(null); setOperationHistory([]); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部状态</option>{["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"].map((value) => <option key={value} value={value}>{statusLabels[value]}</option>)}</select></label></div>
+              <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only">搜索任务记录</span><input value={operationSearch} onChange={(event) => { const value = event.target.value; setOperationSearch(value); setOperationCursor(null); setOperationHistory([]); replaceOperationQuery({ search: value, cursor: null }); }} placeholder="搜索执行阶段或错误代码" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only">按任务类型筛选</span><select value={operationKind} onChange={(event) => { const value = event.target.value; setOperationKind(value); setOperationCursor(null); setOperationHistory([]); replaceOperationQuery({ kind: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部任务类型</option>{Object.entries(jobLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="sr-only">按任务状态筛选</span><select value={operationStatus} onChange={(event) => { const value = event.target.value; setOperationStatus(value); setOperationCursor(null); setOperationHistory([]); replaceOperationQuery({ status: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部状态</option>{["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"].map((value) => <option key={value} value={value}>{statusLabels[value]}</option>)}</select></label></div>
               {operationsLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : operations.length === 0 ? <Empty text="当前筛选条件下没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => (
                 <article key={operation.id} className="flex flex-wrap items-start justify-between gap-4 py-5">
                   <div className="min-w-0 flex-1">
@@ -357,12 +388,12 @@ export function ProjectGovernanceClient({ username }: { username: string }) {
                     {operation.githubSync?.warnings.length ? <p className="mt-2 text-xs leading-5 text-amber-700">{operation.githubSync.warnings.join(" · ")}</p> : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link href={operation.destination} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">查看详情</Link>
+                    <Link href={buildProjectHref(projectId, "job", { jobId: operation.id, search: operationSearch, kind: operationKind, status: operationStatus, cursor: operationCursor, focus: "task-runs", from: "governance", returnTo: navigation.returnTo })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">查看详情</Link>
                     {operation.capability.action ? <button type="button" onClick={() => void actOnJob(operation)} disabled={pending !== null} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 disabled:opacity-40">{pending === `${operation.id}:${operation.capability.action}` ? "处理中…" : operation.capability.action === "reconcile" ? "人工收口" : "取消任务"}</button> : null}
                   </div>
                 </article>
               ))}</div>}
-              <CursorPagination page={operationHistory.length + 1} hasPrevious={operationHistory.length > 0} hasNext={operationNextCursor !== null} disabled={operationsLoading} onPrevious={() => { const previous = operationHistory.at(-1) ?? null; setOperationHistory((current) => current.slice(0, -1)); setOperationCursor(previous); }} onNext={() => { if (!operationNextCursor) return; setOperationHistory((current) => [...current, operationCursor]); setOperationCursor(operationNextCursor); }} />
+              <CursorPagination page={operationHistory.length + 1} hasPrevious={operationHistory.length > 0} hasNext={operationNextCursor !== null} disabled={operationsLoading} onPrevious={() => { const previous = operationHistory.at(-1) ?? null; setOperationHistory((current) => current.slice(0, -1)); setOperationCursor(previous); replaceOperationQuery({ cursor: previous }); }} onNext={() => { if (!operationNextCursor) return; setOperationHistory((current) => [...current, operationCursor]); setOperationCursor(operationNextCursor); replaceOperationQuery({ cursor: operationNextCursor }); }} />
               </div>
             </details>
 

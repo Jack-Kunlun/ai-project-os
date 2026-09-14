@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
+import { safeResponseError } from "@/lib/safe-error-presentation";
 
 type PolicyStatus = "draft" | "active" | "retired";
 type PolicyAction = "created" | "activated" | "retired";
@@ -37,16 +39,23 @@ const actionLabels: Record<PolicyAction, string> = {
 };
 
 async function readError(response: Response, fallback: string): Promise<string> {
-  try {
-    const payload = await response.json() as { error?: { message?: string } };
-    return payload.error?.message ?? fallback;
-  } catch {
-    return fallback;
-  }
+  return (await safeResponseError(response, fallback)).message;
 }
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function latestPolicyEvidence(policies: readonly Policy[]): string {
+  const activationDates = policies.flatMap((policy) => policy.activatedAt === null ? [] : [policy.activatedAt]);
+  if (activationDates.length > 0) {
+    const latestActivation = activationDates.reduce((latest, value) => value > latest ? value : latest);
+    return `最近生效证据：${formatDate(latestActivation)}`;
+  }
+  const latestAudit = policies.flatMap((policy) => policy.audits).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  return latestAudit === undefined
+    ? "尚未取得验证或生效证据"
+    : `最近策略审计（${actionLabels[latestAudit.action]}）：${formatDate(latestAudit.createdAt)}`;
 }
 
 export function PlatformGrantOfferPolicyPanel() {
@@ -130,6 +139,16 @@ export function PlatformGrantOfferPolicyPanel() {
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">策略只影响之后符合条件的新注册，不补发、不修改历史；现有用户差异与补发在后续治理。资格来源由服务端固定为已验证身份。</p>
         </div>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{loading ? "读取中…" : `${policies.length} 个版本`}</span>
+      </div>
+
+      <div className="mt-6">
+        <ScopeEvidenceCard title="平台赠送策略边界" evidence={{
+          scope: "平台 · 后续已验证新注册",
+          owner: "平台管理员",
+          payer: "平台承担赠送额度",
+          affectedProjects: "项目不适用 · 符合条件账户",
+          latestSuccess: latestPolicyEvidence(policies),
+        }} />
       </div>
 
       <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-100">

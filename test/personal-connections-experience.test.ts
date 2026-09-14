@@ -37,7 +37,8 @@ test("personal Git and MCP clients use only owner APIs and preserve lifecycle sa
   assert.match(git, /api\/me\/git-connections/u);
   assert.match(git, /repositoryPath/u);
   assert.match(git, /trackedRef/u);
-  assert.match(git, /readConnectionError/u);
+  assert.match(git, /safeResponseError/u);
+  assert.doesNotMatch(git, /payload\.error(?:\?\.)?message/u);
   assert.match(git, /ConnectionGovernancePanel/u);
   assert.match(git, /governance/u);
   assert.match(git, /setDraft\(\(current\) => \(\{ \.\.\.current, secret: "" \}\)\)/u);
@@ -53,6 +54,8 @@ test("personal Git and MCP clients use only owner APIs and preserve lifecycle sa
   assert.match(git, /rejection|revocation/u);
 
   assert.match(mcp, /api\/me\/mcp-connections/u);
+  assert.match(mcp, /safeResponseError/u);
+  assert.doesNotMatch(mcp, /payload\.error(?:\?\.)?message/u);
   assert.match(mcp, /ConnectionGovernancePanel/u);
   assert.match(mcp, /governance/u);
   assert.match(mcp, /api\/me\/mcp-delegations/u);

@@ -189,6 +189,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
 }
 
 test("first-run administrator can reach protected pages with production security headers", async ({ page, request }) => {
+  test.setTimeout(60_000);
   const browserErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") browserErrors.push(`console:${message.text()}`);
@@ -257,7 +258,7 @@ test("first-run administrator can reach protected pages with production security
   const addSourceTrigger = page.locator("#add-source-trigger");
   await expect(addSourceTrigger).toBeVisible();
   await addSourceTrigger.click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?kind=all&view=add$`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?view=add&kind=all$`, "u"));
   const addSourceDialog = page.getByRole("dialog", { name: "添加来源" });
   await expect(addSourceDialog).toBeVisible();
   const closeSourceDialog = addSourceDialog.getByRole("button", { name: "关闭", exact: true });
@@ -283,13 +284,22 @@ test("first-run administrator can reach protected pages with production security
   const sourceRow = sourceList.getByRole("listitem").filter({ hasText: sourceText });
   await expect(sourceRow).toBeVisible();
 
+  const sourceSearchInput = page.getByPlaceholder("搜索正文、来源链接或内容哈希");
+  await sourceSearchInput.fill("Browser smoke");
+  await sourceSearchInput.press("Enter");
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=all$`, "u"));
+  await page.getByLabel("按原始资料类型筛选").selectOption("manual");
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=manual$`, "u"));
   await page.getByRole("link", { name: "审核 AI 候选", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials/review$`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials/review\\?focus=review-queue&from=materials&returnTo=`, "u"));
+  await expect(page.locator("#review-queue")).toBeFocused();
   await expect(page.getByRole("heading", { name: "审核 AI 候选", exact: true }).first()).toBeVisible();
   await expect(page.getByText("当前没有待审核 AI 候选。", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "返回项目资料", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials$`, "u"));
-  await expect(page.getByRole("heading", { name: "原始资料来源库", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: /返回来源页面/u }).click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=manual&focus=sources-heading$`, "u"));
+  await expect(page.getByPlaceholder("搜索正文、来源链接或内容哈希")).toHaveValue("Browser smoke");
+  await expect(page.getByLabel("按原始资料类型筛选")).toHaveValue("manual");
+  await expect(page.locator("#sources-heading")).toBeFocused();
 
   const returnedSourceRow = page.getByRole("list", { name: "项目原始资料列表", exact: true }).getByRole("listitem").filter({ hasText: sourceText });
   await expect(returnedSourceRow).toBeVisible();
@@ -302,12 +312,51 @@ test("first-run administrator can reach protected pages with production security
   await expect(page.getByRole("heading", { name: "原始资料内容", exact: true })).toBeVisible();
   await expect(page.getByText(sourceText, { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "返回原始资料", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?kind=all&focus=${returnedSourceId}$`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/materials\\?search=Browser\\+smoke&kind=manual&focus=${returnedSourceId}$`, "u"));
   const restoredSourceLink = page.locator(`#source-link-${returnedSourceId}`);
   await expect(restoredSourceLink).toBeVisible();
   await expect(restoredSourceLink).toBeFocused();
 
   const browserSmokeFixtures = await seedBrowserSmokeFixtures(projectId);
+
+  await page.goto(`/projects/${projectId}`);
+  const failedTasksLink = page.getByRole("link", { name: /任务异常/u });
+  await expect(failedTasksLink).toBeVisible();
+  await failedTasksLink.click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/governance\\?status=failed&focus=task-runs&from=overview&returnTo=`, "u"));
+  await expect(page.getByLabel("按任务状态筛选")).toHaveValue("failed");
+  await expect(page.locator("#task-runs")).toBeFocused();
+  await expect(page.getByText("BROWSER_SMOKE_PENDING", { exact: false })).toBeVisible();
+  await page.getByRole("link", { name: "查看详情", exact: true }).first().click();
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/jobs/${browserSmokeFixtures.pendingJobId}\\?.*from=governance&returnTo=`, "u"));
+  await page.getByRole("link", { name: /返回任务列表/u }).click();
+  await expect(page.getByLabel("按任务状态筛选")).toHaveValue("failed");
+  await expect(page.locator("#task-runs")).toBeFocused();
+  await page.getByRole("link", { name: /返回来源页面/u }).click();
+  await expect(page.locator("#current-state")).toBeFocused();
+
+  await page.goto(`/projects/${projectId}/materials/review?focus=review-queue&from=overview&returnTo=${encodeURIComponent(`/projects/${projectId}?focus=current-state`)}`);
+  await expect(page.locator("#review-queue")).toBeFocused();
+  await expect(page.getByText("原始资料 → AI 候选 → 已确认事实 → AI 可引用记忆", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /返回来源页面/u })).toBeVisible();
+
+  await page.goto(`/projects/${projectId}/intelligence?focus=runtime-readiness`);
+  await expect(page.locator("#runtime-readiness")).toBeFocused();
+  await expect(page.getByText("就绪条件", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("当前缺失", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "当前 AI 路由边界", exact: true })).toBeVisible();
+  await expect(page.getByText(/当前项目/u).first()).toBeVisible();
+
+  await page.goto(`/projects/${projectId}/automations`);
+  await page.getByRole("button", { name: "预览并确认", exact: true }).click();
+  const automationPreview = page.getByRole("region", { name: "创建前影响预览" });
+  await expect(automationPreview).toBeVisible();
+  await expect(automationPreview.getByRole("heading", { name: "本次自动化边界", exact: true })).toBeVisible();
+  await expect(automationPreview.getByText("不使用模型或个人连接", { exact: true })).toBeVisible();
+  await expect(automationPreview.getByText("不产生模型费用", { exact: true })).toBeVisible();
+  await expect(automationPreview.getByText("下一次预计运行（UTC）", { exact: true })).toBeVisible();
+  await expect(automationPreview.getByText("业务执行失败不会在当前周期内自动重试；Worker 租约过期会按恢复策略安排后续运行；连续失败 3 次后自动暂停规则", { exact: true })).toBeVisible();
+  await automationPreview.getByRole("button", { name: "返回修改", exact: true }).click();
 
   await page.goto("/dashboard");
   const dashboardJobLink = page.locator(`a[href="/projects/${projectId}/jobs/${browserSmokeFixtures.jobId}"]`);

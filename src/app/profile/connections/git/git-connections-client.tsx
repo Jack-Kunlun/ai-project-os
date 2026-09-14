@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
+import { safeResponseError } from "@/lib/safe-error-presentation";
 import {
   connectionButtonClass,
   connectionErrorText,
   connectionFieldClass,
+  ConnectionRequestError,
   type ConnectionMessage,
   formatConnectionDate,
-  readConnectionError,
 } from "../connection-ui";
 import { ConnectionGovernancePanel } from "../governance-panel";
 import {
@@ -44,6 +46,11 @@ const statusStyles: Record<GitConnection["status"], string> = {
   disabled: "bg-slate-100 text-slate-600 ring-slate-200",
 };
 
+async function readSafeConnectionError(response: Response, fallback: string): Promise<ConnectionRequestError> {
+  const safe = await safeResponseError(response, fallback);
+  return new ConnectionRequestError(safe.message, safe.code ?? "CONNECTION_REQUEST_FAILED", response.status);
+}
+
 export function GitConnectionsClient() {
   const [connections, setConnections] = useState<GitConnection[]>([]);
   const [catalog, setCatalog] = useState<GitCatalogEntry[]>([]);
@@ -58,7 +65,7 @@ export function GitConnectionsClient() {
     setLoading(true);
     try {
       const response = await fetch("/api/me/git-connections", { cache: "no-store" });
-      if (!response.ok) throw await readConnectionError(response, "个人 Git 连接加载失败");
+      if (!response.ok) throw await readSafeConnectionError(response, "个人 Git 连接加载失败");
       const payload = await response.json() as PagePayload;
       setConnections(payload.connections);
       setCatalog(payload.catalog);
@@ -74,7 +81,7 @@ export function GitConnectionsClient() {
     setOwnerDelegationsLoading(true);
     try {
       const response = await fetch("/api/me/git-delegations", { cache: "no-store" });
-      if (!response.ok) throw await readConnectionError(response, "项目委托安全记录加载失败");
+      if (!response.ok) throw await readSafeConnectionError(response, "项目委托安全记录加载失败");
       const payload = await response.json() as OwnerDelegationPayload;
       setOwnerDelegations(payload.delegations);
       setOwnerDelegationsError(null);
@@ -158,7 +165,7 @@ function OwnerDelegationCard({ delegation, onReload, onMessage }: { delegation: 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ expectedVersion: delegation.version, reason: result.value.trim() }),
       });
-      if (!response.ok) throw await readConnectionError(response, action === "rejection" ? "拒绝委托失败" : "撤销委托失败");
+      if (!response.ok) throw await readSafeConnectionError(response, action === "rejection" ? "拒绝委托失败" : "撤销委托失败");
       onMessage({ tone: "success", text: action === "rejection" ? "项目委托已拒绝。" : "项目委托已撤销。" });
       await onReload();
     } catch (error) {
@@ -197,7 +204,7 @@ function GitCreateForm({ catalog, onCreated }: { catalog: readonly GitCatalogEnt
     }
     try {
       const response = await fetch("/api/me/git-connections", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: draft.name, providerKind: draft.providerKind, transport: draft.transport, baseUrl: draft.baseUrl, authKind: draft.authKind, username: draft.username.trim() || null, secret: draft.authKind === "none" ? null : secret, allowPrivateNetwork: draft.allowPrivateNetwork, tlsCaCertificate: draft.transport === "https" ? draft.tlsCaCertificate || null : null, sshKnownHost: draft.transport === "ssh" ? draft.sshKnownHost || null : null }) });
-      if (!response.ok) throw await readConnectionError(response, "Git 连接保存失败");
+      if (!response.ok) throw await readSafeConnectionError(response, "Git 连接保存失败");
       const connection = (await response.json() as { connection: GitConnection }).connection;
       onCreated(connection);
       setDraft(createDefaultGitDraft(catalog));
@@ -211,7 +218,7 @@ function GitCreateForm({ catalog, onCreated }: { catalog: readonly GitCatalogEnt
 }
 
 function GitConnectionCard({ connection, onRemoved, onReload }: { connection: GitConnection; onRemoved: () => void; onReload: () => Promise<void> }) {
-  return <article className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5"><div className="flex min-w-0 flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><h3 className="max-w-full break-words text-base font-semibold text-slate-900">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{gitStatusLabels[connection.status]}</span></div><p className="mt-2 break-all text-xs text-slate-500">{gitProviderLabels[connection.providerKind]} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p>{connection.authKind === "none" ? "无凭据" : `${connection.authKind}（已加密）`}</p><p className="mt-1">更新于 {formatConnectionDate(connection.updatedAt)}</p></div></div>{connection.lastErrorCode ? <p role="status" className="mt-3 break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">最近错误：{connection.lastErrorCode}。请通过安全治理预览管理后续变更；重新测试当前不会发起网络请求，外部连通性仍未验证。</p> : null}<dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-3"><div><dt className="text-slate-400">最近测试</dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastTestedAt)}</dd></div><div><dt className="text-slate-400">已关联仓库</dt><dd className="mt-1 font-medium">{connection._count.repositories} 个（影响预览会列出有权查看的项目状态）</dd></div><div><dt className="text-slate-400">内网访问</dt><dd className="mt-1 font-medium">{connection.allowPrivateNetwork ? "已显式允许" : "禁止"}</dd></div></dl><p className="mt-3 text-xs leading-5 text-slate-500">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p><ConnectionGovernancePanel key={`${connection.id}:${connection.updatedAt}`} kind="git" connection={{ id: connection.id, name: connection.name, status: connection.status, updatedAt: connection.updatedAt, authKind: connection.authKind, recoveryState: connection.recoveryState }} onReload={onReload} onRemoved={onRemoved} />{connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">连接已停用；重新启用后必须重新测试。重新测试与重信任当前不会发起网络请求，外部连通性仍未验证。</p> : null}</article>;
+  return <article className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5"><div className="flex min-w-0 flex-wrap items-start justify-between gap-3"><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-2"><h3 className="max-w-full break-words text-base font-semibold text-slate-900">{connection.name}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ring-1 ${statusStyles[connection.status]}`}>{gitStatusLabels[connection.status]}</span></div><p className="mt-2 break-all text-xs text-slate-500">{gitProviderLabels[connection.providerKind]} · {connection.transport.toUpperCase()} · {connection.baseUrl}</p></div><div className="shrink-0 text-right text-xs text-slate-400"><p>{connection.authKind === "none" ? "无凭据" : `${connection.authKind}（已加密）`}</p><p className="mt-1">更新于 {formatConnectionDate(connection.updatedAt)}</p></div></div>{connection.lastErrorCode ? <p role="status" className="mt-3 break-words rounded-xl bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">最近错误：{connection.lastErrorCode}。请通过安全治理预览管理后续变更；重新测试当前不会发起网络请求，外部连通性仍未验证。</p> : null}<dl className="mt-4 grid gap-3 text-xs text-slate-600 sm:grid-cols-2"><div><dt className="text-slate-400">最近测试</dt><dd className="mt-1 font-medium">{formatConnectionDate(connection.lastTestedAt)}</dd></div><div><dt className="text-slate-400">内网访问</dt><dd className="mt-1 font-medium">{connection.allowPrivateNetwork ? "已显式允许" : "禁止"}</dd></div></dl><div className="mt-4"><ScopeEvidenceCard title="个人 Git 连接边界" evidence={{ scope: "个人连接", owner: "当前账户", payer: "不适用（Git 连接不产生平台模型费用）", affectedProjects: "尚未取得项目委托证据；仅按当前账户的项目权限与明确委托判断，不以仓库数量代替项目影响", latestSuccess: connection.lastTestedAt ? `最近测试：${formatConnectionDate(connection.lastTestedAt)}` : "尚未完成连接测试" }} /></div><p className="mt-3 text-xs leading-5 text-slate-500">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p><ConnectionGovernancePanel key={`${connection.id}:${connection.updatedAt}`} kind="git" connection={{ id: connection.id, name: connection.name, status: connection.status, updatedAt: connection.updatedAt, authKind: connection.authKind, recoveryState: connection.recoveryState }} onReload={onReload} onRemoved={onRemoved} />{connection.status === "disabled" ? <p className="mt-3 rounded-xl bg-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">连接已停用；重新启用后必须重新测试。重新测试与重信任当前不会发起网络请求，外部连通性仍未验证。</p> : null}</article>;
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block min-w-0 text-xs font-semibold text-slate-700">{label}{children}</label>;

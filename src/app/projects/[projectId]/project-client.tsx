@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ListPagination } from "@/components/list-pagination";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
-import { buildMaterialsReturnTo, isAddSourceView, parseMaterialKind, parseMaterialsPage, type MaterialKind } from "./materials/materials-navigation";
+import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
+import { safeResponseError } from "@/lib/safe-error-presentation";
+import { buildMaterialsReturnTo, isAddSourceView, parseMaterialKind, type MaterialKind } from "./materials/materials-navigation";
 import { ProjectMaterialIntake } from "./project-material-intake";
 
 type ProjectItem = {
@@ -66,10 +68,6 @@ type Project = {
   };
 };
 
-type ErrorPayload = {
-  error?: { message?: string };
-};
-
 type ItemCounts = { candidate: number; confirmed: number; dismissed: number; superseded: number };
 type ProjectSourcePage = { sources: ProjectSourceSummary[]; pagination: ListPaginationState };
 type ProjectItemPage = { items: ProjectItem[]; counts: ItemCounts; pagination: ListPaginationState };
@@ -109,20 +107,14 @@ type ItemFormState = {
 type ItemAction = "confirm" | "dismiss" | "reopen";
 
 async function readError(response: Response, fallback: string): Promise<string> {
-  try {
-    const payload = (await response.json()) as ErrorPayload;
-    return payload.error?.message ?? fallback;
-  } catch {
-    return fallback;
-  }
+  return (await safeResponseError(response, fallback)).message;
 }
 
 async function getProject(projectId: string): Promise<Project> {
   const response = await fetch(`/api/projects/${projectId}`, { cache: "no-store" });
-  const payload = (await response.json()) as { project?: Project; error?: { message?: string } };
-  if (!response.ok || !payload.project) {
-    throw new Error(payload.error?.message ?? "项目加载失败");
-  }
+  if (!response.ok) throw new Error(await readError(response, "项目加载失败"));
+  const payload = (await response.json()) as { project?: Project };
+  if (!payload.project) throw new Error("项目加载响应无效");
   return payload.project;
 }
 
@@ -130,17 +122,17 @@ async function getSources(projectId: string, input: { page: number; search: stri
   const query = new URLSearchParams({ page: String(input.page), pageSize: "20", kind: input.kind });
   if (input.search.trim()) query.set("search", input.search.trim());
   const response = await fetch(`/api/projects/${projectId}/sources?${query}`, { cache: "no-store" });
-  const payload = (await response.json()) as Partial<ProjectSourcePage> & { error?: { message?: string } };
-  if (!response.ok || !payload.sources || !payload.pagination) {
-    throw new Error(payload.error?.message ?? "项目资料加载失败");
-  }
+  if (!response.ok) throw new Error(await readError(response, "项目资料加载失败"));
+  const payload = (await response.json()) as Partial<ProjectSourcePage>;
+  if (!payload.sources || !payload.pagination) throw new Error("项目资料加载响应无效");
   return { sources: payload.sources, pagination: payload.pagination };
 }
 
 async function getSource(projectId: string, sourceId: string): Promise<ProjectSource> {
   const response = await fetch(`/api/projects/${projectId}/sources/${sourceId}`, { cache: "no-store" });
-  const payload = (await response.json()) as { source?: ProjectSource; error?: { message?: string } };
-  if (!response.ok || !payload.source) throw new Error(payload.error?.message ?? "资料原文加载失败");
+  if (!response.ok) throw new Error(await readError(response, "资料原文加载失败"));
+  const payload = (await response.json()) as { source?: ProjectSource };
+  if (!payload.source) throw new Error("资料原文加载响应无效");
   return payload.source;
 }
 
@@ -148,10 +140,9 @@ async function getItems(projectId: string, input: { page: number; search: string
   const query = new URLSearchParams({ page: String(input.page), pageSize: "20", type: input.type, reviewStatus: input.reviewStatus });
   if (input.search.trim()) query.set("search", input.search.trim());
   const response = await fetch(`/api/projects/${projectId}/items?${query}`, { cache: "no-store" });
-  const payload = (await response.json()) as Partial<ProjectItemPage> & { error?: { message?: string } };
-  if (!response.ok || !payload.items || !payload.pagination || !payload.counts) {
-    throw new Error(payload.error?.message ?? "项目条目加载失败");
-  }
+  if (!response.ok) throw new Error(await readError(response, "项目条目加载失败"));
+  const payload = (await response.json()) as Partial<ProjectItemPage>;
+  if (!payload.items || !payload.pagination || !payload.counts) throw new Error("项目条目加载响应无效");
   return { items: payload.items, counts: payload.counts, pagination: payload.pagination };
 }
 
@@ -230,18 +221,19 @@ export function ProjectDetailClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const focusSourceId = searchParams.get("focus");
-  const isAddSourceOpen = isAddSourceView(searchParams.get("view"));
-  const queryMaterialKind = parseMaterialKind(searchParams.get("kind"));
+  const navigation = useMemo(() => parseProjectPageState("materials", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
+  const focusSourceId = navigation.focus;
+  const isAddSourceOpen = isAddSourceView(navigation.view);
+  const queryMaterialKind = parseMaterialKind(navigation.kind);
   const intakeKind: MaterialKind = queryMaterialKind === "all" ? "manual" : queryMaterialKind;
   const [project, setProject] = useState<Project | null>(null);
   const [sources, setSources] = useState<ProjectSourceSummary[]>([]);
   const [sourceDetails, setSourceDetails] = useState<Record<string, ProjectSource>>({});
   const [sourcePagination, setSourcePagination] = useState<ListPaginationState>(emptyPagination);
-  const sourceSearch = searchParams.get("search") ?? "";
+  const sourceSearch = navigation.search ?? "";
   const deferredSourceSearch = useDeferredValue(sourceSearch);
   const sourceKind: MaterialKind = queryMaterialKind;
-  const sourcePage = parseMaterialsPage(searchParams.get("page"));
+  const sourcePage = navigation.page ?? 1;
   const [isSourceDetailLoading, setIsSourceDetailLoading] = useState(false);
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [itemCounts, setItemCounts] = useState<ItemCounts>({ candidate: 0, confirmed: 0, dismissed: 0, superseded: 0 });
@@ -282,10 +274,12 @@ export function ProjectDetailClient({ username }: { username: string }) {
       focusCancelledRef.current = null;
       return;
     }
-    if (isSourcesLoading || !project || focusRestoredRef.current === focusSourceId || focusCancelledRef.current === focusSourceId || !sources.some((source) => source.id === focusSourceId)) return;
+    const staticFocus = focusSourceId === "sources-heading";
+    if (isSourcesLoading || !project || focusRestoredRef.current === focusSourceId || focusCancelledRef.current === focusSourceId || (!staticFocus && !sources.some((source) => source.id === focusSourceId))) return;
     const sourceId = focusSourceId;
-    const initialTarget = document.getElementById(`source-link-${sourceId}`);
-    if (!(initialTarget instanceof HTMLAnchorElement) || !initialTarget.isConnected) return;
+    const findTarget = () => document.getElementById(staticFocus ? sourceId : `source-link-${sourceId}`);
+    const initialTarget = findTarget();
+    if (!(initialTarget instanceof HTMLElement) || !initialTarget.isConnected) return;
 
     let userCancelled = false;
     let firstFrame = 0;
@@ -309,8 +303,8 @@ export function ProjectDetailClient({ username }: { username: string }) {
           removeFocusListeners();
           return;
         }
-        const target = document.getElementById(`source-link-${sourceId}`);
-        if (target instanceof HTMLAnchorElement && target.isConnected) {
+        const target = findTarget();
+        if (target instanceof HTMLElement && target.isConnected) {
           target.scrollIntoView({ block: "center" });
           target.focus({ preventScroll: true });
           if (document.activeElement === target) focusRestoredRef.current = sourceId;
@@ -327,17 +321,16 @@ export function ProjectDetailClient({ username }: { username: string }) {
   }, [focusSourceId, isSourcesLoading, project, sources]);
 
   function replaceMaterialsQuery(input: { view?: "add" | null; search?: string; kind?: MaterialKind; page?: number }): void {
-    const params = new URLSearchParams();
-    const nextSearch = input.search ?? searchParams.get("search") ?? "";
-    const nextKind = input.kind ?? parseMaterialKind(searchParams.get("kind"));
-    const nextPage = input.page ?? parseMaterialsPage(searchParams.get("page"));
-    if (nextSearch.trim()) params.set("search", nextSearch.trim().slice(0, 200));
-    params.set("kind", nextKind);
-    if (nextPage > 1) params.set("page", String(nextPage));
-    const nextView = input.view === undefined ? searchParams.get("view") : input.view;
-    if (nextView === "add") params.set("view", "add");
-    const query = params.toString();
-    router.replace(`/projects/${encodeURIComponent(projectId)}/materials${query ? `?${query}` : ""}`, { scroll: false });
+    const href = buildProjectHref(projectId, "materials", {
+      search: input.search ?? navigation.search,
+      kind: input.kind ?? queryMaterialKind,
+      page: input.page ?? navigation.page,
+      view: input.view === undefined ? navigation.view : input.view,
+      focus: navigation.focus,
+      from: navigation.from,
+      returnTo: navigation.returnTo,
+    });
+    router.replace(href, { scroll: false });
   }
 
   const loadProject = useCallback(async () => {
@@ -642,6 +635,16 @@ export function ProjectDetailClient({ username }: { username: string }) {
   const selectedSource = sourceDetails[itemForm.sourceId] ?? sources.find((source) => source.id === itemForm.sourceId) ?? null;
   const sourceOptions = selectedSource && !sources.some((source) => source.id === selectedSource.id) ? [selectedSource, ...sources] : sources;
   const isEditingItem = editingItemId !== null;
+  const materialReviewHref = buildProjectHref(projectId, "materialsReview", {
+    focus: "review-queue",
+    from: "materials",
+    returnTo: buildProjectHref(projectId, "materials", {
+      search: sourceSearch,
+      kind: sourceKind,
+      page: sourcePage,
+      focus: "sources-heading",
+    }),
+  });
 
   if (error) {
     return <ProjectShell username={username} projectId={projectId}><div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700">{error}</div></ProjectShell>;
@@ -653,6 +656,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
 
   return (
     <ProjectShell username={username} projectId={projectId}>
+      {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
       <div className="border-b border-slate-200/80 pb-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -662,7 +666,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
           </div>
           <div className="flex flex-wrap gap-3" aria-label="资料主要操作">
             <button id="add-source-trigger" type="button" onClick={() => replaceMaterialsQuery({ view: "add" })} className="inline-flex min-h-11 items-center justify-center rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">添加来源</button>
-            <Link href={`/projects/${encodeURIComponent(projectId)}/materials/review`} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-3 text-sm font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">审核 AI 候选</Link>
+            <Link href={materialReviewHref} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-3 text-sm font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">审核 AI 候选</Link>
           </div>
         </div>
       </div>
@@ -671,7 +675,7 @@ export function ProjectDetailClient({ username }: { username: string }) {
         <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Source library</p>
-            <h2 id="sources-heading" className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">原始资料来源库</h2>
+            <h2 id="sources-heading" tabIndex={-1} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 outline-none focus:ring-4 focus:ring-indigo-100">原始资料来源库</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">这里保存文本、文件、网页和仓库发布的原始内容。它们是可追溯输入，不等同于 AI 候选、已确认事实或 AI 可引用记忆。</p>
           </div>
           <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600">{isSourcesLoading ? "读取中…" : `${sourcePagination.total} 条原始资料`}</span>
@@ -922,10 +926,10 @@ export function ProjectDetailClient({ username }: { username: string }) {
                 <ItemCard
                   key={item.id}
                   item={item}
-                  projectId={projectId}
                   itemActionId={itemActionId}
                   isSavingItem={isSavingItem}
                   editingItemId={editingItemId}
+                  materialReviewHref={materialReviewHref}
                   onEdit={handleEditItem}
                   onAction={handleItemAction}
                 />
@@ -943,18 +947,18 @@ export function ProjectDetailClient({ username }: { username: string }) {
 
 function ItemCard({
   item,
-  projectId,
   itemActionId,
   isSavingItem,
   editingItemId,
+  materialReviewHref,
   onEdit,
   onAction,
 }: {
   item: ProjectItem;
-  projectId: string;
   itemActionId: string | null;
   isSavingItem: boolean;
   editingItemId: string | null;
+  materialReviewHref: string;
   onEdit: (item: ProjectItem) => Promise<void>;
   onAction: (item: ProjectItem, action: ItemAction) => void;
 }) {
@@ -1032,7 +1036,7 @@ function ItemCard({
           </div>
         ) : (
           <span className="shrink-0 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-400">
-            {requiresAiWorkbench && item.reviewStatus === "candidate" ? <Link href={`/projects/${encodeURIComponent(projectId)}/materials/review`} className="text-indigo-700 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-900">前往审核 AI 候选</Link> : "只读"}
+            {requiresAiWorkbench && item.reviewStatus === "candidate" ? <Link href={materialReviewHref} className="text-indigo-700 underline decoration-indigo-200 underline-offset-4 hover:text-indigo-900">前往审核 AI 候选</Link> : "只读"}
           </span>
         )}
       </div>

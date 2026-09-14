@@ -1,8 +1,12 @@
 "use client";
 
-import { useCallback, useDeferredValue, useEffect, useState } from "react";
+import Link from "next/link";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CursorPagination } from "@/components/list-pagination";
+import { KnowledgeLifecycle } from "@/components/knowledge-lifecycle";
+import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
+import { safeResponseError } from "@/lib/safe-error-presentation";
 import { isReviewType, parseReviewType, type ReviewType } from "./materials/materials-navigation";
 
 type Review = {
@@ -26,9 +30,8 @@ type CursorPage = { items: Review[]; nextCursor: string | null };
 const itemLabels = { decision: "决策", progress: "进展", issue: "问题", risk: "风险" } as const;
 
 async function readJson<T>(response: Response): Promise<T> {
-  const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-  if (!response.ok) throw new Error(payload?.error?.message ?? `请求失败（${response.status}）`);
-  return payload as T;
+  if (!response.ok) throw new Error((await safeResponseError(response, `请求失败（${response.status}）`)).message);
+  return await response.json() as T;
 }
 
 function formatDate(value: string): string {
@@ -39,12 +42,13 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const navigation = useMemo(() => parseProjectPageState("materialsReview", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const cursor = searchParams.get("cursor");
-  const search = searchParams.get("search") ?? "";
+  const cursor = navigation.cursor;
+  const search = navigation.search ?? "";
   const deferredSearch = useDeferredValue(search);
-  const itemType: ReviewType = parseReviewType(searchParams.get("type"));
+  const itemType: ReviewType = parseReviewType(navigation.filter);
   const [history, setHistory] = useState<Array<string | null>>([]);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<string | null>(null);
@@ -52,15 +56,18 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
   const [message, setMessage] = useState<string | null>(null);
 
   function replaceReviewQuery(input: { search?: string; type?: ReviewType; cursor?: string | null }): void {
-    const params = new URLSearchParams();
-    const nextSearch = input.search ?? searchParams.get("search") ?? "";
-    const nextType = input.type ?? parseReviewType(searchParams.get("type"));
-    const nextCursor = input.cursor === undefined ? searchParams.get("cursor") : input.cursor;
-    if (nextSearch.trim()) params.set("search", nextSearch.trim().slice(0, 200));
-    if (nextType !== "all") params.set("type", nextType);
-    if (nextCursor) params.set("cursor", nextCursor);
-    const query = params.toString();
-    router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
+    const nextSearch = input.search ?? navigation.search ?? "";
+    const nextType = input.type ?? parseReviewType(navigation.filter);
+    const nextCursor = input.cursor === undefined ? navigation.cursor : input.cursor;
+    const href = buildProjectHref(projectId, "materialsReview", {
+      search: nextSearch,
+      filter: nextType,
+      cursor: nextCursor,
+      focus: "review-queue",
+      from: navigation.from,
+      returnTo: navigation.returnTo,
+    });
+    router.replace(href === pathname ? pathname : href, { scroll: false });
   }
 
   const load = useCallback(async () => {
@@ -85,6 +92,16 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (navigation.focus !== "review-queue" || loading) return;
+    const timer = window.setTimeout(() => {
+      const target = document.getElementById("review-queue");
+      target?.scrollIntoView({ block: "start" });
+      if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loading, navigation.focus]);
 
   async function reviewCandidate(review: Review, action: "accept" | "dismiss") {
     const key = `${review.source}:${review.id}:${action}`;
@@ -128,11 +145,13 @@ export function ProjectMaterialReviewQueue({ projectId, onChanged }: { projectId
   }
 
   return (
-    <section id="review-queue" aria-labelledby="review-queue-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
+    <section id="review-queue" tabIndex={-1} aria-labelledby="review-queue-heading" className="mt-10 scroll-mt-44 rounded-3xl border border-slate-200 bg-white p-7 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-8">
+      {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-5 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
       <div className="flex flex-col gap-4 border-b border-slate-100 pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">AI candidate review</p><h2 id="review-queue-heading" className="mt-2 text-2xl font-semibold tracking-tight">审核 AI 候选</h2><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">AI 抽取结果仍是候选。核对原始资料证据后，确认操作只会将其推进为已确认事实，不会在这里直接承诺进入 AI 可引用记忆。</p></div>
         <span className="rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">当前页 {reviews.length} 条</span>
       </div>
+      <div className="mt-5"><KnowledgeLifecycle compact /></div>
       <div className="mt-6 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_190px]">
         <label><span className="sr-only">搜索 AI 候选</span><input value={search} onChange={(event) => { const value = event.target.value; setHistory([]); replaceReviewQuery({ search: value, cursor: null }); }} placeholder="搜索候选标题、内容或证据" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
         <label><span className="sr-only">按候选类型筛选</span><select value={itemType} onChange={(event) => { const value = isReviewType(event.target.value) ? event.target.value : "all"; setHistory([]); replaceReviewQuery({ type: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-indigo-300"><option value="all">全部类型</option><option value="decision">决策</option><option value="progress">进展</option><option value="issue">问题</option><option value="risk">风险</option></select></label>

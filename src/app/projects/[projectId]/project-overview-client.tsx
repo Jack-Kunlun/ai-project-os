@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
+import { safeResponseError } from "@/lib/safe-error-presentation";
 import type { SnapshotRecord } from "@/lib/project-snapshot";
 
 type Project = {
@@ -49,9 +51,8 @@ type OverviewData = {
 };
 
 async function readJson<T>(response: Response, fallback: string): Promise<T> {
-  const payload = await response.json().catch(() => null) as ({ error?: { message?: string } } & Partial<T>) | null;
-  if (!response.ok) throw new Error(payload?.error?.message ?? fallback);
-  return payload as T;
+  if (!response.ok) throw new Error((await safeResponseError(response, fallback)).message);
+  return await response.json() as T;
 }
 
 function formatDate(value: string): string {
@@ -67,6 +68,8 @@ const worldStatusMeta: Record<WorldStatus, { label: string; detail: string; tone
 
 export function ProjectOverviewClient({ username }: { username: string }) {
   const { projectId } = useParams<{ projectId: string }>();
+  const searchParams = useSearchParams();
+  const navigation = useMemo(() => parseProjectPageState("overview", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
   const [data, setData] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [snapshotPending, setSnapshotPending] = useState(false);
@@ -104,6 +107,16 @@ export function ProjectOverviewClient({ username }: { username: string }) {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  useEffect(() => {
+    if (navigation.focus !== "current-state" || loading || data === null) return;
+    const timer = window.setTimeout(() => {
+      const target = document.getElementById("current-state");
+      target?.scrollIntoView({ block: "start" });
+      if (target instanceof HTMLElement) target.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [data, loading, navigation.focus]);
+
   const summary = useMemo(() => {
     if (data === null) return null;
     const confirmed = data.itemCounts.confirmed;
@@ -138,10 +151,11 @@ export function ProjectOverviewClient({ username }: { username: string }) {
 
   const nextStep = (() => {
     if (data === null || summary === null) return null;
-    if (data.project._count.sources === 0 && data.project._count.assets === 0) return { title: "添加第一份项目资料", detail: "输入文本，或上传图片、文档和文件夹。", href: `/projects/${projectId}/materials`, action: "添加资料" };
-    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "核对原始资料后，只有人工确认的内容才会进入已确认事实。", href: `/projects/${projectId}/materials/review`, action: "开始审核" };
-    if (!data.governance.index.compatible) return { title: "建立或更新项目记忆", detail: "把已确认内容建立为可检索、可引用的语义索引。", href: `/projects/${projectId}/memory`, action: "管理记忆" };
-    return { title: "查询项目或生成简报", detail: "当前项目已经具备可引用的智能查询基础。", href: `/projects/${projectId}/intelligence`, action: "打开 AI 工作台" };
+    const returnTo = buildProjectHref(projectId, "overview", { focus: "current-state" });
+    if (data.project._count.sources === 0 && data.project._count.assets === 0) return { title: "添加第一份项目资料", detail: "输入文本，或上传图片、文档和文件夹。", href: buildProjectHref(projectId, "materials", { view: "add", from: "overview", returnTo }), action: "添加资料" };
+    if (summary.pendingContent > 0) return { title: "审核待确认内容", detail: "核对原始资料后，只有人工确认的内容才会进入已确认事实。", href: buildProjectHref(projectId, "materialsReview", { focus: "review-queue", from: "overview", returnTo }), action: "开始审核" };
+    if (!data.governance.index.compatible) return { title: "建立或更新项目记忆", detail: "把已确认内容建立为可检索、可引用的语义索引。", href: buildProjectHref(projectId, "memory", { from: "overview", returnTo }), action: "管理记忆" };
+    return { title: "查询项目或生成简报", detail: "当前项目已经具备可引用的智能查询基础。", href: buildProjectHref(projectId, "intelligence", { focus: "agent-investigation", from: "overview", returnTo }), action: "打开 AI 工作台" };
   })();
 
   return (
@@ -187,7 +201,7 @@ export function ProjectOverviewClient({ username }: { username: string }) {
             </section>
 
             <section className="mt-6 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-              <article id="current-state" className="scroll-mt-36 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
+              <article id="current-state" tabIndex={-1} className="scroll-mt-36 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm outline-none focus:ring-4 focus:ring-indigo-100 sm:p-7">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Current state</p><h2 className="mt-2 text-xl font-semibold">项目当前状态</h2></div>
                   <span className={`rounded-full px-3 py-1 text-xs font-semibold ${worldStatusMeta[data.world.status].tone}`}>{worldStatusMeta[data.world.status].label}</span>
@@ -201,8 +215,8 @@ export function ProjectOverviewClient({ username }: { username: string }) {
               <article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
                 <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Attention</p><h2 className="mt-2 text-xl font-semibold">需要关注</h2></div>
                 <div className="mt-5 divide-y divide-slate-100">
-                  <AttentionRow label="待审核内容" value={summary.pendingContent} href={`/projects/${projectId}/materials/review`} />
-                  <AttentionRow label="任务异常" value={summary.taskIssues} href={`/projects/${projectId}/governance`} />
+                  <AttentionRow label="待审核内容" value={summary.pendingContent} href={buildProjectHref(projectId, "materialsReview", { focus: "review-queue", from: "overview", returnTo: buildProjectHref(projectId, "overview", { focus: "current-state" }) })} />
+                  <AttentionRow label="任务异常" value={summary.taskIssues} href={buildProjectHref(projectId, "governance", { status: "failed", focus: "task-runs", from: "overview", returnTo: buildProjectHref(projectId, "overview", { focus: "current-state" }) })} />
                   <AttentionRow label="仓库同步风险" value={summary.githubIssues} href={`/projects/${projectId}/repositories`} />
                 </div>
                 <Link href={`/projects/${projectId}/governance`} className="mt-5 inline-flex text-xs font-semibold text-indigo-600">进入项目管理 →</Link>

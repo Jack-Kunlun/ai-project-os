@@ -208,7 +208,8 @@ test("governance routes are authenticated no-store reads and UI reuses bounded a
   ]);
   assert.match(materialReviews, /\/memory\/candidates\/\$\{review\.id\}/u);
   assert.match(materialReviews, /\/ai-memory\/candidates\/\$\{review\.id\}/u);
-  assert.match(client, /href=\{operation\.destination\}/u);
+  assert.match(client, /buildProjectHref\(projectId, "job"/u);
+  assert.doesNotMatch(client, /href=\{operation\.destination\}/u);
   assert.doesNotMatch(client, /action:\s*"acceptAll"|bulkAccept/u);
   assert.doesNotMatch(client, /待审核候选/u);
   assert.match(service, /`\/projects\/\$\{projectId\}\/jobs\/\$\{row\.id\}`/u);

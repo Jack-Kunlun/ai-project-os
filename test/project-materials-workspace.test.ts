@@ -45,14 +45,15 @@ test("materials workspace has separate source, intake dialog, and AI review rout
   assert.match(intake, /event.key === "Escape"/u);
   assert.match(intake, /event.shiftKey/u);
   assert.match(reviewPage, /ProjectMaterialReviewPage/u);
-  assert.match(review, /searchParams.get\("cursor"\)/u);
+  assert.match(review, /navigation\.filter/u);
+  assert.match(review, /buildProjectHref/u);
   assert.match(review, /query.set\("itemType", itemType\)/u);
   assert.match(review, /确认进入已确认事实/u);
   assert.match(detail, /safeMaterialsReturnTo/u);
   assert.match(detail, /返回原始资料/u);
   assert.match(detail, />原始资料<\/span>/u);
   assert.doesNotMatch(detail, />候选资料<\/span>/u);
-  assert.match(overview, /materials\/review/u);
+  assert.match(overview, /"materialsReview"/u);
   assert.doesNotMatch(overview, /materials#review-queue/u);
 });
 

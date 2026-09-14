@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { APP_VERSION } from "@/lib/version";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: `AI Project OS · 内部开发版 ${APP_VERSION}`,
+  title: "AI Project OS",
   description: "通过自动抽取、语义记忆、引用式问答与只读项目智能体，建立可追溯、可审阅的项目长期记忆。",
 };
 

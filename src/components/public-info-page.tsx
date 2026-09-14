@@ -1,6 +1,5 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { APP_VERSION } from "@/lib/version";
 
 export function PublicInfoPage({
   eyebrow,
@@ -21,7 +20,6 @@ export function PublicInfoPage({
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-xs font-bold text-white shadow-lg">OS</span>
             <span>
               <span className="block text-sm font-bold tracking-[0.14em]">AI PROJECT OS</span>
-              <span className="mt-0.5 block text-[10px] uppercase tracking-[0.14em] text-slate-500">内部开发版 · {APP_VERSION}</span>
             </span>
           </Link>
           <Link href="/login" className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700">返回登录</Link>

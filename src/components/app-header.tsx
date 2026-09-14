@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { APP_VERSION } from "@/lib/version";
 import { NotificationBell } from "./notification-bell";
 
 type PrimarySection = "dashboard" | "projects" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide" | "admin";
@@ -43,7 +42,6 @@ export function AppHeader({
           </span>
           <span className="hidden sm:block">
             <span className="block text-sm font-bold tracking-[0.14em] text-slate-950">AI PROJECT OS</span>
-            <span className="mt-0.5 block text-[10px] font-medium uppercase tracking-[0.14em] text-slate-500">内部开发版 · {APP_VERSION}</span>
           </span>
         </Link>
 

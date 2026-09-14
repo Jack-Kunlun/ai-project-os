@@ -224,7 +224,9 @@ test("first-run administrator can reach protected pages with production security
   await page.getByRole("button", { name: "我已查看，进入日常工作区", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
   await expect(page.getByRole("heading", { name: "欢迎回来，browser_admin" })).toBeVisible();
-  await expect(page.getByText("内部开发版 · 0.2.0-dev.1", { exact: true })).toBeVisible();
+  await expect(page.getByText("AI PROJECT OS", { exact: true })).toBeVisible();
+  await expect(page.getByText(/内部开发版/u)).toHaveCount(0);
+  await expect(page).toHaveTitle("AI Project OS");
   await expect(page.getByText(/当前没有可访问项目/u)).toBeVisible();
   await expect(page.getByText("运行正常", { exact: true })).toHaveCount(0);
   await expectNoHorizontalOverflow(page, "/dashboard", "欢迎回来，browser_admin", "dashboard");

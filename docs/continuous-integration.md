@@ -11,7 +11,7 @@
 3. 对一次性、名称受限的测试数据库实际运行 `pnpm test:postgres-gates` 中登记的全部 PostgreSQL 门禁。
 4. 安装 Chromium，并通过 `pnpm test:browser-e2e` 构建和启动生产模式应用与 Worker。
 5. 在全新数据库中初始化管理员，检查安全响应头、Dashboard、健康接口、项目列表、使用指南和 MCP 连接页；同时拒绝浏览器控制台错误，并对关键页面执行 WCAG 2.2 A/AA 自动扫描。
-6. 对同一次生产构建执行 `pnpm performance:check`，校验共享 JavaScript、单文件 JavaScript、全局 CSS、全部静态客户端资源，以及五个关键路由的 gzip 体积预算。
+6. 对同一次生产构建执行 `pnpm performance:check`，校验共享 JavaScript、单文件 JavaScript、全局 CSS、全部静态客户端资源，以及六个关键路由的 gzip 体积预算。
 7. 运行 `pnpm release:local`，构建唯一隔离的 Compose 候选，核对迁移、镜像版本、容器与 API 健康，重启后复验并精确清理候选资源。
 
 浏览器门禁固定为单 Worker，失败时保留截图、trace、视频和 HTML 报告。数据库和临时主密钥在门禁结束时精确清理；运行器只接受 `127.0.0.1:56432/postgres` 或等价 loopback 管理地址，并且只操作固定的 `ai_project_os_browser_e2e_test` 数据库。应用端口默认从 loopback 动态分配；如显式设置 `BROWSER_E2E_PORT`，运行器会先拒绝已被占用的端口。Playwright 只接受运行器注入的 `http://127.0.0.1:<port>`，避免误测其他本地服务。

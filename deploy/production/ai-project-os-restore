@@ -213,7 +213,7 @@ wait_for_standby() {
 if [[ $EUID -ne 0 ]]; then
   fail 'RESTORE_ROOT_REQUIRED' 70
 fi
-[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'RESTORE_TAG_INVALID' 64
+[[ "$RELEASE_TAG" == v0.2.0-dev.1 || "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'RESTORE_TAG_INVALID' 64
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'RESTORE_REVISION_INVALID' 65
 [[ "$LATEST_MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
   fail 'RESTORE_MANIFEST_OBJECT_INVALID' 64

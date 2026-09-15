@@ -29,6 +29,38 @@ test("clean-slate routing removes the legacy project route runtime graph", () =>
   assert.match(cleanSlateMigration, new RegExp(`DROP TABLE IF EXISTS "${legacyOwnershipAuditModel}"`, "u"));
 });
 
+test("clean-slate transition fences legacy writes before destructive DDL", () => {
+  const fenceName = "20260910005000_fence_clean_slate_transition";
+  const cleanSlateName = "20260910010000_clean_slate_ai_provider_model";
+  assert.ok(fenceName < cleanSlateName);
+
+  const migration = read(`prisma/migrations/${fenceName}/migration.sql`);
+  assert.match(migration, /CREATE OR REPLACE FUNCTION "clean_slate_transition_write_fence"\(\)/u);
+  assert.match(migration, /row_data JSONB := to_jsonb\(NEW\)/u);
+  assert.match(migration, /CLEAN_SLATE_TRANSITION_WRITE_FENCED/u);
+  assert.match(migration, /row_data ->> 'role' = 'member'/u);
+  assert.match(migration, /row_data ->> 'scope' = 'workspace'/u);
+  assert.match(migration, /row_data \? 'workspaceId'/u);
+
+  for (const relation of [
+    "AppUser",
+    "AiProviderConnection",
+  ]) {
+    assert.match(
+      migration,
+      new RegExp(`CREATE TRIGGER "${relation}_clean_slate_transition_write_fence"[\\s\\S]*BEFORE INSERT OR UPDATE ON "${relation}"`, "u"),
+    );
+  }
+  for (const relation of [legacyRouteModel, legacyRouteRevisionModel, legacyOwnershipAuditModel]) {
+    assert.match(migration, new RegExp(`to_regclass\\('public\\."${relation}"'\\) IS NOT NULL`, "u"));
+    assert.match(
+      migration,
+      new RegExp(`CREATE TRIGGER "${relation}_clean_slate_transition_write_fence"[\\s\\S]*BEFORE INSERT OR UPDATE ON "${relation}"`, "u"),
+    );
+  }
+  assert.doesNotMatch(migration, /SECURITY DEFINER|current_setting|DATABASE_URL|password|secret/iu);
+});
+
 test("effective route resolution retains only platform defaults and personal delegation", () => {
   assert.deepEqual(EFFECTIVE_AI_ROUTE_SOURCES, ["platform_default", "personal_delegation"]);
 

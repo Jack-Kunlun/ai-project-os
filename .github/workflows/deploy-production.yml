@@ -1,12 +1,12 @@
-name: Deploy production (planned; disabled until v1.0.0)
+name: Deploy production
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Future annotated release tag after the first formal v1.0.0 release (for example, v1.0.0)
+        description: Exact approved annotated release tag
         required: true
-        default: v1.0.0
+        default: v0.2.0-dev.1
         type: string
 
 permissions:
@@ -19,9 +19,8 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy verified release tag (disabled until v1.0.0)
-    # PRODUCTION_DEPLOYMENT_DISABLED_BEFORE_V1_0_0: this job must remain skipped while the product is internal development.
-    if: ${{ github.ref == 'refs/heads/main' && false }}
+    name: Deploy verified release tag
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     environment:
@@ -46,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ ! "$DEPLOY_TAG_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ "$DEPLOY_TAG_INPUT" != v0.2.0-dev.1 ]]; then
             echo "DEPLOY_TAG_INVALID" >&2
             exit 64
           fi

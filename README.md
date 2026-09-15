@@ -6,7 +6,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 当前版本状态：`INTERNAL_DEVELOPMENT` · `0.2.0-dev.1`
 
-正式发布基线：无。已发布的内部 prerelease 基线为 `v0.1.0-dev.1`，当前开发版本为 `0.2.0-dev.1`；首个正式公开版本计划为 `1.0.0`，在此之前生产部署入口静态禁用，任何内部开发版本都不得进入生产 tag 通道。
+正式稳定版基线：无。已发布的内部 prerelease 基线为 `v0.1.0-dev.1`，当前批准的受控生产目标为 `v0.2.0-dev.1`；它仍是预发布，不是稳定版或 GitHub Latest。生产部署入口只精确允许该标签，其他内部开发版本不得进入生产 tag 通道。
 
 0.2.x 当前仅表示内部开发版本。平台默认托管模型由系统管理员维护并按平台额度提供；有效会员可在个人中心维护个人模型，但必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用，个人模型不会自动替代平台默认模型。Git 用户私有连接与双确认后的一次性手动只读读取已按当前页面开放。MCP 个人连接与工具发现、管理员净化快照审核、项目连接委托和只读工具授权控制面已开放；远端动作调用、调用审批、派发、结果查看/导入和真实第三方联调仍冻结或未现场验证，不构成已验证的第三方实时能力。
 
@@ -17,7 +17,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 系统管理员完整指南：[docs/admin-operation-guide.md](docs/admin-operation-guide.md)。
 - 兼容索引：[docs/operation-manual.md](docs/operation-manual.md)。
 - 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
-- GitHub Actions 生产部署（未来能力，当前禁用）：[docs/production-deployment.md](docs/production-deployment.md)。
+- GitHub Actions 受控生产部署：[docs/production-deployment.md](docs/production-deployment.md)。
 - 单节点主机迁移与恢复：[docs/production-host-migration.md](docs/production-host-migration.md)。
 - 运行监控基线：[docs/monitoring.md](docs/monitoring.md)。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
@@ -177,7 +177,7 @@ docker compose ps --all
 
 Compose 默认使用三个命名卷：`ai-project-os-pgdata`、`ai-project-os-secrets`、`ai-project-os-uploads`。不要执行 `docker compose down -v`，该命令会删除数据库、凭据主密钥和上传文件。需要并行运行一次性候选验收时，必须同时改用独立 `POSTGRES_PORT`、`APP_PORT`、`AI_PROJECT_OS_PGDATA_VOLUME`、`AI_PROJECT_OS_SECRETS_VOLUME` 和 `AI_PROJECT_OS_UPLOADS_VOLUME`；不要让候选栈复用正式卷。
 
-面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true` 与实际 HTTPS `AI_PROJECT_OS_PUBLIC_ORIGIN`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。当前生产部署入口仍为未来能力，首个正式 `v1.0.0` 前不可执行；cluster-admin、migrator、runtime、writer 和 inventory-reader 密码若包含 URL 保留字符，需要先进行 URL 编码。
+面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true` 与实际 HTTPS `AI_PROJECT_OS_PUBLIC_ORIGIN`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。生产工作流当前仅精确允许已批准的 `v0.2.0-dev.1` 标签；cluster-admin、migrator、runtime、writer 和 inventory-reader 密码若包含 URL 保留字符，需要先进行 URL 编码。
 
 ### 现有卷的数据库账号升级
 

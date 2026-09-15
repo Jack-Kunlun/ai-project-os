@@ -48,6 +48,20 @@ services:
       MIGRATOR_DATABASE_URL: "postgresql://ai_project_os_migrator:${POSTGRES_MIGRATOR_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
     restart: "no"
 
+  production-upgrade-preflight:
+    profiles: ["production-upgrade"]
+    build:
+      context: .
+      target: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_URL: "postgresql://${POSTGRES_USER:-ai_project_os_cluster_admin}:${POSTGRES_CLUSTER_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL: "${DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL:-}"
+    command: ["node", "node_modules/tsx/dist/cli.mjs", "scripts/production-upgrade-preflight.ts", "pre-stop"]
+    restart: "no"
+
   reconcile:
     build:
       context: .

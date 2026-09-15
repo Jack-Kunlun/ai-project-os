@@ -100,6 +100,22 @@ test("host bootstrap pins sensitive tooling and installs root-owned runtime copi
   assert.match(bootstrap, /install -o root -g root -m 0755/u);
 });
 
+test("portable backup validator accepts only the approved prerelease exception plus stable tags", () => {
+  const code = `
+import runpy
+import sys
+pattern = runpy.run_path(sys.argv[1])["BACKUP_NAME"]
+accepted = pattern.fullmatch(sys.argv[2]) is not None
+raise SystemExit(0 if accepted else 1)
+`;
+  const approved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.2.0-dev.1.Abc123"]);
+  assert.equal(approved.status, 0, approved.stderr);
+  const unapproved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.2.0-dev.2.Abc123"]);
+  assert.notEqual(unapproved.status, 0);
+  const stable = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v1.0.0.Abc123"]);
+  assert.equal(stable.status, 0, stable.stderr);
+});
+
 test("portable backup validator accepts the exact v2 layout and rejects tampering", async (context) => {
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "ai-project-os-portable-backup-"));
   context.after(async () => rm(temporaryDirectory, { force: true, recursive: true }));

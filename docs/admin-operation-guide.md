@@ -130,7 +130,7 @@ MEMBERSHIP_GOVERNANCE_EXECUTOR_LABEL='maintenance-window-20260904' \
 http://127.0.0.1:3000/api/auth/github/callback
 ```
 
-凭据只写入未提交的部署配置或受控密钥管理，不写入源码、文档、URL 或日志。`AI_PROJECT_OS_PUBLIC_ORIGIN` 必须是浏览器实际访问的规范 origin，不能填容器内部地址。生产 job 在首个正式版本前静态禁用；不要因为配置了 GitHub Secret 就绕过发布门禁。
+凭据只写入未提交的部署配置或受控密钥管理，不写入源码、文档、URL 或日志。`AI_PROJECT_OS_PUBLIC_ORIGIN` 必须是浏览器实际访问的规范 origin，不能填容器内部地址。当前生产 job 只精确允许 `v0.2.0-dev.1`；不要因为配置了 GitHub Secret 就绕过标签 CI、备份恢复、旧库预检和停写迁移门禁。
 
 用户首次使用 GitHub 登录且系统不存在同邮箱账户时，可按产品规则创建 `member` 并加入默认工作区；同邮箱已存在时不得静默合并，用户应先登录原账号，再走明确绑定流程。临时访问令牌验证后立即撤销，不作为长期 Git 凭据保存。
 

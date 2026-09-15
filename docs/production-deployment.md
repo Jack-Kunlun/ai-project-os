@@ -1,20 +1,21 @@
-# GitHub Actions 生产部署（未来能力，当前禁用）
+# GitHub Actions 生产部署
 
-状态：`PLANNED`。AI Project OS 当前处于 `0.2.0-dev.1` 内部改造开发阶段，基于已发布 prerelease `v0.1.0-dev.1`，没有正式发布基线；首个正式公开版本计划为 `1.0.0`。0.2.x 已在开发分支实现会员个人模型、Git/MCP 用户私有所有权和平台默认模型路由的部分控制面，但尚未完成整版发布资格验收，不能视为生产已交付能力。在 `v1.0.0` 正式发布前，**Deploy production** 工作流的生产 job 通过静态 `if: ... && false` fail-closed，任何手动触发都不会执行检出、SSH、部署或健康检查。
+状态：`CONTROLLED_PRERELEASE`。当前批准的生产目标是 `v0.2.0-dev.1`。该版本仍是预发布，不是稳定版或 GitHub Latest；工作流只对这一精确标签开放，其他 `-dev` 标签继续失败关闭。
 
-未来启用后，AI Project OS 才会从 GitHub Actions 的 **Deploy production** 工作流手动部署已经正式发布并通过标签 CI 的版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
+AI Project OS 从 GitHub Actions 的 **Deploy production** 工作流手动部署已经通过标签 CI 的批准版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 
 ## 安全模型
 
-- 当前工作流 job 静态禁用，原因是项目尚未达到首个正式 `v1.0.0` 发布；重新启用前必须保留同一 fail-closed 原则。
-- 启用后工作流只能通过 `workflow_dispatch` 手动触发，并且必须从 `main` 运行。
-- 输入只接受 `vX.Y.Z`，目标必须是 annotated tag，且 `package.json` 版本必须匹配。
+- 工作流只能通过 `workflow_dispatch` 手动触发，并且必须从 `main` 运行。
+- 当前输入只接受 `v0.2.0-dev.1`，目标必须是 annotated tag，且 `package.json` 版本必须精确匹配 `0.2.0-dev.1`。
 - 部署前会通过 GitHub API 确认该标签、该精确提交的 `CI` push 运行已经 `completed/success`。
 - GitHub 使用独立 ED25519 私钥；服务器对应公钥带 `restrict` 和 forced-command，不能获取 Shell、PTY、端口转发或执行任意命令。
 - forced-command 只接受 `deploy <tag> <40 位 SHA>`，再调用 root 持有的固定部署程序。专用系统账号 `ai-project-os-actions` 没有人工登录密钥；`deploy` 用户不加入 `docker` 组，也不获得无密码 sudo。
 - 服务器会再次通过 GitHub 公共 API 核验标签 CI，专用私钥本身不能绕过发布门禁。
 - 生产 `.env` 位于 `/etc/ai-project-os/production.env`，权限为 `root:root 0600`，不会进入仓库、Actions 日志或部署结果。
+- 候选镜像会在旧 app/worker 仍健康时完成预构建；数据库只读预检要求线上旧库恰好具有已知的前 50 个迁移及校验和，并拒绝 clean-slate 会丢弃的遗留数据。
 - 每次替换容器前，会在同一停写窗口生成 PostgreSQL、自持主密钥卷和上传卷备份，校验 dump、tar 和 SHA-256，以 age 公钥加密并上传 COS；只有远端长度与 CRC64 验证通过才允许继续部署。完整合同见[生产异地备份](production-backup.md)。
+- 备份成功后部署器捕获并停止精确的旧 app/worker 容器，要求运行中的 Compose 服务只剩 PostgreSQL、数据库端口只绑定 `127.0.0.1`，再以新的数据库快照检查同库客户端；预检后会再次核对服务隔离。迁移开始前失败只恢复这些旧容器；迁移一旦开始，不自动回启旧代码。维护窗口内禁止另一个本机管理员或未纳管进程连接数据库；部署锁只序列化本项目的部署与备份，不替代主机访问控制。clean-slate 破坏性 DDL 之前会先安装数据库写入栅栏：检查前已存在的数据使迁移失败，检查后的遗留写入由触发器拒绝，因此不能静默丢弃。
 - 同一时间只允许一个生产部署；GitHub 与服务器两侧均禁止并发覆盖。
 
 ## 一次性服务器准备
@@ -67,17 +68,15 @@ sudo deploy/production/install-production-deploy.sh \
 生产 job 在任何备份、迁移或容器替换之前，通过受限 SSH key 的固定
 `configure-github-oauth` 命令把 OAuth 配置经标准输入发送给 root-owned 配置器。配置器只接受固定三行协议，校验 GitHub 凭据格式、生产 `.env` 的 owner/mode、数据库密码与安全 Cookie 基线，把公开 origin 固定为 `https://ai-project-os.com`，并在同一目录原子替换 `/etc/ai-project-os/production.env`。Client Secret 不进入命令参数、Actions 输出、部署结果或仓库；远端只返回 `PRODUCTION_GITHUB_OAUTH_CONFIG_OK`。
 
-该命令需要服务器已经安装当前版本的受限网关和配置器。部署工具升级仍属于一次性的服务器管理操作：从受信源码重新运行 `install-production-deploy.sh`，只更新 root-owned 工具与精确 sudoers allowlist，不需要管理员手工录入 OAuth 凭据。生产 job 在 `v1.0.0` 前仍保持静态禁用；配置 Environment 不会绕过这一门禁，也不会自动改动线上实例。
+该命令需要服务器已经安装当前版本的受限网关、部署器和配置器。部署 `v0.2.0-dev.1` 前必须从受信候选源码重新运行 `install-production-deploy.sh`，使 root-owned 工具、预检逻辑与精确 tag allowlist 同步更新；旧网关不接受该预发布标签。安装工具不会自动部署应用，配置 Environment 也不会绕过标签、CI、备份或数据库预检。
 
-## 启用后的部署流程（未来计划）
+## 部署流程
 
-首个正式 `v1.0.0` 发布并完成独立发布验收前，不要配置或点击生产部署入口。`0.2.0-dev.1`、`v0.1.0-dev.1` 以及任何 `-dev`/候选版本都不能进入生产 tag 通道。
-
-在未来启用后：
+在点击生产入口前，必须先用当前生产备份在隔离主机完成恢复演练，并确认从前 50 个迁移升级到当前 102 个迁移、数据库权限、app、worker、登录和关键数据不变量均通过。还必须确认生产服务器已安装本版本网关/部署器，Environment secrets/variables 完整，且一次性 legacy owner URL 指向同一 Compose PostgreSQL 数据库。
 
 1. 打开 GitHub 仓库的 **Actions**。
 2. 选择 **Deploy production**。
-3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag。
+3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag 为 `v0.2.0-dev.1`。
 4. 如配置了 Environment 审批，批准该部署。
 5. 工作流才会依次完成标签/CI 验证、受限 SSH、加密异地备份、部署、公网健康与 HTTP→HTTPS 跳转验证。
 
@@ -87,7 +86,8 @@ sudo deploy/production/install-production-deploy.sh \
 
 - 标签 CI 缺失或失败：部署不会连接服务器。
 - SSH、本地备份、age 加密、COS 上传/远端校验、磁盘空间或当前容器状态异常：部署在迁移前失败关闭；失败备份没有远端成功标记，因此不会触发本地清理。
-- 构建失败：旧容器保持运行，已创建的备份保留。
+- 预构建、旧库只读预检或备份失败：旧容器保持运行，已创建的备份保留。
+- 精确停止旧容器后、迁移开始前失败：部署器只重启已捕获的旧 app/worker，并等待旧健康恢复。
 - 迁移或新容器健康失败：工作流失败并保留备份与容器现场；不会自动回滚数据库，因为新迁移可能与旧代码不兼容。
 - 人工恢复前先确定目标版本的数据兼容性，再选择重新部署修复版本或从对应备份恢复 PostgreSQL、主密钥和上传卷。
 

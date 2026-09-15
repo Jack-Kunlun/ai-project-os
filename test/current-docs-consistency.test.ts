@@ -65,7 +65,7 @@ test("current product documents preserve the 0.2.x capability boundaries", async
   assert.match(docs["docs/admin-operation-guide.md"], /system admin 角色只代表平台管理权限，不隐含任何工作区或项目 Owner 权限/u);
 
   const nextRelease = docs["docs/releases/next.md"];
-  assert.match(nextRelease, /当前数据库迁移数为 `101`/u);
+  assert.match(nextRelease, /当前数据库迁移数为 `102`/u);
   assert.match(nextRelease, /50 CLOSED \/ 0 PARTIAL \/ 0 OPEN \/ 1 EXCLUDED/u);
   assert.match(nextRelease, /ADM-008.*已关闭/u);
   assert.match(nextRelease, /R-04.*文档一致性.*R-05.*全量发布门禁均已完成/u);
@@ -73,12 +73,12 @@ test("current product documents preserve the 0.2.x capability boundaries", async
   assert.doesNotMatch(nextRelease, /R-05.*尚未完成/u);
   assert.match(nextRelease, /本地工程候选门禁已通过/u);
   assert.match(nextRelease, /不构成正式发布候选或 RC/u);
-  assert.match(nextRelease, /61 项 PostgreSQL 门禁/u);
+  assert.match(nextRelease, /62 项 PostgreSQL 门禁/u);
   assert.match(nextRelease, /尚未现场联调/u);
 
   assert.doesNotMatch(currentChangelog, /计划中的改造（尚未交付）/u);
   assert.match(currentChangelog, /开发线已实现事实（不构成正式发布资格）/u);
-  assert.match(currentChangelog, /当前数据库迁移数为 101/u);
+  assert.match(currentChangelog, /当前数据库迁移数为 102/u);
   assert.match(docs["docs/v1-operations.md"], /历史\/冻结声明/u);
   assert.match(docs["docs/v0-scope.md"], /历史能力（V0 发布时）/u);
   assert.match(docs["docs/ai-memory-capability-contract.md"], /历史批准的后续能力范围（不自动代表当前已开放）/u);

@@ -15,12 +15,17 @@ readonly PRODUCTION_COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
 readonly RESULT_FILE=/var/lib/ai-project-os/last-deployment
 readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 
+MUTATION_ATTEMPTED=0
+WRITER_RECOVERY_REQUIRED=0
+OLD_APP_ID=
+OLD_WORKER_ID=
+
 if [[ $EUID -ne 0 ]]; then
   printf 'DEPLOY_ROOT_REQUIRED\n' >&2
   exit 70
 fi
 
-if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ "$RELEASE_TAG" != v0.2.0-dev.1 && ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   printf 'DEPLOY_TAG_INVALID\n' >&2
   exit 64
 fi
@@ -193,6 +198,102 @@ compose() {
 
 compose config --quiet
 
+run_upgrade_preflight() {
+  local phase=$1
+  local preflight_output
+
+  preflight_output=$(compose run --rm --no-deps production-upgrade-preflight \
+    node node_modules/tsx/dist/cli.mjs scripts/production-upgrade-preflight.ts "$phase")
+  grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$preflight_output" || {
+    printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_RESULT_INVALID\n' >&2
+    return 1
+  }
+  grep -Eq '"targetTag"[[:space:]]*:[[:space:]]*"v0\.2\.0-dev\.1"' <<<"$preflight_output" || {
+    printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_TARGET_INVALID\n' >&2
+    return 1
+  }
+  grep -Eq '"rollback"[[:space:]]*:[[:space:]]*"verified"' <<<"$preflight_output" || {
+    printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_ROLLBACK_INVALID\n' >&2
+    return 1
+  }
+  printf '%s\n' "$preflight_output"
+}
+
+assert_maintenance_isolation() {
+  local -a running_services=()
+  local postgres_id published_ports
+  mapfile -t running_services < <(compose ps --services --status running)
+  if (( ${#running_services[@]} != 1 )) || [[ "${running_services[0]}" != postgres ]]; then
+    printf 'DEPLOY_MAINTENANCE_SERVICES_NOT_ISOLATED\n' >&2
+    return 1
+  fi
+  postgres_id=$(compose ps -q postgres)
+  [[ "$postgres_id" =~ ^[0-9a-f]{64}$ ]] || {
+    printf 'DEPLOY_MAINTENANCE_POSTGRES_CONTAINER_INVALID\n' >&2
+    return 1
+  }
+  published_ports=$(docker inspect --format '{{json (index .NetworkSettings.Ports "5432/tcp")}}' "$postgres_id")
+  python3 -c '
+import json
+import sys
+try:
+    bindings = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit(1)
+accepted = (
+    isinstance(bindings, list)
+    and len(bindings) == 1
+    and isinstance(bindings[0], dict)
+    and bindings[0].get("HostIp") == "127.0.0.1"
+    and isinstance(bindings[0].get("HostPort"), str)
+    and bindings[0]["HostPort"].isdigit()
+)
+raise SystemExit(0 if accepted else 1)
+' <<<"$published_ports" || {
+    printf 'DEPLOY_MAINTENANCE_POSTGRES_PORT_NOT_ISOLATED\n' >&2
+    return 1
+  }
+}
+
+container_health() {
+  docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1"
+}
+
+wait_for_old_writers() {
+  local attempt app_state worker_state health_body
+  for attempt in $(seq 1 60); do
+    app_state=$(container_health "$OLD_APP_ID" 2>/dev/null || true)
+    worker_state=$(container_health "$OLD_WORKER_ID" 2>/dev/null || true)
+    if [[ "$app_state" == healthy && "$worker_state" == healthy ]]; then
+      health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health || true)
+      if grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body" \
+        && grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body" \
+        && grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"; then
+        return 0
+      fi
+    fi
+    sleep 5
+  done
+  printf 'DEPLOY_OLD_WRITER_RECOVERY_TIMEOUT\n' >&2
+  return 1
+}
+
+recover_old_writers_on_failure() {
+  local exit_code=$?
+  if (( exit_code != 0 && WRITER_RECOVERY_REQUIRED == 1 && MUTATION_ATTEMPTED == 0 )); then
+    docker start "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null || true
+    wait_for_old_writers || true
+  fi
+  return "$exit_code"
+}
+
+trap recover_old_writers_on_failure EXIT
+
+# Build every candidate image while the old app and worker are still serving.
+# No database-mutating container has run at this point.
+compose build principal-bootstrap migrate reconcile app worker production-upgrade-preflight
+run_upgrade_preflight pre-stop
+
 test -x "$BACKUP_SCRIPT"
 backup_output=$(AI_PROJECT_OS_DEPLOY_LOCK_HELD=1 "$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG")
 printf '%s\n' "$backup_output"
@@ -252,12 +353,52 @@ wait_for_stack() {
   return 1
 }
 
-# ENT-009 is a maintenance-window migration: the old application and worker
-# must not write while principal-bootstrap/migrate/reconcile run.
-compose stop app worker
-compose up -d postgres
-compose up -d --build --force-recreate principal-bootstrap migrate reconcile app worker
-wait_for_stack
+perform_writer_cutover() {
+  local source_health
+  OLD_APP_ID=$(compose ps -q app)
+  OLD_WORKER_ID=$(compose ps -q worker)
+  if [[ ! "$OLD_APP_ID" =~ ^[0-9a-f]{64}$ || ! "$OLD_WORKER_ID" =~ ^[0-9a-f]{64}$ ]]; then
+    printf 'DEPLOY_OLD_WRITER_CONTAINER_INVALID\n' >&2
+    return 69
+  fi
+  if [[ "$(container_health "$OLD_APP_ID")" != healthy || "$(container_health "$OLD_WORKER_ID")" != healthy ]]; then
+    printf 'DEPLOY_OLD_WRITER_NOT_HEALTHY\n' >&2
+    return 69
+  fi
+  source_health=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health) || {
+    printf 'DEPLOY_SOURCE_HEALTH_UNAVAILABLE\n' >&2
+    return 69
+  }
+  if ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$source_health" \
+    || ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"5\.1\.2"' <<<"$source_health" \
+    || ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health" \
+    || ! grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health"; then
+    printf 'DEPLOY_SOURCE_STACK_INVALID\n' >&2
+    return 69
+  fi
+
+  # The clean-slate migration is a maintenance-window migration. Capture and
+  # stop the exact healthy writer containers before the final read-only check.
+  WRITER_RECOVERY_REQUIRED=1
+  docker stop "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null
+  if [[ "$(docker inspect --format '{{.State.Running}}' "$OLD_APP_ID")" != false \
+    || "$(docker inspect --format '{{.State.Running}}' "$OLD_WORKER_ID")" != false ]]; then
+    printf 'DEPLOY_OLD_WRITER_STOP_FAILED\n' >&2
+    return 69
+  fi
+  assert_maintenance_isolation
+  run_upgrade_preflight post-stop
+  assert_maintenance_isolation
+
+  # From this point onward the database may have been changed. Never restart
+  # an old application against a partially or fully upgraded schema.
+  MUTATION_ATTEMPTED=1
+  compose up -d --no-build --force-recreate principal-bootstrap migrate reconcile app worker
+  wait_for_stack
+  WRITER_RECOVERY_REQUIRED=0
+}
+
+perform_writer_cutover
 
 public_health=$(curl --fail --silent --show-error https://ai-project-os.com/api/health)
 grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${RELEASE_TAG#v}"'"' <<<"$public_health"

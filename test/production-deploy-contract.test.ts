@@ -58,20 +58,21 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
-test("production workflow is statically fail-closed before the first formal v1.0.0 release", async () => {
+test("production workflow enables only the explicitly approved v0.2.0-dev.1 prerelease", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /PRODUCTION_DEPLOYMENT_DISABLED_BEFORE_V1_0_0/u);
-  assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' && false \}\}/u);
-  assert.match(workflow, /\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$/u);
-  assert.doesNotMatch(workflow, /0\.1\.0-dev\.1/u);
+  assert.match(workflow, /default: v0\.2\.0-dev\.1/u);
+  assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.2\.0-dev\.1/u);
+  assert.doesNotMatch(workflow, /&& false|DISABLED_BEFORE_V1_0_0|v1\.0\.0/u);
+  assert.doesNotMatch(workflow, /DEPLOY_TAG_INPUT" =~ \^v/u);
 });
 
 test("forced-command gateway accepts only an exact deploy or GitHub OAuth configuration command", async () => {
   const gateway = await readFile(gatewayPath, "utf8");
 
   assert.match(gateway, /SSH_ORIGINAL_COMMAND/u);
-  assert.match(gateway, /\^deploy\\ \(v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\)\\ \(\[0-9a-f\]\{40\}\)\$/u);
+  assert.match(gateway, /v0\\\.2\\\.0-dev\\\.1\|v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-deploy/u);
   assert.match(gateway, /original_command.*== configure-github-oauth/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-configure-github-oauth/u);
@@ -111,6 +112,7 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   const deployment = await readFile(deploymentPath, "utf8");
 
   assert.match(deployment, /REPOSITORY_URL=https:\/\/github\.com\/Jack-Kunlun\/ai-project-os\.git/u);
+  assert.match(deployment, /RELEASE_TAG" != v0\.2\.0-dev\.1/u);
   assert.match(deployment, /DEPLOY_TAG_NOT_ANNOTATED/u);
   assert.match(deployment, /DEPLOY_TAG_REVISION_MISMATCH/u);
   assert.match(deployment, /DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND/u);
@@ -124,6 +126,8 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   assert.match(deployment, /POSTGRES_ENTITLEMENT_WRITER_USER=ai_project_os_entitlement_writer/u);
   assert.match(deployment, /POSTGRES_ENTITLEMENT_WRITER_PASSWORD/u);
   assert.match(deployment, /DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL/u);
+  const compose = await readFile(path.join(repositoryRoot, "compose.yaml"), "utf8");
+  assert.match(compose, /production-upgrade-preflight:[\s\S]*DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL/u);
   assert.match(deployment, /POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD/u);
   assert.match(deployment, /AI_PROJECT_OS_SECURE_COOKIES=true/u);
   assert.match(deployment, /AI_PROJECT_OS_PUBLIC_ORIGIN=https:\/\/ai-project-os\.com/u);
@@ -133,20 +137,40 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   assert.match(deployment, /DEPLOY_GITHUB_OAUTH_CLIENT_ID_INVALID/u);
   assert.match(deployment, /DEPLOY_GITHUB_OAUTH_CLIENT_SECRET_INVALID/u);
   assert.match(deployment, /ai-project-os-backup/u);
+  assert.match(deployment, /compose build principal-bootstrap migrate reconcile app worker production-upgrade-preflight/u);
+  assert.match(deployment, /run_upgrade_preflight pre-stop/u);
+  assert.match(deployment, /run_upgrade_preflight post-stop/u);
+  assert.match(deployment, /DEPLOY_MAINTENANCE_SERVICES_NOT_ISOLATED/u);
+  assert.match(deployment, /DEPLOY_MAINTENANCE_POSTGRES_PORT_NOT_ISOLATED/u);
+  assert.match(deployment, /compose ps --services --status running/u);
+  assert.match(deployment, /bindings\[0\]\.get\("HostIp"\) == "127\.0\.0\.1"/u);
+  assert.match(deployment, /MUTATION_ATTEMPTED=0/u);
+  assert.match(deployment, /MUTATION_ATTEMPTED=1/u);
+  assert.match(deployment, /WRITER_RECOVERY_REQUIRED=1/u);
+  assert.match(deployment, /docker start "\$OLD_APP_ID" "\$OLD_WORKER_ID"/u);
+  assert.match(deployment, /docker stop "\$OLD_APP_ID" "\$OLD_WORKER_ID"/u);
+  assert.match(deployment, /DEPLOY_SOURCE_HEALTH_UNAVAILABLE/u);
+  assert.match(deployment, /DEPLOY_SOURCE_STACK_INVALID/u);
+  assert.match(deployment, /5\\\.1\\\.2/u);
+  assert.match(deployment, /compose up -d --no-build --force-recreate principal-bootstrap migrate reconcile app worker/u);
   assert.match(deployment, /AI_PROJECT_OS_DEPLOY_LOCK_HELD=1/u);
   assert.match(deployment, /pre-deploy "\$RELEASE_TAG"/u);
   assert.match(deployment, /DEPLOY_PRE_BACKUP_RESULT_INVALID/u);
   assert.match(deployment, /backup_object/u);
-  assert.match(deployment, /--force-recreate principal-bootstrap migrate reconcile app worker/u);
+  assert.doesNotMatch(deployment, /compose up[^\n]*--build/u);
   assert.match(deployment, /principal_bootstrap_state/u);
   assert.match(deployment, /reconcile_state/u);
-  assert.match(deployment, /compose stop app worker/u);
-  assert.ok(deployment.indexOf("compose stop app worker") < deployment.indexOf("compose up -d --build --force-recreate principal-bootstrap"));
+  assert.ok(deployment.indexOf("run_upgrade_preflight pre-stop") < deployment.indexOf('"$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG"'));
+  assert.ok(deployment.indexOf('"$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG"') < deployment.indexOf('docker stop "$OLD_APP_ID" "$OLD_WORKER_ID"'));
+  assert.ok(deployment.indexOf('docker stop "$OLD_APP_ID" "$OLD_WORKER_ID"') < deployment.indexOf("run_upgrade_preflight post-stop"));
+  assert.equal(deployment.match(/assert_maintenance_isolation/g)?.length, 3);
+  assert.ok(deployment.indexOf("run_upgrade_preflight post-stop") < deployment.indexOf("MUTATION_ATTEMPTED=1"));
+  assert.ok(deployment.indexOf("MUTATION_ATTEMPTED=1") < deployment.indexOf("compose up -d --no-build --force-recreate principal-bootstrap"));
   assert.match(deployment, /consecutiveFailures/u);
   assert.match(deployment, /https:\/\/ai-project-os\.com\/api\/health/u);
   assert.doesNotMatch(deployment, /\bcompose down\b|down[^\n]*-v/u);
   assert.ok(
-    deployment.indexOf('"$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG"') < deployment.indexOf("compose up -d postgres"),
+    deployment.indexOf('"$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG"') < deployment.indexOf("MUTATION_ATTEMPTED=1"),
     "offsite backup must complete before any production container replacement",
   );
 });
@@ -335,22 +359,23 @@ test("backup publishes an atomic sanitized current record and immutable history 
   assert.notEqual(functionEnd, -1);
   const statusFunctions = backup.slice(functionStart, functionEnd);
   const harnessPath = path.join(temporaryDirectory, "publish-status.sh");
-  const archiveObject = "cos://ai-project-os-backup-1306016679/production/backups/2026/09/02/20260902T032000Z-daily.Abc123/20260902T032000Z-daily.Abc123.tar.age";
+  const backupName = "20260902T032000Z-pre-deploy-to-v0.2.0-dev.1.Abc123";
+  const archiveObject = `cos://ai-project-os-backup-1306016679/production/backups/2026/09/02/${backupName}/${backupName}.tar.age`;
   await writeFile(harnessPath, `#!/usr/bin/env bash
 set -Eeuo pipefail
 readonly PUBLIC_STATUS_ROOT=${JSON.stringify(statusRoot)}
 readonly PUBLIC_HISTORY_ROOT=${JSON.stringify(historyRoot)}
 readonly PUBLIC_CURRENT_FILE=${JSON.stringify(path.join(statusRoot, "current.json"))}
 readonly PUBLIC_HISTORY_MAX=120
-readonly MODE=daily
-readonly TARGET_TAG=
+readonly MODE=pre-deploy
+readonly TARGET_TAG=v0.2.0-dev.1
 PUBLIC_STATUS_ACTIVE=1
 PUBLIC_STATUS_FINALIZED=0
 PUBLIC_RUN_ID=20260902T032000Z-4321
 PUBLIC_STARTED_AT=2026-09-02T03:20:00+08:00
 PUBLIC_STARTED_EPOCH=$(date +%s)
 PUBLIC_FAILURE_CODE_FILE=${JSON.stringify(path.join(statusRoot, ".failure"))}
-PUBLIC_BACKUP_NAME=20260902T032000Z-daily.Abc123
+PUBLIC_BACKUP_NAME=${backupName}
 PUBLIC_ARCHIVE_OBJECT=${JSON.stringify(archiveObject)}
 PUBLIC_ARCHIVE_SHA256=${"b".repeat(64)}
 PUBLIC_ARCHIVE_BYTES=2058936
@@ -370,7 +395,7 @@ finish_public_status succeeded
   const historyRaw = await readFile(historyPath, "utf8");
   const current = JSON.parse(currentRaw) as Record<string, unknown>;
   assert.equal(current.state, "succeeded");
-  assert.equal(current.trigger, "daily");
+  assert.equal(current.trigger, "pre-deploy");
   assert.equal(current.archiveObject, archiveObject);
   assert.equal(current.archiveBytes, 2_058_936);
   assert.equal(current.verificationAttempts, 4);

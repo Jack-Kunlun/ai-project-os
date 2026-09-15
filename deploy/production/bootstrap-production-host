@@ -194,7 +194,7 @@ install_runtime_scripts() {
 prepare_host() {
   local script
 
-  [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'HOST_TAG_INVALID' 64
+  [[ "$RELEASE_TAG" == v0.2.0-dev.1 || "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'HOST_TAG_INVALID' 64
   [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'HOST_REVISION_INVALID' 65
   [[ "$LATEST_MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
     fail 'HOST_MANIFEST_OBJECT_INVALID' 64

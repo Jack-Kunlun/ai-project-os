@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -12,6 +12,7 @@ import {
   readCoherentVersion,
   type CandidateIdentity,
 } from "./local-release-candidate";
+import { DEFAULT_WORKSPACE_ID } from "../src/lib/workspace-constants";
 
 type ProcessResult = { code: number; stdout: string; stderr: string };
 
@@ -22,8 +23,177 @@ type LocalReleaseSummary = {
   migrations: number;
   health: "ok";
   restartPersistence: "ok";
+  businessDataPersistence: "ok";
+  businessDataPersistenceEvidence: {
+    entities: readonly string[];
+    rows: number;
+    snapshotSha256: string;
+    prePostEqual: true;
+  };
+  workerRestart: "ok";
   cleanup: "verified";
 };
+
+type JsonRecord = Record<string, unknown>;
+
+type BusinessFixture = {
+  userId: string;
+  username: string;
+  workspaceId: string;
+  projectId: string;
+  projectSlug: string;
+  sourceId: string;
+  sourceContentHash: string;
+  sourceContentLength: number;
+};
+
+type WorkerRuntimeEvidence = {
+  name: string;
+  status: string;
+  instanceIdHash: string;
+  startedEpochMs: number;
+  heartbeatEpochMs: number;
+  consecutiveFailures: number;
+};
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+const WORKER_HEARTBEAT_STALE_AFTER_MS = 45_000;
+const BUSINESS_SNAPSHOT_ENTITIES = Object.freeze([
+  "AppUser",
+  "Workspace",
+  "WorkspaceMembership",
+  "Project",
+  "ProjectMembership",
+  "ProjectSource",
+] as const);
+
+function isRecord(value: unknown): value is JsonRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function requireRecord(value: unknown, code: string): JsonRecord {
+  if (!isRecord(value)) throw new Error(code);
+  return value;
+}
+
+function requireString(value: unknown, code: string): string {
+  if (typeof value !== "string") throw new Error(code);
+  return value;
+}
+
+function requireUuid(value: unknown, code: string): string {
+  const result = requireString(value, code);
+  if (!UUID_PATTERN.test(result)) throw new Error(code);
+  return result.toLowerCase();
+}
+
+function sqlLiteral(value: string): string {
+  if (/[\u0000-\u001f\u007f-\u009f]/u.test(value)) throw new Error("LOCAL_RELEASE_SQL_LITERAL_INVALID");
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) throw new Error("LOCAL_RELEASE_SNAPSHOT_CANONICALIZATION_FAILED");
+  return serialized;
+}
+
+function snapshotSha256(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
+}
+
+function snapshotRows(snapshot: JsonRecord, entity: string): JsonRecord[] {
+  const value = snapshot[entity];
+  if (!Array.isArray(value) || value.length !== 1 || value.some((row) => !isRecord(row))) {
+    throw new Error(`LOCAL_RELEASE_BUSINESS_SNAPSHOT_CARDINALITY:${entity}:${Array.isArray(value) ? value.length : "invalid"}`);
+  }
+  return value as JsonRecord[];
+}
+
+function assertSnapshotRecordShape(record: JsonRecord, expectedKeys: readonly string[], entity: string): void {
+  const actualKeys = Object.keys(record).sort();
+  const sortedExpectedKeys = [...expectedKeys].sort();
+  if (JSON.stringify(actualKeys) !== JSON.stringify(sortedExpectedKeys)) {
+    throw new Error(`LOCAL_RELEASE_BUSINESS_SNAPSHOT_SHAPE:${entity}`);
+  }
+}
+
+function assertSnapshotField(record: JsonRecord, field: string, expected: unknown, entity: string): void {
+  if (record[field] !== expected) throw new Error(`LOCAL_RELEASE_BUSINESS_SNAPSHOT_FIELD:${entity}:${field}`);
+}
+
+function assertBusinessSnapshot(value: unknown, fixture: BusinessFixture): JsonRecord {
+  const snapshot = requireRecord(value, "LOCAL_RELEASE_BUSINESS_SNAPSHOT_INVALID");
+  const expectedEntities = [...BUSINESS_SNAPSHOT_ENTITIES].sort();
+  if (JSON.stringify(Object.keys(snapshot).sort()) !== JSON.stringify(expectedEntities)) {
+    throw new Error("LOCAL_RELEASE_BUSINESS_SNAPSHOT_ENTITIES_INVALID");
+  }
+
+  const appUser = snapshotRows(snapshot, "AppUser")[0]!;
+  assertSnapshotRecordShape(appUser, ["accountAccessVersion", "createdAt", "disabledAt", "displayName", "email", "emailVerifiedAt", "id", "role", "updatedAt", "username"], "AppUser");
+  assertSnapshotField(appUser, "id", fixture.userId, "AppUser");
+  assertSnapshotField(appUser, "username", fixture.username, "AppUser");
+  assertSnapshotField(appUser, "role", "admin", "AppUser");
+  assertSnapshotField(appUser, "email", null, "AppUser");
+  assertSnapshotField(appUser, "displayName", null, "AppUser");
+  assertSnapshotField(appUser, "emailVerifiedAt", null, "AppUser");
+  assertSnapshotField(appUser, "disabledAt", null, "AppUser");
+  assertSnapshotField(appUser, "accountAccessVersion", 1, "AppUser");
+
+  const workspace = snapshotRows(snapshot, "Workspace")[0]!;
+  assertSnapshotRecordShape(workspace, ["createdAt", "createdById", "id", "initialAdminOnboardingCompletedAt", "name", "slug", "updatedAt"], "Workspace");
+  assertSnapshotField(workspace, "id", fixture.workspaceId, "Workspace");
+  assertSnapshotField(workspace, "createdById", fixture.userId, "Workspace");
+  assertSnapshotField(workspace, "name", "默认工作区", "Workspace");
+  assertSnapshotField(workspace, "slug", "default", "Workspace");
+  assertSnapshotField(workspace, "initialAdminOnboardingCompletedAt", null, "Workspace");
+
+  const workspaceMembership = snapshotRows(snapshot, "WorkspaceMembership")[0]!;
+  assertSnapshotRecordShape(workspaceMembership, ["accessState", "createdAt", "id", "role", "updatedAt", "userId", "workspaceId"], "WorkspaceMembership");
+  assertSnapshotField(workspaceMembership, "workspaceId", fixture.workspaceId, "WorkspaceMembership");
+  assertSnapshotField(workspaceMembership, "userId", fixture.userId, "WorkspaceMembership");
+  assertSnapshotField(workspaceMembership, "role", "owner", "WorkspaceMembership");
+  assertSnapshotField(workspaceMembership, "accessState", "confirmed", "WorkspaceMembership");
+
+  const project = snapshotRows(snapshot, "Project")[0]!;
+  assertSnapshotRecordShape(project, ["archivedAt", "createdAt", "description", "id", "membershipInheritanceMode", "name", "slug", "updatedAt", "workspaceId"], "Project");
+  assertSnapshotField(project, "id", fixture.projectId, "Project");
+  assertSnapshotField(project, "workspaceId", fixture.workspaceId, "Project");
+  assertSnapshotField(project, "slug", fixture.projectSlug, "Project");
+  // SQL reads the PostgreSQL enum label. Prisma maps this value to the
+  // workspaceInherited client name, so the persisted label is underscored.
+  assertSnapshotField(project, "membershipInheritanceMode", "workspace_inherited", "Project");
+  assertSnapshotField(project, "archivedAt", null, "Project");
+
+  const projectMembership = snapshotRows(snapshot, "ProjectMembership")[0]!;
+  assertSnapshotRecordShape(projectMembership, ["accessState", "createdAt", "id", "projectId", "role", "updatedAt", "userId"], "ProjectMembership");
+  assertSnapshotField(projectMembership, "projectId", fixture.projectId, "ProjectMembership");
+  assertSnapshotField(projectMembership, "userId", fixture.userId, "ProjectMembership");
+  assertSnapshotField(projectMembership, "role", "owner", "ProjectMembership");
+  assertSnapshotField(projectMembership, "accessState", "confirmed", "ProjectMembership");
+
+  const source = snapshotRows(snapshot, "ProjectSource")[0]!;
+  assertSnapshotRecordShape(source, ["capturedAt", "contentHash", "contentLength", "contentTextDigest", "externalRef", "id", "ingestedAt", "kind", "manualContentDedupeKey", "originScope", "projectId", "projectRepositoryLinkId", "retiredAt", "revisionKey", "sourceIdentity"], "ProjectSource");
+  assertSnapshotField(source, "id", fixture.sourceId, "ProjectSource");
+  assertSnapshotField(source, "projectId", fixture.projectId, "ProjectSource");
+  assertSnapshotField(source, "kind", "manual", "ProjectSource");
+  assertSnapshotField(source, "originScope", "project", "ProjectSource");
+  assertSnapshotField(source, "projectRepositoryLinkId", null, "ProjectSource");
+  assertSnapshotField(source, "externalRef", null, "ProjectSource");
+  assertSnapshotField(source, "contentHash", fixture.sourceContentHash, "ProjectSource");
+  assertSnapshotField(source, "contentTextDigest", fixture.sourceContentHash, "ProjectSource");
+  assertSnapshotField(source, "manualContentDedupeKey", fixture.sourceContentHash, "ProjectSource");
+  assertSnapshotField(source, "contentLength", fixture.sourceContentLength, "ProjectSource");
+  assertSnapshotField(source, "capturedAt", null, "ProjectSource");
+  assertSnapshotField(source, "retiredAt", null, "ProjectSource");
+
+  return snapshot;
+}
 
 function parseArguments(args: string[]): { allowDirty: boolean } {
   const meaningful = args.filter((argument) => argument !== "--");
@@ -126,6 +296,284 @@ async function verifyHealth(appPort: number, version: string): Promise<void> {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 1_000));
   }
   throw new Error(`LOCAL_RELEASE_HEALTH_FAILED:${lastError}`);
+}
+
+async function postJson(
+  url: string,
+  body: JsonRecord,
+  expectedStatus: number,
+  cookie?: string,
+): Promise<{ payload: JsonRecord; response: Response }> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    origin: new URL(url).origin,
+  };
+  if (cookie !== undefined) headers.cookie = cookie;
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+  const rawBody = await response.text();
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch (error) {
+    throw new Error(`LOCAL_RELEASE_FIXTURE_API_RESPONSE_INVALID:${response.status}`, { cause: error });
+  }
+  if (response.status !== expectedStatus) {
+    throw new Error(`LOCAL_RELEASE_FIXTURE_API_FAILED:${response.status}:${expectedStatus}`);
+  }
+  return { payload: requireRecord(parsed, "LOCAL_RELEASE_FIXTURE_API_PAYLOAD_INVALID"), response };
+}
+
+function readSessionCookie(response: Response): string {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+  const setCookieValues = typeof headers.getSetCookie === "function"
+    ? headers.getSetCookie()
+    : [response.headers.get("set-cookie") ?? ""];
+  const session = setCookieValues
+    .join(",")
+    .match(/(?:^|,)\s*ai_project_os_session=([^;]+)/u)?.[1];
+  if (session === undefined || session.length === 0) throw new Error("LOCAL_RELEASE_FIXTURE_SESSION_MISSING");
+  return `ai_project_os_session=${session}`;
+}
+
+async function seedBusinessFixture(appPort: number, identity: CandidateIdentity): Promise<BusinessFixture> {
+  const baseUrl = `http://127.0.0.1:${appPort}`;
+  const username = `candidate-${identity.token}`;
+  const password = `candidate_${randomBytes(24).toString("hex")}`;
+  const projectSlug = `candidate-${identity.token}`;
+  const sourceContent = "Disposable local release persistence fixture content.";
+  const sourceContentHash = createHash("sha256").update(sourceContent, "utf8").digest("hex");
+  const setup = await postJson(`${baseUrl}/api/setup`, { username, password }, 201);
+  const sessionCookie = readSessionCookie(setup.response);
+  const user = requireRecord(setup.payload.user, "LOCAL_RELEASE_FIXTURE_USER_INVALID");
+  const userId = requireUuid(user.id, "LOCAL_RELEASE_FIXTURE_USER_ID_INVALID");
+  if (user.username !== username || user.role !== "admin") throw new Error("LOCAL_RELEASE_FIXTURE_USER_INVALID");
+
+  const projectResponse = await postJson(`${baseUrl}/api/projects`, {
+    name: `Local release candidate ${identity.token}`,
+    slug: projectSlug,
+    description: "Disposable local release persistence fixture",
+  }, 201, sessionCookie);
+  const project = requireRecord(projectResponse.payload.project, "LOCAL_RELEASE_FIXTURE_PROJECT_INVALID");
+  const projectId = requireUuid(project.id, "LOCAL_RELEASE_FIXTURE_PROJECT_ID_INVALID");
+  if (project.slug !== projectSlug) {
+    throw new Error("LOCAL_RELEASE_FIXTURE_PROJECT_INVALID");
+  }
+
+  const sourceResponse = await postJson(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/sources`, {
+    contentText: sourceContent,
+  }, 201, sessionCookie);
+  const source = requireRecord(sourceResponse.payload.source, "LOCAL_RELEASE_FIXTURE_SOURCE_INVALID");
+  const sourceId = requireUuid(source.id, "LOCAL_RELEASE_FIXTURE_SOURCE_ID_INVALID");
+  if (source.kind !== "manual" || source.contentHash !== sourceContentHash) {
+    throw new Error("LOCAL_RELEASE_FIXTURE_SOURCE_INVALID");
+  }
+
+  return {
+    userId,
+    username,
+    workspaceId: DEFAULT_WORKSPACE_ID,
+    projectId,
+    projectSlug,
+    sourceId,
+    sourceContentHash,
+    sourceContentLength: sourceContent.length,
+  };
+}
+
+async function runRuntimeQuery(
+  composeArgs: string[],
+  runtimePassword: string,
+  query: string,
+): Promise<unknown> {
+  const result = await runProcess("docker", [
+    ...composeArgs,
+    "exec",
+    "-T",
+    "-e",
+    `PGPASSWORD=${runtimePassword}`,
+    "postgres",
+    "psql",
+    "-U",
+    "ai_project_os_runtime",
+    "-d",
+    "ai_project_os_candidate",
+    "-At",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    query,
+  ]);
+  const output = result.stdout.trim();
+  if (output.length === 0 || output.split(/\r?\n/u).length !== 1) {
+    throw new Error("LOCAL_RELEASE_RUNTIME_QUERY_OUTPUT_INVALID");
+  }
+  try {
+    return JSON.parse(output);
+  } catch (error) {
+    throw new Error("LOCAL_RELEASE_RUNTIME_QUERY_JSON_INVALID", { cause: error });
+  }
+}
+
+async function readBusinessSnapshot(
+  composeArgs: string[],
+  runtimePassword: string,
+  fixture: BusinessFixture,
+): Promise<JsonRecord> {
+  const query = `
+SELECT jsonb_build_object(
+  'AppUser', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', u."id"::text,
+      'username', u."username",
+      'displayName', u."displayName",
+      'email', u."email",
+      'emailVerifiedAt', u."emailVerifiedAt",
+      'role', u."role"::text,
+      'disabledAt', u."disabledAt",
+      'accountAccessVersion', u."accountAccessVersion",
+      'createdAt', u."createdAt",
+      'updatedAt', u."updatedAt"
+    ) ORDER BY u."id")
+    FROM "AppUser" AS u
+    WHERE u."id" = ${sqlLiteral(fixture.userId)}::uuid
+  ), '[]'::jsonb),
+  'Workspace', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', w."id"::text,
+      'name', w."name",
+      'slug', w."slug",
+      'createdById', w."createdById"::text,
+      'initialAdminOnboardingCompletedAt', w."initialAdminOnboardingCompletedAt",
+      'createdAt', w."createdAt",
+      'updatedAt', w."updatedAt"
+    ) ORDER BY w."id")
+    FROM "Workspace" AS w
+    WHERE w."id" = ${sqlLiteral(fixture.workspaceId)}::uuid
+  ), '[]'::jsonb),
+  'WorkspaceMembership', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', membership."id"::text,
+      'workspaceId', membership."workspaceId"::text,
+      'userId', membership."userId"::text,
+      'role', membership."role"::text,
+      'accessState', membership."accessState"::text,
+      'createdAt', membership."createdAt",
+      'updatedAt', membership."updatedAt"
+    ) ORDER BY membership."id")
+    FROM "WorkspaceMembership" AS membership
+    WHERE membership."workspaceId" = ${sqlLiteral(fixture.workspaceId)}::uuid
+      AND membership."userId" = ${sqlLiteral(fixture.userId)}::uuid
+  ), '[]'::jsonb),
+  'Project', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', project."id"::text,
+      'workspaceId', project."workspaceId"::text,
+      'membershipInheritanceMode', project."membershipInheritanceMode"::text,
+      'name', project."name",
+      'slug', project."slug",
+      'description', project."description",
+      'archivedAt', project."archivedAt",
+      'createdAt', project."createdAt",
+      'updatedAt', project."updatedAt"
+    ) ORDER BY project."id")
+    FROM "Project" AS project
+    WHERE project."id" = ${sqlLiteral(fixture.projectId)}::uuid
+  ), '[]'::jsonb),
+  'ProjectMembership', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', membership."id"::text,
+      'projectId', membership."projectId"::text,
+      'userId', membership."userId"::text,
+      'role', membership."role"::text,
+      'accessState', membership."accessState"::text,
+      'createdAt', membership."createdAt",
+      'updatedAt', membership."updatedAt"
+    ) ORDER BY membership."id")
+    FROM "ProjectMembership" AS membership
+    WHERE membership."projectId" = ${sqlLiteral(fixture.projectId)}::uuid
+      AND membership."userId" = ${sqlLiteral(fixture.userId)}::uuid
+  ), '[]'::jsonb),
+  'ProjectSource', COALESCE((
+    SELECT jsonb_agg(jsonb_build_object(
+      'id', source."id"::text,
+      'projectId', source."projectId"::text,
+      'kind', source."kind"::text,
+      'originScope', source."originScope"::text,
+      'projectRepositoryLinkId', source."projectRepositoryLinkId"::text,
+      'externalRef', source."externalRef",
+      'contentHash', source."contentHash",
+      'contentTextDigest', encode(digest(convert_to(source."contentText", 'UTF8'), 'sha256'), 'hex'),
+      'contentLength', char_length(source."contentText"),
+      'manualContentDedupeKey', source."manualContentDedupeKey",
+      'sourceIdentity', source."sourceIdentity"::text,
+      'revisionKey', source."revisionKey"::text,
+      'capturedAt', source."capturedAt",
+      'ingestedAt', source."ingestedAt",
+      'retiredAt', source."retiredAt"
+    ) ORDER BY source."id")
+    FROM "ProjectSource" AS source
+    WHERE source."projectId" = ${sqlLiteral(fixture.projectId)}::uuid
+      AND source."id" = ${sqlLiteral(fixture.sourceId)}::uuid
+  ), '[]'::jsonb)
+)::text;
+`;
+  const snapshot = await runRuntimeQuery(composeArgs, runtimePassword, query);
+  return assertBusinessSnapshot(snapshot, fixture);
+}
+
+async function readWorkerRuntime(
+  composeArgs: string[],
+  runtimePassword: string,
+  workerName: string,
+): Promise<WorkerRuntimeEvidence> {
+  const query = `
+SELECT COALESCE(jsonb_agg(jsonb_build_object(
+  'name', runtime."name",
+  'status', runtime."status"::text,
+  'instanceIdHash', runtime."instanceIdHash",
+  'startedEpochMs', (extract(epoch FROM runtime."startedAt") * 1000)::bigint,
+  'heartbeatEpochMs', (extract(epoch FROM runtime."heartbeatAt") * 1000)::bigint,
+  'consecutiveFailures', runtime."consecutiveFailures"
+) ORDER BY runtime."name"), '[]'::jsonb)::text
+FROM "WorkerRuntime" AS runtime
+WHERE runtime."name" = ${sqlLiteral(workerName)};
+`;
+  const value = await runRuntimeQuery(composeArgs, runtimePassword, query);
+  if (!Array.isArray(value) || value.length !== 1 || !isRecord(value[0])) {
+    throw new Error(`LOCAL_RELEASE_WORKER_RUNTIME_CARDINALITY:${Array.isArray(value) ? value.length : "invalid"}`);
+  }
+  const row = value[0];
+  const name = requireString(row.name, "LOCAL_RELEASE_WORKER_RUNTIME_INVALID");
+  const status = requireString(row.status, "LOCAL_RELEASE_WORKER_RUNTIME_INVALID");
+  const instanceIdHash = requireString(row.instanceIdHash, "LOCAL_RELEASE_WORKER_RUNTIME_INVALID");
+  const startedEpochMs = row.startedEpochMs;
+  const heartbeatEpochMs = row.heartbeatEpochMs;
+  const consecutiveFailures = row.consecutiveFailures;
+  if (
+    name !== workerName
+    || status !== "running"
+    || !SHA256_PATTERN.test(instanceIdHash)
+    || typeof startedEpochMs !== "number"
+    || !Number.isSafeInteger(startedEpochMs)
+    || typeof heartbeatEpochMs !== "number"
+    || !Number.isSafeInteger(heartbeatEpochMs)
+    || typeof consecutiveFailures !== "number"
+    || !Number.isSafeInteger(consecutiveFailures)
+    || consecutiveFailures !== 0
+    || heartbeatEpochMs < startedEpochMs
+  ) {
+    throw new Error("LOCAL_RELEASE_WORKER_RUNTIME_INVALID");
+  }
+  const heartbeatAgeMs = Date.now() - heartbeatEpochMs;
+  if (heartbeatAgeMs < -5_000 || heartbeatAgeMs > WORKER_HEARTBEAT_STALE_AFTER_MS) {
+    throw new Error(`LOCAL_RELEASE_WORKER_HEARTBEAT_STALE:${heartbeatAgeMs}`);
+  }
+  return { name, status, instanceIdHash, startedEpochMs, heartbeatEpochMs, consecutiveFailures };
 }
 
 async function expectedMigrationCount(): Promise<number> {
@@ -324,11 +772,27 @@ async function main(): Promise<void> {
     await verifyMigrations(composeArgs, migrationCount);
     await verifyImageLabels(composeArgs, version);
     await verifyHealth(appPort, version);
+    console.log("[local-release] seeding disposable business persistence fixture through the application API");
+    const fixture = await seedBusinessFixture(appPort, identity);
+    const beforeSnapshot = await readBusinessSnapshot(composeArgs, runtimePassword, fixture);
+    const beforeWorker = await readWorkerRuntime(composeArgs, runtimePassword, identity.workerName);
+    const beforeCanonical = canonicalJson(beforeSnapshot);
+    const beforeSnapshotHash = snapshotSha256(beforeSnapshot);
     console.log("[local-release] restarting database, app, and worker");
     await runProcess("docker", [...composeArgs, "restart", "postgres", "app", "worker"], { inherit: true });
     await waitForCandidate(composeArgs);
     await verifyMigrations(composeArgs, migrationCount);
     await verifyHealth(appPort, version);
+    const afterSnapshot = await readBusinessSnapshot(composeArgs, runtimePassword, fixture);
+    const afterWorker = await readWorkerRuntime(composeArgs, runtimePassword, identity.workerName);
+    const afterCanonical = canonicalJson(afterSnapshot);
+    if (beforeCanonical !== afterCanonical) throw new Error("LOCAL_RELEASE_BUSINESS_SNAPSHOT_MISMATCH");
+    if (beforeWorker.instanceIdHash === afterWorker.instanceIdHash) {
+      throw new Error("LOCAL_RELEASE_WORKER_INSTANCE_NOT_REPLACED");
+    }
+    if (afterWorker.startedEpochMs < beforeWorker.startedEpochMs) {
+      throw new Error("LOCAL_RELEASE_WORKER_STARTED_AT_REGRESSED");
+    }
     summary = {
       version,
       revision,
@@ -336,6 +800,14 @@ async function main(): Promise<void> {
       migrations: migrationCount,
       health: "ok",
       restartPersistence: "ok",
+      businessDataPersistence: "ok",
+      businessDataPersistenceEvidence: {
+        entities: BUSINESS_SNAPSHOT_ENTITIES,
+        rows: BUSINESS_SNAPSHOT_ENTITIES.length,
+        snapshotSha256: beforeSnapshotHash,
+        prePostEqual: true,
+      },
+      workerRestart: "ok",
       cleanup: "verified",
     };
   } catch (error) {

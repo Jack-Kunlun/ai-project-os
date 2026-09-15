@@ -182,14 +182,14 @@ test("MCP Package A/C1 keeps delegation control-plane data isolated and project 
   assert.doesNotMatch(tableDefinitions, /endpointUrl|credentialId|maskedSuffix|ciphertext|nonce|authTag/u);
 });
 
-test("MCP 页面指南要求管理员认证后才能进入项目授权", async () => {
+test("MCP 页面指南表达当前个人发现、管理员审核与项目只读授权边界", async () => {
   const [guide, connections] = await Promise.all([
     readFile("src/app/guide/page.tsx", "utf8"),
     readFile("src/app/connections/mcp/mcp-connections-client.tsx", "utf8"),
   ]);
-  assert.match(guide, /由管理员认证精确工具/u);
-  assert.match(guide, /远端声明本身不产生授权资格/u);
-  assert.match(guide, /任何认证撤销、授权撤销/u);
+  assert.match(guide, /个人连接与工具发现、管理员净化快照审核、项目连接委托和只读工具授权控制面已开放/u);
+  assert.match(guide, /MCP 工具必须由管理员审核精确工具后才能由项目 Owner 管理连接委托和只读工具授权/u);
+  assert.match(guide, /远端动作调用、调用审批、派发和结果查看\/导入尚未开放，不能通过内部 API 绕过/u);
   assert.match(connections, /管理员认证精确定义、网络和凭据指纹/u);
   assert.match(connections, /完成工具发现与管理员认证/u);
 });

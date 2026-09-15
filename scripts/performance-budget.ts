@@ -129,6 +129,17 @@ async function listFiles(root: string): Promise<string[]> {
   return nested.flat();
 }
 
+/**
+ * Next emits one empty client entry chunk for every App Router API handler.
+ * Those chunks are server-only routing stubs and are not reachable browser
+ * assets.  Keep the exclusion deliberately narrow so page chunks, including
+ * dynamic pages under an `api`-named segment elsewhere, remain measurable.
+ */
+export function isApiRouteEntryStub(assetPath: string): boolean {
+  const normalized = assetPath.replaceAll("\\", "/");
+  return /^static\/chunks\/app\/api\/(?:[^/]+\/)*route-[^/]+\.js$/u.test(normalized);
+}
+
 function routeManifestPath(buildDir: string, route: string): string {
   const routeDirectory = route === "/" ? "" : route.slice(1);
   return resolve(buildDir, "server/app", routeDirectory, "page_client-reference-manifest.js");
@@ -173,7 +184,9 @@ export async function measurePerformanceBudget(
   const sharedJavaScriptGzipBytes = await sumManifestAssets(buildDir, sharedJavaScript);
 
   const staticRoot = resolve(buildDir, "static");
-  const staticFiles = (await listFiles(staticRoot)).filter((path) => [".css", ".js"].includes(extname(path)));
+  const staticFiles = (await listFiles(staticRoot))
+    .filter((path) => [".css", ".js"].includes(extname(path)))
+    .filter((path) => !isApiRouteEntryStub(`static/${relative(staticRoot, path).split(sep).join("/")}`));
   if (staticFiles.length === 0) throw new Error(`PERFORMANCE_STATIC_ASSETS_MISSING:${staticRoot}`);
   const measuredAssets = await Promise.all(staticFiles.map(async (path) => ({
     path: `static/${relative(staticRoot, path).split(sep).join("/")}`,

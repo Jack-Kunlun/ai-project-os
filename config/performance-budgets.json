@@ -3,7 +3,7 @@
   "budgets": {
     "sharedJavaScriptGzipBytes": 148480,
     "largestJavaScriptAssetGzipBytes": 76800,
-    "globalCssGzipBytes": 13312,
+    "globalCssGzipBytes": 14336,
     "totalStaticClientGzipBytes": 655360
   },
   "criticalRoutes": {

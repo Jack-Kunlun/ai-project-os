@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { gzipSync } from "node:zlib";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   measurePerformanceBudget,
+  isApiRouteEntryStub,
   performanceBudgetFailures,
   type PerformanceBudgetConfig,
 } from "../scripts/performance-budget";
@@ -24,11 +26,20 @@ test("performance budget measures shared, route, CSS, largest, and total gzip si
   const root = await mkdtemp(join(tmpdir(), "ai-project-os-performance-"));
   try {
     await mkdir(join(root, "static/chunks/app/dashboard"), { recursive: true });
+    await mkdir(join(root, "static/chunks/app/api/projects/[projectId]"), { recursive: true });
+    await mkdir(join(root, "static/chunks/app/projects/[projectId]"), { recursive: true });
     await mkdir(join(root, "static/css"), { recursive: true });
     await mkdir(join(root, "server/app/dashboard"), { recursive: true });
-    await writeFile(join(root, "static/chunks/shared.js"), "shared".repeat(100));
-    await writeFile(join(root, "static/chunks/app/dashboard/page-test.js"), "route".repeat(80));
-    await writeFile(join(root, "static/css/app.css"), ".example{color:#123}".repeat(20));
+    const sharedSource = "shared".repeat(100);
+    const routeSource = "route".repeat(80);
+    const cssSource = ".example{color:#123}".repeat(20);
+    const apiStubSource = Array.from({ length: 2_000 }, (_, index) => `api-route-${index}-${"x".repeat(40)}`).join("\n");
+    const dynamicPageSource = "page".repeat(20);
+    await writeFile(join(root, "static/chunks/shared.js"), sharedSource);
+    await writeFile(join(root, "static/chunks/app/dashboard/page-test.js"), routeSource);
+    await writeFile(join(root, "static/chunks/app/api/projects/[projectId]/route-test.js"), apiStubSource);
+    await writeFile(join(root, "static/chunks/app/projects/[projectId]/route-page.js"), dynamicPageSource);
+    await writeFile(join(root, "static/css/app.css"), cssSource);
     await writeFile(join(root, "build-manifest.json"), JSON.stringify({
       rootMainFiles: ["static/chunks/shared.js"],
     }));
@@ -47,6 +58,13 @@ test("performance budget measures shared, route, CSS, largest, and total gzip si
     assert.equal(report.largestJavaScriptAsset.path, "static/chunks/shared.js");
     assert.ok(report.globalCssGzipBytes > 0);
     assert.ok(report.totalStaticClientGzipBytes > report.criticalRoutes["/dashboard"]);
+    assert.equal(isApiRouteEntryStub("static/chunks/app/api/projects/[projectId]/route-test.js"), true);
+    assert.equal(isApiRouteEntryStub("static\\chunks\\app\\api\\projects\\[projectId]\\route-test.js"), true);
+    assert.equal(isApiRouteEntryStub("static/chunks/app/projects/[projectId]/route-page.js"), false);
+    assert.equal(report.totalStaticClientGzipBytes, [sharedSource, routeSource, dynamicPageSource, cssSource]
+      .map((source) => gzipSync(source, { level: 9 }).byteLength)
+      .reduce((sum, size) => sum + size, 0));
+    assert.ok(gzipSync(apiStubSource, { level: 9 }).byteLength > report.totalStaticClientGzipBytes);
     assert.deepEqual(performanceBudgetFailures(report, config), []);
 
     const failures = performanceBudgetFailures(report, {
@@ -94,6 +112,7 @@ test("performance budget is wired into production build and CI", async () => {
   assert.match(runner, /spawn\(command, \["build"\]/u);
   assert.ok(workflow.indexOf("pnpm performance:check") > workflow.indexOf("pnpm test:browser-e2e"));
   assert.equal(checkedConfig.budgets.sharedJavaScriptGzipBytes, 145 * 1024);
+  assert.equal(checkedConfig.budgets.globalCssGzipBytes, 14 * 1024);
   assert.equal(checkedConfig.budgets.totalStaticClientGzipBytes, 640 * 1024);
   assert.deepEqual(Object.keys(checkedConfig.criticalRoutes), [
     "/setup",

@@ -62,13 +62,28 @@ async function assertCurrentAccountAccess(user: AccessUser, db: PrismaClient | P
   }
 }
 
-function projectRolePermission(role: ProjectMembershipRole): ProjectPermission {
+/**
+ * Keep the role-to-permission projection shared by runtime authorization and
+ * control-plane access explanations.  The latter must never grow a second,
+ * subtly different interpretation of a membership role.
+ */
+export function projectRolePermission(role: ProjectMembershipRole): ProjectPermission {
   return role === "owner" ? "owner" : role === "editor" ? "edit" : "view";
 }
 
-function workspaceRolePermission(role: WorkspaceMembershipRole): ProjectPermission | null {
+export function workspaceRolePermission(role: WorkspaceMembershipRole): ProjectPermission | null {
   if (role === "owner" || role === "admin") return "owner";
   return null;
+}
+
+export function highestProjectPermission(
+  left: ProjectPermission | null,
+  right: ProjectPermission | null,
+): ProjectPermission | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  const rank: Record<ProjectPermission, number> = { view: 1, edit: 2, owner: 3 };
+  return rank[left] >= rank[right] ? left : right;
 }
 
 function satisfies(actual: ProjectPermission, required: ProjectPermission): boolean {
@@ -116,9 +131,7 @@ export async function getProjectPermission(
     ? workspaceRolePermission(workspaceMembership.role)
     : null;
   const projectPermission = projectMembership !== null ? projectRolePermission(projectMembership.role) : null;
-  if (workspacePermission === "owner" || projectPermission === "owner") return "owner";
-  if (projectPermission === "edit") return "edit";
-  return projectPermission;
+  return highestProjectPermission(workspacePermission, projectPermission);
 }
 
 export async function assertProjectAccess(

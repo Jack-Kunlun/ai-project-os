@@ -1,7 +1,14 @@
-import { createHash, randomUUID } from "node:crypto";
-import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { Prisma, type AppUser, type PrismaClient, type ProjectMembershipRole, type WorkspaceMembershipRole } from "@prisma/client";
 import { z } from "zod";
+import {
+  highestProjectPermission,
+  projectRolePermission,
+  workspaceRolePermission,
+  type ProjectPermission,
+} from "@/lib/access-control";
 import { lockActorsAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
+import { loadOrCreateMasterKey } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 
 export type AccountAccessAction = "disable" | "restore";
@@ -760,4 +767,815 @@ export async function listAccountAccess(input: Readonly<{
     }));
     return Object.freeze({ items, page, pageSize, hasNextPage });
   });
+}
+
+const ACCESS_MATRIX_PAGE_SIZE_DEFAULT = 20;
+const ACCESS_MATRIX_PAGE_SIZE_MAX = 100;
+const ACCESS_MATRIX_CURSOR_VERSION = 1 as const;
+const ACCESS_MATRIX_CURSOR_CONTEXT = "ai-project-os:account-access-matrix-cursor:v1";
+const ACCESS_MATRIX_READ_TRANSACTION_TIMEOUT_MS = 30_000;
+
+type AccessMatrixCursor = Readonly<{
+  subjectId: string;
+  kind: "workspace" | "project";
+  pageSize: number;
+  createdAt: Date;
+  id: string;
+}>;
+
+type AccessMatrixCursorPayload = Readonly<{
+  version: typeof ACCESS_MATRIX_CURSOR_VERSION;
+  subjectId: string;
+  kind: "workspace" | "project";
+  pageSize: number;
+  createdAt: string;
+  id: string;
+}>;
+
+export type AccessMatrixReason =
+  | "account_disabled"
+  | "account_enabled"
+  | "system_admin_role"
+  | "system_user_role"
+  | "membership_active"
+  | "membership_not_started"
+  | "membership_expired"
+  | "membership_revoked"
+  | "membership_none"
+  | "workspace_membership_confirmed"
+  | "workspace_membership_pending"
+  | "workspace_membership_revoked"
+  | "workspace_membership_missing"
+  | "workspace_role_not_elevated"
+  | "project_inheritance_enabled"
+  | "project_inheritance_disabled"
+  | "direct_project_assignment_confirmed"
+  | "direct_project_assignment_pending"
+  | "direct_project_assignment_revoked"
+  | "direct_project_assignment_missing"
+  | "no_effective_project_permission";
+
+export type AccessMatrixAuditEvidence = Readonly<{
+  kind: "membership_access_audit" | "membership_record";
+  action: "confirmed" | "revoked" | "migration_quarantined" | "bootstrap_confirmed";
+}>;
+
+export type AccessMatrixRevocation = Readonly<{
+  recordedAt: string;
+  evidence: AccessMatrixAuditEvidence;
+}>;
+
+export type AccessMatrixMembership = Readonly<{
+  role: WorkspaceMembershipRole | ProjectMembershipRole;
+  accessState: "pending" | "confirmed";
+  recordedAt: string;
+}>;
+
+export type AccessMatrixWorkspaceProvenance = Readonly<{
+  kind: "workspace_membership" | "none";
+}>;
+
+export type AccessMatrixProjectProvenance = Readonly<{
+  kind:
+    | "direct_project_assignment"
+    | "workspace_inherited_owner_or_admin"
+    | "direct_and_workspace_inherited"
+    | "workspace_membership"
+    | "none";
+}>;
+
+export type EffectiveAccessMatrix = Readonly<{
+  asOf: string;
+  subject: Readonly<{
+    id: string;
+    username: string;
+    displayName: string | null;
+  }>;
+  system: Readonly<{
+    role: "admin" | "user";
+    accountState: AccountAccessState;
+    effective: boolean;
+    reasons: readonly AccessMatrixReason[];
+    source: Readonly<{ kind: "app_user" }>;
+  }>;
+  commercial: Readonly<{
+    tier: "member" | "free";
+    lifecycle: "none" | "not_started" | "active" | "expired" | "revoked";
+    entitlementEffective: boolean;
+    startsAt: string | null;
+    expiresAt: string | null;
+    reasons: readonly AccessMatrixReason[];
+    source:
+      | Readonly<{ kind: "none" }>
+      | Readonly<{ kind: "membership_subscription"; recordedAt: string }>;
+  }>;
+  workspaces: Readonly<{
+    items: readonly Readonly<{
+      id: string;
+      name: string;
+      slug: string;
+      current: AccessMatrixMembership | null;
+      latestRevocation: AccessMatrixRevocation | null;
+      effective: boolean;
+      reasons: readonly AccessMatrixReason[];
+      provenance: AccessMatrixWorkspaceProvenance;
+    }>[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }>;
+  projects: Readonly<{
+    items: readonly Readonly<{
+      id: string;
+      name: string;
+      slug: string;
+      workspaceId: string;
+      workspaceName: string;
+      inheritanceMode: "workspaceInherited" | "projectOnly";
+      archivedAt: string | null;
+      direct: AccessMatrixMembership | null;
+      latestDirectRevocation: AccessMatrixRevocation | null;
+      inheritedFromWorkspace: Readonly<{
+        role: WorkspaceMembershipRole | null;
+        accessState: "pending" | "confirmed" | "revoked" | null;
+        recordedAt: string | null;
+        effective: boolean;
+        provenance: Readonly<{
+          kind: "workspace_inherited_owner_or_admin" | "workspace_membership" | "none";
+        }>;
+      }> | null;
+      grantedPermission: ProjectPermission | null;
+      effectivePermission: ProjectPermission | null;
+      reasons: readonly AccessMatrixReason[];
+      provenance: AccessMatrixProjectProvenance;
+    }>[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }>;
+}>;
+
+const accessMatrixCursorSchema = z.object({
+  version: z.literal(ACCESS_MATRIX_CURSOR_VERSION),
+  subjectId: z.string().uuid(),
+  kind: z.enum(["workspace", "project"]),
+  pageSize: z.number().int().min(1).max(ACCESS_MATRIX_PAGE_SIZE_MAX),
+  createdAt: z.string().datetime({ offset: true }),
+  id: z.string().uuid(),
+}).strict();
+
+function accessMatrixPageSize(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) return ACCESS_MATRIX_PAGE_SIZE_DEFAULT;
+  return Math.min(value as number, ACCESS_MATRIX_PAGE_SIZE_MAX);
+}
+
+function canonicalAccessMatrixCursorPayload(input: AccessMatrixCursorPayload): string {
+  return JSON.stringify(input);
+}
+
+function accessMatrixCursorSignature(key: Buffer, encodedPayload: string): string {
+  return createHmac("sha256", key)
+    .update(ACCESS_MATRIX_CURSOR_CONTEXT, "utf8")
+    .update("\0", "utf8")
+    .update(encodedPayload, "utf8")
+    .digest("base64url");
+}
+
+function encodeAccessMatrixCursor(key: Buffer, input: AccessMatrixCursor): string {
+  const payload: AccessMatrixCursorPayload = {
+    version: ACCESS_MATRIX_CURSOR_VERSION,
+    subjectId: input.subjectId.toLowerCase(),
+    kind: input.kind,
+    pageSize: input.pageSize,
+    createdAt: input.createdAt.toISOString(),
+    id: input.id.toLowerCase(),
+  };
+  const encodedPayload = Buffer.from(canonicalAccessMatrixCursorPayload(payload), "utf8").toString("base64url");
+  return encodedPayload + "." + accessMatrixCursorSignature(key, encodedPayload);
+}
+
+function decodeAccessMatrixCursor(
+  key: Buffer,
+  value: unknown,
+  expected: Readonly<Pick<AccessMatrixCursor, "subjectId" | "kind" | "pageSize">>,
+): AccessMatrixCursor | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || value.length > 512) return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  const [encodedPayload, signature, ...rest] = value.split(".");
+  if (
+    encodedPayload === undefined
+    || signature === undefined
+    || rest.length > 0
+    || !/^[A-Za-z0-9_-]+$/u.test(encodedPayload)
+    || !/^[A-Za-z0-9_-]+$/u.test(signature)
+  ) return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  const expectedSignature = accessMatrixCursorSignature(key, encodedPayload);
+  let supplied: Buffer;
+  let expectedBuffer: Buffer;
+  try {
+    supplied = Buffer.from(signature, "base64url");
+    expectedBuffer = Buffer.from(expectedSignature, "base64url");
+  } catch {
+    return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  }
+  if (
+    supplied.toString("base64url") !== signature
+    || supplied.length !== expectedBuffer.length
+    || !timingSafeEqual(supplied, expectedBuffer)
+  ) return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  const decoded = Buffer.from(encodedPayload, "base64url").toString("utf8");
+  if (Buffer.from(decoded, "utf8").toString("base64url") !== encodedPayload) return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(decoded) as unknown;
+  } catch {
+    return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  }
+  const parsed = accessMatrixCursorSchema.safeParse(parsedJson);
+  if (!parsed.success) return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  const createdAt = new Date(parsed.data.createdAt);
+  if (Number.isNaN(createdAt.getTime())) return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  const canonicalPayload: AccessMatrixCursorPayload = {
+    version: ACCESS_MATRIX_CURSOR_VERSION,
+    subjectId: parsed.data.subjectId.toLowerCase(),
+    kind: parsed.data.kind,
+    pageSize: parsed.data.pageSize,
+    createdAt: createdAt.toISOString(),
+    id: parsed.data.id.toLowerCase(),
+  };
+  if (canonicalAccessMatrixCursorPayload(canonicalPayload) !== decoded) return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  if (
+    canonicalPayload.subjectId !== expected.subjectId.toLowerCase()
+    || canonicalPayload.kind !== expected.kind
+    || canonicalPayload.pageSize !== expected.pageSize
+  ) return fail("ACCOUNT_ACCESS_INVALID_INPUT");
+  return Object.freeze({
+    subjectId: canonicalPayload.subjectId,
+    kind: canonicalPayload.kind,
+    pageSize: canonicalPayload.pageSize,
+    createdAt,
+    id: canonicalPayload.id,
+  });
+}
+
+function afterAccessMatrixCursor(cursor: AccessMatrixCursor | null): Readonly<{
+  OR: [
+    { createdAt: { gt: Date } },
+    { createdAt: Date; id: { gt: string } },
+  ];
+}> | Record<string, never> {
+  if (cursor === null) return {};
+  return {
+    OR: [
+      { createdAt: { gt: cursor.createdAt } },
+      { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+    ],
+  };
+}
+
+function accessMatrixRecordedAt(value: Date): string {
+  return value.toISOString();
+}
+
+export type AccessMatrixMembershipRow = Readonly<{
+  id: string;
+  role: WorkspaceMembershipRole | ProjectMembershipRole;
+  accessState: "pending" | "confirmed" | "revoked";
+  createdAt: Date;
+  updatedAt: Date;
+}>;
+
+type AccessMatrixWorkspaceMembershipRow = AccessMatrixMembershipRow & Readonly<{ workspaceId: string }>;
+type AccessMatrixProjectMembershipRow = AccessMatrixMembershipRow & Readonly<{ projectId: string }>;
+
+type AccessMatrixAuditRow = Readonly<{
+  membershipId: string;
+  action: "confirmed" | "revoked" | "migrationQuarantined" | "bootstrapConfirmed";
+  createdAt: Date;
+}>;
+
+function membershipForDto(row: AccessMatrixMembershipRow): AccessMatrixMembership | null {
+  if (row.accessState === "revoked") return null;
+  return Object.freeze({
+    role: row.role,
+    accessState: row.accessState,
+    recordedAt: accessMatrixRecordedAt(row.updatedAt),
+  });
+}
+
+function auditAction(value: AccessMatrixAuditRow["action"]): AccessMatrixAuditEvidence["action"] {
+  if (value === "migrationQuarantined") return "migration_quarantined";
+  if (value === "bootstrapConfirmed") return "bootstrap_confirmed";
+  return value;
+}
+
+function revocationForDto(
+  row: AccessMatrixMembershipRow | null,
+  audit: AccessMatrixAuditRow | undefined,
+): AccessMatrixRevocation | null {
+  if (row === null || row.accessState !== "revoked") return null;
+  return Object.freeze({
+    recordedAt: accessMatrixRecordedAt(audit?.createdAt ?? row.updatedAt),
+    evidence: Object.freeze({
+      kind: audit === undefined ? "membership_record" as const : "membership_access_audit" as const,
+      action: auditAction(audit?.action ?? "revoked"),
+    }),
+  });
+}
+
+function mapAudits(rows: readonly AccessMatrixAuditRow[]): Map<string, AccessMatrixAuditRow> {
+  const result = new Map<string, AccessMatrixAuditRow>();
+  for (const row of rows) {
+    // The query is ordered newest first.  Keep one bounded, safe audit label
+    // per membership rather than exposing a history or relying on ordering
+    // supplied by a caller.
+    if (!result.has(row.membershipId)) result.set(row.membershipId, row);
+  }
+  return result;
+}
+
+/**
+ * Split a bounded batch into its sole current relationship and its latest
+ * revoked relationship.  This pure projection is also the query-budget
+ * contract: callers must batch rows before invoking it, never query per scope.
+ */
+export function groupAccessMatrixMembershipRows<T extends AccessMatrixMembershipRow>(
+  rows: readonly T[],
+  scopeOf: (row: T) => string,
+): Readonly<{
+  current: ReadonlyMap<string, T>;
+  latestRevoked: ReadonlyMap<string, T>;
+}> {
+  const current = new Map<string, T>();
+  const latestRevoked = new Map<string, T>();
+  for (const row of rows) {
+    const scope = scopeOf(row);
+    if (row.accessState === "revoked") {
+      const previous = latestRevoked.get(scope);
+      if (
+        previous === undefined
+        || row.updatedAt.getTime() > previous.updatedAt.getTime()
+        || (row.updatedAt.getTime() === previous.updatedAt.getTime() && row.id > previous.id)
+      ) latestRevoked.set(scope, row);
+      continue;
+    }
+    if (current.has(scope)) return fail("ACCOUNT_ACCESS_CONFLICT");
+    current.set(scope, row);
+  }
+  return Object.freeze({ current, latestRevoked });
+}
+
+function currentWorkspaceReasons(
+  current: AccessMatrixMembership | null,
+  latestRevocation: AccessMatrixRevocation | null,
+  enabled: boolean,
+): AccessMatrixReason[] {
+  const reasons: AccessMatrixReason[] = current === null
+    ? [latestRevocation === null ? "workspace_membership_missing" : "workspace_membership_revoked"]
+    : current.accessState === "pending"
+      ? ["workspace_membership_pending"]
+      : ["workspace_membership_confirmed"];
+  if (!enabled) reasons.push("account_disabled");
+  return reasons;
+}
+
+function subscriptionLifecycle(
+  subscription: Readonly<{ status: "active" | "revoked"; startsAt: Date; expiresAt: Date }> | null,
+  now: Date,
+): "none" | "not_started" | "active" | "expired" | "revoked" {
+  if (subscription === null) return "none";
+  if (subscription.status === "revoked") return "revoked";
+  if (subscription.startsAt > now) return "not_started";
+  if (subscription.expiresAt <= now) return "expired";
+  return "active";
+}
+
+function commercialReasons(
+  lifecycle: "none" | "not_started" | "active" | "expired" | "revoked",
+  enabled: boolean,
+): AccessMatrixReason[] {
+  const reasons: AccessMatrixReason[] = [
+    lifecycle === "none" ? "membership_none"
+      : lifecycle === "not_started" ? "membership_not_started"
+        : lifecycle === "active" ? "membership_active"
+          : lifecycle === "expired" ? "membership_expired" : "membership_revoked",
+  ];
+  if (!enabled) reasons.push("account_disabled");
+  return reasons;
+}
+
+function projectReasons(input: Readonly<{
+  direct: AccessMatrixMembership | null;
+  latestDirectRevocation: AccessMatrixRevocation | null;
+  inherited: Readonly<{
+    role: WorkspaceMembershipRole | null;
+    accessState: "pending" | "confirmed" | "revoked" | null;
+    effective: boolean;
+  }> | null;
+  inheritedPermission: ProjectPermission | null;
+  inheritanceMode: "workspaceInherited" | "projectOnly";
+  grantedPermission: ProjectPermission | null;
+  effectivePermission: ProjectPermission | null;
+  enabled: boolean;
+}>): AccessMatrixReason[] {
+  const reasons: AccessMatrixReason[] = [];
+  if (input.direct === null) {
+    reasons.push(input.latestDirectRevocation === null ? "direct_project_assignment_missing" : "direct_project_assignment_revoked");
+  } else if (input.direct.accessState === "pending") {
+    reasons.push("direct_project_assignment_pending");
+  } else {
+    reasons.push("direct_project_assignment_confirmed");
+  }
+  if (input.inheritanceMode === "workspaceInherited") {
+    reasons.push("project_inheritance_enabled");
+    // `effective` on the DTO includes the account-disabled overlay.  Reasons
+    // must still describe a confirmed elevated relationship underneath that
+    // overlay, otherwise a disabled owner would be mislabeled as non-elevated.
+    if (input.inheritedPermission !== null) {
+      // The inherited role is intentionally represented only by the safe
+      // provenance and the resulting permission, never by another actor.
+      reasons.push("workspace_membership_confirmed");
+    } else if (input.inherited?.accessState === "pending") {
+      reasons.push("workspace_membership_pending");
+    } else if (input.inherited?.accessState === "revoked") {
+      reasons.push("workspace_membership_revoked");
+    } else if (input.inherited !== null && input.inherited.role !== null) {
+      reasons.push("workspace_role_not_elevated");
+    } else {
+      reasons.push("workspace_membership_missing");
+    }
+  } else {
+    reasons.push("project_inheritance_disabled");
+  }
+  if (input.grantedPermission === null) reasons.push("no_effective_project_permission");
+  if (!input.enabled) reasons.push("account_disabled");
+  return reasons;
+}
+
+function projectProvenance(input: Readonly<{
+  direct: AccessMatrixMembership | null;
+  inherited: Readonly<{
+    role: WorkspaceMembershipRole | null;
+    accessState: "pending" | "confirmed" | "revoked" | null;
+    provenance: Readonly<{
+      kind: "workspace_inherited_owner_or_admin" | "workspace_membership" | "none";
+    }>;
+  }> | null;
+  inheritanceMode: "workspaceInherited" | "projectOnly";
+}>): AccessMatrixProjectProvenance {
+  // Provenance describes only confirmed grants that contributed to the
+  // relationship-calculated permission.  Pending/revoked/directly unrelated
+  // records remain available through the DTO and reasons, but are not an
+  // authorization source.  Account disabled is intentionally ignored here:
+  // grantedPermission is the underlying relationship result and must retain
+  // its source while effectivePermission is separately nulled.
+  const hasConfirmedDirect = input.direct?.accessState === "confirmed";
+  const hasConfirmedElevatedInherited = input.inheritanceMode === "workspaceInherited"
+    && input.inherited?.accessState === "confirmed"
+    && input.inherited.provenance.kind === "workspace_inherited_owner_or_admin";
+  if (hasConfirmedDirect && hasConfirmedElevatedInherited) return Object.freeze({ kind: "direct_and_workspace_inherited" });
+  if (hasConfirmedDirect) return Object.freeze({ kind: "direct_project_assignment" });
+  if (hasConfirmedElevatedInherited) return Object.freeze({ kind: "workspace_inherited_owner_or_admin" });
+  return Object.freeze({ kind: "none" });
+}
+
+function projectPermissionFromRole(role: ProjectMembershipRole | null): ProjectPermission | null {
+  return role === null ? null : projectRolePermission(role);
+}
+
+async function membershipAuditRows(
+  db: Prisma.TransactionClient,
+  kind: "workspace" | "project",
+  membershipIds: readonly string[],
+): Promise<AccessMatrixAuditRow[]> {
+  if (membershipIds.length === 0) return [];
+  return db.membershipAccessAudit.findMany({
+    where: { membershipKind: kind, membershipId: { in: [...new Set(membershipIds)] }, action: "revoked" },
+    orderBy: [{ createdAt: "desc" }, { membershipId: "asc" }],
+    select: { membershipId: true, action: true, createdAt: true },
+  }) as Promise<AccessMatrixAuditRow[]>;
+}
+
+async function workspaceMembershipRows(
+  db: Prisma.TransactionClient,
+  workspaceIds: readonly string[],
+  subjectId: string,
+): Promise<AccessMatrixWorkspaceMembershipRow[]> {
+  if (workspaceIds.length === 0) return [];
+  const scopeIds = [...new Set(workspaceIds)];
+  const scopes = Prisma.join(scopeIds.map((id) => Prisma.sql`${id}::uuid`));
+  return db.$queryRaw<AccessMatrixWorkspaceMembershipRow[]>(Prisma.sql`
+    WITH "current_candidates" AS (
+      SELECT "id", "workspaceId", "role", "accessState", "createdAt", "updatedAt",
+        row_number() OVER (
+          PARTITION BY "workspaceId"
+          ORDER BY "updatedAt" DESC, "id" DESC
+        ) AS "candidateRank"
+      FROM "WorkspaceMembership"
+      WHERE "workspaceId" IN (${scopes})
+        AND "userId" = ${subjectId}::uuid
+        AND "accessState" <> 'revoked'
+    ),
+    "latest_revoked" AS (
+      SELECT "id", "workspaceId", "role", "accessState", "createdAt", "updatedAt",
+        row_number() OVER (
+          PARTITION BY "workspaceId"
+          ORDER BY "updatedAt" DESC, "id" DESC
+        ) AS "candidateRank"
+      FROM "WorkspaceMembership"
+      WHERE "workspaceId" IN (${scopes})
+        AND "userId" = ${subjectId}::uuid
+        AND "accessState" = 'revoked'
+    )
+    SELECT "id", "workspaceId", "role", "accessState", "createdAt", "updatedAt"
+    FROM "current_candidates"
+    WHERE "candidateRank" <= 2
+    UNION ALL
+    SELECT "id", "workspaceId", "role", "accessState", "createdAt", "updatedAt"
+    FROM "latest_revoked"
+    WHERE "candidateRank" = 1
+  `);
+}
+
+async function projectMembershipRows(
+  db: Prisma.TransactionClient,
+  projectIds: readonly string[],
+  subjectId: string,
+): Promise<AccessMatrixProjectMembershipRow[]> {
+  if (projectIds.length === 0) return [];
+  const scopeIds = [...new Set(projectIds)];
+  const scopes = Prisma.join(scopeIds.map((id) => Prisma.sql`${id}::uuid`));
+  return db.$queryRaw<AccessMatrixProjectMembershipRow[]>(Prisma.sql`
+    WITH "current_candidates" AS (
+      SELECT "id", "projectId", "role", "accessState", "createdAt", "updatedAt",
+        row_number() OVER (
+          PARTITION BY "projectId"
+          ORDER BY "updatedAt" DESC, "id" DESC
+        ) AS "candidateRank"
+      FROM "ProjectMembership"
+      WHERE "projectId" IN (${scopes})
+        AND "userId" = ${subjectId}::uuid
+        AND "accessState" <> 'revoked'
+    ),
+    "latest_revoked" AS (
+      SELECT "id", "projectId", "role", "accessState", "createdAt", "updatedAt",
+        row_number() OVER (
+          PARTITION BY "projectId"
+          ORDER BY "updatedAt" DESC, "id" DESC
+        ) AS "candidateRank"
+      FROM "ProjectMembership"
+      WHERE "projectId" IN (${scopes})
+        AND "userId" = ${subjectId}::uuid
+        AND "accessState" = 'revoked'
+    )
+    SELECT "id", "projectId", "role", "accessState", "createdAt", "updatedAt"
+    FROM "current_candidates"
+    WHERE "candidateRank" <= 2
+    UNION ALL
+    SELECT "id", "projectId", "role", "accessState", "createdAt", "updatedAt"
+    FROM "latest_revoked"
+    WHERE "candidateRank" = 1
+  `);
+}
+
+async function getEffectiveAccessMatrixInTransaction(
+  tx: Prisma.TransactionClient,
+  input: Readonly<{
+    subjectId: string;
+    workspaceCursor: AccessMatrixCursor | null;
+    projectCursor: AccessMatrixCursor | null;
+    pageSize: number;
+    cursorKey: Buffer;
+  }>,
+  now: Date,
+): Promise<EffectiveAccessMatrix> {
+  const subject = await tx.appUser.findUnique({
+    where: { id: input.subjectId },
+    select: {
+      id: true,
+      username: true,
+      displayName: true,
+      role: true,
+      disabledAt: true,
+      membershipSubscription: { select: { status: true, startsAt: true, expiresAt: true, createdAt: true, updatedAt: true } },
+    },
+  });
+  if (subject === null) return fail("ACCOUNT_ACCESS_USER_NOT_FOUND");
+  const enabled = subject.disabledAt === null;
+  const role = subject.role === "admin" ? "admin" as const : "user" as const;
+  const systemReasons: AccessMatrixReason[] = [role === "admin" ? "system_admin_role" : "system_user_role", enabled ? "account_enabled" : "account_disabled"];
+
+  const lifecycle = subscriptionLifecycle(subject.membershipSubscription, now);
+  const commercial = Object.freeze({
+    tier: lifecycle === "active" ? "member" as const : "free" as const,
+    lifecycle,
+    entitlementEffective: lifecycle === "active" && enabled,
+    startsAt: subject.membershipSubscription?.startsAt.toISOString() ?? null,
+    expiresAt: subject.membershipSubscription?.expiresAt.toISOString() ?? null,
+    reasons: Object.freeze(commercialReasons(lifecycle, enabled)),
+    source: subject.membershipSubscription === null
+      ? Object.freeze({ kind: "none" as const })
+      : Object.freeze({ kind: "membership_subscription" as const, recordedAt: accessMatrixRecordedAt(subject.membershipSubscription.updatedAt) }),
+  });
+
+  const workspacePage = await tx.workspace.findMany({
+    where: {
+      memberships: { some: { userId: subject.id } },
+      ...afterAccessMatrixCursor(input.workspaceCursor),
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: input.pageSize + 1,
+    select: { id: true, name: true, slug: true, createdAt: true },
+  });
+  const hasMoreWorkspaces = workspacePage.length > input.pageSize;
+  const workspaceRows = workspacePage.slice(0, input.pageSize);
+
+  const projectPage = await tx.project.findMany({
+    where: {
+      AND: [
+        {
+          OR: [
+            { memberships: { some: { userId: subject.id } } },
+            { workspace: { memberships: { some: { userId: subject.id } } } },
+          ],
+        },
+        afterAccessMatrixCursor(input.projectCursor),
+      ],
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: input.pageSize + 1,
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      workspaceId: true,
+      membershipInheritanceMode: true,
+      archivedAt: true,
+      createdAt: true,
+    },
+  });
+  const hasMoreProjects = projectPage.length > input.pageSize;
+  const projectRows = projectPage.slice(0, input.pageSize);
+  const projectWorkspaceIds = [...new Set(projectRows.map((project) => project.workspaceId))];
+  const allWorkspaceIds = [...new Set([...workspaceRows.map((workspace) => workspace.id), ...projectWorkspaceIds])];
+  const [allWorkspaceMembershipRows, allProjectMembershipRows, projectWorkspaceRows] = await Promise.all([
+    workspaceMembershipRows(tx, allWorkspaceIds, subject.id),
+    projectMembershipRows(tx, projectRows.map((project) => project.id), subject.id),
+    projectWorkspaceIds.length === 0
+      ? Promise.resolve([] as Array<{ id: string; name: string }>)
+      : tx.workspace.findMany({ where: { id: { in: projectWorkspaceIds } }, select: { id: true, name: true } }),
+  ]);
+  const workspaceMembershipGroups = groupAccessMatrixMembershipRows(allWorkspaceMembershipRows, (row) => row.workspaceId);
+  const projectMembershipGroups = groupAccessMatrixMembershipRows(allProjectMembershipRows, (row) => row.projectId);
+  const [workspaceRevokedAudits, projectRevokedAudits] = await Promise.all([
+    membershipAuditRows(tx, "workspace", [...workspaceMembershipGroups.latestRevoked.values()].map((row) => row.id)),
+    membershipAuditRows(tx, "project", [...projectMembershipGroups.latestRevoked.values()].map((row) => row.id)),
+  ]).then(([workspaceRowsWithAudit, projectRowsWithAudit]) => [mapAudits(workspaceRowsWithAudit), mapAudits(projectRowsWithAudit)] as const);
+  const workspaceItems = workspaceRows.map((workspace) => {
+    const currentRow = workspaceMembershipGroups.current.get(workspace.id) ?? null;
+    const latestRevokedRow = workspaceMembershipGroups.latestRevoked.get(workspace.id) ?? null;
+    const current = currentRow === null ? null : membershipForDto(currentRow);
+    const latestRevocation = revocationForDto(latestRevokedRow, latestRevokedRow === null ? undefined : workspaceRevokedAudits.get(latestRevokedRow.id));
+    return Object.freeze({
+      id: workspace.id,
+      name: workspace.name,
+      slug: workspace.slug,
+      current,
+      latestRevocation,
+      effective: enabled && current?.accessState === "confirmed",
+      reasons: Object.freeze(currentWorkspaceReasons(current, latestRevocation, enabled)),
+      provenance: Object.freeze({ kind: current?.accessState === "confirmed" ? "workspace_membership" as const : "none" as const }),
+    });
+  });
+  const projectWorkspaceNames = new Map(projectWorkspaceRows.map((workspace) => [workspace.id, workspace.name]));
+
+  const projectItems = projectRows.map((project) => {
+    const directRow = projectMembershipGroups.current.get(project.id) ?? null;
+    const latestDirectRow = projectMembershipGroups.latestRevoked.get(project.id) ?? null;
+    const direct = directRow === null ? null : membershipForDto(directRow);
+    const latestDirectRevocation = revocationForDto(latestDirectRow, latestDirectRow === null ? undefined : projectRevokedAudits.get(latestDirectRow.id));
+    const currentWorkspaceRow = workspaceMembershipGroups.current.get(project.workspaceId) ?? null;
+    const latestWorkspaceRow = workspaceMembershipGroups.latestRevoked.get(project.workspaceId) ?? null;
+    const inheritedRow = currentWorkspaceRow ?? latestWorkspaceRow;
+    const inheritedRole = inheritedRow?.role as WorkspaceMembershipRole | undefined;
+    const inheritedState = inheritedRow?.accessState ?? null;
+    const inheritedPermission = project.membershipInheritanceMode === "workspaceInherited"
+      && inheritedState === "confirmed"
+      && inheritedRole !== undefined
+      ? workspaceRolePermission(inheritedRole)
+      : null;
+    const directPermission = direct?.accessState === "confirmed" ? projectPermissionFromRole(direct.role as ProjectMembershipRole) : null;
+    const grantedPermission = highestProjectPermission(directPermission, inheritedPermission);
+    const effectivePermission = enabled ? grantedPermission : null;
+    const inheritedEffective = enabled && inheritedPermission !== null;
+    const inheritedFromWorkspace = inheritedRow === null
+      ? null
+      : Object.freeze({
+        role: inheritedRole ?? null,
+        accessState: inheritedState,
+        recordedAt: accessMatrixRecordedAt(inheritedRow.updatedAt),
+        effective: inheritedEffective,
+        provenance: Object.freeze({ kind: inheritedPermission !== null ? "workspace_inherited_owner_or_admin" as const : "none" as const }),
+      });
+    return Object.freeze({
+      id: project.id,
+      name: project.name,
+      slug: project.slug,
+      workspaceId: project.workspaceId,
+      workspaceName: projectWorkspaceNames.get(project.workspaceId) ?? "未命名工作区",
+      inheritanceMode: project.membershipInheritanceMode,
+      archivedAt: project.archivedAt?.toISOString() ?? null,
+      direct,
+      latestDirectRevocation,
+      inheritedFromWorkspace,
+      grantedPermission,
+      effectivePermission,
+      reasons: Object.freeze(projectReasons({
+        direct,
+        latestDirectRevocation,
+        inherited: inheritedFromWorkspace,
+        inheritedPermission,
+        inheritanceMode: project.membershipInheritanceMode,
+        grantedPermission,
+        effectivePermission,
+        enabled,
+      })),
+      provenance: projectProvenance({
+        direct,
+        inherited: inheritedFromWorkspace,
+        inheritanceMode: project.membershipInheritanceMode,
+      }),
+    });
+  });
+  const nextWorkspaceCursor = hasMoreWorkspaces && workspaceRows.length > 0
+    ? encodeAccessMatrixCursor(input.cursorKey, {
+      subjectId: subject.id,
+      kind: "workspace",
+      pageSize: input.pageSize,
+      createdAt: workspaceRows[workspaceRows.length - 1]!.createdAt,
+      id: workspaceRows[workspaceRows.length - 1]!.id,
+    })
+    : null;
+  const nextProjectCursor = hasMoreProjects && projectRows.length > 0
+    ? encodeAccessMatrixCursor(input.cursorKey, {
+      subjectId: subject.id,
+      kind: "project",
+      pageSize: input.pageSize,
+      createdAt: projectRows[projectRows.length - 1]!.createdAt,
+      id: projectRows[projectRows.length - 1]!.id,
+    })
+    : null;
+
+  return Object.freeze({
+    asOf: now.toISOString(),
+    subject: Object.freeze({ id: subject.id, username: subject.username, displayName: subject.displayName }),
+    system: Object.freeze({
+      role,
+      accountState: enabled ? "enabled" as const : "disabled" as const,
+      effective: enabled,
+      reasons: Object.freeze(systemReasons),
+      source: Object.freeze({ kind: "app_user" as const }),
+    }),
+    commercial,
+    workspaces: Object.freeze({
+      items: Object.freeze(workspaceItems),
+      nextCursor: nextWorkspaceCursor,
+      hasMore: hasMoreWorkspaces,
+    }),
+    projects: Object.freeze({
+      items: Object.freeze(projectItems),
+      nextCursor: nextProjectCursor,
+      hasMore: hasMoreProjects,
+    }),
+  });
+}
+
+export async function getEffectiveAccessMatrix(input: Readonly<{
+  adminUserId: string;
+  adminAccountAccessVersion: number;
+  userId: string;
+  workspaceCursor?: string | null;
+  projectCursor?: string | null;
+  pageSize?: number;
+}>, db: PrismaClient = getDb()): Promise<EffectiveAccessMatrix> {
+  const adminId = userId(input.adminUserId);
+  const expectedAdminVersion = positiveVersion(input.adminAccountAccessVersion)!;
+  const subjectId = userId(input.userId);
+  const pageSize = accessMatrixPageSize(input.pageSize);
+  await assertAdmin(adminId, db);
+  const cursorKey = await loadOrCreateMasterKey();
+  const workspaceCursor = decodeAccessMatrixCursor(cursorKey, input.workspaceCursor, { subjectId, kind: "workspace", pageSize });
+  const projectCursor = decodeAccessMatrixCursor(cursorKey, input.projectCursor, { subjectId, kind: "project", pageSize });
+  try {
+    return await db.$transaction(async (tx) => {
+      await lockActorsAccess(tx, [adminId]);
+      assertAdminSnapshot(await loadAdmin(tx, adminId), expectedAdminVersion);
+      const now = await databaseNow(tx);
+      return getEffectiveAccessMatrixInTransaction(tx, { subjectId, workspaceCursor, projectCursor, pageSize, cursorKey }, now);
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      timeout: ACCESS_MATRIX_READ_TRANSACTION_TIMEOUT_MS,
+    });
+  } catch (error) {
+    if (isTransactionConflict(error)) return fail("ACCOUNT_ACCESS_CONFLICT");
+    throw error;
+  }
 }

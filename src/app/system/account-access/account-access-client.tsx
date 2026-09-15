@@ -49,6 +49,102 @@ type Preview = {
   previewExpiresAt: string;
 };
 
+type MatrixPermission = "owner" | "edit" | "view";
+type MatrixReason =
+  | "account_disabled"
+  | "account_enabled"
+  | "system_admin_role"
+  | "system_user_role"
+  | "membership_active"
+  | "membership_not_started"
+  | "membership_expired"
+  | "membership_revoked"
+  | "membership_none"
+  | "workspace_membership_confirmed"
+  | "workspace_membership_pending"
+  | "workspace_membership_revoked"
+  | "workspace_membership_missing"
+  | "workspace_role_not_elevated"
+  | "project_inheritance_enabled"
+  | "project_inheritance_disabled"
+  | "direct_project_assignment_confirmed"
+  | "direct_project_assignment_pending"
+  | "direct_project_assignment_revoked"
+  | "direct_project_assignment_missing"
+  | "no_effective_project_permission";
+type MatrixMembership = {
+  role: "owner" | "admin" | "member" | "viewer" | "editor";
+  accessState: "pending" | "confirmed";
+  recordedAt: string;
+};
+type MatrixRevocation = {
+  recordedAt: string;
+  evidence: {
+    kind: "membership_access_audit" | "membership_record";
+    action: "confirmed" | "revoked" | "migration_quarantined" | "bootstrap_confirmed";
+  };
+};
+type AccessMatrix = {
+  asOf: string;
+  subject: { id: string; username: string; displayName: string | null };
+  system: {
+    role: "admin" | "user";
+    accountState: AccountAccessState;
+    effective: boolean;
+    reasons: MatrixReason[];
+    source: { kind: "app_user" };
+  };
+  commercial: {
+    tier: "member" | "free";
+    lifecycle: "none" | "not_started" | "active" | "expired" | "revoked";
+    entitlementEffective: boolean;
+    startsAt: string | null;
+    expiresAt: string | null;
+    reasons: MatrixReason[];
+    source: { kind: "none" } | { kind: "membership_subscription"; recordedAt: string };
+  };
+  workspaces: {
+    items: Array<{
+      id: string;
+      name: string;
+      slug: string;
+      current: MatrixMembership | null;
+      latestRevocation: MatrixRevocation | null;
+      effective: boolean;
+      reasons: MatrixReason[];
+      provenance: { kind: "workspace_membership" | "none" };
+    }>;
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+  projects: {
+    items: Array<{
+      id: string;
+      name: string;
+      slug: string;
+      workspaceId: string;
+      workspaceName: string;
+      inheritanceMode: "workspaceInherited" | "projectOnly";
+      archivedAt: string | null;
+      direct: MatrixMembership | null;
+      latestDirectRevocation: MatrixRevocation | null;
+      inheritedFromWorkspace: {
+        role: "owner" | "admin" | "member" | "viewer" | null;
+        accessState: "pending" | "confirmed" | "revoked" | null;
+        recordedAt: string | null;
+        effective: boolean;
+        provenance: { kind: "workspace_inherited_owner_or_admin" | "workspace_membership" | "none" };
+      } | null;
+      grantedPermission: MatrixPermission | null;
+      effectivePermission: MatrixPermission | null;
+      reasons: MatrixReason[];
+      provenance: { kind: "direct_project_assignment" | "workspace_inherited_owner_or_admin" | "direct_and_workspace_inherited" | "workspace_membership" | "none" };
+    }>;
+    nextCursor: string | null;
+    hasMore: boolean;
+  };
+};
+
 function newRequestKey(): string {
   try {
     return globalThis.crypto.randomUUID();
@@ -69,6 +165,58 @@ async function responseError(response: Response, fallback: string): Promise<stri
 function formatDate(value: string | null): string {
   if (value === null) return "—";
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+const matrixReasonLabels: Record<MatrixReason, string> = {
+  account_disabled: "账号已停用",
+  account_enabled: "账号已启用",
+  system_admin_role: "系统管理员角色",
+  system_user_role: "普通用户角色",
+  membership_active: "会员有效期内",
+  membership_not_started: "会员尚未开始",
+  membership_expired: "会员已过期",
+  membership_revoked: "会员已撤销",
+  membership_none: "没有会员订阅",
+  workspace_membership_confirmed: "工作区关系已确认",
+  workspace_membership_pending: "工作区关系待确认",
+  workspace_membership_revoked: "工作区关系已撤销",
+  workspace_membership_missing: "没有工作区关系",
+  workspace_role_not_elevated: "工作区角色不产生项目权限",
+  project_inheritance_enabled: "项目启用工作区继承",
+  project_inheritance_disabled: "项目未启用工作区继承",
+  direct_project_assignment_confirmed: "项目直接授权已确认",
+  direct_project_assignment_pending: "项目直接授权待确认",
+  direct_project_assignment_revoked: "项目直接授权已撤销",
+  direct_project_assignment_missing: "没有项目直接授权",
+  no_effective_project_permission: "当前没有有效项目权限",
+};
+
+function matrixReasonLabel(reason: MatrixReason): string {
+  return matrixReasonLabels[reason];
+}
+
+function matrixRoleLabel(role: MatrixMembership["role"] | null): string {
+  if (role === null) return "—";
+  return role === "admin" ? "管理员" : role === "owner" ? "Owner" : role === "editor" ? "Editor" : role === "member" ? "成员" : "Viewer";
+}
+
+function matrixPermissionLabel(permission: MatrixPermission | null): string {
+  if (permission === null) return "无";
+  return permission === "owner" ? "Owner" : permission === "edit" ? "可编辑" : "可查看";
+}
+
+function matrixLifecycleLabel(lifecycle: AccessMatrix["commercial"]["lifecycle"]): string {
+  return lifecycle === "none" ? "无订阅" : lifecycle === "not_started" ? "未开始" : lifecycle === "active" ? "有效" : lifecycle === "expired" ? "已过期" : "已撤销";
+}
+
+function matrixSourceLabel(kind: AccessMatrix["projects"]["items"][number]["provenance"]["kind"]): string {
+  return kind === "direct_project_assignment"
+    ? "项目直接授权"
+    : kind === "workspace_inherited_owner_or_admin"
+      ? "工作区 Owner/Admin 继承"
+      : kind === "direct_and_workspace_inherited"
+        ? "直接授权 + 工作区继承"
+        : kind === "workspace_membership" ? "工作区关系（不产生项目权限）" : "无授权来源";
 }
 
 export function AccountAccessClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
@@ -137,9 +285,42 @@ function AccountCard({ item, currentUsername, onChanged }: { item: Item; current
   const [confirmationUsername, setConfirmationUsername] = useState("");
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [matrix, setMatrix] = useState<AccessMatrix | null>(null);
+  const [matrixLoading, setMatrixLoading] = useState(false);
+  const [matrixLoadingMore, setMatrixLoadingMore] = useState<"workspaces" | "projects" | null>(null);
+  const [matrixError, setMatrixError] = useState<string | null>(null);
   const requestKeyRef = useRef(newRequestKey());
+  const matrixRequestVersionRef = useRef(0);
   const isSelf = item.username === currentUsername;
   const nextAction: Action = item.state === "enabled" ? "disable" : "restore";
+
+  async function loadMatrix(kind: "initial" | "workspaces" | "projects"): Promise<void> {
+    if (matrixLoading || matrixLoadingMore !== null) return;
+    const workspaceCursor = kind === "workspaces" ? matrix?.workspaces.nextCursor : undefined;
+    const projectCursor = kind === "projects" ? matrix?.projects.nextCursor : undefined;
+    if ((kind === "workspaces" && (workspaceCursor === null || workspaceCursor === undefined))
+      || (kind === "projects" && (projectCursor === null || projectCursor === undefined))) return;
+    const requestVersion = matrixRequestVersionRef.current;
+    if (kind === "initial") setMatrixLoading(true);
+    else setMatrixLoadingMore(kind);
+    setMatrixError(null);
+    try {
+      const params = new URLSearchParams({ pageSize: "20" });
+      if (workspaceCursor) params.set("workspaceCursor", workspaceCursor);
+      if (projectCursor) params.set("projectCursor", projectCursor);
+      const response = await fetch(`/api/system/account-access/${item.id}?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await responseError(response, "有效访问矩阵加载失败"));
+      const next = await response.json() as AccessMatrix;
+      if (requestVersion === matrixRequestVersionRef.current) setMatrix(next);
+    } catch (cause) {
+      if (requestVersion === matrixRequestVersionRef.current) setMatrixError(cause instanceof Error ? cause.message : "有效访问矩阵加载失败");
+    } finally {
+      if (requestVersion === matrixRequestVersionRef.current) {
+        if (kind === "initial") setMatrixLoading(false);
+        else setMatrixLoadingMore(null);
+      }
+    }
+  }
 
   function changeReason(value: string): void {
     setReason(value);
@@ -208,6 +389,11 @@ function AccountCard({ item, currentUsername, onChanged }: { item: Item; current
         }),
       });
       if (!response.ok) throw new Error(await responseError(response, "账号状态更新失败"));
+      matrixRequestVersionRef.current += 1;
+      setMatrix(null);
+      setMatrixError(null);
+      setMatrixLoading(false);
+      setMatrixLoadingMore(null);
       setPreview(null);
       setConfirmationUsername("");
       setReason("");
@@ -232,10 +418,25 @@ function AccountCard({ item, currentUsername, onChanged }: { item: Item; current
           <p className="mt-2 break-words text-xs text-slate-500">@{item.username}</p>
           <p className="mt-2 text-xs text-slate-400">账号版本 {item.accountAccessVersion} · 会话记录 {item.sessionCount} 条{item.disabledAt ? ` · 停用于 ${formatDate(item.disabledAt)}` : ""}</p>
         </div>
-        <button type="button" disabled={pending || isSelf} onClick={() => void requestPreview()} className={`min-h-11 shrink-0 rounded-xl px-4 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${nextAction === "disable" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}`}>
-          {isSelf ? "当前账号" : nextAction === "disable" ? "停用账号" : "恢复账号"}
-        </button>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            disabled={matrixLoading || matrixLoadingMore !== null}
+            onClick={() => matrix === null ? void loadMatrix("initial") : setMatrix(null)}
+            aria-expanded={matrix !== null}
+            aria-controls={`effective-access-matrix-${item.id}`}
+            className="min-h-11 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-800 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {matrixLoading ? "读取矩阵…" : matrix === null ? "查看有效访问矩阵" : "收起有效访问矩阵"}
+          </button>
+          <button type="button" disabled={pending || isSelf} onClick={() => void requestPreview()} className={`min-h-11 rounded-xl px-4 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${nextAction === "disable" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}`}>
+            {isSelf ? "当前账号" : nextAction === "disable" ? "停用账号" : "恢复账号"}
+          </button>
+        </div>
       </div>
+
+      {matrixError ? <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{matrixError}</p> : null}
+      {matrix ? <EffectiveAccessMatrixView matrix={matrix} loadingMore={matrixLoadingMore} onLoadMore={(kind) => void loadMatrix(kind)} /> : null}
 
       {!isSelf ? <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <label className="min-w-0">
@@ -273,4 +474,107 @@ function AccountCard({ item, currentUsername, onChanged }: { item: Item; current
 
 function PreviewStat({ label, value }: { label: string; value: string }) {
   return <div className="rounded-xl bg-white px-3 py-3"><dt className="text-[12px] text-slate-500">{label}</dt><dd className="mt-1 text-sm font-semibold text-slate-900">{value}</dd></div>;
+}
+
+function EffectiveAccessMatrixView({
+  matrix,
+  loadingMore,
+  onLoadMore,
+}: {
+  matrix: AccessMatrix;
+  loadingMore: "workspaces" | "projects" | null;
+  onLoadMore: (kind: "workspaces" | "projects") => void;
+}) {
+  return (
+    <section id={`effective-access-matrix-${matrix.subject.id}`} className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4" aria-label="有效访问矩阵">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-indigo-950">有效访问矩阵</h3>
+          <p className="mt-1 text-xs leading-5 text-indigo-800">统一查看系统角色、会员资格、工作区关系和项目权限。本页结果测量于 {formatDate(matrix.asOf)}；继续读取时会替换为下一页独立测量结果，只显示安全的授权来源标签。</p>
+        </div>
+        <span className="rounded-full bg-white px-2.5 py-1 text-[12px] font-semibold text-indigo-700">只读审计视图</span>
+      </div>
+
+      <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MatrixStat label="系统角色" value={matrix.system.role === "admin" ? "系统管理员" : "普通用户"} detail={matrix.system.effective ? "当前有效" : "账号已停用"} />
+        <MatrixStat label="商业会员" value={matrix.commercial.tier === "member" ? "会员" : "普通账户"} detail={`${matrixLifecycleLabel(matrix.commercial.lifecycle)} · ${matrix.commercial.entitlementEffective ? "权益有效" : "权益无效"}`} />
+        <MatrixStat label="工作区" value={`${matrix.workspaces.items.length} 个`} detail={matrix.workspaces.hasMore ? "当前页 · 查看下一页" : "已全部显示"} />
+        <MatrixStat label="项目" value={`${matrix.projects.items.length} 个`} detail={matrix.projects.hasMore ? "当前页 · 查看下一页" : "已全部显示"} />
+      </dl>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-xl bg-white p-4">
+          <h4 className="text-sm font-semibold text-slate-900">系统与商业资格</h4>
+          <div className="mt-3 space-y-3 text-xs leading-5 text-slate-600">
+            <MatrixLine label="系统状态" value={matrix.system.effective ? "启用" : "停用"} />
+            <MatrixLine label="系统来源" value="AppUser 账号记录" />
+            <MatrixLine label="会员有效期" value={`${formatDate(matrix.commercial.startsAt)} 至 ${formatDate(matrix.commercial.expiresAt)}`} />
+            <MatrixLine label="会员来源" value={matrix.commercial.source.kind === "none" ? "无订阅记录" : `会员订阅记录（${formatDate(matrix.commercial.source.recordedAt)}）`} />
+          </div>
+          <ReasonList reasons={[...matrix.system.reasons, ...matrix.commercial.reasons]} />
+        </div>
+
+        <div className="rounded-xl bg-white p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-slate-900">工作区关系</h4>
+            <span className="text-xs text-slate-500">{matrix.workspaces.hasMore ? "结果已分页" : "已全部显示"}</span>
+          </div>
+          {matrix.workspaces.items.length === 0 ? <p className="mt-3 text-xs leading-5 text-slate-500">没有工作区关系。系统管理员角色不会自动获得工作区或项目权限。</p> : <div className="mt-3 space-y-3">
+            {matrix.workspaces.items.map((workspace) => <div key={workspace.id} className="rounded-xl border border-slate-100 px-3 py-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="break-words text-sm font-semibold text-slate-900">{workspace.name}</p>
+                  <p className="mt-1 break-words text-xs text-slate-500">{workspace.slug} · {workspace.current === null ? "无当前关系" : `${matrixRoleLabel(workspace.current.role)} · ${workspace.current.accessState === "confirmed" ? "已确认" : "待确认"}`}</p>
+                </div>
+                <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${workspace.effective ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{workspace.effective ? "当前有效" : "当前无效"}</span>
+              </div>
+              {workspace.latestRevocation ? <p className="mt-2 text-xs text-slate-500">最近撤销证据：{workspace.latestRevocation.evidence.kind === "membership_access_audit" ? "访问审计记录" : "关系记录"} · {formatDate(workspace.latestRevocation.recordedAt)}</p> : null}
+              <ReasonList reasons={workspace.reasons} />
+            </div>)}
+          </div>}
+          {matrix.workspaces.hasMore ? <button type="button" onClick={() => onLoadMore("workspaces")} disabled={loadingMore !== null} className="mt-3 min-h-11 w-full rounded-xl border border-indigo-200 px-4 py-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50">{loadingMore === "workspaces" ? "读取下一页…" : "查看下一页工作区"}</button> : null}
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-xl bg-white p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-sm font-semibold text-slate-900">项目权限</h4>
+          <span className="text-xs text-slate-500">{matrix.projects.hasMore ? "结果已分页" : "已全部显示"}</span>
+        </div>
+        {matrix.projects.items.length === 0 ? <p className="mt-3 text-xs leading-5 text-slate-500">没有直接或工作区关联的项目。</p> : <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {matrix.projects.items.map((project) => <div key={project.id} className="rounded-xl border border-slate-100 px-3 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="break-words text-sm font-semibold text-slate-900">{project.name}</p>
+                <p className="mt-1 break-words text-xs text-slate-500">{project.workspaceName} · {project.inheritanceMode === "workspaceInherited" ? "继承工作区权限" : "仅项目直接权限"}{project.archivedAt ? " · 已归档" : ""}</p>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${project.effectivePermission === null ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>{matrixPermissionLabel(project.effectivePermission)}</span>
+            </div>
+            <dl className="mt-3 space-y-2 text-xs leading-5 text-slate-600">
+              <MatrixLine label="关系计算结果" value={matrixPermissionLabel(project.grantedPermission)} />
+              <MatrixLine label="当前有效权限" value={matrixPermissionLabel(project.effectivePermission)} />
+              <MatrixLine label="直接关系" value={project.direct === null ? "无当前关系" : `${matrixRoleLabel(project.direct.role)} · ${project.direct.accessState === "confirmed" ? "已确认" : "待确认"}`} />
+              <MatrixLine label="继承关系" value={project.inheritedFromWorkspace === null ? "无工作区关系" : `${matrixRoleLabel(project.inheritedFromWorkspace.role)} · ${project.inheritedFromWorkspace.accessState === "confirmed" ? "已确认" : project.inheritedFromWorkspace.accessState === "pending" ? "待确认" : "已撤销"}`} />
+              <MatrixLine label="授权来源" value={matrixSourceLabel(project.provenance.kind)} />
+            </dl>
+            {project.latestDirectRevocation ? <p className="mt-2 text-xs text-slate-500">最近直接授权撤销证据：{project.latestDirectRevocation.evidence.kind === "membership_access_audit" ? "访问审计记录" : "关系记录"} · {formatDate(project.latestDirectRevocation.recordedAt)}</p> : null}
+            <ReasonList reasons={project.reasons} />
+          </div>)}
+        </div>}
+        {matrix.projects.hasMore ? <button type="button" onClick={() => onLoadMore("projects")} disabled={loadingMore !== null} className="mt-3 min-h-11 w-full rounded-xl border border-indigo-200 px-4 py-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50">{loadingMore === "projects" ? "读取下一页…" : "查看下一页项目"}</button> : null}
+      </div>
+    </section>
+  );
+}
+
+function MatrixStat({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <div className="rounded-xl border border-slate-100 bg-white px-3 py-3"><dt className="text-[12px] text-slate-500">{label}</dt><dd className="mt-1 text-sm font-semibold text-slate-900">{value}</dd><p className="mt-1 text-xs text-slate-500">{detail}</p></div>;
+}
+
+function MatrixLine({ label, value }: { label: string; value: string }) {
+  return <div className="flex flex-wrap justify-between gap-2"><dt className="text-slate-500">{label}</dt><dd className="text-right font-medium text-slate-800">{value}</dd></div>;
+}
+
+function ReasonList({ reasons }: { reasons: MatrixReason[] }) {
+  return <ul className="mt-3 flex flex-wrap gap-2" aria-label="状态解释">{reasons.map((reason, index) => <li key={`${reason}-${index}`} className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] text-slate-600">{matrixReasonLabel(reason)}</li>)}</ul>;
 }

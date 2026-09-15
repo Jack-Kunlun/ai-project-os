@@ -2,17 +2,20 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { Prisma } from "@prisma/client";
+import { MembershipAccessAuditAction, Prisma } from "@prisma/client";
 import { createSession, readSessionToken } from "../src/lib/auth";
 import { AccountAccessGuardError, assertAccountAccessForActor } from "../src/lib/account-access-guard";
+import { appendProjectMembershipAudit, appendWorkspaceMembershipAudit, grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership, revokeWorkspaceMembership } from "../src/lib/membership-governance";
 import { getDb } from "../src/lib/db";
 import {
   AccountAccessServiceError,
   executeAccountAccess,
+  getEffectiveAccessMatrix,
   listAccountAccess,
   previewAccountAccess,
   type AccountAccessPreview,
 } from "../src/lib/account-access-service";
+import { createControlledMembership, revokeControlledMembershipInTransaction } from "./membership-fixture";
 
 const shouldRun = process.env.ACCOUNT_ACCESS_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_account_access_lifecycle_test";
@@ -238,4 +241,378 @@ test("account access is epoch-bound, preview-confirmed, idempotent and append-on
   assert.equal(sessionRows.length, 2);
   assert.equal(sessionRows[0]?.accountAccessVersion, 1);
   assert.equal(sessionRows[1]?.accountAccessVersion, 3);
+});
+
+test("effective access matrix preserves independent role facts and disabled overlays in PostgreSQL", {
+  skip: !shouldRun ? "ACCOUNT_ACCESS_POSTGRES_GATE=1 is required" : false,
+}, async () => {
+  assertDisposableGateDatabase();
+  const db = getDb();
+  const suffix = randomUUID().slice(0, 8);
+  const adminId = randomUUID();
+  const disabledAdminId = randomUUID();
+  const orphanOwnerId = randomUUID();
+  const subjectId = randomUUID();
+  const futureId = randomUUID();
+  const expiredId = randomUUID();
+  const revokedId = randomUUID();
+  const noneId = randomUUID();
+  const now = new Date();
+  await db.appUser.createMany({
+    data: [
+      { id: adminId, username: `matrix_admin_${suffix}`, role: "admin" },
+      { id: disabledAdminId, username: `matrix_disabled_admin_${suffix}`, role: "admin" },
+      { id: orphanOwnerId, username: `matrix_orphan_owner_${suffix}`, role: "user" },
+      { id: subjectId, username: `matrix_subject_${suffix}`, role: "user" },
+      { id: futureId, username: `matrix_future_${suffix}`, role: "user" },
+      { id: expiredId, username: `matrix_expired_${suffix}`, role: "user" },
+      { id: revokedId, username: `matrix_revoked_${suffix}`, role: "user" },
+      { id: noneId, username: `matrix_none_${suffix}`, role: "user" },
+    ],
+  });
+  await createControlledMembership(db, {
+    adminId,
+    userId: subjectId,
+    startsAt: new Date(now.getTime() - 60_000),
+    expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+    note: "matrix active fixture",
+  });
+  await createControlledMembership(db, {
+    adminId,
+    userId: futureId,
+    startsAt: new Date(now.getTime() + 60 * 60_000),
+    expiresAt: new Date(now.getTime() + 2 * 60 * 60_000),
+    note: "matrix future fixture",
+  });
+  await createControlledMembership(db, {
+    adminId,
+    userId: expiredId,
+    startsAt: new Date(now.getTime() - 2 * 60 * 60_000),
+    expiresAt: new Date(now.getTime() - 60_000),
+    note: "matrix expired fixture",
+  });
+  const revokedSubscription = await createControlledMembership(db, {
+    adminId,
+    userId: revokedId,
+    startsAt: new Date(now.getTime() - 2 * 60 * 60_000),
+    expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+    note: "matrix revoked fixture",
+  });
+  await db.$transaction((tx) => revokeControlledMembershipInTransaction(tx, {
+    subscriptionId: revokedSubscription.id,
+    adminId,
+    reason: "matrix revoked fixture",
+  }));
+
+  const workspaceId = randomUUID();
+  const pendingWorkspaceId = randomUUID();
+  const revokedWorkspaceId = randomUUID();
+  const inheritedProjectId = randomUUID();
+  const directProjectId = randomUUID();
+  const combinedProjectId = randomUUID();
+  const pendingProjectId = randomUUID();
+  const oldRevokedProjectId = randomUUID();
+  const pendingInheritedProjectId = randomUUID();
+  const memberWorkspaceId = randomUUID();
+  const memberCombinedProjectId = randomUUID();
+  const memberInheritedProjectId = randomUUID();
+  const orphanWorkspaceId = randomUUID();
+  const orphanProjectId = randomUUID();
+  const revokedInheritedProjectId = randomUUID();
+  const historyWorkspaceId = randomUUID();
+  const historyProjectId = randomUUID();
+  await db.$transaction(async (tx) => {
+    await tx.workspace.createMany({
+      data: [
+        { id: workspaceId, name: `Matrix workspace ${suffix}`, slug: `matrix-workspace-${suffix}`, createdById: adminId },
+        { id: pendingWorkspaceId, name: `Matrix pending ${suffix}`, slug: `matrix-pending-${suffix}`, createdById: adminId },
+        { id: revokedWorkspaceId, name: `Matrix revoked ${suffix}`, slug: `matrix-revoked-${suffix}`, createdById: adminId },
+        { id: historyWorkspaceId, name: `Matrix history ${suffix}`, slug: `matrix-history-${suffix}`, createdById: adminId },
+      ],
+    });
+    await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "matrix backup owner" });
+    await grantWorkspaceMembership(tx, { workspaceId, userId: subjectId, role: "owner", actorId: adminId, reason: "matrix subject owner" });
+    await grantWorkspaceMembership(tx, { workspaceId: pendingWorkspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "matrix pending backup owner" });
+    const pendingWorkspace = await tx.workspaceMembership.create({ data: { id: randomUUID(), workspaceId: pendingWorkspaceId, userId: subjectId, role: "member", accessState: "pending" } });
+    await appendWorkspaceMembershipAudit(tx, pendingWorkspace, { action: MembershipAccessAuditAction.migrationQuarantined, previousState: null, actorId: adminId, reason: "matrix pending workspace" });
+    await grantWorkspaceMembership(tx, { workspaceId: revokedWorkspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "matrix revoked backup owner" });
+    await grantWorkspaceMembership(tx, { workspaceId: revokedWorkspaceId, userId: subjectId, role: "viewer", actorId: adminId, reason: "matrix revoked workspace" });
+    await grantWorkspaceMembership(tx, { workspaceId: historyWorkspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "matrix history backup owner" });
+
+    await tx.project.createMany({
+      data: [
+        { id: inheritedProjectId, workspaceId, name: `Matrix inherited ${suffix}`, slug: `matrix-inherited-${suffix}`, membershipInheritanceMode: "workspaceInherited" },
+        { id: directProjectId, workspaceId, name: `Matrix direct ${suffix}`, slug: `matrix-direct-${suffix}`, membershipInheritanceMode: "projectOnly" },
+        { id: combinedProjectId, workspaceId, name: `Matrix combined ${suffix}`, slug: `matrix-combined-${suffix}`, membershipInheritanceMode: "workspaceInherited" },
+        { id: pendingProjectId, workspaceId, name: `Matrix pending project ${suffix}`, slug: `matrix-pending-project-${suffix}`, membershipInheritanceMode: "projectOnly" },
+        { id: oldRevokedProjectId, workspaceId, name: `Matrix regrant ${suffix}`, slug: `matrix-regrant-${suffix}`, membershipInheritanceMode: "projectOnly" },
+        { id: historyProjectId, workspaceId: historyWorkspaceId, name: `Matrix project history ${suffix}`, slug: `matrix-project-history-${suffix}`, membershipInheritanceMode: "projectOnly" },
+      ],
+    });
+    await grantProjectMembership(tx, { projectId: directProjectId, workspaceId, userId: subjectId, role: "viewer", actorId: adminId, reason: "matrix direct viewer" });
+    await grantProjectMembership(tx, { projectId: combinedProjectId, workspaceId, userId: subjectId, role: "viewer", actorId: adminId, reason: "matrix combined viewer" });
+    const pendingProject = await tx.projectMembership.create({ data: { id: randomUUID(), projectId: pendingProjectId, userId: subjectId, role: "editor", accessState: "pending" } });
+    await appendProjectMembershipAudit(tx, { ...pendingProject, workspaceId }, { action: MembershipAccessAuditAction.migrationQuarantined, previousState: null, actorId: adminId, reason: "matrix pending project" });
+    await grantProjectMembership(tx, { projectId: oldRevokedProjectId, workspaceId, userId: subjectId, role: "viewer", actorId: adminId, reason: "matrix old direct viewer" });
+  });
+  for (let index = 0; index < 12; index += 1) {
+    await db.$transaction((tx) => grantWorkspaceMembership(tx, { workspaceId: historyWorkspaceId, userId: subjectId, role: "viewer", actorId: adminId, reason: `matrix history workspace grant ${index}` }));
+    await db.$transaction(async (tx) => {
+      const revoked = await revokeWorkspaceMembership(tx, historyWorkspaceId, subjectId, { actorId: adminId, reason: `matrix history workspace revoke ${index}` });
+      assert.ok(revoked);
+    });
+  }
+  for (let index = 0; index < 12; index += 1) {
+    await db.$transaction((tx) => grantProjectMembership(tx, { projectId: historyProjectId, workspaceId: historyWorkspaceId, userId: subjectId, role: "viewer", actorId: adminId, reason: `matrix history project grant ${index}` }));
+    await db.$transaction(async (tx) => {
+      const revoked = await revokeProjectMembership(tx, historyProjectId, subjectId, historyWorkspaceId, { actorId: adminId, reason: `matrix history project revoke ${index}` });
+      assert.ok(revoked);
+    });
+  }
+  await db.$transaction((tx) => revokeWorkspaceMembership(tx, revokedWorkspaceId, subjectId, { actorId: adminId, reason: "matrix revoked workspace" }));
+  await db.$transaction((tx) => revokeProjectMembership(tx, oldRevokedProjectId, subjectId, workspaceId, { actorId: adminId, reason: "matrix old direct revoke" }));
+  await db.$transaction((tx) => grantProjectMembership(tx, { projectId: oldRevokedProjectId, workspaceId, userId: subjectId, role: "editor", actorId: adminId, reason: "matrix direct regrant editor" }));
+
+  const enabledMatrix = await getEffectiveAccessMatrix({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: subjectId,
+    pageSize: 4,
+  }, db);
+  assert.ok(enabledMatrix.projects.nextCursor);
+  const validProjectCursor = enabledMatrix.projects.nextCursor;
+  const tamperedProjectCursor = `${validProjectCursor.slice(0, -1)}${validProjectCursor.endsWith("A") ? "B" : "A"}`;
+  await assert.rejects(
+    () => getEffectiveAccessMatrix({ adminUserId: adminId, adminAccountAccessVersion: 1, userId: subjectId, projectCursor: tamperedProjectCursor, pageSize: 4 }, db),
+    (error: unknown) => serviceCode(error) === "ACCOUNT_ACCESS_INVALID_INPUT",
+  );
+  await assert.rejects(
+    () => getEffectiveAccessMatrix({ adminUserId: adminId, adminAccountAccessVersion: 1, userId: futureId, projectCursor: validProjectCursor, pageSize: 4 }, db),
+    (error: unknown) => serviceCode(error) === "ACCOUNT_ACCESS_INVALID_INPUT",
+  );
+  await assert.rejects(
+    () => getEffectiveAccessMatrix({ adminUserId: adminId, adminAccountAccessVersion: 1, userId: subjectId, workspaceCursor: validProjectCursor, pageSize: 4 }, db),
+    (error: unknown) => serviceCode(error) === "ACCOUNT_ACCESS_INVALID_INPUT",
+  );
+  await assert.rejects(
+    () => getEffectiveAccessMatrix({ adminUserId: adminId, adminAccountAccessVersion: 1, userId: subjectId, projectCursor: validProjectCursor, pageSize: 3 }, db),
+    (error: unknown) => serviceCode(error) === "ACCOUNT_ACCESS_INVALID_INPUT",
+  );
+  const enabledProjectContinuation = await getEffectiveAccessMatrix({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: subjectId,
+    projectCursor: enabledMatrix.projects.nextCursor,
+    pageSize: 4,
+  }, db);
+  assert.equal(enabledMatrix.system.role, "user");
+  assert.equal(enabledMatrix.system.effective, true);
+  assert.equal(enabledMatrix.commercial.tier, "member");
+  assert.equal(enabledMatrix.commercial.entitlementEffective, true);
+  assert.equal(enabledMatrix.workspaces.hasMore, false);
+  assert.equal(enabledMatrix.projects.hasMore, true);
+  assert.equal(enabledProjectContinuation.projects.hasMore, false);
+  assert.equal(enabledProjectContinuation.projects.items.length, 2);
+  const enabledProjects = [...enabledMatrix.projects.items, ...enabledProjectContinuation.projects.items];
+  assert.equal(new Set(enabledProjects.map((project) => project.id)).size, 6);
+  const inherited = enabledProjects.find((project) => project.id === inheritedProjectId);
+  const direct = enabledProjects.find((project) => project.id === directProjectId);
+  const combined = enabledProjects.find((project) => project.id === combinedProjectId);
+  const pending = enabledProjects.find((project) => project.id === pendingProjectId);
+  const regrant = enabledProjects.find((project) => project.id === oldRevokedProjectId);
+  const pendingWorkspace = enabledMatrix.workspaces.items.find((workspace) => workspace.id === pendingWorkspaceId);
+  const revokedWorkspace = enabledMatrix.workspaces.items.find((workspace) => workspace.id === revokedWorkspaceId);
+  const historyWorkspace = enabledMatrix.workspaces.items.find((workspace) => workspace.id === historyWorkspaceId);
+  assert.ok(inherited && direct && combined && pending && regrant && pendingWorkspace && revokedWorkspace && historyWorkspace);
+  assert.equal(pendingWorkspace.provenance.kind, "none");
+  assert.equal(revokedWorkspace.provenance.kind, "none");
+  assert.equal(historyWorkspace.provenance.kind, "none");
+  assert.equal(historyWorkspace.current, null);
+  assert.ok(historyWorkspace.latestRevocation);
+  assert.equal(inherited.grantedPermission, "owner");
+  assert.equal(inherited.effectivePermission, "owner");
+  assert.equal(inherited.provenance.kind, "workspace_inherited_owner_or_admin");
+  assert.equal(direct.grantedPermission, "view");
+  assert.equal(direct.effectivePermission, "view");
+  assert.equal(direct.provenance.kind, "direct_project_assignment");
+  assert.equal(combined.grantedPermission, "owner");
+  assert.equal(combined.effectivePermission, "owner");
+  assert.equal(combined.provenance.kind, "direct_and_workspace_inherited");
+  assert.equal(pending.grantedPermission, null);
+  assert.equal(pending.effectivePermission, null);
+  assert.equal(pending.direct?.accessState, "pending");
+  assert.equal(regrant.direct?.role, "editor");
+  assert.ok(regrant.latestDirectRevocation);
+  const serializedEnabledMatrix = JSON.stringify({ enabledMatrix, enabledProjectContinuation });
+  assert.doesNotMatch(serializedEnabledMatrix, /"(?:reason|note|actorId|disabledReason|passwordHash|tokenHash|connection|credential|secret)"\s*:/iu);
+
+  const disabledAdminPreview = await previewAccountAccess({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: disabledAdminId,
+    action: "disable",
+    reason: "matrix disabled administrator fixture",
+    expectedVersion: 1,
+  }, db);
+  await executeAccountAccess(executeInput(disabledAdminPreview, {
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    reason: "matrix disabled administrator fixture",
+    requestKey: `matrix-disable-admin-${suffix}`,
+  }), db);
+  await assert.rejects(
+    () => getEffectiveAccessMatrix({ adminUserId: disabledAdminId, adminAccountAccessVersion: 1, userId: subjectId, pageSize: 4 }, db),
+    (error: unknown) => serviceCode(error) === "ACCOUNT_ACCESS_ADMIN_REQUIRED",
+  );
+  await assert.rejects(
+    () => getEffectiveAccessMatrix({ adminUserId: adminId, adminAccountAccessVersion: 2, userId: subjectId, pageSize: 4 }, db),
+    (error: unknown) => serviceCode(error) === "ACCOUNT_ACCESS_ADMIN_STALE",
+  );
+
+  await db.$transaction(async (tx) => {
+    await tx.workspace.createMany({
+      data: [
+        { id: memberWorkspaceId, name: `Matrix member ${suffix}`, slug: `matrix-member-${suffix}`, createdById: adminId },
+        { id: orphanWorkspaceId, name: `Matrix orphan ${suffix}`, slug: `matrix-orphan-${suffix}`, createdById: adminId },
+      ],
+    });
+    await grantWorkspaceMembership(tx, { workspaceId: memberWorkspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "matrix member backup owner" });
+    await grantWorkspaceMembership(tx, { workspaceId: memberWorkspaceId, userId: subjectId, role: "member", actorId: adminId, reason: "matrix member relationship" });
+    await grantWorkspaceMembership(tx, { workspaceId: orphanWorkspaceId, userId: orphanOwnerId, role: "owner", actorId: adminId, reason: "matrix orphan backup owner" });
+    await grantWorkspaceMembership(tx, { workspaceId: orphanWorkspaceId, userId: subjectId, role: "member", actorId: adminId, reason: "matrix orphan subject member" });
+    await tx.project.createMany({
+      data: [
+        { id: pendingInheritedProjectId, workspaceId, name: `Matrix pending inherited ${suffix}`, slug: `matrix-pending-inherited-${suffix}`, membershipInheritanceMode: "workspaceInherited" },
+        { id: memberCombinedProjectId, workspaceId: memberWorkspaceId, name: `Matrix member direct ${suffix}`, slug: `matrix-member-direct-${suffix}`, membershipInheritanceMode: "workspaceInherited" },
+        { id: memberInheritedProjectId, workspaceId: memberWorkspaceId, name: `Matrix member inherited ${suffix}`, slug: `matrix-member-inherited-${suffix}`, membershipInheritanceMode: "workspaceInherited" },
+        { id: orphanProjectId, workspaceId: orphanWorkspaceId, name: `Matrix orphan project ${suffix}`, slug: `matrix-orphan-project-${suffix}`, membershipInheritanceMode: "workspaceInherited" },
+        { id: revokedInheritedProjectId, workspaceId: revokedWorkspaceId, name: `Matrix revoked inherited ${suffix}`, slug: `matrix-revoked-inherited-${suffix}`, membershipInheritanceMode: "workspaceInherited" },
+      ],
+    });
+    const pendingInheritedProject = await tx.projectMembership.create({ data: { id: randomUUID(), projectId: pendingInheritedProjectId, userId: subjectId, role: "editor", accessState: "pending" } });
+    await appendProjectMembershipAudit(tx, { ...pendingInheritedProject, workspaceId }, { action: MembershipAccessAuditAction.migrationQuarantined, previousState: null, actorId: adminId, reason: "matrix pending inherited direct" });
+    await grantProjectMembership(tx, { projectId: memberCombinedProjectId, workspaceId: memberWorkspaceId, userId: subjectId, role: "viewer", actorId: adminId, reason: "matrix member direct viewer" });
+  });
+
+  const provenanceMatrix = await getEffectiveAccessMatrix({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: subjectId,
+    pageSize: 100,
+  }, db);
+  const pendingInherited = provenanceMatrix.projects.items.find((project) => project.id === pendingInheritedProjectId);
+  const memberCombined = provenanceMatrix.projects.items.find((project) => project.id === memberCombinedProjectId);
+  const memberInherited = provenanceMatrix.projects.items.find((project) => project.id === memberInheritedProjectId);
+  const revokedInherited = provenanceMatrix.projects.items.find((project) => project.id === revokedInheritedProjectId);
+  const provenanceHistoryWorkspace = provenanceMatrix.workspaces.items.find((workspace) => workspace.id === historyWorkspaceId);
+  const provenanceHistoryProject = provenanceMatrix.projects.items.find((project) => project.id === historyProjectId);
+  assert.ok(pendingInherited && memberCombined && memberInherited && revokedInherited && provenanceHistoryWorkspace && provenanceHistoryProject);
+  assert.equal(pendingInherited.direct?.accessState, "pending");
+  assert.equal(pendingInherited.grantedPermission, "owner");
+  assert.equal(pendingInherited.provenance.kind, "workspace_inherited_owner_or_admin");
+  assert.equal(pendingInherited.inheritedFromWorkspace?.provenance.kind, "workspace_inherited_owner_or_admin");
+  assert.equal(memberCombined.direct?.accessState, "confirmed");
+  assert.equal(memberCombined.inheritedFromWorkspace?.role, "member");
+  assert.equal(memberCombined.inheritedFromWorkspace?.provenance.kind, "none");
+  assert.equal(memberCombined.grantedPermission, "view");
+  assert.equal(memberCombined.provenance.kind, "direct_project_assignment");
+  assert.equal(memberInherited.grantedPermission, null);
+  assert.equal(memberInherited.inheritedFromWorkspace?.provenance.kind, "none");
+  assert.equal(memberInherited.provenance.kind, "none");
+  assert.equal(revokedInherited.inheritedFromWorkspace?.accessState, "revoked");
+  assert.equal(revokedInherited.inheritedFromWorkspace?.provenance.kind, "none");
+  assert.equal(revokedInherited.grantedPermission, null);
+  assert.equal(revokedInherited.provenance.kind, "none");
+  assert.equal(provenanceHistoryWorkspace.current, null);
+  assert.ok(provenanceHistoryWorkspace.latestRevocation);
+  assert.equal(provenanceHistoryWorkspace.provenance.kind, "none");
+  assert.equal(provenanceHistoryProject.direct, null);
+  assert.ok(provenanceHistoryProject.latestDirectRevocation);
+  assert.equal(provenanceHistoryProject.inheritedFromWorkspace?.accessState, "revoked");
+  assert.equal(provenanceHistoryProject.inheritedFromWorkspace?.provenance.kind, "none");
+  assert.equal(provenanceHistoryProject.provenance.kind, "none");
+  const latestHistoryWorkspaceMembership = await db.workspaceMembership.findFirstOrThrow({
+    where: { workspaceId: historyWorkspaceId, userId: subjectId, accessState: "revoked" },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  const latestHistoryProjectMembership = await db.projectMembership.findFirstOrThrow({
+    where: { projectId: historyProjectId, userId: subjectId, accessState: "revoked" },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  const newestHistoryWorkspaceAudit = await db.membershipAccessAudit.findFirstOrThrow({
+    where: { membershipKind: "workspace", membershipId: latestHistoryWorkspaceMembership.id, action: MembershipAccessAuditAction.revoked },
+    select: { createdAt: true },
+  });
+  const newestHistoryProjectAudit = await db.membershipAccessAudit.findFirstOrThrow({
+    where: { membershipKind: "project", membershipId: latestHistoryProjectMembership.id, action: MembershipAccessAuditAction.revoked },
+    select: { createdAt: true },
+  });
+  assert.equal(provenanceHistoryWorkspace.latestRevocation.recordedAt, newestHistoryWorkspaceAudit.createdAt.toISOString());
+  assert.equal(provenanceHistoryProject.latestDirectRevocation.recordedAt, newestHistoryProjectAudit.createdAt.toISOString());
+
+  const adminMatrix = await getEffectiveAccessMatrix({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: adminId,
+    pageSize: 100,
+  }, db);
+  assert.equal(adminMatrix.projects.items.some((project) => project.id === orphanProjectId), false);
+
+  const disablePreview = await previewAccountAccess({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: subjectId,
+    action: "disable",
+    reason: "matrix disabled overlay",
+    expectedVersion: 1,
+  }, db);
+  await executeAccountAccess({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: subjectId,
+    action: "disable",
+    reason: "matrix disabled overlay",
+    expectedVersion: disablePreview.current.accountAccessVersion,
+    expectedImpactFingerprint: disablePreview.impactFingerprint,
+    requestKey: `matrix-disable-${suffix}`,
+    requestFingerprint: disablePreview.requestFingerprint,
+    previewId: disablePreview.previewId,
+    previewIssuedAt: disablePreview.previewIssuedAt,
+    previewExpiresAt: disablePreview.previewExpiresAt,
+    confirmation: true,
+    confirmationUsername: `matrix_subject_${suffix}`,
+  }, db);
+  const disabledMatrix = await getEffectiveAccessMatrix({
+    adminUserId: adminId,
+    adminAccountAccessVersion: 1,
+    userId: subjectId,
+    pageSize: 100,
+  }, db);
+  assert.equal(disabledMatrix.system.accountState, "disabled");
+  assert.equal(disabledMatrix.commercial.tier, "member");
+  assert.equal(disabledMatrix.commercial.entitlementEffective, false);
+  const disabledCombined = disabledMatrix.projects.items.find((project) => project.id === combinedProjectId);
+  assert.ok(disabledCombined);
+  assert.equal(disabledCombined.grantedPermission, "owner");
+  assert.equal(disabledCombined.effectivePermission, null);
+  assert.equal(disabledCombined.provenance.kind, "direct_and_workspace_inherited");
+  assert.ok(disabledCombined.reasons.includes("workspace_membership_confirmed"));
+  const disabledWorkspace = disabledMatrix.workspaces.items.find((workspace) => workspace.id === workspaceId);
+  assert.ok(disabledWorkspace);
+  assert.equal(disabledWorkspace.effective, false);
+  assert.doesNotMatch(JSON.stringify(disabledMatrix), /"(?:reason|note|actorId|disabledReason|passwordHash|tokenHash|connection|credential|secret)"\s*:/iu);
+
+  const lifecycleChecks = [
+    [futureId, "not_started"],
+    [expiredId, "expired"],
+    [revokedId, "revoked"],
+    [noneId, "none"],
+  ] as const;
+  for (const [userId, lifecycle] of lifecycleChecks) {
+    const result = await getEffectiveAccessMatrix({ adminUserId: adminId, adminAccountAccessVersion: 1, userId, pageSize: 100 }, db);
+    assert.equal(result.commercial.lifecycle, lifecycle);
+    assert.equal(result.commercial.tier, "free");
+  }
 });

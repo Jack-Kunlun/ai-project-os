@@ -68,9 +68,12 @@ test("current product documents preserve the 0.2.x capability boundaries", async
   assert.match(nextRelease, /当前数据库迁移数为 `101`/u);
   assert.match(nextRelease, /50 CLOSED \/ 0 PARTIAL \/ 0 OPEN \/ 1 EXCLUDED/u);
   assert.match(nextRelease, /ADM-008.*已关闭/u);
-  assert.match(nextRelease, /R-04.*文档一致性由本提交完成/u);
+  assert.match(nextRelease, /R-04.*文档一致性.*R-05.*全量发布门禁均已完成/u);
   assert.doesNotMatch(nextRelease, /R-04.*正在由本提交完成/u);
-  assert.match(nextRelease, /R-05.*尚未完成/u);
+  assert.doesNotMatch(nextRelease, /R-05.*尚未完成/u);
+  assert.match(nextRelease, /本地工程候选门禁已通过/u);
+  assert.match(nextRelease, /不构成正式发布候选或 RC/u);
+  assert.match(nextRelease, /61 项 PostgreSQL 门禁/u);
   assert.match(nextRelease, /尚未现场联调/u);
 
   assert.doesNotMatch(currentChangelog, /计划中的改造（尚未交付）/u);

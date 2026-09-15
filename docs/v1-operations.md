@@ -1,5 +1,7 @@
 # V1 本机运行手册
 
+> 历史/冻结声明：本文记录 V1 本机 CLI 的历史兼容流程，不是当前 `0.2.0-dev.1` 的产品真相或发布操作指南。当前页面能力、模型来源、个人连接委托、MCP 控制面和账号访问边界以 [README](../README.md)、[普通用户操作指南](user-operation-guide.md) 和 [管理员操作指南](admin-operation-guide.md) 为准。本文中的旧 CLI、旧连接器或完整同步流程不得用于绕过当前页面控制；workspace-scoped provider、旧工作区 BYOK 和 ProjectAiRoute 均不属于当前能力。
+
 AI Project OS V1 把网页人工工作台与本机受控编排分开：网页不保存 GitHub/OpenAI 凭据，也不提供模型授权、仓库同步、索引或搜索写接口；这些动作只由本机 CLI 发起。
 
 ## 1. 启动基础服务

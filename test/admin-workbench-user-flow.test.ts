@@ -551,7 +551,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.doesNotMatch(userDocs, /迁移期间不启动新的外部仓库访问|个人连接开放后/u);
   assert.match(adminDocs, /管理工作台/u);
   assert.match(adminDocs, /管理员配置并验证平台托管模型，并为视觉、抽取、向量和生成能力维护默认路由/u);
-  assert.match(adminDocs, /普通用户不能配置个人模型，只能消费平台额度；只有有效会员可以维护个人模型连接/u);
+  assert.match(adminDocs, /普通用户使用平台额度；只有有效会员可以维护个人模型连接，且个人模型必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用/u);
   assert.match(adminDocs, /`\/system\/memberships`[^。]*兼容跳转 `\/admin\/users\/memberships`/u);
   assert.match(adminDocs, /`\/system\/operations` 仅 initial super admin 可用[^。]*兼容跳转 `\/admin\/operations\/backups`/u);
   assert.match(adminDocs, /其他 system admin 按现有安全行为返回不可见页面/u);

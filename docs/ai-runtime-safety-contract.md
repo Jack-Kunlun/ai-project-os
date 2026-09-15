@@ -1,8 +1,8 @@
 # AI 运行时安全合同
 
-状态：长期运行时安全合同。V1 已开放本机逐次授权的 Embedding 索引与查询向量执行；自动抽取、生成式摘要/分析、RAG 回答和生产智能体执行仍关闭。
+状态：长期运行时安全合同。本文保留历史运行时安全约束；当前 `0.2.0-dev.1` 的有效模型来源以平台默认模型或连接所有者与项目 Owner 双确认的个人模型委托为准，远端 MCP 动作调用、调用审批、派发和结果查看/导入仍关闭。真实第三方模型、Git、OIDC 和 MCP 尚未现场联调，当前产品边界以 [README](../README.md)、[普通用户操作指南](user-operation-guide.md) 和 [管理员操作指南](admin-operation-guide.md) 为准。
 
-本文档定义受控模型处理进入 AI Project OS 的安全边界、数据不变量、运行记录和验收门。下文的阶段性“当前”陈述保留历史语境，不是产品现状；当前产品真相以 [README](../README.md) 和 [V1 本机运行手册](v1-operations.md) 为准。
+本文档定义受控模型处理进入 AI Project OS 的安全边界、数据不变量、运行记录和验收门。下文的阶段性“当前”陈述保留历史语境，不是产品现状；当前产品真相以 [README](../README.md)、[普通用户操作指南](user-operation-guide.md) 和 [管理员操作指南](admin-operation-guide.md) 为准。
 
 ## 合同冻结时的边界
 
@@ -10,7 +10,7 @@
 
 本合同描述的实体、typed service、网关和状态目前只存在于 server-only 实现与专用门禁中，仍不属于 V0 产品文案、UI 或公开 API。即使 fake provider 和专用数据库门禁通过，也不能据此宣称真实 AI 能力已经交付。
 
-### 当前实现状态
+### 历史节点实现状态（保留记录）
 
 该节点当时已在专用 disposable PostgreSQL gate 中验证 additive governance migration、typed fake runtime service、`prepare`、CAS claim、`AiRunAttempt`、审计写入以及 queued Run 的 policy/grant、scanner 和 budget 终态闭合。仓库还提供受控 `autoExtract` Responses 与 Embeddings request plan、响应验证器和共享 HTTP transport：request plan 只接受服务端固定 profile、运行标识和明确输入；验证器只接受同一进程中由对应编译器签发的 plan，把响应绑定回固定 model、metadata 和输入快照，并校验来源证据或向量维度、索引和 usage。HTTP transport 固定 OpenAI origin，使用不可序列化的内存 credential handle，只执行一次 POST，禁止 redirect，不读取 HTTP error body，并限制成功响应体大小。
 

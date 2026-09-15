@@ -1,6 +1,6 @@
 # AI Project OS V0 历史范围
 
-> 本文保留 V0 发布时的范围与验收事实，不代表当前产品能力。当前版本与运行方式见 [README](../README.md) 和 [V1 本机运行手册](v1-operations.md)。
+> 本文保留 V0 发布时的范围与验收事实，不代表当前产品能力。当前版本与运行方式见 [README](../README.md)、[普通用户操作指南](user-operation-guide.md) 和 [管理员操作指南](admin-operation-guide.md)；V1 本机 CLI 手册仅保留历史兼容流程。
 
 ## 定位
 
@@ -8,7 +8,7 @@ AI Project OS V0 是面向单项目的人工、可追溯 Project Snapshot 工作
 
 V0 是确定性的项目状态记录工具，不调用 LLM，也不自动抽取、总结、纠错或判断优先级。项目记忆持久化在 PostgreSQL 中，由原始 Source、人工确认和纠错后的 Item，以及不可变 Snapshot 组成；只有人工核对并确认的 Item 才能进入 Snapshot。
 
-## 当前能力
+## 历史能力（V0 发布时）
 
 - Project：创建、列表、读取、更新项目，并显示 Source、Item、Scan、Snapshot 统计。
 - ProjectSource：手工保存原始候选资料、来源类型、可选无凭据 HTTP(S) 链接、资料时间和精确 SHA-256；同项目完全重复内容会被拒绝。

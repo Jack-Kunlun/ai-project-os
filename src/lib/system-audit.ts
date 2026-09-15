@@ -487,6 +487,7 @@ type CursorPayload = Readonly<{
 }>;
 
 const CURSOR_VERSION = 1 as const;
+const BASE64URL_UNPADDED_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
 function auditError(code: string, message: string, status = 400): never {
   throw new ApiError(status, code, message);
@@ -531,22 +532,28 @@ async function encodeCursor(payload: CursorPayload): Promise<string> {
   return `${encodedPayload}.${await cursorSignature(encodedPayload)}`;
 }
 
+function decodeCanonicalBase64Url(value: string): Buffer | null {
+  if (!BASE64URL_UNPADDED_PATTERN.test(value)) return null;
+  try {
+    const decoded = Buffer.from(value, "base64url");
+    return decoded.toString("base64url") === value ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
 async function decodeCursor(value: string): Promise<CursorPayload> {
   const [encodedPayload, signature, ...rest] = value.split(".");
   if (!encodedPayload || !signature || rest.length > 0) return auditError("SYSTEM_AUDIT_CURSOR_INVALID", "审计分页游标无效");
+  const decodedPayload = decodeCanonicalBase64Url(encodedPayload);
+  const supplied = decodeCanonicalBase64Url(signature);
+  if (decodedPayload === null || supplied === null) return auditError("SYSTEM_AUDIT_CURSOR_INVALID", "审计分页游标无效");
   const expectedSignature = await cursorSignature(encodedPayload);
-  let supplied: Buffer;
-  let expected: Buffer;
-  try {
-    supplied = Buffer.from(signature, "base64url");
-    expected = Buffer.from(expectedSignature, "base64url");
-  } catch {
-    return auditError("SYSTEM_AUDIT_CURSOR_INVALID", "审计分页游标无效");
-  }
-  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return auditError("SYSTEM_AUDIT_CURSOR_INVALID", "审计分页游标无效");
+  const expected = decodeCanonicalBase64Url(expectedSignature);
+  if (expected === null || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return auditError("SYSTEM_AUDIT_CURSOR_INVALID", "审计分页游标无效");
   let parsed: unknown;
   try {
-    parsed = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as unknown;
+    parsed = JSON.parse(decodedPayload.toString("utf8")) as unknown;
   } catch {
     return auditError("SYSTEM_AUDIT_CURSOR_INVALID", "审计分页游标无效");
   }

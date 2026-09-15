@@ -22,6 +22,7 @@ const USER_ID = "22222222-2222-4222-8222-222222222222";
 const PROJECT_ID = "33333333-3333-4333-8333-333333333333";
 const WORKSPACE_ID = "44444444-4444-4444-8444-444444444444";
 const sessionToken = "a".repeat(48);
+const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 type FakeRow = Record<string, unknown>;
 type FakeWhere = Record<string, unknown>;
@@ -161,6 +162,19 @@ function makeRows(): Readonly<Record<string, FakeRow[]>> {
 
 function uuidFor(seed: number): string {
   return `90000000-0000-4000-8000-${seed.toString(16).padStart(12, "0")}`;
+}
+
+function nonCanonicalSignatureAlias(cursor: string): string {
+  const separator = cursor.indexOf(".");
+  assert.ok(separator > 0);
+  const encodedPayload = cursor.slice(0, separator);
+  const signature = cursor.slice(separator + 1);
+  assert.ok(signature.length > 0);
+  const lastIndex = BASE64URL_ALPHABET.indexOf(signature[signature.length - 1]!);
+  assert.equal(lastIndex % 4, 0);
+  const aliasSignature = `${signature.slice(0, -1)}${BASE64URL_ALPHABET[lastIndex + 1]}`;
+  assert.deepEqual(Buffer.from(aliasSignature, "base64url"), Buffer.from(signature, "base64url"));
+  return `${encodedPayload}.${aliasSignature}`;
 }
 
 function makeDenseRows(): Readonly<Record<string, FakeRow[]>> {
@@ -604,9 +618,18 @@ test("cursor integrity, filter binding, time bounds and resource limits fail clo
   const first = await listSystemAudit({ pageSize: 1 }, db, now);
   assert.ok(first.nextCursor);
   const cursor = first.nextCursor!;
-  const tampered = `${cursor.slice(0, -1)}${cursor.endsWith("A") ? "B" : "A"}`;
+  const tampered = nonCanonicalSignatureAlias(cursor);
   const isCode = (code: string) => (error: unknown): boolean => error instanceof ApiError && error.code === code;
   await assert.rejects(() => listSystemAudit({ pageSize: 1, cursor: tampered }, db, now), isCode("SYSTEM_AUDIT_CURSOR_INVALID"));
+  const separator = cursor.indexOf(".");
+  assert.ok(separator > 0);
+  for (const malformed of [
+    `${cursor.slice(0, -1)}+`,
+    `${cursor.slice(0, separator)}=.${cursor.slice(separator + 1)}`,
+    `${cursor}=`,
+  ]) {
+    await assert.rejects(() => listSystemAudit({ pageSize: 1, cursor: malformed }, db, now), isCode("SYSTEM_AUDIT_CURSOR_INVALID"));
+  }
   await assert.rejects(() => listSystemAudit({ pageSize: 1, cursor, action: "activated" }, db, now), isCode("SYSTEM_AUDIT_CURSOR_INVALID"));
   await assert.rejects(() => listSystemAudit({ pageSize: 1, cursor }, db, new Date("2026-12-10T02:00:00.000Z")), isCode("SYSTEM_AUDIT_TIME_INVALID"));
 

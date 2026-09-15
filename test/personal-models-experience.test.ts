@@ -103,6 +103,26 @@ test("first catalog defaults include a valid generation or embedding capability"
   assert.equal(hasPersonalModelCapability(draft), true);
 });
 
+test("personal model defaults fail closed for an empty or capability-free catalog", () => {
+  assert.equal(createDefaultPersonalModelDraft([]), null);
+  const draft = createDefaultPersonalModelDraft([
+    {
+      ...catalog[0],
+      generationModelSuggestions: [],
+      embeddingModelSuggestions: [],
+      visionModelSuggestions: [],
+    },
+  ]);
+  assert.ok(draft);
+  assert.equal(draft.generationModelId, "");
+  assert.equal(draft.embeddingModelId, "");
+  assert.equal(draft.embeddingDimensions, "");
+  assert.equal(draft.visionModelId, "");
+  assert.equal(hasPersonalModelCapability(draft), false);
+  assert.equal(hasPersonalModelCapability({ generationModelId: "", embeddingModelId: "  " }), false);
+  assert.equal(hasPersonalModelCapability({ generationModelId: "gpt-test", embeddingModelId: "" }), true);
+});
+
 test("editing snapshot binds fields and expectedUpdatedAt to the same provider version", () => {
   const provider = {
     id: "11111111-1111-4111-8111-111111111111",
@@ -138,4 +158,54 @@ test("editing snapshot binds fields and expectedUpdatedAt to the same provider v
   const configuration = createPersonalModelConfigurationPatch(draft);
   assert.equal("apiKey" in configuration, false);
   assert.equal("expectedUpdatedAt" in configuration, false);
+});
+
+test("personal model patches preserve explicit nulls when optional capability fields are empty", () => {
+  const provider = {
+    id: "22222222-2222-4222-8222-222222222222",
+    name: "无默认模型",
+    kind: "openai" as const,
+    protocol: "chatCompletions",
+    baseUrl: "https://api.openai.com/v1",
+    defaultGenerationModelId: null,
+    defaultEmbeddingModelId: null,
+    defaultVisionModelId: "vision-model",
+    embeddingDimensions: null,
+    configurationVersion: 1,
+    status: "disabled",
+    lastTestedAt: null,
+    lastErrorCode: null,
+    disabledAt: "2026-09-05T00:00:00.000Z",
+    createdAt: "2026-09-05T00:00:00.000Z",
+    updatedAt: "2026-09-05T00:00:01.000Z",
+    credential: { maskedSuffix: "5678", rotatedAt: null, updatedAt: "2026-09-05T00:00:00.000Z" },
+  };
+  const draft = createPersonalModelEditDraft(provider);
+  assert.deepEqual(draft, {
+    name: "无默认模型",
+    kind: "openai",
+    apiKey: "",
+    generationModelId: "",
+    visionModelId: "vision-model",
+    embeddingModelId: "",
+    embeddingDimensions: "",
+    expectedUpdatedAt: provider.updatedAt,
+  });
+  assert.deepEqual(createPersonalModelConfigurationPatch(draft), {
+    name: "无默认模型",
+    generationModelId: null,
+    visionModelId: "vision-model",
+    embeddingModelId: null,
+    embeddingDimensions: null,
+  });
+  assert.deepEqual(
+    createPersonalModelConfigurationPatch({ ...draft, embeddingModelId: "embedding-model", embeddingDimensions: "" }),
+    {
+      name: "无默认模型",
+      generationModelId: null,
+      visionModelId: "vision-model",
+      embeddingModelId: "embedding-model",
+      embeddingDimensions: null,
+    },
+  );
 });

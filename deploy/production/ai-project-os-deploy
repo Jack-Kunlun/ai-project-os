@@ -212,6 +212,10 @@ run_upgrade_preflight() {
     printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_TARGET_INVALID\n' >&2
     return 1
   }
+  grep -Eq '"databasePrincipal"[[:space:]]*:[[:space:]]*"(cluster-admin-owned|legacy-extension-owners-reassignable|pinned-oid10-extension-owners-supported)"' <<<"$preflight_output" || {
+    printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_PRINCIPAL_INVALID\n' >&2
+    return 1
+  }
   grep -Eq '"rollback"[[:space:]]*:[[:space:]]*"verified"' <<<"$preflight_output" || {
     printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_ROLLBACK_INVALID\n' >&2
     return 1

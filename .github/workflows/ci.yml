@@ -70,6 +70,9 @@ jobs:
       - name: Run every PostgreSQL gate
         run: pnpm test:postgres-gates
 
+      - name: Run isolated PostgreSQL 18 OID10 gate
+        run: pnpm test:database-principal-oid10
+
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 

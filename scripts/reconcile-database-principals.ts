@@ -34,6 +34,65 @@ const REQUIRED_EXTENSIONS = Object.freeze(["vector", "pg_trgm", "pgcrypto", "plp
 const FIRST_NORMAL_OBJECT_ID = 16384 as const;
 const DATABASE_PRINCIPAL_LOCK_KEY = "ai-project-os:database-principals";
 
+type LegacyOwnershipPolicy =
+  | Readonly<{
+      kind: "reassign";
+      sourceRole: string;
+    }>
+  | Readonly<{
+      kind: "preserve-sealed-oid10";
+      sourceRole: typeof LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL;
+      sourceOid: "10";
+    }>;
+
+type Oid10SessionPolicy = Readonly<{
+  kind: "allow-oid10-logical-replication-launcher";
+  role: string;
+  sourceOid: "10";
+}>;
+
+type SealedLegacyRoleRow = Readonly<{
+  oid: string;
+  rolcanlogin: boolean;
+  rolpassword: string | null;
+  rolsuper: boolean;
+  rolcreatedb: boolean;
+  rolcreaterole: boolean;
+  rolinherit: boolean;
+  rolreplication: boolean;
+  rolbypassrls: boolean;
+}>;
+
+function reassignOwnershipPolicy(sourceRole: string): LegacyOwnershipPolicy {
+  return { kind: "reassign", sourceRole };
+}
+
+function sealedLegacyOwnershipPolicy(sourceOid: string): LegacyOwnershipPolicy {
+  if (sourceOid === "10") {
+    return {
+      kind: "preserve-sealed-oid10",
+      sourceRole: LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL,
+      sourceOid: "10",
+    };
+  }
+  return reassignOwnershipPolicy(LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL);
+}
+
+function oid10SessionPolicy(role: string, sourceOid: string): Oid10SessionPolicy | undefined {
+  if (sourceOid !== "10") return undefined;
+  return {
+    kind: "allow-oid10-logical-replication-launcher",
+    role,
+    sourceOid: "10",
+  };
+}
+
+function sessionPolicyForOwnership(policy: LegacyOwnershipPolicy | null | undefined): Oid10SessionPolicy | undefined {
+  return policy?.kind === "preserve-sealed-oid10"
+    ? oid10SessionPolicy(policy.sourceRole, policy.sourceOid)
+    : undefined;
+}
+
 class DatabasePrincipalError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -511,10 +570,12 @@ async function readTargetRoleSessions(client: Client, role: string): Promise<Tar
   return result.rows;
 }
 
-function classifyTargetRoleSession(session: TargetRoleSession, pinnedSuperuser: boolean): TargetRoleSessionDisposition {
+function classifyTargetRoleSession(session: TargetRoleSession, sessionPolicy?: Oid10SessionPolicy): TargetRoleSessionDisposition {
   if (targetRoleSessionPredicate(session)) return "drain";
-  if (pinnedSuperuser
-    && session.role_oid === "10"
+  if (sessionPolicy !== undefined
+    && sessionPolicy.sourceOid === "10"
+    && sessionPolicy.role.length > 0
+    && session.role_oid === sessionPolicy.sourceOid
     && session.backend_type === "logical replication launcher"
     && session.datid === null
     && session.datname === null) {
@@ -525,20 +586,21 @@ function classifyTargetRoleSession(session: TargetRoleSession, pinnedSuperuser: 
 
 function classifyTargetRoleSessions(
   sessions: readonly TargetRoleSession[],
-  pinnedSuperuser: boolean,
+  sessionPolicy?: Oid10SessionPolicy,
 ): TargetRoleSessionDisposition[] {
   // Classify the complete snapshot before any termination.  An unexpected
   // worker must fail closed without partially draining the target role.
-  return sessions.map((session) => classifyTargetRoleSession(session, pinnedSuperuser));
+  return sessions.map((session) => classifyTargetRoleSession(session, sessionPolicy));
 }
 
 async function assertTargetRoleSessionsDrained(
   client: Client,
   role: string,
-  pinnedSuperuser = false,
+  sessionPolicy?: Oid10SessionPolicy,
   failureCode = "DATABASE_PRINCIPAL_BOOTSTRAP_SESSIONS_ACTIVE",
 ): Promise<void> {
-  const dispositions = classifyTargetRoleSessions(await readTargetRoleSessions(client, role), pinnedSuperuser);
+  if (sessionPolicy !== undefined && sessionPolicy.role !== role) return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_POLICY_INVALID");
+  const dispositions = classifyTargetRoleSessions(await readTargetRoleSessions(client, role), sessionPolicy);
   if (dispositions.includes("drain")) return fail(failureCode);
 }
 
@@ -640,16 +702,71 @@ async function restoreSharedOwnership(client: Client, snapshot: SharedOwnerSnaps
   }
 }
 
-async function assertNoUnsupportedCurrentOwnership(client: Client, role: string, pinnedSuperuser = false): Promise<void> {
-  const pinnedSystemNamespaceClause = "AND namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'";
+async function assertNoUnsupportedCurrentOwnership(client: Client, policy: LegacyOwnershipPolicy): Promise<void> {
+  const role = policy.sourceRole;
+  const preservesSealedOid10 = policy.kind === "preserve-sealed-oid10";
+  const extensionAllowlist = [...REQUIRED_EXTENSIONS];
+  const pinnedNamespaceObjectClause = preservesSealedOid10
+    ? `AND namespace.oid >= ${FIRST_NORMAL_OBJECT_ID}
+            AND namespace.nspname !~ '^pg_temp_[0-9]+$'
+            AND namespace.nspname !~ '^pg_toast_temp_[0-9]+$'
+            AND NOT EXISTS (
+              SELECT 1
+                FROM pg_depend dependency
+                JOIN pg_extension extension_row ON extension_row.oid = dependency.refobjid
+               WHERE dependency.classid = 'pg_namespace'::regclass
+                 AND dependency.objid = namespace.oid
+                 AND dependency.refclassid = 'pg_extension'::regclass
+                 AND dependency.deptype = 'e'
+                 AND extension_row.extname = ANY($2::text[])
+            )`
+    : "AND namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'";
+  const pinnedRelationObjectClause = preservesSealedOid10
+    ? `AND relation.oid >= ${FIRST_NORMAL_OBJECT_ID}
+            AND NOT EXISTS (
+              SELECT 1
+                FROM pg_depend dependency
+                JOIN pg_extension extension_row ON extension_row.oid = dependency.refobjid
+               WHERE dependency.classid = 'pg_class'::regclass
+                 AND dependency.objid = relation.oid
+                 AND dependency.refclassid = 'pg_extension'::regclass
+                 AND dependency.deptype = 'e'
+                 AND extension_row.extname = ANY($2::text[])
+            )`
+    : "AND namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'";
+  const pinnedFunctionObjectClause = preservesSealedOid10
+    ? `AND function_row.oid >= ${FIRST_NORMAL_OBJECT_ID}
+            AND NOT EXISTS (
+              SELECT 1
+                FROM pg_depend dependency
+                JOIN pg_extension extension_row ON extension_row.oid = dependency.refobjid
+               WHERE dependency.classid = 'pg_proc'::regclass
+                 AND dependency.objid = function_row.oid
+                 AND dependency.refclassid = 'pg_extension'::regclass
+                 AND dependency.deptype = 'e'
+                 AND extension_row.extname = ANY($2::text[])
+            )`
+    : "AND namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'";
+  const pinnedTypeObjectClause = preservesSealedOid10
+    ? `AND type_row.oid >= ${FIRST_NORMAL_OBJECT_ID}
+            AND NOT EXISTS (
+              SELECT 1
+                FROM pg_depend dependency
+                JOIN pg_extension extension_row ON extension_row.oid = dependency.refobjid
+               WHERE dependency.classid = 'pg_type'::regclass
+                 AND dependency.objid = type_row.oid
+                 AND dependency.refclassid = 'pg_extension'::regclass
+                 AND dependency.deptype = 'e'
+                 AND extension_row.extname = ANY($2::text[])
+            )`
+    : "AND namespace.nspname NOT LIKE 'pg_%' AND namespace.nspname <> 'information_schema'";
   const result = await client.query<{ object_kind: string; object_name: string }>(`
     SELECT 'schema' AS object_kind, namespace.nspname AS object_name
       FROM pg_namespace namespace
       JOIN pg_roles owner_role ON owner_role.oid = namespace.nspowner
      WHERE owner_role.rolname = $1
        AND namespace.nspname <> 'public'
-       AND namespace.nspname NOT LIKE 'pg_%'
-       AND namespace.nspname <> 'information_schema'
+       ${pinnedNamespaceObjectClause}
     UNION ALL
     SELECT 'relation' AS object_kind, namespace.nspname || '.' || relation.relname AS object_name
       FROM pg_class relation
@@ -657,7 +774,7 @@ async function assertNoUnsupportedCurrentOwnership(client: Client, role: string,
       JOIN pg_roles owner_role ON owner_role.oid = relation.relowner
      WHERE owner_role.rolname = $1
        AND namespace.nspname <> 'public'
-       ${pinnedSystemNamespaceClause}
+       ${pinnedRelationObjectClause}
     UNION ALL
     SELECT 'function' AS object_kind, namespace.nspname || '.' || function_row.proname AS object_name
       FROM pg_proc function_row
@@ -665,7 +782,7 @@ async function assertNoUnsupportedCurrentOwnership(client: Client, role: string,
       JOIN pg_roles owner_role ON owner_role.oid = function_row.proowner
      WHERE owner_role.rolname = $1
        AND namespace.nspname <> 'public'
-       ${pinnedSystemNamespaceClause}
+       ${pinnedFunctionObjectClause}
     UNION ALL
     SELECT 'type' AS object_kind, namespace.nspname || '.' || type_row.typname AS object_name
       FROM pg_type type_row
@@ -673,8 +790,8 @@ async function assertNoUnsupportedCurrentOwnership(client: Client, role: string,
       JOIN pg_roles owner_role ON owner_role.oid = type_row.typowner
      WHERE owner_role.rolname = $1
        AND namespace.nspname <> 'public'
-       ${pinnedSystemNamespaceClause}
-  `, [role]);
+       ${pinnedTypeObjectClause}
+  `, preservesSealedOid10 ? [role, extensionAllowlist] : [role]);
   if (result.rowCount !== 0) return fail("DATABASE_PRINCIPAL_UNSUPPORTED_OWNER_OBJECT");
   const unsupportedCatalogs = [
     ["pg_foreign_server", "srvowner", null],
@@ -693,7 +810,7 @@ async function assertNoUnsupportedCurrentOwnership(client: Client, role: string,
     ["pg_largeobject_metadata", "lomowner", null],
   ] as const;
   for (const [catalog, ownerColumn, namespaceColumn] of unsupportedCatalogs) {
-    const unsupportedCatalogNamespaceClause = pinnedSuperuser && namespaceColumn !== null
+    const unsupportedCatalogNamespaceClause = preservesSealedOid10 && namespaceColumn !== null
       ? `AND (catalog_row.oid >= ${FIRST_NORMAL_OBJECT_ID}
               OR EXISTS (
                 SELECT 1
@@ -703,7 +820,7 @@ async function assertNoUnsupportedCurrentOwnership(client: Client, role: string,
                    AND nspname <> 'information_schema'
               ))`
       : "";
-    const builtinLanguageClause = pinnedSuperuser && catalog === "pg_language"
+    const builtinLanguageClause = preservesSealedOid10 && catalog === "pg_language"
       ? "AND catalog_row.lanname NOT IN ('c', 'internal', 'plpgsql', 'sql')"
       : "";
     const result = await client.query(`
@@ -806,14 +923,19 @@ async function assignCurrentOwnedObjects(client: Client, objects: readonly Curre
   }
 }
 
-async function transferCurrentOwnedObjects(client: Client, sourceRole: string, pinnedSuperuser: boolean): Promise<void> {
-  await assertNoUnsupportedCurrentOwnership(client, sourceRole, pinnedSuperuser);
-  const source = await client.query<{ oid: string }>("SELECT oid::text FROM pg_roles WHERE rolname = $1", [sourceRole]);
+async function transferCurrentOwnedObjects(client: Client, policy: LegacyOwnershipPolicy): Promise<void> {
+  const source = await client.query<{ oid: string }>("SELECT oid::text FROM pg_roles WHERE rolname = $1", [policy.sourceRole]);
   const sourceOid = source.rows[0]?.oid;
   if (sourceOid === undefined) return fail("DATABASE_PRINCIPAL_BOOTSTRAP_ROLE_REQUIRED");
+  if (policy.kind === "reassign" && sourceOid === "10") return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_POLICY_INVALID");
+  if (policy.kind === "preserve-sealed-oid10"
+    && (policy.sourceRole !== LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL || sourceOid !== policy.sourceOid)) {
+    return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_POLICY_INVALID");
+  }
+  await assertNoUnsupportedCurrentOwnership(client, policy);
   const objects = await readCurrentOwnedObjects(client, sourceOid);
-  const shared = pinnedSuperuser ? null : await snapshotSharedOwnership(client, sourceRole);
-  if (!pinnedSuperuser) await client.query(`REASSIGN OWNED BY ${quoteIdentifier(sourceRole)} TO ${quoteIdentifier(CLUSTER_ADMIN_DATABASE_PRINCIPAL)}`);
+  const shared = policy.kind === "reassign" ? await snapshotSharedOwnership(client, policy.sourceRole) : null;
+  if (policy.kind === "reassign") await client.query(`REASSIGN OWNED BY ${quoteIdentifier(policy.sourceRole)} TO ${quoteIdentifier(CLUSTER_ADMIN_DATABASE_PRINCIPAL)}`);
   if (shared !== null) await restoreSharedOwnership(client, shared);
   await assignCurrentOwnedObjects(client, objects);
   const remaining = await client.query(`
@@ -963,7 +1085,9 @@ async function assertNoStaleDefaultPrivileges(client: Client, legacyOwner?: stri
   }
 }
 
-async function assertRetiredRoleAttributes(client: Client, role: string, pinnedSuperuser = false): Promise<void> {
+async function assertRetiredRoleAttributes(client: Client, policy: LegacyOwnershipPolicy): Promise<void> {
+  const role = policy.sourceRole;
+  const expectedSuperuser = policy.kind === "preserve-sealed-oid10";
   const result = await client.query<{
     rolname: string;
     rolcanlogin: boolean;
@@ -979,7 +1103,7 @@ async function assertRetiredRoleAttributes(client: Client, role: string, pinnedS
      WHERE rolname = $1
   `, [role]);
   const row = result.rows[0];
-  if (row === undefined || row.rolcanlogin || row.rolsuper !== pinnedSuperuser || row.rolcreatedb || row.rolcreaterole || row.rolinherit || row.rolreplication || row.rolbypassrls) {
+  if (row === undefined || row.rolcanlogin || row.rolsuper !== expectedSuperuser || row.rolcreatedb || row.rolcreaterole || row.rolinherit || row.rolreplication || row.rolbypassrls) {
     return fail("DATABASE_PRINCIPAL_BOOTSTRAP_ROLE_NOT_RETIRED");
   }
 }
@@ -993,9 +1117,10 @@ async function assertRetiredRolePasswordNull(client: Client, role: string): Prom
   if (result.rows[0]?.rolpassword !== null) return fail("DATABASE_PRINCIPAL_BOOTSTRAP_ROLE_NOT_RETIRED");
 }
 
-async function assertRetiredRoleShape(client: Client, role: string, pinnedSuperuser = false): Promise<void> {
-  await assertRetiredRoleAttributes(client, role, pinnedSuperuser);
-  await assertRetiredRolePasswordNull(client, role);
+async function assertRetiredRoleShape(client: Client, policy: LegacyOwnershipPolicy): Promise<void> {
+  await assertRetiredRoleAttributes(client, policy);
+  await assertRetiredRolePasswordNull(client, policy.sourceRole);
+  await assertNoRoleMembership(client, policy.sourceRole);
 }
 
 async function verifyRetiredRoleCannotLogin(connectionString: string): Promise<void> {
@@ -1029,10 +1154,13 @@ async function assertRelationInventory(client: Client): Promise<void> {
   if (unknown.length > 0 || missing.length > 0) return fail("DATABASE_PRINCIPAL_RELATION_INVENTORY_MISMATCH");
 }
 
-async function ensureAllowedExtensions(client: Client): Promise<void> {
+async function createRequiredExtensions(client: Client): Promise<void> {
   for (const extension of REQUIRED_EXTENSIONS.filter((value) => value !== "plpgsql")) {
     await client.query(`CREATE EXTENSION IF NOT EXISTS ${quoteIdentifier(extension)} WITH SCHEMA public`);
   }
+}
+
+async function assertAllowedExtensionOwnership(client: Client, policy?: LegacyOwnershipPolicy | null): Promise<void> {
   const result = await client.query<{ extname: string; schema_name: string; owner: string; owner_oid: string }>(`
     SELECT extension_row.extname,
            namespace.nspname AS schema_name,
@@ -1044,11 +1172,46 @@ async function ensureAllowedExtensions(client: Client): Promise<void> {
   const actual = result.rows.map((row) => row.extname).sort();
   const expected = [...REQUIRED_EXTENSIONS].sort();
   if (actual.length !== expected.length || actual.some((value, index) => value !== expected[index])) return fail("DATABASE_PRINCIPAL_EXTENSION_INVENTORY_INVALID");
-  if (result.rows.some((row) => row.extname === "plpgsql"
-    ? row.owner !== CLUSTER_ADMIN_DATABASE_PRINCIPAL && row.owner_oid !== "10"
-    : row.schema_name !== "public" || row.owner !== CLUSTER_ADMIN_DATABASE_PRINCIPAL)) {
+  const pinned = policy?.kind === "preserve-sealed-oid10";
+  if (result.rows.some((row) => {
+    const expectedSchema = row.extname === "plpgsql" ? "pg_catalog" : "public";
+    if (row.schema_name !== expectedSchema) return true;
+    if (pinned) {
+      const ownedByClusterAdmin = row.owner === CLUSTER_ADMIN_DATABASE_PRINCIPAL;
+      const ownedBySealedOid10 = row.owner === policy.sourceRole && row.owner_oid === policy.sourceOid;
+      return !ownedByClusterAdmin && !ownedBySealedOid10;
+    }
+    return row.owner !== CLUSTER_ADMIN_DATABASE_PRINCIPAL;
+  })) {
     return fail("DATABASE_PRINCIPAL_EXTENSION_OWNER_INVALID");
   }
+}
+
+async function readSealedLegacyOwnershipPolicy(client: Client, allowAbsent = true): Promise<LegacyOwnershipPolicy | null> {
+  const result = await client.query<SealedLegacyRoleRow>(`
+    SELECT oid::text, rolcanlogin, rolpassword, rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication, rolbypassrls
+      FROM pg_authid
+     WHERE rolname = $1
+  `, [LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL]);
+  const row = result.rows[0];
+  if (row === undefined) {
+    if (allowAbsent) return null;
+    return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_NOT_RETIRED");
+  }
+  if (row.rolcanlogin || row.rolpassword !== null || row.rolcreatedb || row.rolcreaterole || row.rolinherit || row.rolreplication || row.rolbypassrls) {
+    return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_NOT_RETIRED");
+  }
+  await assertNoRoleMembership(client, LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL);
+  if (row.oid === "10") {
+    if (!row.rolsuper) return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_NOT_RETIRED");
+    return {
+      kind: "preserve-sealed-oid10",
+      sourceRole: LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL,
+      sourceOid: "10",
+    };
+  }
+  if (row.rolsuper) return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_NOT_RETIRED");
+  return { kind: "reassign", sourceRole: LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL };
 }
 
 async function setOwners(client: Client): Promise<void> {
@@ -1147,7 +1310,7 @@ async function assertOwnershipShape(client: Client): Promise<void> {
  * their maintenance owner remains the cluster admin (or the sealed pinned
  * legacy OID10 role).
  */
-async function assertBootstrapOwnershipReady(client: Client): Promise<void> {
+async function assertBootstrapOwnershipReady(client: Client, policy?: LegacyOwnershipPolicy | null): Promise<void> {
   const owners = await client.query<{ database_owner: string; schema_owner: string }>(`
     SELECT pg_get_userbyid(database_row.datdba) AS database_owner,
            pg_get_userbyid(namespace.nspowner) AS schema_owner
@@ -1161,6 +1324,7 @@ async function assertBootstrapOwnershipReady(client: Client): Promise<void> {
     return fail("DATABASE_PRINCIPAL_BOOTSTRAP_OWNERSHIP_INVALID");
   }
   await assertOwnershipShape(client);
+  await assertAllowedExtensionOwnership(client, policy);
 }
 
 /**
@@ -1171,10 +1335,11 @@ async function assertBootstrapOwnershipReady(client: Client): Promise<void> {
  * deliberately opt-in; without it a non-owner migrator fails closed before
  * running SQL.
  */
-async function freezeRoleSessions(client: Client, role: string, pinnedSuperuser = false): Promise<void> {
+async function freezeRoleSessions(client: Client, role: string, sessionPolicy?: Oid10SessionPolicy): Promise<void> {
+  if (sessionPolicy !== undefined && sessionPolicy.role !== role) return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_POLICY_INVALID");
   await client.query(`ALTER ROLE ${quoteIdentifier(role)} NOLOGIN`);
   const initialSessions = await readTargetRoleSessions(client, role);
-  const initialDispositions = classifyTargetRoleSessions(initialSessions, pinnedSuperuser);
+  const initialDispositions = classifyTargetRoleSessions(initialSessions, sessionPolicy);
   const drainableSessions = initialSessions.filter((_, index) => initialDispositions[index] === "drain");
   for (const session of drainableSessions) {
     const result = await client.query<{ terminated: boolean }>("SELECT pg_terminate_backend($1::integer) AS terminated", [session.pid]);
@@ -1182,7 +1347,7 @@ async function freezeRoleSessions(client: Client, role: string, pinnedSuperuser 
   }
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const activeSessions = await readTargetRoleSessions(client, role);
-    const activeDispositions = classifyTargetRoleSessions(activeSessions, pinnedSuperuser);
+    const activeDispositions = classifyTargetRoleSessions(activeSessions, sessionPolicy);
     if (!activeDispositions.includes("drain")) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -1204,7 +1369,8 @@ async function assertNoPreparedTransactions(client: Client, roles: readonly stri
   if (result.rowCount !== 0) return fail("DATABASE_PRINCIPAL_PREPARED_TRANSACTION_ACTIVE");
 }
 
-async function bootstrapExistingOwners(client: Client, bootstrapRole: string, pinnedSuperuser: boolean): Promise<void> {
+async function bootstrapExistingOwners(client: Client, policy: LegacyOwnershipPolicy): Promise<void> {
+  const bootstrapRole = policy.sourceRole;
   if ([CLUSTER_ADMIN_DATABASE_PRINCIPAL, MIGRATOR_DATABASE_PRINCIPAL, RUNTIME_DATABASE_PRINCIPAL, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL].includes(bootstrapRole as typeof CLUSTER_ADMIN_DATABASE_PRINCIPAL)) {
     return fail("DATABASE_PRINCIPAL_BOOTSTRAP_ROLE_RESERVED");
   }
@@ -1218,13 +1384,13 @@ async function bootstrapExistingOwners(client: Client, bootstrapRole: string, pi
   await assertNoPreparedTransactions(client, [...FINAL_DATABASE_PRINCIPALS, CLUSTER_ADMIN_DATABASE_PRINCIPAL, INVENTORY_READER_DATABASE_PRINCIPAL, bootstrapRole]);
   await client.query(`ALTER DATABASE ${quoteIdentifier(databaseName)} OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
   await client.query(`ALTER SCHEMA public OWNER TO ${quoteIdentifier(MIGRATOR_DATABASE_PRINCIPAL)}`);
-  await transferCurrentOwnedObjects(client, bootstrapRole, pinnedSuperuser);
+  await transferCurrentOwnedObjects(client, policy);
   await revokeRoleMembershipEdges(client, bootstrapRole);
   await assertNoRoleMembership(client, MIGRATOR_DATABASE_PRINCIPAL);
   await assertNoRoleMembership(client, RUNTIME_DATABASE_PRINCIPAL);
   await assertNoRoleMembership(client, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL);
   await assertNoRoleMembership(client, CLUSTER_ADMIN_DATABASE_PRINCIPAL);
-  await client.query(`ALTER ROLE ${quoteIdentifier(bootstrapRole)} WITH NOLOGIN PASSWORD NULL ${pinnedSuperuser ? "SUPERUSER" : "NOSUPERUSER"} NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
+  await client.query(`ALTER ROLE ${quoteIdentifier(bootstrapRole)} WITH NOLOGIN PASSWORD NULL ${policy.kind === "preserve-sealed-oid10" ? "SUPERUSER" : "NOSUPERUSER"} NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
 }
 
 async function grantTablePrivileges(client: Client): Promise<void> {
@@ -1583,7 +1749,12 @@ async function reconcile(): Promise<void> {
     await assertOriginReplicationRole(admin);
     await admin.query("BEGIN");
     await lockCoordinator(admin);
-    await ensureAllowedExtensions(admin);
+    const sealedLegacyPolicy = await readSealedLegacyOwnershipPolicy(admin);
+    if (sealedLegacyPolicy !== null) {
+      await assertRetiredRoleShape(admin, sealedLegacyPolicy);
+      await assertNoUnsupportedCurrentOwnership(admin, sealedLegacyPolicy);
+    }
+    await createRequiredExtensions(admin);
     await ensureRole(admin, MIGRATOR_DATABASE_PRINCIPAL, rolePassword(migratorUrl), true);
     await ensureRole(admin, RUNTIME_DATABASE_PRINCIPAL, rolePassword(runtimeUrl), false);
     await ensureRole(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, rolePassword(writerUrl), false);
@@ -1598,8 +1769,8 @@ async function reconcile(): Promise<void> {
     await revokeRoleMembershipEdges(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL);
     await revokeRoleMembershipEdges(admin, CLUSTER_ADMIN_DATABASE_PRINCIPAL);
     await revokeRoleMembershipEdges(admin, INVENTORY_READER_DATABASE_PRINCIPAL);
-    await transferCurrentOwnedObjects(admin, RUNTIME_DATABASE_PRINCIPAL, false);
-    await transferCurrentOwnedObjects(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, false);
+    await transferCurrentOwnedObjects(admin, reassignOwnershipPolicy(RUNTIME_DATABASE_PRINCIPAL));
+    await transferCurrentOwnedObjects(admin, reassignOwnershipPolicy(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL));
     await assertRelationInventory(admin);
     await ensureInventoryAggregateFunction(admin);
     await setOwners(admin);
@@ -1613,6 +1784,7 @@ async function reconcile(): Promise<void> {
     await assertNoRoleMembership(admin, CLUSTER_ADMIN_DATABASE_PRINCIPAL);
     await assertFinalRoleShape(admin, false);
     await verifyAcl(admin);
+    await assertAllowedExtensionOwnership(admin, sealedLegacyPolicy);
     await admin.query(`ALTER ROLE ${quoteIdentifier(RUNTIME_DATABASE_PRINCIPAL)} LOGIN`);
     await admin.query(`ALTER ROLE ${quoteIdentifier(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL)} LOGIN`);
     await admin.query(`ALTER ROLE ${quoteIdentifier(INVENTORY_READER_DATABASE_PRINCIPAL)} LOGIN`);
@@ -1631,8 +1803,12 @@ async function reconcile(): Promise<void> {
 type LegacyBootstrapContext = Readonly<{
   connectionString: string;
   originalRole: string;
-  pinnedSuperuser: boolean;
   oid: string;
+}>;
+
+type LegacyDiscoveryResult = Readonly<{
+  context: LegacyBootstrapContext | null;
+  sealedPolicy: LegacyOwnershipPolicy | null;
 }>;
 
 async function createClusterAdminFromLegacy(legacyUrl: URL, adminPassword: string): Promise<LegacyBootstrapContext> {
@@ -1657,7 +1833,6 @@ async function createClusterAdminFromLegacy(legacyUrl: URL, adminPassword: strin
     return {
       connectionString: legacyUrl.toString(),
       originalRole: session.session_user,
-      pinnedSuperuser: session.oid === "10",
       oid: session.oid,
     };
   } finally {
@@ -1694,24 +1869,15 @@ async function probeClusterAdmin(connectionString: string): Promise<boolean> {
 async function discoverPendingLegacy(
   client: Client,
   legacyUrl: URL,
-): Promise<LegacyBootstrapContext | null> {
+): Promise<LegacyDiscoveryResult> {
   const originalRole = roleUsername(legacyUrl);
-  const sealedRole = await client.query<{ oid: string; rolcanlogin: boolean; rolpassword: string | null; rolsuper: boolean; rolcreatedb: boolean; rolcreaterole: boolean; rolinherit: boolean; rolreplication: boolean; rolbypassrls: boolean }>(`
-    SELECT oid::text, rolcanlogin, rolpassword, rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication, rolbypassrls
-      FROM pg_authid WHERE rolname = $1
-  `, [LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL]);
-  const sealedRow = sealedRole.rows[0];
-  if (sealedRow !== undefined) {
-    const sealed = !sealedRow.rolcanlogin && sealedRow.rolsuper === (sealedRow.oid === "10") && sealedRow.rolpassword === null
-      && !sealedRow.rolcreatedb && !sealedRow.rolcreaterole && !sealedRow.rolinherit
-      && !sealedRow.rolreplication && !sealedRow.rolbypassrls;
-    if (!sealed) return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_NOT_RETIRED");
-    await assertNoRoleMembership(client, LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL);
+  const sealedPolicy = await readSealedLegacyOwnershipPolicy(client);
+  if (sealedPolicy !== null) {
     // A process may have been interrupted after the main conversion commit
     // but before its post-commit session drain.  The admin path is allowed to
     // heal that narrow state; an ordinary migrator must never inspect
     // pg_stat_activity because PostgreSQL masks other sessions there.
-    await freezeRoleSessions(client, LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL, sealedRow.oid === "10");
+    await freezeRoleSessions(client, LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL, sessionPolicyForOwnership(sealedPolicy));
     const original = await client.query<{ rolname: string; rolcanlogin: boolean; rolsuper: boolean; rolcreatedb: boolean; rolcreaterole: boolean; rolinherit: boolean; rolreplication: boolean; rolbypassrls: boolean }>(`
       SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, rolinherit, rolreplication, rolbypassrls
         FROM pg_roles WHERE rolname = $1
@@ -1724,28 +1890,31 @@ async function discoverPendingLegacy(
         && originalRow.rolcanlogin === (originalRole === MIGRATOR_DATABASE_PRINCIPAL);
       if (!isRecreatedDataRole) return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_COLLISION");
     }
-    await assertBootstrapOwnershipReady(client);
+    await assertBootstrapOwnershipReady(client, sealedPolicy);
     // The old URL may still use ai_project_os_migrator.  That name is now
     // occupied by the newly-created ordinary migrator, while the original
     // OID10 is safely sealed under the maintenance name.  Treat this as the
     // completed state instead of mistaking the new migrator for the source.
-    return null;
+    return { context: null, sealedPolicy };
   }
   if (originalRole === LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL) {
-    return null;
+    return { context: null, sealedPolicy: null };
   }
   const source = await client.query<{ oid: string; is_superuser: boolean; can_login: boolean }>(`
     SELECT oid::text, rolsuper AS is_superuser, rolcanlogin AS can_login
       FROM pg_roles WHERE rolname = $1
   `, [originalRole]);
   const row = source.rows[0];
-  if (row === undefined) return null;
+  if (row === undefined) return { context: null, sealedPolicy: null };
   // The legacy URL is an explicit identity proof, not a requirement to log
   // in again.  Tx A can have committed the cluster admin and the source
   // NOLOGIN barrier before the process was interrupted; accept that exact
   // superuser/OID state so the admin path can drain and resume adoption.
   if (!row.is_superuser) return fail("DATABASE_PRINCIPAL_BOOTSTRAP_OWNER_REQUIRED");
-  return { connectionString: legacyUrl.toString(), originalRole, pinnedSuperuser: row.oid === "10", oid: row.oid };
+  return {
+    context: { connectionString: legacyUrl.toString(), originalRole, oid: row.oid },
+    sealedPolicy: null,
+  };
 }
 
 /**
@@ -1780,7 +1949,7 @@ async function sealLegacySource(admin: Client, legacy: LegacyBootstrapContext): 
   // The authentication barrier is committed before this drain.  This call
   // intentionally runs on the cluster-admin connection, which can see and
   // terminate client backends across databases.
-  await freezeRoleSessions(admin, legacy.originalRole, legacy.pinnedSuperuser);
+  await freezeRoleSessions(admin, legacy.originalRole, oid10SessionPolicy(legacy.originalRole, legacy.oid));
 }
 
 async function bootstrapIfNeeded(): Promise<void> {
@@ -1811,7 +1980,7 @@ async function bootstrapIfNeeded(): Promise<void> {
   const admin = new Client({ connectionString: adminUrl.toString(), connectionTimeoutMillis: 5_000 });
   let retiredRole: string | null = null;
   let retiredRoleConnectionString: string | null = null;
-  let retiredRolePinned = false;
+  let retiredRolePolicy: LegacyOwnershipPolicy | null = null;
   await admin.connect();
   try {
     await assertClusterAdminSession(admin);
@@ -1821,7 +1990,15 @@ async function bootstrapIfNeeded(): Promise<void> {
     // conversion transaction.  On a restart after Tx A, the explicit legacy
     // URL is only an identifier: discoverPendingLegacy can adopt a source
     // that is already NOLOGIN without trying to authenticate as it again.
-    if (legacy === null && adminReady && legacyUrl !== null) legacy = await discoverPendingLegacy(admin, legacyUrl);
+    if (legacy === null && adminReady) {
+      if (legacyUrl !== null) {
+        const discovery = await discoverPendingLegacy(admin, legacyUrl);
+        legacy = discovery.context;
+        retiredRolePolicy = discovery.sealedPolicy;
+      } else {
+        retiredRolePolicy = await readSealedLegacyOwnershipPolicy(admin);
+      }
+    }
     if (legacy !== null) await sealLegacySource(admin, legacy);
 
     let mainCommitIssued = false;
@@ -1860,27 +2037,29 @@ async function bootstrapIfNeeded(): Promise<void> {
       await revokeRoleMembershipEdges(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL);
       await revokeRoleMembershipEdges(admin, CLUSTER_ADMIN_DATABASE_PRINCIPAL);
       await revokeRoleMembershipEdges(admin, INVENTORY_READER_DATABASE_PRINCIPAL);
+      await createRequiredExtensions(admin);
 
       if (legacy !== null) {
-        await transferCurrentOwnedObjects(admin, RUNTIME_DATABASE_PRINCIPAL, false);
-        await transferCurrentOwnedObjects(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, false);
+        await transferCurrentOwnedObjects(admin, reassignOwnershipPolicy(RUNTIME_DATABASE_PRINCIPAL));
+        await transferCurrentOwnedObjects(admin, reassignOwnershipPolicy(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL));
         await normalizeDefaultPrivileges(admin, LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL);
         await grantInventoryReader(admin);
+        const pendingPolicy = sealedLegacyOwnershipPolicy(legacy.oid);
         // This is the final privileged statement in the legacy transaction.
         // The helper freezes/transfers the source, removes every membership
         // edge, and seals the OID10 exception without attempting NOSUPERUSER.
-        await bootstrapExistingOwners(admin, LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL, legacy.pinnedSuperuser);
-        await assertRetiredRoleShape(admin, LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL, legacy.pinnedSuperuser);
-        await ensureAllowedExtensions(admin);
+        await bootstrapExistingOwners(admin, pendingPolicy);
+        const sealedPolicy = await readSealedLegacyOwnershipPolicy(admin, false);
+        if (sealedPolicy === null || sealedPolicy.kind !== pendingPolicy.kind) return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_POLICY_INVALID");
+        retiredRolePolicy = sealedPolicy;
+        await assertRetiredRoleShape(admin, sealedPolicy);
         retiredRole = LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL;
         const retiredUrl = new URL(legacy.connectionString);
         retiredUrl.username = LEGACY_BOOTSTRAP_DATABASE_PRINCIPAL;
         retiredRoleConnectionString = retiredUrl.toString();
-        retiredRolePinned = legacy.pinnedSuperuser;
       } else {
-        await ensureAllowedExtensions(admin);
-        await transferCurrentOwnedObjects(admin, RUNTIME_DATABASE_PRINCIPAL, false);
-        await transferCurrentOwnedObjects(admin, ENTITLEMENT_WRITER_DATABASE_PRINCIPAL, false);
+        await transferCurrentOwnedObjects(admin, reassignOwnershipPolicy(RUNTIME_DATABASE_PRINCIPAL));
+        await transferCurrentOwnedObjects(admin, reassignOwnershipPolicy(ENTITLEMENT_WRITER_DATABASE_PRINCIPAL));
         const database = await admin.query<{ datname: string }>("SELECT current_database() AS datname");
         const databaseName = database.rows[0]?.datname;
         if (databaseName === undefined) return fail("DATABASE_PRINCIPAL_DATABASE_NOT_FOUND");
@@ -1889,7 +2068,7 @@ async function bootstrapIfNeeded(): Promise<void> {
         await normalizeDefaultPrivileges(admin);
         await grantInventoryReader(admin);
       }
-      await assertBootstrapOwnershipReady(admin);
+      await assertBootstrapOwnershipReady(admin, retiredRolePolicy);
       // Do not issue ROLLBACK after COMMIT has been sent.  A transport or
       // server error at that boundary cannot safely be treated as if the
       // conversion were uncommitted; the persisted state is designed to be
@@ -1910,11 +2089,12 @@ async function bootstrapIfNeeded(): Promise<void> {
       await admin.query("BEGIN");
       try {
         await lockCoordinator(admin);
-        await freezeRoleSessions(admin, retiredRole, retiredRolePinned);
-        await assertRetiredRoleShape(admin, retiredRole, retiredRolePinned);
+        if (retiredRolePolicy === null || retiredRolePolicy.sourceRole !== retiredRole) return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_POLICY_INVALID");
+        await freezeRoleSessions(admin, retiredRole, sessionPolicyForOwnership(retiredRolePolicy));
+        await assertRetiredRoleShape(admin, retiredRolePolicy);
         await assertNoRoleMembership(admin, retiredRole);
         await assertNoStaleDefaultPrivileges(admin, retiredRole);
-        await assertTargetRoleSessionsDrained(admin, retiredRole, retiredRolePinned);
+        await assertTargetRoleSessionsDrained(admin, retiredRole, sessionPolicyForOwnership(retiredRolePolicy));
         postCommitIssued = true;
         await admin.query("COMMIT");
       } catch (error) {
@@ -1940,7 +2120,8 @@ async function bootstrapIfNeeded(): Promise<void> {
       // pg_roles masks rolpassword for non-superusers.  The cluster-admin
       // transaction already proved PASSWORD NULL; this verifier checks only
       // attributes visible to the ordinary migrator session.
-      await assertRetiredRoleAttributes(verifier, retiredRole, retiredRolePinned);
+      if (retiredRolePolicy === null || retiredRolePolicy.sourceRole !== retiredRole) return fail("DATABASE_PRINCIPAL_LEGACY_ROLE_POLICY_INVALID");
+      await assertRetiredRoleAttributes(verifier, retiredRolePolicy);
       await assertNoRoleMembership(verifier, retiredRole);
       await assertNoStaleDefaultPrivileges(verifier, retiredRole);
     }

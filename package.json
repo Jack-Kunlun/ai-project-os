@@ -30,6 +30,7 @@
     "test:project-world-postgres": "tsx --test test/project-world-postgres.test.ts",
     "test:worker-health-postgres": "tsx --test test/worker-health-postgres.test.ts",
     "test:postgres-gates": "tsx scripts/run-postgres-gates.ts",
+    "test:database-principal-oid10": "tsx scripts/run-database-principal-oid10-gate.ts",
     "test:production-upgrade-preflight-postgres": "tsx --test test/production-upgrade-preflight-postgres.test.ts",
     "project-snapshot:demo": "tsx scripts/project-snapshot-demo.ts",
     "project-ai:config": "tsx scripts/project-ai-config.ts",

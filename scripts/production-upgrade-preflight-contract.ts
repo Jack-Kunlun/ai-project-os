@@ -1,6 +1,9 @@
 export const PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_URL_ENV = "PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_URL" as const;
 export const PRODUCTION_UPGRADE_PREFLIGHT_LEGACY_DATABASE_URL_ENV = "DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL" as const;
 export const PRODUCTION_UPGRADE_PREFLIGHT_APPLICATION_NAME = "ai-project-os-production-upgrade-preflight" as const;
+export const PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE = "ai_project_os_cluster_admin" as const;
+export const PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE = "ai_project_os_legacy_bootstrap" as const;
+export const PRODUCTION_UPGRADE_REQUIRED_EXTENSIONS = Object.freeze(["vector", "pg_trgm", "pgcrypto", "plpgsql"] as const);
 export const PRODUCTION_UPGRADE_TARGET_TAG = "v0.2.0-dev.1" as const;
 export const PRODUCTION_UPGRADE_TARGET_VERSION = "0.2.0-dev.1" as const;
 export const PRODUCTION_UPGRADE_SOURCE_VERSION = "5.1.2" as const;
@@ -103,6 +106,7 @@ export type ProductionUpgradePreflightErrorCode =
   | "PRODUCTION_UPGRADE_PREFLIGHT_TRANSACTION_INVALID"
   | "PRODUCTION_UPGRADE_PREFLIGHT_MIGRATION_LEDGER_INVALID"
   | "PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID"
+  | "PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_PRINCIPAL_INVALID"
   | "PRODUCTION_UPGRADE_PREFLIGHT_DATA_BLOCKED"
   | "PRODUCTION_UPGRADE_PREFLIGHT_CLIENT_BACKENDS_PRESENT"
   | "PRODUCTION_UPGRADE_PREFLIGHT_ROLLBACK_FAILED"
@@ -200,18 +204,35 @@ export function parseProductionUpgradePreflightDatabaseUrl(value: string): Produ
 export function readProductionUpgradePreflightDatabaseConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): ProductionUpgradePreflightDatabaseConfig {
+  return readProductionUpgradePreflightDatabaseCandidates(env)[0];
+}
+
+export function readProductionUpgradePreflightDatabaseCandidates(
+  env: Readonly<Record<string, string | undefined>>,
+): readonly ProductionUpgradePreflightDatabaseConfig[] {
   const targetValue = env[PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_URL_ENV];
   if (typeof targetValue !== "string" || targetValue.length === 0) {
     throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_URL_REQUIRED");
   }
   const target = parseProductionUpgradePreflightDatabaseUrl(targetValue);
   const legacyValue = env[PRODUCTION_UPGRADE_PREFLIGHT_LEGACY_DATABASE_URL_ENV];
-  if (typeof legacyValue !== "string" || legacyValue.length === 0) return target;
+  if (typeof legacyValue !== "string" || legacyValue.length === 0) return [target];
   const legacy = parseProductionUpgradePreflightDatabaseUrl(legacyValue);
   if (legacy.host !== target.host || legacy.port !== target.port || legacy.database !== target.database) {
     throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_MISMATCH");
   }
-  return legacy;
+  const sameConfig = legacy.user === target.user && legacy.password === target.password;
+  // The old owner is the authoritative first-run identity.  The cluster
+  // admin is only a connection fallback for the post-seal/rename state.
+  return sameConfig ? [legacy] : [legacy, target];
+}
+
+export function readProductionUpgradePreflightLegacyRole(
+  env: Readonly<Record<string, string | undefined>>,
+): string | null {
+  const legacyValue = env[PRODUCTION_UPGRADE_PREFLIGHT_LEGACY_DATABASE_URL_ENV];
+  if (typeof legacyValue !== "string" || legacyValue.length === 0) return null;
+  return parseProductionUpgradePreflightDatabaseUrl(legacyValue).user;
 }
 
 export function safeProductionUpgradePreflightErrorCode(error: unknown): ProductionUpgradePreflightErrorCode {
@@ -232,6 +253,7 @@ export type ProductionUpgradePreflightReport = Readonly<{
     transaction: "read-only-repeatable-read";
     migrationLedger: "verified";
     legacySchema: "verified";
+    databasePrincipal: "cluster-admin-owned" | "legacy-extension-owners-reassignable" | "pinned-oid10-extension-owners-supported";
     cleanSlateData: "clear";
     clientBackends: "clear" | "not-applicable";
     rollback: "verified";
@@ -240,6 +262,7 @@ export type ProductionUpgradePreflightReport = Readonly<{
 
 export function buildProductionUpgradePreflightReport(
   phase: ProductionUpgradePreflightPhase,
+  databasePrincipal: ProductionUpgradePreflightReport["checks"]["databasePrincipal"],
 ): ProductionUpgradePreflightReport {
   return Object.freeze({
     ok: true,
@@ -251,6 +274,7 @@ export function buildProductionUpgradePreflightReport(
       transaction: "read-only-repeatable-read",
       migrationLedger: "verified",
       legacySchema: "verified",
+      databasePrincipal,
       cleanSlateData: "clear",
       clientBackends: phase === "post-stop" ? "clear" : "not-applicable",
       rollback: "verified",

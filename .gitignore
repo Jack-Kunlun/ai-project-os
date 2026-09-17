@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/evidence
 /playwright-report
 /test-results
 

@@ -85,22 +85,8 @@ async function installLegacySchema(databaseUrl: string, temporaryPrismaRoot: str
   await installMigrationSnapshot(databaseUrl, temporaryPrismaRoot, LEGACY_MIGRATION_MANIFEST.map((entry) => entry.name));
 }
 
-async function installMigrationsThroughFence(databaseUrl: string, temporaryPrismaRoot: string): Promise<void> {
-  const sourceRoot = resolve(process.cwd(), "prisma/migrations");
-  const targetRoot = resolve(temporaryPrismaRoot, "migrations");
-  const migrationNames = await migrationNamesThrough(cleanSlateFenceMigration);
-  assert.equal(migrationNames.at(-1), cleanSlateFenceMigration);
-  for (const name of migrationNames) {
-    await cp(resolve(sourceRoot, name), resolve(targetRoot, name), { recursive: true });
-  }
-  await execFile("pnpm", ["exec", "prisma", "migrate", "deploy", "--config", resolve(temporaryPrismaRoot, "prisma.config.ts")], {
-    cwd: process.cwd(),
-    env: { ...process.env, DATABASE_URL: databaseUrl },
-  });
-}
-
 test(
-  "production upgrade preflight accepts the exact legacy schema, fences concurrent writes, and upgrades 50 migrations to 102",
+  "production upgrade preflight accepts the exact v0.2 schema and upgrades 102 migrations to 103",
   { skip: !shouldRun ? "PRODUCTION_UPGRADE_PREFLIGHT_POSTGRES_GATE=1 is required" : false },
   async (context) => {
     const url = testDatabaseUrl();
@@ -123,17 +109,17 @@ test(
       `);
       assert.deepEqual(afterRollback.rows, [{ transaction_read_only: "off", transaction_isolation: "read committed" }]);
 
-      await client.query(`
-        INSERT INTO "AppUser"
-          ("id", "username", "passwordHash", "passwordSalt", "passwordVersion", "role", "updatedAt")
-        VALUES
-          ('00000000-0000-4000-8000-000000000099', 'preflight_member', repeat('a', 43), repeat('b', 22), 1, 'member', clock_timestamp())
+      const memberRole = await client.query<{ has_member: boolean }>(`
+        SELECT EXISTS (
+          SELECT 1
+            FROM pg_catalog.pg_enum AS enum_value
+            JOIN pg_catalog.pg_type AS enum_type
+              ON enum_type.oid = enum_value.enumtypid
+           WHERE enum_type.typname = 'AppUserRole'
+             AND enum_value.enumlabel = 'member'
+        ) AS has_member
       `);
-      await assert.rejects(
-        () => runProductionUpgradePreflight(queryClient(client), "pre-stop"),
-        /PRODUCTION_UPGRADE_PREFLIGHT_DATA_BLOCKED/u,
-      );
-      await client.query(`DELETE FROM "AppUser" WHERE "id" = '00000000-0000-4000-8000-000000000099'`);
+      assert.deepEqual(memberRole.rows, [{ has_member: false }]);
 
       const sameDatabaseBackend = new Client({ connectionString: url, connectionTimeoutMillis: 5_000 });
       await sameDatabaseBackend.connect();
@@ -178,19 +164,11 @@ test(
         await otherDatabaseBackend.end();
       }
 
-      await installMigrationsThroughFence(url, temporaryPrismaRoot);
-      for (const statement of [
-        `INSERT INTO "AppUser" ("role") VALUES ('member')`,
-        `INSERT INTO "AiProviderConnection" ("scope") VALUES ('workspace')`,
-        `INSERT INTO "ProjectAiRoute" DEFAULT VALUES`,
-        `INSERT INTO "ProjectAiRouteRevision" DEFAULT VALUES`,
-        `INSERT INTO "AiProviderOwnershipAudit" DEFAULT VALUES`,
-      ]) {
-        await assert.rejects(
-          () => client.query(statement),
-          /CLEAN_SLATE_TRANSITION_WRITE_FENCED/u,
-        );
-      }
+      await cp(
+        resolve(process.cwd(), "prisma/migrations/20260917010000_add_platform_bootstrap"),
+        resolve(temporaryPrismaRoot, "migrations/20260917010000_add_platform_bootstrap"),
+        { recursive: true },
+      );
 
       await execFile("pnpm", ["exec", "prisma", "migrate", "deploy", "--config", "prisma.config.ts"], {
         cwd: process.cwd(),
@@ -198,6 +176,7 @@ test(
       });
       const upgraded = await client.query<{
         migration_count: number;
+        platform_bootstrap: string | null;
         project_ai_route: string | null;
         project_ai_route_revision: string | null;
         ownership_audit: string | null;
@@ -205,6 +184,7 @@ test(
         workspace_id_column: boolean;
       }>(`
         SELECT (SELECT count(*)::integer FROM "_prisma_migrations" WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL) AS migration_count,
+               pg_catalog.to_regclass('public."PlatformBootstrap"')::text AS platform_bootstrap,
                pg_catalog.to_regclass('public."ProjectAiRoute"')::text AS project_ai_route,
                pg_catalog.to_regclass('public."ProjectAiRouteRevision"')::text AS project_ai_route_revision,
                pg_catalog.to_regclass('public."AiProviderOwnershipAudit"')::text AS ownership_audit,
@@ -224,7 +204,8 @@ test(
                ) AS workspace_id_column
       `);
       assert.deepEqual(upgraded.rows, [{
-        migration_count: 102,
+        migration_count: 103,
+        platform_bootstrap: '"PlatformBootstrap"',
         project_ai_route: null,
         project_ai_route_revision: null,
         ownership_audit: null,
@@ -238,7 +219,7 @@ test(
 );
 
 test(
-  "production upgrade fence is a safe 101 to 102 compatibility migration after clean-slate",
+  "production upgrade fence is a safe 102 to 103 compatibility migration after clean-slate",
   { skip: !shouldRun ? "PRODUCTION_UPGRADE_PREFLIGHT_POSTGRES_GATE=1 is required" : false },
   async (context) => {
     const sourceUrl = new URL(testDatabaseUrl());
@@ -259,7 +240,7 @@ test(
       await admin.query(`DROP DATABASE IF EXISTS "${compatibilityDatabaseName}" WITH (FORCE)`);
       await admin.query(`CREATE DATABASE "${compatibilityDatabaseName}" OWNER "ai_project_os_gate"`);
       const originalMigrationNames = (await migrationNamesThrough()).filter((name) => name !== cleanSlateFenceMigration);
-      assert.equal(originalMigrationNames.length, 101);
+      assert.equal(originalMigrationNames.length, 102);
       await installMigrationSnapshot(compatibilityUrl.toString(), temporaryPrismaRoot, originalMigrationNames);
 
       await execFile("pnpm", ["exec", "prisma", "migrate", "deploy", "--config", "prisma.config.ts"], {
@@ -284,7 +265,7 @@ test(
             ) AS trigger_names
         `);
         assert.deepEqual(result.rows, [{
-          migration_count: 102,
+          migration_count: 103,
           trigger_names: [
             "AiProviderConnection_clean_slate_transition_write_fence",
             "AppUser_clean_slate_transition_write_fence",

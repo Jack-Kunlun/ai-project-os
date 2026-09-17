@@ -76,14 +76,14 @@ async function readError(response: Response, fallback: string): Promise<string> 
   }
 }
 
-export function PlatformCreditGovernancePanel() {
+export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: string } = {}) {
   const [grants, setGrants] = useState<Grant[]>([]);
   const [users, setUsers] = useState<TargetUser[]>([]);
   const [grantPage, setGrantPage] = useState(1);
   const [userPage, setUserPage] = useState(1);
   const [grantsHasNextPage, setGrantsHasNextPage] = useState(false);
   const [usersHasNextPage, setUsersHasNextPage] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState(focusUserId ?? "");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
@@ -98,6 +98,7 @@ export function PlatformCreditGovernancePanel() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ grantPage: String(grantPage), grantPageSize: "10", userPage: String(userPage), userPageSize: "10" });
+      if (focusUserId !== undefined) params.set("userId", focusUserId);
       if (search.trim()) params.set("search", search.trim());
       const response = await fetch(`/api/admin/credits/grants?${params.toString()}`, { cache: "no-store" });
       if (!response.ok) throw new Error(await readError(response, "平台额度读取失败"));
@@ -111,16 +112,16 @@ export function PlatformCreditGovernancePanel() {
       setUsers(payload.users);
       setGrantsHasNextPage(payload.grantsHasNextPage === true);
       setUsersHasNextPage(payload.usersHasNextPage === true);
-      setSelectedUserId((current) => payload.users.some((user) => user.id === current && !user.disabled)
+      setSelectedUserId((current) => focusUserId ?? (payload.users.some((user) => user.id === current && !user.disabled)
         ? current
-        : payload.users.find((user) => !user.disabled)?.id ?? "");
+        : payload.users.find((user) => !user.disabled)?.id ?? ""));
       setMessage(null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "平台额度读取失败");
     } finally {
       setLoading(false);
     }
-  }, [grantPage, search, userPage]);
+  }, [focusUserId, grantPage, search, userPage]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -228,18 +229,18 @@ export function PlatformCreditGovernancePanel() {
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{loading ? "读取中…" : `${grants.length} 条记录`}</span>
       </div>
 
-      <div className="mt-6 flex flex-wrap items-end gap-3">
+      {focusUserId === undefined ? <div className="mt-6 flex flex-wrap items-end gap-3">
         <label className="min-w-56 flex-1 text-xs font-medium text-slate-600">搜索用户<input value={search} onChange={(event) => { setSearch(event.target.value); setGrantPage(1); setUserPage(1); }} placeholder="用户名或显示名" maxLength={160} className="edit-field" /></label>
         <button type="button" onClick={() => void load()} disabled={pending} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-700 disabled:opacity-50">刷新</button>
-      </div>
+      </div> : null}
 
-      <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-100">
+      {focusUserId === undefined ? <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-100">
         <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
           <h3 className="text-sm font-semibold text-slate-800">逐用户额度差异</h3>
           <p className="mt-1 text-xs text-slate-500">包含尚无额度、已用尽、已过期、已撤销和停用账号；活动预留单独列示。</p>
         </div>
         <table className="min-w-full text-left text-xs">
-          <thead className="bg-slate-50 text-slate-500"><tr><th className="px-4 py-3 font-semibold">用户</th><th className="px-4 py-3 font-semibold">差异状态</th><th className="px-4 py-3 font-semibold">Grant</th><th className="px-4 py-3 font-semibold">可用 / 预留</th></tr></thead>
+          <thead className="bg-slate-50 text-slate-500"><tr><th className="px-4 py-3 font-semibold">用户</th><th className="px-4 py-3 font-semibold">差异状态</th><th className="px-4 py-3 font-semibold">额度记录</th><th className="px-4 py-3 font-semibold">可用 / 预留</th></tr></thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {users.map((user) => <tr key={user.id}>
               <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-800">{user.username}{user.displayName ? <span className="ml-2 font-normal text-slate-400">{user.displayName}</span> : null}</td>
@@ -257,10 +258,10 @@ export function PlatformCreditGovernancePanel() {
             <button type="button" onClick={() => setUserPage((page) => page + 1)} disabled={loading || !usersHasNextPage} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50">下一页</button>
           </div>
         </div>
-      </div>
+      </div> : null}
 
       <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-100">
-        <div className="border-b border-slate-100 bg-slate-50 px-4 py-3"><h3 className="text-sm font-semibold text-slate-800">Grant 明细</h3></div>
+        <div className="border-b border-slate-100 bg-slate-50 px-4 py-3"><h3 className="text-sm font-semibold text-slate-800">额度记录</h3></div>
         <table className="min-w-full text-left text-xs">
           <thead className="bg-slate-50 text-slate-500"><tr><th className="px-4 py-3 font-semibold">用户</th><th className="px-4 py-3 font-semibold">类型</th><th className="px-4 py-3 font-semibold">额度 / 剩余</th><th className="px-4 py-3 font-semibold">状态 / 到期</th><th className="px-4 py-3 font-semibold">操作</th></tr></thead>
           <tbody className="divide-y divide-slate-100 bg-white">
@@ -277,7 +278,7 @@ export function PlatformCreditGovernancePanel() {
           </tbody>
         </table>
         <div className="flex items-center justify-between border-t border-slate-100 bg-white px-4 py-3 text-xs text-slate-500">
-          <span>Grant 第 {grantPage} 页</span>
+          <span>额度记录第 {grantPage} 页</span>
           <div className="flex gap-2">
             <button type="button" onClick={() => setGrantPage((page) => Math.max(1, page - 1))} disabled={loading || grantPage === 1} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50">上一页</button>
             <button type="button" onClick={() => setGrantPage((page) => page + 1)} disabled={loading || !grantsHasNextPage} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50">下一页</button>
@@ -286,11 +287,11 @@ export function PlatformCreditGovernancePanel() {
       </div>
 
       <form onSubmit={previewGrant} className="mt-6 grid gap-4 border-t border-slate-100 pt-6 sm:grid-cols-4">
-        <label className="text-xs font-medium text-slate-600 sm:col-span-4">补发目标<select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} required className="edit-field"><option value="">请选择搜索结果中的用户</option>{users.map((user) => <option key={user.id} value={user.id} disabled={user.disabled}>{user.username}{user.displayName ? ` · ${user.displayName}` : ""}{user.disabled ? " · 已停用" : ""}</option>)}</select></label>
+        {focusUserId === undefined ? <label className="text-xs font-medium text-slate-600 sm:col-span-4">补发目标<select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} required className="edit-field"><option value="">请选择搜索结果中的用户</option>{users.map((user) => <option key={user.id} value={user.id} disabled={user.disabled}>{user.username}{user.displayName ? ` · ${user.displayName}` : ""}{user.disabled ? " · 已停用" : ""}</option>)}</select></label> : <p className="text-xs font-medium text-slate-600 sm:col-span-4">当前用户：{selectedUser?.username ?? "读取中…"}</p>}
         <label className="text-xs font-medium text-slate-600">补发额度<input type="number" min={1} max={10_000_000} value={grantAmount} onChange={(event) => setGrantAmount(event.target.value)} required className="edit-field" /></label>
         <label className="text-xs font-medium text-slate-600">到期时间<input type="datetime-local" value={grantExpiresAt} onChange={(event) => setGrantExpiresAt(event.target.value)} required className="edit-field" /></label>
         <label className="text-xs font-medium text-slate-600 sm:col-span-2">原因（必填）<input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required className="edit-field" /></label>
-        <div className="sm:col-span-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">搜索会覆盖尚无额度记录的本地用户；执行前仍会再次校验目标状态。</p><button disabled={pending || selectedUser === undefined || selectedUser.disabled} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "预览补发"}</button></div>
+        <div className="sm:col-span-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">搜索会覆盖尚无额度记录的本地用户；执行前仍会再次校验目标状态与用户角色。</p><button disabled={pending || selectedUser === undefined || selectedUser.disabled} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "预览补发"}</button></div>
       </form>
 
       {preview ? <form onSubmit={executePreview} className="mt-6 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-5">

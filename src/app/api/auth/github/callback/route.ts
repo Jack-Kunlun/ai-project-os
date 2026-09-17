@@ -35,7 +35,8 @@ export async function GET(request: Request) {
       cookieState: cookieValue(requestCookies, GITHUB_OAUTH_STATE_COOKIE_NAME),
       sessionUserId: sessionUser?.id,
     });
-    const response = NextResponse.redirect(githubOAuthPublicUrl(canonicalInternalReturnPath(result.returnTo)), 303);
+    const destination = result.session?.user.role === "admin" ? "/admin" : canonicalInternalReturnPath(result.returnTo);
+    const response = NextResponse.redirect(githubOAuthPublicUrl(destination), 303);
     if (result.session !== null) {
       response.headers.append("set-cookie", sessionCookie(result.session.token, result.session.expiresAt, result.remember));
     }

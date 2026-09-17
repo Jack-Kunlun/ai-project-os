@@ -62,6 +62,7 @@ import { PlatformCreditGovernanceError } from "@/lib/platform-credit-governance-
 import { MembershipApplicationServiceError } from "@/lib/membership-application-service";
 import { WorkspaceRoleGovernanceError } from "@/lib/workspace-role-governance-service";
 import { FirstAdminOnboardingError } from "@/lib/first-admin-onboarding-service";
+import { AdminUserOperationsError } from "@/lib/admin-user-operations-service";
 
 export type ApiErrorBody = {
   error: {
@@ -84,6 +85,15 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof AdminUserOperationsError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      ADMIN_USER_OPERATIONS_ADMIN_REQUIRED: [403, "只有系统管理员可以管理普通用户"],
+      ADMIN_USER_OPERATIONS_USER_NOT_FOUND: [404, "普通用户不存在"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "用户运营读取失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof ProjectWorldError) {
     const mapping: Record<string, readonly [number, string]> = {
       PROJECT_WORLD_INVALID_INPUT: [400, "项目世界模型请求无效"],

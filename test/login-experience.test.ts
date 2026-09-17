@@ -17,6 +17,9 @@ test("login page exposes the reference layout and real configured auth choices",
   ]);
 
   assert.match(form, /让项目知识可追溯/u);
+  assert.match(form, /import Image from "next\/image"/u);
+  assert.match(form, /Image src="\/brand\/ai-project-os-admin\.png" alt=""/u);
+  assert.doesNotMatch(form, />OS<\/span>/u);
   assert.match(form, /记住我/u);
   assert.match(form, /忘记密码/u);
   assert.match(form, /使用 GitHub 登录/u);

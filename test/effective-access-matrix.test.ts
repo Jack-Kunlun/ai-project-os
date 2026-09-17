@@ -48,11 +48,14 @@ test("effective project permission uses the same role projection as runtime acce
   assert.equal(highestProjectPermission(null, null), null);
 });
 
-test("ADM-008 matrix is a read-only, bounded detail surface", async () => {
-  const [service, route, client] = await Promise.all([
+test("ADM-008 account detail endpoint is a read-only, bounded safe summary", async () => {
+  const [service, route, client, operations, detailClient, e2e] = await Promise.all([
     readFile("src/lib/account-access-service.ts", "utf8"),
     readFile("src/app/api/system/account-access/[userId]/route.ts", "utf8"),
     readFile("src/app/system/account-access/account-access-client.tsx", "utf8"),
+    readFile("src/lib/admin-user-operations-service.ts", "utf8"),
+    readFile("src/app/admin/users/[userId]/user-detail-client.tsx", "utf8"),
+    readFile("e2e/adm008-effective-access.spec.ts", "utf8"),
   ]);
 
   assert.match(service, /export async function getEffectiveAccessMatrix/u);
@@ -91,15 +94,24 @@ test("ADM-008 matrix is a read-only, bounded detail surface", async () => {
   assert.match(route, /handleNoStoreApiError/u);
   assert.doesNotMatch(route, /return handleApiError\(error\)/u);
   assert.match(route, /allow: "PATCH"[\s\S]*noStoreHeaders|noStoreHeaders[\s\S]*allow: "PATCH"/u);
-  assert.match(route, /workspaceCursor/u);
-  assert.match(route, /projectCursor/u);
-  assert.match(client, /查看有效访问矩阵/u);
-  assert.match(client, /查看下一页工作区/u);
-  assert.match(client, /查看下一页项目/u);
-  assert.match(client, /setMatrix\(next\)/u);
-  assert.match(client, /setMatrix\(null\)/u);
-  assert.doesNotMatch(client, /mergeMatrixItems/u);
+  assert.doesNotMatch(route, /workspaceCursor|projectCursor|workspace|project/iu);
+  assert.doesNotMatch(client, /workspace|project|access matrix|mergeMatrixItems/iu);
   assert.doesNotMatch(client, /disabledReason/u);
   assert.doesNotMatch(client, /passwordHash/u);
   assert.doesNotMatch(client, /tokenHash/u);
+  assert.match(operations, /membershipApplication[\s\S]*statusVersion[\s\S]*submittedAt[\s\S]*fulfilledAt[\s\S]*rejectedAt[\s\S]*withdrawnAt/u);
+  assert.match(operations, /membershipApplication\.findFirst/u);
+  assert.doesNotMatch(operations, /membershipApplication[\s\S]*requestReason/u);
+  assert.doesNotMatch(operations, /membershipApplication[\s\S]*rejectionReason/u);
+  assert.match(detailClient, /applicationId: membershipAction === "grant"[\s\S]*membershipApplication\.id/u);
+  assert.match(detailClient, /membership-applications\/reject\/preview/u);
+  assert.match(detailClient, /membership-applications\/reject\/execute/u);
+  assert.match(detailClient, /await load\(\)/u);
+  assert.doesNotMatch(detailClient, /requestReason|rejectionReason|affectedProjects|projectName|workspaceName|有效访问矩阵/iu);
+  assert.match(e2e, /api\/admin\/users\//u);
+  assert.match(e2e, /projectName, workspaceName, workspaceSlug, projectSlug, projectId, workspaceId/u);
+  assert.match(e2e, /response\.body\)\.not\.toContain\(secret\)/u);
+  assert.match(e2e, /pageText\)\.not\.toContain\(leakedValue\)/u);
+  assert.match(e2e, /"有效访问矩阵"/u);
+  assert.doesNotMatch(e2e, /查看有效访问矩阵|有效访问矩阵.*toBeVisible/iu);
 });

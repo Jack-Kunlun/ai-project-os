@@ -9,7 +9,8 @@ export default async function SetupPage() {
   if (await isApplicationInitialized()) {
     const session = await getPageSession();
     if (session === null) redirect("/login");
-    redirect(await getFirstAdminOnboardingState(session.id) === "pending" ? "/onboarding" : "/dashboard");
+    const onboarding = await getFirstAdminOnboardingState(session.id);
+    redirect(onboarding === "pending" ? "/onboarding" : session.role === "admin" ? "/admin" : "/dashboard");
   }
   return <SetupForm />;
 }

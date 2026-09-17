@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
-import { executeAccountAccess, getEffectiveAccessMatrix, type AccountAccessAction } from "@/lib/account-access-service";
+import { executeAccountAccess, type AccountAccessAction } from "@/lib/account-access-service";
+import { getAdminUserOperationsDetail } from "@/lib/admin-user-operations-service";
 
 export const dynamic = "force-dynamic";
 
@@ -13,12 +14,6 @@ function handleNoStoreApiError(error: unknown) {
   response.headers.set("cache-control", noStoreHeaders["cache-control"]);
   return response;
 }
-
-const matrixQuerySchema = z.object({
-  workspaceCursor: z.string().max(512).optional(),
-  projectCursor: z.string().max(512).optional(),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-}).strict();
 
 const executeSchema = z.object({
   action: z.enum(["disable", "restore"]),
@@ -38,21 +33,12 @@ export async function GET(request: Request, context: { params: Promise<{ userId:
   try {
     const admin = await requireApiSession(request);
     const params = await context.params;
-    const url = new URL(request.url);
-    const query = matrixQuerySchema.parse({
-      workspaceCursor: url.searchParams.get("workspaceCursor") ?? undefined,
-      projectCursor: url.searchParams.get("projectCursor") ?? undefined,
-      pageSize: url.searchParams.get("pageSize") ?? undefined,
-    });
-    const matrix = await getEffectiveAccessMatrix({
+    const detail = await getAdminUserOperationsDetail({
       adminUserId: admin.id,
       adminAccountAccessVersion: admin.accountAccessVersion,
       userId: z.string().uuid().parse(params.userId),
-      workspaceCursor: query.workspaceCursor,
-      projectCursor: query.projectCursor,
-      pageSize: query.pageSize,
     });
-    return NextResponse.json(matrix, { headers: noStoreHeaders });
+    return NextResponse.json({ user: detail.summary.user, account: detail.summary.user, records: detail.records.account }, { headers: noStoreHeaders });
   } catch (error) {
     return handleNoStoreApiError(error);
   }

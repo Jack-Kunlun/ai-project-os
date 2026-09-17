@@ -7,6 +7,7 @@ import { listPlatformTokenGrants } from "@/lib/platform-credit-governance-servic
 export const dynamic = "force-dynamic";
 
 const querySchema = z.object({
+  userId: z.string().uuid().optional(),
   search: z.string().trim().max(160).optional(),
   kind: z.enum(["signup", "manual"]).optional(),
   status: z.enum(["active", "expired", "revoked"]).optional(),

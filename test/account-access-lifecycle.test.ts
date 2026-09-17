@@ -207,6 +207,8 @@ test("account access lifecycle is a separate preview and detail PATCH surface", 
   assert.match(detail, /export async function PATCH/u);
   assert.match(detail, /adminAccountAccessVersion: admin\.accountAccessVersion/u);
   assert.match(detail, /export async function DELETE/u);
-  assert.match(navigation, /accountAccess/u);
+  assert.match(navigation, /href: "\/admin\/users"/u);
+  assert.doesNotMatch(navigation, /href: "\/system\/account-access"/u);
   assert.match(page, /requireSystemAdminPage/u);
+  assert.match(page, /redirect\("\/admin\/users"\)/u);
 });

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createPasswordRecord } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { createControlledMembership } from "../test/membership-fixture";
 import {
   expectR02MobileDrawer,
@@ -15,9 +16,29 @@ import {
   R02_ADMIN_ROUTES,
   R02_VIEWPORTS,
   signInR02Admin,
+  signInR02Owner,
 } from "./support/r02-admin-navigation";
 
 const R02_ACTOR_PASSWORD = "R02Actor2026Password!";
+
+async function expectR02OverviewErrorState(page: Page): Promise<void> {
+  const overviewRoute = "**/api/system/overview";
+  await page.route(overviewRoute, async (route) => {
+    await route.abort();
+  });
+  await page.goto("/admin");
+  const unavailableActions = page.locator('[aria-labelledby="admin-pending-actions-title"]');
+  await expect(page.locator('p[role="alert"]')).toBeVisible();
+  await expect(unavailableActions.getByText("未取得", { exact: true })).toHaveCount(8);
+  await expect(unavailableActions.getByText("0", { exact: true })).toHaveCount(0);
+  await page.unroute(overviewRoute);
+}
+
+async function expectR02AdminBrand(page: Page): Promise<void> {
+  const brand = page.getByRole("link", { name: "AI Project OS 平台管理总览", exact: true });
+  await expect(brand).toHaveCount(1);
+  await expect(brand).toHaveAttribute("href", "/admin");
+}
 
 type R02ActorKind = "free" | "active" | "expired" | "disabled";
 type R02Actor = Readonly<{ id: string; username: string; password: string; kind: R02ActorKind }>;
@@ -71,7 +92,7 @@ async function createR02Project(page: Parameters<typeof signInR02Admin>[0]): Pro
 async function seedR02DetailFixtures(projectId: string): Promise<Readonly<{ sourceId: string; sourceText: string; jobId: string; syncRunId: string }>> {
   const db = getDb();
   try {
-    const admin = await db.appUser.findUniqueOrThrow({ where: { username: "browser_admin" }, select: { id: true } });
+    const owner = await db.appUser.findUniqueOrThrow({ where: { username: "browser_owner" }, select: { id: true } });
     const sourceText = "R02 valid source detail fixture";
     const contentHash = createHash("sha256").update(sourceText).digest("hex");
     const source = await db.projectSource.create({
@@ -90,7 +111,7 @@ async function seedR02DetailFixtures(projectId: string): Promise<Readonly<{ sour
         progressCurrent: 1,
         progressTotal: 1,
         idempotencyKey: createHash("sha256").update(`r02-job:${projectId}:${randomUUID()}`).digest("hex"),
-        requestedById: admin.id,
+        requestedById: owner.id,
         startedAt: completedAt,
         completedAt,
       },
@@ -106,7 +127,7 @@ async function seedR02DetailFixtures(projectId: string): Promise<Readonly<{ sour
         progressCurrent: 0,
         progressTotal: 0,
         idempotencyKey: createHash("sha256").update(`r02-sync-job:${projectId}:${randomUUID()}`).digest("hex"),
-        requestedById: admin.id,
+        requestedById: owner.id,
         startedAt: completedAt,
         completedAt,
       },
@@ -216,59 +237,85 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   test.setTimeout(360_000);
   await signInR02Admin(page);
 
+  const ownerContext = await browser.newContext();
+  const ownerPage = await ownerContext.newPage();
+  await signInR02Owner(ownerPage);
+
+  await expectR02OverviewErrorState(page);
+
+  for (const path of ["/dashboard", "/projects", "/team"] as const) {
+    await page.goto(path);
+    await expect(page).toHaveURL(/\/admin$/u);
+  }
+
   for (const path of ["/dashboard", "/projects", "/team", "/notifications", "/profile", "/guide"] as const) {
     for (const width of R02_VIEWPORTS) {
-      await page.setViewportSize({ width, height: 844 });
-      await page.goto(path);
-      await expect(page.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(1);
-      await expectR02NoHorizontalOverflow(page, `${path}@${width}`);
+      await ownerPage.setViewportSize({ width, height: 844 });
+      await ownerPage.goto(path);
+      await expect(ownerPage.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(0);
+      await expectR02NoHorizontalOverflow(ownerPage, `${path}@${width}`);
     }
   }
 
   for (const [path, expectedPath] of R02_PUBLIC_ROUTE_EXPECTATIONS) {
-    const response = await page.goto(path);
+    const response = await ownerPage.goto(path);
     expect(response?.status(), `${path} must be reachable or redirect safely`).toBeLessThan(400);
     await expect.poll(() => {
-      const url = new URL(page.url());
+      const url = new URL(ownerPage.url());
       return `${url.pathname}${url.search}`;
     }).toBe(expectedPath);
   }
 
-  await page.setViewportSize({ width: 1440, height: 844 });
-  await page.goto("/projects?focus=r02-header");
-  const adminEntry = page.getByRole("link", { name: "管理工作台", exact: true });
-  await adminEntry.focus();
-  await expect(adminEntry).toBeFocused();
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/admin$/u);
-  await page.goBack();
-  await expect(page).toHaveURL(/\/projects\?focus=r02-header$/u);
-  await expectR02NoAccessibilityViolations(page, "projects shared header@1440");
+  for (const [path, expectedPath] of [
+    ["/settings", "/admin/models"],
+    ["/system/memberships", "/admin/users"],
+    ["/system/operations", "/admin/operations/backups"],
+  ] as const) {
+    await page.goto(path);
+    await expect(page).toHaveURL(new RegExp(`${expectedPath.replaceAll("/", "\\/")}$`, "u"));
+  }
+
+  await ownerPage.setViewportSize({ width: 1440, height: 844 });
+  await ownerPage.goto("/projects?focus=r02-header");
+  await expect(ownerPage.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(0);
+  await ownerPage.goto("/projects?focus=r02-header");
+  await expectR02NoAccessibilityViolations(ownerPage, "projects shared header@1440");
 
   for (const width of R02_VIEWPORTS) {
     await page.setViewportSize({ width, height: 844 });
     for (const route of R02_ADMIN_ROUTES) {
+      await page.setViewportSize({ width, height: route.path === "/admin/models" && width === 1440 ? 900 : 844 });
       const response = await page.goto(route.path);
       expect(response?.status(), `${route.path}@${width} must be reachable in production browser`).toBeLessThan(400);
-      await expectR02SettledRoute(page, route, `${route.path}@${width}`);
-      await expect(page.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(1);
+      const settledRoute = route.path === "/admin/account"
+        ? { ...route, terminal: { ...route.terminal, exact: false } }
+        : route;
+      await expectR02SettledRoute(page, settledRoute, `${route.path}@${width}`);
+      await expectR02AdminBrand(page);
       await expectR02NoHorizontalOverflow(page, `${route.path}@${width}`);
       if (width >= 1024) {
         await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true })).toBeVisible();
-        await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link")).toHaveCount(10);
+        await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link")).toHaveCount(12);
       } else {
         await expect(page.getByRole("button", { name: "打开导航", exact: true })).toBeVisible();
       }
       if (route.path === "/admin") {
         const readinessHeading = page.getByRole("heading", { name: "管理员总览", exact: true });
         await expectR02InViewport(page, readinessHeading, `admin primary heading@${width}`);
-        const readinessItem = page.getByRole("heading", { name: "数据库连接", exact: true });
-        await expectR02InViewport(page, readinessItem, `admin initial readiness item@${width}`);
+        const pendingActionsHeading = page.getByRole("heading", { name: "待处理事项", exact: true });
+        await expectR02InViewport(page, pendingActionsHeading, `admin pending actions@${width}`);
         if (width < 1024) await expectR02MobileDrawer(page);
+      }
+      if (route.path === "/admin/models") {
+        await expect(page.getByRole("button", { name: "加密保存连接", exact: true }), `platform model primary action@${width}`).toBeVisible();
       }
     }
     if (width === 390) await expectR02NoAccessibilityViolations(page, "admin representative@390");
   }
+
+  await page.goto("/admin/connectors/git");
+  await expect(page).toHaveURL(/\/admin$/u);
+  await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/admin");
@@ -281,14 +328,14 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   await expectR02SettledRoute(page, R02_ADMIN_ROUTES.find((route) => route.path === "/admin/audit")!, "admin drawer navigation target@390");
 
   await page.setViewportSize({ width: 1440, height: 844 });
-  const project = await createR02Project(page);
+  const project = await createR02Project(ownerPage);
   const projectRoutes = r02ProjectRoutes(project.id, project.name);
   for (const route of projectRoutes) {
-    const response = await page.goto(route.path);
+    const response = await ownerPage.goto(route.path);
     expect(response?.status(), `${route.path} must be reachable in production browser`).toBeLessThan(400);
-    await expectR02SettledRoute(page, route, `${route.path}@1440`);
-    await expect(page.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(1);
-    await expectR02NoHorizontalOverflow(page, `${route.path}@1440`);
+    await expectR02SettledRoute(ownerPage, route, `${route.path}@1440`);
+    await expect(ownerPage.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(0);
+    await expectR02NoHorizontalOverflow(ownerPage, `${route.path}@1440`);
   }
   const representativePaths = new Set([
     `/projects/${project.id}`,
@@ -298,55 +345,55 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     `/projects/${project.id}/governance`,
   ]);
   for (const width of R02_VIEWPORTS.slice(1)) {
-    await page.setViewportSize({ width, height: 844 });
+    await ownerPage.setViewportSize({ width, height: 844 });
     for (const route of projectRoutes.filter((candidate) => representativePaths.has(candidate.path))) {
-      await page.goto(route.path);
-      await expectR02SettledRoute(page, route, `${route.path}@${width} representative`);
-      await expect(page.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(1);
-      await expectR02NoHorizontalOverflow(page, `${route.path}@${width} representative`);
+      await ownerPage.goto(route.path);
+      await expectR02SettledRoute(ownerPage, route, `${route.path}@${width} representative`);
+      await expect(ownerPage.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(0);
+      await expectR02NoHorizontalOverflow(ownerPage, `${route.path}@${width} representative`);
     }
   }
   for (const path of r02ProjectGuardRoutes(project.id)) {
-    const response = await page.goto(path);
+    const response = await ownerPage.goto(path);
     expect(response?.status(), `${path} guard must render without a server error`).toBeLessThan(500);
-    await expect(page.locator('[role="alert"]:not(#__next-route-announcer__)')).toBeVisible();
-    await expect(page.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(1);
+    await expect(ownerPage.locator('[role="alert"]:not(#__next-route-announcer__)')).toBeVisible();
+    await expect(ownerPage.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(0);
   }
 
   const details = await seedR02DetailFixtures(project.id);
-  await page.setViewportSize({ width: 390, height: 844 });
+  await ownerPage.setViewportSize({ width: 390, height: 844 });
   const materialReturnTo = `/projects/${project.id}/materials?kind=all&focus=${details.sourceId}`;
-  await page.goto(`/projects/${project.id}/materials/sources/${details.sourceId}?returnTo=${encodeURIComponent(materialReturnTo)}`);
-  await expect(page.getByRole("heading", { name: "项目资料详情", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "原始资料内容", exact: true })).toBeVisible();
-  await expect(page.getByText(details.sourceText, { exact: true })).toBeVisible();
-  await expect(page.locator(".animate-pulse")).toHaveCount(0);
-  await expect(page.locator('[role="alert"]:not(#__next-route-announcer__)')).toHaveCount(0);
-  await expectR02NoHorizontalOverflow(page, "valid source detail@390");
-  await page.getByRole("link", { name: "返回原始资料", exact: true }).click();
-  await expect.poll(() => `${new URL(page.url()).pathname}${new URL(page.url()).search}`).toBe(materialReturnTo);
-  await expect(page.locator(`#source-link-${details.sourceId}`)).toBeFocused();
+  await ownerPage.goto(`/projects/${project.id}/materials/sources/${details.sourceId}?returnTo=${encodeURIComponent(materialReturnTo)}`);
+  await expect(ownerPage.getByRole("heading", { name: "项目资料详情", exact: true })).toBeVisible();
+  await expect(ownerPage.getByRole("heading", { name: "原始资料内容", exact: true })).toBeVisible();
+  await expect(ownerPage.getByText(details.sourceText, { exact: true })).toBeVisible();
+  await expect(ownerPage.locator(".animate-pulse")).toHaveCount(0);
+  await expect(ownerPage.locator('[role="alert"]:not(#__next-route-announcer__)')).toHaveCount(0);
+  await expectR02NoHorizontalOverflow(ownerPage, "valid source detail@390");
+  await ownerPage.getByRole("link", { name: "返回原始资料", exact: true }).click();
+  await expect.poll(() => `${new URL(ownerPage.url()).pathname}${new URL(ownerPage.url()).search}`).toBe(materialReturnTo);
+  await expect(ownerPage.locator(`#source-link-${details.sourceId}`)).toBeFocused();
 
   const projectReturnTo = `/projects/${project.id}`;
-  await page.goto(`/projects/${project.id}/jobs/${details.jobId}?from=governance&returnTo=${encodeURIComponent(projectReturnTo)}`);
-  await expect(page.getByRole("heading", { name: "项目简报", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "任务结果", exact: true })).toBeVisible();
-  await expect(page.getByText("执行阶段：terminal", { exact: true })).toBeVisible();
-  await expect(page.getByText("1 / 1 · 100%", { exact: true })).toBeVisible();
-  await expect(page.locator(".animate-pulse")).toHaveCount(0);
-  await expect(page.locator('[role="alert"]:not(#__next-route-announcer__)')).toHaveCount(0);
-  await expectR02NoHorizontalOverflow(page, "valid job detail@390");
-  await page.getByRole("link", { name: /返回任务列表/u }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${project.id}/governance\\?`, "u"));
-  await expect(page.locator("#task-runs")).toBeFocused();
+  await ownerPage.goto(`/projects/${project.id}/jobs/${details.jobId}?from=governance&returnTo=${encodeURIComponent(projectReturnTo)}`);
+  await expect(ownerPage.getByRole("heading", { name: "项目简报", exact: true })).toBeVisible();
+  await expect(ownerPage.getByRole("heading", { name: "任务结果", exact: true })).toBeVisible();
+  await expect(ownerPage.getByText("执行阶段：terminal", { exact: true })).toBeVisible();
+  await expect(ownerPage.getByText("1 / 1 · 100%", { exact: true })).toBeVisible();
+  await expect(ownerPage.locator(".animate-pulse")).toHaveCount(0);
+  await expect(ownerPage.locator('[role="alert"]:not(#__next-route-announcer__)')).toHaveCount(0);
+  await expectR02NoHorizontalOverflow(ownerPage, "valid job detail@390");
+  await ownerPage.getByRole("link", { name: /返回任务列表/u }).click();
+  await expect(ownerPage).toHaveURL(new RegExp(`/projects/${project.id}/governance\\?`, "u"));
+  await expect(ownerPage.locator("#task-runs")).toBeFocused();
 
-  await page.goto(`/projects/${project.id}/github-syncs/${details.syncRunId}`);
-  await expect(page.getByRole("heading", { name: "一键同步详情", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "冻结目标执行状态", exact: true })).toBeVisible();
-  await expect(page.locator('[role="alert"]:not(#__next-route-announcer__)')).toHaveCount(0);
-  await expectR02NoHorizontalOverflow(page, "valid GitHub sync detail@390");
-  await page.getByRole("link", { name: /返回上一级/u }).click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${project.id}/repositories$`, "u"));
+  await ownerPage.goto(`/projects/${project.id}/github-syncs/${details.syncRunId}`);
+  await expect(ownerPage.getByRole("heading", { name: "一键同步详情", exact: true })).toBeVisible();
+  await expect(ownerPage.getByRole("heading", { name: "冻结目标执行状态", exact: true })).toBeVisible();
+  await expect(ownerPage.locator('[role="alert"]:not(#__next-route-announcer__)')).toHaveCount(0);
+  await expectR02NoHorizontalOverflow(ownerPage, "valid GitHub sync detail@390");
+  await ownerPage.getByRole("link", { name: /返回上一级/u }).click();
+  await expect(ownerPage).toHaveURL(new RegExp(`/projects/${project.id}/repositories$`, "u"));
 
   const actors = await seedR02Actors();
   const freeContext = await browser.newContext();
@@ -415,6 +462,6 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     await expect(disabledPage).toHaveURL(/\/login$/u);
     await expect(disabledPage.getByText("用户名或密码错误", { exact: true })).toBeVisible();
   } finally {
-    await Promise.all([freeContext.close(), activeContext.close(), expiredContext.close(), disabledContext.close()]);
+    await Promise.all([ownerContext.close(), freeContext.close(), activeContext.close(), expiredContext.close(), disabledContext.close()]);
   }
 });

@@ -49,7 +49,7 @@ const successfulDrill: PublicRecoveryDrill = {
   errorCode: null,
 };
 
-function fakeSessionDb(user: Readonly<{ id: string; role: AppUserRole }>, creatorId = initialAdminId): PrismaClient {
+function fakeSessionDb(user: Readonly<{ id: string; role: AppUserRole }>, bootstrapAdminId = initialAdminId): PrismaClient {
   const now = new Date();
   return {
     appUser: {
@@ -76,8 +76,8 @@ function fakeSessionDb(user: Readonly<{ id: string; role: AppUserRole }>, creato
       }),
       updateMany: async () => ({ count: 0 }),
     },
-    workspace: {
-      findUnique: async () => ({ createdById: creatorId }),
+    platformBootstrap: {
+      findUnique: async () => ({ initialAdminUserId: bootstrapAdminId }),
     },
   } as unknown as PrismaClient;
 }

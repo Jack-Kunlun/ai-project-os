@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
-import { requirePageSession, type SafeSessionUser } from "@/lib/auth";
+import { requireAuthenticatedPageSession, type SafeSessionUser } from "@/lib/auth";
 
 export async function requireSystemAdminPage(): Promise<SafeSessionUser> {
-  const user = await requirePageSession();
+  const user = await requireAuthenticatedPageSession();
   if (user.role !== "admin") redirect("/dashboard");
   return user;
 }

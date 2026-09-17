@@ -3,7 +3,7 @@ import { lstat, open, readdir } from "node:fs/promises";
 import path from "node:path";
 import type { AppUserRole, PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { AuthError, DEFAULT_WORKSPACE_ID } from "@/lib/auth";
+import { AuthError } from "@/lib/auth";
 import { getDb } from "@/lib/db";
 import type { BackupOperationsSnapshot, PublicBackupRun, PublicRecoveryDrill } from "@/lib/system-operations-types";
 
@@ -126,11 +126,11 @@ export async function isInitialSuperAdmin(
   db: PrismaClient = getDb(),
 ): Promise<boolean> {
   if (user.role !== "admin") return false;
-  const workspace = await db.workspace.findUnique({
-    where: { id: DEFAULT_WORKSPACE_ID },
-    select: { createdById: true },
+  const bootstrap = await db.platformBootstrap.findUnique({
+    where: { id: "platform" },
+    select: { initialAdminUserId: true },
   });
-  return workspace?.createdById === user.id;
+  return bootstrap?.initialAdminUserId === user.id;
 }
 
 export async function requireInitialSuperAdmin(

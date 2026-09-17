@@ -6,6 +6,19 @@ import { findConfirmedProjectMembership, findConfirmedWorkspaceMembership } from
 
 const PROJECT_ID_SCHEMA = z.string().uuid();
 const PROJECT_PATH_PATTERN = /^\/api\/projects\/([^/]+)(?:\/|$)/u;
+const PLATFORM_API_PREFIXES = ["/api/admin", "/api/system", "/api/settings"] as const;
+const DEPRECATED_PLATFORM_API_PREFIXES = ["/api/settings/git-connections"] as const;
+const ORDINARY_USER_API_PREFIXES = [
+  "/api/dashboard",
+  "/api/projects",
+  "/api/workspaces",
+  "/api/workspace-invitations",
+  "/api/me",
+  "/api/notifications",
+  "/api/profile",
+] as const;
+const SHARED_API_PREFIXES = ["/api/auth"] as const;
+const PUBLIC_API_PREFIXES = ["/api/health", "/api/setup"] as const;
 // Keep the narrow terminal bypass limited to Zod UUIDs with a non-NIL value:
 // versions 1-8 and RFC 4122 variant 8/9/a/b, for both dynamic path segments.
 const UUID_PATH_SEGMENT = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}";
@@ -47,6 +60,32 @@ export class AccessControlError extends Error {
 
 export type AccessUser = Readonly<{ id: string; role: AppUserRole; accountAccessVersion?: number }>;
 export type ProjectPermission = "owner" | "edit" | "view";
+
+export type ApiNamespace = "platform" | "ordinary-user" | "shared" | "public" | "deprecated" | "unknown";
+
+function pathMatchesPrefix(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
+function normalizeApiPath(path: string): string {
+  if (path.length <= 1) return path;
+  return path.replace(/\/+$/u, "");
+}
+
+/**
+ * Classify API paths before resource-level RBAC.  Platform routes are kept
+ * separate from the ordinary user domain so a valid session cannot cross the
+ * product boundary merely by calling a different URL.
+ */
+export function classifyApiPath(path: string): ApiNamespace {
+  const normalized = normalizeApiPath(path);
+  if (DEPRECATED_PLATFORM_API_PREFIXES.some((prefix) => pathMatchesPrefix(normalized, prefix))) return "deprecated";
+  if (PLATFORM_API_PREFIXES.some((prefix) => pathMatchesPrefix(normalized, prefix))) return "platform";
+  if (ORDINARY_USER_API_PREFIXES.some((prefix) => pathMatchesPrefix(normalized, prefix))) return "ordinary-user";
+  if (SHARED_API_PREFIXES.some((prefix) => pathMatchesPrefix(normalized, prefix))) return "shared";
+  if (PUBLIC_API_PREFIXES.some((prefix) => pathMatchesPrefix(normalized, prefix))) return "public";
+  return "unknown";
+}
 
 function fail(code: AccessControlErrorCode): never {
   throw new AccessControlError(code);
@@ -186,14 +225,12 @@ export async function authorizeApiRequest(
   await assertCurrentAccountAccess(user, db);
   const rawPath = new URL(request.url).pathname;
   const path = decodedApiPath(request);
-  if (path.startsWith("/api/system/")) {
-    if (user.role !== "admin") return fail("ACCESS_FORBIDDEN");
-    return;
-  }
-  if (path.startsWith("/api/settings/")) {
-    if (user.role !== "admin") return fail("ACCESS_FORBIDDEN");
-    return;
-  }
+  const namespace = classifyApiPath(path);
+  if (namespace === "deprecated") return fail("ACCESS_FORBIDDEN");
+  if (namespace === "platform" && user.role !== "admin") return fail("ACCESS_FORBIDDEN");
+  if (namespace === "ordinary-user" && user.role === "admin") return fail("ACCESS_FORBIDDEN");
+  if (user.role === "admin" && namespace === "unknown") return fail("ACCESS_FORBIDDEN");
+  if (namespace === "platform" || namespace === "shared" || namespace === "public") return;
   const projectIdCandidate = path.match(PROJECT_PATH_PATTERN)?.[1];
   if (projectIdCandidate === undefined) return;
   const parsedProjectId = PROJECT_ID_SCHEMA.safeParse(projectIdCandidate);

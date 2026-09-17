@@ -65,7 +65,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
   const systemTitle = `Browser smoke system history ${suffix}`;
   const now = new Date();
   try {
-    const admin = await db.appUser.findUniqueOrThrow({ where: { username: "browser_admin" }, select: { id: true } });
+    const owner = await db.appUser.findUniqueOrThrow({ where: { username: "browser_owner" }, select: { id: true } });
     const job = await db.backgroundJob.create({
       data: {
         projectId,
@@ -77,7 +77,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
         progressCurrent: 1,
         progressTotal: 1,
         idempotencyKey: fixtureDigest(`browser-smoke-job:${projectId}:${suffix}`),
-        requestedById: admin.id,
+        requestedById: owner.id,
         startedAt: new Date(now.getTime() - 1_000),
         completedAt: now,
       },
@@ -92,7 +92,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
         payload: {},
         failureCode: "BROWSER_SMOKE_PENDING",
         idempotencyKey: fixtureDigest(`browser-smoke-pending-job:${projectId}:${suffix}`),
-        requestedById: admin.id,
+        requestedById: owner.id,
         completedAt: now,
       },
       select: { id: true },
@@ -105,7 +105,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
         intervalMinutes: 60,
         config: {},
         nextRunAt: new Date(now.getTime() + 60 * 60_000),
-        createdById: admin.id,
+        createdById: owner.id,
       },
       select: { id: true },
     });
@@ -123,7 +123,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
     });
     await db.notification.create({
       data: {
-        userId: admin.id,
+        userId: owner.id,
         projectId,
         subjectKind: "backgroundJob",
         subjectId: job.id,
@@ -139,7 +139,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
     });
     await db.notification.create({
       data: {
-        userId: admin.id,
+        userId: owner.id,
         projectId,
         subjectKind: "backgroundJob",
         subjectId: pendingJob.id,
@@ -155,7 +155,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
     });
     await db.notification.create({
       data: {
-        userId: admin.id,
+        userId: owner.id,
         projectId,
         subjectKind: "automationRun",
         subjectId: failedRun.id,
@@ -171,7 +171,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
     });
     await db.notification.create({
       data: {
-        userId: admin.id,
+        userId: owner.id,
         projectId: null,
         kind: "system",
         severity: "info",
@@ -188,13 +188,17 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
   }
 }
 
-test("first-run administrator can reach protected pages with production security headers", async ({ page, request }) => {
+test("first-run administrator and business Owner stay separate across protected pages", async ({ page, request }) => {
   test.setTimeout(60_000);
   const browserErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") browserErrors.push(`console:${message.text()}`);
   });
   page.on("pageerror", (error) => browserErrors.push(`page:${error.message}`));
+  const adminUsername = "browser_admin";
+  const adminPassword = "BrowserGate2026Password!";
+  const ownerUsername = "browser_owner";
+  const ownerPassword = "BrowserOwner2026Password!";
 
   const setupResponse = await page.goto("/setup");
   expect(setupResponse?.status()).toBe(200);
@@ -206,37 +210,58 @@ test("first-run administrator can reach protected pages with production security
   expect(headers["x-powered-by"]).toBeUndefined();
   await expectNoAccessibilityViolations(page, "setup");
 
-  await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
-  await page.getByLabel("密码", { exact: true }).fill("BrowserGate2026Password!");
-  await page.getByLabel("再次输入密码", { exact: true }).fill("BrowserGate2026Password!");
+  await page.getByLabel("用户名", { exact: true }).fill(adminUsername);
+  await page.getByLabel("密码", { exact: true }).fill(adminPassword);
+  await page.getByLabel("再次输入密码", { exact: true }).fill(adminPassword);
   await page.getByRole("button", { name: "创建管理员并进入" }).click();
 
   await expect(page).toHaveURL(/\/onboarding$/u);
-  await expect(page.getByRole("heading", { name: "管理工作台首次就绪", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "平台首次就绪清单", exact: true })).toBeVisible();
-  await expect(page.getByText("清单不要求全部变绿。完成引导只记录你已查看管理工作台，不等于模型、Git、MCP 或其他外部服务已经现场验证。", { exact: true })).toBeVisible();
-  await page.reload();
-  await expect(page).toHaveURL(/\/onboarding$/u);
-  await expect(page.getByRole("heading", { name: "管理工作台首次就绪", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "建立独立的业务 Owner", exact: true })).toBeVisible();
+  await expect(page.getByText("平台管理员只负责运营和安全治理。创建一个独立普通账号作为默认工作区 Owner 后，管理员将直接进入管理后台，业务负责人使用自己的账号进入用户工作台。", { exact: true })).toBeVisible();
+  await page.getByLabel("Owner 用户名", { exact: true }).fill(ownerUsername);
+  await page.getByLabel("初始密码", { exact: true }).fill(ownerPassword);
+  await page.getByLabel("确认密码", { exact: true }).fill(ownerPassword);
+  await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin$/u);
+  await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
   await page.goto("/dashboard");
-  await expect(page).toHaveURL(/\/onboarding$/u);
-  await expect(page.getByRole("heading", { name: "平台首次就绪清单", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "我已查看，进入日常工作区", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin$/u);
+  await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
+
+  const browser = page.context().browser();
+  if (browser === null) throw new Error("BROWSER_SMOKE_BROWSER_UNAVAILABLE");
+  const adminContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+  const adminPage = await adminContext.newPage();
+  await adminPage.goto("/login");
+  await adminPage.getByLabel("用户名", { exact: true }).fill(adminUsername);
+  await adminPage.getByLabel("密码", { exact: true }).fill(adminPassword);
+  await adminPage.getByRole("button", { name: "登 录", exact: true }).click();
+  await expect(adminPage).toHaveURL(/\/admin$/u);
+  await expect(adminPage.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await expect(page).toHaveURL(/\/login$/u);
+  await page.getByLabel("用户名", { exact: true }).fill(ownerUsername);
+  await page.getByLabel("密码", { exact: true }).fill(ownerPassword);
+  await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
-  await expect(page.getByRole("heading", { name: "欢迎回来，browser_admin" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `欢迎回来，${ownerUsername}`, exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  await expect(page.getByRole("heading", { name: `欢迎回来，${ownerUsername}`, exact: true })).toBeVisible();
   await expect(page.getByText("AI PROJECT OS", { exact: true })).toBeVisible();
   await expect(page.getByText(/内部开发版/u)).toHaveCount(0);
   await expect(page).toHaveTitle("AI Project OS");
   await expect(page.getByText(/当前没有可访问项目/u)).toBeVisible();
   await expect(page.getByText("运行正常", { exact: true })).toHaveCount(0);
-  await expectNoHorizontalOverflow(page, "/dashboard", "欢迎回来，browser_admin", "dashboard");
+  await expectNoHorizontalOverflow(page, "/dashboard", `欢迎回来，${ownerUsername}`, "dashboard");
   await expectNoAccessibilityViolations(page, "dashboard");
 
   const healthResponse = await request.get("/api/health");
   expect(healthResponse.ok()).toBe(true);
   expect(await healthResponse.json()).toMatchObject({
     status: "ok",
-    version: "0.2.0-dev.1",
+    version: "0.3.0-dev.1",
     database: "up",
     worker: { status: "up", consecutiveFailures: 0 },
   });
@@ -368,15 +393,14 @@ test("first-run administrator can reach protected pages with production security
   await expect(page.getByRole("heading", { name: "项目简报", exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/dashboard$/u);
-  await expectNoHorizontalOverflow(page, "/dashboard", "欢迎回来，browser_admin", "dashboard with recent job");
+  await expectNoHorizontalOverflow(page, "/dashboard", `欢迎回来，${ownerUsername}`, "dashboard with recent job");
 
   const mobileViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/dashboard");
   const mobileNavigationTargets = [
     { name: /打开通知中心/u, path: /\/notifications$/u },
-    { name: "个人中心：browser_admin", path: /\/profile$/u },
-    { name: "管理工作台", path: /\/admin$/u },
+    { name: `个人中心：${ownerUsername}`, path: /\/profile$/u },
   ] as const;
   for (const target of mobileNavigationTargets) {
     const link = page.getByRole("link", { name: target.name });
@@ -387,7 +411,7 @@ test("first-run administrator can reach protected pages with production security
     await expect(page).toHaveURL(target.path);
     await page.goBack();
     await expect(page).toHaveURL(/\/dashboard$/u);
-    await expect(page.getByRole("heading", { name: "欢迎回来，browser_admin" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: `欢迎回来，${ownerUsername}` })).toBeVisible();
   }
   if (mobileViewport !== null) await page.setViewportSize(mobileViewport);
 
@@ -484,12 +508,12 @@ test("first-run administrator can reach protected pages with production security
   await expectNoAccessibilityViolations(page, "personal MCP connections");
   await page.goto("/profile");
 
-  const membershipGrant = await page.evaluate(async () => {
-    const listResponse = await fetch("/api/system/memberships?search=browser_admin", { cache: "no-store" });
+  const membershipGrant = await adminPage.evaluate(async (targetUsername) => {
+    const listResponse = await fetch(`/api/system/memberships?search=${encodeURIComponent(targetUsername)}`, { cache: "no-store" });
     if (!listResponse.ok) throw new Error(`membership list failed: ${listResponse.status}`);
     const list = await listResponse.json() as { items: Array<{ id: string; username: string }> };
-    const currentUser = list.items.find((item) => item.username === "browser_admin");
-    if (currentUser === undefined) throw new Error("browser_admin membership row missing");
+    const currentUser = list.items.find((item) => item.username === targetUsername);
+    if (currentUser === undefined) throw new Error(`${targetUsername} membership row missing`);
     const grantDays = 1;
     const grantNote = "browser smoke disposable";
     const previewResponse = await fetch("/api/system/memberships/preview", {
@@ -539,7 +563,7 @@ test("first-run administrator can reach protected pages with production security
     const body = await response.json() as { subscription?: { status?: string }; error?: { message?: string } };
     if (!response.ok) throw new Error(`membership grant failed: ${response.status} ${body.error?.message ?? "unknown error"}`);
     return { status: response.status, body };
-  });
+  }, ownerUsername);
   expect(membershipGrant.status).toBe(200);
   expect(membershipGrant.body.subscription?.status).toBe("active");
 
@@ -584,17 +608,22 @@ test("first-run administrator can reach protected pages with production security
   await expectNoAccessibilityViolations(page, "personal models mobile");
   if (originalViewport !== null) await page.setViewportSize(originalViewport);
 
-  await page.goto("/admin");
-  await expect(page.getByRole("heading", { name: "管理员总览" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "管理工作台导航" })).toBeVisible();
-  await expect(page.getByText("平台额度总览", { exact: true })).toBeVisible();
-  await expectNoAccessibilityViolations(page, "admin overview");
+  await adminPage.goto("/admin");
+  await expect(adminPage.getByRole("heading", { name: "管理员总览" })).toBeVisible();
+  await expect(adminPage.getByRole("navigation", { name: "管理工作台导航" })).toBeVisible();
+  await expect(adminPage.getByText("平台额度总览", { exact: true })).toBeVisible();
+  const initialPendingActions = adminPage.locator('[aria-labelledby="admin-pending-actions-title"]');
+  await expect(initialPendingActions.getByText("无待办", { exact: true })).toHaveCount(1);
+  await expect(initialPendingActions.getByText("待处理", { exact: true })).toHaveCount(3);
+  await expect(initialPendingActions.getByText("未取得", { exact: true })).toHaveCount(0);
+  await expectNoAccessibilityViolations(adminPage, "admin overview");
 
-  await page.goto("/admin/connectors/mcp");
-  await expect(page.getByRole("heading", { name: "MCP 工具安全审核", exact: true })).toBeVisible();
-  await expect(page.getByText(/管理员只审核已经净化的工具快照/u)).toBeVisible();
-  await expect(page.getByText(/不开放远端工具操作/u)).toBeVisible();
-  await expect(page.getByLabel("Bearer Token", { exact: true })).toHaveCount(0);
-  await expectNoAccessibilityViolations(page, "MCP connections");
+  await adminPage.goto("/admin/connectors/mcp");
+  await expect(adminPage.getByRole("heading", { name: "MCP 工具安全审核", exact: true })).toBeVisible();
+  await expect(adminPage.getByText(/管理员只审核已经净化的工具快照/u)).toBeVisible();
+  await expect(adminPage.getByText(/不开放远端工具操作/u)).toBeVisible();
+  await expect(adminPage.getByLabel("Bearer Token", { exact: true })).toHaveCount(0);
+  await expectNoAccessibilityViolations(adminPage, "MCP connections");
   expect(browserErrors).toEqual([]);
+  await adminContext.close();
 });

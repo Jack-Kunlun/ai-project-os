@@ -58,12 +58,12 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
-test("production workflow enables only the explicitly approved v0.2.0-dev.1 prerelease", async () => {
+test("production workflow enables only the explicitly approved v0.3.0-dev.1 prerelease", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /default: v0\.2\.0-dev\.1/u);
+  assert.match(workflow, /default: v0\.3\.0-dev\.1/u);
   assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.2\.0-dev\.1/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.3\.0-dev\.1/u);
   assert.doesNotMatch(workflow, /&& false|DISABLED_BEFORE_V1_0_0|v1\.0\.0/u);
   assert.doesNotMatch(workflow, /DEPLOY_TAG_INPUT" =~ \^v/u);
 });
@@ -72,7 +72,7 @@ test("forced-command gateway accepts only an exact deploy or GitHub OAuth config
   const gateway = await readFile(gatewayPath, "utf8");
 
   assert.match(gateway, /SSH_ORIGINAL_COMMAND/u);
-  assert.match(gateway, /v0\\\.2\\\.0-dev\\\.1\|v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+/u);
+  assert.match(gateway, /v0\\\.3\\\.0-dev\\\.1/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-deploy/u);
   assert.match(gateway, /original_command.*== configure-github-oauth/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-configure-github-oauth/u);
@@ -112,7 +112,7 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   const deployment = await readFile(deploymentPath, "utf8");
 
   assert.match(deployment, /REPOSITORY_URL=https:\/\/github\.com\/Jack-Kunlun\/ai-project-os\.git/u);
-  assert.match(deployment, /RELEASE_TAG" != v0\.2\.0-dev\.1/u);
+  assert.match(deployment, /RELEASE_TAG" != v0\.3\.0-dev\.1/u);
   assert.match(deployment, /DEPLOY_TAG_NOT_ANNOTATED/u);
   assert.match(deployment, /DEPLOY_TAG_REVISION_MISMATCH/u);
   assert.match(deployment, /DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND/u);
@@ -151,7 +151,7 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   assert.match(deployment, /docker stop "\$OLD_APP_ID" "\$OLD_WORKER_ID"/u);
   assert.match(deployment, /DEPLOY_SOURCE_HEALTH_UNAVAILABLE/u);
   assert.match(deployment, /DEPLOY_SOURCE_STACK_INVALID/u);
-  assert.match(deployment, /5\\\.1\\\.2/u);
+  assert.match(deployment, /0\\\.2\\\.0-dev\\\.1/u);
   assert.match(deployment, /compose up -d --no-build --force-recreate principal-bootstrap migrate reconcile app worker/u);
   assert.match(deployment, /AI_PROJECT_OS_DEPLOY_LOCK_HELD=1/u);
   assert.match(deployment, /pre-deploy "\$RELEASE_TAG"/u);
@@ -359,7 +359,7 @@ test("backup publishes an atomic sanitized current record and immutable history 
   assert.notEqual(functionEnd, -1);
   const statusFunctions = backup.slice(functionStart, functionEnd);
   const harnessPath = path.join(temporaryDirectory, "publish-status.sh");
-  const backupName = "20260902T032000Z-pre-deploy-to-v0.2.0-dev.1.Abc123";
+  const backupName = "20260902T032000Z-pre-deploy-to-v0.3.0-dev.1.Abc123";
   const archiveObject = `cos://ai-project-os-backup-1306016679/production/backups/2026/09/02/${backupName}/${backupName}.tar.age`;
   await writeFile(harnessPath, `#!/usr/bin/env bash
 set -Eeuo pipefail
@@ -368,7 +368,7 @@ readonly PUBLIC_HISTORY_ROOT=${JSON.stringify(historyRoot)}
 readonly PUBLIC_CURRENT_FILE=${JSON.stringify(path.join(statusRoot, "current.json"))}
 readonly PUBLIC_HISTORY_MAX=120
 readonly MODE=pre-deploy
-readonly TARGET_TAG=v0.2.0-dev.1
+readonly TARGET_TAG=v0.3.0-dev.1
 PUBLIC_STATUS_ACTIVE=1
 PUBLIC_STATUS_FINALIZED=0
 PUBLIC_RUN_ID=20260902T032000Z-4321

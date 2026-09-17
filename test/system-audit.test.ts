@@ -742,12 +742,18 @@ test("system audit API error responses do not expose validation detail objects",
 
 test("system audit UI consumes only safe references and protects detail request ordering", async () => {
   const source = await readFile(new URL("../src/app/admin/audit/audit-client.tsx", import.meta.url), "utf8");
+  const viewModel = await readFile(new URL("../src/app/admin/audit/audit-view-model.ts", import.meta.url), "utf8");
   const catalog = await readFile(new URL("../src/lib/system-audit-catalog.ts", import.meta.url), "utf8");
   for (const privateField of ["routeId", "providerConnectionId", "subscriptionId", "previewId", "invitationId", "attestationId", "connectionId", "toolDefinitionId", "delegationId", "gitConnectionId", "mcpConnectionId", "grantId"]) {
     assert.equal(source.includes(privateField), false, privateField);
   }
-  assert.match(source, /allowedActionsBySource/u);
-  assert.match(source, /allowedResultsBySource/u);
+  assert.match(source, /from "@\/app\/admin\/audit\/audit-view-model"/u);
+  assert.match(source, /visibleActionOptions/u);
+  assert.match(source, /visibleResultOptions/u);
+  assert.match(viewModel, /SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE/u);
+  assert.match(viewModel, /SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE/u);
+  assert.match(viewModel, /export function sourceActions\(value: string\)/u);
+  assert.match(viewModel, /export function sourceResults\(value: string\)/u);
   assert.match(source, /AbortController/u);
   assert.doesNotMatch(source, /aiProviderOwnership|legacyOwnershipConfirmed/u);
   assert.match(catalog, /projectGitManualRun/u);

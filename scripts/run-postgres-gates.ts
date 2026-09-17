@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { Client } from "pg";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "@prisma/client";
 import {
   buildPostgresGateDatabaseUrl,
   POSTGRES_GATE_TEST_USER,
@@ -7,6 +9,13 @@ import {
   validatePostgresGateAdminUrl,
   type PostgresGateDefinition,
 } from "./postgres-gate-contract";
+import { activateAccountEntitlements } from "../src/lib/account-entitlement-activation-service";
+import { createBootstrapSignupOfferPolicy } from "../src/lib/platform-grant-offer-policy-service";
+
+const SEEDED_ADMIN_ID = "00000000-0000-4000-8000-000000000010";
+const SEEDED_OWNER_ID = "00000000-0000-4000-8000-000000000012";
+const SEEDED_OWNER_MEMBERSHIP_ID = "00000000-0000-4000-8000-000000000011";
+const DEFAULT_WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -52,20 +61,34 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
       INSERT INTO "AppUser"
         ("id", "username", "passwordHash", "passwordSalt", "passwordVersion", "role", "updatedAt")
       VALUES
-        ('00000000-0000-4000-8000-000000000010', 'postgres_gate_admin', repeat('a', 43), repeat('b', 22), 1, 'admin', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
+        ('${SEEDED_ADMIN_ID}', 'postgres_gate_admin', repeat('a', 43), repeat('b', 22), 1, 'admin', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
       ON CONFLICT ("username") DO NOTHING
     `);
     await client.query(`
+      INSERT INTO "AppUser"
+        ("id", "username", "passwordHash", "passwordSalt", "passwordVersion", "role", "updatedAt")
+      VALUES
+        ('${SEEDED_OWNER_ID}', 'postgres_gate_owner', repeat('c', 43), repeat('d', 22), 1, 'user', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
+      ON CONFLICT ("username") DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO "PlatformBootstrap"
+        ("id", "initialAdminUserId", "initialOwnerUserId", "adminOnboardingCompletedAt", "initialOwnerCreatedAt", "version")
+      VALUES
+        ('platform', '${SEEDED_ADMIN_ID}', '${SEEDED_OWNER_ID}', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3), (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3), 2)
+      ON CONFLICT ("id") DO NOTHING
+    `);
+    await client.query(`
       UPDATE "Workspace"
-      SET "createdById" = '00000000-0000-4000-8000-000000000010', "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
-      WHERE "id" = '00000000-0000-4000-8000-000000000001'
+      SET "createdById" = '${SEEDED_OWNER_ID}', "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
+      WHERE "id" = '${DEFAULT_WORKSPACE_ID}'
     `);
     await client.query(`
       WITH inserted AS (
         INSERT INTO "WorkspaceMembership"
           ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
         VALUES
-          ('00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000010', 'owner', 'confirmed', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
+          ('${SEEDED_OWNER_MEMBERSHIP_ID}', '${DEFAULT_WORKSPACE_ID}', '${SEEDED_OWNER_ID}', 'owner', 'confirmed', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
         ON CONFLICT ("id") DO NOTHING
         RETURNING "id", "workspaceId", "userId", "role", "accessState", "createdAt", "updatedAt"
       )
@@ -73,8 +96,8 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
         ("id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId", "action", "previousState", "newState", "roleSnapshot", "actorId", "reason", "membershipFingerprint")
       SELECT
         gen_random_uuid(), 'workspace', inserted."id", inserted."workspaceId", NULL, inserted."userId",
-        'bootstrap_confirmed', NULL, 'confirmed', inserted."role", inserted."userId",
-        'postgres_gate_bootstrap_admin',
+        'bootstrap_confirmed', NULL, 'confirmed', inserted."role", '${SEEDED_ADMIN_ID}',
+        'postgres_gate_bootstrap_owner',
         encode(digest(convert_to(concat_ws(
           E'\\x1f', inserted."id"::text, inserted."workspaceId"::text, inserted."userId"::text,
           inserted."role"::text,
@@ -89,6 +112,24 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
     throw error;
   } finally {
     await client.end();
+  }
+
+  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+  try {
+    const now = new Date();
+    await prisma.$transaction((tx) => createBootstrapSignupOfferPolicy(tx, SEEDED_ADMIN_ID, now));
+    await activateAccountEntitlements({
+      userId: SEEDED_OWNER_ID,
+      source: "localProvisioning",
+      actorId: SEEDED_ADMIN_ID,
+      actorAccountAccessVersion: 1,
+      accountAccessVersion: 1,
+      evidenceKind: "postgres-gate-seed",
+      evidenceRef: `workspace:${DEFAULT_WORKSPACE_ID}`,
+      now,
+    }, prisma);
+  } finally {
+    await prisma.$disconnect();
   }
 }
 

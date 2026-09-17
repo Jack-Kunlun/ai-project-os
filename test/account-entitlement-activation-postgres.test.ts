@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { Prisma } from "@prisma/client";
 import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
-import { DEFAULT_WORKSPACE_ID, initializeAdmin } from "../src/lib/auth";
+import { initializeAdmin } from "../src/lib/auth";
 import { activateAccountEntitlements } from "../src/lib/account-entitlement-activation-service";
 import {
   changePlatformGrantOfferPolicyLifecycle,
@@ -18,7 +18,6 @@ import {
   previewAccountEntitlementBackfill,
 } from "../src/lib/account-entitlement-backfill-service";
 import { getDb } from "../src/lib/db";
-import { grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { getSystemAuditDetail, listSystemAudit } from "../src/lib/system-audit";
 
 const shouldRun = process.env.ACCOUNT_ENTITLEMENT_ACTIVATION_POSTGRES_GATE === "1";
@@ -34,9 +33,9 @@ test(
       const actor: PlatformGrantOfferPolicyActor = bootstrap.user;
 
       assert.equal(await db.platformGrantOfferPolicy.count({ where: { status: "active" } }), 1);
-      assert.equal(await db.platformTokenGrant.count({ where: { userId: actor.id, kind: "signup" } }), 1);
-      assert.equal(await db.platformTokenLedgerEntry.count({ where: { userId: actor.id, reasonCode: "AI_SIGNUP_GRANT" } }), 1);
-      assert.equal(await db.accountEntitlementActivation.count({ where: { userId: actor.id, lifecycleKey: "initial_account_v1" } }), 1);
+      assert.equal(await db.platformTokenGrant.count({ where: { userId: actor.id, kind: "signup" } }), 0);
+      assert.equal(await db.platformTokenLedgerEntry.count({ where: { userId: actor.id, reasonCode: "AI_SIGNUP_GRANT" } }), 0);
+      assert.equal(await db.accountEntitlementActivation.count({ where: { userId: actor.id, lifecycleKey: "initial_account_v1" } }), 0);
 
       const concurrentUser = await db.appUser.create({
         data: { id: randomUUID(), username: `entitlement_concurrent_${suffix}`, role: "user" },
@@ -696,13 +695,6 @@ test(
       const secondAdmin = await db.appUser.create({
         data: { id: randomUUID(), username: `entitlement_epoch_admin_${suffix}`, role: "admin" },
       });
-      await db.$transaction((tx) => grantWorkspaceMembership(tx, {
-        workspaceId: DEFAULT_WORKSPACE_ID,
-        userId: secondAdmin.id,
-        role: "owner",
-        actorId: actor.id,
-        reason: "account_entitlement_activation_epoch_backup_owner",
-      }));
       const disableActorPreview = await previewAccountAccess({
         adminUserId: secondAdmin.id,
         adminAccountAccessVersion: secondAdmin.accountAccessVersion,

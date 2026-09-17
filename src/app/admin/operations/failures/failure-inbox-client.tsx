@@ -109,7 +109,7 @@ export function AdminFailureInboxClient() {
       <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">失败与待对账收件箱</h1>
-          <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">这里只读汇总平台待核对、Worker / 后台任务、索引、个人连接、自动化和受控动作异常。每项只有一个安全下一步，不显示个人身份、凭据、工具定义、参数或载荷。</p>
+          <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">这里只读汇总平台待核对、Worker / 后台任务、索引、个人连接、自动化和受控动作异常。业务责任方在用户侧处理，管理员后台不提供业务详情入口；每项只有一个安全下一步，不显示个人身份、凭据、工具定义、参数或载荷。</p>
         </div>
         {data ? <span className="rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-slate-200">测量于 {formatDate(data.observedAt)}</span> : null}
       </div>

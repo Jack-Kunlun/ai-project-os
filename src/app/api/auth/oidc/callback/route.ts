@@ -19,7 +19,8 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     if (url.searchParams.has("error")) throw new Error("OIDC_PROVIDER_REJECTED");
     const result = await completeOidcLogin({ code: url.searchParams.get("code"), state: url.searchParams.get("state"), cookieState: cookieValue(request.headers.get("cookie"), OIDC_STATE_COOKIE_NAME) });
-    const response = NextResponse.redirect(new URL(canonicalInternalReturnPath(result.returnTo), url.origin), 303);
+    const destination = result.session.user.role === "admin" ? "/admin" : canonicalInternalReturnPath(result.returnTo);
+    const response = NextResponse.redirect(new URL(destination, url.origin), 303);
     response.headers.append("set-cookie", sessionCookie(result.session.token, result.session.expiresAt));
     response.headers.append("set-cookie", expiredOidcStateCookie());
     response.headers.set("cache-control", "no-store");

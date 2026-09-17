@@ -39,7 +39,7 @@ test("system-admin identity is passed from protected server pages to shared head
 test("admin navigation is a persistent desktop sidebar with an accessible mobile drawer", async () => {
   const shell = await read("src/components/admin-shell.tsx");
   const itemKeys = [...shell.matchAll(/key:\s*"([A-Za-z]+)"/gu)].map((match) => match[1]);
-  assert.equal(itemKeys.length, 10);
+  assert.equal(itemKeys.length, 12);
   assert.match(shell, /lg:grid-cols-\[15rem_minmax\(0,1fr\)\]/u);
   assert.match(shell, /sticky top-24 hidden[\s\S]*lg:flex/u);
   assert.match(shell, /lg:hidden/u);
@@ -64,7 +64,13 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(spec, /createControlledMembership/u);
   assert.match(spec, /\/projects\?focus=r02-return/u);
   assert.match(spec, /projectApi\.status\)\.toBe\(403\)/u);
-  assert.match(spec, /goBack\(\)/u);
+  assert.match(spec, /await signInR02Admin\(page\);[\s\S]*?const ownerContext = await browser\.newContext\(\);[\s\S]*?await signInR02Owner\(ownerPage\);/u);
+  assert.ok(spec.includes('await expect(page).toHaveURL(/\\/admin$/u);'));
+  assert.match(spec, /AI Project OS 平台管理总览/u);
+  assert.match(spec, /toHaveAttribute\("href", "\/admin"\)/u);
+  assert.match(spec, /ownerPage\.getByRole\("link", \{ name: "管理工作台", exact: true \}\)\)\.toHaveCount\(0\)/u);
+  assert.match(spec, /getByRole\("navigation", \{ name: "管理工作台导航", exact: true \}\)\.getByRole\("link"\)\)\.toHaveCount\(12\)/u);
+  assert.match(support, /drawer\.getByRole\("link"\)\)\.toHaveCount\(12\)/u);
   assert.match(spec, /expectR02NoAccessibilityViolations/u);
   assert.match(spec, /expectR02SettledRoute/u);
   assert.match(spec, /seedR02DetailFixtures/u);
@@ -73,6 +79,12 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(spec, /R02_ACTOR_PASSWORD/u);
   assert.match(support, /R02_PUBLIC_ROUTE_EXPECTATIONS/u);
   assert.match(support, /r02ProjectGuardRoutes/u);
+  assert.match(support, /path: "\/admin\/models", heading: "平台模型"/u);
+  assert.match(support, /path: "\/admin\/models\/routes", heading: "默认模型路由"/u);
+  assert.match(support, /path: "\/admin\/credits", heading: "平台额度"/u);
+  assert.match(support, /path: "\/admin\/operations\/probes", heading: "连接探测预算"/u);
+  assert.match(support, /path: "\/admin\/users", heading: "用户运营"/u);
+  assert.match(support, /path: "\/admin\/account", heading: "管理员账户"/u);
   assert.match(support, /terminal:/u);
   assert.match(support, /pendingTexts/u);
   assert.match(support, /R02_PROJECT_PENDING_TEXTS/u);

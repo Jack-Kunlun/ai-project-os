@@ -25,7 +25,7 @@ if [[ $EUID -ne 0 ]]; then
   exit 70
 fi
 
-if [[ "$RELEASE_TAG" != v0.2.0-dev.1 && ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ "$RELEASE_TAG" != v0.3.0-dev.1 ]]; then
   printf 'DEPLOY_TAG_INVALID\n' >&2
   exit 64
 fi
@@ -208,7 +208,7 @@ run_upgrade_preflight() {
     printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_RESULT_INVALID\n' >&2
     return 1
   }
-  grep -Eq '"targetTag"[[:space:]]*:[[:space:]]*"v0\.2\.0-dev\.1"' <<<"$preflight_output" || {
+  grep -Eq '"targetTag"[[:space:]]*:[[:space:]]*"v0\.3\.0-dev\.1"' <<<"$preflight_output" || {
     printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_TARGET_INVALID\n' >&2
     return 1
   }
@@ -370,7 +370,7 @@ perform_writer_cutover() {
     return 69
   }
   if ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$source_health" \
-    || ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"5\.1\.2"' <<<"$source_health" \
+    || ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.2\.0-dev\.1"' <<<"$source_health" \
     || ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health" \
     || ! grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health"; then
     printf 'DEPLOY_SOURCE_STACK_INVALID\n' >&2

@@ -190,10 +190,10 @@ test(
       const adapter = new PrismaPg({ connectionString: url });
       const prisma = new PrismaClient({ adapter });
       try {
-        const admin = await prisma.appUser.create({
-          data: { username: "history_admin_gate", role: "admin" },
+        const user = await prisma.appUser.create({
+          data: { username: "history_user_gate", role: "user" },
         });
-        const session = await createSession(prisma, admin);
+        const session = await createSession(prisma, user);
         const requestHeaders = {
           "content-type": "application/json",
           origin: "http://localhost",
@@ -234,9 +234,9 @@ test(
         await prisma.$transaction((tx) => grantProjectMembership(tx, {
           projectId,
           workspaceId: DEFAULT_WORKSPACE_ID,
-          userId: admin.id,
+          userId: user.id,
           role: "owner",
-          actorId: admin.id,
+          actorId: user.id,
           reason: "project_item_history_route_fixture",
         }));
         await prisma.projectSource.createMany({
@@ -341,7 +341,7 @@ test(
         const sourceDetailRoute = await import("@/app/api/projects/[projectId]/sources/[sourceId]/route");
 
         const createdResponse = await itemRoute.POST(
-          new Request("http://localhost/api/items", {
+          new Request(`http://localhost/api/projects/${projectId}/items`, {
             method: "POST",
             headers: requestHeaders,
             body: JSON.stringify({
@@ -361,7 +361,7 @@ test(
         assert.equal(createdBody.item.reviewStatus, "candidate");
 
         const confirmOnce = () => itemDetailRoute.PATCH(
-          new Request("http://localhost/api/items", {
+          new Request(`http://localhost/api/projects/${projectId}/items/${createdBody.item.id}`, {
             method: "PATCH",
             headers: requestHeaders,
             body: JSON.stringify({
@@ -380,7 +380,7 @@ test(
         assert.equal(confirmedBody.item.reviewStatus, "confirmed");
 
         const editedResponse = await itemDetailRoute.PATCH(
-          new Request("http://localhost/api/items", {
+          new Request(`http://localhost/api/projects/${projectId}/items/${createdBody.item.id}`, {
             method: "PATCH",
             headers: requestHeaders,
             body: JSON.stringify({
@@ -402,7 +402,7 @@ test(
         assert.equal(editedBody.item.reviewStatus, "candidate");
 
         const staleResponse = await itemDetailRoute.PATCH(
-          new Request("http://localhost/api/items", {
+          new Request(`http://localhost/api/projects/${projectId}/items/${createdBody.item.id}`, {
             method: "PATCH",
             headers: requestHeaders,
             body: JSON.stringify({
@@ -432,7 +432,10 @@ test(
         }), 1);
 
         const deleteResponse = await sourceDetailRoute.DELETE(
-          new Request("http://localhost/api/sources", { method: "DELETE", headers: requestHeaders }),
+          new Request(`http://localhost/api/projects/${projectId}/sources/${sourceId}`, {
+            method: "DELETE",
+            headers: requestHeaders,
+          }),
           { params: Promise.resolve({ projectId, sourceId }) },
         );
         assert.equal(deleteResponse.status, 409);

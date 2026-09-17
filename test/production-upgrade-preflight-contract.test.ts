@@ -46,16 +46,18 @@ function validLedger(): readonly Record<string, unknown>[] {
 }
 
 function validRelations(): readonly Record<string, unknown>[] {
-  return ["AppUser", "AiProviderConnection", "ProjectAiRoute", "ProjectAiRouteRevision", "Workspace"]
+  return ["AppUser", "AiProviderConnection", "ProjectAiProviderDelegation", "ProjectAiEffectiveRouteSelection", "Workspace"]
     .map((relation_name) => ({ relation_name, present: true }));
 }
 
 function validColumns(): readonly Record<string, unknown>[] {
   return [
     ["AppUser", "id"], ["AppUser", "role"], ["AiProviderConnection", "id"],
-    ["ProjectAiRoute", "projectId"],
-    ["ProjectAiRoute", "operation"], ["ProjectAiRoute", "providerConnectionId"],
-    ["ProjectAiRouteRevision", "id"], ["ProjectAiRouteRevision", "projectId"],
+    ["AiProviderConnection", "scope"], ["AiProviderConnection", "ownerUserId"],
+    ["ProjectAiProviderDelegation", "id"], ["ProjectAiProviderDelegation", "projectId"],
+    ["ProjectAiProviderDelegation", "providerConnectionId"],
+    ["ProjectAiEffectiveRouteSelection", "id"], ["ProjectAiEffectiveRouteSelection", "projectId"],
+    ["ProjectAiEffectiveRouteSelection", "delegationId"],
     ["Workspace", "id"],
   ].map(([relation_name, column_name]) => ({ relation_name, column_name, present: true }));
 }
@@ -93,10 +95,10 @@ function fakeClient(state: FakeState = {}) {
 }
 
 test("production upgrade preflight has an exact source/target contract and fixed connection limits", () => {
-  assert.equal(PRODUCTION_UPGRADE_TARGET_TAG, "v0.2.0-dev.1");
-  assert.equal(PRODUCTION_UPGRADE_SOURCE_VERSION, "5.1.2");
-  assert.equal(LEGACY_MIGRATION_MANIFEST.length, 50);
-  assert.equal(new Set(LEGACY_MIGRATION_MANIFEST.map((entry) => entry.name)).size, 50);
+  assert.equal(PRODUCTION_UPGRADE_TARGET_TAG, "v0.3.0-dev.1");
+  assert.equal(PRODUCTION_UPGRADE_SOURCE_VERSION, "0.2.0-dev.1");
+  assert.equal(LEGACY_MIGRATION_MANIFEST.length, 102);
+  assert.equal(new Set(LEGACY_MIGRATION_MANIFEST.map((entry) => entry.name)).size, 102);
   assert.ok(LEGACY_MIGRATION_MANIFEST.every((entry) => /^[0-9a-f]{64}$/u.test(entry.checksum)));
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_APPLICATION_NAME, "ai-project-os-production-upgrade-preflight");
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_CONNECTION_TIMEOUT_MILLIS, 5_000);
@@ -104,7 +106,7 @@ test("production upgrade preflight has an exact source/target contract and fixed
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_LOCK_TIMEOUT_MILLIS, 5_000);
 });
 
-test("legacy migration manifest matches the first 50 migration files byte-for-byte", async () => {
+test("legacy migration manifest matches the first 102 migration files byte-for-byte", async () => {
   const migrationRoot = resolve(process.cwd(), "prisma/migrations");
   for (const entry of LEGACY_MIGRATION_MANIFEST) {
     const sql = await readFile(resolve(migrationRoot, entry.name, "migration.sql"));

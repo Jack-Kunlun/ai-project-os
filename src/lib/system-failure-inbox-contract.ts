@@ -34,7 +34,7 @@ export const SYSTEM_FAILURE_INBOX_LIFECYCLE_LABELS: Readonly<Record<SystemFailur
 export type SystemFailureInboxResponsibility =
   | "平台管理员"
   | "系统管理员"
-  | "项目责任方"
+  | "业务责任方"
   | "连接所有者"
   | "自动化规则所有者";
 

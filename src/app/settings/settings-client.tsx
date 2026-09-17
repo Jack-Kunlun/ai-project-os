@@ -2,13 +2,11 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { AdminHeader } from "@/components/admin-header";
 import { AdminPageFrame } from "@/components/admin-shell";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
-import { PlatformDefaultRoutesPanel } from "./platform-default-routes-client";
-import { PlatformGrantOfferPolicyPanel } from "@/app/admin/models/platform-grant-offer-policy-client";
-import { PlatformCreditGovernancePanel } from "@/app/admin/models/platform-credit-governance-client";
 
 type ProviderKind = "openai" | "deepseek" | "qwen" | "glm";
 type ProviderCatalogEntry = {
@@ -51,19 +49,6 @@ type ProviderCheck = Readonly<{
   }>;
 }>;
 
-type ProbeBudgetSummary = Readonly<{
-  version: number;
-  status: "active" | "scheduled" | "expired";
-  unitLimit: number;
-  alertThresholdUnits: number;
-  reservedUnits: number;
-  settledUnits: number;
-  heldUnits: number;
-  availableUnits: number;
-  startsAt: string;
-  expiresAt: string;
-}>;
-
 async function readError(response: Response, fallback: string): Promise<string> {
   return (await safeResponseError(response, fallback)).message;
 }
@@ -73,18 +58,6 @@ function dateLabel(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
-}
-
-const probeBudgetStatusLabel: Record<ProbeBudgetSummary["status"], string> = {
-  active: "已启用",
-  scheduled: "待生效",
-  expired: "已过期",
-};
-
-function probeBudgetEvidence(budget: ProbeBudgetSummary | null, loading: boolean): string {
-  if (loading) return "正在读取预算状态";
-  if (budget === null) return "尚未启用预算；暂无探测预算状态证据";
-  return `预算状态证据：版本 ${budget.version} · ${probeBudgetStatusLabel[budget.status]} · 有效期 ${dateLabel(budget.startsAt)} — ${dateLabel(budget.expiresAt)}`;
 }
 
 function describeProviderCheck(check: ProviderCheck): string {
@@ -103,12 +76,11 @@ const statusLabel = {
   disabled: "已停用",
 } as const;
 
-export function SettingsClient({ username, canManageProviders, activeMembership, membershipStatus, adminMode = false }: { username: string; canManageProviders: boolean; activeMembership: boolean; membershipStatus: "active" | "expired" | "revoked" | "none"; adminMode?: boolean }) {
+export function SettingsClient({ username, canManageProviders, activeMembership, membershipStatus, adminMode = false, returnTo }: { username: string; canManageProviders: boolean; activeMembership: boolean; membershipStatus: "active" | "expired" | "revoked" | "none"; adminMode?: boolean; returnTo?: "/admin/models/routes" }) {
   const [catalog, setCatalog] = useState<ProviderCatalogEntry[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [loading, setLoading] = useState(canManageProviders);
   const [error, setError] = useState<string | null>(null);
-  const [routeRefreshToken, setRouteRefreshToken] = useState(0);
 
   async function reload() {
     setLoading(true);
@@ -134,46 +106,37 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
     return () => window.clearTimeout(timer);
   }, [canManageProviders]);
 
-  function notifyProviderMutation() {
-    setRouteRefreshToken((current) => current + 1);
-  }
-
   function handleProviderCreated(provider: Provider) {
     setProviders((current) => [...current, provider]);
-    notifyProviderMutation();
   }
 
   function handleProviderChanged(next: Provider) {
     setProviders((current) => current.map((entry) => entry.id === next.id ? next : entry));
-    notifyProviderMutation();
   }
 
   function handleProviderRemoved(providerId: string) {
     setProviders((current) => current.filter((entry) => entry.id !== providerId));
-    notifyProviderMutation();
   }
 
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="settings" isSystemAdmin={adminMode} />
+      {adminMode ? <AdminHeader username={username} /> : <AppHeader username={username} active="settings" />}
       <AdminPageFrame active="models" showSidebar={adminMode}><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-        <section className="pb-10 pt-12">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI connections</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">模型供应商</h1>
-          <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">
-            API Key 只在提交时发送到服务端，并使用本机独立主密钥加密保存。页面和接口永远不会返回明文 Key。
-          </p>
+        <section className="pb-5 pt-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">AI connections</p>
+              <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">平台模型</h1>
+            </div>
+            {adminMode && returnTo ? <a href={returnTo} className="inline-flex min-h-10 items-center rounded-xl border border-indigo-200 px-4 py-2 text-xs font-semibold text-indigo-700 transition hover:border-indigo-400 hover:bg-indigo-50">返回默认路由</a> : null}
+          </div>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">添加、编辑和验证平台供应商连接。密钥仅提交至服务端加密保存；默认路由、平台额度和探测预算使用独立治理入口。</p>
         </section>
 
         {!canManageProviders ? <section className="mt-7 rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7"><h2 className="text-xl font-semibold">平台模型由系统管理员管理</h2><p className="mt-3 text-sm leading-7 text-slate-600">普通用户可以使用平台额度和平台默认模型，不会请求或查看平台供应商接口。{activeMembership ? "当前会员有效，你可以在个人账号中配置自己的模型连接。" : membershipStatus === "expired" ? "会员资格已到期；重新获得资格后才可配置个人模型。" : membershipStatus === "revoked" ? "会员资格已撤销；重新获得资格后才可配置个人模型。" : "如需配置个人模型，请在个人中心提交会员申请。"}</p>{activeMembership ? <a href="/profile/models" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">配置个人模型</a> : null}</section> : null}
         {canManageProviders && error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
 
-        {canManageProviders ? <ProviderCapabilityMatrix catalog={catalog} /> : null}
-        {adminMode ? <PlatformProviderProbeBudgetPanel /> : null}
-        {adminMode ? <PlatformGrantOfferPolicyPanel /> : null}
-        {adminMode ? <PlatformCreditGovernancePanel /> : null}
-
-        {canManageProviders ? <section className="mt-8 grid gap-6 lg:grid-cols-[0.72fr_1.28fr]">
+        {canManageProviders ? <section className="mt-3 grid gap-6 lg:grid-cols-[0.72fr_1.28fr]">
           <ProviderCreateForm catalog={catalog} onCreated={handleProviderCreated} />
           <div className="space-y-4">
             <div className="flex items-end justify-between px-1">
@@ -192,119 +155,13 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
                 catalog={catalog.find((entry) => entry.kind === provider.kind)}
                 onChanged={handleProviderChanged}
                 onRemoved={handleProviderRemoved}
+                onProbeFinished={reload}
               />
             ))}
           </div>
         </section> : null}
-        {adminMode ? <PlatformDefaultRoutesPanel refreshToken={routeRefreshToken} onRouteMutation={() => { void reload(); }} /> : null}
       </div></AdminPageFrame>
     </main>
-  );
-}
-
-function PlatformProviderProbeBudgetPanel() {
-  const [budget, setBudget] = useState<ProbeBudgetSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState(false);
-  const [unitLimit, setUnitLimit] = useState("10");
-  const [threshold, setThreshold] = useState("8");
-  const [startsAt, setStartsAt] = useState(() => new Date(Date.now() + 60_000).toISOString().slice(0, 16));
-  const [expiresAt, setExpiresAt] = useState(() => new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString().slice(0, 16));
-  const [message, setMessage] = useState<string | null>(null);
-
-  async function load() {
-    setLoading(true);
-    try {
-      const response = await fetch("/api/admin/platform-provider-probe/budget", { cache: "no-store" });
-      if (!response.ok) throw new Error(await readError(response, "探测预算读取失败"));
-      const payload = await response.json() as { budget: ProbeBudgetSummary | null };
-      setBudget(payload.budget);
-      setMessage(null);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "探测预算读取失败");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  async function activate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPending(true);
-    setMessage(null);
-    try {
-      const response = await fetch("/api/admin/platform-provider-probe/budget", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          unitLimit: Number(unitLimit),
-          alertThresholdUnits: Number(threshold),
-          startsAt: new Date(startsAt).toISOString(),
-          expiresAt: new Date(expiresAt).toISOString(),
-        }),
-      });
-      if (!response.ok) throw new Error(await readError(response, "探测预算启用失败"));
-      await load();
-      setMessage("新的平台连接探测预算已启用；未知外发不会自动重试。 ");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "探测预算启用失败");
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" aria-labelledby="platform-probe-budget-title">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Operations budget</p>
-          <h2 id="platform-probe-budget-title" className="mt-2 text-2xl font-semibold">平台连接探测预算</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">连接测试按固定能力请求计量，预算用尽或出现未知外发时不会自动重试。这里不显示供应商地址、凭据或内部记录标识。</p>
-        </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{loading ? "读取中…" : budget === null ? "未启用" : budget.status === "active" ? "已启用" : budget.status === "scheduled" ? "待生效" : "已过期"}</span>
-      </div>
-      <div className="mt-6"><ScopeEvidenceCard title="平台探测预算边界" evidence={{ scope: "平台 · 供应商连通性探测", owner: "平台管理员", payer: "平台探测预算", affectedProjects: "项目不适用 · 仅平台供应商连通性探测", latestSuccess: probeBudgetEvidence(budget, loading) }} /></div>
-      {budget ? <dl className="mt-6 grid gap-4 rounded-2xl bg-slate-50 p-4 text-xs sm:grid-cols-4"><div><dt className="text-slate-400">版本</dt><dd className="mt-1 font-medium text-slate-700">{budget.version}</dd></div><div><dt className="text-slate-400">可用单位</dt><dd className="mt-1 font-medium text-slate-700">{budget.availableUnits} / {budget.unitLimit}</dd></div><div><dt className="text-slate-400">已结算 / 待核对</dt><dd className="mt-1 font-medium text-slate-700">{budget.settledUnits} / {budget.heldUnits}</dd></div><div><dt className="text-slate-400">有效期</dt><dd className="mt-1 font-medium text-slate-700">{dateLabel(budget.startsAt)} — {dateLabel(budget.expiresAt)}</dd></div></dl> : null}
-      <form onSubmit={activate} className="mt-6 grid gap-4 border-t border-slate-100 pt-6 sm:grid-cols-4">
-        <label className="text-xs font-medium text-slate-600">单位上限<input type="number" min={1} max={10_000} value={unitLimit} onChange={(event) => setUnitLimit(event.target.value)} required className="edit-field" /></label>
-        <label className="text-xs font-medium text-slate-600">告警阈值<input type="number" min={0} max={10_000} value={threshold} onChange={(event) => setThreshold(event.target.value)} required className="edit-field" /></label>
-        <label className="text-xs font-medium text-slate-600">开始时间<input type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} required className="edit-field" /></label>
-        <label className="text-xs font-medium text-slate-600">结束时间<input type="datetime-local" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} required className="edit-field" /></label>
-        <div className="sm:col-span-4"><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? "启用中…" : budget === null ? "启用探测预算" : "轮换探测预算"}</button></div>
-      </form>
-      {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}
-    </section>
-  );
-}
-
-function ProviderCapabilityMatrix({ catalog }: { catalog: ProviderCatalogEntry[] }) {
-  return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
-      <div className="border-b border-slate-100 pb-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Model capabilities</p>
-        <h2 className="mt-2 text-2xl font-semibold">供应商与模型能力</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-500">以下是系统当前内置的模型建议。生成模型用于自动抽取和引用式问答；向量模型专门用于语义索引，两者可以选择不同供应商。</p>
-      </div>
-      {catalog.length === 0 ? <div className="mt-5 h-28 animate-pulse rounded-2xl bg-slate-100" /> : (
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          {catalog.map((entry) => (
-            <article key={entry.kind} className={`rounded-2xl border p-5 ${entry.supportsEmbeddings ? "border-slate-200 bg-slate-50" : "border-amber-200 bg-amber-50"}`}>
-              <div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-slate-800">{entry.displayName}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${entry.supportsEmbeddings ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>{entry.supportsEmbeddings ? "支持语义向量" : "不支持语义向量"}</span></div>
-              <dl className="mt-4 space-y-3 text-xs leading-5">
-                <div><dt className="font-semibold text-slate-500">生成 / 文档抽取</dt><dd className="mt-1 text-slate-700">{entry.generationModelSuggestions.join("、")}</dd></div>
-                <div><dt className="font-semibold text-slate-500">语义向量</dt><dd className={`mt-1 ${entry.supportsEmbeddings ? "text-slate-700" : "font-medium text-amber-800"}`}>{entry.supportsEmbeddings ? entry.embeddingModelSuggestions.map((model) => `${model.id}（${model.dimensions} 维）`).join("、") : "本系统当前未接入该供应商的向量模型；请选 GLM（或其他已配置的向量供应商）"}</dd></div>
-                <div><dt className="font-semibold text-slate-500">图片识别</dt><dd className="mt-1 text-slate-700">{entry.supportsVision ? entry.visionModelSuggestions.join("、") : "不支持"}</dd></div>
-              </dl>
-            </article>
-          ))}
-        </div>
-      )}
-      <p className="mt-4 rounded-xl bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-800">DeepSeek 可以用于文档自动抽取；它在这里缺少的是向量能力，而不是文档理解能力。抽取时系统会用服务端证据块定位真实原文，并逐条显示定位、校正、跳过和重复统计。</p>
-    </section>
   );
 }
 
@@ -408,7 +265,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className="mt-5 block text-sm font-medium text-slate-200">{label}{children}</label>;
 }
 
-function ProviderCard({ provider, catalog, onChanged, onRemoved }: { provider: Provider; catalog?: ProviderCatalogEntry; onChanged: (provider: Provider) => void; onRemoved: (providerId: string) => void }) {
+function ProviderCard({ provider, catalog, onChanged, onRemoved, onProbeFinished }: { provider: Provider; catalog?: ProviderCatalogEntry; onChanged: (provider: Provider) => void; onRemoved: (providerId: string) => void; onProbeFinished: () => Promise<void> }) {
   const [testing, setTesting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [pending, setPending] = useState(false);
@@ -437,6 +294,7 @@ function ProviderCard({ provider, catalog, onChanged, onRemoved }: { provider: P
       });
       if (!response.ok) throw new Error(await readError(response, "连接测试失败"));
       const payload = await response.json() as ProviderCheck;
+      await onProbeFinished();
       setMessage(describeProviderCheck(payload));
     } catch (testError) {
       setMessage(testError instanceof Error ? testError.message : "连接测试失败");

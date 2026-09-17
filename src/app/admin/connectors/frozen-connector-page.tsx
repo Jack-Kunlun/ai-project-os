@@ -1,29 +1,27 @@
-import { AppHeader } from "@/components/app-header";
+import { AdminHeader } from "@/components/admin-header";
 import { AdminPageFrame, type AdminSection } from "@/components/admin-shell";
 
 export function FrozenConnectorPage({
   username,
   active,
-  isSystemAdmin,
   title,
   description,
 }: Readonly<{
   username: string;
-  active: Extract<AdminSection, "git" | "mcp">;
-  isSystemAdmin: boolean;
+  active: Extract<AdminSection, "mcp">;
   title: string;
   description: string;
 }>) {
   return (
     <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="connections" isSystemAdmin={isSystemAdmin} />
+      <AdminHeader username={username} />
       <AdminPageFrame active={active}>
         <section className="rounded-[2rem] border border-amber-200 bg-white p-8 shadow-sm sm:p-10">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Migration boundary</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">{title}</h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">{description}</p>
           <div className="mt-7 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-900" role="status">
-            管理员连接配置已冻结。本页不会读取、展示或提交任何凭据，也不提供用户凭据池。{active === "git" ? "个人 Git 连接请由用户在个人中心配置，项目仓库页再由连接所有者与项目 Owner 发起明确的受控一次性只读委托。" : "个人 MCP 连接请由用户在个人中心配置；通用 MCP 动作产品入口仍未开放，项目不会在此页面创建或派发动作。"} 管理员只查看必要的安全状态，不代替用户持有或管理私人 Git/MCP 凭据。
+            管理员连接配置已冻结。本页不会读取、展示或提交任何凭据，也不提供用户凭据池。个人 MCP 连接由用户在个人中心配置；管理员只查看必要的安全状态，不代替用户持有或管理私人凭据。
           </div>
         </section>
       </AdminPageFrame>

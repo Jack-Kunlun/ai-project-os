@@ -333,6 +333,7 @@ async function previewInTransaction(db: PlatformCreditGovernanceDb, actor: Platf
   await assertCurrentAdmin(db, { id: actor.id, role: "admin", accountAccessVersion: actor.accountAccessVersion });
   const target = await loadUser(db, targetId);
   if (target === null) return fail("PLATFORM_CREDIT_GOVERNANCE_USER_NOT_FOUND");
+  if (target.role !== "user") return fail("PLATFORM_CREDIT_GOVERNANCE_USER_NOT_FOUND");
   const grant = revokeGrant;
   if (input.action === "revoke" && (grant === null || grant.userId !== target.id)) return fail("PLATFORM_CREDIT_GOVERNANCE_GRANT_NOT_FOUND");
   if (grant !== null) await lockGrant(db, grant.id);
@@ -412,6 +413,7 @@ async function executeInTransaction(db: PlatformCreditGovernanceDb, actor: Platf
   const lockedActor = await assertCurrentAdmin(db, { id: actor.id, role: "admin", accountAccessVersion: actor.accountAccessVersion });
   const target = await loadUser(db, targetId);
   if (target === null) return fail("PLATFORM_CREDIT_GOVERNANCE_USER_NOT_FOUND");
+  if (target.role !== "user") return fail("PLATFORM_CREDIT_GOVERNANCE_USER_NOT_FOUND");
   if (target.username !== input.confirmationUsername) return fail("PLATFORM_CREDIT_GOVERNANCE_CONFIRMATION_MISMATCH");
   const grant = input.grantId === null || input.grantId === undefined ? null : await loadGrant(db, uuid(input.grantId));
   if (input.action === "revoke") {
@@ -529,6 +531,7 @@ export type PlatformCreditTargetUser = Readonly<{
 }>;
 
 export async function listPlatformTokenGrants(input: Readonly<{
+  userId?: string;
   search?: string;
   kind?: "signup" | "manual";
   status?: "active" | "expired" | "revoked";
@@ -561,7 +564,11 @@ export async function listPlatformTokenGrants(input: Readonly<{
   const userPageSize = Number.isSafeInteger(input.userPageSize) && (input.userPageSize ?? 20) >= 1 ? Math.min(input.userPageSize ?? 20, 100) : 20;
   const search = input.search?.trim().slice(0, 160) ?? "";
   const now = await databaseNow(db);
-  const userWhere = search.length === 0 ? {} : { OR: [{ username: { contains: search, mode: Prisma.QueryMode.insensitive } }, { displayName: { contains: search, mode: Prisma.QueryMode.insensitive } }] };
+  const userWhere = {
+    role: "user" as const,
+    ...(input.userId === undefined ? {} : { id: input.userId }),
+    ...(search.length === 0 ? {} : { OR: [{ username: { contains: search, mode: Prisma.QueryMode.insensitive } }, { displayName: { contains: search, mode: Prisma.QueryMode.insensitive } }] }),
+  };
   const userRows = await db.appUser.findMany({
     where: userWhere,
     orderBy: [{ username: "asc" }, { id: "asc" }],
@@ -588,7 +595,7 @@ export async function listPlatformTokenGrants(input: Readonly<{
       ? { revokedAt: null, expiresAt: { lte: now } }
       : { revokedAt: null, expiresAt: { gt: now } };
   const rows = await db.platformTokenGrant.findMany({
-    where: { ...(input.kind === undefined ? {} : { kind: input.kind }), ...statusWhere, ...(search.length === 0 ? {} : { user: userWhere }) },
+    where: { ...(input.kind === undefined ? {} : { kind: input.kind }), ...statusWhere, user: userWhere },
     orderBy: [{ issuedAt: "desc" }, { id: "desc" }], skip: (grantPage - 1) * grantPageSize, take: grantPageSize + 1,
     select: { id: true, userId: true, kind: true, amount: true, remainingTokens: true, issuedAt: true, expiresAt: true, revokedAt: true, version: true, offerVersion: true, user: { select: { username: true, displayName: true } } },
   });

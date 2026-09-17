@@ -118,7 +118,7 @@ export type SystemOverview = Readonly<{
   }>;
   backup: SystemOverviewBackup;
   setupChecklist: readonly Readonly<{
-    key: "database" | "worker" | "platform-provider" | "default-routes" | "backup-source" | "first-project";
+    key: "database" | "worker" | "platform-provider" | "default-routes" | "backup-source";
     label: string;
     status: "ready" | "attention" | "unknown" | "restricted";
     detail: string;
@@ -456,14 +456,6 @@ async function readFailureGroups(db: PrismaClient, since: Date, until: Date): Pr
   return Object.freeze({ providerCalls, mcpCalls, backgroundJobs, automationRuns, controlledActions });
 }
 
-async function readOptionalCount(read: () => Promise<number>): Promise<number | null> {
-  try {
-    return await read();
-  } catch {
-    return null;
-  }
-}
-
 async function requireVerifiedAdminActor(actor: OverviewActor, db: PrismaClient): Promise<void> {
   if (actor === null || actor.role !== "admin" || actor.id.trim().length === 0) throw new AuthError("AUTH_FORBIDDEN");
   const stored = await db.appUser.findUnique({
@@ -498,7 +490,7 @@ export async function getSystemOverview(
   await requireVerifiedAdminActor(actor, db);
   await db.$queryRaw`SELECT 1`;
   const failureWindowStart = new Date(now.getTime() - SYSTEM_OVERVIEW_FAILURE_WINDOW_DAYS * 24 * 60 * 60 * 1_000);
-  const [users, activeMemberships, verifiedPlatformModels, issued, available, reserved, consumed, worker, routeReadiness, pendingMcpAttestations, failures, backupResult, projectCount] = await Promise.all([
+  const [users, activeMemberships, verifiedPlatformModels, issued, available, reserved, consumed, worker, routeReadiness, pendingMcpAttestations, failures, backupResult] = await Promise.all([
     db.appUser.count(),
     db.membershipSubscription.count({ where: { status: "active", startsAt: { lte: now }, expiresAt: { gt: now } } }),
     db.aiProviderConnection.count({ where: { scope: "platform", status: "verified", disabledAt: null } }),
@@ -511,7 +503,6 @@ export async function getSystemOverview(
     readPendingMcpAttestationCount(db),
     readFailureGroups(db, failureWindowStart, now),
     readBackupResult(actor, db, now),
-    readOptionalCount(() => db.project.count()),
   ]);
 
   const defaultRoutes = routeProjection(routeReadiness?.operations ?? null);
@@ -547,7 +538,6 @@ export async function getSystemOverview(
     { key: "platform-provider" as const, label: "平台托管模型", status: verifiedPlatformModels > 0 ? "ready" as const : "attention" as const, detail: verifiedPlatformModels > 0 ? `已验证 ${verifiedPlatformModels} 个平台连接。` : "尚未取得可用的平台托管模型连接。" },
     { key: "default-routes" as const, label: "默认模型路由", status: defaultRoutes.controlPlane === "not_obtained" ? "unknown" as const : defaultRoutes.controlPlane === "ready" ? "ready" as const : "attention" as const, detail: defaultRoutes.ready === null ? "尚未取得路由就绪证据。" : `${defaultRoutes.ready}/${defaultRoutes.total} 项控制面路由已就绪；真实模型调用仍未取得现场证据。` },
     { key: "backup-source" as const, label: "备份状态源", status: backupChecklistStatus, detail: backup.access === "restricted" ? "仅初始超级管理员可读取备份详情。" : backup.access === "not_obtained" ? "无法确认初始超级管理员权限；备份状态、记录、新鲜度和恢复演练均未取得。" : backup.snapshotRead === "error" ? "已取得权限，但备份状态读取失败；未取得可用证据。" : backup.latestValidRecord.status === "none" ? `状态源 ${backup.sourceStatus}；没有 current 或历史记录，新鲜度未知。` : `状态源 ${backup.sourceStatus} · 任务记录 ${backup.latestValidRecord.state ?? "未取得"} · 新鲜度 ${backup.freshness.status} · 恢复演练 ${backup.recoveryDrill.status}。` },
-    { key: "first-project" as const, label: "首个项目", status: projectCount === null ? "unknown" as const : projectCount > 0 ? "ready" as const : "attention" as const, detail: projectCount === null ? "尚未取得项目数量。" : projectCount > 0 ? `当前已有 ${projectCount} 个项目。` : "尚未创建项目。" },
   ]);
 
   return Object.freeze({

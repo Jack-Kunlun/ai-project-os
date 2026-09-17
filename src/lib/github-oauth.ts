@@ -24,6 +24,7 @@ const GITHUB_API_VERSION = "2026-03-10";
 const ATTEMPT_LIFETIME_MS = 10 * 60 * 1_000;
 const MAX_ACTIVE_ATTEMPTS = 200;
 const ATTEMPT_LOCK_ID = 2_026_090_201;
+const PLATFORM_BOOTSTRAP_LOCK_ID = 781452903;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_JSON_BYTES = 64 * 1_024;
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -140,6 +141,22 @@ function canonicalLinkUserId(value: unknown, intent: GitHubOauthIntent): string 
   return value;
 }
 
+/**
+ * GitHub login is a user-domain capability.  Keep the bootstrap fence in the
+ * same transaction as the eventual account/membership/entitlement writes so
+ * an OAuth callback cannot race first-owner provisioning.
+ */
+async function assertPlatformBootstrapReady(db: Prisma.TransactionClient): Promise<void> {
+  await db.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${PLATFORM_BOOTSTRAP_LOCK_ID})`);
+  const bootstrap = await db.platformBootstrap.findUnique({
+    where: { id: "platform" },
+    select: { initialOwnerUserId: true, adminOnboardingCompletedAt: true },
+  });
+  if (bootstrap === null || bootstrap.initialOwnerUserId === null || bootstrap.adminOnboardingCompletedAt === null) {
+    return fail("GITHUB_OAUTH_NOT_CONFIGURED");
+  }
+}
+
 export async function beginGitHubOAuth(
   input: Readonly<{
     returnTo?: unknown;
@@ -162,12 +179,14 @@ export async function beginGitHubOAuth(
   const expiresAt = new Date(Date.now() + ATTEMPT_LIFETIME_MS);
 
   await db.$transaction(async (tx) => {
+    await assertPlatformBootstrapReady(tx);
     if (linkUserId !== null) await lockActorAccess(tx, linkUserId);
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${ATTEMPT_LOCK_ID})`);
     const now = new Date();
     if (linkUserId !== null) {
-      const user = await tx.appUser.findUnique({ where: { id: linkUserId }, select: { disabledAt: true } });
+      const user = await tx.appUser.findUnique({ where: { id: linkUserId }, select: { disabledAt: true, role: true } });
       if (user === null || user.disabledAt !== null) return fail("GITHUB_OAUTH_ACCOUNT_DISABLED");
+      if (user.role !== "user") return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
     }
 
     const expired = await tx.gitHubOauthAttempt.findMany({
@@ -364,6 +383,7 @@ export async function completeGitHubOAuth(
   const profile = await fetchVerifiedGitHubProfile({ config, code: input.code, redirectUri: attempt.redirectUri, verifier });
 
   return db.$transaction(async (tx) => {
+    await assertPlatformBootstrapReady(tx);
     if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
     const now = new Date();
     let existingIdentity = await tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId }, include: { user: true } });
@@ -374,6 +394,7 @@ export async function completeGitHubOAuth(
     if (attempt.intent === "link") {
       const user = await tx.appUser.findUnique({ where: { id: attempt.linkUserId! } });
       if (user === null || user.disabledAt !== null) return fail("GITHUB_OAUTH_ACCOUNT_DISABLED");
+      if (user.role !== "user") return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
       const [byGitHub, byUser] = await Promise.all([
         tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId } }),
         tx.gitHubIdentity.findUnique({ where: { userId: user.id } }),

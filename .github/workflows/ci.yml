@@ -20,19 +20,19 @@ jobs:
       postgres:
         image: pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
         env:
-          POSTGRES_USER: postgres
+          POSTGRES_USER: ai_project_os_cluster_admin
           POSTGRES_PASSWORD: AiProjectOsCiAdmin_20260831
           POSTGRES_DB: postgres
         ports:
           - 56432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-cmd "pg_isready -U ai_project_os_cluster_admin -d postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
       DATABASE_URL: postgresql://ai_project_os_gate:AiProjectOsCiGate_20260831@127.0.0.1:56432/ai_project_os_ci_default_test
-      POSTGRES_GATE_ADMIN_URL: postgresql://postgres:AiProjectOsCiAdmin_20260831@127.0.0.1:56432/postgres
+      POSTGRES_GATE_ADMIN_URL: postgresql://ai_project_os_cluster_admin:AiProjectOsCiAdmin_20260831@127.0.0.1:56432/postgres
       POSTGRES_GATE_TEST_PASSWORD: AiProjectOsCiGate_20260831
       NEXT_TELEMETRY_DISABLED: "1"
     steps:

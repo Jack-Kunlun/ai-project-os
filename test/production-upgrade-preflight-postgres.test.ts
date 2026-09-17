@@ -5,7 +5,10 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { Client } from "pg";
-import { LEGACY_MIGRATION_MANIFEST } from "../scripts/production-upgrade-preflight-contract";
+import {
+  LEGACY_MIGRATION_MANIFEST,
+  PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE,
+} from "../scripts/production-upgrade-preflight-contract";
 import { runProductionUpgradePreflight } from "../scripts/production-upgrade-preflight";
 
 const shouldRun = process.env.PRODUCTION_UPGRADE_PREFLIGHT_POSTGRES_GATE === "1";
@@ -176,9 +179,12 @@ test(
     try {
       await installLegacySchema(url, temporaryPrismaRoot);
       const preflightOptions = { legacyRole: pinnedAdminRole } as const;
+      const expectedDatabasePrincipal = pinnedAdminRole === PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE
+        ? "cluster-admin-owned"
+        : "pinned-oid10-extension-owners-supported";
 
       const preStop = await runProductionUpgradePreflight(queryClient(client), "pre-stop", preflightOptions);
-      assert.equal(preStop.checks.databasePrincipal, "cluster-admin-owned");
+      assert.equal(preStop.checks.databasePrincipal, expectedDatabasePrincipal);
       assert.equal(preStop.checks.rollback, "verified");
       const afterRollback = await client.query<{ transaction_read_only: string; transaction_isolation: string }>(`
         SELECT current_setting('transaction_read_only') AS transaction_read_only,
@@ -235,7 +241,7 @@ test(
       await otherDatabaseBackend.connect();
       try {
       const postStop = await runProductionUpgradePreflight(queryClient(client), "post-stop", preflightOptions);
-        assert.equal(postStop.checks.databasePrincipal, "cluster-admin-owned");
+        assert.equal(postStop.checks.databasePrincipal, expectedDatabasePrincipal);
         assert.equal(postStop.checks.clientBackends, "clear");
         assert.equal(postStop.checks.rollback, "verified");
       } finally {

@@ -276,7 +276,11 @@ async function runPrincipalBootstrap(
     MIGRATOR_DATABASE_URL: roleUrl(migratorRole, migratorPassword),
     POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: `Inventory_${randomUUID().replaceAll("-", "")}`,
   };
-  if (bootstrapConnectionString !== undefined) environment.DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL = bootstrapConnectionString;
+  if (bootstrapConnectionString !== undefined) {
+    environment.DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL = bootstrapConnectionString;
+  } else {
+    delete environment.DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL;
+  }
   await execFile(
     process.execPath,
     ["node_modules/tsx/dist/cli.mjs", "scripts/reconcile-database-principals.ts", "--bootstrap-if-needed"],
@@ -478,14 +482,30 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
     // authenticate again before the admin resumes the conversion.
     await admin.query(`ALTER ROLE ${quoteIdentifier(legacyRole)} NOLOGIN`);
     await runPrincipalBootstrap(runtimePassword, migratorPassword, writerPassword, roleUrl(legacyRole, legacyPassword));
-    const extensionOwners = await admin.query<{ extname: string; owner: string }>(`
-      SELECT extension_row.extname, pg_get_userbyid(extension_row.extowner) AS owner
+    const extensionOwners = await admin.query<{ extname: string; schema_name: string; owner: string; owner_oid: string }>(`
+      SELECT extension_row.extname,
+             namespace.nspname AS schema_name,
+             pg_get_userbyid(extension_row.extowner) AS owner,
+             extension_row.extowner::text AS owner_oid
         FROM pg_extension extension_row
-       WHERE extension_row.extname <> 'plpgsql'
+        JOIN pg_namespace namespace ON namespace.oid = extension_row.extnamespace
        ORDER BY extension_row.extname
     `);
-    assert.ok(extensionOwners.rows.length > 0);
-    assert.ok(extensionOwners.rows.every((row) => row.owner === clusterAdminRole));
+    assert.deepEqual(
+      extensionOwners.rows.map((row) => `${row.extname}|${row.schema_name}|${row.owner}`).sort(),
+      [
+        `pg_trgm|public|${clusterAdminRole}`,
+        `pgcrypto|public|${clusterAdminRole}`,
+        `plpgsql|pg_catalog|${clusterAdminRole}`,
+        `vector|public|${clusterAdminRole}`,
+      ].sort(),
+    );
+    const clusterAdminOid = await admin.query<{ oid: string }>(
+      "SELECT oid::text FROM pg_roles WHERE rolname = $1",
+      [clusterAdminRole],
+    );
+    assert.ok(clusterAdminOid.rows[0]?.oid);
+    assert.ok(extensionOwners.rows.every((row) => row.owner_oid === clusterAdminOid.rows[0]?.oid));
     const externalOwner = await admin.query<{ owner: string }>("SELECT pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname = $1", [externalDatabaseName]);
     assert.deepEqual(externalOwner.rows[0], { owner: "ai_project_os_legacy_bootstrap" });
     const currentOwnerAfterBootstrap = await admin.query<{ owner: string }>("SELECT pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname = current_database()");
@@ -497,6 +517,9 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
     // A rerun with the retained legacy URL must self-heal/verify through the
     // cluster-admin path after the sealed role has replaced the source OID.
     await runPrincipalBootstrap(runtimePassword, migratorPassword, writerPassword, roleUrl(legacyRole, legacyPassword));
+    // The completed state must also be idempotent after the one-time legacy URL
+    // has been removed; the sealed-role policy is derived from pg_authid.
+    await runPrincipalBootstrap(runtimePassword, migratorPassword, writerPassword);
 
     const retiredRole = await admin.query<{
       rolcanlogin: boolean;

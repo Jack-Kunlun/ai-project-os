@@ -5,7 +5,10 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { Client } from "pg";
-import { LEGACY_MIGRATION_MANIFEST } from "../scripts/production-upgrade-preflight-contract";
+import {
+  LEGACY_MIGRATION_MANIFEST,
+  PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE,
+} from "../scripts/production-upgrade-preflight-contract";
 import { runProductionUpgradePreflight } from "../scripts/production-upgrade-preflight";
 
 const shouldRun = process.env.PRODUCTION_UPGRADE_PREFLIGHT_POSTGRES_GATE === "1";
@@ -31,6 +34,65 @@ function testDatabaseUrl(): string {
     || parsed.hash !== ""
   ) throw new Error("PRODUCTION_UPGRADE_PREFLIGHT_TEST_DATABASE_URL_INVALID");
   return parsed.toString();
+}
+
+function testDatabaseAdminUrl(): string {
+  const configuredAdminUrl = process.env.POSTGRES_GATE_ADMIN_URL;
+  if (typeof configuredAdminUrl !== "string" || configuredAdminUrl.length === 0) {
+    throw new Error("POSTGRES_GATE_ADMIN_URL_REQUIRED");
+  }
+  const parsed = new URL(configuredAdminUrl);
+  if (
+    !["postgres:", "postgresql:"].includes(parsed.protocol)
+    || !["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname.toLowerCase())
+    || parsed.port !== "56432"
+    || parsed.pathname !== "/postgres"
+    || parsed.username.length === 0
+    || parsed.password.length === 0
+    || parsed.search !== ""
+    || parsed.hash !== ""
+  ) throw new Error("POSTGRES_GATE_ADMIN_URL_INVALID");
+  parsed.pathname = `/${testDatabaseName}`;
+  return parsed.toString();
+}
+
+async function prepareOid10ExtensionOwner(databaseUrl: string): Promise<string> {
+  const admin = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
+  await admin.connect();
+  try {
+    const session = await admin.query<{ session_user: string; session_oid: string; is_superuser: boolean }>(`
+      SELECT session_user,
+             (SELECT oid::text FROM pg_authid WHERE rolname = session_user) AS session_oid,
+             (SELECT rolsuper FROM pg_authid WHERE rolname = session_user) AS is_superuser
+    `);
+    const sessionRow = session.rows[0];
+    assert.equal(sessionRow?.session_oid, "10");
+    assert.equal(sessionRow?.is_superuser, true);
+    for (const extension of ["vector", "pg_trgm", "pgcrypto"] as const) {
+      await admin.query(`CREATE EXTENSION IF NOT EXISTS "${extension}" WITH SCHEMA public`);
+    }
+    const extensions = await admin.query<{ extension_name: string; schema_name: string; owner_name: string; owner_oid: string }>(`
+      SELECT extension_row.extname AS extension_name,
+             namespace.nspname AS schema_name,
+             pg_get_userbyid(extension_row.extowner) AS owner_name,
+             extension_row.extowner::text AS owner_oid
+        FROM pg_extension extension_row
+        JOIN pg_namespace namespace ON namespace.oid = extension_row.extnamespace
+       ORDER BY extension_row.extname
+    `);
+    assert.deepEqual(
+      extensions.rows.map((row) => [row.extension_name, row.schema_name, row.owner_name, row.owner_oid]),
+      [
+        ["pg_trgm", "public", sessionRow?.session_user, "10"],
+        ["pgcrypto", "public", sessionRow?.session_user, "10"],
+        ["plpgsql", "pg_catalog", sessionRow?.session_user, "10"],
+        ["vector", "public", sessionRow?.session_user, "10"],
+      ],
+    );
+    return sessionRow?.session_user ?? "";
+  } finally {
+    await admin.end();
+  }
 }
 
 function queryClient(client: Client) {
@@ -90,18 +152,25 @@ test(
   { skip: !shouldRun ? "PRODUCTION_UPGRADE_PREFLIGHT_POSTGRES_GATE=1 is required" : false },
   async (context) => {
     const url = testDatabaseUrl();
+    const pinnedAdminUrl = testDatabaseAdminUrl();
     const cacheRoot = resolve(process.cwd(), "node_modules/.cache");
     await mkdir(cacheRoot, { recursive: true });
     const temporaryPrismaRoot = await mkdtemp(resolve(cacheRoot, "production-preflight-prisma-"));
     context.after(async () => {
       await rm(temporaryPrismaRoot, { recursive: true, force: true });
     });
-    const client = new Client({ connectionString: url, connectionTimeoutMillis: 5_000 });
+    const pinnedAdminRole = await prepareOid10ExtensionOwner(pinnedAdminUrl);
+    const client = new Client({ connectionString: pinnedAdminUrl, connectionTimeoutMillis: 5_000 });
     await client.connect();
     try {
       await installLegacySchema(url, temporaryPrismaRoot);
+      const preflightOptions = { legacyRole: pinnedAdminRole } as const;
+      const expectedDatabasePrincipal = pinnedAdminRole === PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE
+        ? "cluster-admin-owned"
+        : "pinned-oid10-extension-owners-supported";
 
-      const preStop = await runProductionUpgradePreflight(queryClient(client), "pre-stop");
+      const preStop = await runProductionUpgradePreflight(queryClient(client), "pre-stop", preflightOptions);
+      assert.equal(preStop.checks.databasePrincipal, expectedDatabasePrincipal);
       assert.equal(preStop.checks.rollback, "verified");
       const afterRollback = await client.query<{ transaction_read_only: string; transaction_isolation: string }>(`
         SELECT current_setting('transaction_read_only') AS transaction_read_only,
@@ -125,7 +194,7 @@ test(
       await sameDatabaseBackend.connect();
       try {
         await assert.rejects(
-          () => runProductionUpgradePreflight(queryClient(client), "post-stop"),
+          () => runProductionUpgradePreflight(queryClient(client), "post-stop", preflightOptions),
           /PRODUCTION_UPGRADE_PREFLIGHT_CLIENT_BACKENDS_PRESENT/u,
         );
       } finally {
@@ -145,7 +214,7 @@ test(
       };
       try {
         await assert.rejects(
-          () => runProductionUpgradePreflight(lateBackendAdapter, "post-stop"),
+          () => runProductionUpgradePreflight(lateBackendAdapter, "post-stop", preflightOptions),
           /PRODUCTION_UPGRADE_PREFLIGHT_CLIENT_BACKENDS_PRESENT/u,
         );
       } finally {
@@ -157,7 +226,8 @@ test(
       const otherDatabaseBackend = new Client({ connectionString: adminDatabaseUrl.toString(), connectionTimeoutMillis: 5_000 });
       await otherDatabaseBackend.connect();
       try {
-        const postStop = await runProductionUpgradePreflight(queryClient(client), "post-stop");
+      const postStop = await runProductionUpgradePreflight(queryClient(client), "post-stop", preflightOptions);
+        assert.equal(postStop.checks.databasePrincipal, expectedDatabasePrincipal);
         assert.equal(postStop.checks.clientBackends, "clear");
         assert.equal(postStop.checks.rollback, "verified");
       } finally {

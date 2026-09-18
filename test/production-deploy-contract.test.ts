@@ -140,6 +140,8 @@ test("root deployer verifies source, requires a verified offsite backup, migrate
   assert.match(deployment, /compose build principal-bootstrap migrate reconcile app worker production-upgrade-preflight/u);
   assert.match(deployment, /run_upgrade_preflight pre-stop/u);
   assert.match(deployment, /run_upgrade_preflight post-stop/u);
+  assert.match(deployment, /legacy-extension-owners-reassignable/u);
+  assert.match(deployment, /DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_PRINCIPAL_INVALID/u);
   assert.match(deployment, /DEPLOY_MAINTENANCE_SERVICES_NOT_ISOLATED/u);
   assert.match(deployment, /DEPLOY_MAINTENANCE_POSTGRES_PORT_NOT_ISOLATED/u);
   assert.match(deployment, /compose ps --services --status running/u);

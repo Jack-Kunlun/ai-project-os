@@ -7,17 +7,49 @@ import {
   buildProductionUpgradePreflightReport,
   CLEAN_SLATE_DATA_GATES,
   LEGACY_MIGRATION_MANIFEST,
+  PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE,
+  PRODUCTION_UPGRADE_REQUIRED_EXTENSIONS,
+  PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE,
   ProductionUpgradePreflightError,
   parseProductionUpgradePreflightArguments,
-  readProductionUpgradePreflightDatabaseConfig,
+  readProductionUpgradePreflightDatabaseCandidates,
+  readProductionUpgradePreflightLegacyRole,
   REQUIRED_LEGACY_SCHEMA,
   safeProductionUpgradePreflightErrorCode,
   type ProductionUpgradePreflightPhase,
+  type ProductionUpgradePreflightDatabaseConfig,
   type ProductionUpgradePreflightReport,
 } from "./production-upgrade-preflight-contract";
 
 export interface ProductionUpgradePreflightQueryClient {
   query<Row = unknown>(text: string, values?: readonly unknown[]): Promise<{ rows: readonly Row[] }>;
+}
+
+interface ProductionUpgradePreflightConnectableClient extends ProductionUpgradePreflightQueryClient {
+  connect(): Promise<void>;
+  end(): Promise<void>;
+}
+
+type ProductionUpgradePreflightClientFactory = (
+  config: ProductionUpgradePreflightDatabaseConfig,
+) => ProductionUpgradePreflightConnectableClient;
+
+export async function connectProductionUpgradePreflightClient(
+  configs: readonly ProductionUpgradePreflightDatabaseConfig[],
+  clientFactory: ProductionUpgradePreflightClientFactory = (config) => new Client(config),
+): Promise<ProductionUpgradePreflightConnectableClient> {
+  for (const config of configs) {
+    const client = clientFactory(config);
+    try {
+      await client.connect();
+      return client;
+    } catch {
+      // A sealed or renamed legacy role is expected to fail here.  Do not
+      // expose the driver error; the target candidate is the only fallback.
+      await client.end().catch(() => undefined);
+    }
+  }
+  throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_CONNECT_FAILED");
 }
 
 interface MigrationLedgerRow {
@@ -69,6 +101,40 @@ interface TransactionSettingsRow {
   statement_timeout: string;
 }
 
+interface DatabasePrincipalSessionRow {
+  session_user: string;
+  current_user: string;
+  session_role_oid: string | null;
+  session_is_superuser: boolean;
+}
+
+interface DatabasePrincipalRoleRow {
+  role_name: string;
+  role_oid: string;
+  can_login: boolean;
+  password: string | null;
+  is_superuser: boolean;
+  can_create_db: boolean;
+  can_create_role: boolean;
+  inherit: boolean;
+  replication: boolean;
+  bypass_rls: boolean;
+  has_membership: boolean;
+}
+
+interface DatabasePrincipalExtensionRow {
+  extension_name: string;
+  schema_name: string;
+  owner_name: string | null;
+  owner_oid: string;
+}
+
+type DatabasePrincipalCheck = "cluster-admin-owned" | "legacy-extension-owners-reassignable" | "pinned-oid10-extension-owners-supported";
+
+interface ProductionUpgradePreflightOptions {
+  legacyRole?: string | null;
+}
+
 export const PRODUCTION_UPGRADE_PREFLIGHT_SQL = Object.freeze({
   begin: "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY",
   searchPath: "SET LOCAL search_path = pg_catalog, public",
@@ -79,6 +145,43 @@ export const PRODUCTION_UPGRADE_PREFLIGHT_SQL = Object.freeze({
            current_setting('transaction_isolation') AS transaction_isolation,
            current_setting('lock_timeout') AS lock_timeout,
            current_setting('statement_timeout') AS statement_timeout
+  `,
+  databasePrincipalSession: `
+    SELECT session_user,
+           current_user,
+           (SELECT role_row.oid::text FROM pg_catalog.pg_roles AS role_row WHERE role_row.rolname = session_user) AS session_role_oid,
+           (SELECT role_row.rolsuper FROM pg_catalog.pg_roles AS role_row WHERE role_row.rolname = session_user) AS session_is_superuser
+  `,
+  databasePrincipalRoles: `
+    SELECT role_row.rolname AS role_name,
+           role_row.oid::text AS role_oid,
+           role_row.rolcanlogin AS can_login,
+           role_row.rolpassword AS password,
+           role_row.rolsuper AS is_superuser,
+           role_row.rolcreatedb AS can_create_db,
+           role_row.rolcreaterole AS can_create_role,
+           role_row.rolinherit AS inherit,
+           role_row.rolreplication AS replication,
+           role_row.rolbypassrls AS bypass_rls,
+           EXISTS (
+             SELECT 1
+               FROM pg_catalog.pg_auth_members AS membership
+              WHERE membership.member = role_row.oid
+                 OR membership.roleid = role_row.oid
+           ) AS has_membership
+      FROM pg_catalog.pg_authid AS role_row
+     WHERE role_row.rolname = ANY($1::text[])
+     ORDER BY role_row.rolname
+  `,
+  databasePrincipalExtensions: `
+    SELECT extension_row.extname AS extension_name,
+           namespace.nspname AS schema_name,
+           pg_catalog.pg_get_userbyid(extension_row.extowner) AS owner_name,
+           extension_row.extowner::text AS owner_oid
+      FROM pg_catalog.pg_extension AS extension_row
+      JOIN pg_catalog.pg_namespace AS namespace
+        ON namespace.oid = extension_row.extnamespace
+     ORDER BY extension_row.extname
   `,
   migrationLedger: `
     SELECT migration."migration_name" AS migration_name,
@@ -214,6 +317,116 @@ function validateTransactionSettings(row: TransactionSettingsRow): void {
   }
 }
 
+function isExactSealedLegacyRole(row: DatabasePrincipalRoleRow | undefined): boolean {
+  return row?.role_name === PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE
+    && row.role_oid === "10"
+    && !row.can_login
+    && row.password === null
+    && row.is_superuser
+    && !row.can_create_db
+    && !row.can_create_role
+    && !row.inherit
+    && !row.replication
+    && !row.bypass_rls
+    && !row.has_membership;
+}
+
+function invalidDatabasePrincipal(): never {
+  throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_PRINCIPAL_INVALID");
+}
+
+function isUsableAdministrativeRole(row: DatabasePrincipalRoleRow | undefined): row is DatabasePrincipalRoleRow {
+  return row !== undefined && row.is_superuser && !row.has_membership;
+}
+
+function validateDatabasePrincipalFeasibility(
+  session: DatabasePrincipalSessionRow,
+  roles: readonly DatabasePrincipalRoleRow[],
+  extensions: readonly DatabasePrincipalExtensionRow[],
+  legacyRole: string | null,
+): DatabasePrincipalCheck {
+  if (
+    session.session_user.length === 0
+    || session.session_user !== session.current_user
+    || session.session_role_oid === null
+    || !session.session_is_superuser
+  ) return invalidDatabasePrincipal();
+
+  const expectedRoleNames = new Set<string>([
+    session.session_user,
+    PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE,
+    PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE,
+    ...(legacyRole === null ? [] : [legacyRole]),
+  ]);
+  const roleByName = new Map<string, DatabasePrincipalRoleRow>();
+  for (const role of roles) {
+    if (roleByName.has(role.role_name) || !expectedRoleNames.has(role.role_name)) return invalidDatabasePrincipal();
+    roleByName.set(role.role_name, role);
+  }
+
+  const sessionIsClusterAdmin = session.session_user === PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE;
+  const sessionIsLegacy = legacyRole !== null && session.session_user === legacyRole;
+  if (!sessionIsClusterAdmin && !sessionIsLegacy) return invalidDatabasePrincipal();
+  const sessionRole = roleByName.get(session.session_user);
+  if (
+    !isUsableAdministrativeRole(sessionRole)
+    || !sessionRole.can_login
+    || sessionRole.role_oid !== session.session_role_oid
+  ) return invalidDatabasePrincipal();
+
+  const clusterAdminRole = roleByName.get(PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE);
+  if (clusterAdminRole !== undefined
+    && !isUsableAdministrativeRole(clusterAdminRole)) {
+    return invalidDatabasePrincipal();
+  }
+
+  const sealedRole = roleByName.get(PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE);
+  if (sealedRole !== undefined && !isExactSealedLegacyRole(sealedRole)) return invalidDatabasePrincipal();
+
+  const configuredLegacyRole = legacyRole === null ? undefined : roleByName.get(legacyRole);
+  if (configuredLegacyRole !== undefined
+    && legacyRole !== PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE
+    && !isUsableAdministrativeRole(configuredLegacyRole)) {
+    return invalidDatabasePrincipal();
+  }
+
+  const expectedExtensions = [...PRODUCTION_UPGRADE_REQUIRED_EXTENSIONS].sort();
+  const actualExtensions = extensions.map((row) => row.extension_name).sort();
+  if (
+    actualExtensions.length !== expectedExtensions.length
+    || actualExtensions.some((name, index) => name !== expectedExtensions[index])
+  ) return invalidDatabasePrincipal();
+
+  let highestCheck: DatabasePrincipalCheck = "cluster-admin-owned";
+  for (const extension of extensions) {
+    const expectedSchema = extension.extension_name === "plpgsql" ? "pg_catalog" : "public";
+    if (extension.schema_name !== expectedSchema || extension.owner_name === null) return invalidDatabasePrincipal();
+
+    const ownerRole = roleByName.get(extension.owner_name);
+    if (ownerRole === undefined || ownerRole.role_oid !== extension.owner_oid) return invalidDatabasePrincipal();
+    if (extension.owner_name === PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE) {
+      if (!isUsableAdministrativeRole(ownerRole)) return invalidDatabasePrincipal();
+      continue;
+    }
+    if (extension.owner_name === PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE) {
+      if (extension.owner_oid !== "10" || !isExactSealedLegacyRole(sealedRole)) return invalidDatabasePrincipal();
+      highestCheck = "pinned-oid10-extension-owners-supported";
+      continue;
+    }
+    if (legacyRole !== null && extension.owner_name === legacyRole && legacyRole !== PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE) {
+      if (!isUsableAdministrativeRole(ownerRole)) return invalidDatabasePrincipal();
+      if (ownerRole.role_oid === "10") {
+        highestCheck = "pinned-oid10-extension-owners-supported";
+      } else if (highestCheck === "cluster-admin-owned") {
+        highestCheck = "legacy-extension-owners-reassignable";
+      }
+      continue;
+    }
+    return invalidDatabasePrincipal();
+  }
+  return highestCheck;
+}
+
 function rowFinished(row: MigrationLedgerRow): boolean {
   if (typeof row.finished === "boolean") return row.finished;
   return row.finished_at !== null && row.finished_at !== undefined;
@@ -296,9 +509,11 @@ function validateDataGates(row: DataGateRow): void {
 export async function runProductionUpgradePreflight(
   client: ProductionUpgradePreflightQueryClient,
   phase: ProductionUpgradePreflightPhase,
+  options: ProductionUpgradePreflightOptions = {},
 ): Promise<ProductionUpgradePreflightReport> {
   let failure: ProductionUpgradePreflightError | undefined;
   let checksPassed = false;
+  let databasePrincipal: DatabasePrincipalCheck | undefined;
   try {
     try {
       await client.query(PRODUCTION_UPGRADE_PREFLIGHT_SQL.begin);
@@ -310,6 +525,28 @@ export async function runProductionUpgradePreflight(
     }
 
     validateTransactionSettings(requireSingleRow(await queryProductionUpgradePreflightRows<TransactionSettingsRow>(client, PRODUCTION_UPGRADE_PREFLIGHT_SQL.transactionSettings)));
+    const databasePrincipalSession = requireSingleRow(await queryProductionUpgradePreflightRows<DatabasePrincipalSessionRow>(client, PRODUCTION_UPGRADE_PREFLIGHT_SQL.databasePrincipalSession));
+    const databasePrincipalRoleNames = [
+      databasePrincipalSession.session_user,
+      PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE,
+      PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE,
+      ...(options.legacyRole === null || options.legacyRole === undefined ? [] : [options.legacyRole]),
+    ];
+    const databasePrincipalRoles = await queryProductionUpgradePreflightRows<DatabasePrincipalRoleRow>(
+      client,
+      PRODUCTION_UPGRADE_PREFLIGHT_SQL.databasePrincipalRoles,
+      [Array.from(new Set(databasePrincipalRoleNames))],
+    );
+    const databasePrincipalExtensions = await queryProductionUpgradePreflightRows<DatabasePrincipalExtensionRow>(
+      client,
+      PRODUCTION_UPGRADE_PREFLIGHT_SQL.databasePrincipalExtensions,
+    );
+    databasePrincipal = validateDatabasePrincipalFeasibility(
+      databasePrincipalSession,
+      databasePrincipalRoles,
+      databasePrincipalExtensions,
+      options.legacyRole ?? null,
+    );
     const migrationRows = await queryProductionUpgradePreflightRows<MigrationLedgerRow>(client, PRODUCTION_UPGRADE_PREFLIGHT_SQL.migrationLedger);
     validateMigrationLedger(migrationRows);
 
@@ -357,14 +594,15 @@ export async function runProductionUpgradePreflight(
       throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_CLIENT_BACKENDS_PRESENT");
     }
   }
-  return buildProductionUpgradePreflightReport(phase);
+  if (databasePrincipal === undefined) throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_RESULT_INVALID");
+  return buildProductionUpgradePreflightReport(phase, databasePrincipal);
 }
 
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value));
 }
 
-function asQueryClient(client: Client): ProductionUpgradePreflightQueryClient {
+function asQueryClient(client: ProductionUpgradePreflightQueryClient): ProductionUpgradePreflightQueryClient {
   return {
     query: async <Row = unknown>(text: string, values?: readonly unknown[]) => {
       const result = await client.query(text, values === undefined ? undefined : [...values]);
@@ -379,15 +617,17 @@ export async function main(
 ): Promise<number> {
   try {
     const phase = parseProductionUpgradePreflightArguments(args);
-    const client = new Client(readProductionUpgradePreflightDatabaseConfig(env));
+    const databaseConfigs = readProductionUpgradePreflightDatabaseCandidates(env);
+    const legacyRole = readProductionUpgradePreflightLegacyRole(env);
+    let client: ProductionUpgradePreflightConnectableClient;
     try {
-      await client.connect();
-    } catch {
-      printJson(buildProductionUpgradePreflightFailure(new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_CONNECT_FAILED")));
+      client = await connectProductionUpgradePreflightClient(databaseConfigs);
+    } catch (error) {
+      printJson(buildProductionUpgradePreflightFailure(error));
       return 1;
     }
     try {
-      printJson(await runProductionUpgradePreflight(asQueryClient(client), phase));
+      printJson(await runProductionUpgradePreflight(asQueryClient(client), phase, { legacyRole }));
       return 0;
     } catch (error) {
       printJson(buildProductionUpgradePreflightFailure(error));

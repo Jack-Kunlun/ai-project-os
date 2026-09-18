@@ -49,7 +49,7 @@ test("read-only session authentication preserves validity checks without touchin
         user: {
           id: userId,
           username: "owner",
-          role: "admin" as const,
+          role: "user" as const,
           disabledAt: null,
           accountAccessVersion: 1,
         },

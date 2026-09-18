@@ -245,11 +245,27 @@ export const PRODUCTION_UPGRADE_PREFLIGHT_SQL = Object.freeze({
            ) AS app_user_member,
            EXISTS (
              SELECT 1 FROM "public"."AiProviderConnection" AS provider
-              WHERE pg_catalog.to_jsonb(provider) ->> 'scope' = 'workspace'
+             WHERE pg_catalog.to_jsonb(provider) ->> 'scope' = 'workspace'
                  OR (pg_catalog.to_jsonb(provider) ? 'workspaceId' AND pg_catalog.to_jsonb(provider) ->> 'workspaceId' IS NOT NULL)
            ) AS workspace_provider_or_workspace_id,
-           EXISTS (SELECT 1 FROM "public"."ProjectAiRoute") AS project_ai_route,
-           EXISTS (SELECT 1 FROM "public"."ProjectAiRouteRevision") AS project_ai_route_revision,
+           EXISTS (
+             SELECT 1
+               FROM pg_catalog.pg_class AS relation_meta
+               JOIN pg_catalog.pg_namespace AS namespace_meta
+                 ON namespace_meta.oid = relation_meta.relnamespace
+              WHERE namespace_meta.nspname = 'public'
+                AND relation_meta.relname = 'ProjectAiRoute'
+                AND relation_meta.relkind IN ('r', 'p')
+           ) AS project_ai_route,
+           EXISTS (
+             SELECT 1
+               FROM pg_catalog.pg_class AS relation_meta
+               JOIN pg_catalog.pg_namespace AS namespace_meta
+                 ON namespace_meta.oid = relation_meta.relnamespace
+              WHERE namespace_meta.nspname = 'public'
+                AND relation_meta.relname = 'ProjectAiRouteRevision'
+                AND relation_meta.relkind IN ('r', 'p')
+           ) AS project_ai_route_revision,
            false AS ai_provider_ownership_audit
   `,
   auditDataGate: `

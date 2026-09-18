@@ -6,8 +6,9 @@ import { promisify } from "node:util";
 import test from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
-import { initializeAdmin } from "../src/lib/auth";
+import { initializeAdmin, initializeFirstOwner } from "../src/lib/auth";
 import { getDb, getEntitlementDb } from "../src/lib/db";
+import { getFirstAdminOnboardingState } from "../src/lib/first-admin-onboarding-service";
 import {
   changePlatformGrantOfferPolicyLifecycle,
   createPlatformGrantOfferPolicy,
@@ -904,11 +905,17 @@ test("production reconcile separates non-owner runtime from writer and preserves
       writer = getEntitlementDb();
       const bootstrap = await initializeAdmin({ username: `database_principal_admin_${suffix}`, password: "DatabasePrincipalGatePassword_2026" }, writer);
       const actor: PlatformGrantOfferPolicyActor = bootstrap.user;
-      notificationUserId = actor.id;
       assert.equal(actor.role, "admin");
-      assert.equal(await writer.accountEntitlementActivation.count({ where: { userId: actor.id, lifecycleKey: "initial_account_v1" } }), 1);
-      assert.equal(await writer.platformTokenGrant.count({ where: { userId: actor.id, kind: "signup" } }), 1);
-      assert.equal(await writer.platformTokenLedgerEntry.count({ where: { userId: actor.id, reasonCode: "AI_SIGNUP_GRANT" } }), 1);
+      assert.equal(await writer.accountEntitlementActivation.count({ where: { userId: actor.id, lifecycleKey: "initial_account_v1" } }), 0);
+      assert.equal(await writer.platformTokenGrant.count({ where: { userId: actor.id, kind: "signup" } }), 0);
+      assert.equal(await writer.platformTokenLedgerEntry.count({ where: { userId: actor.id, reasonCode: "AI_SIGNUP_GRANT" } }), 0);
+
+      const ownerBootstrap = await initializeFirstOwner(actor as typeof bootstrap.user, {
+        username: `database_principal_owner_${suffix}`,
+        password: "DatabasePrincipalOwnerPassword_2026",
+      }, writer);
+      const owner = ownerBootstrap.user;
+      notificationUserId = owner.id;
 
       const draft = await createPlatformGrantOfferPolicy({
         offerVersion: `principal-${suffix}`,
@@ -925,16 +932,21 @@ test("production reconcile separates non-owner runtime from writer and preserves
       // Ordinary runtime settlement remains usable through the explicitly
       // permitted grant columns and non-signup ledger append path.
       runtimeDb = getDb();
+      // The runtime principal needs this read for the admin's durable
+      // onboarding guard, while the entitlement writer owns the completion
+      // transition.  Keep this assertion on the real runtime client so a
+      // catalog-only ACL check cannot hide a connection binding mistake.
+      assert.equal(await getFirstAdminOnboardingState(actor.id, runtimeDb), "completed");
       const callKey = `database-principal:${suffix}:reservation`;
       const reservation = await reservePlatformTokens({
-        userId: actor.id,
+        userId: owner.id,
         callKey,
         operation: "autoExtract",
         modelId: "database-principal-test-model",
         estimatedTokens: 10,
       }, runtimeDb);
       assert.equal(reservation.created, true);
-      const settled = await settlePlatformTokenReservation({ userId: actor.id, callKey, actualTokens: 5, usageKnown: true }, runtimeDb);
+      const settled = await settlePlatformTokenReservation({ userId: owner.id, callKey, actualTokens: 5, usageKnown: true }, runtimeDb);
       assert.equal(settled.status, "settled");
 
       // Exercise the newly reconciled SECURITY INVOKER owner helper through
@@ -1020,6 +1032,35 @@ test("production reconcile separates non-owner runtime from writer and preserves
     const runtimeClient = runtime;
     const runtimeIdentity = await runtimeClient.query<{ session_user: string; current_user: string }>("SELECT session_user, current_user");
     assert.deepEqual(runtimeIdentity.rows[0], { session_user: runtimeRole, current_user: runtimeRole });
+    const bootstrapAcl = await admin.query<{
+      runtime_select: boolean;
+      runtime_insert: boolean;
+      runtime_update: boolean;
+      runtime_delete: boolean;
+      writer_select: boolean;
+      writer_insert: boolean;
+      writer_update: boolean;
+      writer_delete: boolean;
+    }>(`
+      SELECT has_table_privilege($1, 'public."PlatformBootstrap"', 'SELECT') AS runtime_select,
+             has_table_privilege($1, 'public."PlatformBootstrap"', 'INSERT') AS runtime_insert,
+             has_table_privilege($1, 'public."PlatformBootstrap"', 'UPDATE') AS runtime_update,
+             has_table_privilege($1, 'public."PlatformBootstrap"', 'DELETE') AS runtime_delete,
+             has_table_privilege($2, 'public."PlatformBootstrap"', 'SELECT') AS writer_select,
+             has_table_privilege($2, 'public."PlatformBootstrap"', 'INSERT') AS writer_insert,
+             has_table_privilege($2, 'public."PlatformBootstrap"', 'UPDATE') AS writer_update,
+             has_table_privilege($2, 'public."PlatformBootstrap"', 'DELETE') AS writer_delete
+    `, [runtimeRole, writerRole]);
+    assert.deepEqual(bootstrapAcl.rows[0], {
+      runtime_select: true,
+      runtime_insert: false,
+      runtime_update: false,
+      runtime_delete: false,
+      writer_select: true,
+      writer_insert: true,
+      writer_update: true,
+      writer_delete: true,
+    });
     const runtimePrivileges = await runtimeClient.query<{
       policySelect: boolean;
       policyInsert: boolean;

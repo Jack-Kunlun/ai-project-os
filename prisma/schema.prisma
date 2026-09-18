@@ -4492,6 +4492,8 @@ model AppUser {
   resolvedMemoryQualityIssues  MemoryQualityIssue[]
   createdWebSources            WebSource[]
   createdWorkspaces            Workspace[]                       @relation("WorkspaceCreatedBy")
+  platformBootstrapAsInitialAdmin PlatformBootstrap?             @relation("PlatformBootstrapInitialAdmin")
+  platformBootstrapAsInitialOwner PlatformBootstrap?             @relation("PlatformBootstrapInitialOwner")
   workspaceMemberships         WorkspaceMembership[]
   projectMemberships           ProjectMembership[]
   workspaceRoleMutationPreviewsAsActor WorkspaceRoleMutationPreview[] @relation("WorkspaceRoleMutationPreviewActor")
@@ -5039,6 +5041,19 @@ model PlatformTokenLedgerEntry {
   @@index([userId, callKey])
 }
 
+model PlatformBootstrap {
+  id                           String   @id @default("platform") @db.VarChar(32)
+  initialAdminUserId           String   @unique @db.Uuid
+  initialOwnerUserId           String?  @unique @db.Uuid
+  adminOnboardingCompletedAt   DateTime? @db.Timestamp(3)
+  initialOwnerCreatedAt        DateTime? @db.Timestamp(3)
+  version                      Int      @default(1)
+  createdAt                    DateTime @default(now()) @db.Timestamp(3)
+  updatedAt                    DateTime @updatedAt @db.Timestamp(3)
+  initialAdmin                 AppUser  @relation("PlatformBootstrapInitialAdmin", fields: [initialAdminUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  initialOwner                 AppUser? @relation("PlatformBootstrapInitialOwner", fields: [initialOwnerUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+}
+
 model AppSession {
   id         String    @id @default(uuid()) @db.Uuid
   userId     String    @db.Uuid
@@ -5059,7 +5074,6 @@ model Workspace {
   name          String                @db.VarChar(160)
   slug          String                @unique @db.VarChar(80)
   createdById   String?               @db.Uuid
-  initialAdminOnboardingCompletedAt DateTime? @db.Timestamp(3)
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @updatedAt
   createdBy     AppUser?              @relation("WorkspaceCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)

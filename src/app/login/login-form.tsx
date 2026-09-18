@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent, type ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -41,7 +42,8 @@ export function LoginForm({
         const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
         throw new Error(payload?.error?.message ?? "登录失败");
       }
-      router.replace(returnTo);
+      const payload = await response.json() as { user: { role: "admin" | "user" } };
+      router.replace(payload.user.role === "admin" ? "/admin" : returnTo);
       router.refresh();
     } catch (loginError) {
       setError(loginError instanceof Error ? loginError.message : "登录失败");
@@ -61,7 +63,9 @@ export function LoginForm({
           <div className="pointer-events-none absolute bottom-[116px] right-10 h-1.5 w-1.5 rounded-full bg-indigo-300/70 shadow-[0_0_18px_6px_rgba(129,140,248,.35)]" />
           <div className="relative flex min-h-full flex-col">
             <div className="flex items-center gap-4">
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-[14px] bg-white text-sm font-black tracking-tight text-slate-950 shadow-lg">OS</span>
+              <span className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-white/10 bg-black shadow-lg shadow-emerald-500/10">
+                <Image src="/brand/ai-project-os-admin.png" alt="" width={44} height={44} priority className="h-full w-full scale-[1.75] object-cover" />
+              </span>
               <span className="text-[16px] font-semibold tracking-[-0.01em] text-slate-100">AI Project OS</span>
             </div>
 

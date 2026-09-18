@@ -61,6 +61,11 @@ export type CreatedSession = Readonly<{
   user: SafeSessionUser;
 }>;
 
+export type CreatedInitialOwner = Readonly<{
+  user: SafeSessionUser;
+  createdAt: Date;
+}>;
+
 function fail(code: AuthErrorCode): never {
   throw new AuthError(code);
 }
@@ -341,7 +346,6 @@ export async function initializeAdmin(
   return db.$transaction(async (tx) => {
     if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(781452903)`;
-    await lockWorkspaceAccess(tx, DEFAULT_WORKSPACE_ID);
     if ((await tx.appUser.count({ where: { role: "admin" } })) > 0) {
       return fail("AUTH_ALREADY_INITIALIZED");
     }
@@ -357,23 +361,103 @@ export async function initializeAdmin(
     const user = await tx.appUser.create({
       data: { username, role: "admin", ...password },
     });
-    await tx.workspace.update({ where: { id: DEFAULT_WORKSPACE_ID }, data: { createdById: user.id } });
-    const membership = await tx.workspaceMembership.create({ data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "owner", accessState: "confirmed" } });
+    await tx.platformBootstrap.create({
+      data: { id: "platform", initialAdminUserId: user.id },
+    });
+    await createBootstrapSignupOfferPolicy(tx, user.id);
+    return createSessionInTransaction(tx, user);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function initializeFirstOwner(
+  actor: SafeSessionUser,
+  input: Readonly<{ username: unknown; password: unknown }>,
+  db: PrismaClient = getEntitlementDb(),
+): Promise<CreatedInitialOwner> {
+  if (actor.role !== "admin") return fail("AUTH_FORBIDDEN");
+  const username = canonicalUsername(input.username);
+  const password = await createPasswordRecord(input.password);
+  return db.$transaction(async (tx) => {
+    if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(781452903)`;
+    await lockActorAccess(tx, actor.id);
+    await lockWorkspaceAccess(tx, DEFAULT_WORKSPACE_ID);
+    await tx.$queryRaw`SELECT "id" FROM "PlatformBootstrap" WHERE "id" = 'platform' FOR UPDATE`;
+
+    const [currentActor, bootstrap, workspace, workspaceMembershipCount, projectMembershipCount] = await Promise.all([
+      tx.appUser.findUnique({
+        where: { id: actor.id },
+        select: { id: true, role: true, disabledAt: true, accountAccessVersion: true },
+      }),
+      tx.platformBootstrap.findUnique({ where: { id: "platform" } }),
+      tx.workspace.findUnique({ where: { id: DEFAULT_WORKSPACE_ID }, select: { id: true, createdById: true } }),
+      tx.workspaceMembership.count(),
+      tx.projectMembership.count(),
+    ]);
+    if (
+      currentActor === null
+      || currentActor.role !== "admin"
+      || currentActor.disabledAt !== null
+      || currentActor.accountAccessVersion !== actor.accountAccessVersion
+      || bootstrap === null
+      || bootstrap.initialAdminUserId !== actor.id
+    ) return fail("AUTH_FORBIDDEN");
+    if (
+      bootstrap.initialOwnerUserId !== null
+      || bootstrap.initialOwnerCreatedAt !== null
+      || workspace === null
+      || workspace.createdById !== null
+      || workspaceMembershipCount !== 0
+      || projectMembershipCount !== 0
+    ) return fail("AUTH_ALREADY_INITIALIZED");
+
+    const owner = await tx.appUser.create({ data: { username, role: "user", ...password } });
+    const membership = await tx.workspaceMembership.create({
+      data: {
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        userId: owner.id,
+        role: "owner",
+        accessState: "confirmed",
+      },
+    });
+    await tx.workspace.update({
+      where: { id: DEFAULT_WORKSPACE_ID },
+      data: { createdById: owner.id },
+    });
     await appendWorkspaceMembershipAudit(tx, membership, {
       action: "bootstrapConfirmed",
       previousState: null,
-      actorId: user.id,
-      reason: "fresh_application_bootstrap",
+      actorId: actor.id,
+      reason: "initial_owner_bootstrap",
     });
-    await createBootstrapSignupOfferPolicy(tx, user.id);
     await activateAccountEntitlements({
-      userId: user.id,
-      source: "bootstrap",
-      actorId: user.id,
-      accountAccessVersion: user.accountAccessVersion,
-      evidenceKind: "setup",
+      userId: owner.id,
+      source: "localProvisioning",
+      actorId: actor.id,
+      actorAccountAccessVersion: actor.accountAccessVersion,
+      accountAccessVersion: owner.accountAccessVersion,
+      evidenceKind: "initial-owner-bootstrap",
     }, tx);
-    return createSessionInTransaction(tx, user);
+    const createdAt = new Date();
+    const updated = await tx.platformBootstrap.updateMany({
+      where: { id: "platform", initialAdminUserId: actor.id, initialOwnerUserId: null },
+      data: {
+        initialOwnerUserId: owner.id,
+        initialOwnerCreatedAt: createdAt,
+        adminOnboardingCompletedAt: createdAt,
+        version: { increment: 1 },
+      },
+    });
+    if (updated.count !== 1) return fail("AUTH_ALREADY_INITIALIZED");
+    return Object.freeze({
+      user: Object.freeze({
+        id: owner.id,
+        username: owner.username,
+        role: "user" as const,
+        accountAccessVersion: owner.accountAccessVersion,
+      }),
+      createdAt,
+    });
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -601,7 +685,12 @@ export async function requireApiSessionReadOnly(
   return user;
 }
 
-export async function requirePageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
+/**
+ * Authenticate a page without choosing a product surface.  Admin pages use
+ * this base guard so the user-domain guard cannot redirect them back to
+ * /admin.  The first-admin onboarding gate stays ahead of both surfaces.
+ */
+export async function requireAuthenticatedPageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
   const store = await cookies();
   const user = await readSessionToken(store.get(SESSION_COOKIE_NAME)?.value ?? null, db);
   if (user !== null) {
@@ -609,6 +698,21 @@ export async function requirePageSession(db: PrismaClient = getDb()): Promise<Sa
     return user;
   }
   redirect((await isApplicationInitialized(db)) ? "/login" : "/setup");
+}
+
+/**
+ * Guard ordinary user pages.  Keep the legacy requirePageSession name as an
+ * alias because existing user pages already use it; admins are redirected to
+ * their independent platform surface before any user-domain projection runs.
+ */
+export async function requireUserPageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
+  const user = await requireAuthenticatedPageSession(db);
+  if (user.role === "admin") redirect("/admin");
+  return user;
+}
+
+export async function requirePageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
+  return requireUserPageSession(db);
 }
 
 /**
@@ -622,7 +726,7 @@ export async function requireFirstAdminOnboardingPage(
   const store = await cookies();
   const user = await readSessionToken(store.get(SESSION_COOKIE_NAME)?.value ?? null, db);
   if (user === null) redirect((await isApplicationInitialized(db)) ? "/login" : "/setup");
-  if (await getFirstAdminOnboardingState(user.id, db) !== "pending") redirect("/dashboard");
+  if (await getFirstAdminOnboardingState(user.id, db) !== "pending") redirect(user.role === "admin" ? "/admin" : "/dashboard");
   return user;
 }
 

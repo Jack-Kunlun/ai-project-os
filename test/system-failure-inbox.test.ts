@@ -69,7 +69,6 @@ test("failure inbox projection normalizes unsafe codes and destinations", () => 
 });
 
 type FakeDbOptions = Readonly<{
-  readableProjectIds?: readonly string[];
   currentOverflow?: boolean;
 }>;
 
@@ -175,7 +174,7 @@ function fakeDb(options: FakeDbOptions = {}): PrismaClient {
     projectAction: { findMany: async () => actions },
     projectMcpActionDispatchAttempt: { findMany: async (args: { where?: { status?: unknown } }) => mcpRows(args) },
     workerRuntime: { findUnique: async () => ({ status: "degraded", heartbeatAt: new Date(now.getTime() - 5_000), consecutiveFailures: 1 }) },
-    project: { findMany: async () => (options.readableProjectIds ?? []).map((id) => ({ id })) },
+    project: { findMany: async () => { throw new Error("PROJECT_LOOKUP_FORBIDDEN"); } },
   };
   return db as unknown as PrismaClient;
 }
@@ -233,10 +232,12 @@ test("failure inbox applies window, index-over-job dedupe, stable paging, and no
   assert.deepEqual(paged.map((entry) => entry.entryId), all.entries.map((entry) => entry.entryId));
   assert.equal(new Set(paged.map((entry) => entry.entryId)).size, paged.length);
 
-  const readable = await listSystemFailureInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { ...query, pageSize: 50 }, fakeDb({ readableProjectIds: [projectId] }), { now, cursorKey: key });
-  assert.equal(readable.entries.filter((entry) => entry.source === "indexGeneration").every((entry) => entry.destination === `/projects/${projectId}/memory`), true);
-  assert.equal(readable.entries.find((entry) => entry.safeErrorCode === "AUTOMATION_RULE_PAUSED")?.destination, `/projects/${projectId}/automations`);
+  const readable = await listSystemFailureInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { ...query, pageSize: 50 }, fakeDb(), { now, cursorKey: key });
+  assert.equal(readable.entries.filter((entry) => entry.source === "indexGeneration").every((entry) => entry.destination === null), true);
+  assert.equal(readable.entries.find((entry) => entry.safeErrorCode === "AUTOMATION_RULE_PAUSED")?.destination, null);
   assert.equal(readable.entries.filter((entry) => entry.safeErrorCode?.startsWith("MCP_")).every((entry) => entry.destination === null), true);
+  assert.equal(JSON.stringify(readable).includes("/projects/"), false);
+  assert.equal(JSON.stringify(readable).includes(projectId), false);
 
   const overflow = await listSystemFailureInbox("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", { ...query, pageSize: 50 }, fakeDb({ currentOverflow: true }), { now, cursorKey: key });
   assert.equal(overflow.entries.some((entry) => entry.safeErrorCode === "BACKGROUND_RECENT_AFTER_CURRENT_OVERFLOW"), true);
@@ -285,6 +286,7 @@ test("static source selectors exclude personal and sensitive payload fields", as
   const ruleSelector = source.slice(ruleSelectorStart, ruleSelectorEnd);
   for (const field of ["name", "config", "createdById"]) assert.equal(ruleSelector.includes(`${field}: true`), false, field);
   assert.match(ruleSelector, /consecutiveFailures: true/u);
+  assert.doesNotMatch(source, /readableProjectIds|projectDestination|\/projects\//u);
   assert.doesNotMatch(source, /status: "failed", createdAt: \{ gte: from, lte: now \}/u);
   assert.match(source, /status: "failed", completedAt: \{ gte: from, lte: now \}/u);
 });

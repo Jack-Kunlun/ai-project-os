@@ -4,6 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 
 export const R02_VIEWPORTS = [1440, 1024, 768, 390] as const;
 export const R02_ADMIN_PASSWORD = "BrowserGate2026Password!";
+export const R02_OWNER_PASSWORD = "BrowserOwner2026Password!";
 const R02_WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 export const R02_PUBLIC_ROUTE_EXPECTATIONS = [
@@ -16,9 +17,9 @@ export const R02_PUBLIC_ROUTE_EXPECTATIONS = [
   ["/help", "/help"],
   ["/connections", "/profile/connections/git"],
   ["/connections/mcp", "/profile/connections/mcp"],
-  ["/settings", "/admin/models"],
-  ["/system/memberships", "/admin/users/memberships"],
-  ["/system/operations", "/admin/operations/backups"],
+  ["/settings", "/dashboard"],
+  ["/system/memberships", "/dashboard"],
+  ["/system/operations", "/dashboard"],
 ] as const;
 
 export type R02RouteExpectation = Readonly<{
@@ -30,15 +31,17 @@ export type R02RouteExpectation = Readonly<{
 
 export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
   { path: "/admin", heading: "管理员总览", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取就绪证据…", "正在读取默认路由状态…", "读取中…"] },
-  { path: "/admin/models", heading: "模型供应商", terminal: { kind: "text", name: "从左侧添加第一个模型供应商。" }, pendingTexts: ["读取中…"] },
-  { path: "/admin/connectors/git", heading: "Git 连接配置已冻结", terminal: { kind: "text", name: "管理员连接配置已冻结", exact: false } },
+  { path: "/admin/models", heading: "平台模型", terminal: { kind: "text", name: "从左侧添加第一个模型供应商。" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/models/routes", heading: "默认模型路由", terminal: { kind: "text", name: "平台默认模型路由控制面" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/credits", heading: "平台额度", terminal: { kind: "text", name: "平台额度治理" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/operations/probes", heading: "连接探测预算", terminal: { kind: "text", name: "平台连接探测预算" }, pendingTexts: ["读取中…"] },
   { path: "/admin/connectors/mcp", heading: "MCP 工具安全审核", terminal: { kind: "text", name: "当前没有候选记录" }, pendingTexts: ["正在读取安全快照…"] },
-  { path: "/admin/users/memberships", heading: "会员资格管理", terminal: { kind: "text", name: "@browser_admin" }, pendingTexts: ["读取中…"] },
-  { path: "/system/account-access", heading: "账号状态治理", terminal: { kind: "text", name: "@browser_admin" }, pendingTexts: ["读取中…", "读取账号状态…"] },
-  { path: "/admin/audit", heading: "审计中心", terminal: { kind: "text", name: "快照 ", exact: false }, pendingTexts: ["正在读取审计快照…"] },
+  { path: "/admin/users", heading: "用户运营", terminal: { kind: "text", name: "普通用户" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/audit", heading: "审计中心", terminal: { kind: "text", name: "当前筛选", exact: false }, pendingTexts: ["正在读取审计快照…"] },
   { path: "/admin/operations/failures", heading: "失败与待对账收件箱", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取安全异常…"] },
   { path: "/admin/operations/backups", heading: "生产备份与 COS 同步", terminal: { kind: "heading", name: "恢复演练证据" } },
   { path: "/admin/guide", heading: "管理员操作指南", terminal: { kind: "heading", name: "平台模型" } },
+  { path: "/admin/account", heading: "管理员账户", terminal: { kind: "text", name: "维护平台管理员的登录资料与密码。" }, pendingTexts: ["读取中…"] },
 ] as const;
 
 const R02_PROJECT_PENDING_TEXTS = [
@@ -78,16 +81,19 @@ export function r02ProjectGuardRoutes(projectId: string): string[] {
 }
 
 export async function settleR02Admin(page: Page): Promise<void> {
-  await expect(page).toHaveURL(/\/(?:onboarding|dashboard)$/u);
+  await expect(page).toHaveURL(/\/(?:onboarding|admin)$/u);
   if (new URL(page.url()).pathname === "/onboarding") {
-    await page.getByRole("button", { name: "我已查看，进入日常工作区", exact: true }).click();
+    await page.getByLabel("Owner 用户名", { exact: true }).fill("browser_owner");
+    await page.getByLabel("初始密码", { exact: true }).fill("BrowserOwner2026Password!");
+    await page.getByLabel("确认密码", { exact: true }).fill("BrowserOwner2026Password!");
+    await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
   }
-  await expect(page).toHaveURL(/\/dashboard$/u);
+  await expect(page).toHaveURL(/\/admin$/u);
 }
 
 export async function signInR02Admin(page: Page): Promise<void> {
   await page.goto("/setup");
-  await expect(page).toHaveURL(/\/(?:setup|login|onboarding|dashboard)$/u);
+  await expect(page).toHaveURL(/\/(?:setup|login|onboarding|admin)$/u);
   const pathname = new URL(page.url()).pathname;
   if (pathname === "/setup") {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
@@ -100,6 +106,15 @@ export async function signInR02Admin(page: Page): Promise<void> {
     await page.getByRole("button", { name: "登 录", exact: true }).click();
   }
   await settleR02Admin(page);
+}
+
+export async function signInR02Owner(page: Page): Promise<void> {
+  await page.goto("/login");
+  await expect(page).toHaveURL(/\/login$/u);
+  await page.getByLabel("用户名", { exact: true }).fill("browser_owner");
+  await page.getByLabel("密码", { exact: true }).fill(R02_OWNER_PASSWORD);
+  await page.getByRole("button", { name: "登 录", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/u);
 }
 
 export async function expectR02NoHorizontalOverflow(page: Page, surface: string): Promise<void> {
@@ -152,7 +167,7 @@ export async function expectR02MobileDrawer(page: Page): Promise<void> {
   await trigger.click();
   const drawer = page.getByRole("dialog", { name: "管理工作台导航" });
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole("link")).toHaveCount(10);
+  await expect(drawer.getByRole("link")).toHaveCount(12);
   const close = drawer.getByRole("button", { name: "关闭管理导航", exact: true });
   await expect(close).toBeFocused();
   await page.keyboard.down("Shift");

@@ -24,7 +24,10 @@ const githubFailureMessages: Record<string, string> = {
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ password?: string; oidc?: string; github?: string; returnTo?: string }> }) {
   if (!(await isApplicationInitialized())) redirect("/setup");
   const existingSession = await getPageSession();
-  if (existingSession !== null) redirect(await getFirstAdminOnboardingState(existingSession.id) === "pending" ? "/onboarding" : "/dashboard");
+  if (existingSession !== null) {
+    const onboarding = await getFirstAdminOnboardingState(existingSession.id);
+    redirect(onboarding === "pending" ? "/onboarding" : existingSession.role === "admin" ? "/admin" : "/dashboard");
+  }
   const params = await searchParams;
   const notice = params.password === "updated"
     ? "密码已更新，请使用新密码重新登录。"

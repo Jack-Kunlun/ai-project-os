@@ -65,7 +65,7 @@ test("服务端权限入口覆盖所有项目 API 与全局连接设置", async 
   const projectLayout = await readFile(join(process.cwd(), "src/app/projects/[projectId]/layout.tsx"), "utf8");
   const syncPage = await readFile(join(process.cwd(), "src/app/projects/[projectId]/github-syncs/[syncRunId]/page.tsx"), "utf8");
   assert.match(access, /PROJECT_PATH_PATTERN/u);
-  assert.match(access, /path\.startsWith\("\/api\/settings\/"\)/u);
+  assert.match(access, /PLATFORM_API_PREFIXES|\/api\/settings/u);
   assert.match(access, /assertProjectAccess/u);
   assert.match(auth, /authorizeApiRequest\(user, request, db\)/u);
   assert.match(projectLayout, /assertProjectAccess\(user, parsed\.data, "view"\)/u);

@@ -3,19 +3,21 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-export type AdminSection = "overview" | "models" | "git" | "mcp" | "memberships" | "accountAccess" | "audit" | "operations" | "failures" | "guide";
+export type AdminSection = "overview" | "models" | "modelRoutes" | "credits" | "probes" | "git" | "mcp" | "users" | "memberships" | "accountAccess" | "audit" | "operations" | "failures" | "guide" | "account";
 
 const items: Array<{ key: AdminSection; label: string; href: string; description: string }> = [
   { key: "overview", label: "总览", href: "/admin", description: "平台就绪与待处理" },
-  { key: "models", label: "平台模型", href: "/admin/models", description: "托管模型与默认路由" },
-  { key: "git", label: "Git 连接", href: "/admin/connectors/git", description: "用户私有连接边界" },
-  { key: "mcp", label: "MCP 连接", href: "/admin/connectors/mcp", description: "安全认证与只读工具" },
-  { key: "memberships", label: "用户与会员", href: "/admin/users/memberships", description: "会员资格管理" },
-  { key: "accountAccess", label: "账号状态", href: "/system/account-access", description: "停用与恢复治理" },
+  { key: "models", label: "平台模型", href: "/admin/models", description: "供应商与模型连接" },
+  { key: "modelRoutes", label: "默认路由", href: "/admin/models/routes", description: "能力路由与倍率" },
+  { key: "credits", label: "平台额度", href: "/admin/credits", description: "赠送策略与额度治理" },
+  { key: "probes", label: "探测预算", href: "/admin/operations/probes", description: "连接测试预算" },
+  { key: "mcp", label: "MCP 安全", href: "/admin/connectors/mcp", description: "工具认证与平台安全" },
+  { key: "users", label: "用户运营", href: "/admin/users", description: "账号、会员与额度" },
   { key: "audit", label: "审计中心", href: "/admin/audit", description: "安全证据与变更历史" },
   { key: "failures", label: "失败收件箱", href: "/admin/operations/failures", description: "失败与待对账" },
   { key: "operations", label: "备份 / 运维", href: "/admin/operations/backups", description: "受限只读状态" },
   { key: "guide", label: "管理员指南", href: "/admin/guide", description: "职责与安全边界" },
+  { key: "account", label: "管理员账户", href: "/admin/account", description: "登录资料与安全" },
 ];
 
 const focusableSelector = [
@@ -131,14 +133,13 @@ export function AdminShell({ active }: { active: AdminSection }) {
           <div className="min-w-0">
             <p className="text-[12px] font-semibold uppercase tracking-[0.2em] text-indigo-600">Admin workspace</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-950">管理工作台</h2>
-            <p className="mt-1 text-[12px] leading-4 text-slate-500">平台托管模型与安全状态 · 用户 Git / MCP 连接仍归个人配置</p>
+            <p className="mt-1 text-[12px] leading-4 text-slate-500">平台配置、用户治理、安全审计与运维状态</p>
           </div>
-          <Link href="/dashboard" className="mt-3 inline-flex rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-200 hover:text-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">返回用户工作台</Link>
         </div>
         <nav aria-label="管理工作台导航" className="mt-3 grid gap-1">
           <NavigationLinks active={active} />
         </nav>
-        <p className="mt-3 px-3 text-[12px] leading-4 text-slate-400">管理员只治理平台策略与安全证据，不代持个人凭据；真实外部调用需单独现场验收。</p>
+        <p className="mt-3 px-3 text-[12px] leading-4 text-slate-400">平台管理员不进入项目、团队和用户工作区，也不代持用户个人凭据。</p>
     </aside>
 
     {drawerOpen ? <div className="fixed inset-0 z-50 lg:hidden" aria-label="移动端管理导航">
@@ -154,7 +155,7 @@ export function AdminShell({ active }: { active: AdminSection }) {
         <nav aria-label="移动端管理工作台导航" className="mt-4 grid gap-2">
           <NavigationLinks active={active} onNavigate={() => setDrawerOpen(false)} />
         </nav>
-        <p className="mt-5 rounded-2xl bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">Git 与 MCP 是每个用户自己的连接。这里仅显示平台级治理入口与安全认证状态，不会读取个人 Token。</p>
+        <p className="mt-5 rounded-2xl bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">这里仅提供平台运营与安全治理能力，不展示用户项目、团队或个人连接。</p>
       </div>
     </div> : null}
   </>;

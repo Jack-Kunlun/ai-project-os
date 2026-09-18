@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
+import { AdminHeader } from "@/components/admin-header";
 import { AdminPageFrame } from "@/components/admin-shell";
 
 type Subscription = {
@@ -12,8 +13,6 @@ type Subscription = {
   startsAt: string;
   expiresAt: string;
   revokedAt: string | null;
-  revocationReason: string | null;
-  note: string | null;
   version: number;
   updatedAt: string;
 };
@@ -21,7 +20,6 @@ type Item = {
   id: string;
   username: string;
   displayName: string | null;
-  email: string | null;
   role: "admin" | "user";
   disabledAt: string | null;
   membershipSubscription: Subscription | null;
@@ -29,8 +27,6 @@ type Item = {
     id: string;
     status: "pending" | "fulfilled" | "rejected" | "withdrawn";
     statusVersion: number;
-    requestReason: string | null;
-    rejectionReason: string | null;
     submittedAt: string;
     fulfilledAt: string | null;
     rejectedAt: string | null;
@@ -42,18 +38,11 @@ type Preview = {
   action: Action;
   user: { id: string; username: string; disabledAt: string | null };
   current: { state: string; version: number; startsAt: string | null; expiresAt: string | null; status: "active" | "revoked" | null };
-  target: { state: string; version: number; startsAt: string; expiresAt: string; status: "active" | "revoked"; revokedAt: string | null; revocationReason: string | null; note: string | null };
+  target: { state: string; version: number; startsAt: string; expiresAt: string; status: "active" | "revoked"; revokedAt: string | null };
   dependencyStats: {
     nonTerminalPersonalDelegations: number;
     effectivePersonalRouteSelections: number;
     publishedPersonalIndexes: number;
-    affectedProjects: Array<{
-      projectId: string;
-      projectName: string;
-      nonTerminalPersonalDelegations: number;
-      effectivePersonalRouteSelections: number;
-      publishedPersonalIndexes: number;
-    }>;
     personalModelAutomationsAffected: number;
     platformAutomationImpact: "unaffected";
     gitMcpImpact: "unaffected";
@@ -129,7 +118,7 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
   }, [load]);
 
   return <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-    <AppHeader username={username} active={adminMode ? "admin" : "profile"} isSystemAdmin={adminMode} />
+    {adminMode ? <AdminHeader username={username} /> : <AppHeader username={username} active="profile" />}
     <AdminPageFrame active="memberships" showSidebar={adminMode}><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
@@ -325,7 +314,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
           <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-semibold text-slate-600">{item.role === "admin" ? "系统管理员" : "普通用户"}</span>
           <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${subscription?.status === "active" && new Date(subscription.expiresAt) > new Date() ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{statusLabel(subscription)}</span>
         </div>
-        <p className="mt-2 text-xs text-slate-500">@{item.username}{item.email ? ` · ${item.email}` : ""}</p>
+        <p className="mt-2 text-xs text-slate-500">@{item.username}</p>
         <p className="mt-2 text-xs text-slate-400">{subscription ? `到期：${date(subscription.expiresAt)} · 版本 ${subscription.version}` : "尚未授予会员资格"}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -337,7 +326,7 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
         {subscription && subscription.status === "active" && new Date(subscription.expiresAt) > new Date() ? <button type="button" disabled={pending} onClick={() => void requestPreview("revoke")} className="rounded-xl border border-rose-200 px-4 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50">预览撤销</button> : null}
       </div>
     </div>
-    {item.membershipApplication ? <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-xs leading-5 text-indigo-900"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">会员申请：{item.membershipApplication.status === "pending" ? "待处理" : item.membershipApplication.status === "fulfilled" ? "已完成" : item.membershipApplication.status === "rejected" ? "已拒绝" : "已撤回"}</span><span>提交于 {date(item.membershipApplication.submittedAt)}</span></div>{item.membershipApplication.requestReason ? <p className="mt-2 text-indigo-800">申请说明：{item.membershipApplication.requestReason}</p> : null}{item.membershipApplication.status === "pending" ? <button type="button" disabled={pending} onClick={() => void requestRejectPreview()} className="mt-3 rounded-xl border border-indigo-200 bg-white px-3 py-2 font-semibold text-indigo-700 disabled:opacity-50">预览拒绝申请</button> : item.membershipApplication.rejectionReason ? <p className="mt-2 text-rose-700">处理原因：{item.membershipApplication.rejectionReason}</p> : null}</div> : null}
+    {item.membershipApplication ? <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-xs leading-5 text-indigo-900"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-semibold">会员申请：{item.membershipApplication.status === "pending" ? "待处理" : item.membershipApplication.status === "fulfilled" ? "已完成" : item.membershipApplication.status === "rejected" ? "已拒绝" : "已撤回"}</span><span>提交于 {date(item.membershipApplication.submittedAt)}</span></div>{item.membershipApplication.status === "pending" ? <button type="button" disabled={pending} onClick={() => void requestRejectPreview()} className="mt-3 rounded-xl border border-indigo-200 bg-white px-3 py-2 font-semibold text-indigo-700 disabled:opacity-50">预览拒绝申请</button> : null}</div> : null}
     <label className="mt-4 block">
       <span className="mb-2 block text-xs font-semibold text-slate-500">授予 / 延期备注</span>
       <input value={note} onChange={(event) => changedNote(event.target.value)} placeholder="可选，仅用于审计" maxLength={500} className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" />
@@ -356,13 +345,8 @@ function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void
         <span className="rounded-full bg-white px-3 py-1 text-[12px] font-semibold text-indigo-700">预览有效至 {dateTime(preview.previewExpiresAt)}</span>
       </div>
       <div className="mt-3 rounded-xl border border-indigo-100 bg-white/70 p-3 text-xs leading-6 text-indigo-900">
-        <p className="font-semibold">受影响项目（{preview.dependencyStats.affectedProjects.length}）</p>
-        {preview.dependencyStats.affectedProjects.length === 0 ? <p>没有检测到个人模型依赖。</p> : <div className="mt-2 max-h-48 space-y-2 overflow-y-auto pr-2">
-          {preview.dependencyStats.affectedProjects.map((project) => <div key={project.projectId} className="rounded-lg border border-indigo-100 px-3 py-2">
-            <p className="font-semibold text-indigo-950">{project.projectName}</p>
-            <p>未终态个人委托 {project.nonTerminalPersonalDelegations} 项 · 有效个人路由 {project.effectivePersonalRouteSelections} 项 · 已发布个人索引 {project.publishedPersonalIndexes} 项</p>
-          </div>)}
-        </div>}
+        <p className="font-semibold">个人模型依赖摘要</p>
+        <p>未终态个人委托 {preview.dependencyStats.nonTerminalPersonalDelegations} 项 · 有效个人路由 {preview.dependencyStats.effectivePersonalRouteSelections} 项 · 已发布个人索引 {preview.dependencyStats.publishedPersonalIndexes} 项</p>
       </div>
       <p className="mt-3 text-xs leading-6 text-indigo-900">个人模型自动化影响 {preview.dependencyStats.personalModelAutomationsAffected} 项；平台自动化、Git 与 MCP 配置不受影响。</p>
       {preview.blockingCategories.length > 0 ? <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs leading-6 text-amber-800">检测到未解除的个人模型依赖，当前只能关闭确认；解除依赖后请重新预览。</p> : null}

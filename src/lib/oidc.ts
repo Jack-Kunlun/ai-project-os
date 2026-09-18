@@ -23,6 +23,7 @@ export const OIDC_STATE_COOKIE_NAME = "ai_project_os_oidc_state" as const;
 const OIDC_ATTEMPT_LIFETIME_MS = 10 * 60 * 1_000;
 const OIDC_MAX_ACTIVE_ATTEMPTS = 200;
 const OIDC_ATTEMPT_LOCK_NAMESPACE = 20260830;
+const PLATFORM_BOOTSTRAP_LOCK_ID = 781452903;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DOMAIN_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))+$/u;
 const SCOPE_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/u;
@@ -125,6 +126,22 @@ type Discovery = z.infer<typeof discoverySchema>;
 
 function fail(code: OidcErrorCode): never {
   throw new OidcError(code);
+}
+
+/**
+ * OIDC is a user-domain login path.  The check is repeated after the
+ * transaction-scoped bootstrap lock in the callback so a pending first-owner
+ * setup cannot be bypassed by creating a user or membership through OIDC.
+ */
+async function assertPlatformBootstrapReady(db: Prisma.TransactionClient): Promise<void> {
+  await db.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${PLATFORM_BOOTSTRAP_LOCK_ID})`);
+  const bootstrap = await db.platformBootstrap.findUnique({
+    where: { id: "platform" },
+    select: { initialOwnerUserId: true, adminOnboardingCompletedAt: true },
+  });
+  if (bootstrap === null || bootstrap.initialOwnerUserId === null || bootstrap.adminOnboardingCompletedAt === null) {
+    return fail("OIDC_PROVIDER_NOT_VERIFIED");
+  }
 }
 
 function uuid(value: unknown): string {
@@ -388,6 +405,7 @@ export async function beginOidcLogin(input: Readonly<{ providerId: unknown; redi
   const verifier = randomBytes(48).toString("base64url");
   const expiresAt = new Date(Date.now() + OIDC_ATTEMPT_LIFETIME_MS);
   const provider = await db.$transaction(async (tx) => {
+    await assertPlatformBootstrapReady(tx);
     await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${providerId}::text, ${OIDC_ATTEMPT_LOCK_NAMESPACE}))`);
     const lockedProvider = await tx.oidcProvider.findUnique({ where: { id: providerId } });
     if (lockedProvider === null) return fail("OIDC_PROVIDER_NOT_FOUND");
@@ -531,6 +549,7 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
   const preferredUsername = safeClaim(payload.preferred_username, 64) ?? claimedEmail?.split("@")[0] ?? subject;
 
   return db.$transaction(async (tx) => {
+    await assertPlatformBootstrapReady(tx);
     if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
     let provider = await tx.oidcProvider.findUnique({ where: { id: attempt.providerId } });
     if (provider === null || provider.status !== "verified" || provider.disabledAt !== null) return fail("OIDC_PROVIDER_NOT_VERIFIED");

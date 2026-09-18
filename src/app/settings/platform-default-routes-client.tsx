@@ -147,10 +147,26 @@ function operationImpactSummary(impact: Impact): string[] {
   ];
 }
 
+function formatMultiplier(bps: number): string {
+  const normalized = (bps / 10_000).toFixed(4).replace(/0+$/u, "").replace(/\.$/u, "");
+  if (!normalized.includes(".")) return `${normalized}.00`;
+  const [, decimals = ""] = normalized.split(".");
+  return decimals.length < 2 ? `${normalized}${"0".repeat(2 - decimals.length)}` : normalized;
+}
+
+function multiplierToBps(value: string): number | null {
+  const normalized = value.trim();
+  if (!/^\d+(?:\.\d{0,4})?$/u.test(normalized)) return null;
+  const [whole, fraction = ""] = normalized.split(".");
+  const bps = Number(`${whole}${fraction.padEnd(4, "0")}`);
+  return Number.isSafeInteger(bps) && bps >= 1 && bps <= 100_000 ? bps : null;
+}
+
 export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }: { refreshToken?: number; onRouteMutation?: () => void }) {
   const { confirm, dialog } = useAppConfirmDialog();
   const [routes, setRoutes] = useState<Route[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [providersLoaded, setProvidersLoaded] = useState(false);
   const [readiness, setReadiness] = useState<Record<Operation, Readiness> | null>(null);
   const [audits, setAudits] = useState<Audit[]>([]);
   const [operation, setOperation] = useState<Operation>("embedding");
@@ -158,7 +174,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
   const [modelId, setModelId] = useState("");
   const [embeddingDimensions, setEmbeddingDimensions] = useState("");
   const [maxOutputTokens, setMaxOutputTokens] = useState("2048");
-  const [quotaMultiplierBps, setQuotaMultiplierBps] = useState("10000");
+  const [quotaMultiplier, setQuotaMultiplier] = useState("1.00");
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -169,6 +185,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
   const requestSequenceRef = useRef(0);
 
   const eligibleProviders = providers.filter((provider) => provider.status === "verified" && provider.disabledAt === null);
+  const draftQuotaMultiplierBps = multiplierToBps(quotaMultiplier);
 
   const reload = useCallback(async () => {
     const requestSequence = ++requestSequenceRef.current;
@@ -192,6 +209,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
         && (currentProviderId === "" || nextProviderId !== currentProviderId);
       setRoutes(payload.routes);
       setProviders(payload.providers);
+      setProvidersLoaded(true);
       setReadiness(payload.readiness.operations);
       setAudits(payload.audits);
       const nextEditingRouteId = currentEditingRouteId !== null
@@ -253,7 +271,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
     setModelId(route.modelId);
     setEmbeddingDimensions(route.embeddingDimensions === null ? "" : String(route.embeddingDimensions));
     setMaxOutputTokens(route.maxOutputTokens === null ? "" : String(route.maxOutputTokens));
-    setQuotaMultiplierBps(String(route.quotaMultiplierBps));
+    setQuotaMultiplier(formatMultiplier(route.quotaMultiplierBps));
     setMessage(null);
   }
 
@@ -264,7 +282,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
     setModelId(defaults.modelId);
     setEmbeddingDimensions(defaults.embeddingDimensions);
     setMaxOutputTokens(defaults.maxOutputTokens);
-    setQuotaMultiplierBps("10000");
+    setQuotaMultiplier("1.00");
   }
 
   async function saveDraft(event: FormEvent<HTMLFormElement>) {
@@ -277,6 +295,12 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
     setPending(true);
     setMessage(null);
     try {
+      const quotaMultiplierBps = multiplierToBps(quotaMultiplier);
+      if (quotaMultiplierBps === null) {
+        setMessage("倍率请输入 0.0001 到 10.0000 之间的数字。 ");
+        setPending(false);
+        return;
+      }
       const response = await fetch(editingRoute === null ? "/api/settings/platform-ai-routes" : `/api/settings/platform-ai-routes/${editingRoute.id}`, {
         method: editingRoute === null ? "POST" : "PATCH",
         headers: { "content-type": "application/json" },
@@ -285,7 +309,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
           modelId,
           embeddingDimensions: operation === "embedding" ? Number(embeddingDimensions) : null,
           maxOutputTokens: operation === "embedding" ? null : Number(maxOutputTokens),
-          quotaMultiplierBps: Number(quotaMultiplierBps),
+          quotaMultiplierBps,
           ...(editingRoute === null ? { operation } : { expectedUpdatedAt: editingRoute.updatedAt }),
         }),
       });
@@ -363,6 +387,8 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
         <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-800">Web AI 路由解析已接入</span>
       </div>
 
+      {providersLoaded && eligibleProviders.length === 0 ? <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4" role="status"><div><p className="text-sm font-semibold text-amber-900">尚无已验证的平台供应商</p><p className="mt-1 text-xs leading-5 text-amber-800">先配置并测试一个平台模型连接，才能创建默认路由。</p></div><a href="/admin/models?returnTo=%2Fadmin%2Fmodels%2Froutes" className="inline-flex min-h-10 items-center rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700">去配置平台模型</a></div> : null}
+
       <form onSubmit={saveDraft} className="mt-6 grid gap-4 rounded-2xl border border-white/80 bg-white p-5 shadow-sm lg:grid-cols-2">
         <label className="text-xs font-semibold text-slate-600">操作
           <select value={operation} disabled={editingRouteId !== null} onChange={(event) => changeOperation(event.target.value as Operation)} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm disabled:bg-slate-100 disabled:text-slate-400">
@@ -384,8 +410,9 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
         </label> : <label className="text-xs font-semibold text-slate-600">最大输出 Token
           <input type="number" min={1} max={65536} value={maxOutputTokens} onChange={(event) => setMaxOutputTokens(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
         </label>}
-        <label className="text-xs font-semibold text-slate-600">倍率（bps）
-          <input type="number" min={1} max={100000} value={quotaMultiplierBps} onChange={(event) => setQuotaMultiplierBps(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+        <label className="text-xs font-semibold text-slate-600">倍率
+          <input type="number" min={0.0001} max={10} step={0.0001} value={quotaMultiplier} onChange={(event) => setQuotaMultiplier(event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" />
+          <span className="mt-1 block text-[12px] font-normal text-slate-400">按倍数填写；当前值 {draftQuotaMultiplierBps === null ? "待填写" : `${formatMultiplier(draftQuotaMultiplierBps)}×（${draftQuotaMultiplierBps} bps）`}。</span>
         </label>
         <div className="flex items-end gap-2"><button disabled={pending || providerId === ""} className="min-w-0 flex-1 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40">{pending ? "处理中…" : editingRouteId === null ? "创建路由草稿" : "保存草稿修改"}</button>{editingRouteId !== null ? <button type="button" disabled={pending} onClick={cancelDraftEdit} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-600 disabled:opacity-40">取消编辑</button> : null}</div>
       </form>
@@ -403,7 +430,7 @@ export function PlatformDefaultRoutesPanel({ refreshToken = 0, onRouteMutation }
         {routes.length === 0 ? <div className="rounded-2xl border border-dashed border-indigo-200 bg-white/70 p-8 text-center text-sm text-slate-500">尚无路由草稿。创建前请先添加并测试一个平台供应商。</div> : routes.map((route) => {
           const provider = providers.find((entry) => entry.id === route.providerConnectionId);
           return <article key={route.id} className="rounded-2xl border border-white/80 bg-white p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900">{operationLabels[route.operation]} · v{route.version}</h3><p className="mt-1 text-xs text-slate-500">{route.modelId} · 倍率 {route.quotaMultiplierBps} bps · {route.status}</p><p className="mt-1 text-xs text-slate-500">供应商：{provider?.name ?? "未知"} · 当前配置版本 {provider?.configurationVersion ?? "未知"} · 已验证版本 {route.validatedProviderConfigurationVersion ?? "未验证"} · {provider?.status ?? "未知"}</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${routeValidationLabel(route, provider) === "已验证" ? "bg-emerald-50 text-emerald-700" : routeValidationLabel(route, provider) === "未验证" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-800"}`}>{routeValidationLabel(route, provider)}</span></div>
+            <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-slate-900">{operationLabels[route.operation]} · v{route.version}</h3><p className="mt-1 text-xs text-slate-500">{route.modelId} · 倍率 {formatMultiplier(route.quotaMultiplierBps)}×（{route.quotaMultiplierBps} bps） · {route.status}</p><p className="mt-1 text-xs text-slate-500">供应商：{provider?.name ?? "未知"} · 当前配置版本 {provider?.configurationVersion ?? "未知"} · 已验证版本 {route.validatedProviderConfigurationVersion ?? "未验证"} · {provider?.status ?? "未知"}</p></div><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${routeValidationLabel(route, provider) === "已验证" ? "bg-emerald-50 text-emerald-700" : routeValidationLabel(route, provider) === "未验证" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-800"}`}>{routeValidationLabel(route, provider)}</span></div>
             <div className="mt-4"><ScopeEvidenceCard title="路由配置边界" evidence={{ scope: `平台默认 · ${operationLabels[route.operation]}`, owner: "平台管理员", payer: "平台额度，由当前发起人扣减", affectedProjects: impact?.routeId === route.id ? `当前影响 ${impact.indexImpact.affectedProjectCount} 个项目` : "可能影响所有未采用个人委派的项目；精确数量请查看影响", latestSuccess: route.validatedAt ? `最近本地验证：${new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(route.validatedAt))}` : "尚未完成本地验证" }} /></div>
             <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={pending || route.status !== "draft"} onClick={() => editDraft(route)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">编辑草稿</button><button type="button" disabled={pending || route.status !== "draft"} onClick={() => void lifecycle(route, "validate")} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">本地验证</button><button type="button" disabled={pending || route.status !== "verified"} onClick={() => void lifecycle(route, "activate")} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">激活控制面路由</button><button type="button" disabled={pending || route.status === "retired"} onClick={() => void lifecycle(route, "retire")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">退役</button><button type="button" disabled={pending} onClick={() => void showImpact(route)} className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 disabled:opacity-40">查看影响</button></div>
           </article>;

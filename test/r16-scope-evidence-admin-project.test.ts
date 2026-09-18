@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("ADM-014 persistent configuration cards expose honest scope evidence", async () => {
-  const [platform, team, automations, settings] = await Promise.all([
+  const [platform, team, automations, settings, probeBudget] = await Promise.all([
     readFile("src/app/admin/models/platform-grant-offer-policy-client.tsx", "utf8"),
     readFile("src/app/team/team-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/automations/project-automations-client.tsx", "utf8"),
     readFile("src/app/settings/settings-client.tsx", "utf8"),
+    readFile("src/app/admin/operations/probes/platform-probe-budget-client.tsx", "utf8"),
   ]);
 
   assert.match(platform, /ScopeEvidenceCard/u);
@@ -39,20 +40,16 @@ test("ADM-014 persistent configuration cards expose honest scope evidence", asyn
   assert.match(settings, /当前有 \$\{provider\._count\.platformDefaultAiRoutes\} 条活动默认路由引用/u);
   assert.match(settings, /尚无活动默认路由引用；暂无项目影响证据/u);
   assert.doesNotMatch(settings, /affectedProjects:\s*provider\._count\.platformDefaultAiRoutes > 0 \? `被/u);
-  assert.match(settings, /function probeBudgetEvidence\(budget: ProbeBudgetSummary \| null, loading: boolean\)/u);
-  assert.match(settings, /尚未启用预算；暂无探测预算状态证据/u);
+  assert.match(probeBudget, /function budgetEvidence\(budget: ProbeBudgetSummary \| null, loading: boolean\)/u);
+  assert.match(probeBudget, /尚未启用预算；暂无探测预算状态证据/u);
+  assert.match(probeBudget, /ScopeEvidenceCard title="平台探测预算边界"/u);
+  assert.match(probeBudget, /平台 · 供应商连通性探测/u);
+  assert.match(probeBudget, /平台管理员/u);
+  assert.match(probeBudget, /平台探测预算/u);
+  assert.match(probeBudget, /项目不适用 · 仅平台供应商连通性探测/u);
+  assert.match(probeBudget, /budgetEvidence\(budget, loading\)/u);
 
-  const budgetPanelStart = settings.indexOf("function PlatformProviderProbeBudgetPanel()");
-  assert.ok(budgetPanelStart >= 0, "PlatformProviderProbeBudgetPanel must remain identifiable");
-  const budgetPanel = settings.slice(budgetPanelStart);
-  assert.match(budgetPanel, /ScopeEvidenceCard title="平台探测预算边界"/u);
-  assert.match(budgetPanel, /平台 · 供应商连通性探测/u);
-  assert.match(budgetPanel, /平台管理员/u);
-  assert.match(budgetPanel, /平台探测预算/u);
-  assert.match(budgetPanel, /项目不适用 · 仅平台供应商连通性探测/u);
-  assert.match(budgetPanel, /probeBudgetEvidence\(budget, loading\)/u);
-
-  for (const source of [platform, team, automations, settings]) {
+  for (const source of [platform, team, automations, settings, probeBudget]) {
     const pixelValues = [...source.matchAll(/(?<![\d.])(\d+)px/gu)].map((match) => Number(match[1]));
     assert.deepEqual(pixelValues.filter((value) => value > 3 && value % 2 === 1), [], "odd pixel values over 3 are prohibited");
   }

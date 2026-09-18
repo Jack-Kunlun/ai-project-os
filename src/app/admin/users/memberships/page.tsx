@@ -1,7 +1,7 @@
-import { MembershipsClient } from "@/app/system/memberships/memberships-client";
+import { redirect } from "next/navigation";
 import { requireSystemAdminPage } from "@/lib/system-admin";
 
 export default async function AdminMembershipsPage() {
-  const user = await requireSystemAdminPage();
-  return <MembershipsClient username={user.username} adminMode={user.role === "admin"} />;
+  await requireSystemAdminPage();
+  redirect("/admin/users");
 }

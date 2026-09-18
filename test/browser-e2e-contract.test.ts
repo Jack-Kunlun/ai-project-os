@@ -66,7 +66,7 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(webAiConfirmation, /executeRequests\)\.toHaveLength\(1\)/u);
   assert.match(webAiConfirmation, /consumedAt: null, consumedJobId: null/u);
   assert.doesNotMatch(webAiConfirmation, /route\.(?:fetch|fulfill)/u);
-  assert.match(systemAudit, /administrator audit center exposes new safe sources/u);
+  assert.match(systemAudit, /administrator audit center keeps short labels on one line and separates common from advanced filters/u);
   assert.match(systemAudit, /projectGitManualRun/u);
   assert.match(systemAudit, /projectMcpActionApproval/u);
   assert.match(systemAudit, /projectMcpActionRuntime/u);
@@ -78,9 +78,12 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(systemAudit, /option\[value="runFailed"\]/u);
   assert.match(systemAudit, /expect\(sourceValues\)\.not\.toContain\("aiProviderOwnership"\)/u);
   assert.match(systemAudit, /expect\(actionValues\)\.not\.toContain\("legacyOwnershipConfirmed"\)/u);
-  assert.match(systemAudit, /记录 ID：\$\{fixture\.auditId\}/u);
+  assert.match(systemAudit, /activateAccountEntitlements/u);
+  assert.doesNotMatch(systemAudit, /accountEntitlementActivation\.create/u);
+  assert.doesNotMatch(systemAudit, /accountEntitlementActivationAudit\.create/u);
+  assert.match(systemAudit, /getByText\(fixture\.auditId, \{ exact: true \}\)/u);
   assert.match(systemAudit, /assertForbiddenAuditApis/u);
-  assert.doesNotMatch(systemAudit, /route\.(?:fetch|fulfill)/u);
+  assert.match(systemAudit, /page\.route\(detailRoute/u);
   assert.match(gitConnections, /role="status" aria-label="正在加载项目委托安全记录"/u);
   assert.match(gitConnections, /role="status" aria-label="正在加载 Git 连接"/u);
   assert.match(failureInbox, /\/admin\/operations\/failures/u);
@@ -95,16 +98,26 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(r02Spec, /createControlledMembership/u);
   assert.match(r02Spec, /R02ActorKind/u);
   assert.match(r02Spec, /用户名或密码错误/u);
-  assert.match(r02Spec, /goBack\(\)/u);
+  assert.doesNotMatch(r02Spec, /goBack\(\)/u);
+  assert.match(r02Spec, /AI Project OS 平台管理总览/u);
+  assert.match(r02Spec, /toHaveAttribute\("href", "\/admin"\)/u);
   assert.match(r02Spec, /projects\?focus=r02-header/u);
   assert.match(r02Spec, /expectR02NoAccessibilityViolations/u);
   assert.match(r02Spec, /R02_ADMIN_ROUTES/u);
   assert.match(r02Spec, /r02ProjectRoutes/u);
   assert.match(r02Spec, /expectR02MobileDrawer/u);
+  assert.match(r02Spec, /expectR02OverviewErrorState/u);
+  assert.match(r02Spec, /platform model primary action/u);
+  assert.match(r02Spec, /width === 1440 \? 900 : 844/u);
+  assert.match(r02Spec, /width: 390, height: 844/u);
+  assert.match(r02Spec, /\/admin\/connectors\/git/u);
+  assert.match(r02Spec, /未取得/u);
+  assert.match(smoke, /initialPendingActions/u);
+  assert.match(smoke, /无待办/u);
   assert.doesNotMatch(r02Spec, /route\.(?:fetch|fulfill)/u);
   assert.match(r02Support, /R02_VIEWPORTS/u);
   assert.match(r02Support, /keyboard\.press\("Escape"\)/u);
-  assert.match(r02Support, /getByRole\("link"\).*toHaveCount\(10\)/u);
+  assert.match(r02Support, /getByRole\("link"\).*toHaveCount\(12\)/u);
 });
 
 test("CI uses pinned least-privilege actions and runs all bounded gates", async () => {

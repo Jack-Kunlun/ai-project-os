@@ -39,6 +39,7 @@ test(
     const db = getDb();
     const suffix = randomUUID().slice(0, 8);
     const nonAdminId = randomUUID();
+    const businessOwnerId = randomUUID();
     const disabledAdminId = randomUUID();
     const workspaceId = randomUUID();
     const directProjectId = randomUUID();
@@ -60,6 +61,7 @@ test(
       await db.appUser.createMany({
         data: [
           { id: nonAdminId, username: `failure_inbox_user_${suffix}`, role: "user" },
+          { id: businessOwnerId, username: `failure_inbox_owner_${suffix}`, role: "user" },
           { id: disabledAdminId, username: `failure_inbox_disabled_${suffix}`, role: "admin", disabledAt: NOW },
         ],
       });
@@ -76,6 +78,7 @@ test(
       await db.$transaction(async (tx) => {
         await tx.workspace.create({ data: { id: workspaceId, name: `Failure inbox ${suffix}`, slug: `failure-inbox-${suffix}`, createdById: ADMIN_ID } });
         await grantWorkspaceMembership(tx, { workspaceId, userId: ADMIN_ID, role: "owner", actorId: ADMIN_ID, reason: "system_failure_inbox_gate_workspace_owner" });
+        await grantWorkspaceMembership(tx, { workspaceId, userId: businessOwnerId, role: "admin", actorId: ADMIN_ID, reason: "system_failure_inbox_gate_business_owner" });
       });
       const directMembership = await db.$transaction(async (tx) => {
         await tx.project.createMany({
@@ -86,8 +89,10 @@ test(
             { id: archivedProjectId, workspaceId, name: `Archived ${suffix}`, slug: `failure-archived-${suffix}` },
           ],
         });
-        const direct = await grantProjectMembership(tx, { projectId: directProjectId, workspaceId, userId: ADMIN_ID, role: "owner", actorId: ADMIN_ID, reason: "system_failure_inbox_gate_direct_owner" });
-        await grantProjectMembership(tx, { projectId: archivedProjectId, workspaceId, userId: ADMIN_ID, role: "owner", actorId: ADMIN_ID, reason: "system_failure_inbox_gate_archived_owner" });
+        const direct = await grantProjectMembership(tx, { projectId: directProjectId, workspaceId, userId: businessOwnerId, role: "owner", actorId: businessOwnerId, reason: "system_failure_inbox_gate_direct_business_owner" });
+        await grantProjectMembership(tx, { projectId: directProjectId, workspaceId, userId: ADMIN_ID, role: "viewer", actorId: ADMIN_ID, reason: "system_failure_inbox_gate_direct_admin_relation" });
+        await grantProjectMembership(tx, { projectId: archivedProjectId, workspaceId, userId: businessOwnerId, role: "owner", actorId: businessOwnerId, reason: "system_failure_inbox_gate_archived_business_owner" });
+        await grantProjectMembership(tx, { projectId: archivedProjectId, workspaceId, userId: ADMIN_ID, role: "viewer", actorId: ADMIN_ID, reason: "system_failure_inbox_gate_archived_admin_relation" });
         await tx.project.update({ where: { id: archivedProjectId }, data: { archivedAt: NOW } });
         return direct;
       });
@@ -149,7 +154,7 @@ test(
           status: "unknown",
           failureCode: "MEMORY_JOB_SHOULD_BE_DEDUPED",
           reconciliationRequired: true,
-          requestedById: ADMIN_ID,
+          requestedById: businessOwnerId,
           idempotencyKey: idempotencyKey(1),
           createdAt: OLD,
         },
@@ -196,7 +201,7 @@ test(
           nextRunAt: OLD,
           lastRunAt: OLD,
           consecutiveFailures: 3,
-          createdById: ADMIN_ID,
+          createdById: businessOwnerId,
           createdAt: OLD,
           updatedAt: OLD,
         },
@@ -239,7 +244,7 @@ test(
             stateVersion: 3,
             proposerProjectMembershipId: directMembership.id,
             proposerMembershipCreatedAt: directMembership.createdAt,
-            lastActorId: ADMIN_ID,
+            lastActorId: businessOwnerId,
             lastActorProjectMembershipId: directMembership.id,
             lastActorMembershipCreatedAt: directMembership.createdAt,
             grantVersion: 1,
@@ -250,7 +255,7 @@ test(
             networkFingerprint: "5".repeat(64),
             credentialFingerprint: "6".repeat(64),
             connectionConfigurationRevision: 1,
-            connectionOwnerId: ADMIN_ID,
+            connectionOwnerId: businessOwnerId,
             connectionOwnerAccountAccessVersion: 1,
             connectionOwnershipState: "confirmed",
             connectionAllowPrivateNetwork: false,
@@ -266,7 +271,7 @@ test(
             projectId: directProjectId,
             actionId: mcpActionId,
             actorKind: "owner",
-            actorId: ADMIN_ID,
+            actorId: businessOwnerId,
             actorProjectMembershipId: directMembership.id,
             actorMembershipCreatedAt: directMembership.createdAt,
             rpcRequestId: randomUUID(),
@@ -277,7 +282,7 @@ test(
             networkFingerprint: "5".repeat(64),
             credentialFingerprint: "6".repeat(64),
             connectionConfigurationRevision: 1,
-            connectionOwnerId: ADMIN_ID,
+            connectionOwnerId: businessOwnerId,
             connectionOwnerAccountAccessVersion: 1,
             reservationTransactionId: BigInt(1),
             reservationExpiresAt: new Date(NOW.getTime() + 60_000),
@@ -295,7 +300,7 @@ test(
           kind: "autoExtract" as const,
           status: "unknown" as const,
           reconciliationRequired: true,
-          requestedById: ADMIN_ID,
+          requestedById: businessOwnerId,
           idempotencyKey: idempotencyKey(index + 10),
           createdAt: OLD,
         })),
@@ -308,7 +313,7 @@ test(
           status: "failed",
           failureCode: "RECENT_AFTER_CURRENT_LIMIT",
           reconciliationRequired: false,
-          requestedById: ADMIN_ID,
+          requestedById: businessOwnerId,
           idempotencyKey: idempotencyKey(999),
           createdAt: OLD,
           completedAt: RECENT,
@@ -321,15 +326,15 @@ test(
       assert.equal(result.entries.some((entry) => entry.safeErrorCode === "PAUSED_RUN_SHOULD_BE_DEDUPED"), false);
       const pausedRule = result.entries.find((entry) => entry.safeErrorCode === "AUTOMATION_RULE_PAUSED");
       assert.equal(pausedRule?.lifecycle, "requires_owner_review");
-      assert.equal(pausedRule?.destination, `/projects/${directProjectId}/automations`);
+      assert.equal(pausedRule?.destination, null);
       assert.equal(result.entries.some((entry) => entry.safeErrorCode === "RECENT_AFTER_CURRENT_LIMIT"), true);
       assert.deepEqual(result.partialSources, ["workerBackgroundJob"]);
 
-      const destinations = new Map(result.entries.filter((entry) => entry.source === "indexGeneration" && entry.destination !== null).map((entry) => [entry.destination, entry.destination]));
-      assert.equal(destinations.has(`/projects/${directProjectId}/memory`), true);
-      assert.equal(destinations.has(`/projects/${inheritedProjectId}/memory`), true);
-      assert.equal(result.entries.filter((entry) => entry.source === "indexGeneration" && entry.destination === null).length >= 2, true);
+      assert.equal(result.entries.filter((entry) => entry.source === "indexGeneration").every((entry) => entry.destination === null), true);
       assert.equal(result.entries.find((entry) => entry.safeErrorCode === "MCP_UNKNOWN")?.destination, null);
+      assert.equal(JSON.stringify(result).includes("/projects/"), false);
+      assert.equal(JSON.stringify(result).includes(directProjectId), false);
+      assert.equal(JSON.stringify(result).includes(inheritedProjectId), false);
     } finally {
       globalThis.fetch = previousFetch;
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

@@ -50,9 +50,9 @@ docker() {
 container_health() { printf 'healthy\\n'; }
 curl() {
   if [[ "$SCENARIO" == source-version-failure ]]; then
-    printf '{"status":"ok","version":"5.1.1","database":"up","worker":{"status":"up"}}\\n'
+    printf '{"status":"ok","version":"0.2.0-dev.0","database":"up","worker":{"status":"up"}}\\n'
   else
-    printf '{"status":"ok","version":"5.1.2","database":"up","worker":{"status":"up"}}\\n'
+    printf '{"status":"ok","version":"0.2.0-dev.1","database":"up","worker":{"status":"up"}}\\n'
   fi
 }
 assert_maintenance_isolation() { printf 'isolation:verified\\n' >> "$TRACE_FILE"; }

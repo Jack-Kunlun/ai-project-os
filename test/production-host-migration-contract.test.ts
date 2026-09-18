@@ -81,6 +81,22 @@ test("host migration keeps the restored target passive until an explicit guarded
   assert.doesNotMatch(migration, /secret(Key|Id).*printf|AGE-SECRET-KEY.*printf/iu);
 });
 
+test("restore migration accepts only a v0.2 source backup for the v0.3 target", async () => {
+  const restore = await readFile(restorePath, "utf8");
+
+  assert.match(restore, /readonly MIGRATION_SOURCE_VERSION=0\.2\.0-dev\.1/u);
+  assert.match(restore, /readonly MIGRATION_TARGET_TAG=v0\.3\.0-dev\.1/u);
+  assert.match(restore, /validate_backup_release "\$manifest_app_version"/u);
+  assert.match(
+    restore,
+    /if \[\[ "\$RESTORE_MODE" == migration \]\]; then[\s\S]*\[\[ "\$RELEASE_TAG" == "\$MIGRATION_TARGET_TAG" && "\$manifest_app_version" == "\$MIGRATION_SOURCE_VERSION" \]\][\s\S]*fail 'RESTORE_BACKUP_RELEASE_MISMATCH'/u,
+  );
+  assert.match(
+    restore,
+    /\[\[ "\$manifest_app_version" == "\$\{RELEASE_TAG#v\}" \]\] \|\| fail 'RESTORE_BACKUP_RELEASE_MISMATCH'/u,
+  );
+});
+
 test("host bootstrap pins sensitive tooling and installs root-owned runtime copies", async () => {
   const bootstrap = await readFile(bootstrapPath, "utf8");
 
@@ -100,7 +116,7 @@ test("host bootstrap pins sensitive tooling and installs root-owned runtime copi
   assert.match(bootstrap, /install -o root -g root -m 0755/u);
 });
 
-test("portable backup validator accepts only the approved prerelease exception plus stable tags", () => {
+test("portable backup validator accepts only the exact approved production prerelease", () => {
   const code = `
 import runpy
 import sys
@@ -108,19 +124,19 @@ pattern = runpy.run_path(sys.argv[1])["BACKUP_NAME"]
 accepted = pattern.fullmatch(sys.argv[2]) is not None
 raise SystemExit(0 if accepted else 1)
 `;
-  const approved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.2.0-dev.1.Abc123"]);
+  const approved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.3.0-dev.1.Abc123"]);
   assert.equal(approved.status, 0, approved.stderr);
-  const unapproved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.2.0-dev.2.Abc123"]);
+  const unapproved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.2.0-dev.1.Abc123"]);
   assert.notEqual(unapproved.status, 0);
   const stable = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v1.0.0.Abc123"]);
-  assert.equal(stable.status, 0, stable.stderr);
+  assert.notEqual(stable.status, 0);
 });
 
 test("portable backup validator accepts the exact v2 layout and rejects tampering", async (context) => {
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "ai-project-os-portable-backup-"));
   context.after(async () => rm(temporaryDirectory, { force: true, recursive: true }));
 
-  const backupName = "20260902T120000Z-manual.Abc123";
+  const backupName = "20260902T120000Z-pre-deploy-to-v0.3.0-dev.1.Abc123";
   const artifactRoot = path.join(temporaryDirectory, "artifact");
   const backupRoot = path.join(artifactRoot, backupName);
   const hostRoot = path.join(temporaryDirectory, "host");
@@ -163,11 +179,11 @@ test("portable backup validator accepts the exact v2 layout and rejects tamperin
     [
       "format_version=2",
       "created_at=2026-09-02T20:00:00+08:00",
-      "reason=manual",
+      "reason=pre-deploy",
       "compose_project=ai-project-os",
       "writers_quiesced=true",
       "cos_region=ap-hongkong",
-      "app_version=5.1.2",
+      "app_version=0.2.0-dev.1",
       `backup_name=${backupName}`,
       "source_quiesced=true",
       "",
@@ -195,7 +211,7 @@ test("portable backup validator accepts the exact v2 layout and rejects tamperin
     formatVersion: 2,
     backupName,
     createdAt: "2026-09-02T20:00:00+08:00",
-    appVersion: "5.1.2",
+    appVersion: "0.2.0-dev.1",
     archiveObject,
     checksumObject: `${archiveObject}.sha256`,
     archiveSha256: "a".repeat(64),
@@ -241,7 +257,7 @@ test("migration controller dry-run validates its complete local input bundle wit
     migrationPath,
     "--source-host", "8.8.8.8",
     "--target-host", "1.1.1.1",
-    "--release-tag", "v5.1.2",
+    "--release-tag", "v0.3.0-dev.1",
     "--revision", "a".repeat(40),
     "--manifest-object", "cos://ai-project-os-backup-1306016679/production/manifests/latest.json",
     "--root-identity", rootIdentity,

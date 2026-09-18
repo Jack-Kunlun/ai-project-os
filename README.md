@@ -4,17 +4,17 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 外部模型、Git、OIDC 与 MCP 需由每个部署自行配置并现场验证；模型输出与自动抽取结果均需人工审核。项目智能体和 MCP 不具备 Shell、代码修改、Git 写入、合并或部署权限。
 
-当前版本状态：`INTERNAL_DEVELOPMENT` · `0.2.0-dev.1`
+当前版本状态：`CONTROLLED_PRERELEASE` · `0.3.0-dev.1（受控生产预发布）`
 
-正式稳定版基线：无。已发布的内部 prerelease 基线为 `v0.1.0-dev.1`，当前批准的受控生产目标为 `v0.2.0-dev.1`；它仍是预发布，不是稳定版或 GitHub Latest。生产部署入口只精确允许该标签，其他内部开发版本不得进入生产 tag 通道。
+正式稳定版基线：无。已发布的内部 prerelease 基线为 `v0.1.0-dev.1`，当前唯一批准的受控生产目标为 `v0.3.0-dev.1`；它仍是预发布，不是稳定版或 GitHub Latest。生产部署入口只精确允许该标签，旧 `v0.2.0-dev.1` 和其他内部开发版本均不得进入生产 tag 通道。
 
-0.2.x 当前仅表示内部开发版本。平台默认托管模型由系统管理员维护并按平台额度提供；有效会员可在个人中心维护个人模型，但必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用，个人模型不会自动替代平台默认模型。Git 用户私有连接与双确认后的一次性手动只读读取已按当前页面开放。MCP 个人连接与工具发现、管理员净化快照审核、项目连接委托和只读工具授权控制面已开放；远端动作调用、调用审批、派发、结果查看/导入和真实第三方联调仍冻结或未现场验证，不构成已验证的第三方实时能力。
+0.3.0-dev.1 是当前受控生产预发布，重点是平台管理员与普通用户完全分离、清理退场入口、简化平台模型与额度配置，以及收紧管理工作台的安全边界。平台默认托管模型由平台管理员维护并按平台额度提供；有效会员可在个人中心维护个人模型，但必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用，个人模型不会自动替代平台默认模型。Git 用户私有连接与双确认后的一次性手动只读读取已按当前页面开放。MCP 个人连接与工具发现、管理员净化快照审核、项目连接委托和只读工具授权控制面已开放；远端动作调用、调用审批、派发、结果查看/导入和真实第三方联调仍冻结或未现场验证，不构成已验证的第三方实时能力。旧管理员 Git、旧会员和账号矩阵路径只保留受守卫的兼容跳转。
 
 ## 从哪里开始
 
 - 页面指南：启动后打开 <http://127.0.0.1:3000/guide>。
 - 普通用户完整指南：[docs/user-operation-guide.md](docs/user-operation-guide.md)。
-- 系统管理员完整指南：[docs/admin-operation-guide.md](docs/admin-operation-guide.md)。
+- 平台管理员完整指南：[docs/admin-operation-guide.md](docs/admin-operation-guide.md)。
 - 兼容索引：[docs/operation-manual.md](docs/operation-manual.md)。
 - 部署安全基线：[docs/deployment-security.md](docs/deployment-security.md)。
 - GitHub Actions 受控生产部署：[docs/production-deployment.md](docs/production-deployment.md)。
@@ -23,7 +23,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 - 持续集成与浏览器门禁：[docs/continuous-integration.md](docs/continuous-integration.md)。
 - 本地持续交付候选门禁：[docs/local-release.md](docs/local-release.md)。
 - 外部服务现场验收：[docs/external-service-acceptance.md](docs/external-service-acceptance.md)。
-- 当前内部开发状态：[docs/releases/next.md](docs/releases/next.md)。
+- 当前受控预发布状态：[docs/releases/next.md](docs/releases/next.md)。
 - V5.1.2 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.2.md](docs/releases/v5.1.2.md)。
 - V5.1.1 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.1.md](docs/releases/v5.1.1.md)。
 - V5.1.0 内部研发里程碑记录（非正式发布）：[docs/releases/v5.1.0.md](docs/releases/v5.1.0.md)。
@@ -39,8 +39,8 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 推荐首次使用顺序：
 
-1. 启动 Docker Compose，初始化本地管理员。
-2. 由系统管理员在“管理工作台 → 平台模型”（`/admin/models`）添加并测试 OpenAI、DeepSeek、Qwen 或 GLM。
+1. 启动 Docker Compose，初始化平台管理员，再创建独立的普通用户 Owner；两种身份进入不同工作台。
+2. 由平台管理员在“管理工作台 → 平台模型”（`/admin/models`）添加并测试 OpenAI、DeepSeek、Qwen 或 GLM，并在 `/admin/models/routes` 配置默认路由。
 3. 进入项目仓库页查看已有安全摘要；旧版项目 Git 连接、首次关联和同步入口已冻结。个人 Git 连接可在个人中心配置，项目页支持完成双确认后发起一次性手动只读读取；自动化、写入/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准。
 4. 在个人中心创建 MCP 连接并发现工具；管理员在 MCP 审核工作台核对净化快照，项目 MCP 页面再管理连接委托和只读工具授权。项目页面不提供远端动作调用、调用审批、派发、结果查看或结果导入；这些能力仍冻结，不能通过内部 API 绕过页面边界。
 5. 创建项目，在项目“智能控制台”查看当前可用的视觉、抽取、向量与生成能力；项目内不维护独立模型路由。
@@ -57,14 +57,14 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 当前能力
 
-| 能力 | 0.2.0-dev.1 当前开发线行为（承接 v0.1.0-dev.1） |
+| 能力 | 0.3.0-dev.1 受控生产预发布行为 |
 | --- | --- |
 | Dashboard | 汇总跨项目世界状态、配置就绪度、计划风险、运营提醒、推荐下一步和最近任务；项目管理保持为独立顶部入口 |
 | 项目与个人中心 | 项目搜索、创建、软归档、恢复和受限 JSON 导出；个人资料、登录名、密码和活动会话管理 |
 | 多用户与 RBAC | 工作区角色 Owner/Admin/Member/Viewer，项目角色 Owner/Editor/Viewer；服务端对页面和 API 统一鉴权 |
 | 邀请、GitHub 登录与 OIDC | 邮箱限定邀请；GitHub OAuth Authorization Code + PKCE 与个人中心显式绑定；OpenID Connect Authorization Code + PKCE、受控自动建号和企业内网显式授权 |
 | 模型供应商 | 页面配置 OpenAI、DeepSeek、Qwen、GLM 的 API Key、生成/视觉/向量模型并测试连接；密钥不回显 |
-| AI 能力与模型使用方式 | 平台默认托管模型由系统管理员维护；有效会员可维护个人模型，并在连接所有者与项目 Owner 双确认委托生效后按项目使用，个人模型不会自动替代平台默认模型 |
+| AI 能力与模型使用方式 | 平台默认托管模型由平台管理员维护；有效会员可维护个人模型，并在连接所有者与项目 Owner 双确认委托生效后按项目使用，个人模型不会自动替代平台默认模型 |
 | 文件与图片识别 | TXT、Markdown、JSON、CSV、PDF、DOCX、PPTX、XLSX、PNG、JPEG、WebP；本地解析文本，图片和扫描 PDF 经当次授权后调用视觉模型并逐片段审核 |
 | 外部资料 | 抓取公开网页或经明确授权的内网页面；浏览器选择本地文件夹后按文件批量导入；来源版本原子发布 |
 | 多 Git 连接 | 个人 Git 连接、项目双确认委托和一次性手动只读读取已开放；自动化、写入/提交、旧版项目/管理员入口和旧 PAT 路径保持关闭，目标 Git 服务是否可用以连接测试和单次读取结果为准，页面不暴露凭据、CA 或 known_hosts |
@@ -86,13 +86,15 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 配置入口
 
-平台配置仅由 system admin 在管理工作台维护；旧设置/连接器 URL 仅作服务端角色检查后的兼容跳转。业务配置均位于页面：
+平台配置仅由平台管理员在管理工作台维护；旧设置、Git 连接器、会员和账号矩阵 URL 仅作服务端角色检查后的兼容跳转，不是当前正常入口。业务配置均位于页面：
 
-- `/admin/models`：平台模型、能力、自定义模型 ID 与 API Key（system admin）。
-- `/admin/connectors/git`：Git 连接迁移/冻结说明（system admin），不接收用户凭据。
-- `/admin/connectors/mcp`：MCP 净化快照、候选详情与管理员不可变审核工作台（system admin），不接收用户 Bearer Token。
-- `/admin/users/memberships`：用户会员资格（system admin）。
-- `/system/account-access`：账号停用/恢复与只读有效访问矩阵（system admin）；系统管理员角色不隐含任何工作区或项目 Owner 权限。
+- `/admin/models`：平台供应商与模型连接（平台管理员）。
+- `/admin/models/routes`：平台默认能力路由和倍率（平台管理员）。
+- `/admin/credits`：新注册赠送策略、额度记录和人工治理（平台管理员）。
+- `/admin/operations/probes`：连接探测预算和告警阈值（平台管理员）。
+- `/admin/connectors/mcp`：MCP 净化快照、候选详情与管理员不可变安全审核（平台管理员），不接收用户 Bearer Token。
+- `/admin/users`：账号、会员和用户额度摘要；用户详情页处理账号停用、恢复和关联记录，停用账号仍可审计且有效结果为 `effective=false`（平台管理员）。
+- `/admin/audit`、`/admin/operations/failures`：审计证据、失败和待对账状态（平台管理员）。
 - `/admin/operations/backups`：备份/运维状态（按初始超级管理员规则）。
 - `/team`：成员、邀请和 OIDC。
 - `/projects/:projectId/control`：项目 AI 能力状态和模型使用方式（不维护独立项目路由）。
@@ -135,7 +137,7 @@ AI Project OS 是一套可本地部署、证据驱动的项目运营工作台。
 
 ## 当前限制
 
-- 当前 `0.2.0-dev.1` 内部开发版本承接 `v0.1.0-dev.1` 的默认工作区；数据模型支持多个工作区，但页面尚未提供工作区创建和切换。平台默认模型由系统管理员维护；有效会员个人模型须经过连接所有者与项目 Owner 双确认委托，不会自动替代平台默认模型。旧版项目 GitHub、管理员 Git 连接和旧 MCP attestation 直写入口保持冻结；个人 MCP 工具发现、管理员净化审核与项目 delegation/grant 控制面已开放。
+- 当前 `0.3.0-dev.1` 是受控生产预发布，仍不是稳定版或 GitHub Latest。平台管理员只负责平台运营和安全治理，不进入项目、团队或用户工作区；普通用户负责自己的项目和个人连接。个人 MCP 工具发现、管理员净化审核与项目委托/只读授权控制面已开放；旧管理员 Git、旧会员和账号矩阵入口只保留受守卫的兼容跳转。
 - 数据库 trigger 只约束正常应用写入的一致性，不是抵抗已取得应用数据库凭据或任意 SQL 能力的独立授权边界；生产需隔离 runtime 与 migrator 角色并限制网络访问。账号访问代次迁移不支持旧、新应用滚动并存，部署必须在维护窗口停止旧 app/worker、执行迁移，再启动新版本。
 - OIDC 不提供“按邮箱自动合并已有本地账户”。已有账户需要未来的显式身份绑定流程；当前遇到相同邮箱会拒绝登录，避免账户劫持。
 - Git 通用连接器和 GitHub 扩展资料的既有外发入口在迁移期间冻结；Issue、PR、Release 等扩展资料的个人连接能力属于 planned 范围。
@@ -177,7 +179,7 @@ docker compose ps --all
 
 Compose 默认使用三个命名卷：`ai-project-os-pgdata`、`ai-project-os-secrets`、`ai-project-os-uploads`。不要执行 `docker compose down -v`，该命令会删除数据库、凭据主密钥和上传文件。需要并行运行一次性候选验收时，必须同时改用独立 `POSTGRES_PORT`、`APP_PORT`、`AI_PROJECT_OS_PGDATA_VOLUME`、`AI_PROJECT_OS_SECRETS_VOLUME` 和 `AI_PROJECT_OS_UPLOADS_VOLUME`；不要让候选栈复用正式卷。
 
-面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true` 与实际 HTTPS `AI_PROJECT_OS_PUBLIC_ORIGIN`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。生产工作流当前仅精确允许已批准的 `v0.2.0-dev.1` 标签；cluster-admin、migrator、runtime、writer 和 inventory-reader 密码若包含 URL 保留字符，需要先进行 URL 编码。
+面向局域网外提供服务前，应按[部署安全基线](docs/deployment-security.md)配置 HTTPS、入口限流和可信反向代理，并设置 `AI_PROJECT_OS_SECURE_COOKIES=true` 与实际 HTTPS `AI_PROJECT_OS_PUBLIC_ORIGIN`。仓库提供的 Nginx 示例必须替换域名与证书路径并通过 `nginx -t` 后才能启用。生产工作流当前仅精确允许已批准的 `v0.3.0-dev.1` 标签；cluster-admin、migrator、runtime、writer 和 inventory-reader 密码若包含 URL 保留字符，需要先进行 URL 编码。
 
 ### 现有卷的数据库账号升级
 
@@ -237,13 +239,14 @@ pnpm exec prisma migrate status --config prisma.config.ts
 
 - `/dashboard`：跨项目概览、就绪度和最近任务。
 - `/projects`：项目管理。
-- `/admin`：system admin 管理工作台总览。
-- `/admin/models`：system admin 平台模型。
-- `/admin/connectors/git`：system admin Git 连接迁移/冻结说明，不接收凭据。
-- `/admin/connectors/mcp`：system admin MCP 候选与不可变审核工作台，不接收凭据。
-- `/system/account-access`：system admin 账号状态治理与只读有效访问矩阵；停用账号的所有矩阵结果均为 `effective=false`，且 system admin 不隐含 workspace/project Owner 权限。
-- `/admin/users/memberships`：system admin 用户与会员。
-- `/admin/operations/backups`：system admin 备份/运维状态。
+- `/admin`：平台管理员管理工作台总览，不展示项目、团队或个人连接。
+- `/admin/models`：平台管理员配置平台模型连接。
+- `/admin/models/routes`：平台管理员配置默认能力路由。
+- `/admin/credits`：平台管理员管理赠送策略和额度记录。
+- `/admin/operations/probes`：平台管理员配置连接探测预算。
+- `/admin/connectors/mcp`：平台管理员执行 MCP 候选与不可变安全审核，不接收个人凭据。
+- `/admin/users`：平台管理员管理用户、会员、账号状态和额度摘要。
+- `/admin/operations/backups`：平台管理员查看受限备份/运维状态。
 - `/settings`、`/connections`、`/connections/mcp`：兼容跳转，非 admin 返回用户工作台。
 - `/team`：成员、邀请和 OIDC。
 - `/notifications`：通知中心。
@@ -265,4 +268,4 @@ pnpm exec prisma migrate status --config prisma.config.ts
 
 ## 历史材料
 
-V1 CLI 手册和历史运行合同继续保留用于兼容与审计，但不覆盖当前 `0.2.0-dev.1` 开发线的页面能力。当前能力、限制和使用方式以本 README、页面指南和操作手册为准；0.2.x 改造目标仍以需求文档和开发计划为准，不视为已交付能力。
+V1 CLI 手册和历史运行合同继续保留用于兼容与审计，但不覆盖当前 `0.3.0-dev.1` 受控生产预发布的页面能力。当前能力、限制和使用方式以本 README、页面指南和操作手册为准；`0.3.0-dev.1` 仍是预发布，不是稳定版或 GitHub Latest。当前批准的生产目标为 `v0.3.0-dev.1`。

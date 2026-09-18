@@ -752,12 +752,11 @@ test("error mapping exposes stable control-plane codes and runtime projection re
   assert.match(routesClient, /expectedUpdatedAt: route\.updatedAt/u);
 });
 
-test("管理员连接冻结页明确个人所有权、受控委托和通用 MCP 入口边界", async () => {
+test("MCP 安全说明明确个人所有权且不恢复管理员 Git 入口", async () => {
   const connectorPage = await readFile("src/app/admin/connectors/frozen-connector-page.tsx", "utf8");
-  assert.match(connectorPage, /个人 Git 连接请由用户在个人中心配置/u);
-  assert.match(connectorPage, /个人 MCP 连接请由用户在个人中心配置/u);
-  assert.match(connectorPage, /连接所有者与项目 Owner 发起明确的受控一次性只读委托/u);
-  assert.match(connectorPage, /通用 MCP 动作产品入口仍未开放/u);
-  assert.match(connectorPage, /不代替用户持有或管理私人 Git\/MCP 凭据/u);
+  assert.match(connectorPage, /个人 MCP 连接由用户在个人中心配置/u);
+  assert.match(connectorPage, /管理员只查看必要的安全状态/u);
+  assert.match(connectorPage, /不代替用户持有或管理私人凭据/u);
+  assert.doesNotMatch(connectorPage, /个人 Git|Git\/MCP/u);
   assert.doesNotMatch(connectorPage, /等待个人连接配置和项目授权页面上线/u);
 });

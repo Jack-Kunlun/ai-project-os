@@ -10,7 +10,7 @@ import {
 } from "../scripts/local-release-candidate";
 
 test("candidate identity scopes every destructive target to one generated project", () => {
-  const identity = createCandidateIdentity("m5abcdeffeed", "0.2.0-dev.1");
+  const identity = createCandidateIdentity("m5abcdeffeed", "0.3.0-dev.1");
   assert.match(identity.projectName, /^ai-project-os-candidate-/u);
   assert.ok(Object.values(identity.volumes).every((value) => value.startsWith(identity.projectName)));
   assert.ok(Object.values(identity.images).every((value) => value.startsWith(identity.projectName)));
@@ -47,7 +47,7 @@ test("release version must agree across package, application, and OCI metadata",
     readFile("src/lib/version.ts", "utf8"),
     readFile("Dockerfile", "utf8"),
   ]);
-  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "0.2.0-dev.1");
+  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "0.3.0-dev.1");
   assert.throws(
     () => readCoherentVersion(packageJson, 'export const APP_VERSION = "9.9.9";', dockerfile),
     /LOCAL_RELEASE_VERSION_MISMATCH/u,
@@ -90,4 +90,22 @@ test("local release command is wired to CI without tag, push, or broad cleanup",
   assert.doesNotMatch(runner, /runProcess\("git",\s*\["(?:tag|push)"/u);
   assert.doesNotMatch(runner, /runProcess\("docker",\s*\["push"/u);
   assert.doesNotMatch(runner, /down\s+-v/u);
+});
+
+test("v0.3 bootstrap schema keeps platform administration separate from the workspace owner", async () => {
+  const [schema, bootstrapMigration, runner] = await Promise.all([
+    readFile("prisma/schema.prisma", "utf8"),
+    readFile("prisma/migrations/20260917010000_add_platform_bootstrap/migration.sql", "utf8"),
+    readFile("scripts/run-local-release.ts", "utf8"),
+  ]);
+  const workspaceModel = schema.match(/model Workspace \{[\s\S]*?\n\}/u)?.[0] ?? "";
+  assert.doesNotMatch(workspaceModel, /initialAdminOnboardingCompletedAt/u);
+  assert.match(bootstrapMigration, /initialOwnerUserId.*IS NULL[\s\S]*initialOwnerCreatedAt.*IS NULL[\s\S]*adminOnboardingCompletedAt.*IS NULL/u);
+  assert.match(bootstrapMigration, /DROP TRIGGER IF EXISTS "Workspace_first_admin_onboarding_completion_guard"/u);
+  assert.match(bootstrapMigration, /DROP FUNCTION IF EXISTS "first_admin_onboarding_completion_guard"/u);
+  assert.match(bootstrapMigration, /DROP COLUMN IF EXISTS "initialAdminOnboardingCompletedAt"/u);
+  assert.match(runner, /role", "user", "AppUser"/u);
+  assert.match(runner, /ownerUsername/iu);
+  assert.match(runner, /api\/admin\/onboarding\/complete/u);
+  assert.match(runner, /api\/auth\/login/u);
 });

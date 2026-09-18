@@ -10,16 +10,19 @@ const BROWSER_FAILURE_USER_PASSWORD = "BrowserFailureUser2026!";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 async function settleBrowserAdmin(page: Page): Promise<void> {
-  await expect(page).toHaveURL(/\/(?:onboarding|dashboard)$/u);
+  await expect(page).toHaveURL(/\/(?:onboarding|admin)$/u);
   if (new URL(page.url()).pathname === "/onboarding") {
-    await page.getByRole("button", { name: "我已查看，进入日常工作区", exact: true }).click();
+    await page.getByLabel("Owner 用户名", { exact: true }).fill("browser_owner");
+    await page.getByLabel("初始密码", { exact: true }).fill("BrowserOwner2026Password!");
+    await page.getByLabel("确认密码", { exact: true }).fill("BrowserOwner2026Password!");
+    await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
   }
-  await expect(page).toHaveURL(/\/dashboard$/u);
+  await expect(page).toHaveURL(/\/admin$/u);
 }
 
 async function signInBrowserAdmin(page: Page): Promise<void> {
   await page.goto("/setup");
-  await expect(page).toHaveURL(/\/(?:setup|login|onboarding|dashboard)$/u);
+  await expect(page).toHaveURL(/\/(?:setup|login|onboarding|admin)$/u);
   const landingPath = new URL(page.url()).pathname;
   if (landingPath === "/setup") {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");

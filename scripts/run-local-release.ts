@@ -37,8 +37,9 @@ type LocalReleaseSummary = {
 type JsonRecord = Record<string, unknown>;
 
 type BusinessFixture = {
-  userId: string;
-  username: string;
+  adminId: string;
+  ownerId: string;
+  ownerUsername: string;
   workspaceId: string;
   projectId: string;
   projectSlug: string;
@@ -136,9 +137,9 @@ function assertBusinessSnapshot(value: unknown, fixture: BusinessFixture): JsonR
 
   const appUser = snapshotRows(snapshot, "AppUser")[0]!;
   assertSnapshotRecordShape(appUser, ["accountAccessVersion", "createdAt", "disabledAt", "displayName", "email", "emailVerifiedAt", "id", "role", "updatedAt", "username"], "AppUser");
-  assertSnapshotField(appUser, "id", fixture.userId, "AppUser");
-  assertSnapshotField(appUser, "username", fixture.username, "AppUser");
-  assertSnapshotField(appUser, "role", "admin", "AppUser");
+  assertSnapshotField(appUser, "id", fixture.ownerId, "AppUser");
+  assertSnapshotField(appUser, "username", fixture.ownerUsername, "AppUser");
+  assertSnapshotField(appUser, "role", "user", "AppUser");
   assertSnapshotField(appUser, "email", null, "AppUser");
   assertSnapshotField(appUser, "displayName", null, "AppUser");
   assertSnapshotField(appUser, "emailVerifiedAt", null, "AppUser");
@@ -146,17 +147,16 @@ function assertBusinessSnapshot(value: unknown, fixture: BusinessFixture): JsonR
   assertSnapshotField(appUser, "accountAccessVersion", 1, "AppUser");
 
   const workspace = snapshotRows(snapshot, "Workspace")[0]!;
-  assertSnapshotRecordShape(workspace, ["createdAt", "createdById", "id", "initialAdminOnboardingCompletedAt", "name", "slug", "updatedAt"], "Workspace");
+  assertSnapshotRecordShape(workspace, ["createdAt", "createdById", "id", "name", "slug", "updatedAt"], "Workspace");
   assertSnapshotField(workspace, "id", fixture.workspaceId, "Workspace");
-  assertSnapshotField(workspace, "createdById", fixture.userId, "Workspace");
+  assertSnapshotField(workspace, "createdById", fixture.ownerId, "Workspace");
   assertSnapshotField(workspace, "name", "默认工作区", "Workspace");
   assertSnapshotField(workspace, "slug", "default", "Workspace");
-  assertSnapshotField(workspace, "initialAdminOnboardingCompletedAt", null, "Workspace");
 
   const workspaceMembership = snapshotRows(snapshot, "WorkspaceMembership")[0]!;
   assertSnapshotRecordShape(workspaceMembership, ["accessState", "createdAt", "id", "role", "updatedAt", "userId", "workspaceId"], "WorkspaceMembership");
   assertSnapshotField(workspaceMembership, "workspaceId", fixture.workspaceId, "WorkspaceMembership");
-  assertSnapshotField(workspaceMembership, "userId", fixture.userId, "WorkspaceMembership");
+  assertSnapshotField(workspaceMembership, "userId", fixture.ownerId, "WorkspaceMembership");
   assertSnapshotField(workspaceMembership, "role", "owner", "WorkspaceMembership");
   assertSnapshotField(workspaceMembership, "accessState", "confirmed", "WorkspaceMembership");
 
@@ -173,7 +173,7 @@ function assertBusinessSnapshot(value: unknown, fixture: BusinessFixture): JsonR
   const projectMembership = snapshotRows(snapshot, "ProjectMembership")[0]!;
   assertSnapshotRecordShape(projectMembership, ["accessState", "createdAt", "id", "projectId", "role", "updatedAt", "userId"], "ProjectMembership");
   assertSnapshotField(projectMembership, "projectId", fixture.projectId, "ProjectMembership");
-  assertSnapshotField(projectMembership, "userId", fixture.userId, "ProjectMembership");
+  assertSnapshotField(projectMembership, "userId", fixture.ownerId, "ProjectMembership");
   assertSnapshotField(projectMembership, "role", "owner", "ProjectMembership");
   assertSnapshotField(projectMembership, "accessState", "confirmed", "ProjectMembership");
 
@@ -342,22 +342,33 @@ function readSessionCookie(response: Response): string {
 
 async function seedBusinessFixture(appPort: number, identity: CandidateIdentity): Promise<BusinessFixture> {
   const baseUrl = `http://127.0.0.1:${appPort}`;
-  const username = `candidate-${identity.token}`;
-  const password = `candidate_${randomBytes(24).toString("hex")}`;
+  const adminUsername = `candidate-admin-${identity.token}`;
+  const ownerUsername = `candidate-owner-${identity.token}`;
+  const adminPassword = `candidate_admin_${randomBytes(24).toString("hex")}`;
+  const ownerPassword = `candidate_owner_${randomBytes(24).toString("hex")}`;
   const projectSlug = `candidate-${identity.token}`;
   const sourceContent = "Disposable local release persistence fixture content.";
   const sourceContentHash = createHash("sha256").update(sourceContent, "utf8").digest("hex");
-  const setup = await postJson(`${baseUrl}/api/setup`, { username, password }, 201);
-  const sessionCookie = readSessionCookie(setup.response);
+  const setup = await postJson(`${baseUrl}/api/setup`, { username: adminUsername, password: adminPassword }, 201);
+  const adminSessionCookie = readSessionCookie(setup.response);
   const user = requireRecord(setup.payload.user, "LOCAL_RELEASE_FIXTURE_USER_INVALID");
-  const userId = requireUuid(user.id, "LOCAL_RELEASE_FIXTURE_USER_ID_INVALID");
-  if (user.username !== username || user.role !== "admin") throw new Error("LOCAL_RELEASE_FIXTURE_USER_INVALID");
+  const adminId = requireUuid(user.id, "LOCAL_RELEASE_FIXTURE_ADMIN_ID_INVALID");
+  if (user.username !== adminUsername || user.role !== "admin") throw new Error("LOCAL_RELEASE_FIXTURE_ADMIN_INVALID");
+
+  await postJson(`${baseUrl}/api/admin/onboarding/complete`, { username: ownerUsername, password: ownerPassword }, 201, adminSessionCookie);
+  const ownerLogin = await postJson(`${baseUrl}/api/auth/login`, { username: ownerUsername, password: ownerPassword, remember: true }, 200);
+  const ownerSessionCookie = readSessionCookie(ownerLogin.response);
+  const owner = requireRecord(ownerLogin.payload.user, "LOCAL_RELEASE_FIXTURE_OWNER_INVALID");
+  const ownerId = requireUuid(owner.id, "LOCAL_RELEASE_FIXTURE_OWNER_ID_INVALID");
+  if (owner.username !== ownerUsername || owner.role !== "user" || ownerId === adminId) {
+    throw new Error("LOCAL_RELEASE_FIXTURE_OWNER_INVALID");
+  }
 
   const projectResponse = await postJson(`${baseUrl}/api/projects`, {
     name: `Local release candidate ${identity.token}`,
     slug: projectSlug,
     description: "Disposable local release persistence fixture",
-  }, 201, sessionCookie);
+  }, 201, ownerSessionCookie);
   const project = requireRecord(projectResponse.payload.project, "LOCAL_RELEASE_FIXTURE_PROJECT_INVALID");
   const projectId = requireUuid(project.id, "LOCAL_RELEASE_FIXTURE_PROJECT_ID_INVALID");
   if (project.slug !== projectSlug) {
@@ -366,7 +377,7 @@ async function seedBusinessFixture(appPort: number, identity: CandidateIdentity)
 
   const sourceResponse = await postJson(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/sources`, {
     contentText: sourceContent,
-  }, 201, sessionCookie);
+  }, 201, ownerSessionCookie);
   const source = requireRecord(sourceResponse.payload.source, "LOCAL_RELEASE_FIXTURE_SOURCE_INVALID");
   const sourceId = requireUuid(source.id, "LOCAL_RELEASE_FIXTURE_SOURCE_ID_INVALID");
   if (source.kind !== "manual" || source.contentHash !== sourceContentHash) {
@@ -374,8 +385,9 @@ async function seedBusinessFixture(appPort: number, identity: CandidateIdentity)
   }
 
   return {
-    userId,
-    username,
+    adminId,
+    ownerId,
+    ownerUsername,
     workspaceId: DEFAULT_WORKSPACE_ID,
     projectId,
     projectSlug,
@@ -440,7 +452,7 @@ SELECT jsonb_build_object(
       'updatedAt', u."updatedAt"
     ) ORDER BY u."id")
     FROM "AppUser" AS u
-    WHERE u."id" = ${sqlLiteral(fixture.userId)}::uuid
+    WHERE u."id" = ${sqlLiteral(fixture.ownerId)}::uuid
   ), '[]'::jsonb),
   'Workspace', COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
@@ -448,7 +460,6 @@ SELECT jsonb_build_object(
       'name', w."name",
       'slug', w."slug",
       'createdById', w."createdById"::text,
-      'initialAdminOnboardingCompletedAt', w."initialAdminOnboardingCompletedAt",
       'createdAt', w."createdAt",
       'updatedAt', w."updatedAt"
     ) ORDER BY w."id")
@@ -467,7 +478,7 @@ SELECT jsonb_build_object(
     ) ORDER BY membership."id")
     FROM "WorkspaceMembership" AS membership
     WHERE membership."workspaceId" = ${sqlLiteral(fixture.workspaceId)}::uuid
-      AND membership."userId" = ${sqlLiteral(fixture.userId)}::uuid
+      AND membership."userId" = ${sqlLiteral(fixture.ownerId)}::uuid
   ), '[]'::jsonb),
   'Project', COALESCE((
     SELECT jsonb_agg(jsonb_build_object(
@@ -496,7 +507,7 @@ SELECT jsonb_build_object(
     ) ORDER BY membership."id")
     FROM "ProjectMembership" AS membership
     WHERE membership."projectId" = ${sqlLiteral(fixture.projectId)}::uuid
-      AND membership."userId" = ${sqlLiteral(fixture.userId)}::uuid
+      AND membership."userId" = ${sqlLiteral(fixture.ownerId)}::uuid
   ), '[]'::jsonb),
   'ProjectSource', COALESCE((
     SELECT jsonb_agg(jsonb_build_object(

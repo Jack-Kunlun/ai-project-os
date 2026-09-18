@@ -34,7 +34,7 @@ export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
   "ProjectScan", "ProjectSnapshot", "ProjectAiPolicyRevision", "ProjectAiPolicyOperationProfile",
   "ProjectAiPolicy", "ModelProcessingGrant", "ModelProcessingGrantSource", "ModelProcessingGrantOperation",
   "AiRun", "AiRunAttempt", "AiRunInputSource", "AiAuditEvent", "AiCandidateBatch", "AiCandidateClaim",
-  "AppUser", "AppUserEmailVerificationAudit", "AccountAccessMutationPreview", "AccountAccessAudit",
+  "AppUser", "PlatformBootstrap", "AppUserEmailVerificationAudit", "AccountAccessMutationPreview", "AccountAccessAudit",
   "MembershipSubscription", "MembershipMutationPreview", "MembershipSubscriptionAudit", "PlatformTokenGrant", "PlatformTokenGrantLegacyNullIssuerSnapshot",
   "MembershipApplication", "MembershipApplicationPreview", "MembershipApplicationAudit",
   "PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenLedgerEntry",
@@ -64,6 +64,7 @@ export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
 ] as const);
 
 export const ENTITLEMENT_PROTECTED_RELATIONS = Object.freeze([
+  "PlatformBootstrap",
   "PlatformGrantOfferPolicy",
   "PlatformGrantOfferPolicyAudit",
   "AccountEntitlementActivation",
@@ -200,7 +201,6 @@ export const DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX = Object.freeze([
  * EXECUTE privilege for PUBLIC, runtime, or entitlement-writer roles.
  */
 export const DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX = Object.freeze([
-  triggerFunction("first_admin_onboarding_completion_guard", "", "first-admin onboarding one-way completion trigger"),
   triggerFunction("notification_subject_context_guard", "", "notification subject and intent immutability trigger"),
   triggerFunction("git_connection_governance_security_guard", "", "Git connection security-field governance trigger"),
   triggerFunction("git_connection_configuration_version_guard", "", "Git connection configuration-version trigger"),

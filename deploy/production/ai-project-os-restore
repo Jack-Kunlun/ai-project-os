@@ -23,6 +23,8 @@ readonly RESULT_FILE=/var/lib/ai-project-os/last-host-migration
 readonly DEPLOY_LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 readonly BACKUP_LOCK_FILE=/run/lock/ai-project-os-backup.lock
 readonly POSTGRES_IMAGE='pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff'
+readonly MIGRATION_SOURCE_VERSION=0.2.0-dev.1
+readonly MIGRATION_TARGET_TAG=v0.3.0-dev.1
 
 RESTORE_ROOT=
 EXTRACT_ROOT=
@@ -82,6 +84,18 @@ read_env_value() {
   [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] ||
     fail "RESTORE_ENV_VALUE_INVALID key=$key" 71
   printf '%s' "$value"
+}
+
+validate_backup_release() {
+  local manifest_app_version=$1
+
+  if [[ "$RESTORE_MODE" == migration ]]; then
+    [[ "$RELEASE_TAG" == "$MIGRATION_TARGET_TAG" && "$manifest_app_version" == "$MIGRATION_SOURCE_VERSION" ]] ||
+      fail 'RESTORE_BACKUP_RELEASE_MISMATCH' 68
+    return
+  fi
+
+  [[ "$manifest_app_version" == "${RELEASE_TAG#v}" ]] || fail 'RESTORE_BACKUP_RELEASE_MISMATCH' 68
 }
 
 compose() {
@@ -213,7 +227,7 @@ wait_for_standby() {
 if [[ $EUID -ne 0 ]]; then
   fail 'RESTORE_ROOT_REQUIRED' 70
 fi
-[[ "$RELEASE_TAG" == v0.2.0-dev.1 || "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'RESTORE_TAG_INVALID' 64
+[[ "$RELEASE_TAG" == v0.3.0-dev.1 ]] || fail 'RESTORE_TAG_INVALID' 64
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'RESTORE_REVISION_INVALID' 65
 [[ "$LATEST_MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
   fail 'RESTORE_MANIFEST_OBJECT_INVALID' 64
@@ -262,7 +276,7 @@ checksum_object=${manifest_values[4]}
 archive_sha256=${manifest_values[5]}
 archive_bytes=${manifest_values[6]}
 source_quiesced=${manifest_values[7]}
-[[ "$manifest_app_version" == "${RELEASE_TAG#v}" ]] || fail 'RESTORE_BACKUP_RELEASE_MISMATCH' 68
+validate_backup_release "$manifest_app_version"
 if [[ "$RESTORE_MODE" == migration && "$source_quiesced" != true ]]; then
   fail 'RESTORE_MIGRATION_BACKUP_NOT_QUIESCED' 68
 fi

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { AdminHeader } from "@/components/admin-header";
 import { AdminPageFrame } from "@/components/admin-shell";
 import { ParentPageLink } from "@/components/parent-page-link";
 import { safeResponseError } from "@/lib/safe-error-presentation";
@@ -131,7 +132,7 @@ export function SystemOperationsClient({
 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
-      <AppHeader username={username} active={adminMode ? "admin" : "profile"} isSystemAdmin={adminMode} />
+      {adminMode ? <AdminHeader username={username} /> : <AppHeader username={username} active="profile" />}
       <AdminPageFrame active="operations" showSidebar={adminMode}><div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
         <div className="mb-5"><ParentPageLink href={adminMode ? "/admin" : "/profile"} label={adminMode ? "返回管理总览" : "返回个人中心"} /></div>
         <section className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10">

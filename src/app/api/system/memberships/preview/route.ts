@@ -16,12 +16,34 @@ const previewSchema = z.object({
   applicationId: z.string().uuid().nullable().optional(),
 }).strict();
 
+function safePreview(preview: Awaited<ReturnType<typeof previewMembership>>) {
+  return {
+    ...preview,
+    target: {
+      state: preview.target.state,
+      version: preview.target.version,
+      startsAt: preview.target.startsAt,
+      expiresAt: preview.target.expiresAt,
+      status: preview.target.status,
+      revokedAt: preview.target.revokedAt,
+    },
+    dependencyStats: {
+      nonTerminalPersonalDelegations: preview.dependencyStats.nonTerminalPersonalDelegations,
+      effectivePersonalRouteSelections: preview.dependencyStats.effectivePersonalRouteSelections,
+      publishedPersonalIndexes: preview.dependencyStats.publishedPersonalIndexes,
+      personalModelAutomationsAffected: preview.dependencyStats.personalModelAutomationsAffected,
+      platformAutomationImpact: preview.dependencyStats.platformAutomationImpact,
+      gitMcpImpact: preview.dependencyStats.gitMcpImpact,
+    },
+  };
+}
+
 async function respond(input: unknown, request: Request): Promise<NextResponse> {
   assertSameOrigin(request);
   const admin = await requireApiSession(request);
   const parsed = previewSchema.parse(input);
   const preview = await previewMembership({ ...parsed, adminUserId: admin.id, days: parsed.days ?? undefined, applicationId: parsed.applicationId ?? undefined }, undefined);
-  return NextResponse.json({ preview }, { headers: { "cache-control": "no-store" } });
+  return NextResponse.json({ preview: safePreview(preview) }, { headers: { "cache-control": "no-store" } });
 }
 
 export async function POST(request: Request) {

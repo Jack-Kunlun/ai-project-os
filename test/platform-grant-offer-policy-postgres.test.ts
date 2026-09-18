@@ -105,9 +105,9 @@ test("versioned signup offer policy bootstraps, rotates atomically, and fails cl
   const bootstrap = await initializeAdmin({ username: `policy_admin_${suffix}`, password: "PolicyGatePassword_2026" }, db);
   const actor: PlatformGrantOfferPolicyActor = bootstrap.user;
 
-  assert.equal(await db.platformTokenGrant.count({ where: { userId: actor.id } }), 1);
-  assert.equal(await db.platformTokenLedgerEntry.count({ where: { userId: actor.id } }), 1);
-  assert.equal(await db.accountEntitlementActivation.count({ where: { userId: actor.id } }), 1);
+  assert.equal(await db.platformTokenGrant.count({ where: { userId: actor.id } }), 0);
+  assert.equal(await db.platformTokenLedgerEntry.count({ where: { userId: actor.id } }), 0);
+  assert.equal(await db.accountEntitlementActivation.count({ where: { userId: actor.id } }), 0);
 
   await runLegacyPreflightCase(db, {
     offerVersion: "legacy-draft-v1",

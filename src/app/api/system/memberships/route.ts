@@ -21,7 +21,36 @@ export async function GET(request: Request) {
       page: url.searchParams.get("page") ?? undefined,
       pageSize: url.searchParams.get("pageSize") ?? undefined,
     });
-    return NextResponse.json(await listMemberships({ ...query, adminUserId: admin.id }), { headers: { "cache-control": "no-store" } });
+    const result = await listMemberships({ ...query, adminUserId: admin.id });
+    return NextResponse.json({
+      ...result,
+      items: result.items.filter((item) => item.role === "user").map((item) => ({
+        id: item.id,
+        username: item.username,
+        displayName: item.displayName,
+        role: "user" as const,
+        disabledAt: item.disabledAt,
+        membershipSubscription: item.membershipSubscription === null ? null : {
+          id: item.membershipSubscription.id,
+          userId: item.membershipSubscription.userId,
+          status: item.membershipSubscription.status,
+          startsAt: item.membershipSubscription.startsAt,
+          expiresAt: item.membershipSubscription.expiresAt,
+          revokedAt: item.membershipSubscription.revokedAt,
+          version: item.membershipSubscription.version,
+          updatedAt: item.membershipSubscription.updatedAt,
+        },
+        membershipApplication: item.membershipApplication === null ? null : {
+          id: item.membershipApplication.id,
+          status: item.membershipApplication.status,
+          statusVersion: item.membershipApplication.statusVersion,
+          submittedAt: item.membershipApplication.submittedAt,
+          fulfilledAt: item.membershipApplication.fulfilledAt,
+          rejectedAt: item.membershipApplication.rejectedAt,
+          withdrawnAt: item.membershipApplication.withdrawnAt,
+        },
+      })),
+    }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return handleApiError(error);
   }

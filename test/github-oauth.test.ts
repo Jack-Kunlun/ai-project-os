@@ -72,7 +72,11 @@ type PlatformTokenLedgerEntryRecord = {
   createdAt: Date;
 };
 
-function fakeDb() {
+function fakeDb(initialBootstrap: Readonly<{ initialOwnerUserId: string | null; adminOnboardingCompletedAt: Date | null }> = {
+  initialOwnerUserId: "99999999-9999-4999-8999-999999999999",
+  adminOnboardingCompletedAt: new Date("2026-09-16T00:00:00.000Z"),
+}) {
+  const bootstrap = { ...initialBootstrap };
   const credentials = new Map<string, ExternalCredential>();
   const attempts = new Map<string, Attempt>();
   const identities = new Map<string, { id: string; userId: string; githubUserId: bigint; login: string; email: string; displayName: string | null; lastLoginAt: Date }>();
@@ -92,11 +96,14 @@ function fakeDb() {
   const accountEntitlementActivations = new Map<string, Record<string, unknown>>();
   const accountEntitlementActivationAudits: Array<Record<string, unknown>> = [];
   let sequence = 0;
-  const user = { id: USER_ID, username: "admin", role: "admin" as const, emailVerifiedAt: null, disabledAt: null, accountAccessVersion: 1 };
+  const user = { id: USER_ID, username: "member", role: "user" as const, emailVerifiedAt: null, disabledAt: null, accountAccessVersion: 1 };
   users.set(user.id, user);
 
   const tx = {
     $executeRaw: async () => 1,
+    platformBootstrap: {
+      findUnique: async () => bootstrap,
+    },
     appUser: {
       findUnique: async ({ where }: { where: { id?: string; email?: string } }) => where.id
         ? users.get(where.id) ?? null
@@ -257,7 +264,7 @@ function fakeDb() {
     ...tx,
     $transaction: async (callback: (client: typeof tx) => unknown) => callback(tx),
   } as unknown as PrismaClient;
-  return { db, credentials, attempts, identities, users, memberships, platformTokenGrants, platformTokenLedgerEntries, accountEntitlementActivations, accountEntitlementActivationAudits, emailVerificationAudits };
+  return { db, credentials, attempts, identities, users, memberships, platformTokenGrants, platformTokenLedgerEntries, accountEntitlementActivations, accountEntitlementActivationAudits, emailVerificationAudits, bootstrap };
 }
 
 test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient token revocation", async () => {
@@ -447,5 +454,58 @@ test("GitHub OAuth rejects a callback without the matching state cookie", async 
     if (originalClientId === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = originalClientId;
     if (originalClientSecret === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = originalClientSecret;
     if (originalPublicOrigin === undefined) delete process.env.AI_PROJECT_OS_PUBLIC_ORIGIN; else process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = originalPublicOrigin;
+  }
+});
+
+test("GitHub OAuth fails closed while first-owner bootstrap is pending, including a callback race", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "ai-project-os-github-bootstrap-"));
+  const originalFetch = globalThis.fetch;
+  const originalClientId = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID;
+  const originalClientSecret = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET;
+  const originalPublicOrigin = process.env.AI_PROJECT_OS_PUBLIC_ORIGIN;
+  const originalMasterKey = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+  process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = "Iv1.1234567890";
+  process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = "github-oauth-secret-for-tests";
+  process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = "http://127.0.0.1:3000";
+  process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(temp, "master.key");
+
+  try {
+    const store = fakeDb({ initialOwnerUserId: null, adminOnboardingCompletedAt: null });
+    await assert.rejects(
+      beginGitHubOAuth({ intent: "login", returnTo: "/login" }, store.db),
+      (error: unknown) => error instanceof GitHubOAuthError && error.code === "GITHUB_OAUTH_NOT_CONFIGURED",
+    );
+    assert.equal(store.attempts.size, 0);
+    assert.equal(store.users.size, 1);
+
+    store.bootstrap.initialOwnerUserId = "99999999-9999-4999-8999-999999999999";
+    store.bootstrap.adminOnboardingCompletedAt = new Date("2026-09-16T00:00:00.000Z");
+    const flow = await beginGitHubOAuth({ intent: "login", returnTo: "/dashboard" }, store.db);
+    store.bootstrap.initialOwnerUserId = null;
+    store.bootstrap.adminOnboardingCompletedAt = null;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/login/oauth/access_token")) return Response.json({ access_token: "github-temporary-access-token", token_type: "bearer", scope: "read:user,user:email" });
+      if (url.endsWith("/user/emails")) return Response.json([{ email: "pending@github.test", primary: true, verified: true }]);
+      if (url.endsWith("/user")) return Response.json({ id: 42, login: "pending-user", name: "Pending User", type: "User" });
+      if (url.includes("/applications/") && init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`unexpected request: ${url}`);
+    };
+
+    await assert.rejects(
+      completeGitHubOAuth({ code: "github-pending-code", state: flow.state, cookieState: flow.state }, store.db),
+      (error: unknown) => error instanceof GitHubOAuthError && error.code === "GITHUB_OAUTH_NOT_CONFIGURED",
+    );
+    assert.equal(store.users.size, 1);
+    assert.equal(store.memberships.length, 0);
+    assert.equal(store.platformTokenGrants.size, 0);
+    assert.equal(store.identities.size, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalClientId === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = originalClientId;
+    if (originalClientSecret === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = originalClientSecret;
+    if (originalPublicOrigin === undefined) delete process.env.AI_PROJECT_OS_PUBLIC_ORIGIN; else process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = originalPublicOrigin;
+    if (originalMasterKey === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE; else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = originalMasterKey;
+    await rm(temp, { recursive: true, force: true });
   }
 });

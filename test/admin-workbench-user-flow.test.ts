@@ -161,7 +161,7 @@ test("Git project repository routes pass the session actor to the service author
 });
 
 test("admin workbench and overview are server protected and dashboard has no global provider count", async () => {
-  const [layout, page, overviewRoute, overviewService, shell, header, profile, dashboardRoute, settings, connections, connectionsMcp, memberships, operations] = await Promise.all([
+  const [layout, page, overviewRoute, overviewService, shell, header, profile, dashboardRoute, settings, connections, connectionsMcp, operations] = await Promise.all([
     readFile("src/app/admin/layout.tsx", "utf8"),
     readFile("src/app/admin/page.tsx", "utf8"),
     readFile("src/app/api/system/overview/route.ts", "utf8"),
@@ -173,7 +173,6 @@ test("admin workbench and overview are server protected and dashboard has no glo
     readFile("src/app/settings/page.tsx", "utf8"),
     readFile("src/app/connections/page.tsx", "utf8"),
     readFile("src/app/connections/mcp/page.tsx", "utf8"),
-    readFile("src/app/system/memberships/page.tsx", "utf8"),
     readFile("src/app/system/operations/page.tsx", "utf8"),
   ]);
 
@@ -185,10 +184,14 @@ test("admin workbench and overview are server protected and dashboard has no glo
   assert.match(overviewService, /platformTokenGrant\.aggregate/u);
   assert.match(overviewService, /platformTokenReservation\.aggregate/u);
   assert.match(overviewService, /status: \{ in: \["reserved", "held"\] \}/u);
+  assert.doesNotMatch(overviewService, /project\.count|first-project/u);
   assert.match(shell, /平台模型/u);
-  assert.match(shell, /Git 连接/u);
-  assert.match(shell, /MCP 连接/u);
-  assert.match(shell, /用户与会员/u);
+  assert.doesNotMatch(shell, /Git 连接|MCP 连接|用户与会员|\/admin\/connectors\/git|\/admin\/users\/memberships/u);
+  assert.match(shell, /MCP 安全/u);
+  assert.match(shell, /用户运营/u);
+  assert.match(shell, /\/admin\/models\/routes/u);
+  assert.match(shell, /\/admin\/credits/u);
+  assert.match(shell, /\/admin\/operations\/probes/u);
   assert.match(shell, /备份 \/ 运维/u);
   assert.doesNotMatch(header, /label: "模型设置"/u);
   assert.doesNotMatch(header, /label: "连接器"/u);
@@ -200,7 +203,6 @@ test("admin workbench and overview are server protected and dashboard has no glo
   assert.doesNotMatch(connections, /user\.role/u);
   assert.match(connectionsMcp, /await requirePageSession\(\);\s*redirect\("\/profile\/connections\/mcp"\)/u);
   assert.doesNotMatch(connectionsMcp, /user\.role/u);
-  assert.match(memberships, /redirect\(user\.role === "admin" \? "\/admin\/users\/memberships" : "\/dashboard"\)/u);
   assert.match(operations, /if \(user\.role !== "admin"\) redirect\("\/dashboard"\)/u);
 });
 
@@ -218,7 +220,7 @@ test("admin overview uses read-only aggregates and exposes no identity or creden
     platformTokenGrant: { aggregate: async (input: { where?: unknown }) => { calls.push(input.where ? "available" : "issued"); return { _sum: input.where ? { remainingTokens: 420 } : { amount: 500_000 } }; } },
     platformTokenReservation: { aggregate: async (input: { where?: unknown }) => { calls.push("reservations"); return JSON.stringify(input.where).includes("settled") ? { _sum: { settledTokens: 35 } } : { _sum: { reservedTokens: 80 } }; } },
     workerRuntime: { findUnique: async () => { calls.push("worker"); return { status: "running", heartbeatAt: new Date(now.getTime() - 1_000), consecutiveFailures: 0 }; } },
-    workspace: { findUnique: async () => ({ createdById: "99999999-9999-4999-8999-999999999999" }) },
+    platformBootstrap: { findUnique: async () => ({ initialAdminUserId: "99999999-9999-4999-8999-999999999999" }) },
   } as unknown as PrismaClient;
 
   const overview = await getSystemOverview(currentAdminActor, db, now);
@@ -246,8 +248,7 @@ test("admin overview keeps control-plane readiness separate from live-call evide
     platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 2 } : { reservedTokens: 3 } }) },
     workerRuntime: { findUnique: async () => ({ status: "running", heartbeatAt: new Date(now.getTime() - 1_000), consecutiveFailures: 2 }) },
     platformDefaultAiRoute: { findMany: async () => [] },
-    project: { count: async () => 0 },
-    workspace: { findUnique: async () => ({ createdById: actorId }) },
+    platformBootstrap: { findUnique: async () => ({ initialAdminUserId: actorId }) },
     providerCallAudit: { groupBy: async () => [{ safeErrorCode: "PROVIDER_TIMEOUT", _count: { _all: 2 } }] },
     projectMcpActionDispatchAttempt: { groupBy: async () => [{ safeErrorCode: "MCP_DISPATCH_FAILED", _count: { _all: 1 } }] },
     backgroundJob: { groupBy: async () => [{ failureCode: "JOB_FAILED", _count: { _all: 3 } }] },
@@ -276,6 +277,7 @@ test("admin overview keeps control-plane readiness separate from live-call evide
   assert.equal(overview.backup.recoveryDrill.status, "not_obtained");
   assert.equal(overview.setupChecklist.find((item) => item.key === "backup-source")?.status, "unknown");
   assert.equal(overview.setupChecklist.find((item) => item.key === "default-routes")?.status, "attention");
+  assert.equal(overview.setupChecklist.some((item) => (item.key as string) === "first-project"), false);
 });
 
 test("admin overview never treats a local recovery drill as production backup readiness", async (context) => {
@@ -320,8 +322,7 @@ test("admin overview never treats a local recovery drill as production backup re
       platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 0 } : { reservedTokens: 0 } }) },
       workerRuntime: { findUnique: async () => null },
       platformDefaultAiRoute: { findMany: async () => [] },
-      project: { count: async () => 0 },
-      workspace: { findUnique: async () => ({ createdById: actorId }) },
+      platformBootstrap: { findUnique: async () => ({ initialAdminUserId: actorId }) },
       providerCallAudit: { groupBy: async () => [] },
       projectMcpActionDispatchAttempt: { groupBy: async () => [] },
       backgroundJob: { groupBy: async () => [] },
@@ -365,6 +366,42 @@ test("admin overview labels MCP failures as bounded control-plane evidence and k
   assert.doesNotMatch(client, /连续失败/u);
 });
 
+test("admin overview pending actions distinguish loading, failed, zero, unknown, and positive evidence", async () => {
+  type Project = (data: {
+    failureTotal: number | null;
+    pendingMcp: number | null;
+    verifiedPlatformModels: number;
+    defaultRoutes: { ready: number | null; total: number };
+  } | null, loading: boolean) => ReadonlyArray<{ value: string; state: "pending" | "clear" | "unknown" }>;
+  const loaded = await import("../src/components/admin-overview-client") as unknown as {
+    projectAdminPendingActions?: Project;
+    default?: { projectAdminPendingActions?: Project };
+    "module.exports"?: { projectAdminPendingActions?: Project };
+  };
+  const project = loaded.projectAdminPendingActions
+    ?? loaded.default?.projectAdminPendingActions
+    ?? loaded["module.exports"]?.projectAdminPendingActions;
+  if (typeof project !== "function") throw new Error("admin overview projection export unavailable");
+  assert.deepEqual(project(null, true).map(({ value, state }) => [value, state]), [
+    ["读取中…", "unknown"],
+    ["读取中…", "unknown"],
+    ["读取中…", "unknown"],
+    ["读取中…", "unknown"],
+  ]);
+  assert.deepEqual(project(null, false).map(({ value, state }) => [value, state]), [
+    ["未取得", "unknown"],
+    ["未取得", "unknown"],
+    ["未取得", "unknown"],
+    ["未取得", "unknown"],
+  ]);
+  const zero = project({ failureTotal: 0, pendingMcp: 0, verifiedPlatformModels: 0, defaultRoutes: { ready: 0, total: 6 } }, false);
+  assert.deepEqual(zero.map(({ value, state }) => [value, state]), [["0", "clear"], ["0", "clear"], ["0", "pending"], ["0/6", "pending"]]);
+  const unknown = project({ failureTotal: null, pendingMcp: null, verifiedPlatformModels: 0, defaultRoutes: { ready: null, total: 6 } }, false);
+  assert.deepEqual(unknown.map(({ value, state }) => [value, state]), [["未取得", "unknown"], ["未取得", "unknown"], ["0", "pending"], ["未取得", "unknown"]]);
+  const positive = project({ failureTotal: 2, pendingMcp: 3, verifiedPlatformModels: 1, defaultRoutes: { ready: 6, total: 6 } }, false);
+  assert.deepEqual(positive.map(({ value, state }) => [value, state]), [["2", "pending"], ["3", "pending"], ["1", "clear"], ["6/6", "clear"]]);
+});
+
 test("admin failure aggregates use terminal completedAt windows, retain null-code evidence, exclude personal BYOK, and include automation and controlled actions", async () => {
   const now = new Date("2026-09-03T00:00:00.000Z");
   const whereBySource: Array<{ source: string; where: Record<string, unknown> }> = [];
@@ -383,8 +420,7 @@ test("admin failure aggregates use terminal completedAt windows, retain null-cod
     platformTokenGrant: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where ? { remainingTokens: 0 } : { amount: 0 } }) },
     platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 0 } : { reservedTokens: 0 } }) },
     workerRuntime: { findUnique: async () => null },
-    project: { count: async () => 0 },
-    workspace: { findUnique: async () => ({ createdById: actorId }) },
+    platformBootstrap: { findUnique: async () => ({ initialAdminUserId: actorId }) },
     // Simulate both ownership classes. A Prisma groupBy applies the predicate
     // before returning rows, so this callback models platform inclusion and
     // personal BYOK exclusion together with the captured where clause.
@@ -439,8 +475,7 @@ test("admin overview keeps backup permission failures distinct from restricted a
     platformTokenGrant: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where ? { remainingTokens: 0 } : { amount: 0 } }) },
     platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 0 } : { reservedTokens: 0 } }) },
     workerRuntime: { findUnique: async () => null },
-    project: { count: async () => 0 },
-    workspace: { findUnique: async () => { throw new Error("permission lookup unavailable"); } },
+    platformBootstrap: { findUnique: async () => { throw new Error("permission lookup unavailable"); } },
   } as unknown as PrismaClient;
 
   const overview = await getSystemOverview(currentAdminActor, db, now);
@@ -468,8 +503,7 @@ test("admin backup projection preserves an invalid source status instead of pres
       platformTokenGrant: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where ? { remainingTokens: 0 } : { amount: 0 } }) },
       platformTokenReservation: { aggregate: async (input: { where?: unknown }) => ({ _sum: input.where && JSON.stringify(input.where).includes("settled") ? { settledTokens: 0 } : { reservedTokens: 0 } }) },
       workerRuntime: { findUnique: async () => null },
-      project: { count: async () => 0 },
-      workspace: { findUnique: async () => ({ createdById: actorId }) },
+      platformBootstrap: { findUnique: async () => ({ initialAdminUserId: actorId }) },
     } as unknown as PrismaClient;
 
     const overview = await getSystemOverview(currentAdminActor, db, now);
@@ -521,7 +555,8 @@ test("admin navigation source implements a persistent desktop rail and focus-con
   assert.match(shell, /addEventListener\("focusin"/u);
   assert.match(shell, /drawerRef\.current\?\.contains/u);
   assert.match(shell, /focus-visible:outline-2/u);
-  assert.match(shell, /用户私有连接边界/u);
+  assert.match(shell, /平台管理员不进入项目、团队和用户工作区/u);
+  assert.match(shell, /不展示用户项目、团队或个人连接/u);
 });
 
 test("user guide and project surfaces keep admin controls out of the ordinary flow", async () => {
@@ -550,23 +585,26 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(userDocs, /一次性手动读取只读取双确认委托中明确的分支、目录和文本文件/u);
   assert.doesNotMatch(userDocs, /迁移期间不启动新的外部仓库访问|个人连接开放后/u);
   assert.match(adminDocs, /管理工作台/u);
-  assert.match(adminDocs, /管理员配置并验证平台托管模型，并为视觉、抽取、向量和生成能力维护默认路由/u);
+  assert.match(adminDocs, /在 `\/admin\/models` 配置并测试/u);
+  assert.match(adminDocs, /在 `\/admin\/models\/routes` 为视觉、抽取、向量和生成能力维护默认路由/u);
   assert.match(adminDocs, /普通用户使用平台额度；只有有效会员可以维护个人模型连接，且个人模型必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用/u);
-  assert.match(adminDocs, /`\/system\/memberships`[^。]*兼容跳转 `\/admin\/users\/memberships`/u);
+  assert.match(adminDocs, /`\/system\/memberships`[^。]*兼容跳转 `\/admin\/users`/u);
   assert.match(adminDocs, /`\/system\/operations` 仅 initial super admin 可用[^。]*兼容跳转 `\/admin\/operations\/backups`/u);
   assert.match(adminDocs, /其他 system admin 按现有安全行为返回不可见页面/u);
   assert.doesNotMatch(adminDocs, /`\/system\/\*`[^。]*把系统管理员导向上述页面/u);
-  assert.match(adminDocs, /legacy 项目仓库新增接口(?:均)?已冻结/u);
+  assert.match(adminDocs, /legacy 项目仓库新增接口(?:均)?已退场/u);
   assert.match(adminDocs, /个人 Git 连接和项目页的一次性手动只读委托由用户和项目 Owner 管理/u);
-  assert.match(adminDocs, /管理员不代替用户持有或配置凭据/u);
+  assert.match(adminDocs, /平台管理员不代替用户持有或配置凭据/u);
   assert.match(readme, /旧版项目 Git 连接、首次关联和同步入口已冻结/u);
   assert.match(readme, /进入项目仓库页查看已有安全摘要/u);
-  assert.match(adminGuide, /管理员配置并验证平台托管模型，并为各项能力设置默认路由/u);
-  assert.match(adminGuide, /普通用户只能消费平台额度，不能配置个人模型；有效会员才可维护自己的模型连接/u);
+  assert.match(adminGuide, /\/admin\/models 只配置和验证平台供应商与模型连接/u);
+  assert.match(adminGuide, /\/admin\/models\/routes 独立维护/u);
+  assert.match(adminGuide, /\/admin\/credits/u);
+  assert.match(adminGuide, /\/admin\/operations\/probes/u);
+  assert.match(adminGuide, /\/admin\/users 统一查看账号、会员和用户额度摘要/u);
+  assert.match(adminGuide, /平台管理员只负责平台运营，不进入项目、团队和用户工作区/u);
   assert.match(readme, /\/admin\/models/u);
-  assert.match(readme, /\/admin\/connectors\/git/u);
   assert.match(readme, /\/admin\/connectors\/mcp/u);
-  assert.match(readme, /\/admin\/users\/memberships/u);
   assert.match(readme, /\/admin\/operations\/backups/u);
   assert.match(manual, /user-operation-guide\.md/u);
   assert.match(manual, /admin-operation-guide\.md/u);

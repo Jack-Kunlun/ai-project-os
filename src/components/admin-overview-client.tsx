@@ -62,9 +62,78 @@ function routeStatusTone(route: SystemOverviewRoute): string {
   return route.controlPlane === "ready" ? "bg-emerald-50 text-emerald-700" : route.controlPlane === "not_obtained" ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-800";
 }
 
+export type AdminPendingActionState = "pending" | "clear" | "unknown";
+
+export type AdminPendingActionProjection = Readonly<{
+  key: "failures" | "mcp" | "models" | "routes";
+  title: string;
+  value: string;
+  state: AdminPendingActionState;
+  detail: string;
+  href: string;
+}>;
+
+export type AdminPendingActionData = Readonly<{
+  failureTotal: number | null;
+  pendingMcp: number | null;
+  verifiedPlatformModels: number;
+  defaultRoutes: Readonly<{ ready: number | null; total: number }>;
+}>;
+
+const pendingActionDefinitions = [
+  { key: "failures" as const, title: "失败聚合", href: "/admin/operations/failures" },
+  { key: "mcp" as const, title: "MCP 待认证", href: "/admin/connectors/mcp" },
+  { key: "models" as const, title: "已验证平台模型", href: "/admin/models" },
+  { key: "routes" as const, title: "默认路由", href: "/admin/models/routes" },
+] as const;
+
+export function projectAdminPendingActions(data: AdminPendingActionData | null, loading: boolean): readonly AdminPendingActionProjection[] {
+  if (loading) {
+    return pendingActionDefinitions.map((definition) => ({
+      ...definition,
+      value: "读取中…",
+      state: "unknown" as const,
+      detail: "正在读取本次测量证据。",
+    }));
+  }
+  if (data === null) {
+    return pendingActionDefinitions.map((definition) => ({
+      ...definition,
+      value: "未取得",
+      state: "unknown" as const,
+      detail: "本次测量未取得证据。",
+    }));
+  }
+  const failure = data.failureTotal === null
+    ? { value: "未取得", state: "unknown" as const, detail: "尚未取得失败聚合证据。" }
+    : data.failureTotal > 0
+      ? { value: data.failureTotal.toLocaleString("zh-CN"), state: "pending" as const, detail: "有平台异常需要继续核对。" }
+      : { value: "0", state: "clear" as const, detail: "本次测量没有平台失败。" };
+  const mcp = data.pendingMcp === null
+    ? { value: "未取得", state: "unknown" as const, detail: "尚未取得待认证数量。" }
+    : data.pendingMcp > 0
+      ? { value: data.pendingMcp.toLocaleString("zh-CN"), state: "pending" as const, detail: "有工具等待管理员认证。" }
+      : { value: "0", state: "clear" as const, detail: "本次测量没有待认证工具。" };
+  const models = data.verifiedPlatformModels === 0
+    ? { value: "0", state: "pending" as const, detail: "尚未取得可用的平台模型。" }
+    : { value: data.verifiedPlatformModels.toLocaleString("zh-CN"), state: "clear" as const, detail: "已有可用的平台模型。" };
+  const routes = data.defaultRoutes.ready === null
+    ? { value: "未取得", state: "unknown" as const, detail: "尚未取得默认路由就绪证据。" }
+    : data.defaultRoutes.ready < data.defaultRoutes.total
+      ? { value: `${data.defaultRoutes.ready}/${data.defaultRoutes.total}`, state: "pending" as const, detail: "仍有默认路由未就绪。" }
+      : { value: `${data.defaultRoutes.ready}/${data.defaultRoutes.total}`, state: "clear" as const, detail: "所有默认路由控制面已就绪。" };
+  return [
+    { ...pendingActionDefinitions[0], ...failure },
+    { ...pendingActionDefinitions[1], ...mcp },
+    { ...pendingActionDefinitions[2], ...models },
+    { ...pendingActionDefinitions[3], ...routes },
+  ];
+}
+
 export function AdminOverviewClient() {
   const [overview, setOverview] = useState<SystemOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -73,14 +142,22 @@ export function AdminOverviewClient() {
       setOverview(await response.json() as SystemOverview);
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "管理总览加载失败");
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false);
     });
     return () => controller.abort();
   }, []);
 
   const worker = overview?.service.worker;
   const routeReady = overview?.defaultRoutes.ready;
-  const failureTotal = overview?.failures.total;
-  const pendingMcp = overview?.mcp.pendingAttestations;
+  const failureTotal = overview === null ? null : overview.failures.total;
+  const pendingMcp = overview === null ? null : overview.mcp.pendingAttestations;
+  const pendingActions = projectAdminPendingActions(overview === null ? null : {
+    failureTotal: overview.failures.total,
+    pendingMcp: overview.mcp.pendingAttestations,
+    verifiedPlatformModels: overview.counts.verifiedPlatformModels,
+    defaultRoutes: overview.defaultRoutes,
+  }, loading);
 
   return <div className="mx-auto max-w-7xl px-4 pb-16 pt-8 sm:px-8 lg:px-10">
     <section className="rounded-[2rem] bg-slate-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-10 sm:py-10">
@@ -92,6 +169,18 @@ export function AdminOverviewClient() {
 
     {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}
 
+    <section className="mt-6 rounded-3xl border border-amber-200 bg-amber-50/70 p-6 shadow-sm sm:p-7" aria-labelledby="admin-pending-actions-title">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Operations queue</p>
+          <h2 id="admin-pending-actions-title" className="mt-2 text-xl font-semibold text-slate-950">待处理事项</h2>
+          <p className="mt-2 text-xs leading-5 text-slate-600">只根据本次已取得的安全聚合判断。数量为 0 表示当前测量没有待办；“未取得”表示证据尚未返回。</p>
+        </div>
+        <span className="rounded-full bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600">平台运营视角</span>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{pendingActions.map((action) => <ActionCard key={action.key} action={action} />)}</div>
+    </section>
+
     <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-labelledby="admin-readiness-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -99,18 +188,18 @@ export function AdminOverviewClient() {
           <h2 id="admin-readiness-title" className="mt-2 text-xl font-semibold text-slate-950">平台首次就绪清单</h2>
           <p className="mt-2 text-xs leading-5 text-slate-500">清单只反映已取得的安全状态；“已就绪”不代表外部模型调用已经现场验证。</p>
         </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">{overview ? `${overview.setupChecklist.filter((item) => item.status === "ready").length}/${overview.setupChecklist.length} 项完成` : "读取中…"}</span>
+        <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">{loading ? "读取中…" : overview ? `${overview.setupChecklist.filter((item) => item.status === "ready").length}/${overview.setupChecklist.length} 项完成` : "未取得"}</span>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {(overview?.setupChecklist ?? []).map((item) => <article key={item.key} className="rounded-2xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">{item.label}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(item.status)}`}>{checklistStatusLabel(item.status)}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{item.detail}</p></article>)}
-        {!overview ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">正在读取就绪证据…</div> : null}
+        {!overview ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? "正在读取就绪证据…" : "未取得就绪证据。"}</div> : null}
       </div>
     </section>
 
     <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="应用服务状态">
-      <StatusCard label="应用服务" value={overview ? "正常" : "读取中…"} detail={overview ? `版本 ${overview.service.version}` : "等待安全读取"} tone="emerald" />
-      <StatusCard label="数据库" value={overview?.service.database === "up" ? "可用" : "读取中…"} detail="只读健康检查" tone="cyan" />
-      <StatusCard label="Worker" value={worker ? workerLabel(worker.status) : "读取中…"} detail={worker ? workerDetail(worker) : "等待安全读取"} tone="violet" />
+      <StatusCard label="应用服务" value={loading ? "读取中…" : overview ? "正常" : "未取得"} detail={loading ? "等待安全读取" : overview ? `版本 ${overview.service.version}` : "本次测量未取得应用状态。"} tone="emerald" />
+      <StatusCard label="数据库" value={loading ? "读取中…" : overview?.service.database === "up" ? "可用" : "未取得"} detail={loading ? "等待安全读取" : "只读健康检查"} tone="cyan" />
+      <StatusCard label="Worker" value={loading ? "读取中…" : worker ? workerLabel(worker.status) : "未取得"} detail={loading ? "等待安全读取" : worker ? workerDetail(worker) : "本次测量未取得 Worker 状态。"} tone="violet" />
     </section>
 
     <section className="mt-6 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-6 shadow-sm sm:p-7" aria-labelledby="default-route-title">
@@ -120,10 +209,10 @@ export function AdminOverviewClient() {
           <h2 id="default-route-title" className="mt-2 text-xl font-semibold text-slate-950">默认模型路由</h2>
           <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-600">控制面状态来自 active 路由、平台供应商归属、验证版本和能力匹配检查。当前数据没有真实调用凭证，因此每项都单独标记为“真实调用证据未取得”。</p>
         </div>
-        <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${overview?.defaultRoutes.controlPlane === "ready" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{routeReady === null || routeReady === undefined || overview === null ? "未取得路由证据" : `${routeReady}/${overview.defaultRoutes.total} 项控制面就绪`}</span>
+        <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${overview?.defaultRoutes.controlPlane === "ready" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{loading ? "读取中…" : routeReady === null || routeReady === undefined || overview === null ? "未取得路由证据" : `${routeReady}/${overview.defaultRoutes.total} 项控制面就绪`}</span>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {overview ? Object.values(overview.defaultRoutes.operations).map((route) => <RouteCard key={route.operation} route={route} />) : <div className="rounded-2xl border border-dashed border-indigo-200 bg-white/70 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">正在读取默认路由状态…</div>}
+        {overview ? Object.values(overview.defaultRoutes.operations).map((route) => <RouteCard key={route.operation} route={route} />) : <div className="rounded-2xl border border-dashed border-indigo-200 bg-white/70 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? "正在读取默认路由状态…" : "未取得默认路由证据。"}</div>}
       </div>
     </section>
 
@@ -133,9 +222,9 @@ export function AdminOverviewClient() {
     </section>
 
     <section className="mt-6 grid gap-6 lg:grid-cols-3" aria-label="安全与恢复状态">
-      <EvidenceCard title="MCP 认证队列" eyebrow="Connection safety" value={overview ? valueLabel(pendingMcp ?? null) : "读取中…"} detail={pendingMcp === null || pendingMcp === undefined ? "未取得待认证数量；不会暴露个人连接或工具正文。" : "符合安全条件但尚未取得有效管理员认证的只读工具数量。"} tone={pendingMcp === null || pendingMcp === undefined ? "unknown" : pendingMcp > 0 ? "attention" : "ready"} />
-      <EvidenceCard title="调度/控制面失败聚合" eyebrow="Safe failures" value={failureTotal === null || failureTotal === undefined ? "—" : valueLabel(failureTotal)} detail={overview ? failureDetail(overview) : "不会显示调用正文，只读取安全错误码聚合。"} tone={failureTotal === null || failureTotal === undefined ? "unknown" : failureTotal > 0 ? "attention" : "ready"} href="/admin/operations/failures" linkLabel="打开失败收件箱" />
-      <BackupCard backup={overview?.backup} />
+      <EvidenceCard title="MCP 认证队列" eyebrow="Connection safety" value={loading ? "读取中…" : overview ? valueLabel(pendingMcp) : "未取得"} detail={loading ? "等待安全读取" : pendingMcp === null || pendingMcp === undefined ? "未取得待认证数量；不会暴露个人连接或工具正文。" : "符合安全条件但尚未取得有效管理员认证的只读工具数量。"} tone={pendingMcp === null || pendingMcp === undefined ? "unknown" : pendingMcp > 0 ? "attention" : "ready"} />
+      <EvidenceCard title="调度/控制面失败聚合" eyebrow="Safe failures" value={loading ? "读取中…" : overview && failureTotal !== null ? valueLabel(failureTotal) : "未取得"} detail={loading ? "等待安全读取" : overview ? failureDetail(overview) : "本次测量未取得失败聚合证据。"} tone={failureTotal === null || failureTotal === undefined ? "unknown" : failureTotal > 0 ? "attention" : "ready"} href="/admin/operations/failures" linkLabel="打开失败收件箱" />
+      <BackupCard backup={overview?.backup} loading={loading} />
     </section>
 
     <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Ownership boundary</p><h2 className="mt-2 text-xl font-semibold">管理员能看什么</h2><div className="mt-4 grid gap-3 text-sm leading-6 text-slate-600 sm:grid-cols-3"><p className="rounded-2xl bg-slate-50 px-4 py-4"><strong className="text-slate-900">平台托管模型</strong><br />管理员维护平台连接和默认路由；普通用户按平台额度使用。</p><p className="rounded-2xl bg-slate-50 px-4 py-4"><strong className="text-slate-900">个人 Git / MCP</strong><br />连接归创建它的用户。管理员只处理安全策略、认证和聚合状态，不读取个人凭据。</p><p className="rounded-2xl bg-slate-50 px-4 py-4"><strong className="text-slate-900">备份与恢复</strong><br />任务结果、状态读取新鲜度和恢复演练证据分别展示；缺失证据保持“未取得”。</p></div></section>
@@ -170,8 +259,19 @@ function failureSummary(label: string, aggregate: SystemOverviewFailureAggregate
   return aggregate.total === null ? `${label}未取得` : `${label} ${aggregate.total} 次`;
 }
 
-function BackupCard({ backup }: { backup?: SystemOverview["backup"] }) {
-  if (backup === undefined) return <EvidenceCard title="备份与恢复证据" eyebrow="Recovery" value="读取中…" detail="等待安全读取" tone="unknown" />;
+function ActionCard({ action }: { action: AdminPendingActionProjection }) {
+  const styles = {
+    pending: "bg-amber-100 text-amber-900",
+    clear: "bg-emerald-100 text-emerald-800",
+    unknown: "bg-slate-100 text-slate-600",
+  } as const;
+  const labels = { pending: "待处理", clear: "无待办", unknown: "未取得" } as const;
+  return <article className="rounded-2xl border border-white/80 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><h3 className="text-sm font-semibold text-slate-900">{action.title}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${styles[action.state]}`}>{labels[action.state]}</span></div><p className="mt-4 text-2xl font-semibold text-slate-950">{action.value}</p><p className="mt-2 min-h-10 text-xs leading-5 text-slate-500">{action.detail}</p><Link href={action.href} className="mt-3 inline-flex text-xs font-semibold text-indigo-700 hover:text-indigo-900">查看运营入口 →</Link></article>;
+}
+
+function BackupCard({ backup, loading }: { backup?: SystemOverview["backup"]; loading: boolean }) {
+  if (loading) return <EvidenceCard title="备份与恢复证据" eyebrow="Recovery" value="读取中…" detail="等待安全读取" tone="unknown" />;
+  if (backup === undefined) return <EvidenceCard title="备份与恢复证据" eyebrow="Recovery" value="未取得" detail="本次测量未取得备份与恢复证据。" tone="unknown" />;
   if (backup.access === "restricted") return <EvidenceCard title="备份与恢复证据" eyebrow="Recovery" value="受限" detail="仅初始超级管理员可读取备份任务详情；当前未取得状态新鲜度和恢复演练证据。" tone="restricted" />;
   if (backup.access === "not_obtained") return <EvidenceCard title="备份与恢复证据" eyebrow="Recovery" value="未取得" detail={`权限检查未完成；状态源 ${backup.sourceStatus}，任务记录、新鲜度和恢复演练均未取得。`} tone="unknown" />;
   const recordState = backup.latestValidRecord.state ?? "未取得";

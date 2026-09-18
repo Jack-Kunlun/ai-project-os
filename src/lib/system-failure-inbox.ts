@@ -67,9 +67,9 @@ const catalog: Readonly<Record<SystemFailureInboxSource, Readonly<{
     nextStep: "核对 Worker 与后台任务的安全状态。",
   },
   indexGeneration: {
-    responsibility: "项目责任方",
+    responsibility: "业务责任方",
     reason: "索引生成状态与预期边界未完成核对或近期构建失败；索引条目优先于其关联后台任务展示。",
-    nextStep: "在具备项目权限时打开项目记忆页核对索引状态。",
+    nextStep: "由业务责任方在用户侧处理；管理员后台不提供业务详情入口。",
   },
   connection: {
     responsibility: "连接所有者",
@@ -82,9 +82,9 @@ const catalog: Readonly<Record<SystemFailureInboxSource, Readonly<{
     nextStep: "由自动化规则所有者核对规则与来源配置。",
   },
   controlledAction: {
-    responsibility: "项目责任方",
+    responsibility: "业务责任方",
     reason: "受控动作或 MCP 调度尝试未能得到可确认的安全终态；不展示工具、参数、端点、载荷或结果正文。",
-    nextStep: "在具备项目权限时打开项目动作页核对安全错误码和状态。",
+    nextStep: "由业务责任方在用户侧处理；管理员后台不提供业务详情入口。",
   },
 };
 
@@ -256,7 +256,6 @@ const providerHeldSelect = {
 
 const backgroundJobSelect = {
   id: true,
-  projectId: true,
   status: true,
   failureCode: true,
   reconciliationRequired: true,
@@ -266,7 +265,6 @@ const backgroundJobSelect = {
 
 const memoryIndexGenerationSelect = {
   id: true,
-  projectId: true,
   jobId: true,
   status: true,
   failureCode: true,
@@ -277,7 +275,6 @@ const memoryIndexGenerationSelect = {
 
 const indexGenerationSelect = {
   id: true,
-  projectId: true,
   status: true,
   failureCode: true,
   createdAt: true,
@@ -301,7 +298,6 @@ const mcpConnectionSelect = {
 const automationRunSelect = {
   id: true,
   automationRuleId: true,
-  projectId: true,
   status: true,
   failureCode: true,
   createdAt: true,
@@ -311,7 +307,6 @@ const automationRunSelect = {
 
 const automationRuleSelect = {
   id: true,
-  projectId: true,
   status: true,
   consecutiveFailures: true,
   updatedAt: true,
@@ -319,7 +314,6 @@ const automationRuleSelect = {
 
 const projectActionSelect = {
   id: true,
-  projectId: true,
   status: true,
   failureCode: true,
   createdAt: true,
@@ -328,7 +322,6 @@ const projectActionSelect = {
 
 const mcpDispatchAttemptSelect = {
   id: true,
-  projectId: true,
   actionId: true,
   status: true,
   safeErrorCode: true,
@@ -337,8 +330,6 @@ const mcpDispatchAttemptSelect = {
 } satisfies Prisma.ProjectMcpActionDispatchAttemptSelect;
 
 type FailureInboxDb = PrismaClient;
-type ProjectDestinationKind = "job" | "memory" | "index" | "automation" | "automationRule" | "action";
-type InternalDestination = Readonly<{ projectId: string; kind: ProjectDestinationKind; subjectId?: string }>;
 type InternalCandidate = Readonly<{
   source: SystemFailureInboxSource;
   id: string;
@@ -346,42 +337,8 @@ type InternalCandidate = Readonly<{
   occurredAt: Date;
   safeErrorCode?: unknown;
   responsibility?: SystemFailureInboxResponsibility;
-  destination: InternalDestination | Readonly<{ href: string }> | null;
+  destination: string | null;
 }>;
-
-function projectDestination(kind: ProjectDestinationKind, projectId: string, subjectId?: string): string | null {
-  if (!UUID_PATTERN.test(projectId)) return null;
-  if (kind === "memory" || kind === "index") return `/projects/${projectId}/memory`;
-  if (kind === "automationRule") return `/projects/${projectId}/automations`;
-  if (subjectId === undefined || !UUID_PATTERN.test(subjectId)) return null;
-  if (kind === "job") return `/projects/${projectId}/jobs/${subjectId}`;
-  if (kind === "automation") return `/projects/${projectId}/automations?run=${subjectId}`;
-  return `/projects/${projectId}/actions?action=${subjectId}`;
-}
-
-function directDestination(candidate: InternalCandidate, readableProjectIds: ReadonlySet<string>): string | null {
-  if (candidate.destination === null) return null;
-  if ("href" in candidate.destination) return candidate.destination.href.startsWith("/") && !candidate.destination.href.startsWith("//") ? candidate.destination.href : null;
-  if (!readableProjectIds.has(candidate.destination.projectId)) return null;
-  return projectDestination(candidate.destination.kind, candidate.destination.projectId, candidate.destination.subjectId);
-}
-
-async function readableProjectIds(actorId: string, projectIds: readonly string[], db: FailureInboxDb): Promise<ReadonlySet<string>> {
-  const validIds = [...new Set(projectIds.filter((id) => UUID_PATTERN.test(id)))];
-  if (validIds.length === 0) return new Set();
-  const rows = await db.project.findMany({
-    where: {
-      id: { in: validIds },
-      archivedAt: null,
-      OR: [
-        { memberships: { some: { userId: actorId, accessState: "confirmed", user: { disabledAt: null } } } },
-        { membershipInheritanceMode: "workspaceInherited", workspace: { memberships: { some: { userId: actorId, accessState: "confirmed", role: { in: ["owner", "admin"] }, user: { disabledAt: null } } } } },
-      ],
-    },
-    select: { id: true },
-  });
-  return new Set(rows.map((row) => row.id));
-}
 
 function recentCompleted(completedAt: Date | null, from: Date, now: Date): boolean {
   return completedAt !== null && completedAt >= from && completedAt <= now;
@@ -431,7 +388,7 @@ function failureInboxCandidates(
 ): InternalCandidate[] {
   const candidates: InternalCandidate[] = [];
   for (const row of rows.providerHeld) {
-    candidates.push({ source: "providerHeld", id: row.id, lifecycle: "requires_reconciliation", occurredAt: row.updatedAt, safeErrorCode: row.safeErrorCode, destination: { href: "/admin/models" } });
+    candidates.push({ source: "providerHeld", id: row.id, lifecycle: "requires_reconciliation", occurredAt: row.updatedAt, safeErrorCode: row.safeErrorCode, destination: "/admin/models" });
   }
 
   const indexJobIds = new Set(rows.memoryIndexes.filter((row) => row.jobId !== null).map((row) => row.jobId!));
@@ -446,8 +403,8 @@ function failureInboxCandidates(
       lifecycle,
       occurredAt: row.completedAt ?? row.createdAt,
       safeErrorCode: row.failureCode,
-      responsibility: "项目责任方",
-      destination: row.projectId === null ? null : { projectId: row.projectId, kind: "job", subjectId: row.id },
+      responsibility: "业务责任方",
+      destination: null,
     });
   }
   for (const row of rows.memoryIndexes) {
@@ -460,7 +417,7 @@ function failureInboxCandidates(
       lifecycle,
       occurredAt: row.completedAt ?? row.createdAt,
       safeErrorCode: row.failureCode,
-      destination: { projectId: row.projectId, kind: "memory" },
+      destination: null,
     });
   }
   for (const row of rows.indexes) {
@@ -473,7 +430,7 @@ function failureInboxCandidates(
       lifecycle,
       occurredAt: row.completedAt ?? row.createdAt,
       safeErrorCode: row.failureCode,
-      destination: { projectId: row.projectId, kind: "index" },
+      destination: null,
     });
   }
   for (const row of [...rows.gitConnections, ...rows.mcpConnections]) {
@@ -488,7 +445,7 @@ function failureInboxCandidates(
       occurredAt: row.updatedAt,
       safeErrorCode: "AUTOMATION_RULE_PAUSED",
       responsibility: "自动化规则所有者",
-      destination: { projectId: row.projectId, kind: "automationRule" },
+      destination: null,
     });
   }
   for (const row of rows.automationRuns) {
@@ -502,7 +459,7 @@ function failureInboxCandidates(
       occurredAt: row.completedAt ?? row.createdAt,
       safeErrorCode: safeAutomationFailureCode(row.failureCode) ?? "AUTOMATION_EXECUTION_FAILED",
       responsibility: "自动化规则所有者",
-      destination: { projectId: row.projectId, kind: "automation", subjectId: row.id },
+      destination: null,
     });
   }
   for (const row of rows.actions) {
@@ -514,7 +471,7 @@ function failureInboxCandidates(
       lifecycle,
       occurredAt: row.completedAt ?? row.createdAt,
       safeErrorCode: row.failureCode,
-      destination: { projectId: row.projectId, kind: "action", subjectId: row.id },
+      destination: null,
     });
   }
   for (const row of rows.mcpAttempts) {
@@ -675,8 +632,6 @@ export async function listSystemFailureInbox(
     mcpAttempts: [...mcpCurrent.rows, ...mcpRecent.rows],
     worker,
   }, from, now));
-  const projectIds = internal.flatMap((candidate) => candidate.destination !== null && "projectId" in candidate.destination ? [candidate.destination.projectId] : []);
-  const readable = await readableProjectIds(actorId, projectIds, db);
   const entries = internal
     .map((candidate) => {
       try {
@@ -687,7 +642,7 @@ export async function listSystemFailureInbox(
           occurredAt: candidate.occurredAt,
           safeErrorCode: candidate.safeErrorCode,
           responsibility: candidate.responsibility,
-          destination: directDestination(candidate, readable),
+          destination: candidate.destination,
         });
       } catch {
         return null;

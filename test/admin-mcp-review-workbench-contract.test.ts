@@ -3,10 +3,18 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("管理员 MCP 页面由服务器守住权限并挂载审核工作台", async () => {
-  const page = await readFile("src/app/admin/connectors/mcp/page.tsx", "utf8");
+  const [page, layout, shell] = await Promise.all([
+    readFile("src/app/admin/connectors/mcp/page.tsx", "utf8"),
+    readFile("src/app/admin/layout.tsx", "utf8"),
+    readFile("src/components/admin-shell.tsx", "utf8"),
+  ]);
   assert.match(page, /requireSystemAdminPage/u);
   assert.match(page, /McpReviewWorkbench/u);
-  assert.match(page, /AdminPageFrame active="mcp"/u);
+  assert.match(layout, /AdminHeader/u);
+  assert.match(layout, /AdminAppShell/u);
+  assert.match(shell, /key: "security",\s*label: "安全中心"/u);
+  assert.match(shell, /href: "\/admin\/connectors\/mcp"/u);
+  assert.match(shell, /label: "MCP 审核"/u);
 });
 
 test("MCP 审核工作台只消费净化候选 API，不暴露连接材料或动作入口", async () => {

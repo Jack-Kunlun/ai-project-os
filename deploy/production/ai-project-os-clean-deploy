@@ -1,0 +1,520 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+
+# Dedicated one-release clean reset. It never migrates the v0.3 database.
+readonly RELEASE_TAG=${1-}
+readonly EXPECTED_REVISION=${2-}
+readonly CONFIRMATION_TOKEN=${3-}
+readonly REQUIRED_CONFIRMATION=CONFIRM_CLEAN_RESET_V1
+readonly REPOSITORY_URL=https://github.com/Jack-Kunlun/ai-project-os.git
+readonly REPOSITORY_DIR=/srv/ai-project-os/repository
+readonly ENV_FILE=/etc/ai-project-os/production.env
+readonly COMPOSE_PROJECT=ai-project-os
+readonly BACKUP_SCRIPT=/usr/local/sbin/ai-project-os-backup
+readonly PRODUCTION_COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
+readonly RESULT_FILE=/var/lib/ai-project-os/last-deployment
+readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+readonly SOURCE_VERSION=0.3.0-dev.1
+readonly TARGET_VERSION=0.4.0-dev.1
+readonly POSTGRES_CLIENT_DRAIN_ATTEMPTS=30
+readonly POSTGRES_CLIENT_DRAIN_INTERVAL_SECONDS=2
+readonly POSTGRES_CLIENT_DRAIN_TIMEOUT_SECONDS=10
+
+MUTATION_ATTEMPTED=0
+DESTRUCTIVE_RESET_COMMITTED=0
+WRITER_RECOVERY_REQUIRED=0
+OLD_APP_ID=
+OLD_WORKER_ID=
+PGDATA_VOLUME=
+STACK_HEALTH=
+STACK_STATES=
+backup_path=
+backup_object=
+backup_manifest=
+backup_sha256=
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2-1}"
+}
+
+[[ $EUID -eq 0 ]] || fail CLEAN_DEPLOY_ROOT_REQUIRED 70
+[[ "$RELEASE_TAG" == v0.4.0-dev.1 ]] || fail CLEAN_DEPLOY_TAG_INVALID 64
+[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail CLEAN_DEPLOY_REVISION_INVALID 65
+[[ "$CONFIRMATION_TOKEN" == "$REQUIRED_CONFIRMATION" ]] || fail CLEAN_DEPLOY_CONFIRMATION_INVALID 64
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || fail CLEAN_DEPLOY_ALREADY_RUNNING 75
+
+for required_command in curl docker flock git grep install mktemp python3 sed sha256sum stat awk timeout; do
+  command -v "$required_command" >/dev/null || fail "CLEAN_DEPLOY_COMMAND_MISSING command=$required_command" 70
+done
+
+test -r "$ENV_FILE" || fail CLEAN_DEPLOY_ENV_MISSING 70
+test ! -L "$ENV_FILE" || fail CLEAN_DEPLOY_ENV_SYMLINK 70
+[[ "$(stat -c %U:%G "$ENV_FILE")" == root:root ]] || fail CLEAN_DEPLOY_ENV_OWNER_INVALID 70
+[[ "$(stat -c %a "$ENV_FILE")" == 600 ]] || fail CLEAN_DEPLOY_ENV_MODE_INVALID 70
+
+validate_required_exact_env_value() {
+  local key=$1 expected=$2 invalid_marker=$3 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || fail "CLEAN_DEPLOY_ENV_DUPLICATE_KEY key=$key" 70
+  (( ${#matches[@]} == 1 )) || fail "$invalid_marker" 70
+  value=${matches[0]#*=}
+  [[ "$value" == "$expected" ]] || fail "$invalid_marker" 70
+}
+
+validate_required_regex_env_value() {
+  local key=$1 pattern=$2 invalid_marker=$3 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || fail "CLEAN_DEPLOY_ENV_DUPLICATE_KEY key=$key" 70
+  (( ${#matches[@]} == 1 )) || fail "$invalid_marker" 70
+  value=${matches[0]#*=}
+  [[ "$value" =~ $pattern ]] || fail "$invalid_marker" 70
+}
+
+validate_optional_regex_env_value() {
+  local key=$1 pattern=$2 invalid_marker=$3 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || fail "CLEAN_DEPLOY_ENV_DUPLICATE_KEY key=$key" 70
+  (( ${#matches[@]} == 0 )) && return 0
+  value=${matches[0]#*=}
+  [[ "$value" =~ $pattern ]] || fail "$invalid_marker" 70
+}
+
+validate_github_oauth_env_value() {
+  local key=$1 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || fail "CLEAN_DEPLOY_ENV_DUPLICATE_KEY key=$key" 70
+  (( ${#matches[@]} == 1 )) || return 1
+  value=${matches[0]#*=}
+  (( ${#value} >= 8 && ${#value} <= 512 )) || return 1
+  [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+validate_production_env() {
+  validate_required_exact_env_value POSTGRES_USER ai_project_os_cluster_admin CLEAN_DEPLOY_POSTGRES_USER_INVALID
+  validate_required_regex_env_value POSTGRES_CLUSTER_ADMIN_PASSWORD '^[0-9a-f]{64}$' CLEAN_DEPLOY_POSTGRES_CLUSTER_ADMIN_PASSWORD_INVALID
+  validate_required_regex_env_value POSTGRES_MIGRATOR_PASSWORD '^[0-9a-f]{64}$' CLEAN_DEPLOY_POSTGRES_MIGRATOR_PASSWORD_INVALID
+  validate_required_exact_env_value POSTGRES_RUNTIME_USER ai_project_os_runtime CLEAN_DEPLOY_POSTGRES_RUNTIME_USER_INVALID
+  validate_required_regex_env_value POSTGRES_RUNTIME_PASSWORD '^[0-9a-f]{64}$' CLEAN_DEPLOY_POSTGRES_RUNTIME_PASSWORD_INVALID
+  validate_required_exact_env_value POSTGRES_ENTITLEMENT_WRITER_USER ai_project_os_entitlement_writer CLEAN_DEPLOY_ENTITLEMENT_WRITER_USER_INVALID
+  validate_required_regex_env_value POSTGRES_ENTITLEMENT_WRITER_PASSWORD '^[0-9a-f]{64}$' CLEAN_DEPLOY_ENTITLEMENT_WRITER_PASSWORD_INVALID
+  validate_required_regex_env_value POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD '^[0-9a-f]{64}$' CLEAN_DEPLOY_ENTITLEMENT_READER_PASSWORD_INVALID
+  validate_optional_regex_env_value POSTGRES_DB '^ai_project_os$' CLEAN_DEPLOY_POSTGRES_DB_INVALID
+  validate_required_exact_env_value AI_PROJECT_OS_SECURE_COOKIES true CLEAN_DEPLOY_SECURE_COOKIES_INVALID
+  validate_required_exact_env_value AI_PROJECT_OS_PUBLIC_ORIGIN https://ai-project-os.com CLEAN_DEPLOY_PUBLIC_ORIGIN_INVALID
+  validate_optional_regex_env_value DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL '^$|^postgres(ql)?://[^[:space:]?#]+$' CLEAN_DEPLOY_LEGACY_BOOTSTRAP_URL_INVALID
+  validate_optional_regex_env_value AI_PROJECT_OS_PGDATA_VOLUME '^ai-project-os(-[a-z0-9-]+)?-pgdata$' CLEAN_DEPLOY_PGDATA_VOLUME_NAME_INVALID
+  validate_optional_regex_env_value AI_PROJECT_OS_SECRETS_VOLUME '^ai-project-os(-[a-z0-9-]+)?-secrets$' CLEAN_DEPLOY_SECRETS_VOLUME_NAME_INVALID
+  validate_optional_regex_env_value AI_PROJECT_OS_UPLOADS_VOLUME '^ai-project-os(-[a-z0-9-]+)?-uploads$' CLEAN_DEPLOY_UPLOADS_VOLUME_NAME_INVALID
+  validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID || fail CLEAN_DEPLOY_GITHUB_OAUTH_CLIENT_ID_INVALID 70
+  validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET || fail CLEAN_DEPLOY_GITHUB_OAUTH_CLIENT_SECRET_INVALID 70
+}
+
+validate_production_env
+
+install -d -o root -g root -m 0755 /srv/ai-project-os
+install -d -o root -g root -m 0700 "$(dirname "$RESULT_FILE")"
+
+if [[ ! -d "$REPOSITORY_DIR/.git" ]]; then
+  temporary_repository="${REPOSITORY_DIR}.init.$$"
+  trap 'rm -rf -- "${temporary_repository-}"' EXIT
+  git clone --filter=blob:none --no-checkout "$REPOSITORY_URL" "$temporary_repository"
+  chown -R root:root "$temporary_repository"
+  mv -- "$temporary_repository" "$REPOSITORY_DIR"
+  trap - EXIT
+fi
+[[ "$(stat -c %U:%G "$REPOSITORY_DIR")" == root:root ]] || fail CLEAN_DEPLOY_REPOSITORY_OWNER_INVALID 70
+[[ "$(git -C "$REPOSITORY_DIR" remote get-url origin)" == "$REPOSITORY_URL" ]] || fail CLEAN_DEPLOY_REPOSITORY_REMOTE_INVALID 70
+
+git -C "$REPOSITORY_DIR" fetch --force --no-tags origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+[[ "$(git -C "$REPOSITORY_DIR" cat-file -t "refs/tags/$RELEASE_TAG")" == tag ]] || fail CLEAN_DEPLOY_TAG_NOT_ANNOTATED 66
+resolved_revision=$(git -C "$REPOSITORY_DIR" rev-parse "refs/tags/$RELEASE_TAG^{}")
+[[ "$resolved_revision" == "$EXPECTED_REVISION" ]] || fail CLEAN_DEPLOY_TAG_REVISION_MISMATCH 67
+
+ci_runs_url="https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$EXPECTED_REVISION&per_page=100"
+ci_runs_json=$(curl --fail --silent --show-error --header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28' "$ci_runs_url")
+if ! python3 -c '
+import json
+import sys
+payload = json.load(sys.stdin)
+revision, tag = sys.argv[1:3]
+accepted = any(
+    run.get("head_sha") == revision
+    and run.get("head_branch") == tag
+    and run.get("event") == "push"
+    and run.get("status") == "completed"
+    and run.get("conclusion") == "success"
+    for run in payload.get("workflow_runs", [])
+)
+raise SystemExit(0 if accepted else 1)
+' "$EXPECTED_REVISION" "$RELEASE_TAG" <<<"$ci_runs_json"; then
+  fail CLEAN_DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND 72
+fi
+
+git -C "$REPOSITORY_DIR" checkout --detach --force "$EXPECTED_REVISION"
+[[ -z "$(git -C "$REPOSITORY_DIR" status --porcelain)" ]] || fail CLEAN_DEPLOY_REPOSITORY_DIRTY 70
+package_version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$REPOSITORY_DIR/package.json" | head -n 1)
+[[ "v$package_version" == "$RELEASE_TAG" ]] || fail CLEAN_DEPLOY_PACKAGE_VERSION_MISMATCH 68
+
+compose() {
+  test -f "$PRODUCTION_COMPOSE_OVERRIDE" || fail CLEAN_DEPLOY_COMPOSE_OVERRIDE_MISSING 70
+  docker compose --project-name "$COMPOSE_PROJECT" --env-file "$ENV_FILE" \
+    --project-directory "$REPOSITORY_DIR" --file "$REPOSITORY_DIR/compose.yaml" \
+    --file "$PRODUCTION_COMPOSE_OVERRIDE" "$@"
+}
+compose config --quiet || fail CLEAN_DEPLOY_COMPOSE_CONFIG_INVALID 70
+
+container_health() {
+  docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1"
+}
+assert_stack_container() {
+  local container_id=$1 service=$2
+  [[ "$container_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ "$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}:{{index .Config.Labels "com.docker.compose.service"}}' "$container_id")" == "$COMPOSE_PROJECT:$service" ]]
+}
+
+wait_for_old_writers() {
+  local attempt app_state worker_state health_body
+  for attempt in $(seq 1 60); do
+    app_state=$(container_health "$OLD_APP_ID" 2>/dev/null || true)
+    worker_state=$(container_health "$OLD_WORKER_ID" 2>/dev/null || true)
+    if [[ "$app_state" == healthy && "$worker_state" == healthy ]]; then
+      health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health || true)
+      if grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body" &&
+        grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.3\.0-dev\.1"' <<<"$health_body" &&
+        grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body" &&
+        grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"; then
+        return 0
+      fi
+    fi
+    sleep 5
+  done
+  printf '%s\n' CLEAN_DEPLOY_OLD_WRITER_RECOVERY_TIMEOUT >&2
+  return 1
+}
+
+recover_old_writers_on_failure() {
+  local exit_code=$?
+  local app_running worker_running app_paused worker_paused
+  if (( exit_code != 0 && WRITER_RECOVERY_REQUIRED == 1 && MUTATION_ATTEMPTED == 0 )); then
+    app_running=$(docker inspect --format '{{.State.Running}}' "$OLD_APP_ID" 2>/dev/null || true)
+    worker_running=$(docker inspect --format '{{.State.Running}}' "$OLD_WORKER_ID" 2>/dev/null || true)
+    app_paused=$(docker inspect --format '{{.State.Paused}}' "$OLD_APP_ID" 2>/dev/null || true)
+    worker_paused=$(docker inspect --format '{{.State.Paused}}' "$OLD_WORKER_ID" 2>/dev/null || true)
+    [[ -z "$app_paused" || "$app_paused" != true ]] || docker unpause "$OLD_APP_ID" >/dev/null || true
+    [[ -z "$worker_paused" || "$worker_paused" != true ]] || docker unpause "$OLD_WORKER_ID" >/dev/null || true
+    [[ "$app_running" != false ]] || docker start "$OLD_APP_ID" >/dev/null || true
+    [[ "$worker_running" != false ]] || docker start "$OLD_WORKER_ID" >/dev/null || true
+    wait_for_old_writers || true
+  elif (( exit_code != 0 && MUTATION_ATTEMPTED == 1 )); then
+    printf 'CLEAN_DEPLOY_RECOVERY_REQUIRED mutation_attempted=true reset_boundary=%s old_writers_not_restarted=true backup_preserved=true\n' \
+      "$([[ "$DESTRUCTIVE_RESET_COMMITTED" == 1 ]] && printf committed || printf not-committed)" >&2
+  fi
+  return "$exit_code"
+}
+trap recover_old_writers_on_failure EXIT
+
+# Build candidates while old app/worker continue serving. The migrate image is
+# only used to initialize the empty database; no source data migration runs.
+compose build principal-bootstrap migrate reconcile app worker
+
+capture_source_writers() {
+  local source_health public_health
+  OLD_APP_ID=$(compose ps -q app)
+  OLD_WORKER_ID=$(compose ps -q worker)
+  assert_stack_container "$OLD_APP_ID" app || fail CLEAN_DEPLOY_OLD_APP_INVALID 69
+  assert_stack_container "$OLD_WORKER_ID" worker || fail CLEAN_DEPLOY_OLD_WORKER_INVALID 69
+  [[ "$(container_health "$OLD_APP_ID")" == healthy ]] || fail CLEAN_DEPLOY_OLD_APP_NOT_HEALTHY 69
+  [[ "$(container_health "$OLD_WORKER_ID")" == healthy ]] || fail CLEAN_DEPLOY_OLD_WORKER_NOT_HEALTHY 69
+
+  source_health=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health) ||
+    fail CLEAN_DEPLOY_SOURCE_LOCAL_HEALTH_UNAVAILABLE 69
+  if ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$source_health" ||
+    ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.3\.0-dev\.1"' <<<"$source_health" ||
+    ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health" ||
+    ! grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health"; then
+    fail CLEAN_DEPLOY_SOURCE_LOCAL_HEALTH_INVALID 69
+  fi
+  public_health=$(curl --fail --silent --show-error https://ai-project-os.com/api/health) ||
+    fail CLEAN_DEPLOY_SOURCE_PUBLIC_HEALTH_UNAVAILABLE 69
+  if ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$public_health" ||
+    ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.3\.0-dev\.1"' <<<"$public_health" ||
+    ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$public_health"; then
+    fail CLEAN_DEPLOY_SOURCE_PUBLIC_HEALTH_INVALID 69
+  fi
+  WRITER_RECOVERY_REQUIRED=1
+}
+capture_source_writers
+
+assert_maintenance_isolation() {
+  local -a running_services=()
+  local postgres_id published_ports
+  mapfile -t running_services < <(compose ps --services --status running)
+  (( ${#running_services[@]} == 1 )) && [[ "${running_services[0]}" == postgres ]] ||
+    fail CLEAN_DEPLOY_MAINTENANCE_SERVICES_NOT_ISOLATED 69
+  postgres_id=$(compose ps -q postgres)
+  assert_stack_container "$postgres_id" postgres || fail CLEAN_DEPLOY_MAINTENANCE_POSTGRES_INVALID 69
+  published_ports=$(docker inspect --format '{{json (index .NetworkSettings.Ports "5432/tcp")}}' "$postgres_id")
+  python3 -c '
+import json
+import sys
+try:
+    bindings = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit(1)
+accepted = (
+    isinstance(bindings, list) and len(bindings) == 1
+    and isinstance(bindings[0], dict)
+    and bindings[0].get("HostIp") == "127.0.0.1"
+    and isinstance(bindings[0].get("HostPort"), str)
+    and bindings[0]["HostPort"].isdigit()
+)
+raise SystemExit(0 if accepted else 1)
+' <<<"$published_ports" || fail CLEAN_DEPLOY_MAINTENANCE_POSTGRES_PORT_INVALID 69
+}
+
+stop_source_writers() {
+  docker stop "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null || fail CLEAN_DEPLOY_OLD_WRITER_STOP_FAILED 69
+  [[ "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_APP_ID")" == false:false ]] ||
+    fail CLEAN_DEPLOY_OLD_APP_STOP_FAILED 69
+  [[ "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_WORKER_ID")" == false:false ]] ||
+    fail CLEAN_DEPLOY_OLD_WORKER_STOP_FAILED 69
+  assert_maintenance_isolation
+}
+
+drain_postgres_clients() {
+  local attempt client_count postgres_id
+  postgres_id=$(compose ps -q postgres)
+  assert_stack_container "$postgres_id" postgres || fail CLEAN_DEPLOY_DRAIN_POSTGRES_INVALID 69
+
+  for attempt in $(seq 1 "$POSTGRES_CLIENT_DRAIN_ATTEMPTS"); do
+    client_count=$(timeout "$POSTGRES_CLIENT_DRAIN_TIMEOUT_SECONDS" docker exec "$postgres_id" sh -ec \
+      'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -X -A -t -v ON_ERROR_STOP=1 -c "$1"' \
+      sh 'SELECT count(*)::text FROM pg_catalog.pg_stat_activity AS activity WHERE activity.datname = pg_catalog.current_database() AND activity.backend_type = '\''client backend'\'' AND activity.pid <> pg_catalog.pg_backend_pid();' \
+      2>/dev/null) || fail CLEAN_DEPLOY_POSTGRES_CLIENT_DRAIN_QUERY_FAILED 69
+    [[ "$client_count" =~ ^[0-9]+$ ]] || fail CLEAN_DEPLOY_POSTGRES_CLIENT_DRAIN_RESULT_INVALID 69
+    [[ "$client_count" == 0 ]] && return 0
+    [[ "$attempt" == "$POSTGRES_CLIENT_DRAIN_ATTEMPTS" ]] || sleep "$POSTGRES_CLIENT_DRAIN_INTERVAL_SECONDS"
+  done
+
+  fail CLEAN_DEPLOY_POSTGRES_CLIENT_DRAIN_TIMEOUT 69
+}
+stop_source_writers
+drain_postgres_clients
+
+test -x "$BACKUP_SCRIPT" || fail CLEAN_DEPLOY_BACKUP_SCRIPT_MISSING 70
+backup_output=$(AI_PROJECT_OS_DEPLOY_LOCK_HELD=1 AI_PROJECT_OS_CUTOVER=1 \
+  AI_PROJECT_OS_CUTOVER_LOCK_HELD=1 AI_PROJECT_OS_EXPECTED_APP_ID="$OLD_APP_ID" \
+  AI_PROJECT_OS_EXPECTED_WORKER_ID="$OLD_WORKER_ID" \
+  "$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG")
+printf '%s\n' "$backup_output"
+
+grep -Eq '^BACKUP_OK .* source_quiesced=true$' <<<"$backup_output" || fail CLEAN_DEPLOY_PRE_BACKUP_SOURCE_NOT_QUIESCED 69
+grep -Eq '^BACKUP_COS_OBJECT_VERIFIED type=archive .*crc64=[^ ]+' <<<"$backup_output" || fail CLEAN_DEPLOY_PRE_BACKUP_COS_ARCHIVE_UNVERIFIED 69
+grep -Eq '^BACKUP_COS_OBJECT_VERIFIED type=manifest .*crc64=[^ ]+' <<<"$backup_output" || fail CLEAN_DEPLOY_PRE_BACKUP_COS_MANIFEST_UNVERIFIED 69
+backup_path=$(sed -n 's/^BACKUP_OK .* source=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+backup_object=$(sed -n 's/^BACKUP_OK .* object=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+backup_manifest=$(sed -n 's/^BACKUP_OK .* verified_manifest=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+backup_sha256=$(sed -n 's/^BACKUP_OK .* sha256=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+[[ "$backup_path" =~ ^/var/backups/ai-project-os/[^/]+$ ]] || fail CLEAN_DEPLOY_PRE_BACKUP_PATH_INVALID 69
+[[ "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]] || fail CLEAN_DEPLOY_PRE_BACKUP_OBJECT_INVALID 69
+[[ "$backup_manifest" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.4\.0-dev\.1\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.4\.0-dev\.1\.[A-Za-z0-9]{6}\.manifest\.json$ ]] ||
+  fail CLEAN_DEPLOY_PRE_BACKUP_VERIFIED_MANIFEST_INVALID 69
+[[ "$backup_sha256" =~ ^[0-9a-f]{64}$ ]] || fail CLEAN_DEPLOY_PRE_BACKUP_CRC_INVALID 69
+
+read_env_value() {
+  local key=$1 default_value=$2
+  local -a matches=()
+
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || fail "CLEAN_DEPLOY_ENV_DUPLICATE_KEY key=$key" 70
+  if (( ${#matches[@]} == 0 )); then
+    printf '%s' "$default_value"
+    return
+  fi
+  printf '%s' "${matches[0]#*=}"
+}
+
+resolve_pgdata_volume() {
+  local config_json configured_volume
+
+  PGDATA_VOLUME=$(read_env_value AI_PROJECT_OS_PGDATA_VOLUME ai-project-os-pgdata)
+  SECRETS_VOLUME=$(read_env_value AI_PROJECT_OS_SECRETS_VOLUME ai-project-os-secrets)
+  UPLOADS_VOLUME=$(read_env_value AI_PROJECT_OS_UPLOADS_VOLUME ai-project-os-uploads)
+  [[ "$PGDATA_VOLUME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || fail CLEAN_DEPLOY_PGDATA_VOLUME_VALUE_INVALID 70
+  [[ "$SECRETS_VOLUME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || fail CLEAN_DEPLOY_SECRETS_VOLUME_VALUE_INVALID 70
+  [[ "$UPLOADS_VOLUME" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || fail CLEAN_DEPLOY_UPLOADS_VOLUME_VALUE_INVALID 70
+  [[ "$PGDATA_VOLUME" != "$SECRETS_VOLUME" && "$PGDATA_VOLUME" != "$UPLOADS_VOLUME" ]] ||
+    fail CLEAN_DEPLOY_PERSISTENT_VOLUME_PROTECTED 70
+
+  # The name must be a project-scoped pgdata name. A custom existing volume is
+  # accepted only when the Compose source and Docker ownership labels below
+  # identify that exact volume; no prefix/glob deletion is ever used.
+  [[ "$PGDATA_VOLUME" =~ ^ai-project-os(-[a-z0-9-]+)?-pgdata$ ]] || fail CLEAN_DEPLOY_PGDATA_VOLUME_NAME_INVALID 70
+
+  config_json=$(compose config --format json)
+  configured_volume=$(python3 -c '
+import json
+import sys
+config = json.load(sys.stdin)
+postgres = config.get("services", {}).get("postgres", {})
+mounts = [mount for mount in postgres.get("volumes", [])
+          if mount.get("type") == "volume" and mount.get("target") == "/var/lib/postgresql"]
+volumes = config.get("volumes", {})
+if len(mounts) != 1:
+    raise SystemExit("CLEAN_DEPLOY_PGDATA_MOUNT_INVALID")
+source = mounts[0].get("source")
+volume = volumes.get("ai_project_os_pgdata", {})
+if not isinstance(source, str) or volume.get("name") != source:
+    raise SystemExit("CLEAN_DEPLOY_PGDATA_CONFIG_MISMATCH")
+print(source)
+  ' <<<"$config_json") || fail CLEAN_DEPLOY_PGDATA_CONFIG_INVALID 70
+  [[ "$configured_volume" == "$PGDATA_VOLUME" ]] || fail CLEAN_DEPLOY_PGDATA_CONFIG_MISMATCH 70
+}
+
+validate_pgdata_volume_before_mutation() {
+  local postgres_id mount_json pgdata_labels
+  local -a attached_containers=()
+
+  resolve_pgdata_volume
+  postgres_id=$(compose ps -q postgres)
+  assert_stack_container "$postgres_id" postgres || fail CLEAN_DEPLOY_CURRENT_POSTGRES_INVALID 70
+
+  pgdata_labels=$(docker volume inspect --format '{{json .Labels}}' "$PGDATA_VOLUME") || fail CLEAN_DEPLOY_PGDATA_VOLUME_MISSING 70
+  python3 -c '
+import json
+import sys
+labels = json.load(sys.stdin)
+if labels.get("com.docker.compose.project") != "ai-project-os":
+    raise SystemExit(1)
+if labels.get("com.docker.compose.volume") != "ai_project_os_pgdata":
+    raise SystemExit(1)
+' <<<"$pgdata_labels" || fail CLEAN_DEPLOY_PGDATA_VOLUME_OWNERSHIP_INVALID 70
+
+  mount_json=$(docker inspect --format '{{json .Mounts}}' "$postgres_id") || fail CLEAN_DEPLOY_PGDATA_MOUNT_INSPECT_FAILED 70
+  python3 -c '
+import json
+import sys
+mounts = json.load(sys.stdin)
+expected = sys.argv[1]
+selected = [mount for mount in mounts
+            if mount.get("Type") == "volume"
+            and mount.get("Destination") == "/var/lib/postgresql"]
+if len(selected) != 1 or selected[0].get("Name") != expected:
+    raise SystemExit(1)
+' "$PGDATA_VOLUME" <<<"$mount_json" || fail CLEAN_DEPLOY_PGDATA_MOUNT_INVALID 70
+
+  mapfile -t attached_containers < <(docker ps -aq --filter "volume=$PGDATA_VOLUME")
+  (( ${#attached_containers[@]} == 1 && "${attached_containers[0]}" == "$postgres_id" )) ||
+    fail CLEAN_DEPLOY_PGDATA_VOLUME_ATTACHED 70
+}
+
+# Backup is verified and exact writers remain stopped. All fallible volume
+# validation happens before the mutation boundary so old writers remain
+# recoverable if the production scene is unsafe.
+validate_pgdata_volume_before_mutation
+MUTATION_ATTEMPTED=1
+compose down --remove-orphans
+
+attached_containers=$(docker ps -aq --filter "volume=$PGDATA_VOLUME")
+[[ -z "$attached_containers" ]] || fail CLEAN_DEPLOY_PGDATA_VOLUME_ATTACHED 70
+
+# Irreversible boundary: remove only this exact owned pgdata volume.
+DESTRUCTIVE_RESET_COMMITTED=1
+docker volume rm -- "$PGDATA_VOLUME" >/dev/null || fail CLEAN_DEPLOY_PGDATA_VOLUME_REMOVE_FAILED 73
+
+compose up -d --no-build --force-recreate postgres
+for attempt in $(seq 1 60); do
+  postgres_id=$(compose ps -q postgres)
+  if [[ "$postgres_id" =~ ^[0-9a-f]{64}$ ]] && [[ "$(container_health "$postgres_id")" == healthy ]]; then break; fi
+  [[ "$attempt" == 60 ]] && fail CLEAN_DEPLOY_POSTGRES_HEALTH_TIMEOUT 73
+  sleep 5
+done
+compose up -d --no-build --force-recreate principal-bootstrap migrate reconcile app worker
+
+wait_for_stack() {
+  local attempt postgres_id principal_bootstrap_id migrate_id reconcile_id app_id worker_id
+  local postgres_state principal_bootstrap_state migrate_state reconcile_state app_state worker_state health_body
+  for attempt in $(seq 1 60); do
+    postgres_id=$(compose ps -q postgres)
+    principal_bootstrap_id=$(compose ps -aq principal-bootstrap)
+    migrate_id=$(compose ps -aq migrate)
+    reconcile_id=$(compose ps -aq reconcile)
+    app_id=$(compose ps -q app)
+    worker_id=$(compose ps -q worker)
+    if [[ -n "$postgres_id" && -n "$principal_bootstrap_id" && -n "$migrate_id" && -n "$reconcile_id" && -n "$app_id" && -n "$worker_id" ]]; then
+      postgres_state=$(container_health "$postgres_id")
+      principal_bootstrap_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$principal_bootstrap_id")
+      migrate_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$migrate_id")
+      reconcile_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$reconcile_id")
+      app_state=$(container_health "$app_id")
+      worker_state=$(container_health "$worker_id")
+      if [[ "$postgres_state" == healthy && "$principal_bootstrap_state" == exited:0 && "$migrate_state" == exited:0 && "$reconcile_state" == exited:0 && "$app_state" == healthy && "$worker_state" == healthy ]]; then
+        health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)
+        grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body"
+        grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.4\.0-dev\.1"' <<<"$health_body"
+        grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
+        grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
+        grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$health_body"
+        STACK_HEALTH=$health_body
+        STACK_STATES="postgres=$postgres_state principal-bootstrap=$principal_bootstrap_state migrate=$migrate_state reconcile=$reconcile_state app=$app_state worker=$worker_state"
+        return 0
+      fi
+    fi
+    sleep 5
+  done
+  compose ps -a >&2 || true
+  fail CLEAN_DEPLOY_STACK_HEALTH_TIMEOUT 73
+}
+wait_for_stack
+
+postgres_id=$(compose ps -q postgres)
+migration_count=$(docker exec "$postgres_id" sh -ec 'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -X -A -t -c "$1"' sh 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')
+[[ "$migration_count" =~ ^105$ ]] || fail CLEAN_DEPLOY_FRESH_MIGRATION_COUNT_INVALID 73
+
+setup_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/setup) || fail CLEAN_DEPLOY_SETUP_UNAVAILABLE 73
+grep -q 'First-run setup' <<<"$setup_body" || fail CLEAN_DEPLOY_SETUP_FIRST_ADMIN_NOT_REQUIRED 73
+grep -q '创建管理员并进入' <<<"$setup_body" || fail CLEAN_DEPLOY_SETUP_FORM_INVALID 73
+
+public_health=$(curl --fail --silent --show-error https://ai-project-os.com/api/health) || fail CLEAN_DEPLOY_PUBLIC_HEALTH_UNAVAILABLE 73
+grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_HEALTH_INVALID 73
+grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.4\.0-dev\.1"' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_VERSION_INVALID 73
+grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_DATABASE_INVALID 73
+grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_WORKER_INVALID 73
+grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_WORKER_FAILURES_INVALID 73
+
+completed_at=$(date -Is)
+{
+  printf 'CLEAN_DEPLOY_OK\n'
+  printf 'mode=clean-reset\n'
+  printf 'tag=%s\n' "$RELEASE_TAG"
+  printf 'revision=%s\n' "$EXPECTED_REVISION"
+  printf 'source_version=%s\n' "$SOURCE_VERSION"
+  printf 'target_version=%s\n' "$TARGET_VERSION"
+  printf 'data_migration=not-performed\n'
+  printf 'fresh_database=true\n'
+  printf 'destructive_reset=performed\n'
+  printf 'pgdata_volume=%s\n' "$PGDATA_VOLUME"
+  printf 'states=%s\n' "$STACK_STATES"
+  printf 'health=%s\n' "$STACK_HEALTH"
+  printf 'setup=first-admin-required\n'
+  printf 'backup=%s\n' "$backup_path"
+  printf 'backup_object=%s\n' "$backup_object"
+  printf 'backup_manifest=%s\n' "$backup_manifest"
+  printf 'backup_sha256=%s\n' "$backup_sha256"
+  printf 'completed_at=%s\n' "$completed_at"
+} > "$RESULT_FILE"
+chmod 600 "$RESULT_FILE"
+
+WRITER_RECOVERY_REQUIRED=0
+printf 'CLEAN_DEPLOY_OK tag=%s revision=%s reset=performed migration=not-performed pgdata_volume=%s backup_object=%s backup_manifest=%s\n' \
+  "$RELEASE_TAG" "$EXPECTED_REVISION" "$PGDATA_VOLUME" "$backup_object" "$backup_manifest"

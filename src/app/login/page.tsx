@@ -3,8 +3,7 @@ import { getPageSession, isApplicationInitialized } from "@/lib/auth";
 import { LoginForm } from "./login-form";
 import { listPublicOidcProviders } from "@/lib/oidc";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
-import { isGitHubOAuthConfigured } from "@/lib/github-oauth";
-import { getFirstAdminOnboardingState } from "@/lib/first-admin-onboarding-service";
+import { getGitHubOAuthAvailability } from "@/lib/github-oauth";
 
 export const dynamic = "force-dynamic";
 
@@ -19,14 +18,16 @@ const githubFailureMessages: Record<string, string> = {
   GITHUB_OAUTH_TOKEN_EXCHANGE_FAILED: "GitHub 授权码交换失败，请稍后重试。",
   GITHUB_OAUTH_PROFILE_FAILED: "GitHub 账户资料读取失败，请稍后重试。",
   GITHUB_OAUTH_FLOW_INVALID: "GitHub 登录状态无效或已经使用，请重新开始。",
+  GITHUB_OAUTH_BOOTSTRAP_PENDING: "平台初始化尚未完成，GitHub 登录暂不可用，请稍后重试。",
+  GITHUB_OAUTH_NOT_CONFIGURED: "GitHub 登录尚未配置，请联系工作区管理员。",
+  GITHUB_OAUTH_CONFIG_INVALID: "GitHub 登录配置无效，请联系工作区管理员。",
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ password?: string; oidc?: string; github?: string; returnTo?: string }> }) {
   if (!(await isApplicationInitialized())) redirect("/setup");
   const existingSession = await getPageSession();
   if (existingSession !== null) {
-    const onboarding = await getFirstAdminOnboardingState(existingSession.id);
-    redirect(onboarding === "pending" ? "/onboarding" : existingSession.role === "admin" ? "/admin" : "/dashboard");
+    redirect(existingSession.role === "admin" ? "/admin" : "/dashboard");
   }
   const params = await searchParams;
   const notice = params.password === "updated"
@@ -38,5 +39,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         : undefined;
   const noticeTone = params.password === "updated" ? "success" as const : notice ? "error" as const : undefined;
   const returnTo = canonicalInternalReturnPath(params.returnTo);
-  return <LoginForm notice={notice} noticeTone={noticeTone} oidcProviders={await listPublicOidcProviders()} returnTo={returnTo} githubLoginAvailable={isGitHubOAuthConfigured()} />;
+  const githubAvailability = await getGitHubOAuthAvailability();
+  return <LoginForm notice={notice} noticeTone={noticeTone} oidcProviders={await listPublicOidcProviders()} returnTo={returnTo} githubLoginAvailable={githubAvailability.status === "available"} githubAvailability={githubAvailability.status} />;
 }

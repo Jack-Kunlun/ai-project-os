@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
-import { AdminHeader } from "@/components/admin-header";
 import { AdminPageFrame } from "@/components/admin-shell";
+import { AdminPageHeader } from "@/components/admin-page-header";
 
 type Subscription = {
   id: string;
@@ -94,9 +94,15 @@ function statusLabel(subscription: Subscription | null): string {
   return subscription.status === "active" && new Date(subscription.expiresAt) > new Date() ? "会员有效" : "已到期/撤销";
 }
 
+function applicationLabel(application: Item["membershipApplication"]): string {
+  if (application === null) return "无申请";
+  return application.status === "pending" ? "待处理" : application.status === "fulfilled" ? "已完成" : application.status === "rejected" ? "已拒绝" : "已撤回";
+}
+
 export function MembershipsClient({ username, adminMode = false }: { username: string; adminMode?: boolean }) {
   const [items, setItems] = useState<Item[]>([]);
   const [search, setSearch] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -117,17 +123,8 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-    {adminMode ? <AdminHeader username={username} /> : <AppHeader username={username} active="profile" />}
-    <AdminPageFrame active="memberships" showSidebar={adminMode}><div className="mx-auto max-w-6xl px-6 py-8 sm:px-10 lg:px-12">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Membership operations</p>
-          <h1 className="mt-4 text-4xl font-semibold tracking-[-0.04em]">会员资格管理</h1>
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-500">每次变更都会先生成影响预览，再由管理员确认执行。不会修改用户角色、工作区角色或连接配置。</p>
-        </div>
-        <Link href={adminMode ? "/admin" : "/profile"} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600">返回{adminMode ? "管理总览" : "个人中心"}</Link>
-      </div>
+  const content = <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
+      <AdminPageHeader title="会员资格管理" description="每次变更都会先生成影响预览，再由管理员确认执行；不会修改用户角色、工作区角色或连接配置。" actions={!adminMode ? <Link href="/profile" className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600">返回个人中心</Link> : undefined} />
       <div className="mt-8 flex gap-4">
         <label className="min-w-0 flex-1">
           <span className="sr-only">搜索会员</span>
@@ -137,11 +134,45 @@ export function MembershipsClient({ username, adminMode = false }: { username: s
       </div>
       <p className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs leading-6 text-indigo-800">Git / MCP 私有连接与平台自动化属于独立配置，不会因会员撤销被修改。个人模型配置会保留，但会员失效期间不可使用。</p>
       {error ? <div role="alert" className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
-      <section className="mt-6 space-y-4">
-        {loading ? <div className="rounded-3xl border border-slate-200 bg-white p-10 text-sm text-slate-500">读取中…</div> : items.length === 0 ? <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-sm text-slate-500">没有匹配的用户。</div> : items.map((item) => <MembershipCard key={item.id} item={item} onChanged={() => void load()} />)}
+      <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="membership-list-title">
+        <div className="border-b border-slate-100 px-5 py-5 sm:px-6">
+          <h2 id="membership-list-title" className="text-lg font-semibold text-slate-900">会员资格列表</h2>
+          <p className="mt-1 text-xs leading-5 text-slate-500">会员页面专门处理资格与申请；展开单行后进行授予、延期、撤销或拒绝，并保留原有预览确认流程。</p>
+        </div>
+        {loading ? <div className="px-6 py-12 text-center text-sm text-slate-500">读取中…</div> : items.length === 0 ? <div className="px-6 py-12 text-center text-sm text-slate-500">没有匹配的用户。</div> : <div className="overflow-x-auto">
+          <table className="min-w-[860px] w-full text-left text-sm">
+            <thead className="bg-slate-50 text-xs font-semibold text-slate-500">
+              <tr>
+                <th scope="col" className="px-5 py-3 sm:px-6">用户</th>
+                <th scope="col" className="px-5 py-3">申请状态</th>
+                <th scope="col" className="px-5 py-3">会员状态</th>
+                <th scope="col" className="px-5 py-3">有效期 / 最近变更</th>
+                <th scope="col" className="px-5 py-3 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {items.map((item) => {
+                const expanded = expandedId === item.id;
+                const subscription = item.membershipSubscription;
+                return <Fragment key={item.id}>
+                  <tr key={item.id} className={`transition hover:bg-indigo-50/50 ${expanded ? "bg-indigo-50/30" : ""}`}>
+                    <td className="px-5 py-4 sm:px-6"><p className="font-semibold text-slate-900">{item.displayName || item.username}</p><p className="mt-1 text-xs text-slate-400">@{item.username}</p></td>
+                    <td className="px-5 py-4 align-top"><span className={`inline-flex rounded-full px-2.5 py-1 text-[12px] font-semibold ${item.membershipApplication?.status === "pending" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{applicationLabel(item.membershipApplication)}</span>{item.membershipApplication ? <p className="mt-1 text-xs text-slate-400">提交于 {date(item.membershipApplication.submittedAt)}</p> : null}</td>
+                    <td className="px-5 py-4 align-top"><span className={`inline-flex rounded-full px-2.5 py-1 text-[12px] font-semibold ${subscription?.status === "active" && new Date(subscription.expiresAt) > new Date() ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{statusLabel(subscription)}</span></td>
+                    <td className="px-5 py-4 align-top text-xs text-slate-600"><span>{subscription ? `至 ${date(subscription.expiresAt)}` : "尚未授予"}</span><span className="mt-1 block text-slate-400">{subscription ? `最近变更 ${date(subscription.updatedAt)}` : "—"}</span></td>
+                    <td className="px-5 py-4 text-right align-top"><button type="button" aria-expanded={expanded} aria-controls={`membership-management-${item.id}`} onClick={() => setExpandedId((current) => current === item.id ? null : item.id)} className="inline-flex rounded-lg px-2 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500">{expanded ? "收起管理" : "管理资格"}</button></td>
+                  </tr>
+                  {expanded ? <tr key={`${item.id}-management`} id={`membership-management-${item.id}`}><td colSpan={5} className="bg-slate-50/70 p-4 sm:p-6"><MembershipCard item={item} onChanged={() => { setExpandedId(null); void load(); }} /></td></tr> : null}
+                </Fragment>;
+              })}
+            </tbody>
+          </table>
+        </div>}
       </section>
-    </div></AdminPageFrame>
-  </main>;
+    </div>;
+
+  if (adminMode) return content;
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="profile" /><AdminPageFrame active="memberships" showSidebar={false}>{content}</AdminPageFrame></main>;
 }
 
 function MembershipCard({ item, onChanged }: { item: Item; onChanged: () => void }) {

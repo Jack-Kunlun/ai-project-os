@@ -14,7 +14,7 @@ const MIGRATOR_ROLE = "ai_project_os_migrator";
 const RUNTIME_ROLE = "ai_project_os_runtime";
 const WRITER_ROLE = "ai_project_os_entitlement_writer";
 const REQUIRED_EXTENSIONS = Object.freeze(["vector", "pg_trgm", "pgcrypto", "plpgsql"] as const);
-const EXPECTED_MIGRATION_COUNT = 103;
+const EXPECTED_MIGRATION_COUNT = 105;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1_000;
 const READY_TIMEOUT_MS = 2 * 60 * 1_000;
 

@@ -9,8 +9,7 @@
 | 页面 | 用途 | 权限 |
 | --- | --- | --- |
 | `/admin` | 应用服务状态、数据库/Worker 检查和安全聚合 | 平台管理员 |
-| `/admin/models` | 平台供应商和平台模型连接 | 平台管理员 |
-| `/admin/models/routes` | 平台默认能力路由和倍率 | 平台管理员 |
+| `/admin/models` | 平台供应商、模型连接和逐项能力配置 | 平台管理员 |
 | `/admin/credits` | 新注册赠送策略、额度记录和人工治理 | 平台管理员 |
 | `/admin/operations/probes` | 供应商连接探测预算和告警阈值 | 平台管理员 |
 | `/admin/connectors/mcp` | MCP 净化快照和不可变安全审核 | 平台管理员 |
@@ -21,7 +20,7 @@
 | `/admin/guide` | 管理员流程、安全和验收 | 平台管理员 |
 | `/admin/account` | 管理员登录资料和安全设置 | 平台管理员 |
 
-`/settings` 与 `/system/*` 只保留受守卫的兼容跳转，不是当前管理导航。`/admin/connectors/git`、`/admin/users/memberships` 和 `/system/account-access` 已退出正常入口；访问时分别回到平台总览、用户运营或用户运营页面。`/system/memberships` 对 system admin 兼容跳转 `/admin/users`，普通用户返回用户工作台；`/system/operations` 仅 initial super admin 可用并兼容跳转 `/admin/operations/backups`，其他 system admin 按现有安全行为返回不可见页面，普通用户返回用户工作台。`/connections` 与 `/connections/mcp` 属于普通用户个人连接流程，不是管理员连接器页面。
+`/settings` 与 `/system/*` 只保留受守卫的兼容跳转，不是当前管理导航。`/admin/connectors/git` 和 `/system/account-access` 已退出正常入口；访问时分别回到平台总览或用户运营页面。`/admin/users/memberships` 是用户与权益下的会员二级页面；`/system/memberships` 对 system admin 兼容跳转 `/admin/users/memberships`，普通用户返回用户工作台；`/system/operations` 仅 initial super admin 可用并兼容跳转 `/admin/operations/backups`，其他 system admin 按现有安全行为返回不可见页面，普通用户返回用户工作台。`/connections` 与 `/connections/mcp` 属于普通用户个人连接流程，不是管理员连接器页面。
 
 账号停用/恢复现在归 `/admin/users` 的用户详情页管理。管理员可以查看安全摘要和必要的有效访问结果，但不通过旧的账号矩阵入口管理项目关系；停用账号仍可审计，所有有效结果均为 `effective=false`。system admin 角色只代表平台管理权限，不隐含任何工作区或项目 Owner 权限。
 
@@ -71,7 +70,7 @@ Compose 会按 `principal-bootstrap → migrate → reconcile → app/worker` �
 
 #### 现有卷的账号拓扑升级
 
-这不是在线或滚动升级。先在一致维护窗口完成备份并停止旧 app/worker。设置 `POSTGRES_USER=ai_project_os_cluster_admin`、`POSTGRES_CLUSTER_ADMIN_PASSWORD`、`POSTGRES_MIGRATOR_PASSWORD`，并将旧 owner（例如 `ai_project_os`）的凭据只写入临时 `DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL`。启动 Compose 后确认 `principal-bootstrap`、`migrate`、`reconcile` 全部成功；bootstrap 会先创建 cluster-admin，再在当前数据库转移旧 owner 的受支持对象、清理成员关系并封存旧角色。普通旧 owner 变为 `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`；官方 initdb OID10 不能降级为 `NOSUPERUSER`，只保留不可避免的 `SUPERUSER`，同时设置 `NOLOGIN`、清除密码、清除成员关系并终止其他会话。随后删除并轮换 legacy URL；它不能出现在 app/worker/migrate 环境、提交文件或日志中。封存角色仍保留以便依赖审查，只有检查外部依赖和成员关系后才可在单独维护窗口受控地 `DROP ROLE`。bootstrap 缺失、owner 不支持或凭据错误时必须在迁移前 fail closed。升级会保留业务数据并转移当前数据库的受支持关系、序列、函数、过程和类型；不要删除正式卷。
+这不是在线或滚动升级。部署器先完成候选构建和旧库只读预检，再在一致维护窗口停止精确的旧 app/worker，完成维护隔离与 post-stop 只读预检后生成最终迁移备份；备份成功后才启动迁移，迁移开始后不恢复旧代码。设置 `POSTGRES_USER=ai_project_os_cluster_admin`、`POSTGRES_CLUSTER_ADMIN_PASSWORD`、`POSTGRES_MIGRATOR_PASSWORD`，并将旧 owner（例如 `ai_project_os`）的凭据只写入临时 `DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL`。启动 Compose 后确认 `principal-bootstrap`、`migrate`、`reconcile` 全部成功；bootstrap 会先创建 cluster-admin，再在当前数据库转移旧 owner 的受支持对象、清理成员关系并封存旧角色。普通旧 owner 变为 `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`；官方 initdb OID10 不能降级为 `NOSUPERUSER`，只保留不可避免的 `SUPERUSER`，同时设置 `NOLOGIN`、清除密码、清除成员关系并终止其他会话。随后删除并轮换 legacy URL；它不能出现在 app/worker/migrate 环境、提交文件或日志中。封存角色仍保留以便依赖审查，只有检查外部依赖和成员关系后才可在单独维护窗口受控地 `DROP ROLE`。bootstrap 缺失、owner 不支持或凭据错误时必须在迁移前 fail closed。升级会保留业务数据并转移当前数据库的受支持关系、序列、函数、过程和类型；不要删除正式卷。
 
 连接 URL 中的密码必须按 URL 规则编码；生产部署的五个 PostgreSQL 密码使用 64 位十六进制值。若 bootstrap URL 中含旧 owner 密码，升级完成后应立即轮换旧 owner 凭据。
 
@@ -134,7 +133,7 @@ MEMBERSHIP_GOVERNANCE_EXECUTOR_LABEL='maintenance-window-20260904' \
 http://127.0.0.1:3000/api/auth/github/callback
 ```
 
-凭据只写入未提交的部署配置或受控密钥管理，不写入源码、文档、URL 或日志。`AI_PROJECT_OS_PUBLIC_ORIGIN` 必须是浏览器实际访问的规范 origin，不能填容器内部地址。当前生产 job 只精确允许 `v0.3.0-dev.1`；旧 `v0.2.0-dev.1` 和其他 dev tag 均失败关闭，不要因为配置了 GitHub Secret 就绕过标签 CI、备份恢复、旧库预检和停写迁移门禁。
+凭据只写入未提交的部署配置或受控密钥管理，不写入源码、文档、URL 或日志。`AI_PROJECT_OS_PUBLIC_ORIGIN` 必须是浏览器实际访问的规范 origin，不能填容器内部地址。当前生产 job 只精确允许 `v0.4.0-dev.1`；旧 `v0.3.0-dev.1`、`v0.2.0-dev.1` 和其他 dev tag 均失败关闭，不要因为配置了 GitHub Secret 就绕过标签 CI、备份恢复、旧库预检和停写迁移门禁。
 
 用户首次使用 GitHub 登录且系统不存在同邮箱账户时，可按产品规则创建 `member` 并加入默认工作区；同邮箱已存在时不得静默合并，用户应先登录原账号，再走明确绑定流程。临时访问令牌验证后立即撤销，不作为长期 Git 凭据保存。
 
@@ -154,9 +153,9 @@ http://127.0.0.1:3000/api/auth/oidc/callback
 
 ### 4.1 当前模型供应商管理流程
 
-在 `/admin/models` 配置并测试 OpenAI、DeepSeek、Qwen 或 GLM 的平台连接。平台模型页面只负责供应商连接和模型信息；连接表单接收 API Key 后只在服务端以 AES-256-GCM 加密保存，页面只显示受限状态和掩码信息，禁止读取、记录或复制明文。
+在 `/admin/models` 配置并测试 OpenAI、DeepSeek、Qwen 或 GLM 的平台连接。平台能力配置页同时负责供应商连接、模型信息和逐项能力选择；连接表单填写完成后可以先测试，只有测试通过才能保存并启用，状态文案统一为“启用/停用”。API Key 只在服务端以 AES-256-GCM 加密保存，页面只显示受限状态和掩码信息，禁止读取、记录或复制明文。
 
-在 `/admin/models/routes` 为视觉、抽取、向量和生成能力维护默认路由；在 `/admin/credits` 管理新注册赠送策略、额度记录和人工额度治理；在 `/admin/operations/probes` 设置供应商连接探测预算、告警阈值和有效期。DeepSeek 可用于生成能力，GLM 可按已验证能力用于向量能力；不要把某个供应商的存在写成永久免费的承诺。普通用户使用平台额度；只有有效会员可以维护个人模型连接，且个人模型必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用，不会自动替代平台默认模型。会员到期或撤销后不能继续测试、启用或调用个人模型。
+在 `/admin/models` 的能力卡片中分别为视觉、抽取、向量和生成能力选择已验证可用的模型；不创建路由草稿，也不通过额外路由页面绕过测试。`/admin/credits` 管理新注册赠送策略、额度记录和人工额度治理；`/admin/operations/probes` 设置供应商连接探测预算、告警阈值和有效期。DeepSeek 可用于生成能力，GLM 可按已验证能力用于向量能力；不要把某个供应商的存在写成永久免费的承诺。普通用户使用平台额度；只有有效会员可以维护个人模型连接，且个人模型必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用，不会自动替代平台默认模型。会员到期或撤销后不能继续测试、启用或调用个人模型。
 
 平台表单允许自定义模型 ID，但每种 capability 仍需符合服务端供应商协议和能力校验。GLM 可以只配置向量模型与维度，生成/视觉字段保持未配置时应保存为 `null`；DeepSeek 的默认生成模型和现有视觉意图不能因该兼容路径回归。连接测试只展示真实能力的布尔/维度结果，例如“向量连接通过（1024 维）”，不展示模型返回正文。
 

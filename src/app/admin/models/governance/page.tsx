@@ -3,5 +3,5 @@ import { requireSystemAdminPage } from "@/lib/system-admin";
 
 export default async function AdminModelGovernancePage() {
   await requireSystemAdminPage();
-  redirect("/admin/models/routes");
+  redirect("/admin/models");
 }

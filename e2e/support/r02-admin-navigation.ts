@@ -32,17 +32,27 @@ export type R02RouteExpectation = Readonly<{
 export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
   { path: "/admin", heading: "管理员总览", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取就绪证据…", "正在读取默认路由状态…", "读取中…"] },
   { path: "/admin/models", heading: "平台模型", terminal: { kind: "text", name: "从左侧添加第一个模型供应商。" }, pendingTexts: ["读取中…"] },
-  { path: "/admin/models/routes", heading: "默认模型路由", terminal: { kind: "text", name: "平台默认模型路由控制面" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/models/routes", heading: "平台模型", terminal: { kind: "text", name: "平台能力配置" }, pendingTexts: ["读取中…"] },
   { path: "/admin/credits", heading: "平台额度", terminal: { kind: "text", name: "平台额度治理" }, pendingTexts: ["读取中…"] },
   { path: "/admin/operations/probes", heading: "连接探测预算", terminal: { kind: "text", name: "平台连接探测预算" }, pendingTexts: ["读取中…"] },
   { path: "/admin/connectors/mcp", heading: "MCP 工具安全审核", terminal: { kind: "text", name: "当前没有候选记录" }, pendingTexts: ["正在读取安全快照…"] },
   { path: "/admin/users", heading: "用户运营", terminal: { kind: "text", name: "普通用户" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/users/memberships", heading: "会员资格管理", terminal: { kind: "text", name: "Git / MCP 私有连接与平台自动化属于独立配置", exact: false }, pendingTexts: ["读取中…"] },
   { path: "/admin/audit", heading: "审计中心", terminal: { kind: "text", name: "当前筛选", exact: false }, pendingTexts: ["正在读取审计快照…"] },
   { path: "/admin/operations/failures", heading: "失败与待对账收件箱", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取安全异常…"] },
   { path: "/admin/operations/backups", heading: "生产备份与 COS 同步", terminal: { kind: "heading", name: "恢复演练证据" } },
   { path: "/admin/guide", heading: "管理员操作指南", terminal: { kind: "heading", name: "平台模型" } },
   { path: "/admin/account", heading: "管理员账户", terminal: { kind: "text", name: "维护平台管理员的登录资料与密码。" }, pendingTexts: ["读取中…"] },
 ] as const;
+
+export function expectedR02AdminNavigationLinkCount(pathname: string): number {
+  if (pathname === "/admin") return 1;
+  if (pathname === "/admin/users" || pathname.startsWith("/admin/users/") || pathname === "/admin/credits") return 4;
+  if (pathname.startsWith("/admin/models") || pathname === "/admin/operations/probes") return 4;
+  if (pathname.startsWith("/admin/connectors/mcp") || pathname.startsWith("/admin/audit")) return 3;
+  if (pathname.startsWith("/admin/operations/")) return 3;
+  return 1;
+}
 
 const R02_PROJECT_PENDING_TEXTS = [
   "读取中…",
@@ -161,19 +171,20 @@ export async function expectR02NoAccessibilityViolations(page: Page, surface: st
   expect(violations, `${surface} must satisfy automated WCAG 2.2 A/AA checks`).toEqual([]);
 }
 
-export async function expectR02MobileDrawer(page: Page): Promise<void> {
+export async function expectR02MobileDrawer(page: Page, pathname = "/admin"): Promise<void> {
   const trigger = page.getByRole("button", { name: "打开导航", exact: true });
   await expect(trigger).toBeVisible();
   await trigger.click();
   const drawer = page.getByRole("dialog", { name: "管理工作台导航" });
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole("link")).toHaveCount(12);
+  await expect(drawer.getByRole("link")).toHaveCount(expectedR02AdminNavigationLinkCount(pathname));
   const close = drawer.getByRole("button", { name: "关闭管理导航", exact: true });
   await expect(close).toBeFocused();
+  const focusable = drawer.locator('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
   await page.keyboard.down("Shift");
   await page.keyboard.press("Tab");
   await page.keyboard.up("Shift");
-  await expect(drawer.getByRole("link").last()).toBeFocused();
+  await expect(focusable.last()).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(close).toBeFocused();
   await page.keyboard.press("Escape");

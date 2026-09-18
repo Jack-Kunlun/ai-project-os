@@ -5,7 +5,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createProviderConnection } from "../src/lib/ai-providers";
 import {
   AiEntitlementError,
   holdPlatformTokenReservation,
@@ -22,6 +21,7 @@ import {
 } from "../src/lib/platform-credit-governance-service";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
+import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 
 const shouldRun = process.env.AI_ENTITLEMENTS_POSTGRES_GATE === "1";
 type GovernancePreview = Awaited<ReturnType<typeof previewPlatformTokenGrantMutation>>;
@@ -124,7 +124,7 @@ test("AI entitlements enforce signup-compatible scope and project cleanup retent
     const retained = await reservePlatformTokens({ userId: retentionUserId, jobId: retentionJobId, callKey: `gate:${suffix}:retention`, operation: "autoExtract", modelId: "deepseek-v4-flash", estimatedTokens: 10, now: entitlementNow }, db);
     const reservation = await db.platformTokenReservation.findUniqueOrThrow({ where: { id: retained.reservationId } });
     const ledger = await db.platformTokenLedgerEntry.findFirstOrThrow({ where: { reservationId: reservation.id, entryKind: "reserve", grantId: governedGrant.grantId } });
-    const provider = await createProviderConnection({ name: `Retention DeepSeek ${suffix}`, kind: "deepseek", apiKey: "deepseek-retention-key", generationModelId: "deepseek-v4-flash", visionModelId: null, embeddingModelId: null, embeddingDimensions: null }, adminActor, db);
+    const provider = await createVerifiedProviderFixture({ name: `Retention DeepSeek ${suffix}`, kind: "deepseek", apiKey: "deepseek-retention-key", generationModelId: "deepseek-v4-flash", visionModelId: null, embeddingModelId: null, embeddingDimensions: null }, adminActor, db);
     createdProviderIds.push(provider.id);
     createdCredentialIds.push((await db.aiProviderConnection.findUniqueOrThrow({ where: { id: provider.id }, select: { credentialId: true } })).credentialId);
     const job = await db.backgroundJob.create({ data: { id: randomUUID(), projectId, kind: "autoExtract", idempotencyKey: "a".repeat(64), requestedById: ownerId, payload: {} } });

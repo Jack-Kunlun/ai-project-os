@@ -34,7 +34,7 @@ sudo /usr/local/sbin/ai-project-os-backup manual
 sudo cat /var/lib/ai-project-os-backup/last-success
 ```
 
-新的格式版本为 2。一次成功备份必须同时验证加密归档、SHA-256 sidecar、不可变 manifest 和带 COS 版本控制的 `manifests/latest.json` 指针。普通 `manual`、`daily` 和 `pre-deploy` 备份的 `sourceQuiesced` 为 `false`；只有迁移停写入口生成的最终备份为 `true`。
+新的格式版本为 2。一次成功备份必须同时验证加密归档、SHA-256 sidecar、唯一命名且经 COS metadata 验证的 manifest 和 `manifests/latest.json` 指针。普通 `manual`、`daily` 备份的 `sourceQuiesced` 为 `false`；生产部署专用的 `pre-deploy` 必须使用 cutover 模式并保持精确旧写入者暂停，因此其 `sourceQuiesced` 为 `true`，可以作为 v0.3→v0.4 migration restore 输入。
 
 在第一次主机迁移前，应继续保留已经通过独立解密、完整性和隔离恢复验证的 age 私钥副本。
 

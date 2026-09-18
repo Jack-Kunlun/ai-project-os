@@ -177,7 +177,7 @@ test("admin workbench and overview are server protected and dashboard has no glo
   ]);
 
   assert.match(layout, /requireSystemAdminPage\(\)/u);
-  assert.match(page, /AdminPageFrame active="overview"/u);
+  assert.match(page, /AdminOverviewClient/u);
   assert.match(overviewRoute, /user\.role !== "admin"/u);
   assert.match(overviewRoute, /status: 403/u);
   assert.doesNotMatch(overviewService, /getPlatformTokenSummary/u);
@@ -185,14 +185,13 @@ test("admin workbench and overview are server protected and dashboard has no glo
   assert.match(overviewService, /platformTokenReservation\.aggregate/u);
   assert.match(overviewService, /status: \{ in: \["reserved", "held"\] \}/u);
   assert.doesNotMatch(overviewService, /project\.count|first-project/u);
-  assert.match(shell, /平台模型/u);
-  assert.doesNotMatch(shell, /Git 连接|MCP 连接|用户与会员|\/admin\/connectors\/git|\/admin\/users\/memberships/u);
-  assert.match(shell, /MCP 安全/u);
-  assert.match(shell, /用户运营/u);
-  assert.match(shell, /\/admin\/models\/routes/u);
+  for (const label of ["Dashboard", "用户与权益", "配置中心", "安全中心", "运维中心"]) assert.match(shell, new RegExp(label, "u"));
+  assert.doesNotMatch(shell, /Git 连接|MCP 连接|用户与会员|\/admin\/connectors\/git/u);
+  assert.match(shell, /label: "能力配置"/u);
+  assert.doesNotMatch(shell, /\/admin\/models\/routes/u);
   assert.match(shell, /\/admin\/credits/u);
   assert.match(shell, /\/admin\/operations\/probes/u);
-  assert.match(shell, /备份 \/ 运维/u);
+  assert.match(shell, /\/admin\/operations\/backups/u);
   assert.doesNotMatch(header, /label: "模型设置"/u);
   assert.doesNotMatch(header, /label: "连接器"/u);
   assert.match(header, /isSystemAdmin \? <Link href="\/admin"/u);
@@ -231,7 +230,7 @@ test("admin overview uses read-only aggregates and exposes no identity or creden
   assert.equal(overview.backup.access, "restricted");
   assert.equal(overview.backup.snapshotRead, "restricted");
   assert.equal(overview.backup.freshness.status, "restricted");
-  assert.deepEqual(calls.sort(), ["available", "health", "health", "issued", "memberships", "providers", "reservations", "reservations", "users", "worker"].sort());
+  assert.deepEqual(calls.sort(), ["available", "health", "health", "health", "health", "health", "issued", "memberships", "providers", "reservations", "reservations", "users", "worker"].sort());
 });
 
 test("admin overview keeps control-plane readiness separate from live-call evidence", async () => {
@@ -542,8 +541,10 @@ test("admin navigation source implements a persistent desktop rail and focus-con
   // AppHeader owns the sticky top layer; the admin sub-navigation remains in
   // normal flow so it cannot cover the header at any viewport width.
   assert.doesNotMatch(shell, /sticky top-2 z-40/u);
-  assert.match(shell, /rounded-3xl border border-indigo-100/u);
-  assert.match(shell, /lg:flex/u);
+  assert.match(shell, /const moduleGroups: ReadonlyArray/u);
+  assert.match(shell, /aria-controls=\{`admin-nav-\$\{item\.key\}`\}/u);
+  assert.match(shell, /border-l border-slate-200/u);
+  assert.match(shell, /lg:block/u);
   assert.match(shell, /aria-expanded=\{drawerOpen\}/u);
   assert.match(shell, /role="dialog"/u);
   assert.match(shell, /aria-modal="true"/u);
@@ -555,8 +556,8 @@ test("admin navigation source implements a persistent desktop rail and focus-con
   assert.match(shell, /addEventListener\("focusin"/u);
   assert.match(shell, /drawerRef\.current\?\.contains/u);
   assert.match(shell, /focus-visible:outline-2/u);
-  assert.match(shell, /平台管理员不进入项目、团队和用户工作区/u);
-  assert.match(shell, /不展示用户项目、团队或个人连接/u);
+  assert.doesNotMatch(shell, /平台管理员不进入项目、团队和用户工作区/u);
+  assert.doesNotMatch(shell, /不展示用户项目、团队或个人连接/u);
 });
 
 test("user guide and project surfaces keep admin controls out of the ordinary flow", async () => {
@@ -586,9 +587,10 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.doesNotMatch(userDocs, /迁移期间不启动新的外部仓库访问|个人连接开放后/u);
   assert.match(adminDocs, /管理工作台/u);
   assert.match(adminDocs, /在 `\/admin\/models` 配置并测试/u);
-  assert.match(adminDocs, /在 `\/admin\/models\/routes` 为视觉、抽取、向量和生成能力维护默认路由/u);
+  assert.match(adminDocs, /在 `\/admin\/models` 的能力卡片中分别为视觉、抽取、向量和生成能力选择已验证可用的模型/u);
+  assert.doesNotMatch(adminDocs, /`\/admin\/models\/routes`/u);
   assert.match(adminDocs, /普通用户使用平台额度；只有有效会员可以维护个人模型连接，且个人模型必须经连接所有者与项目 Owner 双确认委托后才可在项目中使用/u);
-  assert.match(adminDocs, /`\/system\/memberships`[^。]*兼容跳转 `\/admin\/users`/u);
+  assert.match(adminDocs, /`\/system\/memberships`[^。]*兼容跳转 `\/admin\/users\/memberships`/u);
   assert.match(adminDocs, /`\/system\/operations` 仅 initial super admin 可用[^。]*兼容跳转 `\/admin\/operations\/backups`/u);
   assert.match(adminDocs, /其他 system admin 按现有安全行为返回不可见页面/u);
   assert.doesNotMatch(adminDocs, /`\/system\/\*`[^。]*把系统管理员导向上述页面/u);
@@ -597,12 +599,12 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(adminDocs, /平台管理员不代替用户持有或配置凭据/u);
   assert.match(readme, /旧版项目 Git 连接、首次关联和同步入口已冻结/u);
   assert.match(readme, /进入项目仓库页查看已有安全摘要/u);
-  assert.match(adminGuide, /\/admin\/models 只配置和验证平台供应商与模型连接/u);
-  assert.match(adminGuide, /\/admin\/models\/routes 独立维护/u);
-  assert.match(adminGuide, /\/admin\/credits/u);
-  assert.match(adminGuide, /\/admin\/operations\/probes/u);
-  assert.match(adminGuide, /\/admin\/users 统一查看账号、会员和用户额度摘要/u);
-  assert.match(adminGuide, /平台管理员只负责平台运营，不进入项目、团队和用户工作区/u);
+  assert.match(adminGuide, /AdminPageHeader title="管理员操作指南" description="按当前控制面流程完成预算、供应商连接、能力模型和用户治理/u);
+  assert.match(adminGuide, /<GuideCard title="1\. 先准备探测预算" summary=/u);
+  assert.match(adminGuide, /<GuideCard title="2\. 新增供应商：先测试后保存" summary=/u);
+  assert.match(adminGuide, /<GuideCard title="3\. 六项能力：选择、测试、启用" summary=/u);
+  assert.match(adminGuide, /成功条件：/u);
+  assert.match(adminGuide, /常见阻塞：/u);
   assert.match(readme, /\/admin\/models/u);
   assert.match(readme, /\/admin\/connectors\/mcp/u);
   assert.match(readme, /\/admin\/operations\/backups/u);

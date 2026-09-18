@@ -17,8 +17,8 @@ test("login page exposes the reference layout and real configured auth choices",
   ]);
 
   assert.match(form, /让项目知识可追溯/u);
-  assert.match(form, /import Image from "next\/image"/u);
-  assert.match(form, /Image src="\/brand\/ai-project-os-admin\.png" alt=""/u);
+  assert.match(form, /BrandMark/u);
+  assert.match(await readFile("src/components/brand-mark.tsx", "utf8"), /ai-project-os-admin-crisp\.png/u);
   assert.doesNotMatch(form, />OS<\/span>/u);
   assert.match(form, /记住我/u);
   assert.match(form, /忘记密码/u);
@@ -34,7 +34,7 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.match(form, /text-\[12px\]/u);
   assert.match(form, /sm:mt-7/u);
   assert.match(form, /githubLoginAvailable/u);
-  assert.match(page, /isGitHubOAuthConfigured/u);
+  assert.match(page, /getGitHubOAuthAvailability/u);
   assert.match(localRoute, /remember/u);
   assert.match(githubStart, /beginGitHubOAuth/u);
   assert.doesNotMatch(githubStart, /requestUrl\.origin/u);

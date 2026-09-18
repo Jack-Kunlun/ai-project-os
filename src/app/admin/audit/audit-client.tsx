@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { AuditDetailDrawer } from "@/app/admin/audit/audit-detail-drawer";
+import { AdminPageHeader } from "@/components/admin-page-header";
 import {
   AUDIT_PAGE_SIZE,
   auditActionLabel,
@@ -209,17 +210,8 @@ export function AdminAuditClient() {
   const advancedActive = hasAdvancedFilterValues(input);
   const page = history.length + 1;
 
-  return <div className="pb-16">
-    <section className="rounded-3xl bg-slate-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-8 sm:py-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">System audit center</p>
-      <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">审计中心</h1>
-          <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">集中查看平台控制面变更证据。这里只展示结构化状态、版本和安全引用，不展示凭据、路径、参数、原因正文或外部请求标识。</p>
-        </div>
-        {data ? <span className="rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-slate-200">快照 {dateParts(data.snapshotAt).full}</span> : null}
-      </div>
-    </section>
+  return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
+    <AdminPageHeader title="审计中心" description="查看平台控制面变更证据；仅展示结构化状态、版本和安全引用。" meta={data ? `快照 ${dateParts(data.snapshotAt).full}` : undefined} />
 
     <form onSubmit={applyFilters} className="mt-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

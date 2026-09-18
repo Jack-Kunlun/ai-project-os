@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -15,7 +16,6 @@ const shouldRun = process.env.PRODUCTION_UPGRADE_PREFLIGHT_POSTGRES_GATE === "1"
 const configuredUrl = process.env.PRODUCTION_UPGRADE_PREFLIGHT_TEST_DATABASE_URL;
 const testDatabaseName = "ai_project_os_production_preflight_test";
 const compatibilityDatabaseName = "ai_project_os_production_preflight_compat_test";
-const cleanSlateFenceMigration = "20260910005000_fence_clean_slate_transition";
 const execFile = promisify(execFileCallback);
 
 function testDatabaseUrl(): string {
@@ -147,8 +147,68 @@ async function installLegacySchema(databaseUrl: string, temporaryPrismaRoot: str
   await installMigrationSnapshot(databaseUrl, temporaryPrismaRoot, LEGACY_MIGRATION_MANIFEST.map((entry) => entry.name));
 }
 
+async function seedLegacyProbeEvidence(client: Client): Promise<Readonly<{ settledAttemptId: string; rejectedAttemptId: string; providerConnectionId: string }>> {
+  const actorId = randomUUID();
+  const credentialId = randomUUID();
+  const providerConnectionId = randomUUID();
+  const budgetId = randomUUID();
+  const settledAttemptId = randomUUID();
+  const rejectedAttemptId = randomUUID();
+  const settledRequestKey = "a".repeat(64);
+  const settledRequestFingerprint = "b".repeat(64);
+  const settledCredentialFingerprint = "c".repeat(64);
+  const rejectedRequestKey = "d".repeat(64);
+  const rejectedRequestFingerprint = "e".repeat(64);
+
+  await client.query("BEGIN");
+  try {
+    await client.query("SET LOCAL ai_project_os.platform_provider_probe_mutation = 'service-v1'");
+    await client.query("SET CONSTRAINTS ALL DEFERRED");
+    await client.query(`
+      INSERT INTO "AppUser" ("id", "username", "role", "accountAccessVersion", "createdAt", "updatedAt")
+      VALUES ($1, $2, 'admin', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [actorId, `compat-probe-${actorId.slice(0, 8)}`]);
+    await client.query(`
+      INSERT INTO "ExternalCredential" ("id", "kind", "ciphertext", "nonce", "authTag", "maskedSuffix", "secretFingerprint", "createdAt", "updatedAt")
+      VALUES ($1, 'ai_provider', decode('00', 'hex'), decode('00', 'hex'), decode('00', 'hex'), 'compat', $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [credentialId, "f".repeat(64)]);
+    await client.query(`
+      INSERT INTO "AiProviderConnection" ("id", "name", "kind", "scope", "protocol", "baseUrl", "credentialId", "defaultGenerationModelId", "configurationVersion", "status", "createdAt", "updatedAt")
+      VALUES ($1, 'compat-provider', 'openai', 'platform', 'chat_completions', 'https://example.invalid/v1', $2, 'compat-model', 1, 'verified', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [providerConnectionId, credentialId]);
+    await client.query(`
+      INSERT INTO "PlatformProviderProbeBudget" ("id", "version", "status", "unitLimit", "alertThresholdUnits", "reservedUnits", "settledUnits", "heldUnits", "startsAt", "expiresAt", "createdById", "createdAt", "updatedAt")
+      VALUES ($1, 1, 'draft', 2, 1, 0, 0, 0, CURRENT_TIMESTAMP - INTERVAL '1 minute', CURRENT_TIMESTAMP + INTERVAL '1 hour', $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [budgetId, actorId]);
+    await client.query(`
+      INSERT INTO "PlatformProviderProbeAttempt" ("id", "budgetId", "providerConnectionId", "actorId", "actorAccountAccessVersion", "providerConfigurationVersion", "credentialSecretFingerprint", "clientRequestKeyHash", "requestFingerprint", "status", "plannedUnits", "dispatchedUnits", "settledUnits", "releasedUnits", "heldUnits", "leaseExpiresAt", "startedAt", "terminalAt", "createdAt", "updatedAt")
+      VALUES ($1, $2, $3, $4, 1, 1, $5, $6, $7, 'settled', 1, 1, 1, 0, 0, CURRENT_TIMESTAMP + INTERVAL '1 hour', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [settledAttemptId, budgetId, providerConnectionId, actorId, settledCredentialFingerprint, settledRequestKey, settledRequestFingerprint]);
+    for (const [event, ordinal] of [["reserved", 1], ["dispatched", 1], ["settled", 1]] as const) {
+      await client.query(`
+        INSERT INTO "PlatformProviderProbeLedger" ("id", "budgetId", "attemptId", "actorId", "ordinal", "event", "capability", "units", "createdAt")
+        VALUES ($1, $2, $3, $4, $5, $6, 'generation', 1, CURRENT_TIMESTAMP)
+      `, [randomUUID(), budgetId, settledAttemptId, actorId, ordinal, event]);
+    }
+    await client.query(`
+      INSERT INTO "PlatformProviderProbeAttempt" ("id", "providerConnectionId", "actorId", "actorAccountAccessVersion", "providerConfigurationVersion", "clientRequestKeyHash", "requestFingerprint", "status", "safeErrorCode", "plannedUnits", "dispatchedUnits", "settledUnits", "releasedUnits", "heldUnits", "leaseExpiresAt", "terminalAt", "createdAt", "updatedAt")
+      VALUES ($1, $2, $3, 1, 1, $4, $5, 'rejected', 'PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED', 0, 0, 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `, [rejectedAttemptId, providerConnectionId, actorId, rejectedRequestKey, rejectedRequestFingerprint]);
+    await client.query(`
+      INSERT INTO "PlatformProviderProbeLedger" ("id", "attemptId", "actorId", "ordinal", "event", "units", "safeErrorCode", "createdAt")
+      VALUES ($1, $2, $3, 0, 'rejected', 0, 'PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED', CURRENT_TIMESTAMP)
+    `, [randomUUID(), rejectedAttemptId, actorId]);
+    await client.query(`UPDATE "PlatformProviderProbeBudget" SET "settledUnits" = 1 WHERE "id" = $1`, [budgetId]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  }
+  return { settledAttemptId, rejectedAttemptId, providerConnectionId };
+}
+
 test(
-  "production upgrade preflight accepts the exact v0.2 schema and upgrades 102 migrations to 103",
+  "production upgrade preflight accepts the exact v0.3 schema and upgrades 103 migrations to 105",
   { skip: !shouldRun ? "PRODUCTION_UPGRADE_PREFLIGHT_POSTGRES_GATE=1 is required" : false },
   async (context) => {
     const url = testDatabaseUrl();
@@ -164,6 +224,7 @@ test(
     await client.connect();
     try {
       await installLegacySchema(url, temporaryPrismaRoot);
+      const legacyProbeEvidence = await seedLegacyProbeEvidence(client);
       const preflightOptions = { legacyRole: pinnedAdminRole } as const;
       const expectedDatabasePrincipal = pinnedAdminRole === PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE
         ? "cluster-admin-owned"
@@ -177,18 +238,6 @@ test(
                current_setting('transaction_isolation') AS transaction_isolation
       `);
       assert.deepEqual(afterRollback.rows, [{ transaction_read_only: "off", transaction_isolation: "read committed" }]);
-
-      const memberRole = await client.query<{ has_member: boolean }>(`
-        SELECT EXISTS (
-          SELECT 1
-            FROM pg_catalog.pg_enum AS enum_value
-            JOIN pg_catalog.pg_type AS enum_type
-              ON enum_type.oid = enum_value.enumtypid
-           WHERE enum_type.typname = 'AppUserRole'
-             AND enum_value.enumlabel = 'member'
-        ) AS has_member
-      `);
-      assert.deepEqual(memberRole.rows, [{ has_member: false }]);
 
       const sameDatabaseBackend = new Client({ connectionString: url, connectionTimeoutMillis: 5_000 });
       await sameDatabaseBackend.connect();
@@ -234,12 +283,6 @@ test(
         await otherDatabaseBackend.end();
       }
 
-      await cp(
-        resolve(process.cwd(), "prisma/migrations/20260917010000_add_platform_bootstrap"),
-        resolve(temporaryPrismaRoot, "migrations/20260917010000_add_platform_bootstrap"),
-        { recursive: true },
-      );
-
       await execFile("pnpm", ["exec", "prisma", "migrate", "deploy", "--config", "prisma.config.ts"], {
         cwd: process.cwd(),
         env: { ...process.env, DATABASE_URL: url },
@@ -250,38 +293,96 @@ test(
         project_ai_route: string | null;
         project_ai_route_revision: string | null;
         ownership_audit: string | null;
-        member_role: boolean;
-        workspace_id_column: boolean;
+        probe_subject: string | null;
+        consumed_route_id: string | null;
       }>(`
         SELECT (SELECT count(*)::integer FROM "_prisma_migrations" WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL) AS migration_count,
                pg_catalog.to_regclass('public."PlatformBootstrap"')::text AS platform_bootstrap,
                pg_catalog.to_regclass('public."ProjectAiRoute"')::text AS project_ai_route,
                pg_catalog.to_regclass('public."ProjectAiRouteRevision"')::text AS project_ai_route_revision,
                pg_catalog.to_regclass('public."AiProviderOwnershipAudit"')::text AS ownership_audit,
-               EXISTS (
-                 SELECT 1 FROM pg_catalog.pg_enum enum_value
-                 JOIN pg_catalog.pg_type enum_type ON enum_type.oid = enum_value.enumtypid
-                 WHERE enum_type.typname = 'AppUserRole' AND enum_value.enumlabel = 'member'
-               ) AS member_role,
-               EXISTS (
-                 SELECT 1 FROM pg_catalog.pg_attribute attribute_meta
-                 JOIN pg_catalog.pg_class relation_meta ON relation_meta.oid = attribute_meta.attrelid
+               (SELECT attribute_meta.atttypid::regtype::text
+                  FROM pg_catalog.pg_attribute attribute_meta
+                  JOIN pg_catalog.pg_class relation_meta ON relation_meta.oid = attribute_meta.attrelid
                  WHERE relation_meta.relnamespace = 'public'::pg_catalog.regnamespace
-                   AND relation_meta.relname = 'AiProviderConnection'
-                   AND attribute_meta.attname = 'workspaceId'
+                   AND relation_meta.relname = 'PlatformProviderProbeAttempt'
+                   AND attribute_meta.attname = 'subject'
                    AND attribute_meta.attnum > 0
-                   AND NOT attribute_meta.attisdropped
-               ) AS workspace_id_column
+                   AND NOT attribute_meta.attisdropped) AS probe_subject,
+               (SELECT attribute_meta.atttypid::regtype::text
+                  FROM pg_catalog.pg_attribute attribute_meta
+                  JOIN pg_catalog.pg_class relation_meta ON relation_meta.oid = attribute_meta.attrelid
+                 WHERE relation_meta.relnamespace = 'public'::pg_catalog.regnamespace
+                   AND relation_meta.relname = 'PlatformProviderProbeAttempt'
+                   AND attribute_meta.attname = 'consumedRouteId'
+                   AND attribute_meta.attnum > 0
+                   AND NOT attribute_meta.attisdropped) AS consumed_route_id
       `);
       assert.deepEqual(upgraded.rows, [{
-        migration_count: 103,
+        migration_count: 105,
         platform_bootstrap: '"PlatformBootstrap"',
         project_ai_route: null,
         project_ai_route_revision: null,
         ownership_audit: null,
-        member_role: false,
-        workspace_id_column: false,
+        probe_subject: '"PlatformProviderProbeSubject"',
+        consumed_route_id: 'uuid',
       }]);
+
+      const preservedEvidence = await client.query<{
+        id: string;
+        status: string;
+        subject: string;
+        provider_connection_id: string | null;
+        ledger_count: number;
+      }>(`
+        SELECT attempt."id",
+               attempt."status"::text AS status,
+               attempt."subject"::text AS subject,
+               attempt."providerConnectionId"::text AS provider_connection_id,
+               count(ledger."id")::integer AS ledger_count
+          FROM "PlatformProviderProbeAttempt" AS attempt
+          LEFT JOIN "PlatformProviderProbeLedger" AS ledger ON ledger."attemptId" = attempt."id"
+         WHERE attempt."id" IN ($1, $2)
+         GROUP BY attempt."id", attempt."status", attempt."subject", attempt."providerConnectionId"
+         ORDER BY attempt."id"
+      `, [legacyProbeEvidence.rejectedAttemptId, legacyProbeEvidence.settledAttemptId]);
+      assert.deepEqual(
+        preservedEvidence.rows.map((row) => ({ ...row, provider_connection_id: row.provider_connection_id ?? null })),
+        [
+          {
+            id: legacyProbeEvidence.rejectedAttemptId,
+            status: "rejected",
+            subject: "savedConnection",
+            provider_connection_id: legacyProbeEvidence.providerConnectionId,
+            ledger_count: 1,
+          },
+          {
+            id: legacyProbeEvidence.settledAttemptId,
+            status: "settled",
+            subject: "savedConnection",
+            provider_connection_id: legacyProbeEvidence.providerConnectionId,
+            ledger_count: 3,
+          },
+        ].sort((left, right) => left.id.localeCompare(right.id)),
+      );
+      const constraints = await client.query<{ conname: string; contype: string; convalidated: boolean }>(`
+        SELECT constraint_meta.conname,
+               constraint_meta.contype,
+               constraint_meta.convalidated
+          FROM pg_catalog.pg_constraint AS constraint_meta
+         WHERE constraint_meta.conrelid = 'public."PlatformProviderProbeAttempt"'::regclass
+           AND constraint_meta.conname IN (
+             'PlatformProviderProbeAttempt_provider_fkey',
+             'PlatformProviderProbeAttempt_consumed_route_fkey',
+             'PlatformProviderProbeAttempt_shape_check'
+           )
+         ORDER BY constraint_meta.conname
+      `);
+      assert.deepEqual(constraints.rows, [
+        { conname: "PlatformProviderProbeAttempt_consumed_route_fkey", contype: "f", convalidated: true },
+        { conname: "PlatformProviderProbeAttempt_provider_fkey", contype: "f", convalidated: true },
+        { conname: "PlatformProviderProbeAttempt_shape_check", contype: "c", convalidated: true },
+      ]);
     } finally {
       await client.end();
     }
@@ -289,7 +390,7 @@ test(
 );
 
 test(
-  "production upgrade fence is a safe 102 to 103 compatibility migration after clean-slate",
+  "production upgrade applies exactly the two additive v0.4 migrations after the 103-entry source ledger",
   { skip: !shouldRun ? "PRODUCTION_UPGRADE_PREFLIGHT_POSTGRES_GATE=1 is required" : false },
   async (context) => {
     const sourceUrl = new URL(testDatabaseUrl());
@@ -309,9 +410,10 @@ test(
     try {
       await admin.query(`DROP DATABASE IF EXISTS "${compatibilityDatabaseName}" WITH (FORCE)`);
       await admin.query(`CREATE DATABASE "${compatibilityDatabaseName}" OWNER "ai_project_os_gate"`);
-      const originalMigrationNames = (await migrationNamesThrough()).filter((name) => name !== cleanSlateFenceMigration);
-      assert.equal(originalMigrationNames.length, 102);
-      await installMigrationSnapshot(compatibilityUrl.toString(), temporaryPrismaRoot, originalMigrationNames);
+      const sourceMigrationNames = await migrationNamesThrough("20260917010000_add_platform_bootstrap");
+      assert.equal(sourceMigrationNames.length, 103);
+      assert.deepEqual(sourceMigrationNames, LEGACY_MIGRATION_MANIFEST.map((entry) => entry.name));
+      await installMigrationSnapshot(compatibilityUrl.toString(), temporaryPrismaRoot, sourceMigrationNames);
 
       await execFile("pnpm", ["exec", "prisma", "migrate", "deploy", "--config", "prisma.config.ts"], {
         cwd: process.cwd(),
@@ -321,24 +423,26 @@ test(
       const compatibilityClient = new Client({ connectionString: compatibilityUrl.toString(), connectionTimeoutMillis: 5_000 });
       await compatibilityClient.connect();
       try {
-        const result = await compatibilityClient.query<{ migration_count: number; trigger_names: string[] }>(`
+        const result = await compatibilityClient.query<{ migration_count: number; target_migrations: string[] }>(`
           SELECT
             (SELECT count(*)::integer FROM "_prisma_migrations" WHERE "finished_at" IS NOT NULL AND "rolled_back_at" IS NULL) AS migration_count,
             (
               SELECT COALESCE(
-                jsonb_agg(trigger_meta.tgname ORDER BY trigger_meta.tgname),
+                jsonb_agg(migration."migration_name" ORDER BY migration."migration_name"),
                 '[]'::jsonb
               )
-              FROM pg_catalog.pg_trigger AS trigger_meta
-              WHERE NOT trigger_meta.tgisinternal
-                AND trigger_meta.tgname LIKE '%clean_slate_transition_write_fence'
-            ) AS trigger_names
+              FROM "_prisma_migrations" AS migration
+              WHERE migration."migration_name" IN (
+                '20260918020000_generalize_platform_probe_evidence',
+                '20260918023000_add_platform_route_consumption_reference'
+              )
+            ) AS target_migrations
         `);
         assert.deepEqual(result.rows, [{
-          migration_count: 103,
-          trigger_names: [
-            "AiProviderConnection_clean_slate_transition_write_fence",
-            "AppUser_clean_slate_transition_write_fence",
+          migration_count: 105,
+          target_migrations: [
+            "20260918020000_generalize_platform_probe_evidence",
+            "20260918023000_add_platform_route_consumption_reference",
           ],
         }]);
       } finally {

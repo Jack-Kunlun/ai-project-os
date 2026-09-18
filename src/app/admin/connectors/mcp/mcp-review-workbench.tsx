@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { AdminPageHeader } from "@/components/admin-page-header";
 
 type ReviewState = "eligible" | "active";
 type ReviewConclusion = "read_only_verified" | "read_only_rejected" | "needs_research";
@@ -370,21 +371,12 @@ export function McpReviewWorkbench() {
     if (conclusion === "read_only_verified" && view === "eligible") setSelectedId("");
   }
 
-  return <div className="mx-auto max-w-7xl px-4 pb-16 pt-8 sm:px-8 lg:px-10">
-    <section className="rounded-3xl bg-slate-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-8 sm:py-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">MCP control-plane review</p>
-      <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">MCP 工具安全审核</h1>
-          <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">管理员只审核已经净化的工具快照，冻结定义、网络、凭据指纹和配置版本。审核记录只表达受控结论，不开放远端工具操作。</p>
-        </div>
-        <span className="rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-slate-200">安全审核工作台</span>
-      </div>
-      <div className="mt-6 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-indigo-300/30 bg-white/10 px-4 py-3 text-xs leading-5 text-slate-200">远端 Schema 与 annotations 属于不可信远端声明，仅供人工审核，不能替代平台安全判断。</div>
-        <div className="rounded-2xl border border-indigo-300/30 bg-white/10 px-4 py-3 text-xs leading-5 text-slate-200">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</div>
-      </div>
-    </section>
+  return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
+    <AdminPageHeader title="MCP 工具安全审核" description="审核已经净化的工具快照；审核记录只表达受控结论，不开放远端工具操作。" meta="安全审核工作台" />
+    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-xs leading-5 text-indigo-950">远端 Schema 与 annotations 属于不可信远端声明，仅供人工审核，不能替代平台安全判断。</div>
+      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">费用承担者为连接所有者；第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</div>
+    </div>
 
     <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
       <div role="tablist" aria-label="MCP 审核候选状态" className="flex flex-wrap gap-2">

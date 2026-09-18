@@ -5,7 +5,6 @@ import { readCliArguments } from "./cli-arguments";
 import {
   buildProductionUpgradePreflightFailure,
   buildProductionUpgradePreflightReport,
-  CLEAN_SLATE_DATA_GATES,
   LEGACY_MIGRATION_MANIFEST,
   PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE,
   PRODUCTION_UPGRADE_REQUIRED_EXTENSIONS,
@@ -73,21 +72,26 @@ interface SchemaColumnRow {
   present: boolean;
 }
 
-interface DataGateRow {
-  app_user_member: boolean;
-  workspace_provider_or_workspace_id: boolean;
-  project_ai_route: boolean;
-  project_ai_route_revision: boolean;
-  ai_provider_ownership_audit?: boolean;
+interface SchemaEnumTypeRow {
+  type_name: string;
+  labels: readonly string[];
 }
 
-interface OptionalRelationRow {
+interface SchemaConstraintRow {
   relation_name: string;
+  constraint_name: string;
+  constraint_type: string | null;
   present: boolean;
+  validated: boolean;
 }
 
-interface AuditDataGateRow {
-  ai_provider_ownership_audit: boolean;
+interface SchemaIndexRow {
+  relation_name: string;
+  index_name: string;
+  present: boolean;
+  unique: boolean;
+  valid: boolean;
+  ready: boolean;
 }
 
 interface ClientBackendRow {
@@ -224,52 +228,72 @@ export const PRODUCTION_UPGRADE_PREFLIGHT_SQL = Object.freeze({
                 AND NOT attribute_meta.attisdropped
            ) AS present
       FROM unnest($1::text[], $2::text[]) WITH ORDINALITY AS expected(relation_name, column_name, ordinal)
+      ORDER BY expected.ordinal
+  `,
+  schemaEnumTypes: `
+    SELECT expected.type_name,
+           COALESCE(
+             array_agg(enum_meta.enumlabel ORDER BY enum_meta.enumsortorder)
+               FILTER (WHERE enum_meta.enumlabel IS NOT NULL),
+             ARRAY[]::text[]
+           ) AS labels
+      FROM unnest($1::text[]) WITH ORDINALITY AS expected(type_name, ordinal)
+      LEFT JOIN pg_catalog.pg_type AS type_meta
+        ON type_meta.typname = expected.type_name
+      LEFT JOIN pg_catalog.pg_namespace AS namespace_meta
+        ON namespace_meta.oid = type_meta.typnamespace
+       AND namespace_meta.nspname = 'public'
+      LEFT JOIN pg_catalog.pg_enum AS enum_meta
+        ON enum_meta.enumtypid = type_meta.oid
+       AND namespace_meta.nspname = 'public'
+     GROUP BY expected.type_name, expected.ordinal
      ORDER BY expected.ordinal
   `,
-  optionalRelations: `
-    SELECT 'AiProviderOwnershipAudit' AS relation_name,
-           EXISTS (
-             SELECT 1
-               FROM pg_catalog.pg_class AS relation_meta
-               JOIN pg_catalog.pg_namespace AS namespace_meta
-                 ON namespace_meta.oid = relation_meta.relnamespace
-              WHERE namespace_meta.nspname = 'public'
-                AND relation_meta.relname = 'AiProviderOwnershipAudit'
-                AND relation_meta.relkind IN ('r', 'p')
-           ) AS present
+  schemaConstraints: `
+    SELECT expected.relation_name,
+           expected.constraint_name,
+           constraint_meta.contype AS constraint_type,
+           constraint_meta.oid IS NOT NULL AS present,
+           COALESCE(constraint_meta.convalidated, false) AS validated
+      FROM unnest($1::text[], $2::text[]) WITH ORDINALITY AS expected(relation_name, constraint_name, ordinal)
+      LEFT JOIN pg_catalog.pg_class AS relation_meta
+        ON relation_meta.relname = expected.relation_name
+       AND relation_meta.relkind IN ('r', 'p')
+      LEFT JOIN pg_catalog.pg_namespace AS relation_namespace
+        ON relation_namespace.oid = relation_meta.relnamespace
+       AND relation_namespace.nspname = 'public'
+      LEFT JOIN pg_catalog.pg_constraint AS constraint_meta
+        ON constraint_meta.conrelid = relation_meta.oid
+       AND constraint_meta.conname = expected.constraint_name
+       AND relation_namespace.oid IS NOT NULL
+     ORDER BY expected.ordinal
   `,
-  dataGates: `
-    SELECT EXISTS (
-             SELECT 1 FROM "public"."AppUser" AS app_user
-              WHERE app_user."role"::text = 'member'
-           ) AS app_user_member,
-           EXISTS (
-             SELECT 1 FROM "public"."AiProviderConnection" AS provider
-             WHERE pg_catalog.to_jsonb(provider) ->> 'scope' = 'workspace'
-                 OR (pg_catalog.to_jsonb(provider) ? 'workspaceId' AND pg_catalog.to_jsonb(provider) ->> 'workspaceId' IS NOT NULL)
-           ) AS workspace_provider_or_workspace_id,
-           EXISTS (
-             SELECT 1
-               FROM pg_catalog.pg_class AS relation_meta
-               JOIN pg_catalog.pg_namespace AS namespace_meta
-                 ON namespace_meta.oid = relation_meta.relnamespace
-              WHERE namespace_meta.nspname = 'public'
-                AND relation_meta.relname = 'ProjectAiRoute'
-                AND relation_meta.relkind IN ('r', 'p')
-           ) AS project_ai_route,
-           EXISTS (
-             SELECT 1
-               FROM pg_catalog.pg_class AS relation_meta
-               JOIN pg_catalog.pg_namespace AS namespace_meta
-                 ON namespace_meta.oid = relation_meta.relnamespace
-              WHERE namespace_meta.nspname = 'public'
-                AND relation_meta.relname = 'ProjectAiRouteRevision'
-                AND relation_meta.relkind IN ('r', 'p')
-           ) AS project_ai_route_revision,
-           false AS ai_provider_ownership_audit
-  `,
-  auditDataGate: `
-    SELECT EXISTS (SELECT 1 FROM "public"."AiProviderOwnershipAudit") AS ai_provider_ownership_audit
+  schemaIndexes: `
+    SELECT expected.relation_name,
+           expected.index_name,
+           index_info.indexrelid IS NOT NULL AS present,
+           COALESCE(index_info.indisunique, false) AS unique,
+           COALESCE(index_info.indisvalid, false) AS valid,
+           COALESCE(index_info.indisready, false) AS ready
+      FROM unnest($1::text[], $2::text[]) WITH ORDINALITY AS expected(relation_name, index_name, ordinal)
+      LEFT JOIN pg_catalog.pg_class AS relation_meta
+        ON relation_meta.relname = expected.relation_name
+       AND relation_meta.relkind IN ('r', 'p')
+      LEFT JOIN pg_catalog.pg_namespace AS relation_namespace
+        ON relation_namespace.oid = relation_meta.relnamespace
+       AND relation_namespace.nspname = 'public'
+      LEFT JOIN pg_catalog.pg_class AS index_meta
+        ON index_meta.relname = expected.index_name
+       AND index_meta.relkind = 'i'
+      LEFT JOIN pg_catalog.pg_namespace AS index_namespace
+        ON index_namespace.oid = index_meta.relnamespace
+       AND index_namespace.nspname = 'public'
+      LEFT JOIN pg_catalog.pg_index AS index_info
+        ON index_info.indexrelid = index_meta.oid
+       AND index_info.indrelid = relation_meta.oid
+       AND relation_namespace.oid IS NOT NULL
+       AND index_namespace.oid IS NOT NULL
+     ORDER BY expected.ordinal
   `,
   otherClientBackends: `
     SELECT EXISTS (
@@ -300,10 +324,6 @@ function requireSingleRow<Row>(rows: readonly Row[]): Row {
     throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_RESULT_INVALID");
   }
   return rows[0];
-}
-
-function isBoolean(value: unknown): value is boolean {
-  return typeof value === "boolean";
 }
 
 function validateTransactionSettings(row: TransactionSettingsRow): void {
@@ -475,6 +495,9 @@ function validateMigrationLedger(rows: readonly MigrationLedgerRow[]): void {
 function validateLegacySchema(
   relationRows: readonly SchemaRelationRow[],
   columnRows: readonly SchemaColumnRow[],
+  enumTypeRows: readonly SchemaEnumTypeRow[],
+  constraintRows: readonly SchemaConstraintRow[],
+  indexRows: readonly SchemaIndexRow[],
 ): void {
   const expectedRelations = REQUIRED_LEGACY_SCHEMA.relations;
   if (
@@ -493,16 +516,46 @@ function validateLegacySchema(
   ) {
     throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID");
   }
-}
-
-function validateDataGates(row: DataGateRow): void {
-  for (const gate of CLEAN_SLATE_DATA_GATES) {
-    if (!isBoolean(row[gate])) {
-      throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_RESULT_INVALID");
-    }
-    if (row[gate]) {
-      throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_DATA_BLOCKED");
-    }
+  const expectedEnumTypes = REQUIRED_LEGACY_SCHEMA.enumTypes;
+  if (
+    enumTypeRows.length !== expectedEnumTypes.length
+    || expectedEnumTypes.some(({ type, labels }, index) => {
+      const row = enumTypeRows[index];
+      return row?.type_name !== type
+        || row.labels.length !== labels.length
+        || labels.some((label, labelIndex) => row.labels[labelIndex] !== label);
+    })
+  ) {
+    throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID");
+  }
+  const expectedConstraints = REQUIRED_LEGACY_SCHEMA.constraints;
+  if (
+    constraintRows.length !== expectedConstraints.length
+    || expectedConstraints.some(({ relation, name, type }, index) => {
+      const row = constraintRows[index];
+      return row?.relation_name !== relation
+        || row.constraint_name !== name
+        || row.constraint_type !== type
+        || row.present !== true
+        || row.validated !== true;
+    })
+  ) {
+    throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID");
+  }
+  const expectedIndexes = REQUIRED_LEGACY_SCHEMA.indexes;
+  if (
+    indexRows.length !== expectedIndexes.length
+    || expectedIndexes.some(({ relation, name, unique }, index) => {
+      const row = indexRows[index];
+      return row?.relation_name !== relation
+        || row.index_name !== name
+        || row.present !== true
+        || row.unique !== unique
+        || row.valid !== true
+        || row.ready !== true;
+    })
+  ) {
+    throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID");
   }
 }
 
@@ -554,20 +607,24 @@ export async function runProductionUpgradePreflight(
     const schemaRelations = await queryProductionUpgradePreflightRows<SchemaRelationRow>(client, PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaRelations, [relationNames]);
     const schemaColumns = REQUIRED_LEGACY_SCHEMA.columns.map(({ relation, column }) => [relation, column] as const);
     const schemaColumnRows = await queryProductionUpgradePreflightRows<SchemaColumnRow>(client, PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaColumns, [schemaColumns.map(([relation]) => relation), schemaColumns.map(([, column]) => column)]);
-    validateLegacySchema(schemaRelations, schemaColumnRows);
-
-    const dataGates = requireSingleRow(await queryProductionUpgradePreflightRows<DataGateRow>(client, PRODUCTION_UPGRADE_PREFLIGHT_SQL.dataGates));
-    const optionalRelations = requireSingleRow(await queryProductionUpgradePreflightRows<OptionalRelationRow>(client, PRODUCTION_UPGRADE_PREFLIGHT_SQL.optionalRelations));
-    if (optionalRelations.relation_name !== "AiProviderOwnershipAudit" || typeof optionalRelations.present !== "boolean") {
-      throw new ProductionUpgradePreflightError("PRODUCTION_UPGRADE_PREFLIGHT_RESULT_INVALID");
-    }
-    if (optionalRelations.present) {
-      const audit = requireSingleRow(await queryProductionUpgradePreflightRows<AuditDataGateRow>(client, PRODUCTION_UPGRADE_PREFLIGHT_SQL.auditDataGate));
-      dataGates.ai_provider_ownership_audit = audit.ai_provider_ownership_audit;
-    } else {
-      dataGates.ai_provider_ownership_audit = false;
-    }
-    validateDataGates(dataGates);
+    const schemaEnumTypeRows = await queryProductionUpgradePreflightRows<SchemaEnumTypeRow>(
+      client,
+      PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaEnumTypes,
+      [REQUIRED_LEGACY_SCHEMA.enumTypes.map(({ type }) => type)],
+    );
+    const schemaConstraints = REQUIRED_LEGACY_SCHEMA.constraints.map(({ relation, name }) => [relation, name] as const);
+    const schemaConstraintRows = await queryProductionUpgradePreflightRows<SchemaConstraintRow>(
+      client,
+      PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaConstraints,
+      [schemaConstraints.map(([relation]) => relation), schemaConstraints.map(([, name]) => name)],
+    );
+    const schemaIndexes = REQUIRED_LEGACY_SCHEMA.indexes.map(({ relation, name }) => [relation, name] as const);
+    const schemaIndexRows = await queryProductionUpgradePreflightRows<SchemaIndexRow>(
+      client,
+      PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaIndexes,
+      [schemaIndexes.map(([relation]) => relation), schemaIndexes.map(([, name]) => name)],
+    );
+    validateLegacySchema(schemaRelations, schemaColumnRows, schemaEnumTypeRows, schemaConstraintRows, schemaIndexRows);
 
     checksPassed = true;
   } catch (error) {

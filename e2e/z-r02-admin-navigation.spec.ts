@@ -10,6 +10,7 @@ import {
   expectR02NoAccessibilityViolations,
   expectR02NoHorizontalOverflow,
   expectR02SettledRoute,
+  expectedR02AdminNavigationLinkCount,
   r02ProjectGuardRoutes,
   r02ProjectRoutes,
   R02_PUBLIC_ROUTE_EXPECTATIONS,
@@ -268,7 +269,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
 
   for (const [path, expectedPath] of [
     ["/settings", "/admin/models"],
-    ["/system/memberships", "/admin/users"],
+    ["/system/memberships", "/admin/users/memberships"],
     ["/system/operations", "/admin/operations/backups"],
   ] as const) {
     await page.goto(path);
@@ -295,7 +296,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
       await expectR02NoHorizontalOverflow(page, `${route.path}@${width}`);
       if (width >= 1024) {
         await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true })).toBeVisible();
-        await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link")).toHaveCount(12);
+        await expect(page.getByRole("navigation", { name: "管理工作台导航", exact: true }).getByRole("link")).toHaveCount(expectedR02AdminNavigationLinkCount(route.path));
       } else {
         await expect(page.getByRole("button", { name: "打开导航", exact: true })).toBeVisible();
       }
@@ -304,11 +305,11 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
         await expectR02InViewport(page, readinessHeading, `admin primary heading@${width}`);
         const pendingActionsHeading = page.getByRole("heading", { name: "待处理事项", exact: true });
         await expectR02InViewport(page, pendingActionsHeading, `admin pending actions@${width}`);
-        if (width < 1024) await expectR02MobileDrawer(page);
       }
       if (route.path === "/admin/models") {
-        await expect(page.getByRole("button", { name: "加密保存连接", exact: true }), `platform model primary action@${width}`).toBeVisible();
+        await expect(page.getByRole("button", { name: "新增供应商", exact: true }), `platform model primary action@${width}`).toBeVisible();
       }
+      if (width < 1024) await expectR02MobileDrawer(page, route.path);
     }
     if (width === 390) await expectR02NoAccessibilityViolations(page, "admin representative@390");
   }
@@ -322,7 +323,8 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   await expectR02SettledRoute(page, R02_ADMIN_ROUTES[0], "admin drawer navigation source@390");
   await page.getByRole("button", { name: "打开导航", exact: true }).click();
   const mobileDrawer = page.getByRole("dialog", { name: "管理工作台导航" });
-  await mobileDrawer.getByRole("link", { name: /审计中心/u }).click();
+  await mobileDrawer.getByRole("button", { name: "展开安全中心", exact: true }).click();
+  await mobileDrawer.getByRole("link", { name: "审计记录", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/audit$/u);
   await expect(mobileDrawer).toBeHidden();
   await expectR02SettledRoute(page, R02_ADMIN_ROUTES.find((route) => route.path === "/admin/audit")!, "admin drawer navigation target@390");

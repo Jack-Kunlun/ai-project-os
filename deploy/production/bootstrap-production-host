@@ -194,7 +194,7 @@ install_runtime_scripts() {
 prepare_host() {
   local script
 
-  [[ "$RELEASE_TAG" == v0.3.0-dev.1 ]] || fail 'HOST_TAG_INVALID' 64
+  [[ "$RELEASE_TAG" == v0.4.0-dev.1 ]] || fail 'HOST_TAG_INVALID' 64
   [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'HOST_REVISION_INVALID' 65
   [[ "$LATEST_MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
     fail 'HOST_MANIFEST_OBJECT_INVALID' 64
@@ -207,7 +207,8 @@ prepare_host() {
     ai-project-os-backup \
     ai-project-os-backup.service \
     ai-project-os-backup.timer \
-    ai-project-os-deploy \
+    ai-project-os-configure-github-oauth \
+    ai-project-os-clean-deploy \
     ai-project-os-deactivate-host \
     ai-project-os-deploy.sudoers \
     ai-project-os-restore \

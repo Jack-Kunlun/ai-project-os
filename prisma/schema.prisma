@@ -506,6 +506,12 @@ enum PlatformProviderProbeAttemptStatus {
   held
 }
 
+enum PlatformProviderProbeSubject {
+  savedConnection
+  draftConnection
+  routeOperation
+}
+
 enum PlatformProviderProbeLedgerEvent {
   rejected
   reserved
@@ -6255,11 +6261,21 @@ model PlatformProviderProbeBudget {
 model PlatformProviderProbeAttempt {
   id                         String                              @id @default(uuid()) @db.Uuid
   budgetId                   String?                             @db.Uuid
-  providerConnectionId       String                              @db.Uuid
+  subject                    PlatformProviderProbeSubject       @default(savedConnection)
+  providerConnectionId       String?                             @db.Uuid
   actorId                    String                              @db.Uuid
   actorAccountAccessVersion  Int
   providerConfigurationVersion Int
   credentialSecretFingerprint String?                            @db.Char(64)
+  providerKind               AiProviderKind?
+  targetOperation            AiOperation?
+  targetModelId              String?                             @db.VarChar(128)
+  targetPayload              Json?                               @db.JsonB
+  configurationDigest        String?                             @db.Char(64)
+  evidenceExpiresAt          DateTime?
+  consumedAt                 DateTime?
+  consumedProviderConnectionId String?                           @db.Uuid
+  consumedRouteId            String?                             @db.Uuid
   clientRequestKeyHash       String                              @db.Char(64)
   requestFingerprint         String                              @db.Char(64)
   status                     PlatformProviderProbeAttemptStatus
@@ -6275,11 +6291,16 @@ model PlatformProviderProbeAttempt {
   terminalAt                 DateTime?
   updatedAt                  DateTime                          @updatedAt
   budget                     PlatformProviderProbeBudget?       @relation(fields: [budgetId], references: [id], onDelete: NoAction, onUpdate: Cascade)
-  providerConnection         AiProviderConnection                @relation("PlatformProviderProbeAttemptProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection         AiProviderConnection?               @relation("PlatformProviderProbeAttemptProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  consumedRoute              PlatformDefaultAiRoute?              @relation("PlatformProviderProbeAttemptConsumedRoute", fields: [consumedRouteId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   actor                      AppUser                             @relation("PlatformProviderProbeAttemptActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   ledgerEvents               PlatformProviderProbeLedger[]
 
   @@unique([providerConnectionId, actorId, clientRequestKeyHash])
+  @@index([subject, actorId, clientRequestKeyHash])
+  @@index([evidenceExpiresAt, consumedAt])
+  @@index([consumedProviderConnectionId])
+  @@index([consumedRouteId])
   @@index([providerConnectionId, status, updatedAt])
   @@index([actorId, createdAt])
   @@index([leaseExpiresAt, status])
@@ -6520,6 +6541,7 @@ model PlatformDefaultAiRoute {
   createdBy            AppUser                      @relation("PlatformDefaultAiRouteCreatedBy", fields: [createdById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   updatedBy            AppUser                      @relation("PlatformDefaultAiRouteUpdatedBy", fields: [updatedById], references: [id], onDelete: NoAction, onUpdate: Cascade)
   audits               PlatformDefaultAiRouteAudit[]
+  consumedProbeAttempts PlatformProviderProbeAttempt[] @relation("PlatformProviderProbeAttemptConsumedRoute")
 
   @@unique([operation, version])
   @@index([operation, status, updatedAt])

@@ -5,7 +5,6 @@ import { resolve } from "node:path";
 import test from "node:test";
 import {
   buildProductionUpgradePreflightFailure,
-  CLEAN_SLATE_DATA_GATES,
   LEGACY_MIGRATION_MANIFEST,
   PRODUCTION_UPGRADE_PREFLIGHT_APPLICATION_NAME,
   PRODUCTION_UPGRADE_PREFLIGHT_CONNECTION_TIMEOUT_MILLIS,
@@ -14,6 +13,7 @@ import {
   PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE,
   PRODUCTION_UPGRADE_REQUIRED_EXTENSIONS,
   PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE,
+  REQUIRED_LEGACY_SCHEMA,
   PRODUCTION_UPGRADE_SOURCE_VERSION,
   PRODUCTION_UPGRADE_TARGET_TAG,
   parseProductionUpgradePreflightArguments,
@@ -35,9 +35,9 @@ type FakeState = {
   ledger?: readonly Record<string, unknown>[];
   relations?: readonly Record<string, unknown>[];
   columns?: readonly Record<string, unknown>[];
-  gates?: Record<string, unknown>;
-  auditRelationPresent?: boolean;
-  auditGate?: unknown;
+  enumTypes?: readonly Record<string, unknown>[];
+  constraints?: readonly Record<string, unknown>[];
+  indexes?: readonly Record<string, unknown>[];
   otherClientBackend?: boolean;
   settings?: Record<string, unknown>;
   databasePrincipalSession?: Record<string, unknown>;
@@ -56,24 +56,41 @@ function validLedger(): readonly Record<string, unknown>[] {
 }
 
 function validRelations(): readonly Record<string, unknown>[] {
-  return ["AppUser", "AiProviderConnection", "ProjectAiProviderDelegation", "ProjectAiEffectiveRouteSelection", "Workspace"]
+  return REQUIRED_LEGACY_SCHEMA.relations
     .map((relation_name) => ({ relation_name, present: true }));
 }
 
 function validColumns(): readonly Record<string, unknown>[] {
-  return [
-    ["AppUser", "id"], ["AppUser", "role"], ["AiProviderConnection", "id"],
-    ["AiProviderConnection", "scope"], ["AiProviderConnection", "ownerUserId"],
-    ["ProjectAiProviderDelegation", "id"], ["ProjectAiProviderDelegation", "projectId"],
-    ["ProjectAiProviderDelegation", "providerConnectionId"],
-    ["ProjectAiEffectiveRouteSelection", "id"], ["ProjectAiEffectiveRouteSelection", "projectId"],
-    ["ProjectAiEffectiveRouteSelection", "delegationId"],
-    ["Workspace", "id"],
-  ].map(([relation_name, column_name]) => ({ relation_name, column_name, present: true }));
+  return REQUIRED_LEGACY_SCHEMA.columns
+    .map(({ relation: relation_name, column: column_name }) => ({ relation_name, column_name, present: true }));
 }
 
-function validGates(): Record<string, false> {
-  return Object.fromEntries(CLEAN_SLATE_DATA_GATES.map((gate) => [gate, false])) as Record<string, false>;
+function validEnumTypes(): readonly Record<string, unknown>[] {
+  return REQUIRED_LEGACY_SCHEMA.enumTypes
+    .map(({ type: type_name, labels }) => ({ type_name, labels: [...labels] }));
+}
+
+function validConstraints(): readonly Record<string, unknown>[] {
+  return REQUIRED_LEGACY_SCHEMA.constraints
+    .map(({ relation: relation_name, name: constraint_name, type: constraint_type }) => ({
+      relation_name,
+      constraint_name,
+      constraint_type,
+      present: true,
+      validated: true,
+    }));
+}
+
+function validIndexes(): readonly Record<string, unknown>[] {
+  return REQUIRED_LEGACY_SCHEMA.indexes
+    .map(({ relation: relation_name, name: index_name, unique }) => ({
+      relation_name,
+      index_name,
+      present: true,
+      unique,
+      valid: true,
+      ready: true,
+    }));
 }
 
 function validDatabasePrincipalSession(): Record<string, unknown> {
@@ -140,9 +157,9 @@ function fakeClient(state: FakeState = {}) {
       if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.migrationLedger) return { rows: (state.ledger ?? validLedger()) as readonly Row[] };
       if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaRelations) return { rows: (state.relations ?? validRelations()) as readonly Row[] };
       if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaColumns) return { rows: (state.columns ?? validColumns()) as readonly Row[] };
-      if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.optionalRelations) return { rows: [{ relation_name: "AiProviderOwnershipAudit", present: state.auditRelationPresent ?? false }] as unknown as readonly Row[] };
-      if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.auditDataGate) return { rows: [{ ai_provider_ownership_audit: state.auditGate ?? false }] as unknown as readonly Row[] };
-      if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.dataGates) return { rows: [state.gates ?? validGates()] as unknown as readonly Row[] };
+      if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaEnumTypes) return { rows: (state.enumTypes ?? validEnumTypes()) as readonly Row[] };
+      if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaConstraints) return { rows: (state.constraints ?? validConstraints()) as readonly Row[] };
+      if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaIndexes) return { rows: (state.indexes ?? validIndexes()) as readonly Row[] };
       if (text === PRODUCTION_UPGRADE_PREFLIGHT_SQL.otherClientBackends) return { rows: [{ other_client_backend: state.otherClientBackend ?? false }] as unknown as readonly Row[] };
       return { rows: [] as readonly Row[] };
     },
@@ -151,18 +168,30 @@ function fakeClient(state: FakeState = {}) {
 }
 
 test("production upgrade preflight has an exact source/target contract and fixed connection limits", () => {
-  assert.equal(PRODUCTION_UPGRADE_TARGET_TAG, "v0.3.0-dev.1");
-  assert.equal(PRODUCTION_UPGRADE_SOURCE_VERSION, "0.2.0-dev.1");
-  assert.equal(LEGACY_MIGRATION_MANIFEST.length, 102);
-  assert.equal(new Set(LEGACY_MIGRATION_MANIFEST.map((entry) => entry.name)).size, 102);
+  assert.equal(PRODUCTION_UPGRADE_TARGET_TAG, "v0.4.0-dev.1");
+  assert.equal(PRODUCTION_UPGRADE_SOURCE_VERSION, "0.3.0-dev.1");
+  assert.equal(LEGACY_MIGRATION_MANIFEST.length, 103);
+  assert.equal(new Set(LEGACY_MIGRATION_MANIFEST.map((entry) => entry.name)).size, 103);
   assert.ok(LEGACY_MIGRATION_MANIFEST.every((entry) => /^[0-9a-f]{64}$/u.test(entry.checksum)));
+  assert.ok(REQUIRED_LEGACY_SCHEMA.relations.includes("PlatformProviderProbeAttempt"));
+  assert.ok(REQUIRED_LEGACY_SCHEMA.columns.some(({ relation, column }) => relation === "PlatformProviderProbeAttempt" && column === "providerConnectionId"));
+  assert.ok(REQUIRED_LEGACY_SCHEMA.columns.some(({ relation, column }) => relation === "PlatformDefaultAiRoute" && column === "id"));
+  assert.deepEqual(REQUIRED_LEGACY_SCHEMA.enumTypes.find(({ type }) => type === "AiOperation")?.labels, ["embedding", "autoExtract", "sourceSummary", "projectAnalysis", "generateWithContext", "visionExtract"]);
+  assert.deepEqual(REQUIRED_LEGACY_SCHEMA.enumTypes.find(({ type }) => type === "PlatformProviderProbeAttemptStatus")?.labels, ["rejected", "reserved", "running", "settled", "released", "held"]);
+  assert.deepEqual(REQUIRED_LEGACY_SCHEMA.constraints, [
+    { relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_shape_check", type: "c" },
+    { relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_provider_fkey", type: "f" },
+  ]);
+  assert.deepEqual(REQUIRED_LEGACY_SCHEMA.indexes, [
+    { relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_providerConnectionId_actorId_clientRequestKeyHash_key", unique: true },
+  ]);
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_APPLICATION_NAME, "ai-project-os-production-upgrade-preflight");
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_CONNECTION_TIMEOUT_MILLIS, 5_000);
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_QUERY_TIMEOUT_MILLIS, 30_000);
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_LOCK_TIMEOUT_MILLIS, 5_000);
 });
 
-test("legacy migration manifest matches the first 102 migration files byte-for-byte", async () => {
+test("source migration manifest matches the first 103 migration files byte-for-byte", async () => {
   const migrationRoot = resolve(process.cwd(), "prisma/migrations");
   for (const entry of LEGACY_MIGRATION_MANIFEST) {
     const sql = await readFile(resolve(migrationRoot, entry.name, "migration.sql"));
@@ -289,16 +318,7 @@ test("pre-stop and post-stop preflight are read-only, fixed-query, and rollback-
   }
 });
 
-test("each clean-slate blocker and every ledger integrity failure fails closed and rolls back", async () => {
-  for (const gate of CLEAN_SLATE_DATA_GATES) {
-    const state = gate === "ai_provider_ownership_audit"
-      ? { gates: validGates(), auditRelationPresent: true, auditGate: true }
-      : { gates: { ...validGates(), [gate]: true } };
-    const { client, calls } = fakeClient(state);
-    await assert.rejects(() => runProductionUpgradePreflight(client, "pre-stop"), /PRODUCTION_UPGRADE_PREFLIGHT_DATA_BLOCKED/u);
-    assert.equal(calls.at(-1), PRODUCTION_UPGRADE_PREFLIGHT_SQL.rollback);
-  }
-
+test("every ledger integrity failure fails closed and rolls back", async () => {
   const ledgerFailures = [
     [],
     [...validLedger().slice(1)],
@@ -465,6 +485,44 @@ test("database-principal preflight accepts supported owners and rejects unsafe e
 test("schema, client-backend, transaction, and rollback failures are safe", async () => {
   const { client: schemaClient } = fakeClient({ relations: validRelations().map((row, index) => index === 0 ? { ...row, present: false } : row) });
   await assert.rejects(() => runProductionUpgradePreflight(schemaClient, "pre-stop"), /PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID/u);
+
+  const missingProbeDependency = fakeClient({
+    columns: validColumns().map((row) => row.relation_name === "PlatformProviderProbeAttempt" && row.column_name === "providerConnectionId"
+      ? { ...row, present: false }
+      : row),
+  });
+  await assert.rejects(() => runProductionUpgradePreflight(missingProbeDependency.client, "pre-stop"), /PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID/u);
+  assert.equal(missingProbeDependency.calls.includes(PRODUCTION_UPGRADE_PREFLIGHT_SQL.rollback), true);
+
+  const driftedProbeEnum = fakeClient({
+    enumTypes: validEnumTypes().map((row) => row.type_name === "PlatformProviderProbeAttemptStatus"
+      ? { ...row, labels: ["rejected", "reserved", "running", "settled", "released"] }
+      : row),
+  });
+  await assert.rejects(() => runProductionUpgradePreflight(driftedProbeEnum.client, "pre-stop"), /PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID/u);
+  assert.equal(driftedProbeEnum.calls.includes(PRODUCTION_UPGRADE_PREFLIGHT_SQL.rollback), true);
+
+  const missingProbeConstraint = fakeClient({
+    constraints: validConstraints().map((row) => row.constraint_name === "PlatformProviderProbeAttempt_shape_check"
+      ? { ...row, present: false }
+      : row),
+  });
+  await assert.rejects(() => runProductionUpgradePreflight(missingProbeConstraint.client, "pre-stop"), /PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID/u);
+  assert.equal(missingProbeConstraint.calls.includes(PRODUCTION_UPGRADE_PREFLIGHT_SQL.rollback), true);
+
+  const unvalidatedProbeConstraint = fakeClient({
+    constraints: validConstraints().map((row) => row.constraint_name === "PlatformProviderProbeAttempt_provider_fkey"
+      ? { ...row, validated: false }
+      : row),
+  });
+  await assert.rejects(() => runProductionUpgradePreflight(unvalidatedProbeConstraint.client, "pre-stop"), /PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID/u);
+  assert.equal(unvalidatedProbeConstraint.calls.includes(PRODUCTION_UPGRADE_PREFLIGHT_SQL.rollback), true);
+
+  const nonUniqueProbeIndex = fakeClient({
+    indexes: validIndexes().map((row) => ({ ...row, unique: false })),
+  });
+  await assert.rejects(() => runProductionUpgradePreflight(nonUniqueProbeIndex.client, "pre-stop"), /PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID/u);
+  assert.equal(nonUniqueProbeIndex.calls.includes(PRODUCTION_UPGRADE_PREFLIGHT_SQL.rollback), true);
 
   const { client: backendClient } = fakeClient({ otherClientBackend: true });
   await assert.rejects(() => runProductionUpgradePreflight(backendClient, "post-stop"), /PRODUCTION_UPGRADE_PREFLIGHT_CLIENT_BACKENDS_PRESENT/u);

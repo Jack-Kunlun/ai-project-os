@@ -144,7 +144,7 @@ export const SYSTEM_AUDIT_ACTION_LABELS: Readonly<Record<SystemAuditAction, stri
   draftUpdated: "更新草稿",
   validated: "验证",
   activated: "启用",
-  retired: "退役",
+  retired: "停用",
   grant: "发放",
   extend: "延期",
   revoke: "撤销",

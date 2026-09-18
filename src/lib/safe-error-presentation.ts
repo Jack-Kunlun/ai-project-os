@@ -16,6 +16,13 @@ const EXACT_PRESENTATIONS: Readonly<Record<string, Readonly<{ summary: string; n
   WEB_AI_CONFIRMATION_STALE: { summary: "项目资料、索引或模型路由已变化。", nextStep: "重新读取最新外发摘要并再次确认。" },
   WEB_AI_CONFIRMATION_CONSUMED: { summary: "本次外发确认已经使用。", nextStep: "重新读取外发摘要并创建新的确认。" },
   WEB_AI_CONFIRMATION_REQUIRED: { summary: "本次操作还没有有效的外发确认。", nextStep: "先读取外发摘要，再确认并执行。" },
+  PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED: { summary: "尚未启用平台连接测试额度。", nextStep: "先创建测试预算周期，再验证供应商连接。" },
+  PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED: { summary: "平台连接测试额度不足。", nextStep: "创建新的测试预算周期后再验证供应商连接。" },
+  PLATFORM_PROVIDER_PROBE_PROVIDER_AUTH_FAILED: { summary: "供应商凭据无效或权限不足。", nextStep: "检查 API Key 是否有效，重新保存后再测试。" },
+  PLATFORM_PROVIDER_PROBE_PROVIDER_REJECTED: { summary: "供应商拒绝了当前探测请求。", nextStep: "检查模型 ID 与能力配置，修正后再测试。" },
+  PLATFORM_PROVIDER_PROBE_PROVIDER_INVALID_RESPONSE: { summary: "供应商响应无法验证。", nextStep: "检查模型 ID 和协议；DeepSeek 探测会关闭思考模式后重试。" },
+  PLATFORM_PROVIDER_PROBE_PROVIDER_TIMEOUT: { summary: "供应商响应超时。", nextStep: "检查网络或供应商状态，稍后再试。" },
+  PLATFORM_PROVIDER_PROBE_PROVIDER_UNAVAILABLE: { summary: "供应商当前不可用。", nextStep: "检查供应商状态和连接配置后再试。" },
 });
 
 const SAFE_PRESENTATION_CODES = new Set([
@@ -42,6 +49,20 @@ const SAFE_PRESENTATION_CODES = new Set([
   "SOURCE_EXCERPT_MISMATCH",
   "SOURCE_IN_USE",
   "SOURCE_NOT_FOUND",
+  "PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED",
+  "PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_AUTH_FAILED",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_REJECTED",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_INVALID_RESPONSE",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_TIMEOUT",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_UNAVAILABLE",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_RATE_LIMITED",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_RESPONSE_TOO_LARGE",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_EMBEDDING_UNSUPPORTED",
+  "PLATFORM_PROVIDER_PROBE_PROVIDER_VISION_UNSUPPORTED",
+  "PLATFORM_PROVIDER_PROBE_RECONCILIATION_REQUIRED",
+  "PLATFORM_PROVIDER_PROBE_RECONCILIATION_HOLD",
+  "PLATFORM_PROVIDER_PROBE_RECONCILED_NO_DISPATCH",
 ]);
 
 function normalizedCode(value: unknown): string | null {

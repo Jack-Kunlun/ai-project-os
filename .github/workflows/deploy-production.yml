@@ -6,7 +6,7 @@ on:
       tag:
         description: Exact approved annotated release tag
         required: true
-        default: v0.3.0-dev.1
+        default: v0.4.0-dev.1
         type: string
 
 permissions:
@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$DEPLOY_TAG_INPUT" != v0.3.0-dev.1 ]]; then
+          if [[ "$DEPLOY_TAG_INPUT" != v0.4.0-dev.1 ]]; then
             echo "DEPLOY_TAG_INVALID" >&2
             exit 64
           fi
@@ -155,7 +155,7 @@ jobs:
           fi
           printf '%s\n' "$config_output"
 
-      - name: Create verified offsite backup and deploy through forced-command gateway
+      - name: Create verified offsite backup and clean-reset deploy through forced-command gateway
         run: |
           set -euo pipefail
           umask 077
@@ -172,7 +172,7 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=6 \
             "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
-            "deploy $DEPLOY_TAG $DEPLOY_SHA" 2>&1 | tee "$deployment_output_file"
+                "clean-deploy $DEPLOY_TAG $DEPLOY_SHA CONFIRM_CLEAN_RESET_V1" 2>&1 | tee "$deployment_output_file"
           pipeline_status=("${PIPESTATUS[@]}")
           set -e
 
@@ -184,12 +184,11 @@ jobs:
             exit 74
           fi
 
-          grep -q '^DEPLOY_OK ' "$deployment_output_file"
+          grep -q '^CLEAN_DEPLOY_OK ' "$deployment_output_file"
 
-          backup_object=$(sed -n 's/^DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
+          backup_object=$(sed -n 's/^CLEAN_DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
             "$deployment_output_file" | tail -n 1)
-          if [[ "$backup_object" != none-first-deploy && \
-            ! "$backup_object" =~ ^cos://[^/]+/production/backups/ ]]; then
+          if [[ ! "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]]; then
             echo "PRODUCTION_BACKUP_RESULT_INVALID" >&2
             exit 68
           fi

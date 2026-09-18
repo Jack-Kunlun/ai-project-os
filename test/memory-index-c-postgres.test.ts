@@ -16,7 +16,6 @@ import {
   type GitHubReadOnlyClient,
   type VerifiedGitHubRepository,
 } from "../src/lib/github";
-import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import {
   activatePlatformDefaultAiRoute,
@@ -34,6 +33,7 @@ import type { WebAiActor } from "../src/lib/web-ai-access";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 import { createControlledMembership } from "./membership-fixture";
 import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
+import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -388,7 +388,7 @@ test(
           });
         }
       });
-      const provider = await createProviderConnection({
+      const provider = await createVerifiedProviderFixture({
         name: `Memory index C provider ${randomUUID().slice(0, 8)}`,
         kind: "glm",
         apiKey: "sk-memory-index-c-secret",

@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import test from "node:test";
-import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
 import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
+import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import {
   activatePlatformDefaultAiRoute,
@@ -150,7 +150,7 @@ test(
           manualContentDedupeKey: sourceHash,
         },
       });
-      const provider = await createProviderConnection({
+      const provider = await createVerifiedProviderFixture({
         name: `V2 mock ${suffix}`,
         kind: "glm",
         apiKey: "sk-v2-workflow-secret",

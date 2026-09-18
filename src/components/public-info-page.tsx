@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { BrandMark } from "@/components/brand-mark";
 
 export function PublicInfoPage({
   eyebrow,
@@ -17,7 +18,7 @@ export function PublicInfoPage({
       <div className="mx-auto max-w-4xl">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <Link href="/login" className="flex items-center gap-3" aria-label="返回 AI Project OS 登录页">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-xs font-bold text-white shadow-lg">OS</span>
+            <BrandMark size={40} />
             <span>
               <span className="block text-sm font-bold tracking-[0.14em]">AI PROJECT OS</span>
             </span>

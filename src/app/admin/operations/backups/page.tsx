@@ -1,13 +1,12 @@
-import { AdminPageFrame } from "@/components/admin-shell";
-import { AdminHeader } from "@/components/admin-header";
 import { requireSystemAdminPage } from "@/lib/system-admin";
 import { isInitialSuperAdmin, readBackupOperationsSnapshot } from "@/lib/system-operations";
 import { SystemOperationsClient } from "@/app/system/operations/system-operations-client";
+import { AdminPageHeader } from "@/components/admin-page-header";
 
 export default async function AdminBackupsPage() {
   const user = await requireSystemAdminPage();
   if (!(await isInitialSuperAdmin(user))) {
-    return <main className="min-h-screen bg-[#f4f6fb] text-slate-950"><AdminHeader username={user.username} /><AdminPageFrame active="operations"><div className="mx-auto max-w-4xl px-5 py-10 sm:px-8"><section className="rounded-3xl border border-amber-200 bg-amber-50 p-7"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Restricted operations</p><h1 className="mt-3 text-2xl font-semibold">备份与运维仅限初始超级管理员</h1><p className="mt-3 text-sm leading-7 text-amber-900">普通系统管理员可以查看其他管理能力，但不能读取服务器备份状态或触碰恢复边界。</p></section></div></AdminPageFrame></main>;
+    return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6"><AdminPageHeader title="备份与运维" description="备份状态和恢复边界仅对初始超级管理员开放。" /><section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-6"><h2 className="text-base font-semibold text-amber-950">当前账号无权读取服务器备份状态</h2><p className="mt-2 text-sm leading-6 text-amber-900">普通系统管理员可以查看其他管理能力，但不能读取服务器备份状态或触碰恢复边界。</p></section></div>;
   }
   return <SystemOperationsClient username={user.username} initialSnapshot={await readBackupOperationsSnapshot()} adminMode={user.role === "admin"} />;
 }

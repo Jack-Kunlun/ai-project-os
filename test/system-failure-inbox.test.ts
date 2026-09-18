@@ -304,7 +304,12 @@ test("R09 admin UI is gated, read-only, live-measured, and exposes all lifecycle
   assert.match(handler, /requireApiSession/u);
   assert.match(handler, /assertSystemFailureInboxAdmin/u);
   assert.match(route, /force-dynamic/u);
-  assert.match(shell, /failures.*\/admin\/operations\/failures/u);
+  const moduleGroupsSource = shell.slice(shell.indexOf("const moduleGroups"));
+  const operationsModule = moduleGroupsSource.match(/\{\s*key: "operations",[\s\S]*?\n  \},/u)?.[0] ?? "";
+  assert.notEqual(operationsModule, "");
+  assert.match(operationsModule, /label: "运维中心"/u);
+  assert.match(operationsModule, /\{\s*label: "失败收件箱",\s*href: "\/admin\/operations\/failures",\s*exact: true\s*\}/u);
+  assert.doesNotMatch(shell, /const moduleTabs/u);
   assert.match(overview, /\/admin\/operations\/failures/u);
   assert.match(client, /SYSTEM_FAILURE_INBOX_LIFECYCLES/u);
   assert.match(client, /SYSTEM_FAILURE_INBOX_LIFECYCLE_LABELS/u);

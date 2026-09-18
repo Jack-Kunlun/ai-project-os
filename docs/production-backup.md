@@ -1,17 +1,19 @@
 # 生产异地备份
 
-本工具用于单节点实例的 PostgreSQL、凭据主密钥卷、上传卷和主机恢复配置备份。它可以独立于发布入口安装；当前部署链精确支持 `v0.3.0-dev.1`，仍拒绝旧 `v0.2.0-dev.1` 和其他未批准的预发布标签。
+本工具用于单节点实例的 PostgreSQL、凭据主密钥卷、上传卷和主机恢复配置备份。它可以独立于发布入口安装；当前部署链精确支持 `v0.4.0-dev.1`，仍拒绝旧 `v0.3.0-dev.1`、`v0.2.0-dev.1` 和其他未批准的预发布标签。
+
+`v0.4.0-dev.1` 的 `clean-deploy` 将此备份作为强制破坏性 reset 门禁：v0.3 用户、配置、额度、审计、供应商连接和其他旧数据库记录不会迁移到新库，管理员必须重新初始化 `/setup`。备份成功不提供卷删除后的自动回滚；只有归档、唯一命名且经 COS metadata 验证的 manifest 均验证成功，部署器才会继续删除精确 PostgreSQL 卷。
 
 ## 已实现边界
 
 - `ai-project-os-backup.timer` 每天在服务器本地时间 03:20 后的随机 20 分钟窗口内运行，并通过 `Persistent=true` 补跑关机期间错过的计划。
-- `app` 与 `worker` 在数据复制窗口短暂停顿；失败、超时或信号退出都会尝试恢复写入者。PostgreSQL custom dump、主密钥卷和上传卷因此来自同一停写窗口。恢复写入后，脚本会等待两项 Docker health 重新变为 `healthy`，才继续上传并报告成功。
+- 普通 `daily`、`manual` 模式会先暂停 `app` 与 `worker`，在数据复制窗口采集 PostgreSQL custom dump、主密钥卷和上传卷，随后恢复写入者并等待两项 Docker health 重新变为 `healthy`，再继续上传并报告成功，因此其 `source_quiesced=false`。部署专用 `pre-deploy` 由部署器先停止并确认精确的旧 app/worker，再通过维护隔离和 post-stop 只读预检确认没有其他同库客户端；随后备份脚本读取这两个已停止容器的文件卷，生成并远端验证 `source_quiesced=true` 的最终迁移备份。备份失败或迁移前失败会通过精确容器 ID 恢复写入者；备份成功后才进入迁移，迁移开始后不恢复旧代码。暂停不能替代数据库客户端排空，因此 pre-deploy 不使用暂停作为最终快照边界。
 - 格式版本 2 还会按严格白名单加入 `production.env`、COS 上传配置、age 公钥、TLS 证书/私钥、`deploy` 登录材料和 Actions 公钥。它们只存在于 age 加密归档内，不会写入公开 manifest、运维状态 JSON 或仓库。
 - 本地备份先校验 `pg_restore --list`、三个 tar 目录和内部 `SHA256SUMS`，然后以专用 age 公钥流式加密；服务器不持有解密私钥。
-- 加密归档、SHA-256 sidecar、不可变 manifest 和 `manifests/latest.json` 指针上传到 COS。COSCLI 必须完成整体 CRC64 校验，随后脚本通过 `HeadObject` 对比远端长度并要求 CRC64 元数据存在。
+- 加密归档、SHA-256 sidecar、唯一命名且经 COS metadata 验证的 manifest 和 `manifests/latest.json` 指针上传到 COS。COSCLI 必须完成整体 CRC64 校验，随后脚本通过 `HeadObject` 对比远端长度并要求 CRC64 元数据存在。
 - 只有四件对象均验证成功，备份目录才会获得 root-only 的 `.cos-upload-verified` 标记。无标记、上传失败或结构不完整的本地备份不会进入自动清理范围。
 - 默认只清理超过 14 天且带有效远端标记的本地备份，并始终保留至少 3 份已验证本地副本。现有手工备份因为没有自动上传标记，不会被删除。
-- 正式部署器在任何迁移、构建或容器替换前调用同一个脚本；远端备份失败会使部署失败关闭。
+- `v0.4.0-dev.1` 正式部署器先在旧 app/worker 仍健康时完成候选镜像构建，再停止精确旧 writer ID，以 stopped-writer cutover 模式调用同一个脚本；只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许 clean reset。远端备份失败会使部署失败关闭。
 - 每日/手工备份会先取得生产部署锁，部署期间不会启动；部署器持有同一把锁后再调用 `pre-deploy` 模式，避免定时备份与迁移或容器替换交叉运行。
 - 每次任务会把运行中、成功、失败或跳过状态原子写入 `/var/lib/ai-project-os-operations/backups`。这里只包含时间、任务类型、对象路径、大小、摘要、重试次数和安全错误码；生产 Compose 以只读方式将该目录挂载给应用，应用没有 Docker、systemd、备份正文或凭据访问权。
 
@@ -67,7 +69,7 @@ sudo cat /var/lib/ai-project-os-operations/backups/current.json
 - `/var/backups/ai-project-os/...` 下的精确本地备份路径
 - 加密归档与 SHA-256 sidecar 的 `cos://.../production/backups/...` 对象
 - age 加密归档的 SHA-256
-- 不可变 manifest 与 `manifests/latest.json` 对象路径
+- 唯一命名且经 COS metadata 验证的 manifest 与 `manifests/latest.json` 对象路径
 
 `current.json` 与 `history/*.json` 是供系统运维页面读取的脱敏副本，保持 `root:root 0644` 并位于专用 `0755` 目录。页面仅对初始化应用时创建的首位超级管理员开放；其他系统管理员、工作区管理员和普通成员均不能通过受保护 API 读取。状态目录不包含 COS Secret、COSCLI 配置、age 私钥、数据库密码、原始日志或备份正文。
 
@@ -99,13 +101,14 @@ GitHub Actions 生产部署时，服务器端部署器会执行：
 
 ```text
 标签与成功 CI 复核
-→ 候选镜像预构建与旧库只读预检
-→ 同一停写窗口本地备份
+→ 候选镜像预构建
+→ 捕获精确旧 app/worker，停止并确认写入者已退出
+→ 维护隔离与 stopped-writer cutover
 → age 加密
 → COS 上传及远端大小/CRC64 校验
 → 写入本地远端验证标记
-→ 精确停止旧 app/worker 并复查数据库无其他同库客户端
-→ 才允许迁移和替换容器
+→ 由同一批已停止旧 app/worker 生成并验证 `source_quiesced=true` 备份
+→ 才允许删除精确 PostgreSQL 卷并初始化新库
 ```
 
 Actions 只能看到对象路径和成功标记，不能读取 COS 凭据、age 私钥、数据库密码或备份正文。

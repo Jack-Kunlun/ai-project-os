@@ -55,7 +55,7 @@ import { ProjectMcpToolGrantServiceError } from "@/lib/project-mcp-tool-grant-se
 import { ProjectMcpActionServiceError } from "@/lib/project-mcp-action-service";
 import { ProjectMcpActionDispatchError } from "@/lib/project-mcp-action-dispatch-service";
 import { ProjectDelegatedGitRuntimeError } from "@/lib/project-delegated-git-runtime-service";
-import { PlatformProviderProbeServiceError } from "@/lib/platform-provider-probe-service";
+import { PlatformProviderProbeServiceError } from "@/lib/platform-provider-probe-contract";
 import { PlatformGrantOfferPolicyError } from "@/lib/platform-grant-offer-policy-service";
 import { AccountEntitlementBackfillError } from "@/lib/account-entitlement-backfill-service";
 import { PlatformCreditGovernanceError } from "@/lib/platform-credit-governance-service";
@@ -353,6 +353,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     const mapping: Record<string, readonly [number, string]> = {
       GITHUB_OAUTH_NOT_CONFIGURED: [503, "GitHub 登录尚未配置，请联系工作区管理员"],
       GITHUB_OAUTH_CONFIG_INVALID: [500, "GitHub 登录配置无效，请联系工作区管理员"],
+      GITHUB_OAUTH_BOOTSTRAP_PENDING: [503, "平台初始化尚未完成，GitHub 登录暂不可用，请稍后重试"],
       GITHUB_OAUTH_INVALID_INPUT: [400, "GitHub 登录请求无效"],
       GITHUB_OAUTH_FLOW_INVALID: [400, "GitHub 登录状态无效或已经使用"],
       GITHUB_OAUTH_FLOW_EXPIRED: [410, "GitHub 登录已过期，请重新开始"],
@@ -786,7 +787,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PLATFORM_AI_ROUTE_NOT_DRAFT: [409, "只有草稿路由可以编辑或验证"],
       PLATFORM_AI_ROUTE_NOT_VALIDATED: [409, "平台默认路由尚未通过本地验证"],
       PLATFORM_AI_ROUTE_CONFIGURATION_CHANGED: [409, "供应商配置已变化，请重新创建并验证路由草稿"],
-      PLATFORM_AI_ROUTE_REASON_REQUIRED: [400, "退役平台默认路由必须填写原因"],
+      PLATFORM_AI_ROUTE_REASON_REQUIRED: [400, "停用平台默认路由必须填写原因；停用后不可恢复，需要新建配置或版本"],
     } as const;
     const [status, message] = mapping[error.code];
     return { status, body: { error: { code: error.code, message } } };

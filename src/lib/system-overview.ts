@@ -17,6 +17,7 @@ const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{2,127}$/u;
 export const SYSTEM_OVERVIEW_FAILURE_WINDOW_DAYS = 7;
 export const SYSTEM_OVERVIEW_BACKUP_FRESHNESS_THRESHOLD_MS = 48 * 60 * 60 * 1_000;
 export const SYSTEM_OVERVIEW_RECOVERY_DRILL_FRESHNESS_THRESHOLD_MS = RECOVERY_DRILL_FRESHNESS_THRESHOLD_MS;
+export const SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE = "Asia/Shanghai" as const;
 
 type OverviewActor = Readonly<{ id: string; role: AppUserRole }>;
 type FailureGroup = Readonly<{ code: string; count: number }>;
@@ -31,6 +32,30 @@ export type SystemOverviewFailureWindow = Readonly<{
   days: typeof SYSTEM_OVERVIEW_FAILURE_WINDOW_DAYS;
   from: string;
   to: string;
+}>;
+
+export type SystemOverviewTrendPoint = Readonly<{
+  date: string;
+  newUsers: number | null;
+  platformTokens: number | null;
+  unknownCalls: number | null;
+  settledQuota: number | null;
+}>;
+
+export type SystemOverviewAnalytics = Readonly<{
+  timeZone: typeof SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE;
+  today: Readonly<{
+    date: string;
+    newUsers: number | null;
+    platformTokens: number | null;
+    unknownCalls: number | null;
+    settledQuota: number | null;
+    activeMemberships: number | null;
+  }>;
+  trends: Readonly<{
+    days7: readonly SystemOverviewTrendPoint[];
+    days30: readonly SystemOverviewTrendPoint[];
+  }>;
 }>;
 
 export type SystemOverviewRoute = Readonly<{
@@ -95,6 +120,7 @@ export type SystemOverview = Readonly<{
     reservedTokens: number;
     consumedTokens: number;
   }>;
+  analytics: SystemOverviewAnalytics;
   defaultRoutes: Readonly<{
     total: number;
     ready: number | null;
@@ -127,6 +153,126 @@ export type SystemOverview = Readonly<{
 
 function aggregateValue(value: number | null | undefined): number {
   return value ?? 0;
+}
+
+type AnalyticsRows = Readonly<{
+  users: readonly { date: string; value: number }[] | null;
+  calls: readonly { date: string; tokens: number; unknownCalls: number }[] | null;
+  quota: readonly { date: string; value: number }[] | null;
+}>;
+
+function shanghaiDateKey(value: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: string): string => parts.find((entry) => entry.type === type)?.value ?? "00";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function shanghaiDayStart(dateKey: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(dateKey);
+  if (match === null) throw new Error("SYSTEM_OVERVIEW_DATE_INVALID");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return new Date(Date.UTC(year, month - 1, day) - 8 * 60 * 60 * 1_000);
+}
+
+function analyticsDateKeys(now: Date, days: number): readonly string[] {
+  const today = shanghaiDayStart(shanghaiDateKey(now));
+  return Object.freeze(Array.from({ length: days }, (_, index) => {
+    const date = new Date(today.getTime() - (days - index - 1) * 24 * 60 * 60 * 1_000);
+    return shanghaiDateKey(date);
+  }));
+}
+
+function safeAnalyticsInteger(value: unknown): number {
+  const parsed = typeof value === "bigint" ? Number(value) : typeof value === "number" ? value : Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error("SYSTEM_OVERVIEW_ANALYTICS_VALUE_INVALID");
+  return parsed;
+}
+
+function safeAnalyticsDate(value: unknown): string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) throw new Error("SYSTEM_OVERVIEW_ANALYTICS_DATE_INVALID");
+  return value;
+}
+
+async function readSystemOverviewAnalyticsRows(db: PrismaClient, start: Date, end: Date): Promise<AnalyticsRows> {
+  const read = async <T, R>(query: Promise<T>, normalize: (value: T) => R): Promise<R | null> => {
+    try {
+      return normalize(await query);
+    } catch {
+      return null;
+    }
+  };
+  const [users, calls, quota] = await Promise.all([
+    read(
+      db.$queryRaw<Array<{ date: string; value: bigint | number | string }>>(Prisma.sql`
+        SELECT to_char("createdAt" AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD') AS "date",
+               COUNT(*)::bigint AS "value"
+        FROM "AppUser"
+        WHERE "role" = 'user'::"AppUserRole"
+          AND "createdAt" >= ${start}
+          AND "createdAt" < ${end}
+        GROUP BY 1
+        ORDER BY 1
+      `),
+      (rows) => Object.freeze(rows.map((row) => ({ date: safeAnalyticsDate(row.date), value: safeAnalyticsInteger(row.value) }))),
+    ),
+    read(
+      db.$queryRaw<Array<{ date: string; tokens: bigint | number | string; "unknownCalls": bigint | number | string }>>(Prisma.sql`
+        SELECT to_char("completedAt" AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD') AS "date",
+               COALESCE(SUM("inputTokens" + "outputTokens") FILTER (WHERE "usageKnown" = TRUE), 0)::bigint AS "tokens",
+               COUNT(*) FILTER (WHERE "usageKnown" = FALSE)::bigint AS "unknownCalls"
+        FROM "ProviderCallAudit"
+        WHERE "billingMode" = 'platform'::"AiBillingMode"
+          AND "payerKind" = 'platform_caller'::"AiRuntimePayerKind"
+          AND "completedAt" IS NOT NULL
+          AND "completedAt" >= ${start}
+          AND "completedAt" < ${end}
+        GROUP BY 1
+        ORDER BY 1
+      `),
+      (rows) => Object.freeze(rows.map((row) => ({ date: safeAnalyticsDate(row.date), tokens: safeAnalyticsInteger(row.tokens), unknownCalls: safeAnalyticsInteger(row.unknownCalls) }))),
+    ),
+    read(
+      db.$queryRaw<Array<{ date: string; value: bigint | number | string }>>(Prisma.sql`
+        SELECT to_char("settledAt" AT TIME ZONE ${SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE}, 'YYYY-MM-DD') AS "date",
+               COALESCE(SUM("settledTokens"), 0)::bigint AS "value"
+        FROM "PlatformTokenReservation"
+        WHERE "status" = 'settled'::"PlatformTokenReservationStatus"
+          AND "settledAt" IS NOT NULL
+          AND "settledAt" >= ${start}
+          AND "settledAt" < ${end}
+        GROUP BY 1
+        ORDER BY 1
+      `),
+      (rows) => Object.freeze(rows.map((row) => ({ date: safeAnalyticsDate(row.date), value: safeAnalyticsInteger(row.value) }))),
+    ),
+  ]);
+  return Object.freeze({ users, calls, quota });
+}
+
+function projectTrendPoint(date: string, rows: AnalyticsRows): SystemOverviewTrendPoint {
+  const users = rows.users?.find((row) => row.date === date)?.value ?? (rows.users === null ? null : 0);
+  const call = rows.calls?.find((row) => row.date === date);
+  const quota = rows.quota?.find((row) => row.date === date)?.value ?? (rows.quota === null ? null : 0);
+  return Object.freeze({ date, newUsers: users, platformTokens: call?.tokens ?? (rows.calls === null ? null : 0), unknownCalls: call?.unknownCalls ?? (rows.calls === null ? null : 0), settledQuota: quota });
+}
+
+async function readSystemOverviewAnalytics(db: PrismaClient, now: Date): Promise<SystemOverviewAnalytics> {
+  const days30 = analyticsDateKeys(now, 30);
+  const start = shanghaiDayStart(days30[0]!);
+  const rows = await readSystemOverviewAnalyticsRows(db, start, now);
+  const trend30 = Object.freeze(days30.map((date) => projectTrendPoint(date, rows)));
+  return Object.freeze({
+    timeZone: SYSTEM_OVERVIEW_ANALYTICS_TIME_ZONE,
+    today: Object.freeze({ ...trend30[trend30.length - 1]!, activeMemberships: null }),
+    trends: Object.freeze({ days7: Object.freeze(trend30.slice(-7)), days30: trend30 }),
+  });
 }
 
 function safeErrorCode(value: string | null): string {
@@ -490,7 +636,7 @@ export async function getSystemOverview(
   await requireVerifiedAdminActor(actor, db);
   await db.$queryRaw`SELECT 1`;
   const failureWindowStart = new Date(now.getTime() - SYSTEM_OVERVIEW_FAILURE_WINDOW_DAYS * 24 * 60 * 60 * 1_000);
-  const [users, activeMemberships, verifiedPlatformModels, issued, available, reserved, consumed, worker, routeReadiness, pendingMcpAttestations, failures, backupResult] = await Promise.all([
+  const [users, activeMemberships, verifiedPlatformModels, issued, available, reserved, consumed, worker, routeReadiness, pendingMcpAttestations, failures, backupResult, analytics] = await Promise.all([
     db.appUser.count(),
     db.membershipSubscription.count({ where: { status: "active", startsAt: { lte: now }, expiresAt: { gt: now } } }),
     db.aiProviderConnection.count({ where: { scope: "platform", status: "verified", disabledAt: null } }),
@@ -503,6 +649,7 @@ export async function getSystemOverview(
     readPendingMcpAttestationCount(db),
     readFailureGroups(db, failureWindowStart, now),
     readBackupResult(actor, db, now),
+    readSystemOverviewAnalytics(db, now),
   ]);
 
   const defaultRoutes = routeProjection(routeReadiness?.operations ?? null);
@@ -549,6 +696,10 @@ export async function getSystemOverview(
       reservedTokens: aggregateValue(reserved._sum.reservedTokens),
       consumedTokens: aggregateValue(consumed._sum.settledTokens),
     },
+    analytics: Object.freeze({
+      ...analytics,
+      today: Object.freeze({ ...analytics.today, activeMemberships }),
+    }),
     defaultRoutes,
     mcp: { pendingAttestations: pendingMcpAttestations, evidence: pendingMcpAttestations === null ? "not_obtained" : "available" },
     failures: {

@@ -7,6 +7,7 @@ import type { ExternalCredential, PrismaClient } from "@prisma/client";
 import {
   beginGitHubOAuth,
   completeGitHubOAuth,
+  getGitHubOAuthAvailability,
   GitHubOAuthError,
   githubOAuthPublicUrl,
   githubOAuthStateCookie,
@@ -473,7 +474,7 @@ test("GitHub OAuth fails closed while first-owner bootstrap is pending, includin
     const store = fakeDb({ initialOwnerUserId: null, adminOnboardingCompletedAt: null });
     await assert.rejects(
       beginGitHubOAuth({ intent: "login", returnTo: "/login" }, store.db),
-      (error: unknown) => error instanceof GitHubOAuthError && error.code === "GITHUB_OAUTH_NOT_CONFIGURED",
+      (error: unknown) => error instanceof GitHubOAuthError && error.code === "GITHUB_OAUTH_BOOTSTRAP_PENDING",
     );
     assert.equal(store.attempts.size, 0);
     assert.equal(store.users.size, 1);
@@ -494,7 +495,7 @@ test("GitHub OAuth fails closed while first-owner bootstrap is pending, includin
 
     await assert.rejects(
       completeGitHubOAuth({ code: "github-pending-code", state: flow.state, cookieState: flow.state }, store.db),
-      (error: unknown) => error instanceof GitHubOAuthError && error.code === "GITHUB_OAUTH_NOT_CONFIGURED",
+      (error: unknown) => error instanceof GitHubOAuthError && error.code === "GITHUB_OAUTH_BOOTSTRAP_PENDING",
     );
     assert.equal(store.users.size, 1);
     assert.equal(store.memberships.length, 0);
@@ -507,5 +508,34 @@ test("GitHub OAuth fails closed while first-owner bootstrap is pending, includin
     if (originalPublicOrigin === undefined) delete process.env.AI_PROJECT_OS_PUBLIC_ORIGIN; else process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = originalPublicOrigin;
     if (originalMasterKey === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE; else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = originalMasterKey;
     await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("GitHub OAuth availability exposes only the configuration/bootstrap state", async () => {
+  const originalClientId = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID;
+  const originalClientSecret = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET;
+  const originalPublicOrigin = process.env.AI_PROJECT_OS_PUBLIC_ORIGIN;
+  try {
+    delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID;
+    delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET;
+    process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = "https://ai-project-os.com";
+    assert.equal((await getGitHubOAuthAvailability()).status, "notConfigured");
+
+    process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = "Iv1.1234567890";
+    assert.equal((await getGitHubOAuthAvailability()).status, "configurationInvalid");
+
+    process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = "github-oauth-secret-for-tests";
+    const pending = fakeDb({ initialOwnerUserId: null, adminOnboardingCompletedAt: null });
+    const pendingAvailability = await getGitHubOAuthAvailability(pending.db);
+    assert.deepEqual(pendingAvailability, { status: "bootstrapPending", callbackPath: "/api/auth/github/callback" });
+
+    const available = fakeDb();
+    const availableAvailability = await getGitHubOAuthAvailability(available.db);
+    assert.deepEqual(availableAvailability, { status: "available", callbackPath: "/api/auth/github/callback" });
+    assert.equal(JSON.stringify(availableAvailability).includes("secret"), false);
+  } finally {
+    if (originalClientId === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID = originalClientId;
+    if (originalClientSecret === undefined) delete process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET; else process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = originalClientSecret;
+    if (originalPublicOrigin === undefined) delete process.env.AI_PROJECT_OS_PUBLIC_ORIGIN; else process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = originalPublicOrigin;
   }
 });

@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import test from "node:test";
 import { Prisma, ProjectItemRevisionAction } from "@prisma/client";
-import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { appendProjectItemRevision, createPrimaryProjectItemEvidence } from "../src/lib/project-item-history";
@@ -31,6 +30,7 @@ import {
 import { createControlledMembership } from "./membership-fixture";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
+import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 
 const shouldRun = process.env.PROJECT_INTELLIGENCE_POSTGRES_GATE === "1";
 
@@ -229,7 +229,7 @@ test(
         });
       });
 
-      const provider = await createProviderConnection({
+      const provider = await createVerifiedProviderFixture({
         name: `V2.1 mock ${suffix}`,
         kind: "glm",
         apiKey: "sk-v2-1-intelligence-secret",
@@ -408,7 +408,7 @@ test(
         select: { id: true, status: true, stage: true, failureCode: true, result: true, completedAt: true },
       });
 
-      const alternateProvider = await createProviderConnection({
+      const alternateProvider = await createVerifiedProviderFixture({
         name: `V2.1 alternate ${suffix}`,
         kind: "glm",
         apiKey: "sk-v2-1-intelligence-secret",

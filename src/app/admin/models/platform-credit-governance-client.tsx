@@ -39,6 +39,8 @@ const differenceLabel: Readonly<Record<TargetUser["difference"], string>> = {
   revoked: "额度已撤销",
 };
 
+const adminInputClass = "mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+
 type Preview = Readonly<{
   previewId: string;
   action: "grant" | "revoke";
@@ -219,7 +221,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
   }
 
   return (
-    <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8" aria-labelledby="platform-credit-governance-title">
+    <section className={`${focusUserId === undefined ? "mt-8" : "mt-6"} rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8`} aria-labelledby="platform-credit-governance-title">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Platform credits</p>
@@ -230,7 +232,7 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
       </div>
 
       {focusUserId === undefined ? <div className="mt-6 flex flex-wrap items-end gap-3">
-        <label className="min-w-56 flex-1 text-xs font-medium text-slate-600">搜索用户<input value={search} onChange={(event) => { setSearch(event.target.value); setGrantPage(1); setUserPage(1); }} placeholder="用户名或显示名" maxLength={160} className="edit-field" /></label>
+        <label className="min-w-56 flex-1 text-xs font-medium text-slate-600">搜索用户<input value={search} onChange={(event) => { setSearch(event.target.value); setGrantPage(1); setUserPage(1); }} placeholder="用户名或显示名" maxLength={160} className={adminInputClass} /></label>
         <button type="button" onClick={() => void load()} disabled={pending} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-semibold text-slate-700 disabled:opacity-50">刷新</button>
       </div> : null}
 
@@ -287,17 +289,17 @@ export function PlatformCreditGovernancePanel({ focusUserId }: { focusUserId?: s
       </div>
 
       <form onSubmit={previewGrant} className="mt-6 grid gap-4 border-t border-slate-100 pt-6 sm:grid-cols-4">
-        {focusUserId === undefined ? <label className="text-xs font-medium text-slate-600 sm:col-span-4">补发目标<select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} required className="edit-field"><option value="">请选择搜索结果中的用户</option>{users.map((user) => <option key={user.id} value={user.id} disabled={user.disabled}>{user.username}{user.displayName ? ` · ${user.displayName}` : ""}{user.disabled ? " · 已停用" : ""}</option>)}</select></label> : <p className="text-xs font-medium text-slate-600 sm:col-span-4">当前用户：{selectedUser?.username ?? "读取中…"}</p>}
-        <label className="text-xs font-medium text-slate-600">补发额度<input type="number" min={1} max={10_000_000} value={grantAmount} onChange={(event) => setGrantAmount(event.target.value)} required className="edit-field" /></label>
-        <label className="text-xs font-medium text-slate-600">到期时间<input type="datetime-local" value={grantExpiresAt} onChange={(event) => setGrantExpiresAt(event.target.value)} required className="edit-field" /></label>
-        <label className="text-xs font-medium text-slate-600 sm:col-span-2">原因（必填）<input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required className="edit-field" /></label>
+        {focusUserId === undefined ? <label className="text-xs font-medium text-slate-600 sm:col-span-4">补发目标<select value={selectedUserId} onChange={(event) => setSelectedUserId(event.target.value)} required className={adminInputClass}><option value="">请选择搜索结果中的用户</option>{users.map((user) => <option key={user.id} value={user.id} disabled={user.disabled}>{user.username}{user.displayName ? ` · ${user.displayName}` : ""}{user.disabled ? " · 已停用" : ""}</option>)}</select></label> : <p className="text-xs font-medium text-slate-600 sm:col-span-4">当前用户：{selectedUser?.username ?? "读取中…"}</p>}
+        <label className="text-xs font-medium text-slate-600">补发额度<input type="number" min={1} max={10_000_000} value={grantAmount} onChange={(event) => setGrantAmount(event.target.value)} required className={adminInputClass} /></label>
+        <label className="text-xs font-medium text-slate-600">到期时间<input type="datetime-local" value={grantExpiresAt} onChange={(event) => setGrantExpiresAt(event.target.value)} required className={adminInputClass} /></label>
+        <label className="text-xs font-medium text-slate-600 sm:col-span-2">原因（必填）<input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required className={adminInputClass} /></label>
         <div className="sm:col-span-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">搜索会覆盖尚无额度记录的本地用户；执行前仍会再次校验目标状态与用户角色。</p><button disabled={pending || selectedUser === undefined || selectedUser.disabled} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "预览补发"}</button></div>
       </form>
 
       {preview ? <form onSubmit={executePreview} className="mt-6 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-5">
         <div className="flex flex-wrap items-start justify-between gap-4"><div><h3 className="font-semibold text-slate-900">确认{preview.action === "grant" ? "补发" : "撤销"}平台额度</h3><p className="mt-2 text-xs leading-5 text-slate-600">目标：{preview.target.username}；{preview.action === "grant" ? `补发 ${preview.grant.amount?.toLocaleString() ?? "—"}，到期 ${formatDate(preview.grant.expiresAt)}` : `可回收 ${preview.reclaimableTokens.toLocaleString()}，阻塞预留 ${preview.blockerCount} 笔`}。预览有效至 {formatDate(preview.expiresAt)}。</p></div><button type="button" onClick={() => setPreview(null)} className="text-xs font-semibold text-slate-500">取消</button></div>
         {preview.blockerCount > 0 ? <p className="mt-3 text-xs text-rose-700">当前存在活动预留，撤销会被拒绝；请先完成账务核对。</p> : null}
-        <label className="mt-4 block text-xs font-medium text-slate-600">输入目标用户名确认<input value={confirmationUsername} onChange={(event) => setConfirmationUsername(event.target.value)} maxLength={64} required className="edit-field" /></label>
+        <label className="mt-4 block text-xs font-medium text-slate-600">输入目标用户名确认<input value={confirmationUsername} onChange={(event) => setConfirmationUsername(event.target.value)} maxLength={64} required className={adminInputClass} /></label>
         <button disabled={pending || !preview.canExecute} className="mt-4 rounded-xl bg-slate-950 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "确认并执行"}</button>
       </form> : null}
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}

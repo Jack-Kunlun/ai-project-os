@@ -1,7 +1,9 @@
-import { redirect } from "next/navigation";
+import { MembershipsClient } from "@/app/system/memberships/memberships-client";
 import { requireSystemAdminPage } from "@/lib/system-admin";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminMembershipsPage() {
-  await requireSystemAdminPage();
-  redirect("/admin/users");
+  const user = await requireSystemAdminPage();
+  return <MembershipsClient username={user.username} adminMode />;
 }

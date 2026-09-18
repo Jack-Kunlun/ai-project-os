@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { AdminPageHeader } from "@/components/admin-page-header";
 
 type AdminProfile = Readonly<{
   username: string;
@@ -69,12 +70,8 @@ export function AdminAccountClient({ initialUsername }: { initialUsername: strin
     } catch (error) { setMessage(error instanceof Error ? error.message : "密码更新失败"); setPending(false); }
   }
 
-  return <div className="mx-auto max-w-4xl py-8">
-    <section className="rounded-[2rem] bg-slate-950 px-7 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">Administrator account</p>
-      <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">管理员账户</h1>
-      <p className="mt-3 text-sm leading-7 text-slate-300">维护平台管理员的登录资料与密码。这里不显示项目、团队、工作区角色、个人连接或业务额度。</p>
-    </section>
+  return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
+    <AdminPageHeader title="管理员账户" description="维护平台管理员的登录资料与密码；这里不显示项目、团队、工作区角色、个人连接或业务额度。" />
     {message ? <p role="status" className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">{message}</p> : null}
     <section className="mt-6 grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:grid-cols-3">
       <div><p className="text-xs font-semibold text-slate-400">登录名</p><p className="mt-2 font-semibold">{profile?.username ?? initialUsername}</p></div>

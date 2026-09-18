@@ -10,11 +10,17 @@ test("admin shell is independent from the user workspace and uses the supplied b
     readFile("src/app/admin/account/page.tsx", "utf8"),
     readFile("src/app/api/admin/account/route.ts", "utf8"),
   ]);
-  assert.match(header, /\/brand\/ai-project-os-admin\.png/u);
+  assert.match(header, /BrandMark/u);
   assert.match(header, /平台运营管理/u);
   assert.doesNotMatch(header, /\/dashboard|\/projects|\/team/u);
   assert.doesNotMatch(shell, /key: "git"|href: "\/dashboard"/u);
-  assert.match(shell, /href: "\/admin\/account"/u);
+  const primarySource = shell.split("const primaryItems", 2)[1]?.split("];", 1)[0] ?? "";
+  assert.equal([...primarySource.matchAll(/key:\s*"[A-Za-z]+"/gu)].length, 5);
+  for (const href of ["/admin", "/admin/users", "/admin/models", "/admin/connectors/mcp", "/admin/operations/failures"]) {
+    assert.match(primarySource, new RegExp(`href: "${href.replaceAll("/", "\\/")}"`, "u"));
+  }
+  assert.match(header, /href="\/admin\/account"/u);
+  assert.doesNotMatch(shell, /href: "\/admin\/account"|href="\/admin\/account"/u);
   assert.match(gitPage, /redirect\("\/admin"\)/u);
   assert.match(accountPage, /AdminAccountClient/u);
   assert.match(accountApi, /requireApiSession\(request\)[\s\S]*actor\.role !== "admin"/u);
@@ -22,8 +28,9 @@ test("admin shell is independent from the user workspace and uses the supplied b
 });
 
 test("platform model responsibilities are split into independent admin surfaces", async () => {
-  const [client, shell, legacyGovernance, modelsPage, routes, routesClient, credits, probes] = await Promise.all([
+  const [client, pageHeader, shell, legacyGovernance, modelsPage, routes, routesClient, credits, probes] = await Promise.all([
     readFile("src/app/settings/settings-client.tsx", "utf8"),
+    readFile("src/components/admin-page-header.tsx", "utf8"),
     readFile("src/components/admin-shell.tsx", "utf8"),
     readFile("src/app/admin/models/governance/page.tsx", "utf8"),
     readFile("src/app/admin/models/page.tsx", "utf8"),
@@ -32,22 +39,25 @@ test("platform model responsibilities are split into independent admin surfaces"
     readFile("src/app/admin/credits/page.tsx", "utf8"),
     readFile("src/app/admin/operations/probes/page.tsx", "utf8"),
   ]);
-  assert.match(client, /<h1 className=.*>平台模型<\/h1>/u);
+  assert.match(client, /import \{ AdminPageHeader \} from "@\/components\/admin-page-header"/u);
+  assert.match(client, /<AdminPageHeader title="平台模型"/u);
+  assert.match(pageHeader, /export function AdminPageHeader/u);
+  assert.match(pageHeader, /<h1 className=/u);
+  assert.doesNotMatch(client, /<h1 className=.*>平台模型<\/h1>/u);
   assert.match(client, /ProviderCreateForm/u);
   assert.doesNotMatch(client, /PlatformProviderProbeBudgetPanel|PlatformDefaultRoutesPanel|PlatformGrantOfferPolicyPanel|PlatformCreditGovernancePanel|adminView/u);
-  assert.match(shell, /href: "\/admin\/models\/routes"/u);
+  assert.match(shell, /label: "能力配置"/u);
+  assert.doesNotMatch(shell, /href: "\/admin\/models\/routes"/u);
   assert.match(shell, /href: "\/admin\/credits"/u);
   assert.match(shell, /href: "\/admin\/operations\/probes"/u);
   assert.doesNotMatch(shell, /modelGovernance|href: "\/admin\/models\/governance"/u);
   assert.match(legacyGovernance, /requireSystemAdminPage/u);
-  assert.match(legacyGovernance, /redirect\("\/admin\/models\/routes"\)/u);
-  assert.match(modelsPage, /params\.returnTo === "\/admin\/models\/routes"/u);
-  assert.match(modelsPage, /returnTo=\{returnTo\}/u);
-  assert.doesNotMatch(modelsPage, /returnTo.*request|new URL\(/u);
-  assert.match(client, /returnTo\?: "\/admin\/models\/routes"/u);
-  assert.match(client, /返回默认路由/u);
-  assert.match(routes, /PlatformDefaultRoutesPanel/u);
-  assert.match(routesClient, /admin\/models\?returnTo=%2Fadmin%2Fmodels%2Froutes/u);
+  assert.match(legacyGovernance, /redirect\("\/admin\/models"\)/u);
+  assert.doesNotMatch(modelsPage, /returnTo|new URL\(/u);
+  assert.doesNotMatch(client, /returnTo|返回默认路由|返回管理总览/u);
+  assert.match(routes, /redirect\("\/admin\/models"\)/u);
+  assert.doesNotMatch(routes, /PlatformDefaultRoutesPanel/u);
+  assert.match(routesClient, /href="\/admin\/models"/u);
   assert.match(routesClient, /尚无已验证的平台供应商/u);
   assert.match(routesClient, /formatMultiplier\(route\.quotaMultiplierBps\).*bps/u);
   assert.match(routesClient, /quotaMultiplierBps,/u);

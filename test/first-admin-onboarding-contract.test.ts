@@ -29,7 +29,9 @@ test("first-admin onboarding creates a separate business owner behind a durable 
   assert.match(principalCatalog, /ENTITLEMENT_PROTECTED_RELATIONS[\s\S]*"PlatformBootstrap"/u);
 
   assert.match(auth, /getFirstAdminOnboardingState\(user\.id, db\)/u);
-  assert.match(auth, /redirect\("\/onboarding"\)/u);
+  assert.match(auth, /requireFirstAdminOnboardingPage/u);
+  const authenticatedPageGuard = auth.slice(auth.indexOf("export async function requireAuthenticatedPageSession"), auth.indexOf("export async function requireUserPageSession"));
+  assert.doesNotMatch(authenticatedPageGuard, /redirect\("\/onboarding"\)/u);
   assert.match(auth, /requireFirstAdminOnboardingPage/u);
   assert.match(auth, /export async function initializeFirstOwner/u);
   assert.match(auth, /role: "user" as const/u);
@@ -49,11 +51,13 @@ test("first-admin onboarding creates a separate business owner behind a durable 
   assert.match(route, /username: z\.string\(\)[\s\S]*password: z\.string\(\)/u);
   assert.match(route, /status: 201/u);
   assert.match(route, /cache-control": "no-store"/u);
-  assert.match(page, /AdminOverviewClient/u);
+  assert.doesNotMatch(page, /AdminOverviewClient/u);
+  assert.match(page, /AdminPageHeader title="初始化业务 Owner"/u);
+  assert.match(page, /FirstAdminOnboardingClient/u);
   assert.match(page, /requireFirstAdminOnboardingPage/u);
   assert.match(client, /创建首个业务 Owner/u);
   assert.match(client, /JSON\.stringify\(\{ username, password \}\)/u);
   assert.match(client, /router\.replace\("\/admin"\)/u);
   assert.match(client, /disabled:bg-slate-500/u);
-  assert.match(setup, /router\.replace\("\/onboarding"\)/u);
+  assert.match(setup, /router\.replace\("\/admin"\)/u);
 });

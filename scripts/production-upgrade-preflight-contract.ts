@@ -4,9 +4,9 @@ export const PRODUCTION_UPGRADE_PREFLIGHT_APPLICATION_NAME = "ai-project-os-prod
 export const PRODUCTION_UPGRADE_CLUSTER_ADMIN_ROLE = "ai_project_os_cluster_admin" as const;
 export const PRODUCTION_UPGRADE_SEALED_LEGACY_ROLE = "ai_project_os_legacy_bootstrap" as const;
 export const PRODUCTION_UPGRADE_REQUIRED_EXTENSIONS = Object.freeze(["vector", "pg_trgm", "pgcrypto", "plpgsql"] as const);
-export const PRODUCTION_UPGRADE_TARGET_TAG = "v0.3.0-dev.1" as const;
-export const PRODUCTION_UPGRADE_TARGET_VERSION = "0.3.0-dev.1" as const;
-export const PRODUCTION_UPGRADE_SOURCE_VERSION = "0.2.0-dev.1" as const;
+export const PRODUCTION_UPGRADE_TARGET_TAG = "v0.4.0-dev.1" as const;
+export const PRODUCTION_UPGRADE_TARGET_VERSION = "0.4.0-dev.1" as const;
+export const PRODUCTION_UPGRADE_SOURCE_VERSION = "0.3.0-dev.1" as const;
 export const PRODUCTION_UPGRADE_PREFLIGHT_CONNECTION_TIMEOUT_MILLIS = 5_000 as const;
 export const PRODUCTION_UPGRADE_PREFLIGHT_QUERY_TIMEOUT_MILLIS = 30_000 as const;
 export const PRODUCTION_UPGRADE_PREFLIGHT_LOCK_TIMEOUT_MILLIS = 5_000 as const;
@@ -114,18 +114,25 @@ export const LEGACY_MIGRATION_MANIFEST = Object.freeze([
   Object.freeze({ name: "20260913010000_add_first_admin_onboarding", checksum: "83ee9dd44daf6799dece695435ab63bb6a78015dbbcb7bf4f5d253a8065e728d" }),
   Object.freeze({ name: "20260913020000_add_trustworthy_notification_subjects", checksum: "688266581dc9f07bc54a58185997f0d8c13b6fb0d87d461afcc0116e560b6722" }),
   Object.freeze({ name: "20260914010000_harden_git_manual_final_fence_and_connection_recovery", checksum: "43d2095b7111f4752ad90d1b20858558c134ee19278ef78f0f2338b9daa17b47" }),
+  Object.freeze({ name: "20260917010000_add_platform_bootstrap", checksum: "7d8ddf305180418c1b47d8fe4276dd5801a4fd40c8f20fd694e4b7f46d8bfba1" }),
 ] as const);
 
 export const REQUIRED_LEGACY_SCHEMA = Object.freeze({
   relations: Object.freeze([
     "AppUser",
     "AiProviderConnection",
+    "PlatformProviderProbeBudget",
+    "PlatformProviderProbeAttempt",
+    "PlatformProviderProbeLedger",
+    "PlatformDefaultAiRoute",
     "ProjectAiProviderDelegation",
     "ProjectAiEffectiveRouteSelection",
+    "PlatformBootstrap",
     "Workspace",
   ] as const),
   columns: Object.freeze([
     Object.freeze({ relation: "AppUser", column: "id" }),
+    Object.freeze({ relation: "AppUser", column: "accountAccessVersion" }),
     Object.freeze({ relation: "AppUser", column: "role" }),
     Object.freeze({ relation: "AiProviderConnection", column: "id" }),
     Object.freeze({ relation: "AiProviderConnection", column: "scope" }),
@@ -136,17 +143,53 @@ export const REQUIRED_LEGACY_SCHEMA = Object.freeze({
     Object.freeze({ relation: "ProjectAiEffectiveRouteSelection", column: "id" }),
     Object.freeze({ relation: "ProjectAiEffectiveRouteSelection", column: "projectId" }),
     Object.freeze({ relation: "ProjectAiEffectiveRouteSelection", column: "delegationId" }),
+    Object.freeze({ relation: "PlatformBootstrap", column: "id" }),
+    Object.freeze({ relation: "PlatformBootstrap", column: "initialAdminUserId" }),
+    Object.freeze({ relation: "PlatformProviderProbeBudget", column: "id" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "id" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "budgetId" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "providerConnectionId" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "actorId" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "actorAccountAccessVersion" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "providerConfigurationVersion" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "credentialSecretFingerprint" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "clientRequestKeyHash" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "requestFingerprint" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "status" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "plannedUnits" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "dispatchedUnits" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "settledUnits" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "releasedUnits" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "heldUnits" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "leaseExpiresAt" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "startedAt" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", column: "terminalAt" }),
+    Object.freeze({ relation: "PlatformProviderProbeLedger", column: "id" }),
+    Object.freeze({ relation: "PlatformProviderProbeLedger", column: "budgetId" }),
+    Object.freeze({ relation: "PlatformProviderProbeLedger", column: "attemptId" }),
+    Object.freeze({ relation: "PlatformProviderProbeLedger", column: "actorId" }),
+    Object.freeze({ relation: "PlatformProviderProbeLedger", column: "ordinal" }),
+    Object.freeze({ relation: "PlatformProviderProbeLedger", column: "event" }),
+    Object.freeze({ relation: "PlatformProviderProbeLedger", column: "capability" }),
+    Object.freeze({ relation: "PlatformProviderProbeLedger", column: "units" }),
+    Object.freeze({ relation: "PlatformDefaultAiRoute", column: "id" }),
     Object.freeze({ relation: "Workspace", column: "id" }),
   ] as const),
+  enumTypes: Object.freeze([
+    Object.freeze({ type: "AiProviderKind", labels: Object.freeze(["openai", "deepseek", "qwen", "glm"]) }),
+    Object.freeze({ type: "AiOperation", labels: Object.freeze(["embedding", "autoExtract", "sourceSummary", "projectAnalysis", "generateWithContext", "visionExtract"]) }),
+    Object.freeze({ type: "PlatformProviderProbeAttemptStatus", labels: Object.freeze(["rejected", "reserved", "running", "settled", "released", "held"]) }),
+    Object.freeze({ type: "PlatformProviderProbeLedgerEvent", labels: Object.freeze(["rejected", "reserved", "dispatched", "settled", "released", "held"]) }),
+    Object.freeze({ type: "PlatformProviderProbeCapability", labels: Object.freeze(["generation", "embedding", "vision"]) }),
+  ] as const),
+  constraints: Object.freeze([
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_shape_check", type: "c" }),
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_provider_fkey", type: "f" }),
+  ] as const),
+  indexes: Object.freeze([
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_providerConnectionId_actorId_clientRequestKeyHash_key", unique: true }),
+  ] as const),
 } as const);
-
-export const CLEAN_SLATE_DATA_GATES = Object.freeze([
-  "app_user_member",
-  "workspace_provider_or_workspace_id",
-  "project_ai_route",
-  "project_ai_route_revision",
-  "ai_provider_ownership_audit",
-] as const);
 
 export type ProductionUpgradePreflightPhase = "pre-stop" | "post-stop";
 
@@ -162,7 +205,6 @@ export type ProductionUpgradePreflightErrorCode =
   | "PRODUCTION_UPGRADE_PREFLIGHT_MIGRATION_LEDGER_INVALID"
   | "PRODUCTION_UPGRADE_PREFLIGHT_SCHEMA_INVALID"
   | "PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_PRINCIPAL_INVALID"
-  | "PRODUCTION_UPGRADE_PREFLIGHT_DATA_BLOCKED"
   | "PRODUCTION_UPGRADE_PREFLIGHT_CLIENT_BACKENDS_PRESENT"
   | "PRODUCTION_UPGRADE_PREFLIGHT_ROLLBACK_FAILED"
   | "PRODUCTION_UPGRADE_PREFLIGHT_FAILED";
@@ -309,7 +351,6 @@ export type ProductionUpgradePreflightReport = Readonly<{
     migrationLedger: "verified";
     legacySchema: "verified";
     databasePrincipal: "cluster-admin-owned" | "legacy-extension-owners-reassignable" | "pinned-oid10-extension-owners-supported";
-    cleanSlateData: "clear";
     clientBackends: "clear" | "not-applicable";
     rollback: "verified";
   }>;
@@ -330,7 +371,6 @@ export function buildProductionUpgradePreflightReport(
       migrationLedger: "verified",
       legacySchema: "verified",
       databasePrincipal,
-      cleanSlateData: "clear",
       clientBackends: phase === "post-stop" ? "clear" : "not-applicable",
       rollback: "verified",
     }),

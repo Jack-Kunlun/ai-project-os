@@ -70,7 +70,7 @@ test("project overview and materials use separate routes with a compact navigati
 test("platform provider form keeps GLM embedding-only defaults optional", async () => {
   const settings = await readFile("src/app/settings/settings-client.tsx", "utf8");
 
-  assert.match(settings, /const \[generationModelId, setGenerationModelId\] = useState\("deepseek-v4-flash"\)/u);
+  assert.match(settings, /const \[generationModelId, setGenerationModelId\] = useState\("deepseek-flash"\)/u);
   assert.match(settings, /setGenerationModelId\(nextKind === "glm" \? "" : next\.generationModelSuggestions\[0\] \?\? ""\)/u);
   assert.match(settings, /setVisionModelId\(nextKind === "glm" \? "" : next\.visionModelSuggestions\[0\] \?\? ""\)/u);
   assert.match(settings, /generationModelId: generationModelId \|\| null/u);

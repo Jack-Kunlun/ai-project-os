@@ -19,13 +19,14 @@ MUTATION_ATTEMPTED=0
 WRITER_RECOVERY_REQUIRED=0
 OLD_APP_ID=
 OLD_WORKER_ID=
+PRE_DEPLOY_BACKUP_SOURCE_QUIESCED=0
 
 if [[ $EUID -ne 0 ]]; then
   printf 'DEPLOY_ROOT_REQUIRED\n' >&2
   exit 70
 fi
 
-if [[ "$RELEASE_TAG" != v0.3.0-dev.1 ]]; then
+if [[ "$RELEASE_TAG" != v0.4.0-dev.1 ]]; then
   printf 'DEPLOY_TAG_INVALID\n' >&2
   exit 64
 fi
@@ -208,7 +209,7 @@ run_upgrade_preflight() {
     printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_RESULT_INVALID\n' >&2
     return 1
   }
-  grep -Eq '"targetTag"[[:space:]]*:[[:space:]]*"v0\.3\.0-dev\.1"' <<<"$preflight_output" || {
+  grep -Eq '"targetTag"[[:space:]]*:[[:space:]]*"v0\.4\.0-dev\.1"' <<<"$preflight_output" || {
     printf 'DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_TARGET_INVALID\n' >&2
     return 1
   }
@@ -284,8 +285,20 @@ wait_for_old_writers() {
 
 recover_old_writers_on_failure() {
   local exit_code=$?
+  local app_paused worker_paused app_running worker_running
   if (( exit_code != 0 && WRITER_RECOVERY_REQUIRED == 1 && MUTATION_ATTEMPTED == 0 )); then
-    docker start "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null || true
+    app_paused=$(docker inspect --format '{{.State.Paused}}' "$OLD_APP_ID" 2>/dev/null || true)
+    worker_paused=$(docker inspect --format '{{.State.Paused}}' "$OLD_WORKER_ID" 2>/dev/null || true)
+    app_running=$(docker inspect --format '{{.State.Running}}' "$OLD_APP_ID" 2>/dev/null || true)
+    worker_running=$(docker inspect --format '{{.State.Running}}' "$OLD_WORKER_ID" 2>/dev/null || true)
+    [[ "$app_paused" != true ]] || docker unpause "$OLD_APP_ID" >/dev/null || true
+    [[ "$worker_paused" != true ]] || docker unpause "$OLD_WORKER_ID" >/dev/null || true
+    if [[ "$app_running" == false && "$worker_running" == false ]]; then
+      docker start "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null || true
+    else
+      [[ "$app_running" != false ]] || docker start "$OLD_APP_ID" >/dev/null || true
+      [[ "$worker_running" != false ]] || docker start "$OLD_WORKER_ID" >/dev/null || true
+    fi
     wait_for_old_writers || true
   fi
   return "$exit_code"
@@ -298,23 +311,88 @@ trap recover_old_writers_on_failure EXIT
 compose build principal-bootstrap migrate reconcile app worker production-upgrade-preflight
 run_upgrade_preflight pre-stop
 
+capture_source_writers() {
+  local source_health
+
+  OLD_APP_ID=$(compose ps -q app)
+  OLD_WORKER_ID=$(compose ps -q worker)
+  if [[ ! "$OLD_APP_ID" =~ ^[0-9a-f]{64}$ || ! "$OLD_WORKER_ID" =~ ^[0-9a-f]{64}$ ]]; then
+    printf 'DEPLOY_OLD_WRITER_CONTAINER_INVALID\n' >&2
+    return 69
+  fi
+  if [[ "$(container_health "$OLD_APP_ID")" != healthy || "$(container_health "$OLD_WORKER_ID")" != healthy ]]; then
+    printf 'DEPLOY_OLD_WRITER_NOT_HEALTHY\n' >&2
+    return 69
+  fi
+  source_health=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health) || {
+    printf 'DEPLOY_SOURCE_HEALTH_UNAVAILABLE\n' >&2
+    return 69
+  }
+  if ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$source_health" \
+    || ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.3\.0-dev\.1"' <<<"$source_health" \
+    || ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health" \
+    || ! grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health"; then
+    printf 'DEPLOY_SOURCE_STACK_INVALID\n' >&2
+    return 69
+  fi
+
+  WRITER_RECOVERY_REQUIRED=1
+}
+
+capture_source_writers
+
+stop_source_writers() {
+  if [[ ! "$OLD_APP_ID" =~ ^[0-9a-f]{64}$ || ! "$OLD_WORKER_ID" =~ ^[0-9a-f]{64}$ ]]; then
+    printf 'DEPLOY_OLD_WRITER_CONTAINER_INVALID\n' >&2
+    return 69
+  fi
+
+  # Stop the exact healthy writers before taking the final migration backup.
+  # A Docker pause does not drain already-dispatched PostgreSQL transactions.
+  docker stop "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null
+  if [[ "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_APP_ID")" != false:false \
+    || "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_WORKER_ID")" != false:false ]]; then
+    printf 'DEPLOY_OLD_WRITER_STOP_FAILED\n' >&2
+    return 69
+  fi
+
+  assert_maintenance_isolation
+  run_upgrade_preflight post-stop
+  assert_maintenance_isolation
+}
+
+stop_source_writers
+
 test -x "$BACKUP_SCRIPT"
-backup_output=$(AI_PROJECT_OS_DEPLOY_LOCK_HELD=1 "$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG")
+backup_output=$(AI_PROJECT_OS_DEPLOY_LOCK_HELD=1 \
+  AI_PROJECT_OS_CUTOVER=1 \
+  AI_PROJECT_OS_CUTOVER_LOCK_HELD=1 \
+  AI_PROJECT_OS_EXPECTED_APP_ID="$OLD_APP_ID" \
+  AI_PROJECT_OS_EXPECTED_WORKER_ID="$OLD_WORKER_ID" \
+  "$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG")
 printf '%s\n' "$backup_output"
 
 if grep -q '^BACKUP_SKIPPED_NO_STACK ' <<<"$backup_output"; then
   backup_path=none-first-deploy
   backup_object=none-first-deploy
+  backup_manifest=none-first-deploy
 else
   backup_path=$(sed -n 's/^BACKUP_OK .* source=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
   backup_object=$(sed -n 's/^BACKUP_OK .* object=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+  backup_manifest=$(sed -n 's/^BACKUP_OK .* verified_manifest=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
   if [[ ! "$backup_path" =~ ^/var/backups/ai-project-os/[^/]+$ ]] || \
-    [[ ! "$backup_object" =~ ^cos://[^/]+/production/backups/ ]]; then
+    [[ ! "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]] || \
+    [[ ! "$backup_manifest" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.4\.0-dev\.1\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.4\.0-dev\.1\.[A-Za-z0-9]{6}\.manifest\.json$ ]]; then
     printf 'DEPLOY_PRE_BACKUP_RESULT_INVALID\n' >&2
     exit 69
   fi
+  if ! grep -Eq '^BACKUP_OK .* source_quiesced=true$' <<<"$backup_output"; then
+    printf 'DEPLOY_PRE_BACKUP_SOURCE_NOT_QUIESCED\n' >&2
+    exit 69
+  fi
+  PRE_DEPLOY_BACKUP_SOURCE_QUIESCED=1
 fi
-readonly backup_path backup_object
+readonly backup_path backup_object backup_manifest
 
 wait_for_stack() {
   local attempt postgres_id principal_bootstrap_id migrate_id reconcile_id app_id worker_id
@@ -358,41 +436,23 @@ wait_for_stack() {
 }
 
 perform_writer_cutover() {
-  local source_health
-  OLD_APP_ID=$(compose ps -q app)
-  OLD_WORKER_ID=$(compose ps -q worker)
   if [[ ! "$OLD_APP_ID" =~ ^[0-9a-f]{64}$ || ! "$OLD_WORKER_ID" =~ ^[0-9a-f]{64}$ ]]; then
     printf 'DEPLOY_OLD_WRITER_CONTAINER_INVALID\n' >&2
     return 69
   fi
-  if [[ "$(container_health "$OLD_APP_ID")" != healthy || "$(container_health "$OLD_WORKER_ID")" != healthy ]]; then
-    printf 'DEPLOY_OLD_WRITER_NOT_HEALTHY\n' >&2
-    return 69
-  fi
-  source_health=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health) || {
-    printf 'DEPLOY_SOURCE_HEALTH_UNAVAILABLE\n' >&2
-    return 69
-  }
-  if ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$source_health" \
-    || ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.2\.0-dev\.1"' <<<"$source_health" \
-    || ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health" \
-    || ! grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health"; then
-    printf 'DEPLOY_SOURCE_STACK_INVALID\n' >&2
+  if (( PRE_DEPLOY_BACKUP_SOURCE_QUIESCED != 1 )); then
+    printf 'DEPLOY_PRE_BACKUP_SOURCE_NOT_QUIESCED\n' >&2
     return 69
   fi
 
-  # The clean-slate migration is a maintenance-window migration. Capture and
-  # stop the exact healthy writer containers before the final read-only check.
-  WRITER_RECOVERY_REQUIRED=1
-  docker stop "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null
-  if [[ "$(docker inspect --format '{{.State.Running}}' "$OLD_APP_ID")" != false \
-    || "$(docker inspect --format '{{.State.Running}}' "$OLD_WORKER_ID")" != false ]]; then
+  # The verified pre-deploy backup was taken after these exact writers were
+  # stopped and the database was isolated. Never restart old code after the
+  # mutation boundary below.
+  if [[ "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_APP_ID")" != false:false \
+    || "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_WORKER_ID")" != false:false ]]; then
     printf 'DEPLOY_OLD_WRITER_STOP_FAILED\n' >&2
     return 69
   fi
-  assert_maintenance_isolation
-  run_upgrade_preflight post-stop
-  assert_maintenance_isolation
 
   # From this point onward the database may have been changed. Never restart
   # an old application against a partially or fully upgraded schema.
@@ -417,10 +477,11 @@ completed_at=$(date -Is)
   printf 'health=%s\n' "$STACK_HEALTH"
   printf 'backup=%s\n' "$backup_path"
   printf 'backup_object=%s\n' "$backup_object"
+  printf 'backup_manifest=%s\n' "$backup_manifest"
   printf 'completed_at=%s\n' "$completed_at"
 } > "$RESULT_FILE"
 
 chmod 600 "$RESULT_FILE"
 
-printf 'DEPLOY_OK tag=%s revision=%s backup=%s backup_object=%s\n' \
-  "$RELEASE_TAG" "$EXPECTED_REVISION" "$backup_path" "$backup_object"
+printf 'DEPLOY_OK tag=%s revision=%s backup=%s backup_object=%s backup_manifest=%s\n' \
+  "$RELEASE_TAG" "$EXPECTED_REVISION" "$backup_path" "$backup_object" "$backup_manifest"

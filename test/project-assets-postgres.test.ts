@@ -5,7 +5,6 @@ import { rm, unlink } from "node:fs/promises";
 import test from "node:test";
 import { createCanvas } from "@napi-rs/canvas";
 import { invokeVisionCompletion } from "../src/lib/ai-providers";
-import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
@@ -30,6 +29,7 @@ import {
 import { collectProjectMemoryInputs } from "../src/lib/web-memory-index";
 import { createControlledMembership } from "./membership-fixture";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
+import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 
 const shouldRun = process.env.PROJECT_ASSET_POSTGRES_GATE === "1";
 
@@ -156,7 +156,7 @@ test(
       assert.equal(image?.segments[0]?.requiresVision, true);
       assert.equal(await db.projectSource.count({ where: { projectId } }), 1);
 
-      const provider = await createProviderConnection({
+      const provider = await createVerifiedProviderFixture({
         name: `Asset mock ${suffix}`,
         kind: "glm",
         apiKey: "sk-project-assets-test",
@@ -244,7 +244,7 @@ test(
         { kind: "glm" as const, key: "sk-project-assets-glm", model: "glm-5v-turbo" },
         { kind: "deepseek" as const, key: "sk-project-assets-deepseek", model: "deepseek-v4-flash-vision-exp" },
       ]) {
-        const connection = await createProviderConnection({
+        const connection = await createVerifiedProviderFixture({
           name: `Asset ${adapter.kind} ${suffix}`,
           kind: adapter.kind,
           apiKey: adapter.key,

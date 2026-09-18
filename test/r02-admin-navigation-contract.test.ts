@@ -38,16 +38,19 @@ test("system-admin identity is passed from protected server pages to shared head
 
 test("admin navigation is a persistent desktop sidebar with an accessible mobile drawer", async () => {
   const shell = await read("src/components/admin-shell.tsx");
-  const itemKeys = [...shell.matchAll(/key:\s*"([A-Za-z]+)"/gu)].map((match) => match[1]);
-  assert.equal(itemKeys.length, 12);
-  assert.match(shell, /lg:grid-cols-\[15rem_minmax\(0,1fr\)\]/u);
-  assert.match(shell, /sticky top-24 hidden[\s\S]*lg:flex/u);
+  const primarySource = shell.split("const primaryItems", 2)[1]?.split("];", 1)[0] ?? "";
+  const itemKeys = [...primarySource.matchAll(/key:\s*"([A-Za-z]+)"/gu)].map((match) => match[1]);
+  assert.equal(itemKeys.length, 5);
+  assert.match(shell, /w-60 shrink-0 overflow-y-auto[\s\S]*lg:block/u);
+  assert.match(shell, /min-h-0 flex-1 overflow-x-hidden overflow-y-auto/u);
   assert.match(shell, /lg:hidden/u);
   assert.match(shell, /role="dialog" aria-modal="true"/u);
   assert.match(shell, /event\.key === "Escape"/u);
   assert.match(shell, /previousFocus\?\.focus\(\)/u);
   assert.match(shell, /document\.activeElement === first/u);
   assert.match(shell, /document\.activeElement === last/u);
+  assert.match(shell, /aria-current=\{currentPath === item\.href \? "page" : undefined\}/u);
+  assert.match(shell, /aria-current=\{current \? "page" : undefined\}/u);
   assert.doesNotMatch(shell, /overflow-x-auto/u);
 });
 
@@ -69,8 +72,8 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(spec, /AI Project OS 平台管理总览/u);
   assert.match(spec, /toHaveAttribute\("href", "\/admin"\)/u);
   assert.match(spec, /ownerPage\.getByRole\("link", \{ name: "管理工作台", exact: true \}\)\)\.toHaveCount\(0\)/u);
-  assert.match(spec, /getByRole\("navigation", \{ name: "管理工作台导航", exact: true \}\)\.getByRole\("link"\)\)\.toHaveCount\(12\)/u);
-  assert.match(support, /drawer\.getByRole\("link"\)\)\.toHaveCount\(12\)/u);
+  assert.match(spec, /expectedR02AdminNavigationLinkCount/u);
+  assert.match(support, /expectedR02AdminNavigationLinkCount/u);
   assert.match(spec, /expectR02NoAccessibilityViolations/u);
   assert.match(spec, /expectR02SettledRoute/u);
   assert.match(spec, /seedR02DetailFixtures/u);
@@ -80,10 +83,11 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(support, /R02_PUBLIC_ROUTE_EXPECTATIONS/u);
   assert.match(support, /r02ProjectGuardRoutes/u);
   assert.match(support, /path: "\/admin\/models", heading: "平台模型"/u);
-  assert.match(support, /path: "\/admin\/models\/routes", heading: "默认模型路由"/u);
+  assert.match(support, /path: "\/admin\/models\/routes", heading: "平台模型"/u);
   assert.match(support, /path: "\/admin\/credits", heading: "平台额度"/u);
   assert.match(support, /path: "\/admin\/operations\/probes", heading: "连接探测预算"/u);
   assert.match(support, /path: "\/admin\/users", heading: "用户运营"/u);
+  assert.match(support, /path: "\/admin\/users\/memberships", heading: "会员资格管理"/u);
   assert.match(support, /path: "\/admin\/account", heading: "管理员账户"/u);
   assert.match(support, /terminal:/u);
   assert.match(support, /pendingTexts/u);
@@ -93,7 +97,9 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(spec, /getByRole\("heading", \{ name: "待处理事项", exact: true \}\)/u);
   assert.doesNotMatch(spec, /scrollIntoViewIfNeeded/u);
   assert.match(support, /must not settle into a soft error/u);
-  assert.match(support, /keyboard\.press\("Tab"\)[\s\S]*expect\(close\)\.toBeFocused\(\)/u);
+  assert.match(support, /expectedR02AdminNavigationLinkCount/u);
+  assert.match(support, /const focusable = drawer\.locator/u);
+  assert.match(support, /focusable\.last\(\)/u);
   assert.match(support, /AxeBuilder/u);
   assert.doesNotMatch(spec, /seedR02Viewer/u);
 });

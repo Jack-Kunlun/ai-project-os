@@ -27,8 +27,10 @@ export async function POST(request: Request) {
     const actor = await requireApiSession(request);
     assertPlatformProviderAdminHint(actor);
     const provider = await createProviderConnection(await readJsonBody(request), actor);
-    return NextResponse.json({ provider }, { status: 201 });
+    return NextResponse.json({ provider }, { status: 201, headers: { "cache-control": "no-store" } });
   } catch (error) {
-    return handleApiError(error);
+    const response = handleApiError(error);
+    response.headers.set("cache-control", "no-store");
+    return response;
   }
 }

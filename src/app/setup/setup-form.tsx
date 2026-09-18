@@ -36,7 +36,7 @@ export function SetupForm() {
         body: JSON.stringify({ username, password }),
       });
       if (!response.ok) throw new Error(await errorMessage(response));
-      router.replace("/onboarding");
+      router.replace("/admin");
       router.refresh();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "初始化失败");
@@ -52,7 +52,7 @@ export function SetupForm() {
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-400 text-sm font-black text-slate-950">OS</span>
           <p className="mt-10 text-xs font-semibold uppercase tracking-[0.25em] text-indigo-300">First-run setup</p>
           <h1 className="mt-4 text-4xl font-semibold leading-tight tracking-[-0.04em]">先建立只有你能进入的项目记忆空间。</h1>
-          <p className="mt-6 max-w-lg text-sm leading-7 text-slate-300">管理员账号用于保护项目资料、GitHub 仓库身份和模型凭据。供应商 API Key 将在页面录入并由服务端加密保存。</p>
+          <p className="mt-6 max-w-lg text-sm leading-7 text-slate-300">管理员账号用于平台运营、安全治理和模型连接配置。供应商 API Key 将在页面录入并由服务端加密保存；业务 Owner 可稍后独立初始化。</p>
         </section>
         <form onSubmit={submit} className="p-9 sm:p-12">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">本地管理员</p>

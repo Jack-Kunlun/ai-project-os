@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { PlatformDefaultAiOperation } from "@/lib/platform-default-ai-routes";
 import type { SystemOverview, SystemOverviewFailureAggregate, SystemOverviewRoute } from "@/lib/system-overview";
+import { AdminPageHeader } from "@/components/admin-page-header";
 
 const operationLabels: Record<PlatformDefaultAiOperation, string> = {
   embedding: "向量化",
@@ -81,10 +82,10 @@ export type AdminPendingActionData = Readonly<{
 }>;
 
 const pendingActionDefinitions = [
-  { key: "failures" as const, title: "失败聚合", href: "/admin/operations/failures" },
-  { key: "mcp" as const, title: "MCP 待认证", href: "/admin/connectors/mcp" },
-  { key: "models" as const, title: "已验证平台模型", href: "/admin/models" },
-  { key: "routes" as const, title: "默认路由", href: "/admin/models/routes" },
+  { key: "failures" as const, title: "失败事件", href: "/admin/operations/failures" },
+  { key: "mcp" as const, title: "待审核 MCP", href: "/admin/connectors/mcp" },
+  { key: "models" as const, title: "可用模型", href: "/admin/models" },
+  { key: "routes" as const, title: "能力配置", href: "/admin/models" },
 ] as const;
 
 export function projectAdminPendingActions(data: AdminPendingActionData | null, loading: boolean): readonly AdminPendingActionProjection[] {
@@ -118,10 +119,10 @@ export function projectAdminPendingActions(data: AdminPendingActionData | null, 
     ? { value: "0", state: "pending" as const, detail: "尚未取得可用的平台模型。" }
     : { value: data.verifiedPlatformModels.toLocaleString("zh-CN"), state: "clear" as const, detail: "已有可用的平台模型。" };
   const routes = data.defaultRoutes.ready === null
-    ? { value: "未取得", state: "unknown" as const, detail: "尚未取得默认路由就绪证据。" }
+    ? { value: "未取得", state: "unknown" as const, detail: "尚未取得能力路由就绪证据。" }
     : data.defaultRoutes.ready < data.defaultRoutes.total
-      ? { value: `${data.defaultRoutes.ready}/${data.defaultRoutes.total}`, state: "pending" as const, detail: "仍有默认路由未就绪。" }
-      : { value: `${data.defaultRoutes.ready}/${data.defaultRoutes.total}`, state: "clear" as const, detail: "所有默认路由控制面已就绪。" };
+      ? { value: `${data.defaultRoutes.ready}/${data.defaultRoutes.total}`, state: "pending" as const, detail: "仍有能力路由未就绪。" }
+      : { value: `${data.defaultRoutes.ready}/${data.defaultRoutes.total}`, state: "clear" as const, detail: "所有能力路由控制面已就绪。" };
   return [
     { ...pendingActionDefinitions[0], ...failure },
     { ...pendingActionDefinitions[1], ...mcp },
@@ -159,13 +160,8 @@ export function AdminOverviewClient() {
     defaultRoutes: overview.defaultRoutes,
   }, loading);
 
-  return <div className="mx-auto max-w-7xl px-4 pb-16 pt-8 sm:px-8 lg:px-10">
-    <section className="rounded-[2rem] bg-slate-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-10 sm:py-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">System overview</p>
-      <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-5xl">管理员总览</h1>
-      <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里把平台托管配置、控制面状态和真实运行证据分开显示。只读聚合不会包含邮箱、凭据、个人账本、连接 Token 或外部调用正文。</p>
-      {overview ? <p className="mt-4 text-xs text-slate-300">测量于 {formatDate(overview.service.measuredAt)} · 应用版本 {overview.service.version}</p> : null}
-    </section>
+  return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
+    <AdminPageHeader title="管理员总览" meta={overview ? `测量于 ${formatDate(overview.service.measuredAt)} · ${overview.service.version}` : "正在读取最新状态…"} />
 
     {error ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</p> : null}
 
@@ -178,8 +174,24 @@ export function AdminOverviewClient() {
         </div>
         <span className="rounded-full bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-600">平台运营视角</span>
       </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{pendingActions.map((action) => <ActionCard key={action.key} action={action} />)}</div>
+      <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-3">{pendingActions.map((action) => <ActionCard key={action.key} action={action} />)}</div>
     </section>
+
+    <section className="mt-6" aria-labelledby="admin-kpi-title">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Today · Asia/Shanghai</p><h2 id="admin-kpi-title" className="mt-1 text-xl font-semibold text-slate-950">核心指标</h2></div>
+        <span className="text-xs text-slate-400">不含个人 BYOK · 未接入支付金额</span>
+      </div>
+      <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-3">
+        <KpiCard label="今日新增用户" value={analyticsValue(overview?.analytics.today.newUsers, loading)} detail="普通用户创建数" />
+        <KpiCard label="今日托管 Token" value={analyticsValue(overview?.analytics.today.platformTokens, loading)} detail="仅 usageKnown=true" />
+        <KpiCard label="调用待核对" value={analyticsValue(overview?.analytics.today.unknownCalls, loading)} detail="usageKnown=false" />
+        <KpiCard label="今日额度消耗" value={analyticsValue(overview?.analytics.today.settledQuota, loading)} detail="已结算平台额度" />
+        <KpiCard label="有效会员" value={analyticsValue(overview?.analytics.today.activeMemberships, loading)} detail="当前有效资格" />
+      </div>
+    </section>
+
+    <AnalyticsTrendSection overview={overview} loading={loading} />
 
     <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-labelledby="admin-readiness-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -190,7 +202,7 @@ export function AdminOverviewClient() {
         </div>
         <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">{loading ? "读取中…" : overview ? `${overview.setupChecklist.filter((item) => item.status === "ready").length}/${overview.setupChecklist.length} 项完成` : "未取得"}</span>
       </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-5 grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-3">
         {(overview?.setupChecklist ?? []).map((item) => <article key={item.key} className="rounded-2xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">{item.label}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(item.status)}`}>{checklistStatusLabel(item.status)}</span></div><p className="mt-2 text-xs leading-5 text-slate-500">{item.detail}</p></article>)}
         {!overview ? <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? "正在读取就绪证据…" : "未取得就绪证据。"}</div> : null}
       </div>
@@ -211,14 +223,14 @@ export function AdminOverviewClient() {
         </div>
         <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${overview?.defaultRoutes.controlPlane === "ready" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>{loading ? "读取中…" : routeReady === null || routeReady === undefined || overview === null ? "未取得路由证据" : `${routeReady}/${overview.defaultRoutes.total} 项控制面就绪`}</span>
       </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {overview ? Object.values(overview.defaultRoutes.operations).map((route) => <RouteCard key={route.operation} route={route} />) : <div className="rounded-2xl border border-dashed border-indigo-200 bg-white/70 p-5 text-sm text-slate-500 sm:col-span-2 lg:col-span-3">{loading ? "正在读取默认路由状态…" : "未取得默认路由证据。"}</div>}
       </div>
     </section>
 
-    <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-      <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Safe counts</p><h2 className="mt-2 text-xl font-semibold">平台规模</h2><div className="mt-5 grid grid-cols-3 gap-3"><Count label="用户" value={overview?.counts.users} /><Count label="有效会员" value={overview?.counts.activeMemberships} /><Count label="已验证平台连接" value={overview?.counts.verifiedPlatformModels} /></div></div>
-      <div className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Platform credit ledger</p><h2 className="mt-2 text-xl font-semibold">平台额度总览</h2><p className="mt-2 text-xs leading-5 text-slate-500">只读聚合：累计发放、当前可用、预留 / 待核对占用和已确认消耗。</p><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"><Count label="累计发放" value={overview?.tokens.issuedTokens} /><Count label="当前可用" value={overview?.tokens.availableTokens} /><Count label="预留 / 待核对占用" value={overview?.tokens.reservedTokens} /><Count label="已确认消耗" value={overview?.tokens.consumedTokens} /></div></div>
+    <section className="mt-6 grid items-stretch gap-6 lg:grid-cols-[1fr_1.2fr]">
+      <div className="flex h-full flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Safe counts</p><h2 className="mt-2 text-xl font-semibold">平台规模</h2><div className="mt-auto grid grid-cols-3 gap-3 pt-5"><Count label="用户" value={overview?.counts.users} /><Count label="有效会员" value={overview?.counts.activeMemberships} /><Count label="已验证平台连接" value={overview?.counts.verifiedPlatformModels} /></div></div>
+      <div className="flex h-full flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Platform credit ledger</p><h2 className="mt-2 text-xl font-semibold">平台额度总览</h2><p className="mt-2 text-xs leading-5 text-slate-500">只读聚合：累计发放、当前可用、预留 / 待核对占用和已确认消耗。</p><div className="mt-auto grid grid-cols-2 gap-3 pt-5 sm:grid-cols-4"><Count label="累计发放" value={overview?.tokens.issuedTokens} /><Count label="当前可用" value={overview?.tokens.availableTokens} /><Count label="预留 / 待核对占用" value={overview?.tokens.reservedTokens} /><Count label="已确认消耗" value={overview?.tokens.consumedTokens} /></div></div>
     </section>
 
     <section className="mt-6 grid gap-6 lg:grid-cols-3" aria-label="安全与恢复状态">
@@ -227,7 +239,6 @@ export function AdminOverviewClient() {
       <BackupCard backup={overview?.backup} loading={loading} />
     </section>
 
-    <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Ownership boundary</p><h2 className="mt-2 text-xl font-semibold">管理员能看什么</h2><div className="mt-4 grid gap-3 text-sm leading-6 text-slate-600 sm:grid-cols-3"><p className="rounded-2xl bg-slate-50 px-4 py-4"><strong className="text-slate-900">平台托管模型</strong><br />管理员维护平台连接和默认路由；普通用户按平台额度使用。</p><p className="rounded-2xl bg-slate-50 px-4 py-4"><strong className="text-slate-900">个人 Git / MCP</strong><br />连接归创建它的用户。管理员只处理安全策略、认证和聚合状态，不读取个人凭据。</p><p className="rounded-2xl bg-slate-50 px-4 py-4"><strong className="text-slate-900">备份与恢复</strong><br />任务结果、状态读取新鲜度和恢复演练证据分别展示；缺失证据保持“未取得”。</p></div></section>
   </div>;
 }
 
@@ -236,12 +247,28 @@ function workerDetail(worker: SystemOverview["service"]["worker"]): string {
   return `${heartbeat} · Worker 循环异常 ${worker.consecutiveFailures} 次`;
 }
 
+function analyticsValue(value: number | null | undefined, loading: boolean): string {
+  return value === undefined ? loading ? "读取中…" : "未取得" : value === null ? "未取得" : value.toLocaleString("zh-CN");
+}
+
+function KpiCard({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <article className="min-w-0 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm"><h3 className="truncate text-xs font-semibold text-slate-500">{label}</h3><p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">{value}</p><p className="mt-2 truncate text-xs text-slate-400">{detail}</p></article>;
+}
+
+function AnalyticsTrendSection({ overview, loading }: { overview: SystemOverview | null; loading: boolean }) {
+  const trend = overview?.analytics.trends.days7 ?? [];
+  return <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="admin-trend-title">
+    <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">7-day trend</p><h2 id="admin-trend-title" className="mt-1 text-xl font-semibold text-slate-950">运营趋势</h2></div><span className="text-xs text-slate-400">每日零值保留，读取失败显示“未取得”</span></div>
+    <div className="mt-4 overflow-x-auto"><table className="min-w-[600px] w-full border-collapse text-left text-xs"><thead><tr className="border-b border-slate-100 text-slate-400"><th className="whitespace-nowrap px-3 py-2 font-semibold">日期</th><th className="whitespace-nowrap px-3 py-2 font-semibold">新增用户</th><th className="whitespace-nowrap px-3 py-2 font-semibold">托管 Token</th><th className="whitespace-nowrap px-3 py-2 font-semibold">待核对调用</th><th className="whitespace-nowrap px-3 py-2 font-semibold">额度消耗</th></tr></thead><tbody>{trend.length === 0 ? <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-500">{loading ? "正在读取趋势…" : "未取得趋势证据。"}</td></tr> : trend.map((point) => <tr key={point.date} className="border-b border-slate-50 last:border-0"><th className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-700">{point.date}</th><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.newUsers, loading)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.platformTokens, loading)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.unknownCalls, loading)}</td><td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{analyticsValue(point.settledQuota, loading)}</td></tr>)}</tbody></table></div>
+  </section>;
+}
+
 function checklistStatusLabel(status: "ready" | "attention" | "unknown" | "restricted"): string {
   return { ready: "已就绪", attention: "需处理", unknown: "未知", restricted: "受限" }[status];
 }
 
 function RouteCard({ route }: { route: SystemOverviewRoute }) {
-  return <article className="rounded-2xl border border-white/80 bg-white p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-slate-900">{operationLabels[route.operation]}</h3><p className="mt-1 text-[12px] text-slate-500">{route.routeVersion === null ? "暂无 active 版本" : `控制面版本 v${route.routeVersion}`}</p></div><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${routeStatusTone(route)}`}>{routeCodeLabels[route.code]}</span></div><p className="mt-3 text-xs leading-5 text-slate-500">真实模型调用：<span className="font-semibold text-slate-700">未取得现场证据</span></p></article>;
+  return <article className="flex h-full flex-col rounded-2xl border border-white/80 bg-white p-4"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-slate-900">{operationLabels[route.operation]}</h3><p className="mt-1 text-[12px] text-slate-500">{route.routeVersion === null ? "暂无 active 版本" : `控制面版本 v${route.routeVersion}`}</p></div><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${routeStatusTone(route)}`}>{routeCodeLabels[route.code]}</span></div><p className="mt-auto pt-3 text-xs leading-5 text-slate-500">真实模型调用：<span className="font-semibold text-slate-700">未取得现场证据</span></p></article>;
 }
 
 function failureDetail(overview: SystemOverview): string {
@@ -266,7 +293,7 @@ function ActionCard({ action }: { action: AdminPendingActionProjection }) {
     unknown: "bg-slate-100 text-slate-600",
   } as const;
   const labels = { pending: "待处理", clear: "无待办", unknown: "未取得" } as const;
-  return <article className="rounded-2xl border border-white/80 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><h3 className="text-sm font-semibold text-slate-900">{action.title}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${styles[action.state]}`}>{labels[action.state]}</span></div><p className="mt-4 text-2xl font-semibold text-slate-950">{action.value}</p><p className="mt-2 min-h-10 text-xs leading-5 text-slate-500">{action.detail}</p><Link href={action.href} className="mt-3 inline-flex text-xs font-semibold text-indigo-700 hover:text-indigo-900">查看运营入口 →</Link></article>;
+  return <article className="min-w-0 rounded-2xl border border-white/80 bg-white p-4 shadow-sm"><div className="flex min-w-0 items-center justify-between gap-3"><h3 className="min-w-0 truncate whitespace-nowrap text-sm font-semibold text-slate-900">{action.title}</h3><span className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-semibold ${styles[action.state]}`}>{labels[action.state]}</span></div><p className="mt-4 text-2xl font-semibold text-slate-950">{action.value}</p><p className="mt-2 min-h-10 text-xs leading-5 text-slate-500">{action.detail}</p><Link href={action.href} className="mt-3 inline-flex whitespace-nowrap text-xs font-semibold text-indigo-700 hover:text-indigo-900">查看运营入口 →</Link></article>;
 }
 
 function BackupCard({ backup, loading }: { backup?: SystemOverview["backup"]; loading: boolean }) {
@@ -295,7 +322,7 @@ function BackupCard({ backup, loading }: { backup?: SystemOverview["backup"]; lo
 }
 
 function EvidenceCard({ title, eyebrow, value, detail, tone, href, linkLabel }: { title: string; eyebrow: string; value: string; detail: string; tone: "ready" | "attention" | "unknown" | "restricted"; href?: string; linkLabel?: string }) {
-  return <article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{eyebrow}</p><h2 className="mt-2 text-lg font-semibold text-slate-950">{title}</h2><p className={`mt-4 inline-flex rounded-full px-3 py-1.5 text-sm font-semibold ${statusTone(tone)}`}>{value}</p><p className="mt-3 text-xs leading-5 text-slate-500">{detail}</p>{href && linkLabel ? <Link href={href} className="mt-4 inline-flex rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{linkLabel}</Link> : null}</article>;
+  return <article className="flex h-full flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{eyebrow}</p><h2 className="mt-2 text-lg font-semibold text-slate-950">{title}</h2><p className={`mt-4 inline-flex self-start rounded-full px-3 py-1.5 text-sm font-semibold ${statusTone(tone)}`}>{value}</p><p className="mt-3 flex-1 text-xs leading-5 text-slate-500">{detail}</p>{href && linkLabel ? <Link href={href} className="mt-4 inline-flex self-start rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">{linkLabel}</Link> : null}</article>;
 }
 
 function StatusCard({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: "emerald" | "cyan" | "violet" }) {

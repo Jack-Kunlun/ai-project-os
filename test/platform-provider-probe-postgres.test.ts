@@ -6,9 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { createProviderConnection, updateProviderConnection } from "../src/lib/ai-providers";
+import { updateProviderConnection } from "../src/lib/ai-providers";
+import { applyPlatformAiOperation, probePlatformAiOperation } from "../src/lib/platform-ai-operation-service";
 import { createAndActivatePlatformProviderProbeBudget, PlatformProviderProbeServiceError, runPlatformProviderProbe, reconcilePlatformProviderProbeAttempts } from "../src/lib/platform-provider-probe-service";
 import { getDb } from "../src/lib/db";
+import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 
 const shouldRun = process.env.PLATFORM_PROVIDER_PROBE_POSTGRES_GATE === "1";
 
@@ -80,7 +82,7 @@ test(
     const previousFetch = globalThis.fetch;
     let fetches = 0;
     try {
-      const provider = await createProviderConnection({
+      const provider = await createVerifiedProviderFixture({
         name: `Platform probe ${suffix}`,
         kind: "openai",
         apiKey: "platform-probe-test-key",
@@ -90,6 +92,14 @@ test(
         visionModelId: "gpt-4o-mini",
       }, actor, db);
       assert.equal(provider.id.length > 0, true);
+
+      const scheduledNow = new Date();
+      await createAndActivatePlatformProviderProbeBudget({
+        unitLimit: 20,
+        alertThresholdUnits: 3,
+        startsAt: new Date(scheduledNow.getTime() + 60_000).toISOString(),
+        expiresAt: new Date(scheduledNow.getTime() + 600_000).toISOString(),
+      }, actor, db);
 
       const noBudget = await runPlatformProviderProbe(provider.id, actor, {
         clientRequestKey: firstClientKey,
@@ -186,7 +196,7 @@ test(
     const previousFetch = globalThis.fetch;
     let fetches = 0;
     try {
-      const provider = await createProviderConnection({
+      const provider = await createVerifiedProviderFixture({
         name: `Platform probe reconcile ${suffix}`,
         kind: "openai",
         apiKey: "platform-probe-reconcile-key",
@@ -268,7 +278,7 @@ test(
     const previousFetch = globalThis.fetch;
     try {
       await db.appUser.create({ data: { id: otherActorId, username: `platform_probe_guard_actor_${suffix}`, role: "user" } });
-      const provider = await createProviderConnection({
+      const provider = await createVerifiedProviderFixture({
         name: `Platform probe guards ${suffix}`,
         kind: "openai",
         apiKey: "platform-probe-guards-key",
@@ -401,6 +411,72 @@ test(
       await assertTransactionGuardRejects(db, (tx) => insertProbeLedger(tx, { budgetId: firstBudget.id, attemptId: settledAttempt.id, actorId: otherActorId, ordinal: 1, event: "held", capability: "generation" }), /ledger binding|parity/iu);
       await assertTransactionGuardRejects(db, (tx) => insertProbeLedger(tx, { budgetId: firstBudget.id, attemptId: settledAttempt.id, actorId: adminId, ordinal: 1, event: "held", capability: "vision" }), /ledger binding|parity/iu);
       await assertTransactionGuardRejects(db, (tx) => insertProbeLedger(tx, { budgetId: firstBudget.id, attemptId: settledAttempt.id, actorId: adminId, ordinal: 2, event: "reserved", capability: "generation" }), /ledger binding|parity/iu);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+      else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousKeyPath;
+      await rm(keyDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "draft proof consumption and operation apply preserve idempotent route evidence",
+  { skip: !shouldRun ? "PLATFORM_PROVIDER_PROBE_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const db = getDb();
+    const suffix = randomUUID().slice(0, 8);
+    const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-platform-operation-proof-"));
+    const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
+    process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
+    const adminId = "00000000-0000-4000-8000-000000000010";
+    const actor = { id: adminId, role: "admin" as const, accountAccessVersion: 1 };
+    const previousFetch = globalThis.fetch;
+    try {
+      const provider = await createVerifiedProviderFixture({
+        name: `Platform operation proof ${suffix}`,
+        kind: "openai",
+        apiKey: "platform-operation-proof-key",
+        generationModelId: "gpt-4.1-mini",
+        embeddingModelId: null,
+        embeddingDimensions: null,
+        visionModelId: null,
+      }, actor, db);
+      const draftAttempt = await db.platformProviderProbeAttempt.findFirstOrThrow({ where: { subject: "draftConnection", consumedProviderConnectionId: provider.id }, select: { id: true, subject: true, consumedAt: true, consumedProviderConnectionId: true, consumedRouteId: true } });
+      assert.equal(draftAttempt.subject, "draftConnection");
+      assert.ok(draftAttempt.consumedAt);
+      assert.equal(draftAttempt.consumedRouteId, null);
+
+      globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), { status: 200, headers: { "content-type": "application/json" } });
+      const input = {
+        clientRequestKey: randomUUID(),
+        providerConnectionId: provider.id,
+        operation: "projectAnalysis" as const,
+        modelId: "gpt-4.1-mini",
+        maxOutputTokens: 256,
+        quotaMultiplierBps: 10_000,
+      };
+      const probe = await probePlatformAiOperation(input, actor, db);
+      assert.equal(probe.status, "settled");
+      assert.ok(probe.probeId);
+      const applied = await applyPlatformAiOperation({ ...input, probeId: probe.probeId }, actor, db);
+      assert.equal(applied.route.status, "active");
+      const proofAfterApply = await db.platformProviderProbeAttempt.findUniqueOrThrow({ where: { id: probe.probeId }, select: { consumedAt: true, consumedProviderConnectionId: true, consumedRouteId: true } });
+      assert.equal(proofAfterApply.consumedProviderConnectionId, provider.id);
+      assert.equal(proofAfterApply.consumedRouteId, applied.route.id);
+      await assertTransactionGuardRejects(db, (tx) => tx.$executeRaw(Prisma.sql`UPDATE "PlatformProviderProbeAttempt" SET "consumedRouteId" = NULL WHERE "id" = ${probe.probeId}::uuid`), /consumed route reference is immutable/iu);
+
+      const audits = await db.platformDefaultAiRouteAudit.findMany({ where: { routeId: applied.route.id }, orderBy: { createdAt: "asc" }, select: { action: true, safeSnapshot: true } });
+      assert.deepEqual(audits.map((audit) => audit.action), ["draftCreated", "validated", "activated"]);
+      assert.deepEqual(audits.map((audit) => (audit.safeSnapshot as { status?: string }).status), ["draft", "verified", "active"]);
+
+      const replay = await applyPlatformAiOperation({ ...input, probeId: probe.probeId }, actor, db);
+      assert.equal(replay.route.id, applied.route.id);
+      assert.equal(await db.platformDefaultAiRoute.count({ where: { operation: "projectAnalysis", status: "active" } }), 1);
+      await assert.rejects(
+        () => applyPlatformAiOperation({ ...input, probeId: probe.probeId, maxOutputTokens: 257 }, actor, db),
+        (error: unknown) => error instanceof PlatformProviderProbeServiceError && error.code === "PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT",
+      );
     } finally {
       globalThis.fetch = previousFetch;
       if (previousKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;

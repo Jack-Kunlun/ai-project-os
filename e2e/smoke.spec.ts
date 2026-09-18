@@ -261,7 +261,7 @@ test("first-run administrator and business Owner stay separate across protected 
   expect(healthResponse.ok()).toBe(true);
   expect(await healthResponse.json()).toMatchObject({
     status: "ok",
-    version: "0.3.0-dev.1",
+    version: "0.4.0-dev.1",
     database: "up",
     worker: { status: "up", consecutiveFailures: 0 },
   });

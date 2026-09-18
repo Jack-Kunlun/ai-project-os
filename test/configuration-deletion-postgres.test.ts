@@ -7,12 +7,12 @@ import { join } from "node:path";
 import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
 import {
-  createProviderConnection,
   deleteProviderConnection,
   ProviderServiceError,
   updateProviderConnection,
 } from "../src/lib/ai-providers";
 import { getDb } from "../src/lib/db";
+import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 import {
   createGitConnection,
   executeGitConnectionMutation,
@@ -199,7 +199,7 @@ test("unused model and Git connections can be permanently deleted while historic
   await db.project.create({ data: { id: projectId, name: `Configuration deletion ${suffix}`, slug: `configuration-deletion-${suffix}` } });
 
   try {
-    const provider = await createProviderConnection({
+    const provider = await createVerifiedProviderFixture({
       name: `Disposable DeepSeek ${suffix}`,
       kind: "deepseek",
       apiKey: `deepseek-test-${suffix}`,

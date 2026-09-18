@@ -49,7 +49,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 [[ $EUID -eq 0 ]] || fail 'HOST_ACTIVATION_ROOT_REQUIRED' 70
-[[ "$RELEASE_TAG" == v0.3.0-dev.1 ]] || fail 'HOST_ACTIVATION_TAG_INVALID' 64
+[[ "$RELEASE_TAG" == v0.4.0-dev.1 ]] || fail 'HOST_ACTIVATION_TAG_INVALID' 64
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'HOST_ACTIVATION_REVISION_INVALID' 65
 [[ "$CONFIRMATION" == CONFIRM_SOURCE_REMAINS_QUIESCED ]] || fail 'HOST_ACTIVATION_CONFIRMATION_REQUIRED' 64
 for required_command in chmod curl date docker flock grep install mktemp mv nginx sed seq sleep stat systemctl; do

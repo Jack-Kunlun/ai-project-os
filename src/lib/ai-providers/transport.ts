@@ -63,6 +63,8 @@ type RuntimeConnection = Pick<
   AiProviderConnection,
   "id" | "kind" | "baseUrl" | "credentialId" | "status"
 > & Readonly<{
+  /** In-memory credential used only by the unsaved draft probe path. */
+  apiKey?: string;
   /** Present only for a governed dispatch admitted against an exact secret. */
   credentialSecretFingerprint?: string;
   /**
@@ -121,20 +123,25 @@ async function providerPost(
   if (remaining <= 0) throw new ProviderTransportError("AI_PROVIDER_TIMEOUT", 504, false);
   await runProviderBoundary(connection.onBeforeCredentialRead);
   let apiKey: string;
-  try {
-    apiKey = await readCredentialSecretWithDeadline(
-      connection.credentialId,
-      absoluteDeadlineAt,
-      connection.credentialSecretFingerprint,
-    );
-  } catch (error) {
-    // Credential rotation is a pre-dispatch fence. Do not let a vault error
-    // fall through to the generic transport handler, which would otherwise
-    // conservatively classify the request as network-uncertain.
-    if (error instanceof CredentialVaultError) {
-      throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+  if (connection.apiKey !== undefined) {
+    if (connection.apiKey.trim().length === 0) throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+    apiKey = connection.apiKey;
+  } else {
+    try {
+      apiKey = await readCredentialSecretWithDeadline(
+        connection.credentialId,
+        absoluteDeadlineAt,
+        connection.credentialSecretFingerprint,
+      );
+    } catch (error) {
+      // Credential rotation is a pre-dispatch fence. Do not let a vault error
+      // fall through to the generic transport handler, which would otherwise
+      // conservatively classify the request as network-uncertain.
+      if (error instanceof CredentialVaultError) {
+        throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
+      }
+      throw error;
     }
-    throw error;
   }
   const remainingAfterCredential = absoluteDeadlineAt === undefined
     ? PROVIDER_REQUEST_TIMEOUT_MS
@@ -238,6 +245,8 @@ export async function invokeChatCompletion(input: Readonly<{
   messages: readonly ChatMessage[];
   maxOutputTokens: number;
   temperature?: number;
+  /** Disable provider reasoning only for bounded connectivity probes. */
+  disableThinking?: boolean;
   absoluteDeadlineAt?: Date;
 }>): Promise<ChatResult> {
   const { payload, requestId } = await providerPost(input.connection, "/chat/completions", {
@@ -246,6 +255,7 @@ export async function invokeChatCompletion(input: Readonly<{
     max_tokens: input.maxOutputTokens,
     temperature: input.temperature ?? 0,
     stream: false,
+    ...(input.connection.kind === "deepseek" && input.disableThinking ? { thinking: { type: "disabled" } } : {}),
   }, input.absoluteDeadlineAt);
   if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
   const record = payload as Record<string, unknown>;
@@ -294,6 +304,8 @@ export async function invokeVisionCompletion(input: Readonly<{
   mimeType: "image/png" | "image/jpeg" | "image/webp";
   prompt: string;
   maxOutputTokens: number;
+  /** Disable provider reasoning only for bounded connectivity probes. */
+  disableThinking?: boolean;
   absoluteDeadlineAt?: Date;
 }>): Promise<ChatResult> {
   if (input.image.length === 0 || input.image.length > 10 * 1024 * 1024 || input.prompt.length < 1 || input.prompt.length > 8_000) {
@@ -301,7 +313,7 @@ export async function invokeVisionCompletion(input: Readonly<{
   }
   const dataUrl = `data:${input.mimeType};base64,${input.image.toString("base64")}`;
   if (input.connection.kind === "deepseek") {
-    if (input.modelId !== "deepseek-v4-flash-vision-exp") return fail("AI_PROVIDER_VISION_UNSUPPORTED", 422);
+    if (input.modelId !== "deepseek-flash" && input.modelId !== "deepseek-v4-flash-vision-exp") return fail("AI_PROVIDER_VISION_UNSUPPORTED", 422);
     const { payload, requestId } = await providerPost(input.connection, "/responses", {
       model: input.modelId,
       instructions: "Extract only evidence visible in the image. Never infer hidden facts. Return the requested JSON object only.",
@@ -314,6 +326,7 @@ export async function invokeVisionCompletion(input: Readonly<{
       }],
       max_output_tokens: input.maxOutputTokens,
       store: false,
+      ...(input.disableThinking ? { reasoning: { effort: "none" } } : {}),
     }, input.absoluteDeadlineAt);
     if (typeof payload !== "object" || payload === null) return fail("AI_PROVIDER_INVALID_RESPONSE", 502, true);
     const record = payload as Record<string, unknown>;

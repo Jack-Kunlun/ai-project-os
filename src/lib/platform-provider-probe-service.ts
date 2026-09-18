@@ -14,7 +14,6 @@ import {
   type PlatformProviderActor,
 } from "@/lib/ai-providers/service";
 import {
-  PROVIDER_REQUEST_TIMEOUT_MS,
   ProviderTransportError,
   invokeChatCompletion,
   invokeEmbeddings,
@@ -23,43 +22,23 @@ import {
 import { canonicalProviderBaseUrl, getProviderDefinition } from "@/lib/ai-providers/registry";
 import { getDb } from "@/lib/db";
 import { persistNotification } from "@/lib/notification-service";
+import {
+  PLATFORM_PROVIDER_PROBE_LEASE_MS,
+  PLATFORM_PROVIDER_PROBE_MAX_BUDGET_DURATION_MS,
+  PLATFORM_PROVIDER_PROBE_MAX_BUDGET_UNITS,
+  PlatformProviderProbeServiceError,
+  type PlatformProviderProbeServiceErrorCode,
+} from "@/lib/platform-provider-probe-contract";
 
-export type PlatformProviderProbeServiceErrorCode =
-  | "PLATFORM_PROVIDER_PROBE_INVALID_INPUT"
-  | "PLATFORM_PROVIDER_PROBE_ADMIN_REQUIRED"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_NOT_FOUND"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_DISABLED"
-  | "PLATFORM_PROVIDER_PROBE_CANONICAL_ENDPOINT_REQUIRED"
-  | "PLATFORM_PROVIDER_PROBE_CONFIGURATION_CONFLICT"
-  | "PLATFORM_PROVIDER_PROBE_BUDGET_REQUIRED"
-  | "PLATFORM_PROVIDER_PROBE_BUDGET_EXHAUSTED"
-  | "PLATFORM_PROVIDER_PROBE_IDEMPOTENCY_CONFLICT"
-  | "PLATFORM_PROVIDER_PROBE_IN_PROGRESS"
-  | "PLATFORM_PROVIDER_PROBE_RECONCILIATION_REQUIRED"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_UNAVAILABLE"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_AUTH_FAILED"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_RATE_LIMITED"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_REJECTED"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_INVALID_RESPONSE"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_RESPONSE_TOO_LARGE"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_TIMEOUT"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_EMBEDDING_UNSUPPORTED"
-  | "PLATFORM_PROVIDER_PROBE_PROVIDER_VISION_UNSUPPORTED"
-  | "PLATFORM_PROVIDER_PROBE_RECONCILED_NO_DISPATCH"
-  | "PLATFORM_PROVIDER_PROBE_RECONCILIATION_HOLD";
-
-export class PlatformProviderProbeServiceError extends Error {
-  constructor(readonly code: PlatformProviderProbeServiceErrorCode) {
-    super(code);
-    this.name = "PlatformProviderProbeServiceError";
-  }
-}
-
-export const PLATFORM_PROVIDER_PROBE_MAX_BODY_BYTES = 4 * 1024;
-export const PLATFORM_PROVIDER_PROBE_MAX_UNITS = 3;
-export const PLATFORM_PROVIDER_PROBE_LEASE_MS = PROVIDER_REQUEST_TIMEOUT_MS * PLATFORM_PROVIDER_PROBE_MAX_UNITS + 15_000;
-export const PLATFORM_PROVIDER_PROBE_MAX_BUDGET_UNITS = 10_000;
-export const PLATFORM_PROVIDER_PROBE_MAX_BUDGET_DURATION_MS = 90 * 24 * 60 * 60 * 1_000;
+export {
+  PLATFORM_PROVIDER_PROBE_LEASE_MS,
+  PLATFORM_PROVIDER_PROBE_MAX_BODY_BYTES,
+  PLATFORM_PROVIDER_PROBE_MAX_BUDGET_DURATION_MS,
+  PLATFORM_PROVIDER_PROBE_MAX_BUDGET_UNITS,
+  PLATFORM_PROVIDER_PROBE_MAX_UNITS,
+  PlatformProviderProbeServiceError,
+} from "@/lib/platform-provider-probe-contract";
+export type { PlatformProviderProbeServiceErrorCode } from "@/lib/platform-provider-probe-contract";
 
 const probeInputSchema = z.object({
   clientRequestKey: z.string().uuid(),
@@ -545,7 +524,7 @@ async function settleProbeOrdinal(
     const attempt = await tx.platformProviderProbeAttempt.findUnique({ where: { id: attemptId }, select: { budgetId: true, providerConnectionId: true, actorId: true, status: true } });
     if (attempt === null || attempt.providerConnectionId !== providerId || ["settled", "released", "held", "rejected"].includes(attempt.status)) return;
     await lockMembershipUser(tx, attempt.actorId);
-    await lockProviderConfiguration(tx, attempt.providerConnectionId);
+    if (attempt.providerConnectionId !== null) await lockProviderConfiguration(tx, attempt.providerConnectionId);
     if (attempt.budgetId !== null) await lockProbeBudget(tx);
     const terminal = await tx.platformProviderProbeLedger.findFirst({ where: { attemptId, ordinal, event: { in: ["settled", "released", "held"] } }, select: { id: true } });
     if (terminal !== null) return;
@@ -572,7 +551,7 @@ async function releaseProbeOrdinal(
     const attempt = await tx.platformProviderProbeAttempt.findUnique({ where: { id: attemptId }, select: { budgetId: true, providerConnectionId: true, actorId: true, status: true } });
     if (attempt === null || ["settled", "released", "held", "rejected"].includes(attempt.status)) return;
     await lockMembershipUser(tx, attempt.actorId);
-    await lockProviderConfiguration(tx, attempt.providerConnectionId);
+    if (attempt.providerConnectionId !== null) await lockProviderConfiguration(tx, attempt.providerConnectionId);
     if (attempt.budgetId !== null) await lockProbeBudget(tx);
     const existing = await tx.platformProviderProbeLedger.findFirst({ where: { attemptId, ordinal, event: { in: ["settled", "released", "held"] } }, select: { id: true } });
     if (existing !== null) return;
@@ -596,7 +575,7 @@ async function holdProbeOrdinal(
     const attempt = await tx.platformProviderProbeAttempt.findUnique({ where: { id: attemptId }, select: { budgetId: true, providerConnectionId: true, actorId: true, status: true } });
     if (attempt === null || ["settled", "released", "held", "rejected"].includes(attempt.status)) return;
     await lockMembershipUser(tx, attempt.actorId);
-    await lockProviderConfiguration(tx, attempt.providerConnectionId);
+    if (attempt.providerConnectionId !== null) await lockProviderConfiguration(tx, attempt.providerConnectionId);
     if (attempt.budgetId !== null) await lockProbeBudget(tx);
     const existing = await tx.platformProviderProbeLedger.findFirst({ where: { attemptId, ordinal, event: { in: ["settled", "released", "held"] } }, select: { id: true } });
     if (existing !== null) return;
@@ -649,7 +628,7 @@ async function finalizeProbe(
       && currentActor.role === "admin"
       && currentActor.disabledAt === null
       && currentActor.accountAccessVersion === attempt.actorAccountAccessVersion;
-    await lockProviderConfiguration(tx, attempt.providerConnectionId);
+    if (attempt.providerConnectionId !== null) await lockProviderConfiguration(tx, attempt.providerConnectionId);
     if (attempt.budgetId !== null) await lockProbeBudget(tx);
     const events = await tx.platformProviderProbeLedger.findMany({ where: { attemptId }, select: { ordinal: true, event: true } });
     const terminalOrdinals = new Set(events.filter((event) => ["settled", "released", "held"].includes(event.event)).map((event) => event.ordinal));
@@ -684,13 +663,13 @@ async function finalizeProbe(
     const terminalError = ledgerError ?? safeErrorCode ?? final?.safeErrorCode ?? attempt.safeErrorCode;
     await tx.platformProviderProbeAttempt.update({ where: { id: attemptId }, data: { status, terminalAt: new Date(), ...(terminalError === null ? {} : { safeErrorCode: terminalError }) } });
     if (status === "settled" && (final?.settledUnits ?? 0) === attempt.plannedUnits && terminalError === null) {
-      const provider = await tx.aiProviderConnection.findFirst({ where: { id: attempt.providerConnectionId, scope: "platform", ownerUserId: null }, select: providerProbeSelect }) as ProviderProbeRow | null;
+      const provider = attempt.providerConnectionId === null ? null : await tx.aiProviderConnection.findFirst({ where: { id: attempt.providerConnectionId, scope: "platform", ownerUserId: null }, select: providerProbeSelect }) as ProviderProbeRow | null;
       const fingerprint = provider === null ? null : await currentCredentialFingerprint(tx, provider.credentialId);
       if (actorCurrent && provider !== null && provider.configurationVersion === attempt.providerConfigurationVersion && fingerprint === attempt.credentialSecretFingerprint) {
         await tx.aiProviderConnection.updateMany({ where: { id: provider.id, scope: "platform", configurationVersion: attempt.providerConfigurationVersion, status: { not: "disabled" } }, data: { status: "verified", lastTestedAt: new Date(), lastErrorCode: null, disabledAt: null } });
       }
     } else if (status === "settled" && terminalError !== null) {
-      const provider = await tx.aiProviderConnection.findFirst({ where: { id: attempt.providerConnectionId, scope: "platform", ownerUserId: null }, select: providerProbeSelect }) as ProviderProbeRow | null;
+      const provider = attempt.providerConnectionId === null ? null : await tx.aiProviderConnection.findFirst({ where: { id: attempt.providerConnectionId, scope: "platform", ownerUserId: null }, select: providerProbeSelect }) as ProviderProbeRow | null;
       const fingerprint = provider === null ? null : await currentCredentialFingerprint(tx, provider.credentialId);
       if (actorCurrent && provider !== null && provider.configurationVersion === attempt.providerConfigurationVersion && fingerprint === attempt.credentialSecretFingerprint) {
         await tx.aiProviderConnection.updateMany({ where: { id: provider.id, scope: "platform", configurationVersion: attempt.providerConfigurationVersion, status: { not: "disabled" } }, data: { status: "error", lastTestedAt: new Date(), lastErrorCode: terminalError, disabledAt: null } });
@@ -725,14 +704,14 @@ async function executeProbe(admission: Admission, input: ProbeInput, db: PrismaC
       // therefore cannot reclaim a healthy three-capability probe mid-flight.
       const absoluteDeadlineAt = admission.deadlineAt;
       if (capability.capability === "generation") {
-        await invokeChatCompletion({ connection, operation: "projectAnalysis", modelId: capability.modelId, messages: [{ role: "system", content: "Connectivity check. Reply OK." }, { role: "user", content: "OK" }], maxOutputTokens: 8, temperature: 0, absoluteDeadlineAt });
+        await invokeChatCompletion({ connection, operation: "projectAnalysis", modelId: capability.modelId, messages: [{ role: "system", content: "Connectivity check. Reply OK." }, { role: "user", content: "OK" }], maxOutputTokens: 8, temperature: 0, disableThinking: true, absoluteDeadlineAt });
       } else if (capability.capability === "embedding") {
         const result = await invokeEmbeddings({ connection, modelId: capability.modelId, texts: ["AI Project OS platform connectivity check"], expectedDimensions: capability.dimensions, absoluteDeadlineAt });
         await settleProbeOrdinal(admission.attemptId, admission.provider.id, ordinal, null, result.dimensions, db);
         continue;
       } else {
         const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
-        await invokeVisionCompletion({ connection, modelId: capability.modelId, image, mimeType: "image/png", prompt: "Reply OK", maxOutputTokens: 8, absoluteDeadlineAt });
+        await invokeVisionCompletion({ connection, modelId: capability.modelId, image, mimeType: "image/png", prompt: "Reply OK", maxOutputTokens: 8, disableThinking: true, absoluteDeadlineAt });
       }
       await settleProbeOrdinal(admission.attemptId, admission.provider.id, ordinal, null, null, db);
     } catch (error) {
@@ -836,10 +815,10 @@ export async function reconcilePlatformProviderProbeAttempts(
     try {
       await db.$transaction(async (tx) => {
         await setProbeMutationContext(tx);
-        const attempt = await tx.platformProviderProbeAttempt.findUnique({ where: { id: candidate.id }, select: { budgetId: true, providerConnectionId: true, actorId: true, plannedUnits: true, status: true, settledUnits: true, releasedUnits: true, heldUnits: true, safeErrorCode: true } });
+        const attempt = await tx.platformProviderProbeAttempt.findUnique({ where: { id: candidate.id }, select: { subject: true, budgetId: true, providerConnectionId: true, actorId: true, plannedUnits: true, status: true, settledUnits: true, releasedUnits: true, heldUnits: true, safeErrorCode: true } });
         if (attempt === null || !["reserved", "running"].includes(attempt.status)) return;
         await lockMembershipUser(tx, attempt.actorId);
-        await lockProviderConfiguration(tx, attempt.providerConnectionId);
+        if (attempt.providerConnectionId !== null) await lockProviderConfiguration(tx, attempt.providerConnectionId);
         if (attempt.budgetId !== null) await lockProbeBudget(tx);
         const events = await tx.platformProviderProbeLedger.findMany({ where: { attemptId: candidate.id }, select: { ordinal: true, event: true } });
         const dispatched = new Set(events.filter((event) => event.event === "dispatched").map((event) => event.ordinal));
@@ -865,7 +844,7 @@ export async function reconcilePlatformProviderProbeAttempts(
         const terminalError = totalHeld > 0
           ? attempt.safeErrorCode ?? "PLATFORM_PROVIDER_PROBE_RECONCILIATION_HOLD"
           : attempt.safeErrorCode ?? (released > 0 ? "PLATFORM_PROVIDER_PROBE_RECONCILED_NO_DISPATCH" : null);
-        await tx.platformProviderProbeAttempt.update({ where: { id: candidate.id }, data: { status, heldUnits: { increment: held }, releasedUnits: { increment: released }, ...(terminalError === null ? {} : { safeErrorCode: terminalError }), terminalAt: now } });
+        await tx.platformProviderProbeAttempt.update({ where: { id: candidate.id }, data: { status, heldUnits: { increment: held }, releasedUnits: { increment: released }, ...(terminalError === null ? {} : { safeErrorCode: terminalError }), terminalAt: now, evidenceExpiresAt: status === "settled" && attempt.subject !== "savedConnection" ? new Date(now.getTime() + 5 * 60_000) : null } });
         reconciled += 1;
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 10_000, maxWait: 10_000 });
     } catch {

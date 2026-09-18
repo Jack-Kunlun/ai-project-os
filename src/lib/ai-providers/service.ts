@@ -1,4 +1,5 @@
 import { Prisma, type AiProviderKind, type PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { lockMembershipUser } from "@/lib/ai-entitlements";
 import { createCredential, rotateCredential } from "@/lib/credential-vault";
@@ -11,6 +12,7 @@ import {
 } from "./registry";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 import { AccountAccessGuardError, assertAccountAccessForActor, requireAccountAccessVersion } from "@/lib/account-access-guard";
+import { consumeDraftProviderProbe, type PlatformProviderDraftProviderInput } from "@/lib/platform-provider-draft-probe-service";
 
 export type ProviderServiceErrorCode =
   | "AI_PROVIDER_INVALID_INPUT"
@@ -45,10 +47,12 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(80),
   kind: providerKindSchema,
   apiKey: z.string().min(8).max(512),
-  generationModelId: modelIdSchema.nullable().optional(),
-  visionModelId: modelIdSchema.nullable().optional(),
-  embeddingModelId: modelIdSchema.nullable().optional(),
-  embeddingDimensions: z.number().int().min(8).max(8192).nullable().optional(),
+  generationModelId: modelIdSchema.nullable(),
+  visionModelId: modelIdSchema.nullable(),
+  embeddingModelId: modelIdSchema.nullable(),
+  embeddingDimensions: z.number().int().min(8).max(8192).nullable(),
+  draftProbeId: z.string().uuid(),
+  createRequestKey: z.string().uuid(),
 }).strict().superRefine((value, context) => {
   if (value.generationModelId == null && value.embeddingModelId == null) {
     context.addIssue({ code: "custom", path: ["generationModelId"], message: "至少配置一种模型能力" });
@@ -135,7 +139,7 @@ function assertEmbeddingConfiguration(
 
 function assertVisionConfiguration(kind: AiProviderKind, modelId: string | null | undefined): void {
   if (!getProviderDefinition(kind).supportsVision && modelId != null) return fail("AI_PROVIDER_INVALID_INPUT");
-  if (kind === "deepseek" && modelId != null && modelId !== "deepseek-v4-flash-vision-exp") {
+  if (kind === "deepseek" && modelId != null && !["deepseek-flash", "deepseek-v4-flash-vision-exp"].includes(modelId)) {
     return fail("AI_PROVIDER_INVALID_INPUT");
   }
 }
@@ -239,9 +243,17 @@ export async function createProviderConnection(
       assertEmbeddingConfiguration(parsed.kind, parsed.embeddingModelId, parsed.embeddingDimensions);
       assertVisionConfiguration(parsed.kind, parsed.visionModelId);
       assertAtLeastOneCapability(parsed.generationModelId, parsed.visionModelId, parsed.embeddingModelId);
+      const providerId = randomUUID();
+      const proof = await consumeDraftProviderProbe(parsed as PlatformProviderDraftProviderInput, actorHint, providerId, tx);
+      if (proof.alreadyConsumedProviderConnectionId !== null) {
+        const existing = await tx.aiProviderConnection.findFirst({ where: { id: proof.alreadyConsumedProviderConnectionId, scope: "platform" }, select: providerSelect });
+        if (existing === null) return fail("AI_PROVIDER_CONFLICT");
+        return existing;
+      }
       const credential = await createCredential("aiProvider", parsed.apiKey, tx);
       return tx.aiProviderConnection.create({
         data: {
+          id: providerId,
           name: parsed.name,
           kind: parsed.kind,
           scope: "platform",
@@ -252,6 +264,9 @@ export async function createProviderConnection(
           defaultVisionModelId: parsed.visionModelId ?? null,
           defaultEmbeddingModelId: parsed.embeddingModelId ?? null,
           embeddingDimensions: parsed.embeddingDimensions ?? null,
+          status: "verified",
+          lastTestedAt: new Date(),
+          lastErrorCode: null,
         },
         select: providerSelect,
       });

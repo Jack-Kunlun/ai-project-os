@@ -7,7 +7,7 @@ umask 077
 
 readonly RELEASE_TAG=${1-}
 readonly EXPECTED_REVISION=${2-}
-readonly LATEST_MANIFEST_OBJECT=${3-}
+readonly MANIFEST_OBJECT=${3-}
 readonly RESTORE_COSCLI_CONFIG=${4-}
 readonly AGE_IDENTITY_FILE=${5-}
 readonly RESTORE_MODE=${6-}
@@ -23,8 +23,8 @@ readonly RESULT_FILE=/var/lib/ai-project-os/last-host-migration
 readonly DEPLOY_LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 readonly BACKUP_LOCK_FILE=/run/lock/ai-project-os-backup.lock
 readonly POSTGRES_IMAGE='pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff'
-readonly MIGRATION_SOURCE_VERSION=0.2.0-dev.1
-readonly MIGRATION_TARGET_TAG=v0.3.0-dev.1
+readonly MIGRATION_SOURCE_VERSION=0.3.0-dev.1
+readonly MIGRATION_TARGET_TAG=v0.4.0-dev.1
 
 RESTORE_ROOT=
 EXTRACT_ROOT=
@@ -227,10 +227,12 @@ wait_for_standby() {
 if [[ $EUID -ne 0 ]]; then
   fail 'RESTORE_ROOT_REQUIRED' 70
 fi
-[[ "$RELEASE_TAG" == v0.3.0-dev.1 ]] || fail 'RESTORE_TAG_INVALID' 64
+[[ "$RELEASE_TAG" == v0.4.0-dev.1 ]] || fail 'RESTORE_TAG_INVALID' 64
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'RESTORE_REVISION_INVALID' 65
-[[ "$LATEST_MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
+if [[ ! "$MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] &&
+  [[ ! "$MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1)\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1)\.[A-Za-z0-9]{6}\.manifest\.json$ ]]; then
   fail 'RESTORE_MANIFEST_OBJECT_INVALID' 64
+fi
 [[ "$RESTORE_COSCLI_CONFIG" == /run/ai-project-os-migration-*/* ]] || fail 'RESTORE_COS_CONFIG_PATH_INVALID' 64
 [[ "$AGE_IDENTITY_FILE" == /run/ai-project-os-migration-*/* ]] || fail 'RESTORE_AGE_KEY_PATH_INVALID' 64
 [[ "$RESTORE_MODE" =~ ^(migration|recovery)$ ]] || fail 'RESTORE_MODE_INVALID' 64
@@ -262,7 +264,7 @@ EXTRACT_ROOT=$RESTORE_ROOT/extracted
 HOST_CONFIG_ROOT=$RESTORE_ROOT/host-config
 
 manifest_path=$RESTORE_ROOT/download/latest.json
-"$COSCLI" cp "$LATEST_MANIFEST_OBJECT" "$manifest_path" \
+"$COSCLI" cp "$MANIFEST_OBJECT" "$manifest_path" \
   -c "$RESTORE_COSCLI_CONFIG" --init-skip --disable-log --process-log=false \
   --fail-output=false --disable-checksum=false --disable-crc64=false --check-point=false
 chmod 600 "$manifest_path"
@@ -280,8 +282,16 @@ validate_backup_release "$manifest_app_version"
 if [[ "$RESTORE_MODE" == migration && "$source_quiesced" != true ]]; then
   fail 'RESTORE_MIGRATION_BACKUP_NOT_QUIESCED' 68
 fi
-manifest_prefix=${LATEST_MANIFEST_OBJECT%/manifests/latest.json}
-[[ "$archive_object" == "$manifest_prefix"/backups/* ]] || fail 'RESTORE_BACKUP_OBJECT_SCOPE_INVALID' 71
+if [[ "$MANIFEST_OBJECT" == */manifests/latest.json ]]; then
+  manifest_prefix=${MANIFEST_OBJECT%/manifests/latest.json}
+  [[ "$archive_object" == "$manifest_prefix"/backups/* ]] || fail 'RESTORE_BACKUP_OBJECT_SCOPE_INVALID' 71
+else
+  immutable_prefix=${MANIFEST_OBJECT%.manifest.json}
+  [[ "$archive_object" == "$immutable_prefix.tar.age" ]] ||
+    fail 'RESTORE_BACKUP_OBJECT_SCOPE_INVALID' 71
+  [[ "$checksum_object" == "$immutable_prefix.tar.age.sha256" ]] ||
+    fail 'RESTORE_CHECKSUM_OBJECT_SCOPE_INVALID' 71
+fi
 
 archive_name=${archive_object##*/}
 archive_path=$RESTORE_ROOT/download/$archive_name

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, type FormEvent, type ReactNode } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { BrandMark } from "@/components/brand-mark";
 
 type LoginFormProps = {
   notice?: string;
@@ -11,6 +11,7 @@ type LoginFormProps = {
   oidcProviders?: Array<{ id: string; name: string }>;
   returnTo?: string;
   githubLoginAvailable?: boolean;
+  githubAvailability?: "notConfigured" | "configurationInvalid" | "bootstrapPending" | "available";
 };
 
 export function LoginForm({
@@ -19,6 +20,7 @@ export function LoginForm({
   oidcProviders = [],
   returnTo = "/dashboard",
   githubLoginAvailable = false,
+  githubAvailability = githubLoginAvailable ? "available" : "notConfigured",
 }: LoginFormProps) {
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -53,6 +55,12 @@ export function LoginForm({
   }
 
   const githubHref = `/api/auth/github/start?intent=login&remember=${remember ? "true" : "false"}&returnTo=${encodeURIComponent(returnTo)}`;
+  const githubUnavailableMessage = {
+    notConfigured: "GitHub 登录尚未配置，请联系工作区管理员",
+    configurationInvalid: "GitHub 登录配置无效，请联系工作区管理员",
+    bootstrapPending: "平台初始化尚未完成，GitHub 登录暂不可用",
+    available: "",
+  }[githubAvailability];
 
   return (
     <main className="flex min-h-screen flex-col justify-center overflow-x-hidden bg-[radial-gradient(circle_at_8%_5%,rgba(224,231,255,.72),transparent_24%),radial-gradient(circle_at_92%_94%,rgba(237,233,254,.68),transparent_25%),#f7f9fd] px-4 py-4 text-slate-950 sm:px-6 sm:py-5">
@@ -63,9 +71,7 @@ export function LoginForm({
           <div className="pointer-events-none absolute bottom-[116px] right-10 h-1.5 w-1.5 rounded-full bg-indigo-300/70 shadow-[0_0_18px_6px_rgba(129,140,248,.35)]" />
           <div className="relative flex min-h-full flex-col">
             <div className="flex items-center gap-4">
-              <span className="relative inline-flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-white/10 bg-black shadow-lg shadow-emerald-500/10">
-                <Image src="/brand/ai-project-os-admin.png" alt="" width={44} height={44} priority className="h-full w-full scale-[1.75] object-cover" />
-              </span>
+              <BrandMark size={44} priority className="rounded-[14px]" />
               <span className="text-[16px] font-semibold tracking-[-0.01em] text-slate-100">AI Project OS</span>
             </div>
 
@@ -128,7 +134,7 @@ export function LoginForm({
             ) : (
               <div>
                 <button type="button" disabled className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-200 bg-slate-50 text-[16px] font-semibold text-slate-500"><GitHubIcon />使用 GitHub 登录</button>
-                <p className="mt-2 text-center text-[12px] text-slate-400">当前部署尚未配置 GitHub OAuth</p>
+                <p className="mt-2 text-center text-[12px] text-slate-400">{githubUnavailableMessage}</p>
               </div>
             )}
 

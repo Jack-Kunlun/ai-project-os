@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { AdminPageHeader } from "@/components/admin-page-header";
 import {
   SYSTEM_FAILURE_INBOX_LIFECYCLE_LABELS,
   SYSTEM_FAILURE_INBOX_LIFECYCLES,
@@ -103,17 +104,8 @@ export function AdminFailureInboxClient() {
     setCursor(previous === "" ? null : previous);
   }
 
-  return <div className="mx-auto max-w-7xl px-4 pb-16 pt-8 sm:px-8 lg:px-10">
-    <section className="rounded-3xl bg-slate-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-8 sm:py-10">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Failure inbox</p>
-      <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">失败与待对账收件箱</h1>
-          <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300">这里只读汇总平台待核对、Worker / 后台任务、索引、个人连接、自动化和受控动作异常。业务责任方在用户侧处理，管理员后台不提供业务详情入口；每项只有一个安全下一步，不显示个人身份、凭据、工具定义、参数或载荷。</p>
-        </div>
-        {data ? <span className="rounded-full bg-white/10 px-3 py-2 text-xs font-semibold text-slate-200">测量于 {formatDate(data.observedAt)}</span> : null}
-      </div>
-    </section>
+  return <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
+    <AdminPageHeader title="失败与待对账收件箱" description="只读汇总平台与后台任务异常；业务责任方在用户侧处理，管理员后台不提供业务详情入口。" meta={data ? `测量于 ${formatDate(data.observedAt)}` : undefined} />
 
     <form onSubmit={applyFilters} className="mt-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
       <div className="grid gap-4 sm:grid-cols-2">

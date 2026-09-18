@@ -248,7 +248,7 @@ function assertCapabilities(
   }
   if ((embeddingModelId == null) !== (embeddingDimensions == null)) return fail("AI_PROVIDER_INVALID_INPUT");
   if (!definition.supportsVision && visionModelId != null) return fail("AI_PROVIDER_INVALID_INPUT");
-  if (kind === "deepseek" && visionModelId != null && visionModelId !== "deepseek-v4-flash-vision-exp") {
+  if (kind === "deepseek" && visionModelId != null && visionModelId !== "deepseek-flash" && visionModelId !== "deepseek-v4-flash-vision-exp") {
     return fail("AI_PROVIDER_INVALID_INPUT");
   }
 }

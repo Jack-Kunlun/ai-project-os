@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
-import { handleApiError, readJsonBody } from "@/lib/api-response";
-import {
-  createPlatformDefaultAiRoute,
-  listPlatformDefaultAiRoutes,
-} from "@/lib/platform-default-ai-routes";
+import { handleApiError } from "@/lib/api-response";
+import { listPlatformDefaultAiRoutes } from "@/lib/platform-default-ai-routes";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +17,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    const actor = await requireApiSession(request);
-    const route = await createPlatformDefaultAiRoute(await readJsonBody(request), actor);
-    return NextResponse.json({ route }, { status: 201 });
+    await requireApiSession(request);
+    return NextResponse.json({ error: { code: "PLATFORM_AI_ROUTE_MUTATIONS_DISABLED", message: "平台默认路由已改为能力配置流程，请在能力配置中完成选择、真实测试和启用。" } }, { status: 410 });
   } catch (error) {
     return handleApiError(error);
   }

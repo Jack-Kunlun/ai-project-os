@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import { AdminHeader } from "@/components/admin-header";
 import { AdminPageFrame } from "@/components/admin-shell";
+import { AdminPageHeader } from "@/components/admin-page-header";
 import { ParentPageLink } from "@/components/parent-page-link";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import type {
@@ -131,27 +131,11 @@ export function SystemOperationsClient({
       : null;
 
   return (
-    <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
-      {adminMode ? <AdminHeader username={username} /> : <AppHeader username={username} active="profile" />}
-      <AdminPageFrame active="operations" showSidebar={adminMode}><div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10 lg:pt-10">
-        <div className="mb-5"><ParentPageLink href={adminMode ? "/admin" : "/profile"} label={adminMode ? "返回管理总览" : "返回个人中心"} /></div>
-        <section className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10">
-          <div className="absolute -right-16 -top-20 h-64 w-64 rounded-full bg-indigo-500/25 blur-3xl" />
-          <div className="relative flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-300">System operations</p>
-                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[12px] font-semibold text-slate-200">仅初始超级管理员</span>
-                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[12px] font-semibold text-slate-200">只读</span>
-              </div>
-              <h1 className="mt-4 text-3xl font-semibold tracking-[-0.04em] sm:text-5xl">生产备份与 COS 同步</h1>
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">查看每日、手动和部署前备份的脱敏执行状态。页面不能启动、删除或恢复备份，也不能访问 COS 密钥、age 私钥、Docker 或 systemd。</p>
-            </div>
-            <button type="button" onClick={() => void refresh()} disabled={refreshing} className="flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50 disabled:opacity-60">
-              {refreshing ? "刷新中…" : "刷新状态"}
-            </button>
-          </div>
-        </section>
+    <OperationsFrame adminMode={adminMode} username={username}>
+      <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
+        {!adminMode ? <div className="mb-4"><ParentPageLink href="/profile" label="返回个人中心" /></div> : null}
+        <AdminPageHeader title="生产备份与 COS 同步" description="查看每日、手动和部署前备份的脱敏执行状态；页面不能启动、删除或恢复备份，也不能访问 COS 密钥、age 私钥、Docker 或 systemd。" actions={<button type="button" onClick={() => void refresh()} disabled={refreshing} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-60">{refreshing ? "刷新中…" : "刷新状态"}</button>} />
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs"><span className="rounded-full bg-amber-50 px-3 py-1.5 font-semibold text-amber-700">仅初始超级管理员</span><span className="rounded-full bg-slate-100 px-3 py-1.5 font-semibold text-slate-600">只读</span></div>
 
         {error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {sourceNotice ? <div role="status" className={`mt-6 rounded-2xl border px-5 py-4 text-sm ${snapshot.sourceStatus === "invalid" ? "border-rose-200 bg-rose-50 text-rose-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>{sourceNotice}</div> : null}
@@ -194,9 +178,14 @@ export function SystemOperationsClient({
           <h2 className="font-semibold">只读安全边界</h2>
           <p className="mt-1 text-indigo-800">备份服务只向专用目录原子写入状态、时间、对象路径、大小、校验摘要和安全错误码；应用仅以只读挂载读取该目录。任何控制操作仍必须在服务器受限流程中执行。</p>
         </section>
-      </div></AdminPageFrame>
-    </main>
+      </div>
+    </OperationsFrame>
   );
+}
+
+function OperationsFrame({ adminMode, username, children }: { adminMode: boolean; username: string; children: React.ReactNode }) {
+  if (adminMode) return <>{children}</>;
+  return <main className="min-h-screen bg-[#f4f6fb] text-slate-950"><AppHeader username={username} active="profile" /><AdminPageFrame active="operations" showSidebar={false}>{children}</AdminPageFrame></main>;
 }
 
 function recoveryDrillFreshness(completedAt: string, now = Date.now()): "fresh" | "stale" | "unknown" {

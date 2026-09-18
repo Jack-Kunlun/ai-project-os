@@ -29,13 +29,13 @@ type Policy = Readonly<{
 const statusLabels: Record<PolicyStatus, string> = {
   draft: "草稿",
   active: "生效中",
-  retired: "已退役",
+  retired: "已停用",
 };
 
 const actionLabels: Record<PolicyAction, string> = {
   created: "创建",
   activated: "启用",
-  retired: "退役",
+  retired: "停用",
 };
 
 async function readError(response: Response, fallback: string): Promise<string> {
@@ -45,6 +45,8 @@ async function readError(response: Response, fallback: string): Promise<string> 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
+
+const adminInputClass = "mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
 
 function latestPolicyEvidence(policies: readonly Policy[]): string {
   const activationDates = policies.flatMap((policy) => policy.activatedAt === null ? [] : [policy.activatedAt]);
@@ -110,7 +112,7 @@ export function PlatformGrantOfferPolicyPanel() {
   }
 
   async function changeLifecycle(policy: Policy, action: "activate" | "retire") {
-    const lifecycleReason = window.prompt(action === "activate" ? "请输入启用原因" : "请输入退役原因", "管理员复核")?.trim();
+    const lifecycleReason = window.prompt(action === "activate" ? "请输入启用原因" : "请输入停用原因", "管理员复核")?.trim();
     if (!lifecycleReason) return;
     setPending(true);
     setMessage(null);
@@ -122,7 +124,7 @@ export function PlatformGrantOfferPolicyPanel() {
       });
       if (!response.ok) throw new Error(await readError(response, "赠送策略状态更新失败"));
       await load();
-      setMessage(action === "activate" ? "赠送策略已启用；只影响之后符合条件的新注册。" : "赠送策略已退役。 ");
+      setMessage(action === "activate" ? "赠送策略已启用；只影响之后符合条件的新注册。" : "赠送策略已停用，停用后不可恢复，需要新建策略版本。 ");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "赠送策略状态更新失败");
     } finally {
@@ -163,7 +165,7 @@ export function PlatformGrantOfferPolicyPanel() {
                 <td className="whitespace-nowrap px-4 py-3 text-slate-500">{formatDate(policy.updatedAt)}</td>
                 <td className="whitespace-nowrap px-4 py-3">
                   {policy.status === "draft" ? <button type="button" disabled={pending} onClick={() => void changeLifecycle(policy, "activate")} className="rounded-lg bg-indigo-600 px-3 py-2 font-semibold text-white disabled:opacity-50">启用</button> : null}
-                  {policy.status === "active" ? <button type="button" disabled={pending} onClick={() => void changeLifecycle(policy, "retire")} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50">退役</button> : null}
+                  {policy.status === "active" ? <button type="button" disabled={pending} onClick={() => void changeLifecycle(policy, "retire")} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-700 disabled:opacity-50">停用</button> : null}
                   {policy.status === "retired" ? <span className="text-slate-400">不可变</span> : null}
                 </td>
               </tr>
@@ -174,11 +176,11 @@ export function PlatformGrantOfferPolicyPanel() {
       </div>
 
       <form onSubmit={createDraft} className="mt-6 grid gap-4 border-t border-slate-100 pt-6 sm:grid-cols-4">
-        <label className="text-xs font-medium text-slate-600">策略版本<input value={offerVersion} onChange={(event) => setOfferVersion(event.target.value)} pattern="[a-z0-9][a-z0-9._-]{2,63}" maxLength={64} required className="edit-field" /></label>
-        <label className="text-xs font-medium text-slate-600">赠送额度<input type="number" value={amount} onChange={(event) => setAmount(event.target.value)} min={1} max={10_000_000} required className="edit-field" /></label>
-        <label className="text-xs font-medium text-slate-600">有效天数<input type="number" value={validForDays} onChange={(event) => setValidForDays(event.target.value)} min={1} max={3_650} required className="edit-field" /></label>
-        <label className="text-xs font-medium text-slate-600">创建原因<input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required className="edit-field" /></label>
-        <div className="sm:col-span-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">启用新版本会在同一事务内退役当前 active 版本。</p><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "创建策略草稿"}</button></div>
+        <label className="text-xs font-medium text-slate-600">策略版本<input value={offerVersion} onChange={(event) => setOfferVersion(event.target.value)} pattern="[a-z0-9][a-z0-9._-]{2,63}" maxLength={64} required className={adminInputClass} /></label>
+        <label className="text-xs font-medium text-slate-600">赠送额度<input type="number" value={amount} onChange={(event) => setAmount(event.target.value)} min={1} max={10_000_000} required className={adminInputClass} /></label>
+        <label className="text-xs font-medium text-slate-600">有效天数<input type="number" value={validForDays} onChange={(event) => setValidForDays(event.target.value)} min={1} max={3_650} required className={adminInputClass} /></label>
+        <label className="text-xs font-medium text-slate-600">创建原因<input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} required className={adminInputClass} /></label>
+        <div className="sm:col-span-4 flex items-center justify-between gap-4"><p className="text-xs text-slate-500">启用新版本会在同一事务内停用当前 active 版本；停用后不可恢复，需要新建策略版本。</p><button disabled={pending} className="rounded-xl bg-indigo-600 px-4 py-3 text-xs font-semibold text-white disabled:opacity-50">{pending ? "处理中…" : "创建策略草稿"}</button></div>
       </form>
       {message ? <p role="status" className="mt-4 text-xs leading-5 text-slate-600">{message}</p> : null}
       {policies.length > 0 ? <p className="mt-4 text-xs leading-5 text-slate-500">最近审计：{actionLabels[policies[0]?.audits[0]?.action ?? "created"]}于 {policies[0]?.audits[0] ? formatDate(policies[0].audits[0].createdAt) : "暂无"}；原因已记录但不在页面展示。</p> : null}

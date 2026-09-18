@@ -35,6 +35,7 @@ const CODE_PATTERN = /^[^\s\u0000-\u001f\u007f-\u009f]{4,4096}$/u;
 export type GitHubOAuthErrorCode =
   | "GITHUB_OAUTH_NOT_CONFIGURED"
   | "GITHUB_OAUTH_CONFIG_INVALID"
+  | "GITHUB_OAUTH_BOOTSTRAP_PENDING"
   | "GITHUB_OAUTH_INVALID_INPUT"
   | "GITHUB_OAUTH_FLOW_INVALID"
   | "GITHUB_OAUTH_FLOW_EXPIRED"
@@ -55,8 +56,20 @@ export class GitHubOAuthError extends Error {
   }
 }
 
+export type GitHubOAuthAvailability = "notConfigured" | "configurationInvalid" | "bootstrapPending" | "available";
+
+export type GitHubOAuthAvailabilityProjection = Readonly<{
+  status: GitHubOAuthAvailability;
+  callbackPath: "/api/auth/github/callback";
+}>;
+
 type GitHubOAuthConfig = Readonly<{ clientId: string; clientSecret: string; publicOrigin: string }>;
 type GitHubProfile = Readonly<{ githubUserId: bigint; login: string; email: string; displayName: string | null }>;
+type GitHubOAuthBootstrapClient = Readonly<{
+  platformBootstrap: Readonly<{
+    findUnique: (args: Readonly<{ where: Readonly<{ id: string }>; select: Readonly<{ initialOwnerUserId: true; adminOnboardingCompletedAt: true }> }>) => Promise<Readonly<{ initialOwnerUserId: string | null; adminOnboardingCompletedAt: Date | null }> | null>;
+  }>;
+}>;
 
 const tokenSchema = z.object({
   access_token: z.string().min(8).max(512),
@@ -127,6 +140,35 @@ export function isGitHubOAuthConfigured(): boolean {
   }
 }
 
+/**
+ * Public pages may expose only this four-state projection. It never returns
+ * environment values or a bootstrap row identifier. A failed bootstrap read
+ * is intentionally fail-closed as pending so the login UI cannot invite a
+ * doomed OAuth flow.
+ */
+export async function getGitHubOAuthAvailability(
+  db?: PrismaClient,
+): Promise<GitHubOAuthAvailabilityProjection> {
+  let configuration: GitHubOAuthAvailability;
+  try {
+    readConfig();
+    configuration = "available";
+  } catch (error) {
+    configuration = error instanceof GitHubOAuthError && error.code === "GITHUB_OAUTH_NOT_CONFIGURED" ? "notConfigured" : "configurationInvalid";
+  }
+  if (configuration !== "available") return Object.freeze({ status: configuration, callbackPath: "/api/auth/github/callback" });
+  try {
+    const database = (db ?? getDb()) as unknown as GitHubOAuthBootstrapClient;
+    const bootstrap = await database.platformBootstrap.findUnique({ where: { id: "platform" }, select: { initialOwnerUserId: true, adminOnboardingCompletedAt: true } });
+    if (bootstrap === null || bootstrap.initialOwnerUserId === null || bootstrap.adminOnboardingCompletedAt === null) {
+      return Object.freeze({ status: "bootstrapPending", callbackPath: "/api/auth/github/callback" });
+    }
+  } catch {
+    return Object.freeze({ status: "bootstrapPending", callbackPath: "/api/auth/github/callback" });
+  }
+  return Object.freeze({ status: "available", callbackPath: "/api/auth/github/callback" });
+}
+
 function canonicalIntent(value: unknown): GitHubOauthIntent {
   if (value !== "login" && value !== "link") return fail("GITHUB_OAUTH_INVALID_INPUT");
   return value;
@@ -153,7 +195,7 @@ async function assertPlatformBootstrapReady(db: Prisma.TransactionClient): Promi
     select: { initialOwnerUserId: true, adminOnboardingCompletedAt: true },
   });
   if (bootstrap === null || bootstrap.initialOwnerUserId === null || bootstrap.adminOnboardingCompletedAt === null) {
-    return fail("GITHUB_OAUTH_NOT_CONFIGURED");
+    return fail("GITHUB_OAUTH_BOOTSTRAP_PENDING");
   }
 }
 

@@ -6,11 +6,11 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
-import { createProviderConnection } from "../src/lib/ai-providers/service";
 import { getDb } from "../src/lib/db";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import { createAndActivatePlatformProviderProbeBudget, runPlatformProviderProbe } from "../src/lib/platform-provider-probe-service";
 import { assertSystemFailureInboxAdmin, listSystemFailureInbox } from "../src/lib/system-failure-inbox";
+import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 
 const shouldRun = process.env.SYSTEM_FAILURE_INBOX_POSTGRES_GATE === "1";
 const ADMIN_ID = "00000000-0000-4000-8000-000000000010";
@@ -97,7 +97,7 @@ test(
         return direct;
       });
 
-      const provider = await createProviderConnection({
+      const provider = await createVerifiedProviderFixture({
         name: `Failure inbox provider ${suffix}`,
         kind: "openai",
         apiKey: `failure-inbox-platform-key-${suffix}`,

@@ -688,15 +688,13 @@ export async function requireApiSessionReadOnly(
 /**
  * Authenticate a page without choosing a product surface.  Admin pages use
  * this base guard so the user-domain guard cannot redirect them back to
- * /admin.  The first-admin onboarding gate stays ahead of both surfaces.
+ * /admin.  The optional business Owner bootstrap must not block the platform
+ * control plane; it has its own dedicated guard below.
  */
 export async function requireAuthenticatedPageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
   const store = await cookies();
   const user = await readSessionToken(store.get(SESSION_COOKIE_NAME)?.value ?? null, db);
-  if (user !== null) {
-    if (await getFirstAdminOnboardingState(user.id, db) === "pending") redirect("/onboarding");
-    return user;
-  }
+  if (user !== null) return user;
   redirect((await isApplicationInitialized(db)) ? "/login" : "/setup");
 }
 

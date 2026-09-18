@@ -117,7 +117,8 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.doesNotMatch(r02Spec, /route\.(?:fetch|fulfill)/u);
   assert.match(r02Support, /R02_VIEWPORTS/u);
   assert.match(r02Support, /keyboard\.press\("Escape"\)/u);
-  assert.match(r02Support, /getByRole\("link"\).*toHaveCount\(12\)/u);
+  assert.match(r02Support, /expectedR02AdminNavigationLinkCount/u);
+  assert.match(r02Support, /focusable\.last\(\)/u);
 });
 
 test("CI uses pinned least-privilege actions and runs all bounded gates", async () => {

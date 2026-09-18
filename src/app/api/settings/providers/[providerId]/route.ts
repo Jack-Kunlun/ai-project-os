@@ -25,9 +25,11 @@ export async function PATCH(
       await readJsonBody(request),
       actor,
     );
-    return NextResponse.json({ provider });
+    return NextResponse.json({ provider }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
-    return handleApiError(error);
+    const response = handleApiError(error);
+    response.headers.set("cache-control", "no-store");
+    return response;
   }
 }
 

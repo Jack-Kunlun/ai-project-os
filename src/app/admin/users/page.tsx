@@ -1,5 +1,3 @@
-import { AdminHeader } from "@/components/admin-header";
-import { AdminPageFrame } from "@/components/admin-shell";
 import { AdminUsersClient } from "@/app/admin/users/users-client";
 import { requireSystemAdminPage } from "@/lib/system-admin";
 
@@ -7,8 +5,5 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminUsersPage() {
   const user = await requireSystemAdminPage();
-  return <>
-    <AdminHeader username={user.username} />
-    <AdminPageFrame active="users"><AdminUsersClient username={user.username} /></AdminPageFrame>
-  </>;
+  return <AdminUsersClient username={user.username} />;
 }

@@ -8,6 +8,7 @@ import test from "node:test";
 const repositoryRoot = process.cwd();
 const workflowPath = path.join(repositoryRoot, ".github/workflows/deploy-production.yml");
 const deploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-deploy");
+const cleanDeploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-clean-deploy");
 const backupPath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup");
 const backupInstallerPath = path.join(repositoryRoot, "deploy/production/install-production-backup.sh");
 const backupServicePath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup.service");
@@ -44,36 +45,38 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.match(workflow, /PRODUCTION_SSH_HOST_INVALID/u);
   assert.match(workflow, /ai-project-os-actions@\$PRODUCTION_SSH_HOST/u);
   assert.doesNotMatch(workflow, /38\.76\.205\.30/u);
-  assert.match(workflow, /"deploy \$DEPLOY_TAG \$DEPLOY_SHA"/u);
-  assert.match(workflow, /Create verified offsite backup and deploy/u);
+  assert.match(workflow, /"clean-deploy \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_CLEAN_RESET_V1"/u);
+  assert.match(workflow, /Create verified offsite backup and clean-reset deploy/u);
   assert.match(workflow, /PRODUCTION_BACKUP_RESULT_INVALID/u);
   assert.match(workflow, /DEPLOY_BACKUP_OBJECT/u);
   assert.match(workflow, /\.worker\.consecutiveFailures == 0/u);
   assert.ok(
     workflow.indexOf("Sync GitHub OAuth configuration through restricted stdin") <
-      workflow.indexOf("Create verified offsite backup and deploy through forced-command gateway"),
+      workflow.indexOf("Create verified offsite backup and clean-reset deploy through forced-command gateway"),
     "production OAuth configuration must be synchronized before deployment starts",
   );
   assert.doesNotMatch(workflow, /configure-github-oauth[^\n]*(GITHUB_OAUTH_CLIENT_ID|GITHUB_OAUTH_CLIENT_SECRET)/u);
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
-test("production workflow enables only the explicitly approved v0.3.0-dev.1 prerelease", async () => {
+test("production workflow enables only the explicitly approved v0.4.0-dev.1 prerelease", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /default: v0\.3\.0-dev\.1/u);
+  assert.match(workflow, /default: v0\.4\.0-dev\.1/u);
   assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.3\.0-dev\.1/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.4\.0-dev\.1/u);
   assert.doesNotMatch(workflow, /&& false|DISABLED_BEFORE_V1_0_0|v1\.0\.0/u);
   assert.doesNotMatch(workflow, /DEPLOY_TAG_INPUT" =~ \^v/u);
 });
 
-test("forced-command gateway accepts only an exact deploy or GitHub OAuth configuration command", async () => {
+test("forced-command gateway accepts only the exact clean reset or GitHub OAuth command", async () => {
   const gateway = await readFile(gatewayPath, "utf8");
 
   assert.match(gateway, /SSH_ORIGINAL_COMMAND/u);
-  assert.match(gateway, /v0\\\.3\\\.0-dev\\\.1/u);
-  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-deploy/u);
+  assert.match(gateway, /v0\\\.4\\\.0-dev\\\.1/u);
+  assert.match(gateway, /clean-deploy/u);
+  assert.match(gateway, /CONFIRM_CLEAN_RESET_V1/u);
+  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-clean-deploy/u);
   assert.match(gateway, /original_command.*== configure-github-oauth/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-configure-github-oauth/u);
   assert.match(gateway, /AI_PROJECT_OS_DEPLOY_COMMAND_DENIED/u);
@@ -108,73 +111,152 @@ test("root GitHub OAuth configurator validates fixed stdin and atomically preser
   assert.doesNotMatch(configurator, /set -x|echo[^\n]*client_secret/iu);
 });
 
-test("root deployer verifies source, requires a verified offsite backup, migrates, and waits for health", async () => {
-  const deployment = await readFile(deploymentPath, "utf8");
+test("clean deploy is fail-closed, backup-first, and never migrates the old database", async () => {
+  const deployment = await readFile(cleanDeploymentPath, "utf8");
 
   assert.match(deployment, /REPOSITORY_URL=https:\/\/github\.com\/Jack-Kunlun\/ai-project-os\.git/u);
-  assert.match(deployment, /RELEASE_TAG" != v0\.3\.0-dev\.1/u);
-  assert.match(deployment, /DEPLOY_TAG_NOT_ANNOTATED/u);
-  assert.match(deployment, /DEPLOY_TAG_REVISION_MISMATCH/u);
-  assert.match(deployment, /DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND/u);
-  assert.match(deployment, /python3 -c/u);
+  assert.match(deployment, /RELEASE_TAG.*v0\.4\.0-dev\.1/u);
+  assert.match(deployment, /EXPECTED_REVISION.*\^\[0-9a-f\]\{40\}/u);
+  assert.match(deployment, /CONFIRM_CLEAN_RESET_V1/u);
+  assert.match(deployment, /CLEAN_DEPLOY_TAG_NOT_ANNOTATED/u);
+  assert.match(deployment, /CLEAN_DEPLOY_TAG_REVISION_MISMATCH/u);
+  assert.match(deployment, /CLEAN_DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND/u);
   assert.match(deployment, /production\.env/u);
-  assert.match(deployment, /POSTGRES_USER=ai_project_os_cluster_admin/u);
+  assert.match(deployment, /POSTGRES_USER/u);
   assert.match(deployment, /POSTGRES_CLUSTER_ADMIN_PASSWORD/u);
   assert.match(deployment, /POSTGRES_MIGRATOR_PASSWORD/u);
-  assert.match(deployment, /POSTGRES_RUNTIME_USER=ai_project_os_runtime/u);
   assert.match(deployment, /POSTGRES_RUNTIME_PASSWORD/u);
-  assert.match(deployment, /POSTGRES_ENTITLEMENT_WRITER_USER=ai_project_os_entitlement_writer/u);
-  assert.match(deployment, /POSTGRES_ENTITLEMENT_WRITER_PASSWORD/u);
-  assert.match(deployment, /DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL/u);
-  const compose = await readFile(path.join(repositoryRoot, "compose.yaml"), "utf8");
-  assert.match(compose, /production-upgrade-preflight:[\s\S]*DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL/u);
-  assert.match(deployment, /POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD/u);
-  assert.match(deployment, /AI_PROJECT_OS_SECURE_COOKIES=true/u);
-  assert.match(deployment, /AI_PROJECT_OS_PUBLIC_ORIGIN=https:\/\/ai-project-os\.com/u);
-  assert.match(deployment, /DEPLOY_PUBLIC_ORIGIN_INVALID/u);
-  assert.match(deployment, /validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID/u);
-  assert.match(deployment, /validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET/u);
-  assert.match(deployment, /DEPLOY_GITHUB_OAUTH_CLIENT_ID_INVALID/u);
-  assert.match(deployment, /DEPLOY_GITHUB_OAUTH_CLIENT_SECRET_INVALID/u);
+  assert.match(deployment, /validate_production_env/u);
+  assert.match(deployment, /CLEAN_DEPLOY_ENV_DUPLICATE_KEY/u);
   assert.match(deployment, /ai-project-os-backup/u);
-  assert.match(deployment, /compose build principal-bootstrap migrate reconcile app worker production-upgrade-preflight/u);
-  assert.match(deployment, /run_upgrade_preflight pre-stop/u);
-  assert.match(deployment, /run_upgrade_preflight post-stop/u);
-  assert.match(deployment, /legacy-extension-owners-reassignable/u);
-  assert.match(deployment, /DEPLOY_PRODUCTION_UPGRADE_PREFLIGHT_DATABASE_PRINCIPAL_INVALID/u);
-  assert.match(deployment, /DEPLOY_MAINTENANCE_SERVICES_NOT_ISOLATED/u);
-  assert.match(deployment, /DEPLOY_MAINTENANCE_POSTGRES_PORT_NOT_ISOLATED/u);
-  assert.match(deployment, /compose ps --services --status running/u);
-  assert.match(deployment, /bindings\[0\]\.get\("HostIp"\) == "127\.0\.0\.1"/u);
-  assert.match(deployment, /MUTATION_ATTEMPTED=0/u);
-  assert.match(deployment, /MUTATION_ATTEMPTED=1/u);
-  assert.match(deployment, /WRITER_RECOVERY_REQUIRED=1/u);
-  assert.match(deployment, /docker start "\$OLD_APP_ID" "\$OLD_WORKER_ID"/u);
-  assert.match(deployment, /docker stop "\$OLD_APP_ID" "\$OLD_WORKER_ID"/u);
-  assert.match(deployment, /DEPLOY_SOURCE_HEALTH_UNAVAILABLE/u);
-  assert.match(deployment, /DEPLOY_SOURCE_STACK_INVALID/u);
-  assert.match(deployment, /0\\\.2\\\.0-dev\\\.1/u);
-  assert.match(deployment, /compose up -d --no-build --force-recreate principal-bootstrap migrate reconcile app worker/u);
-  assert.match(deployment, /AI_PROJECT_OS_DEPLOY_LOCK_HELD=1/u);
-  assert.match(deployment, /pre-deploy "\$RELEASE_TAG"/u);
-  assert.match(deployment, /DEPLOY_PRE_BACKUP_RESULT_INVALID/u);
-  assert.match(deployment, /backup_object/u);
-  assert.doesNotMatch(deployment, /compose up[^\n]*--build/u);
-  assert.match(deployment, /principal_bootstrap_state/u);
-  assert.match(deployment, /reconcile_state/u);
-  assert.ok(deployment.indexOf("run_upgrade_preflight pre-stop") < deployment.indexOf('"$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG"'));
-  assert.ok(deployment.indexOf('"$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG"') < deployment.indexOf('docker stop "$OLD_APP_ID" "$OLD_WORKER_ID"'));
-  assert.ok(deployment.indexOf('docker stop "$OLD_APP_ID" "$OLD_WORKER_ID"') < deployment.indexOf("run_upgrade_preflight post-stop"));
-  assert.equal(deployment.match(/assert_maintenance_isolation/g)?.length, 3);
-  assert.ok(deployment.indexOf("run_upgrade_preflight post-stop") < deployment.indexOf("MUTATION_ATTEMPTED=1"));
-  assert.ok(deployment.indexOf("MUTATION_ATTEMPTED=1") < deployment.indexOf("compose up -d --no-build --force-recreate principal-bootstrap"));
-  assert.match(deployment, /consecutiveFailures/u);
+  assert.match(deployment, /compose build principal-bootstrap migrate reconcile app worker/u);
+  assert.match(deployment, /capture_source_writers/u);
   assert.match(deployment, /https:\/\/ai-project-os\.com\/api\/health/u);
-  assert.doesNotMatch(deployment, /\bcompose down\b|down[^\n]*-v/u);
+  assert.match(deployment, /CLEAN_DEPLOY_PRE_BACKUP_SOURCE_NOT_QUIESCED/u);
+  assert.match(deployment, /pg_stat_activity/u);
+  assert.match(deployment, /backend_type = '\\''client backend'\\''/u);
+  assert.match(deployment, /pid <> pg_catalog\.pg_backend_pid\(\)/u);
+  assert.match(deployment, /CLEAN_DEPLOY_POSTGRES_CLIENT_DRAIN_/u);
+  assert.ok(
+    deployment.indexOf("stop_source_writers\ndrain_postgres_clients") <
+      deployment.indexOf('backup_output=$(AI_PROJECT_OS_DEPLOY_LOCK_HELD=1'),
+    "stopped writers must drain PostgreSQL clients before backup starts",
+  );
+  assert.match(deployment, /BACKUP_COS_OBJECT_VERIFIED type=archive/u);
+  assert.match(deployment, /BACKUP_COS_OBJECT_VERIFIED type=manifest/u);
+  assert.match(deployment, /AI_PROJECT_OS_CUTOVER=1/u);
+  assert.match(deployment, /AI_PROJECT_OS_EXPECTED_APP_ID="\$OLD_APP_ID"/u);
+  assert.match(deployment, /AI_PROJECT_OS_EXPECTED_WORKER_ID="\$OLD_WORKER_ID"/u);
+  assert.match(deployment, /compose down --remove-orphans/u);
+  assert.doesNotMatch(deployment, /compose down[^\n]*-v|docker (system|volume|image) prune|docker volume rm (?!-- "\$PGDATA_VOLUME")/u);
+  assert.match(deployment, /com\.docker\.compose\.project/u);
+  assert.match(deployment, /com\.docker\.compose\.volume/u);
+  assert.match(deployment, /AI_PROJECT_OS_PGDATA_VOLUME/u);
+  assert.match(deployment, /\^ai-project-os\(-\[a-z0-9-\]\+\)\?-pgdata\$/u);
+  assert.match(deployment, /ai-project-os-pgdata/u);
+  assert.match(deployment, /docker volume rm -- "\$PGDATA_VOLUME"/u);
+  assert.match(deployment, /AI_PROJECT_OS_SECRETS_VOLUME/u);
+  assert.match(deployment, /AI_PROJECT_OS_UPLOADS_VOLUME/u);
+  assert.match(deployment, /CLEAN_DEPLOY_PERSISTENT_VOLUME_PROTECTED/u);
+  assert.match(deployment, /validate_pgdata_volume_before_mutation/u);
+  assert.match(deployment, /mount\.get\("Destination"\) == "\/var\/lib\/postgresql"/u);
+  assert.match(deployment, /attached_containers\[0\].*postgres_id/u);
+  assert.match(deployment, /DESTRUCTIVE_RESET_COMMITTED=1/u);
+  assert.match(deployment, /CLEAN_DEPLOY_RECOVERY_REQUIRED/u);
+  assert.match(deployment, /old_writers_not_restarted=true/u);
+  assert.doesNotMatch(deployment, /production-upgrade-preflight/u);
+  assert.match(deployment, /data_migration=not-performed/u);
+  assert.match(deployment, /fresh_database=true/u);
+  assert.match(deployment, /CLEAN_DEPLOY_FRESH_MIGRATION_COUNT_INVALID/u);
+  assert.match(deployment, /First-run setup/u);
+  assert.match(deployment, /setup=first-admin-required/u);
+  assert.match(deployment, /consecutiveFailures/u);
   assert.ok(
     deployment.indexOf('"$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG"') < deployment.indexOf("MUTATION_ATTEMPTED=1"),
-    "offsite backup must complete before any production container replacement",
+    "verified backup must precede the mutation flag",
   );
+  assert.ok(
+    deployment.indexOf("validate_pgdata_volume_before_mutation\nMUTATION_ATTEMPTED=1") <
+      deployment.indexOf("compose down --remove-orphans"),
+    "volume name/config/ownership/attachment validation must precede mutation and compose down",
+  );
+  assert.ok(
+    deployment.indexOf("MUTATION_ATTEMPTED=1\ncompose down --remove-orphans") !== -1,
+    "mutation flag must be immediately before compose down",
+  );
+  assert.ok(
+    deployment.indexOf("compose down --remove-orphans") < deployment.indexOf('attached_containers=$(docker ps -aq --filter "volume=$PGDATA_VOLUME")'),
+    "post-down checks may only assert zero attachments before removing the exact volume",
+  );
+  assert.ok(
+    deployment.indexOf("DESTRUCTIVE_RESET_COMMITTED=1") < deployment.indexOf('docker volume rm -- "$PGDATA_VOLUME"'),
+    "reset boundary must be committed immediately before volume removal",
+  );
+});
+
+test("clean deploy rejects duplicate required, OAuth, and volume environment keys", async () => {
+  const deployment = await readFile(cleanDeploymentPath, "utf8");
+  const helperStart = deployment.indexOf("validate_required_exact_env_value() {");
+  const helperEnd = deployment.indexOf("\nvalidate_production_env\n", helperStart);
+  assert.notEqual(helperStart, -1);
+  assert.notEqual(helperEnd, -1);
+  const validators = deployment.slice(helperStart, helperEnd);
+  const directory = await mkdtemp(path.join(tmpdir(), "ai-project-os-clean-env-"));
+  const harnessPath = path.join(directory, "validate-env.sh");
+  const password = "a".repeat(64);
+  const baseEnv = [
+    "POSTGRES_USER=ai_project_os_cluster_admin",
+    `POSTGRES_CLUSTER_ADMIN_PASSWORD=${password}`,
+    `POSTGRES_MIGRATOR_PASSWORD=${password}`,
+    "POSTGRES_RUNTIME_USER=ai_project_os_runtime",
+    `POSTGRES_RUNTIME_PASSWORD=${password}`,
+    "POSTGRES_ENTITLEMENT_WRITER_USER=ai_project_os_entitlement_writer",
+    `POSTGRES_ENTITLEMENT_WRITER_PASSWORD=${password}`,
+    `POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD=${password}`,
+    "POSTGRES_DB=ai_project_os",
+    "AI_PROJECT_OS_SECURE_COOKIES=true",
+    "AI_PROJECT_OS_PUBLIC_ORIGIN=https://ai-project-os.com",
+    "AI_PROJECT_OS_PGDATA_VOLUME=ai-project-os-pgdata",
+    "AI_PROJECT_OS_SECRETS_VOLUME=ai-project-os-secrets",
+    "AI_PROJECT_OS_UPLOADS_VOLUME=ai-project-os-uploads",
+    "AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID=client-id-123",
+    "AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET=client-secret-123",
+  ].join("\n");
+  await writeFile(
+    harnessPath,
+    `#!/usr/bin/env bash
+set -Eeuo pipefail
+ENV_FILE=$1
+fail() { printf '%s\\n' "$1" >&2; exit "\${2-1}"; }
+mapfile() {
+  local target=$2 line
+  while IFS= read -r line; do
+    eval "$target+=(\\"\\$line\\")"
+  done
+}
+${validators}
+validate_production_env
+`,
+    { mode: 0o700 },
+  );
+  await chmod(harnessPath, 0o700);
+
+  const duplicateCases = [
+    ["POSTGRES_USER=another-cluster-admin", "POSTGRES_USER"],
+    ["AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID=client-id-456", "AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID"],
+    ["AI_PROJECT_OS_PGDATA_VOLUME=ai-project-os-alt-pgdata", "AI_PROJECT_OS_PGDATA_VOLUME"],
+  ] as const;
+  try {
+    for (const [duplicateLine, key] of duplicateCases) {
+      const envPath = path.join(directory, `${key}.env`);
+      await writeFile(envPath, `${baseEnv}\n${duplicateLine}\n`, { mode: 0o600 });
+      const result = spawnSync("bash", [harnessPath, envPath], { encoding: "utf8" });
+      assert.notEqual(result.status, 0, key);
+      assert.match(result.stderr, new RegExp(`CLEAN_DEPLOY_ENV_DUPLICATE_KEY key=${key}`));
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("backup quiesces writers, verifies encrypted COS objects, and deletes only marked local backups", async () => {
@@ -226,10 +308,18 @@ test("backup quiesces writers, verifies encrypted COS objects, and deletes only 
   );
   assert.match(backup, /LOCAL_RETENTION_DAYS_DEFAULT=14/u);
   assert.match(backup, /LOCAL_MIN_VERIFIED_DEFAULT=3/u);
+  assert.match(backup, /pre-deploy-to-v0\\.4\\.0-dev\\.1/u);
+  assert.doesNotMatch(backup, /pre-deploy-to-v0\\.3\\.0-dev\\.1/u);
   assert.match(backup, /\.cos-upload-verified/u);
   assert.match(backup, /ai-project-os-deploy\.lock/u);
   assert.match(backup, /BACKUP_DEPLOYMENT_IN_PROGRESS/u);
   assert.match(backup, /BACKUP_PRE_DEPLOY_CALLER_INVALID/u);
+  assert.match(backup, /BACKUP_PRE_DEPLOY_REQUIRES_CUTOVER/u);
+  assert.match(backup, /AI_PROJECT_OS_EXPECTED_APP_ID/u);
+  assert.match(backup, /BACKUP_WRITER_IDS_CHANGED/u);
+  assert.match(backup, /source_quiesced=%s.*CUTOVER_MODE/u);
+  assert.match(backup, /if \[\[ "\$MODE" != pre-deploy \]\]; then\n  cleanup_verified_local_backups/u);
+  assert.match(backup, /RETENTION_REMOVED=0/u);
   assert.match(backup, /rm -rf --one-file-system -- "\$path"/u);
   assert.doesNotMatch(backup, /docker (system|volume|image) prune|find[^\n]*-delete/u);
   assert.doesNotMatch(backup, /read_config_value COS_SECRET_(ID|KEY)/u);
@@ -243,6 +333,41 @@ test("backup quiesces writers, verifies encrypted COS objects, and deletes only 
       backup.lastIndexOf('cleanup_verified_local_backups "$backup_path"'),
     "retention must run only after the current backup has a verified marker",
   );
+});
+
+test("deploy pre-deploy backup is the quiesced artifact accepted by migration restore", async () => {
+  const [deployment, backup, restore] = await Promise.all([
+    readFile(deploymentPath, "utf8"),
+    readFile(backupPath, "utf8"),
+    readFile(path.join(repositoryRoot, "deploy/production/ai-project-os-restore"), "utf8"),
+  ]);
+
+  assert.ok(deployment.indexOf("AI_PROJECT_OS_CUTOVER=1") < deployment.indexOf("DEPLOY_PRE_BACKUP_SOURCE_NOT_QUIESCED"));
+  assert.match(deployment, /BACKUP_OK .* source_quiesced=true/u);
+  assert.match(backup, /\[\[ "\$MODE" != pre-deploy \]\] \|\| fail 'BACKUP_PRE_DEPLOY_REQUIRES_CUTOVER'/u);
+  assert.match(backup, /printf 'source_quiesced=%s\\n' .*CUTOVER_MODE/u);
+  assert.match(restore, /MIGRATION_SOURCE_VERSION=0\.3\.0-dev\.1/u);
+  assert.match(restore, /MIGRATION_TARGET_TAG=v0\.4\.0-dev\.1/u);
+  assert.match(restore, /"\$RESTORE_MODE" == migration && "\$source_quiesced" != true/u);
+});
+
+test("backup and deploy contracts call the COS-verified unique manifest verified, not immutable", async () => {
+  const [backup, cleanDeployment, deployment, backupDocs, deploymentDocs, migrationDocs] = await Promise.all([
+    readFile(backupPath, "utf8"),
+    readFile(cleanDeploymentPath, "utf8"),
+    readFile(deploymentPath, "utf8"),
+    readFile(path.join(repositoryRoot, "docs/production-backup.md"), "utf8"),
+    readFile(path.join(repositoryRoot, "docs/production-deployment.md"), "utf8"),
+    readFile(path.join(repositoryRoot, "docs/production-host-migration.md"), "utf8"),
+  ]);
+
+  assert.match(backup, /verified_manifest=%s/u);
+  assert.doesNotMatch(backup, /immutable_manifest|immutable manifest|WORM/iu);
+  assert.ok(cleanDeployment.includes("verified_manifest=\\([^ ]*\\)"));
+  assert.ok(deployment.includes("verified_manifest=\\([^ ]*\\)"));
+  for (const document of [backupDocs, deploymentDocs, migrationDocs]) {
+    assert.doesNotMatch(document, /不可变 manifest|immutable manifest|WORM/iu);
+  }
 });
 
 test("backup retries transient COS metadata visibility without weakening remote verification", async (context) => {
@@ -345,7 +470,7 @@ verify_remote_object cos://example/archive.tar.age "$MOCK_LOCAL_ARCHIVE" archive
   assert.equal((await readFile(counterPath, "utf8")).trim(), "8");
 });
 
-test("backup publishes an atomic sanitized current record and immutable history entry", async (context) => {
+test("backup publishes an atomic sanitized current record and verified history entry", async (context) => {
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "ai-project-os-backup-status-"));
   context.after(async () => {
     await rm(temporaryDirectory, { force: true, recursive: true });
@@ -361,7 +486,7 @@ test("backup publishes an atomic sanitized current record and immutable history 
   assert.notEqual(functionEnd, -1);
   const statusFunctions = backup.slice(functionStart, functionEnd);
   const harnessPath = path.join(temporaryDirectory, "publish-status.sh");
-  const backupName = "20260902T032000Z-pre-deploy-to-v0.3.0-dev.1.Abc123";
+  const backupName = "20260902T032000Z-pre-deploy-to-v0.4.0-dev.1.Abc123";
   const archiveObject = `cos://ai-project-os-backup-1306016679/production/backups/2026/09/02/${backupName}/${backupName}.tar.age`;
   await writeFile(harnessPath, `#!/usr/bin/env bash
 set -Eeuo pipefail
@@ -370,7 +495,7 @@ readonly PUBLIC_HISTORY_ROOT=${JSON.stringify(historyRoot)}
 readonly PUBLIC_CURRENT_FILE=${JSON.stringify(path.join(statusRoot, "current.json"))}
 readonly PUBLIC_HISTORY_MAX=120
 readonly MODE=pre-deploy
-readonly TARGET_TAG=v0.3.0-dev.1
+readonly TARGET_TAG=v0.4.0-dev.1
 PUBLIC_STATUS_ACTIVE=1
 PUBLIC_STATUS_FINALIZED=0
 PUBLIC_RUN_ID=20260902T032000Z-4321
@@ -467,7 +592,7 @@ test("installer keeps secrets root-only and installs a restricted Actions key", 
   assert.match(installer, /INSTALL_EXISTING_ACTIONS_KEY_INVALID/u);
   assert.match(installer, /visudo -cf/u);
   assert.deepEqual(sudoers.trim().split("\n"), [
-    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-deploy",
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-clean-deploy",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-github-oauth",
   ]);
 });
@@ -481,7 +606,7 @@ test("production shell entrypoints pass bash syntax validation", () => {
     "bootstrap-production-host",
     "migrate-production-host",
   ].map((name) => path.join(repositoryRoot, "deploy/production", name));
-  for (const scriptPath of [deploymentPath, backupPath, gatewayPath, githubOAuthConfiguratorPath, installerPath, backupInstallerPath, ...additionalScripts]) {
+  for (const scriptPath of [deploymentPath, cleanDeploymentPath, backupPath, gatewayPath, githubOAuthConfiguratorPath, installerPath, backupInstallerPath, ...additionalScripts]) {
     const result = spawnSync("bash", ["-n", scriptPath], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
   }

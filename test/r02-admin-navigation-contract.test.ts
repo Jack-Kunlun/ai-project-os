@@ -90,7 +90,7 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(support, /R02_PROJECT_PENDING_TEXTS/u);
   assert.match(support, /must leave labelled loading states/u);
   assert.match(spec, /expectR02InViewport/u);
-  assert.match(spec, /getByRole\("heading", \{ name: "数据库连接", exact: true \}\)/u);
+  assert.match(spec, /getByRole\("heading", \{ name: "待处理事项", exact: true \}\)/u);
   assert.doesNotMatch(spec, /scrollIntoViewIfNeeded/u);
   assert.match(support, /must not settle into a soft error/u);
   assert.match(support, /keyboard\.press\("Tab"\)[\s\S]*expect\(close\)\.toBeFocused\(\)/u);

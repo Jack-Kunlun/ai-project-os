@@ -569,7 +569,9 @@ function withStageDiagnostics(client: PrismaClient): {
 
 /**
  * Poll catalog lock evidence. The timeout only bounds an absent-evidence
- * failure; success requires pg_blocking_pids plus a Lock wait event.
+ * failure; success requires pg_blocking_pids plus a Lock wait event. The
+ * observer must stay outside the lock-holding transaction because PostgreSQL
+ * caches pg_stat_activity snapshots for the lifetime of a transaction.
  */
 async function waitForBlockingEvidence(
   client: Client,
@@ -3194,7 +3196,8 @@ async function runTwoConnectionRevokeFirstEvidence(
   client: Client,
   url: string,
 ): Promise<void> {
-  const serviceDatabaseUrl = new URL(validateAiRuntimeTestDatabaseUrl(url));
+  const validatedUrl = validateAiRuntimeTestDatabaseUrl(url);
+  const serviceDatabaseUrl = new URL(validatedUrl);
   const serviceApplicationName = "ai-runtime-revoke-first";
   serviceDatabaseUrl.searchParams.set("application_name", serviceApplicationName);
   await setupFreshLiveGrant(client);
@@ -3204,6 +3207,7 @@ async function runTwoConnectionRevokeFirstEvidence(
     transactionOptions: { timeout: 15_000 },
   });
   let mutationClient: Client | null = null;
+  let observerClient: Client | null = null;
   let mutationOpen = false;
   let claimPromise: Promise<ClaimAndDispatchRunResult> | undefined;
   let provider: FakeProviderRecorder | undefined;
@@ -3224,7 +3228,7 @@ async function runTwoConnectionRevokeFirstEvidence(
       "AI_RUNTIME_POSTGRES_TWO_CONNECTION_REVOKE_FIRST_PREPARE",
     );
 
-    mutationClient = await connectDedicated(url);
+    mutationClient = await connectDedicated(validatedUrl);
     const mutationPidResult = await safeQuery<{ pid: number }>(
       mutationClient,
       "SELECT pg_backend_pid()::integer AS pid",
@@ -3236,6 +3240,7 @@ async function runTwoConnectionRevokeFirstEvidence(
         mutationPid > 0,
       "AI_RUNTIME_POSTGRES_TWO_CONNECTION_MUTATION_PID",
     );
+    observerClient = await connectDedicated(validatedUrl);
     await safeQuery(mutationClient, "BEGIN");
     mutationOpen = true;
     await safeQuery(
@@ -3267,7 +3272,7 @@ async function runTwoConnectionRevokeFirstEvidence(
       operationKey: prepared.operationKey,
     });
     await waitForBlockingEvidence(
-      mutationClient,
+      observerClient,
       serviceApplicationName,
       mutationPid,
     );
@@ -3305,6 +3310,9 @@ async function runTwoConnectionRevokeFirstEvidence(
     await servicePrisma.$disconnect();
     if (mutationClient !== null) {
       await closeClient(mutationClient);
+    }
+    if (observerClient !== null) {
+      await closeClient(observerClient);
     }
   }
 }

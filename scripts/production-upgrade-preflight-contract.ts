@@ -187,7 +187,8 @@ export const REQUIRED_LEGACY_SCHEMA = Object.freeze({
     Object.freeze({ relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_provider_fkey", type: "f" }),
   ] as const),
   indexes: Object.freeze([
-    Object.freeze({ relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_providerConnectionId_actorId_clientRequestKeyHash_key", unique: true }),
+    // PostgreSQL truncates identifiers to its 63-byte catalog limit.
+    Object.freeze({ relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_providerConnectionId_actorId_clien", unique: true }),
   ] as const),
 } as const);
 

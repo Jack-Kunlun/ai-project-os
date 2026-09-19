@@ -233,7 +233,7 @@ export const PRODUCTION_UPGRADE_PREFLIGHT_SQL = Object.freeze({
   schemaEnumTypes: `
     SELECT expected.type_name,
            COALESCE(
-             array_agg(enum_meta.enumlabel ORDER BY enum_meta.enumsortorder)
+             array_agg(enum_meta.enumlabel::text ORDER BY enum_meta.enumsortorder)
                FILTER (WHERE enum_meta.enumlabel IS NOT NULL),
              ARRAY[]::text[]
            ) AS labels

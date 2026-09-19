@@ -183,8 +183,9 @@ test("production upgrade preflight has an exact source/target contract and fixed
     { relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_provider_fkey", type: "f" },
   ]);
   assert.deepEqual(REQUIRED_LEGACY_SCHEMA.indexes, [
-    { relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_providerConnectionId_actorId_clientRequestKeyHash_key", unique: true },
+    { relation: "PlatformProviderProbeAttempt", name: "PlatformProviderProbeAttempt_providerConnectionId_actorId_clien", unique: true },
   ]);
+  assert.equal(Buffer.byteLength(REQUIRED_LEGACY_SCHEMA.indexes[0]?.name ?? "", "utf8"), 63);
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_APPLICATION_NAME, "ai-project-os-production-upgrade-preflight");
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_CONNECTION_TIMEOUT_MILLIS, 5_000);
   assert.equal(PRODUCTION_UPGRADE_PREFLIGHT_QUERY_TIMEOUT_MILLIS, 30_000);
@@ -555,6 +556,7 @@ test("preflight implementation stays read-only and does not expose sensitive dia
   assert.match(PRODUCTION_UPGRADE_PREFLIGHT_SQL.databasePrincipalRoles, /pg_authid/u);
   assert.match(PRODUCTION_UPGRADE_PREFLIGHT_SQL.databasePrincipalExtensions, /pg_extension/u);
   assert.match(PRODUCTION_UPGRADE_PREFLIGHT_SQL.otherClientBackends, /datname = pg_catalog\.current_database\(\)/u);
+  assert.match(PRODUCTION_UPGRADE_PREFLIGHT_SQL.schemaEnumTypes, /array_agg\(enum_meta\.enumlabel::text ORDER BY enum_meta\.enumsortorder\)/u);
   assert.match(source, /buildProductionUpgradePreflightFailure/u);
   assert.doesNotMatch(source, /console\.(error|warn).*?(password|database|url|sql|error)/iu);
 });

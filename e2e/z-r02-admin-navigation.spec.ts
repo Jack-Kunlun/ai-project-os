@@ -288,10 +288,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
       await page.setViewportSize({ width, height: route.path === "/admin/models" && width === 1440 ? 900 : 844 });
       const response = await page.goto(route.path);
       expect(response?.status(), `${route.path}@${width} must be reachable in production browser`).toBeLessThan(400);
-      const settledRoute = route.path === "/admin/account"
-        ? { ...route, terminal: { ...route.terminal, exact: false } }
-        : route;
-      await expectR02SettledRoute(page, settledRoute, `${route.path}@${width}`);
+      await expectR02SettledRoute(page, route, `${route.path}@${width}`);
       await expectR02AdminBrand(page);
       await expectR02NoHorizontalOverflow(page, `${route.path}@${width}`);
       if (width >= 1024) {
@@ -307,7 +304,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
         await expectR02InViewport(page, pendingActionsHeading, `admin pending actions@${width}`);
       }
       if (route.path === "/admin/models") {
-        await expect(page.getByRole("button", { name: "新增供应商", exact: true }), `platform model primary action@${width}`).toBeVisible();
+        await expect(page.locator("main header").getByRole("button", { name: "新增供应商", exact: true }), `platform model primary action@${width}`).toBeVisible();
       }
       if (width < 1024) await expectR02MobileDrawer(page, route.path);
     }

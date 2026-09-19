@@ -31,7 +31,7 @@ export type R02RouteExpectation = Readonly<{
 
 export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
   { path: "/admin", heading: "管理员总览", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取就绪证据…", "正在读取默认路由状态…", "读取中…"] },
-  { path: "/admin/models", heading: "平台模型", terminal: { kind: "text", name: "从左侧添加第一个模型供应商。" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/models", heading: "平台模型", terminal: { kind: "heading", name: "已配置连接" }, pendingTexts: ["读取中…"] },
   { path: "/admin/models/routes", heading: "平台模型", terminal: { kind: "text", name: "平台能力配置" }, pendingTexts: ["读取中…"] },
   { path: "/admin/credits", heading: "平台额度", terminal: { kind: "text", name: "平台额度治理" }, pendingTexts: ["读取中…"] },
   { path: "/admin/operations/probes", heading: "连接探测预算", terminal: { kind: "text", name: "平台连接探测预算" }, pendingTexts: ["读取中…"] },
@@ -41,14 +41,14 @@ export const R02_ADMIN_ROUTES: readonly R02RouteExpectation[] = [
   { path: "/admin/audit", heading: "审计中心", terminal: { kind: "text", name: "当前筛选", exact: false }, pendingTexts: ["正在读取审计快照…"] },
   { path: "/admin/operations/failures", heading: "失败与待对账收件箱", terminal: { kind: "text", name: "测量于", exact: false }, pendingTexts: ["正在读取安全异常…"] },
   { path: "/admin/operations/backups", heading: "生产备份与 COS 同步", terminal: { kind: "heading", name: "恢复演练证据" } },
-  { path: "/admin/guide", heading: "管理员操作指南", terminal: { kind: "heading", name: "平台模型" } },
-  { path: "/admin/account", heading: "管理员账户", terminal: { kind: "text", name: "维护平台管理员的登录资料与密码。" }, pendingTexts: ["读取中…"] },
+  { path: "/admin/guide", heading: "管理员操作指南", terminal: { kind: "heading", name: "2. 新增供应商：先测试后保存" } },
+  { path: "/admin/account", heading: "管理员账户", terminal: { kind: "heading", name: "登录密码" }, pendingTexts: ["读取中…"] },
 ] as const;
 
 export function expectedR02AdminNavigationLinkCount(pathname: string): number {
   if (pathname === "/admin") return 1;
   if (pathname === "/admin/users" || pathname.startsWith("/admin/users/") || pathname === "/admin/credits") return 4;
-  if (pathname.startsWith("/admin/models") || pathname === "/admin/operations/probes") return 4;
+  if (pathname.startsWith("/admin/models") || pathname === "/admin/operations/probes") return 3;
   if (pathname.startsWith("/admin/connectors/mcp") || pathname.startsWith("/admin/audit")) return 3;
   if (pathname.startsWith("/admin/operations/")) return 3;
   return 1;

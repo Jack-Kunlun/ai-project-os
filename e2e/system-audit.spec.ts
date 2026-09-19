@@ -444,13 +444,15 @@ test("audit detail drawer handles loading, failure, close and restores focus and
     await expect(trigger).toBeFocused();
 
     // Opening and closing the drawer keeps filters, page and scroll position.
-    const scrollBefore = await page.evaluate(() => {
-      const previousScrollBehavior = document.documentElement.style.scrollBehavior;
-      document.documentElement.style.scrollBehavior = "auto";
-      window.scrollTo(0, 320);
-      const stableScrollY = window.scrollY;
-      document.documentElement.style.scrollBehavior = previousScrollBehavior;
-      return stableScrollY;
+    const adminScroller = page.locator("main").first();
+    const scrollBefore = await adminScroller.evaluate((element) => {
+      const scroller = element as HTMLElement;
+      const previousScrollBehavior = scroller.style.scrollBehavior;
+      scroller.style.scrollBehavior = "auto";
+      scroller.scrollTo(0, 320);
+      const stableScrollTop = scroller.scrollTop;
+      scroller.style.scrollBehavior = previousScrollBehavior;
+      return stableScrollTop;
     });
     expect(scrollBefore, "列表必须足够长以便验证滚动位置").toBeGreaterThan(0);
     await trigger.click();
@@ -460,7 +462,7 @@ test("audit detail drawer handles loading, failure, close and restores focus and
     await expect(page.getByText("来源：AI 运行时", { exact: true })).toBeVisible();
     await expect(page.getByText("第 1 页", { exact: true })).toBeVisible();
     await expect
-      .poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - scrollBefore), { message: "关闭详情后滚动位置偏差必须不超过 1 CSS 像素" })
+      .poll(async () => Math.abs((await adminScroller.evaluate((element) => (element as HTMLElement).scrollTop)) - scrollBefore), { message: "关闭详情后滚动位置偏差必须不超过 1 CSS 像素" })
       .toBeLessThanOrEqual(1);
     await expect(trigger).toBeFocused();
   } finally {

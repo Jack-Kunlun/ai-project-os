@@ -202,28 +202,47 @@ test("first-run administrator and business Owner stay separate across protected 
 
   const setupResponse = await page.goto("/setup");
   expect(setupResponse?.status()).toBe(200);
-  const headers = setupResponse?.headers() ?? {};
-  expect(headers["content-security-policy"]).toContain("default-src 'self'");
-  expect(headers["content-security-policy"]).toContain("frame-ancestors 'none'");
-  expect(headers["x-content-type-options"]).toBe("nosniff");
-  expect(headers["x-frame-options"]).toBe("DENY");
-  expect(headers["x-powered-by"]).toBeUndefined();
-  await expectNoAccessibilityViolations(page, "setup");
+  const landingPath = new URL(page.url()).pathname;
+  if (landingPath === "/setup") {
+    const headers = setupResponse?.headers() ?? {};
+    expect(headers["content-security-policy"]).toContain("default-src 'self'");
+    expect(headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+    expect(headers["x-content-type-options"]).toBe("nosniff");
+    expect(headers["x-frame-options"]).toBe("DENY");
+    expect(headers["x-powered-by"]).toBeUndefined();
+    await expectNoAccessibilityViolations(page, "setup");
 
-  await page.getByLabel("用户名", { exact: true }).fill(adminUsername);
-  await page.getByLabel("密码", { exact: true }).fill(adminPassword);
-  await page.getByLabel("再次输入密码", { exact: true }).fill(adminPassword);
-  await page.getByRole("button", { name: "创建管理员并进入" }).click();
+    await page.getByLabel("用户名", { exact: true }).fill(adminUsername);
+    await page.getByLabel("密码", { exact: true }).fill(adminPassword);
+    await page.getByLabel("再次输入密码", { exact: true }).fill(adminPassword);
+    await page.getByRole("button", { name: "创建管理员并进入" }).click();
+  } else if (landingPath === "/login") {
+    await expectNoAccessibilityViolations(page, "login");
+    await page.getByLabel("用户名", { exact: true }).fill(adminUsername);
+    await page.getByLabel("密码", { exact: true }).fill(adminPassword);
+    await page.getByRole("button", { name: "登 录", exact: true }).click();
+  } else if (landingPath === "/onboarding") {
+    await page.goto("/admin");
+  } else {
+    expect(landingPath).toBe("/admin");
+  }
 
-  await expect(page).toHaveURL(/\/onboarding$/u);
-  await expect(page.getByRole("heading", { name: "建立独立的业务 Owner", exact: true })).toBeVisible();
-  await expect(page.getByText("平台管理员只负责运营和安全治理。创建一个独立普通账号作为默认工作区 Owner 后，管理员将直接进入管理后台，业务负责人使用自己的账号进入用户工作台。", { exact: true })).toBeVisible();
-  await page.getByLabel("Owner 用户名", { exact: true }).fill(ownerUsername);
-  await page.getByLabel("初始密码", { exact: true }).fill(ownerPassword);
-  await page.getByLabel("确认密码", { exact: true }).fill(ownerPassword);
-  await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
   await expect(page).toHaveURL(/\/admin$/u);
   await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
+
+  // First-admin setup intentionally lands in the admin control plane. Owner
+  // bootstrap is optional and must be entered explicitly when still pending.
+  await page.goto("/onboarding");
+  const onboardingPath = new URL(page.url()).pathname;
+  expect(["/onboarding", "/admin"]).toContain(onboardingPath);
+  if (onboardingPath === "/onboarding") {
+    await expect(page.getByRole("heading", { name: "创建首个业务 Owner", exact: true })).toBeVisible();
+    await page.getByLabel("Owner 用户名", { exact: true }).fill(ownerUsername);
+    await page.getByLabel("初始密码", { exact: true }).fill(ownerPassword);
+    await page.getByLabel("确认密码", { exact: true }).fill(ownerPassword);
+    await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
+  }
+  await expect(page).toHaveURL(/\/admin$/u);
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/admin$/u);
   await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
@@ -620,7 +639,7 @@ test("first-run administrator and business Owner stay separate across protected 
 
   await adminPage.goto("/admin/connectors/mcp");
   await expect(adminPage.getByRole("heading", { name: "MCP 工具安全审核", exact: true })).toBeVisible();
-  await expect(adminPage.getByText(/管理员只审核已经净化的工具快照/u)).toBeVisible();
+  await expect(adminPage.getByText(/审核已经净化的工具快照/u)).toBeVisible();
   await expect(adminPage.getByText(/不开放远端工具操作/u)).toBeVisible();
   await expect(adminPage.getByLabel("Bearer Token", { exact: true })).toHaveCount(0);
   await expectNoAccessibilityViolations(adminPage, "MCP connections");

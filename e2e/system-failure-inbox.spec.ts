@@ -48,7 +48,7 @@ test("administrator can open the read-only failure inbox and non-admins remain b
   await signInBrowserAdmin(page);
   await page.goto("/admin/operations/failures");
   await expect(page.getByRole("heading", { name: "失败与待对账收件箱", exact: true })).toBeVisible();
-  await expect(page.getByText("这里只读汇总平台待核对、Worker / 后台任务、索引、个人连接、自动化和受控动作异常。", { exact: false })).toBeVisible();
+  await expect(page.getByText("只读汇总平台与后台任务异常；业务责任方在用户侧处理，管理员后台不提供业务详情入口。", { exact: true })).toBeVisible();
   await expect(page.getByText("实时测量结果，不承诺跨页严格历史快照", { exact: false })).toBeVisible();
 
   const sourceSelect = page.getByRole("combobox", { name: "来源", exact: true });

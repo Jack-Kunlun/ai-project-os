@@ -88,6 +88,22 @@ validate_optional_regex_env_value() {
   [[ "$value" =~ $pattern ]] || fail "$invalid_marker" 70
 }
 
+is_allowed_pgdata_volume_name() {
+  local candidate=${1-}
+  [[ "$candidate" =~ ^ai-project-os(-[a-z0-9-]+)?-pgdata$ ]] ||
+    [[ "$candidate" == "ai-project-os-pgdata-v0-2-0-dev-1-fresh" ]]
+}
+
+validate_optional_pgdata_volume_name() {
+  local key=$1 invalid_marker=$2 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || fail "CLEAN_DEPLOY_ENV_DUPLICATE_KEY key=$key" 70
+  (( ${#matches[@]} == 0 )) && return 0
+  value=${matches[0]#*=}
+  is_allowed_pgdata_volume_name "$value" || fail "$invalid_marker" 70
+}
+
 validate_github_oauth_env_value() {
   local key=$1 value
   local -a matches=()
@@ -112,7 +128,7 @@ validate_production_env() {
   validate_required_exact_env_value AI_PROJECT_OS_SECURE_COOKIES true CLEAN_DEPLOY_SECURE_COOKIES_INVALID
   validate_required_exact_env_value AI_PROJECT_OS_PUBLIC_ORIGIN https://ai-project-os.com CLEAN_DEPLOY_PUBLIC_ORIGIN_INVALID
   validate_optional_regex_env_value DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL '^$|^postgres(ql)?://[^[:space:]?#]+$' CLEAN_DEPLOY_LEGACY_BOOTSTRAP_URL_INVALID
-  validate_optional_regex_env_value AI_PROJECT_OS_PGDATA_VOLUME '^ai-project-os(-[a-z0-9-]+)?-pgdata$' CLEAN_DEPLOY_PGDATA_VOLUME_NAME_INVALID
+  validate_optional_pgdata_volume_name AI_PROJECT_OS_PGDATA_VOLUME CLEAN_DEPLOY_PGDATA_VOLUME_NAME_INVALID
   validate_optional_regex_env_value AI_PROJECT_OS_SECRETS_VOLUME '^ai-project-os(-[a-z0-9-]+)?-secrets$' CLEAN_DEPLOY_SECRETS_VOLUME_NAME_INVALID
   validate_optional_regex_env_value AI_PROJECT_OS_UPLOADS_VOLUME '^ai-project-os(-[a-z0-9-]+)?-uploads$' CLEAN_DEPLOY_UPLOADS_VOLUME_NAME_INVALID
   validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID || fail CLEAN_DEPLOY_GITHUB_OAUTH_CLIENT_ID_INVALID 70
@@ -359,7 +375,7 @@ resolve_pgdata_volume() {
   # The name must be a project-scoped pgdata name. A custom existing volume is
   # accepted only when the Compose source and Docker ownership labels below
   # identify that exact volume; no prefix/glob deletion is ever used.
-  [[ "$PGDATA_VOLUME" =~ ^ai-project-os(-[a-z0-9-]+)?-pgdata$ ]] || fail CLEAN_DEPLOY_PGDATA_VOLUME_NAME_INVALID 70
+  is_allowed_pgdata_volume_name "$PGDATA_VOLUME" || fail CLEAN_DEPLOY_PGDATA_VOLUME_NAME_INVALID 70
 
   config_json=$(compose config --format json)
   configured_volume=$(python3 -c '

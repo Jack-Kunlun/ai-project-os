@@ -259,6 +259,84 @@ validate_production_env
   }
 });
 
+test("clean deploy allows only the verified legacy pgdata volume name", async () => {
+  const deployment = await readFile(cleanDeploymentPath, "utf8");
+  const helperStart = deployment.indexOf("validate_required_exact_env_value() {");
+  const helperEnd = deployment.indexOf("\nvalidate_production_env\n", helperStart);
+  assert.notEqual(helperStart, -1);
+  assert.notEqual(helperEnd, -1);
+  const validators = deployment.slice(helperStart, helperEnd);
+  const directory = await mkdtemp(path.join(tmpdir(), "ai-project-os-clean-pgdata-name-"));
+  const harnessPath = path.join(directory, "validate-pgdata-name.sh");
+  assert.ok(deployment.includes('is_allowed_pgdata_volume_name "$PGDATA_VOLUME"'));
+  assert.match(deployment, /ai-project-os-pgdata-v0-2-0-dev-1-fresh/u);
+  const password = "a".repeat(64);
+  const baseEnv = [
+    "POSTGRES_USER=ai_project_os_cluster_admin",
+    `POSTGRES_CLUSTER_ADMIN_PASSWORD=${password}`,
+    `POSTGRES_MIGRATOR_PASSWORD=${password}`,
+    "POSTGRES_RUNTIME_USER=ai_project_os_runtime",
+    `POSTGRES_RUNTIME_PASSWORD=${password}`,
+    "POSTGRES_ENTITLEMENT_WRITER_USER=ai_project_os_entitlement_writer",
+    `POSTGRES_ENTITLEMENT_WRITER_PASSWORD=${password}`,
+    `POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD=${password}`,
+    "POSTGRES_DB=ai_project_os",
+    "AI_PROJECT_OS_SECURE_COOKIES=true",
+    "AI_PROJECT_OS_PUBLIC_ORIGIN=https://ai-project-os.com",
+    "AI_PROJECT_OS_SECRETS_VOLUME=ai-project-os-secrets",
+    "AI_PROJECT_OS_UPLOADS_VOLUME=ai-project-os-uploads",
+    "AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID=client-id-123",
+    "AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET=client-secret-123",
+  ].join("\n");
+  await writeFile(
+    harnessPath,
+    `#!/usr/bin/env bash
+set -Eeuo pipefail
+ENV_FILE=$1
+fail() { printf '%s\\n' "$1" >&2; exit "\${2-1}"; }
+mapfile() {
+  local target=$2 line
+  while IFS= read -r line; do
+    eval "$target+=(\\"\\$line\\")"
+  done
+}
+${validators}
+validate_production_env
+`,
+    { mode: 0o700 },
+  );
+  await chmod(harnessPath, 0o700);
+
+  try {
+    const accepted = [
+      "AI_PROJECT_OS_PGDATA_VOLUME=ai-project-os-pgdata",
+      "AI_PROJECT_OS_PGDATA_VOLUME=ai-project-os-alt-pgdata",
+      "AI_PROJECT_OS_PGDATA_VOLUME=ai-project-os-pgdata-v0-2-0-dev-1-fresh",
+    ];
+    for (const volumeLine of accepted) {
+      const envPath = path.join(directory, `${volumeLine.slice(volumeLine.indexOf("=") + 1)}.env`);
+      await writeFile(envPath, `${baseEnv}\n${volumeLine}\n`, { mode: 0o600 });
+      const result = spawnSync("bash", [harnessPath, envPath], { encoding: "utf8" });
+      assert.equal(result.status, 0, `${volumeLine}: ${result.stderr}`);
+    }
+
+    const rejected = [
+      "ai-project-os-pgdata-v0-2-0-dev-1-freshx",
+      "ai-project-os-pgdata-v0-2-0-dev-1",
+      "ai-project-os-pgdata-v0-2-0-dev-1-fresh-backup",
+    ];
+    for (const volumeName of rejected) {
+      const envPath = path.join(directory, `${volumeName}.env`);
+      await writeFile(envPath, `${baseEnv}\nAI_PROJECT_OS_PGDATA_VOLUME=${volumeName}\n`, { mode: 0o600 });
+      const result = spawnSync("bash", [harnessPath, envPath], { encoding: "utf8" });
+      assert.notEqual(result.status, 0, volumeName);
+      assert.match(result.stderr, /CLEAN_DEPLOY_PGDATA_VOLUME_NAME_INVALID/u);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("backup quiesces writers, verifies encrypted COS objects, and deletes only marked local backups", async () => {
   const backup = await readFile(backupPath, "utf8");
   const remoteVerificationFunction = backup.slice(

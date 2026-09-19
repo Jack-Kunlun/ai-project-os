@@ -567,102 +567,41 @@ function withStageDiagnostics(client: PrismaClient): {
   return { client: wrapped as unknown as PrismaClient, stages };
 }
 
-type BackendPidSignal = {
-  promise: Promise<number>;
-  resolve: (pid: number) => void;
-  reject: (error: unknown) => void;
-};
-
-function createBackendPidSignal(): BackendPidSignal {
-  let resolve!: (pid: number) => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<number>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-  return { promise, resolve, reject };
-}
-
-/**
- * Test-only transaction wrapper. It obtains the backend PID from the same
- * transaction connection before delegating the callback, without inspecting
- * or changing the callback arguments, rows, or errors.
- */
-function withBackendPidSignal(
-  client: PrismaClient,
-  signal: BackendPidSignal,
-): PrismaClient {
-  const wrapped = new Proxy(client, {
-    get(target, property, receiver) {
-      if (property !== "$transaction") {
-        return Reflect.get(target, property, receiver);
-      }
-      const transaction = Reflect.get(target, property, receiver);
-      if (typeof transaction !== "function") {
-        return transaction;
-      }
-      return (...args: unknown[]) => {
-        const callback = args[0];
-        if (typeof callback !== "function") {
-          return Reflect.apply(transaction, target, args);
-        }
-        const delegatedArgs = [...args];
-        delegatedArgs[0] = async (tx: unknown) => {
-          let rows: Array<{ pid: number }>;
-          try {
-            rows = await (tx as Prisma.TransactionClient).$queryRaw<
-              Array<{ pid: number }>
-            >(Prisma.sql`
-              SELECT pg_backend_pid()::int AS pid
-            `);
-          } catch {
-            const error = new Error("AI_RUNTIME_POSTGRES_BACKEND_PID_FAILED");
-            signal.reject(error);
-            throw error;
-          }
-          const pid = rows[0]?.pid;
-          if (!Number.isSafeInteger(pid) || pid <= 0) {
-            const error = new Error("AI_RUNTIME_POSTGRES_BACKEND_PID_FAILED");
-            signal.reject(error);
-            throw error;
-          }
-          signal.resolve(pid);
-          return (callback as (transaction: unknown) => Promise<unknown>)(tx);
-        };
-        return Reflect.apply(transaction, target, delegatedArgs);
-      };
-    },
-  });
-  return wrapped as unknown as PrismaClient;
-}
-
 /**
  * Poll catalog lock evidence. The timeout only bounds an absent-evidence
  * failure; success requires pg_blocking_pids plus a Lock wait event.
  */
 async function waitForBlockingEvidence(
   client: Client,
-  blockedPid: number,
+  serviceApplicationName: string,
+  mutationPid: number,
 ): Promise<void> {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
     const result = await safeQuery<{
-      blocking_count: number;
+      blocked_pid: number;
+      blocking_pids: number[];
       wait_event_type: string | null;
+      wait_event: string | null;
       state: string | null;
     }>(
       client,
-      `SELECT cardinality(pg_blocking_pids(a.pid)) AS blocking_count,
+      `SELECT a.pid::integer AS blocked_pid,
+              pg_blocking_pids(a.pid) AS blocking_pids,
               a.wait_event_type,
+              a.wait_event,
               a.state
          FROM pg_stat_activity AS a
-        WHERE a.pid = $1::integer`,
-      [blockedPid],
+        WHERE a.datname = current_database()
+          AND a.application_name = $1
+          AND a.backend_type = 'client backend'
+          AND $2::integer = ANY(pg_blocking_pids(a.pid))`,
+      [serviceApplicationName, mutationPid],
     );
     const row = result.rows[0];
     if (
       row !== undefined &&
-      row.blocking_count > 0 &&
+      row.blocking_pids.includes(mutationPid) &&
       row.wait_event_type === "Lock" &&
       row.state === "active"
     ) {
@@ -3255,9 +3194,15 @@ async function runTwoConnectionRevokeFirstEvidence(
   client: Client,
   url: string,
 ): Promise<void> {
+  const serviceDatabaseUrl = new URL(validateAiRuntimeTestDatabaseUrl(url));
+  const serviceApplicationName = "ai-runtime-revoke-first";
+  serviceDatabaseUrl.searchParams.set("application_name", serviceApplicationName);
   await setupFreshLiveGrant(client);
-  const adapter = new PrismaPg({ connectionString: url });
-  const servicePrisma = new PrismaClient({ adapter });
+  const adapter = new PrismaPg({ connectionString: serviceDatabaseUrl.toString() });
+  const servicePrisma = new PrismaClient({
+    adapter,
+    transactionOptions: { timeout: 15_000 },
+  });
   let mutationClient: Client | null = null;
   let mutationOpen = false;
   let claimPromise: Promise<ClaimAndDispatchRunResult> | undefined;
@@ -3280,6 +3225,17 @@ async function runTwoConnectionRevokeFirstEvidence(
     );
 
     mutationClient = await connectDedicated(url);
+    const mutationPidResult = await safeQuery<{ pid: number }>(
+      mutationClient,
+      "SELECT pg_backend_pid()::integer AS pid",
+    );
+    const mutationPid = mutationPidResult.rows[0]?.pid;
+    requireCondition(
+      typeof mutationPid === "number" &&
+        Number.isSafeInteger(mutationPid) &&
+        mutationPid > 0,
+      "AI_RUNTIME_POSTGRES_TWO_CONNECTION_MUTATION_PID",
+    );
     await safeQuery(mutationClient, "BEGIN");
     mutationOpen = true;
     await safeQuery(
@@ -3299,11 +3255,9 @@ async function runTwoConnectionRevokeFirstEvidence(
       [projectAId, grantAId],
     );
 
-    const pidSignal = createBackendPidSignal();
-    const serviceClient = withBackendPidSignal(servicePrisma, pidSignal);
     provider = new FakeProviderRecorder();
     const claimService = createAiRuntimeService({
-      db: serviceClient,
+      db: servicePrisma,
       admissibilityGate: new FakeAdmissibilityGate(),
       provider,
     });
@@ -3312,8 +3266,11 @@ async function runTwoConnectionRevokeFirstEvidence(
       runId: prepared.runId,
       operationKey: prepared.operationKey,
     });
-    const servicePid = await pidSignal.promise;
-    await waitForBlockingEvidence(mutationClient, servicePid);
+    await waitForBlockingEvidence(
+      mutationClient,
+      serviceApplicationName,
+      mutationPid,
+    );
     await safeQuery(mutationClient, "COMMIT");
     mutationOpen = false;
 

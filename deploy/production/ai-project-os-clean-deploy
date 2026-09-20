@@ -429,7 +429,7 @@ if len(selected) != 1 or selected[0].get("Name") != expected:
     raise SystemExit(1)
 ' "$PGDATA_VOLUME" <<<"$mount_json" || fail CLEAN_DEPLOY_PGDATA_MOUNT_INVALID 70
 
-  mapfile -t attached_containers < <(docker ps -aq --filter "volume=$PGDATA_VOLUME")
+  mapfile -t attached_containers < <(docker ps -aq --no-trunc --filter "volume=$PGDATA_VOLUME")
   (( ${#attached_containers[@]} == 1 && "${attached_containers[0]}" == "$postgres_id" )) ||
     fail CLEAN_DEPLOY_PGDATA_VOLUME_ATTACHED 70
 }
@@ -441,7 +441,7 @@ validate_pgdata_volume_before_mutation
 MUTATION_ATTEMPTED=1
 compose down --remove-orphans
 
-attached_containers=$(docker ps -aq --filter "volume=$PGDATA_VOLUME")
+attached_containers=$(docker ps -aq --no-trunc --filter "volume=$PGDATA_VOLUME")
 [[ -z "$attached_containers" ]] || fail CLEAN_DEPLOY_PGDATA_VOLUME_ATTACHED 70
 
 # Irreversible boundary: remove only this exact owned pgdata volume.

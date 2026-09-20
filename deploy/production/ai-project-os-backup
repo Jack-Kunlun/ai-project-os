@@ -441,12 +441,13 @@ service_container_ids() {
   local service=$1
 
   docker ps -q \
+    --no-trunc \
     --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
     --filter "label=com.docker.compose.service=$service"
 }
 
 all_stack_container_ids() {
-  docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT"
+  docker ps -aq --no-trunc --filter "label=com.docker.compose.project=$COMPOSE_PROJECT"
 }
 
 require_single_running_container() {
@@ -465,7 +466,7 @@ require_single_stack_container() {
   local service=$1
   local -a ids=()
 
-  mapfile -t ids < <(docker ps -aq \
+  mapfile -t ids < <(docker ps -aq --no-trunc \
     --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
     --filter "label=com.docker.compose.service=$service")
   (( ${#ids[@]} == 1 )) || fail "BACKUP_STACK_SERVICE_INVALID service=$service count=${#ids[@]}" 72

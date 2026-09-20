@@ -184,8 +184,9 @@ test("clean deploy is fail-closed, backup-first, and never migrates the old data
     deployment.indexOf("MUTATION_ATTEMPTED=1\ncompose down --remove-orphans") !== -1,
     "mutation flag must be immediately before compose down",
   );
+  assert.match(deployment, /docker ps -aq --no-trunc --filter "volume=\$PGDATA_VOLUME"/u);
   assert.ok(
-    deployment.indexOf("compose down --remove-orphans") < deployment.indexOf('attached_containers=$(docker ps -aq --filter "volume=$PGDATA_VOLUME")'),
+    deployment.indexOf("compose down --remove-orphans") < deployment.indexOf('attached_containers=$(docker ps -aq --no-trunc --filter "volume=$PGDATA_VOLUME")'),
     "post-down checks may only assert zero attachments before removing the exact volume",
   );
   assert.ok(
@@ -427,6 +428,74 @@ test("deploy pre-deploy backup is the quiesced artifact accepted by migration re
   assert.match(restore, /MIGRATION_SOURCE_VERSION=0\.3\.0-dev\.1/u);
   assert.match(restore, /MIGRATION_TARGET_TAG=v0\.4\.0-dev\.1/u);
   assert.match(restore, /"\$RESTORE_MODE" == migration && "\$source_quiesced" != true/u);
+});
+
+test("backup writer identity checks use full Docker IDs and reject changed containers", async () => {
+  const backup = await readFile(backupPath, "utf8");
+  const functionStart = backup.indexOf("require_single_stack_container() {");
+  const functionEnd = backup.indexOf("\nrequire_single_stopped_container()", functionStart);
+  assert.notEqual(functionStart, -1);
+  assert.notEqual(functionEnd, -1);
+  const stackLookupFunction = backup.slice(functionStart, functionEnd);
+  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "ai-project-os-backup-container-id-"));
+  const mockDockerPath = path.join(temporaryDirectory, "docker");
+  const harnessPath = path.join(temporaryDirectory, "writer-id-check.sh");
+  const fullId = "a".repeat(64);
+  const shortId = fullId.slice(0, 12);
+  const changedId = "b".repeat(64);
+
+  try {
+    await writeFile(
+      mockDockerPath,
+      `#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ "\${1-}" == ps ]] || exit 1
+if [[ " $* " == *" --no-trunc "* ]]; then
+  printf '%s\\n' "${fullId}"
+else
+  printf '%s\\n' "${shortId}"
+fi
+`,
+      { mode: 0o700 },
+    );
+    await chmod(mockDockerPath, 0o700);
+    await writeFile(
+      harnessPath,
+      `#!/usr/bin/env bash
+set -Eeuo pipefail
+readonly COMPOSE_PROJECT=ai-project-os
+fail() { printf '%s\\n' "$1" >&2; exit "\${2-1}"; }
+mapfile() {
+  local target=$2 line
+  while IFS= read -r line; do
+    eval "$target+=(\\"\\$line\\")"
+  done
+}
+${stackLookupFunction}
+actual_id=$(require_single_stack_container app)
+[[ "$actual_id" == "\${EXPECTED_APP_ID-}" ]] || fail BACKUP_WRITER_IDS_CHANGED 75
+printf '%s\\n' "$actual_id"
+`,
+      { mode: 0o700 },
+    );
+    await chmod(harnessPath, 0o700);
+
+    const sameContainer = spawnSync("bash", [harnessPath], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`, EXPECTED_APP_ID: fullId },
+    });
+    assert.equal(sameContainer.status, 0, sameContainer.stderr);
+    assert.equal(sameContainer.stdout.trim(), fullId);
+
+    const changedContainer = spawnSync("bash", [harnessPath], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${temporaryDirectory}:${process.env.PATH ?? ""}`, EXPECTED_APP_ID: changedId },
+    });
+    assert.equal(changedContainer.status, 75, changedContainer.stderr);
+    assert.match(changedContainer.stderr, /BACKUP_WRITER_IDS_CHANGED/u);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
 });
 
 test("backup and deploy contracts call the COS-verified unique manifest verified, not immutable", async () => {

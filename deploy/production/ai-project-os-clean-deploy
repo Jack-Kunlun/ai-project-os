@@ -434,8 +434,8 @@ if len(selected) != 1 or selected[0].get("Name") != expected:
 ' "$PGDATA_VOLUME" <<<"$mount_json" || fail CLEAN_DEPLOY_PGDATA_MOUNT_INVALID 70
 
   mapfile -t attached_containers < <(docker ps -aq --no-trunc --filter "volume=$PGDATA_VOLUME")
-  (( ${#attached_containers[@]} == 1 && "${attached_containers[0]}" == "$postgres_id" )) ||
-    fail CLEAN_DEPLOY_PGDATA_VOLUME_ATTACHED 70
+  (( ${#attached_containers[@]} == 1 )) || fail CLEAN_DEPLOY_PGDATA_VOLUME_ATTACHED 70
+  [[ "${attached_containers[0]}" == "$postgres_id" ]] || fail CLEAN_DEPLOY_PGDATA_VOLUME_ATTACHED 70
 }
 
 # Backup is verified and exact writers remain stopped. All fallible volume

@@ -436,6 +436,74 @@ printf 'PGDATA_VOLUME=%s\\n' "$PGDATA_VOLUME"
   }
 });
 
+test("clean deploy compares attached full container IDs as strings", async () => {
+  const deployment = await readFile(cleanDeploymentPath, "utf8");
+  const functionStart = deployment.indexOf("validate_pgdata_volume_before_mutation() {");
+  const functionEnd = deployment.indexOf("\n}\n\n# Backup is verified", functionStart);
+  assert.notEqual(functionStart, -1);
+  assert.notEqual(functionEnd, -1);
+  const validationFunction = deployment.slice(functionStart, functionEnd + 2);
+  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "ai-project-os-clean-pgdata-attachments-"));
+  const harnessPath = path.join(temporaryDirectory, "validate-pgdata-attachments.sh");
+  const postgresId = "2426805b42800e580babe74749bc2508aac1c42b164763505a0acc89b34f260a";
+
+  try {
+    await writeFile(
+      harnessPath,
+      `#!/usr/bin/env bash
+set -Eeuo pipefail
+readonly PGDATA_VOLUME=ai-project-os-pgdata
+readonly POSTGRES_ID=${postgresId}
+fail() { printf '%s\\n' "$1" >&2; exit "\${2-1}"; }
+mapfile() {
+  local target=$2 line
+  while IFS= read -r line; do
+    eval "$target+=(\\"\\$line\\")"
+  done
+}
+resolve_pgdata_volume() { :; }
+assert_stack_container() { [[ "$1" == "$POSTGRES_ID" && "$2" == postgres ]]; }
+compose() { [[ "$1" == ps && "$2" == -q && "$3" == postgres ]] && printf '%s\\n' "$POSTGRES_ID"; }
+docker() {
+  if [[ "\$1 \$2" == "volume inspect" ]]; then
+    printf '%s\\n' '{"com.docker.compose.project":"ai-project-os","com.docker.compose.volume":"ai_project_os_pgdata"}'
+  elif [[ "\$1" == inspect && "\$*" == *".Mounts"* ]]; then
+    printf '%s\\n' '[{"Type":"volume","Name":"ai-project-os-pgdata","Destination":"/var/lib/postgresql"}]'
+  elif [[ "\$1" == ps ]]; then
+    [[ -z "\${MOCK_ATTACHED_CONTAINERS-}" ]] || printf '%s\\n' "\${MOCK_ATTACHED_CONTAINERS}"
+  else
+    exit 1
+  fi
+}
+${validationFunction}
+validate_pgdata_volume_before_mutation
+`,
+      { mode: 0o700 },
+    );
+    await chmod(harnessPath, 0o700);
+
+    const cases = [
+      ["matching-full-id", postgresId, 0],
+      ["mismatching-full-id", "3".repeat(64), 70],
+      ["zero-attached-containers", "", 70],
+      ["multiple-attached-containers", `${postgresId}\n${"4".repeat(64)}`, 70],
+    ] as const;
+    for (const [caseName, attachedContainers, expectedStatus] of cases) {
+      const result = spawnSync("bash", [harnessPath], {
+        encoding: "utf8",
+        env: { ...process.env, MOCK_ATTACHED_CONTAINERS: attachedContainers },
+      });
+      assert.equal(result.status, expectedStatus, `${caseName}: ${result.stderr}`);
+      if (expectedStatus !== 0) {
+        assert.match(result.stderr, /CLEAN_DEPLOY_PGDATA_VOLUME_ATTACHED/u, caseName);
+        assert.doesNotMatch(result.stderr, /value too great for base/u, caseName);
+      }
+    }
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("backup quiesces writers, verifies encrypted COS objects, and deletes only marked local backups", async () => {
   const backup = await readFile(backupPath, "utf8");
   const remoteVerificationFunction = backup.slice(

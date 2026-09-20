@@ -389,11 +389,15 @@ volumes = config.get("volumes", {})
 if len(mounts) != 1:
     raise SystemExit("CLEAN_DEPLOY_PGDATA_MOUNT_INVALID")
 source = mounts[0].get("source")
-volume = volumes.get("ai_project_os_pgdata", {})
-if not isinstance(source, str) or volume.get("name") != source:
+if source != "ai_project_os_pgdata":
     raise SystemExit("CLEAN_DEPLOY_PGDATA_CONFIG_MISMATCH")
-print(source)
-  ' <<<"$config_json") || fail CLEAN_DEPLOY_PGDATA_CONFIG_INVALID 70
+volume = volumes.get("ai_project_os_pgdata")
+physical_name = volume.get("name") if isinstance(volume, dict) else None
+expected_name = sys.argv[1]
+if not isinstance(physical_name, str) or not physical_name or physical_name != expected_name:
+    raise SystemExit("CLEAN_DEPLOY_PGDATA_CONFIG_MISMATCH")
+print(physical_name)
+  ' "$PGDATA_VOLUME" <<<"$config_json") || fail CLEAN_DEPLOY_PGDATA_CONFIG_INVALID 70
   [[ "$configured_volume" == "$PGDATA_VOLUME" ]] || fail CLEAN_DEPLOY_PGDATA_CONFIG_MISMATCH 70
 }
 

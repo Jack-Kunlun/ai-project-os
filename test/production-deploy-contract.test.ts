@@ -338,6 +338,104 @@ validate_production_env
   }
 });
 
+test("clean deploy resolves Compose logical pgdata source to the configured physical volume", async () => {
+  const deployment = await readFile(cleanDeploymentPath, "utf8");
+  const readStart = deployment.indexOf("read_env_value() {");
+  const readEnd = deployment.indexOf("\nresolve_pgdata_volume()", readStart);
+  const allowedStart = deployment.indexOf("is_allowed_pgdata_volume_name() {");
+  const allowedEnd = deployment.indexOf("\nvalidate_optional_pgdata_volume_name()", allowedStart);
+  const resolveStart = deployment.indexOf("resolve_pgdata_volume() {");
+  const resolveEnd = deployment.indexOf("\nvalidate_pgdata_volume_before_mutation()", resolveStart);
+  assert.notEqual(readStart, -1);
+  assert.notEqual(readEnd, -1);
+  assert.notEqual(allowedStart, -1);
+  assert.notEqual(allowedEnd, -1);
+  assert.notEqual(resolveStart, -1);
+  assert.notEqual(resolveEnd, -1);
+
+  const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "ai-project-os-clean-pgdata-config-"));
+  const harnessPath = path.join(temporaryDirectory, "resolve-pgdata-volume.sh");
+  const canonicalVolume = "ai-project-os-pgdata";
+  const legacyVolume = "ai-project-os-pgdata-v0-2-0-dev-1-fresh";
+  const composeConfig = (source: string, physicalName: string) =>
+    JSON.stringify({
+      services: {
+        postgres: {
+          volumes: [{ type: "volume", source, target: "/var/lib/postgresql" }],
+        },
+      },
+      volumes: {
+        ai_project_os_pgdata: { name: physicalName },
+      },
+    });
+
+  try {
+    await writeFile(
+      harnessPath,
+      `#!/usr/bin/env bash
+set -Eeuo pipefail
+ENV_FILE=$1
+fail() { printf '%s\\n' "$1" >&2; exit "\${2-1}"; }
+mapfile() {
+  local target=$2 line
+  while IFS= read -r line; do
+    eval "$target+=(\\"\\$line\\")"
+  done
+}
+compose() { printf '%s\\n' "$MOCK_COMPOSE_JSON"; }
+${deployment.slice(readStart, readEnd)}
+${deployment.slice(allowedStart, allowedEnd)}
+${deployment.slice(resolveStart, resolveEnd)}
+resolve_pgdata_volume
+printf 'PGDATA_VOLUME=%s\\n' "$PGDATA_VOLUME"
+`,
+      { mode: 0o700 },
+    );
+    await chmod(harnessPath, 0o700);
+
+    const validCases = [
+      [canonicalVolume, canonicalVolume],
+      [legacyVolume, legacyVolume],
+    ] as const;
+    for (const [configuredVolume, physicalName] of validCases) {
+      const envPath = path.join(temporaryDirectory, `${configuredVolume}.env`);
+      await writeFile(envPath, `AI_PROJECT_OS_PGDATA_VOLUME=${configuredVolume}\n`, { mode: 0o600 });
+      const result = spawnSync("bash", [harnessPath, envPath], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          MOCK_COMPOSE_JSON: composeConfig("ai_project_os_pgdata", physicalName),
+        },
+      });
+      assert.equal(result.status, 0, `${configuredVolume}: ${result.stderr}`);
+      assert.equal(result.stdout.trim(), `PGDATA_VOLUME=${physicalName}`);
+    }
+
+    const invalidCases = [
+      ["wrong-logical-source", legacyVolume, "other_pgdata_source"],
+      ["wrong-physical-name", legacyVolume, canonicalVolume],
+    ] as const;
+    for (const [caseName, configuredVolume, physicalName] of invalidCases) {
+      const envPath = path.join(temporaryDirectory, `${caseName}.env`);
+      await writeFile(envPath, `AI_PROJECT_OS_PGDATA_VOLUME=${configuredVolume}\n`, { mode: 0o600 });
+      const result = spawnSync("bash", [harnessPath, envPath], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          MOCK_COMPOSE_JSON: composeConfig(
+            caseName === "wrong-logical-source" ? physicalName : "ai_project_os_pgdata",
+            physicalName,
+          ),
+        },
+      });
+      assert.notEqual(result.status, 0, caseName);
+      assert.match(result.stderr, /CLEAN_DEPLOY_PGDATA_CONFIG_INVALID/u, caseName);
+    }
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("backup quiesces writers, verifies encrypted COS objects, and deletes only marked local backups", async () => {
   const backup = await readFile(backupPath, "utf8");
   const remoteVerificationFunction = backup.slice(

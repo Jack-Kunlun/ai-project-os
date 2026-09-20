@@ -22,7 +22,7 @@ readonly PRODUCTION_COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
 readonly RESULT_FILE=/var/lib/ai-project-os/last-preserve-deployment
 readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 readonly SOURCE_VERSION=0.5.0-dev.1
-readonly TARGET_VERSION=0.5.0-dev.2
+readonly TARGET_VERSION=0.5.0-dev.3
 readonly EXPECTED_SOURCE_REVISION=63a0a3700bd42a6d0ce5569276ce74a4b6aa9815
 readonly EXPECTED_MIGRATION_COUNT=106
 readonly POSTGRES_CLIENT_DRAIN_ATTEMPTS=30
@@ -385,7 +385,8 @@ raise SystemExit(0 if len(before) == len(after) == 5 and all(new >= old for old,
 assert_maintenance_isolation() {
   local -a running=()
   mapfile -t running < <(docker ps --no-trunc -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT")
-  (( ${#running[@]} == 1 && "${running[0]}" == "$POSTGRES_ID" ))
+  [[ ${#running[@]} -eq 1 ]] || return 1
+  [[ "${running[0]}" == "$POSTGRES_ID" ]]
 }
 
 stop_source_writers() {
@@ -527,7 +528,7 @@ recover_on_failure() {
 }
 
 [[ $EUID -eq 0 ]] || { printf 'PRESERVE_DEPLOY_ROOT_REQUIRED\n' >&2; exit 70; }
-[[ "$SOURCE_TAG" == v0.5.0-dev.1 && "$TARGET_TAG" == v0.5.0-dev.2 ]] || { printf 'PRESERVE_DEPLOY_TAG_INVALID\n' >&2; exit 64; }
+[[ "$SOURCE_TAG" == v0.5.0-dev.1 && "$TARGET_TAG" == v0.5.0-dev.3 ]] || { printf 'PRESERVE_DEPLOY_TAG_INVALID\n' >&2; exit 64; }
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || { printf 'PRESERVE_DEPLOY_REVISION_INVALID\n' >&2; exit 65; }
 [[ "$CONFIRMATION_TOKEN" == "$REQUIRED_CONFIRMATION" ]] || { printf 'PRESERVE_DEPLOY_CONFIRMATION_INVALID\n' >&2; exit 64; }
 validate_environment || { printf 'PRESERVE_DEPLOY_ENV_INVALID\n' >&2; exit 70; }
@@ -600,7 +601,7 @@ BACKUP_OBJECT=$(sed -n 's/^BACKUP_OK .* object=\([^ ]*\) .*/\1/p' <<<"$backup_ou
 BACKUP_MANIFEST=$(sed -n 's/^BACKUP_OK .* verified_manifest=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
 [[ "$BACKUP_PATH" =~ ^/var/backups/ai-project-os/[^/]+$ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_PATH_INVALID\n' >&2; exit 69; }
 [[ "$BACKUP_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_OBJECT_INVALID\n' >&2; exit 69; }
-[[ "$BACKUP_MANIFEST" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.2\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.2\.[A-Za-z0-9]{6}\.manifest\.json$ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_MANIFEST_INVALID\n' >&2; exit 69; }
+[[ "$BACKUP_MANIFEST" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.3\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.3\.[A-Za-z0-9]{6}\.manifest\.json$ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_MANIFEST_INVALID\n' >&2; exit 69; }
 
 verify_pgdata_identity_unchanged || { printf 'PRESERVE_DEPLOY_PRE_SWITCH_PGDATA_CHANGED\n' >&2; exit 69; }
 CUTOVER_ATTEMPTED=1

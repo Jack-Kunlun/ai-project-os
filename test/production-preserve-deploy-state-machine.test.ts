@@ -110,6 +110,42 @@ exit 74
   return { result, evidence };
 }
 
+async function runIsolationScenario(dockerIds: string[]) {
+  const source = await readFile(preservePath, "utf8");
+  const isolation = extractFunction(source, "assert_maintenance_isolation", "\nstop_source_writers");
+  const directory = await mkdtemp(path.join(tmpdir(), "ai-project-os-preserve-isolation-"));
+  const harness = path.join(directory, "harness.sh");
+  const postgresId = `13e7${"a".repeat(60)}`;
+  const dockerOutput = dockerIds.map((id) => `  printf '%s\\n' "${id}"`).join("\n");
+  await writeFile(
+    harness,
+    `#!/usr/bin/env bash
+set -Eeuo pipefail
+COMPOSE_PROJECT=ai-project-os
+POSTGRES_ID=${postgresId}
+mapfile() {
+  local _flag=$1 variable=$2 line
+  eval "$variable=()"
+  while IFS= read -r line; do
+    eval "$variable+=(\\"$line\\")"
+  done
+}
+docker() {
+  [[ "\${1-}" == ps ]] || return 1
+  [[ " $* " == *"label=com.docker.compose.project=$COMPOSE_PROJECT"* ]] || return 1
+${dockerOutput}
+}
+${isolation}
+assert_maintenance_isolation
+`,
+    { mode: 0o700 },
+  );
+  await chmod(harness, 0o700);
+  const result = spawnSync("bash", [harness], { encoding: "utf8" });
+  await rm(directory, { recursive: true, force: true });
+  return result;
+}
+
 test("pre-switch backup failure restarts only the captured source writers", async () => {
   const { result, evidence } = await runRecoveryScenario("pre-backup-failure");
   assert.equal(result.status, 74);
@@ -147,4 +183,23 @@ test("rollback isolation failure reports writers may be running", async () => {
   assert.match(evidence, /PRESERVE_DEPLOY_EMERGENCY phase=post-switch writers_may_be_running=true/u);
   assert.doesNotMatch(evidence, /writers_stopped=true/u);
   assert.match(evidence, /isolation/u);
+});
+
+test("maintenance isolation compares full Docker IDs as strings and rejects extra containers", async () => {
+  const postgresId = `13e7${"a".repeat(60)}`;
+  const extraId = `deadbeef${"b".repeat(56)}`;
+  const otherId = `01234567${"c".repeat(56)}`;
+
+  const isolated = await runIsolationScenario([postgresId]);
+  assert.equal(isolated.status, 0, isolated.stderr);
+  assert.doesNotMatch(isolated.stderr, /value too great for base/u);
+
+  const empty = await runIsolationScenario([]);
+  assert.notEqual(empty.status, 0);
+
+  const contaminated = await runIsolationScenario([postgresId, extraId]);
+  assert.notEqual(contaminated.status, 0);
+
+  const wrongId = await runIsolationScenario([otherId]);
+  assert.notEqual(wrongId.status, 0);
 });

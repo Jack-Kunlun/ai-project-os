@@ -5,7 +5,7 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 original_command=${SSH_ORIGINAL_COMMAND-}
 
-if [[ "$original_command" =~ ^preserve-deploy\ (v0\.5\.0-dev\.1)\ (v0\.5\.0-dev\.2)\ ([0-9a-f]{40})\ (CONFIRM_PRESERVE_DATA_V1)$ ]]; then
+if [[ "$original_command" =~ ^preserve-deploy\ (v0\.5\.0-dev\.1)\ (v0\.5\.0-dev\.3)\ ([0-9a-f]{40})\ (CONFIRM_PRESERVE_DATA_V1)$ ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-preserve-deploy \
     "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
 fi

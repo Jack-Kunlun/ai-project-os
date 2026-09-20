@@ -320,7 +320,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   expect(healthResponse.ok()).toBe(true);
   expect(await healthResponse.json()).toMatchObject({
     status: "ok",
-    version: "0.5.0-dev.2",
+    version: "0.5.0-dev.3",
     database: "up",
     worker: { status: "up", consecutiveFailures: 0 },
   });

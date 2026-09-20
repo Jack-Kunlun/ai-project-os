@@ -59,12 +59,12 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
-test("production workflow enables only the explicitly approved v0.5.0-dev.2 prerelease", async () => {
+test("production workflow enables only the explicitly approved v0.5.0-dev.3 prerelease", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /default: v0\.5\.0-dev\.2/u);
+  assert.match(workflow, /default: v0\.5\.0-dev\.3/u);
   assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.2/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.3/u);
   assert.doesNotMatch(workflow, /&& false|DISABLED_BEFORE_V1_0_0|v1\.0\.0/u);
   assert.doesNotMatch(workflow, /DEPLOY_TAG_INPUT" =~ \^v/u);
 });
@@ -74,7 +74,7 @@ test("forced-command gateway accepts only the exact preserve-data or GitHub OAut
 
   assert.match(gateway, /SSH_ORIGINAL_COMMAND/u);
   assert.match(gateway, /v0\\\.5\\\.0-dev\\\.1/u);
-  assert.match(gateway, /v0\\\.5\\\.0-dev\\\.2/u);
+  assert.match(gateway, /v0\\\.5\\\.0-dev\\\.3/u);
   assert.match(gateway, /preserve-deploy/u);
   assert.match(gateway, /CONFIRM_PRESERVE_DATA_V1/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-preserve-deploy/u);
@@ -554,7 +554,7 @@ test("backup quiesces writers, verifies encrypted COS objects, and deletes only 
   );
   assert.match(backup, /LOCAL_RETENTION_DAYS_DEFAULT=14/u);
   assert.match(backup, /LOCAL_MIN_VERIFIED_DEFAULT=3/u);
-  assert.match(backup, /pre-deploy-to-v0\\\.5\\\.0-dev\\\.\(1\|2\)/u);
+  assert.match(backup, /pre-deploy-to-v0\\\.5\\\.0-dev\\\.\(1\|2\|3\)/u);
   assert.doesNotMatch(backup, /pre-deploy-to-v0\\.3\\.0-dev\\.1/u);
   assert.match(backup, /\.cos-upload-verified/u);
   assert.match(backup, /ai-project-os-deploy\.lock/u);

@@ -27,7 +27,7 @@ test("preserve deploy is an isolated one-release, fail-closed channel", async ()
   assert.equal(spawnSync("bash", ["-n", preservePath], { encoding: "utf8" }).status, 0);
   assert.match(preserve, /SOURCE_TAG=\$\{1-\}/u);
   assert.match(preserve, /TARGET_TAG=\$\{2-\}/u);
-  assert.match(preserve, /SOURCE_TAG" == v0\.5\.0-dev\.1 && "\$TARGET_TAG" == v0\.5\.0-dev\.2/u);
+  assert.match(preserve, /SOURCE_TAG" == v0\.5\.0-dev\.1 && "\$TARGET_TAG" == v0\.5\.0-dev\.3/u);
   assert.match(preserve, /EXPECTED_SOURCE_REVISION=63a0a3700bd42a6d0ce5569276ce74a4b6aa9815/u);
   assert.match(preserve, /CONFIRM_PRESERVE_DATA_V1/u);
   assert.match(preserve, /source_revision.*EXPECTED_SOURCE_REVISION/u);
@@ -214,7 +214,7 @@ test("gateway, sudoers, and installer expose only preserve deploy plus OAuth", a
     read(installerPath),
   ]);
 
-  assert.ok(gateway.includes("preserve-deploy\\ (v0\\.5\\.0-dev\\.1)\\ (v0\\.5\\.0-dev\\.2)"));
+  assert.ok(gateway.includes("preserve-deploy\\ (v0\\.5\\.0-dev\\.1)\\ (v0\\.5\\.0-dev\\.3)"));
   assert.match(gateway, /CONFIRM_PRESERVE_DATA_V1/u);
   assert.doesNotMatch(gateway, /clean-deploy/u);
   assert.match(gateway, /ai-project-os-preserve-deploy/u);
@@ -226,22 +226,22 @@ test("gateway, sudoers, and installer expose only preserve deploy plus OAuth", a
   assert.match(installer, /bash -n \/usr\/local\/sbin\/ai-project-os-preserve-deploy/u);
 });
 
-test("backup and recovery allow only the explicit .2 preserve names", async () => {
+test("backup and recovery allow the explicit .1, .2, and .3 preserve names", async () => {
   const [backup, restore] = await Promise.all([read(backupPath), read(restorePath)]);
 
-  assert.ok(backup.includes("pre-deploy-to-v0\\.5\\.0-dev\\.(1|2)"));
-  assert.ok(backup.includes('TARGET_TAG" =~ ^v0\\.5\\.0-dev\\.(1|2)$'));
-  assert.ok(restore.includes('RELEASE_TAG" =~ ^v0\\.5\\.0-dev\\.(1|2)$'));
-  assert.ok(restore.includes("pre-deploy-to-v0\\.5\\.0-dev\\.(1|2)"));
+  assert.ok(backup.includes("pre-deploy-to-v0\\.5\\.0-dev\\.(1|2|3)"));
+  assert.ok(backup.includes('TARGET_TAG" =~ ^v0\\.5\\.0-dev\\.(1|2|3)$'));
+  assert.ok(restore.includes('RELEASE_TAG" =~ ^v0\\.5\\.0-dev\\.(1|2|3)$'));
+  assert.ok(restore.includes("pre-deploy-to-v0\\.5\\.0-dev\\.(1|2|3)"));
   assert.doesNotMatch(restore, /v0\\\.4\\\.0-dev\\\.2/u);
   assert.match(restore, /MIGRATION_TARGET_TAG=v0\.5\.0-dev\.1/u);
 });
 
-test("production workflow is main-only and requires exact .2 preserve markers", async () => {
+test("production workflow is main-only and requires exact .3 preserve markers", async () => {
   const [workflow, ciWorkflow] = await Promise.all([read(workflowPath), read(ciWorkflowPath)]);
 
-  assert.match(workflow, /default: v0\.5\.0-dev\.2/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.2/u);
+  assert.match(workflow, /default: v0\.5\.0-dev\.3/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.3/u);
   assert.match(workflow, /git rev-parse HEAD.*deploy_sha/u);
   assert.match(workflow, /git merge-base --is-ancestor "\$source_sha" "\$deploy_sha"/u);
   assert.match(workflow, /git rev-list --merges "\$source_sha\.\.\$deploy_sha"/u);

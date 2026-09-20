@@ -1,2 +1,2 @@
-ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-clean-deploy
+ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-preserve-deploy
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-github-oauth

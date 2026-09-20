@@ -1,0 +1,645 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LC_ALL=C
+umask 077
+
+# This is deliberately a one-release, data-preserving cutover.  It is not a
+# general upgrade runner: no migration container is started and the existing
+# PostgreSQL volume/container must remain byte-for-byte the same resource.
+readonly SOURCE_TAG=${1-}
+readonly TARGET_TAG=${2-}
+readonly EXPECTED_REVISION=${3-}
+readonly CONFIRMATION_TOKEN=${4-}
+readonly REQUIRED_CONFIRMATION=CONFIRM_PRESERVE_DATA_V1
+readonly REPOSITORY_URL=https://github.com/Jack-Kunlun/ai-project-os.git
+readonly REPOSITORY_DIR=/srv/ai-project-os/repository
+readonly ENV_FILE=/etc/ai-project-os/production.env
+readonly COMPOSE_PROJECT=ai-project-os
+readonly BACKUP_SCRIPT=/usr/local/sbin/ai-project-os-backup
+readonly PRODUCTION_COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
+readonly RESULT_FILE=/var/lib/ai-project-os/last-preserve-deployment
+readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+readonly SOURCE_VERSION=0.5.0-dev.1
+readonly TARGET_VERSION=0.5.0-dev.2
+readonly EXPECTED_SOURCE_REVISION=63a0a3700bd42a6d0ce5569276ce74a4b6aa9815
+readonly EXPECTED_MIGRATION_COUNT=106
+readonly POSTGRES_CLIENT_DRAIN_ATTEMPTS=30
+readonly POSTGRES_CLIENT_DRAIN_INTERVAL_SECONDS=2
+readonly POSTGRES_CLIENT_DRAIN_TIMEOUT_SECONDS=10
+
+OLD_APP_ID=
+OLD_WORKER_ID=
+POSTGRES_ID=
+OLD_APP_IMAGE_ID=
+OLD_WORKER_IMAGE_ID=
+OLD_APP_IMAGE_REF=
+OLD_WORKER_IMAGE_REF=
+TARGET_APP_IMAGE_ID=
+TARGET_WORKER_IMAGE_ID=
+NEW_APP_ID=
+NEW_WORKER_ID=
+PGDATA_VOLUME=
+PGDATA_MOUNT=
+PGDATA_CREATED_AT=
+PGDATA_LABELS=
+PGDATA_CONSUMERS=
+DATA_SNAPSHOT_BEFORE=
+MIGRATION_SNAPSHOT_BEFORE=
+BACKUP_PATH=
+BACKUP_OBJECT=
+BACKUP_MANIFEST=
+STACK_HEALTH=
+CUTOVER_ATTEMPTED=0
+WRITER_RECOVERY_REQUIRED=0
+
+fail() {
+  printf '%s\n' "$1" >&2
+  return "${2-1}"
+}
+
+read_env_value() {
+  local key=$1 default_value=${2-} line
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || return 1
+  if (( ${#matches[@]} == 0 )); then
+    printf '%s' "$default_value"
+  else
+    line=${matches[0]}
+    printf '%s' "${line#*=}"
+  fi
+}
+
+validate_required_exact_env_value() {
+  local key=$1 expected=$2 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || return 1
+  (( ${#matches[@]} == 1 )) || return 1
+  value=${matches[0]#*=}
+  [[ "$value" == "$expected" ]]
+}
+
+validate_required_regex_env_value() {
+  local key=$1 pattern=$2 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || return 1
+  (( ${#matches[@]} == 1 )) || return 1
+  value=${matches[0]#*=}
+  [[ "$value" =~ $pattern ]]
+}
+
+validate_optional_regex_env_value() {
+  local key=$1 pattern=$2 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || return 1
+  (( ${#matches[@]} == 0 )) && return 0
+  value=${matches[0]#*=}
+  [[ "$value" =~ $pattern ]]
+}
+
+is_allowed_pgdata_volume_name() {
+  local candidate=${1-}
+  [[ "$candidate" =~ ^ai-project-os(-[a-z0-9-]+)?-pgdata$ ]] ||
+    [[ "$candidate" == ai-project-os-pgdata-v0-2-0-dev-1-fresh ]]
+}
+
+validate_optional_pgdata_volume_name() {
+  local key=$1 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || return 1
+  (( ${#matches[@]} == 0 )) && return 0
+  value=${matches[0]#*=}
+  is_allowed_pgdata_volume_name "$value"
+}
+
+validate_github_oauth_env_value() {
+  local key=$1 value
+  local -a matches=()
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} <= 1 )) || return 1
+  (( ${#matches[@]} == 1 )) || return 1
+  value=${matches[0]#*=}
+  (( ${#value} >= 8 && ${#value} <= 512 )) || return 1
+  [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+validate_environment() {
+  [[ -r "$ENV_FILE" && ! -L "$ENV_FILE" ]] || return 1
+  [[ "$(stat -c %U:%G "$ENV_FILE")" == root:root ]] || return 1
+  [[ "$(stat -c %a "$ENV_FILE")" == 600 ]] || return 1
+  validate_required_exact_env_value POSTGRES_USER ai_project_os_cluster_admin || return 1
+  validate_required_regex_env_value POSTGRES_CLUSTER_ADMIN_PASSWORD '^[0-9a-f]{64}$' || return 1
+  validate_required_regex_env_value POSTGRES_MIGRATOR_PASSWORD '^[0-9a-f]{64}$' || return 1
+  validate_required_exact_env_value POSTGRES_RUNTIME_USER ai_project_os_runtime || return 1
+  validate_required_regex_env_value POSTGRES_RUNTIME_PASSWORD '^[0-9a-f]{64}$' || return 1
+  validate_required_exact_env_value POSTGRES_ENTITLEMENT_WRITER_USER ai_project_os_entitlement_writer || return 1
+  validate_required_regex_env_value POSTGRES_ENTITLEMENT_WRITER_PASSWORD '^[0-9a-f]{64}$' || return 1
+  validate_required_regex_env_value POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD '^[0-9a-f]{64}$' || return 1
+  validate_optional_regex_env_value POSTGRES_DB '^ai_project_os$' || return 1
+  validate_required_exact_env_value AI_PROJECT_OS_SECURE_COOKIES true || return 1
+  validate_required_exact_env_value AI_PROJECT_OS_PUBLIC_ORIGIN https://ai-project-os.com || return 1
+  validate_optional_regex_env_value DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL '^$|^postgres(ql)?://[^[:space:]?#]+$' || return 1
+  validate_optional_pgdata_volume_name AI_PROJECT_OS_PGDATA_VOLUME || return 1
+  validate_optional_regex_env_value AI_PROJECT_OS_SECRETS_VOLUME '^ai-project-os(-[a-z0-9-]+)?-secrets$' || return 1
+  validate_optional_regex_env_value AI_PROJECT_OS_UPLOADS_VOLUME '^ai-project-os(-[a-z0-9-]+)?-uploads$' || return 1
+  validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID || return 1
+  validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET || return 1
+}
+
+compose() {
+  test -f "$PRODUCTION_COMPOSE_OVERRIDE" || return 1
+  docker compose --project-name "$COMPOSE_PROJECT" --env-file "$ENV_FILE" \
+    --project-directory "$REPOSITORY_DIR" --file "$REPOSITORY_DIR/compose.yaml" \
+    --file "$PRODUCTION_COMPOSE_OVERRIDE" "$@"
+}
+
+ensure_repository_clean() {
+  [[ -z "$(git -C "$REPOSITORY_DIR" status --porcelain)" ]]
+}
+
+container_health() {
+  docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1"
+}
+
+require_single_stack_container() {
+  local service=$1
+  local -a ids=()
+  mapfile -t ids < <(docker ps -aq --no-trunc \
+    --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=$service")
+  (( ${#ids[@]} == 1 )) || return 1
+  [[ "${ids[0]}" =~ ^[0-9a-f]{64}$ ]] || return 1
+  printf '%s' "${ids[0]}"
+}
+
+require_running_healthy_writer() {
+  local service=$1 container_id
+  container_id=$(require_single_stack_container "$service") || return 1
+  [[ "$(docker inspect --format '{{.State.Status}}:{{.State.Paused}}' "$container_id")" == running:false ]] || return 1
+  [[ "$(container_health "$container_id")" == healthy ]] || return 1
+  printf '%s' "$container_id"
+}
+
+verify_health_body() {
+  local body=$1 version=$2
+  grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$body" &&
+    grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"$version"'"' <<<"$body" &&
+    grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$body" &&
+    grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$body" &&
+    grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$body"
+}
+
+wait_for_local_health() {
+  local version=$1 attempt body
+  for attempt in $(seq 1 60); do
+    if body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health 2>/dev/null) &&
+      verify_health_body "$body" "$version"; then
+      STACK_HEALTH=$body
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+verify_public_health() {
+  local version=$1 attempt body
+  for attempt in $(seq 1 30); do
+    if body=$(curl --fail --silent --show-error https://ai-project-os.com/api/health 2>/dev/null) &&
+      verify_health_body "$body" "$version"; then
+      return 0
+    fi
+    [[ "$attempt" == 30 ]] || sleep 10
+  done
+  return 1
+}
+
+resolve_release() {
+  local source_revision target_revision source_version target_version
+  install -d -o root -g root -m 0755 /srv/ai-project-os
+  if [[ ! -d "$REPOSITORY_DIR/.git" ]]; then
+    local temporary_repository="${REPOSITORY_DIR}.init.$$"
+    trap 'rm -rf -- "${temporary_repository-}"' RETURN
+    git clone --filter=blob:none --no-checkout "$REPOSITORY_URL" "$temporary_repository" || return 1
+    chown -R root:root "$temporary_repository"
+    mv -- "$temporary_repository" "$REPOSITORY_DIR"
+    trap - RETURN
+  fi
+  [[ "$(stat -c %U:%G "$REPOSITORY_DIR")" == root:root ]] || return 1
+  [[ "$(git -C "$REPOSITORY_DIR" remote get-url origin)" == "$REPOSITORY_URL" ]] || return 1
+  git -C "$REPOSITORY_DIR" fetch --force --no-tags origin \
+    "refs/tags/$SOURCE_TAG:refs/tags/$SOURCE_TAG" \
+    "refs/tags/$TARGET_TAG:refs/tags/$TARGET_TAG" || return 1
+  [[ "$(git -C "$REPOSITORY_DIR" cat-file -t "refs/tags/$SOURCE_TAG")" == tag ]] || return 1
+  [[ "$(git -C "$REPOSITORY_DIR" cat-file -t "refs/tags/$TARGET_TAG")" == tag ]] || return 1
+  source_revision=$(git -C "$REPOSITORY_DIR" rev-parse "refs/tags/$SOURCE_TAG^{}") || return 1
+  target_revision=$(git -C "$REPOSITORY_DIR" rev-parse "refs/tags/$TARGET_TAG^{}") || return 1
+  [[ "$source_revision" == "$EXPECTED_SOURCE_REVISION" ]] || return 1
+  [[ "$target_revision" == "$EXPECTED_REVISION" ]] || return 1
+  [[ "$source_revision" != "$target_revision" ]] || return 1
+  git -C "$REPOSITORY_DIR" merge-base --is-ancestor "$source_revision" "$target_revision" || return 1
+  [[ -z "$(git -C "$REPOSITORY_DIR" rev-list --merges "$source_revision..$target_revision")" ]] || return 1
+  source_version=$(git -C "$REPOSITORY_DIR" show "$source_revision:package.json" | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+  target_version=$(git -C "$REPOSITORY_DIR" show "$target_revision:package.json" | sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+  [[ "$source_version" == "$SOURCE_VERSION" && "$target_version" == "$TARGET_VERSION" ]] || return 1
+  git -C "$REPOSITORY_DIR" diff --quiet "$source_revision" "$target_revision" -- prisma/schema.prisma prisma/migrations || return 1
+  changed_paths=$(git -C "$REPOSITORY_DIR" diff --name-only "$source_revision" "$target_revision") || return 1
+  python3 -c '
+import sys
+allowed = {
+    ".github/workflows/deploy-production.yml",
+    ".github/workflows/ci.yml",
+    "CHANGELOG.md",
+    "Dockerfile",
+    "README.md",
+    "deploy/production/ai-project-os-actions-gateway",
+    "deploy/production/ai-project-os-backup",
+    "deploy/production/ai-project-os-deploy.sudoers",
+    "deploy/production/ai-project-os-preserve-deploy",
+    "deploy/production/ai-project-os-restore",
+    "deploy/production/install-production-deploy.sh",
+    "docs/production-backup.md",
+    "docs/production-deployment.md",
+    "docs/releases/next.md",
+    "e2e/smoke.spec.ts",
+    "e2e/z-r02-admin-navigation.spec.ts",
+    "package.json",
+    "src/app/settings/settings-client.tsx",
+    "src/lib/version.ts",
+    "test/production-deploy-contract.test.ts",
+    "test/local-release-candidate.test.ts",
+    "test/production-preserve-deploy-contract.test.ts",
+    "test/production-preserve-deploy-state-machine.test.ts",
+}
+changed = {line for line in sys.stdin.read().splitlines() if line}
+raise SystemExit(0 if changed <= allowed else 1)
+' <<<"$changed_paths" || return 1
+  SOURCE_REVISION=$source_revision
+  TARGET_REVISION=$target_revision
+}
+
+verify_ci_for_revision() {
+  local revision=$1 tag=$2 runs_url runs_json
+  runs_url="https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$revision&per_page=100"
+  runs_json=$(curl --fail --silent --show-error \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'X-GitHub-Api-Version: 2022-11-28' "$runs_url") || return 1
+  python3 -c '
+import json, sys
+payload = json.load(sys.stdin)
+revision, tag = sys.argv[1:3]
+accepted = any(
+    run.get("head_sha") == revision and
+    run.get("head_branch") == tag and
+    run.get("event") == "push" and
+    run.get("status") == "completed" and
+    run.get("conclusion") == "success"
+    for run in payload.get("workflow_runs", [])
+)
+raise SystemExit(0 if accepted else 1)
+' "$revision" "$tag" <<<"$runs_json"
+}
+
+capture_pgdata_identity() {
+  local config_json configured_volume attached published_ports
+  config_json=$(compose config --format json) || return 1
+  configured_volume=$(python3 -c '
+import json, sys
+config = json.load(sys.stdin)
+mounts = [m for m in config["services"]["postgres"]["volumes"] if m.get("type") == "volume" and m.get("target") == "/var/lib/postgresql"]
+physical = config["volumes"]["ai_project_os_pgdata"].get("name")
+if len(mounts) != 1 or mounts[0].get("source") != "ai_project_os_pgdata" or not isinstance(physical, str):
+    raise SystemExit(1)
+print(physical)
+' <<<"$config_json") || return 1
+PGDATA_VOLUME=$(read_env_value AI_PROJECT_OS_PGDATA_VOLUME ai-project-os-pgdata) || return 1
+[[ "$configured_volume" == "$PGDATA_VOLUME" ]] || return 1
+PGDATA_MOUNT=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}|{{.Type}}{{end}}{{end}}' "$POSTGRES_ID") || return 1
+[[ "$PGDATA_MOUNT" == "$PGDATA_VOLUME|volume" ]] || return 1
+published_ports=$(docker inspect --format '{{json (index .NetworkSettings.Ports "5432/tcp")}}' "$POSTGRES_ID") || return 1
+python3 -c '
+import json, sys
+bindings = json.load(sys.stdin)
+ok = (
+    isinstance(bindings, list) and len(bindings) == 1 and
+    isinstance(bindings[0], dict) and bindings[0].get("HostIp") == "127.0.0.1" and
+    isinstance(bindings[0].get("HostPort"), str) and bindings[0]["HostPort"].isdigit()
+)
+raise SystemExit(0 if ok else 1)
+' <<<"$published_ports" || return 1
+PGDATA_CREATED_AT=$(docker volume inspect --format '{{.CreatedAt}}' "$PGDATA_VOLUME") || return 1
+PGDATA_LABELS=$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$PGDATA_VOLUME") || return 1
+[[ "$PGDATA_LABELS" == "$COMPOSE_PROJECT|ai_project_os_pgdata" ]] || return 1
+attached=$(docker ps -aq --no-trunc --filter "volume=$PGDATA_VOLUME") || return 1
+PGDATA_CONSUMERS=$(tr '\n' ' ' <<<"$attached" | sed 's/[[:space:]]*$//')
+[[ "$PGDATA_CONSUMERS" == "$POSTGRES_ID" ]] || return 1
+}
+
+verify_pgdata_identity_unchanged() {
+  local current_mount current_created current_labels attached
+  [[ "$(docker inspect --format '{{.State.Status}}' "$POSTGRES_ID")" == running ]] || return 1
+  current_mount=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}|{{.Type}}{{end}}{{end}}' "$POSTGRES_ID") || return 1
+  current_created=$(docker volume inspect --format '{{.CreatedAt}}' "$PGDATA_VOLUME") || return 1
+  current_labels=$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$PGDATA_VOLUME") || return 1
+  attached=$(docker ps -aq --no-trunc --filter "volume=$PGDATA_VOLUME") || return 1
+  [[ "$current_mount" == "$PGDATA_MOUNT" && "$current_created" == "$PGDATA_CREATED_AT" &&
+    "$current_labels" == "$PGDATA_LABELS" && "$(tr '\n' ' ' <<<"$attached" | sed 's/[[:space:]]*$//')" == "$PGDATA_CONSUMERS" ]]
+}
+
+read_database_snapshot() {
+  local snapshot
+  snapshot=$(docker exec "$POSTGRES_ID" sh -ec \
+    'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -X -A -t -v ON_ERROR_STOP=1 -c "$1"' sh \
+    'SELECT (SELECT count(*) FROM "AppUser") || '"'"'|'"'"' || (SELECT count(*) FROM "AppUser" WHERE "role" = '"'"'admin'"'"') || '"'"'|'"'"' || (SELECT count(*) FROM "Workspace") || '"'"'|'"'"' || (SELECT count(*) FROM "AiProviderConnection") || '"'"'|'"'"' || (SELECT count(*) FROM "PlatformTokenGrant");') || return 1
+  snapshot=$(tr -d '[:space:]' <<<"$snapshot")
+  [[ "$snapshot" =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+$ ]] || return 1
+  printf '%s' "$snapshot"
+}
+
+read_migration_snapshot() {
+  local snapshot
+  snapshot=$(docker exec "$POSTGRES_ID" sh -ec \
+    'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -X -A -t -v ON_ERROR_STOP=1 -c "$1"' sh \
+    'SELECT (SELECT count(*) FROM "_prisma_migrations") || '"'"'|'"'"' || (SELECT count(*) FROM "_prisma_migrations" WHERE "finished_at" IS NOT NULL) || '"'"'|'"'"' || (SELECT count(*) FROM "_prisma_migrations" WHERE "rolled_back_at" IS NOT NULL) || '"'"'|'"'"' || (SELECT count(*) FROM "_prisma_migrations" WHERE "finished_at" IS NULL AND "rolled_back_at" IS NULL);') || return 1
+  snapshot=$(tr -d '[:space:]' <<<"$snapshot")
+  [[ "$snapshot" == "$EXPECTED_MIGRATION_COUNT|$EXPECTED_MIGRATION_COUNT|0|0" ]] || return 1
+  printf '%s' "$snapshot"
+}
+
+assert_data_snapshot_not_decreased() {
+  local current_snapshot=$1
+  python3 -c '
+import sys
+before = [int(value) for value in sys.argv[1].split("|")]
+after = [int(value) for value in sys.argv[2].split("|")]
+raise SystemExit(0 if len(before) == len(after) == 5 and all(new >= old for old, new in zip(before, after)) else 1)
+' "$DATA_SNAPSHOT_BEFORE" "$current_snapshot"
+}
+
+assert_maintenance_isolation() {
+  local -a running=()
+  mapfile -t running < <(docker ps --no-trunc -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT")
+  (( ${#running[@]} == 1 && "${running[0]}" == "$POSTGRES_ID" ))
+}
+
+stop_source_writers() {
+  docker stop "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null || return 1
+  [[ "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_APP_ID")" == false:false ]] || return 1
+  [[ "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_WORKER_ID")" == false:false ]] || return 1
+  assert_maintenance_isolation
+}
+
+drain_postgres_clients() {
+  local attempt client_count
+  for attempt in $(seq 1 "$POSTGRES_CLIENT_DRAIN_ATTEMPTS"); do
+    client_count=$(timeout "$POSTGRES_CLIENT_DRAIN_TIMEOUT_SECONDS" docker exec "$POSTGRES_ID" sh -ec \
+      'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -X -A -t -v ON_ERROR_STOP=1 -c "$1"' sh \
+      'SELECT count(*)::text FROM pg_catalog.pg_stat_activity WHERE datname = pg_catalog.current_database() AND backend_type = '"'"'client backend'"'"' AND pid <> pg_catalog.pg_backend_pid();') || return 1
+    client_count=$(tr -d '[:space:]' <<<"$client_count")
+    [[ "$client_count" =~ ^[0-9]+$ ]] || return 1
+    [[ "$client_count" == 0 ]] && return 0
+    [[ "$attempt" == "$POSTGRES_CLIENT_DRAIN_ATTEMPTS" ]] || sleep "$POSTGRES_CLIENT_DRAIN_INTERVAL_SECONDS"
+  done
+  return 1
+}
+
+wait_for_source_writers() {
+  local attempt body
+  for attempt in $(seq 1 60); do
+    if [[ "$(container_health "$OLD_APP_ID" 2>/dev/null || true)" == healthy &&
+      "$(container_health "$OLD_WORKER_ID" 2>/dev/null || true)" == healthy ]] &&
+      body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health 2>/dev/null) &&
+      verify_health_body "$body" "$SOURCE_VERSION"; then
+      verify_public_health "$SOURCE_VERSION" || return 1
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+wait_for_writer_ids() {
+  local version=$1 app_id=$2 worker_id=$3 attempt body
+  for attempt in $(seq 1 60); do
+    if [[ "$(docker inspect --format '{{.State.Status}}:{{.State.Paused}}' "$app_id" 2>/dev/null || true)" == running:false &&
+      "$(docker inspect --format '{{.State.Status}}:{{.State.Paused}}' "$worker_id" 2>/dev/null || true)" == running:false &&
+      "$(container_health "$app_id" 2>/dev/null || true)" == healthy &&
+      "$(container_health "$worker_id" 2>/dev/null || true)" == healthy ]] &&
+      body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health 2>/dev/null) &&
+      verify_health_body "$body" "$version"; then
+      STACK_HEALTH=$body
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+restart_source_writers() {
+  docker start "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null || return 1
+  wait_for_source_writers
+}
+
+rollback_to_source() {
+  local source_config_status
+  ensure_repository_clean || return 1
+  git -C "$REPOSITORY_DIR" checkout --detach --force "$SOURCE_REVISION" || return 1
+  [[ -z "$(git -C "$REPOSITORY_DIR" status --porcelain)" ]] || return 1
+  source_config_status=0
+  compose config --quiet || source_config_status=$?
+  (( source_config_status == 0 )) || return 1
+  docker tag "$OLD_APP_IMAGE_ID" "$OLD_APP_IMAGE_REF" || return 1
+  docker tag "$OLD_WORKER_IMAGE_ID" "$OLD_WORKER_IMAGE_REF" || return 1
+  compose up -d --no-deps --no-build --force-recreate app worker || return 1
+  OLD_APP_ID=$(require_single_stack_container app) || return 1
+  OLD_WORKER_ID=$(require_single_stack_container worker) || return 1
+  [[ "$(docker inspect --format '{{.Image}}' "$OLD_APP_ID")" == "$OLD_APP_IMAGE_ID" ]] || return 1
+  [[ "$(docker inspect --format '{{.Image}}' "$OLD_WORKER_ID")" == "$OLD_WORKER_IMAGE_ID" ]] || return 1
+  wait_for_writer_ids "$SOURCE_VERSION" "$OLD_APP_ID" "$OLD_WORKER_ID" || return 1
+  verify_public_health "$SOURCE_VERSION" || return 1
+  assert_data_snapshot_not_decreased "$(read_database_snapshot)" || return 1
+  [[ "$(read_migration_snapshot)" == "$MIGRATION_SNAPSHOT_BEFORE" ]] || return 1
+  verify_pgdata_identity_unchanged || return 1
+  printf 'PRESERVE_DEPLOY_ROLLBACK_OK tag=%s data_snapshot=%s migration_ledger=%s\n' \
+    "$SOURCE_TAG" "$DATA_SNAPSHOT_BEFORE" "$MIGRATION_SNAPSHOT_BEFORE"
+}
+
+quiesce_current_writers_after_rollback_failure() {
+  local writer_ids remaining_app_ids remaining_worker_ids writer_id
+  writer_ids=$(
+    {
+      docker ps --no-trunc -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+        --filter "label=com.docker.compose.service=app"
+      docker ps --no-trunc -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+        --filter "label=com.docker.compose.service=worker"
+    } | sort -u
+  ) || return 1
+
+  while IFS= read -r writer_id; do
+    [[ -z "$writer_id" ]] && continue
+    [[ "$writer_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [[ "$writer_id" != "$POSTGRES_ID" ]] || return 1
+    docker stop "$writer_id" >/dev/null || return 1
+  done <<<"$writer_ids"
+
+  remaining_app_ids=$(docker ps --no-trunc -q \
+    --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=app") || return 1
+  remaining_worker_ids=$(docker ps --no-trunc -q \
+    --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+    --filter "label=com.docker.compose.service=worker") || return 1
+  [[ -z "$remaining_app_ids" && -z "$remaining_worker_ids" ]] || return 1
+  assert_maintenance_isolation
+}
+
+recover_on_failure() {
+  local exit_code=$? recovery_status
+  trap - EXIT
+  if (( exit_code == 0 )); then
+    return 0
+  fi
+  set +e
+  if (( CUTOVER_ATTEMPTED == 1 )); then
+    rollback_to_source
+    recovery_status=$?
+    if (( recovery_status != 0 )); then
+      if quiesce_current_writers_after_rollback_failure; then
+        printf 'PRESERVE_DEPLOY_RECOVERY_REQUIRED phase=post-switch writers_stopped=true postgres_action=none pgdata_action=none data_backup_preserved=true\n' >&2
+      else
+        printf 'PRESERVE_DEPLOY_EMERGENCY phase=post-switch writers_may_be_running=true stop_verification_failed=true postgres_action=none pgdata_action=none data_backup_preserved=true action=manual_intervention_required\n' >&2
+      fi
+    fi
+  elif (( WRITER_RECOVERY_REQUIRED == 1 )); then
+    restart_source_writers
+    recovery_status=$?
+    if (( recovery_status != 0 )); then
+      printf 'PRESERVE_DEPLOY_RECOVERY_REQUIRED phase=pre-switch old_writers_not_restarted=true data_backup_preserved=true\n' >&2
+    fi
+  fi
+  set -e
+  return "$exit_code"
+}
+
+[[ $EUID -eq 0 ]] || { printf 'PRESERVE_DEPLOY_ROOT_REQUIRED\n' >&2; exit 70; }
+[[ "$SOURCE_TAG" == v0.5.0-dev.1 && "$TARGET_TAG" == v0.5.0-dev.2 ]] || { printf 'PRESERVE_DEPLOY_TAG_INVALID\n' >&2; exit 64; }
+[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || { printf 'PRESERVE_DEPLOY_REVISION_INVALID\n' >&2; exit 65; }
+[[ "$CONFIRMATION_TOKEN" == "$REQUIRED_CONFIRMATION" ]] || { printf 'PRESERVE_DEPLOY_CONFIRMATION_INVALID\n' >&2; exit 64; }
+validate_environment || { printf 'PRESERVE_DEPLOY_ENV_INVALID\n' >&2; exit 70; }
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || { printf 'PRESERVE_DEPLOY_ALREADY_RUNNING\n' >&2; exit 75; }
+
+for required_command in chown curl date dirname docker flock git grep head install mktemp mv python3 rm sed seq sha256sum sleep sort stat timeout tr; do
+  command -v "$required_command" >/dev/null || { printf 'PRESERVE_DEPLOY_COMMAND_MISSING command=%s\n' "$required_command" >&2; exit 70; }
+done
+
+trap recover_on_failure EXIT
+
+resolve_release || { printf 'PRESERVE_DEPLOY_RELEASE_INVALID\n' >&2; exit 66; }
+verify_ci_for_revision "$SOURCE_REVISION" "$SOURCE_TAG" || { printf 'PRESERVE_DEPLOY_SOURCE_CI_NOT_FOUND\n' >&2; exit 72; }
+verify_ci_for_revision "$TARGET_REVISION" "$TARGET_TAG" || { printf 'PRESERVE_DEPLOY_TARGET_CI_NOT_FOUND\n' >&2; exit 72; }
+
+# The repository is switched only after all source checks pass. Existing
+# containers continue to run from their immutable .1 images during the build.
+ensure_repository_clean || { printf 'PRESERVE_DEPLOY_REPOSITORY_DIRTY\n' >&2; exit 70; }
+git -C "$REPOSITORY_DIR" checkout --detach --force "$SOURCE_REVISION" || { printf 'PRESERVE_DEPLOY_SOURCE_CHECKOUT_FAILED\n' >&2; exit 70; }
+compose config --quiet || { printf 'PRESERVE_DEPLOY_SOURCE_COMPOSE_INVALID\n' >&2; exit 70; }
+
+OLD_APP_ID=$(require_running_healthy_writer app) || { printf 'PRESERVE_DEPLOY_OLD_APP_INVALID\n' >&2; exit 69; }
+OLD_WORKER_ID=$(require_running_healthy_writer worker) || { printf 'PRESERVE_DEPLOY_OLD_WORKER_INVALID\n' >&2; exit 69; }
+POSTGRES_ID=$(require_running_healthy_writer postgres) || { printf 'PRESERVE_DEPLOY_POSTGRES_INVALID\n' >&2; exit 69; }
+OLD_APP_IMAGE_ID=$(docker inspect --format '{{.Image}}' "$OLD_APP_ID") || exit 69
+OLD_WORKER_IMAGE_ID=$(docker inspect --format '{{.Image}}' "$OLD_WORKER_ID") || exit 69
+OLD_APP_IMAGE_REF=$(docker inspect --format '{{.Config.Image}}' "$OLD_APP_ID") || exit 69
+OLD_WORKER_IMAGE_REF=$(docker inspect --format '{{.Config.Image}}' "$OLD_WORKER_ID") || exit 69
+[[ "$OLD_APP_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ && "$OLD_WORKER_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 69
+[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$OLD_APP_IMAGE_ID")" == "$SOURCE_VERSION" ]] || exit 69
+[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$OLD_WORKER_IMAGE_ID")" == "$SOURCE_VERSION" ]] || exit 69
+capture_pgdata_identity || { printf 'PRESERVE_DEPLOY_PGDATA_IDENTITY_INVALID\n' >&2; exit 70; }
+DATA_SNAPSHOT_BEFORE=$(read_database_snapshot) || { printf 'PRESERVE_DEPLOY_DATA_SNAPSHOT_INVALID\n' >&2; exit 70; }
+MIGRATION_SNAPSHOT_BEFORE=$(read_migration_snapshot) || { printf 'PRESERVE_DEPLOY_MIGRATION_LEDGER_INVALID\n' >&2; exit 70; }
+
+source_health=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health) || { printf 'PRESERVE_DEPLOY_SOURCE_LOCAL_HEALTH_UNAVAILABLE\n' >&2; exit 69; }
+verify_health_body "$source_health" "$SOURCE_VERSION" || { printf 'PRESERVE_DEPLOY_SOURCE_LOCAL_HEALTH_INVALID\n' >&2; exit 69; }
+verify_public_health "$SOURCE_VERSION" || { printf 'PRESERVE_DEPLOY_SOURCE_PUBLIC_HEALTH_INVALID\n' >&2; exit 69; }
+
+ensure_repository_clean || { printf 'PRESERVE_DEPLOY_REPOSITORY_DIRTY\n' >&2; exit 70; }
+git -C "$REPOSITORY_DIR" checkout --detach --force "$TARGET_REVISION" || { printf 'PRESERVE_DEPLOY_TARGET_CHECKOUT_FAILED\n' >&2; exit 70; }
+compose config --quiet || { printf 'PRESERVE_DEPLOY_TARGET_COMPOSE_INVALID\n' >&2; exit 70; }
+compose build app worker || { printf 'PRESERVE_DEPLOY_IMAGE_BUILD_FAILED\n' >&2; exit 73; }
+TARGET_APP_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$OLD_APP_IMAGE_REF") || exit 73
+TARGET_WORKER_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$OLD_WORKER_IMAGE_REF") || exit 73
+[[ "$TARGET_APP_IMAGE_ID" != "$OLD_APP_IMAGE_ID" && "$TARGET_WORKER_IMAGE_ID" != "$OLD_WORKER_IMAGE_ID" ]] || { printf 'PRESERVE_DEPLOY_IMAGE_NOT_REBUILT\n' >&2; exit 73; }
+[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$TARGET_APP_IMAGE_ID")" == "$TARGET_VERSION" ]] || exit 73
+[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$TARGET_WORKER_IMAGE_ID")" == "$TARGET_VERSION" ]] || exit 73
+
+WRITER_RECOVERY_REQUIRED=1
+ensure_repository_clean || { printf 'PRESERVE_DEPLOY_REPOSITORY_DIRTY_BEFORE_STOP\n' >&2; exit 70; }
+stop_source_writers || { printf 'PRESERVE_DEPLOY_OLD_WRITER_STOP_FAILED\n' >&2; exit 69; }
+drain_postgres_clients || { printf 'PRESERVE_DEPLOY_POSTGRES_CLIENT_DRAIN_FAILED\n' >&2; exit 69; }
+DATA_SNAPSHOT_BEFORE=$(read_database_snapshot) || { printf 'PRESERVE_DEPLOY_STOPPED_DATA_SNAPSHOT_INVALID\n' >&2; exit 70; }
+MIGRATION_SNAPSHOT_BEFORE=$(read_migration_snapshot) || { printf 'PRESERVE_DEPLOY_STOPPED_MIGRATION_LEDGER_INVALID\n' >&2; exit 70; }
+
+test -x "$BACKUP_SCRIPT" || { printf 'PRESERVE_DEPLOY_BACKUP_SCRIPT_MISSING\n' >&2; exit 70; }
+backup_output=$(AI_PROJECT_OS_DEPLOY_LOCK_HELD=1 AI_PROJECT_OS_CUTOVER=1 \
+  AI_PROJECT_OS_CUTOVER_LOCK_HELD=1 AI_PROJECT_OS_EXPECTED_APP_ID="$OLD_APP_ID" \
+  AI_PROJECT_OS_EXPECTED_WORKER_ID="$OLD_WORKER_ID" \
+  "$BACKUP_SCRIPT" pre-deploy "$TARGET_TAG") || { printf 'PRESERVE_DEPLOY_BACKUP_FAILED\n' >&2; exit 69; }
+printf '%s\n' "$backup_output"
+grep -Eq '^BACKUP_OK .* source_quiesced=true$' <<<"$backup_output" || { printf 'PRESERVE_DEPLOY_BACKUP_NOT_QUIESCED\n' >&2; exit 69; }
+grep -Eq '^BACKUP_COS_OBJECT_VERIFIED type=archive ' <<<"$backup_output" || { printf 'PRESERVE_DEPLOY_BACKUP_ARCHIVE_UNVERIFIED\n' >&2; exit 69; }
+grep -Eq '^BACKUP_COS_OBJECT_VERIFIED type=manifest ' <<<"$backup_output" || { printf 'PRESERVE_DEPLOY_BACKUP_MANIFEST_UNVERIFIED\n' >&2; exit 69; }
+BACKUP_PATH=$(sed -n 's/^BACKUP_OK .* source=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+BACKUP_OBJECT=$(sed -n 's/^BACKUP_OK .* object=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+BACKUP_MANIFEST=$(sed -n 's/^BACKUP_OK .* verified_manifest=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+[[ "$BACKUP_PATH" =~ ^/var/backups/ai-project-os/[^/]+$ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_PATH_INVALID\n' >&2; exit 69; }
+[[ "$BACKUP_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_OBJECT_INVALID\n' >&2; exit 69; }
+[[ "$BACKUP_MANIFEST" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.2\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.2\.[A-Za-z0-9]{6}\.manifest\.json$ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_MANIFEST_INVALID\n' >&2; exit 69; }
+
+verify_pgdata_identity_unchanged || { printf 'PRESERVE_DEPLOY_PRE_SWITCH_PGDATA_CHANGED\n' >&2; exit 69; }
+CUTOVER_ATTEMPTED=1
+compose up -d --no-deps --no-build --force-recreate app worker || { printf 'PRESERVE_DEPLOY_WRITER_CUTOVER_FAILED\n' >&2; exit 74; }
+NEW_APP_ID=$(require_single_stack_container app) || { printf 'PRESERVE_DEPLOY_TARGET_APP_INVALID\n' >&2; exit 74; }
+NEW_WORKER_ID=$(require_single_stack_container worker) || { printf 'PRESERVE_DEPLOY_TARGET_WORKER_INVALID\n' >&2; exit 74; }
+[[ "$NEW_APP_ID" != "$OLD_APP_ID" && "$NEW_WORKER_ID" != "$OLD_WORKER_ID" ]] || { printf 'PRESERVE_DEPLOY_TARGET_WRITERS_NOT_REPLACED\n' >&2; exit 74; }
+[[ "$(docker inspect --format '{{.Image}}' "$NEW_APP_ID")" == "$TARGET_APP_IMAGE_ID" ]] || { printf 'PRESERVE_DEPLOY_TARGET_APP_IMAGE_INVALID\n' >&2; exit 74; }
+[[ "$(docker inspect --format '{{.Image}}' "$NEW_WORKER_ID")" == "$TARGET_WORKER_IMAGE_ID" ]] || { printf 'PRESERVE_DEPLOY_TARGET_WORKER_IMAGE_INVALID\n' >&2; exit 74; }
+wait_for_writer_ids "$TARGET_VERSION" "$NEW_APP_ID" "$NEW_WORKER_ID" || { printf 'PRESERVE_DEPLOY_TARGET_LOCAL_HEALTH_INVALID\n' >&2; exit 74; }
+data_snapshot_after=$(read_database_snapshot) || { printf 'PRESERVE_DEPLOY_DATA_SNAPSHOT_INVALID\n' >&2; exit 74; }
+assert_data_snapshot_not_decreased "$data_snapshot_after" || { printf 'PRESERVE_DEPLOY_DATA_DECREASED\n' >&2; exit 74; }
+[[ "$(read_migration_snapshot)" == "$MIGRATION_SNAPSHOT_BEFORE" ]] || { printf 'PRESERVE_DEPLOY_MIGRATION_LEDGER_CHANGED\n' >&2; exit 74; }
+verify_pgdata_identity_unchanged || { printf 'PRESERVE_DEPLOY_POST_SWITCH_PGDATA_CHANGED\n' >&2; exit 74; }
+verify_public_health "$TARGET_VERSION" || { printf 'PRESERVE_DEPLOY_TARGET_PUBLIC_HEALTH_INVALID\n' >&2; exit 74; }
+[[ -n "$STACK_HEALTH" ]] || { printf 'PRESERVE_DEPLOY_TARGET_LOCAL_HEALTH_UNRECORDED\n' >&2; exit 74; }
+
+WRITER_RECOVERY_REQUIRED=0
+completed_at=$(date -Is)
+install -d -o root -g root -m 0700 "$(dirname "$RESULT_FILE")"
+result_tmp=$(mktemp "$(dirname "$RESULT_FILE")/.last-preserve-deployment.XXXXXX")
+{
+  printf 'PRESERVE_DEPLOY_OK\n'
+  printf 'source_tag=%s\n' "$SOURCE_TAG"
+  printf 'target_tag=%s\n' "$TARGET_TAG"
+  printf 'revision=%s\n' "$EXPECTED_REVISION"
+  printf 'postgres_container=%s\n' "$POSTGRES_ID"
+  printf 'pgdata_volume=%s\n' "$PGDATA_VOLUME"
+  printf 'migration_ledger=%s\n' "$MIGRATION_SNAPSHOT_BEFORE"
+  printf 'data_snapshot=%s\n' "$DATA_SNAPSHOT_BEFORE"
+  printf 'data_snapshot_after=%s\n' "$data_snapshot_after"
+  printf 'backup=%s\n' "$BACKUP_PATH"
+  printf 'backup_object=%s\n' "$BACKUP_OBJECT"
+  printf 'backup_manifest=%s\n' "$BACKUP_MANIFEST"
+  printf 'health=%s\n' "$STACK_HEALTH"
+  printf 'completed_at=%s\n' "$completed_at"
+} > "$result_tmp"
+chmod 600 "$result_tmp"
+mv -f -- "$result_tmp" "$RESULT_FILE"
+
+printf 'PRESERVE_DEPLOY_OK source=%s target=%s revision=%s backup=%s backup_object=%s backup_manifest=%s postgres=%s pgdata=%s\n' \
+  "$SOURCE_TAG" "$TARGET_TAG" "$EXPECTED_REVISION" "$BACKUP_PATH" "$BACKUP_OBJECT" "$BACKUP_MANIFEST" "$POSTGRES_ID" "$PGDATA_VOLUME"

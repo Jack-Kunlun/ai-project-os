@@ -6,7 +6,7 @@ on:
       tag:
         description: Exact approved annotated release tag
         required: true
-        default: v0.5.0-dev.1
+        default: v0.5.0-dev.2
         type: string
 
 permissions:
@@ -45,20 +45,39 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$DEPLOY_TAG_INPUT" != v0.5.0-dev.1 ]]; then
+          if [[ "$DEPLOY_TAG_INPUT" != v0.5.0-dev.2 ]]; then
             echo "DEPLOY_TAG_INVALID" >&2
             exit 64
           fi
 
           git fetch --force --no-tags origin \
+            "refs/tags/v0.5.0-dev.1:refs/tags/v0.5.0-dev.1" \
             "refs/tags/$DEPLOY_TAG_INPUT:refs/tags/$DEPLOY_TAG_INPUT"
 
-          if [[ "$(git cat-file -t "refs/tags/$DEPLOY_TAG_INPUT")" != tag ]]; then
+          if [[ "$(git cat-file -t refs/tags/v0.5.0-dev.1)" != tag ||
+            "$(git cat-file -t "refs/tags/$DEPLOY_TAG_INPUT")" != tag ]]; then
             echo "DEPLOY_TAG_NOT_ANNOTATED" >&2
             exit 65
           fi
 
+          source_sha=$(git rev-parse "refs/tags/v0.5.0-dev.1^{}")
           deploy_sha=$(git rev-parse "refs/tags/$DEPLOY_TAG_INPUT^{}")
+          if [[ "$source_sha" == "$deploy_sha" ]]; then
+            echo "DEPLOY_SOURCE_TARGET_MUST_DIFFER" >&2
+            exit 66
+          fi
+          if ! git merge-base --is-ancestor "$source_sha" "$deploy_sha"; then
+            echo "DEPLOY_SOURCE_TARGET_NOT_LINEAR" >&2
+            exit 66
+          fi
+          if [[ -n "$(git rev-list --merges "$source_sha..$deploy_sha")" ]]; then
+            echo "DEPLOY_SOURCE_TARGET_HAS_MERGE_COMMITS" >&2
+            exit 66
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$deploy_sha" ]]; then
+            echo "DEPLOY_MAIN_HEAD_MISMATCH" >&2
+            exit 66
+          fi
           package_version=$(git show "$deploy_sha:package.json" | node -e \
             "let value='';process.stdin.on('data',chunk=>value+=chunk);process.stdin.on('end',()=>process.stdout.write(JSON.parse(value).version));")
 
@@ -86,6 +105,26 @@ jobs:
             )' <<<"$runs_json" >/dev/null; then
             echo "DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND" >&2
             exit 67
+          fi
+
+          source_runs_url="https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$source_sha&per_page=100"
+          source_runs_json=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$source_runs_url")
+          if ! jq --exit-status \
+            --arg sha "$source_sha" \
+            --arg tag "v0.5.0-dev.1" \
+            '.workflow_runs | any(
+              .head_sha == $sha and
+              .head_branch == $tag and
+              .event == "push" and
+              .status == "completed" and
+              .conclusion == "success"
+            )' <<<"$source_runs_json" >/dev/null; then
+            echo "DEPLOY_SOURCE_TAG_SUCCESSFUL_CI_NOT_FOUND" >&2
+            exit 68
           fi
 
           printf 'DEPLOY_TAG=%s\n' "$DEPLOY_TAG_INPUT" >> "$GITHUB_ENV"
@@ -155,7 +194,7 @@ jobs:
           fi
           printf '%s\n' "$config_output"
 
-      - name: Create verified offsite backup and clean-reset deploy through forced-command gateway
+      - name: Create verified offsite backup and preserve-data deploy through forced-command gateway
         run: |
           set -euo pipefail
           umask 077
@@ -172,7 +211,7 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=6 \
             "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
-                "clean-deploy $DEPLOY_TAG $DEPLOY_SHA CONFIRM_CLEAN_RESET_V1" 2>&1 | tee "$deployment_output_file"
+                "preserve-deploy v0.5.0-dev.1 $DEPLOY_TAG $DEPLOY_SHA CONFIRM_PRESERVE_DATA_V1" 2>&1 | tee "$deployment_output_file"
           pipeline_status=("${PIPESTATUS[@]}")
           set -e
 
@@ -184,9 +223,10 @@ jobs:
             exit 74
           fi
 
-          grep -q '^CLEAN_DEPLOY_OK ' "$deployment_output_file"
+          grep -q '^PRESERVE_DEPLOY_OK ' "$deployment_output_file"
+          grep -q '^BACKUP_OK .* source_quiesced=true$' "$deployment_output_file"
 
-          backup_object=$(sed -n 's/^CLEAN_DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
+          backup_object=$(sed -n 's/^PRESERVE_DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
             "$deployment_output_file" | tail -n 1)
           if [[ ! "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]]; then
             echo "PRODUCTION_BACKUP_RESULT_INVALID" >&2

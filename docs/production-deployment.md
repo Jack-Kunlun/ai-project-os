@@ -1,6 +1,6 @@
 # GitHub Actions 生产部署
 
-状态：`CONTROLLED_PRERELEASE`。当前批准的生产目标是 `v0.5.0-dev.1`。该版本仍是预发布，不是稳定版或 GitHub Latest；工作流只对这一精确标签开放，旧 `v0.4.0-dev.1`、`v0.3.0-dev.1`、`v0.2.0-dev.1` 和其他 `-dev` 标签继续失败关闭。
+状态：`CONTROLLED_PRERELEASE`。当前批准的生产目标是 `v0.5.0-dev.2`。该版本仍是预发布，不是稳定版或 GitHub Latest；工作流只对这一精确标签开放，旧 `v0.5.0-dev.1` clean-reset 入口、`v0.4.0-dev.1`、`v0.3.0-dev.1`、`v0.2.0-dev.1` 和其他 `-dev` 标签继续失败关闭。
 
 AI Project OS 从 GitHub Actions 的 **Deploy production** 工作流手动部署已经通过标签 CI 的批准版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 
@@ -10,17 +10,23 @@ AI Project OS 从 GitHub Actions 的 **Deploy production** 工作流手动部署
 
 因此 v0.3 用户、配置、额度、审计、供应商连接和其他数据库记录不会被带入 v0.4；管理员必须在新数据库的 `/setup` 重新初始化并重新配置供应商、额度、审计基线和其他平台数据。备份是强制门禁，但 PostgreSQL 卷删除后不提供自动回滚；失败时保留备份与新栈现场，由管理员按验证过的备份恢复或修复。
 
+## v0.5.0-dev.2 preserve-data 边界
+
+`v0.5.0-dev.2` 只允许从已运行的 `v0.5.0-dev.1` 做一次性保留数据切换。部署器在旧 app/worker 继续服务时仅构建这两个新镜像；停止精确旧 writer 后排空数据库客户端，完成 `pre-deploy-to-v0.5.0-dev.2` 加密异地备份，再只重建 app/worker。它不会运行数据库迁移、principal bootstrap、reconcile，不会删除或重建 PostgreSQL 容器/卷，也不会执行 Compose down 或 Docker prune。
+
+切换前后必须保持同一 PostgreSQL 容器、PGDATA 物理卷名称、创建时间、Compose 标签和唯一挂载者，且 `_prisma_migrations` 为 106 条总计、106 条已完成、0 条回滚、0 条未完成；关键数据计数不得减少。切换失败时，部署器使用切换前捕获的旧镜像 ID 和源 checkout 自动恢复 `.1` app/worker；回退也失败时会按 Compose project/service 精确停止 app/worker，并验证只剩原 PostgreSQL 运行后输出 `PRESERVE_DEPLOY_RECOVERY_REQUIRED`。若停止或隔离验证失败，则输出 `PRESERVE_DEPLOY_EMERGENCY writers_may_be_running=true`，不得假定写入者已停止，必须立即人工处置。
+
 ## 安全模型
 
 - 工作流只能通过 `workflow_dispatch` 手动触发，并且必须从 `main` 运行。
-- 当前输入只接受 `v0.5.0-dev.1`，目标必须是 annotated tag，且 `package.json` 版本必须精确匹配 `0.5.0-dev.1`。
-- 部署前会通过 GitHub API 确认该标签、该精确提交的 `CI` push 运行已经 `completed/success`。
+- 当前输入只接受 `v0.5.0-dev.2`，目标必须是 annotated tag，且 `package.json` 版本必须精确匹配 `0.5.0-dev.2`；服务器同时固定核验不可变的 `.1` 源标签。
+- 部署前会通过 GitHub API 确认 `.1` 源标签和 `.2` 目标标签对应精确提交的 `CI` push 运行已经 `completed/success`。
 - GitHub 使用独立 ED25519 私钥；服务器对应公钥带 `restrict` 和 forced-command，不能获取 Shell、PTY、端口转发或执行任意命令。
-- forced-command 只接受 `clean-deploy v0.5.0-dev.1 <40 位 SHA> CONFIRM_CLEAN_RESET_V1`，再调用 root 持有的固定部署程序。专用系统账号 `ai-project-os-actions` 没有人工登录密钥；`deploy` 用户不加入 `docker` 组，也不获得无密码 sudo。
+- forced-command 只接受 `preserve-deploy v0.5.0-dev.1 v0.5.0-dev.2 <40 位 SHA> CONFIRM_PRESERVE_DATA_V1`，再调用 root 持有的固定部署程序；sudoers 不再开放 clean-deploy。专用系统账号 `ai-project-os-actions` 没有人工登录密钥；`deploy` 用户不加入 `docker` 组，也不获得无密码 sudo。
 - 服务器会再次通过 GitHub 公共 API 核验标签 CI，专用私钥本身不能绕过发布门禁。
 - 生产 `.env` 位于 `/etc/ai-project-os/production.env`，权限为 `root:root 0600`，不会进入仓库、Actions 日志或部署结果。
 - 候选镜像会在旧 app/worker 仍健康时完成预构建；部署器捕获精确健康容器 ID，停止旧 app/worker，确认维护窗口中只剩本项目的 PostgreSQL 并且端口只绑定 `127.0.0.1`，再以 stopped-writer cutover 模式调用 `pre-deploy` 备份。只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许继续；完整合同见[生产异地备份](production-backup.md)。
-- 备份成功后设置 mutation 标记并执行不带 `-v` 的 `docker compose down --remove-orphans`，检查 `AI_PROJECT_OS_PGDATA_VOLUME` 的 Compose 挂载、`com.docker.compose.project=ai-project-os` 和数据库卷角色标签，确认没有附着容器后仅删除该精确 PostgreSQL 卷。随后启动全新的 `postgres`、`principal-bootstrap`、`migrate`、`reconcile`、`app` 和 `worker`，等待初始化步骤退出成功、健康检查通过，并验证本地与公网 v0.5 健康、Worker `consecutiveFailures=0` 及 `/setup` 首位管理员表单。mutation 之前失败只恢复捕获的旧 ID；mutation 或卷删除之后绝不自动回启旧代码。
+- preserve-data 部署在验证备份后只执行 `docker compose up -d --no-deps --no-build --force-recreate app worker`；绝不执行 `docker compose down`、删除卷、Docker prune 或任何数据库初始化/迁移服务。
 - 同一时间只允许一个生产部署；GitHub 与服务器两侧均禁止并发覆盖。
 
 ## 一次性服务器准备
@@ -42,7 +48,7 @@ sudo deploy/production/install-production-deploy.sh \
 
 安装器会：
 
-1. 安装 root-owned 的 `/usr/local/sbin/ai-project-os-clean-deploy` 和 forced-command gateway。
+1. 安装 root-owned 的 `/usr/local/sbin/ai-project-os-preserve-deploy` 和 forced-command gateway；历史 clean-deploy 文件仅保留作受控恢复材料，不在 Actions sudoers 中开放。
 2. 使用 `visudo` 校验并安装只允许固定部署程序的 sudoers 规则。
 3. 把现有生产 `.env` 复制到 `/etc/ai-project-os/production.env`，设为 `root:root 0600`，同时收紧旧文件权限。
 4. 创建密码锁定的专用系统账号 `ai-project-os-actions`，只为该账号追加受限 Actions 公钥；现有 `deploy` 人工运维账号和公钥保持不变。
@@ -73,15 +79,15 @@ sudo deploy/production/install-production-deploy.sh \
 生产 job 在任何备份、迁移或容器替换之前，通过受限 SSH key 的固定
 `configure-github-oauth` 命令把 OAuth 配置经标准输入发送给 root-owned 配置器。配置器只接受固定三行协议，校验 GitHub 凭据格式、生产 `.env` 的 owner/mode、数据库密码与安全 Cookie 基线，把公开 origin 固定为 `https://ai-project-os.com`，并在同一目录原子替换 `/etc/ai-project-os/production.env`。Client Secret 不进入命令参数、Actions 输出、部署结果或仓库；远端只返回 `PRODUCTION_GITHUB_OAUTH_CONFIG_OK`。
 
-该命令需要服务器已经安装当前版本的受限网关、部署器和配置器。部署 `v0.5.0-dev.1` 前必须从受信候选源码重新运行 `install-production-deploy.sh`，使 root-owned 工具、106-entry fresh migration ledger 与精确 tag allowlist 同步更新；旧网关不接受该预发布标签。安装工具不会自动部署应用，配置 Environment 也不会绕过标签、CI、备份或数据库预检。
+该命令需要服务器已经安装当前版本的受限网关、preserve-data 部署器和配置器。部署 `v0.5.0-dev.2` 前必须从受信候选源码重新运行 `install-production-deploy.sh`，使 root-owned 工具、106-entry migration ledger 门禁与精确 tag allowlist 同步更新；旧网关不接受该 preserve 命令。安装工具不会自动部署应用，配置 Environment 也不会绕过标签、CI、备份或数据不变性预检。
 
 ## 部署流程
 
-在点击生产入口前，必须先用当前生产备份在隔离主机完成恢复演练，并确认备份归档、manifest、数据库权限、app、worker 和登录边界均通过。由于这是 clean reset，恢复演练不能被解释为把 v0.3 用户、配置、额度、审计或供应商数据迁入 v0.4。还必须确认生产服务器已安装本版本网关/部署器，Environment secrets/variables 完整。
+在点击生产入口前，必须先用当前生产备份在隔离主机完成恢复演练，并确认备份归档、manifest、数据库权限、app、worker 和登录边界均通过。保留数据切换不删除生产数据库，但回退所需的旧镜像 ID、源 checkout 和 PostgreSQL 身份证据必须可用。还必须确认生产服务器已安装本版本网关/部署器，Environment secrets/variables 完整。
 
 1. 打开 GitHub 仓库的 **Actions**。
 2. 选择 **Deploy production**。
-3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag 为 `v0.5.0-dev.1`。
+3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag 为 `v0.5.0-dev.2`。
 4. 如配置了 Environment 审批，批准该部署。
 5. 工作流才会依次完成标签/CI 验证、受限 SSH、加密异地备份、部署、公网健康与 HTTP→HTTPS 跳转验证。
 
@@ -91,9 +97,9 @@ sudo deploy/production/install-production-deploy.sh \
 
 - 标签 CI 缺失或失败：部署不会连接服务器。
 - SSH、本地备份、age 加密、COS 上传/远端校验、磁盘空间或当前容器状态异常：部署在迁移前失败关闭；失败备份没有远端成功标记，因此不会触发本地清理。
-- 预构建、停止、维护隔离或备份失败：mutation 尚未开始，部署器只重启已捕获的旧 app/worker ID，并保留已创建的备份。
-- 备份成功后 mutation 标记生效；新栈健康失败或 PostgreSQL 卷已删除时，工作流失败并保留备份与新栈现场，绝不自动回启旧代码或自动回滚数据库。
-- 人工恢复前先确认目标版本与备份 manifest，再从已验证备份恢复 PostgreSQL、主密钥和上传卷，或修复并重新执行 clean reset。
+- 预构建、停止、维护隔离或备份失败：切换尚未开始，部署器只重启已捕获的旧 app/worker ID，并保留已创建的备份。
+- app/worker 切换或健康检查失败：部署器恢复源 `.1` checkout 和捕获的旧镜像，并验证本地健康、数据计数、迁移 ledger 与 PGDATA 身份；回退失败时先隔离 app/worker 并输出 `PRESERVE_DEPLOY_RECOVERY_REQUIRED`。若 stop/隔离验证失败，输出 `PRESERVE_DEPLOY_EMERGENCY writers_may_be_running=true`，不得宣称写入者已停止，必须立即人工处置。
+- 人工恢复前先确认目标版本与备份 manifest；`.1` recovery 可以接受 `pre-deploy-to-v0.5.0-dev.2` 备份，未来 `.2` recovery 只接受 appVersion 与目标标签一致的备份。
 
 服务器只自动删除超过本地保留期、已通过远端验证并带 root-only 标记的旧备份，同时保留最小副本数；无标记的手工或失败备份不会删除。COS 生命周期仍需在定时运行、部署前备份和独立恢复均通过后另行配置。“成功上传备份”不等于“恢复已经验证”。
 

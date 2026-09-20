@@ -45,38 +45,39 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.match(workflow, /PRODUCTION_SSH_HOST_INVALID/u);
   assert.match(workflow, /ai-project-os-actions@\$PRODUCTION_SSH_HOST/u);
   assert.doesNotMatch(workflow, /38\.76\.205\.30/u);
-  assert.match(workflow, /"clean-deploy \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_CLEAN_RESET_V1"/u);
-  assert.match(workflow, /Create verified offsite backup and clean-reset deploy/u);
+  assert.match(workflow, /"preserve-deploy v0\.5\.0-dev\.1 \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_PRESERVE_DATA_V1"/u);
+  assert.match(workflow, /Create verified offsite backup and preserve-data deploy/u);
   assert.match(workflow, /PRODUCTION_BACKUP_RESULT_INVALID/u);
   assert.match(workflow, /DEPLOY_BACKUP_OBJECT/u);
   assert.match(workflow, /\.worker\.consecutiveFailures == 0/u);
   assert.ok(
     workflow.indexOf("Sync GitHub OAuth configuration through restricted stdin") <
-      workflow.indexOf("Create verified offsite backup and clean-reset deploy through forced-command gateway"),
+      workflow.indexOf("Create verified offsite backup and preserve-data deploy through forced-command gateway"),
     "production OAuth configuration must be synchronized before deployment starts",
   );
   assert.doesNotMatch(workflow, /configure-github-oauth[^\n]*(GITHUB_OAUTH_CLIENT_ID|GITHUB_OAUTH_CLIENT_SECRET)/u);
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
-test("production workflow enables only the explicitly approved v0.5.0-dev.1 prerelease", async () => {
+test("production workflow enables only the explicitly approved v0.5.0-dev.2 prerelease", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /default: v0\.5\.0-dev\.1/u);
+  assert.match(workflow, /default: v0\.5\.0-dev\.2/u);
   assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.1/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.2/u);
   assert.doesNotMatch(workflow, /&& false|DISABLED_BEFORE_V1_0_0|v1\.0\.0/u);
   assert.doesNotMatch(workflow, /DEPLOY_TAG_INPUT" =~ \^v/u);
 });
 
-test("forced-command gateway accepts only the exact clean reset or GitHub OAuth command", async () => {
+test("forced-command gateway accepts only the exact preserve-data or GitHub OAuth command", async () => {
   const gateway = await readFile(gatewayPath, "utf8");
 
   assert.match(gateway, /SSH_ORIGINAL_COMMAND/u);
   assert.match(gateway, /v0\\\.5\\\.0-dev\\\.1/u);
-  assert.match(gateway, /clean-deploy/u);
-  assert.match(gateway, /CONFIRM_CLEAN_RESET_V1/u);
-  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-clean-deploy/u);
+  assert.match(gateway, /v0\\\.5\\\.0-dev\\\.2/u);
+  assert.match(gateway, /preserve-deploy/u);
+  assert.match(gateway, /CONFIRM_PRESERVE_DATA_V1/u);
+  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-preserve-deploy/u);
   assert.match(gateway, /original_command.*== configure-github-oauth/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-configure-github-oauth/u);
   assert.match(gateway, /AI_PROJECT_OS_DEPLOY_COMMAND_DENIED/u);
@@ -553,7 +554,7 @@ test("backup quiesces writers, verifies encrypted COS objects, and deletes only 
   );
   assert.match(backup, /LOCAL_RETENTION_DAYS_DEFAULT=14/u);
   assert.match(backup, /LOCAL_MIN_VERIFIED_DEFAULT=3/u);
-  assert.match(backup, /pre-deploy-to-v0\\\.5\\\.0-dev\\\.1/u);
+  assert.match(backup, /pre-deploy-to-v0\\\.5\\\.0-dev\\\.\(1\|2\)/u);
   assert.doesNotMatch(backup, /pre-deploy-to-v0\\.3\\.0-dev\\.1/u);
   assert.match(backup, /\.cos-upload-verified/u);
   assert.match(backup, /ai-project-os-deploy\.lock/u);
@@ -905,7 +906,7 @@ test("installer keeps secrets root-only and installs a restricted Actions key", 
   assert.match(installer, /INSTALL_EXISTING_ACTIONS_KEY_INVALID/u);
   assert.match(installer, /visudo -cf/u);
   assert.deepEqual(sudoers.trim().split("\n"), [
-    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-clean-deploy",
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-preserve-deploy",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-github-oauth",
   ]);
 });

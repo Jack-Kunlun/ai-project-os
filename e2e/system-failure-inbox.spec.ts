@@ -2,27 +2,19 @@ import { randomUUID } from "node:crypto";
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Browser, Page } from "@playwright/test";
-import { createPasswordRecord } from "@/lib/auth";
-import { getDb } from "@/lib/db";
+import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 
 const BROWSER_ADMIN_PASSWORD = "BrowserGate2026Password!";
 const BROWSER_FAILURE_USER_PASSWORD = "BrowserFailureUser2026!";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 async function settleBrowserAdmin(page: Page): Promise<void> {
-  await expect(page).toHaveURL(/\/(?:onboarding|admin)$/u);
-  if (new URL(page.url()).pathname === "/onboarding") {
-    await page.getByLabel("Owner 用户名", { exact: true }).fill("browser_owner");
-    await page.getByLabel("初始密码", { exact: true }).fill("BrowserOwner2026Password!");
-    await page.getByLabel("确认密码", { exact: true }).fill("BrowserOwner2026Password!");
-    await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
-  }
   await expect(page).toHaveURL(/\/admin$/u);
 }
 
 async function signInBrowserAdmin(page: Page): Promise<void> {
   await page.goto("/setup");
-  await expect(page).toHaveURL(/\/(?:setup|login|onboarding|admin)$/u);
+  await expect(page).toHaveURL(/\/(?:setup|login|admin)$/u);
   const landingPath = new URL(page.url()).pathname;
   if (landingPath === "/setup") {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
@@ -38,10 +30,9 @@ async function signInBrowserAdmin(page: Page): Promise<void> {
 }
 
 async function seedFailureInboxUser(): Promise<{ username: string }> {
-  const db = getDb();
   const username = `failure-inbox-browser-${randomUUID().replaceAll("-", "").slice(0, 12)}`;
-  await db.appUser.create({ data: { username, role: "user", ...(await createPasswordRecord(BROWSER_FAILURE_USER_PASSWORD)) } });
-  return { username };
+  const user = await seedBrowserPersonalUser(username, BROWSER_FAILURE_USER_PASSWORD);
+  return { username: user.username };
 }
 
 test("administrator can open the read-only failure inbox and non-admins remain blocked", async ({ page, browser }: { page: Page; browser: Browser }) => {

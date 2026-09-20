@@ -158,7 +158,7 @@ done
 validate_ipv4 "$SOURCE_HOST" || fail 'MIGRATION_SOURCE_HOST_INVALID' 64
 validate_ipv4 "$TARGET_HOST" || fail 'MIGRATION_TARGET_HOST_INVALID' 64
 [[ "$SOURCE_HOST" != "$TARGET_HOST" ]] || fail 'MIGRATION_HOSTS_MUST_DIFFER' 64
-[[ "$RELEASE_TAG" == v0.4.0-dev.1 ]] || fail 'MIGRATION_TAG_INVALID' 64
+[[ "$RELEASE_TAG" == v0.5.0-dev.1 ]] || fail 'MIGRATION_TAG_INVALID' 64
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail 'MIGRATION_REVISION_INVALID' 65
 [[ "$LATEST_MANIFEST_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]*/manifests/latest\.json$ ]] ||
   fail 'MIGRATION_MANIFEST_OBJECT_INVALID' 64

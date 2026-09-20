@@ -17,8 +17,8 @@ readonly BACKUP_SCRIPT=/usr/local/sbin/ai-project-os-backup
 readonly PRODUCTION_COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
 readonly RESULT_FILE=/var/lib/ai-project-os/last-deployment
 readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
-readonly SOURCE_VERSION=0.3.0-dev.1
-readonly TARGET_VERSION=0.4.0-dev.1
+readonly SOURCE_VERSION=0.4.0-dev.1
+readonly TARGET_VERSION=0.5.0-dev.1
 readonly POSTGRES_CLIENT_DRAIN_ATTEMPTS=30
 readonly POSTGRES_CLIENT_DRAIN_INTERVAL_SECONDS=2
 readonly POSTGRES_CLIENT_DRAIN_TIMEOUT_SECONDS=10
@@ -42,7 +42,7 @@ fail() {
 }
 
 [[ $EUID -eq 0 ]] || fail CLEAN_DEPLOY_ROOT_REQUIRED 70
-[[ "$RELEASE_TAG" == v0.4.0-dev.1 ]] || fail CLEAN_DEPLOY_TAG_INVALID 64
+[[ "$RELEASE_TAG" == v0.5.0-dev.1 ]] || fail CLEAN_DEPLOY_TAG_INVALID 64
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail CLEAN_DEPLOY_REVISION_INVALID 65
 [[ "$CONFIRMATION_TOKEN" == "$REQUIRED_CONFIRMATION" ]] || fail CLEAN_DEPLOY_CONFIRMATION_INVALID 64
 
@@ -206,7 +206,7 @@ wait_for_old_writers() {
     if [[ "$app_state" == healthy && "$worker_state" == healthy ]]; then
       health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health || true)
       if grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body" &&
-        grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.3\.0-dev\.1"' <<<"$health_body" &&
+        grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.4\.0-dev\.1"' <<<"$health_body" &&
         grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body" &&
         grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"; then
         return 0
@@ -255,7 +255,7 @@ capture_source_writers() {
   source_health=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health) ||
     fail CLEAN_DEPLOY_SOURCE_LOCAL_HEALTH_UNAVAILABLE 69
   if ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$source_health" ||
-    ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.3\.0-dev\.1"' <<<"$source_health" ||
+    ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.4\.0-dev\.1"' <<<"$source_health" ||
     ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health" ||
     ! grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health"; then
     fail CLEAN_DEPLOY_SOURCE_LOCAL_HEALTH_INVALID 69
@@ -263,7 +263,7 @@ capture_source_writers() {
   public_health=$(curl --fail --silent --show-error https://ai-project-os.com/api/health) ||
     fail CLEAN_DEPLOY_SOURCE_PUBLIC_HEALTH_UNAVAILABLE 69
   if ! grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$public_health" ||
-    ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.3\.0-dev\.1"' <<<"$public_health" ||
+    ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.4\.0-dev\.1"' <<<"$public_health" ||
     ! grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$public_health"; then
     fail CLEAN_DEPLOY_SOURCE_PUBLIC_HEALTH_INVALID 69
   fi
@@ -343,7 +343,7 @@ backup_manifest=$(sed -n 's/^BACKUP_OK .* verified_manifest=\([^ ]*\) .*/\1/p' <
 backup_sha256=$(sed -n 's/^BACKUP_OK .* sha256=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
 [[ "$backup_path" =~ ^/var/backups/ai-project-os/[^/]+$ ]] || fail CLEAN_DEPLOY_PRE_BACKUP_PATH_INVALID 69
 [[ "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]] || fail CLEAN_DEPLOY_PRE_BACKUP_OBJECT_INVALID 69
-[[ "$backup_manifest" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.4\.0-dev\.1\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.4\.0-dev\.1\.[A-Za-z0-9]{6}\.manifest\.json$ ]] ||
+[[ "$backup_manifest" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.1\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.1\.[A-Za-z0-9]{6}\.manifest\.json$ ]] ||
   fail CLEAN_DEPLOY_PRE_BACKUP_VERIFIED_MANIFEST_INVALID 69
 [[ "$backup_sha256" =~ ^[0-9a-f]{64}$ ]] || fail CLEAN_DEPLOY_PRE_BACKUP_CRC_INVALID 69
 
@@ -481,7 +481,7 @@ wait_for_stack() {
       if [[ "$postgres_state" == healthy && "$principal_bootstrap_state" == exited:0 && "$migrate_state" == exited:0 && "$reconcile_state" == exited:0 && "$app_state" == healthy && "$worker_state" == healthy ]]; then
         health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)
         grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body"
-        grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.4\.0-dev\.1"' <<<"$health_body"
+        grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.5\.0-dev\.1"' <<<"$health_body"
         grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
         grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
         grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$health_body"
@@ -499,7 +499,7 @@ wait_for_stack
 
 postgres_id=$(compose ps -q postgres)
 migration_count=$(docker exec "$postgres_id" sh -ec 'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -X -A -t -c "$1"' sh 'SELECT count(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')
-[[ "$migration_count" =~ ^105$ ]] || fail CLEAN_DEPLOY_FRESH_MIGRATION_COUNT_INVALID 73
+[[ "$migration_count" =~ ^106$ ]] || fail CLEAN_DEPLOY_FRESH_MIGRATION_COUNT_INVALID 73
 
 setup_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/setup) || fail CLEAN_DEPLOY_SETUP_UNAVAILABLE 73
 grep -q 'First-run setup' <<<"$setup_body" || fail CLEAN_DEPLOY_SETUP_FIRST_ADMIN_NOT_REQUIRED 73
@@ -507,7 +507,7 @@ grep -q '创建管理员并进入' <<<"$setup_body" || fail CLEAN_DEPLOY_SETUP_F
 
 public_health=$(curl --fail --silent --show-error https://ai-project-os.com/api/health) || fail CLEAN_DEPLOY_PUBLIC_HEALTH_UNAVAILABLE 73
 grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_HEALTH_INVALID 73
-grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.4\.0-dev\.1"' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_VERSION_INVALID 73
+grep -Eq '"version"[[:space:]]*:[[:space:]]*"0\.5\.0-dev\.1"' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_VERSION_INVALID 73
 grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_DATABASE_INVALID 73
 grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_WORKER_INVALID 73
 grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$public_health" || fail CLEAN_DEPLOY_PUBLIC_WORKER_FAILURES_INVALID 73

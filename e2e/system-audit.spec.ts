@@ -3,9 +3,8 @@ import { mkdir } from "node:fs/promises";
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Browser, Locator, Page, Route } from "@playwright/test";
-import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
-import { createPasswordRecord } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 
 const BROWSER_ADMIN_PASSWORD = "BrowserGate2026Password!";
 const BROWSER_AUDIT_USER_PASSWORD = "BrowserAuditUser2026!";
@@ -31,19 +30,12 @@ type AuditFixture = Readonly<{
 }>;
 
 async function settleBrowserAdmin(page: Page): Promise<void> {
-  await expect(page).toHaveURL(/\/(?:onboarding|admin)$/u);
-  if (new URL(page.url()).pathname === "/onboarding") {
-    await page.getByLabel("Owner 用户名", { exact: true }).fill("browser_owner");
-    await page.getByLabel("初始密码", { exact: true }).fill("BrowserOwner2026Password!");
-    await page.getByLabel("确认密码", { exact: true }).fill("BrowserOwner2026Password!");
-    await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
-  }
   await expect(page).toHaveURL(/\/admin$/u);
 }
 
 async function signInBrowserAdmin(page: Page): Promise<void> {
   await page.goto("/setup");
-  await expect(page).toHaveURL(/\/(?:setup|login|onboarding|admin)$/u);
+  await expect(page).toHaveURL(/\/(?:setup|login|admin)$/u);
   const landingPath = new URL(page.url()).pathname;
   if (landingPath === "/setup") {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
@@ -54,8 +46,6 @@ async function signInBrowserAdmin(page: Page): Promise<void> {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
     await page.getByLabel("密码", { exact: true }).fill(BROWSER_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "登 录", exact: true }).click();
-  } else {
-    expect(["/onboarding", "/admin"]).toContain(landingPath);
   }
   await settleBrowserAdmin(page);
 }
@@ -69,24 +59,18 @@ async function seedSystemAuditFixture(): Promise<AuditFixture> {
   const db = getDb();
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
   const projectId = randomUUID();
-  const workspaceId = randomUUID();
   const policyRevisionId = randomUUID();
   const auditId = randomUUID();
-  const ordinaryUserId = randomUUID();
   const ordinaryUsername = `audit-viewer-${suffix}`;
   const fingerprint = "a".repeat(64);
-  const password = await createPasswordRecord(BROWSER_AUDIT_USER_PASSWORD);
   const browserAdmin = await db.appUser.findUniqueOrThrow({
     where: { username: "browser_admin" },
     select: { id: true, role: true, accountAccessVersion: true },
   });
   if (browserAdmin.role !== "admin") throw new Error("BROWSER_AUDIT_ADMIN_FIXTURE_INVALID");
 
-  const ordinaryUser = await db.appUser.create({
-    data: { id: ordinaryUserId, username: ordinaryUsername, role: "user", ...password },
-    select: { id: true, accountAccessVersion: true },
-  });
-  await db.workspace.create({ data: { id: workspaceId, name: `Browser audit ${suffix}`, slug: `browser-audit-${suffix}` } });
+  const ordinaryUser = await seedBrowserPersonalUser(ordinaryUsername, BROWSER_AUDIT_USER_PASSWORD);
+  const workspaceId = ordinaryUser.workspaceId;
   await db.project.create({ data: { id: projectId, workspaceId, name: `Browser audit ${suffix}`, slug: `browser-audit-${suffix}-project` } });
   await db.projectAiPolicyRevision.create({
     data: {
@@ -124,21 +108,12 @@ async function seedSystemAuditFixture(): Promise<AuditFixture> {
       createdAt: new Date(Date.now() - 60_000 - index * 1_000),
     })),
   });
-  const activation = await activateAccountEntitlements({
-    userId: ordinaryUser.id,
-    source: "localProvisioning",
-    actorId: browserAdmin.id,
-    actorAccountAccessVersion: browserAdmin.accountAccessVersion,
-    accountAccessVersion: ordinaryUser.accountAccessVersion,
-    evidenceKind: "browser-audit",
-    evidenceRef: `browser-audit:${ordinaryUser.id}`,
-  });
   const activationAudit = await db.accountEntitlementActivationAudit.findFirstOrThrow({
-    where: { activationId: activation.id },
+    where: { activationId: ordinaryUser.activationId },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: { id: true },
   });
-  return { auditId, activationAuditId: activationAudit.id, projectId, workspaceId, ordinaryUserId, ordinaryUsername };
+  return { auditId, activationAuditId: activationAudit.id, projectId, workspaceId, ordinaryUserId: ordinaryUser.id, ordinaryUsername };
 }
 
 function cleanupSystemAuditFixture(fixture: AuditFixture): Promise<void> {

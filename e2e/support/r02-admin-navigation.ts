@@ -1,10 +1,10 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
+import type { BrowserPersonalUser } from "./browser-fixtures";
 
 export const R02_VIEWPORTS = [1440, 1024, 768, 390] as const;
 export const R02_ADMIN_PASSWORD = "BrowserGate2026Password!";
-export const R02_OWNER_PASSWORD = "BrowserOwner2026Password!";
 const R02_WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 export const R02_PUBLIC_ROUTE_EXPECTATIONS = [
@@ -91,19 +91,12 @@ export function r02ProjectGuardRoutes(projectId: string): string[] {
 }
 
 export async function settleR02Admin(page: Page): Promise<void> {
-  await expect(page).toHaveURL(/\/(?:onboarding|admin)$/u);
-  if (new URL(page.url()).pathname === "/onboarding") {
-    await page.getByLabel("Owner 用户名", { exact: true }).fill("browser_owner");
-    await page.getByLabel("初始密码", { exact: true }).fill("BrowserOwner2026Password!");
-    await page.getByLabel("确认密码", { exact: true }).fill("BrowserOwner2026Password!");
-    await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
-  }
   await expect(page).toHaveURL(/\/admin$/u);
 }
 
 export async function signInR02Admin(page: Page): Promise<void> {
   await page.goto("/setup");
-  await expect(page).toHaveURL(/\/(?:setup|login|onboarding|admin)$/u);
+  await expect(page).toHaveURL(/\/(?:setup|login|admin)$/u);
   const pathname = new URL(page.url()).pathname;
   if (pathname === "/setup") {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
@@ -118,11 +111,11 @@ export async function signInR02Admin(page: Page): Promise<void> {
   await settleR02Admin(page);
 }
 
-export async function signInR02Owner(page: Page): Promise<void> {
+export async function signInR02PersonalUser(page: Page, user: BrowserPersonalUser): Promise<void> {
   await page.goto("/login");
   await expect(page).toHaveURL(/\/login$/u);
-  await page.getByLabel("用户名", { exact: true }).fill("browser_owner");
-  await page.getByLabel("密码", { exact: true }).fill(R02_OWNER_PASSWORD);
+  await page.getByLabel("用户名", { exact: true }).fill(user.username);
+  await page.getByLabel("密码", { exact: true }).fill(user.password);
   await page.getByRole("button", { name: "登 录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/u);
 }

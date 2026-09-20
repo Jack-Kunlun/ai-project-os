@@ -1,18 +1,17 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Prisma, type GitHubOauthIntent, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
-import { appendEmailVerificationAudit, createSessionInTransaction, DEFAULT_WORKSPACE_ID, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
+import { appendEmailVerificationAudit, createSessionInTransaction, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
 import { createCredential, readCredentialSecret } from "@/lib/credential-vault";
 import { assertEntitlementWriterSession, getDb, getEntitlementDb, isEntitlementDatabase } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
 import { lockActorAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
 import {
-  appendWorkspaceMembershipAudit,
   findCurrentWorkspaceMembership,
-  hasRevokedWorkspaceMembership,
   grantWorkspaceMembership,
 } from "@/lib/membership-governance";
 import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
+import { withSerializableRetry } from "@/lib/prisma-transaction";
 
 export const GITHUB_OAUTH_STATE_COOKIE_NAME = "ai_project_os_github_oauth_state" as const;
 
@@ -25,6 +24,7 @@ const ATTEMPT_LIFETIME_MS = 10 * 60 * 1_000;
 const MAX_ACTIVE_ATTEMPTS = 200;
 const ATTEMPT_LOCK_ID = 2_026_090_201;
 const PLATFORM_BOOTSTRAP_LOCK_ID = 781452903;
+const MAX_GITHUB_OAUTH_UNIQUE_RETRIES = 2;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_JSON_BYTES = 64 * 1_024;
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -67,7 +67,7 @@ type GitHubOAuthConfig = Readonly<{ clientId: string; clientSecret: string; publ
 type GitHubProfile = Readonly<{ githubUserId: bigint; login: string; email: string; displayName: string | null }>;
 type GitHubOAuthBootstrapClient = Readonly<{
   platformBootstrap: Readonly<{
-    findUnique: (args: Readonly<{ where: Readonly<{ id: string }>; select: Readonly<{ initialOwnerUserId: true; adminOnboardingCompletedAt: true }> }>) => Promise<Readonly<{ initialOwnerUserId: string | null; adminOnboardingCompletedAt: Date | null }> | null>;
+    findUnique: (args: Readonly<{ where: Readonly<{ id: string }>; select: Readonly<{ initialAdminUserId: true }> }>) => Promise<Readonly<{ initialAdminUserId: string | null }> | null>;
   }>;
 }>;
 
@@ -159,8 +159,8 @@ export async function getGitHubOAuthAvailability(
   if (configuration !== "available") return Object.freeze({ status: configuration, callbackPath: "/api/auth/github/callback" });
   try {
     const database = (db ?? getDb()) as unknown as GitHubOAuthBootstrapClient;
-    const bootstrap = await database.platformBootstrap.findUnique({ where: { id: "platform" }, select: { initialOwnerUserId: true, adminOnboardingCompletedAt: true } });
-    if (bootstrap === null || bootstrap.initialOwnerUserId === null || bootstrap.adminOnboardingCompletedAt === null) {
+    const bootstrap = await database.platformBootstrap.findUnique({ where: { id: "platform" }, select: { initialAdminUserId: true } });
+    if (bootstrap === null || bootstrap.initialAdminUserId === null) {
       return Object.freeze({ status: "bootstrapPending", callbackPath: "/api/auth/github/callback" });
     }
   } catch {
@@ -184,17 +184,17 @@ function canonicalLinkUserId(value: unknown, intent: GitHubOauthIntent): string 
 }
 
 /**
- * GitHub login is a user-domain capability.  Keep the bootstrap fence in the
- * same transaction as the eventual account/membership/entitlement writes so
- * an OAuth callback cannot race first-owner provisioning.
+ * GitHub login is a user-domain capability. Keep the platform-admin bootstrap
+ * fence in the same transaction as the eventual account/membership/entitlement
+ * writes so a callback cannot race application initialization.
  */
 async function assertPlatformBootstrapReady(db: Prisma.TransactionClient): Promise<void> {
   await db.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${PLATFORM_BOOTSTRAP_LOCK_ID})`);
   const bootstrap = await db.platformBootstrap.findUnique({
     where: { id: "platform" },
-    select: { initialOwnerUserId: true, adminOnboardingCompletedAt: true },
+    select: { initialAdminUserId: true },
   });
-  if (bootstrap === null || bootstrap.initialOwnerUserId === null || bootstrap.adminOnboardingCompletedAt === null) {
+  if (bootstrap === null || bootstrap.initialAdminUserId === null) {
     return fail("GITHUB_OAUTH_BOOTSTRAP_PENDING");
   }
 }
@@ -397,6 +397,268 @@ async function availableGitHubUsername(login: string, db: Prisma.TransactionClie
   return `github-${randomBytes(12).toString("hex")}`;
 }
 
+function personalWorkspaceName(username: string): string {
+  return `${username} 的工作区`;
+}
+
+function isGitHubSignupUniqueConflict(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") return false;
+  const target = error.meta && typeof error.meta === "object" && "target" in error.meta
+    ? (error.meta as { target?: unknown }).target
+    : undefined;
+  const targetName = Array.isArray(target) && target.length === 1
+    ? target[0]
+    : typeof target === "string"
+      ? target
+      : undefined;
+  const metaRecord = error.meta && typeof error.meta === "object" ? error.meta as Record<string, unknown> : null;
+  const driverAdapterError = metaRecord?.driverAdapterError;
+  const cause = driverAdapterError && typeof driverAdapterError === "object"
+    ? (driverAdapterError as Record<string, unknown>).cause
+    : null;
+  const constraint = cause && typeof cause === "object"
+    ? (cause as Record<string, unknown>).constraint
+    : null;
+  const constraintName = constraint && typeof constraint === "object"
+    ? (constraint as Record<string, unknown>).index
+    : undefined;
+  return [targetName, constraintName].some((name) => typeof name === "string" && [
+    "email",
+    "username",
+    "githubUserId",
+    "userId",
+    "AppUser_email_key",
+    "AppUser_username_key",
+    "GitHubIdentity_githubUserId_key",
+    "GitHubIdentity_userId_key",
+    "Workspace_slug_key",
+  ].includes(name));
+}
+
+/**
+ * Existing GitHub identities may predate personal workspaces.  A returning
+ * login repairs that legacy state only after the user already has at least one
+ * confirmed membership (checked by the caller), and never changes that
+ * existing membership.  The actor lock is held by the caller before this
+ * helper is entered; the workspace lock is therefore always acquired second.
+ */
+async function ensurePersonalWorkspaceForExistingIdentity(
+  db: Prisma.TransactionClient,
+  user: Readonly<{ id: string; username: string }>,
+): Promise<void> {
+  const slug = `user-${user.id}`;
+  const existing = await db.workspace.findUnique({
+    where: { slug },
+    select: { id: true, createdById: true },
+  });
+
+  if (existing === null) {
+    const workspaceId = randomUUID();
+    await lockWorkspaceAccess(db, workspaceId);
+    const workspace = await db.workspace.create({
+      data: {
+        id: workspaceId,
+        name: personalWorkspaceName(user.username),
+        slug,
+        createdById: user.id,
+      },
+      select: { id: true },
+    });
+    await grantWorkspaceMembership(db, {
+      workspaceId: workspace.id,
+      userId: user.id,
+      role: "owner",
+      actorId: user.id,
+      reason: "github_oauth_personal_workspace_migrated",
+    });
+    return;
+  }
+
+  await lockWorkspaceAccess(db, existing.id);
+  const canonical = await db.workspace.findUnique({
+    where: { slug },
+    select: { id: true, createdById: true },
+  });
+  if (canonical === null || canonical.createdById !== user.id) {
+    return fail("GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED");
+  }
+
+  const membership = await findCurrentWorkspaceMembership(db, canonical.id, user.id);
+  if (membership === null || membership.accessState !== "confirmed" || membership.role !== "owner") {
+    return fail("GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED");
+  }
+}
+
+async function runGitHubOAuthTransaction(
+  db: PrismaClient,
+  attempt: Readonly<{
+    id: string;
+    credentialId: string;
+    intent: GitHubOauthIntent;
+    linkUserId: string | null;
+    returnTo: string;
+    remember: boolean;
+  }>,
+  profile: GitHubProfile,
+): Promise<Readonly<{ session: CreatedSession | null; returnTo: string; intent: GitHubOauthIntent; remember: boolean }>> {
+  return withSerializableRetry(db, async (tx) => {
+    await assertPlatformBootstrapReady(tx);
+    if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
+    const now = new Date();
+
+    // The profile lock is acquired before resolving the identity on every
+    // serializable attempt. This makes two independent states for the same
+    // GitHub profile converge on one identity/user/workspace, while all
+    // account and workspace locks still follow actor -> workspace order.
+    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${profile.githubUserId.toString()}::text, ${ATTEMPT_LOCK_ID}))`);
+    let identity = await tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId }, include: { user: true } });
+    if (attempt.intent === "link") {
+      await lockActorAccess(tx, attempt.linkUserId!);
+    } else if (identity !== null) {
+      await lockActorAccess(tx, identity.userId);
+    }
+    identity = await tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId }, include: { user: true } });
+
+    if (attempt.intent === "link") {
+      const user = await tx.appUser.findUnique({ where: { id: attempt.linkUserId! } });
+      if (user === null || user.disabledAt !== null) return fail("GITHUB_OAUTH_ACCOUNT_DISABLED");
+      if (user.role !== "user") return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
+      const [byGitHub, byUser] = await Promise.all([
+        tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId } }),
+        tx.gitHubIdentity.findUnique({ where: { userId: user.id } }),
+      ]);
+      if ((byGitHub !== null && byGitHub.userId !== user.id) || (byUser !== null && byUser.githubUserId !== profile.githubUserId)) {
+        return fail("GITHUB_OAUTH_IDENTITY_CONFLICT");
+      }
+      const emailOwner = await tx.appUser.findUnique({ where: { email: profile.email }, select: { id: true } });
+      if (emailOwner !== null && emailOwner.id !== user.id) return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
+      await setVerifiedAccountEmail(tx, user.id, profile.email, "github", now);
+      await tx.gitHubIdentity.upsert({
+        where: { userId: user.id },
+        create: { userId: user.id, ...profile, lastLoginAt: now },
+        update: { login: profile.login, email: profile.email, displayName: profile.displayName, lastLoginAt: now },
+      });
+      await tx.gitHubOauthAttempt.delete({ where: { id: attempt.id } });
+      await tx.externalCredential.delete({ where: { id: attempt.credentialId } });
+      return Object.freeze({ session: null, returnTo: "/profile?github=linked", intent: attempt.intent, remember: attempt.remember });
+    }
+
+    if (identity === null) {
+      const emailOwner = await tx.appUser.findUnique({ where: { email: profile.email }, select: { id: true } });
+      if (emailOwner !== null) return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
+      const user = await tx.appUser.create({
+        data: {
+          username: await availableGitHubUsername(profile.login, tx),
+          displayName: profile.displayName,
+          email: profile.email,
+          emailVerifiedAt: now,
+          role: "user",
+          passwordHash: null,
+          passwordSalt: null,
+        },
+      });
+      await appendEmailVerificationAudit(tx, {
+        userId: user.id,
+        event: "verified",
+        emailBefore: null,
+        emailAfter: profile.email,
+        verifiedAtBefore: null,
+        verifiedAtAfter: now,
+        source: "github",
+        reason: "github_primary_email_verified",
+      });
+
+      // A GitHub signup owns a fresh personal workspace. It must never join a
+      // historical/default workspace row that may still exist in old data.
+      await lockActorAccess(tx, user.id);
+      const workspaceId = randomUUID();
+      await lockWorkspaceAccess(tx, workspaceId);
+      const workspace = await tx.workspace.create({
+        data: {
+          id: workspaceId,
+          name: personalWorkspaceName(user.username),
+          slug: `user-${user.id}`,
+          createdById: user.id,
+        },
+        select: { id: true },
+      });
+      await grantWorkspaceMembership(tx, {
+        workspaceId: workspace.id,
+        userId: user.id,
+        role: "owner",
+        actorId: user.id,
+        reason: "github_oauth_personal_workspace_created",
+      });
+      await activateAccountEntitlements({
+        userId: user.id,
+        source: "githubRegistration",
+        actorId: user.id,
+        accountAccessVersion: user.accountAccessVersion,
+        actorAccountAccessVersion: user.accountAccessVersion,
+        evidenceKind: "github",
+        evidenceRef: profile.githubUserId.toString(),
+        now,
+      }, tx);
+      identity = await tx.gitHubIdentity.create({
+        data: { userId: user.id, ...profile, lastLoginAt: now },
+        include: { user: true },
+      });
+    } else {
+      if (identity.user.role !== "user") return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
+      if (identity.user.disabledAt !== null) return fail("GITHUB_OAUTH_ACCOUNT_DISABLED");
+      const emailOwner = await tx.appUser.findUnique({ where: { email: profile.email }, select: { id: true } });
+      if (emailOwner !== null && emailOwner.id !== identity.user.id) return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
+      await setVerifiedAccountEmail(tx, identity.user.id, profile.email, "github", now);
+      await ensurePersonalWorkspaceForExistingIdentity(tx, identity.user);
+      identity = await tx.gitHubIdentity.update({
+        where: { id: identity.id },
+        data: { login: profile.login, email: profile.email, displayName: profile.displayName, lastLoginAt: now },
+        include: { user: true },
+      });
+    }
+    await tx.gitHubOauthAttempt.delete({ where: { id: attempt.id } });
+    await tx.externalCredential.delete({ where: { id: attempt.credentialId } });
+    const session = await createSessionInTransaction(tx, identity.user);
+    return Object.freeze({ session, returnTo: canonicalInternalReturnPath(attempt.returnTo), intent: attempt.intent, remember: attempt.remember });
+  });
+}
+
+async function completeGitHubOAuthTransaction(
+  db: PrismaClient,
+  attempt: Readonly<{
+    id: string;
+    credentialId: string;
+    intent: GitHubOauthIntent;
+    linkUserId: string | null;
+    returnTo: string;
+    remember: boolean;
+  }>,
+  profile: GitHubProfile,
+): Promise<Readonly<{ session: CreatedSession | null; returnTo: string; intent: GitHubOauthIntent; remember: boolean }>> {
+  for (let uniqueRetry = 0; ; uniqueRetry += 1) {
+    try {
+      return await runGitHubOAuthTransaction(db, attempt, profile);
+    } catch (error) {
+      // A Serializable snapshot can be established before the profile lock:
+      // a second callback may therefore miss the first callback's identity and
+      // hit a signup unique index (email/username/GitHubIdentity). Retry that
+      // one narrow race after the failed transaction is fully rolled back and
+      // a fresh connection-level read confirms the winner. Do not retry other
+      // unique conflicts, and never repeat provider calls here.
+      if (
+        attempt.intent !== "login"
+        || uniqueRetry >= MAX_GITHUB_OAUTH_UNIQUE_RETRIES
+        || !isGitHubSignupUniqueConflict(error)
+      ) throw error;
+      const existingIdentity = await db.gitHubIdentity.findUnique({
+        where: { githubUserId: profile.githubUserId },
+        select: { id: true },
+      });
+      if (existingIdentity === null) throw error;
+    }
+  }
+}
+
 export async function completeGitHubOAuth(
   input: Readonly<{ code: unknown; state: unknown; cookieState: unknown; sessionUserId?: unknown }>,
   db: PrismaClient = getEntitlementDb(),
@@ -423,112 +685,7 @@ export async function completeGitHubOAuth(
   const verifier = await readCredentialSecret(attempt.credentialId, "githubOauthFlow", db);
   if (!/^[A-Za-z0-9_-]{43,128}$/u.test(verifier)) return fail("GITHUB_OAUTH_FLOW_INVALID");
   const profile = await fetchVerifiedGitHubProfile({ config, code: input.code, redirectUri: attempt.redirectUri, verifier });
-
-  return db.$transaction(async (tx) => {
-    await assertPlatformBootstrapReady(tx);
-    if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
-    const now = new Date();
-    let existingIdentity = await tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId }, include: { user: true } });
-    const actorId = attempt.intent === "link" ? attempt.linkUserId : existingIdentity?.userId;
-    if (actorId !== null && actorId !== undefined) await lockActorAccess(tx, actorId);
-    if (attempt.intent === "login") await lockWorkspaceAccess(tx, DEFAULT_WORKSPACE_ID);
-    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${profile.githubUserId.toString()}::text, ${ATTEMPT_LOCK_ID}))`);
-    if (attempt.intent === "link") {
-      const user = await tx.appUser.findUnique({ where: { id: attempt.linkUserId! } });
-      if (user === null || user.disabledAt !== null) return fail("GITHUB_OAUTH_ACCOUNT_DISABLED");
-      if (user.role !== "user") return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
-      const [byGitHub, byUser] = await Promise.all([
-        tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId } }),
-        tx.gitHubIdentity.findUnique({ where: { userId: user.id } }),
-      ]);
-      if ((byGitHub !== null && byGitHub.userId !== user.id) || (byUser !== null && byUser.githubUserId !== profile.githubUserId)) {
-        return fail("GITHUB_OAUTH_IDENTITY_CONFLICT");
-      }
-      const emailOwner = await tx.appUser.findUnique({ where: { email: profile.email }, select: { id: true } });
-      if (emailOwner !== null && emailOwner.id !== user.id) return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
-      await setVerifiedAccountEmail(tx, user.id, profile.email, "github", now);
-      await tx.gitHubIdentity.upsert({
-        where: { userId: user.id },
-        create: { userId: user.id, ...profile, lastLoginAt: now },
-        update: { login: profile.login, email: profile.email, displayName: profile.displayName, lastLoginAt: now },
-      });
-      await tx.gitHubOauthAttempt.delete({ where: { id: attempt.id } });
-      await tx.externalCredential.delete({ where: { id: attempt.credentialId } });
-      return Object.freeze({ session: null, returnTo: "/profile?github=linked", intent: attempt.intent, remember: attempt.remember });
-    }
-
-    existingIdentity = await tx.gitHubIdentity.findUnique({ where: { githubUserId: profile.githubUserId }, include: { user: true } });
-    let identity = existingIdentity;
-    if (identity === null) {
-      const emailOwner = await tx.appUser.findUnique({ where: { email: profile.email }, select: { id: true } });
-      if (emailOwner !== null) return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
-      const user = await tx.appUser.create({
-        data: {
-          username: await availableGitHubUsername(profile.login, tx),
-          displayName: profile.displayName,
-          email: profile.email,
-          emailVerifiedAt: now,
-          role: "user",
-          passwordHash: null,
-          passwordSalt: null,
-        },
-      });
-      await appendEmailVerificationAudit(tx, {
-        userId: user.id,
-        event: "verified",
-        emailBefore: null,
-        emailAfter: profile.email,
-        verifiedAtBefore: null,
-        verifiedAtAfter: now,
-        source: "github",
-        reason: "github_primary_email_verified",
-      });
-      const workspaceMembership = await tx.workspaceMembership.create({
-        data: { workspaceId: DEFAULT_WORKSPACE_ID, userId: user.id, role: "member", accessState: "confirmed" },
-      });
-      await appendWorkspaceMembershipAudit(tx, workspaceMembership, { action: "confirmed", previousState: null, actorId: user.id, reason: "github_oauth_membership_created" });
-      await activateAccountEntitlements({
-        userId: user.id,
-        source: "githubRegistration",
-        actorId: user.id,
-        accountAccessVersion: user.accountAccessVersion,
-        actorAccountAccessVersion: user.accountAccessVersion,
-        evidenceKind: "github",
-        evidenceRef: profile.githubUserId.toString(),
-        now,
-      }, tx);
-      identity = await tx.gitHubIdentity.create({
-        data: { userId: user.id, ...profile, lastLoginAt: now },
-        include: { user: true },
-      });
-    } else {
-      if (identity.user.disabledAt !== null) return fail("GITHUB_OAUTH_ACCOUNT_DISABLED");
-      const emailOwner = await tx.appUser.findUnique({ where: { email: profile.email }, select: { id: true } });
-      if (emailOwner !== null && emailOwner.id !== identity.user.id) return fail("GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED");
-      await setVerifiedAccountEmail(tx, identity.user.id, profile.email, "github", now);
-      const currentMembership = await findCurrentWorkspaceMembership(tx, DEFAULT_WORKSPACE_ID, identity.user.id);
-      if (currentMembership !== null && currentMembership.accessState !== "confirmed") return fail("GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED");
-      if (currentMembership === null) {
-        if (await hasRevokedWorkspaceMembership(tx, DEFAULT_WORKSPACE_ID, identity.user.id)) return fail("GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED");
-        await grantWorkspaceMembership(tx, {
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          userId: identity.user.id,
-          role: "member",
-          actorId: identity.user.id,
-          reason: "github_oauth_membership_created",
-        });
-      }
-      identity = await tx.gitHubIdentity.update({
-        where: { id: identity.id },
-        data: { login: profile.login, email: profile.email, displayName: profile.displayName, lastLoginAt: now },
-        include: { user: true },
-      });
-    }
-    await tx.gitHubOauthAttempt.delete({ where: { id: attempt.id } });
-    await tx.externalCredential.delete({ where: { id: attempt.credentialId } });
-    const session = await createSessionInTransaction(tx, identity.user);
-    return Object.freeze({ session, returnTo: canonicalInternalReturnPath(attempt.returnTo), intent: attempt.intent, remember: attempt.remember });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  return completeGitHubOAuthTransaction(db, attempt, profile);
 }
 
 export async function githubOAuthFailurePath(state: unknown, db: PrismaClient = getDb()): Promise<string> {

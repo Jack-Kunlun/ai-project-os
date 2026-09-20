@@ -359,6 +359,7 @@ test("系统管理员不能凭全局角色自动解析租户工作区", async ()
       findUnique: async () => membership,
     },
     workspace: {
+      findUnique: async () => null,
       findUniqueOrThrow: async () => ({ _count: { memberships: 1, projects: 0, oidcProviders: 0 } }),
     },
   } as unknown as PrismaClient;
@@ -375,6 +376,15 @@ test("系统管理员不能凭全局角色自动解析租户工作区", async ()
   membership = { role: "admin", accessState: "confirmed" };
   assert.equal(await resolveProjectCreationWorkspace(admin, db), workspaceId);
   assert.deepEqual(await resolveUserWorkspace(admin, db), workspace);
+  const ordinary = { ...admin, role: "user" as const };
+  await assert.rejects(
+    () => resolveProjectCreationWorkspace(ordinary, db),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+  await assert.rejects(
+    () => resolveUserWorkspace(ordinary, db),
+    (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_NOT_FOUND",
+  );
   const overview = await getWorkspaceOverview(admin, db);
   assert.equal(overview.role, "admin");
   assert.deepEqual(overview.counts, { memberships: 1, projects: 0, oidcProviders: 0 });

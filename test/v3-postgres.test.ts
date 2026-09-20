@@ -8,7 +8,6 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { ProjectItemRevisionAction, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
 import { AccessControlError, accessibleProjectWhere, authorizeApiRequest } from "../src/lib/access-control";
 import { AutomationError, createProjectAutomationRule, listUserNotifications, openNotification, previewProjectAutomationRule, runAutomationWorkerCycle } from "../src/lib/automation";
-import { DEFAULT_WORKSPACE_ID } from "../src/lib/auth";
 import { getDb } from "../src/lib/db";
 import { analyzeProjectMemoryQuality, resolveMemoryQualityIssue, updateProjectItemMemoryMetadata } from "../src/lib/memory-quality";
 import { beginOidcLogin, completeOidcLogin, createOidcProvider, deleteOidcProvider, OidcError, updateOidcProvider } from "../src/lib/oidc";
@@ -19,6 +18,7 @@ import { acceptWorkspaceInvitation, createWorkspaceInvitation, updateWorkspaceMe
 import { findConfirmedProjectMembership, findConfirmedWorkspaceMembership, grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership, revokeWorkspaceMembership } from "../src/lib/membership-governance";
 
 const shouldRun = process.env.V3_POSTGRES_GATE === "1";
+const SEEDED_WORKSPACE_ID = "00000000-0000-4000-8000-000000000099";
 
 function digest(value: string) { return createHash("sha256").update(value, "utf8").digest("hex"); }
 
@@ -101,27 +101,22 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   issuer = `http://127.0.0.1:${address.port}/tenant-${suffix}`;
 
   try {
-    const bootstrap = await db.platformBootstrap.findUniqueOrThrow({
-      where: { id: "platform" },
-      select: { initialOwner: true },
-    });
-    assert.ok(bootstrap.initialOwner !== null);
-    assert.equal(bootstrap.initialOwner.role, "user");
-    const owner = bootstrap.initialOwner;
+    const owner = await db.appUser.findUniqueOrThrow({ where: { username: "postgres_gate_owner" } });
+    assert.equal(owner.role, "user");
     const memberEmail = `v3-member-${suffix}@example.com`;
     await db.appUser.create({ data: { id: memberId, username: `v3_member_${suffix}`, email: memberEmail, emailVerifiedAt: new Date(), role: "user", passwordHash: null, passwordSalt: null } });
     await db.appUser.create({ data: { id: outsiderUserId, username: `v3_outsider_user_${suffix}`, role: "user", passwordHash: null, passwordSalt: null } });
     await db.project.createMany({ data: [
-      { id: projectA, workspaceId: DEFAULT_WORKSPACE_ID, name: `V3 A ${suffix}`, slug: `v3-a-${suffix}` },
-      { id: projectB, workspaceId: DEFAULT_WORKSPACE_ID, name: `V3 B ${suffix}`, slug: `v3-b-${suffix}` },
+      { id: projectA, workspaceId: SEEDED_WORKSPACE_ID, name: `V3 A ${suffix}`, slug: `v3-a-${suffix}` },
+      { id: projectB, workspaceId: SEEDED_WORKSPACE_ID, name: `V3 B ${suffix}`, slug: `v3-b-${suffix}` },
     ] });
     await db.$transaction(async (tx) => {
       await tx.workspace.create({ data: { id: roleWorkspaceId, name: `Role safety ${suffix}`, slug: `role-safety-${suffix}`, createdById: owner.id } });
-      await grantWorkspaceMembership(tx, { workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "member", actorId: owner.id, reason: "v3_gate_fixture_default_workspace" });
+      await grantWorkspaceMembership(tx, { workspaceId: SEEDED_WORKSPACE_ID, userId: memberId, role: "member", actorId: owner.id, reason: "v3_gate_fixture_default_workspace" });
       await grantWorkspaceMembership(tx, { workspaceId: roleWorkspaceId, userId: memberId, role: "owner", actorId: owner.id, reason: "v3_gate_fixture_role_workspace" });
-      await grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: owner.id, role: "owner", actorId: owner.id, reason: "v3_gate_fixture_owner_direct_access_for_automation_and_web_source" });
-      await grantProjectMembership(tx, { projectId: projectA, workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "viewer", actorId: owner.id, reason: "v3_gate_fixture_project_a" });
-      await grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: memberId, role: "editor", actorId: owner.id, reason: "v3_gate_fixture_project_b" });
+      await grantProjectMembership(tx, { projectId: projectB, workspaceId: SEEDED_WORKSPACE_ID, userId: owner.id, role: "owner", actorId: owner.id, reason: "v3_gate_fixture_owner_direct_access_for_automation_and_web_source" });
+      await grantProjectMembership(tx, { projectId: projectA, workspaceId: SEEDED_WORKSPACE_ID, userId: memberId, role: "viewer", actorId: owner.id, reason: "v3_gate_fixture_project_a" });
+      await grantProjectMembership(tx, { projectId: projectB, workspaceId: SEEDED_WORKSPACE_ID, userId: memberId, role: "editor", actorId: owner.id, reason: "v3_gate_fixture_project_b" });
     });
 
     const member = { id: memberId, role: "user" as const, accountAccessVersion: 1 };
@@ -160,11 +155,11 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       () => openNotification(outsiderUserId, projectNotification.id, db),
       (error: unknown) => error instanceof AutomationError && error.code === "NOTIFICATION_NOT_FOUND",
     );
-    await db.$transaction((tx) => grantProjectMembership(tx, { projectId: projectB, workspaceId: DEFAULT_WORKSPACE_ID, userId: outsiderUserId, role: "viewer", actorId: owner.id, reason: "v3_gate_fixture_outsider_project" }));
+    await db.$transaction((tx) => grantProjectMembership(tx, { projectId: projectB, workspaceId: SEEDED_WORKSPACE_ID, userId: outsiderUserId, role: "viewer", actorId: owner.id, reason: "v3_gate_fixture_outsider_project" }));
     assert.deepEqual((await listUserNotifications(outsiderUserId, db)).notifications.map((notification) => notification.id).sort(), [platformNotification.id, projectNotification.id].sort());
     await db.$transaction(async (tx) => {
-      await revokeProjectMembership(tx, projectB, outsiderUserId, DEFAULT_WORKSPACE_ID, { actorId: owner.id, reason: "v3_gate_revoke_outsider_project" });
-      await grantWorkspaceMembership(tx, { workspaceId: DEFAULT_WORKSPACE_ID, userId: outsiderUserId, role: "admin", actorId: owner.id, reason: "v3_gate_fixture_outsider_workspace" });
+      await revokeProjectMembership(tx, projectB, outsiderUserId, SEEDED_WORKSPACE_ID, { actorId: owner.id, reason: "v3_gate_revoke_outsider_project" });
+      await grantWorkspaceMembership(tx, { workspaceId: SEEDED_WORKSPACE_ID, userId: outsiderUserId, role: "admin", actorId: owner.id, reason: "v3_gate_fixture_outsider_workspace" });
     });
     assert.equal((await db.project.findUniqueOrThrow({ where: { id: projectB }, select: { membershipInheritanceMode: true } })).membershipInheritanceMode, "projectOnly");
     assert.deepEqual((await listUserNotifications(outsiderUserId, db)).notifications.map((notification) => notification.id), [platformNotification.id]);
@@ -172,7 +167,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       () => openNotification(outsiderUserId, projectNotification.id, db),
       (error: unknown) => error instanceof AutomationError && error.code === "NOTIFICATION_NOT_FOUND",
     );
-    await db.$transaction((tx) => revokeWorkspaceMembership(tx, DEFAULT_WORKSPACE_ID, outsiderUserId, { actorId: owner.id, reason: "v3_gate_revoke_outsider_workspace" }));
+    await db.$transaction((tx) => revokeWorkspaceMembership(tx, SEEDED_WORKSPACE_ID, outsiderUserId, { actorId: owner.id, reason: "v3_gate_revoke_outsider_workspace" }));
     await db.notification.update({ where: { id: projectNotification.id }, data: { readAt: null } });
     assert.deepEqual((await listUserNotifications(outsiderUserId, db)).notifications.map((notification) => notification.id), [platformNotification.id]);
     await assert.rejects(
@@ -180,9 +175,9 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       (error: unknown) => error instanceof AutomationError && error.code === "NOTIFICATION_NOT_FOUND",
     );
     await assert.rejects(() => updateWorkspaceMember(roleWorkspaceId, memberId, { workspaceRole: "viewer" }, member, db), (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_ROLE_GOVERNANCE_REQUIRED");
-    const invitation = await createWorkspaceInvitation(DEFAULT_WORKSPACE_ID, { email: memberEmail, workspaceRole: "viewer", projectId: projectB, projectRole: "viewer", expiresInDays: 7, requestKey: randomUUID() }, owner, db);
+    const invitation = await createWorkspaceInvitation(SEEDED_WORKSPACE_ID, { email: memberEmail, workspaceRole: "viewer", projectId: projectB, projectRole: "viewer", expiresInDays: 7, requestKey: randomUUID() }, owner, db);
     await acceptWorkspaceInvitation(invitation.token, { id: memberId, email: memberEmail, accountAccessVersion: member.accountAccessVersion }, "/dashboard", db);
-    assert.equal((await findConfirmedWorkspaceMembership(db, DEFAULT_WORKSPACE_ID, memberId))?.role, "member");
+    assert.equal((await findConfirmedWorkspaceMembership(db, SEEDED_WORKSPACE_ID, memberId))?.role, "member");
     assert.equal((await findConfirmedProjectMembership(db, projectB, memberId))?.role, "editor");
 
     const sourceText = "数据库选择 PostgreSQL。自动同步已启用。风险需要复核。";
@@ -244,7 +239,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     assert.equal(await db.projectSource.count({ where: { projectId: projectB, kind: "web", retiredAt: null } }), 1);
     assert.equal(await db.projectSource.count({ where: { projectId: projectB, kind: "web", retiredAt: { not: null } } }), 1);
 
-    const provider = await createOidcProvider(DEFAULT_WORKSPACE_ID, { name: `OIDC ${suffix}`, issuerUrl: issuer, clientId: `client-${suffix}`, clientSecret: `secret-${suffix}-123456`, scopes: ["openid", "profile", "email"], allowPrivateNetwork: true, autoProvision: true, defaultWorkspaceRole: "viewer", allowedEmailDomains: ["example.com"] }, owner, db);
+    const provider = await createOidcProvider(SEEDED_WORKSPACE_ID, { name: `OIDC ${suffix}`, issuerUrl: issuer, clientId: `client-${suffix}`, clientSecret: `secret-${suffix}-123456`, scopes: ["openid", "profile", "email"], allowPrivateNetwork: true, autoProvision: true, defaultWorkspaceRole: "viewer", allowedEmailDomains: ["example.com"] }, owner, db);
     oidcProviderId = provider.id;
     const persistedProvider = await db.oidcProvider.findUniqueOrThrow({ where: { id: provider.id }, select: { credentialId: true, tokenAuthMethod: true, tokenAddressFingerprint: true, jwksAddressFingerprint: true } });
     oidcProviderCredentialId = persistedProvider.credentialId;
@@ -261,8 +256,51 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     assert.equal(oidcUser.role, "user");
     assert.ok(oidcUser.emailVerifiedAt instanceof Date);
     assert.equal(oidcUser.passwordHash, null);
-    assert.equal((await findConfirmedWorkspaceMembership(db, DEFAULT_WORKSPACE_ID, oidcUser.id))?.role, "viewer");
+    const personalWorkspace = await db.workspace.findFirst({
+      where: {
+        createdById: oidcUser.id,
+        memberships: { some: { userId: oidcUser.id, role: "owner", accessState: "confirmed" } },
+      },
+      select: { id: true, slug: true },
+    });
+    assert.ok(personalWorkspace !== null);
+    assert.equal(personalWorkspace.slug, `user-${oidcUser.id}`);
+    assert.equal((await findConfirmedWorkspaceMembership(db, personalWorkspace.id, oidcUser.id))?.role, "owner");
+    assert.equal((await findConfirmedWorkspaceMembership(db, SEEDED_WORKSPACE_ID, oidcUser.id))?.role, "viewer");
     assert.equal(await db.appSession.count({ where: { userId: oidcUser.id, revokedAt: null } }), 1);
+
+    // A legacy OIDC identity may already be admitted to the provider
+    // workspace without the canonical personal workspace. The callback may
+    // lazily create only that missing personal space; it must not regrant a
+    // pre-existing/revoked Owner membership later.
+    tokenEmail = `oidc-legacy-${suffix}@example.com`;
+    tokenSubject = `legacy-subject-${suffix}`;
+    const legacyUser = await db.appUser.create({ data: { username: `oidc_legacy_${suffix}`, email: tokenEmail, emailVerifiedAt: new Date(), role: "user", passwordHash: null, passwordSalt: null } });
+    await db.$transaction(async (tx) => {
+      await grantWorkspaceMembership(tx, { workspaceId: SEEDED_WORKSPACE_ID, userId: legacyUser.id, role: "viewer", actorId: owner.id, reason: "v3_gate_legacy_oidc_provider_membership" });
+      await tx.oidcIdentity.create({ data: { providerId: provider.id, userId: legacyUser.id, subject: tokenSubject, email: tokenEmail, displayName: "Legacy OIDC", lastLoginAt: new Date() } });
+    });
+    const legacyFlow = await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/dashboard" }, db);
+    const legacyAuthorization = new URL(legacyFlow.authorizationUrl);
+    expectedNonce = legacyAuthorization.searchParams.get("nonce")!;
+    expectedChallenge = legacyAuthorization.searchParams.get("code_challenge")!;
+    await completeOidcLogin({ code: "valid-code", state: legacyFlow.state, cookieState: legacyFlow.state }, db);
+    const lazyPersonalWorkspace = await db.workspace.findUniqueOrThrow({ where: { slug: `user-${legacyUser.id}` }, select: { id: true, createdById: true } });
+    assert.equal(lazyPersonalWorkspace.createdById, legacyUser.id);
+    assert.equal((await findConfirmedWorkspaceMembership(db, lazyPersonalWorkspace.id, legacyUser.id))?.role, "owner");
+    await db.$transaction(async (tx) => {
+      await grantWorkspaceMembership(tx, { workspaceId: lazyPersonalWorkspace.id, userId: owner.id, role: "owner", actorId: legacyUser.id, reason: "v3_gate_transfer_legacy_personal_owner" });
+      await revokeWorkspaceMembership(tx, lazyPersonalWorkspace.id, legacyUser.id, { actorId: owner.id, reason: "v3_gate_revoke_legacy_personal_owner" });
+    });
+    const revokedLegacyFlow = await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/dashboard" }, db);
+    const revokedLegacyAuthorization = new URL(revokedLegacyFlow.authorizationUrl);
+    expectedNonce = revokedLegacyAuthorization.searchParams.get("nonce")!;
+    expectedChallenge = revokedLegacyAuthorization.searchParams.get("code_challenge")!;
+    await assert.rejects(
+      () => completeOidcLogin({ code: "valid-code", state: revokedLegacyFlow.state, cookieState: revokedLegacyFlow.state }, db),
+      (error: unknown) => error instanceof OidcError && error.code === "OIDC_ACCOUNT_NOT_ALLOWED",
+    );
+    assert.equal(await findConfirmedWorkspaceMembership(db, lazyPersonalWorkspace.id, legacyUser.id), null);
     await assert.rejects(() => completeOidcLogin({ code: "valid-code", state: flow.state, cookieState: flow.state }, db), (error: unknown) => error instanceof OidcError && error.code === "OIDC_FLOW_INVALID");
 
     const capacityStates: string[] = [];
@@ -282,23 +320,23 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     const collisionAuthorization = new URL(collisionFlow.authorizationUrl);
     expectedNonce = collisionAuthorization.searchParams.get("nonce")!;
     expectedChallenge = collisionAuthorization.searchParams.get("code_challenge")!;
-    await updateOidcProvider(DEFAULT_WORKSPACE_ID, provider.id, { enabled: false }, owner, db);
+    await updateOidcProvider(SEEDED_WORKSPACE_ID, provider.id, { enabled: false }, owner, db);
     await assert.rejects(() => completeOidcLogin({ code: "valid-code", state: collisionFlow.state, cookieState: collisionFlow.state }, db), (error: unknown) => error instanceof OidcError && error.code === "OIDC_PROVIDER_NOT_VERIFIED");
-    await updateOidcProvider(DEFAULT_WORKSPACE_ID, provider.id, { enabled: true }, owner, db);
+    await updateOidcProvider(SEEDED_WORKSPACE_ID, provider.id, { enabled: true }, owner, db);
     await assert.rejects(() => completeOidcLogin({ code: "valid-code", state: collisionFlow.state, cookieState: collisionFlow.state }, db), (error: unknown) => error instanceof OidcError && error.code === "OIDC_ACCOUNT_NOT_ALLOWED");
     failedFlowCredentialId = (await db.oidcLoginAttempt.findUniqueOrThrow({ where: { stateHash: digest(collisionFlow.state) }, select: { credentialId: true } })).credentialId;
     assert.equal(await db.oidcIdentity.count({ where: { providerId: provider.id, subject: tokenSubject } }), 0);
 
-    const disabledInUseProvider = await updateOidcProvider(DEFAULT_WORKSPACE_ID, provider.id, { enabled: false }, owner, db);
+    const disabledInUseProvider = await updateOidcProvider(SEEDED_WORKSPACE_ID, provider.id, { enabled: false }, owner, db);
     await assert.rejects(
-      () => deleteOidcProvider(DEFAULT_WORKSPACE_ID, provider.id, {
+      () => deleteOidcProvider(SEEDED_WORKSPACE_ID, provider.id, {
         confirmationName: provider.name,
         expectedUpdatedAt: disabledInUseProvider.updatedAt.toISOString(),
       }, owner, db),
       (error: unknown) => error instanceof OidcError && error.code === "OIDC_PROVIDER_IN_USE",
     );
 
-    const disposableProvider = await createOidcProvider(DEFAULT_WORKSPACE_ID, {
+    const disposableProvider = await createOidcProvider(SEEDED_WORKSPACE_ID, {
       name: `Disposable OIDC ${suffix}`,
       issuerUrl: issuer,
       clientId: `disposable-client-${suffix}`,
@@ -311,15 +349,15 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     }, owner, db);
     disposableOidcProviderId = disposableProvider.id;
     disposableOidcCredentialId = (await db.oidcProvider.findUniqueOrThrow({ where: { id: disposableProvider.id }, select: { credentialId: true } })).credentialId;
-    const disposableDisabled = await updateOidcProvider(DEFAULT_WORKSPACE_ID, disposableProvider.id, { enabled: false }, owner, db);
+    const disposableDisabled = await updateOidcProvider(SEEDED_WORKSPACE_ID, disposableProvider.id, { enabled: false }, owner, db);
     await assert.rejects(
-      () => deleteOidcProvider(DEFAULT_WORKSPACE_ID, disposableProvider.id, {
+      () => deleteOidcProvider(SEEDED_WORKSPACE_ID, disposableProvider.id, {
         confirmationName: "wrong name",
         expectedUpdatedAt: disposableDisabled.updatedAt.toISOString(),
       }, owner, db),
       (error: unknown) => error instanceof OidcError && error.code === "OIDC_PROVIDER_CONFIRMATION_MISMATCH",
     );
-    await deleteOidcProvider(DEFAULT_WORKSPACE_ID, disposableProvider.id, {
+    await deleteOidcProvider(SEEDED_WORKSPACE_ID, disposableProvider.id, {
       confirmationName: disposableProvider.name,
       expectedUpdatedAt: disposableDisabled.updatedAt.toISOString(),
     }, owner, db);

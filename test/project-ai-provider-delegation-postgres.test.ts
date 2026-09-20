@@ -27,7 +27,7 @@ import { createControlledMembership, extendControlledMembershipInTransaction } f
 
 const shouldRun = process.env.PROJECT_AI_PROVIDER_DELEGATION_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_project_ai_provider_delegation_test";
-const defaultWorkspaceId = "00000000-0000-4000-8000-000000000001";
+const defaultWorkspaceId = randomUUID(); // Explicit disposable fixture; no production default workspace.
 const seededAdminId = "00000000-0000-4000-8000-000000000010";
 
 function assertDisposableGateDatabase(): void {
@@ -318,6 +318,23 @@ test(
       expiresAt: new Date(now.getTime() - 60_000),
       grantedById: seededAdminId,
     });
+    await db.$transaction(async (tx) => {
+      await tx.workspace.create({
+        data: {
+          id: defaultWorkspaceId,
+          name: `Delegation workspace ${suffix}`,
+          slug: `delegation-workspace-${suffix}`,
+          createdById: projectOwnerId,
+        },
+      });
+      await grantWorkspaceMembership(tx, {
+        workspaceId: defaultWorkspaceId,
+        userId: projectOwnerId,
+        role: "owner",
+        actorId: projectOwnerId,
+        reason: "delegation_gate_workspace_owner",
+      });
+    });
     await db.project.create({ data: { id: projectId, workspaceId: defaultWorkspaceId, name: `Delegation ${suffix}`, slug: `delegation-${suffix}` } });
     await db.$transaction(async (tx) => {
       await grantWorkspaceMembership(tx, {
@@ -326,13 +343,6 @@ test(
         role: "member",
         actorId: seededAdminId,
         reason: "delegation_gate_workspace_owner",
-      });
-      await grantWorkspaceMembership(tx, {
-        workspaceId: defaultWorkspaceId,
-        userId: projectOwnerId,
-        role: "member",
-        actorId: seededAdminId,
-        reason: "delegation_gate_project_owner",
       });
       await grantProjectMembership(tx, {
         projectId,

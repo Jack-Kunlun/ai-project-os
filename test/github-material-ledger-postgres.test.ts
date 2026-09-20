@@ -15,6 +15,7 @@ import {
   GITHUB_SOFT_EXCLUDE_CLASSES,
   createGitHubRepositoryLedgerService,
 } from "@/lib/github";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -160,8 +161,9 @@ test(
 
       const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
       try {
+        const workspace = await createPostgresWorkspaceFixture(prisma);
         await prisma.project.create({
-          data: { id: projectId, name: "Material ledger", slug: "material-ledger" },
+          data: { id: projectId, workspaceId: workspace.workspaceId, name: "Material ledger", slug: "material-ledger" },
         });
         const service = createGitHubRepositoryLedgerService({ db: prisma });
         const linkA = await service.connect({

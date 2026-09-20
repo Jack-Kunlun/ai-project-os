@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { MembershipAccessState, Prisma, type AppUser, type PrismaClient, type ProjectMembershipRole, type WorkspaceMembershipRole } from "@prisma/client";
 import { z } from "zod";
 import { AccessControlError, assertWorkspaceAdmin, type AccessUser } from "@/lib/access-control";
@@ -211,6 +211,30 @@ async function assertProjectsInWorkspace(workspaceId: string, grants: readonly {
 }
 
 export async function resolveUserWorkspace(user: AccessUser, db: PrismaClient = getDb()) {
+  // A user may still have a legacy/invited membership that predates personal
+  // workspace provisioning. Prefer the canonical personal Owner workspace
+  // whenever it exists so ordinary user flows never silently land in the
+  // shared workspace first.
+  const personalWorkspace = await db.workspace.findUnique({
+    where: { slug: `user-${user.id}` },
+  });
+  if (personalWorkspace !== null) {
+    if (personalWorkspace.createdById !== user.id) return fail("WORKSPACE_NOT_FOUND");
+    const personalMembership = await db.workspaceMembership.findFirst({
+      where: {
+        workspaceId: personalWorkspace.id,
+        userId: user.id,
+        role: "owner",
+        accessState: "confirmed",
+      },
+      include: { workspace: true },
+    });
+    if (personalMembership === null) return fail("WORKSPACE_NOT_FOUND");
+    return personalMembership.workspace;
+  }
+
+  if (user.role === "user") return fail("WORKSPACE_NOT_FOUND");
+
   const membership = await db.workspaceMembership.findFirst({
     where: { userId: user.id, accessState: "confirmed" },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -253,18 +277,49 @@ export async function createLocalWorkspaceMember(workspaceIdInput: unknown, inpu
   const parsed = createMemberSchema.parse(input);
   const normalizedEmail = email(parsed.email);
   const password = await createPasswordRecord(parsed.password);
+  // Allocate both ids before entering the transaction so the new account can
+  // participate in the same actor lock fence as the provisioning actor.  The
+  // personal workspace slug is derived from the account id and is therefore
+  // deterministic without ever depending on the legacy/default workspace.
+  const userId = randomUUID();
+  const personalWorkspaceId = randomUUID();
   await assertProjectsInWorkspace(workspaceId, parsed.projectGrants, db);
   try {
     return await db.$transaction(async (tx) => {
       if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
-      await lockActorsAccess(tx, [actor.id]);
+      await lockActorsAccess(tx, [actor.id, userId]);
       await lockWorkspaceAccess(tx, workspaceId);
+      await lockWorkspaceAccess(tx, personalWorkspaceId);
       const currentActor = await tx.appUser.findUnique({ where: { id: actor.id }, select: { id: true, disabledAt: true, accountAccessVersion: true } });
       const actingMembership = await findConfirmedWorkspaceMembership(tx, workspaceId, actor.id);
       if (currentActor === null || currentActor.disabledAt !== null || actingMembership === null || (actingMembership.role !== "owner" && actingMembership.role !== "admin")) throw new AccessControlError("ACCESS_FORBIDDEN");
       if (currentActor.accountAccessVersion !== actor.accountAccessVersion) throw new AccessControlError("ACCOUNT_ACCESS_STALE");
       await assertProjectsInWorkspace(workspaceId, parsed.projectGrants, tx);
-      const user = await tx.appUser.create({ data: { username: parsed.username, displayName: parsed.displayName ?? null, email: normalizedEmail, role: "user", ...password } });
+      const user = await tx.appUser.create({ data: { id: userId, username: parsed.username, displayName: parsed.displayName ?? null, email: normalizedEmail, role: "user", ...password } });
+      const personalWorkspace = await tx.workspace.create({
+        data: {
+          id: personalWorkspaceId,
+          name: `${user.username} 的工作区`,
+          slug: `user-${user.id}`,
+          createdById: user.id,
+        },
+        select: { id: true },
+      });
+      const personalWorkspaceMembership = await tx.workspaceMembership.create({
+        data: {
+          id: randomUUID(),
+          workspaceId: personalWorkspace.id,
+          userId: user.id,
+          role: "owner",
+          accessState: MembershipAccessState.confirmed,
+        },
+      });
+      await appendWorkspaceMembershipAudit(tx, personalWorkspaceMembership, {
+        action: "confirmed",
+        previousState: null,
+        actorId: user.id,
+        reason: "local_member_personal_workspace_created",
+      });
       await activateAccountEntitlements({
         userId: user.id,
         source: "localProvisioning",

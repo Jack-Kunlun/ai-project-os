@@ -92,9 +92,9 @@ timeout() { shift; "$@"; }
 container_health() { printf 'healthy\\n'; }
 curl() {
   if [[ "$SCENARIO" == source-failure ]]; then
-    printf '{"status":"ok","version":"0.3.0-dev.0","database":"up","worker":{"status":"up"}}\\n'
+    printf '{"status":"ok","version":"0.4.0-dev.0","database":"up","worker":{"status":"up"}}\\n'
   else
-    printf '{"status":"ok","version":"0.3.0-dev.1","database":"up","worker":{"status":"up"}}\\n'
+    printf '{"status":"ok","version":"0.4.0-dev.1","database":"up","worker":{"status":"up"}}\\n'
   fi
 }
 wait_for_old_writers() { printf 'wait:old-writers\\n' >> "$TRACE_FILE"; }

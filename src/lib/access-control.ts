@@ -208,6 +208,17 @@ export async function assertWorkspaceAdmin(
 }
 
 export async function resolveProjectCreationWorkspace(user: AccessUser, db: PrismaClient = getDb()): Promise<string> {
+  const personalWorkspace = await db.workspace.findUnique({
+    where: { slug: `user-${user.id}` },
+    select: { id: true, createdById: true },
+  });
+  if (personalWorkspace !== null) {
+    if (personalWorkspace.createdById !== user.id) return fail("ACCESS_FORBIDDEN");
+    const ownerMembership = await findConfirmedWorkspaceMembership(db, personalWorkspace.id, user.id);
+    if (ownerMembership?.role !== "owner") return fail("ACCESS_FORBIDDEN");
+    return personalWorkspace.id;
+  }
+  if (user.role === "user") return fail("ACCESS_FORBIDDEN");
   const membership = await db.workspaceMembership.findFirst({
     where: { userId: user.id, accessState: "confirmed", role: { in: ["owner", "admin"] } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],

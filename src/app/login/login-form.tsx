@@ -58,7 +58,7 @@ export function LoginForm({
   const githubUnavailableMessage = {
     notConfigured: "GitHub 登录尚未配置，请联系工作区管理员",
     configurationInvalid: "GitHub 登录配置无效，请联系工作区管理员",
-    bootstrapPending: "平台初始化尚未完成，GitHub 登录暂不可用",
+    bootstrapPending: "平台管理员尚未完成初始化，GitHub 登录暂不可用",
     available: "",
   }[githubAvailability];
 

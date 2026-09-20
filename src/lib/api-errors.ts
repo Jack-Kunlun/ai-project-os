@@ -61,7 +61,6 @@ import { AccountEntitlementBackfillError } from "@/lib/account-entitlement-backf
 import { PlatformCreditGovernanceError } from "@/lib/platform-credit-governance-service";
 import { MembershipApplicationServiceError } from "@/lib/membership-application-service";
 import { WorkspaceRoleGovernanceError } from "@/lib/workspace-role-governance-service";
-import { FirstAdminOnboardingError } from "@/lib/first-admin-onboarding-service";
 import { AdminUserOperationsError } from "@/lib/admin-user-operations-service";
 
 export type ApiErrorBody = {
@@ -353,7 +352,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
     const mapping: Record<string, readonly [number, string]> = {
       GITHUB_OAUTH_NOT_CONFIGURED: [503, "GitHub 登录尚未配置，请联系工作区管理员"],
       GITHUB_OAUTH_CONFIG_INVALID: [500, "GitHub 登录配置无效，请联系工作区管理员"],
-      GITHUB_OAUTH_BOOTSTRAP_PENDING: [503, "平台初始化尚未完成，GitHub 登录暂不可用，请稍后重试"],
+      GITHUB_OAUTH_BOOTSTRAP_PENDING: [503, "平台管理员尚未完成初始化，GitHub 登录暂不可用，请稍后重试"],
       GITHUB_OAUTH_INVALID_INPUT: [400, "GitHub 登录请求无效"],
       GITHUB_OAUTH_FLOW_INVALID: [400, "GitHub 登录状态无效或已经使用"],
       GITHUB_OAUTH_FLOW_EXPIRED: [410, "GitHub 登录已过期，请重新开始"],
@@ -593,23 +592,13 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AUTH_CURRENT_PASSWORD_INVALID: [401, "当前密码不正确"],
       AUTH_PASSWORD_UNCHANGED: [400, "新密码不能与当前密码相同"],
       AUTH_LOCAL_PASSWORD_EXISTS: [409, "该账户已经设置本地密码"],
+      AUTH_PERSONAL_WORKSPACE_NOT_READY: [409, "个人工作区尚未就绪，请联系管理员完成成员治理"],
       AUTH_REQUIRED: [401, "请先登录"],
       AUTH_FORBIDDEN: [403, "你没有执行此操作所需的权限"],
       AUTH_ACCOUNT_DISABLED: [403, "账户已停用"],
       AUTH_CSRF_REJECTED: [403, "请求来源校验失败"],
     } as const;
     const [status, message] = mapping[error.code];
-    return { status, body: { error: { code: error.code, message } } };
-  }
-
-  if (error instanceof FirstAdminOnboardingError) {
-    const mapping: Record<string, readonly [number, string]> = {
-      FIRST_ADMIN_ONBOARDING_INVALID_INPUT: [400, "首次管理员引导请求无效"],
-      FIRST_ADMIN_ONBOARDING_FORBIDDEN: [403, "只有默认工作区的首位管理员可以完成首次引导"],
-      FIRST_ADMIN_ONBOARDING_ACCOUNT_STALE: [409, "账号状态已变化，请重新登录后重试"],
-      FIRST_ADMIN_ONBOARDING_CONFLICT: [409, "首次管理员引导状态已变化，请刷新后重试"],
-    };
-    const [status, message] = mapping[error.code] ?? [409, "首次管理员引导未完成"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

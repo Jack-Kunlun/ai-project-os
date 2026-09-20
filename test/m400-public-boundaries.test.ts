@@ -5,7 +5,7 @@ import type { PrismaClient } from "@prisma/client";
 import { AccessControlError } from "../src/lib/access-control";
 import { createSession } from "../src/lib/auth";
 import { listMemberships } from "../src/lib/membership-service";
-import { WorkspaceError, createLocalWorkspaceMember, listWorkspaceMembers, updateWorkspaceMember } from "../src/lib/workspaces";
+import { WorkspaceError, createLocalWorkspaceMember, listWorkspaceMembers, resolveUserWorkspace, updateWorkspaceMember } from "../src/lib/workspaces";
 import { toSystemRole } from "../src/lib/system-role";
 
 const adminId = "11111111-1111-4111-8111-111111111111";
@@ -105,6 +105,9 @@ test("workspace member list/create/update use a minimal DTO without system crede
   );
 
   let createdData: Record<string, unknown> | undefined;
+  let personalWorkspaceData: Record<string, unknown> | undefined;
+  const createdWorkspaceMemberships: Array<Record<string, unknown>> = [];
+  const workspaceMembershipAudits: Array<Record<string, unknown>> = [];
   let activationData: Record<string, unknown> | undefined;
   let activationAuditData: Record<string, unknown> | undefined;
   const actorSnapshot = { id: adminId, disabledAt: null, accountAccessVersion: 1 };
@@ -114,7 +117,7 @@ test("workspace member list/create/update use a minimal DTO without system crede
       findUnique: async ({ where }: { where: { id: string } }) => where.id === memberId ? createdUserSnapshot : actorSnapshot,
       create: async ({ data }: { data: Record<string, unknown> }) => {
         createdData = data;
-        return { ...data, ...createdUserSnapshot };
+        return { ...data, disabledAt: null, accountAccessVersion: 1 };
       },
     },
     accountEntitlementActivation: {
@@ -132,13 +135,28 @@ test("workspace member list/create/update use a minimal DTO without system crede
         return data;
       },
     },
+    workspace: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        personalWorkspaceData = data;
+        return { id: data.id };
+      },
+    },
     workspaceMembership: {
       findMany: async ({ where }: { where?: { userId?: string } }) => where?.userId === adminId ? [{ role: "admin" as const, accessState: "confirmed" as const }] : [],
-      create: async () => ({ ...safeMember, id: "55555555-5555-4555-8555-555555555556" }),
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const created = { ...safeMember, ...data };
+        createdWorkspaceMemberships.push(created);
+        return created;
+      },
       findUniqueOrThrow: async () => safeMember,
     },
     projectMembership: { createMany: async () => ({ count: 0 }) },
-    membershipAccessAudit: { create: async () => ({}) },
+    membershipAccessAudit: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        workspaceMembershipAudits.push(data);
+        return data;
+      },
+    },
     $executeRaw: async () => 0,
   };
   const createDb = {
@@ -154,7 +172,22 @@ test("workspace member list/create/update use a minimal DTO without system crede
     createDb,
   );
   assert.equal(createdData?.role, "user");
-  assert.equal(activationData?.userId, memberId);
+  assert.equal(typeof createdData?.id, "string");
+  assert.equal(personalWorkspaceData?.createdById, createdData?.id);
+  assert.equal(personalWorkspaceData?.slug, `user-${createdData?.id}`);
+  assert.equal(personalWorkspaceData?.name, "new-member 的工作区");
+  assert.equal(createdWorkspaceMemberships[0]?.workspaceId, personalWorkspaceData?.id);
+  assert.equal(createdWorkspaceMemberships[0]?.userId, createdData?.id);
+  assert.equal(createdWorkspaceMemberships[0]?.role, "owner");
+  assert.equal(createdWorkspaceMemberships[0]?.accessState, "confirmed");
+  assert.equal(createdWorkspaceMemberships[1]?.workspaceId, workspaceId);
+  assert.equal(createdWorkspaceMemberships[1]?.userId, createdData?.id);
+  assert.equal(createdWorkspaceMemberships[1]?.role, "member");
+  assert.equal(workspaceMembershipAudits[0]?.membershipKind, "workspace");
+  assert.equal(workspaceMembershipAudits[0]?.action, "confirmed");
+  assert.equal(workspaceMembershipAudits[0]?.actorId, createdData?.id);
+  assert.equal(workspaceMembershipAudits[0]?.reason, "local_member_personal_workspace_created");
+  assert.equal(activationData?.userId, createdData?.id);
   assert.equal(activationData?.source, "localProvisioning");
   assert.equal(activationData?.decision, "no_active_offer");
   assert.equal(activationData?.status, "no_active_offer");
@@ -214,4 +247,52 @@ test("system-role mapper is fail-closed and canonical for current storage values
   assert.equal(toSystemRole("admin"), "admin");
   assert.equal(toSystemRole("user"), "user");
   assert.throws(() => toSystemRole("future" as never), /UNSUPPORTED_APP_USER_ROLE/u);
+});
+
+test("user workspace resolution prefers the canonical personal owner workspace", async () => {
+  const userId = "77777777-7777-4777-8777-777777777777";
+  const personalWorkspace = { id: "88888888-8888-4888-8888-888888888888", slug: `user-${userId}`, createdById: userId };
+  const sharedWorkspace = { id: "99999999-9999-4999-8999-999999999999", slug: "shared-workspace" };
+  const queries: Array<Record<string, unknown>> = [];
+  const db = {
+    workspace: {
+      findUnique: async () => personalWorkspace,
+    },
+    workspaceMembership: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        queries.push(where);
+        return { workspace: personalWorkspace };
+      },
+    },
+  } as unknown as PrismaClient;
+
+  const resolved = await resolveUserWorkspace({ id: userId, role: "user", accountAccessVersion: 1 }, db);
+  assert.equal(resolved.id, personalWorkspace.id);
+  assert.equal(queries[0]?.workspaceId, personalWorkspace.id);
+
+  const legacyDb = {
+    workspace: {
+      findUnique: async () => null,
+    },
+    workspaceMembership: {
+      findFirst: async () => ({ workspace: sharedWorkspace }),
+    },
+  } as unknown as PrismaClient;
+  await assert.rejects(
+    () => resolveUserWorkspace({ id: userId, role: "user", accountAccessVersion: 1 }, legacyDb),
+    (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_NOT_FOUND",
+  );
+
+  const missingOwnerDb = {
+    workspace: {
+      findUnique: async () => personalWorkspace,
+    },
+    workspaceMembership: {
+      findFirst: async () => null,
+    },
+  } as unknown as PrismaClient;
+  await assert.rejects(
+    () => resolveUserWorkspace({ id: userId, role: "user", accountAccessVersion: 1 }, missingOwnerDb),
+    (error: unknown) => error instanceof WorkspaceError && error.code === "WORKSPACE_NOT_FOUND",
+  );
 });

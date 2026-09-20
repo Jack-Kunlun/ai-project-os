@@ -15,6 +15,7 @@ import {
   updateProjectJobProgress,
 } from "../src/lib/project-workflow";
 import { grantProjectMembership } from "../src/lib/membership-governance";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const shouldRun = process.env.PROJECT_WORKFLOW_POSTGRES_GATE === "1";
 
@@ -43,12 +44,13 @@ test(
       });
       createdUserId = user.id;
     }
+    const workspace = await createPostgresWorkspaceFixture(db);
 
     try {
       await db.project.createMany({
         data: [
-          { id: projectId, name: `Workflow ${suffix}`, slug: `workflow-${suffix}` },
-          { id: otherProjectId, name: `Workflow other ${suffix}`, slug: `workflow-other-${suffix}` },
+          { id: projectId, workspaceId: workspace.workspaceId, name: `Workflow ${suffix}`, slug: `workflow-${suffix}` },
+          { id: otherProjectId, workspaceId: workspace.workspaceId, name: `Workflow other ${suffix}`, slug: `workflow-other-${suffix}` },
         ],
       });
       const projectWorkspace = await db.project.findUniqueOrThrow({
@@ -155,7 +157,7 @@ test(
 
       const cascadeProjectId = randomUUID();
       await db.project.create({
-        data: { id: cascadeProjectId, name: `Workflow cascade ${suffix}`, slug: `workflow-cascade-${suffix}` },
+        data: { id: cascadeProjectId, workspaceId: workspace.workspaceId, name: `Workflow cascade ${suffix}`, slug: `workflow-cascade-${suffix}` },
       });
       const cascadeJob = await db.backgroundJob.create({
         data: {

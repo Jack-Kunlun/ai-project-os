@@ -73,21 +73,21 @@ type PlatformTokenLedgerEntryRecord = {
   createdAt: Date;
 };
 
-function fakeDb(initialBootstrap: Readonly<{ initialOwnerUserId: string | null; adminOnboardingCompletedAt: Date | null }> = {
-  initialOwnerUserId: "99999999-9999-4999-8999-999999999999",
-  adminOnboardingCompletedAt: new Date("2026-09-16T00:00:00.000Z"),
+function fakeDb(initialBootstrap: Readonly<{ initialAdminUserId: string | null }> = {
+  initialAdminUserId: "99999999-9999-4999-8999-999999999999",
 }) {
   const bootstrap = { ...initialBootstrap };
   const credentials = new Map<string, ExternalCredential>();
   const attempts = new Map<string, Attempt>();
   const identities = new Map<string, { id: string; userId: string; githubUserId: bigint; login: string; email: string; displayName: string | null; lastLoginAt: Date }>();
   const users = new Map<string, { id: string; username: string; role: "admin" | "user"; displayName?: string | null; email?: string | null; emailVerifiedAt?: Date | null; disabledAt: Date | null; accountAccessVersion: number }>();
+  const workspaces = new Map<string, { id: string; name: string; slug: string; createdById: string }>();
   const emailVerificationAudits: Array<Record<string, unknown>> = [];
   const memberships: Array<{
     id: string;
     workspaceId: string;
     userId: string;
-    role: "member";
+    role: "owner" | "member";
     accessState: "confirmed";
     createdAt: Date;
     updatedAt: Date;
@@ -122,15 +122,26 @@ function fakeDb(initialBootstrap: Readonly<{ initialOwnerUserId: string | null; 
         return created;
       },
     },
+    workspace: {
+      findUnique: async ({ where }: { where: { slug: string } }) => [...workspaces.values()].find((workspace) => workspace.slug === where.slug) ?? null,
+      create: async ({ data }: { data: { id: string; name: string; slug: string; createdById: string } }) => {
+        const created = { ...data };
+        workspaces.set(created.id, created);
+        return created;
+      },
+    },
     workspaceMembership: {
-      create: async ({ data }: { data: { workspaceId: string; userId: string; role: "member"; accessState: "confirmed" } }) => {
+      create: async ({ data }: { data: { workspaceId: string; userId: string; role: "owner" | "member"; accessState: "confirmed" } }) => {
         const now = new Date();
         const created = { id: `66666666-6666-4666-8666-${String(++sequence).padStart(12, "0")}`, ...data, createdAt: now, updatedAt: now };
         memberships.push(created);
         return created;
       },
-      findMany: async ({ where }: { where: { workspaceId: string; userId: string; accessState: "confirmed" | { not: "revoked" } } }) =>
-        memberships.filter((membership) => membership.workspaceId === where.workspaceId && membership.userId === where.userId && membership.accessState === "confirmed"),
+      findMany: async ({ where }: { where: { workspaceId?: string; userId?: string; accessState?: "confirmed" | { not: "revoked" } } }) =>
+        memberships.filter((membership) => (where.workspaceId === undefined || membership.workspaceId === where.workspaceId)
+          && (where.userId === undefined || membership.userId === where.userId)
+          && (where.accessState === "confirmed" ? membership.accessState === "confirmed" : true)),
+      count: async ({ where }: { where: { userId: string; accessState: "confirmed" } }) => memberships.filter((membership) => membership.userId === where.userId && membership.accessState === where.accessState).length,
     },
     membershipAccessAudit: {
       create: async () => ({}),
@@ -265,7 +276,7 @@ function fakeDb(initialBootstrap: Readonly<{ initialOwnerUserId: string | null; 
     ...tx,
     $transaction: async (callback: (client: typeof tx) => unknown) => callback(tx),
   } as unknown as PrismaClient;
-  return { db, credentials, attempts, identities, users, memberships, platformTokenGrants, platformTokenLedgerEntries, accountEntitlementActivations, accountEntitlementActivationAudits, emailVerificationAudits, bootstrap };
+  return { db, credentials, attempts, identities, users, workspaces, memberships, platformTokenGrants, platformTokenLedgerEntries, accountEntitlementActivations, accountEntitlementActivationAudits, emailVerificationAudits, bootstrap };
 }
 
 test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient token revocation", async () => {
@@ -338,7 +349,11 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     assert.equal(registered.session?.user.username, "octocat");
     assert.equal(registrationStore.users.size, 2);
     assert.equal([...registrationStore.users.values()].find((item) => item.username === "octocat")?.role, "user");
-    assert.deepEqual(registrationStore.memberships.map((membership) => membership.role), ["member"]);
+    assert.deepEqual(registrationStore.memberships.map((membership) => membership.role), ["owner"]);
+    assert.equal(registrationStore.workspaces.size, 1);
+    const personalWorkspace = [...registrationStore.workspaces.values()][0];
+    assert.equal(personalWorkspace?.createdById, registered.session?.user.id);
+    assert.equal(personalWorkspace?.slug, `user-${registered.session?.user.id}`);
     assert.equal(registrationStore.identities.size, 1);
     assert.equal(registrationStore.platformTokenGrants.size, 1);
     const signupGrant = [...registrationStore.platformTokenGrants.values()][0];
@@ -364,6 +379,34 @@ test("GitHub OAuth uses PKCE, explicit linking, verified email, and transient to
     assert.equal(registrationStore.platformTokenGrants.size, 1);
     assert.equal(registrationStore.platformTokenLedgerEntries.size, 1);
 
+    githubUserId = 9;
+    githubLogin = "legacy-member";
+    githubEmail = "legacy-member@github.test";
+    const legacyStore = fakeDb();
+    legacyStore.identities.set("legacy-github-identity", {
+      id: "legacy-github-identity",
+      userId: USER_ID,
+      githubUserId: BigInt(githubUserId),
+      login: githubLogin,
+      email: githubEmail,
+      displayName: "Legacy Member",
+      lastLoginAt: new Date(),
+    });
+    const legacyFlow = await beginGitHubOAuth({
+      returnTo: "/dashboard",
+      intent: "login",
+      remember: true,
+    }, legacyStore.db);
+    const legacySignedIn = await completeGitHubOAuth({ code: "github-legacy-member-code", state: legacyFlow.state, cookieState: legacyFlow.state }, legacyStore.db);
+    assert.equal(legacySignedIn.session?.user.id, USER_ID);
+    assert.equal(legacyStore.workspaces.size, 1);
+    assert.equal(legacyStore.memberships.length, 1);
+    assert.equal(legacyStore.memberships[0]?.role, "owner");
+    assert.equal(legacyStore.memberships[0]?.userId, USER_ID);
+
+    githubUserId = 7;
+    githubLogin = "octocat";
+    githubEmail = "Octocat@GitHub.Test";
     const existingEmailStore = fakeDb();
     existingEmailStore.users.set("66666666-6666-4666-8666-666666666666", {
       id: "66666666-6666-4666-8666-666666666666",
@@ -458,7 +501,7 @@ test("GitHub OAuth rejects a callback without the matching state cookie", async 
   }
 });
 
-test("GitHub OAuth fails closed while first-owner bootstrap is pending, including a callback race", async () => {
+test("GitHub OAuth fails closed while platform-admin bootstrap is pending, including a callback race", async () => {
   const temp = await mkdtemp(join(tmpdir(), "ai-project-os-github-bootstrap-"));
   const originalFetch = globalThis.fetch;
   const originalClientId = process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID;
@@ -471,7 +514,7 @@ test("GitHub OAuth fails closed while first-owner bootstrap is pending, includin
   process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(temp, "master.key");
 
   try {
-    const store = fakeDb({ initialOwnerUserId: null, adminOnboardingCompletedAt: null });
+    const store = fakeDb({ initialAdminUserId: null });
     await assert.rejects(
       beginGitHubOAuth({ intent: "login", returnTo: "/login" }, store.db),
       (error: unknown) => error instanceof GitHubOAuthError && error.code === "GITHUB_OAUTH_BOOTSTRAP_PENDING",
@@ -479,11 +522,9 @@ test("GitHub OAuth fails closed while first-owner bootstrap is pending, includin
     assert.equal(store.attempts.size, 0);
     assert.equal(store.users.size, 1);
 
-    store.bootstrap.initialOwnerUserId = "99999999-9999-4999-8999-999999999999";
-    store.bootstrap.adminOnboardingCompletedAt = new Date("2026-09-16T00:00:00.000Z");
+    store.bootstrap.initialAdminUserId = "99999999-9999-4999-8999-999999999999";
     const flow = await beginGitHubOAuth({ intent: "login", returnTo: "/dashboard" }, store.db);
-    store.bootstrap.initialOwnerUserId = null;
-    store.bootstrap.adminOnboardingCompletedAt = null;
+    store.bootstrap.initialAdminUserId = null;
     globalThis.fetch = async (input, init) => {
       const url = String(input);
       if (url.endsWith("/login/oauth/access_token")) return Response.json({ access_token: "github-temporary-access-token", token_type: "bearer", scope: "read:user,user:email" });
@@ -525,7 +566,7 @@ test("GitHub OAuth availability exposes only the configuration/bootstrap state",
     assert.equal((await getGitHubOAuthAvailability()).status, "configurationInvalid");
 
     process.env.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET = "github-oauth-secret-for-tests";
-    const pending = fakeDb({ initialOwnerUserId: null, adminOnboardingCompletedAt: null });
+    const pending = fakeDb({ initialAdminUserId: null });
     const pendingAvailability = await getGitHubOAuthAvailability(pending.db);
     assert.deepEqual(pendingAvailability, { status: "bootstrapPending", callbackPath: "/api/auth/github/callback" });
 

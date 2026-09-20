@@ -36,15 +36,11 @@ test("ENT-009 keeps one immutable activation source and versioned signup identit
   assert.doesNotMatch(workspaces, /issueVerifiedSignupGrant\(/u);
   const adminBootstrap = auth.slice(
     auth.indexOf("export async function initializeAdmin"),
-    auth.indexOf("export async function initializeFirstOwner"),
+    auth.indexOf("export async function loginAdmin"),
   );
   assert.match(adminBootstrap, /data: \{ username, role: "admin", \.\.\.password \}/u);
   assert.doesNotMatch(adminBootstrap, /activateAccountEntitlements|source:/u);
-  const ownerProvisioning = auth.slice(
-    auth.indexOf("export async function initializeFirstOwner"),
-    auth.indexOf("export async function loginAdmin"),
-  );
-  assert.match(ownerProvisioning, /source: "localProvisioning"/u);
+  assert.doesNotMatch(auth, /initializeFirstOwner|initial-owner-bootstrap|localProvisioning/u);
   assert.match(github, /source: "githubRegistration"/u);
   assert.match(oidc, /source: invitation === null \? "oidcRegistration" : "oidcInvitationRegistration"/u);
   assert.match(workspaces, /source: "localProvisioning"/u);

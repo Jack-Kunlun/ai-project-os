@@ -27,10 +27,9 @@ import {
 } from "../src/lib/notification-service";
 import { grantProjectMembership, revokeProjectMembership } from "../src/lib/membership-governance";
 import { reconcileProjectJob } from "../src/lib/project-workflow";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const shouldRun = process.env.NOTIFICATION_SUBJECTS_POSTGRES_GATE === "1";
-const seededAdminId = "00000000-0000-4000-8000-000000000010";
-const workspaceId = "00000000-0000-4000-8000-000000000001";
 const repositoryRoot = process.cwd();
 const notificationMigration = "20260913020000_add_trustworthy_notification_subjects";
 const execFile = promisify(execFileCallback);
@@ -96,7 +95,7 @@ async function runHistoricalBackfillGate(): Promise<void> {
     await admin.connect();
     await admin.query(`CREATE DATABASE ${quotedIdentifier(databaseName)}`);
     const allMigrations = await migrationNamesFromDisk();
-    const beforeR07 = allMigrations.filter((name) => name !== notificationMigration);
+    const beforeR07 = allMigrations.filter((name) => name < notificationMigration);
     tempRoot = await mkdtemp(join(tmpdir(), "ai-project-os-notification-upgrade-"));
     await stageMigrations(tempRoot, beforeR07);
     await writeFile(join(tempRoot, "prisma.config.ts"), `import { defineConfig, env } from "prisma/config";\nexport default defineConfig({ schema: ${JSON.stringify(join(repositoryRoot, "prisma", "schema.prisma"))}, migrations: { path: ${JSON.stringify(join(tempRoot, "prisma", "migrations"))} }, datasource: { url: env("DATABASE_URL") } });\n`);
@@ -212,13 +211,14 @@ test(
           { id: secondOwnerId, username: `notification_owner_${suffix}`, role: "user", passwordHash: "a".repeat(43), passwordSalt: "b".repeat(22), passwordVersion: 1 },
         ],
       });
+      const { workspaceId, ownerId } = await createPostgresWorkspaceFixture(db);
       await db.project.createMany({
         data: [
           { id: projectId, workspaceId, name: `Notification ${suffix}`, slug: `notification-${suffix}` },
           { id: otherProjectId, workspaceId, name: `Notification other ${suffix}`, slug: `notification-other-${suffix}` },
         ],
       });
-      const admin = await db.appUser.findUniqueOrThrow({ where: { id: seededAdminId } });
+      const admin = await db.appUser.findUniqueOrThrow({ where: { id: ownerId } });
       await db.$transaction(async (tx) => {
         await grantProjectMembership(tx, { projectId, workspaceId, userId: admin.id, role: "owner", actorId: admin.id, reason: "notification_subjects_gate_admin_owner" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: admin.id, reason: "notification_subjects_gate_editor" });

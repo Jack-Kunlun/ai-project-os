@@ -1,20 +1,16 @@
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { Prisma, type AppUser, type PrismaClient } from "@prisma/client";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { assertEntitlementWriterSession, getDb, getEntitlementDb, isEntitlementDatabase } from "@/lib/db";
 import { authorizeApiRequest } from "@/lib/access-control";
 import { lockActorAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
-import { appendWorkspaceMembershipAudit } from "@/lib/membership-governance";
+import { findCurrentWorkspaceMembership, grantWorkspaceMembership } from "@/lib/membership-governance";
 import { toSystemRole, type SystemRole } from "@/lib/system-role";
 import { createBootstrapSignupOfferPolicy } from "@/lib/platform-grant-offer-policy-service";
-import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
-import { getFirstAdminOnboardingState } from "@/lib/first-admin-onboarding-service";
-import { DEFAULT_WORKSPACE_ID } from "@/lib/workspace-constants";
 
 export const SESSION_COOKIE_NAME = "ai_project_os_session" as const;
 export const SESSION_LIFETIME_DAYS = 14 as const;
-export { DEFAULT_WORKSPACE_ID } from "@/lib/workspace-constants";
 
 const PASSWORD_VERSION = 1;
 const SCRYPT_KEY_BYTES = 32;
@@ -34,6 +30,7 @@ export type AuthErrorCode =
   | "AUTH_CURRENT_PASSWORD_INVALID"
   | "AUTH_PASSWORD_UNCHANGED"
   | "AUTH_LOCAL_PASSWORD_EXISTS"
+  | "AUTH_PERSONAL_WORKSPACE_NOT_READY"
   | "AUTH_REQUIRED"
   | "AUTH_FORBIDDEN"
   | "AUTH_ACCOUNT_DISABLED"
@@ -59,11 +56,6 @@ export type CreatedSession = Readonly<{
   token: string;
   expiresAt: Date;
   user: SafeSessionUser;
-}>;
-
-export type CreatedInitialOwner = Readonly<{
-  user: SafeSessionUser;
-  createdAt: Date;
 }>;
 
 function fail(code: AuthErrorCode): never {
@@ -369,96 +361,95 @@ export async function initializeAdmin(
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
-export async function initializeFirstOwner(
-  actor: SafeSessionUser,
-  input: Readonly<{ username: unknown; password: unknown }>,
-  db: PrismaClient = getEntitlementDb(),
-): Promise<CreatedInitialOwner> {
-  if (actor.role !== "admin") return fail("AUTH_FORBIDDEN");
-  const username = canonicalUsername(input.username);
-  const password = await createPasswordRecord(input.password);
+function personalWorkspaceName(username: string): string {
+  return `${username} 的工作区`;
+}
+
+/**
+ * Repair the personal workspace for an ordinary local account created before
+ * v0.5.  The account lock is always acquired by the caller before this helper
+ * runs. A canonical workspace is never re-owned or re-granted: a pending,
+ * revoked, or non-owner current membership is an explicit governance failure.
+ */
+async function ensureLocalPersonalWorkspace(
+  db: Prisma.TransactionClient,
+  user: Readonly<{ id: string; username: string }>,
+): Promise<void> {
+  const slug = `user-${user.id}`;
+  let workspace = await db.workspace.findUnique({
+    where: { slug },
+    select: { id: true, createdById: true },
+  });
+
+  if (workspace === null) {
+    // The actor lock serializes local logins for this account. The deterministic
+    // personal key also fences any other personal-workspace writer before the
+    // row exists, while preserving the actor -> workspace lock order.
+    await lockWorkspaceAccess(db, user.id);
+    workspace = await db.workspace.findUnique({
+      where: { slug },
+      select: { id: true, createdById: true },
+    });
+    if (workspace === null) {
+      workspace = await db.workspace.create({
+        data: {
+          id: randomUUID(),
+          name: personalWorkspaceName(user.username),
+          slug,
+          createdById: user.id,
+        },
+        select: { id: true, createdById: true },
+      });
+      await grantWorkspaceMembership(db, {
+        workspaceId: workspace.id,
+        userId: user.id,
+        role: "owner",
+        actorId: user.id,
+        reason: "local_login_personal_workspace_created",
+      });
+      return;
+    }
+  }
+
+  await lockWorkspaceAccess(db, workspace.id);
+  const canonicalWorkspace = await db.workspace.findUnique({
+    where: { slug },
+    select: { id: true, createdById: true },
+  });
+  if (canonicalWorkspace === null || canonicalWorkspace.createdById !== user.id) {
+    return fail("AUTH_PERSONAL_WORKSPACE_NOT_READY");
+  }
+  const membership = await findCurrentWorkspaceMembership(db, canonicalWorkspace.id, user.id);
+  if (membership === null || membership.accessState !== "confirmed" || membership.role !== "owner") {
+    return fail("AUTH_PERSONAL_WORKSPACE_NOT_READY");
+  }
+}
+
+async function loginOrdinaryUser(
+  input: Readonly<{ password: unknown }>,
+  userId: string,
+  db: PrismaClient,
+): Promise<CreatedSession> {
   return db.$transaction(async (tx) => {
     if (isEntitlementDatabase(db)) await assertEntitlementWriterSession(tx);
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(781452903)`;
-    await lockActorAccess(tx, actor.id);
-    await lockWorkspaceAccess(tx, DEFAULT_WORKSPACE_ID);
-    await tx.$queryRaw`SELECT "id" FROM "PlatformBootstrap" WHERE "id" = 'platform' FOR UPDATE`;
-
-    const [currentActor, bootstrap, workspace, workspaceMembershipCount, projectMembershipCount] = await Promise.all([
-      tx.appUser.findUnique({
-        where: { id: actor.id },
-        select: { id: true, role: true, disabledAt: true, accountAccessVersion: true },
-      }),
-      tx.platformBootstrap.findUnique({ where: { id: "platform" } }),
-      tx.workspace.findUnique({ where: { id: DEFAULT_WORKSPACE_ID }, select: { id: true, createdById: true } }),
-      tx.workspaceMembership.count(),
-      tx.projectMembership.count(),
-    ]);
+    await lockActorAccess(tx, userId);
+    const current = await tx.appUser.findUnique({ where: { id: userId } });
     if (
-      currentActor === null
-      || currentActor.role !== "admin"
-      || currentActor.disabledAt !== null
-      || currentActor.accountAccessVersion !== actor.accountAccessVersion
-      || bootstrap === null
-      || bootstrap.initialAdminUserId !== actor.id
-    ) return fail("AUTH_FORBIDDEN");
-    if (
-      bootstrap.initialOwnerUserId !== null
-      || bootstrap.initialOwnerCreatedAt !== null
-      || workspace === null
-      || workspace.createdById !== null
-      || workspaceMembershipCount !== 0
-      || projectMembershipCount !== 0
-    ) return fail("AUTH_ALREADY_INITIALIZED");
-
-    const owner = await tx.appUser.create({ data: { username, role: "user", ...password } });
-    const membership = await tx.workspaceMembership.create({
-      data: {
-        workspaceId: DEFAULT_WORKSPACE_ID,
-        userId: owner.id,
-        role: "owner",
-        accessState: "confirmed",
-      },
+      current === null
+      || current.role !== "user"
+      || current.disabledAt !== null
+      || !(await verifyPasswordRecord(input.password, current))
+    ) {
+      return fail("AUTH_INVALID_CREDENTIALS");
+    }
+    await ensureLocalPersonalWorkspace(tx, current);
+    const now = new Date();
+    await tx.appSession.updateMany({
+      where: { userId: current.id, expiresAt: { lte: now }, revokedAt: null },
+      data: { revokedAt: now },
     });
-    await tx.workspace.update({
-      where: { id: DEFAULT_WORKSPACE_ID },
-      data: { createdById: owner.id },
-    });
-    await appendWorkspaceMembershipAudit(tx, membership, {
-      action: "bootstrapConfirmed",
-      previousState: null,
-      actorId: actor.id,
-      reason: "initial_owner_bootstrap",
-    });
-    await activateAccountEntitlements({
-      userId: owner.id,
-      source: "localProvisioning",
-      actorId: actor.id,
-      actorAccountAccessVersion: actor.accountAccessVersion,
-      accountAccessVersion: owner.accountAccessVersion,
-      evidenceKind: "initial-owner-bootstrap",
-    }, tx);
-    const createdAt = new Date();
-    const updated = await tx.platformBootstrap.updateMany({
-      where: { id: "platform", initialAdminUserId: actor.id, initialOwnerUserId: null },
-      data: {
-        initialOwnerUserId: owner.id,
-        initialOwnerCreatedAt: createdAt,
-        adminOnboardingCompletedAt: createdAt,
-        version: { increment: 1 },
-      },
-    });
-    if (updated.count !== 1) return fail("AUTH_ALREADY_INITIALIZED");
-    return Object.freeze({
-      user: Object.freeze({
-        id: owner.id,
-        username: owner.username,
-        role: "user" as const,
-        accountAccessVersion: owner.accountAccessVersion,
-      }),
-      createdAt,
-    });
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return createSessionInTransaction(tx, current, now);
+  });
 }
 
 export async function loginAdmin(
@@ -479,6 +470,7 @@ export async function loginAdmin(
   ) {
     return fail("AUTH_INVALID_CREDENTIALS");
   }
+  if (user.role === "user") return loginOrdinaryUser(input, user.id, db);
   await db.appSession.updateMany({
     where: { userId: user.id, expiresAt: { lte: new Date() }, revokedAt: null },
     data: { revokedAt: new Date() },
@@ -711,21 +703,6 @@ export async function requireUserPageSession(db: PrismaClient = getDb()): Promis
 
 export async function requirePageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser> {
   return requireUserPageSession(db);
-}
-
-/**
- * The onboarding page intentionally lives outside the admin layout. Keep a
- * dedicated guard here so the normal page gate can redirect pending sessions
- * without making /onboarding redirect back to itself.
- */
-export async function requireFirstAdminOnboardingPage(
-  db: PrismaClient = getDb(),
-): Promise<SafeSessionUser> {
-  const store = await cookies();
-  const user = await readSessionToken(store.get(SESSION_COOKIE_NAME)?.value ?? null, db);
-  if (user === null) redirect((await isApplicationInitialized(db)) ? "/login" : "/setup");
-  if (await getFirstAdminOnboardingState(user.id, db) !== "pending") redirect(user.role === "admin" ? "/admin" : "/dashboard");
-  return user;
 }
 
 export async function getPageSession(db: PrismaClient = getDb()): Promise<SafeSessionUser | null> {

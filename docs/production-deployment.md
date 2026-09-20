@@ -1,26 +1,26 @@
 # GitHub Actions 生产部署
 
-状态：`CONTROLLED_PRERELEASE`。当前批准的生产目标是 `v0.4.0-dev.1`。该版本仍是预发布，不是稳定版或 GitHub Latest；工作流只对这一精确标签开放，旧 `v0.3.0-dev.1`、`v0.2.0-dev.1` 和其他 `-dev` 标签继续失败关闭。
+状态：`CONTROLLED_PRERELEASE`。当前批准的生产目标是 `v0.5.0-dev.1`。该版本仍是预发布，不是稳定版或 GitHub Latest；工作流只对这一精确标签开放，旧 `v0.4.0-dev.1`、`v0.3.0-dev.1`、`v0.2.0-dev.1` 和其他 `-dev` 标签继续失败关闭。
 
 AI Project OS 从 GitHub Actions 的 **Deploy production** 工作流手动部署已经通过标签 CI 的批准版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 
-## v0.4.0-dev.1 clean-reset 边界
+## v0.5.0-dev.1 clean-reset 边界
 
-`v0.4.0-dev.1` 使用一次性的 `clean-deploy` 路径，不是 v0.3 的数据库升级。部署器在切换前必须完成并验证 PostgreSQL、主密钥卷、上传卷和主机恢复配置的加密异地备份，然后只删除 Compose 项目标记且未被挂载的 `AI_PROJECT_OS_PGDATA_VOLUME`；永不删除 secrets、uploads、`.env` 或备份目录，也不执行 `down -v`、Docker prune 或通配删除。
+`v0.5.0-dev.1` 使用一次性的 `clean-deploy` 路径，不是 v0.4 的数据库升级。部署器在切换前必须完成并验证 PostgreSQL、主密钥卷、上传卷和主机恢复配置的加密异地备份，然后只删除 Compose 项目标记且未被挂载的 `AI_PROJECT_OS_PGDATA_VOLUME`；永不删除 secrets、uploads、`.env` 或备份目录，也不执行 `down -v`、Docker prune 或通配删除。
 
 因此 v0.3 用户、配置、额度、审计、供应商连接和其他数据库记录不会被带入 v0.4；管理员必须在新数据库的 `/setup` 重新初始化并重新配置供应商、额度、审计基线和其他平台数据。备份是强制门禁，但 PostgreSQL 卷删除后不提供自动回滚；失败时保留备份与新栈现场，由管理员按验证过的备份恢复或修复。
 
 ## 安全模型
 
 - 工作流只能通过 `workflow_dispatch` 手动触发，并且必须从 `main` 运行。
-- 当前输入只接受 `v0.4.0-dev.1`，目标必须是 annotated tag，且 `package.json` 版本必须精确匹配 `0.4.0-dev.1`。
+- 当前输入只接受 `v0.5.0-dev.1`，目标必须是 annotated tag，且 `package.json` 版本必须精确匹配 `0.5.0-dev.1`。
 - 部署前会通过 GitHub API 确认该标签、该精确提交的 `CI` push 运行已经 `completed/success`。
 - GitHub 使用独立 ED25519 私钥；服务器对应公钥带 `restrict` 和 forced-command，不能获取 Shell、PTY、端口转发或执行任意命令。
-- forced-command 只接受 `clean-deploy v0.4.0-dev.1 <40 位 SHA> CONFIRM_CLEAN_RESET_V1`，再调用 root 持有的固定部署程序。专用系统账号 `ai-project-os-actions` 没有人工登录密钥；`deploy` 用户不加入 `docker` 组，也不获得无密码 sudo。
+- forced-command 只接受 `clean-deploy v0.5.0-dev.1 <40 位 SHA> CONFIRM_CLEAN_RESET_V1`，再调用 root 持有的固定部署程序。专用系统账号 `ai-project-os-actions` 没有人工登录密钥；`deploy` 用户不加入 `docker` 组，也不获得无密码 sudo。
 - 服务器会再次通过 GitHub 公共 API 核验标签 CI，专用私钥本身不能绕过发布门禁。
 - 生产 `.env` 位于 `/etc/ai-project-os/production.env`，权限为 `root:root 0600`，不会进入仓库、Actions 日志或部署结果。
 - 候选镜像会在旧 app/worker 仍健康时完成预构建；部署器捕获精确健康容器 ID，停止旧 app/worker，确认维护窗口中只剩本项目的 PostgreSQL 并且端口只绑定 `127.0.0.1`，再以 stopped-writer cutover 模式调用 `pre-deploy` 备份。只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许继续；完整合同见[生产异地备份](production-backup.md)。
-- 备份成功后设置 mutation 标记并执行不带 `-v` 的 `docker compose down --remove-orphans`，检查 `AI_PROJECT_OS_PGDATA_VOLUME` 的 Compose 挂载、`com.docker.compose.project=ai-project-os` 和数据库卷角色标签，确认没有附着容器后仅删除该精确 PostgreSQL 卷。随后启动全新的 `postgres`、`principal-bootstrap`、`migrate`、`reconcile`、`app` 和 `worker`，等待初始化步骤退出成功、健康检查通过，并验证本地与公网 v0.4 健康、Worker `consecutiveFailures=0` 及 `/setup` 首位管理员表单。mutation 之前失败只恢复捕获的旧 ID；mutation 或卷删除之后绝不自动回启旧代码。
+- 备份成功后设置 mutation 标记并执行不带 `-v` 的 `docker compose down --remove-orphans`，检查 `AI_PROJECT_OS_PGDATA_VOLUME` 的 Compose 挂载、`com.docker.compose.project=ai-project-os` 和数据库卷角色标签，确认没有附着容器后仅删除该精确 PostgreSQL 卷。随后启动全新的 `postgres`、`principal-bootstrap`、`migrate`、`reconcile`、`app` 和 `worker`，等待初始化步骤退出成功、健康检查通过，并验证本地与公网 v0.5 健康、Worker `consecutiveFailures=0` 及 `/setup` 首位管理员表单。mutation 之前失败只恢复捕获的旧 ID；mutation 或卷删除之后绝不自动回启旧代码。
 - 同一时间只允许一个生产部署；GitHub 与服务器两侧均禁止并发覆盖。
 
 ## 一次性服务器准备
@@ -73,7 +73,7 @@ sudo deploy/production/install-production-deploy.sh \
 生产 job 在任何备份、迁移或容器替换之前，通过受限 SSH key 的固定
 `configure-github-oauth` 命令把 OAuth 配置经标准输入发送给 root-owned 配置器。配置器只接受固定三行协议，校验 GitHub 凭据格式、生产 `.env` 的 owner/mode、数据库密码与安全 Cookie 基线，把公开 origin 固定为 `https://ai-project-os.com`，并在同一目录原子替换 `/etc/ai-project-os/production.env`。Client Secret 不进入命令参数、Actions 输出、部署结果或仓库；远端只返回 `PRODUCTION_GITHUB_OAUTH_CONFIG_OK`。
 
-该命令需要服务器已经安装当前版本的受限网关、部署器和配置器。部署 `v0.4.0-dev.1` 前必须从受信候选源码重新运行 `install-production-deploy.sh`，使 root-owned 工具、预检逻辑、103-entry source manifest 与精确 tag allowlist 同步更新；旧网关不接受该预发布标签。安装工具不会自动部署应用，配置 Environment 也不会绕过标签、CI、备份或数据库预检。
+该命令需要服务器已经安装当前版本的受限网关、部署器和配置器。部署 `v0.5.0-dev.1` 前必须从受信候选源码重新运行 `install-production-deploy.sh`，使 root-owned 工具、106-entry fresh migration ledger 与精确 tag allowlist 同步更新；旧网关不接受该预发布标签。安装工具不会自动部署应用，配置 Environment 也不会绕过标签、CI、备份或数据库预检。
 
 ## 部署流程
 
@@ -81,7 +81,7 @@ sudo deploy/production/install-production-deploy.sh \
 
 1. 打开 GitHub 仓库的 **Actions**。
 2. 选择 **Deploy production**。
-3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag 为 `v0.4.0-dev.1`。
+3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag 为 `v0.5.0-dev.1`。
 4. 如配置了 Environment 审批，批准该部署。
 5. 工作流才会依次完成标签/CI 验证、受限 SSH、加密异地备份、部署、公网健康与 HTTP→HTTPS 跳转验证。
 

@@ -13,6 +13,7 @@ import {
 } from "../src/lib/ai-providers";
 import { getDb } from "../src/lib/db";
 import { createVerifiedProviderFixture } from "./platform-provider-fixture";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 import {
   createGitConnection,
   executeGitConnectionMutation,
@@ -196,7 +197,8 @@ test("unused model and Git connections can be permanently deleted while historic
     { id: userId, username: `configuration_delete_${suffix}`, role: "admin" },
     { id: otherUserId, username: `configuration_delete_other_${suffix}`, role: "user" },
   ] });
-  await db.project.create({ data: { id: projectId, name: `Configuration deletion ${suffix}`, slug: `configuration-deletion-${suffix}` } });
+  const workspace = await createPostgresWorkspaceFixture(db);
+  await db.project.create({ data: { id: projectId, workspaceId: workspace.workspaceId, name: `Configuration deletion ${suffix}`, slug: `configuration-deletion-${suffix}` } });
 
   try {
     const provider = await createVerifiedProviderFixture({

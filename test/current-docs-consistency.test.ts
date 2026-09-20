@@ -82,7 +82,7 @@ test("current product documents describe the v0.4.0-dev.1 capability boundaries"
 
   assert.match(docs["README.md"], /effective=false/u);
   assert.match(docs["docs/admin-operation-guide.md"], /平台管理员只负责平台配置、用户运营、安全审核和受限运维/u);
-  assert.match(docs["docs/admin-operation-guide.md"], /初始化双身份/u);
+  assert.match(docs["docs/admin-operation-guide.md"], /无需另建默认工作区 Owner/u);
   assert.match(docs["docs/admin-operation-guide.md"], /\/admin\/users/u);
   assert.match(docs["docs/admin-operation-guide.md"], /停用账号仍可审计，?所有有效结果均为 `effective=false`/u);
   assert.match(docs["docs/admin-operation-guide.md"], /system admin 角色只代表平台管理权限，不隐含任何工作区或项目 Owner 权限/u);

@@ -28,17 +28,44 @@ BEGIN
      OR EXISTS (SELECT 1 FROM "ProjectSource" WHERE "id" IN ('11111111-1111-4111-8111-111111111112', '22222222-2222-4222-8222-222222222223'))
      OR EXISTS (SELECT 1 FROM "ProjectItem" WHERE "id" IN ('11111111-1111-4111-8111-111111111114', '11111111-1111-4111-8111-111111111115', '22222222-2222-4222-8222-222222222225'))
      OR EXISTS (SELECT 1 FROM "ProjectScan" WHERE "id" IN ('11111111-1111-4111-8111-111111111113', '22222222-2222-4222-8222-222222222224'))
-     OR EXISTS (SELECT 1 FROM "ProjectSnapshot" WHERE "id" = '11111111-1111-4111-8111-111111111116') THEN
+     OR EXISTS (SELECT 1 FROM "ProjectSnapshot" WHERE "id" = '11111111-1111-4111-8111-111111111116')
+     OR EXISTS (SELECT 1 FROM "AppUser" WHERE "id" = '33333333-3333-4333-8333-333333333331')
+     OR EXISTS (SELECT 1 FROM "Workspace" WHERE "id" = '33333333-3333-4333-8333-333333333332')
+     OR EXISTS (SELECT 1 FROM "WorkspaceMembership" WHERE "id" = '33333333-3333-4333-8333-333333333333') THEN
     RAISE EXCEPTION 'fixed integrity smoke IDs already exist';
   END IF;
   RAISE NOTICE 'fixed integrity smoke IDs absent before writes: PASS';
 END
 $$;
 
-INSERT INTO "Project" ("id", "name", "slug", "updatedAt")
+INSERT INTO "AppUser" ("id", "username", "role", "updatedAt")
+VALUES ('33333333-3333-4333-8333-333333333331', 'integrity_smoke_owner', 'user', CURRENT_TIMESTAMP);
+
+INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "updatedAt")
+VALUES ('33333333-3333-4333-8333-333333333332', 'Integrity Smoke Workspace', 'integrity-smoke-workspace', '33333333-3333-4333-8333-333333333331', CURRENT_TIMESTAMP);
+
+INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
+VALUES ('33333333-3333-4333-8333-333333333333', '33333333-3333-4333-8333-333333333332', '33333333-3333-4333-8333-333333333331', 'owner', 'confirmed', CURRENT_TIMESTAMP);
+
+INSERT INTO "MembershipAccessAudit" (
+  "id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId", "action",
+  "previousState", "newState", "roleSnapshot", "actorId", "reason", "membershipFingerprint"
+)
+SELECT gen_random_uuid(), 'workspace', membership."id", membership."workspaceId", NULL, membership."userId",
+  'confirmed', NULL, 'confirmed', membership."role", membership."userId", 'integrity_smoke_fixture',
+  encode(digest(convert_to(concat_ws(
+    E'\x1f', membership."id"::text, membership."workspaceId"::text, membership."userId"::text,
+    membership."role"::text,
+    to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS'),
+    to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS')
+  ), 'UTF8'), 'sha256'), 'hex')
+FROM "WorkspaceMembership" AS membership
+WHERE membership."id" = '33333333-3333-4333-8333-333333333333';
+
+INSERT INTO "Project" ("id", "workspaceId", "name", "slug", "updatedAt")
 VALUES
-  ('11111111-1111-4111-8111-111111111111', 'Integrity Smoke A', 'integrity-smoke-a', CURRENT_TIMESTAMP),
-  ('22222222-2222-4222-8222-222222222222', 'Integrity Smoke B', 'integrity-smoke-b', CURRENT_TIMESTAMP);
+  ('11111111-1111-4111-8111-111111111111', '33333333-3333-4333-8333-333333333332', 'Integrity Smoke A', 'integrity-smoke-a', CURRENT_TIMESTAMP),
+  ('22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333332', 'Integrity Smoke B', 'integrity-smoke-b', CURRENT_TIMESTAMP);
 
 INSERT INTO "ProjectSource" ("id", "projectId", "kind", "contentText", "contentHash")
 VALUES

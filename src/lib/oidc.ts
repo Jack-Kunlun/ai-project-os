@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { Prisma, type OidcTokenAuthMethod, type PrismaClient } from "@prisma/client";
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
 import { z } from "zod";
@@ -129,17 +129,19 @@ function fail(code: OidcErrorCode): never {
 }
 
 /**
- * OIDC is a user-domain login path.  The check is repeated after the
- * transaction-scoped bootstrap lock in the callback so a pending first-owner
- * setup cannot be bypassed by creating a user or membership through OIDC.
+ * OIDC is a user-domain login path. The platform administrator is the only
+ * required bootstrap actor; a global/default-workspace Owner is not part of
+ * OIDC admission. The check is repeated after the transaction-scoped
+ * bootstrap lock so a pending admin setup cannot be bypassed by creating a
+ * user or membership through OIDC.
  */
 async function assertPlatformBootstrapReady(db: Prisma.TransactionClient): Promise<void> {
   await db.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(${PLATFORM_BOOTSTRAP_LOCK_ID})`);
   const bootstrap = await db.platformBootstrap.findUnique({
     where: { id: "platform" },
-    select: { initialOwnerUserId: true, adminOnboardingCompletedAt: true },
+    select: { initialAdminUserId: true },
   });
-  if (bootstrap === null || bootstrap.initialOwnerUserId === null || bootstrap.adminOnboardingCompletedAt === null) {
+  if (bootstrap === null || bootstrap.initialAdminUserId === null) {
     return fail("OIDC_PROVIDER_NOT_VERIFIED");
   }
 }
@@ -475,6 +477,10 @@ async function availableUsername(baseInput: string, db: Prisma.TransactionClient
   return `oidc-${randomBytes(12).toString("hex")}`;
 }
 
+function personalWorkspaceName(username: string): string {
+  return `${username} 的个人工作区`.slice(0, 160);
+}
+
 function secureEqual(left: string, right: string): boolean {
   const a = Buffer.from(left, "utf8"); const b = Buffer.from(right, "utf8");
   return a.length === b.length && timingSafeEqual(a, b);
@@ -556,11 +562,16 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     let identity = await tx.oidcIdentity.findUnique({ where: { providerId_subject: { providerId: provider.id, subject } }, include: { user: true } });
     let user = identity?.user ?? null;
     const identityExistedBeforeLock = identity !== null;
-    const invitationCandidate = claimedEmail === null || !emailVerified ? null : await tx.workspaceInvitation.findFirst({ where: { workspaceId: provider.workspaceId, email: claimedEmail, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "asc" } });
     const emailOwner = claimedEmail !== null && emailVerified ? await tx.appUser.findUnique({ where: { email: claimedEmail }, select: { id: true } }) : null;
     if (user === null && emailOwner !== null) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
-    if (user !== null) await lockActorsAccess(tx, [user.id]);
+    // A new user id is preallocated so the actor fence is acquired before
+    // either the provider workspace or the personal workspace. This keeps
+    // the callback on the same actor -> workspace lock order as membership
+    // governance even though the AppUser row does not exist yet.
+    const pendingUserId = user?.id ?? randomUUID();
+    await lockActorsAccess(tx, [pendingUserId]);
     await lockWorkspaceAccess(tx, provider.workspaceId);
+    const invitationCandidate = claimedEmail === null || !emailVerified ? null : await tx.workspaceInvitation.findFirst({ where: { workspaceId: provider.workspaceId, email: claimedEmail, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "asc" } });
     if (invitationCandidate?.projectId !== null && invitationCandidate?.projectId !== undefined) await lockProjectAccess(tx, invitationCandidate.projectId);
     if (invitationCandidate !== null) await lockWorkspaceInvitationAccess(tx, invitationCandidate.id);
     // Provider state is checked after the actor/workspace/project fence.  This
@@ -572,6 +583,7 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     if (identityExistedBeforeLock !== (lockedIdentity !== null)) return fail("OIDC_FLOW_INVALID");
     identity = lockedIdentity;
     user = identity?.user ?? null;
+    if (user !== null && user.role !== "user") return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     const invitation = invitationCandidate === null ? null : await tx.workspaceInvitation.findUnique({ where: { id: invitationCandidate.id } });
     if (invitation !== null && (invitation.acceptedAt !== null || invitation.revokedAt !== null || invitation.expiresAt <= new Date())) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     if (invitation !== null && invitation.workspaceId !== provider.workspaceId) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
@@ -586,8 +598,22 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
     const domainAllowed = claimedEmail !== null && emailVerified && (domains.length === 0 || (emailDomain(claimedEmail) !== null && domains.includes(emailDomain(claimedEmail)!)));
     if (user === null && invitation === null && !(provider.autoProvision && domainAllowed)) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
     const newlyCreated = user === null;
+    let personalWorkspace = user === null
+      ? null
+      : await tx.workspace.findUnique({ where: { slug: `user-${user.id}` }, select: { id: true, createdById: true } });
+    if (personalWorkspace !== null && personalWorkspace.createdById !== user?.id) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+    const personalWorkspaceId = personalWorkspace?.id ?? randomUUID();
+    await lockWorkspaceAccess(tx, personalWorkspaceId);
+    if (user !== null && personalWorkspace !== null) {
+      personalWorkspace = await tx.workspace.findUnique({ where: { id: personalWorkspace.id }, select: { id: true, createdById: true } });
+      if (personalWorkspace === null || personalWorkspace.createdById !== user.id) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+      const personalMembership = await findCurrentWorkspaceMembership(tx, personalWorkspace.id, user.id);
+      if (personalMembership === null || personalMembership.accessState !== "confirmed" || personalMembership.role !== "owner") {
+        return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+      }
+    }
     if (user === null) {
-      user = await tx.appUser.create({ data: { username: await availableUsername(preferredUsername, tx), displayName, email: emailVerified ? claimedEmail : null, emailVerifiedAt: emailVerified ? new Date() : null, role: "user", passwordHash: null, passwordSalt: null } });
+      user = await tx.appUser.create({ data: { id: pendingUserId, username: await availableUsername(preferredUsername, tx), displayName, email: emailVerified ? claimedEmail : null, emailVerifiedAt: emailVerified ? new Date() : null, role: "user", passwordHash: null, passwordSalt: null } });
       if (emailVerified && claimedEmail !== null) {
         await appendEmailVerificationAudit(tx, {
           userId: user.id,
@@ -600,21 +626,40 @@ export async function completeOidcLogin(input: Readonly<{ code: unknown; state: 
           reason: "oidc_email_claim_verified",
         });
       }
-      if (newlyCreated) {
-        const activationNow = new Date();
-        await activateAccountEntitlements({
-          userId: user.id,
-          source: invitation === null ? "oidcRegistration" : "oidcInvitationRegistration",
-          actorId: user.id,
-          accountAccessVersion: user.accountAccessVersion,
-          actorAccountAccessVersion: user.accountAccessVersion,
-          evidenceKind: invitation === null ? "oidc" : "oidc-invitation",
-          evidenceRef: provider.id,
-          now: activationNow,
-        }, tx);
-      }
     }
     if (user.disabledAt !== null) return fail("OIDC_ACCOUNT_DISABLED");
+    if (personalWorkspace === null) {
+      const createdWorkspace = await tx.workspace.create({
+        data: {
+          id: personalWorkspaceId,
+          name: personalWorkspaceName(user.username),
+          slug: `user-${user.id}`,
+          createdById: user.id,
+        },
+        select: { id: true, createdById: true },
+      });
+      personalWorkspace = createdWorkspace;
+      await grantWorkspaceMembership(tx, {
+        workspaceId: createdWorkspace.id,
+        userId: user.id,
+        role: "owner",
+        actorId: user.id,
+        reason: "oidc_personal_workspace_created",
+      });
+    }
+    if (newlyCreated) {
+      const activationNow = new Date();
+      await activateAccountEntitlements({
+        userId: user.id,
+        source: invitation === null ? "oidcRegistration" : "oidcInvitationRegistration",
+        actorId: user.id,
+        accountAccessVersion: user.accountAccessVersion,
+        actorAccountAccessVersion: user.accountAccessVersion,
+        evidenceKind: invitation === null ? "oidc" : "oidc-invitation",
+        evidenceRef: provider.id,
+        now: activationNow,
+      }, tx);
+    }
     if (emailVerified && claimedEmail !== null) {
       await setVerifiedAccountEmail(tx, user.id, claimedEmail, "oidc", new Date());
     }

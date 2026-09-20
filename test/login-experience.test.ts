@@ -3,9 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("login page exposes the reference layout and real configured auth choices", async () => {
-  const [form, page, localRoute, githubStart, githubCallback, profile, privacy, terms, help, publicPage] = await Promise.all([
+  const [form, page, apiErrors, localRoute, githubStart, githubCallback, profile, privacy, terms, help, publicPage] = await Promise.all([
     readFile("src/app/login/login-form.tsx", "utf8"),
     readFile("src/app/login/page.tsx", "utf8"),
+    readFile("src/lib/api-errors.ts", "utf8"),
     readFile("src/app/api/auth/login/route.ts", "utf8"),
     readFile("src/app/api/auth/github/start/route.ts", "utf8"),
     readFile("src/app/api/auth/github/callback/route.ts", "utf8"),
@@ -34,7 +35,11 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.match(form, /text-\[12px\]/u);
   assert.match(form, /sm:mt-7/u);
   assert.match(form, /githubLoginAvailable/u);
+  assert.match(form, /平台管理员尚未完成初始化/u);
   assert.match(page, /getGitHubOAuthAvailability/u);
+  assert.match(page, /平台管理员尚未完成初始化/u);
+  assert.match(page, /GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED[\s\S]*工作区成员关系尚未完成管理员核查/u);
+  assert.match(apiErrors, /GITHUB_OAUTH_BOOTSTRAP_PENDING:[\s\S]*平台管理员尚未完成初始化/u);
   assert.match(localRoute, /remember/u);
   assert.match(githubStart, /beginGitHubOAuth/u);
   assert.doesNotMatch(githubStart, /requestUrl\.origin/u);
@@ -42,6 +47,7 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.match(githubCallback, /githubOAuthPublicUrl/u);
   assert.doesNotMatch(githubCallback, /url\.origin/u);
   assert.match(profile, /intent=link/u);
+  assert.match(profile, /平台管理员尚未完成初始化/u);
   for (const publicRoute of [privacy, terms, help]) {
     assert.match(publicRoute, /PublicInfoPage/u);
     assert.doesNotMatch(publicRoute, /requirePageSession/u);

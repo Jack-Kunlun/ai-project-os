@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -12,7 +12,7 @@ import {
   readCoherentVersion,
   type CandidateIdentity,
 } from "./local-release-candidate";
-import { DEFAULT_WORKSPACE_ID } from "../src/lib/workspace-constants";
+import { createPasswordRecord } from "../src/lib/auth";
 
 type ProcessResult = { code: number; stdout: string; stderr: string };
 
@@ -150,8 +150,8 @@ function assertBusinessSnapshot(value: unknown, fixture: BusinessFixture): JsonR
   assertSnapshotRecordShape(workspace, ["createdAt", "createdById", "id", "name", "slug", "updatedAt"], "Workspace");
   assertSnapshotField(workspace, "id", fixture.workspaceId, "Workspace");
   assertSnapshotField(workspace, "createdById", fixture.ownerId, "Workspace");
-  assertSnapshotField(workspace, "name", "默认工作区", "Workspace");
-  assertSnapshotField(workspace, "slug", "default", "Workspace");
+  assertSnapshotField(workspace, "name", `${fixture.ownerUsername} 的个人工作区`, "Workspace");
+  assertSnapshotField(workspace, "slug", `user-${fixture.ownerId}`, "Workspace");
 
   const workspaceMembership = snapshotRows(snapshot, "WorkspaceMembership")[0]!;
   assertSnapshotRecordShape(workspaceMembership, ["accessState", "createdAt", "id", "role", "updatedAt", "userId", "workspaceId"], "WorkspaceMembership");
@@ -340,27 +340,92 @@ function readSessionCookie(response: Response): string {
   return `ai_project_os_session=${session}`;
 }
 
-async function seedBusinessFixture(appPort: number, identity: CandidateIdentity): Promise<BusinessFixture> {
+async function seedBusinessFixture(
+  appPort: number,
+  identity: CandidateIdentity,
+  composeArgs: string[],
+  entitlementWriterPassword: string,
+): Promise<BusinessFixture> {
   const baseUrl = `http://127.0.0.1:${appPort}`;
   const adminUsername = `candidate-admin-${identity.token}`;
   const ownerUsername = `candidate-owner-${identity.token}`;
   const adminPassword = `candidate_admin_${randomBytes(24).toString("hex")}`;
   const ownerPassword = `candidate_owner_${randomBytes(24).toString("hex")}`;
+  const ownerId = randomUUID();
+  const workspaceId = randomUUID();
   const projectSlug = `candidate-${identity.token}`;
   const sourceContent = "Disposable local release persistence fixture content.";
   const sourceContentHash = createHash("sha256").update(sourceContent, "utf8").digest("hex");
+  const ownerPasswordRecord = await createPasswordRecord(ownerPassword);
   const setup = await postJson(`${baseUrl}/api/setup`, { username: adminUsername, password: adminPassword }, 201);
-  const adminSessionCookie = readSessionCookie(setup.response);
   const user = requireRecord(setup.payload.user, "LOCAL_RELEASE_FIXTURE_USER_INVALID");
   const adminId = requireUuid(user.id, "LOCAL_RELEASE_FIXTURE_ADMIN_ID_INVALID");
   if (user.username !== adminUsername || user.role !== "admin") throw new Error("LOCAL_RELEASE_FIXTURE_ADMIN_INVALID");
 
-  await postJson(`${baseUrl}/api/admin/onboarding/complete`, { username: ownerUsername, password: ownerPassword }, 201, adminSessionCookie);
+  // The release candidate is intentionally isolated and has no public signup
+  // route. Seed one ordinary account through the scoped entitlement writer so
+  // the persistence smoke exercises the same personal-workspace invariant as
+  // a real GitHub registration without resurrecting the removed default
+  // workspace/Owner bootstrap endpoint.
+  const fixtureSql = `
+BEGIN;
+INSERT INTO "AppUser" ("id", "username", "passwordHash", "passwordSalt", "passwordVersion", "role", "accountAccessVersion", "createdAt", "updatedAt")
+VALUES (${sqlLiteral(ownerId)}::uuid, ${sqlLiteral(ownerUsername)}, ${sqlLiteral(ownerPasswordRecord.passwordHash)}, ${sqlLiteral(ownerPasswordRecord.passwordSalt)}, 1, 'user', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "createdAt", "updatedAt")
+VALUES (${sqlLiteral(workspaceId)}::uuid, ${sqlLiteral(`${ownerUsername} 的个人工作区`)}, ${sqlLiteral(`user-${ownerId}`)}, ${sqlLiteral(ownerId)}::uuid, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+INSERT INTO "WorkspaceMembership" ("id", "workspaceId", "userId", "role", "accessState", "createdAt", "updatedAt")
+VALUES (${sqlLiteral(randomUUID())}::uuid, ${sqlLiteral(workspaceId)}::uuid, ${sqlLiteral(ownerId)}::uuid, 'owner', 'confirmed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+INSERT INTO "MembershipAccessAudit" (
+  "id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId", "action",
+  "previousState", "newState", "roleSnapshot", "actorId", "reason", "membershipFingerprint"
+)
+SELECT
+  gen_random_uuid(), 'workspace', membership."id", membership."workspaceId", NULL, membership."userId", 'confirmed',
+  NULL, membership."accessState", membership."role"::text, membership."userId",
+  'local_release_personal_workspace_created',
+  encode(digest(convert_to(concat_ws(
+    E'\\x1f', membership."id"::text, membership."workspaceId"::text, membership."userId"::text,
+    membership."role"::text,
+    to_char(membership."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS'),
+    to_char(membership."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS')
+  ), 'UTF8'), 'sha256'), 'hex')
+FROM "WorkspaceMembership" AS membership
+WHERE membership."workspaceId" = ${sqlLiteral(workspaceId)}::uuid
+  AND membership."userId" = ${sqlLiteral(ownerId)}::uuid;
+COMMIT;
+SELECT json_build_object('ownerId', ${sqlLiteral(ownerId)}::text, 'workspaceId', ${sqlLiteral(workspaceId)}::text)::text;
+`;
+  const fixtureResult = await runProcess("docker", [
+    ...composeArgs,
+    "exec",
+    "-T",
+    "-e",
+    `PGPASSWORD=${entitlementWriterPassword}`,
+    "postgres",
+    "psql",
+    "-U",
+    "ai_project_os_entitlement_writer",
+    "-d",
+    "ai_project_os_candidate",
+    "-q",
+    "-At",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    fixtureSql,
+  ]);
+  const fixtureOutputLines = fixtureResult.stdout.trim().split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.startsWith("{"));
+  if (fixtureOutputLines.length !== 1) throw new Error("LOCAL_RELEASE_FIXTURE_DB_OUTPUT_INVALID");
+  const fixtureRecord = requireRecord(JSON.parse(fixtureOutputLines[0]!), "LOCAL_RELEASE_FIXTURE_DB_RESULT_INVALID");
+  if (fixtureRecord.ownerId !== ownerId || fixtureRecord.workspaceId !== workspaceId) {
+    throw new Error("LOCAL_RELEASE_FIXTURE_DB_RESULT_MISMATCH");
+  }
+
   const ownerLogin = await postJson(`${baseUrl}/api/auth/login`, { username: ownerUsername, password: ownerPassword, remember: true }, 200);
   const ownerSessionCookie = readSessionCookie(ownerLogin.response);
   const owner = requireRecord(ownerLogin.payload.user, "LOCAL_RELEASE_FIXTURE_OWNER_INVALID");
-  const ownerId = requireUuid(owner.id, "LOCAL_RELEASE_FIXTURE_OWNER_ID_INVALID");
-  if (owner.username !== ownerUsername || owner.role !== "user" || ownerId === adminId) {
+  const loggedInOwnerId = requireUuid(owner.id, "LOCAL_RELEASE_FIXTURE_OWNER_ID_INVALID");
+  if (owner.username !== ownerUsername || owner.role !== "user" || loggedInOwnerId !== ownerId || loggedInOwnerId === adminId) {
     throw new Error("LOCAL_RELEASE_FIXTURE_OWNER_INVALID");
   }
 
@@ -388,7 +453,7 @@ async function seedBusinessFixture(appPort: number, identity: CandidateIdentity)
     adminId,
     ownerId,
     ownerUsername,
-    workspaceId: DEFAULT_WORKSPACE_ID,
+    workspaceId,
     projectId,
     projectSlug,
     sourceId,
@@ -783,8 +848,8 @@ async function main(): Promise<void> {
     await verifyMigrations(composeArgs, migrationCount);
     await verifyImageLabels(composeArgs, version);
     await verifyHealth(appPort, version);
-    console.log("[local-release] seeding disposable business persistence fixture through the application API");
-    const fixture = await seedBusinessFixture(appPort, identity);
+    console.log("[local-release] seeding disposable personal-workspace fixture in the candidate DB and business data through the application API");
+    const fixture = await seedBusinessFixture(appPort, identity, composeArgs, entitlementWriterPassword);
     const beforeSnapshot = await readBusinessSnapshot(composeArgs, runtimePassword, fixture);
     const beforeWorker = await readWorkerRuntime(composeArgs, runtimePassword, identity.workerName);
     const beforeCanonical = canonicalJson(beforeSnapshot);

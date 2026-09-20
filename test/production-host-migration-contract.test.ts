@@ -83,11 +83,11 @@ test("host migration keeps the restored target passive until an explicit guarded
   assert.doesNotMatch(migration, /secret(Key|Id).*printf|AGE-SECRET-KEY.*printf/iu);
 });
 
-test("restore migration accepts only a v0.3 source backup for the v0.4 target", async () => {
+test("restore migration accepts only a v0.4 source backup for the v0.5 target", async () => {
   const restore = await readFile(restorePath, "utf8");
 
-  assert.match(restore, /readonly MIGRATION_SOURCE_VERSION=0\.3\.0-dev\.1/u);
-  assert.match(restore, /readonly MIGRATION_TARGET_TAG=v0\.4\.0-dev\.1/u);
+  assert.match(restore, /readonly MIGRATION_SOURCE_VERSION=0\.4\.0-dev\.1/u);
+  assert.match(restore, /readonly MIGRATION_TARGET_TAG=v0\.5\.0-dev\.1/u);
   assert.match(restore, /validate_backup_release "\$manifest_app_version"/u);
   assert.match(
     restore,
@@ -126,8 +126,10 @@ pattern = runpy.run_path(sys.argv[1])["BACKUP_NAME"]
 accepted = pattern.fullmatch(sys.argv[2]) is not None
 raise SystemExit(0 if accepted else 1)
 `;
-  const approved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.4.0-dev.1.Abc123"]);
+  const approved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.5.0-dev.1.Abc123"]);
   assert.equal(approved.status, 0, approved.stderr);
+  const previousApproved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.4.0-dev.1.Abc123"]);
+  assert.equal(previousApproved.status, 0, previousApproved.stderr);
   const previousRelease = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.3.0-dev.1.Abc123"]);
   assert.notEqual(previousRelease.status, 0);
   const unapproved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.2.0-dev.1.Abc123"]);
@@ -140,7 +142,7 @@ test("portable backup validator accepts the exact v2 layout and rejects tamperin
   const temporaryDirectory = await mkdtemp(path.join(tmpdir(), "ai-project-os-portable-backup-"));
   context.after(async () => rm(temporaryDirectory, { force: true, recursive: true }));
 
-  const backupName = "20260902T120000Z-pre-deploy-to-v0.4.0-dev.1.Abc123";
+  const backupName = "20260902T120000Z-pre-deploy-to-v0.5.0-dev.1.Abc123";
   const artifactRoot = path.join(temporaryDirectory, "artifact");
   const backupRoot = path.join(artifactRoot, backupName);
   const hostRoot = path.join(temporaryDirectory, "host");
@@ -187,7 +189,7 @@ test("portable backup validator accepts the exact v2 layout and rejects tamperin
       "compose_project=ai-project-os",
       "writers_quiesced=true",
       "cos_region=ap-hongkong",
-      "app_version=0.3.0-dev.1",
+      "app_version=0.4.0-dev.1",
       `backup_name=${backupName}`,
       "source_quiesced=true",
       "",
@@ -215,7 +217,7 @@ test("portable backup validator accepts the exact v2 layout and rejects tamperin
     formatVersion: 2,
     backupName,
     createdAt: "2026-09-02T20:00:00+08:00",
-    appVersion: "0.3.0-dev.1",
+    appVersion: "0.4.0-dev.1",
     archiveObject,
     checksumObject: `${archiveObject}.sha256`,
     archiveSha256: "a".repeat(64),
@@ -261,7 +263,7 @@ test("migration controller dry-run validates its complete local input bundle wit
     migrationPath,
     "--source-host", "8.8.8.8",
     "--target-host", "1.1.1.1",
-    "--release-tag", "v0.4.0-dev.1",
+    "--release-tag", "v0.5.0-dev.1",
     "--revision", "a".repeat(40),
     "--manifest-object", "cos://ai-project-os-backup-1306016679/production/manifests/latest.json",
     "--root-identity", rootIdentity,

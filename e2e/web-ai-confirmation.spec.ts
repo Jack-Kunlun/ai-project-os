@@ -2,30 +2,13 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { getDb } from "@/lib/db";
+import { seedBrowserPersonalUser, type BrowserPersonalUser } from "./support/browser-fixtures";
 
 const BROWSER_ADMIN_PASSWORD = "BrowserGate2026Password!";
-const BROWSER_OWNER_PASSWORD = "BrowserOwner2026Password!";
 
-async function settleBrowserOwner(page: Page): Promise<void> {
-  await expect(page).toHaveURL(/\/(?:onboarding|admin|dashboard)$/u);
-  if (new URL(page.url()).pathname === "/onboarding") {
-    await page.getByLabel("Owner 用户名", { exact: true }).fill("browser_owner");
-    await page.getByLabel("初始密码", { exact: true }).fill(BROWSER_OWNER_PASSWORD);
-    await page.getByLabel("确认密码", { exact: true }).fill(BROWSER_OWNER_PASSWORD);
-    await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
-  }
-  if (new URL(page.url()).pathname === "/admin") {
-    await page.getByRole("button", { name: "退出", exact: true }).click();
-    await page.getByLabel("用户名", { exact: true }).fill("browser_owner");
-    await page.getByLabel("密码", { exact: true }).fill(BROWSER_OWNER_PASSWORD);
-    await page.getByRole("button", { name: "登 录", exact: true }).click();
-  }
-  await expect(page).toHaveURL(/\/dashboard$/u);
-}
-
-async function signInBrowserOwner(page: Page): Promise<void> {
+async function signInBrowserPersonalUser(page: Page): Promise<BrowserPersonalUser> {
   await page.goto("/setup");
-  await expect(page).toHaveURL(/\/(?:setup|login|onboarding|admin|dashboard)$/u);
+  await expect(page).toHaveURL(/\/(?:setup|login|admin)$/u);
   const landingPath = new URL(page.url()).pathname;
   if (landingPath === "/setup") {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
@@ -36,10 +19,16 @@ async function signInBrowserOwner(page: Page): Promise<void> {
     await page.getByLabel("用户名", { exact: true }).fill("browser_admin");
     await page.getByLabel("密码", { exact: true }).fill(BROWSER_ADMIN_PASSWORD);
     await page.getByRole("button", { name: "登 录", exact: true }).click();
-  } else {
-    expect(["/onboarding", "/admin", "/dashboard"]).toContain(landingPath);
   }
-  await settleBrowserOwner(page);
+  await expect(page).toHaveURL(/\/admin$/u);
+  const personalUser = await seedBrowserPersonalUser(`browser-confirmation-${randomUUID().replaceAll("-", "").slice(0, 12)}`, "BrowserPersonal2026Password!");
+  await page.getByRole("button", { name: "退出", exact: true }).click();
+  await expect(page).toHaveURL(/\/login$/u);
+  await page.getByLabel("用户名", { exact: true }).fill(personalUser.username);
+  await page.getByLabel("密码", { exact: true }).fill(personalUser.password);
+  await page.getByRole("button", { name: "登 录", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard$/u);
+  return personalUser;
 }
 
 async function createProject(page: Page, name: string): Promise<string> {
@@ -149,9 +138,9 @@ async function cleanupPlatformEmbeddingFixture(projectId: string, fixture: Await
 }
 
 test("memory confirmation prepare and execute are single-flight and stale input fails closed", async ({ page }) => {
-  await signInBrowserOwner(page);
+  const personalUser = await signInBrowserPersonalUser(page);
   const projectId = await createProject(page, `Browser confirmation ${randomUUID().slice(0, 8)}`);
-  const fixture = await seedPlatformEmbeddingRoute("browser_admin", "browser_owner");
+  const fixture = await seedPlatformEmbeddingRoute("browser_admin", personalUser.username);
   try {
     await addSource(page, projectId, `Browser confirmation source ${randomUUID()}`);
     await page.goto(`/projects/${projectId}/memory`);

@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createPasswordRecord } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { grantWorkspaceMembership } from "@/lib/membership-governance";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { createControlledMembership } from "../test/membership-fixture";
+import { seedBrowserPersonalUser } from "./support/browser-fixtures";
 import {
   expectR02MobileDrawer,
   expectR02InViewport,
@@ -17,7 +18,7 @@ import {
   R02_ADMIN_ROUTES,
   R02_VIEWPORTS,
   signInR02Admin,
-  signInR02Owner,
+  signInR02PersonalUser,
 } from "./support/r02-admin-navigation";
 
 const R02_ACTOR_PASSWORD = "R02Actor2026Password!";
@@ -42,7 +43,7 @@ async function expectR02AdminBrand(page: Page): Promise<void> {
 }
 
 type R02ActorKind = "free" | "active" | "expired" | "disabled";
-type R02Actor = Readonly<{ id: string; username: string; password: string; kind: R02ActorKind }>;
+type R02Actor = Readonly<{ id: string; username: string; password: string; workspaceId: string; kind: R02ActorKind }>;
 type R02Actors = Readonly<Record<R02ActorKind, R02Actor>>;
 
 async function seedR02Actors(): Promise<R02Actors> {
@@ -52,12 +53,18 @@ async function seedR02Actors(): Promise<R02Actors> {
     const actors = {} as Record<R02ActorKind, R02Actor>;
     for (const kind of ["free", "active", "expired", "disabled"] as const) {
       const username = `r02-${kind}-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
-      const row = await db.appUser.create({
-        data: { username, role: "user", ...(await createPasswordRecord(R02_ACTOR_PASSWORD)) },
-        select: { id: true },
-      });
-      actors[kind] = { id: row.id, username, password: R02_ACTOR_PASSWORD, kind };
+      const personalUser = await seedBrowserPersonalUser(username, R02_ACTOR_PASSWORD);
+      actors[kind] = { id: personalUser.id, username: personalUser.username, password: personalUser.password, workspaceId: personalUser.workspaceId, kind };
     }
+    await db.$transaction(async (tx) => {
+      await grantWorkspaceMembership(tx, {
+        workspaceId: actors.disabled.workspaceId,
+        userId: actors.active.id,
+        role: "owner",
+        actorId: actors.disabled.id,
+        reason: "r02_disable_preserves_confirmed_workspace_owner",
+      });
+    });
     const now = new Date();
     await createControlledMembership(db, {
       adminId: admin.id,
@@ -90,10 +97,10 @@ async function createR02Project(page: Parameters<typeof signInR02Admin>[0]): Pro
   return { id: href!.split("/")[2]!, name };
 }
 
-async function seedR02DetailFixtures(projectId: string): Promise<Readonly<{ sourceId: string; sourceText: string; jobId: string; syncRunId: string }>> {
+async function seedR02DetailFixtures(projectId: string, actorId: string): Promise<Readonly<{ sourceId: string; sourceText: string; jobId: string; syncRunId: string }>> {
   const db = getDb();
   try {
-    const owner = await db.appUser.findUniqueOrThrow({ where: { username: "browser_owner" }, select: { id: true } });
+    const owner = await db.appUser.findUniqueOrThrow({ where: { id: actorId }, select: { id: true } });
     const sourceText = "R02 valid source detail fixture";
     const contentHash = createHash("sha256").update(sourceText).digest("hex");
     const source = await db.projectSource.create({
@@ -238,9 +245,10 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   test.setTimeout(360_000);
   await signInR02Admin(page);
 
+  const personalUser = await seedBrowserPersonalUser(`r02-personal-${randomUUID().replaceAll("-", "").slice(0, 16)}`, "R02Personal2026Password!");
   const ownerContext = await browser.newContext();
   const ownerPage = await ownerContext.newPage();
-  await signInR02Owner(ownerPage);
+  await signInR02PersonalUser(ownerPage, personalUser);
 
   await expectR02OverviewErrorState(page);
 
@@ -359,7 +367,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     await expect(ownerPage.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(0);
   }
 
-  const details = await seedR02DetailFixtures(project.id);
+  const details = await seedR02DetailFixtures(project.id, personalUser.id);
   await ownerPage.setViewportSize({ width: 390, height: 844 });
   const materialReturnTo = `/projects/${project.id}/materials?kind=all&focus=${details.sourceId}`;
   await ownerPage.goto(`/projects/${project.id}/materials/sources/${details.sourceId}?returnTo=${encodeURIComponent(materialReturnTo)}`);

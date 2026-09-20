@@ -1,8 +1,8 @@
 # 生产异地备份
 
-本工具用于单节点实例的 PostgreSQL、凭据主密钥卷、上传卷和主机恢复配置备份。它可以独立于发布入口安装；当前部署链精确支持 `v0.4.0-dev.1`，仍拒绝旧 `v0.3.0-dev.1`、`v0.2.0-dev.1` 和其他未批准的预发布标签。
+本工具用于单节点实例的 PostgreSQL、凭据主密钥卷、上传卷和主机恢复配置备份。它可以独立于发布入口安装；当前部署链精确支持 `v0.5.0-dev.1`，仍拒绝旧 `v0.4.0-dev.1`、`v0.3.0-dev.1`、`v0.2.0-dev.1` 和其他未批准的预发布标签。
 
-`v0.4.0-dev.1` 的 `clean-deploy` 将此备份作为强制破坏性 reset 门禁：v0.3 用户、配置、额度、审计、供应商连接和其他旧数据库记录不会迁移到新库，管理员必须重新初始化 `/setup`。备份成功不提供卷删除后的自动回滚；只有归档、唯一命名且经 COS metadata 验证的 manifest 均验证成功，部署器才会继续删除精确 PostgreSQL 卷。
+`v0.5.0-dev.1` 的 `clean-deploy` 将此备份作为强制破坏性 reset 门禁：v0.4 用户、配置、额度、审计、供应商连接和其他旧数据库记录不会迁移到新库，管理员必须重新初始化 `/setup`。备份成功不提供卷删除后的自动回滚；只有归档、唯一命名且经 COS metadata 验证的 manifest 均验证成功，部署器才会继续删除精确 PostgreSQL 卷。
 
 ## 已实现边界
 
@@ -13,7 +13,7 @@
 - 加密归档、SHA-256 sidecar、唯一命名且经 COS metadata 验证的 manifest 和 `manifests/latest.json` 指针上传到 COS。COSCLI 必须完成整体 CRC64 校验，随后脚本通过 `HeadObject` 对比远端长度并要求 CRC64 元数据存在。
 - 只有四件对象均验证成功，备份目录才会获得 root-only 的 `.cos-upload-verified` 标记。无标记、上传失败或结构不完整的本地备份不会进入自动清理范围。
 - 默认只清理超过 14 天且带有效远端标记的本地备份，并始终保留至少 3 份已验证本地副本。现有手工备份因为没有自动上传标记，不会被删除。
-- `v0.4.0-dev.1` 正式部署器先在旧 app/worker 仍健康时完成候选镜像构建，再停止精确旧 writer ID，以 stopped-writer cutover 模式调用同一个脚本；只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许 clean reset。远端备份失败会使部署失败关闭。
+- `v0.5.0-dev.1` 正式部署器先在旧 app/worker 仍健康时完成候选镜像构建，再停止精确旧 writer ID，以 stopped-writer cutover 模式调用同一个脚本；只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许 clean reset。远端备份失败会使部署失败关闭。
 - 每日/手工备份会先取得生产部署锁，部署期间不会启动；部署器持有同一把锁后再调用 `pre-deploy` 模式，避免定时备份与迁移或容器替换交叉运行。
 - 每次任务会把运行中、成功、失败或跳过状态原子写入 `/var/lib/ai-project-os-operations/backups`。这里只包含时间、任务类型、对象路径、大小、摘要、重试次数和安全错误码；生产 Compose 以只读方式将该目录挂载给应用，应用没有 Docker、systemd、备份正文或凭据访问权。
 

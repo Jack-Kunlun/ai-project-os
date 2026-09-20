@@ -10,6 +10,7 @@ import {
   GitHubLedgerError,
   createGitHubRepositoryLedgerService,
 } from "@/lib/github";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -133,16 +134,19 @@ test(
       const adapter = new PrismaPg({ connectionString: url });
       const prisma = new PrismaClient({ adapter });
       try {
+        const workspace = await createPostgresWorkspaceFixture(prisma);
         await prisma.project.createMany({
           data: [
-            { id: projectId, name: "GitHub ledger project", slug: "github-ledger-project" },
+            { id: projectId, workspaceId: workspace.workspaceId, name: "GitHub ledger project", slug: "github-ledger-project" },
             {
               id: otherProjectId,
+              workspaceId: workspace.workspaceId,
               name: "Other GitHub ledger project",
               slug: "other-github-ledger-project",
             },
             {
               id: concurrentProjectId,
+              workspaceId: workspace.workspaceId,
               name: "Concurrent GitHub ledger project",
               slug: "concurrent-github-ledger-project",
             },

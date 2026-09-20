@@ -17,7 +17,7 @@ test("OID10 PostgreSQL gate is isolated, pinned, and self-cleaning", () => {
   assert.match(runner, /DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL/u);
   assert.match(runner, /migrate-noop-before-retry/u);
   assert.match(runner, /migrate-noop-post-restart/u);
-  assert.match(runner, /const EXPECTED_MIGRATION_COUNT = 105;/u);
+  assert.match(runner, /const EXPECTED_MIGRATION_COUNT = 106;/u);
   assert.match(runner, /\["rm", "--force", resources\.container\]/u);
   assert.match(runner, /\["volume", "rm", resources\.volume\]/u);
   assert.match(runner, /\["network", "rm", resources\.network\]/u);

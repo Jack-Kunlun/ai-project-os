@@ -11,6 +11,7 @@ const githubFailureMessages: Record<string, string> = {
   GITHUB_OAUTH_PROVIDER_REJECTED: "GitHub 授权被取消，账户没有发生变化。",
   GITHUB_OAUTH_FLOW_EXPIRED: "GitHub 登录已过期，请重新开始。",
   GITHUB_OAUTH_ACCOUNT_LINK_REQUIRED: "系统中已有使用该邮箱的账号。为避免错误合并，请先使用原账号登录，再到个人中心绑定 GitHub。",
+  GITHUB_OAUTH_MEMBERSHIP_REVIEW_REQUIRED: "该账户的工作区成员关系尚未完成管理员核查，请联系工作区管理员。",
   GITHUB_OAUTH_EMAIL_REQUIRED: "GitHub 账户没有可用的已验证主邮箱，请先在 GitHub 完成邮箱验证。",
   GITHUB_OAUTH_IDENTITY_CONFLICT: "该 GitHub 身份已经绑定其他账户，请联系工作区管理员。",
   GITHUB_OAUTH_ACCOUNT_DISABLED: "该账户已停用，请联系工作区管理员。",
@@ -18,7 +19,7 @@ const githubFailureMessages: Record<string, string> = {
   GITHUB_OAUTH_TOKEN_EXCHANGE_FAILED: "GitHub 授权码交换失败，请稍后重试。",
   GITHUB_OAUTH_PROFILE_FAILED: "GitHub 账户资料读取失败，请稍后重试。",
   GITHUB_OAUTH_FLOW_INVALID: "GitHub 登录状态无效或已经使用，请重新开始。",
-  GITHUB_OAUTH_BOOTSTRAP_PENDING: "平台初始化尚未完成，GitHub 登录暂不可用，请稍后重试。",
+  GITHUB_OAUTH_BOOTSTRAP_PENDING: "平台管理员尚未完成初始化，GitHub 登录暂不可用，请稍后重试。",
   GITHUB_OAUTH_NOT_CONFIGURED: "GitHub 登录尚未配置，请联系工作区管理员。",
   GITHUB_OAUTH_CONFIG_INVALID: "GitHub 登录配置无效，请联系工作区管理员。",
 };

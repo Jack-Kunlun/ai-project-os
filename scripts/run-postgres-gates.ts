@@ -15,7 +15,7 @@ import { createBootstrapSignupOfferPolicy } from "../src/lib/platform-grant-offe
 const SEEDED_ADMIN_ID = "00000000-0000-4000-8000-000000000010";
 const SEEDED_OWNER_ID = "00000000-0000-4000-8000-000000000012";
 const SEEDED_OWNER_MEMBERSHIP_ID = "00000000-0000-4000-8000-000000000011";
-const DEFAULT_WORKSPACE_ID = "00000000-0000-4000-8000-000000000001";
+const SEEDED_WORKSPACE_ID = "00000000-0000-4000-8000-000000000099";
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -73,22 +73,23 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
     `);
     await client.query(`
       INSERT INTO "PlatformBootstrap"
-        ("id", "initialAdminUserId", "initialOwnerUserId", "adminOnboardingCompletedAt", "initialOwnerCreatedAt", "version")
+        ("id", "initialAdminUserId", "version")
       VALUES
-        ('platform', '${SEEDED_ADMIN_ID}', '${SEEDED_OWNER_ID}', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3), (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3), 2)
+        ('platform', '${SEEDED_ADMIN_ID}', 1)
       ON CONFLICT ("id") DO NOTHING
     `);
     await client.query(`
-      UPDATE "Workspace"
-      SET "createdById" = '${SEEDED_OWNER_ID}', "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3)
-      WHERE "id" = '${DEFAULT_WORKSPACE_ID}'
+      INSERT INTO "Workspace" ("id", "name", "slug", "createdById", "createdAt", "updatedAt")
+      VALUES ('${SEEDED_WORKSPACE_ID}', 'Postgres gate fixture', 'postgres-gate-workspace', '${SEEDED_OWNER_ID}',
+        (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3), (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
+      ON CONFLICT ("id") DO NOTHING
     `);
     await client.query(`
       WITH inserted AS (
         INSERT INTO "WorkspaceMembership"
           ("id", "workspaceId", "userId", "role", "accessState", "updatedAt")
         VALUES
-          ('${SEEDED_OWNER_MEMBERSHIP_ID}', '${DEFAULT_WORKSPACE_ID}', '${SEEDED_OWNER_ID}', 'owner', 'confirmed', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
+          ('${SEEDED_OWNER_MEMBERSHIP_ID}', '${SEEDED_WORKSPACE_ID}', '${SEEDED_OWNER_ID}', 'owner', 'confirmed', (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3))
         ON CONFLICT ("id") DO NOTHING
         RETURNING "id", "workspaceId", "userId", "role", "accessState", "createdAt", "updatedAt"
       )
@@ -96,8 +97,8 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
         ("id", "membershipKind", "membershipId", "workspaceId", "projectId", "userId", "action", "previousState", "newState", "roleSnapshot", "actorId", "reason", "membershipFingerprint")
       SELECT
         gen_random_uuid(), 'workspace', inserted."id", inserted."workspaceId", NULL, inserted."userId",
-        'bootstrap_confirmed', NULL, 'confirmed', inserted."role", '${SEEDED_ADMIN_ID}',
-        'postgres_gate_bootstrap_owner',
+        'confirmed', NULL, 'confirmed', inserted."role", '${SEEDED_OWNER_ID}',
+        'postgres_gate_workspace_owner_fixture',
         encode(digest(convert_to(concat_ws(
           E'\\x1f', inserted."id"::text, inserted."workspaceId"::text, inserted."userId"::text,
           inserted."role"::text,
@@ -125,7 +126,7 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
       actorAccountAccessVersion: 1,
       accountAccessVersion: 1,
       evidenceKind: "postgres-gate-seed",
-      evidenceRef: `workspace:${DEFAULT_WORKSPACE_ID}`,
+      evidenceRef: `workspace:${SEEDED_WORKSPACE_ID}`,
       now,
     }, prisma);
   } finally {

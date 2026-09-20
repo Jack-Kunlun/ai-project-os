@@ -15,10 +15,10 @@ import {
 import { deleteArchivedProject, updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { WEB_AI_TRANSFER_CONSENT_VERSION } from "../src/lib/web-ai-contract";
 import { createControlledMembership, revokeControlledMembershipInTransaction } from "./membership-fixture";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const shouldRun = process.env.PERSONAL_RUNTIME_EVIDENCE_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_personal_runtime_evidence_test";
-const workspaceId = "00000000-0000-4000-8000-000000000001";
 const seededAdminId = "00000000-0000-4000-8000-000000000010";
 
 function assertDisposableGateDatabase(): void {
@@ -58,6 +58,7 @@ test(
   async () => {
     assertDisposableGateDatabase();
     const db = getDb();
+    const { workspaceId } = await createPostgresWorkspaceFixture(db);
     const suffix = randomUUID().slice(0, 8);
     const ownerId = randomUUID();
     const projectOwnerId = randomUUID();

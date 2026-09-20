@@ -14,6 +14,7 @@ import {
   type GitHubReadOnlyClient,
   type VerifiedGitHubRepository,
 } from "@/lib/github";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -252,8 +253,9 @@ test(
       const adapter = new PrismaPg({ connectionString: url });
       const prisma = new PrismaClient({ adapter });
       try {
+        const workspace = await createPostgresWorkspaceFixture(prisma);
         await prisma.project.create({
-          data: { id: projectId, name: "GitHub scan project", slug: "github-scan-project" },
+          data: { id: projectId, workspaceId: workspace.workspaceId, name: "GitHub scan project", slug: "github-scan-project" },
         });
         const ledger = createGitHubRepositoryLedgerService({ db: prisma });
         const linkA = await ledger.connect({

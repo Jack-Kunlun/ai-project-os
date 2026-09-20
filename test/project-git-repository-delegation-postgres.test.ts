@@ -26,6 +26,7 @@ import {
 } from "../src/lib/project-git-repository-delegation-service";
 import { executeGitConnectionMutation, previewGitConnectionMutation, updateGitConnection } from "../src/lib/git";
 import { updateProjectLifecycle } from "../src/lib/project-lifecycle";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const shouldRun = process.env.PROJECT_GIT_REPOSITORY_DELEGATION_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_project_git_repository_delegation_test";
@@ -35,7 +36,6 @@ const projectGitDelegationMigration = "20260904150000_add_project_git_repository
 const projectGitRuntimeMigration = "20260904160000_add_project_git_manual_runtime";
 const projectGitReconciliationMigration = "20260904170000_add_project_git_manual_run_reconciliation";
 const seededAdminId = "00000000-0000-4000-8000-000000000010";
-const workspaceId = "00000000-0000-4000-8000-000000000001";
 
 function assertDisposableGateDatabase(): void {
   const configuredUrl = process.env.DATABASE_URL;
@@ -430,6 +430,7 @@ test(
     });
     const projectOwnerActor = { id: projectOwnerId, role: "user" as const, accountAccessVersion: 1 };
     const viewerActor = { id: viewerId, role: "user" as const, accountAccessVersion: 1 };
+    const { workspaceId } = await createPostgresWorkspaceFixture(db);
 
     await db.appUser.createMany({
       data: [

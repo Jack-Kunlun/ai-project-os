@@ -27,6 +27,7 @@ import {
 import { runGitRepositorySyncJob } from "../src/lib/git";
 import { runGitHubCodeScanJob } from "../src/lib/background-jobs";
 import { grantProjectMembership } from "../src/lib/membership-governance";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -446,11 +447,12 @@ test(
           role: "admin",
         },
       });
+      const workspace = await createPostgresWorkspaceFixture(db);
       await db.project.createMany({
         data: [
-          { id: projectAId, name: "Sync A", slug: `sync-a-${randomUUID()}` },
-          { id: projectBId, name: "Sync B", slug: `sync-b-${randomUUID()}` },
-          { id: projectCId, name: "Sync C", slug: `sync-c-${randomUUID()}` },
+          { id: projectAId, workspaceId: workspace.workspaceId, name: "Sync A", slug: `sync-a-${randomUUID()}` },
+          { id: projectBId, workspaceId: workspace.workspaceId, name: "Sync B", slug: `sync-b-${randomUUID()}` },
+          { id: projectCId, workspaceId: workspace.workspaceId, name: "Sync C", slug: `sync-c-${randomUUID()}` },
         ],
       });
       await db.$transaction(async (tx) => {

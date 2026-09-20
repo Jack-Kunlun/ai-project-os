@@ -38,6 +38,7 @@ import {
   type VerifiedGitHubRepository,
 } from "@/lib/github";
 import { hashSourceContent } from "@/lib/source";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -340,10 +341,11 @@ test(
       const adapter = new PrismaPg({ connectionString: url });
       const prisma = new PrismaClient({ adapter });
       try {
+        const workspace = await createPostgresWorkspaceFixture(prisma);
         await prisma.project.createMany({
           data: [
-            { id: projectAId, name: "Repository memory A", slug: "repository-memory-a" },
-            { id: projectBId, name: "Repository memory B", slug: "repository-memory-b" },
+            { id: projectAId, workspaceId: workspace.workspaceId, name: "Repository memory A", slug: "repository-memory-a" },
+            { id: projectBId, workspaceId: workspace.workspaceId, name: "Repository memory B", slug: "repository-memory-b" },
           ],
         });
         const sourceContent = "Approved local project charter for repository memory.";

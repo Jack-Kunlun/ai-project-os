@@ -6,9 +6,9 @@ import { promisify } from "node:util";
 import test from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
-import { initializeAdmin, initializeFirstOwner } from "../src/lib/auth";
+import { initializeAdmin } from "../src/lib/auth";
+import { activateAccountEntitlements } from "../src/lib/account-entitlement-activation-service";
 import { getDb, getEntitlementDb } from "../src/lib/db";
-import { getFirstAdminOnboardingState } from "../src/lib/first-admin-onboarding-service";
 import {
   changePlatformGrantOfferPolicyLifecycle,
   createPlatformGrantOfferPolicy,
@@ -910,11 +910,50 @@ test("production reconcile separates non-owner runtime from writer and preserves
       assert.equal(await writer.platformTokenGrant.count({ where: { userId: actor.id, kind: "signup" } }), 0);
       assert.equal(await writer.platformTokenLedgerEntry.count({ where: { userId: actor.id, reasonCode: "AI_SIGNUP_GRANT" } }), 0);
 
-      const ownerBootstrap = await initializeFirstOwner(actor as typeof bootstrap.user, {
-        username: `database_principal_owner_${suffix}`,
-        password: "DatabasePrincipalOwnerPassword_2026",
-      }, writer);
-      const owner = ownerBootstrap.user;
+      // The platform admin does not bootstrap a shared/default workspace
+      // owner.  Build the same kind of personal workspace that a newly
+      // provisioned user receives, entirely inside the entitlement-writer
+      // transaction used by this gate.
+      const owner = await writer.$transaction(async (tx) => {
+        const user = await tx.appUser.create({
+          data: {
+            id: randomUUID(),
+            username: `database_principal_user_${suffix}`,
+            email: `database-principal-user-${suffix}@example.com`,
+            emailVerifiedAt: new Date(),
+            role: "user",
+            passwordHash: null,
+            passwordSalt: null,
+          },
+          select: { id: true, username: true, accountAccessVersion: true },
+        });
+        const workspace = await tx.workspace.create({
+          data: {
+            id: randomUUID(),
+            name: `${user.username} 的工作区`,
+            slug: `user-${user.id}`,
+            createdById: user.id,
+          },
+          select: { id: true },
+        });
+        await grantWorkspaceMembership(tx, {
+          workspaceId: workspace.id,
+          userId: user.id,
+          role: "owner",
+          actorId: user.id,
+          reason: "database_principal_personal_workspace_fixture",
+        });
+        await activateAccountEntitlements({
+          userId: user.id,
+          source: "localProvisioning",
+          actorId: actor.id,
+          actorAccountAccessVersion: actor.accountAccessVersion,
+          accountAccessVersion: user.accountAccessVersion,
+          evidenceKind: "local-provisioning",
+          evidenceRef: workspace.id,
+        }, tx);
+        return user;
+      });
       notificationUserId = owner.id;
 
       const draft = await createPlatformGrantOfferPolicy({
@@ -932,11 +971,9 @@ test("production reconcile separates non-owner runtime from writer and preserves
       // Ordinary runtime settlement remains usable through the explicitly
       // permitted grant columns and non-signup ledger append path.
       runtimeDb = getDb();
-      // The runtime principal needs this read for the admin's durable
-      // onboarding guard, while the entitlement writer owns the completion
-      // transition.  Keep this assertion on the real runtime client so a
-      // catalog-only ACL check cannot hide a connection binding mistake.
-      assert.equal(await getFirstAdminOnboardingState(actor.id, runtimeDb), "completed");
+      // Keep the following account read and token settlement on the real
+      // runtime client so a catalog-only ACL check cannot hide a connection
+      // binding mistake.
       const callKey = `database-principal:${suffix}:reservation`;
       const reservation = await reservePlatformTokens({
         userId: owner.id,

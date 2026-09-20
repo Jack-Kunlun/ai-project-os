@@ -22,9 +22,9 @@ import {
 } from "../src/lib/web-ai-governance";
 import { createControlledMembership } from "./membership-fixture";
 import { createConfirmedWebAiJobForPostgresGate } from "./web-ai-confirmation-fixture";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 const shouldRun = process.env.PERSONAL_WEB_AI_RUNTIME_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_personal_web_ai_runtime_test";
-const workspaceId = "00000000-0000-4000-8000-000000000001";
 const seededAdminId = "00000000-0000-4000-8000-000000000010";
 
 function assertDisposableGateDatabase(): void {
@@ -112,6 +112,7 @@ test(
   async () => {
     assertDisposableGateDatabase();
     const db = getDb();
+    const { workspaceId } = await createPostgresWorkspaceFixture(db);
     const suffix = randomUUID().slice(0, 8);
     const ownerId = randomUUID();
     const projectOwnerId = randomUUID();

@@ -9,11 +9,11 @@ import {
   confirmProjectGitRepositoryDelegationProject,
   proposeProjectGitRepositoryDelegation,
 } from "../src/lib/project-git-repository-delegation-service";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const databaseUrl = process.env.DATABASE_URL;
 const enabled = process.env.PROJECT_DELEGATED_GIT_RUNTIME_POSTGRES_GATE === "1" && typeof databaseUrl === "string" && databaseUrl.length > 0;
 const seededAdminId = "00000000-0000-4000-8000-000000000010";
-const workspaceId = "00000000-0000-4000-8000-000000000001";
 const testDatabaseName = "ai_project_os_project_delegated_git_runtime_test";
 
 function assertDisposableGateDatabase(): void {
@@ -143,6 +143,7 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
   assertDisposableGateDatabase();
   await client.connect();
   const db = getDb();
+  const { workspaceId } = await createPostgresWorkspaceFixture(db);
   const suffix = randomUUID().slice(0, 8);
   const connectionOwnerId = randomUUID();
   const projectOwnerId = randomUUID();

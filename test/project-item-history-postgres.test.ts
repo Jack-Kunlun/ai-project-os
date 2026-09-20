@@ -8,9 +8,10 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
 import { createSourceChunkService } from "@/lib/ai-memory";
-import { createSession, DEFAULT_WORKSPACE_ID, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { createSession, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { grantProjectMembership } from "@/lib/membership-governance";
 import { hashSourceContent } from "@/lib/source";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -193,6 +194,7 @@ test(
         const user = await prisma.appUser.create({
           data: { username: "history_user_gate", role: "user" },
         });
+        const workspace = await createPostgresWorkspaceFixture(prisma);
         const session = await createSession(prisma, user);
         const requestHeaders = {
           "content-type": "application/json",
@@ -227,13 +229,13 @@ test(
 
         await prisma.project.createMany({
           data: [
-            { id: projectId, name: "History project", slug: "history-project" },
-            { id: otherProjectId, name: "Other project", slug: "other-history-project" },
+            { id: projectId, workspaceId: workspace.workspaceId, name: "History project", slug: "history-project" },
+            { id: otherProjectId, workspaceId: workspace.workspaceId, name: "Other project", slug: "other-history-project" },
           ],
         });
         await prisma.$transaction((tx) => grantProjectMembership(tx, {
           projectId,
-          workspaceId: DEFAULT_WORKSPACE_ID,
+          workspaceId: workspace.workspaceId,
           userId: user.id,
           role: "owner",
           actorId: user.id,

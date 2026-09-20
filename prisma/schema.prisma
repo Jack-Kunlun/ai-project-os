@@ -1443,7 +1443,7 @@ enum ProjectCodeSnapshotStatus {
 
 model Project {
   id                                   String                                @id @default(uuid()) @db.Uuid
-  workspaceId                          String                                @default("00000000-0000-4000-8000-000000000001") @db.Uuid
+  workspaceId                          String                                @db.Uuid
   membershipInheritanceMode            ProjectMembershipInheritanceMode     @default(projectOnly)
   name                                 String
   slug                                 String                                @unique
@@ -4499,7 +4499,6 @@ model AppUser {
   createdWebSources            WebSource[]
   createdWorkspaces            Workspace[]                       @relation("WorkspaceCreatedBy")
   platformBootstrapAsInitialAdmin PlatformBootstrap?             @relation("PlatformBootstrapInitialAdmin")
-  platformBootstrapAsInitialOwner PlatformBootstrap?             @relation("PlatformBootstrapInitialOwner")
   workspaceMemberships         WorkspaceMembership[]
   projectMemberships           ProjectMembership[]
   workspaceRoleMutationPreviewsAsActor WorkspaceRoleMutationPreview[] @relation("WorkspaceRoleMutationPreviewActor")
@@ -5050,14 +5049,10 @@ model PlatformTokenLedgerEntry {
 model PlatformBootstrap {
   id                           String   @id @default("platform") @db.VarChar(32)
   initialAdminUserId           String   @unique @db.Uuid
-  initialOwnerUserId           String?  @unique @db.Uuid
-  adminOnboardingCompletedAt   DateTime? @db.Timestamp(3)
-  initialOwnerCreatedAt        DateTime? @db.Timestamp(3)
   version                      Int      @default(1)
   createdAt                    DateTime @default(now()) @db.Timestamp(3)
   updatedAt                    DateTime @updatedAt @db.Timestamp(3)
   initialAdmin                 AppUser  @relation("PlatformBootstrapInitialAdmin", fields: [initialAdminUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  initialOwner                 AppUser? @relation("PlatformBootstrapInitialOwner", fields: [initialOwnerUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 }
 
 model AppSession {

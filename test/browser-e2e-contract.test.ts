@@ -5,7 +5,7 @@ import test from "node:test";
 const read = (path: string) => readFile(path, "utf8");
 
 test("browser gate stays isolated and exercises the production server", async () => {
-  const [packageJson, config, runner, smoke, automation, webAiConfirmation, systemAudit, gitConnections, failureInbox, r02Spec, r02Support] = await Promise.all([
+  const [packageJson, config, runner, smoke, automation, webAiConfirmation, systemAudit, gitConnections, failureInbox, r02Spec, r02Support, browserFixtures] = await Promise.all([
     read("package.json"),
     read("playwright.config.ts"),
     read("scripts/run-browser-e2e.ts"),
@@ -17,6 +17,7 @@ test("browser gate stays isolated and exercises the production server", async ()
     read("e2e/system-failure-inbox.spec.ts"),
     read("e2e/z-r02-admin-navigation.spec.ts"),
     read("e2e/support/r02-admin-navigation.ts"),
+    read("e2e/support/browser-fixtures.ts"),
   ]);
   const manifest = JSON.parse(packageJson) as {
     devDependencies: Record<string, string>;
@@ -78,7 +79,8 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(systemAudit, /option\[value="runFailed"\]/u);
   assert.match(systemAudit, /expect\(sourceValues\)\.not\.toContain\("aiProviderOwnership"\)/u);
   assert.match(systemAudit, /expect\(actionValues\)\.not\.toContain\("legacyOwnershipConfirmed"\)/u);
-  assert.match(systemAudit, /activateAccountEntitlements/u);
+  assert.match(systemAudit, /seedBrowserPersonalUser/u);
+  assert.match(browserFixtures, /activateAccountEntitlements/u);
   assert.doesNotMatch(systemAudit, /accountEntitlementActivation\.create/u);
   assert.doesNotMatch(systemAudit, /accountEntitlementActivationAudit\.create/u);
   assert.match(systemAudit, /getByText\(fixture\.auditId, \{ exact: true \}\)/u);

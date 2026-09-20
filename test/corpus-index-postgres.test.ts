@@ -39,6 +39,7 @@ import {
   createReadOnlyProjectAgent,
 } from "@/lib/ai-memory";
 import { hashSourceContent } from "@/lib/source";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -134,10 +135,11 @@ test(
       const adapter = new PrismaPg({ connectionString: url });
       const prisma = new PrismaClient({ adapter });
       try {
+        const workspace = await createPostgresWorkspaceFixture(prisma);
         await prisma.project.createMany({
           data: [
-            { id: projectId, name: "Corpus project", slug: "corpus-project" },
-            { id: otherProjectId, name: "Other project", slug: "other-corpus-project" },
+            { id: projectId, workspaceId: workspace.workspaceId, name: "Corpus project", slug: "corpus-project" },
+            { id: otherProjectId, workspaceId: workspace.workspaceId, name: "Other project", slug: "other-corpus-project" },
           ],
         });
         await prisma.projectSource.createMany({

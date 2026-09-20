@@ -10,7 +10,7 @@ import {
 } from "../scripts/local-release-candidate";
 
 test("candidate identity scopes every destructive target to one generated project", () => {
-  const identity = createCandidateIdentity("m5abcdeffeed", "0.4.0-dev.1");
+  const identity = createCandidateIdentity("m5abcdeffeed", "0.5.0-dev.1");
   assert.match(identity.projectName, /^ai-project-os-candidate-/u);
   assert.ok(Object.values(identity.volumes).every((value) => value.startsWith(identity.projectName)));
   assert.ok(Object.values(identity.images).every((value) => value.startsWith(identity.projectName)));
@@ -47,7 +47,7 @@ test("release version must agree across package, application, and OCI metadata",
     readFile("src/lib/version.ts", "utf8"),
     readFile("Dockerfile", "utf8"),
   ]);
-  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "0.4.0-dev.1");
+  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "0.5.0-dev.1");
   assert.throws(
     () => readCoherentVersion(packageJson, 'export const APP_VERSION = "9.9.9";', dockerfile),
     /LOCAL_RELEASE_VERSION_MISMATCH/u,
@@ -86,26 +86,43 @@ test("local release command is wired to CI without tag, push, or broad cleanup",
   assert.doesNotMatch(runner, /externalRef:\s*["'`]/u);
   assert.doesNotMatch(runner, /automationRules?\.create|backgroundJobs?\.create/u);
   assert.match(runner, /cleanupCandidate/u);
+  assert.match(runner, /ai_project_os_entitlement_writer/u);
+  assert.match(runner, /"-q",\s*"-At"/u);
+  assert.match(runner, /createPasswordRecord/u);
+  assert.match(runner, /个人工作区/u);
+  assert.doesNotMatch(runner, /DEFAULT_WORKSPACE_ID/u);
+  assert.doesNotMatch(runner, /api\/admin\/onboarding\/complete/u);
   assert.match(dockerfile, /FROM deps AS builder[\s\S]*ENV NEXT_TELEMETRY_DISABLED=1/u);
   assert.doesNotMatch(runner, /runProcess\("git",\s*\["(?:tag|push)"/u);
   assert.doesNotMatch(runner, /runProcess\("docker",\s*\["push"/u);
   assert.doesNotMatch(runner, /down\s+-v/u);
 });
 
-test("v0.3 bootstrap schema keeps platform administration separate from the workspace owner", async () => {
-  const [schema, bootstrapMigration, runner] = await Promise.all([
+test("v0.5 candidate fixture creates a personal workspace without default-owner onboarding", async () => {
+  const [schema, bootstrapMigration, ownerlessMigration, runner] = await Promise.all([
     readFile("prisma/schema.prisma", "utf8"),
     readFile("prisma/migrations/20260917010000_add_platform_bootstrap/migration.sql", "utf8"),
+    readFile("prisma/migrations/20260920010000_remove_default_workspace_owner_bootstrap/migration.sql", "utf8"),
     readFile("scripts/run-local-release.ts", "utf8"),
   ]);
   const workspaceModel = schema.match(/model Workspace \{[\s\S]*?\n\}/u)?.[0] ?? "";
   assert.doesNotMatch(workspaceModel, /initialAdminOnboardingCompletedAt/u);
   assert.match(bootstrapMigration, /initialOwnerUserId.*IS NULL[\s\S]*initialOwnerCreatedAt.*IS NULL[\s\S]*adminOnboardingCompletedAt.*IS NULL/u);
+  assert.match(ownerlessMigration, /DROP COLUMN "initialOwnerUserId"/u);
+  assert.match(ownerlessMigration, /"workspaceId" DROP DEFAULT/u);
+  assert.doesNotMatch(schema, /initialOwnerUserId|initialOwnerCreatedAt|adminOnboardingCompletedAt/u);
   assert.match(bootstrapMigration, /DROP TRIGGER IF EXISTS "Workspace_first_admin_onboarding_completion_guard"/u);
   assert.match(bootstrapMigration, /DROP FUNCTION IF EXISTS "first_admin_onboarding_completion_guard"/u);
   assert.match(bootstrapMigration, /DROP COLUMN IF EXISTS "initialAdminOnboardingCompletedAt"/u);
   assert.match(runner, /role", "user", "AppUser"/u);
   assert.match(runner, /ownerUsername/iu);
-  assert.match(runner, /api\/admin\/onboarding\/complete/u);
+  assert.match(runner, /workspaceId = randomUUID\(\)/u);
+  assert.match(runner, /accountAccessVersion[\s\S]*createdAt[\s\S]*updatedAt/u);
+  assert.match(runner, /Workspace.*createdAt.*updatedAt/u);
+  assert.match(runner, /WorkspaceMembership.*createdAt.*updatedAt/u);
+  assert.match(runner, /WorkspaceMembership/u);
+  assert.match(runner, /MembershipAccessAudit/u);
+  assert.doesNotMatch(runner, /api\/admin\/onboarding\/complete/u);
+  assert.doesNotMatch(runner, /默认工作区/u);
   assert.match(runner, /api\/auth\/login/u);
 });

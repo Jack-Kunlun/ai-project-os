@@ -1,8 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { getDb } from "@/lib/db";
+import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
+import { createPasswordRecord } from "@/lib/auth";
+import { appendWorkspaceMembershipAudit } from "@/lib/membership-governance";
+import { getDb, getEntitlementDb } from "@/lib/db";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
@@ -188,7 +191,57 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
   }
 }
 
-test("first-run administrator and business Owner stay separate across protected pages", async ({ page, request }) => {
+async function seedBrowserPersonalOwner(username: string, password: string): Promise<Readonly<{ userId: string; workspaceId: string }>> {
+  const db = getEntitlementDb();
+  const userId = randomUUID();
+  const workspaceId = randomUUID();
+  try {
+    const passwordRecord = await createPasswordRecord(password);
+    return await db.$transaction(async (tx) => {
+      const user = await tx.appUser.create({
+        data: { id: userId, username, role: "user", ...passwordRecord },
+        select: { id: true, accountAccessVersion: true },
+      });
+      await tx.workspace.create({
+        data: {
+          id: workspaceId,
+          name: `${username} 的个人工作区`,
+          slug: `user-${user.id}`,
+          createdById: user.id,
+        },
+      });
+      const membership = await tx.workspaceMembership.create({
+        data: {
+          id: randomUUID(),
+          workspaceId,
+          userId: user.id,
+          role: "owner",
+          accessState: "confirmed",
+        },
+      });
+      await appendWorkspaceMembershipAudit(tx, membership, {
+        action: "confirmed",
+        previousState: null,
+        actorId: user.id,
+        reason: "browser_smoke_personal_workspace_created",
+      });
+      await activateAccountEntitlements({
+        userId: user.id,
+        source: "localProvisioning",
+        actorId: user.id,
+        accountAccessVersion: user.accountAccessVersion,
+        actorAccountAccessVersion: user.accountAccessVersion,
+        evidenceKind: "browser-smoke",
+        evidenceRef: "browser-smoke-personal-workspace",
+      }, tx);
+      return { userId: user.id, workspaceId };
+    });
+  } finally {
+    await db.$disconnect();
+  }
+}
+
+test("first-run administrator and personal workspace Owner stay separate across protected pages", async ({ page, request }) => {
   test.setTimeout(60_000);
   const browserErrors: string[] = [];
   page.on("console", (message) => {
@@ -221,8 +274,6 @@ test("first-run administrator and business Owner stay separate across protected 
     await page.getByLabel("用户名", { exact: true }).fill(adminUsername);
     await page.getByLabel("密码", { exact: true }).fill(adminPassword);
     await page.getByRole("button", { name: "登 录", exact: true }).click();
-  } else if (landingPath === "/onboarding") {
-    await page.goto("/admin");
   } else {
     expect(landingPath).toBe("/admin");
   }
@@ -230,18 +281,7 @@ test("first-run administrator and business Owner stay separate across protected 
   await expect(page).toHaveURL(/\/admin$/u);
   await expect(page.getByRole("heading", { name: "管理员总览", exact: true })).toBeVisible();
 
-  // First-admin setup intentionally lands in the admin control plane. Owner
-  // bootstrap is optional and must be entered explicitly when still pending.
-  await page.goto("/onboarding");
-  const onboardingPath = new URL(page.url()).pathname;
-  expect(["/onboarding", "/admin"]).toContain(onboardingPath);
-  if (onboardingPath === "/onboarding") {
-    await expect(page.getByRole("heading", { name: "创建首个业务 Owner", exact: true })).toBeVisible();
-    await page.getByLabel("Owner 用户名", { exact: true }).fill(ownerUsername);
-    await page.getByLabel("初始密码", { exact: true }).fill(ownerPassword);
-    await page.getByLabel("确认密码", { exact: true }).fill(ownerPassword);
-    await page.getByRole("button", { name: "创建 Owner 并进入管理后台", exact: true }).click();
-  }
+  await seedBrowserPersonalOwner(ownerUsername, ownerPassword);
   await expect(page).toHaveURL(/\/admin$/u);
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/admin$/u);
@@ -280,7 +320,7 @@ test("first-run administrator and business Owner stay separate across protected 
   expect(healthResponse.ok()).toBe(true);
   expect(await healthResponse.json()).toMatchObject({
     status: "ok",
-    version: "0.4.0-dev.1",
+    version: "0.5.0-dev.1",
     database: "up",
     worker: { status: "up", consecutiveFailures: 0 },
   });

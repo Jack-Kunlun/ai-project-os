@@ -59,12 +59,12 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
-test("production workflow enables only the explicitly approved v0.4.0-dev.1 prerelease", async () => {
+test("production workflow enables only the explicitly approved v0.5.0-dev.1 prerelease", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /default: v0\.4\.0-dev\.1/u);
+  assert.match(workflow, /default: v0\.5\.0-dev\.1/u);
   assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.4\.0-dev\.1/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.1/u);
   assert.doesNotMatch(workflow, /&& false|DISABLED_BEFORE_V1_0_0|v1\.0\.0/u);
   assert.doesNotMatch(workflow, /DEPLOY_TAG_INPUT" =~ \^v/u);
 });
@@ -73,7 +73,7 @@ test("forced-command gateway accepts only the exact clean reset or GitHub OAuth 
   const gateway = await readFile(gatewayPath, "utf8");
 
   assert.match(gateway, /SSH_ORIGINAL_COMMAND/u);
-  assert.match(gateway, /v0\\\.4\\\.0-dev\\\.1/u);
+  assert.match(gateway, /v0\\\.5\\\.0-dev\\\.1/u);
   assert.match(gateway, /clean-deploy/u);
   assert.match(gateway, /CONFIRM_CLEAN_RESET_V1/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-clean-deploy/u);
@@ -115,7 +115,7 @@ test("clean deploy is fail-closed, backup-first, and never migrates the old data
   const deployment = await readFile(cleanDeploymentPath, "utf8");
 
   assert.match(deployment, /REPOSITORY_URL=https:\/\/github\.com\/Jack-Kunlun\/ai-project-os\.git/u);
-  assert.match(deployment, /RELEASE_TAG.*v0\.4\.0-dev\.1/u);
+  assert.match(deployment, /RELEASE_TAG.*v0\.5\.0-dev\.1/u);
   assert.match(deployment, /EXPECTED_REVISION.*\^\[0-9a-f\]\{40\}/u);
   assert.match(deployment, /CONFIRM_CLEAN_RESET_V1/u);
   assert.match(deployment, /CLEAN_DEPLOY_TAG_NOT_ANNOTATED/u);
@@ -553,7 +553,7 @@ test("backup quiesces writers, verifies encrypted COS objects, and deletes only 
   );
   assert.match(backup, /LOCAL_RETENTION_DAYS_DEFAULT=14/u);
   assert.match(backup, /LOCAL_MIN_VERIFIED_DEFAULT=3/u);
-  assert.match(backup, /pre-deploy-to-v0\\.4\\.0-dev\\.1/u);
+  assert.match(backup, /pre-deploy-to-v0\\\.5\\\.0-dev\\\.1/u);
   assert.doesNotMatch(backup, /pre-deploy-to-v0\\.3\\.0-dev\\.1/u);
   assert.match(backup, /\.cos-upload-verified/u);
   assert.match(backup, /ai-project-os-deploy\.lock/u);
@@ -591,8 +591,8 @@ test("deploy pre-deploy backup is the quiesced artifact accepted by migration re
   assert.match(deployment, /BACKUP_OK .* source_quiesced=true/u);
   assert.match(backup, /\[\[ "\$MODE" != pre-deploy \]\] \|\| fail 'BACKUP_PRE_DEPLOY_REQUIRES_CUTOVER'/u);
   assert.match(backup, /printf 'source_quiesced=%s\\n' .*CUTOVER_MODE/u);
-  assert.match(restore, /MIGRATION_SOURCE_VERSION=0\.3\.0-dev\.1/u);
-  assert.match(restore, /MIGRATION_TARGET_TAG=v0\.4\.0-dev\.1/u);
+  assert.match(restore, /MIGRATION_SOURCE_VERSION=0\.4\.0-dev\.1/u);
+  assert.match(restore, /MIGRATION_TARGET_TAG=v0\.5\.0-dev\.1/u);
   assert.match(restore, /"\$RESTORE_MODE" == migration && "\$source_quiesced" != true/u);
 });
 
@@ -799,7 +799,7 @@ test("backup publishes an atomic sanitized current record and verified history e
   assert.notEqual(functionEnd, -1);
   const statusFunctions = backup.slice(functionStart, functionEnd);
   const harnessPath = path.join(temporaryDirectory, "publish-status.sh");
-  const backupName = "20260902T032000Z-pre-deploy-to-v0.4.0-dev.1.Abc123";
+  const backupName = "20260902T032000Z-pre-deploy-to-v0.5.0-dev.1.Abc123";
   const archiveObject = `cos://ai-project-os-backup-1306016679/production/backups/2026/09/02/${backupName}/${backupName}.tar.age`;
   await writeFile(harnessPath, `#!/usr/bin/env bash
 set -Eeuo pipefail
@@ -808,7 +808,7 @@ readonly PUBLIC_HISTORY_ROOT=${JSON.stringify(historyRoot)}
 readonly PUBLIC_CURRENT_FILE=${JSON.stringify(path.join(statusRoot, "current.json"))}
 readonly PUBLIC_HISTORY_MAX=120
 readonly MODE=pre-deploy
-readonly TARGET_TAG=v0.4.0-dev.1
+readonly TARGET_TAG=v0.5.0-dev.1
 PUBLIC_STATUS_ACTIVE=1
 PUBLIC_STATUS_FINALIZED=0
 PUBLIC_RUN_ID=20260902T032000Z-4321

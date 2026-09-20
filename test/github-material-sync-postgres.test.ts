@@ -24,6 +24,7 @@ import {
   getOpenAiEmbeddingProfile,
   loadOpenAiCredential,
 } from "@/lib/ai-runtime";
+import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
@@ -276,8 +277,9 @@ test(
       );
       const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
       try {
+        const workspace = await createPostgresWorkspaceFixture(prisma);
         await prisma.project.create({
-          data: { id: projectId, name: "Material sync", slug: "material-sync" },
+          data: { id: projectId, workspaceId: workspace.workspaceId, name: "Material sync", slug: "material-sync" },
         });
         const ledger = createGitHubRepositoryLedgerService({ db: prisma });
         const linkA = await ledger.connect({

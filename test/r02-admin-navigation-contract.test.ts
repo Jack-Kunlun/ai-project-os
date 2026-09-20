@@ -67,7 +67,7 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(spec, /createControlledMembership/u);
   assert.match(spec, /\/projects\?focus=r02-return/u);
   assert.match(spec, /projectApi\.status\)\.toBe\(403\)/u);
-  assert.match(spec, /await signInR02Admin\(page\);[\s\S]*?const ownerContext = await browser\.newContext\(\);[\s\S]*?await signInR02Owner\(ownerPage\);/u);
+  assert.match(spec, /await signInR02Admin\(page\);[\s\S]*?const personalUser = await seedBrowserPersonalUser\([\s\S]*?const ownerContext = await browser\.newContext\(\);[\s\S]*?await signInR02PersonalUser\(ownerPage, personalUser\);/u);
   assert.ok(spec.includes('await expect(page).toHaveURL(/\\/admin$/u);'));
   assert.match(spec, /AI Project OS 平台管理总览/u);
   assert.match(spec, /toHaveAttribute\("href", "\/admin"\)/u);

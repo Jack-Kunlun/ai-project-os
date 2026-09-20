@@ -42,6 +42,37 @@ async function expectR02AdminBrand(page: Page): Promise<void> {
   await expect(brand).toHaveAttribute("href", "/admin");
 }
 
+async function expectProviderDialogScrollsOnlyItsContent(page: Page): Promise<void> {
+  await page.locator("main header").getByRole("button", { name: "新增供应商", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "新增供应商", exact: true });
+  await expect(dialog).toBeVisible();
+  const geometry = await dialog.evaluate((element) => {
+    const header = element.querySelector("header");
+    const content = element.querySelector("form > div");
+    const footer = element.querySelector("footer");
+    if (!header || !content || !footer) throw new Error("PROVIDER_DIALOG_STRUCTURE_INVALID");
+    const headerTop = header.getBoundingClientRect().top;
+    const footerTop = footer.getBoundingClientRect().top;
+    const scrollable = content.scrollHeight > content.clientHeight;
+    content.scrollTop = content.scrollHeight;
+    return {
+      height: element.getBoundingClientRect().height,
+      viewportHeight: window.innerHeight,
+      scrollable,
+      scrolled: content.scrollTop > 0,
+      headerStayed: Math.abs(header.getBoundingClientRect().top - headerTop) < 1,
+      footerStayed: Math.abs(footer.getBoundingClientRect().top - footerTop) < 1,
+    };
+  });
+  expect(geometry.height).toBeLessThanOrEqual(Math.min(544, geometry.viewportHeight - 48) + 1);
+  expect(geometry.scrollable).toBe(true);
+  expect(geometry.scrolled).toBe(true);
+  expect(geometry.headerStayed).toBe(true);
+  expect(geometry.footerStayed).toBe(true);
+  await dialog.getByRole("button", { name: "关闭新增供应商" }).click();
+  await expect(dialog).toHaveCount(0);
+}
+
 type R02ActorKind = "free" | "active" | "expired" | "disabled";
 type R02Actor = Readonly<{ id: string; username: string; password: string; workspaceId: string; kind: R02ActorKind }>;
 type R02Actors = Readonly<Record<R02ActorKind, R02Actor>>;
@@ -313,6 +344,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
       }
       if (route.path === "/admin/models") {
         await expect(page.locator("main header").getByRole("button", { name: "新增供应商", exact: true }), `platform model primary action@${width}`).toBeVisible();
+        if (width === 1440 || width === 390) await expectProviderDialogScrollsOnlyItsContent(page);
       }
       if (width < 1024) await expectR02MobileDrawer(page, route.path);
     }

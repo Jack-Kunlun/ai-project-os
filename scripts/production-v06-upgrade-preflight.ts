@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { readCliArguments } from "./cli-arguments";
 
-const TARGET_TAG = "v0.6.0-dev.5" as const;
+const TARGET_TAG = "v0.6.0-dev.6" as const;
 const TARGET_MIGRATION = "20260921010000_add_personal_knowledge_domain" as const;
 const SOURCE_MIGRATION_COUNT = 106;
 const TARGET_MIGRATION_COUNT = 107;

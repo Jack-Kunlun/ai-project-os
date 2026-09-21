@@ -23,11 +23,84 @@ async function expectNoAccessibilityViolations(page: Page, surface: string): Pro
 
 const BROWSER_SMOKE_VIEWPORTS = [1440, 1024, 768, 390] as const;
 
+/** A bounded description of a visible element that contributes to overflow. */
+type OverflowElementDiagnostic = {
+  tagName: string;
+  id: string;
+  className: string;
+  text: string;
+  rect: { left: number; right: number; top: number; width: number; height: number };
+  scrollWidth: number;
+  clientWidth: number;
+};
+
+/** The viewport and document measurements captured for one smoke viewport. */
+type OverflowMeasurement = {
+  bodyWidth: number;
+  documentWidth: number;
+  viewportWidth: number;
+  offenders: OverflowElementDiagnostic[];
+};
+
+/**
+ * Capture enough layout context to identify the element that escaped the
+ * viewport. Text is trimmed and bounded because this value is only diagnostic
+ * output and must never turn a browser failure into a page dump.
+ */
+async function readOverflowMeasurement(page: Page): Promise<OverflowMeasurement> {
+  return page.evaluate(() => {
+    const viewportWidth = window.innerWidth;
+    const offenders = Array.from(document.querySelectorAll<HTMLElement>("body *"))
+      .map((element): OverflowElementDiagnostic | null => {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        const visible = style.display !== "none"
+          && style.visibility !== "hidden"
+          && style.opacity !== "0"
+          && rect.width > 0
+          && rect.height > 0;
+        if (!visible) return null;
+        const crossesViewport = rect.left < -1 || rect.right > viewportWidth + 1;
+        const hasScrollableWidth = element.scrollWidth > element.clientWidth + 1;
+        if (!crossesViewport && !hasScrollableWidth) return null;
+        return {
+          tagName: element.tagName.toLowerCase(),
+          id: element.id,
+          className: typeof element.className === "string" ? element.className : "",
+          text: (element.textContent ?? "").replace(/\s+/gu, " ").trim().slice(0, 120),
+          rect: {
+            left: Math.round(rect.left * 10) / 10,
+            right: Math.round(rect.right * 10) / 10,
+            top: Math.round(rect.top * 10) / 10,
+            width: Math.round(rect.width * 10) / 10,
+            height: Math.round(rect.height * 10) / 10,
+          },
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+        };
+      })
+      .filter((entry): entry is OverflowElementDiagnostic => entry !== null)
+      .sort((left, right) => {
+        const leftOverflow = Math.max(left.rect.right - viewportWidth, left.rect.left * -1, left.scrollWidth - left.clientWidth);
+        const rightOverflow = Math.max(right.rect.right - viewportWidth, right.rect.left * -1, right.scrollWidth - right.clientWidth);
+        return rightOverflow - leftOverflow;
+      })
+      .slice(0, 12);
+    return {
+      bodyWidth: document.body.scrollWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth,
+      offenders,
+    };
+  });
+}
+
 async function expectNoHorizontalOverflow(
   page: Page,
   path: string,
   readyHeading: string,
   surface: string,
+  readyAfterNavigation?: (page: Page) => Promise<void>,
 ): Promise<void> {
   const originalViewport = page.viewportSize();
   try {
@@ -35,13 +108,11 @@ async function expectNoHorizontalOverflow(
       await page.setViewportSize({ width, height: 844 });
       await page.goto(path);
       await expect(page.getByRole("heading", { name: readyHeading, exact: true })).toBeVisible();
-      const dimensions = await page.evaluate(() => ({
-        bodyWidth: document.body.scrollWidth,
-        documentWidth: document.documentElement.scrollWidth,
-        viewportWidth: window.innerWidth,
-      }));
-      expect(dimensions.documentWidth, `${surface} document must not overflow at ${width}px`).toBeLessThanOrEqual(dimensions.viewportWidth);
-      expect(dimensions.bodyWidth, `${surface} body must not overflow at ${width}px`).toBeLessThanOrEqual(dimensions.viewportWidth);
+      if (readyAfterNavigation) await readyAfterNavigation(page);
+      const dimensions = await readOverflowMeasurement(page);
+      const diagnostics = dimensions.offenders.length > 0 ? ` offenders=${JSON.stringify(dimensions.offenders)}` : "";
+      expect(dimensions.documentWidth, `${surface} document must not overflow at ${width}px; dimensions=${JSON.stringify(dimensions)}${diagnostics}`).toBeLessThanOrEqual(dimensions.viewportWidth);
+      expect(dimensions.bodyWidth, `${surface} body must not overflow at ${width}px; dimensions=${JSON.stringify(dimensions)}${diagnostics}`).toBeLessThanOrEqual(dimensions.viewportWidth);
     }
   } finally {
     if (originalViewport !== null) await page.setViewportSize(originalViewport);
@@ -454,7 +525,15 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page.getByRole("heading", { name: "项目简报", exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/dashboard$/u);
-  await expectNoHorizontalOverflow(page, "/dashboard", `欢迎回来，${ownerUsername}`, "dashboard with recent job");
+  await expectNoHorizontalOverflow(
+    page,
+    "/dashboard",
+    `欢迎回来，${ownerUsername}`,
+    "dashboard with recent job",
+    async (dashboardPage) => {
+      await expect(dashboardPage.locator(`a[href="/projects/${projectId}/jobs/${browserSmokeFixtures.jobId}"]`)).toBeVisible();
+    },
+  );
 
   const mobileViewport = page.viewportSize();
   await page.setViewportSize({ width: 390, height: 844 });

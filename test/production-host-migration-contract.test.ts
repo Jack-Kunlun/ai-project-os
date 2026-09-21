@@ -128,6 +128,8 @@ raise SystemExit(0 if accepted else 1)
 `;
   const approved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.5.0-dev.1.Abc123"]);
   assert.equal(approved.status, 0, approved.stderr);
+  const currentApproved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.6.0-dev.6.Abc123"]);
+  assert.equal(currentApproved.status, 0, currentApproved.stderr);
   const previousApproved = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.4.0-dev.1.Abc123"]);
   assert.equal(previousApproved.status, 0, previousApproved.stderr);
   const previousRelease = run("python3", ["-c", code, helperPath, "20260902T120000Z-pre-deploy-to-v0.3.0-dev.1.Abc123"]);

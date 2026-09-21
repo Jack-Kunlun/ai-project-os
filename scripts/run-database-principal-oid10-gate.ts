@@ -94,6 +94,74 @@ async function docker(args: readonly string[], stage: string, timeoutMs = COMMAN
   return requireCommand("docker", args, stage, timeoutMs);
 }
 
+/** Accept only a canonical content digest; mutable tags cannot enter this gate. */
+function isPinnedImageReference(image: string): boolean {
+  return /@sha256:[a-f0-9]{64}$/u.test(image);
+}
+
+/** Distinguish a missing local image from a Docker daemon or socket failure. */
+function isDockerUnavailable(detail: string): boolean {
+  return /Cannot connect to the Docker daemon|docker daemon|docker\.sock|permission denied|EACCES|EPERM/iu.test(detail);
+}
+
+/** Keep registry failures explicit instead of reporting them as local cache misses. */
+function isImageRegistryFailure(detail: string): boolean {
+  return /pull access denied|unauthorized|denied|manifest unknown|not found|no matching manifest|name unknown|repository does not exist|toomanyrequests|rate limit/iu.test(detail);
+}
+
+/**
+ * Resolve the immutable PostgreSQL image locally before any gate resources are
+ * created. GitHub service containers do not guarantee that the digest reference
+ * used to start the service remains addressable from a later Docker CLI call.
+ */
+async function ensurePinnedImage(): Promise<void> {
+  if (!isPinnedImageReference(POSTGRES_IMAGE)) {
+    fail("DATABASE_PRINCIPAL_OID10_PINNED_IMAGE_REFERENCE_INVALID", "pinned-image");
+  }
+
+  const inspected = await runCommand(
+    "docker",
+    ["image", "inspect", POSTGRES_IMAGE, "--format", "{{.Id}}"],
+    "pinned-image",
+    30_000,
+  );
+  if (inspected.code === 0) return;
+
+  const inspectDetail = safeDetail(`${inspected.stdout}\n${inspected.stderr}`);
+  if (isDockerUnavailable(inspectDetail)) {
+    fail("DATABASE_PRINCIPAL_OID10_DOCKER_UNAVAILABLE", "pinned-image", inspectDetail);
+  }
+
+  const pulled = await runCommand("docker", ["image", "pull", POSTGRES_IMAGE], "pull-pinned-image");
+  if (pulled.code !== 0) {
+    const pullDetail = safeDetail(`${pulled.stdout}\n${pulled.stderr}`);
+    if (isDockerUnavailable(pullDetail)) {
+      fail("DATABASE_PRINCIPAL_OID10_DOCKER_UNAVAILABLE", "pull-pinned-image", pullDetail);
+    }
+    if (isImageRegistryFailure(pullDetail)) {
+      fail("DATABASE_PRINCIPAL_OID10_PINNED_IMAGE_REGISTRY_FAILED", "pull-pinned-image", pullDetail);
+    }
+    fail("DATABASE_PRINCIPAL_OID10_PINNED_IMAGE_PULL_FAILED", "pull-pinned-image", pullDetail);
+  }
+
+  const reinspection = await runCommand(
+    "docker",
+    ["image", "inspect", POSTGRES_IMAGE, "--format", "{{.Id}}"],
+    "pinned-image-reinspect",
+    30_000,
+  );
+  if (reinspection.code !== 0) {
+    const reinspectionDetail = safeDetail(`${reinspection.stdout}\n${reinspection.stderr}`);
+    if (isDockerUnavailable(reinspectionDetail)) {
+      fail("DATABASE_PRINCIPAL_OID10_DOCKER_UNAVAILABLE", "pinned-image-reinspect", reinspectionDetail);
+    }
+    if (isImageRegistryFailure(reinspectionDetail)) {
+      fail("DATABASE_PRINCIPAL_OID10_PINNED_IMAGE_REGISTRY_FAILED", "pinned-image-reinspect", reinspectionDetail);
+    }
+    fail("DATABASE_PRINCIPAL_OID10_PINNED_IMAGE_REINSPECT_FAILED", "pinned-image-reinspect", reinspectionDetail);
+  }
+}
+
 function connectionUrl(role: string, password: string, port: number): string {
   return `postgresql://${encodeURIComponent(role)}:${encodeURIComponent(password)}@127.0.0.1:${port}/${DATABASE_NAME}`;
 }
@@ -397,7 +465,7 @@ async function main(): Promise<void> {
   let primaryError: unknown = null;
   try {
     await docker(["version", "--format", "{{.Server.Version}}"], "docker-version", 30_000);
-    await docker(["image", "inspect", POSTGRES_IMAGE, "--format", "{{.Id}}"], "pinned-image", 30_000);
+    await ensurePinnedImage();
     await docker(["volume", "create", "--label", "ai-project-os.gate=database-principal-oid10", resources.volume], "create-volume", 30_000);
     created.volume = true;
     await docker(["network", "create", "--label", "ai-project-os.gate=database-principal-oid10", resources.network], "create-network", 30_000);

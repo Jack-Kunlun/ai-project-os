@@ -7,7 +7,18 @@ const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as { script
 
 test("OID10 PostgreSQL gate is isolated, pinned, and self-cleaning", () => {
   assert.equal(packageJson.scripts?.["test:database-principal-oid10"], "tsx scripts/run-database-principal-oid10-gate.ts");
-  assert.match(runner, /pgvector\/pgvector:0\.8\.6-pg18-trixie@sha256:/u);
+  const image = runner.match(/const POSTGRES_IMAGE = "([^"]+)";/u)?.[1];
+  assert.match(image ?? "", /^pgvector\/pgvector:0\.8\.6-pg18-trixie@sha256:[a-f0-9]{64}$/u);
+  assert.match(runner, /function ensurePinnedImage\(\)/u);
+  assert.match(runner, /\["image", "pull", POSTGRES_IMAGE\]/u);
+  assert.match(runner, /pinned-image-reinspect/u);
+  assert.match(runner, /DATABASE_PRINCIPAL_OID10_DOCKER_UNAVAILABLE/u);
+  assert.match(runner, /DATABASE_PRINCIPAL_OID10_PINNED_IMAGE_REGISTRY_FAILED/u);
+  const firstInspect = runner.indexOf('["image", "inspect", POSTGRES_IMAGE');
+  const pull = runner.indexOf('["image", "pull", POSTGRES_IMAGE');
+  const secondInspect = runner.indexOf('["image", "inspect", POSTGRES_IMAGE', firstInspect + 1);
+  const volumeCreate = runner.indexOf('["volume", "create"');
+  assert.ok(firstInspect >= 0 && pull > firstInspect && secondInspect > pull && volumeCreate > secondInspect);
   assert.match(runner, /POSTGRES_USER=\$\{INITDB_ROLE\}/u);
   assert.match(runner, /row\.oid !== "10"/u);
   assert.match(runner, /FROM pg_authid/u);

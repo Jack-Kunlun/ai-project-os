@@ -134,7 +134,7 @@ test("0.6 upgrades an exact 106-entry ledger and enforces personal knowledge int
       ok: true,
       kind: "v06-upgrade-preflight",
       phase: "pre-stop",
-      targetTag: "v0.6.0-dev.1",
+      targetTag: "v0.6.0-dev.2",
       migrationCount: 106,
       writerSessions: "not-checked",
     });

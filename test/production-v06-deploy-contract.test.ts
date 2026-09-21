@@ -25,13 +25,13 @@ async function readContracts() {
 
 test("0.6 gateway accepts one exact migration grammar and rejects injection", async () => {
   const { gateway } = await readContracts();
-  assert.ok(gateway.includes("^deploy-v06\\ (v0\\.5\\.0-dev\\.(1|4))\\ (v0\\.6\\.0-dev\\.1)\\ ([0-9a-f]{40})\\ (CONFIRM_V06_MIGRATION_V1)$"));
+  assert.ok(gateway.includes("^deploy-v06\\ (v0\\.5\\.0-dev\\.(1|4))\\ (v0\\.6\\.0-dev\\.2)\\ ([0-9a-f]{40})\\ (CONFIRM_V06_MIGRATION_V1)$"));
   assert.match(gateway, /exec sudo -n \/usr\/local\/sbin\/ai-project-os-v06-deploy/u);
 
   for (const command of [
-    `deploy-v06 v0.5.0-dev.2 v0.6.0-dev.1 ${"a".repeat(40)} CONFIRM_V06_MIGRATION_V1`,
-    `deploy-v06 v0.5.0-dev.4 v0.6.0-dev.2 ${"a".repeat(40)} CONFIRM_V06_MIGRATION_V1`,
-    `deploy-v06 v0.5.0-dev.4 v0.6.0-dev.1 ${"a".repeat(40)} CONFIRM_V06_MIGRATION_V1; id`,
+    `deploy-v06 v0.5.0-dev.2 v0.6.0-dev.2 ${"a".repeat(40)} CONFIRM_V06_MIGRATION_V1`,
+    `deploy-v06 v0.5.0-dev.4 v0.6.0-dev.1 ${"a".repeat(40)} CONFIRM_V06_MIGRATION_V1`,
+    `deploy-v06 v0.5.0-dev.4 v0.6.0-dev.2 ${"a".repeat(40)} CONFIRM_V06_MIGRATION_V1; id`,
   ]) {
     const result = spawnSync("bash", [gatewayPath], {
       encoding: "utf8",
@@ -46,7 +46,7 @@ test("0.6 deploy verifies source, stopped writers, backup, migration, and health
   const { deploy } = await readContracts();
   assert.equal(spawnSync("bash", ["-n", deployPath], { encoding: "utf8" }).status, 0);
   assert.match(deploy, /SOURCE_TAG.*v0\.5\.0-dev\\?\.\(1\|4\)|v0\\\.5/u);
-  assert.match(deploy, /RELEASE_TAG" != v0\.6\.0-dev\.1/u);
+  assert.match(deploy, /RELEASE_TAG" != v0\.6\.0-dev\.2/u);
   assert.match(deploy, /CONFIRM_V06_MIGRATION_V1/u);
   assert.match(deploy, /scripts\/production-v06-upgrade-preflight\.ts/u);
   assert.match(deploy, /run_upgrade_preflight pre-stop/u);
@@ -90,7 +90,7 @@ test("0.6 preflight pins the 106 to 107 ledger transition", async () => {
 
 test("backup and recovery recognize the 0.6 stopped-writer artifact", async () => {
   const { backup, restore } = await readContracts();
-  assert.match(backup, /TARGET_TAG" == v0\.6\.0-dev\.1/u);
-  assert.ok(backup.includes("pre-deploy-to-v0\\.6\\.0-dev\\.1"));
-  assert.ok(restore.includes("pre-deploy-to-v0\\.6\\.0-dev\\.1"));
+  assert.match(backup, /TARGET_TAG" == v0\.6\.0-dev\.2/u);
+  assert.ok(backup.includes("pre-deploy-to-v0\\.6\\.0-dev\\.2"));
+  assert.ok(restore.includes("pre-deploy-to-v0\\.6\\.0-dev\\.2"));
 });

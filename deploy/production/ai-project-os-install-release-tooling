@@ -167,7 +167,7 @@ grep -Fq 'CONFIRM_INSTALL_RELEASE_TOOLING_V1' "$GATEWAY" || fail RELEASE_TOOLING
 grep -Fq '/usr/local/sbin/ai-project-os-install-release-tooling' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
 grep -Fq 'CONFIRM_V06_MIGRATION_V1' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
 grep -Fq '/usr/local/sbin/ai-project-os-v06-deploy' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
-grep -Fq 'v0.6.0-dev.1' "$V06_DEPLOYER" || fail RELEASE_TOOLING_V06_DEPLOY_CONTRACT_INVALID 69
+grep -Fq 'v0.6.0-dev.2' "$V06_DEPLOYER" || fail RELEASE_TOOLING_V06_DEPLOY_CONTRACT_INVALID 69
 grep -Fq 'scripts/production-v06-upgrade-preflight.ts' "$V06_DEPLOYER" || fail RELEASE_TOOLING_V06_DEPLOY_CONTRACT_INVALID 69
 # Until the 0.6 migration path is separately approved, a tooling refresh must
 # preserve every command used by the current v0.5 production workflow.
@@ -177,8 +177,8 @@ grep -Fq 'configure-github-oauth' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CON
 grep -Fq 'v0.5.0-dev.1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'v0.5.0-dev.4' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'CONFIRM_PRESERVE_DATA_V1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
-grep -Fq 'v0.6.0-dev.1' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
-grep -Fq 'pre-deploy-to-v0\.6\.0-dev\.1' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
+grep -Fq 'v0.6.0-dev.2' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
+grep -Fq 'pre-deploy-to-v0\.6\.0-dev\.2' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
 
 visudo -cf "$SUDOERS" >/dev/null || fail RELEASE_TOOLING_SUDOERS_INVALID 69
 grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-install-release-tooling' "$SUDOERS" || \

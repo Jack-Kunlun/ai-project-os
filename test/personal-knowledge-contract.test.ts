@@ -328,7 +328,7 @@ test("schema and migration keep personal knowledge owner-scoped without project 
   assert.match(migration, /BEFORE UPDATE OR DELETE ON "PersonalKnowledgeAudit"/u);
   assert.match(migration, /PersonalKnowledgeAudit_references_guard/u);
   assert.match(migration, /NEW\."event" NOT IN \('created', 'revised', 'deleted', 'exported'\)/u);
-  assert.match(migration, /jsonb_object_length\(refs\)/u);
+  assert.match(migration, /SELECT count\(\*\) INTO reference_key_count FROM jsonb_object_keys\(refs\)/u);
   assert.match(migration, /document_state = 'active' AND document_current_revision IS NULL/u);
   assert.match(migration, /CREATE CONSTRAINT TRIGGER "PersonalKnowledgeDocument_current_guard"/u);
   assert.match(migration, /DEFERRABLE INITIALLY DEFERRED/u);

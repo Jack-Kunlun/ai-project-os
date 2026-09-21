@@ -6,7 +6,7 @@ on:
       tag:
         description: Exact approved annotated release tag
         required: true
-        default: v0.5.0-dev.3
+        default: v0.5.0-dev.4
         type: string
 
 permissions:
@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$DEPLOY_TAG_INPUT" != v0.5.0-dev.3 ]]; then
+          if [[ "$DEPLOY_TAG_INPUT" != v0.5.0-dev.4 ]]; then
             echo "DEPLOY_TAG_INVALID" >&2
             exit 64
           fi

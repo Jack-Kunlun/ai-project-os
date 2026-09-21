@@ -22,9 +22,11 @@ readonly PRODUCTION_COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
 readonly RESULT_FILE=/var/lib/ai-project-os/last-preserve-deployment
 readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 readonly SOURCE_VERSION=0.5.0-dev.1
-readonly TARGET_VERSION=0.5.0-dev.3
+readonly TARGET_VERSION=0.5.0-dev.4
 readonly EXPECTED_SOURCE_REVISION=63a0a3700bd42a6d0ce5569276ce74a4b6aa9815
 readonly EXPECTED_MIGRATION_COUNT=106
+readonly SOURCE_ROLLBACK_APP_IMAGE_REF=ai-project-os-preserve-v0-5-0-dev-1-app
+readonly SOURCE_ROLLBACK_WORKER_IMAGE_REF=ai-project-os-preserve-v0-5-0-dev-1-worker
 readonly POSTGRES_CLIENT_DRAIN_ATTEMPTS=30
 readonly POSTGRES_CLIENT_DRAIN_INTERVAL_SECONDS=2
 readonly POSTGRES_CLIENT_DRAIN_TIMEOUT_SECONDS=10
@@ -32,10 +34,16 @@ readonly POSTGRES_CLIENT_DRAIN_TIMEOUT_SECONDS=10
 OLD_APP_ID=
 OLD_WORKER_ID=
 POSTGRES_ID=
+# These are the image records observed on the running source containers. They
+# are retained for audit evidence only: Docker may have garbage-collected the
+# records while leaving the containers runnable, so they must never be used as
+# an image-inspect or rollback prerequisite.
 OLD_APP_IMAGE_ID=
 OLD_WORKER_IMAGE_ID=
 OLD_APP_IMAGE_REF=
 OLD_WORKER_IMAGE_REF=
+SOURCE_ROLLBACK_APP_IMAGE_ID=
+SOURCE_ROLLBACK_WORKER_IMAGE_ID=
 TARGET_APP_IMAGE_ID=
 TARGET_WORKER_IMAGE_ID=
 NEW_APP_ID=
@@ -266,6 +274,8 @@ allowed = {
     "deploy/production/install-production-deploy.sh",
     "docs/production-backup.md",
     "docs/production-deployment.md",
+    "docs/deployment-security.md",
+    "docs/admin-operation-guide.md",
     "docs/releases/next.md",
     "e2e/smoke.spec.ts",
     "e2e/z-r02-admin-navigation.spec.ts",
@@ -442,6 +452,39 @@ wait_for_writer_ids() {
   return 1
 }
 
+verify_container_metadata() {
+  local container_id=$1 expected_version=$2
+  [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$container_id")" == "$expected_version" ]] || return 1
+  [[ -n "$(docker inspect --format '{{.Config.Image}}' "$container_id")" ]]
+}
+
+verify_source_container_metadata() {
+  verify_container_metadata "$1" "$SOURCE_VERSION"
+}
+
+verify_image_ref() {
+  local image_ref=$1 expected_version=$2 image_id
+  image_id=$(docker image inspect --format '{{.Id}}' "$image_ref") || return 1
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+  [[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_ref")" == "$expected_version" ]] || return 1
+  printf '%s' "$image_id"
+}
+
+pin_source_rollback_artifacts() {
+  docker tag "$OLD_APP_IMAGE_REF" "$SOURCE_ROLLBACK_APP_IMAGE_REF" || return 1
+  docker tag "$OLD_WORKER_IMAGE_REF" "$SOURCE_ROLLBACK_WORKER_IMAGE_REF" || return 1
+  SOURCE_ROLLBACK_APP_IMAGE_ID=$(verify_image_ref "$SOURCE_ROLLBACK_APP_IMAGE_REF" "$SOURCE_VERSION") || return 1
+  SOURCE_ROLLBACK_WORKER_IMAGE_ID=$(verify_image_ref "$SOURCE_ROLLBACK_WORKER_IMAGE_REF" "$SOURCE_VERSION") || return 1
+}
+
+verify_source_rollback_artifacts() {
+  local app_image_id worker_image_id
+  app_image_id=$(verify_image_ref "$SOURCE_ROLLBACK_APP_IMAGE_REF" "$SOURCE_VERSION") || return 1
+  worker_image_id=$(verify_image_ref "$SOURCE_ROLLBACK_WORKER_IMAGE_REF" "$SOURCE_VERSION") || return 1
+  [[ "$app_image_id" == "$SOURCE_ROLLBACK_APP_IMAGE_ID" &&
+    "$worker_image_id" == "$SOURCE_ROLLBACK_WORKER_IMAGE_ID" ]]
+}
+
 restart_source_writers() {
   docker start "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null || return 1
   wait_for_source_writers
@@ -455,13 +498,18 @@ rollback_to_source() {
   source_config_status=0
   compose config --quiet || source_config_status=$?
   (( source_config_status == 0 )) || return 1
-  docker tag "$OLD_APP_IMAGE_ID" "$OLD_APP_IMAGE_REF" || return 1
-  docker tag "$OLD_WORKER_IMAGE_ID" "$OLD_WORKER_IMAGE_REF" || return 1
+  verify_source_rollback_artifacts || return 1
+  docker tag "$SOURCE_ROLLBACK_APP_IMAGE_REF" "$OLD_APP_IMAGE_REF" || return 1
+  docker tag "$SOURCE_ROLLBACK_WORKER_IMAGE_REF" "$OLD_WORKER_IMAGE_REF" || return 1
+  [[ "$(verify_image_ref "$OLD_APP_IMAGE_REF" "$SOURCE_VERSION")" == "$SOURCE_ROLLBACK_APP_IMAGE_ID" ]] || return 1
+  [[ "$(verify_image_ref "$OLD_WORKER_IMAGE_REF" "$SOURCE_VERSION")" == "$SOURCE_ROLLBACK_WORKER_IMAGE_ID" ]] || return 1
   compose up -d --no-deps --no-build --force-recreate app worker || return 1
   OLD_APP_ID=$(require_single_stack_container app) || return 1
   OLD_WORKER_ID=$(require_single_stack_container worker) || return 1
-  [[ "$(docker inspect --format '{{.Image}}' "$OLD_APP_ID")" == "$OLD_APP_IMAGE_ID" ]] || return 1
-  [[ "$(docker inspect --format '{{.Image}}' "$OLD_WORKER_ID")" == "$OLD_WORKER_IMAGE_ID" ]] || return 1
+  [[ "$(docker inspect --format '{{.Image}}' "$OLD_APP_ID")" == "$SOURCE_ROLLBACK_APP_IMAGE_ID" ]] || return 1
+  [[ "$(docker inspect --format '{{.Image}}' "$OLD_WORKER_ID")" == "$SOURCE_ROLLBACK_WORKER_IMAGE_ID" ]] || return 1
+  verify_source_container_metadata "$OLD_APP_ID" || return 1
+  verify_source_container_metadata "$OLD_WORKER_ID" || return 1
   wait_for_writer_ids "$SOURCE_VERSION" "$OLD_APP_ID" "$OLD_WORKER_ID" || return 1
   verify_public_health "$SOURCE_VERSION" || return 1
   assert_data_snapshot_not_decreased "$(read_database_snapshot)" || return 1
@@ -528,7 +576,7 @@ recover_on_failure() {
 }
 
 [[ $EUID -eq 0 ]] || { printf 'PRESERVE_DEPLOY_ROOT_REQUIRED\n' >&2; exit 70; }
-[[ "$SOURCE_TAG" == v0.5.0-dev.1 && "$TARGET_TAG" == v0.5.0-dev.3 ]] || { printf 'PRESERVE_DEPLOY_TAG_INVALID\n' >&2; exit 64; }
+[[ "$SOURCE_TAG" == v0.5.0-dev.1 && "$TARGET_TAG" == v0.5.0-dev.4 ]] || { printf 'PRESERVE_DEPLOY_TAG_INVALID\n' >&2; exit 64; }
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || { printf 'PRESERVE_DEPLOY_REVISION_INVALID\n' >&2; exit 65; }
 [[ "$CONFIRMATION_TOKEN" == "$REQUIRED_CONFIRMATION" ]] || { printf 'PRESERVE_DEPLOY_CONFIRMATION_INVALID\n' >&2; exit 64; }
 validate_environment || { printf 'PRESERVE_DEPLOY_ENV_INVALID\n' >&2; exit 70; }
@@ -560,8 +608,10 @@ OLD_WORKER_IMAGE_ID=$(docker inspect --format '{{.Image}}' "$OLD_WORKER_ID") || 
 OLD_APP_IMAGE_REF=$(docker inspect --format '{{.Config.Image}}' "$OLD_APP_ID") || exit 69
 OLD_WORKER_IMAGE_REF=$(docker inspect --format '{{.Config.Image}}' "$OLD_WORKER_ID") || exit 69
 [[ "$OLD_APP_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ && "$OLD_WORKER_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 69
-[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$OLD_APP_IMAGE_ID")" == "$SOURCE_VERSION" ]] || exit 69
-[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$OLD_WORKER_IMAGE_ID")" == "$SOURCE_VERSION" ]] || exit 69
+verify_source_container_metadata "$OLD_APP_ID" || exit 69
+verify_source_container_metadata "$OLD_WORKER_ID" || exit 69
+[[ "$OLD_APP_IMAGE_REF" != "$SOURCE_ROLLBACK_APP_IMAGE_REF" &&
+  "$OLD_WORKER_IMAGE_REF" != "$SOURCE_ROLLBACK_WORKER_IMAGE_REF" ]] || exit 69
 capture_pgdata_identity || { printf 'PRESERVE_DEPLOY_PGDATA_IDENTITY_INVALID\n' >&2; exit 70; }
 DATA_SNAPSHOT_BEFORE=$(read_database_snapshot) || { printf 'PRESERVE_DEPLOY_DATA_SNAPSHOT_INVALID\n' >&2; exit 70; }
 MIGRATION_SNAPSHOT_BEFORE=$(read_migration_snapshot) || { printf 'PRESERVE_DEPLOY_MIGRATION_LEDGER_INVALID\n' >&2; exit 70; }
@@ -571,14 +621,20 @@ verify_health_body "$source_health" "$SOURCE_VERSION" || { printf 'PRESERVE_DEPL
 verify_public_health "$SOURCE_VERSION" || { printf 'PRESERVE_DEPLOY_SOURCE_PUBLIC_HEALTH_INVALID\n' >&2; exit 69; }
 
 ensure_repository_clean || { printf 'PRESERVE_DEPLOY_REPOSITORY_DIRTY\n' >&2; exit 70; }
+git -C "$REPOSITORY_DIR" checkout --detach --force "$SOURCE_REVISION" || { printf 'PRESERVE_DEPLOY_SOURCE_CHECKOUT_FAILED\n' >&2; exit 70; }
+compose config --quiet || { printf 'PRESERVE_DEPLOY_SOURCE_COMPOSE_INVALID\n' >&2; exit 70; }
+compose build app worker || { printf 'PRESERVE_DEPLOY_SOURCE_IMAGE_BUILD_FAILED\n' >&2; exit 73; }
+SOURCE_ROLLBACK_APP_IMAGE_ID=$(verify_image_ref "$OLD_APP_IMAGE_REF" "$SOURCE_VERSION") || { printf 'PRESERVE_DEPLOY_SOURCE_IMAGE_INVALID\n' >&2; exit 73; }
+SOURCE_ROLLBACK_WORKER_IMAGE_ID=$(verify_image_ref "$OLD_WORKER_IMAGE_REF" "$SOURCE_VERSION") || { printf 'PRESERVE_DEPLOY_SOURCE_IMAGE_INVALID\n' >&2; exit 73; }
+pin_source_rollback_artifacts || { printf 'PRESERVE_DEPLOY_SOURCE_ROLLBACK_PIN_FAILED\n' >&2; exit 73; }
+verify_source_rollback_artifacts || { printf 'PRESERVE_DEPLOY_SOURCE_ROLLBACK_INVALID\n' >&2; exit 73; }
 git -C "$REPOSITORY_DIR" checkout --detach --force "$TARGET_REVISION" || { printf 'PRESERVE_DEPLOY_TARGET_CHECKOUT_FAILED\n' >&2; exit 70; }
 compose config --quiet || { printf 'PRESERVE_DEPLOY_TARGET_COMPOSE_INVALID\n' >&2; exit 70; }
 compose build app worker || { printf 'PRESERVE_DEPLOY_IMAGE_BUILD_FAILED\n' >&2; exit 73; }
-TARGET_APP_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$OLD_APP_IMAGE_REF") || exit 73
-TARGET_WORKER_IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$OLD_WORKER_IMAGE_REF") || exit 73
-[[ "$TARGET_APP_IMAGE_ID" != "$OLD_APP_IMAGE_ID" && "$TARGET_WORKER_IMAGE_ID" != "$OLD_WORKER_IMAGE_ID" ]] || { printf 'PRESERVE_DEPLOY_IMAGE_NOT_REBUILT\n' >&2; exit 73; }
-[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$TARGET_APP_IMAGE_ID")" == "$TARGET_VERSION" ]] || exit 73
-[[ "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$TARGET_WORKER_IMAGE_ID")" == "$TARGET_VERSION" ]] || exit 73
+TARGET_APP_IMAGE_ID=$(verify_image_ref "$OLD_APP_IMAGE_REF" "$TARGET_VERSION") || exit 73
+TARGET_WORKER_IMAGE_ID=$(verify_image_ref "$OLD_WORKER_IMAGE_REF" "$TARGET_VERSION") || exit 73
+[[ "$TARGET_APP_IMAGE_ID" != "$SOURCE_ROLLBACK_APP_IMAGE_ID" && "$TARGET_WORKER_IMAGE_ID" != "$SOURCE_ROLLBACK_WORKER_IMAGE_ID" ]] || { printf 'PRESERVE_DEPLOY_IMAGE_NOT_REBUILT\n' >&2; exit 73; }
+verify_source_rollback_artifacts || { printf 'PRESERVE_DEPLOY_SOURCE_ROLLBACK_LOST\n' >&2; exit 73; }
 
 WRITER_RECOVERY_REQUIRED=1
 ensure_repository_clean || { printf 'PRESERVE_DEPLOY_REPOSITORY_DIRTY_BEFORE_STOP\n' >&2; exit 70; }
@@ -601,7 +657,7 @@ BACKUP_OBJECT=$(sed -n 's/^BACKUP_OK .* object=\([^ ]*\) .*/\1/p' <<<"$backup_ou
 BACKUP_MANIFEST=$(sed -n 's/^BACKUP_OK .* verified_manifest=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
 [[ "$BACKUP_PATH" =~ ^/var/backups/ai-project-os/[^/]+$ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_PATH_INVALID\n' >&2; exit 69; }
 [[ "$BACKUP_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_OBJECT_INVALID\n' >&2; exit 69; }
-[[ "$BACKUP_MANIFEST" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.3\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.3\.[A-Za-z0-9]{6}\.manifest\.json$ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_MANIFEST_INVALID\n' >&2; exit 69; }
+[[ "$BACKUP_MANIFEST" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.4\.[A-Za-z0-9]{6}/[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.5\.0-dev\.4\.[A-Za-z0-9]{6}\.manifest\.json$ ]] || { printf 'PRESERVE_DEPLOY_BACKUP_MANIFEST_INVALID\n' >&2; exit 69; }
 
 verify_pgdata_identity_unchanged || { printf 'PRESERVE_DEPLOY_PRE_SWITCH_PGDATA_CHANGED\n' >&2; exit 69; }
 CUTOVER_ATTEMPTED=1
@@ -611,6 +667,8 @@ NEW_WORKER_ID=$(require_single_stack_container worker) || { printf 'PRESERVE_DEP
 [[ "$NEW_APP_ID" != "$OLD_APP_ID" && "$NEW_WORKER_ID" != "$OLD_WORKER_ID" ]] || { printf 'PRESERVE_DEPLOY_TARGET_WRITERS_NOT_REPLACED\n' >&2; exit 74; }
 [[ "$(docker inspect --format '{{.Image}}' "$NEW_APP_ID")" == "$TARGET_APP_IMAGE_ID" ]] || { printf 'PRESERVE_DEPLOY_TARGET_APP_IMAGE_INVALID\n' >&2; exit 74; }
 [[ "$(docker inspect --format '{{.Image}}' "$NEW_WORKER_ID")" == "$TARGET_WORKER_IMAGE_ID" ]] || { printf 'PRESERVE_DEPLOY_TARGET_WORKER_IMAGE_INVALID\n' >&2; exit 74; }
+verify_container_metadata "$NEW_APP_ID" "$TARGET_VERSION" || { printf 'PRESERVE_DEPLOY_TARGET_APP_METADATA_INVALID\n' >&2; exit 74; }
+verify_container_metadata "$NEW_WORKER_ID" "$TARGET_VERSION" || { printf 'PRESERVE_DEPLOY_TARGET_WORKER_METADATA_INVALID\n' >&2; exit 74; }
 wait_for_writer_ids "$TARGET_VERSION" "$NEW_APP_ID" "$NEW_WORKER_ID" || { printf 'PRESERVE_DEPLOY_TARGET_LOCAL_HEALTH_INVALID\n' >&2; exit 74; }
 data_snapshot_after=$(read_database_snapshot) || { printf 'PRESERVE_DEPLOY_DATA_SNAPSHOT_INVALID\n' >&2; exit 74; }
 assert_data_snapshot_not_decreased "$data_snapshot_after" || { printf 'PRESERVE_DEPLOY_DATA_DECREASED\n' >&2; exit 74; }
@@ -630,9 +688,15 @@ result_tmp=$(mktemp "$(dirname "$RESULT_FILE")/.last-preserve-deployment.XXXXXX"
   printf 'revision=%s\n' "$EXPECTED_REVISION"
   printf 'postgres_container=%s\n' "$POSTGRES_ID"
   printf 'pgdata_volume=%s\n' "$PGDATA_VOLUME"
+  printf 'observed_source_app_image=%s\n' "$OLD_APP_IMAGE_ID"
+  printf 'observed_source_worker_image=%s\n' "$OLD_WORKER_IMAGE_ID"
   printf 'migration_ledger=%s\n' "$MIGRATION_SNAPSHOT_BEFORE"
   printf 'data_snapshot=%s\n' "$DATA_SNAPSHOT_BEFORE"
   printf 'data_snapshot_after=%s\n' "$data_snapshot_after"
+  printf 'source_rollback_app_image=%s\n' "$SOURCE_ROLLBACK_APP_IMAGE_ID"
+  printf 'source_rollback_worker_image=%s\n' "$SOURCE_ROLLBACK_WORKER_IMAGE_ID"
+  printf 'target_app_image=%s\n' "$TARGET_APP_IMAGE_ID"
+  printf 'target_worker_image=%s\n' "$TARGET_WORKER_IMAGE_ID"
   printf 'backup=%s\n' "$BACKUP_PATH"
   printf 'backup_object=%s\n' "$BACKUP_OBJECT"
   printf 'backup_manifest=%s\n' "$BACKUP_MANIFEST"

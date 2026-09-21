@@ -146,6 +146,73 @@ assert_maintenance_isolation
   return result;
 }
 
+async function runSourceRollbackPinScenario(failWorkerPin = false) {
+  const source = await readFile(preservePath, "utf8");
+  const verifyImage = extractFunction(source, "verify_image_ref", "\npin_source_rollback_artifacts");
+  const pin = extractFunction(source, "pin_source_rollback_artifacts", "\nverify_source_rollback_artifacts");
+  const verify = extractFunction(source, "verify_source_rollback_artifacts", "\nrestart_source_writers");
+  const directory = await mkdtemp(path.join(tmpdir(), "ai-project-os-preserve-pin-"));
+  const harness = path.join(directory, "harness.sh");
+  const trace = path.join(directory, "trace.log");
+  const appId = "sha256:" + "a".repeat(64);
+  const workerId = "sha256:" + "b".repeat(64);
+  const lines = [
+    "#!/usr/bin/env bash",
+    "set -Eeuo pipefail",
+    "SOURCE_VERSION=0.5.0-dev.1",
+    "OLD_APP_IMAGE_ID=sha256:" + "d".repeat(64),
+    "OLD_WORKER_IMAGE_ID=sha256:" + "e".repeat(64),
+    "OLD_APP_IMAGE_REF=ai-project-os-app",
+    "OLD_WORKER_IMAGE_REF=ai-project-os-worker",
+    "SOURCE_ROLLBACK_APP_IMAGE_REF=ai-project-os-preserve-v0-5-0-dev-1-app",
+    "SOURCE_ROLLBACK_WORKER_IMAGE_REF=ai-project-os-preserve-v0-5-0-dev-1-worker",
+    "SOURCE_ROLLBACK_APP_IMAGE_ID=",
+    "SOURCE_ROLLBACK_WORKER_IMAGE_ID=",
+    "FAIL_WORKER_PIN=" + (failWorkerPin ? "1" : "0"),
+    "TRACE_FILE=" + JSON.stringify(trace),
+    "docker() {",
+    "  local command=\${1-} ref format",
+    "  case \"$command\" in",
+    "    tag)",
+    "      [[ \"$2\" == \"$OLD_APP_IMAGE_REF\" || \"$2\" == \"$OLD_WORKER_IMAGE_REF\" ]] || return 1",
+    "      [[ \"$2\" != sha256:* && \"$3\" != sha256:* ]] || return 1",
+    "      [[ \"$FAIL_WORKER_PIN\" != 1 || \"$2\" != \"$OLD_WORKER_IMAGE_REF\" ]] || return 1",
+    "      printf 'tag:%s:%s\\n' \"$2\" \"$3\" >> \"$TRACE_FILE\"",
+    "      ;;",
+    "    build)",
+    "      [[ \"$2\" == app && \"$3\" == worker ]] || return 1",
+    "      ;;",
+    "    image)",
+    "      [[ \"$2\" == inspect && \"$3\" == --format ]] || return 1",
+    "      format=$4",
+    "      ref=$5",
+    "      [[ \"$ref\" != sha256:* ]] || return 1",
+    "      if [[ \"$format\" == *'.Id'* ]]; then",
+    "        case \"$ref\" in",
+    "          ai-project-os-app|ai-project-os-preserve-v0-5-0-dev-1-app) printf '%s' " + JSON.stringify(appId) + " ;;",
+    "          ai-project-os-worker|ai-project-os-preserve-v0-5-0-dev-1-worker) printf '%s' " + JSON.stringify(workerId) + " ;;",
+    "          *) return 1 ;;",
+    "        esac",
+    "      elif [[ \"$format\" == *'org.opencontainers.image.version'* ]]; then",
+    "        printf '0.5.0-dev.1'",
+    "      else",
+    "        return 1",
+    "      fi",
+    "      ;;",
+    "    *) return 1 ;;",
+    "  esac",
+    "}",
+  ].join("\n") + "\n" + verifyImage + "\n" + pin + "\n" + verify + "\n" +
+    "pin_source_rollback_artifacts\n" +
+    (failWorkerPin ? "printf 'stop\\n' >> \"$TRACE_FILE\"\n" : "docker build app worker\nverify_source_rollback_artifacts\n");
+  await writeFile(harness, lines, { mode: 0o700 });
+  await chmod(harness, 0o700);
+  const result = spawnSync("bash", [harness], { encoding: "utf8" });
+  const evidence = result.stdout + "\n" + result.stderr + "\n" + await readFile(trace, "utf8").catch(() => "");
+  await rm(directory, { recursive: true, force: true });
+  return { result, evidence };
+}
+
 test("pre-switch backup failure restarts only the captured source writers", async () => {
   const { result, evidence } = await runRecoveryScenario("pre-backup-failure");
   assert.equal(result.status, 74);
@@ -202,4 +269,19 @@ test("maintenance isolation compares full Docker IDs as strings and rejects extr
 
   const wrongId = await runIsolationScenario([otherId]);
   assert.notEqual(wrongId.status, 0);
+});
+
+test("source rollback pin uses inspectable service refs even when old container image records are missing", async () => {
+  const { result, evidence } = await runSourceRollbackPinScenario();
+  assert.equal(result.status, 0, result.stderr + "\n" + evidence);
+  assert.match(evidence, /tag:ai-project-os-app:ai-project-os-preserve-v0-5-0-dev-1-app/u);
+  assert.match(evidence, /tag:ai-project-os-worker:ai-project-os-preserve-v0-5-0-dev-1-worker/u);
+  assert.doesNotMatch(evidence, /sha256:dddd/u);
+  assert.doesNotMatch(evidence, /sha256:eeee/u);
+});
+
+test("source rollback pin failure fails closed before a writer stop", async () => {
+  const { result, evidence } = await runSourceRollbackPinScenario(true);
+  assert.notEqual(result.status, 0, evidence);
+  assert.doesNotMatch(evidence, /^stop$/mu);
 });

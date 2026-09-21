@@ -27,7 +27,7 @@ test("preserve deploy is an isolated one-release, fail-closed channel", async ()
   assert.equal(spawnSync("bash", ["-n", preservePath], { encoding: "utf8" }).status, 0);
   assert.match(preserve, /SOURCE_TAG=\$\{1-\}/u);
   assert.match(preserve, /TARGET_TAG=\$\{2-\}/u);
-  assert.match(preserve, /SOURCE_TAG" == v0\.5\.0-dev\.1 && "\$TARGET_TAG" == v0\.5\.0-dev\.3/u);
+  assert.match(preserve, /SOURCE_TAG" == v0\.5\.0-dev\.1 && "\$TARGET_TAG" == v0\.5\.0-dev\.4/u);
   assert.match(preserve, /EXPECTED_SOURCE_REVISION=63a0a3700bd42a6d0ce5569276ce74a4b6aa9815/u);
   assert.match(preserve, /CONFIRM_PRESERVE_DATA_V1/u);
   assert.match(preserve, /source_revision.*EXPECTED_SOURCE_REVISION/u);
@@ -42,8 +42,14 @@ test("preserve deploy is an isolated one-release, fail-closed channel", async ()
   assert.match(preserve, /allowed = \{/u);
   assert.match(preserve, /\.github\/workflows\/ci\.yml/u);
   assert.match(preserve, /deploy\/production\/ai-project-os-preserve-deploy/u);
+  assert.match(preserve, /docs\/deployment-security\.md/u);
+  assert.match(preserve, /docs\/admin-operation-guide\.md/u);
   assert.match(preserve, /test\/production-deploy-contract\.test\.ts/u);
   assert.match(preserve, /PRESERVE_DEPLOY_REPOSITORY_DIRTY_BEFORE_STOP/u);
+  assert.match(preserve, /SOURCE_ROLLBACK_APP_IMAGE_REF/u);
+  assert.match(preserve, /SOURCE_ROLLBACK_WORKER_IMAGE_REF/u);
+  assert.match(preserve, /pin_source_rollback_artifacts/u);
+  assert.match(preserve, /verify_source_rollback_artifacts/u);
 });
 
 test("preserve env gate rejects duplicate keys and validates the clean-deploy key surface", async () => {
@@ -191,6 +197,9 @@ test("preserve deploy protects PostgreSQL identity, ledger, data counts, and rol
   assert.match(preserve, /assert_data_snapshot_not_decreased/u);
   assert.match(preserve, /OLD_APP_IMAGE_ID/u);
   assert.match(preserve, /OLD_WORKER_IMAGE_ID/u);
+  assert.match(preserve, /verify_source_container_metadata/u);
+  assert.match(preserve, /SOURCE_ROLLBACK_APP_IMAGE_ID/u);
+  assert.match(preserve, /SOURCE_ROLLBACK_WORKER_IMAGE_ID/u);
   assert.match(preserve, /rollback_to_source/u);
   assert.match(preserve, /quiesce_current_writers_after_rollback_failure/u);
   assert.match(preserve, /label=com\.docker\.compose\.service=app/u);
@@ -200,11 +209,30 @@ test("preserve deploy protects PostgreSQL identity, ledger, data counts, and rol
   assert.doesNotMatch(preserve, /phase=post-switch old_writers_not_restarted=true/u);
   assert.match(preserve, /PRESERVE_DEPLOY_ROLLBACK_OK/u);
   assert.match(preserve, /PRESERVE_DEPLOY_RECOVERY_REQUIRED/u);
-  assert.match(preserve, /docker tag "\$OLD_APP_IMAGE_ID"/u);
-  assert.match(preserve, /docker tag "\$OLD_WORKER_IMAGE_ID"/u);
+  assert.match(preserve, /docker tag "\$SOURCE_ROLLBACK_APP_IMAGE_REF" "\$OLD_APP_IMAGE_REF"/u);
+  assert.match(preserve, /docker tag "\$SOURCE_ROLLBACK_WORKER_IMAGE_REF" "\$OLD_WORKER_IMAGE_REF"/u);
+  assert.doesNotMatch(preserve, /docker image inspect[^\n]*OLD_APP_IMAGE_ID/u);
+  assert.doesNotMatch(preserve, /docker image inspect[^\n]*OLD_WORKER_IMAGE_ID/u);
+  assert.ok(
+    preserve.indexOf("compose build app worker || { printf 'PRESERVE_DEPLOY_SOURCE_IMAGE_BUILD_FAILED") <
+      preserve.indexOf("stop_source_writers ||"),
+    "source image build must happen before writers stop",
+  );
+  assert.ok(
+    preserve.indexOf("pin_source_rollback_artifacts || { printf 'PRESERVE_DEPLOY_SOURCE_ROLLBACK_PIN_FAILED") <
+      preserve.indexOf("stop_source_writers ||"),
+    "source rollback artifacts must be pinned before writers stop",
+  );
+  assert.ok(
+    preserve.indexOf("verify_source_rollback_artifacts || { printf 'PRESERVE_DEPLOY_SOURCE_ROLLBACK_LOST") <
+      preserve.indexOf("stop_source_writers ||"),
+    "source rollback artifacts must survive target build before writers stop",
+  );
   assert.match(preserve, /trap recover_on_failure EXIT/u);
   assert.match(preserve, /STACK_HEALTH=\$body/u);
   assert.match(preserve, /PRESERVE_DEPLOY_TARGET_LOCAL_HEALTH_UNRECORDED/u);
+  assert.match(preserve, /PRESERVE_DEPLOY_TARGET_APP_METADATA_INVALID/u);
+  assert.match(preserve, /PRESERVE_DEPLOY_TARGET_WORKER_METADATA_INVALID/u);
 });
 
 test("gateway, sudoers, and installer expose only preserve deploy plus OAuth", async () => {
@@ -214,7 +242,7 @@ test("gateway, sudoers, and installer expose only preserve deploy plus OAuth", a
     read(installerPath),
   ]);
 
-  assert.ok(gateway.includes("preserve-deploy\\ (v0\\.5\\.0-dev\\.1)\\ (v0\\.5\\.0-dev\\.3)"));
+  assert.ok(gateway.includes("preserve-deploy\\ (v0\\.5\\.0-dev\\.1)\\ (v0\\.5\\.0-dev\\.4)"));
   assert.match(gateway, /CONFIRM_PRESERVE_DATA_V1/u);
   assert.doesNotMatch(gateway, /clean-deploy/u);
   assert.match(gateway, /ai-project-os-preserve-deploy/u);
@@ -226,22 +254,22 @@ test("gateway, sudoers, and installer expose only preserve deploy plus OAuth", a
   assert.match(installer, /bash -n \/usr\/local\/sbin\/ai-project-os-preserve-deploy/u);
 });
 
-test("backup and recovery allow the explicit .1, .2, and .3 preserve names", async () => {
+test("backup and recovery allow the explicit .1, .2, .3, and .4 preserve names", async () => {
   const [backup, restore] = await Promise.all([read(backupPath), read(restorePath)]);
 
-  assert.ok(backup.includes("pre-deploy-to-v0\\.5\\.0-dev\\.(1|2|3)"));
-  assert.ok(backup.includes('TARGET_TAG" =~ ^v0\\.5\\.0-dev\\.(1|2|3)$'));
-  assert.ok(restore.includes('RELEASE_TAG" =~ ^v0\\.5\\.0-dev\\.(1|2|3)$'));
-  assert.ok(restore.includes("pre-deploy-to-v0\\.5\\.0-dev\\.(1|2|3)"));
+  assert.ok(backup.includes("pre-deploy-to-v0\\.5\\.0-dev\\.(1|2|3|4)"));
+  assert.ok(backup.includes('TARGET_TAG" =~ ^v0\\.5\\.0-dev\\.(1|2|3|4)$'));
+  assert.ok(restore.includes('RELEASE_TAG" =~ ^v0\\.5\\.0-dev\\.(1|2|3|4)$'));
+  assert.ok(restore.includes("pre-deploy-to-v0\\.5\\.0-dev\\.(1|2|3|4)"));
   assert.doesNotMatch(restore, /v0\\\.4\\\.0-dev\\\.2/u);
   assert.match(restore, /MIGRATION_TARGET_TAG=v0\.5\.0-dev\.1/u);
 });
 
-test("production workflow is main-only and requires exact .3 preserve markers", async () => {
+test("production workflow is main-only and requires exact .4 preserve markers", async () => {
   const [workflow, ciWorkflow] = await Promise.all([read(workflowPath), read(ciWorkflowPath)]);
 
-  assert.match(workflow, /default: v0\.5\.0-dev\.3/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.3/u);
+  assert.match(workflow, /default: v0\.5\.0-dev\.4/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.4/u);
   assert.match(workflow, /git rev-parse HEAD.*deploy_sha/u);
   assert.match(workflow, /git merge-base --is-ancestor "\$source_sha" "\$deploy_sha"/u);
   assert.match(workflow, /git rev-list --merges "\$source_sha\.\.\$deploy_sha"/u);

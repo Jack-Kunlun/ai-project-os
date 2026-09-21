@@ -21,6 +21,19 @@ import {
   signInR02PersonalUser,
 } from "./support/r02-admin-navigation";
 
+/** Accept equivalent CSS Color 4 serializations emitted by different Chromium builds. */
+function isExpectedTranslucentScrollbarThumb(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  const rgbaMatch = normalized.match(/^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(0(?:\.\d+)?|1(?:\.0+)?)\s*\)$/u);
+  if (rgbaMatch !== null) {
+    return rgbaMatch[1] === "148" && rgbaMatch[2] === "163" && rgbaMatch[3] === "184" && Number(rgbaMatch[4]) > 0 && Number(rgbaMatch[4]) < 1;
+  }
+  const hexMatch = normalized.match(/^#([0-9a-f]{8})$/u);
+  if (hexMatch === null || hexMatch[1].slice(0, 6) !== "94a3b8") return false;
+  const alpha = Number.parseInt(hexMatch[1].slice(6), 16);
+  return alpha > 0 && alpha < 255;
+}
+
 const R02_ACTOR_PASSWORD = "R02Actor2026Password!";
 
 async function expectR02OverviewErrorState(page: Page): Promise<void> {
@@ -91,7 +104,7 @@ async function expectProviderDialogScrollsOnlyItsContent(page: Page): Promise<vo
   expect(geometry.headerStayed).toBe(true);
   expect(geometry.footerStayed).toBe(true);
   expect(geometry.hasDarkScrollbar).toBe(true);
-  expect(geometry.scrollbarThumb).toContain("rgba");
+  expect(isExpectedTranslucentScrollbarThumb(geometry.scrollbarThumb)).toBe(true);
   await dialog.getByRole("button", { name: "关闭新增供应商" }).click();
   await expect(dialog).toHaveCount(0);
 }
@@ -481,7 +494,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     expect(projectApi.status).toBe(403);
     expect(projectApi.body).not.toContain(project.name);
     await freePage.goto("/personal/configuration");
-    await expect(freePage.getByRole("link", { name: /我的模型/u })).toBeVisible();
+    await expect(freePage.getByRole("link", { name: "我的模型", exact: true })).toBeVisible();
     await freePage.goto("/personal/models");
     await expect(freePage.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
     await expect(freePage.getByText("普通用户", { exact: true })).toBeVisible();

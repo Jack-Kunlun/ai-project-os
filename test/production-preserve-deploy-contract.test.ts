@@ -272,8 +272,8 @@ test("backup and recovery allow the explicit .1, .2, .3, and .4 preserve names",
 test("production workflow is main-only and requires exact 0.6 migration markers", async () => {
   const [workflow, ciWorkflow] = await Promise.all([read(workflowPath), read(ciWorkflowPath)]);
 
-  assert.match(workflow, /default: v0\.6\.0-dev\.4/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.4/u);
+  assert.match(workflow, /default: v0\.6\.0-dev\.5/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.5/u);
   assert.match(workflow, /git rev-parse HEAD.*deploy_sha/u);
   assert.match(workflow, /git merge-base --is-ancestor "\$source_sha" "\$deploy_sha"/u);
   assert.match(workflow, /git rev-list --merges "\$source_sha\.\.\$deploy_sha"/u);

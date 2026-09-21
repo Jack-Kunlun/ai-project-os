@@ -6,6 +6,7 @@ import { activateAccountEntitlements } from "@/lib/account-entitlement-activatio
 import { createPasswordRecord } from "@/lib/auth";
 import { appendWorkspaceMembershipAudit } from "@/lib/membership-governance";
 import { getDb, getEntitlementDb } from "@/lib/db";
+import { APP_VERSION } from "@/lib/version";
 
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
@@ -51,7 +52,7 @@ function fixtureDigest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-async function seedBrowserSmokeFixtures(projectId: string): Promise<{
+async function seedBrowserSmokeFixtures(projectId: string, ownerUsername: string): Promise<{
   jobId: string;
   pendingJobId: string;
   unreadTitle: string;
@@ -68,7 +69,7 @@ async function seedBrowserSmokeFixtures(projectId: string): Promise<{
   const systemTitle = `Browser smoke system history ${suffix}`;
   const now = new Date();
   try {
-    const owner = await db.appUser.findUniqueOrThrow({ where: { username: "browser_owner" }, select: { id: true } });
+    const owner = await db.appUser.findUniqueOrThrow({ where: { username: ownerUsername }, select: { id: true } });
     const job = await db.backgroundJob.create({
       data: {
         projectId,
@@ -250,8 +251,9 @@ test("first-run administrator and personal workspace Owner stay separate across 
   page.on("pageerror", (error) => browserErrors.push(`page:${error.message}`));
   const adminUsername = "browser_admin";
   const adminPassword = "BrowserGate2026Password!";
-  const ownerUsername = "browser_owner";
+  const ownerUsername = `browser_owner_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   const ownerPassword = "BrowserOwner2026Password!";
+  const projectName = `Browser layout project ${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 
   const setupResponse = await page.goto("/setup");
   expect(setupResponse?.status()).toBe(200);
@@ -320,7 +322,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   expect(healthResponse.ok()).toBe(true);
   expect(await healthResponse.json()).toMatchObject({
     status: "ok",
-    version: "0.5.0-dev.4",
+    version: APP_VERSION,
     database: "up",
     worker: { status: "up", consecutiveFailures: 0 },
   });
@@ -332,9 +334,9 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expectNoAccessibilityViolations(page, "projects");
 
   await page.getByRole("button", { name: "＋ 新建项目" }).click();
-  await page.getByLabel("项目名称", { exact: true }).fill("Browser layout project");
+  await page.getByLabel("项目名称", { exact: true }).fill(projectName);
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
-  const projectHref = await page.getByRole("link", { name: "Browser layout project", exact: true }).getAttribute("href");
+  const projectHref = await page.getByRole("link", { name: projectName, exact: true }).getAttribute("href");
   expect(projectHref).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   const projectId = projectHref!.split("/")[2]!;
   await page.goto(`${projectHref!}/materials`);
@@ -403,7 +405,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(restoredSourceLink).toBeVisible();
   await expect(restoredSourceLink).toBeFocused();
 
-  const browserSmokeFixtures = await seedBrowserSmokeFixtures(projectId);
+  const browserSmokeFixtures = await seedBrowserSmokeFixtures(projectId, ownerUsername);
 
   await page.goto(`/projects/${projectId}`);
   const failedTasksLink = page.getByRole("link", { name: /任务异常/u });
@@ -546,12 +548,16 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.goto("/profile");
   await expect(page.getByText("账户详情", { exact: true })).toBeVisible();
   await expect(page.locator("details[open]").filter({ hasText: "账户详情" })).toHaveCount(1);
-  await expect(page.getByRole("link", { name: /^我的 Git 连接/u })).toBeVisible();
-  await expect(page.getByRole("link", { name: /^我的 MCP 连接/u })).toBeVisible();
   await expectNoAccessibilityViolations(page, "profile");
 
-  await page.getByRole("link", { name: /^我的 Git 连接/u }).click();
-  await expect(page).toHaveURL(/\/profile\/connections\/git$/u);
+  await page.goto("/personal/configuration");
+  await expect(page.getByRole("heading", { name: "个人工作区配置", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /我的 Git 连接/u })).toBeVisible();
+  await expect(page.getByRole("link", { name: /我的 MCP 连接/u })).toBeVisible();
+  await expectNoAccessibilityViolations(page, "personal configuration");
+
+  await page.getByRole("link", { name: /我的 Git 连接/u }).click();
+  await expect(page).toHaveURL(/\/personal\/connections\/git$/u);
   await expect(page.getByRole("heading", { name: "我的 Git 连接", exact: true })).toBeVisible();
   await expect(page.getByText(/项目页已支持一次性手动只读委托/u)).toBeVisible();
   await expect(page.getByText(/自动化、写入\/提交和旧 PAT 路径保持关闭/u)).toBeVisible();
@@ -627,8 +633,8 @@ test("first-run administrator and personal workspace Owner stay separate across 
   expect(membershipGrant.body.subscription?.status).toBe("active");
 
   await page.goto("/personal/configuration");
-  await expect(page.getByRole("link", { name: /我的模型/u })).toBeVisible();
-  await page.getByRole("link", { name: /我的模型/u }).click();
+  await expect(page.getByRole("link", { name: "我的模型", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "我的模型", exact: true }).click();
   await expect(page).toHaveURL(/\/personal\/models$/u);
   await expect(page.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
   await expect(page.getByText("会员有效", { exact: true })).toBeVisible();

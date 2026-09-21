@@ -182,13 +182,15 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
   const navigationRoute = embedded ? "overview" : "governance";
   const [summary, setSummary] = useState<Summary | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
-  const [operationCursor, setOperationCursor] = useState<string | null>(navigation.cursor);
   const [operationNextCursor, setOperationNextCursor] = useState<string | null>(null);
   const [operationHistory, setOperationHistory] = useState<Array<string | null>>([]);
-  const [operationSearch, setOperationSearch] = useState(navigation.search ?? "");
+  // Task filters are canonical URL state so deep links and same-page
+  // navigation update the controls and API query together.
+  const operationCursor = navigation.cursor;
+  const operationSearch = navigation.search ?? "";
   const deferredOperationSearch = useDeferredValue(operationSearch);
-  const [operationKind, setOperationKind] = useState(navigation.kind ?? "all");
-  const [operationStatus, setOperationStatus] = useState(navigation.status ?? "all");
+  const operationKind = navigation.kind ?? "all";
+  const operationStatus = navigation.status ?? "all";
   const [operationsLoading, setOperationsLoading] = useState(true);
   const [operationsError, setOperationsError] = useState<string | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -430,7 +432,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
               <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-sm font-semibold text-slate-800 marker:hidden sm:px-8 [&::-webkit-details-marker]:hidden"><span>任务运行记录</span><span className="text-xs font-medium text-slate-400 group-open:hidden">展开记录</span><span className="hidden text-xs font-medium text-slate-400 group-open:inline">收起</span></summary>
               <div className="border-t border-slate-100 p-6 sm:p-8">
               <SectionHeader eyebrow="Recoverable operations" title="任务异常与人工收口" description="未知结果不会自动重试。只有具备对应不可变证据的任务才显示人工收口动作。" />
-              <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only">搜索任务记录</span><input value={operationSearch} onChange={(event) => { const value = event.target.value; setOperationSearch(value); setOperationCursor(null); setOperationHistory([]); replaceOperationQuery({ search: value, cursor: null }); }} placeholder="搜索执行阶段或错误代码" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only">按任务类型筛选</span><select value={operationKind} onChange={(event) => { const value = event.target.value; setOperationKind(value); setOperationCursor(null); setOperationHistory([]); replaceOperationQuery({ kind: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部任务类型</option>{Object.entries(jobLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="sr-only">按任务状态筛选</span><select value={operationStatus} onChange={(event) => { const value = event.target.value; setOperationStatus(value); setOperationCursor(null); setOperationHistory([]); replaceOperationQuery({ status: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部状态</option>{["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"].map((value) => <option key={value} value={value}>{statusLabels[value]}</option>)}</select></label></div>
+              <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only">搜索任务记录</span><input value={operationSearch} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ search: value, cursor: null }); }} placeholder="搜索执行阶段或错误代码" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only">按任务类型筛选</span><select value={operationKind} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ kind: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部任务类型</option>{Object.entries(jobLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="sr-only">按任务状态筛选</span><select value={operationStatus} onChange={(event) => { const value = event.target.value; setOperationHistory([]); replaceOperationQuery({ status: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部状态</option>{["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"].map((value) => <option key={value} value={value}>{statusLabels[value]}</option>)}</select></label></div>
               {operationsError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{operationsError}<button type="button" onClick={() => void fetchOperations()} className="ml-3 font-semibold underline">重试</button></p> : operationsLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : operations.length === 0 ? <Empty text="当前筛选条件下没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => (
                 <article key={operation.id} className="flex flex-wrap items-start justify-between gap-4 py-5">
                   <div className="min-w-0 flex-1">
@@ -446,7 +448,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: em
                   </div>
                 </article>
               ))}</div>}
-              <CursorPagination page={operationHistory.length + 1} hasPrevious={operationHistory.length > 0} hasNext={operationNextCursor !== null} disabled={operationsLoading} onPrevious={() => { const previous = operationHistory.at(-1) ?? null; setOperationHistory((current) => current.slice(0, -1)); setOperationCursor(previous); replaceOperationQuery({ cursor: previous }); }} onNext={() => { if (!operationNextCursor) return; setOperationHistory((current) => [...current, operationCursor]); setOperationCursor(operationNextCursor); replaceOperationQuery({ cursor: operationNextCursor }); }} />
+              <CursorPagination page={operationHistory.length + 1} hasPrevious={operationHistory.length > 0} hasNext={operationNextCursor !== null} disabled={operationsLoading} onPrevious={() => { const previous = operationHistory.at(-1) ?? null; setOperationHistory((current) => current.slice(0, -1)); replaceOperationQuery({ cursor: previous }); }} onNext={() => { if (!operationNextCursor) return; setOperationHistory((current) => [...current, operationCursor]); replaceOperationQuery({ cursor: operationNextCursor }); }} />
               </div>
             </details>
 

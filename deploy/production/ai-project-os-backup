@@ -108,10 +108,10 @@ write_public_status_json() {
   [[ "$MODE" =~ ^(daily|manual|pre-deploy)$ ]] || return 1
   [[ "$PUBLIC_STARTED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]] || return 1
   [[ "$state" =~ ^(running|succeeded|failed|skipped)$ ]] || return 1
-  [[ -z "$TARGET_TAG" || "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.2 ]] || return 1
+  [[ -z "$TARGET_TAG" || "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.3 ]] || return 1
   [[ -z "$completed_at" || "$completed_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]] || return 1
   [[ -z "$duration_seconds" || "$duration_seconds" =~ ^[0-9]+$ ]] || return 1
-  [[ -z "$PUBLIC_BACKUP_NAME" || "$PUBLIC_BACKUP_NAME" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.2)\.[A-Za-z0-9]{6}$ ]] || return 1
+  [[ -z "$PUBLIC_BACKUP_NAME" || "$PUBLIC_BACKUP_NAME" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.3)\.[A-Za-z0-9]{6}$ ]] || return 1
   [[ -z "$PUBLIC_ARCHIVE_OBJECT" || "$PUBLIC_ARCHIVE_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]+$ ]] || return 1
   [[ -z "$PUBLIC_ARCHIVE_SHA256" || "$PUBLIC_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || return 1
   [[ -z "$PUBLIC_ARCHIVE_BYTES" || "$PUBLIC_ARCHIVE_BYTES" =~ ^[0-9]+$ ]] || return 1
@@ -631,7 +631,7 @@ cleanup_verified_local_backups() {
     [[ ! -L "$path" ]] || continue
     [[ "$(dirname -- "$path")" == "$BACKUP_ROOT" ]] || continue
     name=$(basename -- "$path")
-    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.2)\.[A-Za-z0-9]{6}$ ]] || continue
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.3)\.[A-Za-z0-9]{6}$ ]] || continue
 
     marker=$path/.cos-upload-verified
     [[ -f "$marker" && ! -L "$marker" ]] || continue
@@ -659,7 +659,7 @@ cleanup_verified_local_backups() {
 
     name=$(basename -- "$path")
     [[ "$(dirname -- "$path")" == "$BACKUP_ROOT" ]] || fail "BACKUP_RETENTION_PATH_INVALID" 75
-    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.2)\.[A-Za-z0-9]{6}$ ]] ||
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.3)\.[A-Za-z0-9]{6}$ ]] ||
       fail "BACKUP_RETENTION_NAME_INVALID name=$name" 75
     [[ -f "$path/.cos-upload-verified" ]] || fail "BACKUP_RETENTION_MARKER_MISSING name=$name" 75
     grep -qx 'status=COS_UPLOAD_VERIFIED' "$path/.cos-upload-verified" ||
@@ -682,7 +682,7 @@ case "$MODE" in
     reason=$MODE
     ;;
   pre-deploy)
-    [[ "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.2 ]] || fail 'BACKUP_TARGET_TAG_INVALID' 64
+  [[ "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.3 ]] || fail 'BACKUP_TARGET_TAG_INVALID' 64
     [[ "${AI_PROJECT_OS_DEPLOY_LOCK_HELD-}" == 1 ]] || fail 'BACKUP_PRE_DEPLOY_CALLER_INVALID' 75
     reason="pre-deploy-to-$TARGET_TAG"
     ;;

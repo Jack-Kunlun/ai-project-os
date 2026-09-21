@@ -62,12 +62,12 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
-test("production workflow enables only the explicitly approved v0.6.0-dev.2 prerelease", async () => {
+test("production workflow enables only the explicitly approved v0.6.0-dev.3 prerelease", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /default: v0\.6\.0-dev\.2/u);
+  assert.match(workflow, /default: v0\.6\.0-dev\.3/u);
   assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.2/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.3/u);
   assert.doesNotMatch(workflow, /&& false|DISABLED_BEFORE_V1_0_0|v1\.0\.0/u);
   assert.doesNotMatch(workflow, /DEPLOY_TAG_INPUT" =~ \^v/u);
 });

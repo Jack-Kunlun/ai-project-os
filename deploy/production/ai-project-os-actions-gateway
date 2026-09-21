@@ -14,7 +14,7 @@ fi
 
 # The 0.6 migration route fixes both source and target release families. The
 # root deployer verifies the running source, stopped-writer backup, and ledger.
-if [[ "$original_command" =~ ^deploy-v06\ (v0\.5\.0-dev\.(1|4))\ (v0\.6\.0-dev\.2)\ ([0-9a-f]{40})\ (CONFIRM_V06_MIGRATION_V1)$ ]]; then
+if [[ "$original_command" =~ ^deploy-v06\ (v0\.5\.0-dev\.(1|4))\ (v0\.6\.0-dev\.3)\ ([0-9a-f]{40})\ (CONFIRM_V06_MIGRATION_V1)$ ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-v06-deploy \
     "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
 fi

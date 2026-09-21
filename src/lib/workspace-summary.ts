@@ -71,8 +71,49 @@ export type RecentJob = {
 
 export type DashboardState = "zero-project" | "empty-plan" | "running" | "needs-attention" | "healthy";
 
+/**
+ * The dashboard only exposes the caller's current platform-credit advisory.
+ * Project configuration, personal BYOK balances, Git credentials, MCP
+ * connections, and provider details deliberately do not belong in this
+ * cross-project summary.
+ */
+export type DashboardQuota =
+  | {
+      status: "available";
+      unit: "platform_credit";
+      availableCredits: number;
+      nextExpiryAt: string | null;
+    }
+  | {
+      status: "unavailable";
+      unit: "platform_credit";
+    };
+
+/**
+ * Project the read-only entitlement advisory into a small public dashboard
+ * shape. Runtime validation keeps a malformed or partial entitlement read
+ * from becoming a false balance, while extra service fields are discarded.
+ */
+export function projectDashboardQuota(advisory: { availableTokens: unknown; nextExpiryAt: unknown; [key: string]: unknown } | null): DashboardQuota {
+  const availableTokens = advisory?.availableTokens;
+  if (advisory === null || typeof availableTokens !== "number" || !Number.isSafeInteger(availableTokens) || availableTokens < 0) {
+    return { status: "unavailable", unit: "platform_credit" };
+  }
+  if (advisory.nextExpiryAt !== null && (!(advisory.nextExpiryAt instanceof Date) || Number.isNaN(advisory.nextExpiryAt.getTime()))) {
+    return { status: "unavailable", unit: "platform_credit" };
+  }
+  return {
+    status: "available",
+    unit: "platform_credit",
+    availableCredits: availableTokens,
+    nextExpiryAt: advisory.nextExpiryAt instanceof Date ? advisory.nextExpiryAt.toISOString() : null,
+  };
+}
+
 export type DashboardPayload = {
   state: DashboardState;
+  /** Caller-owned platform quota; unavailable means only this advisory read failed. */
+  quota: DashboardQuota;
   summary: {
     projects: number;
     confirmedItems: number;

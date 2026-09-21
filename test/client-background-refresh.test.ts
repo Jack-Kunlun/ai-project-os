@@ -36,7 +36,7 @@ test("mutation-triggered data reloads keep mounted UI after the initial page loa
 test("project Git page uses bounded manual delegation while remote writes stay frozen", () => {
   const path = "src/app/projects/[projectId]/repositories/project-repositories-client.tsx";
   const source = readFileSync(join(root, path), "utf8");
-  assert.match(source, /\/profile\/connections\/git/u, `${path} must link to personal configuration`);
+  assert.match(source, /\/personal\/connections\/git/u, `${path} must link to personal configuration`);
   assert.match(source, /git-repository-delegations/u, `${path} must use the delegated project API`);
   assert.match(source, /manual-sync/u, `${path} must expose the bounded manual read action`);
   assert.match(source, /manualSyncAllowed:\s*true/u);
@@ -49,7 +49,7 @@ test("project Git page uses bounded manual delegation while remote writes stay f
 test("project MCP page manages the control plane while remote actions stay frozen", () => {
   const path = "src/app/projects/[projectId]/tools/project-tools-client.tsx";
   const source = readFileSync(join(root, path), "utf8");
-  assert.match(source, /\/profile\/connections\/mcp/u, `${path} must link to personal configuration`);
+  assert.match(source, /\/personal\/connections\/mcp/u, `${path} must link to personal configuration`);
   assert.match(source, /\/api\/projects\/\$\{projectId\}\/mcp-connection-delegations/u);
   assert.match(source, /\/api\/projects\/\$\{projectId\}\/mcp-tool-grants/u);
   assert.match(source, /控制面开放；动作调用冻结/u, `${path} must distinguish control-plane availability from action freeze`);

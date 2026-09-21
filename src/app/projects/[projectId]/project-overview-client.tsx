@@ -7,6 +7,7 @@ import { AppHeader } from "@/components/app-header";
 import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import type { SnapshotRecord } from "@/lib/project-snapshot";
+import { ProjectGovernanceSections } from "./governance/project-governance-client";
 
 type Project = {
   id: string;
@@ -216,12 +217,15 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
                 <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Attention</p><h2 className="mt-2 text-xl font-semibold">需要关注</h2></div>
                 <div className="mt-5 divide-y divide-slate-100">
                   <AttentionRow label="待审核内容" value={summary.pendingContent} href={buildProjectHref(projectId, "materialsReview", { focus: "review-queue", from: "overview", returnTo: buildProjectHref(projectId, "overview", { focus: "current-state" }) })} />
-                  <AttentionRow label="任务异常" value={summary.taskIssues} href={buildProjectHref(projectId, "governance", { status: "failed", focus: "task-runs", from: "overview", returnTo: buildProjectHref(projectId, "overview", { focus: "current-state" }) })} />
+                  <AttentionRow label="任务异常" value={summary.taskIssues} href={buildProjectHref(projectId, "overview", { status: "failed", focus: "task-runs", from: "overview", returnTo: buildProjectHref(projectId, "overview", { focus: "current-state" }) })} />
                   <AttentionRow label="仓库同步风险" value={summary.githubIssues} href={`/projects/${projectId}/repositories`} />
                 </div>
-                <Link href={`/projects/${projectId}/governance`} className="mt-5 inline-flex text-xs font-semibold text-indigo-600">进入项目管理 →</Link>
+                <Link href={buildProjectHref(projectId, "overview", { focus: "task-runs", from: "overview" })} className="mt-5 inline-flex text-xs font-semibold text-indigo-600">查看任务运行记录 →</Link>
               </article>
             </section>
+
+            {/* Governance panels own their reads and failures so a usage or task endpoint cannot blank the overview. */}
+            <ProjectGovernanceSections projectId={projectId} navigation={navigation} />
 
           </>
         )}

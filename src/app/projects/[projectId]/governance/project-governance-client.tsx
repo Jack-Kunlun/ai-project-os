@@ -5,7 +5,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from "next/navigat
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { CursorPagination } from "@/components/list-pagination";
-import { buildProjectHref, parseProjectPageState } from "@/lib/project-navigation";
+import { buildProjectHref, parseProjectPageState, type ProjectNavigationState } from "@/lib/project-navigation";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
 type Summary = {
@@ -147,12 +147,39 @@ function statusTone(status: string): string {
   return "bg-indigo-50 text-indigo-700";
 }
 
-export function ProjectGovernanceClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
-  const { projectId } = useParams<{ projectId: string }>();
+export type ProjectGovernanceClientProps = Readonly<{
+  /** Header identity is used only by the legacy standalone shell. */
+  username: string;
+  isSystemAdmin: boolean;
+  /** Embedded overview supplies its already parsed project and query state. */
+  projectId?: string;
+  navigation?: ProjectNavigationState;
+  embedded?: boolean;
+}>;
+
+/**
+ * Embed only the usage and task-run panels in the canonical project overview.
+ * The overview owns current state and attention; this adapter deliberately
+ * does not render the former governance summary or a second page header.
+ */
+export function ProjectGovernanceSections({ projectId, navigation }: Readonly<{ projectId: string; navigation: ProjectNavigationState }>) {
+  return <ProjectGovernanceClient username="" isSystemAdmin={false} projectId={projectId} navigation={navigation} embedded />;
+}
+
+/**
+ * Project governance data can render inside overview. The `embedded` branch
+ * keeps all reads and mutations in this component while omitting the legacy
+ * header and hero; each usage/task panel has its own loading and error state.
+ */
+export function ProjectGovernanceClient({ username, isSystemAdmin, projectId: embeddedProjectId, navigation: embeddedNavigation, embedded = false }: ProjectGovernanceClientProps) {
+  const routeParams = useParams<{ projectId: string }>();
+  const projectId = embeddedProjectId ?? routeParams.projectId;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const navigation = useMemo(() => parseProjectPageState("governance", projectId, new URLSearchParams(searchParams.toString())), [projectId, searchParams]);
+  const routeNavigation = useMemo(() => parseProjectPageState(embedded ? "overview" : "governance", projectId, new URLSearchParams(searchParams.toString())), [embedded, projectId, searchParams]);
+  const navigation = embeddedNavigation ?? routeNavigation;
+  const navigationRoute = embedded ? "overview" : "governance";
   const [summary, setSummary] = useState<Summary | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [operationCursor, setOperationCursor] = useState<string | null>(navigation.cursor);
@@ -163,19 +190,21 @@ export function ProjectGovernanceClient({ username, isSystemAdmin }: { username:
   const [operationKind, setOperationKind] = useState(navigation.kind ?? "all");
   const [operationStatus, setOperationStatus] = useState(navigation.status ?? "all");
   const [operationsLoading, setOperationsLoading] = useState(true);
+  const [operationsError, setOperationsError] = useState<string | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null);
   const [usageDays, setUsageDays] = useState<7 | 30 | 90>(30);
   const [canReadProviderBalance, setCanReadProviderBalance] = useState(false);
   const [providerBalances, setProviderBalances] = useState<Record<string, ProviderBalance>>({});
   const [billingPending, setBillingPending] = useState<string | null>(null);
   const [billingError, setBillingError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!embedded);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const replaceOperationQuery = useCallback((input: Readonly<{ search?: string; kind?: string; status?: string; cursor?: string | null }>) => {
-    const href = buildProjectHref(projectId, "governance", {
+    const href = buildProjectHref(projectId, navigationRoute, {
       search: input.search ?? operationSearch,
       kind: input.kind ?? operationKind,
       status: input.status ?? operationStatus,
@@ -185,7 +214,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin }: { username:
       returnTo: navigation.returnTo,
     });
     router.replace(href === pathname ? pathname : href, { scroll: false });
-  }, [navigation.from, navigation.returnTo, operationCursor, operationKind, operationSearch, operationStatus, pathname, projectId, router]);
+  }, [navigation.from, navigation.returnTo, navigationRoute, operationCursor, operationKind, operationSearch, operationStatus, pathname, projectId, router]);
 
   const fetchSummary = useCallback(async () => {
     const payload = await readJson<{ summary: Summary }>(await fetch(`/api/projects/${projectId}/governance`, { cache: "no-store" }));
@@ -194,6 +223,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin }: { username:
 
   const fetchOperations = useCallback(async () => {
     setOperationsLoading(true);
+    setOperationsError(null);
     const query = new URLSearchParams({ limit: "20" });
     if (operationCursor) query.set("cursor", operationCursor);
     if (deferredOperationSearch.trim()) query.set("search", deferredOperationSearch.trim());
@@ -203,45 +233,65 @@ export function ProjectGovernanceClient({ username, isSystemAdmin }: { username:
       const page = await readJson<Page<Operation>>(await fetch(`/api/projects/${projectId}/governance/operations?${query}`, { cache: "no-store" }));
       setOperations(page.items);
       setOperationNextCursor(page.nextCursor);
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : "任务记录加载失败";
+      setOperationsError(message);
     } finally {
       setOperationsLoading(false);
     }
   }, [deferredOperationSearch, operationCursor, operationKind, operationStatus, projectId]);
 
   const fetchUsage = useCallback(async (days: 7 | 30 | 90) => {
-    const payload = await readJson<{ usage: Usage; permissions: { readProviderBalance: boolean } }>(await fetch(`/api/projects/${projectId}/governance/usage?days=${days}`, { cache: "no-store" }));
-    setUsage(payload.usage);
-    setCanReadProviderBalance(payload.permissions.readProviderBalance);
+    setUsageError(null);
+    try {
+      const payload = await readJson<{ usage: Usage; permissions: { readProviderBalance: boolean } }>(await fetch(`/api/projects/${projectId}/governance/usage?days=${days}`, { cache: "no-store" }));
+      setUsage(payload.usage);
+      setCanReadProviderBalance(payload.permissions.readProviderBalance);
+    } catch (loadError) {
+      setUsageError(loadError instanceof Error ? loadError.message : "AI 用量加载失败");
+    }
   }, [projectId]);
 
+  /**
+   * Usage and task runs are separate runtime panels. Keep their requests and
+   * error boundaries independent so a failed billing endpoint never hides the
+   * task list or the overview state owned by the parent page.
+  */
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
+    const usageRequest = fetchUsage(usageDays);
+    if (embedded) {
+      await usageRequest;
+      if (showLoading) setLoading(false);
+      return;
+    }
     setError(null);
     try {
-      await Promise.all([fetchSummary(), fetchUsage(usageDays)]);
+      await fetchSummary();
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "治理数据加载失败");
+      setError(loadError instanceof Error ? loadError.message : "项目状态加载失败");
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [fetchSummary, fetchUsage, usageDays]);
+    await usageRequest;
+  }, [embedded, fetchSummary, fetchUsage, usageDays]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload({ showLoading: true }), 0);
     return () => window.clearTimeout(timer);
   }, [reload]);
 
-  useEffect(() => { const timer = window.setTimeout(() => void fetchOperations().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "任务记录加载失败")), 0); return () => window.clearTimeout(timer); }, [fetchOperations]);
+  useEffect(() => { const timer = window.setTimeout(() => void fetchOperations(), 0); return () => window.clearTimeout(timer); }, [fetchOperations]);
 
   useEffect(() => {
-    if (navigation.focus !== "task-runs" || operationsLoading || loading || summary === null) return;
+    if ((navigation.focus !== "task-runs" && navigation.focus !== "ai-usage") || operationsLoading || loading || (!embedded && summary === null)) return;
     const timer = window.setTimeout(() => {
-      const target = document.getElementById("task-runs");
+      const target = document.getElementById(navigation.focus === "ai-usage" ? "ai-usage" : "task-runs");
       target?.scrollIntoView({ block: "start" });
       if (target instanceof HTMLElement) target.focus({ preventScroll: true });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loading, navigation.focus, operationsLoading, summary]);
+  }, [embedded, loading, navigation.focus, operationsLoading, summary]);
 
   async function actOnJob(operation: Operation) {
     if (operation.capability.action === null) return;
@@ -254,10 +304,10 @@ export function ProjectGovernanceClient({ username, isSystemAdmin }: { username:
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action }),
       }));
-      await Promise.all([fetchSummary(), fetchOperations()]);
+      await Promise.allSettled([embedded ? Promise.resolve() : fetchSummary(), fetchOperations()]);
       setMessage(action === "reconcile" ? "未知结果已按对应任务规则人工收口；系统未自动重试。" : "尚未执行的任务已取消。");
     } catch (actionError) {
-      await Promise.allSettled([fetchSummary(), fetchOperations()]);
+      await Promise.allSettled([embedded ? Promise.resolve() : fetchSummary(), fetchOperations()]);
       setMessage(actionError instanceof Error ? actionError.message : "任务操作失败，请刷新后重试");
     } finally {
       setPending(null);
@@ -285,43 +335,46 @@ export function ProjectGovernanceClient({ username, isSystemAdmin }: { username:
     ? []
     : [...new Map((usage.routes ?? []).map((route) => [route.providerConnectionId, route])).values()];
   const currentRoutes = usage?.routes ?? [];
+  // The embedded branch participates in the overview document outline and
+  // must not create a second page landmark or repeat the page gutters.
+  const RootElement = embedded ? "section" : "main";
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
-      <AppHeader username={username} active="projects" projectId={projectId} projectSection="governance" isSystemAdmin={isSystemAdmin} />
-      <div className="mx-auto max-w-7xl px-5 pb-16 pt-10 sm:px-8 lg:px-10">
-        <section className="flex flex-wrap items-end justify-between gap-5 pb-8">
+    <RootElement aria-label={embedded ? "项目用量与任务运行" : undefined} className={embedded ? "text-slate-950" : "min-h-screen bg-[#f5f7fb] text-slate-950"}>
+      {!embedded ? <AppHeader username={username} active="projects" projectId={projectId} projectSection="governance" isSystemAdmin={isSystemAdmin} /> : null}
+      <div className={embedded ? "" : "mx-auto max-w-7xl px-5 pb-16 pt-10 sm:px-8 lg:px-10"}>
+        {!embedded ? <section className="flex flex-wrap items-end justify-between gap-5 pb-8">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">Project management</p>
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">项目管理</h1>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-600">这里只处理状态治理、权限、动作审批、任务运行与模型路由等管理工作。项目计划和资料审核分别归入对应的独立入口。</p>
           </div>
-          <button type="button" onClick={() => void Promise.all([reload(), fetchOperations()])} disabled={loading || operationsLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button>
-        </section>
+          <button type="button" onClick={() => void Promise.allSettled([reload(), fetchOperations()])} disabled={loading || operationsLoading} className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:opacity-40">刷新</button>
+        </section> : null}
 
         {navigation.returnTo ? <Link href={navigation.returnTo} className="mb-6 inline-flex text-sm font-semibold text-indigo-700">← 返回来源页面</Link> : null}
 
         {error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
         {message ? <div role="status" className="mb-6 rounded-2xl border border-indigo-100 bg-indigo-50 px-5 py-4 text-sm text-indigo-800">{message}</div> : null}
-        <nav aria-label="项目管理功能" className="mb-8 grid gap-3 sm:grid-cols-3">
+        {!embedded ? <nav aria-label="项目管理功能" className="mb-8 grid gap-3 sm:grid-cols-3">
           <Link href={`/projects/${projectId}/world`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">状态治理</span><span className="mt-1 block text-xs text-slate-500">管理事实关系、替代链与状态快照</span></Link>
           <Link href={`/projects/${projectId}/actions`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">动作与审批</span><span className="mt-1 block text-xs text-slate-500">处理外部动作及人工审批</span></Link>
           <Link href={`/projects/${projectId}/tools`} className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700"><span className="text-sm font-semibold">工具权限</span><span className="mt-1 block text-xs text-slate-500">管理项目可使用的只读工具</span></Link>
-        </nav>
-        {loading || summary === null ? <div className="h-44 animate-pulse rounded-3xl bg-slate-200" /> : (
+        </nav> : null}
+        {!embedded && (loading || summary === null) ? <div className="h-44 animate-pulse rounded-3xl bg-slate-200" /> : (
           <>
-            <section className="grid gap-4 md:grid-cols-3">
+            {!embedded && summary !== null ? <section className="grid gap-4 md:grid-cols-3">
               <Metric label="待人工收口" value={summary.jobs.reconciliationRequired} detail="结果未知且需要人工确认的任务" tone={summary.jobs.reconciliationRequired > 0 ? "amber" : "slate"} />
               <Metric label="运行异常" value={summary.jobs.failed + summary.github.partial + summary.github.rateLimited + summary.github.unknown} detail={`失败任务 ${summary.jobs.failed} · 仓库风险 ${summary.github.partial + summary.github.rateLimited + summary.github.unknown}`} tone={summary.jobs.failed + summary.github.unknown > 0 ? "rose" : "slate"} />
               <Metric label="语义索引" value={readinessLabels[summary.index.readiness] ?? summary.index.readiness} detail={`${summary.index.activeRecordCount} 条活动记忆`} tone={summary.index.compatible ? "emerald" : "amber"} />
-            </section>
+            </section> : null}
 
             <section id="ai-usage" className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
               <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 pb-5">
                 <SectionHeader eyebrow="AI routes & billing" title="AI 用量与计费" description="直接查看项目当前使用的模型路由、调用次数与 Token。供应商实际账单与本地调用审计分开显示。" border={false} />
                 <div className="flex rounded-xl bg-slate-100 p-1" aria-label="用量统计周期">{([7, 30, 90] as const).map((days) => <button key={days} type="button" onClick={() => setUsageDays(days)} className={`rounded-lg px-3 py-2 text-xs font-semibold ${usageDays === days ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{days} 天</button>)}</div>
               </div>
-              {usage === null ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : (
+              {usageError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{usageError}<button type="button" onClick={() => void fetchUsage(usageDays)} className="ml-3 font-semibold underline">重试</button></p> : usage === null ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : (
                 <>
                   <div className="mt-6">
                     <h3 className="text-sm font-semibold text-slate-800">当前 AI 路由</h3>
@@ -378,7 +431,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin }: { username:
               <div className="border-t border-slate-100 p-6 sm:p-8">
               <SectionHeader eyebrow="Recoverable operations" title="任务异常与人工收口" description="未知结果不会自动重试。只有具备对应不可变证据的任务才显示人工收口动作。" />
               <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_180px_180px]"><label><span className="sr-only">搜索任务记录</span><input value={operationSearch} onChange={(event) => { const value = event.target.value; setOperationSearch(value); setOperationCursor(null); setOperationHistory([]); replaceOperationQuery({ search: value, cursor: null }); }} placeholder="搜索执行阶段或错误代码" className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-300" /></label><label><span className="sr-only">按任务类型筛选</span><select value={operationKind} onChange={(event) => { const value = event.target.value; setOperationKind(value); setOperationCursor(null); setOperationHistory([]); replaceOperationQuery({ kind: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部任务类型</option>{Object.entries(jobLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label><span className="sr-only">按任务状态筛选</span><select value={operationStatus} onChange={(event) => { const value = event.target.value; setOperationStatus(value); setOperationCursor(null); setOperationHistory([]); replaceOperationQuery({ status: value, cursor: null }); }} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"><option value="all">全部状态</option>{["queued", "waitingConsent", "running", "succeeded", "failed", "unknown", "cancelled"].map((value) => <option key={value} value={value}>{statusLabels[value]}</option>)}</select></label></div>
-              {operationsLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : operations.length === 0 ? <Empty text="当前筛选条件下没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => (
+              {operationsError ? <p role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">{operationsError}<button type="button" onClick={() => void fetchOperations()} className="ml-3 font-semibold underline">重试</button></p> : operationsLoading ? <div className="mt-6 h-32 animate-pulse rounded-2xl bg-slate-100" /> : operations.length === 0 ? <Empty text="当前筛选条件下没有项目任务。" /> : <div className="mt-6 divide-y divide-slate-100">{operations.map((operation) => (
                 <article key={operation.id} className="flex flex-wrap items-start justify-between gap-4 py-5">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{jobLabels[operation.kind] ?? operation.kind}</h3><span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${statusTone(operation.githubSync?.status ?? operation.status)}`}>{statusLabels[operation.githubSync?.status ?? operation.status] ?? (operation.githubSync?.status ?? operation.status)}</span></div>
@@ -388,7 +441,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin }: { username:
                     {operation.githubSync?.warnings.length ? <p className="mt-2 text-xs leading-5 text-amber-700">{operation.githubSync.warnings.join(" · ")}</p> : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link href={buildProjectHref(projectId, "job", { jobId: operation.id, search: operationSearch, kind: operationKind, status: operationStatus, cursor: operationCursor, focus: "task-runs", from: "governance", returnTo: navigation.returnTo })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">查看详情</Link>
+                    <Link href={buildProjectHref(projectId, "job", { jobId: operation.id, search: operationSearch, kind: operationKind, status: operationStatus, cursor: operationCursor, focus: "task-runs", from: embedded ? "overview" : "governance", returnTo: navigation.returnTo })} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">查看详情</Link>
                     {operation.capability.action ? <button type="button" onClick={() => void actOnJob(operation)} disabled={pending !== null} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 disabled:opacity-40">{pending === `${operation.id}:${operation.capability.action}` ? "处理中…" : operation.capability.action === "reconcile" ? "人工收口" : "取消任务"}</button> : null}
                   </div>
                 </article>
@@ -400,7 +453,7 @@ export function ProjectGovernanceClient({ username, isSystemAdmin }: { username:
           </>
         )}
       </div>
-    </main>
+    </RootElement>
   );
 }
 

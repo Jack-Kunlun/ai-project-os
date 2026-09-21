@@ -40,9 +40,9 @@ test("project navigation builds and parses finite page state", () => {
 });
 
 test("project navigation restores only canonical same-project context", () => {
-  const returnTo = buildProjectHref(projectId, "governance", { status: "failed", focus: "task-runs", from: "overview" });
-  const jobHref = buildProjectHref(projectId, "job", { jobId, from: "governance", returnTo });
-  assert.equal(jobHref, `/projects/${projectId}/jobs/${jobId}?from=governance&returnTo=${encodeURIComponent(returnTo)}`);
+  const returnTo = buildProjectHref(projectId, "overview", { status: "failed", focus: "task-runs", from: "overview" });
+  const jobHref = buildProjectHref(projectId, "job", { jobId, from: "overview", returnTo });
+  assert.equal(jobHref, `/projects/${projectId}/jobs/${jobId}?from=overview&returnTo=${encodeURIComponent(returnTo)}`);
   assert.equal(safeProjectReturnTo(projectId, returnTo), returnTo);
   assert.equal(parseProjectHref(projectId, jobHref)?.returnTo, returnTo);
 });
@@ -59,7 +59,7 @@ test("job navigation can carry task filters while returning to an earlier projec
     status: "failed",
     kind: "projectBrief",
     focus: "task-runs",
-    from: "governance",
+    from: "overview",
     returnTo: overview,
   });
   const parsed = parseProjectHref(projectId, job);
@@ -105,6 +105,17 @@ test("project page parsing drops invalid state and builders reject invalid ident
   });
   assert.equal(buildProjectHref("not-a-project", "overview"), "/projects");
   assert.equal(buildProjectHref(projectId, "job", { jobId: "not-a-job" }), "/projects");
+});
+
+test("project overview accepts the former governance filters as canonical state", () => {
+  const state = parseProjectPageState("overview", projectId, new URLSearchParams("status=failed&kind=projectBrief&search=timeout&cursor=abc_123&focus=task-runs&from=overview"));
+  assert.equal(state.route, "overview");
+  assert.equal(state.status, "failed");
+  assert.equal(state.kind, "projectBrief");
+  assert.equal(state.search, "timeout");
+  assert.equal(state.cursor, "abc_123");
+  assert.equal(state.focus, "task-runs");
+  assert.equal(state.from, "overview");
 });
 
 test("global returns require a matching declared source", () => {

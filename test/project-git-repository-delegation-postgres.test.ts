@@ -600,10 +600,13 @@ test(
 
     const viewerProjection = await listProjectGitRepositoryDelegations(projectId, viewerActor, db);
     assert.equal(viewerProjection.delegations.length, 1);
+    assert.equal(viewerProjection.delegations[0]?.connection, null);
     assert.equal(viewerProjection.delegations[0]?.connectionOwner?.displayName, "项目成员");
     assert.doesNotMatch(JSON.stringify(viewerProjection), /git_delegation_(?:owner|project_owner|viewer)_/u);
     assert.equal(viewerProjection.delegations[0]?.capabilities.canProjectConfirm, false);
     assert.equal(viewerProjection.delegations[0]?.capabilities.canManualSync, false);
+    const connectionOwnerProjection = await listProjectGitRepositoryDelegations(projectId, connectionOwnerActor(), db);
+    assert.equal(connectionOwnerProjection.delegations[0]?.connection?.name, `Own Git ${suffix}`);
     const ownerSafetyBeforeMembershipDrift = await listConnectionOwnerProjectGitRepositoryDelegations(connectionOwnerActor(), db);
     assert.equal(ownerSafetyBeforeMembershipDrift.some((item) => item.id === draft.id && item.capabilities.canRevoke), true);
     assert.deepEqual(await listConnectionOwnerProjectGitRepositoryDelegations(projectOwnerActor, db), []);

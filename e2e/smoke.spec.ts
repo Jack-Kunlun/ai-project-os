@@ -409,12 +409,12 @@ test("first-run administrator and personal workspace Owner stay separate across 
   const failedTasksLink = page.getByRole("link", { name: /任务异常/u });
   await expect(failedTasksLink).toBeVisible();
   await failedTasksLink.click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/governance\\?status=failed&focus=task-runs&from=overview&returnTo=`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}\\?status=failed&focus=task-runs&from=overview&returnTo=`, "u"));
   await expect(page.getByLabel("按任务状态筛选")).toHaveValue("failed");
   await expect(page.locator("#task-runs")).toBeFocused();
   await expect(page.getByText("BROWSER_SMOKE_PENDING", { exact: false })).toBeVisible();
   await page.getByRole("link", { name: "查看详情", exact: true }).first().click();
-  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/jobs/${browserSmokeFixtures.pendingJobId}\\?.*from=governance&returnTo=`, "u"));
+  await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/jobs/${browserSmokeFixtures.pendingJobId}\\?.*from=overview&returnTo=`, "u"));
   await page.getByRole("link", { name: /返回任务列表/u }).click();
   await expect(page.getByLabel("按任务状态筛选")).toHaveValue("failed");
   await expect(page.locator("#task-runs")).toBeFocused();
@@ -540,7 +540,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
 
   await page.goto("/guide");
   await expect(page.getByRole("heading", { name: "从账号进入，到可信的项目协作。" })).toBeVisible();
-  await expect(page.getByText(/项目概览 → 项目计划 → 项目资料 → AI 工作台 → 项目自动化 → 项目管理/u)).toBeVisible();
+  await expect(page.getByText(/创建项目 → 项目配置 → 项目概览 → 项目计划 → 项目资料 → AI 工作台 → 项目自动化/u)).toBeVisible();
   await expectNoAccessibilityViolations(page, "guide");
 
   await page.goto("/profile");
@@ -557,7 +557,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(page.getByText(/自动化、写入\/提交和旧 PAT 路径保持关闭/u)).toBeVisible();
   await expectNoAccessibilityViolations(page, "personal Git connections");
 
-  await page.goto("/profile/connections/mcp");
+  await page.goto("/personal/connections/mcp");
   await expect(page.getByRole("heading", { name: "我的 MCP 连接", exact: true })).toBeVisible();
   const mcpBoundary = page.locator("section").filter({ hasText: "当前使用边界" });
   await expect(mcpBoundary).toHaveCount(1);
@@ -626,10 +626,10 @@ test("first-run administrator and personal workspace Owner stay separate across 
   expect(membershipGrant.status).toBe(200);
   expect(membershipGrant.body.subscription?.status).toBe("active");
 
-  await page.reload();
-  await expect(page.getByRole("link", { name: "管理我的模型", exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "管理我的模型", exact: true }).click();
-  await expect(page).toHaveURL(/\/profile\/models$/u);
+  await page.goto("/personal/configuration");
+  await expect(page.getByRole("link", { name: /我的模型/u })).toBeVisible();
+  await page.getByRole("link", { name: /我的模型/u }).click();
+  await expect(page).toHaveURL(/\/personal\/models$/u);
   await expect(page.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
   await expect(page.getByText("会员有效", { exact: true })).toBeVisible();
   await expect(page.getByText(/固定官方端点不可修改/u)).toBeVisible();

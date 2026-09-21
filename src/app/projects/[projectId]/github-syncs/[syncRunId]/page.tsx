@@ -90,7 +90,7 @@ export default async function ProjectGitHubSyncPage({
           </div>
           <span className={`rounded-full px-3 py-1.5 text-xs font-semibold ${statusClass(sync.status)}`}>{statusLabels[sync.status]}</span>
         </div>
-        {sync.reconciliationRequired ? <p className="mt-5 rounded-xl bg-orange-50 px-4 py-3 text-sm leading-6 text-orange-800">外部读取结果未知，未确认是否发布；请回到项目管理的任务列表执行人工收口。该操作不会重试，也不会调用 GitHub。</p> : null}
+        {sync.reconciliationRequired ? <p className="mt-5 rounded-xl bg-orange-50 px-4 py-3 text-sm leading-6 text-orange-800">外部读取结果未知，未确认是否发布；请回到项目概览的任务运行记录执行人工收口。该操作不会重试，也不会调用 GitHub。</p> : null}
         {sync.status !== "unknown" && sync.status !== "queued" && sync.status !== "running" ? <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">同步完成后如需语义搜索或 RAG，请前往智能记忆页面手动检查并重建索引。</p> : null}
         <dl className="mt-7 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div><dt className="text-slate-400">当前阶段</dt><dd className="mt-1 font-semibold">{sync.stage}</dd></div>

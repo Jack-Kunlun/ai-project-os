@@ -14,6 +14,7 @@ const ORDINARY_USER_API_PREFIXES = [
   "/api/workspaces",
   "/api/workspace-invitations",
   "/api/me",
+  "/api/personal",
   "/api/notifications",
   "/api/profile",
 ] as const;

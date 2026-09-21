@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
-import { ProjectManagementParentLink } from "@/components/project-parent-link";
+import { ProjectOverviewParentLink } from "@/components/project-parent-link";
 import { connectionErrorText, connectionFieldClass, readConnectionError } from "@/app/profile/connections/connection-ui";
 
 type ProjectToolsClientProps = Readonly<{ username: string; projectId: string; isSystemAdmin: boolean }>;
@@ -294,15 +294,15 @@ export function ProjectToolsClient({ username, projectId, isSystemAdmin }: Proje
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="tools" isSystemAdmin={isSystemAdmin} />
       {dialog}
       <div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10">
-        <div className="mb-5"><ProjectManagementParentLink projectId={projectId} /></div>
+        <div className="mb-5"><ProjectOverviewParentLink projectId={projectId} /></div>
         <section className="grid gap-7 rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-6 py-8 text-white shadow-xl shadow-slate-950/10 sm:px-8 sm:py-9 lg:grid-cols-[1.2fr_.8fr] lg:px-10">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Project capability grants</p>
             <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] sm:text-4xl">项目工具权限</h1>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">仅管理连接委托和只读工具授权；远端动作、自动化、调用审批和派发仍未开放。当前页面消费既有项目授权 API，所有确认仍由服务端校验。</p>
             <div className="mt-6 flex flex-wrap gap-3">
-              <Link href="/profile/connections/mcp" className="flex min-h-11 items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-violet-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">管理个人 MCP 连接</Link>
-              <Link href={`/projects/${projectId}/governance`} className="flex min-h-11 items-center justify-center rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">查看项目治理</Link>
+              <Link href="/personal/connections/mcp" className="flex min-h-11 items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-violet-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">管理个人 MCP 连接</Link>
+              <Link href={`/projects/${projectId}#current-state`} className="flex min-h-11 items-center justify-center rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">查看项目状态</Link>
             </div>
           </div>
           <div role="status" className="rounded-2xl border border-white/10 bg-white/5 p-5 text-sm leading-6 text-slate-300">

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { LogoutButton } from "@/app/logout-button";
@@ -191,24 +190,6 @@ export function ProfileClient({
 
         {profile ? <>
           <PlatformCreditPanel profile={profile} onChanged={() => void load()} />
-          <section className="mt-6 flex flex-col gap-4 rounded-3xl border border-indigo-100 bg-indigo-50/50 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Personal models</p>
-              <h2 className="mt-1.5 text-lg font-semibold text-slate-900">我的模型</h2>
-              <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">{profile.entitlements.membership.status === "active" ? "会员可配置、测试和维护自己的模型连接。" : profile.entitlements.membership.status === "none" ? "当前可以使用平台额度；如需配置个人模型，可在上方提交会员申请。" : "会员资格已失效，不能测试、启用或调用；仍可安全清理已有连接。"}</p>
-            </div>
-            <Link href="/profile/models" className="inline-flex shrink-0 items-center justify-center rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100">{profile.entitlements.membership.status === "active" ? "管理我的模型" : "查看我的模型"} <span aria-hidden="true" className="ml-1">→</span></Link>
-          </section>
-          <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Personal connections</p><h2 className="mt-1.5 text-lg font-semibold">我的连接</h2><p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-600">Git 与 MCP 连接属于你的个人配置。Git 完成连接所有者与项目 Owner 双确认后，可发起一次性手动只读读取；MCP 的连接委托和只读工具授权控制面已开放，远端动作、自动化和调用审批仍保持关闭。</p></div>
-              <span className="text-xs text-slate-400">凭据仅显示掩码</span>
-            </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <Link href="/profile/connections/git" className="group rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition hover:border-indigo-200 hover:bg-indigo-50"><span className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-800">我的 Git 连接</span><span aria-hidden="true" className="text-indigo-600 transition group-hover:translate-x-0.5">→</span></span><span className="mt-1.5 block text-xs leading-5 text-slate-500">配置 Git 服务、轮换凭据；后续变更通过安全治理预览管理，当前不会发起网络请求，外部连通性仍未验证。</span></Link>
-              <Link href="/profile/connections/mcp" className="group rounded-2xl border border-slate-200 bg-slate-50/70 p-4 transition hover:border-violet-200 hover:bg-violet-50"><span className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-800">我的 MCP 连接</span><span aria-hidden="true" className="text-violet-600 transition group-hover:translate-x-0.5">→</span></span><span className="mt-1.5 block text-xs leading-5 text-slate-500">管理连接委托和只读工具授权；保存时执行受限 DNS/地址安全解析，不发起 MCP 协议请求或发送凭据，MCP 连通性仍未验证。</span></Link>
-            </div>
-          </section>
         </> : null}
 
         {profile ? <section className="mt-6 grid gap-4 sm:grid-cols-2"><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Workspace roles</p><h2 className="mt-2 text-lg font-semibold">工作区身份</h2><div className="mt-4 space-y-2">{profile.workspaceMemberships.map((membership) => <div key={membership.workspace.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm"><span className="font-medium text-slate-700">{membership.workspace.name}</span><span className="text-xs font-semibold text-indigo-700">{membership.role}</span></div>)}</div></div><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Sign-in methods</p><h2 className="mt-2 text-lg font-semibold">登录方式</h2><div className="mt-4 space-y-2"><div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">本地密码：{profile.hasLocalPassword ? "已配置" : "未配置"}</div>{profile.githubIdentity ? <div className="rounded-xl bg-slate-950 px-4 py-3 text-sm text-white">GitHub · @{profile.githubIdentity.login}<span className="mt-1 block text-xs text-slate-300">{profile.githubIdentity.email}</span></div> : githubLoginAvailable ? <a href="/api/auth/github/start?intent=link&returnTo=%2Fprofile" className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50"><span>GitHub 尚未绑定</span><span className="text-indigo-600">立即绑定 →</span></a> : <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-400">{githubAvailability === "bootstrapPending" ? "平台管理员尚未完成初始化，GitHub 登录暂不可用" : githubAvailability === "configurationInvalid" ? "GitHub 登录配置无效，请联系工作区管理员" : "GitHub 登录尚未配置，请联系工作区管理员"}</div>}{profile.oidcIdentities.map((identity) => <div key={identity.provider.id} className="rounded-xl bg-violet-50 px-4 py-3 text-sm text-violet-700">{identity.provider.name}{identity.email ? ` · ${identity.email}` : ""}</div>)}</div></div></section> : null}

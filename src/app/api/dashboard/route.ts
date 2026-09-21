@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth";
 import { handleApiError } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
+import { getPlatformTokenAdvisory } from "@/lib/ai-entitlements";
 import { toPublicProjectJob } from "@/lib/project-workflow";
 import { accessibleProjectWhere } from "@/lib/access-control";
 import { getProjectOperationsSummaries } from "@/lib/project-operations";
 import { getProjectWorldSummaries } from "@/lib/project-world";
+import { projectDashboardQuota } from "@/lib/workspace-summary";
 import {
   nonLegacyMcpMemoryGenerationWhere,
   nonLegacyMcpProjectItemWhere,
@@ -20,7 +22,7 @@ export async function GET(request: Request) {
     const db = getDb();
     const projectWhere = { AND: [accessibleProjectWhere(user), { archivedAt: null }] };
 
-    const [projects, activeJobCount, pendingAssetReviews, recentJobs, activePlatformRouteCount] = await Promise.all([
+    const [projects, activeJobCount, pendingAssetReviews, recentJobs, activePlatformRouteCount, quota] = await Promise.all([
       db.project.findMany({
         where: projectWhere,
         orderBy: { updatedAt: "desc" },
@@ -111,6 +113,11 @@ export async function GET(request: Request) {
         },
       }),
       db.platformDefaultAiRoute.count({ where: { status: "active" } }),
+      // Quota is an advisory card. Isolate its read failure so the existing
+      // project dashboard keeps its current authentication/error semantics.
+      getPlatformTokenAdvisory(user.id, db)
+        .then(projectDashboardQuota)
+        .catch(() => projectDashboardQuota(null)),
     ]);
 
     const projectOperations = await getProjectOperationsSummaries(projects.map((project) => project.id), 3, db);
@@ -165,6 +172,7 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         state,
+        quota,
         summary: {
           projects: projects.length,
           ...summary,

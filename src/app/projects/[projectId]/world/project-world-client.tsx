@@ -232,7 +232,7 @@ export function ProjectWorldClient({ username, projectId, isSystemAdmin }: { use
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
       <AppHeader username={username} active="projects" projectId={projectId} projectSection="world" isSystemAdmin={isSystemAdmin} />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
-        <div className="mb-5"><Link href={`/projects/${projectId}/governance`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700">← 返回项目管理</Link></div>
+        <div className="mb-5"><Link href={`/projects/${projectId}`} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-indigo-200 hover:text-indigo-700">← 返回项目概览</Link></div>
         <section className="relative overflow-hidden rounded-[2rem] bg-slate-950 px-7 py-8 text-white shadow-2xl shadow-slate-950/15 sm:px-10 sm:py-10">
           <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-violet-500/25 blur-3xl" />
           <div className="relative flex flex-wrap items-end justify-between gap-7">

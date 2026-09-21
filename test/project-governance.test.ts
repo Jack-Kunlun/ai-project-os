@@ -219,7 +219,8 @@ test("governance routes are authenticated no-store reads and UI reuses bounded a
   assert.match(jobDetail, /parentSection/u);
   assert.match(jobDetail, /projectSection=\{projectSection\}/u);
   assert.doesNotMatch(jobDetail, /相关功能/u);
-  assert.match(jobDetail, /governance#task-runs/u);
+  assert.match(jobDetail, /buildProjectHref\(projectId, "overview", \{ focus: "task-runs", from: "overview" \}\)/u);
+  assert.match(jobDetail, /navigation\.from === "governance" \|\| navigation\.from === "overview"/u);
   assert.match(notifications, /notificationDetailHref/u);
   assert.match(notifications, /from=notifications/u);
 });

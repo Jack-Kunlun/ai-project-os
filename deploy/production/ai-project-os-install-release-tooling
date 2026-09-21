@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+
+readonly RELEASE_TAG=${1-}
+readonly EXPECTED_REVISION=${2-}
+readonly CONFIRMATION=${3-}
+readonly REPOSITORY_URL=https://github.com/Jack-Kunlun/ai-project-os.git
+# Tooling uses a checkout separate from the live Compose project directory so
+# refreshing control-plane files cannot change the running release checkout.
+readonly TOOLING_REPOSITORY_DIR=/srv/ai-project-os/tooling-repository
+readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+
+# Keep the first bootstrap intentionally limited to the 0.6 release family.
+# A later minor line must update this root-owned policy through a reviewed tag.
+readonly RELEASE_TAG_PATTERN='^v0\.6\.[0-9]+(-dev\.[1-9][0-9]*)?$'
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2-70}"
+}
+
+[[ $EUID -eq 0 ]] || fail RELEASE_TOOLING_ROOT_REQUIRED
+[[ "$RELEASE_TAG" =~ $RELEASE_TAG_PATTERN ]] || fail RELEASE_TOOLING_TAG_INVALID 64
+[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail RELEASE_TOOLING_REVISION_INVALID 65
+[[ "$CONFIRMATION" == CONFIRM_INSTALL_RELEASE_TOOLING_V1 ]] || fail RELEASE_TOOLING_CONFIRMATION_INVALID 66
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || fail RELEASE_TOOLING_DEPLOYMENT_IN_PROGRESS 75
+
+for required_command in bash chown curl dirname flock git grep install mktemp mv python3 rm stat tar visudo; do
+  command -v "$required_command" >/dev/null || fail RELEASE_TOOLING_COMMAND_MISSING 69
+done
+
+install -d -o root -g root -m 0755 /srv/ai-project-os
+
+if [[ ! -d "$TOOLING_REPOSITORY_DIR/.git" ]]; then
+  temporary_repository="${TOOLING_REPOSITORY_DIR}.init.$$"
+  trap 'rm -rf -- "${temporary_repository-}"' EXIT
+  git clone --filter=blob:none --no-checkout "$REPOSITORY_URL" "$temporary_repository"
+  chown -R root:root "$temporary_repository"
+  mv -- "$temporary_repository" "$TOOLING_REPOSITORY_DIR"
+  trap - EXIT
+fi
+
+[[ ! -L "$TOOLING_REPOSITORY_DIR" && ! -L "$TOOLING_REPOSITORY_DIR/.git" ]] || fail RELEASE_TOOLING_REPOSITORY_INVALID
+[[ "$(stat -c %U:%G "$TOOLING_REPOSITORY_DIR")" == root:root ]] || fail RELEASE_TOOLING_REPOSITORY_OWNER_INVALID
+[[ "$(stat -c %U:%G "$TOOLING_REPOSITORY_DIR/.git")" == root:root ]] || fail RELEASE_TOOLING_REPOSITORY_OWNER_INVALID
+[[ "$(git -C "$TOOLING_REPOSITORY_DIR" remote get-url origin)" == "$REPOSITORY_URL" ]] || fail RELEASE_TOOLING_REPOSITORY_ORIGIN_INVALID
+
+git -C "$TOOLING_REPOSITORY_DIR" fetch --force --no-tags origin \
+  "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+
+[[ "$(git -C "$TOOLING_REPOSITORY_DIR" cat-file -t "refs/tags/$RELEASE_TAG")" == tag ]] || \
+  fail RELEASE_TOOLING_TAG_NOT_ANNOTATED 67
+
+resolved_revision=$(git -C "$TOOLING_REPOSITORY_DIR" rev-parse "refs/tags/$RELEASE_TAG^{}")
+[[ "$resolved_revision" == "$EXPECTED_REVISION" ]] || fail RELEASE_TOOLING_TAG_REVISION_MISMATCH 68
+
+# Require the same successful tag-push CI evidence used by the deployment
+# entry point before any candidate file is promoted to a root-owned path.
+ci_runs_url="https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$EXPECTED_REVISION&per_page=100"
+ci_runs_json=$(curl --fail --silent --show-error \
+  --header 'Accept: application/vnd.github+json' \
+  --header 'X-GitHub-Api-Version: 2022-11-28' \
+  "$ci_runs_url")
+
+if ! python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+revision, tag = sys.argv[1:3]
+accepted = any(
+    run.get("head_sha") == revision
+    and run.get("head_branch") == tag
+    and run.get("event") == "push"
+    and run.get("status") == "completed"
+    and run.get("conclusion") == "success"
+    for run in payload.get("workflow_runs", [])
+)
+raise SystemExit(0 if accepted else 1)
+' "$EXPECTED_REVISION" "$RELEASE_TAG" <<<"$ci_runs_json"; then
+  fail RELEASE_TOOLING_SUCCESSFUL_CI_NOT_FOUND 72
+fi
+
+candidate_root=$(mktemp -d /srv/ai-project-os/.release-tooling.XXXXXX)
+STAGED_FILES=()
+
+# Remove only process-owned temporary paths. Installed destinations are never
+# removed by cleanup, including when a later rename fails.
+cleanup() {
+  local staged
+  rm -rf -- "${candidate_root-}"
+  for staged in "${STAGED_FILES[@]}"; do
+    [[ -z "$staged" ]] || rm -f -- "$staged"
+  done
+}
+trap cleanup EXIT
+
+# Archive only the fixed allowlist. Extracting the whole deployment directory
+# would unnecessarily admit unrelated candidate-controlled paths.
+git -C "$TOOLING_REPOSITORY_DIR" archive --format=tar "$EXPECTED_REVISION" -- \
+  package.json \
+  deploy/production/ai-project-os-actions-gateway \
+  deploy/production/ai-project-os-install-release-tooling \
+  deploy/production/ai-project-os-deploy \
+  deploy/production/ai-project-os-v06-deploy \
+  deploy/production/ai-project-os-preserve-deploy \
+  deploy/production/ai-project-os-backup \
+  deploy/production/ai-project-os-restore \
+  deploy/production/ai-project-os-configure-github-oauth \
+  deploy/production/compose.operations.yaml \
+  deploy/production/ai-project-os-deploy.sudoers | \
+  tar --extract --file=- --directory "$candidate_root" --no-same-owner --no-same-permissions
+
+package_version=$(python3 -c '
+import json
+import pathlib
+import sys
+
+value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+version = value.get("version")
+if not isinstance(version, str):
+    raise SystemExit(1)
+print(version, end="")
+' "$candidate_root/package.json") || fail RELEASE_TOOLING_PACKAGE_INVALID 68
+[[ "v$package_version" == "$RELEASE_TAG" ]] || fail RELEASE_TOOLING_PACKAGE_VERSION_MISMATCH 68
+
+readonly CANDIDATE_DIR=$candidate_root/deploy/production
+readonly GATEWAY=$CANDIDATE_DIR/ai-project-os-actions-gateway
+readonly UPDATER=$CANDIDATE_DIR/ai-project-os-install-release-tooling
+readonly DEPLOYER=$CANDIDATE_DIR/ai-project-os-deploy
+readonly V06_DEPLOYER=$CANDIDATE_DIR/ai-project-os-v06-deploy
+readonly PRESERVE_DEPLOYER=$CANDIDATE_DIR/ai-project-os-preserve-deploy
+readonly BACKUP=$CANDIDATE_DIR/ai-project-os-backup
+readonly RESTORE=$CANDIDATE_DIR/ai-project-os-restore
+readonly OAUTH_CONFIGURATOR=$CANDIDATE_DIR/ai-project-os-configure-github-oauth
+readonly COMPOSE_OVERRIDE=$CANDIDATE_DIR/compose.operations.yaml
+readonly SUDOERS=$CANDIDATE_DIR/ai-project-os-deploy.sudoers
+
+# Reject missing files, symlinks, and empty placeholders before validating any
+# content. The candidate cannot choose an install source or destination path.
+for candidate in \
+  "$GATEWAY" \
+  "$UPDATER" \
+  "$DEPLOYER" \
+  "$V06_DEPLOYER" \
+  "$PRESERVE_DEPLOYER" \
+  "$BACKUP" \
+  "$RESTORE" \
+  "$OAUTH_CONFIGURATOR" \
+  "$COMPOSE_OVERRIDE" \
+  "$SUDOERS"; do
+  [[ -f "$candidate" && ! -L "$candidate" && -s "$candidate" ]] || fail RELEASE_TOOLING_CANDIDATE_INVALID 69
+done
+
+for script in "$GATEWAY" "$UPDATER" "$DEPLOYER" "$V06_DEPLOYER" "$PRESERVE_DEPLOYER" "$BACKUP" "$RESTORE" "$OAUTH_CONFIGURATOR"; do
+  bash -n "$script" || fail RELEASE_TOOLING_SCRIPT_INVALID 69
+done
+
+# The refreshed gateway must retain this stable updater entry. Otherwise one
+# release could silently require interactive server access again.
+grep -Fq 'CONFIRM_INSTALL_RELEASE_TOOLING_V1' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
+grep -Fq '/usr/local/sbin/ai-project-os-install-release-tooling' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
+grep -Fq 'CONFIRM_V06_MIGRATION_V1' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
+grep -Fq '/usr/local/sbin/ai-project-os-v06-deploy' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
+grep -Fq 'v0.6.0-dev.1' "$V06_DEPLOYER" || fail RELEASE_TOOLING_V06_DEPLOY_CONTRACT_INVALID 69
+grep -Fq 'scripts/production-v06-upgrade-preflight.ts' "$V06_DEPLOYER" || fail RELEASE_TOOLING_V06_DEPLOY_CONTRACT_INVALID 69
+# Until the 0.6 migration path is separately approved, a tooling refresh must
+# preserve every command used by the current v0.5 production workflow.
+grep -Fq 'CONFIRM_PRESERVE_DATA_V1' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
+grep -Fq '/usr/local/sbin/ai-project-os-preserve-deploy' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
+grep -Fq 'configure-github-oauth' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
+grep -Fq 'v0.5.0-dev.1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
+grep -Fq 'v0.5.0-dev.4' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
+grep -Fq 'CONFIRM_PRESERVE_DATA_V1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
+grep -Fq 'v0.6.0-dev.1' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
+grep -Fq 'pre-deploy-to-v0\.6\.0-dev\.1' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
+
+visudo -cf "$SUDOERS" >/dev/null || fail RELEASE_TOOLING_SUDOERS_INVALID 69
+grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-install-release-tooling' "$SUDOERS" || \
+  fail RELEASE_TOOLING_SUDOERS_CONTRACT_INVALID 69
+grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-deploy' "$SUDOERS" || \
+  fail RELEASE_TOOLING_SUDOERS_CONTRACT_INVALID 69
+grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-preserve-deploy' "$SUDOERS" || \
+  fail RELEASE_TOOLING_SUDOERS_CONTRACT_INVALID 69
+grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-github-oauth' "$SUDOERS" || \
+  fail RELEASE_TOOLING_SUDOERS_CONTRACT_INVALID 69
+if grep -Eq '(ALL=\(ALL|/bin/(ba)?sh|/usr/bin/(ba)?sh|\*)' "$SUDOERS"; then
+  fail RELEASE_TOOLING_SUDOERS_TOO_BROAD 69
+fi
+
+# Refuse symlinked or non-root destination directories before creating any
+# staged root file. Group/world-writable control directories fail closed.
+for target_directory in /usr/local/sbin /etc/ai-project-os /etc/sudoers.d; do
+  [[ -d "$target_directory" && ! -L "$target_directory" ]] || fail RELEASE_TOOLING_TARGET_DIRECTORY_INVALID 69
+  [[ "$(stat -c %U:%G "$target_directory")" == root:root ]] || fail RELEASE_TOOLING_TARGET_DIRECTORY_INVALID 69
+  target_permissions=$(stat -c %A "$target_directory")
+  [[ "${target_permissions:5:1}" != w && "${target_permissions:8:1}" != w ]] || fail RELEASE_TOOLING_TARGET_DIRECTORY_INVALID 69
+done
+
+for destination in \
+  /usr/local/sbin/ai-project-os-install-release-tooling \
+  /usr/local/sbin/ai-project-os-deploy \
+  /usr/local/sbin/ai-project-os-v06-deploy \
+  /usr/local/sbin/ai-project-os-preserve-deploy \
+  /usr/local/sbin/ai-project-os-backup \
+  /usr/local/sbin/ai-project-os-restore \
+  /usr/local/sbin/ai-project-os-configure-github-oauth \
+  /etc/ai-project-os/compose.operations.yaml \
+  /etc/sudoers.d/ai-project-os-deploy \
+  /usr/local/sbin/ai-project-os-actions-gateway; do
+  [[ ! -e "$destination" || ( -f "$destination" && ! -L "$destination" ) ]] || fail RELEASE_TOOLING_TARGET_INVALID 69
+done
+
+# Stage every file on its destination filesystem before the first rename. This
+# catches validation, permission, and free-space failures while the old toolset
+# is still fully intact.
+stage_install() {
+  local source=$1 destination=$2 mode=$3 output_variable=$4 temporary
+  temporary=$(mktemp "$(dirname "$destination")/.release-tooling.XXXXXX")
+  install -o root -g root -m "$mode" "$source" "$temporary"
+  STAGED_FILES+=("$temporary")
+  printf -v "$output_variable" '%s' "$temporary"
+}
+
+# Programs land before policy; the gateway lands last so every command it can
+# expose already has both a validated binary and validated sudo rule.
+stage_install "$UPDATER" /usr/local/sbin/ai-project-os-install-release-tooling 0755 staged_updater
+stage_install "$DEPLOYER" /usr/local/sbin/ai-project-os-deploy 0755 staged_deployer
+stage_install "$V06_DEPLOYER" /usr/local/sbin/ai-project-os-v06-deploy 0755 staged_v06_deployer
+stage_install "$PRESERVE_DEPLOYER" /usr/local/sbin/ai-project-os-preserve-deploy 0755 staged_preserve
+stage_install "$BACKUP" /usr/local/sbin/ai-project-os-backup 0755 staged_backup
+stage_install "$RESTORE" /usr/local/sbin/ai-project-os-restore 0755 staged_restore
+stage_install "$OAUTH_CONFIGURATOR" /usr/local/sbin/ai-project-os-configure-github-oauth 0755 staged_oauth
+stage_install "$COMPOSE_OVERRIDE" /etc/ai-project-os/compose.operations.yaml 0644 staged_compose
+stage_install "$SUDOERS" /etc/sudoers.d/ai-project-os-deploy 0440 staged_sudoers
+stage_install "$GATEWAY" /usr/local/sbin/ai-project-os-actions-gateway 0755 staged_gateway
+
+mv -f -- "$staged_updater" /usr/local/sbin/ai-project-os-install-release-tooling
+mv -f -- "$staged_deployer" /usr/local/sbin/ai-project-os-deploy
+mv -f -- "$staged_v06_deployer" /usr/local/sbin/ai-project-os-v06-deploy
+mv -f -- "$staged_preserve" /usr/local/sbin/ai-project-os-preserve-deploy
+mv -f -- "$staged_backup" /usr/local/sbin/ai-project-os-backup
+mv -f -- "$staged_restore" /usr/local/sbin/ai-project-os-restore
+mv -f -- "$staged_oauth" /usr/local/sbin/ai-project-os-configure-github-oauth
+mv -f -- "$staged_compose" /etc/ai-project-os/compose.operations.yaml
+mv -f -- "$staged_sudoers" /etc/sudoers.d/ai-project-os-deploy
+visudo -cf /etc/sudoers.d/ai-project-os-deploy >/dev/null
+mv -f -- "$staged_gateway" /usr/local/sbin/ai-project-os-actions-gateway
+STAGED_FILES=()
+
+printf 'RELEASE_TOOLING_INSTALL_OK tag=%s revision=%s\n' "$RELEASE_TAG" "$EXPECTED_REVISION"

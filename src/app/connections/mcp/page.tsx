@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 
 export default async function McpConnectionsPage() {
   await requirePageSession();
-  redirect("/profile/connections/mcp");
+  redirect("/personal/connections/mcp");
 }

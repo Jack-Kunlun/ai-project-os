@@ -103,7 +103,7 @@ export function ProjectControlClient({ username, isSystemAdmin }: { username: st
 }
 
 function ModelAccessSection() {
-  return <section className="rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7 shadow-sm sm:p-8"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Model access</p><h2 className="mt-2 text-2xl font-semibold">项目模型使用方式</h2><p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">项目内不再配置独立模型路由。普通用户使用管理员维护的平台默认免费托管模型；会员用户可在<a href="/profile/models" className="font-semibold text-indigo-700 underline">个人模型设置</a>中配置自己的模型，并在项目 AI 能力使用前完成个人连接所有者与项目 Owner 的双确认委托。</p><p className="mt-4 rounded-xl bg-white/80 px-4 py-3 text-xs leading-5 text-slate-600">当前页面只保留项目任务状态和 Git 委托入口。没有可用模型时，系统会返回明确的能力不可用状态，不会回退到已删除的项目路由。</p></section>;
+  return <section className="rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7 shadow-sm sm:p-8"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Model access</p><h2 className="mt-2 text-2xl font-semibold">项目模型使用方式</h2><p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">项目内不再配置独立模型路由。普通用户使用管理员维护的平台默认免费托管模型；会员用户可在<a href="/personal/models" className="font-semibold text-indigo-700 underline">个人模型设置</a>中配置自己的模型，并在项目 AI 能力使用前完成个人连接所有者与项目 Owner 的双确认委托。</p><p className="mt-4 rounded-xl bg-white/80 px-4 py-3 text-xs leading-5 text-slate-600">当前页面只保留项目任务状态和 Git 委托入口。没有可用模型时，系统会返回明确的能力不可用状态，不会回退到已删除的项目路由。</p></section>;
 }
 
 function FrozenRepositorySection({ projectId }: { projectId: string }) {

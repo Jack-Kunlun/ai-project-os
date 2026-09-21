@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/app-header";
-import { jobStatusLabels, type DashboardPayload, type DashboardState, type JobKind, type JobStatus, type RecentJob } from "@/lib/workspace-summary";
+import { jobStatusLabels, type DashboardPayload, type DashboardQuota, type DashboardState, type JobKind, type JobStatus, type RecentJob } from "@/lib/workspace-summary";
 
 const emptyPayload: DashboardPayload = {
   state: "zero-project",
+  quota: { status: "unavailable", unit: "platform_credit" },
   summary: {
     projects: 0,
     confirmedItems: 0,
@@ -55,6 +56,15 @@ async function readError(response: Response, fallback: string): Promise<string> 
 }
 
 function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function formatQuotaExpiry(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
     month: "short",
     day: "numeric",
@@ -187,6 +197,8 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
           <MetricCard label="项目状态" value={payload.summary.atRiskWorlds + payload.summary.attentionWorlds} detail={payload.summary.atRiskWorlds > 0 ? `${payload.summary.atRiskWorlds} 个项目存在风险` : payload.summary.attentionWorlds > 0 ? `${payload.summary.attentionWorlds} 个项目需关注` : stateLabel(payload.state)} icon="alert" tone="rose" loading={loading} unavailable={error !== null} />
         </section>
 
+        <QuotaPanel quota={payload.quota} loading={loading} dashboardUnavailable={error !== null} />
+
         <WorldStatusPanel payload={payload} loading={loading} unavailable={error !== null} />
         <OperationsPanel payload={payload} loading={loading} unavailable={error !== null} />
 
@@ -197,6 +209,25 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
       </div>
     </main>
   );
+}
+
+/**
+ * Show only the caller's platform-credit advisory. Personal models, Git/MCP
+ * connections, and supplier balances are separate configuration or billing
+ * domains; an actual action still revalidates quota before it runs.
+ */
+function QuotaPanel({ quota, loading, dashboardUnavailable }: { quota: DashboardQuota; loading: boolean; dashboardUnavailable: boolean }) {
+  return <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7" aria-label="当前额度">
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500">Platform credit</p>
+        <h2 className="mt-2 text-xl font-semibold">当前额度</h2>
+        <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500">平台额度按当前发起人计费；个人模型、Git、MCP 和供应商余额不计入这里。实际执行前会再次核验额度。</p>
+      </div>
+      <Link href="/profile" className="text-xs font-semibold text-indigo-600 hover:text-indigo-800">查看个人额度详情 →</Link>
+    </div>
+    {loading ? <div className="mt-5 h-20 animate-pulse rounded-2xl bg-slate-100" aria-label="正在读取额度" /> : dashboardUnavailable || quota.status === "unavailable" ? <div className="mt-5 flex items-center justify-between rounded-2xl bg-slate-50 px-5 py-5"><div><p className="text-3xl font-semibold text-slate-400">—</p><p className="mt-2 text-xs text-slate-500">暂时无法读取当前额度</p></div><span className="text-xs text-slate-400">platform credit</span></div> : <div className="mt-5 flex flex-wrap items-end justify-between gap-4 rounded-2xl bg-indigo-50/70 px-5 py-5"><div><p className="text-3xl font-semibold tracking-tight text-indigo-700">{quota.availableCredits.toLocaleString("zh-CN")}</p><p className="mt-2 text-xs text-slate-600">{quota.availableCredits === 0 ? "当前可用额度为 0，执行前会再次核验额度。" : "当前可用于平台模型调用"}</p></div><div className="text-right text-xs text-slate-500"><p>单位：platform credit</p><p className="mt-1">{quota.nextExpiryAt === null ? "暂无到期额度" : `最早到期：${formatQuotaExpiry(quota.nextExpiryAt)}`}</p></div></div>}
+  </section>;
 }
 
 function MetricCard({ label, value, detail, icon, tone, loading, unavailable }: { label: string; value: string | number; detail: string; icon: string; tone: "indigo" | "emerald" | "cyan" | "violet" | "rose"; loading: boolean; unavailable: boolean }) {

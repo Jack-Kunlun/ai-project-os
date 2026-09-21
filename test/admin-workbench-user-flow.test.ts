@@ -152,7 +152,7 @@ test("Git project repository routes pass the session actor to the service author
   assert.match(client, /acknowledgeDataEgress:\s*true/u);
   assert.match(client, /自动化、写入\/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准/u);
   assert.match(client, /不会写入、提交或创建 Pull Request/u);
-  assert.match(client, /href="\/profile\/connections\/git"/u);
+  assert.match(client, /href="\/personal\/connections\/git"/u);
   assert.match(client, /资料已发布到项目/u);
   assert.doesNotMatch(client, /\/git-(?:push|commit)|\/pull-requests?/u);
   assert.doesNotMatch(client, /repository\.connection\.baseUrl/u);
@@ -198,9 +198,9 @@ test("admin workbench and overview are server protected and dashboard has no glo
   assert.doesNotMatch(profile, /系统管理员操作|系统运维|平台模型|Git \/ MCP 连接/u);
   assert.doesNotMatch(dashboardRoute, /aiProviderConnection/u);
   assert.match(settings, /redirect\(user\.role === "admin" \? "\/admin\/models" : "\/dashboard"\)/u);
-  assert.match(connections, /await requirePageSession\(\);\s*redirect\("\/profile\/connections\/git"\)/u);
+  assert.match(connections, /await requirePageSession\(\);\s*redirect\("\/personal\/connections\/git"\)/u);
   assert.doesNotMatch(connections, /user\.role/u);
-  assert.match(connectionsMcp, /await requirePageSession\(\);\s*redirect\("\/profile\/connections\/mcp"\)/u);
+  assert.match(connectionsMcp, /await requirePageSession\(\);\s*redirect\("\/personal\/connections\/mcp"\)/u);
   assert.doesNotMatch(connectionsMcp, /user\.role/u);
   assert.match(operations, /if \(user\.role !== "admin"\) redirect\("\/dashboard"\)/u);
 });
@@ -577,11 +577,11 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   ]);
 
   assert.match(guide, /普通用户操作指南/u);
-  assert.match(guide, /个人 Git 与 MCP 连接可以在个人中心配置/u);
+  assert.match(guide, /个人 Git 与 MCP 连接可以在个人工作区配置/u);
   assert.match(userDocs, /项目概览/u);
   assert.match(userDocs, /项目六个一级入口/u);
   assert.match(userDocs, /只有当前工作区 Owner\/Admin 可以创建项目/u);
-  assert.match(userDocs, /个人 Git 与 MCP 连接都由当前用户在个人中心管理/u);
+  assert.match(userDocs, /个人 Git 与 MCP 连接都由当前用户在个人工作区管理/u);
   assert.match(userDocs, /项目页支持 Git 连接所有者与项目 Owner 双确认后的一次性手动只读读取/u);
   assert.match(userDocs, /一次性手动读取只读取双确认委托中明确的分支、目录和文本文件/u);
   assert.doesNotMatch(userDocs, /迁移期间不启动新的外部仓库访问|个人连接开放后/u);
@@ -622,13 +622,13 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(repositories, /project-confirmation/u);
   assert.match(repositories, /不会写入、提交或创建 Pull Request/u);
   assert.match(repositories, /自动化、写入\/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准/u);
-  assert.match(guide, /个人 Git 与 MCP 连接可以在个人中心配置/u);
-  assert.match(repositories, /href="\/profile\/connections\/git"/u);
+  assert.match(guide, /个人 Git 与 MCP 连接可以在个人工作区配置/u);
+  assert.match(repositories, /href="\/personal\/connections\/git"/u);
   assert.match(repositories, /资料已发布到项目/u);
   assert.doesNotMatch(guide, /新增模型、Git 或 MCP 连接/u);
   assert.match(tools, /控制面开放；动作调用冻结/u);
   assert.match(tools, /仅管理连接委托和只读工具授权/u);
-  assert.match(tools, /href="\/profile\/connections\/mcp"/u);
+  assert.match(tools, /href="\/personal\/connections\/mcp"/u);
   assert.match(tools, /mcp-connection-delegations|mcp-tool-grants/u);
   assert.doesNotMatch(tools, /MCP 连接由管理员维护|mcp-actions|dispatch|result-import|授权并调用|创建并请求审批/u);
   assert.match(repositoriesPage, /isSystemAdmin=\{user\.role === "admin"\}/u);

@@ -1,20 +1,25 @@
 import Link from "next/link";
 import { NotificationBell } from "./notification-bell";
 
-type PrimarySection = "dashboard" | "projects" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide" | "admin";
-type ProjectSection = "overview" | "materials" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
+/** Global user-facing destinations that can own the active navigation state. */
+type PrimarySection = "dashboard" | "projects" | "personalKnowledge" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide" | "admin";
+type ProjectSection = "overview" | "configuration" | "materials" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid", adminOnly: false },
   { key: "projects", label: "项目", href: "/projects", icon: "folder", adminOnly: false },
+  { key: "personalKnowledge", label: "个人工作区", href: "/personal", icon: "book", adminOnly: false },
   { key: "team", label: "团队", href: "/team", icon: "users", adminOnly: false },
 ] as const;
 
 const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources", "repositories"];
 const overviewSections: readonly ProjectSection[] = ["overview"];
 const intelligenceSections: readonly ProjectSection[] = ["control", "memory", "memoryQuality", "intelligence"];
-const managementSections: readonly ProjectSection[] = ["world", "tools", "actions", "governance"];
 
+/**
+ * Render the shared user header. `active` is supplied by the protected server
+ * page so navigation state never depends on client-side URL parsing.
+ */
 export function AppHeader({
   username,
   active,
@@ -108,6 +113,14 @@ export function AppHeader({
                 项目概览
               </Link>
               <Link
+                href={`/projects/${projectId}/configuration`}
+                aria-current={projectSection === "configuration" ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "configuration" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="settings" />
+                项目配置
+              </Link>
+              <Link
                 href={`/projects/${projectId}/plan`}
                 aria-current={projectSection === "plan" ? "page" : undefined}
                 className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "plan" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
@@ -139,14 +152,6 @@ export function AppHeader({
                 <NavIcon name="repeat" />
                 项目自动化
               </Link>
-              <Link
-                href={`/projects/${projectId}/governance`}
-                aria-current={projectSection && managementSections.includes(projectSection) ? "page" : undefined}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && managementSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
-              >
-                <NavIcon name="sliders" />
-                项目管理
-              </Link>
             </nav>
           </div>
         </div>
@@ -169,6 +174,7 @@ function NavIcon({ name }: { name: string }) {
     users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>,
     sparkles: <><path d="m12 3 1.15 3.1L16 7.25l-2.85 1.15L12 11.5 10.85 8.4 8 7.25l2.85-1.15L12 3Z" /><path d="m18.5 13 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z" /><path d="m5.5 12 .95 2.55L9 15.5l-2.55.95L5.5 19l-.95-2.55L2 15.5l2.55-.95L5.5 12Z" /></>,
     repeat: <><path d="M17 2.5 21 6l-4 3.5" /><path d="M3 11V9a3 3 0 0 1 3-3h15" /><path d="m7 21.5-4-3.5L7 14.5" /><path d="M21 13v2a3 3 0 0 1-3 3H3" /></>,
+    settings: <><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" /><path d="m19.4 15 .1.1 1.2 1.2-2.3 2.3-1.3-1.3a7.6 7.6 0 0 1-2 .8V20h-3.2v-1.9a7.6 7.6 0 0 1-2-.8l-1.3 1.3-2.3-2.3L7.5 15a7.6 7.6 0 0 1-.8-2H4.8V9.8h1.9a7.6 7.6 0 0 1 .8-2L6.3 6.5l2.3-2.3 1.3 1.3a7.6 7.6 0 0 1 2-.8V2.8h3.2v1.9a7.6 7.6 0 0 1 2 .8l1.3-1.3 2.3 2.3-1.2 1.3a7.6 7.6 0 0 1 .8 2h1.9V13h-1.9a7.6 7.6 0 0 1-.8 2Z" /></>,
   };
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }

@@ -6,7 +6,7 @@ import { useCallback, useDeferredValue, useEffect, useState } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { AppHeader } from "@/components/app-header";
 import { ListPagination } from "@/components/list-pagination";
-import { ProjectManagementParentLink } from "@/components/project-parent-link";
+import { ProjectOverviewParentLink } from "@/components/project-parent-link";
 
 type CapabilityId = "project.repository.sync" | "project.web-source.sync" | "project.memory-quality.scan" | "project.mcp.read-tool.invoke";
 type PolicyMode = "automatic" | "approvalRequired" | "denied";
@@ -216,7 +216,7 @@ function ProjectActionsContent({ username, projectId, isSystemAdmin, confirm }: 
   return <main className="min-h-screen bg-[#f5f7fb] text-slate-950">
     <AppHeader username={username} active="projects" projectId={projectId} projectSection="actions" isSystemAdmin={isSystemAdmin} />
     <div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12">
-      <div className="mb-5 flex flex-wrap items-center gap-3">{fromNotifications ? <Link href={`/notifications?view=${notificationFilter}${notificationPageCursor ? `&cursor=${encodeURIComponent(notificationPageCursor)}` : ""}${notificationFocusId ? `&focus=${encodeURIComponent(notificationFocusId)}` : ""}`} className="inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">返回活动记录</Link> : null}<ProjectManagementParentLink projectId={projectId} /></div>
+      <div className="mb-5 flex flex-wrap items-center gap-3">{fromNotifications ? <Link href={`/notifications?view=${notificationFilter}${notificationPageCursor ? `&cursor=${encodeURIComponent(notificationPageCursor)}` : ""}${notificationFocusId ? `&focus=${encodeURIComponent(notificationFocusId)}` : ""}`} className="inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">返回活动记录</Link> : null}<ProjectOverviewParentLink projectId={projectId} /></div>
       <section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Controlled action engine</p>
         <div className="mt-3 flex flex-wrap items-end justify-between gap-5"><div><h1 className="text-4xl font-semibold tracking-[-0.04em]">动作与审批</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">每个动作先固定能力、输入指纹和策略快照，再由 Owner 审批或按项目策略自动排队。Worker 只执行内置白名单能力，完整状态变化写入不可变审计。</p></div><button type="button" onClick={() => void reload()} className="flex min-h-11 items-center justify-center rounded-xl border border-white/20 bg-white/10 px-5 py-2.5 text-sm font-semibold text-white hover:bg-white/15">刷新状态</button></div>

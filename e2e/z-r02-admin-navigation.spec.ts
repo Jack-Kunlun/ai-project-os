@@ -46,29 +46,52 @@ async function expectProviderDialogScrollsOnlyItsContent(page: Page): Promise<vo
   await page.locator("main header").getByRole("button", { name: "新增供应商", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "新增供应商", exact: true });
   await expect(dialog).toBeVisible();
+  /**
+   * Keep this contract relative to the overlay padding: the dialog may grow on
+   * tall screens, while only its form body may scroll and custom scrollbar
+   * styling must remain enabled for normal-color modal surfaces.
+   */
   const geometry = await dialog.evaluate((element) => {
     const header = element.querySelector("header");
     const content = element.querySelector("form > div");
     const footer = element.querySelector("footer");
     if (!header || !content || !footer) throw new Error("PROVIDER_DIALOG_STRUCTURE_INVALID");
+    const overlay = element.parentElement;
+    if (!overlay) throw new Error("PROVIDER_DIALOG_OVERLAY_INVALID");
+    const overlayStyle = getComputedStyle(overlay);
+    const paddingTop = Number.parseFloat(overlayStyle.paddingTop);
+    const paddingBottom = Number.parseFloat(overlayStyle.paddingBottom);
+    const dialogRect = element.getBoundingClientRect();
+    const maxHeight = Number.parseFloat(getComputedStyle(element).maxHeight);
     const headerTop = header.getBoundingClientRect().top;
     const footerTop = footer.getBoundingClientRect().top;
+    const contentStyle = getComputedStyle(content);
     const scrollable = content.scrollHeight > content.clientHeight;
     content.scrollTop = content.scrollHeight;
     return {
-      height: element.getBoundingClientRect().height,
-      viewportHeight: window.innerHeight,
+      height: dialogRect.height,
+      availableHeight: window.innerHeight - paddingTop - paddingBottom,
+      maxHeight,
+      withinOverlayMargins: dialogRect.top >= paddingTop - 1 && dialogRect.bottom <= window.innerHeight - paddingBottom + 1,
       scrollable,
       scrolled: content.scrollTop > 0,
       headerStayed: Math.abs(header.getBoundingClientRect().top - headerTop) < 1,
       footerStayed: Math.abs(footer.getBoundingClientRect().top - footerTop) < 1,
+      hasDarkScrollbar: content.classList.contains("app-scrollbar-dark"),
+      scrollbarThumb: contentStyle.getPropertyValue("--scrollbar-thumb").trim(),
     };
   });
-  expect(geometry.height).toBeLessThanOrEqual(Math.min(544, geometry.viewportHeight - 48) + 1);
+  expect(geometry.height).toBeLessThanOrEqual(geometry.availableHeight + 1);
+  expect(geometry.maxHeight).toBeLessThanOrEqual(geometry.availableHeight + 1);
+  expect(Math.abs(geometry.maxHeight - geometry.availableHeight)).toBeLessThanOrEqual(1);
+  expect(geometry.withinOverlayMargins).toBe(true);
+  if (page.viewportSize()?.width && page.viewportSize()!.width >= 1024) expect(geometry.maxHeight).toBeGreaterThan(544);
   expect(geometry.scrollable).toBe(true);
   expect(geometry.scrolled).toBe(true);
   expect(geometry.headerStayed).toBe(true);
   expect(geometry.footerStayed).toBe(true);
+  expect(geometry.hasDarkScrollbar).toBe(true);
+  expect(geometry.scrollbarThumb).toContain("rgba");
   await dialog.getByRole("button", { name: "关闭新增供应商" }).click();
   await expect(dialog).toHaveCount(0);
 }
@@ -381,7 +404,6 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     `/projects/${project.id}/materials`,
     `/projects/${project.id}/intelligence`,
     `/projects/${project.id}/automations`,
-    `/projects/${project.id}/governance`,
   ]);
   for (const width of R02_VIEWPORTS.slice(1)) {
     await ownerPage.setViewportSize({ width, height: 844 });
@@ -414,7 +436,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   await expect(ownerPage.locator(`#source-link-${details.sourceId}`)).toBeFocused();
 
   const projectReturnTo = `/projects/${project.id}`;
-  await ownerPage.goto(`/projects/${project.id}/jobs/${details.jobId}?from=governance&returnTo=${encodeURIComponent(projectReturnTo)}`);
+  await ownerPage.goto(`/projects/${project.id}/jobs/${details.jobId}?from=overview&returnTo=${encodeURIComponent(projectReturnTo)}`);
   await expect(ownerPage.getByRole("heading", { name: "项目简报", exact: true })).toBeVisible();
   await expect(ownerPage.getByRole("heading", { name: "任务结果", exact: true })).toBeVisible();
   await expect(ownerPage.getByText("执行阶段：terminal", { exact: true })).toBeVisible();
@@ -423,7 +445,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   await expect(ownerPage.locator('[role="alert"]:not(#__next-route-announcer__)')).toHaveCount(0);
   await expectR02NoHorizontalOverflow(ownerPage, "valid job detail@390");
   await ownerPage.getByRole("link", { name: /返回任务列表/u }).click();
-  await expect(ownerPage).toHaveURL(new RegExp(`/projects/${project.id}/governance\\?`, "u"));
+  await expect(ownerPage).toHaveURL(new RegExp(`/projects/${project.id}\\?`, "u"));
   await expect(ownerPage.locator("#task-runs")).toBeFocused();
 
   await ownerPage.goto(`/projects/${project.id}/github-syncs/${details.syncRunId}`);
@@ -458,10 +480,9 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     }, project.id);
     expect(projectApi.status).toBe(403);
     expect(projectApi.body).not.toContain(project.name);
-    await freePage.goto("/profile");
-    await expect(freePage.getByRole("link", { name: /查看我的模型/u })).toBeVisible();
-    await expect(freePage.getByRole("link", { name: /管理我的模型/u })).toHaveCount(0);
-    await freePage.goto("/profile/models");
+    await freePage.goto("/personal/configuration");
+    await expect(freePage.getByRole("link", { name: /我的模型/u })).toBeVisible();
+    await freePage.goto("/personal/models");
     await expect(freePage.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
     await expect(freePage.getByText("普通用户", { exact: true })).toBeVisible();
     await expect(freePage.getByRole("button", { name: "保存个人连接", exact: true })).toHaveCount(0);
@@ -470,8 +491,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     expect(freeProviderAttempt.body).not.toContain("r02-placeholder-key-2026");
 
     await signInR02Actor(activePage, actors.active);
-    await expect(activePage.getByRole("link", { name: /管理我的模型/u })).toBeVisible();
-    await activePage.goto("/profile/models");
+    await activePage.goto("/personal/models");
     await expect(activePage.getByText("会员有效", { exact: true })).toBeVisible();
     await expect(activePage.getByRole("button", { name: "保存个人连接", exact: true })).toBeVisible();
     const activeProviderList = await activePage.evaluate(async () => {
@@ -481,9 +501,7 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     expect(activeProviderList).toBe(200);
 
     await signInR02Actor(expiredPage, actors.expired);
-    await expect(expiredPage.getByRole("link", { name: /查看我的模型/u })).toBeVisible();
-    await expect(expiredPage.getByRole("link", { name: /管理我的模型/u })).toHaveCount(0);
-    await expiredPage.goto("/profile/models");
+    await expiredPage.goto("/personal/models");
     await expect(expiredPage.getByText("会员已到期", { exact: true })).toBeVisible();
     await expect(expiredPage.getByRole("button", { name: "保存个人连接", exact: true })).toHaveCount(0);
     const expiredProviderAttempt = await postR02PersonalProvider(expiredPage);

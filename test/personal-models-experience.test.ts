@@ -24,14 +24,21 @@ const catalog = [
 ] as const;
 
 test("personal models page keeps authentication and membership evaluation on the server", async () => {
-  const page = await readFile("src/app/profile/models/page.tsx", "utf8");
+  const [page, legacyPage] = await Promise.all([
+    readFile("src/app/personal/models/page.tsx", "utf8"),
+    readFile("src/app/profile/models/page.tsx", "utf8"),
+  ]);
 
   assert.match(page, /requirePageSession\(\)/u);
   assert.match(page, /getMembershipStatus\(user\.id\)/u);
-  assert.match(page, /active="profile"/u);
+  assert.match(page, /active="personalKnowledge"/u);
+  assert.match(page, /PersonalWorkspaceNav/u);
   assert.match(page, /startsAt: membership\.startsAt\?\.toISOString/u);
   assert.match(page, /expiresAt: membership\.expiresAt\?\.toISOString/u);
   assert.match(page, /<PersonalModelsClient/u);
+  assert.match(legacyPage, /requirePageSession\(\)/u);
+  assert.match(legacyPage, /redirect\("\/personal\/models"\)/u);
+  assert.doesNotMatch(legacyPage, /PersonalModelsClient/u);
 });
 
 test("personal models experience uses only the personal provider contract and never the admin provider API", async () => {
@@ -58,10 +65,10 @@ test("personal models experience uses only the personal provider contract and ne
   assert.match(client, /AI_PROVIDER_IN_USE/u);
   assert.match(client, /状态已刷新，请重新打开编辑/u);
   assert.match(client, /await onReload\(\)[\s\S]*setEditing\(null\)[\s\S]*setDraft\(null\)/u);
-  assert.match(profile, /href="\/profile\/models"/u);
-  assert.match(profile, /可在上方提交会员申请/u);
+  assert.match(client, /href="\/personal\/configuration"/u);
+  assert.doesNotMatch(profile, /href="\/profile\/models"/u);
+  assert.doesNotMatch(profile, /<h2[^>]*>我的模型<\/h2>/u);
   assert.doesNotMatch(profile, /联系管理员开通会员/u);
-  assert.match(profile, /不能测试、启用或调用/u);
 });
 
 test("membership states are reflected as capability gates in the personal models page", async () => {

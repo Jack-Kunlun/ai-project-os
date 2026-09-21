@@ -118,8 +118,8 @@ export function McpConnectionsClient() {
   return (
     <div className="mx-auto max-w-6xl px-5 pb-16 pt-7 sm:px-8 lg:px-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link href="/profile" className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-slate-600 transition hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><span aria-hidden="true">←</span> 返回个人中心</Link>
-        <span className="text-xs text-slate-400">个人设置 / 我的连接 / MCP</span>
+        <Link href="/personal/configuration" className="inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-slate-600 transition hover:text-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"><span aria-hidden="true">←</span> 返回个人工作区配置</Link>
+        <span className="text-xs text-slate-400">个人工作区 / 我的连接 / MCP</span>
       </div>
 
       <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">

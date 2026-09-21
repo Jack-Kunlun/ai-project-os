@@ -15,6 +15,7 @@ const BASE_ORIGIN = "https://ai-project-os.invalid";
 
 export const PROJECT_NAVIGATION_ROUTES = [
   "overview",
+  "configuration",
   "plan",
   "materials",
   "materialsReview",
@@ -105,7 +106,10 @@ type RouteDefinition = Readonly<{
 }>;
 
 const ROUTE_DEFINITIONS: Readonly<Record<ProjectNavigationRoute, RouteDefinition>> = Object.freeze({
-  overview: { suffix: "", queryKeys: ["focus", "from", "returnTo"] },
+  // Overview owns the former governance filters so deep links can land on the
+  // canonical page without losing the task list position or query state.
+  overview: { suffix: "", queryKeys: ["status", "kind", "search", "cursor", "focus", "from", "returnTo"] },
+  configuration: { suffix: "/configuration", queryKeys: ["from", "returnTo"] },
   plan: { suffix: "/plan", queryKeys: ["status", "focus", "from", "returnTo"] },
   materials: { suffix: "/materials", queryKeys: ["view", "search", "kind", "page", "focus", "from", "returnTo"] },
   materialsReview: { suffix: "/materials/review", queryKeys: ["search", "filter", "cursor", "focus", "from", "returnTo"] },
@@ -181,7 +185,7 @@ function isNonEmptySearch(value: string | null | undefined): value is string {
 function isAllowedStatus(route: ProjectNavigationRoute, value: string | null | undefined): value is string {
   if (value === null || value === undefined) return false;
   if (route === "plan") return PROJECT_PLAN_STATUS_VALUES.includes(value as ProjectPlanStatus);
-  if (route === "governance" || route === "job") return PROJECT_JOB_STATUS_VALUES.includes(value as ProjectJobStatus);
+  if (route === "overview" || route === "governance" || route === "job") return PROJECT_JOB_STATUS_VALUES.includes(value as ProjectJobStatus);
   if (route === "assets") return ASSET_STATUS_VALUES.includes(value as (typeof ASSET_STATUS_VALUES)[number]);
   if (route === "actions") return value === "pending" || value === "approved" || value === "rejected" || value === "cancelled" || value === "completed";
   return false;
@@ -192,7 +196,7 @@ function isAllowedKind(route: ProjectNavigationRoute, value: string | null | und
   if (route === "materials") return MATERIAL_KIND_VALUES.includes(value as (typeof MATERIAL_KIND_VALUES)[number]);
   if (route === "assets") return ASSET_KIND_VALUES.includes(value as (typeof ASSET_KIND_VALUES)[number]);
   if (route === "automations") return AUTOMATION_KIND_VALUES.includes(value as (typeof AUTOMATION_KIND_VALUES)[number]);
-  if (route === "governance" || route === "job") return OPERATION_KIND_VALUES.includes(value as (typeof OPERATION_KIND_VALUES)[number]);
+  if (route === "overview" || route === "governance" || route === "job") return OPERATION_KIND_VALUES.includes(value as (typeof OPERATION_KIND_VALUES)[number]);
   return false;
 }
 

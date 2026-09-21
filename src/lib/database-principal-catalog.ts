@@ -34,7 +34,7 @@ export const DATABASE_PRINCIPAL_RELATIONS = Object.freeze([
   "ProjectScan", "ProjectSnapshot", "ProjectAiPolicyRevision", "ProjectAiPolicyOperationProfile",
   "ProjectAiPolicy", "ModelProcessingGrant", "ModelProcessingGrantSource", "ModelProcessingGrantOperation",
   "AiRun", "AiRunAttempt", "AiRunInputSource", "AiAuditEvent", "AiCandidateBatch", "AiCandidateClaim",
-  "AppUser", "PlatformBootstrap", "AppUserEmailVerificationAudit", "AccountAccessMutationPreview", "AccountAccessAudit",
+  "AppUser", "PlatformBootstrap", "AppUserEmailVerificationAudit", "PersonalKnowledgeDocument", "PersonalKnowledgeRevision", "PersonalKnowledgeAudit", "PersonalKnowledgeIndexPointer", "AccountAccessMutationPreview", "AccountAccessAudit",
   "MembershipSubscription", "MembershipMutationPreview", "MembershipSubscriptionAudit", "PlatformTokenGrant", "PlatformTokenGrantLegacyNullIssuerSnapshot",
   "MembershipApplication", "MembershipApplicationPreview", "MembershipApplicationAudit",
   "PlatformTokenReservation", "PlatformTokenReservationAllocation", "PlatformTokenLedgerEntry",
@@ -215,6 +215,10 @@ export const DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX = Object.freeze([
   triggerFunction("project_mcp_tool_grant_review_guard", "", "project MCP grant immutable-review eligibility trigger"),
   triggerFunction("project_git_manual_runtime_transition_audit_guard", "", "project Git manual runtime transition audit completeness trigger"),
   triggerFunction("project_git_manual_runtime_audit_guard", "", "project Git manual runtime audit and final-fence trigger"),
+  triggerFunction("personal_knowledge_document_current_guard", "", "personal knowledge current revision integrity trigger"),
+  triggerFunction("personal_knowledge_revision_immutable_guard", "", "personal knowledge immutable revision trigger"),
+  triggerFunction("personal_knowledge_audit_immutable_guard", "", "personal knowledge append-only audit trigger"),
+  triggerFunction("personal_knowledge_audit_references_guard", "", "personal knowledge audit reference shape trigger"),
 ] as const);
 
 export function isKnownDatabasePrincipalRelation(value: string): boolean {

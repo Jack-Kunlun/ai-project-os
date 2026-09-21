@@ -1,6 +1,6 @@
 # 部署安全基线
 
-本文档适用于把 AI Project OS 暴露到本机之外的部署。默认 Compose 是本地运行基线，不等同于公网生产部署。当前批准的生产目标是精确预发布标签 `v0.5.0-dev.4`；历史生产基线 `v0.5.0-dev.1` 的 clean reset 不属于当前发布路径，旧 `v0.5.0-dev.2`、`v0.5.0-dev.3`、`v0.4.0-dev.1`、`v0.3.0-dev.1`、`v0.2.0-dev.1` 或其他 `-dev` 标签均不得进入当前工作流，也不把预发布描述为稳定版。只有标签 CI、生产备份恢复演练、旧库只读预检、停写切换门禁和部署后现场验收全部通过，才能声明该版本已在生产交付。
+本文档适用于把 AI Project OS 暴露到本机之外的部署。默认 Compose 是本地运行基线，不等同于公网生产部署。当前批准的生产目标是精确预发布标签 `v0.6.0-dev.1`，只允许从生产实际运行的 `v0.5.0-dev.1` 或 `v0.5.0-dev.4` 进入专用升级通道；其他标签均不得进入当前工作流，也不把预发布描述为稳定版。只有标签 CI、生产备份恢复演练、旧库只读预检、停写切换门禁和部署后现场验收全部通过，才能声明该版本已在生产交付。
 
 ## 必须满足的边界
 
@@ -40,4 +40,4 @@ curl --fail https://project-os.example.com/api/health
 
 `/api/health` 可用于存活探测，但它不证明登录、外部连接、持久化或备份可用。发布验收仍需分别覆盖数据库迁移、恢复演练、Worker、页面和真实外部服务。
 
-生产发布使用[GitHub Actions 生产部署](production-deployment.md)中的 forced-command、root-owned 部署入口和备份边界。当前工作流只接受 `v0.5.0-dev.4`；历史 `v0.5.0-dev.1`、`v0.5.0-dev.2`、`v0.5.0-dev.3`、`v0.1.0-dev.1`、旧 `v0.4.0-dev.1`/`v0.3.0-dev.1`/`v0.2.0-dev.1`、其他 `-dev` 标签和未批准版本仍必须失败关闭。不得把通用 SSH Shell、Docker socket 或不受限 sudo 权限交给工作流。
+生产发布使用[GitHub Actions 生产部署](production-deployment.md)中的 forced-command、root-owned 部署入口和备份边界。当前工作流只接受目标 `v0.6.0-dev.1`，源版本只接受 `v0.5.0-dev.1` 或 `v0.5.0-dev.4`；其他标签和未批准版本必须失败关闭。不得把通用 SSH Shell、Docker socket 或不受限 sudo 权限交给工作流。

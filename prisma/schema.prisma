@@ -168,6 +168,21 @@ enum AppUserRole {
   user
 }
 
+/// A personal knowledge document stays owner-scoped for its entire lifetime.
+/// `deleted` is a durable tombstone; it is never returned by active reads.
+enum PersonalKnowledgeDocumentState {
+  active
+  deleted
+}
+
+/// Durable, body-free audit events for owner-only personal knowledge actions.
+enum PersonalKnowledgeAuditEvent {
+  created
+  revised
+  deleted
+  exported
+}
+
 enum AccountAccessAction {
   disable
   restore
@@ -4561,6 +4576,134 @@ model AppUser {
   projectAiProviderDelegationProjectConfirmations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProjectConfirmer")
   projectAiEffectiveRouteSelections            ProjectAiEffectiveRouteSelection[] @relation("ProjectAiEffectiveRouteSelectionSelectedBy")
   billedWebAiGrants             WebAiGrant[]                    @relation("WebAiGrantBillingUser")
+  /// Owner-scoped personal knowledge documents. These relations never imply
+  /// workspace or project visibility; service predicates must include ownerUserId.
+  personalKnowledgeDocuments PersonalKnowledgeDocument[] @relation("PersonalKnowledgeDocumentOwner")
+  personalKnowledgeRevisions PersonalKnowledgeRevision[] @relation("PersonalKnowledgeRevisionOwner")
+  personalKnowledgeAudits PersonalKnowledgeAudit[] @relation("PersonalKnowledgeAuditOwner")
+  personalKnowledgeIndexPointers PersonalKnowledgeIndexPointer[] @relation("PersonalKnowledgeIndexPointerOwner")
+}
+
+/// A pure-text knowledge document owned directly by one active ordinary user.
+/// The current revision is selected by currentRevisionId and version; a null
+/// currentRevisionId is tolerated only before the deferred commit-time guard
+/// runs during the atomic create transaction.
+model PersonalKnowledgeDocument {
+  /// Stable document identifier used by owner-scoped API routes.
+  id                String                              @id @default(uuid()) @db.Uuid
+  /// The only visibility root. This is deliberately not a Workspace or Project key.
+  ownerUserId       String                              @db.Uuid
+  /// Active rows are visible; deleted rows are durable tombstones.
+  state             PersonalKnowledgeDocumentState      @default(active)
+  /// Optimistic compare-and-swap fence for PATCH, DELETE and export audit writes.
+  version           Int                                 @default(1)
+  /// Points to this document's immutable revision matching `version`. It may
+  /// be null only between the first document INSERT and revision pointer
+  /// update inside one transaction; the deferred database trigger rejects an
+  /// active document that reaches transaction commit without this pointer.
+  currentRevisionId String?                             @db.Uuid
+  /// Creation time retained for list ordering and user-facing metadata.
+  createdAt         DateTime                            @default(now())
+  /// Last revision or tombstone mutation time.
+  updatedAt         DateTime                            @updatedAt
+  /// Tombstone timestamp; null means active and a non-null value excludes every active path.
+  deletedAt         DateTime?
+  owner             AppUser                             @relation("PersonalKnowledgeDocumentOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  revisions         PersonalKnowledgeRevision[]         @relation("PersonalKnowledgeDocumentRevisions")
+  currentRevision   PersonalKnowledgeRevision?           @relation("PersonalKnowledgeDocumentCurrentRevision", fields: [currentRevisionId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
+  audits            PersonalKnowledgeAudit[]             @relation("PersonalKnowledgeDocumentAudits")
+  indexPointer      PersonalKnowledgeIndexPointer?       @relation("PersonalKnowledgeDocumentIndexPointer")
+
+  @@unique([id, ownerUserId])
+  @@unique([currentRevisionId, ownerUserId])
+  @@index([ownerUserId, state, updatedAt, id])
+  @@index([ownerUserId, currentRevisionId])
+}
+
+/// Immutable title/body snapshot. Historical bodies are owner-only and remain
+/// available through the revision endpoint while the document is active.
+model PersonalKnowledgeRevision {
+  /// Stable immutable revision identifier used by audit evidence.
+  id          String                    @id @default(uuid()) @db.Uuid
+  /// Parent document; ownerUserId is repeated to make the composite owner fence database-enforced.
+  documentId  String                    @db.Uuid
+  /// Denormalized owner fence; it must match the parent document owner.
+  ownerUserId String                    @db.Uuid
+  /// Monotonic revision number; it must equal the document version when current.
+  version     Int
+  /// User-entered title, bounded to keep summaries and exports manageable.
+  title       String                    @db.VarChar(240)
+  /// Pure text body; uploads and binary payloads are outside T01 scope.
+  content     String                    @db.Text
+  /// SHA-256 of the UTF-8 body used for integrity and export evidence.
+  contentHash String                    @db.Char(64)
+  /// UTF-8 byte count, checked against the stored body by the migration.
+  byteCount   Int
+  /// Immutable revision creation time.
+  createdAt   DateTime                  @default(now())
+  document    PersonalKnowledgeDocument  @relation("PersonalKnowledgeDocumentRevisions", fields: [documentId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade, onUpdate: Cascade)
+  owner       AppUser                   @relation("PersonalKnowledgeRevisionOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  currentFor  PersonalKnowledgeDocument? @relation("PersonalKnowledgeDocumentCurrentRevision")
+  audits      PersonalKnowledgeAudit[]   @relation("PersonalKnowledgeRevisionAudits")
+
+  @@unique([documentId, version])
+  @@unique([ownerUserId, id])
+  @@index([ownerUserId, documentId, version])
+}
+
+/// Body-free append-only evidence for document mutations and exports. The
+/// references JSON contains IDs and format metadata only, never title/content.
+model PersonalKnowledgeAudit {
+  /// Stable append-only audit identifier.
+  id            String                       @id @default(uuid()) @db.Uuid
+  /// Owner fence for every audit lookup and retention decision.
+  ownerUserId   String                       @db.Uuid
+  /// Document identity without copying title or body text.
+  documentId    String                       @db.Uuid
+  /// Revision identity and hash/size evidence for the event.
+  revisionId    String                       @db.Uuid
+  /// Mutation or export event recorded by the service transaction.
+  event         PersonalKnowledgeAuditEvent
+  /// Versioned audit shape for future readers.
+  schemaVersion String                       @db.VarChar(32)
+  /// SHA-256 body digest; the plaintext body is never copied here.
+  contentHash   String                       @db.Char(64)
+  /// UTF-8 byte count associated with contentHash.
+  byteCount     Int
+  /// IDs, versions and format metadata only; title/content are forbidden.
+  references    Json                         @db.JsonB
+  /// Event time assigned by the mutation transaction.
+  createdAt     DateTime                     @default(now())
+  owner         AppUser                      @relation("PersonalKnowledgeAuditOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  document      PersonalKnowledgeDocument    @relation("PersonalKnowledgeDocumentAudits", fields: [documentId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade, onUpdate: Cascade)
+  revision      PersonalKnowledgeRevision    @relation("PersonalKnowledgeRevisionAudits", fields: [revisionId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([ownerUserId, id])
+  @@index([ownerUserId, documentId, createdAt])
+  @@index([ownerUserId, event, createdAt])
+}
+
+/// T03 reserves this pointer for a future personal index. T01 only invalidates
+/// it inside the document mutation transaction and stores no searchable body.
+model PersonalKnowledgeIndexPointer {
+  /// Document identity and primary key for the future T03 index pointer.
+  documentId      String                    @id @db.Uuid
+  /// Owner fence repeated so a pointer can never cross accounts.
+  ownerUserId     String                    @db.Uuid
+  /// Document version whose index is known to be stale.
+  documentVersion Int
+  /// Last mutation that invalidated the future index.
+  invalidatedAt   DateTime                  @default(now())
+  /// Pointer creation time for operational evidence.
+  createdAt       DateTime                  @default(now())
+  /// Last pointer invalidation time.
+  updatedAt       DateTime                  @updatedAt
+  document        PersonalKnowledgeDocument  @relation("PersonalKnowledgeDocumentIndexPointer", fields: [documentId, ownerUserId], references: [id, ownerUserId], onDelete: Cascade, onUpdate: Cascade)
+  owner           AppUser                   @relation("PersonalKnowledgeIndexPointerOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([ownerUserId, documentId])
+  @@unique([documentId, ownerUserId])
+  @@index([ownerUserId, invalidatedAt])
 }
 
 // Email verification evidence contains only status transitions and email

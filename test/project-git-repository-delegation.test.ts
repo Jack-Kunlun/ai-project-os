@@ -297,6 +297,10 @@ test("Git delegation workbench exposes server capabilities and safe run projecti
   assert.match(service, /canReject/u);
   assert.match(service, /canRevoke/u);
   assert.match(service, /canManualSync/u);
+  assert.match(service, /const connectionOwnerView = actorId === row\.connectionOwnerId/u);
+  assert.match(service, /connection: connectionOwnerView[\s\S]*?\? Object\.freeze\([\s\S]*?: null/u);
+  assert.match(repositoriesClient, /connection: Readonly<[^>]*> \| null/u);
+  assert.match(repositoriesClient, /个人连接（仅所有者可见）/u);
   assert.match(service, /canProjectConfirm:[\s\S]*currentOwnerMembership && ownerActorActive/u);
   assert.match(service, /credential\?\.kind === "git"/u);
   const connectionsProjection = service.slice(service.indexOf("connections:"), service.indexOf("delegations:"));

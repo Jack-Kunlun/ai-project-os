@@ -3,6 +3,9 @@
 :root {
   --background: #f4f6fb;
   --foreground: #0f172a;
+  --scrollbar-track: #e2e8f0;
+  --scrollbar-thumb: #94a3b8;
+  --scrollbar-thumb-hover: #64748b;
 }
 
 @theme inline {
@@ -38,6 +41,70 @@ button:not(:disabled) {
 ::selection {
   background: #c7d2fe;
   color: #1e1b4b;
+}
+
+/*
+ * Every scroll container gets shared light colors by default, including nested
+ * panels that cannot share a component class. Those colors preserve native
+ * width; the explicit dark modal opts into compact geometry with these tokens.
+ */
+:where(*) {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+.app-scrollbar-dark {
+  --scrollbar-track: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb: rgba(148, 163, 184, 0.72);
+  --scrollbar-thumb-hover: rgba(203, 213, 225, 0.88);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+.app-scrollbar-dark::-webkit-scrollbar {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
+/* Colors are shared globally; these track/thumb rules do not change native width. */
+:where(*)::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+:where(*)::-webkit-scrollbar-thumb {
+  border: 2px solid var(--scrollbar-track);
+  border-radius: 50%;
+  background: var(--scrollbar-thumb);
+}
+
+:where(*)::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* Let high contrast users keep the browser's system colors and scrollbar size. */
+@media (forced-colors: active) {
+  :where(*) {
+    forced-color-adjust: auto;
+    scrollbar-color: auto;
+  }
+
+  .app-scrollbar-dark {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  .app-scrollbar-dark::-webkit-scrollbar {
+    width: auto;
+    height: auto;
+  }
+
+  :where(*)::-webkit-scrollbar-track {
+    background: Canvas;
+  }
+
+  :where(*)::-webkit-scrollbar-thumb {
+    border-color: Canvas;
+    background: ButtonText;
+  }
 }
 
 /* Tailwind's slate-400 is too light for small secondary text on light surfaces. */

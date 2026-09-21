@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("project overview and materials use separate routes with a compact navigation", async () => {
-  const [page, overview, materialsPage, materials, reviewPage, header, dashboard, world, governance] = await Promise.all([
+test("project overview owns governance panels while materials and configuration stay separate", async () => {
+  const [page, overview, materialsPage, materials, reviewPage, header, dashboard, world, governance, governancePage] = await Promise.all([
     readFile("src/app/projects/[projectId]/page.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/project-overview-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/materials/page.tsx", "utf8"),
@@ -13,27 +13,29 @@ test("project overview and materials use separate routes with a compact navigati
     readFile("src/app/dashboard/dashboard-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/world/project-world-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/governance/project-governance-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/governance/page.tsx", "utf8"),
   ]);
 
   assert.match(page, /ProjectOverviewClient/u);
   assert.match(materialsPage, /ProjectDetailClient/u);
   assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/materials`\}/u);
   assert.doesNotMatch(header, /href=\{`\/projects\/\$\{projectId\}#project-materials`\}/u);
-  assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/governance`\}/u);
+  assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/configuration`\}/u);
+  assert.doesNotMatch(header, /href=\{`\/projects\/\$\{projectId\}\/governance`\}/u);
   assert.match(header, />\s*项目概览\s*</u);
   assert.match(header, />\s*项目计划\s*</u);
   assert.match(header, />\s*项目资料\s*</u);
   assert.match(header, />\s*AI 工作台\s*</u);
   assert.match(header, />\s*项目自动化\s*</u);
-  assert.match(header, />\s*项目管理\s*</u);
-  const orderedTabs = ["项目概览", "项目计划", "项目资料", "AI 工作台", "项目自动化", "项目管理"];
+  assert.match(header, />\s*项目配置\s*</u);
+  assert.doesNotMatch(header, />\s*项目管理\s*</u);
+  const orderedTabs = ["项目概览", "项目配置", "项目计划", "项目资料", "AI 工作台", "项目自动化"];
   const tabPositions = orderedTabs.map((label) => header.indexOf(label));
   assert.ok(tabPositions.every((position) => position >= 0));
   assert.deepEqual([...tabPositions].sort((left, right) => left - right), tabPositions);
   assert.match(header, /const overviewSections[^\n]*\["overview"\]/u);
-  assert.match(header, /const managementSections[^\n]*\["world", "tools", "actions", "governance"\]/u);
   assert.match(header, /projectSection === "plan"/u);
-  assert.match(header, /managementSections/u);
+  assert.doesNotMatch(header, /managementSections/u);
   assert.doesNotMatch(header, /<details|<summary|projectGroups/u);
   assert.doesNotMatch(header, /key: "governance",\s*label: "治理"/u);
 
@@ -45,14 +47,19 @@ test("project overview and materials use separate routes with a compact navigati
   assert.match(overview, /id="current-state"/u);
   assert.doesNotMatch(overview, /项目工作区/u);
   assert.match(overview, /高级状态治理/u);
+  assert.match(overview, /ProjectGovernanceSections/u);
+  assert.match(overview, /focus: "task-runs"/u);
   assert.doesNotMatch(overview, /ProjectMaterialIntake/u);
 
   assert.match(dashboard, /\/projects\/\$\{entry\.project\.id\}#current-state/u);
   assert.doesNotMatch(dashboard, /href=\{`\/projects\/\$\{entry\.project\.id\}\/world`\}/u);
   assert.match(world, /Advanced state governance/u);
-  assert.match(world, /返回项目管理/u);
-  assert.match(governance, />状态治理</u);
-  assert.match(governance, /\/world/u);
+  assert.match(world, /返回项目概览/u);
+  assert.match(governance, /ProjectGovernanceSections/u);
+  assert.match(governance, /id="ai-usage"/u);
+  assert.match(governance, /<details id="task-runs"/u);
+  assert.match(governancePage, /redirect\(buildProjectHref\(projectId, "overview"/u);
+  assert.match(governancePage, /parseProjectPageState\("governance"/u);
 
   assert.match(materials, /projectSection="materials"/u);
   assert.match(materials, /ProjectMaterialIntake/u);
@@ -120,7 +127,7 @@ test("project material operations return to their immediate parent", async () =>
   assert.match(repositories, /ProjectMaterialsParentLink/u);
 });
 
-test("AI workbench spacing and project management keep AI usage visible", async () => {
+test("AI workbench spacing and project overview keep AI usage visible", async () => {
   const [intelligence, governance] = await Promise.all([
     readFile("src/app/projects/[projectId]/intelligence/project-intelligence-client.tsx", "utf8"),
     readFile("src/app/projects/[projectId]/governance/project-governance-client.tsx", "utf8"),

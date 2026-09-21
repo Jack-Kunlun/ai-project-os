@@ -203,7 +203,7 @@ export function SettingsClient({ username, canManageProviders, activeMembership,
     <div className="w-full px-4 pb-12 pt-5 sm:px-5 lg:px-6">
         <AdminPageHeader title="平台模型" description="先查看当前已配置连接；新增供应商时填写官方固定端点的模型与密钥配置。连接测试会单独消耗探测预算。" actions={canManageProviders ? <button ref={createTriggerRef} type="button" onClick={() => setCreateOpen(true)} className="inline-flex min-h-10 items-center rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500">新增供应商</button> : undefined} />
 
-        {!canManageProviders ? <section className="mt-7 rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7"><h2 className="text-xl font-semibold">平台模型由系统管理员管理</h2><p className="mt-3 text-sm leading-7 text-slate-600">普通用户可以使用平台额度和平台默认模型，不会请求或查看平台供应商接口。{activeMembership ? "当前会员有效，你可以在个人账号中配置自己的模型连接。" : membershipStatus === "expired" ? "会员资格已到期；重新获得资格后才可配置个人模型。" : membershipStatus === "revoked" ? "会员资格已撤销；重新获得资格后才可配置个人模型。" : "如需配置个人模型，请在个人中心提交会员申请。"}</p>{activeMembership ? <a href="/profile/models" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">配置个人模型</a> : null}</section> : null}
+        {!canManageProviders ? <section className="mt-7 rounded-3xl border border-indigo-200 bg-indigo-50/70 p-7"><h2 className="text-xl font-semibold">平台模型由系统管理员管理</h2><p className="mt-3 text-sm leading-7 text-slate-600">普通用户可以使用平台额度和平台默认模型，不会请求或查看平台供应商接口。{activeMembership ? "当前会员有效，你可以在个人工作区配置自己的模型连接。" : membershipStatus === "expired" ? "会员资格已到期；重新获得资格后才可配置个人模型。" : membershipStatus === "revoked" ? "会员资格已撤销；重新获得资格后才可配置个人模型。" : "如需配置个人模型，请先完成会员申请。"}</p>{activeMembership ? <a href="/personal/models" className="mt-5 inline-flex rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">配置个人模型</a> : null}</section> : null}
         {canManageProviders && error ? <div role="alert" className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}
 
         {canManageProviders ? <section className="mt-5 space-y-4">
@@ -447,7 +447,8 @@ function ProviderCreateDialog({
   };
   return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-3 sm:p-6" role="presentation">
     <button type="button" aria-label="关闭新增供应商" tabIndex={-1} onClick={close} className="absolute inset-0 bg-slate-950/50" />
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="provider-create-dialog-title" aria-describedby="provider-create-dialog-description" className="relative z-10 flex max-h-[min(34rem,calc(100dvh-3rem))] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-slate-950 shadow-2xl shadow-slate-950/30">
+    {/* Match the overlay's p-3/sm:p-6 insets so tall screens can show more of the form while short screens remain contained. */}
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="provider-create-dialog-title" aria-describedby="provider-create-dialog-description" className="relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-slate-950 shadow-2xl shadow-slate-950/30 sm:max-h-[calc(100dvh-3rem)]">
       <header className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 px-6 py-4 text-white sm:px-7">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">New connection</p>
@@ -582,7 +583,8 @@ function ProviderCreateForm({
 
   return (
     <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col text-white">
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-5 sm:px-7">
+      {/* The body owns overflow so the header and action footer stay available while fields scroll. */}
+      <div className="app-scrollbar-dark min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6 pt-5 sm:px-7">
         <Field label="供应商">
           <select value={kind} onChange={(event) => chooseKind(event.target.value as ProviderKind)} className="dark-field">
             {catalog.map((entry) => <option key={entry.kind} value={entry.kind}>{entry.displayName}</option>)}

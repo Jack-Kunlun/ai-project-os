@@ -62,6 +62,7 @@ import { PlatformCreditGovernanceError } from "@/lib/platform-credit-governance-
 import { MembershipApplicationServiceError } from "@/lib/membership-application-service";
 import { WorkspaceRoleGovernanceError } from "@/lib/workspace-role-governance-service";
 import { AdminUserOperationsError } from "@/lib/admin-user-operations-service";
+import { PersonalKnowledgeError } from "@/lib/personal-knowledge-service";
 
 export type ApiErrorBody = {
   error: {
@@ -84,6 +85,20 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof PersonalKnowledgeError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PERSONAL_KNOWLEDGE_INVALID_INPUT: [400, "个人知识请求无效"],
+      PERSONAL_KNOWLEDGE_FORBIDDEN: [403, "无权访问个人知识"],
+      PERSONAL_KNOWLEDGE_ACCOUNT_DISABLED: [403, "当前账户已停用"],
+      PERSONAL_KNOWLEDGE_ACCOUNT_ACCESS_STALE: [401, "当前会话已失效，请重新登录"],
+      PERSONAL_KNOWLEDGE_DOCUMENT_NOT_FOUND: [404, "个人知识文档不存在"],
+      PERSONAL_KNOWLEDGE_VERSION_CONFLICT: [409, "个人知识文档已被其他操作更新，请刷新后重试"],
+      PERSONAL_KNOWLEDGE_INTEGRITY_ERROR: [500, "个人知识文档完整性校验失败"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "个人知识处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof AdminUserOperationsError) {
     const mapping: Record<string, readonly [number, string]> = {
       ADMIN_USER_OPERATIONS_ADMIN_REQUIRED: [403, "只有系统管理员可以管理普通用户"],

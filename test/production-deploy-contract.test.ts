@@ -8,6 +8,7 @@ import test from "node:test";
 const repositoryRoot = process.cwd();
 const workflowPath = path.join(repositoryRoot, ".github/workflows/deploy-production.yml");
 const deploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-deploy");
+const v06DeploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-v06-deploy");
 const cleanDeploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-clean-deploy");
 const backupPath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup");
 const backupInstallerPath = path.join(repositoryRoot, "deploy/production/install-production-backup.sh");
@@ -15,6 +16,7 @@ const backupServicePath = path.join(repositoryRoot, "deploy/production/ai-projec
 const backupTimerPath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup.timer");
 const productionComposeOverridePath = path.join(repositoryRoot, "deploy/production/compose.operations.yaml");
 const gatewayPath = path.join(repositoryRoot, "deploy/production/ai-project-os-actions-gateway");
+const releaseToolingInstallerPath = path.join(repositoryRoot, "deploy/production/ai-project-os-install-release-tooling");
 const githubOAuthConfiguratorPath = path.join(repositoryRoot, "deploy/production/ai-project-os-configure-github-oauth");
 const installerPath = path.join(repositoryRoot, "deploy/production/install-production-deploy.sh");
 const sudoersPath = path.join(repositoryRoot, "deploy/production/ai-project-os-deploy.sudoers");
@@ -45,31 +47,32 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.match(workflow, /PRODUCTION_SSH_HOST_INVALID/u);
   assert.match(workflow, /ai-project-os-actions@\$PRODUCTION_SSH_HOST/u);
   assert.doesNotMatch(workflow, /38\.76\.205\.30/u);
-  assert.match(workflow, /"preserve-deploy v0\.5\.0-dev\.1 \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_PRESERVE_DATA_V1"/u);
-  assert.match(workflow, /Create verified offsite backup and preserve-data deploy/u);
+  assert.match(workflow, /"install-release-tooling \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_INSTALL_RELEASE_TOOLING_V1"/u);
+  assert.match(workflow, /"deploy-v06 \$DEPLOY_SOURCE_TAG \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_V06_MIGRATION_V1"/u);
+  assert.match(workflow, /Create verified offsite backup and migrate/u);
   assert.match(workflow, /PRODUCTION_BACKUP_RESULT_INVALID/u);
   assert.match(workflow, /DEPLOY_BACKUP_OBJECT/u);
   assert.match(workflow, /\.worker\.consecutiveFailures == 0/u);
   assert.ok(
     workflow.indexOf("Sync GitHub OAuth configuration through restricted stdin") <
-      workflow.indexOf("Create verified offsite backup and preserve-data deploy through forced-command gateway"),
+      workflow.indexOf("Create verified offsite backup and migrate through forced-command gateway"),
     "production OAuth configuration must be synchronized before deployment starts",
   );
   assert.doesNotMatch(workflow, /configure-github-oauth[^\n]*(GITHUB_OAUTH_CLIENT_ID|GITHUB_OAUTH_CLIENT_SECRET)/u);
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
-test("production workflow enables only the explicitly approved v0.5.0-dev.4 prerelease", async () => {
+test("production workflow enables only the explicitly approved v0.6.0-dev.1 prerelease", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /default: v0\.5\.0-dev\.4/u);
+  assert.match(workflow, /default: v0\.6\.0-dev\.1/u);
   assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.4/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.1/u);
   assert.doesNotMatch(workflow, /&& false|DISABLED_BEFORE_V1_0_0|v1\.0\.0/u);
   assert.doesNotMatch(workflow, /DEPLOY_TAG_INPUT" =~ \^v/u);
 });
 
-test("forced-command gateway accepts only the exact preserve-data or GitHub OAuth command", async () => {
+test("forced-command gateway accepts only exact release tooling, preserve-data, or GitHub OAuth commands", async () => {
   const gateway = await readFile(gatewayPath, "utf8");
 
   assert.match(gateway, /SSH_ORIGINAL_COMMAND/u);
@@ -80,6 +83,12 @@ test("forced-command gateway accepts only the exact preserve-data or GitHub OAut
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-preserve-deploy/u);
   assert.match(gateway, /original_command.*== configure-github-oauth/u);
   assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-configure-github-oauth/u);
+  assert.match(gateway, /install-release-tooling/u);
+  assert.match(gateway, /CONFIRM_INSTALL_RELEASE_TOOLING_V1/u);
+  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-install-release-tooling/u);
+  assert.match(gateway, /deploy-v06/u);
+  assert.match(gateway, /CONFIRM_V06_MIGRATION_V1/u);
+  assert.match(gateway, /sudo -n \/usr\/local\/sbin\/ai-project-os-v06-deploy/u);
   assert.match(gateway, /AI_PROJECT_OS_DEPLOY_COMMAND_DENIED/u);
 });
 
@@ -908,6 +917,8 @@ test("installer keeps secrets root-only and installs a restricted Actions key", 
   assert.deepEqual(sudoers.trim().split("\n"), [
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-preserve-deploy",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-github-oauth",
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-install-release-tooling",
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-deploy",
   ]);
 });
 
@@ -920,7 +931,7 @@ test("production shell entrypoints pass bash syntax validation", () => {
     "bootstrap-production-host",
     "migrate-production-host",
   ].map((name) => path.join(repositoryRoot, "deploy/production", name));
-  for (const scriptPath of [deploymentPath, cleanDeploymentPath, backupPath, gatewayPath, githubOAuthConfiguratorPath, installerPath, backupInstallerPath, ...additionalScripts]) {
+  for (const scriptPath of [deploymentPath, v06DeploymentPath, cleanDeploymentPath, backupPath, gatewayPath, releaseToolingInstallerPath, githubOAuthConfiguratorPath, installerPath, backupInstallerPath, ...additionalScripts]) {
     const result = spawnSync("bash", ["-n", scriptPath], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
   }

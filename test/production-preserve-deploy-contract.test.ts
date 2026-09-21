@@ -138,7 +138,8 @@ test("preserve deploy allowlist covers the committed source-to-target diff", asy
   }
 
   const sourceRevision = "63a0a3700bd42a6d0ce5569276ce74a4b6aa9815";
-  const diff = spawnSync("git", ["diff", "--name-only", sourceRevision, "HEAD"], {
+  const targetRevision = "45bdc3e31";
+  const diff = spawnSync("git", ["diff", "--name-only", sourceRevision, targetRevision], {
     cwd: root,
     encoding: "utf8",
   });
@@ -235,7 +236,7 @@ test("preserve deploy protects PostgreSQL identity, ledger, data counts, and rol
   assert.match(preserve, /PRESERVE_DEPLOY_TARGET_WORKER_METADATA_INVALID/u);
 });
 
-test("gateway, sudoers, and installer expose only preserve deploy plus OAuth", async () => {
+test("gateway, sudoers, and installer preserve the v0.5 route while adding the restricted tooling updater", async () => {
   const [gateway, sudoers, installer] = await Promise.all([
     read(gatewayPath),
     read(sudoersPath),
@@ -247,11 +248,14 @@ test("gateway, sudoers, and installer expose only preserve deploy plus OAuth", a
   assert.doesNotMatch(gateway, /clean-deploy/u);
   assert.match(gateway, /ai-project-os-preserve-deploy/u);
   assert.match(gateway, /configure-github-oauth/u);
+  assert.match(gateway, /install-release-tooling/u);
   assert.doesNotMatch(sudoers, /clean-deploy/u);
   assert.match(sudoers, /ai-project-os-preserve-deploy/u);
   assert.match(sudoers, /ai-project-os-configure-github-oauth/u);
+  assert.match(sudoers, /ai-project-os-install-release-tooling/u);
   assert.match(installer, /ai-project-os-preserve-deploy/u);
   assert.match(installer, /bash -n \/usr\/local\/sbin\/ai-project-os-preserve-deploy/u);
+  assert.match(installer, /bash -n \/usr\/local\/sbin\/ai-project-os-install-release-tooling/u);
 });
 
 test("backup and recovery allow the explicit .1, .2, .3, and .4 preserve names", async () => {
@@ -265,17 +269,17 @@ test("backup and recovery allow the explicit .1, .2, .3, and .4 preserve names",
   assert.match(restore, /MIGRATION_TARGET_TAG=v0\.5\.0-dev\.1/u);
 });
 
-test("production workflow is main-only and requires exact .4 preserve markers", async () => {
+test("production workflow is main-only and requires exact 0.6 migration markers", async () => {
   const [workflow, ciWorkflow] = await Promise.all([read(workflowPath), read(ciWorkflowPath)]);
 
-  assert.match(workflow, /default: v0\.5\.0-dev\.4/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.5\.0-dev\.4/u);
+  assert.match(workflow, /default: v0\.6\.0-dev\.1/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.1/u);
   assert.match(workflow, /git rev-parse HEAD.*deploy_sha/u);
   assert.match(workflow, /git merge-base --is-ancestor "\$source_sha" "\$deploy_sha"/u);
   assert.match(workflow, /git rev-list --merges "\$source_sha\.\.\$deploy_sha"/u);
-  assert.match(workflow, /refs\/tags\/v0\.5\.0-dev\.1/u);
-  assert.match(workflow, /preserve-deploy v0\.5\.0-dev\.1 \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_PRESERVE_DATA_V1/u);
-  assert.match(workflow, /PRESERVE_DEPLOY_OK/u);
+  assert.match(workflow, /refs\/tags\/\$DEPLOY_SOURCE_TAG_INPUT/u);
+  assert.match(workflow, /deploy-v06 \$DEPLOY_SOURCE_TAG \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_V06_MIGRATION_V1/u);
+  assert.match(workflow, /\^DEPLOY_OK /u);
   assert.match(workflow, /BACKUP_OK .* source_quiesced=true/u);
   assert.doesNotMatch(workflow, /clean-deploy/u);
   assert.match(ciWorkflow, /uses: actions\/checkout@[\da-f]+[\s\S]*fetch-depth: 0/u);

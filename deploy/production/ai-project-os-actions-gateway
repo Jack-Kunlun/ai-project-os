@@ -5,6 +5,20 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 original_command=${SSH_ORIGINAL_COMMAND-}
 
+# The stable bootstrap accepts only the 0.6 release family, an exact commit,
+# and a fixed confirmation token. Argument re-expansion is never evaluated.
+if [[ "$original_command" =~ ^install-release-tooling\ (v0\.6\.[0-9]+(-dev\.[1-9][0-9]*)?)\ ([0-9a-f]{40})\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-install-release-tooling \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
+fi
+
+# The 0.6 migration route fixes both source and target release families. The
+# root deployer verifies the running source, stopped-writer backup, and ledger.
+if [[ "$original_command" =~ ^deploy-v06\ (v0\.5\.0-dev\.(1|4))\ (v0\.6\.0-dev\.1)\ ([0-9a-f]{40})\ (CONFIRM_V06_MIGRATION_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-v06-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+
 if [[ "$original_command" =~ ^preserve-deploy\ (v0\.5\.0-dev\.1)\ (v0\.5\.0-dev\.4)\ ([0-9a-f]{40})\ (CONFIRM_PRESERVE_DATA_V1)$ ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-preserve-deploy \
     "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"

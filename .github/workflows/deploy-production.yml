@@ -6,8 +6,16 @@ on:
       tag:
         description: Exact approved annotated release tag
         required: true
-        default: v0.5.0-dev.4
+        default: v0.6.0-dev.1
         type: string
+      source_tag:
+        description: Release currently serving production
+        required: true
+        default: v0.5.0-dev.4
+        type: choice
+        options:
+          - v0.5.0-dev.4
+          - v0.5.0-dev.1
 
 permissions:
   contents: read
@@ -40,27 +48,32 @@ jobs:
       - name: Resolve release tag and require its successful CI
         env:
           DEPLOY_TAG_INPUT: ${{ inputs.tag }}
+          DEPLOY_SOURCE_TAG_INPUT: ${{ inputs.source_tag }}
           GH_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          if [[ "$DEPLOY_TAG_INPUT" != v0.5.0-dev.4 ]]; then
+          if [[ "$DEPLOY_TAG_INPUT" != v0.6.0-dev.1 ]]; then
             echo "DEPLOY_TAG_INVALID" >&2
+            exit 64
+          fi
+          if [[ ! "$DEPLOY_SOURCE_TAG_INPUT" =~ ^v0\.5\.0-dev\.(1|4)$ ]]; then
+            echo "DEPLOY_SOURCE_TAG_INVALID" >&2
             exit 64
           fi
 
           git fetch --force --no-tags origin \
-            "refs/tags/v0.5.0-dev.1:refs/tags/v0.5.0-dev.1" \
+            "refs/tags/$DEPLOY_SOURCE_TAG_INPUT:refs/tags/$DEPLOY_SOURCE_TAG_INPUT" \
             "refs/tags/$DEPLOY_TAG_INPUT:refs/tags/$DEPLOY_TAG_INPUT"
 
-          if [[ "$(git cat-file -t refs/tags/v0.5.0-dev.1)" != tag ||
+          if [[ "$(git cat-file -t "refs/tags/$DEPLOY_SOURCE_TAG_INPUT")" != tag ||
             "$(git cat-file -t "refs/tags/$DEPLOY_TAG_INPUT")" != tag ]]; then
             echo "DEPLOY_TAG_NOT_ANNOTATED" >&2
             exit 65
           fi
 
-          source_sha=$(git rev-parse "refs/tags/v0.5.0-dev.1^{}")
+          source_sha=$(git rev-parse "refs/tags/$DEPLOY_SOURCE_TAG_INPUT^{}")
           deploy_sha=$(git rev-parse "refs/tags/$DEPLOY_TAG_INPUT^{}")
           if [[ "$source_sha" == "$deploy_sha" ]]; then
             echo "DEPLOY_SOURCE_TARGET_MUST_DIFFER" >&2
@@ -115,7 +128,7 @@ jobs:
             "$source_runs_url")
           if ! jq --exit-status \
             --arg sha "$source_sha" \
-            --arg tag "v0.5.0-dev.1" \
+            --arg tag "$DEPLOY_SOURCE_TAG_INPUT" \
             '.workflow_runs | any(
               .head_sha == $sha and
               .head_branch == $tag and
@@ -128,6 +141,7 @@ jobs:
           fi
 
           printf 'DEPLOY_TAG=%s\n' "$DEPLOY_TAG_INPUT" >> "$GITHUB_ENV"
+          printf 'DEPLOY_SOURCE_TAG=%s\n' "$DEPLOY_SOURCE_TAG_INPUT" >> "$GITHUB_ENV"
           printf 'DEPLOY_SHA=%s\n' "$deploy_sha" >> "$GITHUB_ENV"
 
       - name: Prepare restricted production SSH identity
@@ -151,6 +165,21 @@ jobs:
 
           ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" >/dev/null
           ssh-keygen -F "$PRODUCTION_SSH_HOST" -f "$RUNNER_TEMP/ai-project-os-ssh/known_hosts" >/dev/null
+
+      - name: Install release tooling from the verified 0.6 tag
+        run: |
+          set -euo pipefail
+
+          tooling_output=$(ssh \
+            -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "install-release-tooling $DEPLOY_TAG $DEPLOY_SHA CONFIRM_INSTALL_RELEASE_TOOLING_V1")
+          grep -Fq "RELEASE_TOOLING_INSTALL_OK tag=$DEPLOY_TAG revision=$DEPLOY_SHA" <<<"$tooling_output"
 
       - name: Sync GitHub OAuth configuration through restricted stdin
         env:
@@ -194,7 +223,7 @@ jobs:
           fi
           printf '%s\n' "$config_output"
 
-      - name: Create verified offsite backup and preserve-data deploy through forced-command gateway
+      - name: Create verified offsite backup and migrate through forced-command gateway
         run: |
           set -euo pipefail
           umask 077
@@ -211,7 +240,7 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=6 \
             "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
-                "preserve-deploy v0.5.0-dev.1 $DEPLOY_TAG $DEPLOY_SHA CONFIRM_PRESERVE_DATA_V1" 2>&1 | tee "$deployment_output_file"
+                "deploy-v06 $DEPLOY_SOURCE_TAG $DEPLOY_TAG $DEPLOY_SHA CONFIRM_V06_MIGRATION_V1" 2>&1 | tee "$deployment_output_file"
           pipeline_status=("${PIPESTATUS[@]}")
           set -e
 
@@ -223,10 +252,10 @@ jobs:
             exit 74
           fi
 
-          grep -q '^PRESERVE_DEPLOY_OK ' "$deployment_output_file"
+          grep -q '^DEPLOY_OK ' "$deployment_output_file"
           grep -q '^BACKUP_OK .* source_quiesced=true$' "$deployment_output_file"
 
-          backup_object=$(sed -n 's/^PRESERVE_DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
+          backup_object=$(sed -n 's/^DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
             "$deployment_output_file" | tail -n 1)
           if [[ ! "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]]; then
             echo "PRODUCTION_BACKUP_RESULT_INVALID" >&2
@@ -268,6 +297,7 @@ jobs:
 
           printf '### Production deployment\n\n' >> "$GITHUB_STEP_SUMMARY"
           printf -- '- Tag: `%s`\n' "$DEPLOY_TAG" >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Source tag: `%s`\n' "$DEPLOY_SOURCE_TAG" >> "$GITHUB_STEP_SUMMARY"
           printf -- '- Revision: `%s`\n' "$DEPLOY_SHA" >> "$GITHUB_STEP_SUMMARY"
           printf -- '- Pre-deploy backup: `%s`\n' "$DEPLOY_BACKUP_OBJECT" >> "$GITHUB_STEP_SUMMARY"
           printf -- '- Health: `status=ok`, `database=up`, `worker=up`\n' >> "$GITHUB_STEP_SUMMARY"

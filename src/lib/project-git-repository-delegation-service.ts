@@ -583,15 +583,21 @@ function delegationView(
   explicitProjectOwner: boolean,
   capabilities: ProjectGitRepositoryDelegationCapabilities = noDelegationCapabilities,
 ) {
-  const privileged = actorId === row.connectionOwnerId || explicitProjectOwner;
+  const connectionOwnerView = actorId === row.connectionOwnerId;
+  const privileged = connectionOwnerView || explicitProjectOwner;
   return Object.freeze({
     id: row.id,
     projectId: row.projectId,
-    connection: {
-      name: row.gitConnection.name,
-      providerKind: row.gitConnection.providerKind,
-      transport: row.gitConnection.transport,
-    },
+    // A personal connection name is private account metadata. Project scope
+    // remains visible, but only its owner receives the connection identity.
+    connection: connectionOwnerView
+      ? Object.freeze({
+          id: row.gitConnection.id,
+          name: row.gitConnection.name,
+          providerKind: row.gitConnection.providerKind,
+          transport: row.gitConnection.transport,
+        })
+      : null,
     connectionOwner: publicIdentity(row.connectionOwner),
     scope: {
       repositoryPath: row.repositoryPath,

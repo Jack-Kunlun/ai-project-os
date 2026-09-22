@@ -108,12 +108,15 @@ git -C "$TOOLING_REPOSITORY_DIR" archive --format=tar "$EXPECTED_REVISION" -- \
   deploy/production/ai-project-os-install-release-tooling \
   deploy/production/ai-project-os-deploy \
   deploy/production/ai-project-os-v06-deploy \
+  deploy/production/ai-project-os-v06-patch-deploy \
   deploy/production/ai-project-os-preserve-deploy \
   deploy/production/ai-project-os-backup \
+  deploy/production/ai_project_os_backup_artifact.py \
   deploy/production/ai-project-os-restore \
   deploy/production/ai-project-os-configure-github-oauth \
   deploy/production/compose.operations.yaml \
-  deploy/production/ai-project-os-deploy.sudoers | \
+  deploy/production/ai-project-os-deploy.sudoers \
+  scripts/production-v06-patch-upgrade-preflight.ts | \
   tar --extract --file=- --directory "$candidate_root" --no-same-owner --no-same-permissions
 
 package_version=$(python3 -c '
@@ -134,8 +137,10 @@ readonly GATEWAY=$CANDIDATE_DIR/ai-project-os-actions-gateway
 readonly UPDATER=$CANDIDATE_DIR/ai-project-os-install-release-tooling
 readonly DEPLOYER=$CANDIDATE_DIR/ai-project-os-deploy
 readonly V06_DEPLOYER=$CANDIDATE_DIR/ai-project-os-v06-deploy
+readonly V06_PATCH_DEPLOYER=$CANDIDATE_DIR/ai-project-os-v06-patch-deploy
 readonly PRESERVE_DEPLOYER=$CANDIDATE_DIR/ai-project-os-preserve-deploy
 readonly BACKUP=$CANDIDATE_DIR/ai-project-os-backup
+readonly BACKUP_ARTIFACT_HELPER=$CANDIDATE_DIR/ai_project_os_backup_artifact.py
 readonly RESTORE=$CANDIDATE_DIR/ai-project-os-restore
 readonly OAUTH_CONFIGURATOR=$CANDIDATE_DIR/ai-project-os-configure-github-oauth
 readonly COMPOSE_OVERRIDE=$CANDIDATE_DIR/compose.operations.yaml
@@ -148,8 +153,10 @@ for candidate in \
   "$UPDATER" \
   "$DEPLOYER" \
   "$V06_DEPLOYER" \
+  "$V06_PATCH_DEPLOYER" \
   "$PRESERVE_DEPLOYER" \
   "$BACKUP" \
+  "$BACKUP_ARTIFACT_HELPER" \
   "$RESTORE" \
   "$OAUTH_CONFIGURATOR" \
   "$COMPOSE_OVERRIDE" \
@@ -157,9 +164,10 @@ for candidate in \
   [[ -f "$candidate" && ! -L "$candidate" && -s "$candidate" ]] || fail RELEASE_TOOLING_CANDIDATE_INVALID 69
 done
 
-for script in "$GATEWAY" "$UPDATER" "$DEPLOYER" "$V06_DEPLOYER" "$PRESERVE_DEPLOYER" "$BACKUP" "$RESTORE" "$OAUTH_CONFIGURATOR"; do
+for script in "$GATEWAY" "$UPDATER" "$DEPLOYER" "$V06_DEPLOYER" "$V06_PATCH_DEPLOYER" "$PRESERVE_DEPLOYER" "$BACKUP" "$RESTORE" "$OAUTH_CONFIGURATOR"; do
   bash -n "$script" || fail RELEASE_TOOLING_SCRIPT_INVALID 69
 done
+python3 -m py_compile "$BACKUP_ARTIFACT_HELPER" || fail RELEASE_TOOLING_BACKUP_HELPER_INVALID 69
 
 # The refreshed gateway must retain this stable updater entry. Otherwise one
 # release could silently require interactive server access again.
@@ -169,6 +177,10 @@ grep -Fq 'CONFIRM_V06_MIGRATION_V1' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_C
 grep -Fq '/usr/local/sbin/ai-project-os-v06-deploy' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
 grep -Fq 'v0.6.0-dev.6' "$V06_DEPLOYER" || fail RELEASE_TOOLING_V06_DEPLOY_CONTRACT_INVALID 69
 grep -Fq 'scripts/production-v06-upgrade-preflight.ts' "$V06_DEPLOYER" || fail RELEASE_TOOLING_V06_DEPLOY_CONTRACT_INVALID 69
+grep -Fq 'v0.6.0-dev.7' "$V06_PATCH_DEPLOYER" || fail RELEASE_TOOLING_V06_PATCH_DEPLOY_CONTRACT_INVALID 69
+grep -Fq 'scripts/production-v06-patch-upgrade-preflight.ts' "$V06_PATCH_DEPLOYER" || fail RELEASE_TOOLING_V06_PATCH_DEPLOY_CONTRACT_INVALID 69
+grep -Fq 'CONFIRM_V06_PATCH_V1' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
+[[ -s "$candidate_root/scripts/production-v06-patch-upgrade-preflight.ts" ]] || fail RELEASE_TOOLING_PATCH_PREFLIGHT_INVALID 69
 # Until the 0.6 migration path is separately approved, a tooling refresh must
 # preserve every command used by the current v0.5 production workflow.
 grep -Fq 'CONFIRM_PRESERVE_DATA_V1' "$GATEWAY" || fail RELEASE_TOOLING_GATEWAY_CONTRACT_INVALID 69
@@ -178,12 +190,44 @@ grep -Fq 'v0.5.0-dev.1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CO
 grep -Fq 'v0.5.0-dev.4' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'CONFIRM_PRESERVE_DATA_V1' "$PRESERVE_DEPLOYER" || fail RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID 69
 grep -Fq 'v0.6.0-dev.6' "$BACKUP" || fail RELEASE_TOOLING_BACKUP_CONTRACT_INVALID 69
+if ! python3 - "$BACKUP_ARTIFACT_HELPER" <<'PY'
+import ast
+import re
+import sys
+
+tree = ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])
+pattern = None
+for node in tree.body:
+    targets = node.targets if isinstance(node, ast.Assign) else []
+    if any(isinstance(target, ast.Name) and target.id == "BACKUP_NAME" for target in targets):
+        value = node.value
+        if (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Attribute)
+            and isinstance(value.func.value, ast.Name)
+            and value.func.value.id == "re"
+            and value.func.attr == "compile"
+            and len(value.args) == 1
+        ):
+            pattern = re.compile(ast.literal_eval(value.args[0]))
+            break
+if pattern is None:
+    raise SystemExit(1)
+sample = "20260922T000000Z-pre-deploy-to-v0.6.0-dev.7.Abc123"
+raise SystemExit(0 if pattern.fullmatch(sample) is not None else 1)
+PY
+then
+  fail RELEASE_TOOLING_BACKUP_HELPER_CONTRACT_INVALID 69
+fi
 grep -Fq 'pre-deploy-to-v0\.6\.0-dev\.6' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
+grep -Fq 'pre-deploy-to-v0\.6\.0-dev\.7' "$RESTORE" || fail RELEASE_TOOLING_RESTORE_CONTRACT_INVALID 69
 
 visudo -cf "$SUDOERS" >/dev/null || fail RELEASE_TOOLING_SUDOERS_INVALID 69
 grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-install-release-tooling' "$SUDOERS" || \
   fail RELEASE_TOOLING_SUDOERS_CONTRACT_INVALID 69
 grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-deploy' "$SUDOERS" || \
+  fail RELEASE_TOOLING_SUDOERS_CONTRACT_INVALID 69
+grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-patch-deploy' "$SUDOERS" || \
   fail RELEASE_TOOLING_SUDOERS_CONTRACT_INVALID 69
 grep -Fqx 'ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-preserve-deploy' "$SUDOERS" || \
   fail RELEASE_TOOLING_SUDOERS_CONTRACT_INVALID 69
@@ -195,7 +239,7 @@ fi
 
 # Refuse symlinked or non-root destination directories before creating any
 # staged root file. Group/world-writable control directories fail closed.
-for target_directory in /usr/local/sbin /etc/ai-project-os /etc/sudoers.d; do
+for target_directory in /usr/local/sbin /usr/local/libexec/ai-project-os /etc/ai-project-os /etc/sudoers.d; do
   [[ -d "$target_directory" && ! -L "$target_directory" ]] || fail RELEASE_TOOLING_TARGET_DIRECTORY_INVALID 69
   [[ "$(stat -c %U:%G "$target_directory")" == root:root ]] || fail RELEASE_TOOLING_TARGET_DIRECTORY_INVALID 69
   target_permissions=$(stat -c %A "$target_directory")
@@ -206,8 +250,10 @@ for destination in \
   /usr/local/sbin/ai-project-os-install-release-tooling \
   /usr/local/sbin/ai-project-os-deploy \
   /usr/local/sbin/ai-project-os-v06-deploy \
+  /usr/local/sbin/ai-project-os-v06-patch-deploy \
   /usr/local/sbin/ai-project-os-preserve-deploy \
   /usr/local/sbin/ai-project-os-backup \
+  /usr/local/libexec/ai-project-os/backup-artifact.py \
   /usr/local/sbin/ai-project-os-restore \
   /usr/local/sbin/ai-project-os-configure-github-oauth \
   /etc/ai-project-os/compose.operations.yaml \
@@ -232,8 +278,10 @@ stage_install() {
 stage_install "$UPDATER" /usr/local/sbin/ai-project-os-install-release-tooling 0755 staged_updater
 stage_install "$DEPLOYER" /usr/local/sbin/ai-project-os-deploy 0755 staged_deployer
 stage_install "$V06_DEPLOYER" /usr/local/sbin/ai-project-os-v06-deploy 0755 staged_v06_deployer
+stage_install "$V06_PATCH_DEPLOYER" /usr/local/sbin/ai-project-os-v06-patch-deploy 0755 staged_v06_patch_deployer
 stage_install "$PRESERVE_DEPLOYER" /usr/local/sbin/ai-project-os-preserve-deploy 0755 staged_preserve
 stage_install "$BACKUP" /usr/local/sbin/ai-project-os-backup 0755 staged_backup
+stage_install "$BACKUP_ARTIFACT_HELPER" /usr/local/libexec/ai-project-os/backup-artifact.py 0755 staged_backup_artifact
 stage_install "$RESTORE" /usr/local/sbin/ai-project-os-restore 0755 staged_restore
 stage_install "$OAUTH_CONFIGURATOR" /usr/local/sbin/ai-project-os-configure-github-oauth 0755 staged_oauth
 stage_install "$COMPOSE_OVERRIDE" /etc/ai-project-os/compose.operations.yaml 0644 staged_compose
@@ -243,8 +291,10 @@ stage_install "$GATEWAY" /usr/local/sbin/ai-project-os-actions-gateway 0755 stag
 mv -f -- "$staged_updater" /usr/local/sbin/ai-project-os-install-release-tooling
 mv -f -- "$staged_deployer" /usr/local/sbin/ai-project-os-deploy
 mv -f -- "$staged_v06_deployer" /usr/local/sbin/ai-project-os-v06-deploy
+mv -f -- "$staged_v06_patch_deployer" /usr/local/sbin/ai-project-os-v06-patch-deploy
 mv -f -- "$staged_preserve" /usr/local/sbin/ai-project-os-preserve-deploy
 mv -f -- "$staged_backup" /usr/local/sbin/ai-project-os-backup
+mv -f -- "$staged_backup_artifact" /usr/local/libexec/ai-project-os/backup-artifact.py
 mv -f -- "$staged_restore" /usr/local/sbin/ai-project-os-restore
 mv -f -- "$staged_oauth" /usr/local/sbin/ai-project-os-configure-github-oauth
 mv -f -- "$staged_compose" /etc/ai-project-os/compose.operations.yaml

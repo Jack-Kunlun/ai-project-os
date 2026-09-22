@@ -32,6 +32,19 @@ const successfulRun: PublicBackupRun = {
   nextRunAt: "2026-09-03T03:24:00+08:00",
 };
 
+const successfulPreDeployRun: PublicBackupRun = {
+  ...successfulRun,
+  runId: "20260922T014605Z-5678",
+  trigger: "pre-deploy",
+  targetTag: "v0.6.0-dev.6",
+  startedAt: "2026-09-22T01:46:05+08:00",
+  completedAt: "2026-09-22T01:47:05+08:00",
+  durationSeconds: 60,
+  backupName: "20260922T014605Z-pre-deploy-to-v0.6.0-dev.6.uWnyuF",
+  archiveObject: "cos://ai-project-os-backup-1306016679/production/backups/2026/09/22/20260922T014605Z-pre-deploy-to-v0.6.0-dev.6.uWnyuF/20260922T014605Z-pre-deploy-to-v0.6.0-dev.6.uWnyuF.tar.age",
+  nextRunAt: null,
+};
+
 const successfulDrill: PublicRecoveryDrill = {
   formatVersion: 1,
   drillId: "20260902T035000Z-abcdef1234567890",
@@ -109,6 +122,35 @@ test("backup status reader accepts only bounded validated records and ignores ma
   assert.equal(snapshot.recoveryDrillSourceStatus, "ready");
   assert.deepEqual(snapshot.recoveryDrill, successfulDrill);
   assert.equal(snapshot.readAt, "2026-09-02T04:00:00.000Z");
+});
+
+test("backup status reader accepts producer prerelease tags in current and history", async (context) => {
+  const root = path.join(await mkdtemp(path.join(tmpdir(), "ai-project-os-ops-prerelease-")), "backups");
+  context.after(async () => rm(path.dirname(root), { force: true, recursive: true }));
+  await mkdir(path.join(root, "history"), { recursive: true });
+  await writeFile(path.join(root, "current.json"), JSON.stringify(successfulPreDeployRun));
+  await writeFile(path.join(root, "history", `${successfulPreDeployRun.runId}.json`), JSON.stringify(successfulPreDeployRun));
+
+  const snapshot = await readBackupOperationsSnapshot({
+    root,
+    now: new Date("2026-09-22T02:00:00.000Z"),
+  });
+
+  assert.equal(snapshot.sourceStatus, "ready");
+  assert.deepEqual(snapshot.current, successfulPreDeployRun);
+  assert.deepEqual(snapshot.history, [successfulPreDeployRun]);
+
+  await writeFile(path.join(root, "current.json"), JSON.stringify({
+    ...successfulPreDeployRun,
+    targetTag: "v0.6.0-dev.0",
+    backupName: "20260922T014605Z-pre-deploy-to-v0.6.0-dev.0.uWnyuF",
+  }));
+  const malformed = await readBackupOperationsSnapshot({
+    root,
+    now: new Date("2026-09-22T02:00:00.000Z"),
+  });
+  assert.equal(malformed.sourceStatus, "invalid");
+  assert.equal(malformed.current, null);
 });
 
 test("backup status reader fails closed for missing, invalid, and symlinked status sources", async (context) => {

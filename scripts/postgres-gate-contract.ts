@@ -74,6 +74,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "worker-health", file: "test/worker-health-postgres.test.ts", database: "ai_project_os_worker_health_test", gateEnv: "WORKER_HEALTH_POSTGRES_GATE", setup: "migrate" },
   { id: "notification-subjects", file: "test/notification-subjects-postgres.test.ts", database: "ai_project_os_notification_subjects_test", gateEnv: "NOTIFICATION_SUBJECTS_POSTGRES_GATE", setup: "migrate", seedAdmin: true },
   { id: "v06-upgrade", file: "test/production-v06-upgrade-postgres.test.ts", database: "ai_project_os_v06_upgrade_test", gateEnv: "PRODUCTION_V06_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V06_UPGRADE_TEST_DATABASE_URL", setup: "self" },
+  { id: "v06-patch-upgrade", file: "test/production-v06-patch-upgrade-postgres.test.ts", database: "ai_project_os_v06_patch_upgrade_test", gateEnv: "PRODUCTION_V06_PATCH_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V06_PATCH_UPGRADE_TEST_DATABASE_URL", setup: "self" },
 ]);
 
 export const POSTGRES_GATE_TEST_USER = "ai_project_os_gate";

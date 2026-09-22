@@ -13,7 +13,10 @@ const DEFAULT_HISTORY_LIMIT = 30;
 const MAX_HISTORY_LIMIT = 90;
 const HISTORY_FILE_PATTERN = /^[0-9]{8}T[0-9]{6}Z-[0-9]+\.json$/u;
 const RUN_ID_PATTERN = /^[0-9]{8}T[0-9]{6}Z-[0-9]+$/u;
-const BACKUP_NAME_PATTERN = /^[0-9]{8}T[0-9]{6}Z-(?:daily|manual|pre-deploy-to-v[0-9]+\.[0-9]+\.[0-9]+)\.[A-Za-z0-9]{6}$/u;
+// Backup producers use SemVer core tags and numeric `-dev.N` prereleases.
+// Keep this grammar narrow so untrusted status files cannot carry arbitrary tag text.
+const RELEASE_TAG_PATTERN = /^v[0-9]+\.[0-9]+\.[0-9]+(?:-dev\.[1-9][0-9]*)?$/u;
+const BACKUP_NAME_PATTERN = /^[0-9]{8}T[0-9]{6}Z-(?:daily|manual|pre-deploy-to-v[0-9]+\.[0-9]+\.[0-9]+(?:-dev\.[1-9][0-9]*)?)\.[A-Za-z0-9]{6}$/u;
 const ARCHIVE_OBJECT_PATTERN = /^cos:\/\/ai-project-os-backup-[0-9]+\/[A-Za-z0-9][A-Za-z0-9._/-]{1,2000}$/u;
 const DRILL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
@@ -24,10 +27,12 @@ const publicBackupRunSchema = z.object({
   runId: z.string().regex(RUN_ID_PATTERN),
   state: z.enum(["running", "succeeded", "failed", "skipped"]),
   trigger: z.enum(["daily", "manual", "pre-deploy"]),
-  targetTag: z.string().regex(/^v[0-9]+\.[0-9]+\.[0-9]+$/u).nullable(),
+  /** Target release tag emitted for pre-deploy runs; recurring runs use null. */
+  targetTag: z.string().regex(RELEASE_TAG_PATTERN).nullable(),
   startedAt: z.iso.datetime({ offset: true }),
   completedAt: z.iso.datetime({ offset: true }).nullable(),
   durationSeconds: z.number().int().nonnegative().nullable(),
+  /** Producer-generated backup directory name, including its six-character suffix. */
   backupName: z.string().regex(BACKUP_NAME_PATTERN).nullable(),
   archiveObject: z.string().regex(ARCHIVE_OBJECT_PATTERN).nullable(),
   archiveSha256: z.string().regex(/^[0-9a-f]{64}$/u).nullable(),

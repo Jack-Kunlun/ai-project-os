@@ -1,6 +1,6 @@
 # GitHub Actions 生产部署
 
-状态：`CONTROLLED_PRERELEASE`。当前批准的生产目标是 `v0.6.0-dev.6`。该版本仍是预发布，不是稳定版或 GitHub Latest；工作流只对这一精确目标标签开放，并要求操作者明确选择生产当前运行的 `v0.5.0-dev.1` 或 `v0.5.0-dev.4` 源版本。
+状态：`CONTROLLED_PRERELEASE`。当前批准的生产目标是 `v0.6.0-dev.7`。该版本仍是预发布，不是稳定版或 GitHub Latest；工作流只对这一精确目标标签开放，并要求操作者明确选择生产当前运行的 `v0.6.0-dev.6` 源版本。
 
 AI Project OS 从 GitHub Actions 的 **Deploy production** 工作流手动部署已经通过标签 CI 的批准版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 
@@ -22,17 +22,23 @@ AI Project OS 从 GitHub Actions 的 **Deploy production** 工作流手动部署
 
 迁移后的预检要求 107 条迁移名称和 SHA-256 checksum 与候选 tag 完全一致，并确认四张个人知识库表存在。迁移边界前失败会重启原 app/worker；迁移边界后失败会停止新 app/worker，输出 `V06_DEPLOY_RECOVERY_REQUIRED` 以及本地备份、COS 对象和 manifest，禁止旧应用自动连接可能已经升级的结构。恢复时按备份 manifest 在隔离环境验证后，使用现有 recovery 模式恢复对应 0.5 源版本。
 
+## v0.6.0-dev.7 无迁移补丁边界
+
+`v0.6.0-dev.7` 只允许从已运行且健康的 `v0.6.0-dev.6` 进入。部署器在旧 app/worker 仍服务时构建新的 app、worker 和只读补丁预检镜像，确认源/目标标签为线性 annotated tag 且 `prisma/migrations` 零差异；停止精确旧 writer 后创建 `source_quiesced=true` 的 `.7` 备份，再次确认 107 条迁移账本、四张个人知识关系以及预先列明的约束、索引、触发器、函数名称/数量、启用/有效状态和枚举值满足预检，最后只重建 app/worker。
+
+补丁路径不会启动 `principal-bootstrap`、`migrate` 或 `reconcile`，不会删除或重建 PostgreSQL、secrets、uploads 卷。切换失败时会停止候选 writer，使用切换前捕获的 `.6` 镜像引用恢复旧 app/worker；恢复失败输出 `PATCH_DEPLOY_EMERGENCY` 并保持 writer 隔离，等待人工处置。
+
 ## 安全模型
 
 - 工作流只能通过 `workflow_dispatch` 手动触发，并且必须从 `main` 运行。
-- 当前目标输入只接受 `v0.6.0-dev.6`，目标必须是 annotated tag，且 `package.json`、应用版本与 OCI 标签必须匹配 `0.6.0-dev.6`；源输入只接受 `.5.0-dev.1` 或 `.5.0-dev.4`。
+- 当前目标输入只接受 `v0.6.0-dev.7`，目标必须是 annotated tag，且 `package.json`、应用版本与 OCI 标签必须匹配 `0.6.0-dev.7`；源输入只接受 `v0.6.0-dev.6`。
 - 部署前会通过 GitHub API 确认所选源标签和 0.6 目标标签对应精确提交的 `CI` push 运行已经 `completed/success`。
 - GitHub 使用独立 ED25519 私钥；服务器对应公钥带 `restrict` 和 forced-command，不能获取 Shell、PTY、端口转发或执行任意命令。
-- forced-command 接受受限的工具更新协议、历史 0.5 preserve 协议，以及精确的 `deploy-v06 <v0.5 source> v0.6.0-dev.6 <40 位 SHA> CONFIRM_V06_MIGRATION_V1`；其他命令全部拒绝。所有协议只调用 root 持有的固定程序，sudoers 不开放 clean-deploy、Shell、Git 或 Docker。
+- forced-command 接受受限的工具更新协议、历史 0.5 preserve/0.5→0.6 迁移协议，以及精确的 `deploy-v06-patch v0.6.0-dev.6 v0.6.0-dev.7 <source SHA> <target SHA> CONFIRM_V06_PATCH_V1`；两个 SHA 都必须是 40 位小写提交摘要，其他命令全部拒绝。所有协议只调用 root 持有的固定程序，sudoers 不开放 clean-deploy、Shell、Git 或 Docker。
 - 服务器会再次通过 GitHub 公共 API 核验标签 CI，专用私钥本身不能绕过发布门禁。
 - 生产 `.env` 位于 `/etc/ai-project-os/production.env`，权限为 `root:root 0600`，不会进入仓库、Actions 日志或部署结果。
-- 源回滚制品和目标镜像会在旧 app/worker 仍健康时完成构建与复核；部署器捕获精确健康容器 ID，停止旧 app/worker，确认维护窗口中只剩本项目的 PostgreSQL 并且端口只绑定 `127.0.0.1`，再以 stopped-writer cutover 模式调用 `pre-deploy` 备份。只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许继续；完整合同见[生产异地备份](production-backup.md)。
-- 0.6 部署在验证停写备份后只运行受 Compose 依赖约束的 principal bootstrap、migrate、reconcile、app 与 worker；绝不执行 `docker compose down`、删除卷或 Docker prune。
+- 历史 `.5 -> .6` 路径会构建并复核源回滚制品和目标镜像；`.6 -> .7` 路径会在旧 app/worker 仍健康时捕获精确容器与镜像身份并构建目标镜像和只读预检。两条路径都会停止旧 app/worker，确认维护窗口中只剩本项目的 PostgreSQL 且端口只绑定 `127.0.0.1`，再以 stopped-writer cutover 模式调用 `pre-deploy` 备份。只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许继续；完整合同见[生产异地备份](production-backup.md)。
+- 0.6 迁移部署在验证停写备份后只运行受 Compose 依赖约束的 principal bootstrap、migrate、reconcile、app 与 worker；`.6`→`.7` 补丁只运行 app 与 worker，绝不执行 `docker compose down`、删除卷或 Docker prune。
 - 同一时间只允许一个生产部署；GitHub 与服务器两侧均禁止并发覆盖。
 
 ## 一次性服务器准备
@@ -54,7 +60,7 @@ sudo deploy/production/install-production-deploy.sh \
 
 安装器会：
 
-1. 安装 root-owned 的 `/usr/local/sbin/ai-project-os-v06-deploy`、preserve 部署器、release-tooling 更新器和 forced-command gateway；历史 clean-deploy 文件仅保留作受控恢复材料，不在 Actions sudoers 中开放。
+1. 安装 root-owned 的 `/usr/local/sbin/ai-project-os-v06-deploy`、`.6`→`.7` 补丁部署器、preserve 部署器、release-tooling 更新器和 forced-command gateway；历史 clean-deploy 文件仅保留作受控恢复材料，不在 Actions sudoers 中开放。
 2. 使用 `visudo` 校验并安装只允许固定部署程序的 sudoers 规则。
 3. 把现有生产 `.env` 复制到 `/etc/ai-project-os/production.env`，设为 `root:root 0600`，同时收紧旧文件权限。
 4. 创建密码锁定的专用系统账号 `ai-project-os-actions`，只为该账号追加受限 Actions 公钥；现有 `deploy` 人工运维账号和公钥保持不变。
@@ -64,9 +70,9 @@ sudo deploy/production/install-production-deploy.sh \
 
 服务器需要从包含 `ai-project-os-install-release-tooling` 的受信源码人工执行一次上述安装器。完成这一次初始化后，受限账号可以通过 `install-release-tooling` 协议刷新 0.6 系列的 root-owned 发布工具，不再需要为每个 0.6.x 候选登录服务器重复运行安装器。
 
-更新器只接受 `v0.6.<patch>` 或 `v0.6.<patch>-dev.<number>` annotated tag、精确 40 位提交和固定确认词。它使用与运行中 Compose checkout 分离的 root-owned 仓库，再次核验固定 GitHub origin、标签提交、`package.json` 版本和该标签提交的成功 CI。通过后只安装代码中列出的 gateway、更新器、部署器、preserve 部署器、OAuth 配置器、Compose operations override 和 sudoers；候选文件必须是普通非空文件，Shell 与 sudoers 必须先通过语法检查，目标路径不能由远端参数指定。
+更新器只接受 `v0.6.<patch>` 或 `v0.6.<patch>-dev.<number>` annotated tag、精确 40 位提交和固定确认词。它使用与运行中 Compose checkout 分离的 root-owned 仓库，再次核验固定 GitHub origin、标签提交、`package.json` 版本和该标签提交的成功 CI。通过后只安装代码中列出的 gateway、更新器、迁移/补丁部署器、preserve 部署器、OAuth 配置器、Compose operations override 和 sudoers；候选文件必须是普通非空文件，Shell 与 sudoers 必须先通过语法检查，目标路径不能由远端参数指定。
 
-当前 **Deploy production** 工作流先调用更新协议，再调用 0.6 专用迁移协议。服务器只需提前完成一次稳定 bootstrap；之后同一 Actions 运行会完成工具同步、OAuth 配置同步、停写备份、迁移和公网健康验证。
+当前 **Deploy production** 工作流先用服务器现有更新器完成一次 bootstrap，再用候选 `.7` 更新器完成第二次工具同步，随后调用 `.6`→`.7` 专用补丁协议。服务器只需提前完成一次稳定 bootstrap；之后同一 Actions 运行会完成两阶段工具同步、OAuth 配置同步、停写备份、无迁移 app/worker 切换和公网健康验证。
 
 ## GitHub Environment
 
@@ -93,15 +99,15 @@ sudo deploy/production/install-production-deploy.sh \
 生产 job 在任何备份、迁移或容器替换之前，通过受限 SSH key 的固定
 `configure-github-oauth` 命令把 OAuth 配置经标准输入发送给 root-owned 配置器。配置器只接受固定三行协议，校验 GitHub 凭据格式、生产 `.env` 的 owner/mode、数据库密码与安全 Cookie 基线，把公开 origin 固定为 `https://ai-project-os.com`，并在同一目录原子替换 `/etc/ai-project-os/production.env`。Client Secret 不进入命令参数、Actions 输出、部署结果或仓库；远端只返回 `PRODUCTION_GITHUB_OAUTH_CONFIG_OK`。
 
-首次使用 0.6 Actions 发布前，服务器必须从受信候选源码运行一次 `install-production-deploy.sh`，安装受限网关、固定 allowlist 的发布工具更新器和 0.6 部署器。之后工作流会从已验证的目标标签原子更新 root-owned 工具，并最后切换网关；安装或更新发布工具都不会自动部署应用，配置 Environment 也不会绕过标签、CI、备份或数据库预检。
+首次使用 0.6 Actions 发布前，服务器必须从受信候选源码运行一次 `install-production-deploy.sh`，安装受限网关、固定 allowlist 的发布工具更新器和 0.6 部署器。之后工作流会从已验证的目标标签按固定顺序暂存并替换 root-owned 工具，最后切换网关；安装或更新发布工具都不会自动部署应用，配置 Environment 也不会绕过标签、CI、备份或数据库预检。
 
 ## 部署流程
 
-在点击生产入口前，必须先用当前生产备份在隔离主机完成恢复演练，并确认备份归档、manifest、数据库权限、app、worker 和登录边界均通过。保留数据切换不删除生产数据库，但回退所需的源 checkout、可 inspect 的源回滚制品和 PostgreSQL 身份证据必须可用；运行中旧容器记录的 digest 不要求仍可 inspect。还必须确认生产服务器已安装本版本网关/部署器，Environment secrets/variables 完整。
+一般生产标准要求在点击生产入口前用当前生产备份在隔离主机完成恢复演练，并确认备份归档、manifest、数据库权限、app、worker 和登录边界均通过；本次 `.7` 预发布按已批准豁免暂缓独立恢复演练，不能宣称恢复能力已现场验证。保留数据切换不删除生产数据库，但回退所需的源 checkout、可 inspect 的源回滚制品和 PostgreSQL 身份证据必须可用；运行中旧容器记录的 digest 不要求仍可 inspect。还必须确认生产服务器已安装本版本网关/部署器，Environment secrets/variables 完整。
 
 1. 打开 GitHub 仓库的 **Actions**。
 2. 选择 **Deploy production**。
-3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag 为 `v0.6.0-dev.6`，并按公网 `/api/health` 选择当前生产 source tag。
+3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag 为 `v0.6.0-dev.7`，source 选择 `v0.6.0-dev.6`。
 4. 如配置了 Environment 审批，批准该部署。
 5. 工作流才会依次完成标签/CI 验证、受限 SSH、加密异地备份、部署、公网健康与 HTTP→HTTPS 跳转验证。
 
@@ -113,7 +119,8 @@ sudo deploy/production/install-production-deploy.sh \
 - SSH、本地备份、age 加密、COS 上传/远端校验、磁盘空间或当前容器状态异常：部署在迁移前失败关闭；失败备份没有远端成功标记，因此不会触发本地清理。
 - 预构建、停止、维护隔离或备份失败：切换尚未开始，部署器只重启已捕获的旧 app/worker ID，并保留已创建的备份。
 - migration、reconcile、app/worker 启动或健康检查在数据库变更后失败：部署器停止 app/worker 并输出 `V06_DEPLOY_RECOVERY_REQUIRED` 及备份位置。不得直接重启 0.5 writer；先在隔离环境验证 stopped-writer 备份，再按恢复手册处理。
-- 人工恢复前先确认目标版本与备份 manifest。恢复目标必须与 manifest 的 `appVersion` 精确一致：从 `.1` 升级前生成的备份只能恢复到 `.1`，从 `.4` 升级前生成的备份只能恢复到 `.4`；`pre-deploy-to-v0.6.0-dev.6` 只是备份用途名称，不会改变其中记录的源版本。由源版本 checkout 重建的回滚镜像不保证与历史丢失镜像字节级一致，应先在隔离恢复环境验证。
+- `.6 -> .7` 补丁在无数据库变更的切换阶段或健康校验失败：部署器停止候选 writer，使用切换前捕获的 `.6` 镜像身份恢复 app/worker；恢复成功输出 `PATCH_DEPLOY_RECOVERY_REQUIRED`，恢复失败输出 `PATCH_DEPLOY_EMERGENCY` 并保持 writer 隔离。
+- 人工恢复前先确认目标版本与备份 manifest。恢复目标必须与 manifest 的 `appVersion` 精确一致：0.5→0.6 备份仍按 `.1` 或 `.4` 源版本恢复；`.6`→`.7` 补丁备份记录 `.6` 源版本，`pre-deploy-to-v0.6.0-dev.7` 只是备份用途名称，不会改变 manifest 的源版本。由源版本 checkout 重建的回滚镜像不保证与历史丢失镜像字节级一致，应先在隔离恢复环境验证。
 
 服务器只自动删除超过本地保留期、已通过远端验证并带 root-only 标记的旧备份，同时保留最小副本数；无标记的手工或失败备份不会删除。COS 生命周期仍需在定时运行、部署前备份和独立恢复均通过后另行配置。“成功上传备份”不等于“恢复已经验证”。
 

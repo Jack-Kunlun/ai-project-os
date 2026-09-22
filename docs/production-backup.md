@@ -1,10 +1,10 @@
 # 生产异地备份
 
-本工具用于单节点实例的 PostgreSQL、凭据主密钥卷、上传卷和主机恢复配置备份。它可以独立于发布入口安装；当前 0.6 部署链使用 `pre-deploy-to-v0.6.0-dev.6` 作为升级前备份用途名称，并继续识别历史 0.5 备份名称用于恢复审计。备份 manifest 始终记录实际源版本，恢复时必须按 manifest 选择精确源标签。
+本工具用于单节点实例的 PostgreSQL、凭据主密钥卷、上传卷和主机恢复配置备份。它可以独立于发布入口安装；当前 0.6 补丁部署链使用 `pre-deploy-to-v0.6.0-dev.7` 作为升级前备份用途名称，并继续识别 `.6` 和历史 0.5 备份名称用于恢复审计。备份 manifest 始终记录实际源版本，恢复时必须按 manifest 选择精确源标签。
 
 `v0.5.0-dev.1` 的 `clean-deploy` 将此备份作为强制破坏性 reset 门禁：v0.4 用户、配置、额度、审计、供应商连接和其他旧数据库记录不会迁移到新库，管理员必须重新初始化 `/setup`。备份成功不提供卷删除后的自动回滚；只有归档、唯一命名且经 COS metadata 验证的 manifest 均验证成功，部署器才会继续删除精确 PostgreSQL 卷。
 
-`v0.6.0-dev.6` 专用部署器在停止旧 writer 并排空数据库连接后，使用 `pre-deploy-to-v0.6.0-dev.6` 命名创建备份，再执行 principal bootstrap、107 条迁移账本验证和 reconcile。该名称表示升级目标，不会改变 manifest 中的源 `appVersion`：从 `.1` 生成的备份只恢复到 `.1`，从 `.4` 生成的备份只恢复到 `.4`。
+`v0.6.0-dev.6` 专用部署器在停止旧 writer 并排空数据库连接后，使用 `pre-deploy-to-v0.6.0-dev.6` 命名创建备份，再执行 principal bootstrap、107 条迁移账本验证和 reconcile。`.6 -> .7` 补丁部署器使用 `pre-deploy-to-v0.6.0-dev.7`，同样要求 stopped-writer 备份和 107 条账本保持不变，但不执行 principal bootstrap、migration 或 reconcile。名称表示升级目标，不会改变 manifest 中的源 `appVersion`：从 `.1` 生成的备份只恢复到 `.1`，从 `.4` 生成的备份只恢复到 `.4`，从 `.6` 生成的补丁备份只恢复到 `.6`。
 
 ## 已实现边界
 
@@ -17,6 +17,7 @@
 - 默认只清理超过 14 天且带有效远端标记的本地备份，并始终保留至少 3 份已验证本地副本。现有手工备份因为没有自动上传标记，不会被删除。
 - `v0.5.0-dev.1` clean-reset 部署器先在旧 app/worker 仍健康时完成候选镜像构建，再停止精确旧 writer ID，以 stopped-writer cutover 模式调用同一个脚本；只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许 reset。远端备份失败会使部署失败关闭。
 - `v0.6.0-dev.6` 部署器沿用 stopped-writer 备份门禁，只允许目标名 `pre-deploy-to-v0.6.0-dev.6`；迁移后要求 107 条 migration ledger 与个人知识关系完整，再启动新 app/worker。历史 0.5 目标仍可由备份/恢复脚本识别，但不进入新的生产部署入口。
+- `v0.6.0-dev.7` 补丁部署器只接受精确 `.6 -> .7`，只允许目标名 `pre-deploy-to-v0.6.0-dev.7`；它在停止旧 app/worker 后验证无 migration、schema 或 Prisma 配置差异，要求 107 条 migration ledger、四张个人知识关系以及预先列明的约束、索引、触发器、函数名称/数量、启用/有效状态和枚举值满足切换前后预检，再启动新 app/worker。
 - 每日/手工备份会先取得生产部署锁，部署期间不会启动；部署器持有同一把锁后再调用 `pre-deploy` 模式，避免定时备份与迁移或容器替换交叉运行。
 - 每次任务会把运行中、成功、失败或跳过状态原子写入 `/var/lib/ai-project-os-operations/backups`。这里只包含时间、任务类型、对象路径、大小、摘要、重试次数和安全错误码；生产 Compose 以只读方式将该目录挂载给应用，应用没有 Docker、systemd、备份正文或凭据访问权。
 
@@ -103,7 +104,7 @@ sudo systemctl list-timers ai-project-os-backup.timer --no-pager
 GitHub Actions 生产部署时，服务器端部署器会执行：
 
 ```text
-标签与成功 CI 复核（`.1` 或 `.4` 源与 `.6` 目标）
+标签与成功 CI 复核（历史 `.1` 或 `.4` 源与 `.6` 目标，或补丁 `.6` 源与 `.7` 目标）
 → 候选镜像预构建
 → 捕获精确旧 app/worker，停止并确认写入者已退出
 → 维护隔离与 stopped-writer cutover
@@ -111,8 +112,9 @@ GitHub Actions 生产部署时，服务器端部署器会执行：
 → COS 上传及远端大小/CRC64 校验
 → 写入本地远端验证标记
 → 由同一批已停止旧 app/worker 生成并验证 `source_quiesced=true` 备份
-→ 执行 principal bootstrap、迁移和 reconcile
-→ 核验 107 条账本与新关系后启动 app/worker，保持 PostgreSQL 原容器与卷
+→（`.5 -> .6` 路径）执行 principal bootstrap、迁移和 reconcile
+→（`.6 -> .7` 路径）跳过迁移，只核验 107 条账本与现有关系
+→ 核验通过后启动 app/worker，保持 PostgreSQL 原容器与卷
 ```
 
 Actions 只能看到对象路径和成功标记，不能读取 COS 凭据、age 私钥、数据库密码或备份正文。

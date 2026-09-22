@@ -34,6 +34,8 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.match(workflow, /persist-credentials: false/u);
   assert.match(workflow, /DEPLOY_TAG_NOT_ANNOTATED/u);
   assert.match(workflow, /DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND/u);
+  assert.match(workflow, /DEPLOY_PATCH_DATABASE_FILES_CHANGED/u);
+  assert.match(workflow, /prisma\/migrations prisma\/schema\.prisma prisma\.config\.ts/u);
   assert.match(workflow, /\.head_branch == \$tag/u);
   assert.match(workflow, /PRODUCTION_SSH_PRIVATE_KEY/u);
   assert.match(workflow, /PRODUCTION_SSH_KNOWN_HOSTS/u);
@@ -48,26 +50,31 @@ test("production workflow is manual, serialized, least-privilege, and tag-CI-gat
   assert.match(workflow, /ai-project-os-actions@\$PRODUCTION_SSH_HOST/u);
   assert.doesNotMatch(workflow, /38\.76\.205\.30/u);
   assert.match(workflow, /"install-release-tooling \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_INSTALL_RELEASE_TOOLING_V1"/u);
-  assert.match(workflow, /"deploy-v06 \$DEPLOY_SOURCE_TAG \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_V06_MIGRATION_V1"/u);
-  assert.match(workflow, /Create verified offsite backup and migrate/u);
+  assert.equal(
+    (workflow.match(/"install-release-tooling \$DEPLOY_TAG \$DEPLOY_SHA CONFIRM_INSTALL_RELEASE_TOOLING_V1"/g) ?? []).length,
+    2,
+    "the current updater must bootstrap the candidate updater before the candidate updater installs patch tooling",
+  );
+  assert.match(workflow, /"deploy-v06-patch \$DEPLOY_SOURCE_TAG \$DEPLOY_TAG \$DEPLOY_SOURCE_SHA \$DEPLOY_SHA CONFIRM_V06_PATCH_V1"/u);
+  assert.match(workflow, /Create verified offsite backup and deploy patch/u);
   assert.match(workflow, /PRODUCTION_BACKUP_RESULT_INVALID/u);
   assert.match(workflow, /DEPLOY_BACKUP_OBJECT/u);
   assert.match(workflow, /\.worker\.consecutiveFailures == 0/u);
   assert.ok(
     workflow.indexOf("Sync GitHub OAuth configuration through restricted stdin") <
-      workflow.indexOf("Create verified offsite backup and migrate through forced-command gateway"),
+      workflow.indexOf("Create verified offsite backup and deploy patch through forced-command gateway"),
     "production OAuth configuration must be synchronized before deployment starts",
   );
   assert.doesNotMatch(workflow, /configure-github-oauth[^\n]*(GITHUB_OAUTH_CLIENT_ID|GITHUB_OAUTH_CLIENT_SECRET)/u);
   assert.doesNotMatch(workflow, /passwordauthentication|sshpass/iu);
 });
 
-test("production workflow enables only the explicitly approved v0.6.0-dev.6 prerelease", async () => {
+test("production workflow enables only the explicitly approved v0.6.0-dev.7 prerelease", async () => {
   const workflow = await readFile(workflowPath, "utf8");
 
-  assert.match(workflow, /default: v0\.6\.0-dev\.6/u);
+  assert.match(workflow, /default: v0\.6\.0-dev\.7/u);
   assert.match(workflow, /if: \$\{\{ github\.ref == 'refs\/heads\/main' \}\}/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.6/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.7/u);
   assert.doesNotMatch(workflow, /&& false|DISABLED_BEFORE_V1_0_0|v1\.0\.0/u);
   assert.doesNotMatch(workflow, /DEPLOY_TAG_INPUT" =~ \^v/u);
 });
@@ -919,6 +926,7 @@ test("installer keeps secrets root-only and installs a restricted Actions key", 
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-github-oauth",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-install-release-tooling",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-deploy",
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-patch-deploy",
   ]);
 });
 

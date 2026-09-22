@@ -2,3 +2,4 @@ ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-preserv
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-configure-github-oauth
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-install-release-tooling
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-deploy
+ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-patch-deploy

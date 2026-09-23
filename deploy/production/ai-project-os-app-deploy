@@ -1,0 +1,504 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+
+readonly SOURCE_TAG=${1-}
+readonly RELEASE_TAG=${2-}
+# Gateway-supplied commit for the source tag, checked before any target build.
+readonly EXPECTED_SOURCE_REVISION=${3-}
+# Gateway-supplied commit for the target tag used as the checkout identity.
+readonly EXPECTED_REVISION=${4-}
+readonly CONFIRMATION=${5-}
+readonly REPOSITORY_URL=https://github.com/Jack-Kunlun/ai-project-os.git
+readonly REPOSITORY_DIR=/srv/ai-project-os/repository
+readonly ENV_FILE=/etc/ai-project-os/production.env
+readonly COMPOSE_PROJECT=ai-project-os
+readonly BACKUP_SCRIPT=/usr/local/sbin/ai-project-os-backup
+readonly PRODUCTION_COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
+readonly RESULT_FILE=/var/lib/ai-project-os/last-deployment
+readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
+
+# Application releases after .8 keep the exact 116-row database baseline.
+readonly PATCH_MIGRATION_COUNT=116
+
+WRITER_RECOVERY_REQUIRED=0
+PATCH_CUTOVER_ATTEMPTED=0
+OLD_APP_ID=
+OLD_WORKER_ID=
+OLD_APP_IMAGE_ID=
+OLD_WORKER_IMAGE_ID=
+OLD_APP_IMAGE_REF=
+OLD_WORKER_IMAGE_REF=
+PRE_DEPLOY_BACKUP_SOURCE_QUIESCED=0
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2-70}"
+}
+
+if [[ $EUID -ne 0 ]]; then
+  fail PATCH_DEPLOY_ROOT_REQUIRED
+fi
+[[ "$SOURCE_TAG" =~ ^v0\.6\.0-dev\.([1-9][0-9]*)$ ]] || fail PATCH_DEPLOY_SOURCE_TAG_INVALID 64
+source_sequence=${BASH_REMATCH[1]}
+[[ "$RELEASE_TAG" =~ ^v0\.6\.0-dev\.([1-9][0-9]*)$ ]] || fail PATCH_DEPLOY_TAG_INVALID 64
+target_sequence=${BASH_REMATCH[1]}
+(( ${#source_sequence} <= 6 && ${#target_sequence} <= 6 )) || fail PATCH_DEPLOY_TAG_SEQUENCE_INVALID 64
+(( source_sequence >= 8 && target_sequence > source_sequence )) || fail PATCH_DEPLOY_TAG_ORDER_INVALID 64
+[[ "$EXPECTED_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail PATCH_DEPLOY_SOURCE_REVISION_INVALID 65
+[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail PATCH_DEPLOY_REVISION_INVALID 65
+[[ "$CONFIRMATION" == CONFIRM_APP_NO_MIGRATION_V1 ]] || fail PATCH_DEPLOY_CONFIRMATION_INVALID 66
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || fail PATCH_DEPLOY_ALREADY_RUNNING 75
+
+for required_command in chmod chown curl date dirname docker flock git grep head install mktemp mv python3 rm sed seq sleep sort stat tail tr; do
+  command -v "$required_command" >/dev/null || fail PATCH_DEPLOY_COMMAND_MISSING 69
+done
+
+require_env_file() {
+  test -r "$ENV_FILE" || fail PATCH_DEPLOY_ENV_MISSING 70
+  test "$(stat -c %U:%G "$ENV_FILE")" = root:root || fail PATCH_DEPLOY_ENV_OWNER_INVALID 70
+  test "$(stat -c %a "$ENV_FILE")" = 600 || fail PATCH_DEPLOY_ENV_MODE_INVALID 70
+  grep -qx 'POSTGRES_USER=ai_project_os_cluster_admin' "$ENV_FILE" || fail PATCH_DEPLOY_POSTGRES_USER_INVALID 70
+  grep -Eq '^POSTGRES_CLUSTER_ADMIN_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail PATCH_DEPLOY_CLUSTER_PASSWORD_INVALID 70
+  grep -Eq '^POSTGRES_RUNTIME_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail PATCH_DEPLOY_RUNTIME_PASSWORD_INVALID 70
+  grep -Eq '^POSTGRES_ENTITLEMENT_WRITER_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail PATCH_DEPLOY_ENTITLEMENT_PASSWORD_INVALID 70
+  grep -Eq '^POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail PATCH_DEPLOY_INVENTORY_PASSWORD_INVALID 70
+  grep -Eq '^POSTGRES_MIGRATOR_PASSWORD=[0-9a-f]{64}$' "$ENV_FILE" || fail PATCH_DEPLOY_MIGRATOR_PASSWORD_INVALID 70
+  grep -qx 'POSTGRES_RUNTIME_USER=ai_project_os_runtime' "$ENV_FILE" || fail PATCH_DEPLOY_RUNTIME_USER_INVALID 70
+  grep -qx 'POSTGRES_ENTITLEMENT_WRITER_USER=ai_project_os_entitlement_writer' "$ENV_FILE" || fail PATCH_DEPLOY_ENTITLEMENT_USER_INVALID 70
+  grep -qx 'AI_PROJECT_OS_SECURE_COOKIES=true' "$ENV_FILE" || fail PATCH_DEPLOY_SECURE_COOKIES_INVALID 70
+  grep -qx 'AI_PROJECT_OS_PUBLIC_ORIGIN=https://ai-project-os.com' "$ENV_FILE" || fail PATCH_DEPLOY_PUBLIC_ORIGIN_INVALID 70
+}
+
+validate_github_oauth_env_value() {
+  local key=$1
+  local value
+  local -a matches=()
+
+  mapfile -t matches < <(grep -E "^${key}=" "$ENV_FILE" || true)
+  (( ${#matches[@]} == 1 )) || return 1
+  value=${matches[0]#*=}
+  (( ${#value} >= 8 && ${#value} <= 512 )) || return 1
+  [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+require_env_file
+validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID || fail PATCH_DEPLOY_GITHUB_OAUTH_CLIENT_ID_INVALID 70
+validate_github_oauth_env_value AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET || fail PATCH_DEPLOY_GITHUB_OAUTH_CLIENT_SECRET_INVALID 70
+
+install -d -o root -g root -m 0755 /srv/ai-project-os
+install -d -o root -g root -m 0700 "$(dirname "$RESULT_FILE")"
+
+if [[ ! -d "$REPOSITORY_DIR/.git" ]]; then
+  temporary_repository="${REPOSITORY_DIR}.init.$$"
+  trap 'rm -rf -- "${temporary_repository-}"' EXIT
+  git clone --filter=blob:none --no-checkout "$REPOSITORY_URL" "$temporary_repository"
+  chown -R root:root "$temporary_repository"
+  mv -- "$temporary_repository" "$REPOSITORY_DIR"
+  trap - EXIT
+fi
+
+[[ "$(stat -c %U:%G "$REPOSITORY_DIR")" == root:root ]] || fail PATCH_DEPLOY_REPOSITORY_OWNER_INVALID 70
+[[ "$(git -C "$REPOSITORY_DIR" remote get-url origin)" == "$REPOSITORY_URL" ]] || fail PATCH_DEPLOY_REPOSITORY_REMOTE_INVALID 70
+
+git -C "$REPOSITORY_DIR" fetch --force --no-tags origin \
+  "refs/tags/$SOURCE_TAG:refs/tags/$SOURCE_TAG" \
+  "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+
+[[ "$(git -C "$REPOSITORY_DIR" cat-file -t "refs/tags/$SOURCE_TAG")" == tag ]] || fail PATCH_DEPLOY_SOURCE_TAG_NOT_ANNOTATED 66
+[[ "$(git -C "$REPOSITORY_DIR" cat-file -t "refs/tags/$RELEASE_TAG")" == tag ]] || fail PATCH_DEPLOY_TAG_NOT_ANNOTATED 66
+source_revision=$(git -C "$REPOSITORY_DIR" rev-parse "refs/tags/$SOURCE_TAG^{}")
+resolved_revision=$(git -C "$REPOSITORY_DIR" rev-parse "refs/tags/$RELEASE_TAG^{}")
+[[ "$source_revision" == "$EXPECTED_SOURCE_REVISION" ]] || fail PATCH_DEPLOY_SOURCE_TAG_REVISION_MISMATCH 67
+[[ "$resolved_revision" == "$EXPECTED_REVISION" ]] || fail PATCH_DEPLOY_TAG_REVISION_MISMATCH 67
+[[ "$source_revision" != "$resolved_revision" ]] || fail PATCH_DEPLOY_SOURCE_TARGET_MUST_DIFFER 66
+git -C "$REPOSITORY_DIR" merge-base --is-ancestor "$source_revision" "$resolved_revision" || fail PATCH_DEPLOY_SOURCE_TARGET_NOT_LINEAR 66
+[[ -z "$(git -C "$REPOSITORY_DIR" rev-list --merges "$source_revision..$resolved_revision")" ]] || fail PATCH_DEPLOY_SOURCE_TARGET_HAS_MERGES 66
+
+# A no-migration deploy must not silently become a migration route.
+[[ -z "$(git -C "$REPOSITORY_DIR" diff --name-only "$source_revision" "$resolved_revision" -- prisma prisma.config.ts)" ]] || fail PATCH_DEPLOY_DATABASE_FILES_CHANGED 69
+
+# A later presentation-only commit must not hide earlier code changes since
+# the installed source tag. Require the database CI job for that whole delta.
+delta_database_required=$(python3 - "$REPOSITORY_DIR" "$source_revision" "$resolved_revision" <<'PY'
+import json
+import re
+import subprocess
+import sys
+
+repository, source, target = sys.argv[1:]
+def git(*args):
+    return subprocess.check_output(["git", "-C", repository, *args])
+
+paths = [part.decode("utf-8") for part in git("diff", "--no-renames", "--name-only", "-z", source, target).split(b"\0") if part]
+version_only = False
+if "package.json" in paths:
+    before_raw = git("show", f"{source}:package.json")
+    after_raw = git("show", f"{target}:package.json")
+    before = json.loads(before_raw)
+    after = json.loads(after_raw)
+    old = re.fullmatch(r"0\.6\.0-dev\.([1-9][0-9]*)", before.get("version", ""))
+    new = re.fullmatch(r"0\.6\.0-dev\.([1-9][0-9]*)", after.get("version", ""))
+    if old and new and 8 <= int(old[1]) < int(new[1]) <= 999999:
+        version_field = re.compile(rb'("version"\s*:\s*")0\.6\.0-dev\.[1-9][0-9]*(")')
+        before_normalized, before_count = version_field.subn(rb'\g<1>VERSION\g<2>', before_raw)
+        after_normalized, after_count = version_field.subn(rb'\g<1>VERSION\g<2>', after_raw)
+        version_only = before_count == after_count == 1 and before_normalized == after_normalized
+    if version_only:
+        paths.remove("package.json")
+
+presentation = re.compile(r"(?:src/(?:.*/)?[^/]+\.css|public/(?:.*/)?[^/]+\.(?:png|jpg|jpeg|webp|ico))\Z")
+print("true" if (not paths and not version_only) or any(not presentation.fullmatch(path) for path in paths) else "false")
+PY
+) || fail PATCH_DEPLOY_CHANGE_SCOPE_INVALID 69
+[[ "$delta_database_required" == true || "$delta_database_required" == false ]] || fail PATCH_DEPLOY_CHANGE_SCOPE_INVALID 69
+
+ci_runs_url="https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$EXPECTED_REVISION&per_page=100"
+ci_runs_json=$(curl --fail --silent --show-error \
+  --header 'Accept: application/vnd.github+json' \
+  --header 'X-GitHub-Api-Version: 2022-11-28' \
+  "$ci_runs_url")
+if ! python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+revision, tag = sys.argv[1:3]
+accepted = any(
+    run.get("head_sha") == revision
+    and run.get("head_branch") == tag
+    and run.get("event") == "push"
+    and run.get("status") == "completed"
+    and run.get("conclusion") == "success"
+    for run in payload.get("workflow_runs", [])
+)
+raise SystemExit(0 if accepted else 1)
+' "$EXPECTED_REVISION" "$RELEASE_TAG" <<<"$ci_runs_json"; then
+  fail PATCH_DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND 72
+fi
+
+if [[ "$delta_database_required" == true ]]; then
+  main_ci_runs_url="https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$EXPECTED_REVISION&per_page=100"
+  main_ci_runs_json=$(curl --fail --silent --show-error \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'X-GitHub-Api-Version: 2022-11-28' \
+    "$main_ci_runs_url") || fail PATCH_DEPLOY_MAIN_CI_UNAVAILABLE 72
+  main_ci_run_id=$(python3 -c '
+import json
+import sys
+payload = json.load(sys.stdin)
+revision = sys.argv[1]
+for run in payload.get("workflow_runs", []):
+    if run.get("head_sha") == revision and run.get("head_branch") == "main" and run.get("conclusion") == "success":
+        print(run.get("id", ""))
+        break
+' "$EXPECTED_REVISION" <<<"$main_ci_runs_json") || fail PATCH_DEPLOY_MAIN_CI_RUN_INVALID 72
+  [[ "$main_ci_run_id" =~ ^[1-9][0-9]*$ ]] || fail PATCH_DEPLOY_MAIN_CI_RUN_INVALID 72
+  jobs_url="https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/runs/$main_ci_run_id/jobs?per_page=100"
+  jobs_json=$(curl --fail --silent --show-error \
+    --header 'Accept: application/vnd.github+json' \
+    --header 'X-GitHub-Api-Version: 2022-11-28' \
+    "$jobs_url") || fail PATCH_DEPLOY_TARGET_CI_JOBS_UNAVAILABLE 72
+  python3 -c '
+import json
+import sys
+payload = json.load(sys.stdin)
+accepted = any(job.get("name") == "Verify database and release candidate" and job.get("conclusion") == "success" for job in payload.get("jobs", []))
+raise SystemExit(0 if accepted else 1)
+' <<<"$jobs_json" || fail PATCH_DEPLOY_FULL_DATABASE_CI_REQUIRED 72
+fi
+
+source_ci_runs_url="https://api.github.com/repos/Jack-Kunlun/ai-project-os/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$source_revision&per_page=100"
+source_ci_runs_json=$(curl --fail --silent --show-error \
+  --header 'Accept: application/vnd.github+json' \
+  --header 'X-GitHub-Api-Version: 2022-11-28' \
+  "$source_ci_runs_url")
+if ! python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+revision, tag = sys.argv[1:3]
+accepted = any(
+    run.get("head_sha") == revision
+    and run.get("head_branch") == tag
+    and run.get("event") == "push"
+    and run.get("status") == "completed"
+    and run.get("conclusion") == "success"
+    for run in payload.get("workflow_runs", [])
+)
+raise SystemExit(0 if accepted else 1)
+' "$source_revision" "$SOURCE_TAG" <<<"$source_ci_runs_json"; then
+  fail PATCH_DEPLOY_SOURCE_TAG_SUCCESSFUL_CI_NOT_FOUND 72
+fi
+
+git -C "$REPOSITORY_DIR" checkout --detach --force "$EXPECTED_REVISION"
+[[ -z "$(git -C "$REPOSITORY_DIR" status --porcelain)" ]] || fail PATCH_DEPLOY_REPOSITORY_DIRTY 70
+package_version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$REPOSITORY_DIR/package.json" | head -n 1)
+[[ "v$package_version" == "$RELEASE_TAG" ]] || fail PATCH_DEPLOY_PACKAGE_VERSION_MISMATCH 68
+
+compose() {
+  test -f "$PRODUCTION_COMPOSE_OVERRIDE" || fail PATCH_DEPLOY_COMPOSE_OVERRIDE_MISSING 70
+  docker compose \
+    --project-name "$COMPOSE_PROJECT" \
+    --env-file "$ENV_FILE" \
+    --project-directory "$REPOSITORY_DIR" \
+    --file "$REPOSITORY_DIR/compose.yaml" \
+    --file "$PRODUCTION_COMPOSE_OVERRIDE" \
+    "$@"
+}
+
+compose config --quiet
+
+container_health() {
+  docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1"
+}
+
+run_patch_preflight() {
+  local phase=$1
+  local preflight_output
+
+  preflight_output=$(compose run --rm --no-deps production-upgrade-preflight \
+    node node_modules/tsx/dist/cli.mjs scripts/production-app-upgrade-preflight.ts "$phase" "$RELEASE_TAG")
+  grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_RESULT_INVALID 69
+  grep -Fq '"targetTag":"'"$RELEASE_TAG"'"' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_TARGET_INVALID 69
+  grep -Eq '"migrationCount"[[:space:]]*:[[:space:]]*116' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_MIGRATION_COUNT_INVALID 69
+  grep -Eq '"migrationChange"[[:space:]]*:[[:space:]]*"none"' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_MIGRATION_CHANGE_INVALID 69
+  if [[ "$phase" == post-stop ]]; then
+    grep -Eq '"writerSessions"[[:space:]]*:[[:space:]]*"stopped"' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_WRITERS_INVALID 69
+  fi
+  printf '%s\n' "$preflight_output"
+}
+
+assert_maintenance_isolation() {
+  local -a running_services=()
+  local postgres_id published_ports
+  mapfile -t running_services < <(compose ps --services --status running)
+  (( ${#running_services[@]} == 1 )) && [[ "${running_services[0]}" == postgres ]] || fail PATCH_DEPLOY_MAINTENANCE_SERVICES_NOT_ISOLATED 69
+  postgres_id=$(compose ps -q postgres)
+  [[ "$postgres_id" =~ ^[0-9a-f]{64}$ ]] || fail PATCH_DEPLOY_MAINTENANCE_POSTGRES_INVALID 69
+  published_ports=$(docker inspect --format '{{json (index .NetworkSettings.Ports "5432/tcp")}}' "$postgres_id")
+  python3 -c '
+import json
+import sys
+try:
+    bindings = json.load(sys.stdin)
+except (json.JSONDecodeError, UnicodeDecodeError):
+    raise SystemExit(1)
+accepted = (
+    isinstance(bindings, list)
+    and len(bindings) == 1
+    and isinstance(bindings[0], dict)
+    and bindings[0].get("HostIp") == "127.0.0.1"
+    and isinstance(bindings[0].get("HostPort"), str)
+    and bindings[0]["HostPort"].isdigit()
+)
+raise SystemExit(0 if accepted else 1)
+' <<<"$published_ports" || fail PATCH_DEPLOY_MAINTENANCE_POSTGRES_PORT_INVALID 69
+}
+
+wait_for_stack() {
+  local expected_version=$1
+  local attempt postgres_id app_id worker_id postgres_state app_state worker_state health_body
+  for attempt in $(seq 1 60); do
+    postgres_id=$(compose ps -q postgres)
+    app_id=$(compose ps -q app)
+    worker_id=$(compose ps -q worker)
+    if [[ -n "$postgres_id" && -n "$app_id" && -n "$worker_id" ]]; then
+      postgres_state=$(container_health "$postgres_id")
+      app_state=$(container_health "$app_id")
+      worker_state=$(container_health "$worker_id")
+      if [[ "$postgres_state" == healthy && "$app_state" == healthy && "$worker_state" == healthy ]]; then
+        health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health)
+        grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body"
+        grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${expected_version#v}"'"' <<<"$health_body"
+        grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
+        grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"
+        grep -Eq '"consecutiveFailures"[[:space:]]*:[[:space:]]*0' <<<"$health_body"
+        STACK_HEALTH=$health_body
+        STACK_STATES="postgres=$postgres_state app=$app_state worker=$worker_state"
+        return 0
+      fi
+    fi
+    sleep 5
+  done
+  compose ps -a >&2
+  fail PATCH_DEPLOY_STACK_HEALTH_TIMEOUT 74
+}
+
+wait_for_source_writers() {
+  local attempt app_state worker_state health_body
+  for attempt in $(seq 1 60); do
+    app_state=$(container_health "$OLD_APP_ID" 2>/dev/null || true)
+    worker_state=$(container_health "$OLD_WORKER_ID" 2>/dev/null || true)
+    if [[ "$app_state" == healthy && "$worker_state" == healthy ]]; then
+      health_body=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health || true)
+      if grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$health_body" \
+        && grep -Fq '"version":"'"${SOURCE_TAG#v}"'"' <<<"$(tr -d '[:space:]' <<<"$health_body")" \
+        && grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$health_body"; then
+        return 0
+      fi
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+quiesce_current_writers() {
+  local writer_id
+  while IFS= read -r writer_id; do
+    [[ -z "$writer_id" ]] && continue
+    [[ "$writer_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+    docker stop "$writer_id" >/dev/null || return 1
+  done < <(
+    {
+      docker ps --no-trunc -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --filter "label=com.docker.compose.service=app"
+      docker ps --no-trunc -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --filter "label=com.docker.compose.service=worker"
+    } | sort -u
+  )
+  local -a running_services=()
+  mapfile -t running_services < <(compose ps --services --status running)
+  (( ${#running_services[@]} == 1 )) && [[ "${running_services[0]}" == postgres ]]
+}
+
+recover_source_writers_on_failure() {
+  local exit_code=$?
+  trap - EXIT
+  set +e
+  if (( exit_code != 0 && WRITER_RECOVERY_REQUIRED == 1 )); then
+    if quiesce_current_writers; then
+      # No migration ran, so the captured .6 image IDs remain a safe rollback
+      # source even when Compose has already recreated the writer containers.
+      if [[ "$OLD_APP_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ && "$OLD_WORKER_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ \
+        && "$OLD_APP_IMAGE_REF" == "$COMPOSE_PROJECT-app" \
+        && "$OLD_WORKER_IMAGE_REF" == "$COMPOSE_PROJECT-worker" ]]; then
+        docker tag "$OLD_APP_IMAGE_ID" "$OLD_APP_IMAGE_REF" >/dev/null || true
+        docker tag "$OLD_WORKER_IMAGE_ID" "$OLD_WORKER_IMAGE_REF" >/dev/null || true
+        if compose up -d --no-deps --no-build --force-recreate app worker >/dev/null; then
+          OLD_APP_ID=$(compose ps -q app)
+          OLD_WORKER_ID=$(compose ps -q worker)
+          if [[ "$OLD_APP_ID" =~ ^[0-9a-f]{64}$ && "$OLD_WORKER_ID" =~ ^[0-9a-f]{64}$ ]] \
+            && wait_for_source_writers; then
+            printf 'PATCH_DEPLOY_RECOVERY_REQUIRED source=%s target=%s writers_restarted=true migration=not-performed\n' "$SOURCE_TAG" "$RELEASE_TAG" >&2
+          else
+            quiesce_current_writers || true
+            printf 'PATCH_DEPLOY_EMERGENCY source=%s target=%s writers_may_be_running=true action=manual_intervention_required\n' "$SOURCE_TAG" "$RELEASE_TAG" >&2
+          fi
+        else
+          quiesce_current_writers || true
+          printf 'PATCH_DEPLOY_EMERGENCY source=%s target=%s writers_may_be_running=true action=manual_intervention_required\n' "$SOURCE_TAG" "$RELEASE_TAG" >&2
+        fi
+      else
+        printf 'PATCH_DEPLOY_EMERGENCY source=%s target=%s rollback_image_invalid=true action=manual_intervention_required\n' "$SOURCE_TAG" "$RELEASE_TAG" >&2
+      fi
+    else
+      printf 'PATCH_DEPLOY_EMERGENCY source=%s target=%s writers_may_be_running=true action=manual_intervention_required\n' "$SOURCE_TAG" "$RELEASE_TAG" >&2
+    fi
+  fi
+  set -e
+  return "$exit_code"
+}
+
+# Capture the source container and image identity before building the target. This is
+# the bounded writer recovery plan for a failure before the database changes.
+OLD_APP_ID=$(compose ps -q app)
+OLD_WORKER_ID=$(compose ps -q worker)
+[[ "$OLD_APP_ID" =~ ^[0-9a-f]{64}$ && "$OLD_WORKER_ID" =~ ^[0-9a-f]{64}$ ]] || fail PATCH_DEPLOY_SOURCE_WRITER_CONTAINER_INVALID 69
+[[ "$(container_health "$OLD_APP_ID")" == healthy && "$(container_health "$OLD_WORKER_ID")" == healthy ]] || fail PATCH_DEPLOY_SOURCE_WRITER_NOT_HEALTHY 69
+source_health=$(curl --fail --silent --show-error http://127.0.0.1:3000/api/health) || fail PATCH_DEPLOY_SOURCE_HEALTH_UNAVAILABLE 69
+grep -Fq '"version":"'"${SOURCE_TAG#v}"'"' <<<"$(tr -d '[:space:]' <<<"$source_health")" || fail PATCH_DEPLOY_SOURCE_VERSION_INVALID 69
+grep -Eq '"database"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health" || fail PATCH_DEPLOY_SOURCE_DATABASE_INVALID 69
+grep -Eq '"worker"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"up"' <<<"$source_health" || fail PATCH_DEPLOY_SOURCE_WORKER_INVALID 69
+OLD_APP_IMAGE_ID=$(docker inspect --format '{{.Image}}' "$OLD_APP_ID")
+OLD_WORKER_IMAGE_ID=$(docker inspect --format '{{.Image}}' "$OLD_WORKER_ID")
+OLD_APP_IMAGE_REF=$(docker inspect --format '{{.Config.Image}}' "$OLD_APP_ID")
+OLD_WORKER_IMAGE_REF=$(docker inspect --format '{{.Config.Image}}' "$OLD_WORKER_ID")
+[[ "$OLD_APP_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ && "$OLD_WORKER_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || fail PATCH_DEPLOY_SOURCE_IMAGE_INVALID 69
+[[ "$OLD_APP_IMAGE_REF" == "$COMPOSE_PROJECT-app" && "$OLD_WORKER_IMAGE_REF" == "$COMPOSE_PROJECT-worker" ]] || fail PATCH_DEPLOY_SOURCE_IMAGE_REF_INVALID 69
+
+# Build only app, worker, and the read-only preflight helper. This route never
+# builds or starts principal-bootstrap, migrate, or reconcile.
+compose build app worker production-upgrade-preflight
+run_patch_preflight pre-stop
+
+# Failures while building or running the pre-stop read-only check leave the
+# healthy .6 writers untouched. Arm recovery only immediately before stop.
+WRITER_RECOVERY_REQUIRED=1
+trap recover_source_writers_on_failure EXIT
+
+stop_source_writers() {
+  docker stop "$OLD_APP_ID" "$OLD_WORKER_ID" >/dev/null
+  [[ "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_APP_ID")" == false:false ]] || fail PATCH_DEPLOY_SOURCE_APP_STOP_FAILED 69
+  [[ "$(docker inspect --format '{{.State.Running}}:{{.State.Paused}}' "$OLD_WORKER_ID")" == false:false ]] || fail PATCH_DEPLOY_SOURCE_WORKER_STOP_FAILED 69
+  PATCH_CUTOVER_ATTEMPTED=1
+  assert_maintenance_isolation
+}
+
+stop_source_writers
+run_patch_preflight post-stop
+
+test -x "$BACKUP_SCRIPT" || fail PATCH_DEPLOY_BACKUP_SCRIPT_MISSING 70
+backup_output=$(AI_PROJECT_OS_DEPLOY_LOCK_HELD=1 \
+  AI_PROJECT_OS_CUTOVER=1 \
+  AI_PROJECT_OS_CUTOVER_LOCK_HELD=1 \
+  AI_PROJECT_OS_EXPECTED_APP_ID="$OLD_APP_ID" \
+  AI_PROJECT_OS_EXPECTED_WORKER_ID="$OLD_WORKER_ID" \
+  "$BACKUP_SCRIPT" pre-deploy "$RELEASE_TAG")
+printf '%s\n' "$backup_output"
+backup_path=$(sed -n 's/^BACKUP_OK .* source=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+backup_object=$(sed -n 's/^BACKUP_OK .* object=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+backup_manifest=$(sed -n 's/^BACKUP_OK .* verified_manifest=\([^ ]*\) .*/\1/p' <<<"$backup_output" | tail -n 1)
+[[ "$backup_path" =~ ^/var/backups/ai-project-os/[^/]+$ ]] || fail PATCH_DEPLOY_BACKUP_RESULT_INVALID 69
+[[ "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/[0-9]{4}/[0-9]{2}/[0-9]{2}/ ]] || fail PATCH_DEPLOY_BACKUP_OBJECT_INVALID 69
+backup_archive_name=${backup_object##*/}
+[[ "$backup_archive_name" =~ ^(.+)\.tar\.age$ ]] || fail PATCH_DEPLOY_BACKUP_OBJECT_INVALID 69
+backup_name=${BASH_REMATCH[1]}
+[[ "$backup_name" =~ ^[0-9]{8}T[0-9]{6}Z-pre-deploy-to-v0\.6\.0-dev\.[1-9][0-9]*\.[A-Za-z0-9]{6}$ ]] || fail PATCH_DEPLOY_BACKUP_NAME_INVALID 69
+[[ "$backup_name" == *"-pre-deploy-to-$RELEASE_TAG."* ]] || fail PATCH_DEPLOY_BACKUP_NAME_INVALID 69
+[[ "$backup_object" == */"$backup_name/$backup_name.tar.age" ]] || fail PATCH_DEPLOY_BACKUP_OBJECT_INVALID 69
+backup_object_dir=${backup_object%/*}
+[[ "$backup_manifest" == "$backup_object_dir/$backup_name.manifest.json" ]] || fail PATCH_DEPLOY_BACKUP_MANIFEST_INVALID 69
+grep -Eq '^BACKUP_OK .* source_quiesced=true$' <<<"$backup_output" || fail PATCH_DEPLOY_BACKUP_NOT_QUIESCED 69
+PRE_DEPLOY_BACKUP_SOURCE_QUIESCED=1
+
+if (( PRE_DEPLOY_BACKUP_SOURCE_QUIESCED != 1 )); then
+  fail PATCH_DEPLOY_PRE_BACKUP_SOURCE_NOT_QUIESCED 69
+fi
+
+# This is an application-only cutover. No migrate service is started and the
+# exact 116-row ledger is checked again immediately before new writers start.
+run_patch_preflight post-cutover
+compose up -d --no-deps --no-build --force-recreate app worker
+wait_for_stack "$RELEASE_TAG"
+# Read the ledger and target catalog once more after new writers are healthy;
+# this closes the before/after cutover proof without running a migration.
+run_patch_preflight post-cutover
+
+public_health=$(curl --fail --silent --show-error https://ai-project-os.com/api/health)
+grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"${RELEASE_TAG#v}"'"' <<<"$public_health" || fail PATCH_DEPLOY_PUBLIC_VERSION_INVALID 69
+grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' <<<"$public_health" || fail PATCH_DEPLOY_PUBLIC_HEALTH_INVALID 69
+WRITER_RECOVERY_REQUIRED=0
+
+completed_at=$(date -Is)
+{
+  printf 'PATCH_DEPLOY_OK\n'
+  printf 'tag=%s\n' "$RELEASE_TAG"
+  printf 'source_tag=%s\n' "$SOURCE_TAG"
+  printf 'revision=%s\n' "$EXPECTED_REVISION"
+  printf 'migration=not-performed\n'
+  printf 'migration_count=%s\n' "$PATCH_MIGRATION_COUNT"
+  printf 'states=%s\n' "$STACK_STATES"
+  printf 'health=%s\n' "$STACK_HEALTH"
+  printf 'backup=%s\n' "$backup_path"
+  printf 'backup_object=%s\n' "$backup_object"
+  printf 'backup_manifest=%s\n' "$backup_manifest"
+  printf 'completed_at=%s\n' "$completed_at"
+} > "$RESULT_FILE"
+chmod 600 "$RESULT_FILE"
+
+printf 'PATCH_DEPLOY_OK tag=%s source=%s revision=%s migration=not-performed migration_count=%s backup=%s backup_object=%s backup_manifest=%s\n' \
+  "$RELEASE_TAG" "$SOURCE_TAG" "$EXPECTED_REVISION" "$PATCH_MIGRATION_COUNT" "$backup_path" "$backup_object" "$backup_manifest"

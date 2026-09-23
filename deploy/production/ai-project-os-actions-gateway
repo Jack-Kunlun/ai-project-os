@@ -26,6 +26,12 @@ if [[ "$original_command" =~ ^deploy-v06-patch\ (v0\.6\.0-dev\.6)\ (v0\.6\.0-dev
     "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
 fi
 
+# Subsequent 0.6 application releases keep the current database unchanged.
+if [[ "$original_command" =~ ^deploy-app\ (v0\.6\.0-dev\.[1-9][0-9]*)\ (v0\.6\.0-dev\.[1-9][0-9]*)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_APP_NO_MIGRATION_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-app-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+
 # The .7 to .8 path applies the reviewed 107 to 116 migration set.
 if [[ "$original_command" =~ ^deploy-v06-next\ (v0\.6\.0-dev\.7)\ (v0\.6\.0-dev\.8)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V06_NEXT_MIGRATION_V1)$ ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-v06-next-deploy \

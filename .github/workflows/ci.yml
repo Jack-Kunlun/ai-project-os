@@ -6,14 +6,81 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Verify internal delivery gates
+  scope:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      database: ${{ steps.classify.outputs.database }}
+      coverage: ${{ steps.classify.outputs.coverage }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify change impact
+        id: classify
+        env:
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_HEAD_SHA: ${{ github.sha }}
+        run: node scripts/ci-change-scope.mjs
+
+  source:
+    needs: scope
+    name: Verify source and client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DATABASE_URL: postgresql://ci_static:ci_static@127.0.0.1:1/ci_static
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.19.0
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack install --global pnpm@10.14.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client for TypeScript checks
+        run: pnpm db:generate
+
+      - name: Run static checks
+        run: |
+          pnpm lint
+          pnpm typecheck
+
+      - name: Run default test suite with coverage thresholds
+        if: ${{ needs.scope.outputs.coverage == 'true' }}
+        run: pnpm test:coverage
+
+      - name: Build and check production client performance
+        if: ${{ needs.scope.outputs.database != 'true' }}
+        run: pnpm test:performance
+
+  database:
+    needs: scope
+    if: ${{ needs.scope.outputs.database == 'true' }}
+    name: Verify database and release candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     services:
@@ -39,7 +106,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node.js
@@ -55,18 +121,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Validate Prisma and migrations
+      - name: Generate and validate Prisma
         run: |
           pnpm db:generate
           pnpm db:validate
-
-      - name: Run static checks
-        run: |
-          pnpm lint
-          pnpm typecheck
-
-      - name: Run default test suite with coverage thresholds
-        run: pnpm test:coverage
 
       - name: Run every PostgreSQL gate
         run: pnpm test:postgres-gates
@@ -96,3 +154,56 @@ jobs:
             test-results/playwright
           if-no-files-found: ignore
           retention-days: 14
+
+  verify:
+    needs: [scope, source, database]
+    if: ${{ always() && !startsWith(github.ref, 'refs/tags/') }}
+    name: Verify internal delivery gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every applicable gate
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SOURCE_RESULT: ${{ needs.source.result }}
+          DATABASE_RESULT: ${{ needs.database.result }}
+          DATABASE_REQUIRED: ${{ needs.scope.outputs.database }}
+        run: |
+          set -euo pipefail
+          test "$SCOPE_RESULT" = success
+          test "$SOURCE_RESULT" = success
+          if [[ "$DATABASE_REQUIRED" == true ]]; then
+            test "$DATABASE_RESULT" = success
+          else
+            test "$DATABASE_REQUIRED" = false
+            test "$DATABASE_RESULT" = skipped
+          fi
+
+  tag-attestation:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out annotated tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require successful main CI for the exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          RELEASE_SHA=$(git rev-parse HEAD)
+          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")" = "$RELEASE_SHA"
+          runs_json=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$RELEASE_SHA&per_page=100")
+          jq --exit-status --arg sha "$RELEASE_SHA" \
+            '.workflow_runs | any(.head_sha == $sha and .head_branch == "main" and .event == "push" and .status == "completed" and .conclusion == "success")' \
+            <<<"$runs_json" >/dev/null

@@ -101,7 +101,7 @@ test("backup and restore allowlists retain .7 and add .8 stopped-writer artifact
   const { backup, restore } = await readContracts();
   assert.ok(backup.includes("pre-deploy-to-v0\\.6\\.0-dev\\.6"));
   assert.ok(backup.includes("pre-deploy-to-v0\\.6\\.0-dev\\.(7|8)"));
-  assert.ok(restore.includes("v0\\.6\\.0-dev\\.(6|7|8)"));
+  assert.ok(restore.includes("v0\\.6\\.0-dev\\.([6-9]|[1-9][0-9]+)"));
   assert.ok(restore.includes("pre-deploy-to-v0\\.6\\.0-dev\\.7"));
   assert.ok(restore.includes("pre-deploy-to-v0\\.6\\.0-dev\\.8"));
 });

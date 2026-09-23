@@ -46,7 +46,7 @@ pnpm db:validate
 
 ## 验收
 
-每次行为变化运行与风险相称的聚焦检查。当前版本发布验收必须包含：Prisma 生成与校验、完整迁移链、类型检查、Lint、测试、生产构建、真实 PostgreSQL Action Engine 与 MCP 授权/审批/失败关闭/结果纳入闭环、真实 PostgreSQL 项目计划权限/状态/证据不可变/依赖循环闭环、Docker Compose `postgres/migrate/app/worker` 状态、认证后页面 smoke，以及按钮文字居中和共享 Header 一致性。真实外部模型、Git、OIDC 或第三方 MCP 服务未配置时，必须明确说明对应连接未做现场验证；MCP 协议联调应使用隔离的只读测试服务，不得用静态检查替代。
+每次行为变化运行与风险相称的聚焦检查。当前版本发布验收必须包含：Prisma 生成与校验、完整迁移链、类型检查、Lint、测试、生产构建、真实 PostgreSQL Action Engine 与 MCP 授权/审批/失败关闭/结果纳入闭环、真实 PostgreSQL 项目计划权限/状态/证据不可变/依赖循环闭环、Docker Compose `postgres/migrate/app/worker` 状态、认证后页面 smoke，以及按钮文字居中和共享 Header 一致性。唯一的自动化轻量例外是提交仅修改 `src/**/*.css`、`public` 下的 PNG/JPEG/WebP/ICO 位图，或只递增 `package.json` 的 `0.6.0-dev.N` 版本号：该提交仍须完成静态检查、Prisma Client 生成、生产构建和性能预算，允许跳过数据库、浏览器和隔离 Compose 候选；混合改动、客户端代码、SVG、脚本、配置及无法分类的改动均走完整验收。标签必须指向同 SHA 已成功的主分支 CI；若源标签到目标标签的累计差异超出轻量范围，应用发布还必须证明目标标签 CI 的完整数据库作业成功；生产发布仍需完成停写、备份、数据库账本预检和健康检查。真实外部模型、Git、OIDC 或第三方 MCP 服务未配置时，必须明确说明对应连接未做现场验证；MCP 协议联调应使用隔离的只读测试服务，不得用静态检查替代。
 
 <!-- BEGIN:nextjs-agent-rules -->
 

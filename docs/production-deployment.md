@@ -80,6 +80,12 @@ sudo deploy/production/install-production-deploy.sh \
 
 当前 **Deploy production** 工作流先用服务器现有更新器完成一次 bootstrap，再用候选 `.8` 更新器完成第二次工具同步，随后调用 `.7`→`.8` 专用迁移协议。同一 Actions 运行完成工具同步、OAuth 配置同步、停写备份、数据库迁移和公网健康验证。
 
+## 后续 0.6 应用版本
+
+从已上线的 v0.6.0-dev.8 开始，后续无数据库变更的 0.6 开发版本使用 **Deploy application** 工作流。它要求目标为比源版本更新的 annotated tag、目标提交是当前 main、对应标签 CI 成功，且 prisma/migrations、prisma/schema.prisma 和 prisma.config.ts 均无差异。服务器再次核对标签、SHA、线性历史、116 条迁移账本和数据库对象；停止旧 app/worker 并验证写入会话已排空后创建加密异地备份，最后只替换 app/worker。数据库改动不能使用这条通道，必须另行评审迁移方案。
+
+主分支 CI 对纯 CSS/PNG/JPEG/WebP/ICO 位图及仅递增 `package.json` 版本号的改动只执行静态检查、生产构建和性能预算，不启动 PostgreSQL 服务。包含客户端代码、数据库、服务端、测试、发布文件或无法分类的变更继续执行覆盖率和完整数据库门禁；数据库作业与通用检查并行运行。标签 CI 只验证同一 SHA 已有成功的主分支 CI；若源标签到目标标签的累计差异超出轻量范围，应用发布还要求目标标签 CI 的数据库作业成功。正式使用前仍需将本工作流随下一候选版本通过 CI 并发布；此段不代表当前 v0.6.0-dev.8 已具备该通道。
+
 ## GitHub Environment
 
 在仓库 **Settings → Environments** 创建 `production`。建议配置 Required reviewers，避免误触立即进入生产。

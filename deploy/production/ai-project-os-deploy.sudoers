@@ -4,3 +4,4 @@ ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-install
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-deploy
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-patch-deploy
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-next-deploy
+ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-app-deploy

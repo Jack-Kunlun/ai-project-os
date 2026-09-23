@@ -1,0 +1,358 @@
+name: Deploy application
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Annotated 0.6 application release tag
+        required: true
+        type: string
+      source_tag:
+        description: Release currently serving production
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ai-project-os-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy verified release tag
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment:
+      name: production
+      url: https://ai-project-os.com
+    env:
+      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve release tag and require its successful CI
+        env:
+          DEPLOY_TAG_INPUT: ${{ inputs.tag }}
+          DEPLOY_SOURCE_TAG_INPUT: ${{ inputs.source_tag }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$DEPLOY_TAG_INPUT" =~ ^v0\.6\.0-dev\.([1-9][0-9]*)$ ]]; then
+            echo "DEPLOY_TAG_INVALID" >&2
+            exit 64
+          fi
+          target_sequence=${BASH_REMATCH[1]}
+          if [[ ! "$DEPLOY_SOURCE_TAG_INPUT" =~ ^v0\.6\.0-dev\.([1-9][0-9]*)$ ]]; then
+            echo "DEPLOY_SOURCE_TAG_INVALID" >&2
+            exit 64
+          fi
+          source_sequence=${BASH_REMATCH[1]}
+          if (( ${#source_sequence} > 6 || ${#target_sequence} > 6 )); then
+            echo "DEPLOY_TAG_SEQUENCE_INVALID" >&2
+            exit 64
+          fi
+          if (( source_sequence < 8 || target_sequence <= source_sequence )); then
+            echo "DEPLOY_TAG_ORDER_INVALID" >&2
+            exit 64
+          fi
+
+          git fetch --force --no-tags origin \
+            "refs/tags/$DEPLOY_SOURCE_TAG_INPUT:refs/tags/$DEPLOY_SOURCE_TAG_INPUT" \
+            "refs/tags/$DEPLOY_TAG_INPUT:refs/tags/$DEPLOY_TAG_INPUT"
+
+          if [[ "$(git cat-file -t "refs/tags/$DEPLOY_SOURCE_TAG_INPUT")" != tag ||
+            "$(git cat-file -t "refs/tags/$DEPLOY_TAG_INPUT")" != tag ]]; then
+            echo "DEPLOY_TAG_NOT_ANNOTATED" >&2
+            exit 65
+          fi
+
+          source_sha=$(git rev-parse "refs/tags/$DEPLOY_SOURCE_TAG_INPUT^{}")
+          deploy_sha=$(git rev-parse "refs/tags/$DEPLOY_TAG_INPUT^{}")
+          if [[ "$source_sha" == "$deploy_sha" ]]; then
+            echo "DEPLOY_SOURCE_TARGET_MUST_DIFFER" >&2
+            exit 66
+          fi
+          if ! git merge-base --is-ancestor "$source_sha" "$deploy_sha"; then
+            echo "DEPLOY_SOURCE_TARGET_NOT_LINEAR" >&2
+            exit 66
+          fi
+          if [[ -n "$(git rev-list --merges "$source_sha..$deploy_sha")" ]]; then
+            echo "DEPLOY_SOURCE_TARGET_HAS_MERGE_COMMITS" >&2
+            exit 66
+          fi
+          if [[ -n "$(git diff --name-only "$source_sha" "$deploy_sha" -- prisma prisma.config.ts)" ]]; then
+            echo "DEPLOY_DATABASE_FILES_CHANGED" >&2
+            exit 66
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$deploy_sha" ]]; then
+            echo "DEPLOY_MAIN_HEAD_MISMATCH" >&2
+            exit 66
+          fi
+          package_version=$(git show "$deploy_sha:package.json" | node -e \
+            "let value='';process.stdin.on('data',chunk=>value+=chunk);process.stdin.on('end',()=>process.stdout.write(JSON.parse(value).version));")
+
+          if [[ "v$package_version" != "$DEPLOY_TAG_INPUT" ]]; then
+            echo "DEPLOY_TAG_VERSION_MISMATCH" >&2
+            exit 66
+          fi
+
+          migration_count=$(git ls-tree -d --name-only "$deploy_sha:prisma/migrations" | grep -Ec '^[0-9]{14}_')
+          if [[ "$migration_count" != 116 ]]; then
+            echo "DEPLOY_MIGRATION_COUNT_INVALID" >&2
+            exit 66
+          fi
+
+          runs_url="https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$deploy_sha&per_page=100"
+          runs_json=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$runs_url")
+
+          if ! jq --exit-status \
+            --arg sha "$deploy_sha" \
+            --arg tag "$DEPLOY_TAG_INPUT" \
+            '.workflow_runs | any(
+              .head_sha == $sha and
+              .head_branch == $tag and
+              .event == "push" and
+              .status == "completed" and
+              .conclusion == "success"
+            )' <<<"$runs_json" >/dev/null; then
+            echo "DEPLOY_TAG_SUCCESSFUL_CI_NOT_FOUND" >&2
+            exit 67
+          fi
+
+          source_runs_url="https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$source_sha&per_page=100"
+          source_runs_json=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "$source_runs_url")
+          if ! jq --exit-status \
+            --arg sha "$source_sha" \
+            --arg tag "$DEPLOY_SOURCE_TAG_INPUT" \
+            '.workflow_runs | any(
+              .head_sha == $sha and
+              .head_branch == $tag and
+              .event == "push" and
+              .status == "completed" and
+              .conclusion == "success"
+            )' <<<"$source_runs_json" >/dev/null; then
+            echo "DEPLOY_SOURCE_TAG_SUCCESSFUL_CI_NOT_FOUND" >&2
+            exit 68
+          fi
+
+          release_scope=$(CI_BASE_SHA="$source_sha" CI_HEAD_SHA="$deploy_sha" node scripts/ci-change-scope.mjs)
+          if grep -Fq 'database=true' <<<"$release_scope"; then
+            main_runs_json=$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$deploy_sha&per_page=100")
+            main_run_id=$(jq --raw-output --arg sha "$deploy_sha" \
+              '[.workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .conclusion == "success") | .id] | first // empty' \
+              <<<"$main_runs_json")
+            [[ "$main_run_id" =~ ^[1-9][0-9]*$ ]] || { echo "DEPLOY_MAIN_CI_RUN_INVALID" >&2; exit 68; }
+            jobs_json=$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GH_REPOSITORY/actions/runs/$main_run_id/jobs?per_page=100")
+            jq --exit-status \
+              '.jobs | any(.name == "Verify database and release candidate" and .conclusion == "success")' \
+              <<<"$jobs_json" >/dev/null || { echo "DEPLOY_FULL_DATABASE_CI_REQUIRED" >&2; exit 68; }
+          fi
+
+          printf 'DEPLOY_TAG=%s\n' "$DEPLOY_TAG_INPUT" >> "$GITHUB_ENV"
+          printf 'DEPLOY_SOURCE_TAG=%s\n' "$DEPLOY_SOURCE_TAG_INPUT" >> "$GITHUB_ENV"
+          printf 'DEPLOY_SOURCE_SHA=%s\n' "$source_sha" >> "$GITHUB_ENV"
+          printf 'DEPLOY_SHA=%s\n' "$deploy_sha" >> "$GITHUB_ENV"
+
+      - name: Prepare restricted production SSH identity
+        env:
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+
+          test -n "$PRODUCTION_SSH_PRIVATE_KEY"
+          test -n "$PRODUCTION_SSH_KNOWN_HOSTS"
+          if [[ ! "$PRODUCTION_SSH_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo "PRODUCTION_SSH_HOST_INVALID" >&2
+            exit 64
+          fi
+
+          install -d -m 700 "$RUNNER_TEMP/ai-project-os-ssh"
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"
+
+          ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" >/dev/null
+          ssh-keygen -F "$PRODUCTION_SSH_HOST" -f "$RUNNER_TEMP/ai-project-os-ssh/known_hosts" >/dev/null
+
+      - name: Bootstrap release tooling with the current server updater
+        run: |
+          set -euo pipefail
+
+          bootstrap_tooling_output=$(ssh \
+            -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "install-release-tooling $DEPLOY_TAG $DEPLOY_SHA CONFIRM_INSTALL_RELEASE_TOOLING_V1")
+          grep -Fq "RELEASE_TOOLING_INSTALL_OK tag=$DEPLOY_TAG revision=$DEPLOY_SHA" <<<"$bootstrap_tooling_output"
+
+      - name: Complete release tooling update with the candidate updater
+        run: |
+          set -euo pipefail
+
+          candidate_tooling_output=$(ssh \
+            -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "install-release-tooling $DEPLOY_TAG $DEPLOY_SHA CONFIRM_INSTALL_RELEASE_TOOLING_V1")
+          grep -Fq "RELEASE_TOOLING_INSTALL_OK tag=$DEPLOY_TAG revision=$DEPLOY_SHA" <<<"$candidate_tooling_output"
+
+      - name: Sync GitHub OAuth configuration through restricted stdin
+        env:
+          GITHUB_OAUTH_CLIENT_ID: ${{ vars.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID }}
+          GITHUB_OAUTH_CLIENT_SECRET: ${{ secrets.AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if (( ${#GITHUB_OAUTH_CLIENT_ID} < 8 || ${#GITHUB_OAUTH_CLIENT_ID} > 512 )) ||
+            [[ ! "$GITHUB_OAUTH_CLIENT_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "PRODUCTION_GITHUB_OAUTH_CLIENT_ID_INVALID" >&2
+            exit 64
+          fi
+          if (( ${#GITHUB_OAUTH_CLIENT_SECRET} < 8 || ${#GITHUB_OAUTH_CLIENT_SECRET} > 512 )) ||
+            [[ ! "$GITHUB_OAUTH_CLIENT_SECRET" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "PRODUCTION_GITHUB_OAUTH_CLIENT_SECRET_INVALID" >&2
+            exit 65
+          fi
+
+          config_output=$(
+            printf '%s\n%s\n%s\n' \
+              'AI_PROJECT_OS_GITHUB_OAUTH_CONFIG_V1' \
+              "$GITHUB_OAUTH_CLIENT_ID" \
+              "$GITHUB_OAUTH_CLIENT_SECRET" | \
+              ssh \
+                -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+                -o BatchMode=yes \
+                -o IdentitiesOnly=yes \
+                -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+                -o ConnectTimeout=15 \
+                "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+                "configure-github-oauth"
+          )
+          unset GITHUB_OAUTH_CLIENT_SECRET
+
+          if [[ "$config_output" != PRODUCTION_GITHUB_OAUTH_CONFIG_OK ]]; then
+            echo "PRODUCTION_GITHUB_OAUTH_CONFIG_RESULT_INVALID" >&2
+            exit 66
+          fi
+          printf '%s\n' "$config_output"
+
+      - name: Create verified offsite backup and deploy application through forced-command gateway
+        run: |
+          set -euo pipefail
+          umask 077
+
+          deployment_output_file="$RUNNER_TEMP/ai-project-os-ssh/deployment-output.log"
+          set +e
+          ssh \
+            -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=6 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+                "deploy-app $DEPLOY_SOURCE_TAG $DEPLOY_TAG $DEPLOY_SOURCE_SHA $DEPLOY_SHA CONFIRM_APP_NO_MIGRATION_V1" 2>&1 | tee "$deployment_output_file"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+
+          if (( pipeline_status[0] != 0 )); then
+            exit "${pipeline_status[0]}"
+          fi
+          if (( pipeline_status[1] != 0 )); then
+            echo "PRODUCTION_DEPLOY_OUTPUT_CAPTURE_FAILED" >&2
+            exit 74
+          fi
+
+          grep -q '^PATCH_DEPLOY_OK ' "$deployment_output_file"
+          grep -q '^BACKUP_OK .* source_quiesced=true$' "$deployment_output_file"
+
+          backup_object=$(sed -n 's/^PATCH_DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
+            "$deployment_output_file" | tail -n 1)
+          if [[ ! "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]]; then
+            echo "PRODUCTION_BACKUP_RESULT_INVALID" >&2
+            exit 68
+          fi
+          printf 'DEPLOY_BACKUP_OBJECT=%s\n' "$backup_object" >> "$GITHUB_ENV"
+
+      - name: Verify public production health
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 30); do
+            if health_json=$(curl --fail --silent --show-error \
+              --connect-timeout 10 \
+              --max-time 20 \
+              https://ai-project-os.com/api/health); then
+              if jq --exit-status \
+                --arg version "${DEPLOY_TAG#v}" \
+                '.status == "ok" and
+                 .version == $version and
+                 .database == "up" and
+                 .worker.status == "up" and
+                 .worker.consecutiveFailures == 0' \
+                <<<"$health_json" >/dev/null; then
+                break
+              fi
+            fi
+
+            if [[ "$attempt" == 30 ]]; then
+              echo "PRODUCTION_PUBLIC_HEALTH_TIMEOUT" >&2
+              exit 68
+            fi
+            sleep 10
+          done
+
+          redirect_headers=$(curl --silent --show-error --dump-header - --output /dev/null \
+            --connect-timeout 10 --max-time 20 http://ai-project-os.com/)
+          grep -Eiq '^location: https://ai-project-os\.com/' <<<"$redirect_headers"
+
+          printf '### Production deployment\n\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Tag: `%s`\n' "$DEPLOY_TAG" >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Source tag: `%s`\n' "$DEPLOY_SOURCE_TAG" >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Revision: `%s`\n' "$DEPLOY_SHA" >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Pre-deploy backup: `%s`\n' "$DEPLOY_BACKUP_OBJECT" >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- Health: `status=ok`, `database=up`, `worker=up`\n' >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- URL: https://ai-project-os.com\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove production SSH identity
+        if: ${{ always() }}
+        run: rm -rf -- "$RUNNER_TEMP/ai-project-os-ssh"

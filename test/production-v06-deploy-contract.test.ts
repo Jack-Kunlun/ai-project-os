@@ -90,7 +90,7 @@ test("0.6 preflight pins the 106 to 107 ledger transition", async () => {
 
 test("backup and recovery recognize the 0.6 stopped-writer artifact", async () => {
   const { backup, restore } = await readContracts();
-  assert.match(backup, /TARGET_TAG" == v0\.6\.0-dev\.6/u);
+  assert.match(backup, /TARGET_TAG" =~ \^v0\\\.6\\\.0-dev/u);
   assert.ok(backup.includes("pre-deploy-to-v0\\.6\\.0-dev\\.6"));
   assert.ok(restore.includes("pre-deploy-to-v0\\.6\\.0-dev\\.6"));
 });

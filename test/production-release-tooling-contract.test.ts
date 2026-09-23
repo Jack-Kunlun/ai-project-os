@@ -128,9 +128,9 @@ test("updater promotes only the fixed validated control-plane allowlist", async 
   assert.doesNotMatch(updater, /source "\$/u);
 });
 
-test("updater backup helper contract accepts the .8 pre-deploy artifact name", async () => {
+test("updater backup helper contract accepts existing and future 0.6 app artifacts", async () => {
   const helper = await readFile(backupArtifactHelperPath, "utf8");
-  assert.ok(helper.includes("pre-deploy-to-v0\\.6\\.0-dev\\.(?:6|7|8)"));
+  assert.ok(helper.includes("pre-deploy-to-v0\\.6\\.0-dev\\.(?:6|7|8|9|[1-9][0-9]+)"));
   const result = spawnSync("python3", [
     "-c",
     [
@@ -138,8 +138,8 @@ test("updater backup helper contract accepts the .8 pre-deploy artifact name", a
       "tree = ast.parse(open(sys.argv[1], encoding='utf-8').read(), sys.argv[1])",
       "node = next(item for item in tree.body if isinstance(item, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'BACKUP_NAME' for target in item.targets))",
       "pattern = re.compile(ast.literal_eval(node.value.args[0]))",
-      "sample = '20260923T000000Z-pre-deploy-to-v0.6.0-dev.8.Abc123'",
-      "raise SystemExit(0 if pattern.fullmatch(sample) is not None else 1)",
+      "samples = ['20260923T000000Z-pre-deploy-to-v0.6.0-dev.8.Abc123', '20260923T000000Z-pre-deploy-to-v0.6.0-dev.9.Abc123', '20260923T000000Z-pre-deploy-to-v0.6.0-dev.10.Abc123']",
+      "raise SystemExit(0 if all(pattern.fullmatch(sample) is not None for sample in samples) else 1)",
     ].join("; "),
     backupArtifactHelperPath,
   ], { encoding: "utf8" });

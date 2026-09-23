@@ -30,6 +30,7 @@ import {
 } from "../src/lib/project-mcp-action-service";
 import { deleteArchivedProject } from "../src/lib/project-lifecycle";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
+import { createMcpConnectionFixture } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.PROJECT_MCP_ACTION_POSTGRES_GATE === "1";
 const NO_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
@@ -134,11 +135,11 @@ test(
         await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: ownerId, reason: "mcp_action_gate_project_viewer" });
         return createdProject;
       });
-      await db.mcpConnection.create({ data: {
+      await createMcpConnectionFixture({
         id: connectionId, name: `MCP action connection ${suffix}`, endpointUrl: "https://mcp.example.invalid/mcp", authKind: "none", credentialId: null,
         allowPrivateNetwork: false, resolvedAddressFingerprint: networkFingerprint, protocolVersion: "2026-07-28", catalogFingerprint: "c".repeat(64),
         credentialFingerprint: NO_CREDENTIAL_FINGERPRINT, configurationRevision: 1, status: "verified", createdById: ownerId, ownerUserId: ownerId, ownerAccountAccessVersion: 1, ownershipState: "confirmed",
-      } });
+      }, db);
       await db.mcpToolDefinition.create({ data: {
         id: definitionId, connectionId, name: "project.lookup", title: "Lookup", description: "Safe lookup",
         inputSchema: { type: "object", properties: { query: { type: "string", minLength: 1 } }, required: ["query"], additionalProperties: false },
@@ -178,7 +179,7 @@ test(
         where: { id: bearerCredential.id },
         select: { secretFingerprint: true },
       });
-      await db.mcpConnection.create({ data: {
+      await createMcpConnectionFixture({
         id: bearerConnectionId,
         name: `MCP action drift connection ${suffix}`,
         endpointUrl: "https://mcp.example.invalid/mcp",
@@ -195,7 +196,7 @@ test(
         ownerUserId: ownerId,
         ownerAccountAccessVersion: 1,
         ownershipState: "confirmed",
-      } });
+      }, db);
       await db.mcpToolDefinition.create({ data: {
         id: bearerDefinitionId,
         connectionId: bearerConnectionId,

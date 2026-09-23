@@ -22,7 +22,6 @@ type AuditDetailDrawerProps = Readonly<{
   error: string | null;
   onClose: () => void;
   onRetry: () => void;
-  returnFocusTo: HTMLElement | null;
 }>;
 
 function CopyableValue({ label, value }: { label: string; value: string }) {
@@ -56,7 +55,7 @@ function CopyableValue({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRetry, returnFocusTo }: AuditDetailDrawerProps) {
+export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRetry }: AuditDetailDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
@@ -100,9 +99,8 @@ export function AuditDetailDrawer({ event, detail, loading, error, onClose, onRe
       window.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = originalOverflow;
       window.scrollTo(0, scrollY);
-      returnFocusTo?.focus({ preventScroll: true });
     };
-  }, [returnFocusTo]);
+  }, []);
 
   const references = auditReferenceEntries(shown.references);
 

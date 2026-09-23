@@ -12,9 +12,6 @@ const items: readonly Readonly<{ key: PersonalWorkspaceNavItem; label: string; h
   { key: "overview", label: "总览", href: "/personal" },
   { key: "knowledge", label: "知识库", href: "/personal/knowledge" },
   { key: "configuration", label: "配置", href: "/personal/configuration" },
-  { key: "models", label: "我的模型", href: "/personal/models" },
-  { key: "git", label: "Git 连接", href: "/personal/connections/git" },
-  { key: "mcp", label: "MCP 连接", href: "/personal/connections/mcp" },
 ];
 
 /**
@@ -27,7 +24,8 @@ export function PersonalWorkspaceNav({ active }: PersonalWorkspaceNavProps): Rea
       <div className="mx-auto max-w-7xl px-5 sm:px-8 lg:px-10">
         <div className="flex flex-wrap items-center gap-1 py-2">
           {items.map((item) => {
-            const isActive = item.key === active;
+            const isConfigurationDetail = active === "models" || active === "git" || active === "mcp";
+            const isActive = item.key === active || (item.key === "configuration" && isConfigurationDetail);
             return (
               <Link
                 key={item.key}

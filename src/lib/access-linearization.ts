@@ -1,7 +1,6 @@
 import { Prisma, type AppUserRole, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { type ProjectPermission } from "@/lib/access-control";
-import { AccountAccessGuardError, assertAccountAccessForActor } from "@/lib/account-access-guard";
 import {
   findConfirmedProjectMembership,
   findConfirmedWorkspaceMembership,
@@ -52,14 +51,6 @@ const permissionRank: Record<ProjectPermission, number> = { view: 1, edit: 2, ow
 
 function fail(code: WebAiAccessErrorCode): never {
   throw new WebAiAccessError(code);
-}
-
-function mapAccountAccessError(error: unknown): never {
-  if (error instanceof AccountAccessGuardError) {
-    if (error.code === "ACCOUNT_DISABLED") return fail("ACCOUNT_DISABLED");
-    if (error.code === "ACCOUNT_ACCESS_STALE") return fail("ACCOUNT_ACCESS_STALE");
-  }
-  return fail("ACCESS_FORBIDDEN");
 }
 
 function canonicalUuid(value: unknown): string | null {
@@ -160,6 +151,118 @@ function projectPermission(
   return null;
 }
 
+type LockedActorRow = Readonly<{
+  id: string;
+  role: string;
+  disabledAt: Date | null;
+  accountAccessVersion: number;
+}>;
+
+type LockedProjectRow = Readonly<{
+  id: string;
+  workspaceId: string;
+  archivedAt: Date | null;
+  // Raw PostgreSQL enum values use the @map value (workspace_inherited or
+  // project_only), while Prisma's client enum uses the camel-case name.
+  membershipInheritanceMode: string;
+}>;
+
+type LockedMembershipRow = Readonly<{ role: string }>;
+
+type AuthoritativeAccessRows = Readonly<{
+  actor: LockedActorRow | null;
+  project: LockedProjectRow | null;
+  workspaceMembership: LockedMembershipRow | null;
+  projectMembership: LockedMembershipRow | null;
+}>;
+
+function oneLockedRow<T>(rows: readonly T[]): T | null {
+  // The partial unique indexes should make this impossible.  Treat any
+  // unexpected duplicate as a closed authorization failure instead of
+  // selecting an arbitrary row.
+  if (rows.length > 1) return null;
+  return rows[0] ?? null;
+}
+
+function normalizedWorkspaceRole(value: unknown): "owner" | "admin" | "member" | "viewer" | null {
+  return value === "owner" || value === "admin" || value === "member" || value === "viewer" ? value : null;
+}
+
+function normalizedProjectRole(value: unknown): "owner" | "editor" | "viewer" | null {
+  return value === "owner" || value === "editor" || value === "viewer" ? value : null;
+}
+
+function normalizedInheritanceMode(value: unknown): "workspaceInherited" | "projectOnly" | null {
+  if (value === "workspaceInherited" || value === "workspace_inherited") return "workspaceInherited";
+  if (value === "projectOnly" || value === "project_only") return "projectOnly";
+  return null;
+}
+
+/**
+ * Reload authorization rows after the advisory fence and take a PostgreSQL
+ * row share lock on every row used as permission evidence.  This is kept as
+ * raw SQL because Prisma's findUnique/findMany calls cannot express FOR SHARE.
+ * The ORM branch exists only for the small in-memory doubles used by the
+ * contract tests; real Prisma clients always expose $queryRaw.
+ */
+async function loadAuthoritativeAccessRows(
+  db: AccessLinearizationDb,
+  input: Readonly<{ actorId: string; workspaceId: string; projectId: string }>,
+): Promise<AuthoritativeAccessRows> {
+  const queryRaw = (db as unknown as {
+    $queryRaw?: <T>(query: Prisma.Sql) => Promise<readonly T[]>;
+  }).$queryRaw;
+  if (typeof queryRaw !== "function") {
+    const [actor, project, workspaceMembership, projectMembership] = await Promise.all([
+      db.appUser.findUnique({ where: { id: input.actorId }, select: { id: true, role: true, disabledAt: true, accountAccessVersion: true } }),
+      db.project.findUnique({ where: { id: input.projectId }, select: { id: true, workspaceId: true, archivedAt: true, membershipInheritanceMode: true } }),
+      findConfirmedWorkspaceMembership(db, input.workspaceId, input.actorId),
+      findConfirmedProjectMembership(db, input.projectId, input.actorId),
+    ]);
+    return { actor, project, workspaceMembership, projectMembership };
+  }
+
+  const runQuery = <T>(query: Prisma.Sql) => queryRaw.call(db, query) as Promise<readonly T[]>;
+  const actorRows = await runQuery<LockedActorRow>(Prisma.sql`
+    SELECT "id", "role", "disabledAt", "accountAccessVersion"
+      FROM "AppUser"
+     WHERE "id" = ${input.actorId}::uuid
+     FOR SHARE
+  `);
+  const projectRows = await runQuery<LockedProjectRow>(Prisma.sql`
+    SELECT "id", "workspaceId", "archivedAt", "membershipInheritanceMode"::text AS "membershipInheritanceMode"
+      FROM "Project"
+     WHERE "id" = ${input.projectId}::uuid
+     FOR SHARE
+  `);
+  const workspaceMembershipRows = await runQuery<LockedMembershipRow>(Prisma.sql`
+    SELECT "role"
+      FROM "WorkspaceMembership"
+     WHERE "workspaceId" = ${input.workspaceId}::uuid
+       AND "userId" = ${input.actorId}::uuid
+       AND "accessState" = 'confirmed'::"MembershipAccessState"
+     ORDER BY "createdAt" ASC, "id" ASC
+     LIMIT 2
+     FOR SHARE
+  `);
+  const projectMembershipRows = await runQuery<LockedMembershipRow>(Prisma.sql`
+    SELECT "role"
+      FROM "ProjectMembership"
+     WHERE "projectId" = ${input.projectId}::uuid
+       AND "userId" = ${input.actorId}::uuid
+       AND "accessState" = 'confirmed'::"MembershipAccessState"
+     ORDER BY "createdAt" ASC, "id" ASC
+     LIMIT 2
+     FOR SHARE
+  `);
+  return {
+    actor: actorRows[0] ?? null,
+    project: projectRows[0] ?? null,
+    workspaceMembership: oneLockedRow(workspaceMembershipRows),
+    projectMembership: oneLockedRow(projectMembershipRows),
+  };
+}
+
 /**
  * Authoritative project admission for a transaction that is about to record a
  * dispatch marker or other durable operation.  It never performs external
@@ -191,27 +294,26 @@ export async function admitWebAiProjectAccess(
   await lockWorkspaceAccess(db, workspaceId);
   await lockProjectAccess(db, projectId);
 
-  try {
-    await assertAccountAccessForActor(db, input.actor);
-  } catch (error) {
-    return mapAccountAccessError(error);
-  }
-
-  const [currentActor, project, workspaceMembership, projectMembership] = await Promise.all([
-    db.appUser.findUnique({ where: { id: actorId }, select: { id: true, role: true, disabledAt: true, accountAccessVersion: true } }),
-    db.project.findUnique({ where: { id: projectId }, select: { id: true, workspaceId: true, archivedAt: true, membershipInheritanceMode: true } }),
-    findConfirmedWorkspaceMembership(db, workspaceId, actorId),
-    findConfirmedProjectMembership(db, projectId, actorId),
-  ]);
+  const { actor: currentActor, project, workspaceMembership, projectMembership } = await loadAuthoritativeAccessRows(db, {
+    actorId,
+    workspaceId,
+    projectId,
+  });
   if (currentActor === null || project === null || project.workspaceId !== workspaceId) return fail("ACCESS_FORBIDDEN");
   if (currentActor.disabledAt !== null) return fail("ACCOUNT_DISABLED");
+  if (currentActor.accountAccessVersion !== input.actor.accountAccessVersion) return fail("ACCOUNT_ACCESS_STALE");
 
-  const workspaceRole = workspaceMembership?.role ?? null;
-  const projectRole = projectMembership?.role ?? null;
+  const currentRole = currentActor.role === "admin" || currentActor.role === "user" ? currentActor.role : null;
+  if (currentRole === null) return fail("ACCESS_FORBIDDEN");
+  const inheritanceMode = normalizedInheritanceMode(project.membershipInheritanceMode);
+  if (inheritanceMode === null) return fail("ACCESS_FORBIDDEN");
+
+  const workspaceRole = normalizedWorkspaceRole(workspaceMembership?.role) ?? null;
+  const projectRole = normalizedProjectRole(projectMembership?.role) ?? null;
   // `projectOnly` is a legacy compatibility mode: no workspace membership,
   // including Owner/Admin, can substitute for a confirmed project grant.
   // `workspaceInherited` is the explicit opt-in for workspace role access.
-  const inheritedWorkspaceRole = project.membershipInheritanceMode === "workspaceInherited"
+  const inheritedWorkspaceRole = inheritanceMode === "workspaceInherited"
     ? workspaceRole
     : null;
   const permission = projectPermission(inheritedWorkspaceRole, projectRole);
@@ -221,7 +323,7 @@ export async function admitWebAiProjectAccess(
   // reuse the admission helper as an archived-project bypass.
   if (!input.allowArchived && project.archivedAt !== null) return fail("ACCESS_FORBIDDEN");
   return Object.freeze({
-    actor: Object.freeze({ id: currentActor.id, role: currentActor.role, accountAccessVersion: currentActor.accountAccessVersion }),
+    actor: Object.freeze({ id: currentActor.id, role: currentRole, accountAccessVersion: currentActor.accountAccessVersion }),
     workspace: Object.freeze({ id: workspaceId }),
     project: Object.freeze({ id: project.id, workspaceId: project.workspaceId, archivedAt: project.archivedAt }),
     permission,

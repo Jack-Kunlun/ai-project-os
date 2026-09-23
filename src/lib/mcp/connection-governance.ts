@@ -6,6 +6,7 @@ import { lockActorAccess } from "@/lib/access-linearization";
 import { rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
+import { applyMcpConnectionProbeUpdate } from "./service";
 import { type McpCapabilityErrorCode, failMcp } from "./errors";
 
 const UUID = z.string().uuid();
@@ -68,6 +69,8 @@ const previewSchema = z.object({
   expectedUpdatedAt: z.string().datetime({ offset: true }),
   confirmationName: z.string().trim().min(1).max(80).optional(),
   secret: z.string().min(8).max(4096).optional(),
+  draftProbeId: UUID.optional(),
+  probeRequestKey: UUID.optional(),
 }).strict();
 
 const executeSchema = z.object({
@@ -78,7 +81,11 @@ const executeSchema = z.object({
   expectedUpdatedAt: z.string().datetime({ offset: true }),
   confirmationName: z.string().trim().min(1).max(80).optional(),
   secret: z.string().min(8).max(4096).optional(),
+  draftProbeId: UUID.optional(),
+  probeRequestKey: UUID.optional(),
 }).strict();
+
+type TestedMcpProbeIntent = Readonly<{ draftProbeId: string; probeRequestKey: string }>;
 
 function fail(code: McpCapabilityErrorCode): never {
   return failMcp(code);
@@ -96,6 +103,27 @@ function date(value: string): Date {
 function uuid(value: unknown): string {
   const parsed = UUID.safeParse(value);
   return parsed.success ? parsed.data : fail("MCP_INVALID_INPUT");
+}
+
+function testedProbeIntent(input: Readonly<{ action: McpConnectionMutationAction; draftProbeId?: string; probeRequestKey?: string }>): TestedMcpProbeIntent | null {
+  const supplied = input.draftProbeId !== undefined || input.probeRequestKey !== undefined;
+  if (!supplied) return null;
+  if (input.action !== "rediscover" || input.draftProbeId === undefined || input.probeRequestKey === undefined) return fail("MCP_INVALID_INPUT");
+  return Object.freeze({ draftProbeId: input.draftProbeId, probeRequestKey: input.probeRequestKey });
+}
+
+async function validateTestedProbe(tx: Tx, intent: TestedMcpProbeIntent, actorId: string, connectionId: string): Promise<void> {
+  const proof = await tx.personalConnectionProbeAttempt.findUnique({ where: { id: intent.draftProbeId }, select: { actorId: true, kind: true, action: true, connectionId: true, status: true, safeErrorCode: true, evidenceExpiresAt: true, consumedAt: true } });
+  if (proof === null
+    || proof.actorId !== actorId
+    || proof.kind !== "mcp"
+    || proof.action !== "update"
+    || proof.connectionId !== connectionId
+    || proof.status !== "settled"
+    || proof.safeErrorCode !== null
+    || proof.consumedAt !== null
+    || proof.evidenceExpiresAt === null
+    || proof.evidenceExpiresAt <= new Date()) return fail("MCP_INVALID_INPUT");
 }
 
 async function clock(tx: Tx): Promise<Date> {
@@ -171,7 +199,7 @@ function impactCount(impact: Impact): number {
   return impact.liveDelegations.length + impact.toolGrantCount + impact.v2Attestations + impact.nonTerminalActions + impact.reservedDispatches;
 }
 
-function blockersFor(action: McpConnectionMutationAction, status: McpConnectionStatus, confirmationName: string | undefined, name: string, candidateSecretPresent: boolean, credentialAvailable: boolean, impact: Impact): string[] {
+function blockersFor(action: McpConnectionMutationAction, status: McpConnectionStatus, confirmationName: string | undefined, name: string, candidateSecretPresent: boolean, credentialAvailable: boolean, impact: Impact, testedProbe: boolean): string[] {
   const blockers: string[] = [];
   if ((action === "rotateCredential" || action === "retrust" || action === "rediscover") && status === "disabled") blockers.push("connection_disabled");
   if (action === "rotateCredential" && !candidateSecretPresent) blockers.push("secret_required_at_preview");
@@ -184,7 +212,7 @@ function blockersFor(action: McpConnectionMutationAction, status: McpConnectionS
   if ((action === "disable" || action === "delete") && impact.reservedDispatches > 0) blockers.push("reserved_dispatch");
   if (action === "delete" && impact.v2Attestations > 0) blockers.push("permanent_v2_attestation");
   if (action === "delete" && confirmationName !== undefined && confirmationName !== name) blockers.push("confirmation_name_mismatch");
-  if (action === "retrust" || action === "rediscover") blockers.push("external_io_planned_not_dispatched");
+  if ((action === "retrust" || action === "rediscover") && !testedProbe) blockers.push("external_io_planned_not_dispatched");
   return blockers;
 }
 
@@ -258,8 +286,9 @@ export async function previewMcpConnectionMutation(connectionIdInput: unknown, i
   if (!parsed.success) return fail("MCP_INVALID_INPUT");
   if (parsed.data.action === "rotateCredential" && parsed.data.secret === undefined) return fail("MCP_INVALID_INPUT");
   if (parsed.data.action === "delete" && parsed.data.confirmationName === undefined) return fail("MCP_INVALID_INPUT");
+  const testedProbe = testedProbeIntent(parsed.data);
   const expectedUpdatedAt = date(parsed.data.expectedUpdatedAt);
-  const requestFingerprint = hash({ connectionId, action: parsed.data.action, requestKey: parsed.data.requestKey, reason: parsed.data.reason, expectedUpdatedAt: expectedUpdatedAt.toISOString(), confirmationName: parsed.data.confirmationName ?? null, candidateSecret: parsed.data.secret === undefined ? null : hash(parsed.data.secret) });
+  const requestFingerprint = hash({ connectionId, action: parsed.data.action, requestKey: parsed.data.requestKey, reason: parsed.data.reason, expectedUpdatedAt: expectedUpdatedAt.toISOString(), confirmationName: parsed.data.confirmationName ?? null, candidateSecret: parsed.data.secret === undefined ? null : hash(parsed.data.secret), testedProbe });
   return withRetry(db, async (tx) => {
     await lockActorAccess(tx, actor.id);
     const actorVersion = await requireActor(tx, actor);
@@ -267,6 +296,7 @@ export async function previewMcpConnectionMutation(connectionIdInput: unknown, i
     const connection = await loadOwnedConnection(tx, connectionId, actor);
     if (connection.ownerAccountAccessVersion !== actorVersion && !canRebindStaleMcpConnection(connection, parsed.data.action, actorVersion)) return fail("MCP_CONNECTION_NOT_VERIFIED");
     if (connection.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return fail("MCP_CONNECTION_CONFLICT");
+    if (testedProbe !== null) await validateTestedProbe(tx, testedProbe, actor.id, connectionId);
     const existing = await tx.mcpConnectionMutationPreview.findUnique({ where: { actorId_requestKey: { actorId: actor.id, requestKey: parsed.data.requestKey } } });
     if (existing !== null) {
       if (existing.requestFingerprint !== requestFingerprint) return fail("MCP_CONNECTION_PREVIEW_MISMATCH");
@@ -274,9 +304,9 @@ export async function previewMcpConnectionMutation(connectionIdInput: unknown, i
       return previewView({ ...existing, connectionStatus: connection.status, configurationRevision: connection.configurationRevision, connectionUpdatedAt: connection.updatedAt, ownerUserId: actor.id });
     }
     const impact = await loadImpact(tx, connectionId, actor.id);
-    const impactSnapshot = { liveDelegations: impact.liveDelegations, activeToolGrants: impact.activeToolGrants, toolGrantCount: impact.toolGrantCount, v2Attestations: impact.v2Attestations, nonTerminalActions: impact.nonTerminalActions, reservedDispatches: impact.reservedDispatches } satisfies Prisma.InputJsonValue;
+    const impactSnapshot = { liveDelegations: impact.liveDelegations, activeToolGrants: impact.activeToolGrants, toolGrantCount: impact.toolGrantCount, v2Attestations: impact.v2Attestations, nonTerminalActions: impact.nonTerminalActions, reservedDispatches: impact.reservedDispatches, ...(testedProbe === null ? {} : { testedProbe }) } satisfies Prisma.InputJsonValue;
     const impactFingerprint = hash(impactSnapshot);
-    const blockers = blockersFor(parsed.data.action, connection.status, parsed.data.confirmationName, connection.name, parsed.data.secret !== undefined, connection.authKind === "bearer" && connection.credentialId !== null && connection.credential !== null, impact);
+    const blockers = blockersFor(parsed.data.action, connection.status, parsed.data.confirmationName, connection.name, parsed.data.secret !== undefined, connection.authKind === "bearer" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null);
     const issuedAt = await clock(tx);
     const expiresAt = new Date(issuedAt.getTime() + PREVIEW_TTL_MS);
     const previewId = randomUUID();
@@ -320,18 +350,28 @@ export async function executeMcpConnectionMutation(connectionIdInput: unknown, i
     if (connection.updatedAt.getTime() !== expectedUpdatedAt.getTime() || connection.updatedAt.getTime() !== preview.connectionUpdatedAt.getTime() || connection.configurationRevision !== preview.configurationRevision || connection.status !== preview.connectionStatus) return fail("MCP_CONNECTION_CONFLICT");
     const now = await clock(tx);
     if (now.getTime() >= preview.expiresAt.getTime()) return fail("MCP_CONNECTION_PREVIEW_EXPIRED");
+    const testedProbe = testedProbeIntent({ action: preview.action, draftProbeId: parsed.data.draftProbeId, probeRequestKey: parsed.data.probeRequestKey });
+    const previewImpact = preview.impactSnapshot !== null && typeof preview.impactSnapshot === "object" && !Array.isArray(preview.impactSnapshot)
+      ? preview.impactSnapshot as Record<string, unknown>
+      : {};
+    if (JSON.stringify(previewImpact.testedProbe ?? null) !== JSON.stringify(testedProbe)) return fail("MCP_CONNECTION_PREVIEW_MISMATCH");
+    if (testedProbe !== null) await validateTestedProbe(tx, testedProbe, actor.id, connectionId);
     const impact = await loadImpact(tx, connectionId, actor.id);
-    const currentImpactSnapshot = { liveDelegations: impact.liveDelegations, activeToolGrants: impact.activeToolGrants, toolGrantCount: impact.toolGrantCount, v2Attestations: impact.v2Attestations, nonTerminalActions: impact.nonTerminalActions, reservedDispatches: impact.reservedDispatches } satisfies Prisma.InputJsonValue;
+    const currentImpactSnapshot = { liveDelegations: impact.liveDelegations, activeToolGrants: impact.activeToolGrants, toolGrantCount: impact.toolGrantCount, v2Attestations: impact.v2Attestations, nonTerminalActions: impact.nonTerminalActions, reservedDispatches: impact.reservedDispatches, ...(testedProbe === null ? {} : { testedProbe }) } satisfies Prisma.InputJsonValue;
     if (hash(currentImpactSnapshot) !== preview.impactFingerprint) return fail("MCP_CONNECTION_IMPACT_CHANGED");
-    const blockers = blockersFor(preview.action, connection.status, parsed.data.confirmationName ?? preview.confirmationName ?? undefined, connection.name, parsed.data.secret !== undefined || preview.candidateSecretFingerprint !== null, connection.authKind === "bearer" && connection.credentialId !== null && connection.credential !== null, impact);
+    const blockers = blockersFor(preview.action, connection.status, parsed.data.confirmationName ?? preview.confirmationName ?? undefined, connection.name, parsed.data.secret !== undefined || preview.candidateSecretFingerprint !== null, connection.authKind === "bearer" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null);
     if (!preview.canExecute || blockers.length > 0) return fail("MCP_CONNECTION_IN_USE");
     const action = preview.action;
     const external = action === "retrust" || action === "rediscover";
-    const executionStatus: "completed" | "held" = external ? "held" : "completed";
-    const safeErrorCode: string | null = external ? "MCP_EXTERNAL_IO_PLANNED_NOT_DISPATCHED" : null;
+    const testedExternal = external && testedProbe !== null;
+    const executionStatus: "completed" | "held" = external && !testedExternal ? "held" : "completed";
+    const safeErrorCode: string | null = external && !testedExternal ? "MCP_EXTERNAL_IO_PLANNED_NOT_DISPATCHED" : null;
     await setGovernanceContext(tx, { preview: preview.id, connectionId, actorId: actor.id, ownerId: actor.id, action: databaseAction(action), requestKey: preview.requestKey, requestFingerprint: preview.requestFingerprint, impactFingerprint: preview.impactFingerprint, execute: true });
     let statusAfter: McpConnectionStatus | null = connection.status;
-    if (action === "rotateCredential") {
+    if (testedExternal && testedProbe !== null) {
+      await applyMcpConnectionProbeUpdate({ connectionId, draftProbeId: testedProbe.draftProbeId, clientRequestKey: testedProbe.probeRequestKey, actor, tx });
+      statusAfter = "verified";
+    } else if (action === "rotateCredential") {
       if (parsed.data.secret === undefined || preview.candidateSecretFingerprint === null || hash(parsed.data.secret) !== preview.candidateSecretFingerprint) return fail("MCP_CONNECTION_PREVIEW_MISMATCH");
       if (connection.authKind !== "bearer" || connection.credentialId === null || connection.credential === null) return fail("MCP_INVALID_INPUT");
       await setConfig(tx, "app.personal_mcp_credential_rotation_context", "1");

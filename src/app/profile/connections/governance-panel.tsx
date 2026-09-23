@@ -64,6 +64,7 @@ type ConnectionGovernancePanelProps = Readonly<{
 }>;
 
 type PendingAction = "preview" | "confirm" | "execute" | null;
+type TestedProbeIntent = Readonly<{ draftProbeId: string; probeRequestKey: string; repositoryPath?: string; trackedRef?: string }>;
 
 const actionLabels: Record<PersonalGovernanceKind, Partial<Record<PersonalGovernanceAction, string>>> = {
   git: {
@@ -88,7 +89,7 @@ const actionDescriptions: Record<PersonalGovernanceKind, Partial<Record<Personal
   git: {
     rotateCredential: "替换服务端加密凭据，并清除需要重新验证的连接状态。",
     retrust: "准备重新确认网络指纹；当前不会发起网络请求，外部连通性仍未验证。",
-    retest: "准备重新测试只读仓库；当前不会发起网络请求，外部连通性仍未验证。",
+    retest: "先执行一次只读 ls-remote 测试，再进入影响预览和独立确认。",
     disable: "停用连接，后续项目使用会失败关闭。",
     enable: "重新启用连接，但不会自动重新测试、重新发现或重放外部操作。",
     delete: "删除连接及其加密凭据；服务端会先检查所有安全影响和历史引用。",
@@ -96,7 +97,7 @@ const actionDescriptions: Record<PersonalGovernanceKind, Partial<Record<Personal
   mcp: {
     rotateCredential: "替换服务端加密凭据，并清除需要重新验证的连接状态。",
     retrust: "准备重新确认网络指纹；治理动作不会发起 MCP 协议请求或向远端发送凭据，MCP 连通性仍未验证。",
-    rediscover: "准备重新发现工具目录；治理动作不会发起 MCP 协议请求或向远端发送凭据，MCP 连通性仍未验证。",
+    rediscover: "先执行 initialize 和 tools/list 只读测试，再进入影响预览和独立确认。",
     disable: "停用连接，后续项目使用会失败关闭。",
     enable: "重新启用连接，但不会自动重新测试、重新发现或重放外部操作。",
     delete: "删除连接及其加密凭据；服务端会先检查所有安全影响和历史引用。",
@@ -109,8 +110,8 @@ function actionDescription(kind: PersonalGovernanceKind, action: PersonalGoverna
 
 function governanceBoundary(kind: PersonalGovernanceKind): string {
   return kind === "mcp"
-    ? "MCP 连接保存时会执行受限 DNS/地址安全解析；治理动作不会发起 MCP 协议请求或向远端发送凭据，MCP 连通性仍未验证。"
-    : "不会自动发起网络请求，外部连通性仍未验证。";
+    ? "MCP 连接保存和重新发现都会先执行受限 DNS/地址安全解析及 initialize/tools-list 只读测试；其他治理动作不会发起协议请求。"
+    : "重新测试会先固定安全地址并执行只读 ls-remote；其他治理动作不会自动发起网络请求。";
 }
 
 function heldActionMessage(kind: PersonalGovernanceKind): string {
@@ -197,6 +198,11 @@ function blockerText(code: string): string {
 function previewApiPath(kind: PersonalGovernanceKind, connectionId: string, operation: "preview" | "execute"): string {
   const prefix = kind === "git" ? "git-connections" : "mcp-connections";
   return `/api/me/${prefix}/${connectionId}/governance/${operation}`;
+}
+
+function probeApiPath(kind: PersonalGovernanceKind, connectionId: string): string {
+  const prefix = kind === "git" ? "git-connections" : "mcp-connections";
+  return `/api/me/${prefix}/${connectionId}/probe`;
 }
 
 function defaultAction(kind: PersonalGovernanceKind, status: string): PersonalGovernanceAction {
@@ -293,6 +299,7 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
   const [confirmationName, setConfirmationName] = useState("");
   const [repositoryPath, setRepositoryPath] = useState("");
   const [trackedRef, setTrackedRef] = useState("main");
+  const [testedProbe, setTestedProbe] = useState<TestedProbeIntent | null>(null);
   const [preview, setPreview] = useState<GovernancePreview | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
   const [message, setMessage] = useState<ConnectionMessage | null>(null);
@@ -302,6 +309,7 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
   function chooseAction(next: PersonalGovernanceAction) {
     setSelectedAction(next);
     setPreview(null);
+    setTestedProbe(null);
     setMessage(null);
     if (next !== "rotateCredential") setSecret("");
     if (next !== "delete") setConfirmationName("");
@@ -341,6 +349,29 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
     setPending("preview");
     setMessage(null);
     try {
+      let probeIntent: TestedProbeIntent | null = null;
+      if (action === "retest" || action === "rediscover") {
+        const probeRequestKey = globalThis.crypto.randomUUID();
+        const probeResponse = await fetch(probeApiPath(kind, connection.id), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            clientRequestKey: probeRequestKey,
+            expectedUpdatedAt: connection.updatedAt,
+            ...(kind === "git" ? { repositoryPath: repositoryPath.trim(), trackedRef: trackedRef.trim() } : {}),
+          }),
+        });
+        if (!probeResponse.ok) throw await readConnectionError(probeResponse, "连通性测试失败");
+        const payload = await probeResponse.json() as { probe?: { draftProbeId?: string | null; createRequestKey?: string; status?: string; safeErrorCode?: string | null } };
+        const probe = payload.probe;
+        if (probe?.status !== "settled" || probe.draftProbeId === undefined || probe.draftProbeId === null || probe.createRequestKey !== probeRequestKey) {
+          throw new Error(probe?.safeErrorCode === null || probe?.safeErrorCode === undefined ? "连通性测试未通过，请检查连接配置。" : `连通性测试未通过：${probe.safeErrorCode}`);
+        }
+        probeIntent = kind === "git"
+          ? { draftProbeId: probe.draftProbeId, probeRequestKey, repositoryPath: repositoryPath.trim(), trackedRef: trackedRef.trim() }
+          : { draftProbeId: probe.draftProbeId, probeRequestKey };
+        setTestedProbe(probeIntent);
+      }
       const response = await fetch(previewApiPath(kind, connection.id, "preview"), {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -351,6 +382,7 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
           expectedUpdatedAt: connection.updatedAt,
           ...(action === "rotateCredential" ? { secret } : {}),
           ...(action === "delete" ? { confirmationName: confirmationName.trim() } : {}),
+          ...(probeIntent === null ? {} : { draftProbeId: probeIntent.draftProbeId, probeRequestKey: probeIntent.probeRequestKey, ...(kind === "git" ? { repositoryPath: probeIntent.repositoryPath, trackedRef: probeIntent.trackedRef } : {}) }),
         }),
       });
       if (!response.ok) throw await readConnectionError(response, "安全影响预览失败");
@@ -399,6 +431,7 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
           expectedUpdatedAt: preview.connection.updatedAt,
           ...(action === "rotateCredential" ? { secret } : {}),
           ...(action === "delete" ? { confirmationName: result.value } : {}),
+          ...(testedProbe === null ? {} : { draftProbeId: testedProbe.draftProbeId, probeRequestKey: testedProbe.probeRequestKey, ...(kind === "git" ? { repositoryPath: testedProbe.repositoryPath, trackedRef: testedProbe.trackedRef } : {}) }),
         }),
       });
       if (!response.ok) throw await readConnectionError(response, "安全变更未执行");
@@ -449,10 +482,10 @@ export function ConnectionGovernancePanel({ kind, connection, onReload, onRemove
         </div>
         {action === "rotateCredential" ? <label className="block text-xs font-semibold text-slate-700">新凭据（仅当前浏览器暂存）<input type="password" autoComplete="new-password" className={connectionFieldClass} value={secret} onChange={(event) => { setSecret(event.target.value); setPreview(null); }} minLength={8} maxLength={32768} placeholder="不会在预览或响应中回显" required disabled={pending !== null || preview !== null} /></label> : null}
         {action === "delete" ? <label className="block text-xs font-semibold text-slate-700">删除预览确认名称<input className={connectionFieldClass} value={confirmationName} onChange={(event) => { setConfirmationName(event.target.value); setPreview(null); }} maxLength={80} placeholder={connection.name} required disabled={pending !== null || preview !== null} /></label> : null}
-        {kind === "git" && action === "retest" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs font-semibold text-slate-700">只读仓库路径<input className={connectionFieldClass} value={repositoryPath} onChange={(event) => { setRepositoryPath(event.target.value); setPreview(null); }} maxLength={768} placeholder="owner/repository" disabled={pending !== null || preview !== null} /></label><label className="block text-xs font-semibold text-slate-700">分支 / ref<input className={connectionFieldClass} value={trackedRef} onChange={(event) => { setTrackedRef(event.target.value); setPreview(null); }} maxLength={255} placeholder="main" disabled={pending !== null || preview !== null} /></label></div> : null}
+        {kind === "git" && action === "retest" ? <div className="grid gap-3 sm:grid-cols-2"><label className="block text-xs font-semibold text-slate-700">只读仓库路径<input className={connectionFieldClass} value={repositoryPath} onChange={(event) => { setRepositoryPath(event.target.value); setPreview(null); setTestedProbe(null); }} maxLength={768} placeholder="owner/repository" disabled={pending !== null || preview !== null} /></label><label className="block text-xs font-semibold text-slate-700">分支 / ref<input className={connectionFieldClass} value={trackedRef} onChange={(event) => { setTrackedRef(event.target.value); setPreview(null); setTestedProbe(null); }} maxLength={255} placeholder="main" disabled={pending !== null || preview !== null} /></label></div> : null}
         {preview === null ? <button type="submit" disabled={pending !== null} className={`${connectionButtonClass} min-h-11 w-fit bg-indigo-600 px-4 text-white hover:bg-indigo-500`}>{pending === "preview" ? "生成预览中…" : `生成${actionLabel}预览`}</button> : <div className="flex flex-wrap gap-2"><button type="button" onClick={() => { setPreview(null); setMessage(null); }} disabled={pending !== null} className={`${connectionButtonClass} border border-slate-200 bg-white text-slate-700 hover:bg-white`}>重新生成预览</button>{preview.canExecute ? <button type="button" onClick={() => void executePreview()} disabled={pending !== null} className={`${connectionButtonClass} bg-slate-950 px-4 text-white hover:bg-indigo-700`}>{pending === "confirm" ? "等待确认…" : pending === "execute" ? "执行中…" : `继续${actionLabel}`}</button> : null}</div>}
       </form> : null}
-      {preview !== null ? <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4" aria-live="polite"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Preview issued</p><p className="mt-1 text-sm font-semibold text-slate-900">{actionLabel} · 配置版本 {preview.connection.configurationVersion}</p><p className="mt-1 text-xs text-slate-500">作用域：{preview.scope} · 费用承担者：{preview.owner.feePayer === "connection_owner" ? "连接所有者" : "未定义"}</p><p className="mt-1 text-xs text-slate-500">签发于 {formatConnectionDate(preview.issuedAt)}，有效至 {formatConnectionDate(preview.expiresAt)}</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${preview.canExecute ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{preview.canExecute ? "可在确认后执行" : "阻断，不能执行"}</span></div><p className="mt-3 text-xs leading-5 text-slate-600">费用承担者为连接所有者。第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p>{totals !== null ? <ImpactDetails kind={kind} impact={preview.impact} /> : null}{preview.blockers.length > 0 ? <div className="mt-4 rounded-2xl bg-rose-50 p-4"><p className="text-xs font-semibold text-rose-800">安全阻断</p><ul className="mt-2 space-y-1 text-xs leading-5 text-rose-700">{preview.blockers.map((blocker) => <li key={blocker}>· {blockerText(blocker)}</li>)}</ul></div> : null}{action === "retest" || action === "rediscover" || action === "retrust" ? <p className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{unavailableActionNote(kind)}</p> : null}</div> : null}
+      {preview !== null ? <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4" aria-live="polite"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Preview issued</p><p className="mt-1 text-sm font-semibold text-slate-900">{actionLabel} · 配置版本 {preview.connection.configurationVersion}</p><p className="mt-1 text-xs text-slate-500">作用域：{preview.scope} · 费用承担者：{preview.owner.feePayer === "connection_owner" ? "连接所有者" : "未定义"}</p><p className="mt-1 text-xs text-slate-500">签发于 {formatConnectionDate(preview.issuedAt)}，有效至 {formatConnectionDate(preview.expiresAt)}</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${preview.canExecute ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{preview.canExecute ? "可在确认后执行" : "阻断，不能执行"}</span></div><p className="mt-3 text-xs leading-5 text-slate-600">费用承担者为连接所有者。第三方费用由其与服务商约定，平台不代扣，也不计入项目平台额度。</p>{totals !== null ? <ImpactDetails kind={kind} impact={preview.impact} /> : null}{preview.blockers.length > 0 ? <div className="mt-4 rounded-2xl bg-rose-50 p-4"><p className="text-xs font-semibold text-rose-800">安全阻断</p><ul className="mt-2 space-y-1 text-xs leading-5 text-rose-700">{preview.blockers.map((blocker) => <li key={blocker}>· {blockerText(blocker)}</li>)}</ul></div> : null}{(action === "retest" || action === "rediscover" || action === "retrust") && testedProbe === null ? <p className="mt-4 rounded-2xl bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{unavailableActionNote(kind)}</p> : null}</div> : null}
       {message ? <p role={message.tone === "error" ? "alert" : "status"} className={`mt-3 text-xs leading-5 ${message.tone === "error" ? "text-rose-700" : message.tone === "success" ? "text-emerald-700" : "text-slate-600"}`}>{message.text}</p> : null}
     </section>
   );

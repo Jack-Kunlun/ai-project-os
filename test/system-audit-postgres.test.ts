@@ -31,6 +31,7 @@ import {
   SYSTEM_AUDIT_REGISTRY,
   SYSTEM_AUDIT_SOURCES,
 } from "@/lib/system-audit";
+import { createGitConnectionFixture, createMcpConnectionFixture } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.SYSTEM_AUDIT_POSTGRES_GATE === "1";
 
@@ -384,25 +385,23 @@ test(
           secretFingerprint: gitCredentialFingerprint,
         },
       });
-      await database.gitConnection.create({
-        data: {
-          id: gitConnectionId,
-          name: `System audit Git ${suffix}`,
-          providerKind: "github",
-          transport: "https",
-          baseUrl: "https://github.com",
-          authKind: "token",
-          allowPrivateNetwork: false,
-          resolvedAddressFingerprint: "c".repeat(64),
-          status: "verified",
-          configurationVersion: 1,
-          ownershipState: "confirmed",
-          createdById: userId,
-          ownerUserId: userId,
-          ownerAccountAccessVersion: 1,
-          credentialId: gitCredentialId,
-        },
-      });
+      await createGitConnectionFixture({
+        id: gitConnectionId,
+        name: `System audit Git ${suffix}`,
+        providerKind: "github",
+        transport: "https",
+        baseUrl: "https://github.com",
+        authKind: "token",
+        allowPrivateNetwork: false,
+        resolvedAddressFingerprint: "c".repeat(64),
+        status: "verified",
+        configurationVersion: 1,
+        ownershipState: "confirmed",
+        createdById: userId,
+        ownerUserId: userId,
+        ownerAccountAccessVersion: 1,
+        credentialId: gitCredentialId,
+      }, database);
       const gitDraft = await proposeProjectGitRepositoryDelegation(projectId, {
         gitConnectionId,
         repositoryPath: "org/system-audit",
@@ -546,26 +545,24 @@ test(
       const mcpNetworkFingerprint = "d".repeat(64);
       const noCredentialFingerprint = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
       const mcpDefinitionFingerprint = "e".repeat(64);
-      await database.mcpConnection.create({
-        data: {
-          id: mcpConnectionId,
-          name: `System audit MCP ${suffix}`,
-          endpointUrl: "https://mcp.example.invalid/mcp",
-          authKind: "none",
-          credentialId: null,
-          allowPrivateNetwork: false,
-          resolvedAddressFingerprint: mcpNetworkFingerprint,
-          protocolVersion: "2026-07-28",
-          catalogFingerprint: "f".repeat(64),
-          credentialFingerprint: noCredentialFingerprint,
-          configurationRevision: 1,
-          status: "verified",
-          createdById: userId,
-          ownerUserId: userId,
-          ownerAccountAccessVersion: 1,
-          ownershipState: "confirmed",
-        },
-      });
+      await createMcpConnectionFixture({
+        id: mcpConnectionId,
+        name: `System audit MCP ${suffix}`,
+        endpointUrl: "https://mcp.example.invalid/mcp",
+        authKind: "none",
+        credentialId: null,
+        allowPrivateNetwork: false,
+        resolvedAddressFingerprint: mcpNetworkFingerprint,
+        protocolVersion: "2026-07-28",
+        catalogFingerprint: "f".repeat(64),
+        credentialFingerprint: noCredentialFingerprint,
+        configurationRevision: 1,
+        status: "verified",
+        createdById: userId,
+        ownerUserId: userId,
+        ownerAccountAccessVersion: 1,
+        ownershipState: "confirmed",
+      }, database);
       await database.mcpToolDefinition.create({
         data: {
           id: mcpDefinitionId,

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { buildProjectHref } from "@/lib/project-navigation";
 
@@ -10,7 +11,26 @@ type ProjectConfigurationClientProps = Readonly<{
   username: string;
   projectId: string;
   isSystemAdmin: boolean;
+  project: Readonly<{
+    id: string;
+    name: string;
+    slug: string;
+    archivedAt: string | null;
+    updatedAt: string;
+    canManage: boolean;
+  }>;
 }>;
+
+type LifecycleAction = "archive" | "restore" | "delete";
+
+async function readError(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await response.json() as { error?: { message?: string } };
+    return payload.error?.message ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 /** One endpoint's independent read state; a failed section must not hide siblings. */
 type SnapshotState<T> = Readonly<{
@@ -491,7 +511,7 @@ function SnapshotPanel({
   children: ReactNode;
 }>): React.JSX.Element {
   return (
-    <section className="min-w-0 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
+    <section className="flex h-full min-w-0 flex-col rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{eyebrow}</p>
@@ -507,7 +527,7 @@ function SnapshotPanel({
       {state.loading && state.data !== null ? <p role="status" className="mt-4 text-xs text-slate-400">正在刷新当前读取时快照…</p> : null}
       {state.data !== null ? <div className="mt-5">{children}</div> : null}
       {!state.loading && state.error === null && state.data === null ? <p className="mt-5 rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-500">暂时没有可展示的配置快照。</p> : null}
-      <div className="mt-5 border-t border-slate-100 pt-4">
+      <div className="mt-auto border-t border-slate-100 pt-4">
         <Link href={managementHref} className="text-xs font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">{managementLabel} →</Link>
       </div>
     </section>
@@ -544,7 +564,96 @@ function McpGrantsView({ snapshot }: { snapshot: McpSnapshot }): React.JSX.Eleme
   return <div><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-700">工具授权摘要</p><span className="text-xs text-slate-400">{snapshot.grants.length} 条 · 候选 {snapshot.candidateCount} 条</span></div>{snapshot.grants.length === 0 ? <p className="mt-3 text-sm text-slate-500">当前没有工具授权记录。</p> : <div className="mt-3 space-y-3">{snapshot.grants.map((grant, index) => <article key={`${grant.toolName ?? "tool"}:${index}`} className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{grant.toolName ?? "工具名称未知"}</p><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{statusLabel(grant.status, mcpStatusLabels)}</span></div><p className="mt-3 text-xs text-slate-600">{effectiveLabel(grant.effective)} · 审核 {grant.reviewRequired === true ? "仍需复核" : grant.reviewRequired === false ? "已具备审核标记" : "状态未知"}{grant.effectiveReason ? ` · ${reasonLabel(grant.effectiveReason)}` : ""}</p><p className="mt-2 text-xs text-slate-500">委托状态：{grant.delegationStatus ? statusLabel(grant.delegationStatus, mcpStatusLabels) : "状态未知"} · {formatDate(grant.expiresAt)}</p></article>)}</div>}<p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900">本页只展示读取时的控制面快照，不会调用远端 MCP 工具；实际动作仍由既有工具页面和服务端重新校验。</p></div>;
 }
 
-export function ProjectConfigurationClient({ username, projectId, isSystemAdmin }: ProjectConfigurationClientProps): React.JSX.Element {
+type ProjectManagementProject = ProjectConfigurationClientProps["project"];
+
+function ProjectManagement({ project, onChanged }: { project: ProjectManagementProject; onChanged: (action: LifecycleAction) => void }): React.JSX.Element {
+  const [exporting, setExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [lifecycle, setLifecycle] = useState<LifecycleAction | null>(null);
+  const archived = project.archivedAt !== null;
+
+  async function exportProject() {
+    setExporting(true);
+    setExportMessage(null);
+    try {
+      const response = await fetch(`/api/projects/${project.id}/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expectedUpdatedAt: project.updatedAt }),
+      });
+      if (!response.ok) throw new Error(await readError(response, "项目导出失败"));
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `ai-project-os-${project.slug}.json`;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      const hash = response.headers.get("x-ai-project-os-export-sha256");
+      setExportMessage(hash ? `JSON 已下载 · SHA-256 ${hash.slice(0, 12)}…` : "JSON 已下载");
+    } catch (error) {
+      setExportMessage(error instanceof Error ? error.message : "项目导出失败");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <section className="mt-7 rounded-3xl border border-indigo-100 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project management</p>
+          <h2 className="mt-2 text-2xl font-semibold">项目管理</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">导出和项目生命周期操作集中在这里，项目卡片保持单一入口。导出会记录审计信息；归档、恢复和删除仍会要求确认。</p>
+        </div>
+        <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700">仅项目 Owner 可操作</span>
+      </div>
+      <div className="mt-5 flex flex-wrap gap-3">
+        <button type="button" onClick={() => void exportProject()} disabled={exporting} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50">{exporting ? "导出中…" : "导出 JSON"}</button>
+        {archived ? <>
+          <button type="button" onClick={() => setLifecycle("restore")} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500">恢复项目</button>
+          <button type="button" onClick={() => setLifecycle("delete")} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-50">永久删除</button>
+        </> : <button type="button" onClick={() => setLifecycle("archive")} className="inline-flex min-h-10 items-center justify-center rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50">归档项目</button>}
+      </div>
+      {exportMessage ? <p role="status" className="mt-3 text-xs leading-5 text-slate-500">{exportMessage}</p> : null}
+      {lifecycle ? <LifecycleDialog project={project} action={lifecycle} onClose={() => setLifecycle(null)} onChanged={(action) => { setLifecycle(null); onChanged(action); }} /> : null}
+    </section>
+  );
+}
+
+function LifecycleDialog({ project, action, onClose, onChanged }: { project: ProjectManagementProject; action: LifecycleAction; onClose: () => void; onChanged: (action: LifecycleAction) => void }): React.JSX.Element {
+  const [confirmation, setConfirmation] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const archive = action === "archive";
+  const remove = action === "delete";
+  const confirmed = action === "restore" || confirmation === project.name;
+
+  async function submit() {
+    if (!confirmed || pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      const response = await fetch(remove ? `/api/projects/${project.id}` : `/api/projects/${project.id}/lifecycle`, {
+        method: remove ? "DELETE" : "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(remove ? { confirmationName: confirmation, expectedUpdatedAt: project.updatedAt } : { action, expectedUpdatedAt: project.updatedAt }),
+      });
+      if (!response.ok) throw new Error(await readError(response, archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败"));
+      onChanged(action);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败");
+      setPending(false);
+    }
+  }
+
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="project-management-dialog-title" className="w-full max-w-lg rounded-t-[2rem] bg-white p-7 shadow-2xl sm:rounded-[2rem] sm:p-8"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project lifecycle</p><h2 id="project-management-dialog-title" className="mt-2 text-2xl font-semibold">{archive ? `归档「${project.name}」` : remove ? `永久删除「${project.name}」` : `恢复「${project.name}」`}</h2><p className={`mt-3 text-sm leading-6 ${remove ? "text-rose-700" : "text-slate-500"}`}>{archive ? "归档后项目将移出进行中列表，并拒绝修改和新任务。数据、历史审计和模型用量不会删除。" : remove ? "此操作不可恢复：项目资料、文件、仓库快照、候选、记忆索引、智能体记录和项目审计都会删除。建议先导出 JSON；系统仅保留不含项目名称或内容的最小删除回执。" : "恢复后项目会重新出现在进行中列表，并可继续修改资料、同步仓库和运行 AI 任务。"}</p>{archive || remove ? <label className="mt-5 block text-sm font-semibold text-slate-700">输入项目名称以确认<input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${remove ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-amber-300 focus:ring-amber-100"}`} /></label> : null}{error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}<div className="mt-7 flex justify-end gap-3"><button type="button" onClick={onClose} disabled={pending} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">取消</button><button type="button" onClick={() => void submit()} disabled={!confirmed || pending} className={`rounded-xl px-5 py-3 text-sm font-semibold text-white disabled:opacity-40 ${remove ? "bg-rose-600" : archive ? "bg-amber-600" : "bg-indigo-600"}`}>{pending ? "处理中…" : archive ? "确认归档" : remove ? "确认永久删除" : "恢复项目"}</button></div></section></div>;
+}
+
+export function ProjectConfigurationClient({ username, projectId, isSystemAdmin, project }: ProjectConfigurationClientProps): React.JSX.Element {
+  const router = useRouter();
   const ai = useProjectSnapshot(projectId, `/api/projects/${projectId}/ai-provider-delegations`, parseAiSnapshot, "模型路由快照加载失败");
   const git = useProjectSnapshot(projectId, `/api/projects/${projectId}/git-repository-delegations`, parseGitSnapshot, "Git 委托快照加载失败");
   const mcp = useProjectSnapshot(projectId, `/api/projects/${projectId}/mcp-connection-delegations`, parseMcpSnapshot, "MCP 委托快照加载失败");
@@ -563,6 +672,14 @@ export function ProjectConfigurationClient({ username, projectId, isSystemAdmin 
             <div className="rounded-2xl border border-white/10 bg-white/[0.07] p-4 text-xs leading-5 text-slate-300 lg:max-w-xs">四个分区独立读取；更新时间可能不同，所有实际操作仍由原接口在提交前重新校验。</div>
           </div>
         </section>
+
+        {project.canManage ? <ProjectManagement project={project} onChanged={(action) => {
+          if (action === "delete") {
+            router.push("/projects");
+            return;
+          }
+          router.refresh();
+        }} /> : null}
 
         <div className="mt-7 grid gap-6 xl:grid-cols-2">
           <SnapshotPanel eyebrow="Model routing" title="模型路由" description="显示 operation、当前选择来源、版本、能力标签与费用承担摘要，不展示个人连接名称或凭据。" state={ai} managementHref={buildProjectHref(projectId, "control")} managementLabel="前往项目 AI 工作台">

@@ -8,10 +8,23 @@ import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/
 import { getDb } from "@/lib/db";
 import { assertProjectActive } from "@/lib/project-lifecycle";
 import { deriveConnectionRecoveryState } from "@/lib/connection-recovery";
-import { resolveSecureEndpointFingerprint } from "@/lib/web-sources";
-import { callMcpTool, discoverMcpTools, MCP_PROTOCOL_VERSION, type McpToolCallResult } from "./client";
+import { canonicalWebSourceUrl, resolveSecureEndpointFingerprint } from "@/lib/web-sources";
+import {
+  callMcpTool,
+  discoverMcpTools,
+  initializeMcpSession,
+  MCP_PROTOCOL_VERSION,
+  type McpToolCallResult,
+} from "./client";
 import { McpCapabilityError, failMcp } from "./errors";
-import { canonicalMcpToolArguments, stableMcpJson, type JsonValue } from "./schema";
+import { assertMcpToolDefinitionSafe, canonicalMcpToolArguments, normalizeMcpToolDefinition, stableMcpJson, type JsonValue } from "./schema";
+import {
+  acceptPersonalConnectionProbeDispatchBoundary,
+  consumePersonalConnectionProbe,
+  runPersonalConnectionProbe,
+  type PersonalConnectionProbeActor,
+  type PersonalConnectionProbeView,
+} from "@/lib/personal-connection-probe-service";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,128}$/u;
@@ -32,6 +45,15 @@ const createConnectionSchema = z.object({
   allowPrivateNetwork: z.boolean().default(false),
 }).strict();
 
+const probeConnectionSchema = createConnectionSchema.extend({
+  clientRequestKey: z.string().uuid(),
+}).strict();
+
+const createConnectionWithProbeSchema = createConnectionSchema.extend({
+  draftProbeId: z.string().uuid(),
+  createRequestKey: z.string().uuid(),
+}).strict();
+
 const updateConnectionSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   bearerToken: z.string().min(8).max(4096).optional(),
@@ -45,6 +67,10 @@ const deleteConnectionSchema = z.object({
   expectedUpdatedAt: z.string().datetime({ offset: true }),
 }).strict();
 const discoverConnectionSchema = z.object({
+  expectedUpdatedAt: z.string().datetime({ offset: true }),
+}).strict();
+const governedProbeSchema = z.object({
+  clientRequestKey: z.string().uuid(),
   expectedUpdatedAt: z.string().datetime({ offset: true }),
 }).strict();
 
@@ -317,41 +343,315 @@ export async function getMcpConnection(connectionIdInput: unknown, actor: McpCon
   return projectPersonalMcpConnection(connection, currentAccountAccessVersion);
 }
 
-export async function createMcpConnection(input: unknown, actor: McpConnectionActor, db: PrismaClient = getDb()) {
-  const parsed = createConnectionSchema.safeParse(input);
+function mcpProbeConfiguration(input: Readonly<{
+  name: string;
+  endpointUrl: string;
+  authKind: "none" | "bearer";
+  allowPrivateNetwork: boolean;
+}>) {
+  return {
+    name: input.name,
+    endpointUrl: input.endpointUrl,
+    authKind: input.authKind,
+    allowPrivateNetwork: input.allowPrivateNetwork,
+  } as const;
+}
+
+function mcpSavedProbeConfiguration(
+  connection: Readonly<Pick<Prisma.McpConnectionGetPayload<{ include: { credential: true } }>, "id" | "name" | "endpointUrl" | "authKind" | "allowPrivateNetwork" | "configurationRevision" | "updatedAt">> & { credential?: { secretFingerprint: string } | null },
+) {
+  return {
+    connectionId: connection.id,
+    name: connection.name,
+    endpointUrl: connection.endpointUrl,
+    authKind: connection.authKind,
+    allowPrivateNetwork: connection.allowPrivateNetwork,
+    configurationRevision: connection.configurationRevision,
+    updatedAt: connection.updatedAt.toISOString(),
+    credentialFingerprint: connection.credential?.secretFingerprint ?? null,
+  } as const;
+}
+
+function assertMcpToolCatalogSafe(tools: readonly unknown[], currentBearerToken: string | null): void {
+  for (const tool of tools) assertMcpToolDefinitionSafe(tool, currentBearerToken);
+}
+
+async function resolveMcpProbeEndpoint(input: Readonly<{ endpointUrl: string; allowPrivateNetwork: boolean }>) {
+  return resolveSecureEndpointFingerprint({ url: input.endpointUrl, allowPrivateNetwork: input.allowPrivateNetwork }).catch((error: unknown) => {
+    const code = error instanceof Error && "code" in error && typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : null;
+    if (code === "WEB_SOURCE_NETWORK_BLOCKED") return failMcp("MCP_NETWORK_BLOCKED");
+    return failMcp("MCP_TRANSPORT_FAILED");
+  });
+}
+
+type McpDraftProbeDependencies = Readonly<{
+  resolveEndpoint?: typeof resolveMcpProbeEndpoint;
+  initializeSession?: typeof initializeMcpSession;
+  discoverTools?: typeof discoverMcpTools;
+}>;
+
+export async function probeMcpConnectionDraft(
+  input: unknown,
+  actor: PersonalConnectionProbeActor,
+  db: PrismaClient = getDb(),
+  dependencies: McpDraftProbeDependencies = {},
+): Promise<PersonalConnectionProbeView> {
+  const parsed = probeConnectionSchema.safeParse(input);
   if (!parsed.success || (parsed.data.authKind === "none") !== (parsed.data.bearerToken == null)) return failMcp("MCP_INVALID_INPUT");
+  const secret = parsed.data.authKind === "none" ? null : parsed.data.bearerToken ?? null;
+  const endpointUrl = canonicalWebSourceUrl(parsed.data.endpointUrl, parsed.data.allowPrivateNetwork);
+  return runPersonalConnectionProbe({
+    kind: "mcp",
+    action: "create",
+    connectionId: null,
+    clientRequestKey: parsed.data.clientRequestKey,
+    configuration: mcpProbeConfiguration({ ...parsed.data, endpointUrl }),
+    secret,
+  }, actor, async () => {
+    const endpoint = await (dependencies.resolveEndpoint ?? resolveMcpProbeEndpoint)({ endpointUrl, allowPrivateNetwork: parsed.data.allowPrivateNetwork });
+    const onDispatchBoundary = () => acceptPersonalConnectionProbeDispatchBoundary({ db, actor });
+    const initialized = await (dependencies.initializeSession ?? initializeMcpSession)({
+      endpointUrl: endpoint.url,
+      allowPrivateNetwork: parsed.data.allowPrivateNetwork,
+      expectedAddressFingerprint: endpoint.fingerprint,
+      bearerToken: secret,
+      onDispatchBoundary,
+    });
+    const discovery = await (dependencies.discoverTools ?? discoverMcpTools)({
+      endpointUrl: endpoint.url,
+      allowPrivateNetwork: parsed.data.allowPrivateNetwork,
+      expectedAddressFingerprint: initialized.addressFingerprint,
+      bearerToken: secret,
+      sessionId: initialized.sessionId,
+      onDispatchBoundary,
+    });
+    if (discovery.addressFingerprint !== initialized.addressFingerprint) return failMcp("MCP_NETWORK_CHANGED");
+    assertMcpToolCatalogSafe(discovery.tools, secret);
+    return {
+      addressFingerprint: discovery.addressFingerprint,
+      protocolVersion: initialized.protocolVersion,
+      catalogFingerprint: discovery.catalogFingerprint,
+      resultCount: discovery.tools.length,
+      resultSnapshot: discovery.tools,
+    };
+  }, db);
+}
+
+/** Probe an existing MCP connection for the governed rediscovery action. */
+export async function probeMcpConnectionUpdate(
+  connectionIdInput: unknown,
+  input: unknown,
+  actor: PersonalConnectionProbeActor,
+  db: PrismaClient = getDb(),
+): Promise<PersonalConnectionProbeView> {
+  const connectionId = uuid(connectionIdInput);
+  const parsed = governedProbeSchema.safeParse(input);
+  if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
+  const expectedUpdatedAt = timestamp(parsed.data.expectedUpdatedAt);
+  await assertMcpActor(db, actor);
+  const connection = await db.mcpConnection.findFirst({ where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" }, include: { credential: true } });
+  if (connection === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
+  const owner = await loadMcpOwner(db, actor.id);
+  assertMcpConnectionEpoch(connection, owner);
+  if (connection.status === "disabled") return failMcp("MCP_CONNECTION_DISABLED");
+  if (connection.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return failMcp("MCP_CONNECTION_CONFLICT");
+  const expectedCredentialFingerprint = connection.credential?.secretFingerprint ?? null;
+  let currentBearerToken: string | null = null;
+  const onDispatchBoundary = () => acceptMcpDiscoveryDispatchBoundary({
+    db,
+    actor,
+    connectionId: connection.id,
+    expectedUpdatedAt: connection.updatedAt,
+    expectedCredentialFingerprint,
+  });
+  const readBearerToken = async () => {
+    currentBearerToken = await bearerToken(connection, db, expectedCredentialFingerprint ?? noCredentialFingerprint());
+    return currentBearerToken;
+  };
+  return runPersonalConnectionProbe({
+    kind: "mcp",
+    action: "update",
+    connectionId,
+    clientRequestKey: parsed.data.clientRequestKey,
+    configuration: mcpSavedProbeConfiguration(connection),
+    secret: null,
+    secretBindingFingerprint: expectedCredentialFingerprint,
+  }, actor, async () => {
+    const endpoint = await resolveMcpProbeEndpoint({ endpointUrl: connection.endpointUrl, allowPrivateNetwork: connection.allowPrivateNetwork });
+    const initialized = await initializeMcpSession({
+      endpointUrl: endpoint.url,
+      allowPrivateNetwork: connection.allowPrivateNetwork,
+      expectedAddressFingerprint: endpoint.fingerprint,
+      bearerToken: null,
+      onDispatchBoundary,
+      readBearerToken,
+    });
+    const discovery = await discoverMcpTools({
+      endpointUrl: endpoint.url,
+      allowPrivateNetwork: connection.allowPrivateNetwork,
+      expectedAddressFingerprint: initialized.addressFingerprint,
+      bearerToken: null,
+      sessionId: initialized.sessionId,
+      onDispatchBoundary,
+      readBearerToken,
+    });
+    if (discovery.addressFingerprint !== initialized.addressFingerprint) return failMcp("MCP_NETWORK_CHANGED");
+    assertMcpToolCatalogSafe(discovery.tools, currentBearerToken);
+    return {
+      addressFingerprint: discovery.addressFingerprint,
+      protocolVersion: initialized.protocolVersion,
+      catalogFingerprint: discovery.catalogFingerprint,
+      resultCount: discovery.tools.length,
+      resultSnapshot: discovery.tools,
+    };
+  }, db);
+}
+
+/** Consume a tested MCP rediscovery proof and update the connection catalog. */
+export async function applyMcpConnectionProbeUpdate(input: Readonly<{
+  connectionId: string;
+  draftProbeId: string;
+  clientRequestKey: string;
+  actor: McpConnectionActor;
+  tx: Prisma.TransactionClient;
+}>): Promise<Readonly<{ protocolVersion: string | null; catalogFingerprint: string | null; resultCount: number | null }>> {
+  const connection = await input.tx.mcpConnection.findFirst({ where: { id: input.connectionId, ownerUserId: input.actor.id, ownershipState: "confirmed" }, include: { credential: true } });
+  if (connection === null) return failMcp("MCP_CONNECTION_NOT_FOUND");
+  const owner = await loadMcpOwner(input.tx, input.actor.id);
+  assertMcpConnectionEpoch(connection, owner);
+  const expectedCredentialFingerprint = connection.credential?.secretFingerprint ?? null;
+  const proof = await consumePersonalConnectionProbe({
+    kind: "mcp",
+    action: "update",
+    connectionId: connection.id,
+    clientRequestKey: input.clientRequestKey,
+    configuration: mcpSavedProbeConfiguration(connection),
+    secret: null,
+    secretBindingFingerprint: expectedCredentialFingerprint,
+  }, input.actor, connection.id, input.tx, input.draftProbeId);
+  const tools = Array.isArray(proof.outcome.resultSnapshot)
+    ? proof.outcome.resultSnapshot.map((tool) => normalizeMcpToolDefinition(tool))
+    : failMcp("MCP_TOOL_CATALOG_INVALID");
+  assertMcpToolCatalogSafe(tools, null);
+  const now = new Date();
+  await input.tx.mcpToolDefinition.updateMany({ where: { connectionId: connection.id, current: true }, data: { current: false, supersededAt: now } });
+  for (const tool of tools) {
+    const existing = await input.tx.mcpToolDefinition.findUnique({ where: { connectionId_name_definitionFingerprint: { connectionId: connection.id, name: tool.name, definitionFingerprint: tool.definitionFingerprint } }, select: { id: true } });
+    if (existing === null) {
+      await input.tx.mcpToolDefinition.create({
+        data: {
+          id: randomUUID(), connectionId: connection.id, name: tool.name, title: tool.title, description: tool.description,
+          inputSchema: tool.inputSchema as Prisma.InputJsonValue,
+          outputSchema: tool.outputSchema === null ? Prisma.DbNull : tool.outputSchema as Prisma.InputJsonValue,
+          annotations: tool.annotations as Prisma.InputJsonValue,
+          remoteReadOnlyHint: tool.remoteReadOnlyHint, definitionFingerprint: tool.definitionFingerprint,
+          current: true, discoveredAt: now, supersededAt: null,
+        },
+      });
+    } else {
+      await input.tx.mcpToolDefinition.update({ where: { id: existing.id }, data: { current: true, supersededAt: null } });
+    }
+  }
+  await input.tx.mcpConnection.update({
+    where: { id: connection.id },
+    data: {
+      status: "verified",
+      protocolVersion: proof.outcome.protocolVersion,
+      catalogFingerprint: proof.outcome.catalogFingerprint,
+      resolvedAddressFingerprint: proof.outcome.addressFingerprint,
+      lastDiscoveredAt: now,
+      lastErrorCode: null,
+      disabledAt: null,
+    },
+  });
+  return Object.freeze({ protocolVersion: proof.outcome.protocolVersion ?? null, catalogFingerprint: proof.outcome.catalogFingerprint ?? null, resultCount: proof.outcome.resultCount ?? null });
+}
+
+export async function createMcpConnection(input: unknown, actor: McpConnectionActor, db: PrismaClient = getDb()) {
+  const parsedResult = createConnectionWithProbeSchema.safeParse(input);
+  if (!parsedResult.success || (parsedResult.data.authKind === "none") !== (parsedResult.data.bearerToken == null)) return failMcp("MCP_INVALID_INPUT");
+  const parsed = parsedResult.data;
+  const endpointUrl = canonicalWebSourceUrl(parsed.endpointUrl, parsed.allowPrivateNetwork);
+  const secret = parsed.authKind === "none" ? null : parsed.bearerToken ?? null;
   await assertMcpActor(db, actor);
   await loadMcpOwner(db, actor.id);
-  const endpoint = await resolveSecureEndpointFingerprint({ url: parsed.data.endpointUrl, allowPrivateNetwork: parsed.data.allowPrivateNetwork })
-    .catch((error: unknown) => {
-      if (error instanceof Error && error.message === "WEB_SOURCE_NETWORK_BLOCKED") return failMcp("MCP_NETWORK_BLOCKED");
-      return failMcp("MCP_TRANSPORT_FAILED");
-    });
   try {
     return await db.$transaction(async (tx) => {
       await lockActorAccess(tx, actor.id);
       await tx.$queryRaw`SELECT "id" FROM "AppUser" WHERE "id" = ${actor.id}::uuid FOR UPDATE`;
       await assertMcpActor(tx, actor);
       const currentOwner = await loadMcpOwner(tx, actor.id);
-      const credential = parsed.data.authKind === "bearer"
-        ? await createCredential("mcp", parsed.data.bearerToken, tx)
+      // Replays must reuse the connection id already bound to the proof. A
+      // fresh id would turn an idempotent retry into a second mutation.
+      const consumedProof = await tx.personalConnectionProbeAttempt.findUnique({ where: { id: parsed.draftProbeId }, select: { consumedConnectionId: true } });
+      const connectionId = consumedProof?.consumedConnectionId ?? randomUUID();
+      const probe = await consumePersonalConnectionProbe({
+        kind: "mcp",
+        action: "create",
+        connectionId: null,
+        clientRequestKey: parsed.createRequestKey,
+        configuration: mcpProbeConfiguration({ ...parsed, endpointUrl }),
+        secret,
+      }, actor, connectionId, tx, parsed.draftProbeId);
+      if (probe.alreadyConsumedConnectionId !== null) {
+        const existing = await tx.mcpConnection.findFirst({ where: { id: probe.alreadyConsumedConnectionId, ownerUserId: actor.id, ownershipState: "confirmed" }, select: connectionSelect });
+        if (existing === null) return failMcp("MCP_CONNECTION_CONFLICT");
+        return projectPersonalMcpConnection(existing, currentOwner.accountAccessVersion);
+      }
+      const tools = Array.isArray(probe.outcome.resultSnapshot)
+        ? probe.outcome.resultSnapshot.map((tool) => normalizeMcpToolDefinition(tool))
+        : failMcp("MCP_TOOL_CATALOG_INVALID");
+      assertMcpToolCatalogSafe(tools, secret);
+      const credential = parsed.authKind === "bearer"
+        ? await createCredential("mcp", secret, tx)
         : null;
-      const connection = await tx.mcpConnection.create({
+      await tx.$executeRaw`SELECT set_config('app.personal_mcp_connection_create_context', 'service-v1', true)`;
+      await tx.mcpConnection.create({
         data: {
-          id: randomUUID(),
-          name: parsed.data.name,
-          endpointUrl: endpoint.url,
-          authKind: parsed.data.authKind,
+          id: connectionId,
+          name: parsed.name,
+          endpointUrl,
+          authKind: parsed.authKind,
           credentialId: credential?.id ?? null,
-          allowPrivateNetwork: parsed.data.allowPrivateNetwork,
-          resolvedAddressFingerprint: endpoint.fingerprint,
+          credentialFingerprint: secret === null
+            ? noCredentialFingerprint()
+            : createHash("sha256").update(secret, "utf8").digest("hex"),
+          allowPrivateNetwork: parsed.allowPrivateNetwork,
+          resolvedAddressFingerprint: probe.outcome.addressFingerprint,
+          protocolVersion: probe.outcome.protocolVersion,
+          catalogFingerprint: probe.outcome.catalogFingerprint,
+          lastDiscoveredAt: new Date(),
+          lastErrorCode: null,
+          status: "verified",
           createdById: actor.id,
           ownerUserId: actor.id,
           ownerAccountAccessVersion: currentOwner.accountAccessVersion,
           ownershipState: "confirmed",
         },
-        select: connectionSelect,
       });
+      const now = new Date();
+      for (const tool of tools) {
+        await tx.mcpToolDefinition.create({
+          data: {
+            id: randomUUID(),
+            connectionId,
+            name: tool.name,
+            title: tool.title,
+            description: tool.description,
+            inputSchema: tool.inputSchema as Prisma.InputJsonValue,
+            outputSchema: tool.outputSchema === null ? Prisma.DbNull : tool.outputSchema as Prisma.InputJsonValue,
+            annotations: tool.annotations as Prisma.InputJsonValue,
+            remoteReadOnlyHint: tool.remoteReadOnlyHint,
+            definitionFingerprint: tool.definitionFingerprint,
+            current: true,
+            discoveredAt: now,
+            supersededAt: null,
+          },
+        });
+      }
+      const connection = await tx.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: connectionSelect });
       return projectPersonalMcpConnection(connection, currentOwner.accountAccessVersion);
     });
   } catch (error) {
@@ -369,6 +669,12 @@ export async function updateMcpConnection(
   const connectionId = uuid(connectionIdInput);
   const parsed = updateConnectionSchema.safeParse(input);
   if (!parsed.success) return failMcp("MCP_INVALID_INPUT");
+  if (parsed.data.bearerToken !== undefined || parsed.data.enabled !== undefined || parsed.data.trustCurrentNetwork !== undefined) {
+    // Configuration/status writes must use the probe plus connection
+    // governance path. Keeping this legacy helper fail-closed prevents a
+    // caller from changing fields bound into a settled proof.
+    return failMcp("MCP_CONNECTION_GOVERNANCE_REQUIRED");
+  }
   await assertMcpActor(db, actor);
   const existing = await db.mcpConnection.findFirst({
     where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
@@ -475,7 +781,7 @@ export async function deleteMcpConnection(
 
 async function bearerToken(
   connection: Readonly<{ authKind: "none" | "bearer"; credentialId: string | null }>,
-  db: PrismaClient,
+  db: McpDb,
   expectedSecretFingerprint?: string,
 ): Promise<string | null> {
   if (connection.authKind === "none") return null;
@@ -555,20 +861,26 @@ export async function discoverMcpConnectionTools(
   if (connection.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return failMcp("MCP_CONNECTION_CONFLICT");
   const expectedCredentialFingerprint = connection.credential?.secretFingerprint ?? null;
   try {
-    const accepted = await acceptMcpDiscoveryDispatchBoundary({
+    const onDispatchBoundary = () => acceptMcpDiscoveryDispatchBoundary({
       db,
       actor,
       connectionId,
       expectedUpdatedAt: connection.updatedAt,
       expectedCredentialFingerprint,
     });
-    if (!accepted) return failMcp("MCP_CONNECTION_CONFLICT");
+    let currentBearerToken: string | null = null;
     const discovery = await discoverMcpTools({
       endpointUrl: connection.endpointUrl,
       allowPrivateNetwork: connection.allowPrivateNetwork,
       expectedAddressFingerprint: connection.resolvedAddressFingerprint,
-      bearerToken: await bearerToken(connection, db, expectedCredentialFingerprint ?? noCredentialFingerprint()),
+      bearerToken: null,
+      onDispatchBoundary,
+      readBearerToken: async () => {
+        currentBearerToken = await bearerToken(connection, db, expectedCredentialFingerprint ?? noCredentialFingerprint());
+        return currentBearerToken;
+      },
     });
+    assertMcpToolCatalogSafe(discovery.tools, currentBearerToken);
     const now = new Date();
     const stored = await db.$transaction(async (tx) => {
       await lockActorAccess(tx, actor.id);

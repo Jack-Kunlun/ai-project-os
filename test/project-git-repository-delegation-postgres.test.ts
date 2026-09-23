@@ -27,6 +27,7 @@ import {
 import { executeGitConnectionMutation, previewGitConnectionMutation, updateGitConnection } from "../src/lib/git";
 import { updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
+import { createGitConnectionFixture } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.PROJECT_GIT_REPOSITORY_DELEGATION_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_project_git_repository_delegation_test";
@@ -485,9 +486,9 @@ test(
       credentialId,
       ownerAccountAccessVersion: 1,
     };
-    await db.gitConnection.create({ data: { ...common, id: connectionId, name: `Own Git ${suffix}` } });
-    await db.gitConnection.create({ data: { ...common, id: foreignConnectionId, name: `Foreign Git ${suffix}`, ownerUserId: projectOwnerId, createdById: projectOwnerId, credentialId: foreignCredentialId } });
-    await db.gitConnection.create({ data: { ...common, id: parityConnectionId, name: `Parity Git ${suffix}`, ownerUserId: parityConnectionOwnerId, createdById: parityConnectionOwnerId, credentialId: parityCredentialId } });
+    await createGitConnectionFixture({ ...common, id: connectionId, name: `Own Git ${suffix}` }, db);
+    await createGitConnectionFixture({ ...common, id: foreignConnectionId, name: `Foreign Git ${suffix}`, ownerUserId: projectOwnerId, createdById: projectOwnerId, credentialId: foreignCredentialId }, db);
+    await createGitConnectionFixture({ ...common, id: parityConnectionId, name: `Parity Git ${suffix}`, ownerUserId: parityConnectionOwnerId, createdById: parityConnectionOwnerId, credentialId: parityCredentialId }, db);
 
     await assert.rejects(
       () => proposeProjectGitRepositoryDelegation(projectId, {

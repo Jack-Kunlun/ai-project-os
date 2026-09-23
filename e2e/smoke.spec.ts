@@ -407,7 +407,8 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await page.getByRole("button", { name: "＋ 新建项目" }).click();
   await page.getByLabel("项目名称", { exact: true }).fill(projectName);
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
-  const projectHref = await page.getByRole("link", { name: projectName, exact: true }).getAttribute("href");
+  const projectCard = page.locator("article").filter({ has: page.getByRole("heading", { name: projectName, exact: true }) });
+  const projectHref = await projectCard.getByRole("link", { name: "进入项目", exact: true }).getAttribute("href");
   expect(projectHref).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   const projectId = projectHref!.split("/")[2]!;
   await page.goto(`${projectHref!}/materials`);
@@ -648,7 +649,8 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expect(mcpBoundary).toHaveCount(1);
   await expect(mcpBoundary.getByText(/项目委托控制面已开放/u)).toBeVisible();
   await expect(mcpBoundary.getByText(/远端动作、自动化和调用审批仍未开放/u)).toBeVisible();
-  await expect(mcpBoundary.getByText(/MCP 连通性仍未验证/u)).toBeVisible();
+  await expect(mcpBoundary.getByText(/新建连接会先执行受限 DNS\/地址安全解析，再完成 initialize 和 tools\/list 只读测试/u)).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存连接", exact: true })).toHaveCount(0);
   await expectNoAccessibilityViolations(page, "personal MCP connections");
   await page.goto("/profile");
 
@@ -712,8 +714,9 @@ test("first-run administrator and personal workspace Owner stay separate across 
   expect(membershipGrant.body.subscription?.status).toBe("active");
 
   await page.goto("/personal/configuration");
-  await expect(page.getByRole("link", { name: "我的模型", exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "我的模型", exact: true }).click();
+  const modelsResource = page.locator('a[href="/personal/models"]');
+  await expect(modelsResource.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
+  await modelsResource.click();
   await expect(page).toHaveURL(/\/personal\/models$/u);
   await expect(page.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
   await expect(page.getByText("会员有效", { exact: true })).toBeVisible();

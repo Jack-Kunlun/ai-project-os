@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { WebSourceError, securePinnedHttpRequest } from "@/lib/web-sources";
+import { WebSourceError, securePinnedHttpRequest, type SecurePinnedRequestDispatchResult } from "@/lib/web-sources";
 import { APP_VERSION } from "@/lib/version";
 import { McpCapabilityError, failMcp } from "./errors";
 import {
@@ -59,6 +59,7 @@ function mapTransportError(error: unknown): never {
   if (error instanceof WebSourceError) {
     if (error.code === "WEB_SOURCE_NETWORK_BLOCKED") return failMcp("MCP_NETWORK_BLOCKED");
     if (error.code === "WEB_SOURCE_NETWORK_CHANGED") return failMcp("MCP_NETWORK_CHANGED");
+    if (error.code === "WEB_SOURCE_REQUEST_BOUNDARY_REJECTED") return failMcp("MCP_CONNECTION_CONFLICT");
     if (error.code === "WEB_SOURCE_TOO_LARGE") return failMcp("MCP_RESPONSE_TOO_LARGE");
   }
   return failMcp("MCP_TRANSPORT_FAILED");
@@ -139,11 +140,16 @@ async function rpcRequest(input: Readonly<{
   allowPrivateNetwork: boolean;
   expectedAddressFingerprint: string | null;
   bearerToken: string | null;
-  method: "tools/list" | "tools/call";
+  method: "initialize" | "tools/list" | "tools/call";
   params: Readonly<Record<string, unknown>>;
+  sessionId?: string | null;
   name?: string;
   extraHeaders?: Readonly<Record<string, string>>;
-}>): Promise<Readonly<{ result: unknown; addressFingerprint: string }>> {
+  /** Called after DNS/fingerprint admission, before each request is built. */
+  onDispatchBoundary?: McpDispatchBoundary;
+  /** Read the saved credential only after the dispatch boundary succeeds. */
+  readBearerToken?: () => Promise<string | null>;
+}>): Promise<Readonly<{ result: unknown; addressFingerprint: string; sessionId: string | null }>> {
   const id = randomUUID();
   const params = { ...input.params, _meta: rpcMetadata() };
   const body = JSON.stringify({ jsonrpc: "2.0", id, method: input.method, params });
@@ -156,8 +162,11 @@ async function rpcRequest(input: Readonly<{
     "user-agent": "AI-Project-OS-MCP/3.2",
     ...input.extraHeaders,
   };
+  if (input.sessionId !== undefined && input.sessionId !== null) headers["mcp-session-id"] = input.sessionId;
   if (input.name !== undefined) headers["mcp-name"] = encodeMcpNameHeader(input.name);
-  if (input.bearerToken !== null) headers.authorization = `Bearer ${input.bearerToken}`;
+  if (input.onDispatchBoundary === undefined && input.readBearerToken === undefined && input.bearerToken !== null) {
+    headers.authorization = `Bearer ${input.bearerToken}`;
+  }
   try {
     const response = await securePinnedHttpRequest({
       url: input.endpointUrl,
@@ -167,6 +176,15 @@ async function rpcRequest(input: Readonly<{
       headers,
       body,
       maximumResponseBytes: MAX_RESPONSE_BYTES,
+      onRequestBodyWriteStart: input.onDispatchBoundary === undefined && input.readBearerToken === undefined
+        ? undefined
+        : async (): Promise<SecurePinnedRequestDispatchResult | boolean> => {
+          const accepted = await input.onDispatchBoundary?.() ?? true;
+          if (!accepted) return false;
+          const bearerToken = input.readBearerToken === undefined ? input.bearerToken : await input.readBearerToken();
+          if (bearerToken === null) return {};
+          return { headers: { ...headers, authorization: `Bearer ${bearerToken}` } };
+        },
     });
     if (response.status === 400 || response.status === 404 || response.status === 405) {
       const maybe = (() => { try { return parseRpcResponse(response.body, response.headers["content-type"] ?? "application/json", id); } catch { return null; } })();
@@ -174,11 +192,37 @@ async function rpcRequest(input: Readonly<{
     }
     if (response.status < 200 || response.status >= 300) return failMcp("MCP_TRANSPORT_FAILED");
     const rpc = parseRpcResponse(response.body, response.headers["content-type"] ?? "", id);
-    if (rpc.error !== undefined) return failMcp(input.method === "tools/call" ? "MCP_TOOL_CALL_FAILED" : "MCP_TOOL_CATALOG_INVALID");
-    return Object.freeze({ result: rpc.result, addressFingerprint: response.fingerprint });
+    if (rpc.error !== undefined) {
+      if (input.method === "tools/call") return failMcp("MCP_TOOL_CALL_FAILED");
+      if (input.method === "initialize") return failMcp("MCP_PROTOCOL_UNSUPPORTED");
+      return failMcp("MCP_TOOL_CATALOG_INVALID");
+    }
+    return Object.freeze({ result: rpc.result, addressFingerprint: response.fingerprint, sessionId: response.headers["mcp-session-id"] ?? null });
   } catch (error) {
     return mapTransportError(error);
   }
+}
+
+export async function initializeMcpSession(input: Readonly<{
+  endpointUrl: string;
+  allowPrivateNetwork: boolean;
+  expectedAddressFingerprint: string | null;
+  bearerToken: string | null;
+  onDispatchBoundary?: McpDispatchBoundary;
+  readBearerToken?: () => Promise<string | null>;
+}>): Promise<Readonly<{ protocolVersion: typeof MCP_PROTOCOL_VERSION; sessionId: string | null; addressFingerprint: string }>> {
+  const response = await rpcRequest({
+    ...input,
+    method: "initialize",
+    params: {
+      protocolVersion: MCP_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: "AI Project OS", version: APP_VERSION },
+    },
+  });
+  if (!isObject(response.result) || response.result.protocolVersion !== MCP_PROTOCOL_VERSION || !isObject(response.result.serverInfo)) return failMcp("MCP_PROTOCOL_UNSUPPORTED");
+  if (response.sessionId !== null && (response.sessionId.length < 1 || response.sessionId.length > 256 || /[\u0000-\u001f\u007f]/u.test(response.sessionId))) return failMcp("MCP_RESPONSE_INVALID");
+  return Object.freeze({ protocolVersion: MCP_PROTOCOL_VERSION, sessionId: response.sessionId, addressFingerprint: response.addressFingerprint });
 }
 
 export async function discoverMcpTools(input: Readonly<{
@@ -186,6 +230,9 @@ export async function discoverMcpTools(input: Readonly<{
   allowPrivateNetwork: boolean;
   expectedAddressFingerprint: string | null;
   bearerToken: string | null;
+  sessionId?: string | null;
+  onDispatchBoundary?: McpDispatchBoundary;
+  readBearerToken?: () => Promise<string | null>;
 }>): Promise<McpDiscoveryResult> {
   const definitions = new Map<string, NormalizedMcpTool>();
   let rejectedCount = 0;

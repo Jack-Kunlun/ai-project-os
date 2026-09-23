@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { AppHeader } from "@/components/app-header";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
@@ -10,57 +10,145 @@ import { safeResponseError } from "@/lib/safe-error-presentation";
 type WorkspaceRole = "owner" | "admin" | "member" | "viewer";
 type ProjectRole = "owner" | "editor" | "viewer";
 type MembershipAccessState = "pending" | "confirmed" | "revoked";
-type Overview = { workspace: { id: string; name: string; slug: string }; role: WorkspaceRole; counts: { memberships: number; projects: number; oidcProviders: number } };
+type Overview = { workspace: { id: string; name: string; slug: string }; role: WorkspaceRole; counts: { memberships: number; projects: number } };
 type Project = { id: string; name: string };
 type Member = { userId: string; role: WorkspaceRole; accessState: MembershipAccessState; user: { id: string; username: string; displayName: string | null; email: string | null; disabledAt: string | null; createdAt: string; oidcIdentities: Array<{ provider: { id: string; name: string }; lastLoginAt: string }> }; workspace: { projects: Project[] }; projectGrants: Array<{ projectId: string; role: ProjectRole; accessState: MembershipAccessState }> };
 type Invitation = { id: string; email: string | null; workspaceRole: WorkspaceRole; projectId: string | null; projectRole: ProjectRole | null; expiresAt: string; acceptedAt: string | null; revokedAt: string | null; version: number; createdAt?: string; project: { name: string } | null; invitedBy: { username: string } };
 type OidcProvider = { id: string; name: string; issuerUrl: string; clientId: string; tokenAuthMethod: "clientSecretPost" | "clientSecretBasic"; allowPrivateNetwork: boolean; autoProvision: boolean; defaultWorkspaceRole: "member" | "viewer"; allowedEmailDomains: string[]; status: "configured" | "verified" | "error" | "disabled"; lastTestedAt: string | null; lastErrorCode: string | null; updatedAt: string };
-type View = "members" | "invitations" | "oidc";
+type AdminView = "members" | "invitations" | "oidc";
+type WorkspaceTeamView = "overview" | "members" | "permissions" | "activity" | "settings" | AdminView;
 
 async function responseError(response: Response, fallback: string) { return (await safeResponseError(response, fallback)).message; }
 
 export function TeamClient({ username, currentUserId, isSystemAdmin }: { username: string; currentUserId: string; isSystemAdmin: boolean }) {
+  void currentUserId;
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [teams, setTeams] = useState<Overview[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [requestedView] = useState(() => searchParams.get("view"));
+  const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
+    if (showLoading) setLoading(true);
+    try {
+      const response = await fetch("/api/teams", { cache: "no-store" });
+      if (!response.ok) throw new Error(await responseError(response, "团队列表加载失败"));
+      setTeams((await response.json() as { teams: Overview[] }).teams);
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "团队列表加载失败");
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, []);
+  useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
+  useEffect(() => {
+    if (loading || error || teams.length !== 1) return;
+    const view = requestedView === "members" || requestedView === "invitations" || requestedView === "oidc" ? `?view=${requestedView}` : "";
+    router.replace(`/team/${teams[0].workspace.id}${view}`);
+  }, [error, loading, requestedView, router, teams]);
+
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="team" isSystemAdmin={isSystemAdmin} /><div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12"><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10"><p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Teams</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">我的团队</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">查看你已确认加入的团队、团队项目和实际访问权限。</p></section>{error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{loading ? <div className="mt-7 grid gap-5 md:grid-cols-2"><div className="h-52 animate-pulse rounded-3xl bg-slate-200" /><div className="h-52 animate-pulse rounded-3xl bg-slate-200" /></div> : teams.length === 0 ? <section className="mt-7 rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center"><h2 className="text-xl font-semibold">暂未加入团队</h2><p className="mt-3 text-sm text-slate-500">加入团队后，团队空间会显示在这里。你的个人工作区仍在“个人工作台”中。</p></section> : teams.length > 1 ? <section className="mt-7 grid gap-5 lg:grid-cols-2" aria-label="团队列表">{teams.map((team) => <article key={team.workspace.id} className="flex min-h-52 flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="flex items-start justify-between gap-4"><div><h2 className="text-xl font-semibold">{team.workspace.name}</h2><p className="mt-2 text-xs text-slate-500">{team.role} · {team.counts.memberships} 位成员 · {team.counts.projects} 个可访问项目</p></div><span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">已加入</span></div><div className="mt-auto pt-7"><a href={`/team/${team.workspace.id}`} className="inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">进入团队</a></div></article>)}</section> : null}</div></main>;
+}
+
+type TeamProjectView = { id: string; name: string; slug: string; description: string | null; archivedAt: string | null; updatedAt: string; _count: { sources: number; items: number } };
+type TeamOverviewPayload = { workspace: { id: string; name: string; slug: string }; role: WorkspaceRole; counts: { memberships: number; projects: number }; members: Array<{ userId: string; role: WorkspaceRole; username: string; displayName: string | null }>; projects: TeamProjectView[] };
+type TeamPermissionsPayload = { workspace: { id: string; name: string; slug: string }; role: WorkspaceRole; projects: Array<{ project: { id: string; name: string; slug: string }; permission: ProjectRole; source: "workspace-role" | "project-grant" }> };
+type TeamActivityPayload = { workspace: { id: string; name: string; slug: string }; role: WorkspaceRole; activity: Array<{ id: string; kind: "membership" | "invitation" | "role"; label: string; createdAt: string; project: { id: string; name: string } | null }> };
+
+export function WorkspaceTeamClient({ username, currentUserId, isSystemAdmin, workspaceId }: { username: string; currentUserId: string; isSystemAdmin: boolean; workspaceId: string }) {
+  void currentUserId;
   const searchParams = useSearchParams();
   const requestedView = searchParams.get("view");
-  const initialView: View = requestedView === "invitations" || requestedView === "oidc" ? requestedView : "members";
-  const [view, setView] = useState<View>(initialView);
-  const [overview, setOverview] = useState<Overview | null>(null);
+  const initialView: WorkspaceTeamView = requestedView === "members" || requestedView === "permissions" || requestedView === "activity" || requestedView === "settings" || requestedView === "invitations" || requestedView === "oidc" ? requestedView : "overview";
+  const [view, setView] = useState<WorkspaceTeamView>(initialView);
+  const [overview, setOverview] = useState<TeamOverviewPayload | null>(null);
+  const [permissions, setPermissions] = useState<TeamPermissionsPayload | null>(null);
+  const [activity, setActivity] = useState<TeamActivityPayload | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [providers, setProviders] = useState<OidcProvider[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   const reload = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
     try {
-      const overviewResponse = await fetch("/api/workspaces/current", { cache: "no-store" });
-      if (!overviewResponse.ok) throw new Error(await responseError(overviewResponse, "工作区加载失败"));
-      const nextOverview = (await overviewResponse.json() as { overview: Overview }).overview;
+      const overviewResponse = await fetch(`/api/teams/${workspaceId}/overview`, { cache: "no-store" });
+      if (!overviewResponse.ok) throw new Error(await responseError(overviewResponse, "团队加载失败"));
+      const nextOverview = (await overviewResponse.json() as { overview: TeamOverviewPayload }).overview;
+      const [permissionsResponse, activityResponse] = await Promise.all([
+        fetch(`/api/teams/${workspaceId}/permissions`, { cache: "no-store" }),
+        fetch(`/api/teams/${workspaceId}/activity`, { cache: "no-store" }),
+      ]);
+      const failedProjection = [permissionsResponse, activityResponse].find((response) => !response.ok);
+      if (failedProjection) throw new Error(await responseError(failedProjection, "团队信息加载失败"));
       setOverview(nextOverview);
-      if (["owner", "admin"].includes(nextOverview.role)) {
+      setPermissions((await permissionsResponse.json() as { permissions: TeamPermissionsPayload }).permissions);
+      setActivity((await activityResponse.json() as { activity: TeamActivityPayload }).activity);
+      if (nextOverview.role === "owner" || nextOverview.role === "admin") {
         const [memberResponse, invitationResponse, oidcResponse] = await Promise.all([
-          fetch(`/api/workspaces/${nextOverview.workspace.id}/members`, { cache: "no-store" }),
-          fetch(`/api/workspaces/${nextOverview.workspace.id}/invitations`, { cache: "no-store" }),
-          fetch(`/api/workspaces/${nextOverview.workspace.id}/oidc-providers`, { cache: "no-store" }),
+          fetch(`/api/workspaces/${workspaceId}/members`, { cache: "no-store" }),
+          fetch(`/api/workspaces/${workspaceId}/invitations`, { cache: "no-store" }),
+          fetch(`/api/workspaces/${workspaceId}/oidc-providers`, { cache: "no-store" }),
         ]);
-        const failed = [memberResponse, invitationResponse, oidcResponse].find((response) => !response.ok);
-        if (failed) throw new Error(await responseError(failed, "团队配置加载失败"));
+        const failedAdmin = [memberResponse, invitationResponse, oidcResponse].find((response) => !response.ok);
+        if (failedAdmin) throw new Error(await responseError(failedAdmin, "团队配置加载失败"));
         setMembers((await memberResponse.json() as { members: Member[] }).members);
         setInvitations((await invitationResponse.json() as { invitations: Invitation[] }).invitations);
         setProviders((await oidcResponse.json() as { providers: OidcProvider[] }).providers);
+      } else {
+        setMembers([]); setInvitations([]); setProviders([]);
       }
       setError(null);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "工作区加载失败"); }
-    finally { if (showLoading) setLoading(false); }
-  }, []);
-  useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
-  // Both the overview response and member list are backed by a confirmed
-  // workspace membership; UI state is not allowed to turn a system role into
-  // tenant access.
-  const canAdmin = overview !== null && ["owner", "admin"].includes(overview.role) && members.some((member) => member.userId === currentUserId && (member.role === "owner" || member.role === "admin"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "团队加载失败");
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, [workspaceId]);
 
-  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="team" isSystemAdmin={isSystemAdmin} /><div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12"><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10"><div className="flex flex-wrap items-end justify-between gap-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Workspace & identity</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">团队与访问控制</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">集中管理本地成员、项目授权与企业 OIDC。所有项目访问由服务端角色校验，页面状态只用于解释权限，不作为安全边界。</p></div>{overview ? <div className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4 text-right"><p className="text-xs text-violet-200">{overview.workspace.name}</p><strong className="mt-1 block text-lg">{overview.role}</strong></div> : null}</div></section>{error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{overview ? <section className="mt-7 grid gap-4 sm:grid-cols-3"><Metric label="成员" value={overview.counts.memberships} /><Metric label="项目" value={overview.counts.projects} /><Metric label="企业身份源" value={overview.counts.oidcProviders} /></section> : null}{!loading && !canAdmin ? <div className="mt-8 rounded-3xl border border-slate-200 bg-white px-6 py-14 text-center"><h2 className="text-xl font-semibold">当前角色无需管理团队配置</h2><p className="mt-3 text-sm text-slate-500">只有工作区 Owner 或 Admin 可以管理成员、邀请与 OIDC 身份源。</p></div> : null}{canAdmin && overview ? <><nav className="mt-8 flex gap-2 overflow-x-auto rounded-2xl bg-slate-100 p-1" aria-label="团队设置">{([['members','成员与权限'],['invitations','邀请链接'],['oidc','企业 OIDC']] as const).map(([key,label]) => <button key={key} onClick={() => setView(key)} className={`shrink-0 rounded-xl px-5 py-2.5 text-sm font-semibold ${view === key ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"}`}>{label}</button>)}</nav><div className="mt-6">{view === "members" ? <MembersView workspaceId={overview.workspace.id} members={members} projects={members[0]?.workspace.projects ?? []} onReload={reload} /> : view === "invitations" ? <InvitationsGovernanceView workspaceId={overview.workspace.id} invitations={invitations} projects={members[0]?.workspace.projects ?? []} onReload={reload} /> : <OidcView workspaceId={overview.workspace.id} providers={providers} onReload={reload} />}</div></> : null}</div></main>;
+  useEffect(() => { const timer = window.setTimeout(() => void reload({ showLoading: true }), 0); return () => window.clearTimeout(timer); }, [reload]);
+
+  const canAdmin = overview !== null && (overview.role === "owner" || overview.role === "admin");
+  const projectOptions: Project[] = overview?.projects.map((project) => ({ id: project.id, name: project.name })) ?? [];
+
+  function selectView(next: WorkspaceTeamView) {
+    setView(next);
+    const query = next === "overview" ? "" : `?view=${next}`;
+    router.replace(`/team/${workspaceId}${query}`);
+  }
+
+  const navigation: Array<[WorkspaceTeamView, string]> = [["overview", "团队总览"], ["members", "成员"], ["permissions", "我的权限"], ["activity", "活动记录"]];
+  if (canAdmin) navigation.push(["settings", "团队设置"]);
+
+  // The workspace back-link is rendered in the same compact client shell as
+  // the existing admin controls; retain its native navigation behavior.
+  // eslint-disable-next-line @next/next/no-html-link-for-pages
+  return <main className="min-h-screen bg-[#f5f7fb] text-slate-950"><AppHeader username={username} active="team" isSystemAdmin={isSystemAdmin} /><div className="mx-auto max-w-7xl px-6 py-9 sm:px-10 lg:px-12"><div className="mb-5"><a href="/team" className="text-sm font-semibold text-violet-700 hover:text-violet-900">← 我的团队</a></div><section className="rounded-[2rem] bg-gradient-to-br from-slate-950 via-slate-900 to-violet-950 px-8 py-10 text-white shadow-xl shadow-slate-950/10"><div className="flex flex-wrap items-end justify-between gap-6"><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">Team workspace</p><h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">{overview?.workspace.name ?? "团队空间"}</h1><p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">查看团队成员、项目访问权限和已记录的团队活动。</p></div>{overview ? <div className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4 text-right"><p className="text-xs text-violet-200">当前角色</p><strong className="mt-1 block text-lg">{overview.role}</strong></div> : null}</div></section>{error ? <div role="alert" className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">{error}</div> : null}{overview ? <section className="mt-7 grid gap-4 sm:grid-cols-2"><Metric label="已确认成员" value={overview.counts.memberships} /><Metric label="可访问项目" value={overview.counts.projects} /></section> : null}<nav className="mt-8 flex gap-2 overflow-x-auto rounded-2xl bg-slate-100 p-1" aria-label="团队功能">{navigation.map(([key, label]) => <button type="button" key={key} onClick={() => selectView(key)} className={`shrink-0 rounded-xl px-5 py-2.5 text-sm font-semibold ${view === key || (view === "invitations" || view === "oidc") && key === "settings" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"}`}>{label}</button>)}</nav>{loading ? <div className="mt-7 h-72 animate-pulse rounded-3xl bg-slate-200" /> : overview ? <div className="mt-7">{view === "overview" ? <TeamOverviewView overview={overview} /> : view === "members" ? canAdmin ? <MembersView workspaceId={workspaceId} members={members} projects={projectOptions} onReload={reload} /> : <TeamMemberDirectory members={overview.members} /> : view === "permissions" ? <TeamPermissionsView permissions={permissions} /> : view === "activity" ? <TeamActivityView activity={activity} /> : canAdmin && view === "invitations" ? <InvitationsGovernanceView workspaceId={workspaceId} invitations={invitations} projects={projectOptions} onReload={reload} /> : canAdmin && view === "oidc" ? <OidcView workspaceId={workspaceId} providers={providers} onReload={reload} /> : canAdmin ? <TeamSettingsView onSelect={selectView} /> : <TeamOverviewView overview={overview} />}</div> : null}</div></main>;
+}
+
+function TeamOverviewView({ overview }: { overview: TeamOverviewPayload }) {
+  return <div className="grid gap-7 lg:grid-cols-[1.15fr_.85fr]"><section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Projects</p><h2 className="mt-2 text-2xl font-semibold">团队项目</h2></div><span className="text-xs text-slate-400">{overview.counts.projects} 个可访问项目</span></div>{overview.projects.length === 0 ? <p className="mt-8 rounded-2xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">当前没有分配给你的项目。</p> : <div className="mt-5 space-y-3">{overview.projects.map((project) => <a key={project.id} href={`/projects/${project.id}`} className="block rounded-2xl border border-slate-100 p-4 transition hover:border-violet-200 hover:bg-violet-50/40"><div className="flex items-start justify-between gap-4"><div className="min-w-0"><h3 className="truncate font-semibold text-slate-900">{project.name}</h3><p className="mt-1 line-clamp-1 text-xs text-slate-500">{project.description || "暂无项目描述"}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${project.archivedAt ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"}`}>{project.archivedAt ? "已归档" : "进行中"}</span></div><p className="mt-3 text-xs text-slate-400">{project._count.sources} 个资料源 · {project._count.items} 条已确认条目</p></a>)}</div>}</section><section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Members</p><h2 className="mt-2 text-2xl font-semibold">团队成员</h2></div><span className="text-xs text-slate-400">{overview.counts.memberships} 人</span></div><div className="mt-5 space-y-3">{overview.members.slice(0, 8).map((member) => <div key={member.userId} className="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3"><div><p className="text-sm font-semibold text-slate-800">{member.displayName || member.username}</p><p className="mt-1 text-xs text-slate-400">@{member.username}</p></div><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">{member.role}</span></div>)}</div></section></div>;
+}
+
+function TeamMemberDirectory({ members }: { members: TeamOverviewPayload["members"] }) {
+  return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Members</p><h2 className="mt-2 text-2xl font-semibold">团队成员</h2><div className="mt-6 grid gap-3 md:grid-cols-2">{members.map((member) => <div key={member.userId} className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-4"><div><p className="text-sm font-semibold text-slate-800">{member.displayName || member.username}</p><p className="mt-1 text-xs text-slate-400">@{member.username}</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{member.role}</span></div>)}</div></section>;
+}
+
+function TeamPermissionsView({ permissions }: { permissions: TeamPermissionsPayload | null }) {
+  if (permissions === null) return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-sm text-slate-500">权限信息暂不可用。</p></section>;
+  return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Access</p><h2 className="mt-2 text-2xl font-semibold">我的项目权限</h2><p className="mt-3 text-sm text-slate-500">权限来自团队角色或项目单独授权，项目列表已经按服务端实际访问结果过滤。</p>{permissions.projects.length === 0 ? <p className="mt-7 rounded-2xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">当前没有可访问的项目。</p> : <div className="mt-6 overflow-hidden rounded-2xl border border-slate-100"><div className="grid grid-cols-[1fr_auto_auto] gap-4 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500"><span>项目</span><span>权限</span><span>来源</span></div>{permissions.projects.map((entry) => <a key={entry.project.id} href={`/projects/${entry.project.id}`} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-t border-slate-100 px-4 py-4 text-sm hover:bg-violet-50/40"><span className="font-semibold text-slate-800">{entry.project.name}</span><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">{entry.permission}</span><span className="text-xs text-slate-400">{entry.source === "workspace-role" ? "团队角色" : "项目授权"}</span></a>)}</div>}</section>;
+}
+
+function TeamActivityView({ activity }: { activity: TeamActivityPayload | null }) {
+  if (activity === null) return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-sm text-slate-500">活动记录暂不可用。</p></section>;
+  return <section className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Activity</p><h2 className="mt-2 text-2xl font-semibold">团队活动记录</h2><p className="mt-3 text-sm text-slate-500">记录来自成员访问、邀请和角色治理审计；敏感原因和凭据不会展示。</p>{activity.activity.length === 0 ? <p className="mt-7 rounded-2xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">暂时没有已记录的团队活动。</p> : <div className="mt-6 space-y-3">{activity.activity.map((entry) => <div key={`${entry.kind}-${entry.id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-100 px-4 py-4"><div><p className="text-sm font-semibold text-slate-800">{entry.label}</p>{entry.project ? <p className="mt-1 text-xs text-slate-500">项目：{entry.project.name}</p> : null}</div><time className="text-xs text-slate-400" dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString("zh-CN")}</time></div>)}</div>}</section>;
+}
+
+function TeamSettingsView({ onSelect }: { onSelect: (view: WorkspaceTeamView) => void }) {
+  return <section className="grid gap-5 md:grid-cols-2"><button type="button" onClick={() => onSelect("members")} className="rounded-3xl border border-slate-200 bg-white p-7 text-left shadow-sm transition hover:border-violet-200"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Members</p><h2 className="mt-2 text-xl font-semibold">成员与角色</h2><p className="mt-3 text-sm leading-6 text-slate-500">管理成员、项目授权和角色治理。</p></button><button type="button" onClick={() => onSelect("invitations")} className="rounded-3xl border border-slate-200 bg-white p-7 text-left shadow-sm transition hover:border-violet-200"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Invitations</p><h2 className="mt-2 text-xl font-semibold">邀请成员</h2><p className="mt-3 text-sm leading-6 text-slate-500">查看和创建团队邀请。</p></button><button type="button" onClick={() => onSelect("oidc")} className="rounded-3xl border border-slate-200 bg-white p-7 text-left shadow-sm transition hover:border-violet-200"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">Enterprise identity</p><h2 className="mt-2 text-xl font-semibold">企业 OIDC</h2><p className="mt-3 text-sm leading-6 text-slate-500">管理团队的企业身份源。</p></button></section>;
 }
 
 function Metric({ label, value }: { label: string; value: number }) { return <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-semibold text-slate-400">{label}</p><strong className="mt-2 block text-3xl">{value}</strong></div>; }

@@ -12,6 +12,12 @@ import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { deriveConnectionRecoveryState } from "@/lib/connection-recovery";
 import {
+  acceptPersonalConnectionProbeDispatchBoundary,
+  consumePersonalConnectionProbe,
+  runPersonalConnectionProbe,
+  type PersonalConnectionProbeActor,
+} from "@/lib/personal-connection-probe-service";
+import {
   claimProjectJob,
   failProjectJob,
   finishProjectJob,
@@ -137,6 +143,19 @@ const createConnectionSchema = z.object({
   sshKnownHost: z.string().max(4096).nullable().optional(),
 }).strict();
 
+const probeConnectionSchema = createConnectionSchema.extend({
+  clientRequestKey: z.string().uuid(),
+  repositoryPath: z.string().min(1).max(768),
+  trackedRef: z.string().min(1).max(255),
+}).strict();
+
+const createConnectionWithProbeSchema = createConnectionSchema.extend({
+  draftProbeId: z.string().uuid(),
+  createRequestKey: z.string().uuid(),
+  repositoryPath: z.string().min(1).max(768),
+  trackedRef: z.string().min(1).max(255),
+}).strict();
+
 const updateConnectionSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   username: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/u).nullable().optional(),
@@ -154,6 +173,12 @@ const deleteConnectionSchema = z.object({
 }).strict();
 
 const repositoryProbeSchema = z.object({
+  repositoryPath: z.string().min(1).max(768),
+  trackedRef: z.string().min(1).max(255),
+  expectedUpdatedAt: z.string().datetime({ offset: true }),
+}).strict();
+const governedProbeSchema = z.object({
+  clientRequestKey: z.string().uuid(),
   repositoryPath: z.string().min(1).max(768),
   trackedRef: z.string().min(1).max(255),
   expectedUpdatedAt: z.string().datetime({ offset: true }),
@@ -331,7 +356,7 @@ function credentialAuthKind(value: GitAuthKind): Exclude<GitAuthKind, "none"> {
 
 async function loadCredential(
   connection: GitConnectionWithSecret,
-  db: PrismaClient,
+  db: PrismaClient | Prisma.TransactionClient,
   expectedSecretFingerprint?: string,
 ): Promise<GitCredentialPayload | null> {
   if (connection.authKind === "none") return null;
@@ -436,7 +461,13 @@ async function probeRepository(
   connection: GitConnectionWithSecret,
   repositoryPath: string,
   trackedRef: string,
-  options: Readonly<{ pinExistingAddress: boolean; db: PrismaClient; onDispatchBoundary?: () => Promise<boolean> }>,
+  options: Readonly<{
+    pinExistingAddress: boolean;
+    db: PrismaClient;
+    credentialOverride?: GitCredentialPayload | null;
+    credentialLoader?: () => Promise<GitCredentialPayload | null>;
+    onDispatchBoundary?: () => Promise<boolean>;
+  }>,
 ): Promise<Readonly<{ commitSha: string; addressFingerprint: string }>> {
   const resolution = options.pinExistingAddress
     ? await assertPinnedGitEndpoint({
@@ -449,28 +480,44 @@ async function probeRepository(
         allowPrivateNetwork: connection.allowPrivateNetwork,
       });
   const endpointUrl = new URL(connection.baseUrl);
-  // The database-owned fence must succeed before decrypting credentials or
-  // creating a runner.  A losing disable/rotation race therefore performs no
-  // secret read and starts no Git process.
-  const accepted = await options.onDispatchBoundary?.() ?? true;
-  if (!accepted) return fail("GIT_CONNECTION_NOT_VERIFIED");
-  const credential = await loadCredential(connection, options.db, connection.credential?.secretFingerprint ?? undefined);
+  // The database-owned fence is executed by the runner immediately after
+  // endpoint resolution and before credential decryption. It is repeated
+  // before each Git process so a rotation/disable race cannot send a stale
+  // credential that was read during an earlier admission.
+  const dispatchBoundary = options.onDispatchBoundary;
+  const credential = options.credentialOverride ?? null;
+  const credentialLoader = options.credentialLoader ?? (options.credentialOverride === undefined
+    ? () => loadCredential(connection, options.db, connection.credential?.secretFingerprint ?? undefined)
+    : undefined);
   const remote = gitRemoteUrl(connection.baseUrl, repositoryPath);
-  const output = await withGitRunner({
-    transport: connection.transport,
-    authKind: connection.authKind,
-    username: defaultUsername(connection),
-    credential,
-    tlsCaCertificate: connection.tlsCaCertificate,
-    sshKnownHost: connection.sshKnownHost,
-    pinnedEndpoint: { hostname: endpointUrl.hostname, port: endpointUrl.port || (connection.transport === "ssh" ? "22" : "443"), addresses: resolution.addresses },
-  }, async (runner) => {
-    return runner.runText(["ls-remote", "--exit-code", remote, `refs/heads/${trackedRef}`], { maxOutputBytes: 64 * 1024 });
-  });
+  let output: string;
+  try {
+    output = await withGitRunner({
+      transport: connection.transport,
+      authKind: connection.authKind,
+      username: defaultUsername(connection),
+      credential,
+      credentialLoader,
+      onBeforeCredentialRead: credentialLoader === undefined ? undefined : dispatchBoundary,
+      onBeforeRequest: dispatchBoundary,
+      tlsCaCertificate: connection.tlsCaCertificate,
+      sshKnownHost: connection.sshKnownHost,
+      pinnedEndpoint: { hostname: endpointUrl.hostname, port: endpointUrl.port || (connection.transport === "ssh" ? "22" : "443"), addresses: resolution.addresses },
+    }, async (runner) => {
+      return runner.runText(["ls-remote", "--exit-code", remote, `refs/heads/${trackedRef}`], { maxOutputBytes: 64 * 1024 });
+    });
+  } catch (error) {
+    if (error instanceof GitRunnerError && error.code === "GIT_REQUEST_BOUNDARY_REJECTED") return fail("GIT_CONNECTION_NOT_VERIFIED");
+    throw error;
+  }
   const commitSha = output.trim().split(/\s+/u)[0] ?? "";
   if (!/^[0-9a-f]{40,64}$/u.test(commitSha)) return fail("GIT_REPOSITORY_NOT_FOUND");
   return Object.freeze({ commitSha, addressFingerprint: resolution.fingerprint });
 }
+
+type GitDraftProbeDependencies = Readonly<{
+  probeRepository?: typeof probeRepository;
+}>;
 
 function canonicalWebUrl(value: string | null | undefined, connection: GitConnectionWithSecret, repositoryPath: string): string {
   const candidate = value ?? (() => {
@@ -687,12 +734,235 @@ export async function getGitConnection(connectionIdInput: unknown, actor: GitCon
   return projectPersonalGitConnection(connection, currentAccountAccessVersion);
 }
 
+function gitProbeConfiguration(input: Readonly<{
+  name: string;
+  providerKind: string;
+  transport: string;
+  baseUrl: string;
+  authKind: string;
+  username?: string | null;
+  allowPrivateNetwork: boolean;
+  tlsCaCertificate: string | null;
+  sshKnownHost: string | null;
+  repositoryPath: string;
+  trackedRef: string;
+}>) {
+  return {
+    name: input.name,
+    providerKind: input.providerKind,
+    transport: input.transport,
+    baseUrl: input.baseUrl,
+    authKind: input.authKind,
+    username: input.username ?? null,
+    allowPrivateNetwork: input.allowPrivateNetwork,
+    tlsCaCertificate: input.tlsCaCertificate,
+    sshKnownHost: input.sshKnownHost,
+    repositoryPath: input.repositoryPath,
+    trackedRef: input.trackedRef,
+  } as const;
+}
+
+function gitSavedProbeConfiguration(
+  connection: Readonly<Pick<GitConnectionWithSecret, "id" | "name" | "providerKind" | "transport" | "baseUrl" | "authKind" | "username" | "allowPrivateNetwork" | "tlsCaCertificate" | "sshKnownHost" | "configurationVersion" | "updatedAt">> & { credential?: { secretFingerprint: string } | null },
+  repositoryPath: string,
+  trackedRef: string,
+) {
+  return {
+    connectionId: connection.id,
+    name: connection.name,
+    providerKind: connection.providerKind,
+    transport: connection.transport,
+    baseUrl: connection.baseUrl,
+    authKind: connection.authKind,
+    username: connection.username,
+    allowPrivateNetwork: connection.allowPrivateNetwork,
+    tlsCaCertificate: connection.tlsCaCertificate,
+    sshKnownHost: connection.sshKnownHost,
+    configurationVersion: connection.configurationVersion,
+    updatedAt: connection.updatedAt.toISOString(),
+    repositoryPath,
+    trackedRef,
+    credentialFingerprint: connection.credential?.secretFingerprint ?? null,
+  } as const;
+}
+
+function inMemoryGitProbeConnection(input: Readonly<{
+  providerKind: "github" | "gitee" | "gitlab" | "gitea" | "forgejo" | "generic";
+  transport: "https" | "ssh";
+  baseUrl: string;
+  authKind: "none" | "token" | "basic" | "sshKey";
+  username: string | null;
+  allowPrivateNetwork: boolean;
+  tlsCaCertificate: string | null;
+  sshKnownHost: string | null;
+}>): GitConnectionWithSecret {
+  return {
+    providerKind: input.providerKind,
+    transport: input.transport,
+    baseUrl: input.baseUrl,
+    authKind: input.authKind,
+    username: input.username,
+    allowPrivateNetwork: input.allowPrivateNetwork,
+    tlsCaCertificate: input.tlsCaCertificate,
+    sshKnownHost: input.sshKnownHost,
+    credentialId: null,
+    credential: null,
+    resolvedAddressFingerprint: null,
+  } as unknown as GitConnectionWithSecret;
+}
+
+export async function probeGitConnectionDraft(
+  input: unknown,
+  actor: PersonalConnectionProbeActor,
+  db: PrismaClient = getDb(),
+  dependencies: GitDraftProbeDependencies = {},
+): Promise<Readonly<import("@/lib/personal-connection-probe-service").PersonalConnectionProbeView>> {
+  const parsed = probeConnectionSchema.safeParse(input);
+  if (!parsed.success) return fail("GIT_CONNECTION_INVALID_INPUT");
+  validateAuth(parsed.data);
+  const baseUrl = canonicalGitBaseUrl(parsed.data.baseUrl, parsed.data.transport);
+  const tlsCaCertificate = parsed.data.transport === "https" ? canonicalTlsCaCertificate(parsed.data.tlsCaCertificate) : null;
+  const sshKnownHost = parsed.data.transport === "ssh" ? canonicalSshKnownHost(parsed.data.sshKnownHost) : null;
+  const repositoryPath = canonicalRepositoryPath(parsed.data.repositoryPath);
+  const trackedRef = canonicalTrackedRef(parsed.data.trackedRef);
+  const secret = parsed.data.authKind === "none" ? null : parsed.data.secret ?? null;
+  const credential = secret === null ? null : decodeGitCredential(encodeGitCredential(credentialAuthKind(parsed.data.authKind), secret), credentialAuthKind(parsed.data.authKind));
+  const probeConnection = inMemoryGitProbeConnection({
+    providerKind: parsed.data.providerKind,
+    transport: parsed.data.transport,
+    baseUrl,
+    authKind: parsed.data.authKind,
+    username: parsed.data.username ?? null,
+    allowPrivateNetwork: parsed.data.allowPrivateNetwork,
+    tlsCaCertificate,
+    sshKnownHost,
+  });
+  return runPersonalConnectionProbe({
+    kind: "git",
+    action: "create",
+    connectionId: null,
+    clientRequestKey: parsed.data.clientRequestKey,
+    configuration: gitProbeConfiguration({ ...parsed.data, baseUrl, tlsCaCertificate, sshKnownHost, repositoryPath, trackedRef }),
+    secret,
+    targetRepositoryPath: repositoryPath,
+    targetTrackedRef: trackedRef,
+  }, actor, async () => {
+    const result = await (dependencies.probeRepository ?? probeRepository)(probeConnection, repositoryPath, trackedRef, {
+      pinExistingAddress: false,
+      db,
+      credentialOverride: credential,
+      onDispatchBoundary: () => acceptPersonalConnectionProbeDispatchBoundary({ db, actor }),
+    });
+    return { addressFingerprint: result.addressFingerprint, commitSha: result.commitSha };
+  }, db);
+}
+
+/**
+ * Probe a saved Git connection for the governed retest action. The saved
+ * connection and encrypted credential are read only after owner/epoch checks;
+ * the proof binds their current configuration and the explicit repository/ref.
+ */
+export async function probeGitConnectionUpdate(
+  connectionIdInput: unknown,
+  input: unknown,
+  actor: PersonalConnectionProbeActor,
+  db: PrismaClient = getDb(),
+): Promise<Readonly<import("@/lib/personal-connection-probe-service").PersonalConnectionProbeView>> {
+  const connectionId = uuid(connectionIdInput);
+  const parsed = governedProbeSchema.safeParse(input);
+  if (!parsed.success) return fail("GIT_CONNECTION_INVALID_INPUT");
+  const repositoryPath = canonicalRepositoryPath(parsed.data.repositoryPath);
+  const trackedRef = canonicalTrackedRef(parsed.data.trackedRef);
+  const expectedUpdatedAt = timestamp(parsed.data.expectedUpdatedAt);
+  const connection = await loadOwnedConnection(connectionId, actor, db);
+  if (connection.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return fail("GIT_CONNECTION_CONFLICT");
+  const expectedCredentialFingerprint = connection.credential?.secretFingerprint ?? null;
+  return runPersonalConnectionProbe({
+    kind: "git",
+    action: "update",
+    connectionId,
+    clientRequestKey: parsed.data.clientRequestKey,
+    configuration: gitSavedProbeConfiguration(connection, repositoryPath, trackedRef),
+    secret: null,
+    secretBindingFingerprint: expectedCredentialFingerprint,
+    targetRepositoryPath: repositoryPath,
+    targetTrackedRef: trackedRef,
+  }, actor, async () => {
+    const result = await probeRepository(connection, repositoryPath, trackedRef, {
+      pinExistingAddress: false,
+      db,
+      credentialLoader: () => loadCredential(connection, db, expectedCredentialFingerprint ?? undefined),
+      onDispatchBoundary: () => acceptGitProbeDispatchBoundary({
+        db,
+        actor,
+        connectionId: connection.id,
+        expectedUpdatedAt: connection.updatedAt,
+        expectedCredentialFingerprint,
+      }),
+    });
+    return { addressFingerprint: result.addressFingerprint, commitSha: result.commitSha };
+  }, db);
+}
+
+/**
+ * Consume a successful saved-connection probe and apply its safe result. The
+ * caller must already establish the connection governance context in the same
+ * transaction; the database probe guard then binds the update to the consumed
+ * proof and exact connection owner.
+ */
+export async function applyGitConnectionProbeUpdate(input: Readonly<{
+  connectionId: string;
+  draftProbeId: string;
+  clientRequestKey: string;
+  repositoryPath: string;
+  trackedRef: string;
+  actor: GitConnectionActor;
+  tx: Prisma.TransactionClient;
+}>): Promise<Readonly<{ commitSha: string | null; addressFingerprint: string | null }>> {
+  const connection = await input.tx.gitConnection.findFirst({
+    where: { id: input.connectionId, ownerUserId: input.actor.id, ownershipState: "confirmed" },
+    include: { credential: true },
+  });
+  if (connection === null) return fail("GIT_CONNECTION_NOT_FOUND");
+  const repositoryPath = canonicalRepositoryPath(input.repositoryPath);
+  const trackedRef = canonicalTrackedRef(input.trackedRef);
+  const expectedCredentialFingerprint = connection.credential?.secretFingerprint ?? null;
+  const proof = await consumePersonalConnectionProbe({
+    kind: "git",
+    action: "update",
+    connectionId: connection.id,
+    clientRequestKey: input.clientRequestKey,
+    configuration: gitSavedProbeConfiguration(connection, repositoryPath, trackedRef),
+    secret: null,
+    secretBindingFingerprint: expectedCredentialFingerprint,
+    targetRepositoryPath: repositoryPath,
+    targetTrackedRef: trackedRef,
+  }, input.actor, connection.id, input.tx, input.draftProbeId);
+  await input.tx.gitConnection.update({
+    where: { id: connection.id },
+    data: {
+      status: "verified",
+      resolvedAddressFingerprint: proof.outcome.addressFingerprint,
+      lastTestedAt: new Date(),
+      lastErrorCode: null,
+      disabledAt: null,
+    },
+    select: { id: true },
+  });
+  return Object.freeze({ commitSha: proof.outcome.commitSha ?? null, addressFingerprint: proof.outcome.addressFingerprint ?? null });
+}
+
 export async function createGitConnection(input: unknown, actor: GitConnectionActor, db: PrismaClient = getDb()) {
-  const parsed = createConnectionSchema.parse(input);
+  const parsedResult = createConnectionWithProbeSchema.safeParse(input);
+  if (!parsedResult.success) return fail("GIT_CONNECTION_INVALID_INPUT");
+  const parsed = parsedResult.data;
   validateAuth(parsed);
   const baseUrl = canonicalGitBaseUrl(parsed.baseUrl, parsed.transport);
   const tlsCaCertificate = parsed.transport === "https" ? canonicalTlsCaCertificate(parsed.tlsCaCertificate) : null;
   const sshKnownHost = parsed.transport === "ssh" ? canonicalSshKnownHost(parsed.sshKnownHost) : null;
+  const repositoryPath = canonicalRepositoryPath(parsed.repositoryPath);
+  const trackedRef = canonicalTrackedRef(parsed.trackedRef);
+  const secret = parsed.authKind === "none" ? null : parsed.secret ?? null;
   try {
     return await db.$transaction(async (tx) => {
       await lockActorAccess(tx, actor.id);
@@ -702,11 +972,32 @@ export async function createGitConnection(input: unknown, actor: GitConnectionAc
         select: { id: true, disabledAt: true, accountAccessVersion: true },
       });
       if (owner === null || owner.disabledAt !== null) return fail("GIT_CONNECTION_DISABLED");
+      // Replays must reuse the connection id already bound to the proof. A
+      // fresh id would turn an idempotent retry into a second mutation.
+      const consumedProof = await tx.personalConnectionProbeAttempt.findUnique({ where: { id: parsed.draftProbeId }, select: { consumedConnectionId: true } });
+      const connectionId = consumedProof?.consumedConnectionId ?? randomUUID();
+      const probe = await consumePersonalConnectionProbe({
+        kind: "git",
+        action: "create",
+        connectionId: null,
+        clientRequestKey: parsed.createRequestKey,
+        configuration: gitProbeConfiguration({ ...parsed, baseUrl, tlsCaCertificate, sshKnownHost, repositoryPath, trackedRef }),
+        secret,
+        targetRepositoryPath: repositoryPath,
+        targetTrackedRef: trackedRef,
+      }, actor, connectionId, tx, parsed.draftProbeId);
+      if (probe.alreadyConsumedConnectionId !== null) {
+        const existing = await tx.gitConnection.findFirst({ where: { id: probe.alreadyConsumedConnectionId, ownerUserId: actor.id, ownershipState: "confirmed" }, select: connectionSelect });
+        if (existing === null) return fail("GIT_CONNECTION_CONFLICT");
+        return projectPersonalGitConnection(existing, owner.accountAccessVersion);
+      }
       const credential = parsed.authKind === "none"
         ? null
-        : await createCredential("git", encodeGitCredential(credentialAuthKind(parsed.authKind), parsed.secret), tx);
+        : await createCredential("git", encodeGitCredential(credentialAuthKind(parsed.authKind), secret), tx);
+      await tx.$executeRaw`SELECT set_config('app.personal_git_connection_create_context', 'service-v1', true)`;
       const connection = await tx.gitConnection.create({
         data: {
+          id: connectionId,
           name: parsed.name,
           providerKind: parsed.providerKind,
           transport: parsed.transport,
@@ -721,6 +1012,10 @@ export async function createGitConnection(input: unknown, actor: GitConnectionAc
           ownerUserId: actor.id,
           ownerAccountAccessVersion: owner.accountAccessVersion,
           ownershipState: "confirmed",
+          status: "verified",
+          resolvedAddressFingerprint: probe.outcome.addressFingerprint,
+          lastTestedAt: new Date(),
+          lastErrorCode: null,
         },
         select: connectionSelect,
       });
@@ -740,6 +1035,17 @@ export async function updateGitConnection(
 ) {
   const connectionId = uuid(connectionIdInput);
   const parsed = updateConnectionSchema.parse(input);
+  if (parsed.secret !== undefined
+    || parsed.username !== undefined
+    || parsed.allowPrivateNetwork !== undefined
+    || parsed.tlsCaCertificate !== undefined
+    || parsed.sshKnownHost !== undefined
+    || parsed.enabled !== undefined) {
+    // Configuration/status writes must use the probe plus connection
+    // governance path. Keeping this legacy helper fail-closed prevents a
+    // caller from changing the exact fields bound into a settled proof.
+    return fail("GIT_CONNECTION_GOVERNANCE_REQUIRED");
+  }
   const expectedUpdatedAt = timestamp(parsed.expectedUpdatedAt);
   await assertGitActor(db, actor);
   const existing = await db.gitConnection.findFirst({
@@ -943,6 +1249,7 @@ export async function testGitConnection(
     const probe = await probeRepository(connection, repositoryPath, trackedRef, {
       pinExistingAddress: false,
       db,
+      credentialLoader: () => loadCredential(connection, db, expectedCredentialFingerprint ?? undefined),
       onDispatchBoundary: () => acceptGitProbeDispatchBoundary({
         db,
         actor,

@@ -30,6 +30,7 @@ import {
 } from "../src/lib/project-mcp-tool-grant-service";
 import { deleteArchivedProject } from "../src/lib/project-lifecycle";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
+import { createMcpConnectionFixture } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.PROJECT_MCP_TOOL_GRANT_POSTGRES_GATE === "1";
 const NO_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
@@ -112,12 +113,12 @@ test(
         return createdProject;
       });
       await disableUser();
-      await db.mcpConnection.create({ data: {
+      await createMcpConnectionFixture({
         id: connectionId, name: `MCP grant connection ${suffix}`, endpointUrl: "https://mcp.example.invalid/mcp", authKind: "none",
         credentialId: null, allowPrivateNetwork: false, resolvedAddressFingerprint: networkFingerprint, protocolVersion: "2026-07-28",
         catalogFingerprint: "c".repeat(64), credentialFingerprint: NO_CREDENTIAL_FINGERPRINT, configurationRevision: 1,
         status: "verified", createdById: adminId, ownerUserId: adminId, ownerAccountAccessVersion: 1, ownershipState: "confirmed",
-      } });
+      }, db);
       await db.mcpToolDefinition.create({ data: {
         id: definitionId, connectionId, name: "project.lookup", title: "Lookup", description: "Safe read-only lookup",
         inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },

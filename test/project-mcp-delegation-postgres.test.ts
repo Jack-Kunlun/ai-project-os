@@ -25,6 +25,7 @@ import {
 } from "../src/lib/project-mcp-connection-delegation-service";
 import { executeMcpConnectionMutation, previewMcpConnectionMutation } from "../src/lib/mcp/connection-governance";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
+import { seedPersonalConnectionProbeCreateContextPg } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.PROJECT_MCP_DELEGATION_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_project_mcp_delegation_test";
@@ -387,10 +388,12 @@ test("MCP Package A PostgreSQL control plane enforces ownership, epochs, fingerp
       `INSERT INTO "ExternalCredential" ("id", "kind", "ciphertext", "nonce", "authTag", "maskedSuffix", "secretFingerprint", "updatedAt") VALUES ($1::uuid, 'mcp', decode('01', 'hex'), decode('02', 'hex'), decode('03', 'hex'), 'gate', $2, CURRENT_TIMESTAMP)`,
       [credentialId, fingerprintA],
     );
+    await seedPersonalConnectionProbeCreateContextPg(client, { kind: "mcp", actorId: ownerId, connectionId });
     await client.query(
       `INSERT INTO "McpConnection" ("id", "name", "endpointUrl", "authKind", "credentialId", "allowPrivateNetwork", "resolvedAddressFingerprint", "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt") VALUES ($1::uuid, $2, 'https://mcp.example.test/mcp', 'bearer', $3::uuid, false, $4, 'verified', $5::uuid, $5::uuid, 1, 'confirmed', CURRENT_TIMESTAMP)`,
       [connectionId, `MCP ${suffix}`, credentialId, fingerprintB, ownerId],
     );
+    await seedPersonalConnectionProbeCreateContextPg(client, { kind: "mcp", actorId: ownerId, connectionId: noCredentialConnectionId });
     await client.query(
       `INSERT INTO "McpConnection" ("id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint", "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt") VALUES ($1::uuid, $2, 'https://mcp.example.test/no-auth', 'none', false, $3, 'configured', $4::uuid, $4::uuid, 1, 'confirmed', CURRENT_TIMESTAMP)`,
       [noCredentialConnectionId, `MCP none ${suffix}`, fingerprintB, ownerId],
@@ -900,14 +903,22 @@ test(
       ownerMembership = memberships.owner;
       projectOwnerMembership = memberships.projectOwner;
 
-      for (const [connectionId, name] of [[attestationConnectionId, "attestation"], [grantConnectionId, "grant"]] as const) {
-        await client.query(
-          `INSERT INTO "McpConnection" (
-             "id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint",
-             "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt"
-           ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 1, 'confirmed', CURRENT_TIMESTAMP)`,
-          [connectionId, `MCP C1 ${name} ${suffix}`, `https://mcp.example.test/c1/${name}/${suffix}`, fingerprintB, ownerId],
-        );
+      await client.query("BEGIN");
+      try {
+        for (const [connectionId, name] of [[attestationConnectionId, "attestation"], [grantConnectionId, "grant"]] as const) {
+          await seedPersonalConnectionProbeCreateContextPg(client, { kind: "mcp", actorId: ownerId, connectionId });
+          await client.query(
+            `INSERT INTO "McpConnection" (
+               "id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint",
+               "status", "createdById", "ownerUserId", "ownerAccountAccessVersion", "ownershipState", "updatedAt"
+             ) VALUES ($1::uuid, $2, $3, 'none', false, $4, 'verified', $5::uuid, $5::uuid, 1, 'confirmed', CURRENT_TIMESTAMP)`,
+            [connectionId, `MCP C1 ${name} ${suffix}`, `https://mcp.example.test/c1/${name}/${suffix}`, fingerprintB, ownerId],
+          );
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
       }
       await client.query(
         `INSERT INTO "McpToolDefinition" ("id", "connectionId", "name", "inputSchema", "readOnlyEligible", "definitionFingerprint", "discoveredAt") VALUES
@@ -1499,6 +1510,7 @@ test(
         [projectId, workspaceId, `MCP terminal project ${suffix}`, `mcp-terminal-project-${suffix}`],
       );
       for (const [index, connectionId] of connectionIds.entries()) {
+        await seedPersonalConnectionProbeCreateContextPg(client, { kind: "mcp", actorId: ownerId, connectionId });
         await client.query(
           `INSERT INTO "McpConnection" (
              "id", "name", "endpointUrl", "authKind", "allowPrivateNetwork", "resolvedAddressFingerprint",
@@ -1749,6 +1761,7 @@ test(
         [foreignConnectionId, "same-name", foreignOwnerId, "none", null],
         [adminConnectionId, `admin-${suffix}`, workspaceAdminId, "none", null],
       ] as const) {
+        await seedPersonalConnectionProbeCreateContextPg(client, { kind: "mcp", actorId: owner, connectionId });
         await client.query(
           `INSERT INTO "McpConnection" (
              "id", "name", "endpointUrl", "authKind", "credentialId", "allowPrivateNetwork", "resolvedAddressFingerprint",

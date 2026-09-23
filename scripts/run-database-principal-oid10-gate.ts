@@ -14,7 +14,7 @@ const MIGRATOR_ROLE = "ai_project_os_migrator";
 const RUNTIME_ROLE = "ai_project_os_runtime";
 const WRITER_ROLE = "ai_project_os_entitlement_writer";
 const REQUIRED_EXTENSIONS = Object.freeze(["vector", "pg_trgm", "pgcrypto", "plpgsql"] as const);
-const EXPECTED_MIGRATION_COUNT = 107;
+const EXPECTED_MIGRATION_COUNT = 116;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1_000;
 const READY_TIMEOUT_MS = 2 * 60 * 1_000;
 
@@ -534,7 +534,7 @@ async function main(): Promise<void> {
   if (primaryError !== null) {
     const detail = primaryError instanceof GateError
       ? primaryError.detail === undefined ? "" : ` detail=${primaryError.detail}`
-      : ` detail=${safeDetail(primaryError instanceof Error ? primaryError.message : String(primaryError))}`;
+      : ` detail=${safeDetail(primaryError instanceof Error ? primaryError.stack ?? primaryError.message : String(primaryError))}`;
     const label = primaryError instanceof GateError ? `${primaryError.code} stage=${primaryError.stage}` : "DATABASE_PRINCIPAL_OID10_GATE_FAILED";
     console.error(`${label}${detail}`);
     if (cleanupError !== null) console.error(`DATABASE_PRINCIPAL_OID10_CLEANUP_FAILED detail=${safeDetail(String(cleanupError))}`);

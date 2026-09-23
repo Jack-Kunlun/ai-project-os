@@ -17,6 +17,24 @@ test("project lifecycle input is optimistic and strict", () => {
   assert.equal(updateProjectLifecycleSchema.safeParse({ action: "archive", expectedUpdatedAt: timestamp, force: true }).success, false);
 });
 
+test("项目导出在完整快照事务内重新确认 Owner 与账号状态", async () => {
+  const [service, route] = await Promise.all([
+    readFile("src/lib/project-export.ts", "utf8"),
+    readFile("src/app/api/projects/[projectId]/export/route.ts", "utf8"),
+  ]);
+  assert.match(service, /input: Readonly<\{ projectId: string; actor: WebAiActor; expectedUpdatedAt: Date \}>/u);
+  assert.match(service, /withWebAiProjectAccessTransaction/u);
+  assert.match(service, /required: "owner"/u);
+  assert.match(service, /allowArchived: true/u);
+  assert.match(service, /isolationLevel:\s*Prisma\.TransactionIsolationLevel\.RepeatableRead/u);
+  assert.match(service, /PROJECT_EXPORT_TRANSACTION_RETRY_LIMIT/u);
+  assert.match(service, /isSerializationConflict\(error\) && attempt < PROJECT_EXPORT_TRANSACTION_RETRY_LIMIT/u);
+  assert.match(service, /loadProjectAiPublicVisibility\(tx, input\.projectId, admission\.actor\.id\)/u);
+  assert.match(service, /requestedById: admission\.actor\.id/u);
+  assert.match(route, /actor: user/u);
+  assert.doesNotMatch(service, /requestedById: string/u);
+});
+
 test("lifecycle and export audit tables are constrained and immutable", async () => {
   const migration = await readFile("prisma/migrations/20260829150000_add_project_lifecycle_and_export_audits/migration.sql", "utf8");
   const deletionMigration = await readFile("prisma/migrations/20260901010000_add_safe_project_deletion/migration.sql", "utf8");

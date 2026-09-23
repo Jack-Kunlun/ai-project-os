@@ -16,6 +16,7 @@ import {
   executeMcpActionSnapshot,
   getProjectMcpToolCenter,
   grantProjectMcpTool,
+  probeMcpConnectionDraft,
   previewMcpConnectionMutation,
 } from "../src/lib/mcp";
 
@@ -106,6 +107,10 @@ test("MCP personal rediscovery stays held while project runtime is fail-closed",
         response.writeHead(401, { "content-type": "application/json" }); response.end("{}"); return;
       }
       response.writeHead(200, { "content-type": "application/json" });
+      if (body.method === "initialize") {
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2026-07-28", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
+        return;
+      }
       if (body.method === "tools/list") {
         response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { resultType: "complete", tools: [{
           name: "project.lookup", description: `Revision ${definitionRevision}`,
@@ -143,9 +148,25 @@ test("MCP personal rediscovery stays held while project runtime is fail-closed",
   });
 
   try {
-    const connection = await createMcpConnection({ name: `MCP ${suffix}`, endpointUrl: `http://127.0.0.1:${serverPort}/mcp`, authKind: "bearer", bearerToken: token, allowPrivateNetwork: true }, admin, db);
+    const connectionName = `MCP ${suffix}`;
+    const endpointUrl = `http://127.0.0.1:${serverPort}/mcp`;
+    const createRequestKey = randomUUID();
+    const probe = await probeMcpConnectionDraft({ name: connectionName, endpointUrl, authKind: "bearer", bearerToken: token, allowPrivateNetwork: true, clientRequestKey: createRequestKey }, admin, db);
+    assert.equal(probe.status, "settled");
+    assert.equal(probe.safeErrorCode, null);
+    assert.ok(probe.draftProbeId);
+    const connection = await createMcpConnection({
+      name: connectionName,
+      endpointUrl,
+      authKind: "bearer",
+      bearerToken: token,
+      allowPrivateNetwork: true,
+      draftProbeId: probe.draftProbeId,
+      createRequestKey,
+    }, admin, db);
     connectionId = connection.id;
     credentialId = (await db.mcpConnection.findUniqueOrThrow({ where: { id: connection.id }, select: { credentialId: true } })).credentialId;
+    assert.deepEqual(requests, ["initialize", "tools/list"]);
     await assert.rejects(
       () => previewMcpConnectionMutation(connection.id, {
         action: "enable",
@@ -230,7 +251,7 @@ test("MCP personal rediscovery stays held while project runtime is fail-closed",
     }, admin, db);
     assert.equal(rediscover.canExecute, false);
     assert.equal(rediscover.blockers.includes("external_io_planned_not_dispatched"), true);
-    assert.deepEqual(requests, []);
+    assert.deepEqual(requests, ["initialize", "tools/list"]);
     await assert.rejects(
       () => getProjectMcpToolCenter(projectId, admin, db),
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_LEGACY_PROJECT_RUNTIME_FROZEN",

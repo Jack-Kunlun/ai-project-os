@@ -269,20 +269,20 @@ test("backup and recovery allow the explicit .1, .2, .3, and .4 preserve names",
   assert.match(restore, /MIGRATION_TARGET_TAG=v0\.5\.0-dev\.1/u);
 });
 
-test("production workflow is main-only and requires exact 0.6 patch markers", async () => {
+test("production workflow is main-only and requires exact 0.6 migration markers", async () => {
   const [workflow, ciWorkflow] = await Promise.all([read(workflowPath), read(ciWorkflowPath)]);
 
-  assert.match(workflow, /default: v0\.6\.0-dev\.7/u);
-  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.7/u);
-  assert.match(workflow, /DEPLOY_SOURCE_TAG_INPUT" != v0\.6\.0-dev\.6/u);
+  assert.match(workflow, /default: v0\.6\.0-dev\.8/u);
+  assert.match(workflow, /DEPLOY_TAG_INPUT" != v0\.6\.0-dev\.8/u);
+  assert.match(workflow, /DEPLOY_SOURCE_TAG_INPUT" != v0\.6\.0-dev\.7/u);
   assert.match(workflow, /git rev-parse HEAD.*deploy_sha/u);
   assert.match(workflow, /git merge-base --is-ancestor "\$source_sha" "\$deploy_sha"/u);
   assert.match(workflow, /git rev-list --merges "\$source_sha\.\.\$deploy_sha"/u);
   assert.match(workflow, /refs\/tags\/\$DEPLOY_SOURCE_TAG_INPUT/u);
   assert.match(workflow, /DEPLOY_SOURCE_SHA=%s\\n' "\$source_sha"/u);
-  assert.match(workflow, /deploy-v06-patch \$DEPLOY_SOURCE_TAG \$DEPLOY_TAG \$DEPLOY_SOURCE_SHA \$DEPLOY_SHA CONFIRM_V06_PATCH_V1/u);
-  assert.match(workflow, /\^PATCH_DEPLOY_OK /u);
-  assert.match(workflow, /DEPLOY_PATCH_DATABASE_FILES_CHANGED/u);
+  assert.match(workflow, /deploy-v06-next \$DEPLOY_SOURCE_TAG \$DEPLOY_TAG \$DEPLOY_SOURCE_SHA \$DEPLOY_SHA CONFIRM_V06_NEXT_MIGRATION_V1/u);
+  assert.match(workflow, /\^DEPLOY_OK /u);
+  assert.match(workflow, /DEPLOY_MIGRATION_COUNT_INVALID/u);
   assert.match(workflow, /BACKUP_OK .* source_quiesced=true/u);
   assert.doesNotMatch(workflow, /clean-deploy/u);
   assert.match(ciWorkflow, /uses: actions\/checkout@[\da-f]+[\s\S]*fetch-depth: 0/u);

@@ -9,6 +9,7 @@ import {
   restoreStagedProjectAssetStorage,
   stageProjectAssetStorageForDeletion,
 } from "@/lib/project-assets/storage";
+import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 
 export type ProjectLifecycleErrorCode =
   | "PROJECT_NOT_FOUND"
@@ -40,10 +41,6 @@ const lifecycleProjectSelect = {
   createdAt: true,
   updatedAt: true,
 } as const;
-
-function isSerializationConflict(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
-}
 
 function isForeignKeyConflict(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003";

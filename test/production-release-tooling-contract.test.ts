@@ -69,6 +69,7 @@ test("root updater verifies tag identity, package version, CI, and a separate ch
   assert.match(updater, /git -C "\$TOOLING_REPOSITORY_DIR" archive --format=tar "\$EXPECTED_REVISION"/u);
   assert.match(updater, /deploy\/production\/ai-project-os-actions-gateway/u);
   assert.match(updater, /scripts\/production-v06-patch-upgrade-preflight\.ts/u);
+  assert.match(updater, /scripts\/production-v06-next-upgrade-preflight\.ts/u);
   assert.match(updater, /\[\[ -s "\$candidate_root\/scripts\/production-v06-patch-upgrade-preflight\.ts" \]\]/u);
   assert.doesNotMatch(updater, /\$CANDIDATE_DIR\/scripts\/production-v06-patch-upgrade-preflight\.ts/u);
   assert.doesNotMatch(updater, /package\.json deploy\/production \|/u);
@@ -85,6 +86,7 @@ test("updater promotes only the fixed validated control-plane allowlist", async 
     "ai-project-os-deploy",
     "ai-project-os-v06-deploy",
     "ai-project-os-v06-patch-deploy",
+    "ai-project-os-v06-next-deploy",
     "ai-project-os-preserve-deploy",
     "ai-project-os-backup",
     "ai_project_os_backup_artifact.py",
@@ -113,6 +115,7 @@ test("updater promotes only the fixed validated control-plane allowlist", async 
   assert.match(updater, /RELEASE_TOOLING_TARGET_DIRECTORY_INVALID/u);
   assert.match(updater, /RELEASE_TOOLING_PRESERVE_CONTRACT_INVALID/u);
   assert.match(updater, /RELEASE_TOOLING_V06_PATCH_DEPLOY_CONTRACT_INVALID/u);
+  assert.match(updater, /RELEASE_TOOLING_V06_NEXT_DEPLOY_CONTRACT_INVALID/u);
   assert.match(updater, /production-v06-patch-upgrade-preflight\.ts/u);
   assert.match(updater, /python3 -m py_compile "\$BACKUP_ARTIFACT_HELPER"/u);
   assert.match(updater, /ast\.parse\(open\(sys\.argv\[1\]/u);
@@ -125,9 +128,9 @@ test("updater promotes only the fixed validated control-plane allowlist", async 
   assert.doesNotMatch(updater, /source "\$/u);
 });
 
-test("updater backup helper contract accepts the .7 pre-deploy artifact name", async () => {
+test("updater backup helper contract accepts the .8 pre-deploy artifact name", async () => {
   const helper = await readFile(backupArtifactHelperPath, "utf8");
-  assert.ok(helper.includes("pre-deploy-to-v0\\.6\\.0-dev\\.(?:6|7)"));
+  assert.ok(helper.includes("pre-deploy-to-v0\\.6\\.0-dev\\.(?:6|7|8)"));
   const result = spawnSync("python3", [
     "-c",
     [
@@ -135,7 +138,7 @@ test("updater backup helper contract accepts the .7 pre-deploy artifact name", a
       "tree = ast.parse(open(sys.argv[1], encoding='utf-8').read(), sys.argv[1])",
       "node = next(item for item in tree.body if isinstance(item, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'BACKUP_NAME' for target in item.targets))",
       "pattern = re.compile(ast.literal_eval(node.value.args[0]))",
-      "sample = '20260922T000000Z-pre-deploy-to-v0.6.0-dev.7.Abc123'",
+      "sample = '20260923T000000Z-pre-deploy-to-v0.6.0-dev.8.Abc123'",
       "raise SystemExit(0 if pattern.fullmatch(sample) is not None else 1)",
     ].join("; "),
     backupArtifactHelperPath,
@@ -148,10 +151,12 @@ test("one-time installer and sudoers retain a narrow stable bootstrap", async ()
 
   assert.match(installer, /ai-project-os-install-release-tooling/u);
   assert.match(installer, /ai-project-os-v06-patch-deploy/u);
+  assert.match(installer, /ai-project-os-v06-next-deploy/u);
   assert.match(installer, /bash -n \/usr\/local\/sbin\/ai-project-os-install-release-tooling/u);
   assert.match(sudoers, /^ai-project-os-actions ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/ai-project-os-install-release-tooling$/mu);
   assert.match(sudoers, /^ai-project-os-actions ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/ai-project-os-v06-deploy$/mu);
   assert.match(sudoers, /^ai-project-os-actions ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/ai-project-os-v06-patch-deploy$/mu);
+  assert.match(sudoers, /^ai-project-os-actions ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/ai-project-os-v06-next-deploy$/mu);
   assert.match(sudoers, /^ai-project-os-actions ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/ai-project-os-preserve-deploy$/mu);
   assert.match(sudoers, /^ai-project-os-actions ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/ai-project-os-configure-github-oauth$/mu);
   assert.doesNotMatch(sudoers, /\/bin\/(ba)?sh|\/usr\/bin\/(ba)?sh|\*|ALL=\(ALL/u);

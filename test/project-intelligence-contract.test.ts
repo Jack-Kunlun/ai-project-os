@@ -258,8 +258,13 @@ function statusTransactionDb() {
     platformTokenGrant: emptyModel(),
     platformTokenReservation: emptyModel(),
     $executeRaw: async () => { read(); return 0; },
-    $queryRaw: async () => {
+    $queryRaw: async (query: unknown) => {
       read();
+      const sql = ((query as { strings?: readonly string[] }).strings ?? []).join(" ");
+      if (sql.includes('FROM "AppUser"')) return [{ id: projectId, role: "user", disabledAt: null, accountAccessVersion: 1 }];
+      if (sql.includes('FROM "Project"')) return [{ id: projectId, workspaceId, membershipInheritanceMode: "project_only", archivedAt: null }];
+      if (sql.includes('FROM "WorkspaceMembership"')) return [];
+      if (sql.includes('FROM "ProjectMembership"')) return [{ role: "editor" }];
       rawQueryCount += 1;
       // The repository status service issues its repository and project
       // snapshot queries in this order. Both execute through the access tx.

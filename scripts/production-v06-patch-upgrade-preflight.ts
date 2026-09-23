@@ -49,6 +49,11 @@ interface TargetCatalogRow {
   audit_events: string[];
 }
 
+/** Keep this .7 patch preflight scoped to Prisma migration directories. */
+function isMigrationDirectoryName(name: string): boolean {
+  return /^\d{14}_/u.test(name);
+}
+
 /** Convert an internal failure into a stable code without exposing credentials. */
 function safeErrorCode(error: unknown): string {
   if (error instanceof Error && /^[A-Z0-9_]+$/u.test(error.message)) return error.message;
@@ -60,8 +65,9 @@ async function readExpectedMigrations(): Promise<readonly ExpectedMigration[]> {
   const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const migrationsRoot = resolve(repositoryRoot, "prisma/migrations");
   const names = (await readdir(migrationsRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && isMigrationDirectoryName(entry.name))
     .map((entry) => entry.name)
+    .filter((name) => name <= LAST_MIGRATION)
     .sort();
 
   if (names.length !== EXPECTED_MIGRATION_COUNT) {

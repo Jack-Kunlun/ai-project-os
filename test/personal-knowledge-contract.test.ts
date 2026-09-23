@@ -7,10 +7,13 @@ import {
   createPersonalKnowledgeDocument,
   deletePersonalKnowledgeDocument,
   exportPersonalKnowledgeDocument,
+  createPersonalKnowledgeRelation,
+  getPersonalKnowledgeOverview,
   listPersonalKnowledgeDocuments,
   listPersonalKnowledgeRevisions,
   PersonalKnowledgeError,
   readPersonalKnowledgeDocument,
+  revokePersonalKnowledgeRelation,
   revisePersonalKnowledgeDocument,
   searchPersonalKnowledgeDocuments,
 } from "../src/lib/personal-knowledge-service";
@@ -49,6 +52,18 @@ type DocumentRow = {
   deletedAt: Date | null;
 };
 
+type RelationRow = {
+  id: string;
+  ownerUserId: string;
+  fromDocumentId: string;
+  fromRevisionId: string;
+  toDocumentId: string;
+  toRevisionId: string;
+  state: "active" | "revoked";
+  createdAt: Date;
+  revokedAt: Date | null;
+};
+
 function cloneDate(value: Date): Date {
   return new Date(value.getTime());
 }
@@ -63,6 +78,14 @@ function cloneDocument(value: DocumentRow): DocumentRow {
     createdAt: cloneDate(value.createdAt),
     updatedAt: cloneDate(value.updatedAt),
     deletedAt: value.deletedAt === undefined || value.deletedAt === null ? null : cloneDate(value.deletedAt),
+  };
+}
+
+function cloneRelation(value: RelationRow): RelationRow {
+  return {
+    ...value,
+    createdAt: cloneDate(value.createdAt),
+    revokedAt: value.revokedAt === null ? null : cloneDate(value.revokedAt),
   };
 }
 
@@ -119,6 +142,18 @@ function matchesDocument(db: PersonalKnowledgeFakeDb, document: DocumentRow, whe
   return true;
 }
 
+function matchesRelation(relation: RelationRow, where: unknown): boolean {
+  const filter = asRecord(where);
+  if (Array.isArray(filter.AND) && !filter.AND.every((part) => matchesRelation(relation, part))) return false;
+  if (filter.ownerUserId !== undefined && !scalarCondition(relation.ownerUserId, filter.ownerUserId)) return false;
+  if (filter.id !== undefined && !scalarCondition(relation.id, filter.id)) return false;
+  if (filter.state !== undefined && !scalarCondition(relation.state, filter.state)) return false;
+  if (filter.fromDocumentId !== undefined && !scalarCondition(relation.fromDocumentId, filter.fromDocumentId)) return false;
+  if (filter.toDocumentId !== undefined && !scalarCondition(relation.toDocumentId, filter.toDocumentId)) return false;
+  if (Array.isArray(filter.OR) && !filter.OR.some((part) => matchesRelation(relation, part))) return false;
+  return true;
+}
+
 function projectDocument(db: PersonalKnowledgeFakeDb, document: DocumentRow): Record<string, unknown> {
   const revision = currentRevision(db, document);
   return {
@@ -133,6 +168,7 @@ class PersonalKnowledgeFakeDb {
   readonly revisions = new Map<string, RevisionRow>();
   readonly audits: Array<Record<string, unknown>> = [];
   readonly pointers = new Map<string, Record<string, unknown>>();
+  readonly relations = new Map<string, RelationRow>();
 
   readonly appUser = {
     findUnique: async ({ where }: { where: { id: string } }) => {
@@ -194,6 +230,35 @@ class PersonalKnowledgeFakeDb {
       return next;
     },
   };
+
+  readonly personalKnowledgeRelation = {
+    create: async ({ data }: { data: RelationRow }) => {
+      this.relations.set(data.id, cloneRelation(data));
+      return cloneRelation(data);
+    },
+    findFirst: async ({ where }: { where: unknown }) => {
+      const row = [...this.relations.values()].find((candidate) => matchesRelation(candidate, where));
+      return row === undefined ? null : cloneRelation(row);
+    },
+    findMany: async ({ where, take }: { where: unknown; take?: number }) => [...this.relations.values()]
+      .filter((relation) => matchesRelation(relation, where))
+      .slice(0, take ?? Number.POSITIVE_INFINITY)
+      .map(cloneRelation),
+    updateMany: async ({ where, data }: { where: unknown; data: Partial<RelationRow> }) => {
+      const rows = [...this.relations.values()].filter((relation) => matchesRelation(relation, where));
+      for (const row of rows) Object.assign(row, data);
+      return { count: rows.length };
+    },
+  };
+
+  async $queryRaw(query: unknown): Promise<Array<Record<string, bigint>>> {
+    const values = asRecord(query)?.values;
+    const ownerId = Array.isArray(values) && typeof values[0] === "string" ? values[0] : OWNER_A;
+    const active = [...this.documents.values()].filter((document) => document.ownerUserId === ownerId && document.state === "active" && document.deletedAt === null);
+    let usedBytes = BigInt(0);
+    for (const document of active) usedBytes += BigInt(currentRevision(this, document)?.byteCount ?? 0);
+    return [{ documentCount: BigInt(active.length), usedBytes, invalidCount: BigInt(0) }];
+  }
 
   async $executeRaw(): Promise<number> {
     return 1;
@@ -276,6 +341,51 @@ test("owner isolation, deletion tombstones, CAS, revision history and body-free 
     const serialized = JSON.stringify(audit);
     assert.doesNotMatch(serialized, /A secret body|A revised body|B secret body|A title|B title/iu);
   }
+});
+
+test("personal graph is explicit, owner isolated, revision aware, and capacity uses current UTF-8 bodies", async () => {
+  const db = seedDb();
+  const first = await createPersonalKnowledgeDocument({ title: "中文", content: "你好🙂" }, actor(OWNER_A), db as never, now);
+  const second = await createPersonalKnowledgeDocument({ title: "Second", content: "abc" }, actor(OWNER_A), db as never, now);
+  const otherOwnerDocument = await createPersonalKnowledgeDocument({ title: "B", content: "secret" }, actor(OWNER_B), db as never, now);
+  const firstId = String(first.id);
+  const secondId = String(second.id);
+  const otherOwnerDocumentId = String(otherOwnerDocument.id);
+
+  const relation = await createPersonalKnowledgeRelation(
+    { fromDocumentId: secondId, toDocumentId: firstId },
+    actor(OWNER_A),
+    db as never,
+    new Date(now.getTime() + 1),
+  );
+  assert.ok(String(relation.fromDocumentId) < String(relation.toDocumentId));
+  assert.equal(relation.stale, false);
+  assert.equal(await codeOf(() => createPersonalKnowledgeRelation({ fromDocumentId: firstId, toDocumentId: secondId }, actor(OWNER_A), db as never)), "PERSONAL_KNOWLEDGE_RELATION_CONFLICT");
+  assert.equal(await codeOf(() => createPersonalKnowledgeRelation({ fromDocumentId: firstId, toDocumentId: otherOwnerDocumentId }, actor(OWNER_A), db as never)), "PERSONAL_KNOWLEDGE_DOCUMENT_NOT_FOUND");
+
+  const initial = await getPersonalKnowledgeOverview(actor(OWNER_A), db as never, new Date(now.getTime() + 2));
+  assert.equal(initial.capacity.documentCount, 2);
+  assert.equal(initial.capacity.usedBytes, Buffer.byteLength("你好🙂", "utf8") + 3);
+  assert.equal(initial.capacity.limitBytes, null);
+  assert.equal(initial.capacity.limitLabel, "未设置上限");
+  assert.equal(initial.index.label, "尚未建立/不可用");
+  assert.equal(initial.graph.nodes.length, 2);
+  assert.equal(initial.graph.edges.length, 1);
+  assert.equal(initial.graph.edges[0]?.stale, false);
+
+  await revisePersonalKnowledgeDocument(firstId, { expectedVersion: 1, content: "updated" }, actor(OWNER_A), db as never, new Date(now.getTime() + 3));
+  const stale = await getPersonalKnowledgeOverview(actor(OWNER_A), db as never, new Date(now.getTime() + 4));
+  assert.equal(stale.graph.edges[0]?.stale, true);
+
+  await revokePersonalKnowledgeRelation(String(relation.id), actor(OWNER_A), db as never, new Date(now.getTime() + 5));
+  const afterRevoke = await getPersonalKnowledgeOverview(actor(OWNER_A), db as never, new Date(now.getTime() + 6));
+  assert.equal(afterRevoke.graph.edges.length, 0);
+
+  await deletePersonalKnowledgeDocument(firstId, { expectedVersion: 2 }, actor(OWNER_A), db as never, new Date(now.getTime() + 7));
+  const afterDelete = await getPersonalKnowledgeOverview(actor(OWNER_A), db as never, new Date(now.getTime() + 8));
+  assert.equal(afterDelete.capacity.documentCount, 1);
+  assert.equal(afterDelete.capacity.usedBytes, 3);
+  assert.equal((await getPersonalKnowledgeOverview(actor(OWNER_B), db as never)).capacity.documentCount, 1);
 });
 
 test("export is a POST-only audited operation with safe response headers", async () => {

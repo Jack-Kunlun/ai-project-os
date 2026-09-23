@@ -492,8 +492,8 @@ test("legacy candidate review repeats authorization inside the write transaction
       action,
     );
     // The service performs a preflight access check, then the transactional
-    // admission reloads the actor twice (guard plus current-row snapshot).
-    assert.equal(actorLookups, 5, `${action} reloads actor inside transaction`);
+    // admission reloads the actor once after taking the advisory fence.
+    assert.equal(actorLookups, 4, `${action} reloads actor inside transaction`);
     assert.equal(membershipLookups, 1, `${action} reloads membership inside transaction`);
     assert.equal(sensitiveCalls, 0, `${action} touched candidate data after revoke`);
   }

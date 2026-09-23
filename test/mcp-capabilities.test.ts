@@ -5,9 +5,11 @@ import { createServer } from "node:http";
 import test from "node:test";
 import {
   McpCapabilityError,
+  assertMcpToolDefinitionSafe,
   callMcpTool,
   canonicalMcpToolArguments,
   discoverMcpTools,
+  initializeMcpSession,
   normalizeMcpToolDefinition,
 } from "../src/lib/mcp";
 
@@ -41,6 +43,54 @@ test("MCP 工具定义只把明确只读且非破坏性的工具列为可授权"
   assert.deepEqual(canonicalMcpToolArguments(readOnlyTool.inputSchema, { region: "cn", query: "release" }), { query: "release", region: "cn" });
   assert.throws(() => canonicalMcpToolArguments(readOnlyTool.inputSchema, { query: "release" }), (error) => mcpCode(error) === "MCP_TOOL_INPUT_INVALID");
   assert.throws(() => normalizeMcpToolDefinition({ ...readOnlyTool, inputSchema: { type: "object", oneOf: [] } }), (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID");
+});
+
+test("MCP 工具定义拒绝 Bearer 回显和凭据形状字段", () => {
+  const bearer = "bearer-secret-for-mcp-definition";
+  assert.throws(
+    () => assertMcpToolDefinitionSafe({ ...readOnlyTool, description: `remote echo: ${bearer}` }, bearer),
+    (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID",
+  );
+  assert.throws(
+    () => assertMcpToolDefinitionSafe({ ...readOnlyTool, annotations: { bearerToken: "redacted" } }),
+    (error) => mcpCode(error) === "MCP_TOOL_CATALOG_INVALID",
+  );
+});
+
+test("MCP saved credential is read only after the DNS dispatch fence", async (context) => {
+  const requests: Array<{ authorization?: string }> = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      requests.push({ authorization: request.headers.authorization });
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string };
+      response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "late-bound" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { protocolVersion: "2026-07-28", capabilities: {}, serverInfo: { name: "fixture", version: "1" } } }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const boundaryOrder: string[] = [];
+  const initialized = await initializeMcpSession({
+    endpointUrl: `http://127.0.0.1:${address.port}/mcp`,
+    allowPrivateNetwork: true,
+    expectedAddressFingerprint: null,
+    bearerToken: null,
+    onDispatchBoundary: () => {
+      boundaryOrder.push("fence");
+      return true;
+    },
+    readBearerToken: async () => {
+      boundaryOrder.push("read");
+      return "late-bound-token";
+    },
+  });
+  assert.equal(initialized.protocolVersion, "2026-07-28");
+  assert.deepEqual(boundaryOrder, ["fence", "read"]);
+  assert.equal(requests[0]?.authorization, "Bearer late-bound-token");
 });
 
 test("远程 Streamable HTTP MCP 完成工具发现、固定请求头和 SSE 只读调用", async (context) => {
@@ -85,6 +135,35 @@ test("远程 Streamable HTTP MCP 完成工具发现、固定请求头和 SSE 只
   assert.equal(requests[1]?.headers["mcp-name"], "project.search");
   assert.equal(requests[1]?.headers["mcp-param-region"], "cn-north");
   assert.equal(requests[1]?.headers.authorization, "Bearer test-token-1234");
+});
+
+test("MCP 草稿测试只执行 initialize 和 tools/list，不调用远端工具", async (context) => {
+  const methods: string[] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: string; method: string };
+      methods.push(body.method);
+      response.writeHead(200, { "content-type": "application/json", "mcp-session-id": "fixture-session" });
+      response.end(JSON.stringify({
+        jsonrpc: "2.0",
+        id: body.id,
+        result: body.method === "initialize"
+          ? { protocolVersion: "2026-07-28", capabilities: {}, serverInfo: { name: "fixture", version: "1" } }
+          : { resultType: "complete", tools: [readOnlyTool] },
+      }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  context.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const endpointUrl = `http://127.0.0.1:${address.port}/mcp`;
+  const initialized = await initializeMcpSession({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: null, bearerToken: null });
+  const discovery = await discoverMcpTools({ endpointUrl, allowPrivateNetwork: true, expectedAddressFingerprint: initialized.addressFingerprint, bearerToken: null, sessionId: initialized.sessionId });
+  assert.equal(discovery.tools.length, 1);
+  assert.deepEqual(methods, ["initialize", "tools/list"]);
 });
 
 test("MCP 数据库迁移固定逐次审批、当前定义唯一和追加式审计", async () => {

@@ -16,9 +16,12 @@ import {
   nonLegacyMcpProjectWorkItemWhere,
   referencesQuarantinedProjectLineage,
 } from "@/lib/legacy-mcp-source-quarantine";
+import { withWebAiProjectAccessTransaction, type WebAiActor } from "@/lib/access-linearization";
+import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 
 export const PROJECT_EXPORT_SCHEMA_VERSION = "ai-project-os.project-export.v3";
 export const PROJECT_EXPORT_MAX_BYTES = 20 * 1024 * 1024;
+const PROJECT_EXPORT_TRANSACTION_RETRY_LIMIT = 3;
 
 export type ProjectExportErrorCode =
   | "PROJECT_EXPORT_NOT_FOUND"
@@ -31,10 +34,6 @@ export class ProjectExportError extends Error {
     super(code);
     this.name = "ProjectExportError";
   }
-}
-
-function isSerializationConflict(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
 }
 
 function iso(value: Date | null): string | null {
@@ -74,11 +73,24 @@ export function sanitizeProjectExportMetadata(value: Prisma.JsonValue): Prisma.J
 }
 
 export async function exportProjectData(
-  input: Readonly<{ projectId: string; requestedById: string; expectedUpdatedAt: Date }>,
+  input: Readonly<{ projectId: string; actor: WebAiActor; expectedUpdatedAt: Date }>,
   db: PrismaClient = getDb(),
 ) {
-  try {
-    return await db.$transaction(async (tx) => {
+  for (let attempt = 1; attempt <= PROJECT_EXPORT_TRANSACTION_RETRY_LIMIT; attempt += 1) {
+    try {
+      // Keep the whole export, including its audit, inside one snapshot. A
+      // serialization failure from the row-locked admission must restart the
+      // complete transaction so no cross-table mix can escape to the caller.
+      return await withWebAiProjectAccessTransaction(
+        db,
+        {
+          actor: input.actor,
+          projectId: input.projectId,
+          required: "owner",
+          allowArchived: true,
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        },
+        async (tx, admission) => {
       const project = await tx.project.findUnique({
         where: { id: input.projectId },
         select: { id: true, name: true, slug: true, description: true, archivedAt: true, createdAt: true, updatedAt: true },
@@ -87,7 +99,7 @@ export async function exportProjectData(
       if (project.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) {
         throw new ProjectExportError("PROJECT_EXPORT_STALE");
       }
-      const visibility = await loadProjectAiPublicVisibility(tx, input.projectId, input.requestedById);
+      const visibility = await loadProjectAiPublicVisibility(tx, input.projectId, admission.actor.id);
 
       const [sources, assets, items, repositories, lifecycle, jobs, answers, reports, agentRuns, actionResultImports, objectives, workItems, dependencies, planAudits, quarantinedLineage] = await Promise.all([
         tx.projectSource.findMany({
@@ -521,7 +533,7 @@ export async function exportProjectData(
       const audit = await tx.projectDataExportAudit.create({
         data: {
           projectId: input.projectId,
-          requestedById: input.requestedById,
+          requestedById: admission.actor.id,
           schemaVersion: PROJECT_EXPORT_SCHEMA_VERSION,
           contentHash,
           byteCount,
@@ -529,9 +541,13 @@ export async function exportProjectData(
         select: { id: true, schemaVersion: true, contentHash: true, byteCount: true, createdAt: true },
       });
       return Object.freeze({ json, audit });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
-  } catch (error) {
-    if (isSerializationConflict(error)) throw new ProjectExportError("PROJECT_EXPORT_CONFLICT");
-    throw error;
+        },
+      );
+    } catch (error) {
+      if (isSerializationConflict(error) && attempt < PROJECT_EXPORT_TRANSACTION_RETRY_LIMIT) continue;
+      if (isSerializationConflict(error)) throw new ProjectExportError("PROJECT_EXPORT_CONFLICT");
+      throw error;
+    }
   }
+  throw new ProjectExportError("PROJECT_EXPORT_CONFLICT");
 }

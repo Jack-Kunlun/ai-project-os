@@ -18,7 +18,7 @@ export async function POST(
     const input = createProjectExportSchema.parse(await readJsonBody(request));
     const exported = await exportProjectData({
       projectId,
-      requestedById: user.id,
+      actor: user,
       expectedUpdatedAt: new Date(input.expectedUpdatedAt),
     });
     const date = exported.audit.createdAt.toISOString().slice(0, 10).replaceAll("-", "");

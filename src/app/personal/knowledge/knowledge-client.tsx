@@ -1,12 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
+import { PersonalKnowledgeQaPanel } from "./personal-knowledge-qa-panel";
+import { PersonalProjectSearchPanel } from "./personal-project-search-panel";
+import { PersonalSemanticIndexPanel } from "./personal-semantic-index-panel";
+import { PersonalSemanticSearchPanel } from "./personal-semantic-search-panel";
 
 /** Keep list requests bounded and aligned with the service default page size. */
 const PAGE_SIZE = 20;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+/** Accept only a document identifier before using the owner-scoped detail API. */
+function parseDocumentQuery(value: string | null): string | null {
+  return value !== null && UUID_PATTERN.test(value) ? value.toLowerCase() : null;
+}
 
 /** A list item omits the body unless the search endpoint supplies an excerpt. */
 type KnowledgeSummary = Readonly<{
@@ -125,6 +136,8 @@ function filenameFromDisposition(header: string | null, fallback: string): strin
  * offset for a document list that may change between requests.
  */
 export function KnowledgeClient({ username, isSystemAdmin = false }: { username: string; isSystemAdmin?: boolean }) {
+  const searchParams = useSearchParams();
+  const requestedDocumentId = parseDocumentQuery(searchParams.get("document"));
   const [documents, setDocuments] = useState<KnowledgeSummary[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -254,9 +267,10 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
       setNextCursor(result.nextCursor);
       setListError(null);
       const currentSelectedId = selectedIdRef.current;
-      const nextSelectedId = currentSelectedId && result.documents.some((item) => item.id === currentSelectedId)
+      const nextSelectedId = requestedDocumentId
+        ?? (currentSelectedId && result.documents.some((item) => item.id === currentSelectedId)
         ? currentSelectedId
-        : result.documents[0]?.id ?? null;
+        : result.documents[0]?.id ?? null);
       if (nextSelectedId !== currentSelectedId) {
         mutationTokenRef.current += 1;
         detailRequestRef.current?.controller.abort();
@@ -294,7 +308,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
         setListLoading(false);
       }
     }
-  }, [cursor, searchQuery]);
+  }, [cursor, requestedDocumentId, searchQuery]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadDocuments(), 0);
@@ -662,6 +676,9 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
             {editing ? <EditorForm mode={mode} draft={draft} saving={saving} onDraftChange={setDraft} onCancel={() => { if (document) { setDraft({ title: document.title, content: document.content }); setMode("view"); } else { setMode("view"); } }} onSubmit={saveDraft} /> : detailLoading ? <div className="space-y-4" aria-label="正在加载内容"><div className="h-7 w-2/3 animate-pulse rounded bg-slate-100" /><div className="h-4 w-1/3 animate-pulse rounded bg-slate-100" /><div className="h-72 animate-pulse rounded-2xl bg-slate-100" /></div> : document ? <DocumentDetail document={document} revisions={revisions} historyOpen={historyOpen} historyLoading={historyLoading} historyNextCursor={historyNextCursor} historyError={historyError} expandedRevisionVersion={expandedRevisionVersion} revisionContent={revisionContent} revisionLoading={revisionLoading} revisionError={revisionError} exporting={exporting} deleting={deleting} onEdit={() => { setDraft({ title: document.title, content: document.content }); setMode("edit"); }} onDelete={() => void deleteDocument()} onExport={(format) => void exportDocument(format)} onHistory={() => { if (historyOpen) clearHistoryState(); else void loadHistory(); }} onReloadHistory={() => void loadHistory()} onLoadMoreHistory={() => { if (historyNextCursor) void loadHistory(historyNextCursor, true); }} onToggleRevision={toggleRevision} /> : <EmptyDetail onCreate={startCreate} />}
           </section>
         </div>
+        <div className="mt-7"><PersonalSemanticIndexPanel /></div>
+        <div className="mt-7"><PersonalSemanticSearchPanel /></div>
+        <div className="mt-7"><PersonalProjectSearchPanel /></div>
       </div>
       {dialog}
     </main>
@@ -750,6 +767,8 @@ function DocumentDetail({
       <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 px-5 py-5">
         <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-slate-700">{document.content}</pre>
       </div>
+
+      <PersonalKnowledgeQaPanel key={`${document.id}:${document.version}`} documentId={document.id} version={document.version} />
 
       {historyOpen ? (
         <section className="mt-6 border-t border-slate-100 pt-5">

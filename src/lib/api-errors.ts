@@ -63,6 +63,10 @@ import { MembershipApplicationServiceError } from "@/lib/membership-application-
 import { WorkspaceRoleGovernanceError } from "@/lib/workspace-role-governance-service";
 import { AdminUserOperationsError } from "@/lib/admin-user-operations-service";
 import { PersonalKnowledgeError } from "@/lib/personal-knowledge-service";
+import { PersonalKnowledgeQaError } from "@/lib/personal-knowledge-qa-service";
+import { PersonalProjectSearchError } from "@/lib/personal-project-search-service";
+import { PersonalConnectionProbeError } from "@/lib/personal-connection-probe-service";
+import { PersonalKnowledgeSemanticError } from "@/lib/personal-knowledge-semantic-service";
 
 export type ApiErrorBody = {
   error: {
@@ -85,6 +89,21 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof PersonalConnectionProbeError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PERSONAL_CONNECTION_PROBE_INVALID_INPUT: [400, "连接探测请求无效"],
+      PERSONAL_CONNECTION_PROBE_IDEMPOTENCY_CONFLICT: [409, "该探测请求标识已经绑定了另一份配置"],
+      PERSONAL_CONNECTION_PROBE_IN_PROGRESS: [409, "连接探测正在进行，请稍后重试"],
+      PERSONAL_CONNECTION_PROBE_REQUIRED: [409, "保存前必须先完成连接探测"],
+      PERSONAL_CONNECTION_PROBE_CONFIGURATION_CONFLICT: [409, "连接探测与当前配置或账户状态不一致，请重新探测"],
+      PERSONAL_CONNECTION_PROBE_EXPIRED: [409, "连接探测已过期，请重新探测"],
+      PERSONAL_CONNECTION_PROBE_CONSUMED: [409, "连接探测已被使用，不能重复保存"],
+      PERSONAL_CONNECTION_PROBE_FAILED: [502, "连接探测失败"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "连接探测处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
   if (error instanceof PersonalKnowledgeError) {
     const mapping: Record<string, readonly [number, string]> = {
       PERSONAL_KNOWLEDGE_INVALID_INPUT: [400, "个人知识请求无效"],
@@ -93,9 +112,73 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       PERSONAL_KNOWLEDGE_ACCOUNT_ACCESS_STALE: [401, "当前会话已失效，请重新登录"],
       PERSONAL_KNOWLEDGE_DOCUMENT_NOT_FOUND: [404, "个人知识文档不存在"],
       PERSONAL_KNOWLEDGE_VERSION_CONFLICT: [409, "个人知识文档已被其他操作更新，请刷新后重试"],
+      PERSONAL_KNOWLEDGE_RELATION_CONFLICT: [409, "这两个知识文档已经存在有效关联"],
+      PERSONAL_KNOWLEDGE_RELATION_NOT_FOUND: [404, "个人知识关联不存在"],
       PERSONAL_KNOWLEDGE_INTEGRITY_ERROR: [500, "个人知识文档完整性校验失败"],
     };
     const [status, message] = mapping[error.code] ?? [500, "个人知识处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof PersonalKnowledgeQaError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PERSONAL_KNOWLEDGE_QA_INVALID_INPUT: [400, "个人知识问答请求无效"],
+      PERSONAL_KNOWLEDGE_QA_FORBIDDEN: [403, "无权使用个人知识问答"],
+      PERSONAL_KNOWLEDGE_QA_ACCOUNT_DISABLED: [403, "当前账户已停用"],
+      PERSONAL_KNOWLEDGE_QA_ACCOUNT_ACCESS_STALE: [401, "当前会话已失效，请重新登录"],
+      PERSONAL_KNOWLEDGE_QA_DOCUMENT_NOT_FOUND: [404, "个人知识页面不存在或已不可用"],
+      PERSONAL_KNOWLEDGE_QA_PROVIDER_NOT_FOUND: [404, "所选个人模型连接不存在"],
+      PERSONAL_KNOWLEDGE_QA_PROVIDER_NOT_VERIFIED: [409, "所选个人模型连接尚未验证通过"],
+      PERSONAL_KNOWLEDGE_QA_NO_EVIDENCE: [422, "当前页面没有找到与问题匹配的内容"],
+      PERSONAL_KNOWLEDGE_QA_CONFIRMATION_REQUIRED: [409, "请先重新准备并确认本次问答"],
+      PERSONAL_KNOWLEDGE_QA_CONFIRMATION_STALE: [409, "页面或模型配置已变化，请重新准备问答"],
+      PERSONAL_KNOWLEDGE_QA_CONFIRMATION_EXPIRED: [409, "问答确认已过期，请重新准备"],
+      PERSONAL_KNOWLEDGE_QA_CONFIRMATION_CONSUMED: [409, "问答确认已经使用，请重新准备"],
+      PERSONAL_KNOWLEDGE_QA_PROVIDER_UNAVAILABLE: [502, "个人模型当前不可用"],
+      PERSONAL_KNOWLEDGE_QA_PROVIDER_UNCERTAIN: [502, "个人模型请求结果不确定，请检查供应商状态后再试"],
+      PERSONAL_KNOWLEDGE_QA_INVALID_MODEL_OUTPUT: [502, "个人模型返回内容无法验证"],
+      PERSONAL_KNOWLEDGE_QA_INVALID_CITATION: [502, "个人模型返回了无法验证的引用"],
+      PERSONAL_KNOWLEDGE_QA_CONFLICT: [409, "个人知识问答状态已变化，请刷新后重试"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "个人知识问答处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof PersonalKnowledgeSemanticError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PERSONAL_KNOWLEDGE_SEMANTIC_INVALID_INPUT: [400, "个人知识语义搜索请求无效"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_FORBIDDEN: [403, "无权使用个人知识语义搜索"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_ACCOUNT_DISABLED: [403, "当前账户已停用"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_ACCOUNT_ACCESS_STALE: [401, "当前会话已失效，请重新登录"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_NOT_FOUND: [404, "所选个人模型连接不存在"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_NOT_VERIFIED: [409, "所选个人模型连接尚未验证通过或不支持向量"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_MISMATCH: [409, "语义索引与所选模型不匹配，请使用建立索引时的模型"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_NO_DOCUMENTS: [409, "请先在个人知识库中添加内容"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_TOO_LARGE: [413, "个人知识库超过单次语义索引上限"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_NOT_AVAILABLE: [409, "个人语义索引尚未建立或已不可用"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_STALE: [409, "知识内容或模型配置已变化，请重新准备语义操作"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_CONFIRMATION_REQUIRED: [409, "请先重新准备并确认本次语义操作"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_CONFIRMATION_EXPIRED: [409, "语义操作确认已过期，请重新准备"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_CONFIRMATION_CONSUMED: [409, "语义操作确认已经使用，请重新准备"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_CONFIRMATION_STALE: [409, "知识内容或模型配置已变化，请重新准备语义操作"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_UNAVAILABLE: [502, "个人向量模型当前不可用"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_PROVIDER_UNCERTAIN: [502, "个人向量模型请求结果不确定，请检查供应商状态后再试"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_CONFLICT: [409, "个人语义索引状态已变化，请刷新后重试"],
+      PERSONAL_KNOWLEDGE_SEMANTIC_INTEGRITY_ERROR: [500, "个人语义索引完整性校验失败"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "个人语义搜索处理失败"];
+    return { status, body: { error: { code: error.code, message } } };
+  }
+
+  if (error instanceof PersonalProjectSearchError) {
+    const mapping: Record<string, readonly [number, string]> = {
+      PERSONAL_PROJECT_SEARCH_INVALID_INPUT: [400, "项目搜索请求无效"],
+      PERSONAL_PROJECT_SEARCH_PROJECT_UNAVAILABLE: [409, "所选项目已不可用，请刷新后重试"],
+      PERSONAL_PROJECT_SEARCH_NOT_READY: [409, "所选项目的当前索引尚未准备好"],
+      PERSONAL_PROJECT_SEARCH_SCOPE_TOO_LARGE: [413, "所选项目的可搜索资料超过安全上限"],
+      PERSONAL_PROJECT_SEARCH_CONFLICT: [409, "项目搜索索引已变化，请刷新后重试"],
+    };
+    const [status, message] = mapping[error.code] ?? [500, "项目搜索失败"];
     return { status, body: { error: { code: error.code, message } } };
   }
 

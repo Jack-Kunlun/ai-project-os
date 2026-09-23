@@ -21,6 +21,9 @@ test("项目配置是受保护的一级项目导航路由", async () => {
   assert.match(header, /href=\{`\/projects\/\$\{projectId\}\/configuration`\}/u);
   assert.match(header, /项目配置/u);
   assert.match(page, /requirePageSession()/u);
+  assert.match(page, /withWebAiProjectAccessTransaction/u);
+  assert.match(page, /allowArchived: true/u);
+  assert.match(page, /canManage: admission.permission === "owner"/u);
   assert.match(page, /ProjectConfigurationClient/u);
   assert.match(page, /isSystemAdmin=\{user\.role === "admin"\}/u);
 });
@@ -58,9 +61,15 @@ test("项目配置四个快照分区独立读取并保护迟到响应", async ()
   assert.match(source, /errorState\?\.projectId === projectId/u);
   assert.match(source, /仅项目 Owner 可查看工具授权/u);
   assert.match(source, /自动化范围需单独开放/u);
+  assert.match(source, /ProjectManagement/u);
+  assert.match(source, /仅项目 Owner 可操作/u);
+  assert.match(source, /导出 JSON/u);
+  assert.match(source, /归档项目/u);
+  assert.match(source, /恢复项目/u);
+  assert.match(source, /永久删除/u);
+  assert.match(source, /expectedUpdatedAt/u);
   for (const comment of ["Accept only plain object-like payloads", "Bound each displayed scope list", "Project the AI selection allowlist", "Read one independent control-plane endpoint"]) {
     assert.match(source, new RegExp(comment, "u"), `configuration source should document ${comment}`);
   }
   assert.doesNotMatch(source, /endpointUrl|bearerToken|ciphertext|nonce|authTag|secretFingerprint|resolvedAddressFingerprint|credentialFingerprint/u);
-  assert.doesNotMatch(source, /method:\s*"(?:POST|PUT|PATCH|DELETE)"/u);
 });

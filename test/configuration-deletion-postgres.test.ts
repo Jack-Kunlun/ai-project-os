@@ -12,6 +12,7 @@ import {
   updateProviderConnection,
 } from "../src/lib/ai-providers";
 import { getDb } from "../src/lib/db";
+import { runPersonalConnectionProbe } from "../src/lib/personal-connection-probe-service";
 import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 import {
@@ -36,6 +37,81 @@ const shouldRun = process.env.CONFIGURATION_DELETION_POSTGRES_GATE === "1";
 type GovernanceActor = Readonly<{ id: string; accountAccessVersion?: number }>;
 type GitMutationAction = "rotateCredential" | "retrust" | "retest" | "disable" | "enable" | "delete";
 type McpMutationAction = "rotateCredential" | "retrust" | "rediscover" | "disable" | "enable" | "delete";
+
+type CreateProbeProof = Readonly<{ draftProbeId: string; createRequestKey: string }>;
+
+async function probeGitCreateProof(input: Readonly<{
+  name: string;
+  secret: string;
+  actor: GovernanceActor;
+  db: PrismaClient;
+}>): Promise<CreateProbeProof> {
+  const createRequestKey = randomUUID();
+  const repositoryPath = "octocat/Hello-World";
+  const trackedRef = "main";
+  const probe = await runPersonalConnectionProbe({
+    kind: "git",
+    action: "create",
+    connectionId: null,
+    clientRequestKey: createRequestKey,
+    configuration: {
+      name: input.name,
+      providerKind: "github",
+      transport: "https",
+      baseUrl: "https://github.com",
+      authKind: "token",
+      username: null,
+      allowPrivateNetwork: false,
+      tlsCaCertificate: null,
+      sshKnownHost: null,
+      repositoryPath,
+      trackedRef,
+    },
+    secret: input.secret,
+    targetRepositoryPath: repositoryPath,
+    targetTrackedRef: trackedRef,
+  }, input.actor, async () => ({
+    addressFingerprint: "a".repeat(64),
+    commitSha: "b".repeat(40),
+    resultSnapshot: { repositoryPath, trackedRef },
+  }), input.db);
+  assert.equal(probe.status, "settled");
+  assert.equal(probe.safeErrorCode, null);
+  assert.ok(probe.draftProbeId);
+  return { draftProbeId: probe.draftProbeId, createRequestKey };
+}
+
+async function probeMcpCreateProof(input: Readonly<{
+  name: string;
+  bearerToken: string;
+  actor: GovernanceActor;
+  db: PrismaClient;
+}>): Promise<CreateProbeProof> {
+  const createRequestKey = randomUUID();
+  const probe = await runPersonalConnectionProbe({
+    kind: "mcp",
+    action: "create",
+    connectionId: null,
+    clientRequestKey: createRequestKey,
+    configuration: {
+      name: input.name,
+      endpointUrl: "http://127.0.0.1:9/mcp",
+      authKind: "bearer",
+      allowPrivateNetwork: true,
+    },
+    secret: input.bearerToken,
+  }, input.actor, async () => ({
+    addressFingerprint: "a".repeat(64),
+    protocolVersion: "2025-06-18",
+    catalogFingerprint: "c".repeat(64),
+    resultCount: 0,
+    resultSnapshot: [],
+  }), input.db);
+  assert.equal(probe.status, "settled");
+  assert.equal(probe.safeErrorCode, null);
+  assert.ok(probe.draftProbeId);
+  return { draftProbeId: probe.draftProbeId, createRequestKey };
+}
 
 function compactRequestKey(prefix: string, suffix: string, connectionId?: string): string {
   const key = `${prefix}-${suffix}${connectionId === undefined ? "" : `-${connectionId.slice(0, 8)}`}`;
@@ -227,14 +303,21 @@ test("unused model and Git connections can be permanently deleted while historic
     providerId = null;
     providerCredentialId = null;
 
+    const disposableGitName = `Disposable Git ${suffix}`;
+    const disposableGitSecret = `github-test-${suffix}`;
+    const disposableGitProbe = await probeGitCreateProof({ name: disposableGitName, secret: disposableGitSecret, actor: gitActor, db });
     const createdGitConnection = await createGitConnection({
-      name: `Disposable Git ${suffix}`,
+      name: disposableGitName,
       providerKind: "github",
       transport: "https",
       baseUrl: "https://github.com",
       authKind: "token",
-      secret: `github-test-${suffix}`,
+      secret: disposableGitSecret,
       allowPrivateNetwork: false,
+      repositoryPath: "octocat/Hello-World",
+      trackedRef: "main",
+      draftProbeId: disposableGitProbe.draftProbeId,
+      createRequestKey: disposableGitProbe.createRequestKey,
     }, adminActor, db);
     gitConnectionId = createdGitConnection.id;
     gitCredentialId = (await db.gitConnection.findUniqueOrThrow({ where: { id: createdGitConnection.id }, select: { credentialId: true } })).credentialId;
@@ -394,14 +477,21 @@ test("unused model and Git connections can be permanently deleted while historic
     gitConnectionId = null;
     gitCredentialId = null;
 
+    const historicalGitName = `Historical Git ${suffix}`;
+    const historicalGitSecret = `github-history-${suffix}`;
+    const historicalGitProbe = await probeGitCreateProof({ name: historicalGitName, secret: historicalGitSecret, actor: gitActor, db });
     const historicalConnection = await createGitConnection({
-      name: `Historical Git ${suffix}`,
+      name: historicalGitName,
       providerKind: "github",
       transport: "https",
       baseUrl: "https://github.com",
       authKind: "token",
-      secret: `github-history-${suffix}`,
+      secret: historicalGitSecret,
       allowPrivateNetwork: false,
+      repositoryPath: "octocat/Hello-World",
+      trackedRef: "main",
+      draftProbeId: historicalGitProbe.draftProbeId,
+      createRequestKey: historicalGitProbe.createRequestKey,
     }, gitActor, db);
     historicalConnectionId = historicalConnection.id;
     historicalCredentialId = (await db.gitConnection.findUniqueOrThrow({ where: { id: historicalConnection.id }, select: { credentialId: true } })).credentialId;
@@ -454,12 +544,17 @@ test("unused model and Git connections can be permanently deleted while historic
       (error: unknown) => error instanceof GitServiceError && error.code === "GIT_CONNECTION_IN_USE",
     );
 
+    const privateMcpName = `Private MCP ${suffix}`;
+    const privateMcpToken = `mcp-test-token-${suffix}`;
+    const privateMcpProbe = await probeMcpCreateProof({ name: privateMcpName, bearerToken: privateMcpToken, actor: gitActor, db });
     const mcpConnection = await createMcpConnection({
-      name: `Private MCP ${suffix}`,
+      name: privateMcpName,
       endpointUrl: "http://127.0.0.1:9/mcp",
       authKind: "bearer",
-      bearerToken: `mcp-test-token-${suffix}`,
+      bearerToken: privateMcpToken,
       allowPrivateNetwork: true,
+      draftProbeId: privateMcpProbe.draftProbeId,
+      createRequestKey: privateMcpProbe.createRequestKey,
     }, gitActor, db);
     mcpConnectionId = mcpConnection.id;
     mcpCredentialId = (await db.mcpConnection.findUniqueOrThrow({ where: { id: mcpConnection.id }, select: { credentialId: true } })).credentialId;

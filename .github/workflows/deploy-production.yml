@@ -6,15 +6,15 @@ on:
       tag:
         description: Exact approved annotated release tag
         required: true
-        default: v0.6.0-dev.7
+        default: v0.6.0-dev.8
         type: string
       source_tag:
         description: Release currently serving production
         required: true
-        default: v0.6.0-dev.6
+        default: v0.6.0-dev.7
         type: choice
         options:
-          - v0.6.0-dev.6
+          - v0.6.0-dev.7
 
 permissions:
   contents: read
@@ -53,11 +53,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$DEPLOY_TAG_INPUT" != v0.6.0-dev.7 ]]; then
+          if [[ "$DEPLOY_TAG_INPUT" != v0.6.0-dev.8 ]]; then
             echo "DEPLOY_TAG_INVALID" >&2
             exit 64
           fi
-          if [[ "$DEPLOY_SOURCE_TAG_INPUT" != v0.6.0-dev.6 ]]; then
+          if [[ "$DEPLOY_SOURCE_TAG_INPUT" != v0.6.0-dev.7 ]]; then
             echo "DEPLOY_SOURCE_TAG_INVALID" >&2
             exit 64
           fi
@@ -98,8 +98,9 @@ jobs:
             exit 66
           fi
 
-          if [[ -n "$(git diff --name-only "$source_sha" "$deploy_sha" -- prisma/migrations prisma/schema.prisma prisma.config.ts)" ]]; then
-            echo "DEPLOY_PATCH_DATABASE_FILES_CHANGED" >&2
+          migration_count=$(git ls-tree -d --name-only "$deploy_sha:prisma/migrations" | grep -Ec '^[0-9]{14}_')
+          if [[ "$migration_count" != 116 ]]; then
+            echo "DEPLOY_MIGRATION_COUNT_INVALID" >&2
             exit 66
           fi
 
@@ -243,7 +244,7 @@ jobs:
           fi
           printf '%s\n' "$config_output"
 
-      - name: Create verified offsite backup and deploy patch through forced-command gateway
+      - name: Create verified offsite backup and deploy migration through forced-command gateway
         run: |
           set -euo pipefail
           umask 077
@@ -260,7 +261,7 @@ jobs:
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=6 \
             "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
-                "deploy-v06-patch $DEPLOY_SOURCE_TAG $DEPLOY_TAG $DEPLOY_SOURCE_SHA $DEPLOY_SHA CONFIRM_V06_PATCH_V1" 2>&1 | tee "$deployment_output_file"
+                "deploy-v06-next $DEPLOY_SOURCE_TAG $DEPLOY_TAG $DEPLOY_SOURCE_SHA $DEPLOY_SHA CONFIRM_V06_NEXT_MIGRATION_V1" 2>&1 | tee "$deployment_output_file"
           pipeline_status=("${PIPESTATUS[@]}")
           set -e
 
@@ -272,10 +273,10 @@ jobs:
             exit 74
           fi
 
-          grep -q '^PATCH_DEPLOY_OK ' "$deployment_output_file"
+          grep -q '^DEPLOY_OK ' "$deployment_output_file"
           grep -q '^BACKUP_OK .* source_quiesced=true$' "$deployment_output_file"
 
-          backup_object=$(sed -n 's/^PATCH_DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
+          backup_object=$(sed -n 's/^DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' \
             "$deployment_output_file" | tail -n 1)
           if [[ ! "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]]; then
             echo "PRODUCTION_BACKUP_RESULT_INVALID" >&2

@@ -38,12 +38,19 @@ test("personal governance UI is secret-safe and keeps external actions fail-clos
   assert.match(panel, /requiredValue: action === "delete" \? connection\.name : "确认"/u);
   assert.match(panel, /费用承担者为连接所有者/u);
   assert.match(panel, /governanceBoundary\(kind\)/u);
-  assert.match(panel, /MCP 连接保存时会执行受限 DNS\/地址安全解析/u);
+  assert.match(panel, /MCP 连接保存和重新发现都会先执行受限 DNS\/地址安全解析及 initialize\/tools-list 只读测试/u);
   assert.match(panel, /不会发起 MCP 协议请求或向远端发送凭据/u);
-  assert.match(panel, /不会自动发起网络请求，外部连通性仍未验证/u);
-  assert.match(gitClient, /当前不会发起网络请求，外部连通性仍未验证/u);
-  assert.match(mcpClient, /保存时会执行受限 DNS\/地址安全解析/u);
-  assert.match(mcpClient, /不会发起 MCP 协议请求或向远端发送凭据/u);
+  assert.match(panel, /其他治理动作不会自动发起网络请求/u);
+  assert.match(gitClient, /\/api\/me\/git-connections\/probe/u);
+  assert.match(gitClient, /测试指定仓库和 ref，确认结果后再保存/u);
+  assert.match(gitClient, /draftProbeId: testedProbe\.draftProbeId/u);
+  assert.match(gitClient, /已完成 Git 仓库只读测试并加密保存/u);
+  assert.match(mcpClient, /\/api\/me\/mcp-connections\/probe/u);
+  assert.match(mcpClient, /新建连接会先执行受限 DNS\/地址安全解析，再完成 initialize 和 tools\/list 只读测试/u);
+  assert.match(mcpClient, /draftProbeId: testedProbe\.draftProbeId/u);
+  assert.match(mcpClient, /已完成 MCP initialize 和 tools\/list 只读测试并加密保存/u);
+  assert.match(gitClient, /setDraft\(\(current\) => \(\{ \.\.\.current, secret: "" \}\)\)/u);
+  assert.match(mcpClient, /setDraft\(\(current\) => \(\{ \.\.\.current, bearerToken: "" \}\)\)/u);
   assert.doesNotMatch(mcpClient, /当前不会发起网络请求，外部连通性仍未验证/u);
 });
 

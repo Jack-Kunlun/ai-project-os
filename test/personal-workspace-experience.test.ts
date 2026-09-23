@@ -17,7 +17,7 @@ test("个人工作区提供受保护的总览和资源配置汇总", async () =>
   assert.match(root, /PersonalWorkspaceNav active="overview"/u);
   assert.doesNotMatch(root, /redirect\(/u);
   assert.match(overview, /\/api\/projects\?view=active&page=1&pageSize=8/u);
-  assert.match(overview, /\/api\/personal\/knowledge\?limit=1/u);
+  assert.match(overview, /\/api\/personal\/knowledge\/overview/u);
   assert.match(overview, /\/api\/me\/ai-providers/u);
   assert.match(overview, /\/api\/me\/git-connections/u);
   assert.match(overview, /\/api\/me\/mcp-connections/u);
@@ -28,7 +28,10 @@ test("个人工作区提供受保护的总览和资源配置汇总", async () =>
   assert.match(overview, /以项目当前有效配置为准/u);
   assert.match(overview, /Git 已关联项目/u);
   assert.match(overview, /MCP 已关联项目/u);
-  assert.match(overview, /href=\{`\/projects\/\$\{project\.id\}\/configuration`\}/u);
+  const projectCard = overview.slice(overview.indexOf("function ProjectCard"));
+  assert.equal((projectCard.match(/<Link /gu) ?? []).length, 1);
+  assert.match(projectCard, /进入项目/u);
+  assert.doesNotMatch(projectCard, /\/configuration/u);
   assert.match(configuration, /PersonalWorkspaceNav active="configuration"/u);
   assert.match(configuration, /href="\/personal\/models"/u);
   assert.match(configuration, /href="\/personal\/connections\/git"/u);
@@ -38,7 +41,14 @@ test("个人工作区提供受保护的总览和资源配置汇总", async () =>
   assert.match(nav, /href: "\/personal"/u);
   assert.match(nav, /href: "\/personal\/knowledge"/u);
   assert.match(nav, /href: "\/personal\/configuration"/u);
-  assert.match(header, /label: "个人工作区", href: "\/personal"/u);
+  assert.doesNotMatch(nav, /href: "\/personal\/(?:models|connections\/git|connections\/mcp)"/u);
+  assert.match(header, /label: "个人工作台", href: "\/personal"/u);
+  assert.match(header, /label: "我的项目", href: "\/projects"/u);
+  assert.match(header, /label: "我的团队", href: "\/team"/u);
+  const primaryLabels = ["Dashboard", "个人工作台", "我的项目", "我的团队"];
+  const primaryPositions = primaryLabels.map((label) => header.indexOf(`label: "${label}"`));
+  assert.ok(primaryPositions.every((position) => position >= 0));
+  assert.deepEqual([...primaryPositions].sort((left, right) => left - right), primaryPositions);
   assert.doesNotMatch(profile, /href="\/profile\/models"/u);
   assert.doesNotMatch(profile, /<h2[^>]*>我的模型<\/h2>/u);
   assert.doesNotMatch(profile, /我的连接|\/profile\/connections/u);

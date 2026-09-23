@@ -309,11 +309,18 @@ test("administrator audit center keeps short labels on one line and separates co
     const firstRowOnPageOne = await auditTable.getByRole("row").nth(1).getAttribute("data-audit-id");
     expect(firstRowOnPageOne).not.toBeNull();
     await expect(page.getByRole("button", { name: "上一页", exact: true })).toBeDisabled();
+    const nextPageResponsePromise = page.waitForResponse((response) => {
+      if (!response.ok() || !response.url().includes("/api/system/audit?")) return false;
+      return new URL(response.url()).searchParams.has("cursor");
+    });
     await page.getByRole("button", { name: "下一页", exact: true }).click();
+    await nextPageResponsePromise;
     await expect(page.getByText("第 2 页", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "上一页", exact: true })).toBeEnabled();
-    const firstRowOnPageTwo = await auditTable.getByRole("row").nth(1).getAttribute("data-audit-id");
-    expect(firstRowOnPageTwo).not.toBe(firstRowOnPageOne);
+    await expect.poll(
+      async () => auditTable.getByRole("row").nth(1).getAttribute("data-audit-id"),
+      { message: "下一页必须渲染游标请求返回的新首行" },
+    ).not.toBe(firstRowOnPageOne);
     await page.getByRole("button", { name: "上一页", exact: true }).click();
     await expect(page.getByText("第 1 页", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "上一页", exact: true })).toBeDisabled();

@@ -14,8 +14,6 @@ import {
 import { ApiError } from "@/lib/api-errors";
 import { handleApiError, readJsonBody } from "@/lib/api-response";
 import { getDb } from "@/lib/db";
-import { getPlatformTokenSummaryInTransaction } from "@/lib/ai-entitlements";
-import { getCurrentMembershipApplication } from "@/lib/membership-application-service";
 import { toSystemRole } from "@/lib/system-role";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +42,7 @@ export async function GET(request: Request) {
         throw new ApiError(503, "PROFILE_SNAPSHOT_UNAVAILABLE", "个人信息暂时无法读取");
       }
       const sessionUser = await requireApiSessionReadOnly(request, tx, current);
-      const [user, activeSessionCount, latestSession, entitlements, membershipApplication] = await Promise.all([
+      const [user, activeSessionCount, latestSession] = await Promise.all([
         tx.appUser.findUnique({
           where: { id: sessionUser.id },
           select: {
@@ -62,20 +60,9 @@ export async function GET(request: Request) {
           orderBy: { lastSeenAt: "desc" },
           select: { lastSeenAt: true, expiresAt: true },
         }),
-        getPlatformTokenSummaryInTransaction(sessionUser.id, tx, current),
-        getCurrentMembershipApplication(sessionUser.id, tx),
       ]);
       if (user === null) throw new ApiError(401, "AUTH_REQUIRED", "请先登录");
       const { passwordHash, githubIdentity, role, ...safeUser } = user;
-      const safeMembershipApplication = membershipApplication === null ? null : {
-        id: membershipApplication.id,
-        status: membershipApplication.status,
-        statusVersion: membershipApplication.statusVersion,
-        submittedAt: membershipApplication.submittedAt,
-        fulfilledAt: membershipApplication.fulfilledAt,
-        rejectedAt: membershipApplication.rejectedAt,
-        withdrawnAt: membershipApplication.withdrawnAt,
-      };
       return {
         ...safeUser,
         role: toSystemRole(role),
@@ -84,18 +71,6 @@ export async function GET(request: Request) {
         activeSessionCount,
         lastSeenAt: latestSession?.lastSeenAt ?? null,
         sessionExpiresAt: latestSession?.expiresAt ?? null,
-        entitlements: {
-          unit: entitlements.unit,
-          totalCredits: entitlements.totalCredits,
-          availableCredits: entitlements.availableCredits,
-          usedCredits: entitlements.usedCredits,
-          reservedCredits: entitlements.reservedCredits,
-          heldCredits: entitlements.heldCredits,
-          nextExpiryAt: entitlements.nextExpiryAt,
-          routeSnapshots: entitlements.routeSnapshots,
-          membership: entitlements.membership,
-          membershipApplication: safeMembershipApplication,
-        },
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     return NextResponse.json(

@@ -17,6 +17,8 @@ const ORDINARY_USER_API_PREFIXES = [
   "/api/personal",
   "/api/notifications",
   "/api/profile",
+  "/api/credits",
+  "/api/teams",
 ] as const;
 const SHARED_API_PREFIXES = ["/api/auth"] as const;
 const PUBLIC_API_PREFIXES = ["/api/health", "/api/setup"] as const;

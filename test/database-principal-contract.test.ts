@@ -42,7 +42,7 @@ test("invoker helper ACL matrix is complete, immutable and uniquely signed", () 
     reason: "workspace enabled-owner invariant validation",
   });
   assert.ok(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.every((helper) => Object.isFrozen(helper) && helper.reason.trim().length > 0));
-  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 18);
+  assert.equal(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.length, 30);
   assert.ok(DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX.every((trigger) => Object.isFrozen(trigger)
     && trigger.identityArguments === ""
     && trigger.runtime === false

@@ -46,6 +46,7 @@ import {
   dispatchProjectMcpAction,
   reconcileStaleProjectMcpActionDispatchReservations,
 } from "../src/lib/project-mcp-action-dispatch-service";
+import { createMcpConnectionFixture } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.PROJECT_MCP_ACTION_DISPATCH_POSTGRES_GATE === "1";
 const NO_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
@@ -600,7 +601,7 @@ test(
         (error: unknown) => error instanceof ActionResultIntakeError
           && error.code === "ACTION_RESULT_INTAKE_NOT_IMPORTABLE",
       );
-      await db.mcpConnection.create({ data: {
+      await createMcpConnectionFixture({
         id: connectionId,
         name: `dispatch connection ${suffix}`,
         endpointUrl: resolved.url,
@@ -617,7 +618,7 @@ test(
         ownerUserId: ownerId,
         ownerAccountAccessVersion: 1,
         ownershipState: "confirmed",
-      } });
+      }, db);
       await db.mcpToolDefinition.create({ data: {
         id: definitionId,
         connectionId,
@@ -676,7 +677,7 @@ test(
         select: { secretFingerprint: true },
       });
       const bearerDefinitionFingerprint = fingerprint("b");
-      await db.mcpConnection.create({ data: {
+      await createMcpConnectionFixture({
         id: bearerConnectionId,
         name: `dispatch bearer connection ${suffix}`,
         endpointUrl: resolved.url,
@@ -693,7 +694,7 @@ test(
         ownerUserId: ownerId,
         ownerAccountAccessVersion: 1,
         ownershipState: "confirmed",
-      } });
+      }, db);
       await db.mcpToolDefinition.create({ data: {
         id: bearerDefinitionId,
         connectionId: bearerConnectionId,

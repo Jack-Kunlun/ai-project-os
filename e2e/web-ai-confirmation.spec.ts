@@ -36,7 +36,8 @@ async function createProject(page: Page, name: string): Promise<string> {
   await page.getByRole("button", { name: "＋ 新建项目" }).click();
   await page.getByLabel("项目名称", { exact: true }).fill(name);
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
-  const projectHref = await page.getByRole("link", { name, exact: true }).getAttribute("href");
+  const projectCard = page.locator("article").filter({ has: page.getByRole("heading", { name, exact: true }) });
+  const projectHref = await projectCard.getByRole("link", { name: "进入项目", exact: true }).getAttribute("href");
   expect(projectHref).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   return projectHref!.slice("/projects/".length);
 }

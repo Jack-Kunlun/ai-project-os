@@ -76,6 +76,16 @@ const webSourceSelect = {
 type ResolvedEndpoint = Readonly<{ address: string; family: 4 | 6; fingerprint: string }>;
 type RawResponse = Readonly<{ status: number; headers: Readonly<Record<string, string>>; body: Buffer }>;
 
+/** A late-bound request patch used when authorization is read after DNS. */
+export type SecurePinnedRequestDispatchResult = Readonly<{
+  headers?: Readonly<Record<string, string>>;
+  body?: string;
+}>;
+type SecurePinnedRequestDispatch =
+  | void
+  | boolean
+  | SecurePinnedRequestDispatchResult;
+
 function fail(code: WebSourceErrorCode): never {
   throw new WebSourceError(code);
 }
@@ -162,7 +172,7 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
   headers?: Readonly<Record<string, string>>;
   body?: string;
   maximumResponseBytes?: number;
-  onRequestBodyWriteStart?: () => void | boolean | Promise<void | boolean>;
+  onRequestBodyWriteStart?: () => SecurePinnedRequestDispatch | Promise<SecurePinnedRequestDispatch>;
 }> = {}): Promise<RawResponse> {
   const maximumResponseBytes = options.maximumResponseBytes ?? MAX_RESPONSE_BYTES;
   if (!Number.isInteger(maximumResponseBytes) || maximumResponseBytes < 1 || maximumResponseBytes > MAX_RESPONSE_BYTES) {
@@ -172,9 +182,15 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
   // fingerprint checks have completed, but before constructing the request.
   // A slow or rejected callback must not leave an AbortSignal/request alive
   // while the database reservation is being decided.
+  let headers = options.headers;
+  let body = options.body;
   if (options.onRequestBodyWriteStart !== undefined) {
-    const boundaryAccepted = await options.onRequestBodyWriteStart();
-    if (boundaryAccepted === false) return fail("WEB_SOURCE_REQUEST_BOUNDARY_REJECTED");
+    const dispatchResult = await options.onRequestBodyWriteStart();
+    if (dispatchResult === false) return fail("WEB_SOURCE_REQUEST_BOUNDARY_REJECTED");
+    if (dispatchResult !== undefined && dispatchResult !== true) {
+      headers = dispatchResult.headers ?? headers;
+      body = dispatchResult.body ?? body;
+    }
   }
   return new Promise<RawResponse>((resolve, reject) => {
     const lookupPinned: LookupFunction = (_hostname, options, callback) => {
@@ -182,7 +198,7 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
     };
     const request = (url.protocol === "https:" ? httpsRequest : httpRequest)(url, {
       method: options.method ?? "GET",
-      headers: { accept: "text/html,text/plain,application/json,application/xml;q=0.9", "accept-encoding": "identity", "user-agent": "AI-Project-OS-Web-Source/1.0", ...options.headers },
+      headers: { accept: "text/html,text/plain,application/json,application/xml;q=0.9", "accept-encoding": "identity", "user-agent": "AI-Project-OS-Web-Source/1.0", ...headers },
       lookup: lookupPinned,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }, (response) => {
@@ -207,7 +223,7 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
     // The callback above completed before request construction; hand the body
     // to Node immediately so no later asynchronous work can create a second
     // dispatch opportunity. Legacy callers leave the callback unset.
-    request.end(options.body);
+    request.end(body);
   }).catch((error: unknown) => {
     if (error instanceof WebSourceError) throw error;
     return fail("WEB_SOURCE_FETCH_FAILED");
@@ -222,7 +238,7 @@ export async function securePinnedHttpRequest(input: Readonly<{
   headers?: Readonly<Record<string, string>>;
   body?: string;
   maximumResponseBytes?: number;
-  onRequestBodyWriteStart?: () => void | boolean | Promise<void | boolean>;
+  onRequestBodyWriteStart?: () => SecurePinnedRequestDispatch | Promise<SecurePinnedRequestDispatch>;
 }>): Promise<Readonly<{
   status: number;
   headers: Readonly<Record<string, string>>;

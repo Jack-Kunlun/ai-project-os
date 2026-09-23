@@ -33,28 +33,28 @@ function validateDisposableDatabaseUrl(value: string): string {
   return value;
 }
 
-/** List the exact historical migration directories that form the 0.5 ledger. */
-async function readSourceMigrationNames(): Promise<readonly string[]> {
+/** List the exact historical migration directories for one side of the 0.6 cutover. */
+async function readMigrationNames(includeTarget: boolean): Promise<readonly string[]> {
   const names = (await readdir(migrationRoot, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && /^\d{14}_/u.test(entry.name))
     .map((entry) => entry.name)
-    .filter((name) => name !== targetMigration)
+    .filter((name) => includeTarget ? name <= targetMigration : name < targetMigration)
     .sort();
-  assert.equal(names.length, 106);
-  assert.equal(names.includes(targetMigration), false);
+  assert.equal(names.length, includeTarget ? 107 : 106);
+  assert.equal(names.includes(targetMigration), includeTarget);
   return names;
 }
 
 /**
- * Build a temporary Prisma migration tree containing only the 0.5 baseline.
+ * Build a temporary Prisma migration tree containing one exact historical ledger.
  * Prisma itself applies it, so the ledger shape and checksums match production.
  */
-async function createSourceMigrationConfig(): Promise<{ directory: string; configPath: string }> {
+async function createMigrationConfig(includeTarget: boolean): Promise<{ directory: string; configPath: string }> {
   const directory = await mkdtemp(join(repositoryRoot, ".tmp-v06-upgrade-"));
   const stagedMigrations = join(directory, "migrations");
   await mkdir(stagedMigrations);
   await cp(join(migrationRoot, "migration_lock.toml"), join(stagedMigrations, "migration_lock.toml"));
-  for (const name of await readSourceMigrationNames()) {
+  for (const name of await readMigrationNames(includeTarget)) {
     await cp(join(migrationRoot, name), join(stagedMigrations, name), { recursive: true });
   }
   const configPath = join(directory, "prisma.config.ts");
@@ -127,9 +127,10 @@ test("0.6 upgrades an exact 106-entry ledger and enforces personal knowledge int
   skip: !shouldRun ? "explicit disposable PostgreSQL 0.6 upgrade gate is required" : false,
 }, async () => {
   const databaseUrl = validateDisposableDatabaseUrl(configuredUrl as string);
-  const staged = await createSourceMigrationConfig();
+  const sourceStaged = await createMigrationConfig(false);
+  const targetStaged = await createMigrationConfig(true);
   try {
-    await migrateWithConfig(staged.configPath, databaseUrl);
+    await migrateWithConfig(sourceStaged.configPath, databaseUrl);
     assert.deepEqual(await runV06UpgradePreflight("pre-stop", databaseUrl), {
       ok: true,
       kind: "v06-upgrade-preflight",
@@ -140,7 +141,7 @@ test("0.6 upgrades an exact 106-entry ledger and enforces personal knowledge int
     });
     assert.equal((await runV06UpgradePreflight("post-stop", databaseUrl)).writerSessions, "stopped");
 
-    await migrateWithConfig(join(repositoryRoot, "prisma.config.ts"), databaseUrl);
+    await migrateWithConfig(targetStaged.configPath, databaseUrl);
     assert.equal((await runV06UpgradePreflight("post-migration", databaseUrl)).migrationCount, 107);
 
     const client = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
@@ -224,6 +225,9 @@ test("0.6 upgrades an exact 106-entry ledger and enforces personal knowledge int
       await client.end();
     }
   } finally {
-    await rm(staged.directory, { recursive: true, force: true });
+    await Promise.all([
+      rm(sourceStaged.directory, { recursive: true, force: true }),
+      rm(targetStaged.directory, { recursive: true, force: true }),
+    ]);
   }
 });

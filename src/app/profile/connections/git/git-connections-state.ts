@@ -40,6 +40,8 @@ export type GitConnectionDraft = Readonly<{
   transport: GitTransport;
   baseUrl: string;
   authKind: GitAuthKind;
+  repositoryPath: string;
+  trackedRef: string;
   username: string;
   secret: string;
   allowPrivateNetwork: boolean;
@@ -80,6 +82,8 @@ export function createDefaultGitDraft(catalog: readonly GitCatalogEntry[] = []):
     transport: "https",
     baseUrl: first?.defaultHttpsUrl ?? "https://github.com",
     authKind: "token",
+    repositoryPath: "",
+    trackedRef: "main",
     username: "",
     secret: "",
     allowPrivateNetwork: false,

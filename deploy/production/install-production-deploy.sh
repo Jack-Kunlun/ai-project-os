@@ -97,6 +97,9 @@ install -o root -g root -m 0755 \
 install -o root -g root -m 0755 \
   "$SOURCE_DIR/ai-project-os-v06-patch-deploy" \
   /usr/local/sbin/ai-project-os-v06-patch-deploy
+install -o root -g root -m 0755 \
+  "$SOURCE_DIR/ai-project-os-v06-next-deploy" \
+  /usr/local/sbin/ai-project-os-v06-next-deploy
 install -o root -g root -m 0644 \
   "$SOURCE_DIR/compose.operations.yaml" \
   /etc/ai-project-os/compose.operations.yaml
@@ -180,6 +183,7 @@ bash -n /usr/local/sbin/ai-project-os-preserve-deploy
 bash -n /usr/local/sbin/ai-project-os-install-release-tooling
 bash -n /usr/local/sbin/ai-project-os-v06-deploy
 bash -n /usr/local/sbin/ai-project-os-v06-patch-deploy
+bash -n /usr/local/sbin/ai-project-os-v06-next-deploy
 bash -n /usr/local/sbin/ai-project-os-configure-github-oauth
 bash -n /usr/local/sbin/ai-project-os-actions-gateway
 bash -n /usr/local/sbin/ai-project-os-restore

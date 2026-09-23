@@ -63,6 +63,19 @@ test("project creation capability follows workspace membership in the API and UI
   assert.doesNotMatch(guide, /系统管理员或当前工作区 Owner\/Admin 可以创建项目/u);
 });
 
+test("项目卡片只保留进入项目的单一主入口", async () => {
+  const [projects, configuration] = await Promise.all([
+    readFile("src/app/projects/projects-client.tsx", "utf8"),
+    readFile("src/app/projects/[projectId]/configuration/project-configuration-client.tsx", "utf8"),
+  ]);
+  const card = projects.slice(projects.indexOf("function ProjectCard"));
+  assert.match(projects, /进入项目/u);
+  assert.match(projects, /查看项目/u);
+  assert.doesNotMatch(card, /导出 JSON|归档项目|恢复项目|永久删除|QuickLink/u);
+  assert.match(configuration, /ProjectManagement/u);
+  assert.match(configuration, /仅项目 Owner 可操作/u);
+});
+
 test("destructive and approval flows use the shared app dialog instead of browser dialogs", async () => {
   const paths = [
     "src/app/settings/settings-client.tsx",

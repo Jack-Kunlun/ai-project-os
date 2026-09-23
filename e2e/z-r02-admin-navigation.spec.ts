@@ -159,7 +159,8 @@ async function createR02Project(page: Parameters<typeof signInR02Admin>[0]): Pro
   const name = `R02 browser project ${randomUUID().slice(0, 8)}`;
   await page.getByLabel("项目名称", { exact: true }).fill(name);
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
-  const href = await page.getByRole("link", { name, exact: true }).getAttribute("href");
+  const projectCard = page.locator("article").filter({ has: page.getByRole("heading", { name, exact: true }) });
+  const href = await projectCard.getByRole("link", { name: "进入项目", exact: true }).getAttribute("href");
   expect(href).toMatch(/^\/projects\/[0-9a-f-]+$/u);
   return { id: href!.split("/")[2]!, name };
 }
@@ -494,7 +495,8 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
     expect(projectApi.status).toBe(403);
     expect(projectApi.body).not.toContain(project.name);
     await freePage.goto("/personal/configuration");
-    await expect(freePage.getByRole("link", { name: "我的模型", exact: true })).toBeVisible();
+    const modelsResource = freePage.locator('a[href="/personal/models"]');
+    await expect(modelsResource.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
     await freePage.goto("/personal/models");
     await expect(freePage.getByRole("heading", { name: "我的模型", exact: true })).toBeVisible();
     await expect(freePage.getByText("普通用户", { exact: true })).toBeVisible();

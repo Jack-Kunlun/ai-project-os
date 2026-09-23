@@ -10,6 +10,7 @@ import {
   proposeProjectGitRepositoryDelegation,
 } from "../src/lib/project-git-repository-delegation-service";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
+import { createGitConnectionFixture } from "./personal-connection-probe-fixture";
 
 const databaseUrl = process.env.DATABASE_URL;
 const enabled = process.env.PROJECT_DELEGATED_GIT_RUNTIME_POSTGRES_GATE === "1" && typeof databaseUrl === "string" && databaseUrl.length > 0;
@@ -269,23 +270,21 @@ test("manual delegated Git runtime keeps staged publication and stale runs audit
     const requesterMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: requesterId }, select: { id: true, createdAt: true } });
     const finalFenceRequesterMembership = await db.projectMembership.findFirstOrThrow({ where: { projectId, userId: finalFenceRequesterId }, select: { id: true, createdAt: true } });
     await db.externalCredential.create({ data: { id: credentialId, kind: "git", ciphertext: Buffer.from([1]), nonce: Buffer.from([2]), authTag: Buffer.from([3]), maskedSuffix: "gate", secretFingerprint: credentialFingerprint } });
-    await db.gitConnection.create({
-      data: {
-        id: connectionId,
-        name: `Manual runtime Git ${suffix}`,
-        providerKind: "github",
-        transport: "https",
-        baseUrl: "https://github.com",
-        authKind: "token",
-        status: "verified",
-        ownershipState: "confirmed",
-        resolvedAddressFingerprint: addressFingerprint,
-        createdById: connectionOwnerId,
-        ownerUserId: connectionOwnerId,
-        ownerAccountAccessVersion: 1,
-        credentialId,
-      },
-    });
+    await createGitConnectionFixture({
+      id: connectionId,
+      name: `Manual runtime Git ${suffix}`,
+      providerKind: "github",
+      transport: "https",
+      baseUrl: "https://github.com",
+      authKind: "token",
+      status: "verified",
+      ownershipState: "confirmed",
+      resolvedAddressFingerprint: addressFingerprint,
+      createdById: connectionOwnerId,
+      ownerUserId: connectionOwnerId,
+      ownerAccountAccessVersion: 1,
+      credentialId,
+    }, db);
     const draft = await proposeProjectGitRepositoryDelegation(projectId, {
       gitConnectionId: connectionId,
       repositoryPath: "org/manual-runtime",

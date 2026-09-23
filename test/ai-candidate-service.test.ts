@@ -578,7 +578,7 @@ test("candidate review repeats actor and membership authorization inside the wri
         (error as { code?: unknown }).code === "ACCESS_FORBIDDEN",
       operation,
     );
-    assert.equal(actorLookups, 5, `${operation} reloads actor inside transaction`);
+    assert.equal(actorLookups, 4, `${operation} reloads actor inside transaction`);
     assert.equal(membershipLookups, 1, `${operation} reloads membership inside transaction`);
     assert.equal(candidateReads, 0, `${operation} reads no candidate after revoke`);
     assert.equal(itemWrites, 0, `${operation} writes no item after revoke`);

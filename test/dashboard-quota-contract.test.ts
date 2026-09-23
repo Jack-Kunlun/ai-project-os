@@ -48,5 +48,8 @@ test("dashboard reads the current caller advisory independently and keeps client
   assert.match(client, /availableCredits === 0/u);
   assert.match(client, /暂时无法读取当前额度/u);
   assert.match(client, /实际执行前会再次核验额度/u);
-  assert.match(client, /href="\/profile"/u);
+  assert.match(client, /href="\/credits"/u);
+  assert.match(client, /我的工作[\s\S]*项目动态/u);
+  assert.match(client, /\/api\/personal\/knowledge\/overview/u);
+  assert.match(client, /\/api\/me\/git-connections/u);
 });

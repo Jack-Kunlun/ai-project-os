@@ -30,7 +30,7 @@ test("profile GET uses one read-only repeatable-read snapshot and read-only sess
   assert.match(getSource, /SET TRANSACTION READ ONLY/u);
   assert.match(getSource, /clock_timestamp\(\) AT TIME ZONE 'UTC'/u);
   assert.match(getSource, /requireApiSessionReadOnly\(request, tx, current\)/u);
-  assert.match(getSource, /getPlatformTokenSummaryInTransaction\(sessionUser\.id, tx, current\)/u);
+  assert.doesNotMatch(getSource, /getPlatformTokenSummary|membershipApplication|entitlements/u);
   assert.doesNotMatch(getSource, /requireApiSession\(request\)/u);
   assert.doesNotMatch(getSource, /getPlatformTokenSummary\(/u);
 });

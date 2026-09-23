@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
+import { HelpTooltip } from "@/components/help-tooltip";
 import { ScopeEvidenceCard } from "@/components/scope-evidence-card";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 import {
@@ -331,7 +332,16 @@ function ProviderCard({ provider, catalog, membership, canConfigure, canMaintain
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block text-xs font-semibold text-slate-700">{label}{children}</label>;
+  const help = label.includes("API Key")
+    ? "从所选供应商的控制台创建你自己的 API Key。示例仅说明格式，请勿使用他人的密钥；保存后在连接卡片中测试。"
+    : label.includes("Base URL")
+      ? "这里显示平台内置的供应商官方地址，由系统固定，无法手动改成其他服务。"
+      : label.includes("模型")
+        ? "填写供应商提供的模型 ID，例如供应商模型目录中的标识；先保存连接，再测试，最后在项目中授权使用。向量维度要与所选向量模型一致。"
+        : label === "供应商"
+          ? "先选择你已开通账号的供应商，再填写该供应商的 API Key 和模型 ID。"
+          : null;
+  return <div className="relative"><label className="block text-xs font-semibold text-slate-700">{label}{children}</label>{help ? <span className="absolute right-0 top-0"><HelpTooltip label={label}>{help}</HelpTooltip></span> : null}</div>;
 }
 
 function ModelField({ label, value, onChange, suggestions, disabled = false }: { label: string; value: string; onChange: (value: string) => void; suggestions: readonly string[]; disabled?: boolean }) {

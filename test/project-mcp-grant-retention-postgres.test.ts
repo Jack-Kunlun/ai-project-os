@@ -19,6 +19,7 @@ import {
   updateProjectLifecycle,
 } from "../src/lib/project-lifecycle";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
+import { createMcpConnectionFixture } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.PROJECT_MCP_GRANT_RETENTION_POSTGRES_GATE === "1";
 const NO_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
@@ -57,26 +58,24 @@ test(
         await grantProjectMembership(tx, { projectId, workspaceId, userId: adminId, role: "owner", actorId: adminId, reason: "grant_retention_gate_project_owner" });
         return createdProject;
       });
-      await db.mcpConnection.create({
-        data: {
-          id: connectionId,
-          name: `Retention MCP ${suffix}`,
-          endpointUrl: "https://mcp.example.invalid/mcp",
-          authKind: "none",
-          credentialId: null,
-          allowPrivateNetwork: false,
-          resolvedAddressFingerprint: networkFingerprint,
-          protocolVersion: "2026-07-28",
-          catalogFingerprint: "c".repeat(64),
-          credentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
-          configurationRevision: 1,
-          status: "verified",
-          createdById: adminId,
-          ownerUserId: adminId,
-          ownerAccountAccessVersion: 1,
-          ownershipState: "confirmed",
-        },
-      });
+      await createMcpConnectionFixture({
+        id: connectionId,
+        name: `Retention MCP ${suffix}`,
+        endpointUrl: "https://mcp.example.invalid/mcp",
+        authKind: "none",
+        credentialId: null,
+        allowPrivateNetwork: false,
+        resolvedAddressFingerprint: networkFingerprint,
+        protocolVersion: "2026-07-28",
+        catalogFingerprint: "c".repeat(64),
+        credentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
+        configurationRevision: 1,
+        status: "verified",
+        createdById: adminId,
+        ownerUserId: adminId,
+        ownerAccountAccessVersion: 1,
+        ownershipState: "confirmed",
+      }, db);
       await db.mcpToolDefinition.create({
         data: {
           id: definitionId,

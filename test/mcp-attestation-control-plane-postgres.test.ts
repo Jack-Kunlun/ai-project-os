@@ -13,6 +13,7 @@ import {
   previewMcpConnectionMutation,
   revokeMcpControlPlaneAttestation,
 } from "../src/lib/mcp";
+import { createMcpConnectionFixture } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.MCP_ATTESTATION_CONTROL_PLANE_POSTGRES_GATE === "1";
 const NO_CREDENTIAL_FINGERPRINT = "d2ab012fb807b99b7d059aabe98a45dd6edf6941a5f22699f8d04b5906dc2c2b";
@@ -71,27 +72,25 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
     { id: replacementAdminId, username: `mcp_c2_replacement_${suffix}`, role: "admin" },
     { id: memberId, username: `mcp_c2_member_${suffix}`, role: "user" },
   ] });
-  await db.mcpConnection.create({
-    data: {
-      id: connectionId,
-      name: `MCP C2 ${suffix}`,
-      endpointUrl: "https://mcp.example.invalid/mcp",
-      authKind: "none",
-      credentialId: null,
-      allowPrivateNetwork: false,
-      resolvedAddressFingerprint: networkFingerprint,
-      protocolVersion: "2026-07-28",
-      catalogFingerprint: "c".repeat(64),
-      credentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
-      configurationRevision,
-      status: "verified",
-      disabledAt: null,
-      createdById: adminId,
-      ownerUserId: adminId,
-      ownerAccountAccessVersion: 1,
-      ownershipState: "confirmed",
-    },
-  });
+  await createMcpConnectionFixture({
+    id: connectionId,
+    name: `MCP C2 ${suffix}`,
+    endpointUrl: "https://mcp.example.invalid/mcp",
+    authKind: "none",
+    credentialId: null,
+    allowPrivateNetwork: false,
+    resolvedAddressFingerprint: networkFingerprint,
+    protocolVersion: "2026-07-28",
+    catalogFingerprint: "c".repeat(64),
+    credentialFingerprint: NO_CREDENTIAL_FINGERPRINT,
+    configurationRevision,
+    status: "verified",
+    disabledAt: null,
+    createdById: adminId,
+    ownerUserId: adminId,
+    ownerAccountAccessVersion: 1,
+    ownershipState: "confirmed",
+  }, db);
   await db.mcpToolDefinition.create({
     data: {
       id: toolDefinitionId,
@@ -238,27 +237,25 @@ test("C2 管理员 MCP 认证控制面具备精确快照、幂等创建和漂移
       secretFingerprint: bearerFingerprint,
     },
   });
-  await db.mcpConnection.create({
-    data: {
-      id: bearerConnectionId,
-      name: `MCP Bearer ${suffix}`,
-      endpointUrl: "https://bearer.example.invalid/mcp",
-      authKind: "bearer",
-      credentialId: bearerCredentialId,
-      allowPrivateNetwork: false,
-      resolvedAddressFingerprint: "f".repeat(64),
-      protocolVersion: "2026-07-28",
-      catalogFingerprint: "1".repeat(64),
-      credentialFingerprint: bearerFingerprint,
-      configurationRevision: 1,
-      status: "verified",
-      disabledAt: null,
-      createdById: adminId,
-      ownerUserId: adminId,
-      ownerAccountAccessVersion: 1,
-      ownershipState: "confirmed",
-    },
-  });
+  await createMcpConnectionFixture({
+    id: bearerConnectionId,
+    name: `MCP Bearer ${suffix}`,
+    endpointUrl: "https://bearer.example.invalid/mcp",
+    authKind: "bearer",
+    credentialId: bearerCredentialId,
+    allowPrivateNetwork: false,
+    resolvedAddressFingerprint: "f".repeat(64),
+    protocolVersion: "2026-07-28",
+    catalogFingerprint: "1".repeat(64),
+    credentialFingerprint: bearerFingerprint,
+    configurationRevision: 1,
+    status: "verified",
+    disabledAt: null,
+    createdById: adminId,
+    ownerUserId: adminId,
+    ownerAccountAccessVersion: 1,
+    ownershipState: "confirmed",
+  }, db);
   await db.mcpToolDefinition.create({
     data: {
       id: bearerToolDefinitionId,

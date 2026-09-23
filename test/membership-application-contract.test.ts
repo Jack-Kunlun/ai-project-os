@@ -9,6 +9,7 @@ const migration = readFileSync("prisma/migrations/20260912010000_add_membership_
 const service = readFileSync("src/lib/membership-application-service.ts", "utf8");
 const profileRoute = readFileSync("src/app/api/profile/route.ts", "utf8");
 const profileClient = readFileSync("src/app/profile/profile-client.tsx", "utf8");
+const creditsClient = readFileSync("src/app/credits/credits-client.tsx", "utf8");
 const membershipService = readFileSync("src/lib/membership-service.ts", "utf8");
 
 test("ENT-012/013 schema is a bounded four-state, preview-controlled application", () => {
@@ -150,12 +151,10 @@ test("application submit preview retries recover the persisted preview without c
   );
 });
 
-test("profile projection is platform-credit based and hides administrator rejection detail", () => {
-  assert.match(profileRoute, /getPlatformTokenSummary/u);
-  assert.match(profileRoute, /totalCredits/u);
-  assert.match(profileRoute, /safeMembershipApplication/u);
-  assert.doesNotMatch(profileRoute, /membershipApplication: membershipApplication/u);
-  assert.match(profileClient, /平台额度/u);
-  assert.match(profileClient, /不是供应商原始 Token、充值余额/u);
-  assert.doesNotMatch(profileClient, /可用平台 Token|预留中 Token/u);
+test("额度与申请投影只在独立额度页读取，账号资料不重复返回", () => {
+  assert.doesNotMatch(profileRoute, /getPlatformTokenSummary|membershipApplication|entitlements/u);
+  assert.match(creditsClient, /平台额度|额度概览/u);
+  assert.match(creditsClient, /不是支付订单或发票/u);
+  assert.match(profileClient, /href="\/credits"/u);
+  assert.doesNotMatch(profileClient, /PlatformCreditPanel|平台额度|额度总量|预留中/u);
 });

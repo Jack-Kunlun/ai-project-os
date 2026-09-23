@@ -18,6 +18,7 @@ import {
   McpCapabilityError,
   previewMcpConnectionMutation,
 } from "../src/lib/mcp";
+import { createGitConnectionFixture, createMcpConnectionFixture } from "./personal-connection-probe-fixture";
 
 const shouldRun = process.env.CONNECTION_GOVERNANCE_POSTGRES_GATE === "1";
 
@@ -50,40 +51,36 @@ test("connection governance rotates credentials exactly once and is the only Pos
   const gitCredentialBefore = await db.externalCredential.findUniqueOrThrow({ where: { id: gitCredential.id }, select: { secretFingerprint: true } });
   const mcpCredentialBefore = await db.externalCredential.findUniqueOrThrow({ where: { id: mcpCredential.id }, select: { secretFingerprint: true } });
   const evidenceTime = new Date("2026-09-12T00:00:00.000Z");
-  const gitConnection = await db.gitConnection.create({
-    data: {
-      id: gitConnectionId,
-      name: `Git gate ${suffix}`,
-      providerKind: "generic",
-      transport: "https",
-      baseUrl: "https://git.example.test",
-      authKind: "token",
-      credentialId: gitCredential.id,
-      createdById: userId,
-      ownerUserId: userId,
-      ownerAccountAccessVersion: 1,
-      ownershipState: "confirmed",
-    },
-  });
-  const mcpConnection = await db.mcpConnection.create({
-    data: {
-      id: mcpConnectionId,
-      name: `MCP gate ${suffix}`,
-      endpointUrl: "https://mcp.example.test/mcp",
-      authKind: "bearer",
-      credentialId: mcpCredential.id,
-      status: "verified",
-      resolvedAddressFingerprint: "b".repeat(64),
-      protocolVersion: "2025-06-18",
-      catalogFingerprint: "c".repeat(64),
-      lastDiscoveredAt: evidenceTime,
-      lastErrorCode: "MCP_TEST_ERROR",
-      createdById: userId,
-      ownerUserId: userId,
-      ownerAccountAccessVersion: 1,
-      ownershipState: "confirmed",
-    },
-  });
+  const gitConnection = await createGitConnectionFixture({
+    id: gitConnectionId,
+    name: `Git gate ${suffix}`,
+    providerKind: "generic",
+    transport: "https",
+    baseUrl: "https://git.example.test",
+    authKind: "token",
+    credentialId: gitCredential.id,
+    createdById: userId,
+    ownerUserId: userId,
+    ownerAccountAccessVersion: 1,
+    ownershipState: "confirmed",
+  }, db);
+  const mcpConnection = await createMcpConnectionFixture({
+    id: mcpConnectionId,
+    name: `MCP gate ${suffix}`,
+    endpointUrl: "https://mcp.example.test/mcp",
+    authKind: "bearer",
+    credentialId: mcpCredential.id,
+    status: "verified",
+    resolvedAddressFingerprint: "b".repeat(64),
+    protocolVersion: "2025-06-18",
+    catalogFingerprint: "c".repeat(64),
+    lastDiscoveredAt: evidenceTime,
+    lastErrorCode: "MCP_TEST_ERROR",
+    createdById: userId,
+    ownerUserId: userId,
+    ownerAccountAccessVersion: 1,
+    ownershipState: "confirmed",
+  }, db);
 
   const rotatedGitSecret = `git-after-${suffix}`;
   const gitRotationPreview = await previewGitConnectionMutation(gitConnection.id, {
@@ -309,65 +306,57 @@ test("account recovery exposes safe connection states and only permits credentia
       { id: targetId, username: `connection_recovery_${suffix}`, accountAccessVersion: 1 },
     ],
   });
-  await db.gitConnection.createMany({
-    data: [
-      {
-        id: gitCredentialConnectionId,
-        name: `Git recovery credential ${suffix}`,
-        providerKind: "generic",
-        transport: "https",
-        baseUrl: "https://git.example.test",
-        authKind: "token",
-        credentialId: gitCredentialId,
-        status: "verified",
-        resolvedAddressFingerprint: "a".repeat(64),
-        createdById: targetId,
-        ownerUserId: targetId,
-        ownerAccountAccessVersion: 1,
-        ownershipState: "confirmed",
-      },
-      {
-        id: gitNoCredentialConnectionId,
-        name: `Git recovery rebuild ${suffix}`,
-        providerKind: "generic",
-        transport: "https",
-        baseUrl: "https://git.example.test",
-        authKind: "none",
-        status: "configured",
-        createdById: targetId,
-        ownerUserId: targetId,
-        ownerAccountAccessVersion: 1,
-        ownershipState: "confirmed",
-      },
-    ],
-  });
-  await db.mcpConnection.createMany({
-    data: [
-      {
-        id: mcpCredentialConnectionId,
-        name: `MCP recovery credential ${suffix}`,
-        endpointUrl: "https://mcp.example.test/mcp",
-        authKind: "bearer",
-        credentialId: mcpCredentialId,
-        status: "configured",
-        createdById: targetId,
-        ownerUserId: targetId,
-        ownerAccountAccessVersion: 1,
-        ownershipState: "confirmed",
-      },
-      {
-        id: mcpNoCredentialConnectionId,
-        name: `MCP recovery rebuild ${suffix}`,
-        endpointUrl: "https://mcp.example.test/mcp",
-        authKind: "none",
-        status: "configured",
-        createdById: targetId,
-        ownerUserId: targetId,
-        ownerAccountAccessVersion: 1,
-        ownershipState: "confirmed",
-      },
-    ],
-  });
+  await createGitConnectionFixture({
+    id: gitCredentialConnectionId,
+    name: `Git recovery credential ${suffix}`,
+    providerKind: "generic",
+    transport: "https",
+    baseUrl: "https://git.example.test",
+    authKind: "token",
+    credentialId: gitCredentialId,
+    status: "verified",
+    resolvedAddressFingerprint: "a".repeat(64),
+    createdById: targetId,
+    ownerUserId: targetId,
+    ownerAccountAccessVersion: 1,
+    ownershipState: "confirmed",
+  }, db);
+  await createGitConnectionFixture({
+    id: gitNoCredentialConnectionId,
+    name: `Git recovery rebuild ${suffix}`,
+    providerKind: "generic",
+    transport: "https",
+    baseUrl: "https://git.example.test",
+    authKind: "none",
+    status: "configured",
+    createdById: targetId,
+    ownerUserId: targetId,
+    ownerAccountAccessVersion: 1,
+    ownershipState: "confirmed",
+  }, db);
+  await createMcpConnectionFixture({
+    id: mcpCredentialConnectionId,
+    name: `MCP recovery credential ${suffix}`,
+    endpointUrl: "https://mcp.example.test/mcp",
+    authKind: "bearer",
+    credentialId: mcpCredentialId,
+    status: "configured",
+    createdById: targetId,
+    ownerUserId: targetId,
+    ownerAccountAccessVersion: 1,
+    ownershipState: "confirmed",
+  }, db);
+  await createMcpConnectionFixture({
+    id: mcpNoCredentialConnectionId,
+    name: `MCP recovery rebuild ${suffix}`,
+    endpointUrl: "https://mcp.example.test/mcp",
+    authKind: "none",
+    status: "configured",
+    createdById: targetId,
+    ownerUserId: targetId,
+    ownerAccountAccessVersion: 1,
+    ownershipState: "confirmed",
+  }, db);
 
   const disablePreview = await previewAccountAccess({
     adminUserId: adminId,

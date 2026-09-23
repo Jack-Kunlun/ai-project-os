@@ -71,7 +71,7 @@ export function AdminAuditClient() {
   const [detail, setDetail] = useState<AuditEvent | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [detailTrigger, setDetailTrigger] = useState<HTMLElement | null>(null);
+  const detailTriggerRef = useRef<HTMLElement | null>(null);
   const detailRequestRef = useRef<AbortController | null>(null);
   const advancedPanelId = useId();
 
@@ -81,6 +81,24 @@ export function AdminAuditClient() {
   useEffect(() => () => {
     detailRequestRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    if (selected !== null) return;
+    const target = detailTriggerRef.current;
+    if (!(target instanceof HTMLElement) || !target.isConnected) return;
+
+    let firstFrame = 0;
+    let secondFrame = 0;
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        if (target.isConnected) target.focus({ preventScroll: true });
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [selected]);
 
   const queryString = useMemo(
     () => buildAuditQueryString(appliedFilters, cursor, AUDIT_PAGE_SIZE),
@@ -123,10 +141,10 @@ export function AdminAuditClient() {
     setDetailError(null);
     setSelected(null);
     setDetail(null);
-    setDetailTrigger(null);
   }
 
   function resetListPosition() {
+    setLoading(true);
     setHistory([]);
     setCursor(null);
     closeDetail();
@@ -134,11 +152,13 @@ export function AdminAuditClient() {
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setLoading(true);
     setAppliedFilters(buildAppliedFilters(input));
     resetListPosition();
   }
 
   function resetFilters() {
+    setLoading(true);
     setInput(EMPTY_INPUT);
     setAppliedFilters({});
     setAdvancedOpen(false);
@@ -161,6 +181,7 @@ export function AdminAuditClient() {
 
   function goNext() {
     if (data?.nextCursor === null || data?.nextCursor === undefined) return;
+    setLoading(true);
     closeDetail();
     setHistory((items) => [...items, cursor ?? ""]);
     setCursor(data.nextCursor);
@@ -169,6 +190,7 @@ export function AdminAuditClient() {
   function goPrevious() {
     const previous = history.at(-1);
     if (previous === undefined) return;
+    setLoading(true);
     closeDetail();
     setHistory((items) => items.slice(0, -1));
     setCursor(previous === "" ? null : previous);
@@ -199,9 +221,9 @@ export function AdminAuditClient() {
   }
 
   function openDetail(event: AuditEvent, trigger: HTMLElement | null) {
+    detailTriggerRef.current = trigger;
     setSelected(event);
     setDetail(null);
-    setDetailTrigger(trigger);
     void loadDetail(event);
   }
 
@@ -313,7 +335,6 @@ export function AdminAuditClient() {
         error={detailError}
         onClose={closeDetail}
         onRetry={() => void loadDetail(selected)}
-        returnFocusTo={detailTrigger}
       />
     ) : null}
   </div>;

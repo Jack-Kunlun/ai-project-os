@@ -1,15 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useDeferredValue, useEffect, useState, type FormEvent, type MouseEvent } from "react";
+import { useCallback, useDeferredValue, useEffect, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
 import { ListPagination } from "@/components/list-pagination";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { jobStatusLabels, type JobKind, type WorkspaceProject } from "@/lib/workspace-summary";
 
 type ProjectsView = "active" | "archived";
-type LifecycleAction = "archive" | "restore" | "delete";
 type ProjectsPayload = {
   view: ProjectsView;
   canCreateProject: boolean;
@@ -55,13 +53,11 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
   const [payload, setPayload] = useState<ProjectsPayload>(emptyPayload);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<ProjectsView>("active");
-  const [lifecycle, setLifecycle] = useState<{ project: WorkspaceProject; action: LifecycleAction } | null>(null);
 
   const load = useCallback(async ({ showLoading = false }: { showLoading?: boolean } = {}) => {
     if (showLoading) setLoading(true);
@@ -94,14 +90,12 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600">Projects</p>
             <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em]">我的项目</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">集中管理项目空间，并直接进入资料、智能控制台、记忆或智能体。</p>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-600">集中管理项目空间，从项目内导航进入资料、AI 工作台和其他功能。</p>
           </div>
           {payload.canCreateProject ? <button type="button" onClick={() => setCreateOpen(true)} className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-indigo-600/15 transition hover:bg-indigo-500">＋ 新建项目</button> : null}
         </section>
 
         {error ? <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700" role="alert"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold underline underline-offset-4">重试</button></div> : null}
-        {message ? <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-700" role="status">{message}</div> : null}
-
         <section className="mt-7" aria-label="项目列表">
           <div className="flex flex-col gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2">
@@ -126,68 +120,30 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
             </div>
           ) : (
             <><div className="mt-5 grid gap-5 lg:grid-cols-2">
-              {payload.projects.map((project) => <ProjectCard key={project.id} project={project} onLifecycle={(action) => { setMessage(null); setLifecycle({ project, action }); }} />)}
+              {payload.projects.map((project) => <ProjectCard key={project.id} project={project} />)}
             </div>{payload.pagination.totalPages > 1 ? <ListPagination {...payload.pagination} onPageChange={setPage} disabled={loading} /> : null}</>
           )}
         </section>
       </div>
 
       {createOpen && payload.canCreateProject ? <CreateProjectDialog onClose={() => setCreateOpen(false)} onCreated={load} /> : null}
-      {lifecycle ? <LifecycleDialog value={lifecycle} onClose={() => setLifecycle(null)} onChanged={async (action, storageCleanupStatus) => { await load(); setMessage(action === "archive" ? "项目已归档，数据与审计记录均已保留。" : action === "restore" ? "项目已恢复，可以继续操作。" : storageCleanupStatus === "pending" ? "项目数据已永久删除；本地文件清理异常已记录，后台会继续重试。" : "项目及本地文件已永久删除；系统仅保留不含项目内容的最小删除回执。"); setLifecycle(null); }} /> : null}
     </main>
   );
 }
 
-function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLifecycle: (action: LifecycleAction) => void }) {
-  const router = useRouter();
+function ProjectCard({ project }: { project: WorkspaceProject }) {
   const archived = project.archivedAt !== null;
-  const [exporting, setExporting] = useState(false);
-  const [exportMessage, setExportMessage] = useState<string | null>(null);
   const checks = [project._count.sources > 0, project.memoryIndexPointer !== null];
   const progress = Math.round((checks.filter(Boolean).length / checks.length) * 100);
   const latestJob = project.backgroundJobs[0];
 
-  async function exportProject() {
-    setExporting(true); setExportMessage(null);
-    try {
-      const response = await fetch(`/api/projects/${project.id}/export`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ expectedUpdatedAt: project.updatedAt }),
-      });
-      if (!response.ok) throw new Error(await readError(response, "项目导出失败"));
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `ai-project-os-${project.slug}.json`;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      const hash = response.headers.get("x-ai-project-os-export-sha256");
-      setExportMessage(hash ? `JSON 已下载 · SHA-256 ${hash.slice(0, 12)}…` : "JSON 已下载");
-    } catch (exportError) {
-      setExportMessage(exportError instanceof Error ? exportError.message : "项目导出失败");
-    } finally {
-      setExporting(false);
-    }
-  }
-  function openProjectFromCard(event: MouseEvent<HTMLElement>) {
-    const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest("a,button,input,select,textarea,summary,details,label,form,[role=button],[role=link],[contenteditable=true]")) return;
-    router.push(`/projects/${project.id}`);
-  }
-
   return (
     <article
-      className={`group rounded-3xl border bg-white p-6 shadow-sm transition ${archived ? "border-slate-200 opacity-90" : "border-slate-200/80 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-xl hover:shadow-indigo-950/5"}`}
-      onDoubleClick={openProjectFromCard}
-      aria-label={`双击打开项目 ${project.name}`}
+      className={`group flex h-full flex-col rounded-3xl border bg-white p-6 shadow-sm transition ${archived ? "border-slate-200 opacity-90" : "border-slate-200/80 hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-xl hover:shadow-indigo-950/5"}`}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          {archived ? <h2 className="truncate text-xl font-semibold tracking-tight text-slate-700">{project.name}</h2> : <Link href={`/projects/${project.id}`} className="block truncate text-xl font-semibold tracking-tight text-slate-900 transition group-hover:text-indigo-700">{project.name}</Link>}
+          <h2 className={`truncate text-xl font-semibold tracking-tight ${archived ? "text-slate-700" : "text-slate-900"}`}>{project.name}</h2>
           <p className="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-slate-500">{project.description || "还没有项目描述。进入资料与条目补充背景，让后续记忆更容易理解。"}</p>
         </div>
         <span className={`shrink-0 rounded-full px-2.5 py-1 text-[12px] font-bold ${archived ? "bg-slate-100 text-slate-600" : project.memoryIndexPointer ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{archived ? "已归档" : project.memoryIndexPointer ? "记忆就绪" : "待建立记忆"}</span>
@@ -201,54 +157,16 @@ function ProjectCard({ project, onLifecycle }: { project: WorkspaceProject; onLi
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500" style={{ width: `${progress}%` }} /></div>
         </div>
       )}
-      <div className="mt-5 flex flex-wrap gap-2">
-        {archived ? (
-          <><button type="button" onClick={() => onLifecycle("restore")} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white">恢复项目</button><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("delete")} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50">永久删除</button></>
-        ) : (
-          <><QuickLink href={`/projects/${project.id}`} label="概览" /><QuickLink href={`/projects/${project.id}/materials`} label="资料" /><QuickLink href={`/projects/${project.id}/intelligence`} label="AI 工作台" primary /><button type="button" onClick={() => void exportProject()} disabled={exporting} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-40">{exporting ? "导出中…" : "导出 JSON"}</button><button type="button" onClick={() => onLifecycle("archive")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-500 hover:border-amber-200 hover:text-amber-700">归档</button></>
-        )}
+      <div className="mt-auto flex pt-5">
+        <Link href={`/projects/${project.id}`} className={`inline-flex min-h-10 items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition ${archived ? "border border-slate-200 text-slate-700 hover:border-indigo-200 hover:text-indigo-700" : "bg-slate-950 text-white hover:bg-indigo-600"}`}>{archived ? "查看项目" : "进入项目"}</Link>
       </div>
-      {exportMessage ? <p role="status" className="mt-3 text-[12px] leading-5 text-slate-500">{exportMessage}</p> : null}
       <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-[12px] text-slate-400"><span>更新于 {formatDate(project.updatedAt)}</span><span>{latestJob ? `${jobLabels[latestJob.kind]} · ${jobStatusLabels[latestJob.status]}` : "暂无任务"}</span></div>
     </article>
   );
 }
 
-function LifecycleDialog({ value, onClose, onChanged }: { value: { project: WorkspaceProject; action: LifecycleAction }; onClose: () => void; onChanged: (action: LifecycleAction, storageCleanupStatus?: "completed" | "pending") => Promise<void> }) {
-  const [confirmation, setConfirmation] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const archive = value.action === "archive";
-  const remove = value.action === "delete";
-  const confirmed = value.action === "restore" || confirmation === value.project.name;
-
-  async function submit() {
-    if (!confirmed || pending) return;
-    setPending(true); setError(null);
-    try {
-      const response = await fetch(remove ? `/api/projects/${value.project.id}` : `/api/projects/${value.project.id}/lifecycle`, {
-        method: remove ? "DELETE" : "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(remove ? { confirmationName: confirmation, expectedUpdatedAt: value.project.updatedAt } : { action: value.action, expectedUpdatedAt: value.project.updatedAt }),
-      });
-      if (!response.ok) throw new Error(await readError(response, archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败"));
-      const storageCleanupStatus = remove ? (await response.json() as { deleted: { storageCleanupStatus: "completed" | "pending" } }).deleted.storageCleanupStatus : undefined;
-      await onChanged(value.action, storageCleanupStatus);
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : archive ? "项目归档失败" : remove ? "项目永久删除失败" : "项目恢复失败");
-      setPending(false);
-    }
-  }
-
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}><section role="dialog" aria-modal="true" aria-labelledby="project-lifecycle-title" className="w-full max-w-lg rounded-t-[2rem] bg-white p-7 shadow-2xl sm:rounded-[2rem] sm:p-8"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Project lifecycle</p><h2 id="project-lifecycle-title" className="mt-2 text-2xl font-semibold">{archive ? `归档「${value.project.name}」` : remove ? `永久删除「${value.project.name}」` : `恢复「${value.project.name}」`}</h2><p className={`mt-3 text-sm leading-6 ${remove ? "text-rose-700" : "text-slate-500"}`}>{archive ? "归档后项目将移出进行中列表，并拒绝修改和新任务。数据、历史审计和模型用量不会删除。" : remove ? "此操作不可恢复：项目资料、文件、仓库快照、候选、记忆索引、智能体记录和项目审计都会删除。建议先导出 JSON；系统仅保留不含项目名称或内容的最小删除回执。" : "恢复后项目会重新出现在进行中列表，并可继续修改资料、同步仓库和运行 AI 任务。"}</p>{archive || remove ? <label className="mt-5 block text-sm font-semibold text-slate-700">输入项目名称以确认<input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${remove ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-amber-300 focus:ring-amber-100"}`} /></label> : null}{error ? <p role="alert" className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}<div className="mt-7 flex justify-end gap-3"><button type="button" onClick={onClose} disabled={pending} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">取消</button><button type="button" onClick={() => void submit()} disabled={!confirmed || pending} className={`rounded-xl px-5 py-3 text-sm font-semibold text-white disabled:opacity-40 ${remove ? "bg-rose-600" : archive ? "bg-amber-600" : "bg-indigo-600"}`}>{pending ? "处理中…" : archive ? "确认归档" : remove ? "确认永久删除" : "恢复项目"}</button></div></section></div>;
-}
-
 function SmallStat({ label, value }: { label: string; value: number }) {
   return <div className="rounded-xl bg-slate-50 px-3 py-3"><p className="text-lg font-semibold text-slate-800">{value}</p><p className="mt-0.5 text-[10px] text-slate-400">{label}</p></div>;
-}
-
-function QuickLink({ href, label, primary = false }: { href: string; label: string; primary?: boolean }) {
-  return <Link href={href} className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${primary ? "bg-slate-950 text-white hover:bg-indigo-600" : "border border-slate-200 text-slate-600 hover:border-indigo-200 hover:text-indigo-700"}`}>{label}</Link>;
 }
 
 function CreateProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => Promise<void> }) {

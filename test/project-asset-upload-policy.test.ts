@@ -109,8 +109,8 @@ test("upload route and UI share server policy, durable admission and quota usage
   assert.match(git, /SSH Deploy Key/u);
   assert.match(mcp, /发现快照/u);
   assert.match(mcp, /每次单独审批/u);
-  assert.match(projects, /onDoubleClick=\{openProjectFromCard\}/u);
-  assert.match(projects, /closest\("a,button,input,select,textarea,summary,details,label,form/u);
+  assert.doesNotMatch(projects, /onDoubleClick=\{openProjectFromCard\}/u);
+  assert.match(projects, />\{archived \? "查看项目" : "进入项目"\}</u);
   assert.match(guide, /getUploadPolicy/u);
   assert.match(guide, /maxDeploymentBytes/u);
   assert.match(guide, /软删除但仍保留/u);

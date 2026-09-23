@@ -141,7 +141,7 @@ test(
 
       const exported = await exportProjectData({
         projectId,
-        requestedById: user.id,
+        actor: user,
         expectedUpdatedAt: archived.project.updatedAt,
       }, db);
       const document = JSON.parse(exported.json) as {

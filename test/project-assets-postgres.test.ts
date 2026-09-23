@@ -224,7 +224,7 @@ test(
       assert.equal(restored?.status, "ready");
       assert.equal(await db.projectSource.count({ where: { projectId, retiredAt: null } }), 2);
       const project = await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { updatedAt: true } });
-      const exported = await exportProjectData({ projectId, requestedById: user.id, expectedUpdatedAt: project.updatedAt }, db);
+      const exported = await exportProjectData({ projectId, actor: user, expectedUpdatedAt: project.updatedAt }, db);
       const exportDocument = JSON.parse(exported.json) as {
         schemaVersion: string;
         sources: Array<{ externalRef: string | null }>;

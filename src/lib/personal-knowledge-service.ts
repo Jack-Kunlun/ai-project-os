@@ -13,6 +13,10 @@ export const PERSONAL_KNOWLEDGE_CONTENT_MAX_LENGTH = 100_000 as const;
 export const PERSONAL_KNOWLEDGE_PAGE_MAX_SIZE = 50 as const;
 /** Default number of rows returned by one list or search request. */
 export const PERSONAL_KNOWLEDGE_PAGE_DEFAULT_SIZE = 20 as const;
+/** Maximum graph nodes returned by one personal overview projection. */
+export const PERSONAL_KNOWLEDGE_GRAPH_MAX_NODES = 200 as const;
+/** Maximum graph edges returned by one personal overview projection. */
+export const PERSONAL_KNOWLEDGE_GRAPH_MAX_EDGES = 500 as const;
 
 const MAX_VERSION = 2_147_483_647;
 const UUID_SCHEMA = z.string().uuid();
@@ -53,6 +57,12 @@ export const personalKnowledgeExportSchema = z.object({
   format: z.enum(["markdown", "text"]).default("markdown"),
 }).strict();
 
+/** Explicit association input; endpoints are canonicalized before storage. */
+export const personalKnowledgeRelationSchema = z.object({
+  fromDocumentId: UUID_SCHEMA,
+  toDocumentId: UUID_SCHEMA,
+}).strict();
+
 const paginationSchema = z.object({
   limit: z.number().int().min(1).max(PERSONAL_KNOWLEDGE_PAGE_MAX_SIZE).default(PERSONAL_KNOWLEDGE_PAGE_DEFAULT_SIZE),
   cursor: z.string().trim().min(1).max(512).optional(),
@@ -77,6 +87,8 @@ export type PersonalKnowledgeErrorCode =
   | "PERSONAL_KNOWLEDGE_ACCOUNT_ACCESS_STALE"
   | "PERSONAL_KNOWLEDGE_DOCUMENT_NOT_FOUND"
   | "PERSONAL_KNOWLEDGE_VERSION_CONFLICT"
+  | "PERSONAL_KNOWLEDGE_RELATION_CONFLICT"
+  | "PERSONAL_KNOWLEDGE_RELATION_NOT_FOUND"
   | "PERSONAL_KNOWLEDGE_INTEGRITY_ERROR";
 
 /** Stable service error codes are mapped to public API messages by api-errors.ts. */
@@ -189,7 +201,35 @@ const searchDocumentSelect = {
   },
 } satisfies Prisma.PersonalKnowledgeDocumentSelect;
 
+const graphDocumentSelect = {
+  id: true,
+  version: true,
+  updatedAt: true,
+  currentRevision: {
+    select: {
+      id: true,
+      version: true,
+      title: true,
+      byteCount: true,
+    },
+  },
+} satisfies Prisma.PersonalKnowledgeDocumentSelect;
+
+const relationSelect = {
+  id: true,
+  ownerUserId: true,
+  fromDocumentId: true,
+  fromRevisionId: true,
+  toDocumentId: true,
+  toRevisionId: true,
+  state: true,
+  createdAt: true,
+  revokedAt: true,
+} satisfies Prisma.PersonalKnowledgeRelationSelect;
+
 type ListDocumentRecord = Prisma.PersonalKnowledgeDocumentGetPayload<{ select: typeof listDocumentSelect }>;
+type GraphDocumentRecord = Prisma.PersonalKnowledgeDocumentGetPayload<{ select: typeof graphDocumentSelect }>;
+type RelationRecord = Prisma.PersonalKnowledgeRelationGetPayload<{ select: typeof relationSelect }>;
 
 /** Produce the canonical lowercase content digest stored in revisions and audits. */
 function sha256(value: string): string {
@@ -234,6 +274,23 @@ function parseExportInput(value: unknown): z.infer<typeof personalKnowledgeExpor
   const parsed = personalKnowledgeExportSchema.safeParse(value);
   if (!parsed.success) return fail("PERSONAL_KNOWLEDGE_INVALID_INPUT");
   return parsed.data;
+}
+
+/** Normalize a relation ID after strict UUID validation. */
+function parseRelationId(value: unknown): string {
+  const parsed = UUID_SCHEMA.safeParse(value);
+  if (!parsed.success) return fail("PERSONAL_KNOWLEDGE_INVALID_INPUT");
+  return parsed.data.toLowerCase();
+}
+
+/** Validate a relation input and put its document endpoints in stable order. */
+function parseRelationInput(value: unknown): Readonly<{ fromDocumentId: string; toDocumentId: string }> {
+  const parsed = personalKnowledgeRelationSchema.safeParse(value);
+  if (!parsed.success) return fail("PERSONAL_KNOWLEDGE_INVALID_INPUT");
+  const endpoints = [parsed.data.fromDocumentId.toLowerCase(), parsed.data.toDocumentId.toLowerCase()];
+  if (endpoints[0] === endpoints[1]) return fail("PERSONAL_KNOWLEDGE_INVALID_INPUT");
+  endpoints.sort();
+  return Object.freeze({ fromDocumentId: endpoints[0]!, toDocumentId: endpoints[1]! });
 }
 
 /** Parse a bounded positive revision number from a route segment. */
@@ -812,6 +869,24 @@ async function deletePersonalKnowledgeDocumentInTransaction(
     data: { state: "deleted", deletedAt: now, updatedAt: now },
   });
   if (deleted.count !== 1) return fail("PERSONAL_KNOWLEDGE_VERSION_CONFLICT");
+  // Keep the application service explicit even though the migration also
+  // installs a database guard for callers that bypass this service.  The
+  // update is in the same transaction as the document tombstone.
+  const relationDelegate = (tx as unknown as {
+    personalKnowledgeRelation?: {
+      updateMany: (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => Promise<{ count: number }>;
+    };
+  }).personalKnowledgeRelation;
+  if (relationDelegate !== undefined) {
+    await relationDelegate.updateMany({
+      where: {
+        ownerUserId: actor.id,
+        state: "active",
+        OR: [{ fromDocumentId: documentId }, { toDocumentId: documentId }],
+      },
+      data: { state: "revoked", revokedAt: now },
+    });
+  }
   await invalidateIndexPointer(tx, { ownerUserId: actor.id, documentId, documentVersion: current.version, invalidatedAt: now });
   await appendAudit(tx, {
     ownerUserId: actor.id,
@@ -838,6 +913,276 @@ export async function deletePersonalKnowledgeDocument(
   const value = parseDeleteInput(input);
   assertOrdinaryActor(actor);
   return runMutationInTransaction(db, (tx) => deletePersonalKnowledgeDocumentInTransaction(documentId, value, actor, tx, now));
+}
+
+type PostgresInteger = bigint | number;
+
+function safePostgresInteger(value: unknown): number {
+  if (typeof value === "bigint") {
+    if (value < BigInt(0) || value > BigInt(Number.MAX_SAFE_INTEGER)) return fail("PERSONAL_KNOWLEDGE_INTEGRITY_ERROR");
+    return Number(value);
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return fail("PERSONAL_KNOWLEDGE_INTEGRITY_ERROR");
+  return value;
+}
+
+/** Aggregate current active revisions without loading an unbounded document list. */
+async function readPersonalKnowledgeCapacity(
+  db: KnowledgeReadDb,
+  ownerUserId: string,
+): Promise<Readonly<{ usedBytes: number; documentCount: number }>> {
+  const rows = await db.$queryRaw<Array<{
+    documentCount: PostgresInteger;
+    usedBytes: PostgresInteger;
+    invalidCount: PostgresInteger;
+  }>>(Prisma.sql`
+    SELECT
+      COUNT(*)::bigint AS "documentCount",
+      COALESCE(SUM(revision."byteCount"), 0)::bigint AS "usedBytes",
+      COUNT(*) FILTER (WHERE
+        revision."id" IS NULL
+        OR revision."documentId" IS DISTINCT FROM document."id"
+        OR revision."ownerUserId" IS DISTINCT FROM document."ownerUserId"
+        OR revision."version" IS DISTINCT FROM document."version"
+        OR revision."byteCount" IS DISTINCT FROM octet_length(revision."content")
+      )::bigint AS "invalidCount"
+    FROM "PersonalKnowledgeDocument" AS document
+    LEFT JOIN "PersonalKnowledgeRevision" AS revision
+      ON revision."id" = document."currentRevisionId"
+     AND revision."ownerUserId" = document."ownerUserId"
+    WHERE document."ownerUserId" = ${ownerUserId}::uuid
+      AND document."state" = 'active'
+      AND document."deletedAt" IS NULL
+  `);
+  const row = rows[0];
+  if (row === undefined) return fail("PERSONAL_KNOWLEDGE_INTEGRITY_ERROR");
+  const invalidCount = safePostgresInteger(row.invalidCount);
+  if (invalidCount !== 0) return fail("PERSONAL_KNOWLEDGE_INTEGRITY_ERROR");
+  return Object.freeze({
+    usedBytes: safePostgresInteger(row.usedBytes),
+    documentCount: safePostgresInteger(row.documentCount),
+  });
+}
+
+/** Project a relation onto safe graph data and mark revision-stale edges. */
+function publicRelation(
+  relation: RelationRecord,
+  documents: ReadonlyMap<string, GraphDocumentRecord>,
+): Readonly<Record<string, unknown>> {
+  const from = documents.get(relation.fromDocumentId);
+  const to = documents.get(relation.toDocumentId);
+  if (from === undefined || to === undefined || from.currentRevision === null || to.currentRevision === null) {
+    return fail("PERSONAL_KNOWLEDGE_INTEGRITY_ERROR");
+  }
+  if (from.currentRevision.version !== from.version || to.currentRevision.version !== to.version) {
+    return fail("PERSONAL_KNOWLEDGE_INTEGRITY_ERROR");
+  }
+  return Object.freeze({
+    id: relation.id,
+    fromDocumentId: relation.fromDocumentId,
+    fromRevisionId: relation.fromRevisionId,
+    toDocumentId: relation.toDocumentId,
+    toRevisionId: relation.toRevisionId,
+    stale: relation.fromRevisionId !== from.currentRevision.id || relation.toRevisionId !== to.currentRevision.id,
+    createdAt: relation.createdAt,
+  });
+}
+
+/** Return bounded active relation records for the selected owner and nodes. */
+async function findGraphRelations(
+  db: KnowledgeReadDb,
+  ownerUserId: string,
+  documentIds: readonly string[],
+): Promise<Readonly<{ relations: readonly RelationRecord[]; truncated: boolean }>> {
+  if (documentIds.length === 0) return Object.freeze({ relations: Object.freeze([]), truncated: false });
+  const rows = await db.personalKnowledgeRelation.findMany({
+    where: {
+      ownerUserId,
+      state: "active",
+      fromDocumentId: { in: [...documentIds] },
+      toDocumentId: { in: [...documentIds] },
+    },
+    orderBy: [{ fromDocumentId: "asc" }, { toDocumentId: "asc" }, { id: "asc" }],
+    take: PERSONAL_KNOWLEDGE_GRAPH_MAX_EDGES + 1,
+    select: relationSelect,
+  });
+  return Object.freeze({
+    relations: Object.freeze(rows.slice(0, PERSONAL_KNOWLEDGE_GRAPH_MAX_EDGES)),
+    truncated: rows.length > PERSONAL_KNOWLEDGE_GRAPH_MAX_EDGES,
+  });
+}
+
+/** Build the owner-scoped personal graph, capacity and truthful index status inside one snapshot. */
+async function getPersonalKnowledgeOverviewInTransaction(
+  actor: PersonalKnowledgeActor,
+  db: KnowledgeReadDb = getDb(),
+  measuredAt = new Date(),
+): Promise<Readonly<{
+  graph: Readonly<{
+    nodes: readonly Readonly<Record<string, unknown>>[];
+    edges: readonly Readonly<Record<string, unknown>>[];
+    truncated: boolean;
+    maxNodes: number;
+    maxEdges: number;
+  }>;
+  capacity: Readonly<{
+    usedBytes: number;
+    documentCount: number;
+    limitBytes: null;
+    limitLabel: "未设置上限";
+    measuredAt: Date;
+  }>;
+  index: Readonly<{ status: "not_available"; label: "尚未建立/不可用" }>;
+}>> {
+  await assertActorForRead(db, actor);
+  const capacity = await readPersonalKnowledgeCapacity(db, actor.id);
+
+  const graphDocuments = await db.personalKnowledgeDocument.findMany({
+    where: activeOwnerWhere(actor.id),
+    orderBy: [{ id: "asc" }],
+    take: PERSONAL_KNOWLEDGE_GRAPH_MAX_NODES + 1,
+    select: graphDocumentSelect,
+  });
+  const graphPage = graphDocuments.slice(0, PERSONAL_KNOWLEDGE_GRAPH_MAX_NODES);
+  const graphMap = new Map<string, GraphDocumentRecord>();
+  const nodes = graphPage.map((document) => {
+    if (document.currentRevision === null || document.currentRevision.version !== document.version) {
+      return fail("PERSONAL_KNOWLEDGE_INTEGRITY_ERROR");
+    }
+    graphMap.set(document.id, document);
+    return Object.freeze({
+      id: document.id,
+      version: document.version,
+      title: document.currentRevision.title,
+      byteCount: document.currentRevision.byteCount,
+      updatedAt: document.updatedAt,
+    });
+  });
+  const relationPage = await findGraphRelations(db, actor.id, graphPage.map((document) => document.id));
+  const edges = relationPage.relations.map((relation) => publicRelation(relation, graphMap));
+  return Object.freeze({
+    graph: Object.freeze({
+      nodes: Object.freeze(nodes),
+      edges: Object.freeze(edges),
+      truncated: graphDocuments.length > PERSONAL_KNOWLEDGE_GRAPH_MAX_NODES || relationPage.truncated,
+      maxNodes: PERSONAL_KNOWLEDGE_GRAPH_MAX_NODES,
+      maxEdges: PERSONAL_KNOWLEDGE_GRAPH_MAX_EDGES,
+    }),
+    capacity: Object.freeze({
+      usedBytes: capacity.usedBytes,
+      documentCount: capacity.documentCount,
+      limitBytes: null,
+      limitLabel: "未设置上限" as const,
+      measuredAt,
+    }),
+    index: Object.freeze({ status: "not_available" as const, label: "尚未建立/不可用" as const }),
+  });
+}
+
+/** Read the complete overview from one owner-checked repeatable-read snapshot. */
+export async function getPersonalKnowledgeOverview(
+  actor: PersonalKnowledgeActor,
+  db: KnowledgeRootDb = getDb(),
+  measuredAt = new Date(),
+): ReturnType<typeof getPersonalKnowledgeOverviewInTransaction> {
+  return db.$transaction(
+    (tx) => getPersonalKnowledgeOverviewInTransaction(actor, tx, measuredAt),
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+}
+
+/** List a bounded owner-scoped relation projection for management UIs. */
+export async function listPersonalKnowledgeRelations(
+  actor: PersonalKnowledgeActor,
+  db: KnowledgeRootDb = getDb(),
+): Promise<Readonly<{ relations: readonly Readonly<Record<string, unknown>>[]; truncated: boolean }>> {
+  const overview = await getPersonalKnowledgeOverview(actor, db);
+  return Object.freeze({ relations: overview.graph.edges, truncated: overview.graph.truncated });
+}
+
+/** Create one explicit relation against the current revision of both documents. */
+async function createPersonalKnowledgeRelationInTransaction(
+  endpoints: Readonly<{ fromDocumentId: string; toDocumentId: string }>,
+  actor: PersonalKnowledgeActor,
+  tx: KnowledgeTx,
+  now: Date,
+): Promise<Readonly<Record<string, unknown>>> {
+  await lockActorAccess(tx, actor.id);
+  await lockDocumentAccess(tx, endpoints.fromDocumentId);
+  await lockDocumentAccess(tx, endpoints.toDocumentId);
+  await assertActorInTransaction(tx, actor);
+  const [fromDocument, toDocument] = await Promise.all([
+    findActiveDocument(tx, actor.id, endpoints.fromDocumentId),
+    findActiveDocument(tx, actor.id, endpoints.toDocumentId),
+  ]);
+  const fromRevision = assertCurrentRevision(fromDocument);
+  const toRevision = assertCurrentRevision(toDocument);
+  const existing = await tx.personalKnowledgeRelation.findFirst({
+    where: { ownerUserId: actor.id, state: "active", fromDocumentId: endpoints.fromDocumentId, toDocumentId: endpoints.toDocumentId },
+    select: relationSelect,
+  });
+  if (existing !== null) return fail("PERSONAL_KNOWLEDGE_RELATION_CONFLICT");
+  const relation = await tx.personalKnowledgeRelation.create({
+    data: {
+      id: randomUUID(),
+      ownerUserId: actor.id,
+      fromDocumentId: endpoints.fromDocumentId,
+      fromRevisionId: fromRevision.id,
+      toDocumentId: endpoints.toDocumentId,
+      toRevisionId: toRevision.id,
+      state: "active",
+      createdAt: now,
+      revokedAt: null,
+    },
+    select: relationSelect,
+  });
+  return Object.freeze({
+    id: relation.id,
+    fromDocumentId: relation.fromDocumentId,
+    fromRevisionId: relation.fromRevisionId,
+    toDocumentId: relation.toDocumentId,
+    toRevisionId: relation.toRevisionId,
+    stale: false,
+    createdAt: relation.createdAt,
+  });
+}
+
+export async function createPersonalKnowledgeRelation(
+  input: unknown,
+  actor: PersonalKnowledgeActor,
+  db: KnowledgeRootDb = getDb(),
+  now = new Date(),
+): Promise<Readonly<Record<string, unknown>>> {
+  const endpoints = parseRelationInput(input);
+  assertOrdinaryActor(actor);
+  return runMutationInTransaction(db, (tx) => createPersonalKnowledgeRelationInTransaction(endpoints, actor, tx, now));
+}
+
+/** Revoke an active relation while keeping the owner-scoped history row. */
+export async function revokePersonalKnowledgeRelation(
+  relationIdInput: unknown,
+  actor: PersonalKnowledgeActor,
+  db: KnowledgeRootDb = getDb(),
+  revokedAt = new Date(),
+): Promise<Readonly<{ id: string; revokedAt: Date }>> {
+  const relationId = parseRelationId(relationIdInput);
+  assertOrdinaryActor(actor);
+  return runMutationInTransaction(db, async (tx) => {
+    await lockActorAccess(tx, actor.id);
+    await lockDocumentAccess(tx, relationId);
+    await assertActorInTransaction(tx, actor);
+    const relation = await tx.personalKnowledgeRelation.findFirst({
+      where: { id: relationId, ownerUserId: actor.id, state: "active" },
+      select: { id: true },
+    });
+    if (relation === null) return fail("PERSONAL_KNOWLEDGE_RELATION_NOT_FOUND");
+    const result = await tx.personalKnowledgeRelation.updateMany({
+      where: { id: relationId, ownerUserId: actor.id, state: "active" },
+      data: { state: "revoked", revokedAt },
+    });
+    if (result.count !== 1) return fail("PERSONAL_KNOWLEDGE_RELATION_NOT_FOUND");
+    return Object.freeze({ id: relationId, revokedAt });
+  });
 }
 
 export type PersonalKnowledgeExport = Readonly<{

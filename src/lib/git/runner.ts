@@ -16,7 +16,8 @@ export type GitRunnerErrorCode =
   | "GIT_HOST_KEY_REJECTED"
   | "GIT_OPERATION_TIMEOUT"
   | "GIT_OUTPUT_TOO_LARGE"
-  | "GIT_OPERATION_FAILED";
+  | "GIT_OPERATION_FAILED"
+  | "GIT_REQUEST_BOUNDARY_REJECTED";
 
 export class GitRunnerError extends Error {
   constructor(readonly code: GitRunnerErrorCode) {
@@ -179,6 +180,11 @@ export async function withGitRunner<T>(input: Readonly<{
   authKind: GitAuthKind;
   username: string | null;
   credential: GitCredentialPayload | null;
+  /** Load a saved credential only after the caller's final admission fence. */
+  credentialLoader?: () => Promise<GitCredentialPayload | null>;
+  onBeforeCredentialRead?: () => void | boolean | Promise<void | boolean>;
+  /** Re-check the database fence immediately before every Git process starts. */
+  onBeforeRequest?: () => void | boolean | Promise<void | boolean>;
   tlsCaCertificate: string | null;
   sshKnownHost: string | null;
   pinnedEndpoint: Readonly<{ hostname: string; port: string; addresses: readonly string[] }>;
@@ -189,9 +195,18 @@ export async function withGitRunner<T>(input: Readonly<{
 }>) => Promise<T>): Promise<T> {
   const root = await mkdtemp(join(tmpdir(), "ai-project-os-git-"));
   try {
-    const { env, gitConfigArgs } = await configureWorkspace({ root, ...input });
-    const runBytes = (args: readonly string[], options: Readonly<{ cwd?: string; timeoutMs?: number; maxOutputBytes?: number }> = {}) =>
-      runGitBytes({ args: [...gitConfigArgs, ...args], cwd: options.cwd ?? root, env, timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes });
+    let credential = input.credential;
+    if (input.credentialLoader !== undefined) {
+      const accepted = await input.onBeforeCredentialRead?.() ?? true;
+      if (!accepted) throw new GitRunnerError("GIT_REQUEST_BOUNDARY_REJECTED");
+      credential = await input.credentialLoader();
+    }
+    const { env, gitConfigArgs } = await configureWorkspace({ root, ...input, credential });
+    const runBytes = async (args: readonly string[], options: Readonly<{ cwd?: string; timeoutMs?: number; maxOutputBytes?: number }> = {}) => {
+      const accepted = await input.onBeforeRequest?.() ?? true;
+      if (!accepted) throw new GitRunnerError("GIT_REQUEST_BOUNDARY_REJECTED");
+      return runGitBytes({ args: [...gitConfigArgs, ...args], cwd: options.cwd ?? root, env, timeoutMs: options.timeoutMs, maxOutputBytes: options.maxOutputBytes });
+    };
     return await operation({
       root,
       runBytes,

@@ -203,6 +203,47 @@ export function normalizeMcpToolDefinition(value: unknown): NormalizedMcpTool {
   });
 }
 
+/**
+ * Remote tool metadata is persisted as a capability definition. Reject a
+ * definition if it contains a credential-shaped field or echoes the current
+ * bearer token. This check intentionally fails closed instead of redacting a
+ * tool definition into a different capability fingerprint.
+ */
+export function assertMcpToolDefinitionSafe(value: unknown, currentBearerToken: string | null = null): void {
+  const visited = new WeakSet<object>();
+  const visit = (candidate: unknown, depth: number): void => {
+    if (depth > 12) return failMcp("MCP_TOOL_CATALOG_INVALID");
+    if (typeof candidate === "string") {
+      if (currentBearerToken !== null && currentBearerToken.length > 0 && candidate.includes(currentBearerToken)) {
+        return failMcp("MCP_TOOL_CATALOG_INVALID");
+      }
+      // A credential assignment in free-form metadata is still a secret echo
+      // even when the server does not use a sensitive JSON key.
+      if (/(?:authorization|bearer|access(?:[_ -]?token|[_ -]?key)|refresh(?:[_ -]?token|[_ -]?key)|client(?:[_ -]?secret|[_ -]?key)|api(?:[_ -]?key)|private(?:[_ -]?key)|cookie|set-cookie|token|secret|password|credential)\s*[:=]\s*\S+/iu.test(candidate)) {
+        return failMcp("MCP_TOOL_CATALOG_INVALID");
+      }
+      return;
+    }
+    if (candidate === null || typeof candidate !== "object") return;
+    if (visited.has(candidate)) return failMcp("MCP_TOOL_CATALOG_INVALID");
+    visited.add(candidate);
+    if (Array.isArray(candidate)) {
+      for (const entry of candidate) visit(entry, depth + 1);
+      return;
+    }
+    for (const [key, entry] of Object.entries(candidate)) {
+      if (key.length === 0 || key.length > 256 || CONTROL.test(key) || UNSAFE_OBJECT_KEYS.has(key) || SENSITIVE_RESULT_KEY.test(key)) {
+        return failMcp("MCP_TOOL_CATALOG_INVALID");
+      }
+      if (currentBearerToken !== null && currentBearerToken.length > 0 && key.includes(currentBearerToken)) {
+        return failMcp("MCP_TOOL_CATALOG_INVALID");
+      }
+      visit(entry, depth + 1);
+    }
+  };
+  visit(value, 0);
+}
+
 function equalJson(left: JsonValue, right: JsonValue): boolean {
   return stableJson(toJsonValue(left)) === stableJson(toJsonValue(right));
 }

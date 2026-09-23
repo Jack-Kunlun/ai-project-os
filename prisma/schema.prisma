@@ -183,6 +183,83 @@ enum PersonalKnowledgeAuditEvent {
   exported
 }
 
+/// A short-lived, owner-bound network proof.  The proof binds the exact
+/// connection draft (including the secret fingerprint) to one actor epoch and
+/// is consumed atomically by the subsequent create or governed update.
+enum PersonalConnectionProbeKind {
+  git
+  mcp
+}
+
+enum PersonalConnectionProbeAction {
+  create
+  update
+}
+
+enum PersonalConnectionProbeStatus {
+  running
+  settled
+  rejected
+  held
+}
+
+/// Explicit, user-created links between two personal knowledge documents.
+/// Retired rows remain as history and are never returned as active edges.
+enum PersonalKnowledgeRelationState {
+  active
+  revoked
+}
+
+/// Short-lived, owner-bound prepare/execute state for one personal-page BYOK
+/// question. The challenge stores only hashes and evidence metadata.
+enum PersonalKnowledgeQaChallengeStatus {
+  issued
+  consumed
+}
+
+/// Body-free outcome evidence for one consumed personal-page question.
+enum PersonalKnowledgeQaAuditStatus {
+  running
+  succeeded
+  failed
+  unknown
+}
+
+/// A personal semantic index is a private, owner-scoped vector corpus. The
+/// state row is the invalidation fence; generation rows are immutable build
+/// snapshots and entries never cross owner or revision boundaries.
+enum PersonalKnowledgeSemanticIndexStatus {
+  notBuilt @map("not_built")
+  building
+  ready
+  stale
+  failed
+}
+
+enum PersonalKnowledgeSemanticGenerationStatus {
+  building
+  ready
+  failed
+  superseded
+}
+
+enum PersonalKnowledgeSemanticChallengeKind {
+  build
+  search
+}
+
+enum PersonalKnowledgeSemanticChallengeStatus {
+  issued
+  consumed
+}
+
+enum PersonalKnowledgeSemanticAuditStatus {
+  running
+  succeeded
+  failed
+  unknown
+}
+
 enum AccountAccessAction {
   disable
   restore
@@ -4582,6 +4659,54 @@ model AppUser {
   personalKnowledgeRevisions PersonalKnowledgeRevision[] @relation("PersonalKnowledgeRevisionOwner")
   personalKnowledgeAudits PersonalKnowledgeAudit[] @relation("PersonalKnowledgeAuditOwner")
   personalKnowledgeIndexPointers PersonalKnowledgeIndexPointer[] @relation("PersonalKnowledgeIndexPointerOwner")
+  personalKnowledgeRelations PersonalKnowledgeRelation[] @relation("PersonalKnowledgeRelationOwner")
+  personalConnectionProbeAttempts PersonalConnectionProbeAttempt[] @relation("PersonalConnectionProbeAttemptActor")
+  personalKnowledgeQaChallenges PersonalKnowledgeQaChallenge[] @relation("PersonalKnowledgeQaChallengeOwner")
+  personalKnowledgeQaAudits PersonalKnowledgeQaAudit[] @relation("PersonalKnowledgeQaAuditOwner")
+  personalKnowledgeSemanticIndexState PersonalKnowledgeSemanticIndexState? @relation("PersonalKnowledgeSemanticIndexStateOwner")
+  personalKnowledgeSemanticGenerations PersonalKnowledgeSemanticGeneration[] @relation("PersonalKnowledgeSemanticGenerationOwner")
+  personalKnowledgeSemanticEntries PersonalKnowledgeSemanticEntry[] @relation("PersonalKnowledgeSemanticEntryOwner")
+  personalKnowledgeSemanticChallenges PersonalKnowledgeSemanticChallenge[] @relation("PersonalKnowledgeSemanticChallengeOwner")
+  personalKnowledgeSemanticAudits PersonalKnowledgeSemanticAudit[] @relation("PersonalKnowledgeSemanticAuditOwner")
+}
+
+/// Network proof for personal Git/MCP connection setup and governed updates.
+/// It intentionally stores fingerprints and safe result summaries only; raw
+/// credentials, CA/known_hosts material and remote response bodies never enter
+/// this table.
+model PersonalConnectionProbeAttempt {
+  id                         String                         @id @default(uuid()) @db.Uuid
+  kind                       PersonalConnectionProbeKind
+  action                     PersonalConnectionProbeAction
+  connectionId              String?                        @db.Uuid
+  actorId                   String                         @db.Uuid
+  actorAccountAccessVersion Int
+  clientRequestKeyHash      String                         @db.Char(64)
+  requestFingerprint        String                         @db.Char(64)
+  configurationDigest        String                         @db.Char(64)
+  credentialSecretFingerprint String?                      @db.Char(64)
+  targetRepositoryPath      String?                        @db.VarChar(768)
+  targetTrackedRef          String?                        @db.VarChar(255)
+  resolvedAddressFingerprint String?                       @db.Char(64)
+  resultCommitSha            String?                        @db.VarChar(64)
+  protocolVersion           String?                        @db.VarChar(32)
+  catalogFingerprint         String?                        @db.Char(64)
+  resultCount                Int?
+  resultSnapshot             Json?
+  status                     PersonalConnectionProbeStatus
+  safeErrorCode              String?                        @db.VarChar(96)
+  evidenceExpiresAt          DateTime?
+  consumedAt                 DateTime?
+  consumedConnectionId       String?                        @db.Uuid
+  createdAt                  DateTime                       @default(now())
+  updatedAt                  DateTime                       @updatedAt
+  terminalAt                 DateTime?
+  actor                      AppUser                        @relation("PersonalConnectionProbeAttemptActor", fields: [actorId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([actorId, clientRequestKeyHash])
+  @@index([kind, actorId, clientRequestKeyHash])
+  @@index([connectionId, status, updatedAt])
+  @@index([evidenceExpiresAt, consumedAt])
 }
 
 /// A pure-text knowledge document owned directly by one active ordinary user.
@@ -4613,6 +4738,11 @@ model PersonalKnowledgeDocument {
   currentRevision   PersonalKnowledgeRevision?           @relation("PersonalKnowledgeDocumentCurrentRevision", fields: [currentRevisionId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
   audits            PersonalKnowledgeAudit[]             @relation("PersonalKnowledgeDocumentAudits")
   indexPointer      PersonalKnowledgeIndexPointer?       @relation("PersonalKnowledgeDocumentIndexPointer")
+  relationsFrom     PersonalKnowledgeRelation[]          @relation("PersonalKnowledgeRelationFromDocument")
+  relationsTo       PersonalKnowledgeRelation[]          @relation("PersonalKnowledgeRelationToDocument")
+  qaChallenges      PersonalKnowledgeQaChallenge[]        @relation("PersonalKnowledgeQaChallengeDocument")
+  qaAudits          PersonalKnowledgeQaAudit[]            @relation("PersonalKnowledgeQaAuditDocument")
+  semanticEntries   PersonalKnowledgeSemanticEntry[]       @relation("PersonalKnowledgeSemanticEntryDocument")
 
   @@unique([id, ownerUserId])
   @@unique([currentRevisionId, ownerUserId])
@@ -4645,9 +4775,15 @@ model PersonalKnowledgeRevision {
   owner       AppUser                   @relation("PersonalKnowledgeRevisionOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
   currentFor  PersonalKnowledgeDocument? @relation("PersonalKnowledgeDocumentCurrentRevision")
   audits      PersonalKnowledgeAudit[]   @relation("PersonalKnowledgeRevisionAudits")
+  relationsFrom PersonalKnowledgeRelation[] @relation("PersonalKnowledgeRelationFromRevision")
+  relationsTo   PersonalKnowledgeRelation[] @relation("PersonalKnowledgeRelationToRevision")
+  qaChallenges PersonalKnowledgeQaChallenge[] @relation("PersonalKnowledgeQaChallengeRevision")
+  qaAudits     PersonalKnowledgeQaAudit[] @relation("PersonalKnowledgeQaAuditRevision")
+  semanticEntries PersonalKnowledgeSemanticEntry[] @relation("PersonalKnowledgeSemanticEntryRevision")
 
   @@unique([documentId, version])
   @@unique([ownerUserId, id])
+  @@unique([documentId, ownerUserId, id])
   @@index([ownerUserId, documentId, version])
 }
 
@@ -4704,6 +4840,245 @@ model PersonalKnowledgeIndexPointer {
   @@unique([ownerUserId, documentId])
   @@unique([documentId, ownerUserId])
   @@index([ownerUserId, invalidatedAt])
+}
+
+/// An explicit owner-scoped association between two personal documents.
+/// Endpoint revisions are captured at creation so a later edit is visible as
+/// a stale edge instead of silently changing the meaning of the relation.
+model PersonalKnowledgeRelation {
+  id             String                         @id @default(uuid()) @db.Uuid
+  ownerUserId    String                         @db.Uuid
+  fromDocumentId String                         @db.Uuid
+  fromRevisionId String                         @db.Uuid
+  toDocumentId   String                         @db.Uuid
+  toRevisionId   String                         @db.Uuid
+  state          PersonalKnowledgeRelationState @default(active)
+  createdAt      DateTime                       @default(now())
+  revokedAt      DateTime?
+  owner          AppUser                        @relation("PersonalKnowledgeRelationOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  fromDocument   PersonalKnowledgeDocument      @relation("PersonalKnowledgeRelationFromDocument", fields: [fromDocumentId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
+  fromRevision   PersonalKnowledgeRevision      @relation("PersonalKnowledgeRelationFromRevision", fields: [fromDocumentId, ownerUserId, fromRevisionId], references: [documentId, ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+  toDocument     PersonalKnowledgeDocument      @relation("PersonalKnowledgeRelationToDocument", fields: [toDocumentId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
+  toRevision     PersonalKnowledgeRevision      @relation("PersonalKnowledgeRelationToRevision", fields: [toDocumentId, ownerUserId, toRevisionId], references: [documentId, ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  // Active-row uniqueness is enforced by a migration-managed partial index;
+  // revoked history must remain available for later re-creation.
+  @@unique([id, ownerUserId])
+  @@index([ownerUserId, state, fromDocumentId, toDocumentId, id])
+  @@index([ownerUserId, state, toDocumentId, fromDocumentId, id])
+}
+
+/// One-use prepare proof for a personal knowledge page question. The question
+/// and page body are represented only by hashes; evidenceManifest contains
+/// citation ranges and hashes, never excerpts.
+model PersonalKnowledgeQaChallenge {
+  id                         String                              @id @default(uuid()) @db.Uuid
+  ownerUserId                String                              @db.Uuid
+  documentId                 String                              @db.Uuid
+  revisionId                 String                              @db.Uuid
+  documentVersion            Int
+  contentHash                String                              @db.Char(64)
+  questionHash               String                              @db.Char(64)
+  evidenceManifest           Json                                @db.JsonB
+  providerConnectionId       String                              @db.Uuid
+  providerConfigurationVersion Int
+  modelId                    String                              @db.VarChar(128)
+  credentialSecretFingerprint String                             @db.Char(64)
+  actorAccountAccessVersion  Int
+  clientKeyHash              String                              @db.Char(64)
+  inputFingerprint           String                              @db.Char(64)
+  status                     PersonalKnowledgeQaChallengeStatus  @default(issued)
+  issuedAt                   DateTime                            @default(dbgenerated("clock_timestamp()"))
+  expiresAt                  DateTime
+  consumedAt                 DateTime?
+  owner                      AppUser                             @relation("PersonalKnowledgeQaChallengeOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  document                   PersonalKnowledgeDocument           @relation("PersonalKnowledgeQaChallengeDocument", fields: [documentId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
+  revision                   PersonalKnowledgeRevision            @relation("PersonalKnowledgeQaChallengeRevision", fields: [documentId, ownerUserId, revisionId], references: [documentId, ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection        AiProviderConnection                 @relation("PersonalKnowledgeQaChallengeProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audit                     PersonalKnowledgeQaAudit?
+
+  @@unique([ownerUserId, id])
+  @@unique([ownerUserId, clientKeyHash])
+  @@index([ownerUserId, documentId, issuedAt])
+  @@index([expiresAt, consumedAt])
+  @@index([providerConnectionId, status, issuedAt])
+  @@index([inputFingerprint])
+}
+
+/// Append-only body-free outcome evidence for a personal-page BYOK call.
+/// No question, answer, title, body or credential is persisted here.
+model PersonalKnowledgeQaAudit {
+  id                           String                              @id @default(uuid()) @db.Uuid
+  ownerUserId                  String                              @db.Uuid
+  challengeId                 String                              @unique @db.Uuid
+  documentId                  String                              @db.Uuid
+  revisionId                  String                              @db.Uuid
+  documentVersion             Int
+  contentHash                 String                              @db.Char(64)
+  questionHash                String                              @db.Char(64)
+  evidenceManifest            Json                                @db.JsonB
+  providerConnectionId        String                              @db.Uuid
+  providerConfigurationVersion Int
+  modelId                     String                              @db.VarChar(128)
+  credentialSecretFingerprint String                              @db.Char(64)
+  actorAccountAccessVersion   Int
+  status                      PersonalKnowledgeQaAuditStatus      @default(running)
+  safeErrorCode               String?                             @db.VarChar(96)
+  providerRequestId           String?                             @db.VarChar(256)
+  inputTokens                 Int                                 @default(0)
+  outputTokens                Int                                 @default(0)
+  usageKnown                  Boolean                             @default(false)
+  createdAt                   DateTime                            @default(dbgenerated("clock_timestamp()"))
+  completedAt                 DateTime?
+  owner                       AppUser                             @relation("PersonalKnowledgeQaAuditOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  challenge                   PersonalKnowledgeQaChallenge        @relation(fields: [challengeId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  document                    PersonalKnowledgeDocument            @relation("PersonalKnowledgeQaAuditDocument", fields: [documentId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
+  revision                    PersonalKnowledgeRevision             @relation("PersonalKnowledgeQaAuditRevision", fields: [documentId, ownerUserId, revisionId], references: [documentId, ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection          AiProviderConnection                 @relation("PersonalKnowledgeQaAuditProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([ownerUserId, id])
+  @@index([ownerUserId, createdAt])
+  @@index([ownerUserId, documentId, createdAt])
+  @@index([providerConnectionId, createdAt])
+}
+
+/// One owner-scoped invalidation fence for the personal semantic corpus.
+/// corpusEpoch advances when a source revision or embedding configuration
+/// changes; a generation is publishable only for the current epoch.
+model PersonalKnowledgeSemanticIndexState {
+  ownerUserId        String                               @id @db.Uuid
+  corpusEpoch        Int                                  @default(1)
+  status             PersonalKnowledgeSemanticIndexStatus @default(notBuilt)
+  activeGenerationId String?                              @db.Uuid
+  updatedAt          DateTime                             @updatedAt
+  owner              AppUser                              @relation("PersonalKnowledgeSemanticIndexStateOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@index([status, updatedAt])
+}
+
+/// Immutable provider and source manifest binding for one personal build.
+model PersonalKnowledgeSemanticGeneration {
+  id                           String                                    @id @default(uuid()) @db.Uuid
+  ownerUserId                  String                                    @db.Uuid
+  corpusEpoch                  Int
+  providerConnectionId         String                                    @db.Uuid
+  providerConfigurationVersion Int
+  credentialSecretFingerprint  String                                    @db.Char(64)
+  modelId                      String                                    @db.VarChar(128)
+  dimensions                   Int
+  status                       PersonalKnowledgeSemanticGenerationStatus @default(building)
+  expectedEntryCount           Int
+  indexedEntryCount            Int                                       @default(0)
+  sourceManifestFingerprint    String                                    @db.Char(64)
+  chunkerVersion               String                                    @db.VarChar(64)
+  safeErrorCode                String?                                   @db.VarChar(96)
+  createdAt                    DateTime                                  @default(dbgenerated("clock_timestamp()"))
+  startedAt                    DateTime?
+  completedAt                 DateTime?
+  owner                        AppUser                                   @relation("PersonalKnowledgeSemanticGenerationOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection           AiProviderConnection                       @relation("PersonalKnowledgeSemanticGenerationProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  entries                      PersonalKnowledgeSemanticEntry[]           @relation("PersonalKnowledgeSemanticEntryGeneration")
+  challenges                   PersonalKnowledgeSemanticChallenge[]        @relation("PersonalKnowledgeSemanticChallengeGeneration")
+  audits                       PersonalKnowledgeSemanticAudit[]            @relation("PersonalKnowledgeSemanticAuditGeneration")
+
+  @@unique([ownerUserId, id])
+  @@index([ownerUserId, status, createdAt])
+  @@index([providerConnectionId, status, createdAt])
+}
+
+/// A vector plus immutable revision/range metadata. The source text is read
+/// from the current owner revision at search time, so this table does not
+/// duplicate document bodies or make stale excerpts authoritative.
+model PersonalKnowledgeSemanticEntry {
+  id                String                              @id @default(uuid()) @db.Uuid
+  ownerUserId       String                              @db.Uuid
+  generationId      String                              @db.Uuid
+  documentId        String                              @db.Uuid
+  revisionId        String                              @db.Uuid
+  documentVersion   Int
+  ordinal           Int
+  rangeStart        Int
+  rangeEnd          Int
+  contentHash       String                              @db.Char(64)
+  vector            Unsupported("vector")
+  vectorFingerprint String                              @db.Char(64)
+  createdAt         DateTime                            @default(dbgenerated("clock_timestamp()"))
+  owner             AppUser                             @relation("PersonalKnowledgeSemanticEntryOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  generation        PersonalKnowledgeSemanticGeneration @relation("PersonalKnowledgeSemanticEntryGeneration", fields: [ownerUserId, generationId], references: [ownerUserId, id], onDelete: Cascade, onUpdate: Cascade)
+  document          PersonalKnowledgeDocument           @relation("PersonalKnowledgeSemanticEntryDocument", fields: [documentId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
+  revision          PersonalKnowledgeRevision            @relation("PersonalKnowledgeSemanticEntryRevision", fields: [documentId, ownerUserId, revisionId], references: [documentId, ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([ownerUserId, id])
+  @@unique([ownerUserId, generationId, documentId, revisionId, ordinal])
+  @@index([ownerUserId, generationId, documentId, revisionId])
+  @@index([ownerUserId, contentHash])
+}
+
+/// Short-lived one-use outbound embedding confirmation. Manifests contain
+/// only IDs, revisions, ranges and counts; queryHash is keyed before storage.
+model PersonalKnowledgeSemanticChallenge {
+  id                           String                                 @id @default(uuid()) @db.Uuid
+  ownerUserId                  String                                 @db.Uuid
+  kind                         PersonalKnowledgeSemanticChallengeKind
+  generationId                 String                                 @db.Uuid
+  providerConnectionId         String                                 @db.Uuid
+  providerConfigurationVersion Int
+  credentialSecretFingerprint  String                                 @db.Char(64)
+  modelId                      String                                 @db.VarChar(128)
+  dimensions                   Int
+  corpusEpoch                  Int
+  sourceManifest               Json                                   @db.JsonB
+  expectedEntryCount           Int
+  queryHash                    String?                                @db.Char(64)
+  actorAccountAccessVersion    Int
+  clientKeyHash                String                                 @db.Char(64)
+  inputFingerprint             String                                 @db.Char(64)
+  status                       PersonalKnowledgeSemanticChallengeStatus @default(issued)
+  issuedAt                     DateTime                               @default(dbgenerated("clock_timestamp()"))
+  expiresAt                    DateTime
+  consumedAt                   DateTime?
+  owner                        AppUser                                @relation("PersonalKnowledgeSemanticChallengeOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  generation                   PersonalKnowledgeSemanticGeneration    @relation("PersonalKnowledgeSemanticChallengeGeneration", fields: [ownerUserId, generationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection           AiProviderConnection                    @relation("PersonalKnowledgeSemanticChallengeProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  audit                        PersonalKnowledgeSemanticAudit?
+
+  @@unique([ownerUserId, id])
+  @@unique([ownerUserId, clientKeyHash])
+  @@index([ownerUserId, kind, status, issuedAt])
+  @@index([generationId, status, issuedAt])
+  @@index([expiresAt, consumedAt])
+}
+
+/// Body-free provider outcome evidence for build/search dispatches.
+model PersonalKnowledgeSemanticAudit {
+  id                           String                                 @id @default(uuid()) @db.Uuid
+  ownerUserId                  String                                 @db.Uuid
+  challengeId                  String                                 @unique @db.Uuid
+  generationId                 String                                 @db.Uuid
+  kind                         PersonalKnowledgeSemanticChallengeKind
+  providerConnectionId         String                                 @db.Uuid
+  providerConfigurationVersion Int
+  credentialSecretFingerprint  String                                 @db.Char(64)
+  modelId                      String                                 @db.VarChar(128)
+  dimensions                   Int
+  corpusEpoch                  Int
+  expectedEntryCount           Int
+  status                       PersonalKnowledgeSemanticAuditStatus   @default(running)
+  safeErrorCode                String?                                @db.VarChar(96)
+  providerRequestId            String?                                @db.VarChar(256)
+  requestCount                 Int                                    @default(0)
+  inputTokens                  Int                                    @default(0)
+  usageKnown                   Boolean                                @default(false)
+  createdAt                    DateTime                               @default(dbgenerated("clock_timestamp()"))
+  completedAt                  DateTime?
+  owner                        AppUser                                @relation("PersonalKnowledgeSemanticAuditOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  generation                   PersonalKnowledgeSemanticGeneration    @relation("PersonalKnowledgeSemanticAuditGeneration", fields: [ownerUserId, generationId], references: [ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+  providerConnection           AiProviderConnection                    @relation("PersonalKnowledgeSemanticAuditProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  challenge                    PersonalKnowledgeSemanticChallenge      @relation(fields: [challengeId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([ownerUserId, id])
+  @@index([ownerUserId, kind, createdAt])
+  @@index([ownerUserId, generationId, createdAt])
 }
 
 // Email verification evidence contains only status transitions and email
@@ -6358,6 +6733,11 @@ model AiProviderConnection {
   platformDefaultAiRouteAudits PlatformDefaultAiRouteAudit[] @relation("PlatformDefaultAiRouteAuditProvider")
   projectAiProviderDelegations ProjectAiProviderDelegation[] @relation("ProjectAiProviderDelegationProvider")
   platformProviderProbeAttempts PlatformProviderProbeAttempt[] @relation("PlatformProviderProbeAttemptProvider")
+  personalKnowledgeQaChallenges PersonalKnowledgeQaChallenge[] @relation("PersonalKnowledgeQaChallengeProvider")
+  personalKnowledgeQaAudits PersonalKnowledgeQaAudit[] @relation("PersonalKnowledgeQaAuditProvider")
+  personalKnowledgeSemanticGenerations PersonalKnowledgeSemanticGeneration[] @relation("PersonalKnowledgeSemanticGenerationProvider")
+  personalKnowledgeSemanticChallenges PersonalKnowledgeSemanticChallenge[] @relation("PersonalKnowledgeSemanticChallengeProvider")
+  personalKnowledgeSemanticAudits PersonalKnowledgeSemanticAudit[] @relation("PersonalKnowledgeSemanticAuditProvider")
 
   @@index([kind, status])
   @@index([scope, name])

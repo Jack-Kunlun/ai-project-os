@@ -7,9 +7,9 @@ type ProjectSection = "overview" | "configuration" | "materials" | "assets" | "e
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid", adminOnly: false },
-  { key: "projects", label: "项目", href: "/projects", icon: "folder", adminOnly: false },
-  { key: "personalKnowledge", label: "个人工作区", href: "/personal", icon: "book", adminOnly: false },
-  { key: "team", label: "团队", href: "/team", icon: "users", adminOnly: false },
+  { key: "personalKnowledge", label: "个人工作台", href: "/personal", icon: "book", adminOnly: false },
+  { key: "projects", label: "我的项目", href: "/projects", icon: "folder", adminOnly: false },
+  { key: "team", label: "我的团队", href: "/team", icon: "users", adminOnly: false },
 ] as const;
 
 const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources", "repositories"];

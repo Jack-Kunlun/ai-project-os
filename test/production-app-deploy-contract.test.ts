@@ -68,6 +68,14 @@ test("tag CI attests main while presentation-only changes avoid PostgreSQL", asy
   assert.match(workflow, /test "\$DATABASE_RESULT" = success/u);
 });
 
+test("source and database gates retain the Git history used by release contracts", async () => {
+  const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+  const source = workflow.split("\n  source:\n")[1]?.split("\n  database:\n")[0];
+  const database = workflow.split("\n  database:\n")[1]?.split("\n  verify:\n")[0];
+  assert.match(source ?? "", /fetch-depth: 0/u);
+  assert.match(database ?? "", /fetch-depth: 0/u);
+});
+
 test("server release scope accepts only byte-exact package version changes", async () => {
   const deployer = await readFile(appDeployerPath, "utf8");
   const classifier = deployer.match(/delta_database_required=\$\(python3 - "\$REPOSITORY_DIR" "\$source_revision" "\$resolved_revision" <<'PY'\n([\s\S]*?)\nPY\n\)/u)?.[1];

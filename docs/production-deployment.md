@@ -40,7 +40,7 @@ AI Project OS 从 GitHub Actions 的受控部署工作流手动部署已经通�
 - 历史 **Deploy production** 输入只接受 `v0.6.0-dev.8`，目标必须是 annotated tag，且 `package.json`、应用版本与 OCI 标签必须匹配 `0.6.0-dev.8`；源输入只接受 `v0.6.0-dev.7`。后续版本使用 **Deploy application** 的源/目标标签校验。
 - 部署前会通过 GitHub API 确认所选源标签和 0.6 目标标签对应精确提交的 `CI` push 运行已经 `completed/success`。
 - GitHub 使用独立 ED25519 私钥；服务器对应公钥带 `restrict` 和 forced-command，不能获取 Shell、PTY、端口转发或执行任意命令。
-- `.7`→`.8` 迁移 forced-command 只接受精确的 `deploy-v06-next v0.6.0-dev.7 v0.6.0-dev.8 <source SHA> <target SHA> CONFIRM_V06_NEXT_MIGRATION_V1`；`.8`→`.9` 应用发布使用独立的受限协议。其他命令全部拒绝，sudoers 不开放 Shell、Git 或 Docker。
+- `.7`→`.8` 迁移 forced-command 只接受精确的 `deploy-v06-next v0.6.0-dev.7 v0.6.0-dev.8 <source SHA> <target SHA> CONFIRM_V06_NEXT_MIGRATION_V1`；当前 `.8`→`.10` 应用发布使用独立的受限协议。其他命令全部拒绝，sudoers 不开放 Shell、Git 或 Docker。
 - 服务器会再次通过 GitHub 公共 API 核验标签 CI，专用私钥本身不能绕过发布门禁。
 - 生产 `.env` 位于 `/etc/ai-project-os/production.env`，权限为 `root:root 0600`，不会进入仓库、Actions 日志或部署结果。
 - 历史 `.5 -> .6` 路径会构建并复核源回滚制品和目标镜像；`.6 -> .7` 路径会在旧 app/worker 仍健康时捕获精确容器与镜像身份并构建目标镜像和只读预检。两条路径都会停止旧 app/worker，确认维护窗口中只剩本项目的 PostgreSQL 且端口只绑定 `127.0.0.1`，再以 stopped-writer cutover 模式调用 `pre-deploy` 备份。只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许继续；完整合同见[生产异地备份](production-backup.md)。

@@ -80,7 +80,7 @@ test("credit report aggregates settled allocation credits while preserving a zer
     membershipSubscription: { findUnique: async () => null },
     platformDefaultAiRoute: { findMany: async () => [] },
     platformTokenReservation: {
-      findMany: async ({ where }: { where: { status?: string } }) => where.status === "settled" ? [{ settledAt, allocations: [{ settledTokens: 40 }] }] : [],
+      findMany: async ({ where }: { where: { status?: string } }) => where.status === "settled" ? [{ settledAt, rawSettledTokens: 25, allocations: [{ settledTokens: 40 }] }] : [],
     },
     platformTokenLedgerEntry: {
       count: async () => 1,
@@ -92,6 +92,7 @@ test("credit report aggregates settled allocation credits while preserving a zer
   const query = resolveCreditReportQuery(parseCreditReportQuery(new URLSearchParams("range=custom&from=2026-09-10&to=2026-09-10&timezone=UTC")), now);
   const report = await getCreditReportInTransaction(userId, fakeDb, query, now);
   assert.equal(report.usage.settledCredits, 40);
+  assert.equal(report.usage.daily[0]?.settledRawTokens, 25);
   assert.equal(report.usage.pendingCredits, 0);
   assert.equal(report.ledger.entries[0]?.settledCredits, 40);
   assert.equal(report.ledger.entries[0]?.balanceDelta, 0);

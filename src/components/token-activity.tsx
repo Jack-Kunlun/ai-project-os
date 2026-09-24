@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-type DailyPoint = Readonly<{ date: string; settledCredits: number; pendingCredits: number }>;
+type DailyPoint = Readonly<{ date: string; settledRawTokens: number }>;
 type Mode = "daily" | "weekly" | "cumulative";
 const modes: ReadonlyArray<readonly [Mode, string]> = [["daily", "每日"], ["weekly", "每周"], ["cumulative", "累计"]];
 
@@ -25,11 +25,11 @@ export function TokenActivity({ daily }: { daily: readonly DailyPoint[] }) {
         date.setUTCDate(date.getUTCDate() + day);
         const key = dateKey(date);
         const point = byDate.get(key) ?? null;
-        if (point) cumulative += point.settledCredits;
-        return { date: key, point, value: mode === "cumulative" ? cumulative : point?.settledCredits ?? 0 };
+        if (point) cumulative += point.settledRawTokens;
+        return { date: key, point, value: mode === "cumulative" ? cumulative : point?.settledRawTokens ?? 0 };
       });
       if (mode === "weekly") {
-        const weeklyTotal = week.reduce((sum, cell) => sum + (cell.point?.settledCredits ?? 0), 0);
+        const weeklyTotal = week.reduce((sum, cell) => sum + (cell.point?.settledRawTokens ?? 0), 0);
         for (const cell of week) cell.value = weeklyTotal;
       }
       result.push(week);
@@ -51,11 +51,11 @@ export function TokenActivity({ daily }: { daily: readonly DailyPoint[] }) {
     <div className="mt-4 overflow-x-auto pb-1 app-scrollbar-dark">
       <div className="flex min-w-max gap-[3px]" role="img" aria-label={`Token 活动热力图，${daily.length} 天，${modes.find(([value]) => value === mode)?.[1]}统计`}>
         {weeks.map((week, index) => <div key={week[0].date} className="flex flex-col gap-[3px]">
-          {week.map((cell) => <span key={cell.date} aria-hidden="true" title={cell.point ? `${cell.date} · ${modes.find(([value]) => value === mode)?.[1]}已结算 ${cell.value.toLocaleString("zh-CN")} 平台额度${cell.point.pendingCredits ? ` · 待核对 ${cell.point.pendingCredits.toLocaleString("zh-CN")}` : ""}` : undefined} className={`h-2.5 w-2.5 rounded-[2px] ${cell.point ? tone(cell.value) : "opacity-0"}`} />)}
+          {week.map((cell) => <span key={cell.date} aria-hidden="true" title={cell.point ? `${cell.date} · ${modes.find(([value]) => value === mode)?.[1]}已结算 ${cell.value.toLocaleString("zh-CN")} Token` : undefined} className={`h-2.5 w-2.5 rounded-[2px] ${cell.point ? tone(cell.value) : "opacity-0"}`} />)}
           <span aria-hidden="true" className="h-4 w-2.5 whitespace-nowrap pt-1 text-[10px] text-slate-400">{index === 0 || week.some((cell) => cell.point?.date.endsWith("-01")) ? `${Number(week.find((cell) => cell.point?.date.endsWith("-01"))?.date.slice(5, 7) ?? week.find((cell) => cell.point)?.date.slice(5, 7) ?? "")}月` : ""}</span>
         </div>)}
       </div>
     </div>
-    <p className="mt-3 text-xs text-slate-400">按已结算平台额度着色，非模型原始 Token 数；悬停可查看具体数值。</p>
+    <p className="mt-3 text-xs text-slate-400">按已结算且核实的模型原始 Token 数着色；悬停可查看具体数值。</p>
   </div>;
 }

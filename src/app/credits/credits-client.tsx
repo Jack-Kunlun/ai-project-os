@@ -43,7 +43,7 @@ type Report = {
     membership: { status: "active" | "expired" | "revoked" | "none"; startsAt: string | null; expiresAt: string | null; version: number | null };
     routeSnapshots: Array<{ operation: string; version: number; quotaMultiplierBps: number }>;
   };
-  usage: { daily: Array<{ date: string; settledCredits: number; pendingCredits: number }>; settledCredits: number; pendingCredits: number };
+  usage: { daily: Array<{ date: string; settledCredits: number; settledRawTokens: number; pendingCredits: number }>; settledCredits: number; pendingCredits: number };
   ledger: { entries: Array<{ id: string; occurredAt: string; kind: string; kindLabel: string; operation: string | null; operationLabel: string | null; modelId: string | null; projectName: string; settledCredits: number; balanceDelta: number; status: string }>; page: number; pageSize: number; total: number; hasNextPage: boolean };
   membershipApplication: MembershipApplication | null;
 };

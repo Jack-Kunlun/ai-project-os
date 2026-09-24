@@ -177,11 +177,18 @@ const repositoryProbeSchema = z.object({
   trackedRef: z.string().min(1).max(255),
   expectedUpdatedAt: z.string().datetime({ offset: true }),
 }).strict();
+export const gitConnectionEditCandidateSchema = createConnectionSchema.omit({ name: true }).extend({
+  repositoryPath: z.string().min(1).max(768),
+  trackedRef: z.string().min(1).max(255),
+}).strict();
+export type GitConnectionEditCandidate = z.infer<typeof gitConnectionEditCandidateSchema>;
+
 const governedProbeSchema = z.object({
   clientRequestKey: z.string().uuid(),
   repositoryPath: z.string().min(1).max(768),
   trackedRef: z.string().min(1).max(255),
   expectedUpdatedAt: z.string().datetime({ offset: true }),
+  candidate: gitConnectionEditCandidateSchema.optional(),
 }).strict();
 
 const syncSchema = z.object({
@@ -786,6 +793,23 @@ function gitSavedProbeConfiguration(
   } as const;
 }
 
+function gitEditProbeConfiguration(
+  connection: Readonly<{ id: string; name: string; configurationVersion: number; updatedAt: Date }>,
+  candidate: GitConnectionEditCandidate,
+  baseUrl: string,
+  tlsCaCertificate: string | null,
+  sshKnownHost: string | null,
+  repositoryPath: string,
+  trackedRef: string,
+) {
+  return {
+    ...gitProbeConfiguration({ ...candidate, name: connection.name, baseUrl, tlsCaCertificate, sshKnownHost, repositoryPath, trackedRef }),
+    connectionId: connection.id,
+    configurationVersion: connection.configurationVersion,
+    updatedAt: connection.updatedAt.toISOString(),
+  } as const;
+}
+
 function inMemoryGitProbeConnection(input: Readonly<{
   providerKind: "github" | "gitee" | "gitlab" | "gitea" | "forgejo" | "generic";
   transport: "https" | "ssh";
@@ -867,6 +891,7 @@ export async function probeGitConnectionUpdate(
   input: unknown,
   actor: PersonalConnectionProbeActor,
   db: PrismaClient = getDb(),
+  dependencies: GitDraftProbeDependencies = {},
 ): Promise<Readonly<import("@/lib/personal-connection-probe-service").PersonalConnectionProbeView>> {
   const connectionId = uuid(connectionIdInput);
   const parsed = governedProbeSchema.safeParse(input);
@@ -877,6 +902,29 @@ export async function probeGitConnectionUpdate(
   const connection = await loadOwnedConnection(connectionId, actor, db);
   if (connection.updatedAt.getTime() !== expectedUpdatedAt.getTime()) return fail("GIT_CONNECTION_CONFLICT");
   const expectedCredentialFingerprint = connection.credential?.secretFingerprint ?? null;
+  if (parsed.data.candidate !== undefined) {
+    const candidate = parsed.data.candidate;
+    validateAuth({ ...candidate, name: connection.name });
+    if (canonicalRepositoryPath(candidate.repositoryPath) !== repositoryPath
+      || canonicalTrackedRef(candidate.trackedRef) !== trackedRef) return fail("GIT_CONNECTION_INVALID_INPUT");
+    const baseUrl = canonicalGitBaseUrl(candidate.baseUrl, candidate.transport);
+    const tlsCaCertificate = candidate.transport === "https" ? canonicalTlsCaCertificate(candidate.tlsCaCertificate) : null;
+    const sshKnownHost = candidate.transport === "ssh" ? canonicalSshKnownHost(candidate.sshKnownHost) : null;
+    const secret = candidate.authKind === "none" ? null : candidate.secret ?? null;
+    const credential = secret === null ? null : decodeGitCredential(encodeGitCredential(credentialAuthKind(candidate.authKind), secret), credentialAuthKind(candidate.authKind));
+    const probeConnection = inMemoryGitProbeConnection({ ...candidate, baseUrl, tlsCaCertificate, sshKnownHost, username: candidate.username ?? null });
+    return runPersonalConnectionProbe({
+      kind: "git", action: "update", connectionId, clientRequestKey: parsed.data.clientRequestKey,
+      configuration: gitEditProbeConfiguration(connection, candidate, baseUrl, tlsCaCertificate, sshKnownHost, repositoryPath, trackedRef),
+      secret, targetRepositoryPath: repositoryPath, targetTrackedRef: trackedRef,
+    }, actor, async () => {
+      const result = await (dependencies.probeRepository ?? probeRepository)(probeConnection, repositoryPath, trackedRef, {
+        pinExistingAddress: false, db, credentialOverride: credential,
+        onDispatchBoundary: () => acceptGitProbeDispatchBoundary({ db, actor, connectionId, expectedUpdatedAt: connection.updatedAt, expectedCredentialFingerprint }),
+      });
+      return { addressFingerprint: result.addressFingerprint, commitSha: result.commitSha };
+    }, db);
+  }
   return runPersonalConnectionProbe({
     kind: "git",
     action: "update",
@@ -918,6 +966,7 @@ export async function applyGitConnectionProbeUpdate(input: Readonly<{
   trackedRef: string;
   actor: GitConnectionActor;
   tx: Prisma.TransactionClient;
+  candidate?: GitConnectionEditCandidate;
 }>): Promise<Readonly<{ commitSha: string | null; addressFingerprint: string | null }>> {
   const connection = await input.tx.gitConnection.findFirst({
     where: { id: input.connectionId, ownerUserId: input.actor.id, ownershipState: "confirmed" },
@@ -927,17 +976,31 @@ export async function applyGitConnectionProbeUpdate(input: Readonly<{
   const repositoryPath = canonicalRepositoryPath(input.repositoryPath);
   const trackedRef = canonicalTrackedRef(input.trackedRef);
   const expectedCredentialFingerprint = connection.credential?.secretFingerprint ?? null;
+  const candidate = input.candidate;
+  if (candidate !== undefined) {
+    validateAuth({ ...candidate, name: connection.name });
+    if (canonicalRepositoryPath(candidate.repositoryPath) !== repositoryPath
+      || canonicalTrackedRef(candidate.trackedRef) !== trackedRef) return fail("GIT_CONNECTION_INVALID_INPUT");
+  }
+  const baseUrl = candidate === undefined ? null : canonicalGitBaseUrl(candidate.baseUrl, candidate.transport);
+  const tlsCaCertificate = candidate === undefined ? null : candidate.transport === "https" ? canonicalTlsCaCertificate(candidate.tlsCaCertificate) : null;
+  const sshKnownHost = candidate === undefined ? null : candidate.transport === "ssh" ? canonicalSshKnownHost(candidate.sshKnownHost) : null;
+  const secret = candidate === undefined || candidate.authKind === "none" ? null : candidate.secret ?? null;
   const proof = await consumePersonalConnectionProbe({
     kind: "git",
     action: "update",
     connectionId: connection.id,
     clientRequestKey: input.clientRequestKey,
-    configuration: gitSavedProbeConfiguration(connection, repositoryPath, trackedRef),
-    secret: null,
-    secretBindingFingerprint: expectedCredentialFingerprint,
+    configuration: candidate === undefined
+      ? gitSavedProbeConfiguration(connection, repositoryPath, trackedRef)
+      : gitEditProbeConfiguration(connection, candidate, baseUrl!, tlsCaCertificate, sshKnownHost, repositoryPath, trackedRef),
+    secret,
+    ...(candidate === undefined ? { secretBindingFingerprint: expectedCredentialFingerprint } : {}),
     targetRepositoryPath: repositoryPath,
     targetTrackedRef: trackedRef,
   }, input.actor, connection.id, input.tx, input.draftProbeId);
+  const nextCredential = candidate === undefined || secret === null ? null
+    : await createCredential("git", encodeGitCredential(credentialAuthKind(candidate.authKind), secret), input.tx);
   await input.tx.gitConnection.update({
     where: { id: connection.id },
     data: {
@@ -946,9 +1009,23 @@ export async function applyGitConnectionProbeUpdate(input: Readonly<{
       lastTestedAt: new Date(),
       lastErrorCode: null,
       disabledAt: null,
+      ...(candidate === undefined ? {} : {
+        providerKind: candidate.providerKind,
+        transport: candidate.transport,
+        baseUrl: baseUrl!,
+        authKind: candidate.authKind,
+        username: candidate.username ?? null,
+        credentialId: nextCredential?.id ?? null,
+        allowPrivateNetwork: candidate.allowPrivateNetwork,
+        tlsCaCertificate,
+        sshKnownHost,
+      }),
     },
     select: { id: true },
   });
+  if (candidate !== undefined && connection.credentialId !== null) {
+    await input.tx.externalCredential.delete({ where: { id: connection.credentialId } });
+  }
   return Object.freeze({ commitSha: proof.outcome.commitSha ?? null, addressFingerprint: proof.outcome.addressFingerprint ?? null });
 }
 

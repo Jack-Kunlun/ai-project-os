@@ -16,13 +16,16 @@ async function sourceFiles(directory: string): Promise<string[]> {
 }
 
 test("system-admin identity is passed from protected server pages to shared headers", async () => {
-  const [projectsPage, teamPage, projectPages] = await Promise.all([
+  const [projectsPage, personalProjectsPage, teamPage, projectPages] = await Promise.all([
     read("src/app/projects/page.tsx"),
+    read("src/app/personal/projects/page.tsx"),
     read("src/app/team/page.tsx"),
     Promise.all((await sourceFiles("src/app/projects/[projectId]")).map(read)),
   ]);
 
-  assert.match(projectsPage, /isSystemAdmin=\{user\.role === "admin"\}/u);
+  assert.match(projectsPage, /redirect\("\/personal\/projects"\)/u);
+  assert.match(personalProjectsPage, /requirePageSession\(\)/u);
+  assert.match(personalProjectsPage, /isSystemAdmin=\{user\.role === "admin"\}/u);
   assert.match(teamPage, /isSystemAdmin=\{user\.role === "admin"\}/u);
   for (const source of projectPages) {
     if (!source.includes("<AppHeader")) continue;
@@ -65,7 +68,7 @@ test("R02 browser coverage keeps first-run smoke ordering and direct lifecycle g
   assert.match(spec, /R02_PUBLIC_ROUTE_EXPECTATIONS/u);
   assert.match(spec, /r02ProjectGuardRoutes/u);
   assert.match(spec, /createControlledMembership/u);
-  assert.match(spec, /\/projects\?focus=r02-return/u);
+  assert.match(spec, /signInR02Actor\(freePage, actors\.free, "\/personal\/projects"\)/u);
   assert.match(spec, /projectApi\.status\)\.toBe\(403\)/u);
   assert.match(spec, /await signInR02Admin\(page\);[\s\S]*?const personalUser = await seedBrowserPersonalUser\([\s\S]*?const ownerContext = await browser\.newContext\(\);[\s\S]*?await signInR02PersonalUser\(ownerPage, personalUser\);/u);
   assert.ok(spec.includes('await expect(page).toHaveURL(/\\/admin$/u);'));

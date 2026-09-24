@@ -67,6 +67,7 @@ import { PersonalKnowledgeQaError } from "@/lib/personal-knowledge-qa-service";
 import { PersonalProjectSearchError } from "@/lib/personal-project-search-service";
 import { PersonalConnectionProbeError } from "@/lib/personal-connection-probe-service";
 import { PersonalKnowledgeSemanticError } from "@/lib/personal-knowledge-semantic-service";
+import { ProjectPersonalDefaultError } from "@/lib/project-personal-default-memory";
 
 export type ApiErrorBody = {
   error: {
@@ -89,6 +90,12 @@ export class ApiError extends Error {
 }
 
 export function mapApiError(error: unknown): { status: number; body: ApiErrorBody } {
+  if (error instanceof ProjectPersonalDefaultError) {
+    const message = error.code === "PROJECT_PERSONAL_DEFAULT_CHANGED"
+      ? "个人通用记忆已变化，请重新确认本次项目 AI 请求"
+      : "个人通用记忆状态异常，请检查标记和内容长度";
+    return { status: 409, body: { error: { code: error.code, message } } };
+  }
   if (error instanceof PersonalConnectionProbeError) {
     const mapping: Record<string, readonly [number, string]> = {
       PERSONAL_CONNECTION_PROBE_INVALID_INPUT: [400, "连接探测请求无效"],
@@ -107,6 +114,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
   if (error instanceof PersonalKnowledgeError) {
     const mapping: Record<string, readonly [number, string]> = {
       PERSONAL_KNOWLEDGE_INVALID_INPUT: [400, "个人知识请求无效"],
+      PERSONAL_KNOWLEDGE_DEFAULT_LIMIT_REACHED: [409, "个人通用记忆最多保留 8 条"],
       PERSONAL_KNOWLEDGE_FORBIDDEN: [403, "无权访问个人知识"],
       PERSONAL_KNOWLEDGE_ACCOUNT_DISABLED: [403, "当前账户已停用"],
       PERSONAL_KNOWLEDGE_ACCOUNT_ACCESS_STALE: [401, "当前会话已失效，请重新登录"],

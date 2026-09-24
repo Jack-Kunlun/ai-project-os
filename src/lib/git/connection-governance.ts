@@ -7,7 +7,7 @@ import { rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
 import { encodeGitCredential } from "./credentials";
-import { applyGitConnectionProbeUpdate, GitServiceError, type GitServiceErrorCode } from "./service";
+import { applyGitConnectionProbeUpdate, gitConnectionEditCandidateSchema, GitServiceError, type GitServiceErrorCode, type GitConnectionEditCandidate } from "./service";
 
 const UUID = z.string().uuid();
 const FINGERPRINT = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -72,6 +72,7 @@ const previewSchema = z.object({
   probeRequestKey: UUID.optional(),
   repositoryPath: z.string().trim().min(1).max(768).optional(),
   trackedRef: z.string().trim().min(1).max(255).optional(),
+  candidate: gitConnectionEditCandidateSchema.optional(),
 }).strict();
 
 const executeSchema = z.object({
@@ -86,7 +87,20 @@ const executeSchema = z.object({
   probeRequestKey: UUID.optional(),
   repositoryPath: z.string().trim().min(1).max(768).optional(),
   trackedRef: z.string().trim().min(1).max(255).optional(),
+  candidate: gitConnectionEditCandidateSchema.optional(),
 }).strict();
+
+function editCandidateFingerprint(candidate: GitConnectionEditCandidate | undefined): string | null {
+  return candidate === undefined ? null : hash({ ...candidate, secret: candidate.secret == null ? null : hash(candidate.secret) });
+}
+
+function editBlockers(impact: Impact): string[] {
+  const blockers: string[] = [];
+  if (impact.legacyLinks.length > 0) blockers.push("legacy_project_link");
+  if (impact.liveDelegations.length > 0) blockers.push("live_delegation");
+  if (impact.manualRuns.length > 0) blockers.push("active_manual_run");
+  return blockers;
+}
 
 type TestedGitProbeIntent = Readonly<{
   draftProbeId: string;
@@ -94,6 +108,16 @@ type TestedGitProbeIntent = Readonly<{
   repositoryPath: string;
   trackedRef: string;
 }>;
+
+function sameTestedProbe(value: unknown, expected: TestedGitProbeIntent | null): boolean {
+  if (expected === null) return value === null || value === undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return row.draftProbeId === expected.draftProbeId
+    && row.probeRequestKey === expected.probeRequestKey
+    && row.repositoryPath === expected.repositoryPath
+    && row.trackedRef === expected.trackedRef;
+}
 
 function fail(code: GitServiceErrorCode): never {
   throw new GitServiceError(code);
@@ -345,8 +369,10 @@ export async function previewGitConnectionMutation(
   if (parsed.data.action === "rotateCredential" && parsed.data.secret === undefined) return fail("GIT_CONNECTION_INVALID_INPUT");
   if (parsed.data.action === "delete" && parsed.data.confirmationName === undefined) return fail("GIT_CONNECTION_INVALID_INPUT");
   const testedProbe = testedProbeIntent(parsed.data);
+  if (parsed.data.candidate !== undefined && (parsed.data.action !== "retest" || testedProbe === null)) return fail("GIT_CONNECTION_INVALID_INPUT");
   const expectedUpdatedAt = date(parsed.data.expectedUpdatedAt);
-  const requestFingerprint = hash({ connectionId, action: parsed.data.action, requestKey: parsed.data.requestKey, reason: parsed.data.reason, expectedUpdatedAt: expectedUpdatedAt.toISOString(), confirmationName: parsed.data.confirmationName ?? null, candidateSecret: parsed.data.secret === undefined ? null : hash(parsed.data.secret), testedProbe });
+  const candidateFingerprint = editCandidateFingerprint(parsed.data.candidate);
+  const requestFingerprint = hash({ connectionId, action: parsed.data.action, requestKey: parsed.data.requestKey, reason: parsed.data.reason, expectedUpdatedAt: expectedUpdatedAt.toISOString(), confirmationName: parsed.data.confirmationName ?? null, candidateSecret: parsed.data.secret === undefined ? null : hash(parsed.data.secret), testedProbe, candidateFingerprint });
   return withRetry(db, async (tx) => {
     await lockActorAccess(tx, actor.id);
     const actorVersion = await requireActor(tx, actor);
@@ -368,9 +394,13 @@ export async function previewGitConnectionMutation(
       manualRuns: impact.manualRuns,
       historicalReferences: impact.historicalReferences,
       ...(testedProbe === null ? {} : { testedProbe }),
+      ...(candidateFingerprint === null ? {} : { candidateFingerprint }),
     } satisfies Prisma.InputJsonValue;
     const impactFingerprint = hash(impactSnapshot);
-    const blockers = blockersFor(parsed.data.action, connection.status, parsed.data.confirmationName, connection.name, parsed.data.secret !== undefined, connection.authKind !== "none" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null);
+    const blockers = [
+      ...blockersFor(parsed.data.action, connection.status, parsed.data.confirmationName, connection.name, parsed.data.secret !== undefined, connection.authKind !== "none" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null),
+      ...(candidateFingerprint === null ? [] : editBlockers(impact)),
+    ];
     const issuedAt = await clock(tx);
     const expiresAt = new Date(issuedAt.getTime() + PREVIEW_TTL_MS);
     const previewId = randomUUID();
@@ -430,17 +460,23 @@ export async function executeGitConnectionMutation(
     const now = await clock(tx);
     if (now.getTime() >= preview.expiresAt.getTime()) return fail("GIT_CONNECTION_PREVIEW_EXPIRED");
     const testedProbe = testedProbeIntent({ action: preview.action, draftProbeId: parsed.data.draftProbeId, probeRequestKey: parsed.data.probeRequestKey, repositoryPath: parsed.data.repositoryPath, trackedRef: parsed.data.trackedRef });
+    if (parsed.data.candidate !== undefined && (preview.action !== "retest" || testedProbe === null)) return fail("GIT_CONNECTION_PREVIEW_MISMATCH");
+    const candidateFingerprint = editCandidateFingerprint(parsed.data.candidate);
     const previewImpact = preview.impactSnapshot !== null && typeof preview.impactSnapshot === "object" && !Array.isArray(preview.impactSnapshot)
       ? preview.impactSnapshot as Record<string, unknown>
       : {};
     const previewTestedProbe = previewImpact.testedProbe;
-    if (JSON.stringify(previewTestedProbe ?? null) !== JSON.stringify(testedProbe)) return fail("GIT_CONNECTION_PREVIEW_MISMATCH");
+    if (!sameTestedProbe(previewTestedProbe, testedProbe)
+      || (previewImpact.candidateFingerprint ?? null) !== candidateFingerprint) return fail("GIT_CONNECTION_PREVIEW_MISMATCH");
     if (testedProbe !== null) await validateTestedProbe(tx, testedProbe, actor.id, connectionId);
     const impact = await loadImpact(tx, connectionId, actor.id);
     const currentImpactSnapshot = { legacyLinks: impact.legacyLinks, liveDelegations: impact.liveDelegations, manualRuns: impact.manualRuns, historicalReferences: impact.historicalReferences, ...(testedProbe === null ? {} : { testedProbe }) } satisfies Prisma.InputJsonValue;
-    const currentImpactFingerprint = hash(currentImpactSnapshot);
+    const currentImpactFingerprint = hash({ ...currentImpactSnapshot, ...(candidateFingerprint === null ? {} : { candidateFingerprint }) });
     if (currentImpactFingerprint !== preview.impactFingerprint) return fail("GIT_CONNECTION_IMPACT_CHANGED");
-    const blockers = blockersFor(preview.action, connection.status, parsed.data.confirmationName ?? preview.confirmationName ?? undefined, connection.name, parsed.data.secret !== undefined || preview.candidateSecretFingerprint !== null, connection.authKind !== "none" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null);
+    const blockers = [
+      ...blockersFor(preview.action, connection.status, parsed.data.confirmationName ?? preview.confirmationName ?? undefined, connection.name, parsed.data.secret !== undefined || preview.candidateSecretFingerprint !== null, connection.authKind !== "none" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null),
+      ...(candidateFingerprint === null ? [] : editBlockers(impact)),
+    ];
     if (!preview.canExecute || blockers.length > 0) return fail("GIT_CONNECTION_IN_USE");
     const action = preview.action;
     const external = action === "retrust" || action === "retest";
@@ -450,7 +486,7 @@ export async function executeGitConnectionMutation(
     let executionStatus: "completed" | "held" = external && !testedExternal ? "held" : "completed";
     const safeErrorCode: string | null = external && !testedExternal ? "GIT_EXTERNAL_IO_PLANNED_NOT_DISPATCHED" : null;
     if (testedExternal && testedProbe !== null) {
-      await applyGitConnectionProbeUpdate({ connectionId, draftProbeId: testedProbe.draftProbeId, clientRequestKey: testedProbe.probeRequestKey, repositoryPath: testedProbe.repositoryPath, trackedRef: testedProbe.trackedRef, actor, tx });
+      await applyGitConnectionProbeUpdate({ connectionId, draftProbeId: testedProbe.draftProbeId, clientRequestKey: testedProbe.probeRequestKey, repositoryPath: testedProbe.repositoryPath, trackedRef: testedProbe.trackedRef, actor, tx, candidate: parsed.data.candidate });
       statusAfter = "verified";
     } else if (external) {
       executionStatus = "held";

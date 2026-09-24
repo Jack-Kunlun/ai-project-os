@@ -53,11 +53,12 @@ test("个人知识页面提供纯文本生命周期入口并保持请求无缓�
   assert.doesNotMatch(source, /console\.(log|debug|info|error)/u);
 });
 
-test("个人知识交互不会把正文写入日志或承诺尚未实现的项目智能能力", async () => {
+test("个人知识交互仅将显式标记的通用记忆用于项目 AI", async () => {
   const source = await readFile("src/app/personal/knowledge/knowledge-client.tsx", "utf8");
 
   assert.doesNotMatch(source, /projectId|\/api\/projects/u);
-  assert.doesNotMatch(source, /RAG|AI 自动/u);
+  assert.match(source, /作为个人通用记忆/u);
+  assert.match(source, /项目 AI 可自动参考/u);
   assert.match(source, /纯文本 \/ Markdown/u);
   assert.match(source, /保存后会保留版本历史/u);
 });

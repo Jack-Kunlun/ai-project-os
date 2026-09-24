@@ -480,8 +480,8 @@ test("R02 production pages preserve the trusted admin entry and responsive admin
   const expiredPage = await expiredContext.newPage();
   const disabledPage = await disabledContext.newPage();
   try {
-    await signInR02Actor(freePage, actors.free, "/projects?focus=r02-return");
-    await expect(freePage).toHaveURL(/\/projects\?focus=r02-return$/u);
+    await signInR02Actor(freePage, actors.free, "/personal/projects");
+    await expect(freePage).toHaveURL(/\/personal\/projects$/u);
     await expect(freePage.getByRole("link", { name: "管理工作台", exact: true })).toHaveCount(0);
     await freePage.goto("/admin");
     await expect(freePage).toHaveURL(/\/dashboard$/u);

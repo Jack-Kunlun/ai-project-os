@@ -29,6 +29,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "web-ai-confirmation", file: "test/web-ai-confirmation-postgres.test.ts", database: "ai_project_os_web_ai_confirmation_test", gateEnv: "WEB_AI_CONFIRMATION_POSTGRES_GATE", setup: "migrate" },
   { id: "web-ai-access", file: "test/web-ai-access-postgres.test.ts", database: "ai_project_os_web_ai_access_test", gateEnv: "WEB_AI_ACCESS_POSTGRES_GATE", setup: "migrate" },
   { id: "web-ai-governance", file: "test/web-ai-governance-postgres.test.ts", database: "ai_project_os_web_ai_governance_test", gateEnv: "WEB_AI_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
+  { id: "project-personal-default", file: "test/project-personal-default-memory-postgres.test.ts", database: "ai_project_os_project_personal_default_test", gateEnv: "PROJECT_PERSONAL_DEFAULT_POSTGRES_GATE", setup: "migrate" },
   { id: "membership-governance", file: "test/membership-governance-postgres.test.ts", database: "ai_project_os_membership_governance_test", gateEnv: "MEMBERSHIP_GOVERNANCE_POSTGRES_GATE", databaseUrlEnv: "MEMBERSHIP_GOVERNANCE_POSTGRES_DATABASE_URL", setup: "migrate" },
   { id: "membership-governance-manifest", file: "test/membership-governance-manifest-postgres.test.ts", database: "ai_project_os_membership_governance_manifest_test", gateEnv: "MEMBERSHIP_GOVERNANCE_MANIFEST_POSTGRES_GATE", databaseUrlEnv: "MEMBERSHIP_GOVERNANCE_MANIFEST_POSTGRES_DATABASE_URL", seedAdmin: true, setup: "migrate" },
   { id: "membership-lifecycle", file: "test/membership-lifecycle-postgres.test.ts", database: "ai_project_os_membership_lifecycle_test", gateEnv: "MEMBERSHIP_LIFECYCLE_POSTGRES_GATE", setup: "migrate" },
@@ -51,9 +52,11 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "action-engine", file: "test/action-engine-postgres.test.ts", database: "ai_project_os_action_engine_test", gateEnv: "ACTION_ENGINE_POSTGRES_GATE", setup: "migrate" },
   { id: "mcp-capabilities", file: "test/mcp-capabilities-postgres.test.ts", database: "ai_project_os_mcp_capabilities_test", gateEnv: "MCP_CAPABILITIES_POSTGRES_GATE", setup: "migrate" },
   { id: "connection-governance", file: "test/connection-governance-postgres.test.ts", database: "ai_project_os_connection_governance_test", gateEnv: "CONNECTION_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
+  { id: "connection-configuration-edit", file: "test/connection-configuration-edit-postgres.test.ts", database: "ai_project_os_connection_configuration_edit_test", gateEnv: "CONNECTION_CONFIGURATION_EDIT_POSTGRES_GATE", setup: "migrate" },
   { id: "credits-reporting", file: "test/credits-reporting-postgres.test.ts", database: "ai_project_os_credits_reporting_test", gateEnv: "CREDITS_REPORTING_POSTGRES_GATE", setup: "migrate" },
   { id: "personal-connection-probe", file: "test/personal-connection-probe-postgres.test.ts", database: "ai_project_os_personal_connection_probe_test", gateEnv: "PERSONAL_CONNECTION_PROBE_POSTGRES_GATE", setup: "migrate" },
   { id: "personal-knowledge", file: "test/personal-knowledge-postgres.test.ts", database: "ai_project_os_personal_knowledge_test", gateEnv: "PERSONAL_KNOWLEDGE_POSTGRES_GATE", setup: "migrate" },
+  { id: "personal-knowledge-extraction", file: "test/personal-knowledge-extraction-postgres.test.ts", database: "ai_project_os_personal_knowledge_extraction_test", gateEnv: "PERSONAL_KNOWLEDGE_EXTRACTION_POSTGRES_GATE", setup: "migrate" },
   { id: "personal-knowledge-qa", file: "test/personal-knowledge-qa-postgres.test.ts", database: "ai_project_os_personal_knowledge_qa_test", gateEnv: "PERSONAL_KNOWLEDGE_QA_POSTGRES_GATE", setup: "migrate" },
   { id: "personal-knowledge-semantic", file: "test/personal-knowledge-semantic-postgres.test.ts", database: "ai_project_os_personal_knowledge_semantic_test", gateEnv: "PERSONAL_KNOWLEDGE_SEMANTIC_POSTGRES_GATE", setup: "migrate" },
   { id: "mcp-attestation-control-plane", file: "test/mcp-attestation-control-plane-postgres.test.ts", database: "ai_project_os_mcp_attestation_control_plane_test", gateEnv: "MCP_ATTESTATION_CONTROL_PLANE_POSTGRES_GATE", setup: "migrate" },
@@ -84,6 +87,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "v06-upgrade", file: "test/production-v06-upgrade-postgres.test.ts", database: "ai_project_os_v06_upgrade_test", gateEnv: "PRODUCTION_V06_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V06_UPGRADE_TEST_DATABASE_URL", setup: "self" },
   { id: "v06-patch-upgrade", file: "test/production-v06-patch-upgrade-postgres.test.ts", database: "ai_project_os_v06_patch_upgrade_test", gateEnv: "PRODUCTION_V06_PATCH_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V06_PATCH_UPGRADE_TEST_DATABASE_URL", setup: "self" },
   { id: "v06-next-upgrade", file: "test/production-v06-next-upgrade-postgres.test.ts", database: "ai_project_os_v06_next_upgrade_test", gateEnv: "PRODUCTION_V06_NEXT_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V06_NEXT_UPGRADE_TEST_DATABASE_URL", setup: "self" },
+  { id: "v06-default-memory-upgrade", file: "test/production-v06-default-memory-upgrade-postgres.test.ts", database: "ai_project_os_v06_default_memory_upgrade_test", gateEnv: "PRODUCTION_V06_DEFAULT_MEMORY_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V06_DEFAULT_MEMORY_UPGRADE_TEST_DATABASE_URL", setup: "self" },
 ]);
 
 export const POSTGRES_GATE_TEST_USER = "ai_project_os_gate";

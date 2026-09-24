@@ -143,6 +143,10 @@ const blockerLabels: Record<string, string> = {
   external_io_planned_not_dispatched: "尚未开放外部发包，不能绕过治理",
 };
 
+export function connectionBlockerText(blockers: readonly string[]): string {
+  return blockers.map((blocker) => blockerLabels[blocker] ?? blocker).join("、");
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -38,6 +38,12 @@ if [[ "$original_command" =~ ^deploy-v06-next\ (v0\.6\.0-dev\.7)\ (v0\.6\.0-dev\
     "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
 fi
 
+# The .10 to .11 route applies the reviewed 116 to 117 migration set.
+if [[ "$original_command" =~ ^deploy-v06-default-memory\ (v0\.6\.0-dev\.10)\ (v0\.6\.0-dev\.11)\ ([0-9a-f]{40})\ ([0-9a-f]{40})\ (CONFIRM_V06_DEFAULT_MEMORY_MIGRATION_V1)$ ]]; then
+  exec sudo -n /usr/local/sbin/ai-project-os-v06-default-memory-deploy \
+    "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
+fi
+
 if [[ "$original_command" =~ ^preserve-deploy\ (v0\.5\.0-dev\.1)\ (v0\.5\.0-dev\.4)\ ([0-9a-f]{40})\ (CONFIRM_PRESERVE_DATA_V1)$ ]]; then
   exec sudo -n /usr/local/sbin/ai-project-os-preserve-deploy \
     "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"

@@ -320,8 +320,8 @@ export function PersonalOverviewClient(): React.JSX.Element {
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Personal workspace</p>
         <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">个人工作区总览</h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">集中查看你拥有的知识与连接，以及当前账号可以访问的项目。项目自己的委托、选择和安全规则决定最终生效配置。</p>
+            <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">个人工作台总览</h1>
+            <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里统一展示当前账号可访问的项目和个人资源。个人知识留在个人空间，项目资料与记忆留在各自项目；项目 A 的约定不会自动成为项目 B 的规则。</p>
           </div>
           <Link href="/personal/configuration" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">管理个人资源</Link>
         </div>
@@ -331,8 +331,8 @@ export function PersonalOverviewClient(): React.JSX.Element {
       {state.partialFailures.length > 0 ? <p role="status" className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">部分统计暂不可用：{state.partialFailures.join("、")}。项目和其他已加载内容仍可继续使用。</p> : null}
 
       <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6" aria-label="个人工作区统计">
-        <MetricCard label="进行中项目" value={state.loading ? "…" : String(state.activeProjects)} href="/projects" />
-        <MetricCard label="已归档项目" value={state.loading ? "…" : String(state.archivedProjects)} href="/projects" />
+        <MetricCard label="进行中项目" value={state.loading ? "…" : String(state.activeProjects)} href="/personal/projects" />
+        <MetricCard label="已归档项目" value={state.loading ? "…" : String(state.archivedProjects)} href="/personal/projects" />
         <MetricCard label="知识文档" value={state.loading ? "…" : countLabel(state.knowledgeCount)} href="/personal/knowledge" />
         <MetricCard label="模型连接" value={state.loading ? "…" : countLabel(state.modelCount)} href="/personal/models" />
         <MetricCard label="Git 连接" value={state.loading ? "…" : countLabel(state.gitCount)} href="/personal/connections/git" />
@@ -348,7 +348,7 @@ export function PersonalOverviewClient(): React.JSX.Element {
       <section className="mt-7 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Accessible projects</p><h2 className="mt-2 text-2xl font-semibold">最近访问范围内的项目</h2><p className="mt-2 text-sm text-slate-500">这里只展示当前账号有权读取的最近 8 个进行中项目。</p></div>
-          <Link href="/projects" className="text-sm font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">查看全部项目 →</Link>
+          <Link href="/personal/projects" className="text-sm font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">查看全部项目 →</Link>
         </div>
         {state.loading ? <div className="mt-6 grid gap-4 md:grid-cols-2"><div className="h-36 animate-pulse rounded-2xl bg-slate-100" /><div className="h-36 animate-pulse rounded-2xl bg-slate-100" /></div> : state.projects.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-10 text-center"><p className="text-sm font-semibold text-slate-700">当前没有可访问的进行中项目</p><p className="mt-2 text-xs text-slate-500">个人知识库和个人连接仍可独立使用；获得项目权限后会显示在这里。</p></div> : <div className="mt-6 grid gap-4 md:grid-cols-2">{state.projects.map((project) => <ProjectCard key={project.id} project={project} />)}</div>}
       </section>
@@ -444,7 +444,7 @@ function KnowledgeOverviewSection({
           <h2 id="personal-knowledge-overview-title" className="mt-2 text-2xl font-semibold">个人知识网状连接</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">图中只展示你明确建立的文档关联。文档编辑后，关联会保留创建时的版本并标记为需要复核。</p>
         </div>
-        <Link href="/personal/knowledge" className="text-sm font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">打开知识库 →</Link>
+        <div className="flex flex-wrap gap-4"><Link href="/personal/knowledge" className="text-sm font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">打开知识库 →</Link><Link href="/personal/knowledge/graph" className="text-sm font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">完整知识图谱 →</Link></div>
       </div>
 
       {loading ? <div className="mt-6 h-64 animate-pulse rounded-2xl bg-slate-100" /> : overview === null ? <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-8 text-sm text-amber-800">个人知识图与容量暂不可用，请稍后重新加载。</div> : (

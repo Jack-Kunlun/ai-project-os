@@ -309,11 +309,11 @@ export async function invokeVisionCompletion(input: Readonly<{
   absoluteDeadlineAt?: Date;
 }>): Promise<ChatResult> {
   if (input.image.length === 0 || input.image.length > 10 * 1024 * 1024 || input.prompt.length < 1 || input.prompt.length > 8_000) {
-    return fail("AI_PROVIDER_REJECTED", 400);
+    throw new ProviderTransportError("AI_PROVIDER_REJECTED", 400, false);
   }
   const dataUrl = `data:${input.mimeType};base64,${input.image.toString("base64")}`;
   if (input.connection.kind === "deepseek") {
-    if (input.modelId !== "deepseek-flash" && input.modelId !== "deepseek-v4-flash-vision-exp") return fail("AI_PROVIDER_VISION_UNSUPPORTED", 422);
+    if (input.modelId !== "deepseek-flash" && input.modelId !== "deepseek-v4-flash-vision-exp") throw new ProviderTransportError("AI_PROVIDER_VISION_UNSUPPORTED", 422, false);
     const { payload, requestId } = await providerPost(input.connection, "/responses", {
       model: input.modelId,
       instructions: "Extract only evidence visible in the image. Never infer hidden facts. Return the requested JSON object only.",

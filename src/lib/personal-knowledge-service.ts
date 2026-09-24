@@ -17,6 +17,9 @@ export const PERSONAL_KNOWLEDGE_PAGE_DEFAULT_SIZE = 20 as const;
 export const PERSONAL_KNOWLEDGE_GRAPH_MAX_NODES = 200 as const;
 /** Maximum graph edges returned by one personal overview projection. */
 export const PERSONAL_KNOWLEDGE_GRAPH_MAX_EDGES = 500 as const;
+/** Personal defaults are short conventions, never an implicit document corpus. */
+export const PERSONAL_DEFAULT_MEMORY_MAX_CHARACTERS = 2_000 as const;
+export const PERSONAL_DEFAULT_MEMORY_MAX_DOCUMENTS = 8 as const;
 
 const MAX_VERSION = 2_147_483_647;
 const UUID_SCHEMA = z.string().uuid();
@@ -37,6 +40,7 @@ const versionSchema = z.number().int().min(1).max(MAX_VERSION);
 export const personalKnowledgeCreateSchema = z.object({
   title: titleSchema,
   content: contentSchema,
+  isDefaultMemory: z.boolean().default(false),
 }).strict();
 
 /** Validated compare-and-swap input accepted by PATCH and DELETE. */
@@ -44,7 +48,8 @@ export const personalKnowledgeRevisionSchema = z.object({
   expectedVersion: versionSchema,
   title: titleSchema.optional(),
   content: contentSchema.optional(),
-}).strict().refine((value) => value.title !== undefined || value.content !== undefined);
+  isDefaultMemory: z.boolean().optional(),
+}).strict().refine((value) => value.title !== undefined || value.content !== undefined || value.isDefaultMemory !== undefined);
 
 /** Validated compare-and-swap input accepted by DELETE. */
 export const personalKnowledgeDeleteSchema = z.object({
@@ -87,6 +92,7 @@ export type PersonalKnowledgeErrorCode =
   | "PERSONAL_KNOWLEDGE_ACCOUNT_ACCESS_STALE"
   | "PERSONAL_KNOWLEDGE_DOCUMENT_NOT_FOUND"
   | "PERSONAL_KNOWLEDGE_VERSION_CONFLICT"
+  | "PERSONAL_KNOWLEDGE_DEFAULT_LIMIT_REACHED"
   | "PERSONAL_KNOWLEDGE_RELATION_CONFLICT"
   | "PERSONAL_KNOWLEDGE_RELATION_NOT_FOUND"
   | "PERSONAL_KNOWLEDGE_INTEGRITY_ERROR";
@@ -134,6 +140,7 @@ type RevisionRecord = Readonly<{
 type DocumentRecord = Readonly<{
   id: string;
   version: number;
+  isDefaultMemory: boolean;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -163,6 +170,7 @@ const revisionMetadataSelect = {
 const documentSelect = {
   id: true,
   version: true,
+  isDefaultMemory: true,
   createdAt: true,
   updatedAt: true,
   deletedAt: true,
@@ -172,6 +180,7 @@ const documentSelect = {
 const listDocumentSelect = {
   id: true,
   version: true,
+  isDefaultMemory: true,
   createdAt: true,
   updatedAt: true,
   currentRevision: {
@@ -455,6 +464,7 @@ function publicDocument(document: DocumentRecord): Readonly<Record<string, unkno
   return Object.freeze({
     id: document.id,
     version: document.version,
+    isDefaultMemory: document.isDefaultMemory,
     title: revision.title,
     content: revision.content,
     contentHash: revision.contentHash,
@@ -472,6 +482,7 @@ function publicSummary(document: ListDocumentRecord): Readonly<Record<string, un
   return Object.freeze({
     id: document.id,
     version: document.version,
+    isDefaultMemory: document.isDefaultMemory,
     title: revision.title,
     contentHash: revision.contentHash,
     byteCount: revision.byteCount,
@@ -559,6 +570,11 @@ async function createPersonalKnowledgeDocumentInTransaction(
 ): Promise<Readonly<Record<string, unknown>>> {
   await lockActorAccess(tx, actor.id);
   await assertActorInTransaction(tx, actor);
+  if (value.isDefaultMemory) {
+    if (value.content.length > PERSONAL_DEFAULT_MEMORY_MAX_CHARACTERS) return fail("PERSONAL_KNOWLEDGE_INVALID_INPUT");
+    const count = await tx.personalKnowledgeDocument.count({ where: activeOwnerWhere(actor.id, { isDefaultMemory: true }) });
+    if (count >= PERSONAL_DEFAULT_MEMORY_MAX_DOCUMENTS) return fail("PERSONAL_KNOWLEDGE_DEFAULT_LIMIT_REACHED");
+  }
   const documentId = randomUUID();
   const revisionId = randomUUID();
   const contentHash = sha256(value.content);
@@ -568,6 +584,7 @@ async function createPersonalKnowledgeDocumentInTransaction(
         id: documentId,
         ownerUserId: actor.id,
         state: "active",
+        isDefaultMemory: value.isDefaultMemory,
         version: 1,
         currentRevisionId: null,
         createdAt: now,
@@ -600,7 +617,7 @@ async function createPersonalKnowledgeDocumentInTransaction(
       event: "created",
       contentHash,
       byteCount,
-      references: { revisionId, version: 1 },
+      references: { revisionId, version: 1, isDefaultMemory: value.isDefaultMemory },
       createdAt: now,
   });
   const created = await tx.personalKnowledgeDocument.findFirst({
@@ -795,6 +812,12 @@ async function revisePersonalKnowledgeDocumentInTransaction(
   const currentRevision = assertCurrentRevision(current);
   const title = value.title ?? currentRevision.title;
   const content = value.content ?? currentRevision.content;
+  const isDefaultMemory = value.isDefaultMemory ?? current.isDefaultMemory;
+  if (isDefaultMemory && content.length > PERSONAL_DEFAULT_MEMORY_MAX_CHARACTERS) return fail("PERSONAL_KNOWLEDGE_INVALID_INPUT");
+  if (isDefaultMemory && !current.isDefaultMemory) {
+    const count = await tx.personalKnowledgeDocument.count({ where: activeOwnerWhere(actor.id, { isDefaultMemory: true }) });
+    if (count >= PERSONAL_DEFAULT_MEMORY_MAX_DOCUMENTS) return fail("PERSONAL_KNOWLEDGE_DEFAULT_LIMIT_REACHED");
+  }
   const revisionId = randomUUID();
   const nextVersion = current.version + 1;
   const contentHash = sha256(content);
@@ -814,7 +837,7 @@ async function revisePersonalKnowledgeDocumentInTransaction(
   });
   const updated = await tx.personalKnowledgeDocument.updateMany({
     where: activeOwnerWhere(actor.id, { id: documentId, version: value.expectedVersion }),
-    data: { version: nextVersion, currentRevisionId: revisionId, updatedAt: now },
+    data: { version: nextVersion, currentRevisionId: revisionId, isDefaultMemory, updatedAt: now },
   });
   if (updated.count !== 1) return fail("PERSONAL_KNOWLEDGE_VERSION_CONFLICT");
   await invalidateIndexPointer(tx, { ownerUserId: actor.id, documentId, documentVersion: nextVersion, invalidatedAt: now });
@@ -825,7 +848,7 @@ async function revisePersonalKnowledgeDocumentInTransaction(
     event: "revised",
     contentHash,
     byteCount,
-    references: { revisionId, previousRevisionId: currentRevision.id, version: nextVersion, previousVersion: value.expectedVersion },
+    references: { revisionId, previousRevisionId: currentRevision.id, version: nextVersion, previousVersion: value.expectedVersion, isDefaultMemoryBefore: current.isDefaultMemory, isDefaultMemoryAfter: isDefaultMemory },
     createdAt: now,
   });
   const result = await tx.personalKnowledgeDocument.findFirst({

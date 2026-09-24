@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertSameOrigin, requireApiSession } from "@/lib/auth";
-import { handleApiError } from "@/lib/api-response";
-import { getMcpConnection, McpCapabilityError } from "@/lib/mcp";
+import { handleApiError, readJsonBody } from "@/lib/api-response";
+import { getMcpConnection, updateMcpConnection, McpCapabilityError } from "@/lib/mcp";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
+const renameSchema = z.object({ name: z.string().trim().min(1).max(80), expectedUpdatedAt: z.string().datetime({ offset: true }) }).strict();
 const noStore = { "cache-control": "no-store" } as const;
 
 export async function GET(request: Request, context: { params: Promise<{ connectionId: string }> }) {
@@ -22,9 +23,9 @@ export async function GET(request: Request, context: { params: Promise<{ connect
 export async function PATCH(request: Request, context: { params: Promise<{ connectionId: string }> }) {
   try {
     assertSameOrigin(request);
-    await requireApiSession(request);
-    idSchema.parse((await context.params).connectionId);
-    throw new McpCapabilityError("MCP_CONNECTION_GOVERNANCE_REQUIRED");
+    const actor = await requireApiSession(request);
+    const connectionId = idSchema.parse((await context.params).connectionId);
+    return NextResponse.json({ connection: await updateMcpConnection(connectionId, renameSchema.parse(await readJsonBody(request)), actor) }, { headers: noStore });
   } catch (error) {
     return handleApiError(error);
   }

@@ -69,7 +69,7 @@ function sourceKindLabel(kind: string): string {
 export function PersonalProjectSearchPanel(): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [scope, setScope] = useState<"selected" | "allAccessible">("allAccessible");
+  const [scope, setScope] = useState<"selected" | "allAccessible">("selected");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<readonly ProjectSearchResult[]>([]);
   const [personalResults, setPersonalResults] = useState<readonly PersonalResult[]>([]);
@@ -96,7 +96,9 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
       ]);
       const byId = new Map<string, ProjectOption>();
       for (const project of [...(activePayload.projects ?? []), ...(archivedPayload.projects ?? [])]) byId.set(project.id, project);
-      setProjects([...byId.values()]);
+      const available = [...byId.values()];
+      setProjects(available);
+      setSelectedIds((current) => current.length > 0 ? current : available[0] ? [available[0].id] : []);
       setProjectError(null);
     }).catch((cause) => {
       if (controller.signal.aborted) return;
@@ -208,7 +210,7 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Workspace search</p>
           <h2 id="personal-project-search-title" className="mt-2 text-lg font-semibold text-slate-900">搜索个人工作台</h2>
-          <p className="mt-1 text-xs leading-5 text-slate-500">搜索当前有权访问的项目及个人知识；项目记忆优先展示，个人知识随后展示。项目内容不会复制到个人库。</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">默认只搜索第一个可访问项目及个人知识。跨项目检索需手动选择范围；结果保留项目归属，不会合并成一套规则。</p>
         </div>
         <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">最多 {MAX_SELECTED_PROJECTS} 个项目</span>
       </div>
@@ -250,7 +252,7 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
       {error ? <p className="mt-4 rounded-xl bg-rose-50 px-4 py-3 text-xs leading-5 text-rose-700" role="alert">{error}</p> : null}
       {scope === "allAccessible" ? <p className="mt-4 text-xs text-slate-400">当前范围：本次搜索时仍有权访问的全部项目（最多 50 个）</p> : selectedProjects.length > 0 ? <p className="mt-4 text-xs text-slate-400">当前范围：{selectedProjects.map((project) => project.name).join("、")}</p> : null}
       {!searching && results.length === 0 && personalResults.length === 0 && (scope === "allAccessible" || selectedProjects.length > 0) && query.trim().length > 0 && error === null ? <p className="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-5 text-center text-xs text-slate-500">没有找到匹配的内容。</p> : null}
-      {results.length > 0 ? <h3 className="mt-5 text-sm font-semibold text-slate-800">项目记忆 · 优先</h3> : null}
+      {results.length > 0 ? <h3 className="mt-5 text-sm font-semibold text-slate-800">所选范围的项目结果</h3> : null}
       {results.length > 0 ? <ol className="mt-3 space-y-3" aria-label="项目搜索结果">
         {results.map((result) => <li key={`${result.projectId}:${result.citation.chunkId}`} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500"><span className="font-semibold text-indigo-700">#{result.rank} {result.projectName}</span><span>·</span><span>{sourceKindLabel(result.citation.sourceKind)}</span><span>·</span><span>来源 {result.citation.sourceId.slice(0, 8)}…</span><span>·</span><span>当前索引 {result.snapshotId.slice(0, 8)}…</span></div>

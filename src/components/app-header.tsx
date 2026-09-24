@@ -3,12 +3,12 @@ import { NotificationBell } from "./notification-bell";
 
 /** Global user-facing destinations that can own the active navigation state. */
 type PrimarySection = "dashboard" | "projects" | "personalKnowledge" | "settings" | "connections" | "team" | "notifications" | "profile" | "guide" | "admin";
-type ProjectSection = "overview" | "configuration" | "materials" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
+type ProjectSection = "overview" | "configuration" | "members" | "materials" | "assets" | "externalSources" | "repositories" | "world" | "plan" | "automations" | "tools" | "actions" | "control" | "memory" | "memoryQuality" | "intelligence" | "governance" | "guide";
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid", adminOnly: false },
   { key: "personalKnowledge", label: "个人工作台", href: "/personal", icon: "book", adminOnly: false },
-  { key: "team", label: "我的团队", href: "/team", icon: "users", adminOnly: false },
+  { key: "team", label: "团队与成员", href: "/team", icon: "users", adminOnly: false },
 ] as const;
 
 const materialSections: readonly ProjectSection[] = ["materials", "assets", "externalSources", "repositories"];
@@ -96,7 +96,7 @@ export function AppHeader({
           <div className="mx-auto max-w-7xl px-5 py-2.5 sm:px-8 lg:px-10">
             <nav className="flex w-full flex-wrap items-center gap-1 rounded-xl border border-slate-200/80 bg-white/70 p-1 shadow-sm shadow-slate-950/[0.02]" aria-label="项目导航">
               <Link
-                href="/projects"
+                href="/personal/projects"
                 className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 hover:bg-indigo-50 hover:text-indigo-700"
               >
                 <NavIcon name="arrow-left" />
@@ -118,6 +118,14 @@ export function AppHeader({
               >
                 <NavIcon name="settings" />
                 项目配置
+              </Link>
+              <Link
+                href={`/projects/${projectId}/members`}
+                aria-current={projectSection === "members" ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "members" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="users" />
+                项目成员与权限
               </Link>
               <Link
                 href={`/projects/${projectId}/plan`}

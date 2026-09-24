@@ -57,11 +57,13 @@ function zip(entries: ReadonlyArray<readonly [string, string]>): Buffer {
   return Buffer.concat([...localParts, centralDirectory, end]);
 }
 
-function emptyPdf(width = 120, height = 120): Buffer {
+function emptyPdf(width = 120, height = 120, pageCount = 1): Buffer {
+  const pageIds = Array.from({ length: pageCount }, (_, index) => index + 3);
+  const contentsId = pageCount + 3;
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << >> /Contents 4 0 R >>`,
+    `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageCount} >>`,
+    ...pageIds.map(() => `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << >> /Contents ${contentsId} 0 R >>`),
     "<< /Length 0 >>\nstream\n\nendstream",
   ];
   let body = "%PDF-1.4\n";
@@ -76,6 +78,13 @@ function emptyPdf(width = 120, height = 120): Buffer {
   body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(body, "ascii");
 }
+
+test("personal PDF page budget rejects large documents without breaking the next parse", async () => {
+  const input = { mimeType: "application/pdf", fileName: "scan.pdf", maxPdfPages: 1 } as const;
+  await assert.rejects(parseAssetBuffer({ ...input, buffer: emptyPdf(120, 120, 2) }), /ASSET_DOCUMENT_TOO_LARGE/u);
+  const segments = await parseAssetBuffer({ ...input, buffer: emptyPdf() });
+  assert.equal(segments.length, 1);
+});
 
 test("asset detection validates real signatures, dimensions and file names", async () => {
   const canvas = createCanvas(24, 16);
@@ -128,6 +137,19 @@ test("deterministic parsers preserve Word, PowerPoint and spreadsheet locators",
   assert.equal(sheets[0]!.sheetName, "计划");
   assert.equal(sheets[0]!.cellRange, "A1:B1");
   assert.match(sheets[0]!.contentText, /B1: 小王/);
+});
+
+test("personal import can cap DOCX expansion below the project parser defaults", async () => {
+  const docx = zip([["word/document.xml", `<w:document><w:body><w:p><w:r><w:t>${"A".repeat(200)}</w:t></w:r></w:p></w:body></w:document>`]]);
+  await assert.rejects(
+    () => parseAssetBuffer({
+      buffer: docx,
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      fileName: "large.docx",
+      archiveLimits: { maxEntries: 10, maxExpandedBytes: 100, maxSelectedEntryBytes: 100 },
+    }),
+    (error: unknown) => error instanceof ProjectAssetArchiveError && error.code === "ASSET_ARCHIVE_TOO_LARGE",
+  );
 });
 
 test("blank presentation is rejected instead of being published as an empty source", async () => {

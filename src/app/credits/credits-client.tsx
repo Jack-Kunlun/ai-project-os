@@ -60,6 +60,7 @@ const operationOptions = [
   ["all", "全部操作"], ["embedding", "向量索引"], ["visionExtract", "图片识别"], ["autoExtract", "自动抽取"], ["sourceSummary", "资料摘要"], ["projectAnalysis", "项目分析"], ["generateWithContext", "引用式生成"],
 ] as const;
 const scopeOptions = [["all", "全部范围"], ["personal", "个人用量"], ["project", "项目用量"]] as const;
+type ProjectOption = { id: string; name: string; archivedAt: string | null };
 
 function formatNumber(value: number): string {
   return value.toLocaleString("zh-CN");
@@ -102,20 +103,52 @@ export function CreditsClient({ username, isSystemAdmin = false, initialProjectI
   const [modelId, setModelId] = useState("");
   const [scope, setScope] = useState<Report["query"]["scope"]>(initialProjectId ? "project" : "all");
   const [projectId, setProjectId] = useState(initialProjectId ?? "");
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [requestVersion, setRequestVersion] = useState(0);
 
-  const load = useCallback(async () => {
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadProjects() {
+      try {
+        const collected: ProjectOption[] = [];
+        for (const view of ["active", "archived"] as const) {
+          for (let pageNumber = 1; ; pageNumber += 1) {
+            const response = await fetch(`/api/projects?view=${view}&page=${pageNumber}&pageSize=50`, { cache: "no-store", signal: controller.signal });
+            if (!response.ok) throw new Error(await readError(response, "可选项目加载失败"));
+            const payload = await response.json() as { projects: ProjectOption[]; pagination: { totalPages: number } };
+            collected.push(...payload.projects);
+            if (pageNumber >= payload.pagination.totalPages) break;
+          }
+        }
+        if (controller.signal.aborted) return;
+        setProjects(collected);
+        setProjectsError(null);
+        setProjectId((current) => collected.some((project) => project.id === current) ? current : collected[0]?.id ?? "");
+      } catch (cause) {
+        if (!controller.signal.aborted) setProjectsError(cause instanceof Error ? cause.message : "可选项目加载失败");
+      } finally {
+        if (!controller.signal.aborted) setProjectsLoading(false);
+      }
+    }
+    void loadProjects();
+    return () => controller.abort();
+  }, []);
+
+  const load = useCallback(async (signal: AbortSignal) => {
+    if (signal.aborted) return;
     if (range === "custom" && (!from || !to)) {
       setLoading(false);
       setReport(null);
       setError(null);
       return;
     }
-    if (scope === "project" && !projectId.trim()) {
+    if (scope === "project" && (projectsLoading || !projectId)) {
       setLoading(false);
       setReport(null);
       setError(null);
@@ -128,18 +161,21 @@ export function CreditsClient({ username, isSystemAdmin = false, initialProjectI
     if (modelId.trim()) params.set("modelId", modelId.trim());
     if (scope === "project") params.set("projectId", projectId.trim());
     try {
-      const response = await fetch(`/api/credits?${params.toString()}`, { cache: "no-store" });
+      const response = await fetch(`/api/credits?${params.toString()}`, { cache: "no-store", signal });
       if (!response.ok) throw new Error(await readError(response, "额度报表加载失败"));
-      setReport((await response.json() as { report: Report }).report);
+      const payload = await response.json() as { report: Report };
+      if (signal.aborted) return;
+      setReport(payload.report);
       setError(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "额度报表加载失败");
-    } finally { setLoading(false); }
-  }, [from, kind, modelId, operation, page, projectId, range, scope, timezone, to]);
+      if (!signal.aborted) setError(cause instanceof Error ? cause.message : "额度报表加载失败");
+    } finally { if (!signal.aborted) setLoading(false); }
+  }, [from, kind, modelId, operation, page, projectId, projectsLoading, range, scope, timezone, to]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void load(controller.signal), 0);
+    return () => { window.clearTimeout(timer); controller.abort(); };
   }, [load, requestVersion]);
 
   const maxDaily = useMemo(() => Math.max(1, ...(report?.usage.daily.map((point) => point.settledCredits) ?? [0])), [report]);
@@ -164,13 +200,13 @@ export function CreditsClient({ username, isSystemAdmin = false, initialProjectI
       <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7">
         <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Usage report</p><h2 className="mt-2 text-xl font-semibold">每日用量</h2><p className="mt-1.5 text-sm text-slate-500">按 {report?.query.timezone ?? timezone} 统计，零使用日也会保留。</p></div><div className="flex flex-wrap gap-2">{(Object.keys(rangeLabels) as Array<Report["query"]["range"]>).map((value) => <button key={value} type="button" onClick={() => { setRange(value); setPage(1); }} className={`rounded-xl px-3.5 py-2 text-xs font-semibold transition ${range === value ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-700"}`}>{rangeLabels[value]}</button>)}</div></div>
         {range === "custom" ? <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-xs font-semibold text-slate-600">开始日期<input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal" /></label><label className="text-xs font-semibold text-slate-600">结束日期<input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal" /></label></div> : null}
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><label className="text-xs font-semibold text-slate-600">统计范围<select value={scope} onChange={(event) => { const next = event.target.value as Report["query"]["scope"]; setScope(next); setPage(1); }} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal">{scopeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-xs font-semibold text-slate-600">统计时区<select value={timezone} onChange={(event) => { setTimezone(event.target.value); setPage(1); }} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal"><option value="UTC">UTC</option><option value="Asia/Shanghai">Asia/Shanghai</option><option value="Asia/Tokyo">Asia/Tokyo</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="America/New_York">America/New_York</option><option value="Europe/London">Europe/London</option></select></label><label className="text-xs font-semibold text-slate-600">操作类型<select value={operation} onChange={(event) => { setOperation(event.target.value as Report["query"]["operation"]); setPage(1); }} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal">{operationOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-xs font-semibold text-slate-600">模型筛选<input value={modelId} onChange={(event) => { setModelId(event.target.value); setPage(1); }} placeholder="输入模型标识" className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal" /></label></div>{scope === "project" ? <label className="mt-3 block text-xs font-semibold text-slate-600">项目 ID<input value={projectId} onChange={(event) => { setProjectId(event.target.value); setPage(1); }} placeholder="输入项目 UUID" className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal" /></label> : null}
-        {scope === "project" && !projectId.trim() ? <p role="status" className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2.5 text-xs leading-5 text-indigo-700">请从项目页面进入额度详情，或粘贴有权项目的 UUID 后查看项目用量。</p> : null}
-        {loading && !report ? <div className="mt-6 h-56 animate-pulse rounded-2xl bg-slate-50" /> : report ? <div className="mt-6 overflow-x-auto"><div className="min-w-[540px] space-y-3">{report.usage.daily.map((point) => <div key={point.date} className="grid grid-cols-[72px_1fr_84px] items-center gap-3 text-xs"><span className="text-slate-500">{formatDay(point.date)}</span><div className="h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500 transition-[width]" style={{ width: `${Math.min(100, (point.settledCredits / maxDaily) * 100)}%` }} /></div><span className="text-right font-semibold text-slate-700">{formatNumber(point.settledCredits)}</span>{point.pendingCredits > 0 ? <span className="col-span-2 col-start-2 text-xs text-amber-700">待核对 {formatNumber(point.pendingCredits)}</span> : null}</div>)}</div><div className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-500"><span>已结算：<strong className="text-slate-800">{formatNumber(report.usage.settledCredits)}</strong></span><span>待核对：<strong className="text-amber-700">{formatNumber(report.usage.pendingCredits)}</strong></span></div></div> : null}
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><label className="text-xs font-semibold text-slate-600">统计范围<select value={scope} onChange={(event) => { const next = event.target.value as Report["query"]["scope"]; setScope(next); setPage(1); }} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal">{scopeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-xs font-semibold text-slate-600">统计时区<select value={timezone} onChange={(event) => { setTimezone(event.target.value); setPage(1); }} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal"><option value="UTC">UTC</option><option value="Asia/Shanghai">Asia/Shanghai</option><option value="Asia/Tokyo">Asia/Tokyo</option><option value="America/Los_Angeles">America/Los_Angeles</option><option value="America/New_York">America/New_York</option><option value="Europe/London">Europe/London</option></select></label><label className="text-xs font-semibold text-slate-600">操作类型<select value={operation} onChange={(event) => { setOperation(event.target.value as Report["query"]["operation"]); setPage(1); }} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal">{operationOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="text-xs font-semibold text-slate-600">模型筛选<input value={modelId} onChange={(event) => { setModelId(event.target.value); setPage(1); }} placeholder="输入模型标识" className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal" /></label></div>{scope === "project" ? <label className="mt-3 block text-xs font-semibold text-slate-600">项目<select value={projectId} onChange={(event) => { setProjectId(event.target.value); setPage(1); }} disabled={projectsLoading || projects.length === 0} className="mt-2 block min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal disabled:opacity-60">{projectsLoading ? <option value="">正在加载项目…</option> : projects.length === 0 ? <option value="">暂无可访问项目</option> : projects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.archivedAt ? "（已归档）" : ""}</option>)}</select></label> : null}
+        {scope === "project" && projectsError ? <p role="alert" className="mt-3 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2.5 text-xs leading-5 text-rose-700">{projectsError}</p> : null}
+        {loading && !report ? <div className="mt-6 h-56 animate-pulse rounded-2xl bg-slate-50" /> : report ? <div className="mt-6"><dl className="grid gap-3 sm:grid-cols-3"><div className="rounded-2xl bg-indigo-50 px-4 py-4"><dt className="text-xs font-semibold text-indigo-700">{report.usage.daily.at(-1) ? formatDay(report.usage.daily.at(-1)!.date) : "末日"}已结算</dt><dd className="mt-2 text-2xl font-semibold text-slate-900">{formatNumber(report.usage.daily.at(-1)?.settledCredits ?? 0)}</dd></div><div className="rounded-2xl bg-slate-50 px-4 py-4"><dt className="text-xs font-semibold text-slate-600">所选周期已结算</dt><dd className="mt-2 text-2xl font-semibold text-slate-900">{formatNumber(report.usage.settledCredits)}</dd></div><div className="rounded-2xl bg-amber-50 px-4 py-4"><dt className="text-xs font-semibold text-amber-700">待核对</dt><dd className="mt-2 text-2xl font-semibold text-slate-900">{formatNumber(report.usage.pendingCredits)}</dd></div></dl><div className="mt-6 overflow-x-auto"><div className="min-w-[540px] space-y-3">{report.usage.daily.map((point) => <div key={point.date} className="grid grid-cols-[72px_1fr_84px] items-center gap-3 text-xs"><span className="text-slate-500">{formatDay(point.date)}</span><div className="h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-500 transition-[width]" style={{ width: `${Math.min(100, (point.settledCredits / maxDaily) * 100)}%` }} /></div><span className="text-right font-semibold text-slate-700">{formatNumber(point.settledCredits)}</span>{point.pendingCredits > 0 ? <span className="col-span-2 col-start-2 text-xs text-amber-700">待核对 {formatNumber(point.pendingCredits)}</span> : null}</div>)}</div></div></div> : null}
       </section>
 
       <section className="mt-6 rounded-3xl border border-slate-200/80 bg-white p-5 shadow-sm sm:p-7"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-600">Ledger</p><h2 className="mt-2 text-xl font-semibold">账单记录</h2><p className="mt-1.5 text-sm text-slate-500">流水保留真实额度变化，项目名称只在当前仍有访问权时展示。</p></div><label className="text-xs font-semibold text-slate-600">流水类型<select value={kind} onChange={(event) => { setKind(event.target.value as Report["query"]["kind"]); setPage(1); }} className="mt-2 block min-h-10 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal">{kindOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
-        {report ? <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[820px] text-left text-sm"><thead className="border-b border-slate-100 text-xs text-slate-400"><tr><th className="pb-3 pr-4 font-medium">时间</th><th className="pb-3 pr-4 font-medium">类型</th><th className="pb-3 pr-4 font-medium">项目 / 操作</th><th className="pb-3 pr-4 text-right font-medium">结算消耗</th><th className="pb-3 pr-4 text-right font-medium">可用余额变化</th><th className="pb-3 text-right font-medium">状态</th></tr></thead><tbody className="divide-y divide-slate-100">{report.ledger.entries.map((entry) => <tr key={entry.id} className="align-top"><td className="py-4 pr-4 whitespace-nowrap text-xs text-slate-500">{formatDate(entry.occurredAt)}</td><td className="py-4 pr-4"><span className="font-semibold text-slate-700">{entry.kindLabel}</span></td><td className="py-4 pr-4"><span className="block text-slate-700">{entry.projectName}</span><span className="mt-1 block text-xs text-slate-400">{entry.operationLabel ?? "未关联操作"}{entry.modelId ? ` · ${entry.modelId}` : ""}</span></td><td className="py-4 pr-4 text-right font-semibold text-slate-700">{entry.settledCredits ? formatNumber(entry.settledCredits) : "—"}</td><td className={`py-4 pr-4 text-right font-semibold ${entry.balanceDelta > 0 ? "text-emerald-700" : entry.balanceDelta < 0 ? "text-rose-700" : "text-slate-400"}`}>{entry.balanceDelta > 0 ? "+" : ""}{formatNumber(entry.balanceDelta)}</td><td className="py-4 text-right text-xs text-slate-500">{entry.status === "pending" ? "待核对" : entry.status === "expired" ? "已到期" : entry.status === "revoked" ? "已撤销" : entry.status === "reserved" ? "预留中" : entry.status === "settled" ? "已结算" : entry.status === "released" ? "已释放" : entry.status === "adjusted" ? "已调整" : "有效"}</td></tr>)}</tbody></table>{report.ledger.entries.length === 0 ? <p className="py-14 text-center text-sm text-slate-400">当前筛选范围暂无额度流水</p> : null}</div> : null}
+        {report ? <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[820px] text-center text-sm"><thead className="border-b border-slate-100 text-xs text-slate-400"><tr><th className="pb-3 pr-4 font-medium">时间</th><th className="pb-3 pr-4 font-medium">类型</th><th className="pb-3 pr-4 font-medium">项目 / 操作</th><th className="pb-3 pr-4 text-center font-medium">结算消耗</th><th className="pb-3 pr-4 text-center font-medium">可用余额变化</th><th className="pb-3 text-center font-medium">状态</th></tr></thead><tbody className="divide-y divide-slate-100">{report.ledger.entries.map((entry) => <tr key={entry.id} className="align-top"><td className="py-4 pr-4 whitespace-nowrap text-xs text-slate-500">{formatDate(entry.occurredAt)}</td><td className="py-4 pr-4"><span className="font-semibold text-slate-700">{entry.kindLabel}</span></td><td className="py-4 pr-4"><span className="block text-slate-700">{entry.projectName}</span><span className="mt-1 block text-xs text-slate-400">{entry.operationLabel ?? "未关联操作"}{entry.modelId ? ` · ${entry.modelId}` : ""}</span></td><td className="py-4 pr-4 text-center font-semibold text-slate-700">{entry.settledCredits ? formatNumber(entry.settledCredits) : "—"}</td><td className={`py-4 pr-4 text-center font-semibold ${entry.balanceDelta > 0 ? "text-emerald-700" : entry.balanceDelta < 0 ? "text-rose-700" : "text-slate-400"}`}>{entry.balanceDelta > 0 ? "+" : ""}{formatNumber(entry.balanceDelta)}</td><td className="py-4 text-center text-xs text-slate-500">{entry.status === "pending" ? "待核对" : entry.status === "expired" ? "已到期" : entry.status === "revoked" ? "已撤销" : entry.status === "reserved" ? "预留中" : entry.status === "settled" ? "已结算" : entry.status === "released" ? "已释放" : entry.status === "adjusted" ? "已调整" : "有效"}</td></tr>)}</tbody></table>{report.ledger.entries.length === 0 ? <p className="py-14 text-center text-sm text-slate-400">当前筛选范围暂无额度流水</p> : null}</div> : null}
         {report ? <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 text-xs text-slate-500"><span>共 {formatNumber(report.ledger.total)} 条记录</span><div className="flex gap-2"><button type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold disabled:opacity-40">上一页</button><span className="px-2 py-2">第 {report.ledger.page} 页</span><button type="button" disabled={!report.ledger.hasNextPage || loading} onClick={() => setPage((value) => value + 1)} className="rounded-lg border border-slate-200 px-3 py-2 font-semibold disabled:opacity-40">下一页</button></div></div> : null}
       </section>
 

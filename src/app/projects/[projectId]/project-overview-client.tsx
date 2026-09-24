@@ -213,14 +213,14 @@ export function ProjectOverviewClient({ username, isSystemAdmin }: { username: s
                 <div className="mt-5 flex flex-wrap gap-2"><button type="button" onClick={() => void generateSnapshot()} disabled={snapshotPending || summary.confirmed === 0 || data.project.archivedAt !== null} className="rounded-xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">{snapshotPending ? "更新中…" : data.snapshot ? "更新状态快照" : "生成状态快照"}</button><Link href={`/projects/${projectId}/world`} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-700 hover:border-indigo-200 hover:text-indigo-700">高级状态治理</Link></div>
               </article>
 
-              <article className="rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
+              <article className="flex flex-col rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm sm:p-7">
                 <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Attention</p><h2 className="mt-2 text-xl font-semibold">需要关注</h2></div>
                 <div className="mt-5 divide-y divide-slate-100">
                   <AttentionRow label="待审核内容" value={summary.pendingContent} href={buildProjectHref(projectId, "materialsReview", { focus: "review-queue", from: "overview", returnTo: buildProjectHref(projectId, "overview", { focus: "current-state" }) })} />
                   <AttentionRow label="任务异常" value={summary.taskIssues} href={buildProjectHref(projectId, "overview", { status: "failed", focus: "task-runs", from: "overview", returnTo: buildProjectHref(projectId, "overview", { focus: "current-state" }) })} />
                   <AttentionRow label="仓库同步风险" value={summary.githubIssues} href={`/projects/${projectId}/repositories`} />
                 </div>
-                <Link href={buildProjectHref(projectId, "overview", { focus: "task-runs", from: "overview" })} className="mt-5 inline-flex text-xs font-semibold text-indigo-600">查看任务运行记录 →</Link>
+                <Link href={buildProjectHref(projectId, "overview", { focus: "task-runs", from: "overview" })} className="mt-auto inline-flex min-h-10 items-center pt-5 text-xs font-semibold text-indigo-600">查看任务运行记录 →</Link>
               </article>
             </section>
 

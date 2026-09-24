@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
@@ -152,6 +152,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
   const [mode, setMode] = useState<EditorMode>("view");
   const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [revisions, setRevisions] = useState<KnowledgeRevision[]>([]);
@@ -401,6 +402,26 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
     clearDetailState("create");
     setDraft(emptyDraft);
     setMessage(null);
+  }
+
+  async function importFile(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    setMessage(null);
+    try {
+      const data = new FormData();
+      data.set("file", file);
+      const response = await fetch("/api/personal/knowledge/import", { method: "POST", body: data });
+      if (!response.ok) throw new Error(await readError(response, "文件内容提取失败"));
+      const payload = await response.json() as { preview: KnowledgeDraft };
+      startCreate();
+      setDraft(payload.preview);
+      setMessage({ tone: "success", text: "已提取文件内容，请核对后保存到个人知识库。" });
+    } catch (cause) {
+      setMessage({ tone: "error", text: cause instanceof Error ? cause.message : "文件内容提取失败" });
+    } finally { setImporting(false); }
   }
 
   /** Select a list row and reset detail state before its request begins. */
@@ -655,7 +676,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Knowledge list</p>
                 <h2 className="mt-2 text-2xl font-semibold">我的内容</h2>
               </div>
-              <button type="button" onClick={startCreate} className="shrink-0 rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500">新建内容</button>
+              <div className="flex shrink-0 flex-wrap gap-2"><label className="cursor-pointer rounded-xl border border-indigo-200 px-3.5 py-2.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50">{importing ? "提取中…" : "导入文件"}<input type="file" accept=".txt,.md,.json,.pdf,.docx" disabled={importing} onChange={(event) => void importFile(event)} className="sr-only" /></label><button type="button" onClick={startCreate} className="rounded-xl bg-indigo-600 px-3.5 py-2.5 text-xs font-semibold text-white transition hover:bg-indigo-500">新建内容</button></div>
             </div>
 
             <form onSubmit={submitSearch} className="mt-5 flex gap-2">

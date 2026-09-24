@@ -154,7 +154,8 @@ test("project search route and panel keep selected project scope explicit", asyn
   assert.match(panel, /projectIds: selectedIds/u);
   assert.match(panel, /全部可访问项目/u);
   assert.match(panel, /scope === "allAccessible"/u);
-  assert.match(panel, /不会复制项目内容或调用模型/u);
+  assert.match(panel, /项目记忆优先展示，个人知识随后展示/u);
+  assert.match(panel, /项目内容不会复制到个人库/u);
   assert.match(panel, /当前索引/u);
   assert.match(panel, /sourceKindLabel/u);
 });

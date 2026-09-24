@@ -4,7 +4,7 @@ import type {
   ProjectAssetSegmentLocatorKind,
 } from "@prisma/client";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/types/src/display/api";
-import { readSelectedZipEntries } from "@/lib/project-assets/archive";
+import { readSelectedZipEntries, type ArchiveReadLimits } from "@/lib/project-assets/archive";
 
 export const PROJECT_ASSET_PARSER_VERSION = "project-asset-parser:v1" as const;
 export const MAX_DOCUMENT_PAGES = 300;
@@ -115,57 +115,65 @@ function splitTextSegments(content: string, locator: string): readonly ParsedAss
   return Object.freeze(results);
 }
 
-async function parsePdf(buffer: Buffer): Promise<readonly ParsedAssetSegment[]> {
+async function parsePdf(buffer: Buffer, maxPages = MAX_DOCUMENT_PAGES): Promise<readonly ParsedAssetSegment[]> {
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     const loading = pdfjs.getDocument({ data: new Uint8Array(buffer), useSystemFonts: true });
-    const document = await loading.promise;
-    if (document.numPages < 1) return fail("ASSET_DOCUMENT_EMPTY");
-    if (document.numPages > MAX_DOCUMENT_PAGES) return fail("ASSET_DOCUMENT_TOO_LARGE");
-    const segments: ParsedAssetSegment[] = [];
-    let totalChars = 0;
-    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-      const page = await document.getPage(pageNumber);
-      const text = await page.getTextContent();
-      const parts: string[] = [];
-      for (const item of text.items) {
-        if (!("str" in item) || typeof item.str !== "string") continue;
-        parts.push(item.str);
-        if ("hasEOL" in item && item.hasEOL) parts.push("\n");
-        else parts.push(" ");
+    let document: PDFDocumentProxy | undefined;
+    try {
+      document = await loading.promise;
+      if (document.numPages < 1) return fail("ASSET_DOCUMENT_EMPTY");
+      if (document.numPages > maxPages) return fail("ASSET_DOCUMENT_TOO_LARGE");
+      const segments: ParsedAssetSegment[] = [];
+      let totalChars = 0;
+      for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+        const page = await document.getPage(pageNumber);
+        try {
+          const text = await page.getTextContent();
+          const parts: string[] = [];
+          for (const item of text.items) {
+            if (!("str" in item) || typeof item.str !== "string") continue;
+            parts.push(item.str);
+            if ("hasEOL" in item && item.hasEOL) parts.push("\n");
+            else parts.push(" ");
+          }
+          const contentText = normalizeText(parts.join(""));
+          totalChars += contentText.length;
+          if (totalChars > MAX_EXTRACTED_CHARS) return fail("ASSET_DOCUMENT_TOO_LARGE");
+          segments.push(segment({
+            ordinal: pageNumber - 1,
+            locatorKind: "page",
+            locatorLabel: `第 ${pageNumber} 页`,
+            pageNumber,
+            slideNumber: null,
+            sheetName: null,
+            cellRange: null,
+            requiresVision: contentText.length < 12,
+            extractionMethod: "localDocument",
+            contentText,
+          }));
+        } finally {
+          page.cleanup();
+        }
       }
-      const contentText = normalizeText(parts.join(""));
-      totalChars += contentText.length;
-      if (totalChars > MAX_EXTRACTED_CHARS) return fail("ASSET_DOCUMENT_TOO_LARGE");
-      segments.push(segment({
-        ordinal: pageNumber - 1,
-        locatorKind: "page",
-        locatorLabel: `第 ${pageNumber} 页`,
-        pageNumber,
-        slideNumber: null,
-        sheetName: null,
-        cellRange: null,
-        requiresVision: contentText.length < 12,
-        extractionMethod: "localDocument",
-        contentText,
-      }));
-      page.cleanup();
+      if (segments.filter((entry) => entry.requiresVision).length > MAX_VISION_SEGMENTS_PER_ASSET) {
+        return fail("ASSET_DOCUMENT_TOO_LARGE");
+      }
+      return Object.freeze(segments);
+    } finally {
+      if (document) await document.destroy();
+      else await loading.destroy();
     }
-    await document.destroy();
-    if (segments.filter((entry) => entry.requiresVision).length > MAX_VISION_SEGMENTS_PER_ASSET) {
-      return fail("ASSET_DOCUMENT_TOO_LARGE");
-    }
-    return Object.freeze(segments);
   } catch (error) {
     if (error instanceof ProjectAssetParserError) throw error;
     return fail("ASSET_DOCUMENT_INVALID");
   }
 }
 
-async function parseDocx(buffer: Buffer): Promise<readonly ParsedAssetSegment[]> {
+async function parseDocx(buffer: Buffer, archiveLimits?: ArchiveReadLimits): Promise<readonly ParsedAssetSegment[]> {
   const entries = await readSelectedZipEntries(buffer, (name) =>
     /^word\/(?:document|header\d+|footer\d+|footnotes|endnotes)\.xml$/u.test(name),
-  );
+    archiveLimits);
   const documentXml = entries.get("word/document.xml");
   if (documentXml === undefined) return fail("ASSET_DOCUMENT_INVALID");
   const ordered = [...entries.entries()].sort(([left], [right]) => left.localeCompare(right));
@@ -293,12 +301,14 @@ export async function parseAssetBuffer(input: Readonly<{
   buffer: Buffer;
   mimeType: string;
   fileName: string;
+  archiveLimits?: ArchiveReadLimits;
+  maxPdfPages?: number;
 }>): Promise<readonly ParsedAssetSegment[]> {
   if (input.mimeType.startsWith("text/") || input.mimeType === "application/json") {
     return splitTextSegments(new TextDecoder().decode(input.buffer), input.fileName);
   }
-  if (input.mimeType === "application/pdf") return parsePdf(input.buffer);
-  if (input.mimeType.endsWith("wordprocessingml.document")) return parseDocx(input.buffer);
+  if (input.mimeType === "application/pdf") return parsePdf(input.buffer, input.maxPdfPages);
+  if (input.mimeType.endsWith("wordprocessingml.document")) return parseDocx(input.buffer, input.archiveLimits);
   if (input.mimeType.endsWith("presentationml.presentation")) return parsePptx(input.buffer);
   if (input.mimeType.endsWith("spreadsheetml.sheet")) return parseXlsx(input.buffer);
   if (input.mimeType.startsWith("image/")) {

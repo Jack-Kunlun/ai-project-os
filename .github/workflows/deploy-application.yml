@@ -2,15 +2,6 @@ name: Deploy application
 
 on:
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Annotated 0.6 application release tag
-        required: true
-        type: string
-      source_tag:
-        description: Release currently serving production
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -42,12 +33,20 @@ jobs:
 
       - name: Resolve release tag and require its successful CI
         env:
-          DEPLOY_TAG_INPUT: ${{ inputs.tag }}
-          DEPLOY_SOURCE_TAG_INPUT: ${{ inputs.source_tag }}
           GH_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+
+          DEPLOY_TAG_INPUT="v$(node -p 'require("./package.json").version')"
+          production_health=$(curl --fail --silent --show-error \
+            --connect-timeout 10 --max-time 20 https://ai-project-os.com/api/health)
+          if ! jq --exit-status '.status == "ok" and .database == "up" and .worker.status == "up"' \
+            <<<"$production_health" >/dev/null; then
+            echo "DEPLOY_SOURCE_HEALTH_INVALID" >&2
+            exit 64
+          fi
+          DEPLOY_SOURCE_TAG_INPUT="v$(jq --exit-status --raw-output '.version | strings' <<<"$production_health")"
 
           if [[ ! "$DEPLOY_TAG_INPUT" =~ ^v0\.6\.0-dev\.([1-9][0-9]*)$ ]]; then
             echo "DEPLOY_TAG_INVALID" >&2
@@ -62,6 +61,10 @@ jobs:
           if (( ${#source_sequence} > 6 || ${#target_sequence} > 6 )); then
             echo "DEPLOY_TAG_SEQUENCE_INVALID" >&2
             exit 64
+          fi
+          expected_migration_count=116
+          if (( source_sequence >= 11 )); then
+            expected_migration_count=117
           fi
           if (( source_sequence < 8 || target_sequence <= source_sequence )); then
             echo "DEPLOY_TAG_ORDER_INVALID" >&2
@@ -109,7 +112,7 @@ jobs:
           fi
 
           migration_count=$(git ls-tree -d --name-only "$deploy_sha:prisma/migrations" | grep -Ec '^[0-9]{14}_')
-          if [[ "$migration_count" != 116 ]]; then
+          if [[ "$migration_count" != "$expected_migration_count" ]]; then
             echo "DEPLOY_MIGRATION_COUNT_INVALID" >&2
             exit 66
           fi

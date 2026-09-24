@@ -12,6 +12,8 @@ import { claimProjectJob } from "../src/lib/project-workflow";
 import { finishWebAiJob, stableAiCallKey, auditedProviderCall } from "../src/lib/web-ai-governance";
 import { WebAiAccessError, type WebAiActor } from "../src/lib/web-ai-access";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
+import { createPersonalKnowledgeDocument, revisePersonalKnowledgeDocument } from "../src/lib/personal-knowledge-service";
+import { loadProjectPersonalDefaults } from "../src/lib/project-personal-default-memory";
 import { createConfirmedWebAiJobForPostgresGate } from "./web-ai-confirmation-fixture";
 import { createSignupOfferFixture } from "./platform-grant-offer-policy-fixture";
 import { activateCanonicalSignupGrant } from "./account-entitlement-test-helper";
@@ -432,6 +434,124 @@ test(
       assert.equal(attempt.dispatchState, "pending");
     } finally {
       globalThis.fetch = previousFetch;
+    }
+  },
+);
+
+test(
+  "unmarking a personal default after admission blocks the provider request",
+  { skip: !shouldRun ? "WEB_AI_GOVERNANCE_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const fixture = await createDispatchFixture();
+    const document = await createPersonalKnowledgeDocument({
+      title: "Personal convention",
+      content: "Prefer Vue 3",
+      isDefaultMemory: true,
+    }, fixture.actor, fixture.db);
+    const defaults = await loadProjectPersonalDefaults(fixture.projectId, fixture.actor, fixture.db);
+    const previousFetch = globalThis.fetch;
+    let networkCalls = 0;
+    globalThis.fetch = async () => {
+      networkCalls += 1;
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const callKey = stableAiCallKey(fixture.jobId, "autoExtract", "personal-default-unmark");
+    try {
+      await assert.rejects(
+        () => auditedProviderCall({
+          jobId: fixture.jobId,
+          attempt: fixture.claim,
+          actor: fixture.actor,
+          route: fixture.route,
+          grantId: fixture.grantId,
+          callKey,
+          personalDefaultFingerprint: defaults.fingerprint,
+          call: async (dispatch) => {
+            await revisePersonalKnowledgeDocument(String(document.id), {
+              expectedVersion: 1,
+              isDefaultMemory: false,
+            }, fixture.actor, fixture.db);
+            return invokeChatCompletion({
+              connection: dispatch.connection,
+              operation: "autoExtract",
+              modelId: dispatch.modelId,
+              messages: [{ role: "user", content: "Prefer Vue 3" }],
+              maxOutputTokens: dispatch.maxOutputTokens,
+            });
+          },
+        }, fixture.db),
+        (error: unknown) => error instanceof ProviderTransportError && error.code === "AI_PROVIDER_UNAVAILABLE",
+      );
+      assert.equal(networkCalls, 0);
+      const audit = await fixture.db.providerCallAudit.findFirstOrThrow({ where: { jobId: fixture.jobId, callKey } });
+      assert.equal(audit.status, "failed");
+      const attempt = await fixture.db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: fixture.jobId } });
+      assert.equal(attempt.dispatchState, "pending");
+    } finally {
+      globalThis.fetch = previousFetch;
+      await cleanupDispatchFixture(fixture);
+    }
+  },
+);
+
+test(
+  "unmarking after the credential boundary is blocked by the request boundary",
+  { skip: !shouldRun ? "WEB_AI_GOVERNANCE_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const fixture = await createDispatchFixture();
+    const document = await createPersonalKnowledgeDocument({
+      title: "Personal convention",
+      content: "Prefer Vue 3",
+      isDefaultMemory: true,
+    }, fixture.actor, fixture.db);
+    const defaults = await loadProjectPersonalDefaults(fixture.projectId, fixture.actor, fixture.db);
+    const previousFetch = globalThis.fetch;
+    let networkCalls = 0;
+    globalThis.fetch = async () => {
+      networkCalls += 1;
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const callKey = stableAiCallKey(fixture.jobId, "autoExtract", "personal-default-after-credential");
+    try {
+      await assert.rejects(
+        () => auditedProviderCall({
+          jobId: fixture.jobId,
+          attempt: fixture.claim,
+          actor: fixture.actor,
+          route: fixture.route,
+          grantId: fixture.grantId,
+          callKey,
+          personalDefaultFingerprint: defaults.fingerprint,
+          call: (dispatch) => invokeChatCompletion({
+            connection: {
+              ...dispatch.connection,
+              apiKey: "disposable-test-key",
+              onBeforeCredentialRead: async () => {
+                await (dispatch.connection as typeof dispatch.connection & {
+                  onBeforeCredentialRead?: () => void | boolean | Promise<void | boolean>;
+                }).onBeforeCredentialRead?.();
+                await revisePersonalKnowledgeDocument(String(document.id), {
+                  expectedVersion: 1,
+                  isDefaultMemory: false,
+                }, fixture.actor, fixture.db);
+              },
+            },
+            operation: "autoExtract",
+            modelId: dispatch.modelId,
+            messages: [{ role: "user", content: "Prefer Vue 3" }],
+            maxOutputTokens: dispatch.maxOutputTokens,
+          }),
+        }, fixture.db),
+        (error: unknown) => error instanceof ProviderTransportError && error.code === "AI_PROVIDER_UNAVAILABLE",
+      );
+      assert.equal(networkCalls, 0);
+      const audit = await fixture.db.providerCallAudit.findFirstOrThrow({ where: { jobId: fixture.jobId, callKey } });
+      assert.equal(audit.status, "failed");
+      const attempt = await fixture.db.backgroundJobAttempt.findFirstOrThrow({ where: { jobId: fixture.jobId } });
+      assert.equal(attempt.dispatchState, "pending");
+    } finally {
+      globalThis.fetch = previousFetch;
+      await cleanupDispatchFixture(fixture);
     }
   },
 );

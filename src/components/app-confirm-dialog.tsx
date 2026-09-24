@@ -97,20 +97,24 @@ export function useAppConfirmDialog() {
 
   const dialog = request === null || options === undefined ? null : (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-6" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(false); }}>
-      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className="w-full max-w-lg rounded-t-[2rem] bg-white p-7 shadow-2xl sm:rounded-[2rem] sm:p-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{options.eyebrow ?? "Confirm action"}</p>
-        <h2 id={titleId} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{options.title}</h2>
-        <p id={descriptionId} className={`mt-3 text-sm leading-6 ${descriptionClass}`}>{options.description}</p>
-        {hasInput ? (
-          <label className="mt-5 block text-sm font-semibold text-slate-700">
-            {options.inputLabel}
-            <input autoFocus value={value} onChange={(event) => { valueRef.current = event.target.value; setValue(event.target.value); }} maxLength={options.maxLength ?? 500} placeholder={options.inputPlaceholder} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${tone === "danger" ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-indigo-300 focus:ring-indigo-100"}`} />
-          </label>
-        ) : null}
-        <div className="mt-7 flex justify-end gap-3">
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-t-[2rem] bg-white shadow-2xl sm:rounded-[2rem]">
+        <header className="shrink-0 border-b border-slate-100 px-7 py-5 sm:px-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{options.eyebrow ?? "Confirm action"}</p>
+          <h2 id={titleId} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{options.title}</h2>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
+          <p id={descriptionId} className={`text-sm leading-6 ${descriptionClass}`}>{options.description}</p>
+          {hasInput ? (
+            <label className="mt-5 block text-sm font-semibold text-slate-700">
+              {options.inputLabel}
+              <input autoFocus value={value} onChange={(event) => { valueRef.current = event.target.value; setValue(event.target.value); }} maxLength={options.maxLength ?? 500} placeholder={options.inputPlaceholder} className={`mt-2 w-full rounded-xl border px-4 py-3 text-sm outline-none focus:ring-4 ${tone === "danger" ? "border-rose-200 focus:border-rose-400 focus:ring-rose-100" : "border-slate-200 focus:border-indigo-300 focus:ring-indigo-100"}`} />
+            </label>
+          ) : null}
+        </div>
+        <footer className="flex shrink-0 justify-end gap-3 border-t border-slate-100 bg-white px-7 py-5 sm:px-8">
           <button type="button" onClick={() => close(false)} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600">{options.cancelLabel ?? "取消"}</button>
           <button type="button" onClick={() => close(true)} disabled={!inputValid} className={`rounded-xl px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-40 ${confirmClass}`}>{options.confirmLabel ?? "确认"}</button>
-        </div>
+        </footer>
       </section>
     </div>
   );

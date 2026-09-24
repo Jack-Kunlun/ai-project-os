@@ -5,9 +5,11 @@ import { assertSameOrigin, requireApiSession } from "@/lib/auth";
 import { ProjectAssetArchiveError } from "@/lib/project-assets/archive";
 import { parseAssetBuffer, ProjectAssetParserError } from "@/lib/project-assets/parser";
 import { PERSONAL_KNOWLEDGE_CONTENT_MAX_LENGTH } from "@/lib/personal-knowledge-service";
+import { extractPersonalKnowledgeVision, preparePersonalKnowledgeVision } from "@/lib/personal-knowledge-vision";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const maxDuration = 180;
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_CONCURRENT_IMPORTS = 2;
@@ -15,6 +17,7 @@ let activeImports = 0;
 const mimeByExtension: Record<string, string> = {
   txt: "text/plain", md: "text/markdown", json: "application/json",
   pdf: "application/pdf",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
 function noStore<T extends Response>(response: T): T {
@@ -23,6 +26,7 @@ function noStore<T extends Response>(response: T): T {
 }
 
 export async function POST(request: Request) {
+  const executionDeadlineAt = new Date(Date.now() + 150_000);
   try {
     assertSameOrigin(request);
     const actor = await requireApiSession(request);
@@ -40,23 +44,51 @@ export async function POST(request: Request) {
       throw new ApiError(400, "PERSONAL_KNOWLEDGE_IMPORT_INVALID", "文件上传格式无效");
     }
     const entries = [...data.entries()];
-    if (entries.length !== 1 || entries[0]?.[0] !== "file" || !(entries[0][1] instanceof File)) {
+    const keys = entries.map(([key]) => key).sort().join(",");
+    if (!(keys === "file" || keys === "file,forceVision" || keys === "action,file,providerId"
+      || keys === "action,file,forceVision,providerId" || keys === "action,attemptId,file"
+      || keys === "action,attemptId,file,forceVision")
+      || !(data.get("file") instanceof File)) {
       throw new ApiError(400, "PERSONAL_KNOWLEDGE_IMPORT_INVALID", "请选择一个文件");
     }
-    const file = entries[0][1];
+    const file = data.get("file") as File;
     if (file.size === 0 || file.size > MAX_FILE_BYTES) throw new ApiError(413, "PERSONAL_KNOWLEDGE_IMPORT_TOO_LARGE", "文件超过 2 MB 限制");
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
     const mimeType = mimeByExtension[extension];
-    if (!mimeType) throw new ApiError(415, "PERSONAL_KNOWLEDGE_IMPORT_UNSUPPORTED", "当前支持 TXT、Markdown、JSON、PDF 和 DOCX");
+    if (!mimeType) throw new ApiError(415, "PERSONAL_KNOWLEDGE_IMPORT_UNSUPPORTED", "当前支持 TXT、Markdown、JSON、PDF、DOCX、PNG、JPEG 和 WebP");
+    const forceVision = data.get("forceVision");
+    if (forceVision !== null && (forceVision !== "true" || mimeType !== "application/pdf")) {
+      throw new ApiError(400, "PERSONAL_KNOWLEDGE_IMPORT_INVALID", "视觉识别选项仅适用于 PDF");
+    }
+    const buffer = Buffer.from(await file.arrayBuffer());
+    if ((mimeType === "application/pdf" && buffer.subarray(0, 5).toString("ascii") !== "%PDF-")
+      || (mimeType === "image/png" && !buffer.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex")))
+      || (mimeType === "image/jpeg" && !buffer.subarray(0, 3).equals(Buffer.from("ffd8ff", "hex")))
+      || (mimeType === "image/webp" && !(buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP"))) {
+      throw new ApiError(422, "PERSONAL_KNOWLEDGE_IMPORT_PARSE_FAILED", "文件格式与扩展名不符");
+    }
     let segments;
     try {
-      segments = await parseAssetBuffer({ buffer: Buffer.from(await file.arrayBuffer()), mimeType, fileName: file.name, archiveLimits: { maxEntries: 200, maxExpandedBytes: 4 * 1024 * 1024, maxSelectedEntryBytes: 2 * 1024 * 1024 }, maxPdfPages: 50 });
+      const parsed = await parseAssetBuffer({ buffer, mimeType, fileName: file.name, archiveLimits: { maxEntries: 200, maxExpandedBytes: 4 * 1024 * 1024, maxSelectedEntryBytes: 2 * 1024 * 1024 }, maxPdfPages: 50 });
+      segments = forceVision === "true" ? parsed.map((segment) => ({ ...segment, requiresVision: true })) : parsed;
     } catch (error) {
       if (error instanceof ProjectAssetParserError || error instanceof ProjectAssetArchiveError) throw new ApiError(422, "PERSONAL_KNOWLEDGE_IMPORT_PARSE_FAILED", "文件内容无法提取");
       throw error;
     }
-    if (segments.some((segment) => segment.requiresVision)) throw new ApiError(422, "PERSONAL_KNOWLEDGE_IMPORT_VISION_REQUIRED", "文件包含需要图片识别的页面");
-    const content = segments.map((segment) => segment.contentText).filter(Boolean).join("\n\n");
+    const visionNeeded = segments.some((segment) => segment.requiresVision);
+    const providerId = data.get("providerId");
+    const action = data.get("action");
+    const attemptId = data.get("attemptId");
+    if (visionNeeded && action === "prepare" && typeof providerId === "string") {
+      const prepared = await preparePersonalKnowledgeVision({ actor, providerId, buffer, mimeType, segments });
+      return noStore(NextResponse.json({ confirmation: prepared }));
+    }
+    if (visionNeeded && (action !== "execute" || typeof attemptId !== "string")) {
+      throw new ApiError(422, "PERSONAL_KNOWLEDGE_IMPORT_VISION_REQUIRED", "图片或扫描页需要先选择视觉模型并确认发送");
+    }
+    if (!visionNeeded && action !== null) throw new ApiError(400, "PERSONAL_KNOWLEDGE_IMPORT_INVALID", "文件导入操作无效");
+    const visionContent = visionNeeded ? await extractPersonalKnowledgeVision({ actor, attemptId: attemptId as string, buffer, mimeType, segments, executionDeadlineAt }) : [];
+    const content = [...segments.map((segment) => segment.contentText).filter(Boolean), ...visionContent].join("\n\n");
     if (!content.trim() || content.length > PERSONAL_KNOWLEDGE_CONTENT_MAX_LENGTH) {
       throw new ApiError(422, "PERSONAL_KNOWLEDGE_IMPORT_INVALID_CONTENT", "提取内容为空或超过 100,000 字符");
     }

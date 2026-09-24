@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { isGitConnectionMutationAction } from "@/lib/git/connection-governance";
+import { isMcpConnectionMutationAction } from "@/lib/mcp/connection-governance";
 
 const schema = readFileSync("prisma/schema.prisma", "utf8");
 const migration = readFileSync("prisma/migrations/20260912030000_add_connection_governance/migration.sql", "utf8");
@@ -22,6 +24,16 @@ const mcpState = readFileSync("src/app/profile/connections/mcp/mcp-connections-s
 const principalCatalog = readFileSync("src/lib/database-principal-catalog.ts", "utf8");
 const auditCatalog = readFileSync("src/lib/system-audit-catalog.ts", "utf8");
 const audit = readFileSync("src/lib/system-audit.ts", "utf8");
+
+test("connection governance action guards reject untested direct configuration edits", () => {
+  for (const guard of [isGitConnectionMutationAction, isMcpConnectionMutationAction]) {
+    assert.equal(guard("rotateCredential"), true);
+    assert.equal(guard("editConfiguration"), false);
+    assert.equal(guard({ action: "retest" }), false);
+  }
+  assert.equal(isGitConnectionMutationAction("retest"), true);
+  assert.equal(isMcpConnectionMutationAction("rediscover"), true);
+});
 
 test("Git and MCP connection mutations have separate typed preview and audit models", () => {
   for (const action of ["GitConnectionMutationAction", "McpConnectionMutationAction", "ConnectionMutationExecutionStatus"]) {
@@ -77,9 +89,13 @@ test("legacy high-risk connection entry points fail closed and strict governance
   assert.match(gitTestRoute, /GIT_CONNECTION_GOVERNANCE_REQUIRED/u);
   assert.match(mcpLegacyRoute, /MCP_CONNECTION_GOVERNANCE_REQUIRED/u);
   assert.match(mcpDiscoverRoute, /MCP_CONNECTION_GOVERNANCE_REQUIRED/u);
-  assert.doesNotMatch(gitLegacyRoute, /updateGitConnection|deleteGitConnection/u);
+  assert.match(gitLegacyRoute, /renameSchema\.parse\(await readJsonBody\(request\)\)/u);
+  assert.match(gitLegacyRoute, /updateGitConnection/u);
+  assert.doesNotMatch(gitLegacyRoute, /deleteGitConnection/u);
   assert.doesNotMatch(gitTestRoute, /testGitConnection/u);
-  assert.doesNotMatch(mcpLegacyRoute, /updateMcpConnection|deleteMcpConnection/u);
+  assert.match(mcpLegacyRoute, /renameSchema\.parse\(await readJsonBody\(request\)\)/u);
+  assert.match(mcpLegacyRoute, /updateMcpConnection/u);
+  assert.doesNotMatch(mcpLegacyRoute, /deleteMcpConnection/u);
   assert.doesNotMatch(mcpDiscoverRoute, /discoverMcpConnectionTools/u);
   for (const route of [gitPreviewRoute, gitExecuteRoute, mcpPreviewRoute, mcpExecuteRoute]) {
     assert.match(route, /assertSameOrigin/u);

@@ -10,7 +10,7 @@ type PersonalWorkspaceNavProps = Readonly<{
 
 const items: readonly Readonly<{ key: PersonalWorkspaceNavItem; label: string; href: string }>[] = [
   { key: "overview", label: "总览", href: "/personal" },
-  { key: "projects", label: "全部项目", href: "/projects" },
+  { key: "projects", label: "我的项目", href: "/personal/projects" },
   { key: "knowledge", label: "知识库", href: "/personal/knowledge" },
   { key: "configuration", label: "配置", href: "/personal/configuration" },
 ];

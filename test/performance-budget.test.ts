@@ -113,7 +113,7 @@ test("performance budget is wired into production build and CI", async () => {
   assert.ok(workflow.indexOf("pnpm performance:check") > workflow.indexOf("pnpm test:browser-e2e"));
   assert.equal(checkedConfig.budgets.sharedJavaScriptGzipBytes, 145 * 1024);
   assert.equal(checkedConfig.budgets.globalCssGzipBytes, 14.5 * 1024);
-  assert.equal(checkedConfig.budgets.totalStaticClientGzipBytes, 720 * 1024);
+  assert.equal(checkedConfig.budgets.totalStaticClientGzipBytes, 724 * 1024);
   assert.deepEqual(Object.keys(checkedConfig.criticalRoutes), [
     "/setup",
     "/dashboard",

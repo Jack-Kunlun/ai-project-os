@@ -14,7 +14,7 @@ const MIGRATOR_ROLE = "ai_project_os_migrator";
 const RUNTIME_ROLE = "ai_project_os_runtime";
 const WRITER_ROLE = "ai_project_os_entitlement_writer";
 const REQUIRED_EXTENSIONS = Object.freeze(["vector", "pg_trgm", "pgcrypto", "plpgsql"] as const);
-const EXPECTED_MIGRATION_COUNT = 116;
+const EXPECTED_MIGRATION_COUNT = 117;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1_000;
 const READY_TIMEOUT_MS = 2 * 60 * 1_000;
 
@@ -505,6 +505,18 @@ async function main(): Promise<void> {
     await assertExtensionPolicy(adminUrl);
     await assertApplicationOwnership(adminUrl);
     await assertMigrationLedger(adminUrl);
+    await runRepositoryCommand(["--import", "tsx", "--test", "test/personal-knowledge-extraction-postgres.test.ts"], "personal-extraction-consent", {
+      ...principalEnvironment(urls, secrets.inventory),
+      PERSONAL_KNOWLEDGE_EXTRACTION_POSTGRES_GATE: "1",
+    });
+    await runRepositoryCommand(["--import", "tsx", "--test", "test/project-personal-default-memory-postgres.test.ts"], "project-personal-defaults", {
+      ...principalEnvironment(urls, secrets.inventory),
+      PROJECT_PERSONAL_DEFAULT_POSTGRES_GATE: "1",
+    });
+    await runRepositoryCommand(["--import", "tsx", "--test", "test/connection-configuration-edit-postgres.test.ts"], "connection-configuration-edit", {
+      ...principalEnvironment(urls, secrets.inventory),
+      CONNECTION_CONFIGURATION_EDIT_POSTGRES_GATE: "1",
+    });
     await docker(["restart", resources.container], "postgres-restart", 60_000);
     await waitForPostgres(resources.container);
     port = await publishedPort(resources.container);

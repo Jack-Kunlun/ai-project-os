@@ -142,7 +142,7 @@ const webAiConfirmationSafeSummarySchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.memoryAnswer),
     route: z.object({ embedding: embeddingRouteDisplaySchema, generation: generationRouteDisplaySchema }).strict(),
-    scope: z.object({ indexGenerationId: scopeIdSchema }).strict(),
+    scope: z.object({ indexGenerationId: scopeIdSchema, personalDefaultCount: nonNegativeCountSchema.optional() }).strict(),
   }).strict(),
   z.object({
     action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.assetRecognize),
@@ -152,12 +152,12 @@ const webAiConfirmationSafeSummarySchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.intelligenceBrief),
     route: z.object({ embedding: embeddingRouteDisplaySchema, generation: generationRouteDisplaySchema }).strict(),
-    scope: z.object({ indexGenerationId: scopeIdSchema }).strict(),
+    scope: z.object({ indexGenerationId: scopeIdSchema, personalDefaultCount: nonNegativeCountSchema.optional() }).strict(),
   }).strict(),
   z.object({
     action: z.literal(WEB_AI_CONFIRMATION_ACTIONS.intelligenceAgent),
     route: z.object({ embedding: embeddingRouteDisplaySchema, generation: generationRouteDisplaySchema }).strict(),
-    scope: z.object({ indexGenerationId: scopeIdSchema, questionProvided: z.literal(true) }).strict(),
+    scope: z.object({ indexGenerationId: scopeIdSchema, questionProvided: z.literal(true), personalDefaultCount: nonNegativeCountSchema.optional() }).strict(),
   }).strict(),
 ]);
 

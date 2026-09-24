@@ -20,9 +20,6 @@ readonly PRODUCTION_COMPOSE_OVERRIDE=/etc/ai-project-os/compose.operations.yaml
 readonly RESULT_FILE=/var/lib/ai-project-os/last-deployment
 readonly LOCK_FILE=/run/lock/ai-project-os-deploy.lock
 
-# Application releases after .8 keep the exact 116-row database baseline.
-readonly PATCH_MIGRATION_COUNT=116
-
 WRITER_RECOVERY_REQUIRED=0
 PATCH_CUTOVER_ATTEMPTED=0
 OLD_APP_ID=
@@ -47,6 +44,9 @@ source_sequence=${BASH_REMATCH[1]}
 target_sequence=${BASH_REMATCH[1]}
 (( ${#source_sequence} <= 6 && ${#target_sequence} <= 6 )) || fail PATCH_DEPLOY_TAG_SEQUENCE_INVALID 64
 (( source_sequence >= 8 && target_sequence > source_sequence )) || fail PATCH_DEPLOY_TAG_ORDER_INVALID 64
+PATCH_MIGRATION_COUNT=116
+if (( source_sequence >= 11 )); then PATCH_MIGRATION_COUNT=117; fi
+readonly PATCH_MIGRATION_COUNT
 [[ "$EXPECTED_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail PATCH_DEPLOY_SOURCE_REVISION_INVALID 65
 [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail PATCH_DEPLOY_REVISION_INVALID 65
 [[ "$CONFIRMATION" == CONFIRM_APP_NO_MIGRATION_V1 ]] || fail PATCH_DEPLOY_CONFIRMATION_INVALID 66
@@ -121,6 +121,9 @@ git -C "$REPOSITORY_DIR" merge-base --is-ancestor "$source_revision" "$resolved_
 
 # A no-migration deploy must not silently become a migration route.
 [[ -z "$(git -C "$REPOSITORY_DIR" diff --name-only "$source_revision" "$resolved_revision" -- prisma prisma.config.ts)" ]] || fail PATCH_DEPLOY_DATABASE_FILES_CHANGED 69
+source_migration_count=$(git -C "$REPOSITORY_DIR" ls-tree -d --name-only "$source_revision:prisma/migrations" | grep -Ec '^[0-9]{14}_')
+target_migration_count=$(git -C "$REPOSITORY_DIR" ls-tree -d --name-only "$resolved_revision:prisma/migrations" | grep -Ec '^[0-9]{14}_')
+[[ "$source_migration_count" == "$PATCH_MIGRATION_COUNT" && "$target_migration_count" == "$PATCH_MIGRATION_COUNT" ]] || fail PATCH_DEPLOY_MIGRATION_BASELINE_INVALID 69
 
 # A later presentation-only commit must not hide earlier code changes since
 # the installed source tag. Require the database CI job for that whole delta.
@@ -263,10 +266,10 @@ run_patch_preflight() {
   local preflight_output
 
   preflight_output=$(compose run --rm --no-deps production-upgrade-preflight \
-    node node_modules/tsx/dist/cli.mjs scripts/production-app-upgrade-preflight.ts "$phase" "$RELEASE_TAG")
+    node node_modules/tsx/dist/cli.mjs scripts/production-app-upgrade-preflight.ts "$phase" "$RELEASE_TAG" "$SOURCE_TAG")
   grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_RESULT_INVALID 69
   grep -Fq '"targetTag":"'"$RELEASE_TAG"'"' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_TARGET_INVALID 69
-  grep -Eq '"migrationCount"[[:space:]]*:[[:space:]]*116' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_MIGRATION_COUNT_INVALID 69
+  grep -Eq '"migrationCount"[[:space:]]*:[[:space:]]*'"$PATCH_MIGRATION_COUNT"'([,}]|$)' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_MIGRATION_COUNT_INVALID 69
   grep -Eq '"migrationChange"[[:space:]]*:[[:space:]]*"none"' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_MIGRATION_CHANGE_INVALID 69
   if [[ "$phase" == post-stop ]]; then
     grep -Eq '"writerSessions"[[:space:]]*:[[:space:]]*"stopped"' <<<"$preflight_output" || fail PATCH_DEPLOY_PREFLIGHT_WRITERS_INVALID 69
@@ -470,7 +473,7 @@ if (( PRE_DEPLOY_BACKUP_SOURCE_QUIESCED != 1 )); then
 fi
 
 # This is an application-only cutover. No migrate service is started and the
-# exact 116-row ledger is checked again immediately before new writers start.
+# source-version migration ledger is checked again immediately before new writers start.
 run_patch_preflight post-cutover
 compose up -d --no-deps --no-build --force-recreate app worker
 wait_for_stack "$RELEASE_TAG"

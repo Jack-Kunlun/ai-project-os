@@ -6,7 +6,7 @@ import { lockActorAccess } from "@/lib/access-linearization";
 import { rotateCredential } from "@/lib/credential-vault";
 import { getDb } from "@/lib/db";
 import { isSerializationConflict } from "@/lib/project-snapshot-errors";
-import { applyMcpConnectionProbeUpdate } from "./service";
+import { applyMcpConnectionProbeUpdate, mcpConnectionEditCandidateSchema, type McpConnectionEditCandidate } from "./service";
 import { type McpCapabilityErrorCode, failMcp } from "./errors";
 
 const UUID = z.string().uuid();
@@ -71,6 +71,7 @@ const previewSchema = z.object({
   secret: z.string().min(8).max(4096).optional(),
   draftProbeId: UUID.optional(),
   probeRequestKey: UUID.optional(),
+  candidate: mcpConnectionEditCandidateSchema.optional(),
 }).strict();
 
 const executeSchema = z.object({
@@ -83,9 +84,30 @@ const executeSchema = z.object({
   secret: z.string().min(8).max(4096).optional(),
   draftProbeId: UUID.optional(),
   probeRequestKey: UUID.optional(),
+  candidate: mcpConnectionEditCandidateSchema.optional(),
 }).strict();
 
+function editCandidateFingerprint(candidate: McpConnectionEditCandidate | undefined): string | null {
+  return candidate === undefined ? null : hash({ ...candidate, bearerToken: candidate.bearerToken == null ? null : hash(candidate.bearerToken) });
+}
+
+function editBlockers(impact: Impact): string[] {
+  const blockers: string[] = [];
+  if (impact.liveDelegations.length > 0) blockers.push("live_delegation");
+  if (impact.activeToolGrants.length > 0) blockers.push("active_tool_grant");
+  if (impact.nonTerminalActions > 0) blockers.push("non_terminal_action");
+  if (impact.reservedDispatches > 0) blockers.push("reserved_dispatch");
+  return blockers;
+}
+
 type TestedMcpProbeIntent = Readonly<{ draftProbeId: string; probeRequestKey: string }>;
+
+function sameTestedProbe(value: unknown, expected: TestedMcpProbeIntent | null): boolean {
+  if (expected === null) return value === null || value === undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return row.draftProbeId === expected.draftProbeId && row.probeRequestKey === expected.probeRequestKey;
+}
 
 function fail(code: McpCapabilityErrorCode): never {
   return failMcp(code);
@@ -287,8 +309,10 @@ export async function previewMcpConnectionMutation(connectionIdInput: unknown, i
   if (parsed.data.action === "rotateCredential" && parsed.data.secret === undefined) return fail("MCP_INVALID_INPUT");
   if (parsed.data.action === "delete" && parsed.data.confirmationName === undefined) return fail("MCP_INVALID_INPUT");
   const testedProbe = testedProbeIntent(parsed.data);
+  if (parsed.data.candidate !== undefined && (parsed.data.action !== "rediscover" || testedProbe === null)) return fail("MCP_INVALID_INPUT");
   const expectedUpdatedAt = date(parsed.data.expectedUpdatedAt);
-  const requestFingerprint = hash({ connectionId, action: parsed.data.action, requestKey: parsed.data.requestKey, reason: parsed.data.reason, expectedUpdatedAt: expectedUpdatedAt.toISOString(), confirmationName: parsed.data.confirmationName ?? null, candidateSecret: parsed.data.secret === undefined ? null : hash(parsed.data.secret), testedProbe });
+  const candidateFingerprint = editCandidateFingerprint(parsed.data.candidate);
+  const requestFingerprint = hash({ connectionId, action: parsed.data.action, requestKey: parsed.data.requestKey, reason: parsed.data.reason, expectedUpdatedAt: expectedUpdatedAt.toISOString(), confirmationName: parsed.data.confirmationName ?? null, candidateSecret: parsed.data.secret === undefined ? null : hash(parsed.data.secret), testedProbe, candidateFingerprint });
   return withRetry(db, async (tx) => {
     await lockActorAccess(tx, actor.id);
     const actorVersion = await requireActor(tx, actor);
@@ -304,9 +328,9 @@ export async function previewMcpConnectionMutation(connectionIdInput: unknown, i
       return previewView({ ...existing, connectionStatus: connection.status, configurationRevision: connection.configurationRevision, connectionUpdatedAt: connection.updatedAt, ownerUserId: actor.id });
     }
     const impact = await loadImpact(tx, connectionId, actor.id);
-    const impactSnapshot = { liveDelegations: impact.liveDelegations, activeToolGrants: impact.activeToolGrants, toolGrantCount: impact.toolGrantCount, v2Attestations: impact.v2Attestations, nonTerminalActions: impact.nonTerminalActions, reservedDispatches: impact.reservedDispatches, ...(testedProbe === null ? {} : { testedProbe }) } satisfies Prisma.InputJsonValue;
+    const impactSnapshot = { liveDelegations: impact.liveDelegations, activeToolGrants: impact.activeToolGrants, toolGrantCount: impact.toolGrantCount, v2Attestations: impact.v2Attestations, nonTerminalActions: impact.nonTerminalActions, reservedDispatches: impact.reservedDispatches, ...(testedProbe === null ? {} : { testedProbe }), ...(candidateFingerprint === null ? {} : { candidateFingerprint }) } satisfies Prisma.InputJsonValue;
     const impactFingerprint = hash(impactSnapshot);
-    const blockers = blockersFor(parsed.data.action, connection.status, parsed.data.confirmationName, connection.name, parsed.data.secret !== undefined, connection.authKind === "bearer" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null);
+    const blockers = [...blockersFor(parsed.data.action, connection.status, parsed.data.confirmationName, connection.name, parsed.data.secret !== undefined, connection.authKind === "bearer" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null), ...(candidateFingerprint === null ? [] : editBlockers(impact))];
     const issuedAt = await clock(tx);
     const expiresAt = new Date(issuedAt.getTime() + PREVIEW_TTL_MS);
     const previewId = randomUUID();
@@ -351,15 +375,18 @@ export async function executeMcpConnectionMutation(connectionIdInput: unknown, i
     const now = await clock(tx);
     if (now.getTime() >= preview.expiresAt.getTime()) return fail("MCP_CONNECTION_PREVIEW_EXPIRED");
     const testedProbe = testedProbeIntent({ action: preview.action, draftProbeId: parsed.data.draftProbeId, probeRequestKey: parsed.data.probeRequestKey });
+    if (parsed.data.candidate !== undefined && (preview.action !== "rediscover" || testedProbe === null)) return fail("MCP_CONNECTION_PREVIEW_MISMATCH");
+    const candidateFingerprint = editCandidateFingerprint(parsed.data.candidate);
     const previewImpact = preview.impactSnapshot !== null && typeof preview.impactSnapshot === "object" && !Array.isArray(preview.impactSnapshot)
       ? preview.impactSnapshot as Record<string, unknown>
       : {};
-    if (JSON.stringify(previewImpact.testedProbe ?? null) !== JSON.stringify(testedProbe)) return fail("MCP_CONNECTION_PREVIEW_MISMATCH");
+    if (!sameTestedProbe(previewImpact.testedProbe, testedProbe)
+      || (previewImpact.candidateFingerprint ?? null) !== candidateFingerprint) return fail("MCP_CONNECTION_PREVIEW_MISMATCH");
     if (testedProbe !== null) await validateTestedProbe(tx, testedProbe, actor.id, connectionId);
     const impact = await loadImpact(tx, connectionId, actor.id);
-    const currentImpactSnapshot = { liveDelegations: impact.liveDelegations, activeToolGrants: impact.activeToolGrants, toolGrantCount: impact.toolGrantCount, v2Attestations: impact.v2Attestations, nonTerminalActions: impact.nonTerminalActions, reservedDispatches: impact.reservedDispatches, ...(testedProbe === null ? {} : { testedProbe }) } satisfies Prisma.InputJsonValue;
+    const currentImpactSnapshot = { liveDelegations: impact.liveDelegations, activeToolGrants: impact.activeToolGrants, toolGrantCount: impact.toolGrantCount, v2Attestations: impact.v2Attestations, nonTerminalActions: impact.nonTerminalActions, reservedDispatches: impact.reservedDispatches, ...(testedProbe === null ? {} : { testedProbe }), ...(candidateFingerprint === null ? {} : { candidateFingerprint }) } satisfies Prisma.InputJsonValue;
     if (hash(currentImpactSnapshot) !== preview.impactFingerprint) return fail("MCP_CONNECTION_IMPACT_CHANGED");
-    const blockers = blockersFor(preview.action, connection.status, parsed.data.confirmationName ?? preview.confirmationName ?? undefined, connection.name, parsed.data.secret !== undefined || preview.candidateSecretFingerprint !== null, connection.authKind === "bearer" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null);
+    const blockers = [...blockersFor(preview.action, connection.status, parsed.data.confirmationName ?? preview.confirmationName ?? undefined, connection.name, parsed.data.secret !== undefined || preview.candidateSecretFingerprint !== null, connection.authKind === "bearer" && connection.credentialId !== null && connection.credential !== null, impact, testedProbe !== null), ...(candidateFingerprint === null ? [] : editBlockers(impact))];
     if (!preview.canExecute || blockers.length > 0) return fail("MCP_CONNECTION_IN_USE");
     const action = preview.action;
     const external = action === "retrust" || action === "rediscover";
@@ -369,7 +396,7 @@ export async function executeMcpConnectionMutation(connectionIdInput: unknown, i
     await setGovernanceContext(tx, { preview: preview.id, connectionId, actorId: actor.id, ownerId: actor.id, action: databaseAction(action), requestKey: preview.requestKey, requestFingerprint: preview.requestFingerprint, impactFingerprint: preview.impactFingerprint, execute: true });
     let statusAfter: McpConnectionStatus | null = connection.status;
     if (testedExternal && testedProbe !== null) {
-      await applyMcpConnectionProbeUpdate({ connectionId, draftProbeId: testedProbe.draftProbeId, clientRequestKey: testedProbe.probeRequestKey, actor, tx });
+      await applyMcpConnectionProbeUpdate({ connectionId, draftProbeId: testedProbe.draftProbeId, clientRequestKey: testedProbe.probeRequestKey, actor, tx, candidate: parsed.data.candidate });
       statusAfter = "verified";
     } else if (action === "rotateCredential") {
       if (parsed.data.secret === undefined || preview.candidateSecretFingerprint === null || hash(parsed.data.secret) !== preview.candidateSecretFingerprint) return fail("MCP_CONNECTION_PREVIEW_MISMATCH");

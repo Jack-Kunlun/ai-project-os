@@ -220,6 +220,12 @@ test("all project mutation routes reject archived projects except bounded lifecy
       continue;
     }
     if (!/export async function (POST|PUT|PATCH|DELETE)/u.test(source)) continue;
+    if (path.endsWith("/members/[userId]/route.ts")) {
+      assert.match(source, /withWebAiProjectAccessTransaction/u, `${path} must recheck project access inside the mutation transaction`);
+      assert.match(source, /required: "owner"/u, `${path} must require the project owner`);
+      assert.doesNotMatch(source, /allowArchived: true/u, `${path} must reject archived projects`);
+      continue;
+    }
     if (serviceLifecycleGuarded.has(path)) {
       assert.doesNotMatch(source, /assertProjectActive/u, `${path} delegates lifecycle checks`);
       assert.match(source, /(?:requestedBy|actor):\s*(?:user|sessionUser)|,\s*(?:user|actor)\s*(?:,|\))/u, `${path} passes the session actor`);
@@ -248,4 +254,16 @@ test("active workspace reads exclude archived projects while the project list ex
   assert.ok((dashboard.match(/project: \{ is: projectWhere \}/gu) ?? []).length >= 2);
   assert.match(projects, /z\.enum\(\["active", "archived"\]\)/u);
   assert.match(projects, /counts: \{ active: activeCount, archived: archivedCount \}/u);
+});
+
+test("project member management does not imply inherited team owners can lose access through a project grant", async () => {
+  const members = await readFile("src/app/api/projects/[projectId]/members/route.ts", "utf8");
+  const mutation = await readFile("src/app/api/projects/[projectId]/members/[userId]/route.ts", "utf8");
+  const client = await readFile("src/app/projects/[projectId]/members/project-members-client.tsx", "utf8");
+  assert.match(members, /membershipInheritanceMode === "workspaceInherited"/u);
+  assert.match(members, /inheritedOwner:/u);
+  assert.match(mutation, /PROJECT_MEMBER_INHERITED_OWNER/u);
+  assert.match(mutation, /teamMembership\?\.role === "owner" \|\| teamMembership\?\.role === "admin"/u);
+  assert.match(client, /有效权限：/u);
+  assert.match(client, /!member\.inheritedOwner/u);
 });

@@ -4660,6 +4660,9 @@ model AppUser {
   personalKnowledgeAudits PersonalKnowledgeAudit[] @relation("PersonalKnowledgeAuditOwner")
   personalKnowledgeIndexPointers PersonalKnowledgeIndexPointer[] @relation("PersonalKnowledgeIndexPointerOwner")
   personalKnowledgeRelations PersonalKnowledgeRelation[] @relation("PersonalKnowledgeRelationOwner")
+  personalKnowledgeGraphSuggestions PersonalKnowledgeGraphSuggestion[] @relation("PersonalKnowledgeGraphSuggestionOwner")
+  personalKnowledgeGraphReviews PersonalKnowledgeGraphSuggestion[] @relation("PersonalKnowledgeGraphSuggestionReviewer")
+  personalKnowledgeExtractionAttempts PersonalKnowledgeExtractionAttempt[] @relation("PersonalKnowledgeExtractionAttemptOwner")
   personalConnectionProbeAttempts PersonalConnectionProbeAttempt[] @relation("PersonalConnectionProbeAttemptActor")
   personalKnowledgeQaChallenges PersonalKnowledgeQaChallenge[] @relation("PersonalKnowledgeQaChallengeOwner")
   personalKnowledgeQaAudits PersonalKnowledgeQaAudit[] @relation("PersonalKnowledgeQaAuditOwner")
@@ -4720,6 +4723,8 @@ model PersonalKnowledgeDocument {
   ownerUserId       String                              @db.Uuid
   /// Active rows are visible; deleted rows are durable tombstones.
   state             PersonalKnowledgeDocumentState      @default(active)
+  /// Explicit owner opt-in for cross-project default conventions in project AI.
+  isDefaultMemory   Boolean                             @default(false)
   /// Optimistic compare-and-swap fence for PATCH, DELETE and export audit writes.
   version           Int                                 @default(1)
   /// Points to this document's immutable revision matching `version`. It may
@@ -4740,6 +4745,8 @@ model PersonalKnowledgeDocument {
   indexPointer      PersonalKnowledgeIndexPointer?       @relation("PersonalKnowledgeDocumentIndexPointer")
   relationsFrom     PersonalKnowledgeRelation[]          @relation("PersonalKnowledgeRelationFromDocument")
   relationsTo       PersonalKnowledgeRelation[]          @relation("PersonalKnowledgeRelationToDocument")
+  graphSuggestions  PersonalKnowledgeGraphSuggestion[]   @relation("PersonalKnowledgeGraphSuggestionDocument")
+  extractionAttempts PersonalKnowledgeExtractionAttempt[] @relation("PersonalKnowledgeExtractionAttemptDocument")
   qaChallenges      PersonalKnowledgeQaChallenge[]        @relation("PersonalKnowledgeQaChallengeDocument")
   qaAudits          PersonalKnowledgeQaAudit[]            @relation("PersonalKnowledgeQaAuditDocument")
   semanticEntries   PersonalKnowledgeSemanticEntry[]       @relation("PersonalKnowledgeSemanticEntryDocument")
@@ -4747,6 +4754,7 @@ model PersonalKnowledgeDocument {
   @@unique([id, ownerUserId])
   @@unique([currentRevisionId, ownerUserId])
   @@index([ownerUserId, state, updatedAt, id])
+  @@index([ownerUserId, state, isDefaultMemory, updatedAt, id], map: "PersonalKnowledgeDocument_owner_default_idx")
   @@index([ownerUserId, currentRevisionId])
 }
 
@@ -4777,6 +4785,8 @@ model PersonalKnowledgeRevision {
   audits      PersonalKnowledgeAudit[]   @relation("PersonalKnowledgeRevisionAudits")
   relationsFrom PersonalKnowledgeRelation[] @relation("PersonalKnowledgeRelationFromRevision")
   relationsTo   PersonalKnowledgeRelation[] @relation("PersonalKnowledgeRelationToRevision")
+  graphSuggestions PersonalKnowledgeGraphSuggestion[] @relation("PersonalKnowledgeGraphSuggestionRevision")
+  extractionAttempts PersonalKnowledgeExtractionAttempt[] @relation("PersonalKnowledgeExtractionAttemptRevision")
   qaChallenges PersonalKnowledgeQaChallenge[] @relation("PersonalKnowledgeQaChallengeRevision")
   qaAudits     PersonalKnowledgeQaAudit[] @relation("PersonalKnowledgeQaAuditRevision")
   semanticEntries PersonalKnowledgeSemanticEntry[] @relation("PersonalKnowledgeSemanticEntryRevision")
@@ -4866,6 +4876,73 @@ model PersonalKnowledgeRelation {
   @@unique([id, ownerUserId])
   @@index([ownerUserId, state, fromDocumentId, toDocumentId, id])
   @@index([ownerUserId, state, toDocumentId, fromDocumentId, id])
+}
+
+/// An AI-suggested, source-grounded entity relation. Pending rows never become
+/// graph facts until the owner accepts them; accepted rows retain their source
+/// revision so a later edit can mark the edge stale.
+model PersonalKnowledgeGraphSuggestion {
+  id            String                    @id @default(uuid()) @db.Uuid
+  ownerUserId   String                    @db.Uuid
+  documentId    String                    @db.Uuid
+  revisionId    String                    @db.Uuid
+  subject       String                    @db.VarChar(120)
+  subjectKind   String                    @db.VarChar(24)
+  predicate     String                    @db.VarChar(120)
+  object        String                    @db.VarChar(120)
+  objectKind    String                    @db.VarChar(24)
+  evidence      String                    @db.VarChar(500)
+  status        String                    @default("pending") @db.VarChar(16)
+  createdAt     DateTime                  @default(now())
+  reviewerUserId String?                  @db.Uuid
+  reviewedAt    DateTime?
+  owner         AppUser                   @relation("PersonalKnowledgeGraphSuggestionOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  reviewer      AppUser?                  @relation("PersonalKnowledgeGraphSuggestionReviewer", fields: [reviewerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  document      PersonalKnowledgeDocument @relation("PersonalKnowledgeGraphSuggestionDocument", fields: [documentId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
+  revision      PersonalKnowledgeRevision @relation("PersonalKnowledgeGraphSuggestionRevision", fields: [documentId, ownerUserId, revisionId], references: [documentId, ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([ownerUserId, documentId, revisionId, subject, predicate, object], map: "PersonalKnowledgeGraphSuggestion_source_triple_key")
+  @@index([ownerUserId, status, createdAt, id], map: "PersonalKnowledgeGraphSuggestion_owner_status_idx")
+  @@index([ownerUserId, documentId, status], map: "PersonalKnowledgeGraphSuggestion_owner_document_idx")
+}
+
+/// One-use, owner-bound consent and body-free outcome record for personal
+/// visual extraction or entity graph extraction. The source is represented
+/// only by a digest, size and optional document/revision identifiers.
+model PersonalKnowledgeExtractionAttempt {
+  id                         String   @id @default(uuid()) @db.Uuid
+  ownerUserId                String   @db.Uuid
+  operation                  String   @db.VarChar(16)
+  documentId                 String?  @db.Uuid
+  revisionId                 String?  @db.Uuid
+  inputHash                  String   @db.Char(64)
+  inputBytes                 Int
+  pageManifestHash           String?  @db.Char(64)
+  providerConnectionId       String   @db.Uuid
+  providerConfigurationVersion Int
+  modelId                    String   @db.VarChar(128)
+  credentialSecretFingerprint String @db.Char(64)
+  actorAccountAccessVersion  Int
+  status                     String   @default("issued") @db.VarChar(16)
+  issuedAt                   DateTime @default(now())
+  expiresAt                  DateTime
+  consumedAt                 DateTime?
+  finalizedAt                DateTime?
+  requestCount               Int      @default(0)
+  providerRequestIds         Json     @default("[]") @db.JsonB
+  inputTokens                Int      @default(0)
+  outputTokens               Int      @default(0)
+  usageKnown                 Boolean  @default(false)
+  safeErrorCode              String?  @db.VarChar(100)
+  owner                      AppUser  @relation("PersonalKnowledgeExtractionAttemptOwner", fields: [ownerUserId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+  document                   PersonalKnowledgeDocument? @relation("PersonalKnowledgeExtractionAttemptDocument", fields: [documentId, ownerUserId], references: [id, ownerUserId], onDelete: NoAction, onUpdate: Cascade)
+  revision                   PersonalKnowledgeRevision? @relation("PersonalKnowledgeExtractionAttemptRevision", fields: [documentId, ownerUserId, revisionId], references: [documentId, ownerUserId, id], onDelete: NoAction, onUpdate: Cascade)
+  provider                   AiProviderConnection @relation("PersonalKnowledgeExtractionAttemptProvider", fields: [providerConnectionId], references: [id], onDelete: NoAction, onUpdate: Cascade)
+
+  @@unique([ownerUserId, id])
+  @@index([ownerUserId, issuedAt])
+  @@index([providerConnectionId, status, issuedAt], map: "PersonalKnowledgeExtractionAttempt_provider_status_issued_idx")
+  @@index([expiresAt, status])
 }
 
 /// One-use prepare proof for a personal knowledge page question. The question
@@ -6735,6 +6812,7 @@ model AiProviderConnection {
   platformProviderProbeAttempts PlatformProviderProbeAttempt[] @relation("PlatformProviderProbeAttemptProvider")
   personalKnowledgeQaChallenges PersonalKnowledgeQaChallenge[] @relation("PersonalKnowledgeQaChallengeProvider")
   personalKnowledgeQaAudits PersonalKnowledgeQaAudit[] @relation("PersonalKnowledgeQaAuditProvider")
+  personalKnowledgeExtractionAttempts PersonalKnowledgeExtractionAttempt[] @relation("PersonalKnowledgeExtractionAttemptProvider")
   personalKnowledgeSemanticGenerations PersonalKnowledgeSemanticGeneration[] @relation("PersonalKnowledgeSemanticGenerationProvider")
   personalKnowledgeSemanticChallenges PersonalKnowledgeSemanticChallenge[] @relation("PersonalKnowledgeSemanticChallengeProvider")
   personalKnowledgeSemanticAudits PersonalKnowledgeSemanticAudit[] @relation("PersonalKnowledgeSemanticAuditProvider")

@@ -39,14 +39,14 @@ test("个人工作区提供受保护的总览和资源配置汇总", async () =>
   assert.match(configuration, /不会自动成为任何项目的默认配置/u);
   assert.match(nav, /个人工作区导航/u);
   assert.match(nav, /href: "\/personal"/u);
-  assert.match(nav, /label: "全部项目", href: "\/projects"/u);
+  assert.match(nav, /label: "我的项目", href: "\/personal\/projects"/u);
   assert.match(nav, /href: "\/personal\/knowledge"/u);
   assert.match(nav, /href: "\/personal\/configuration"/u);
   assert.doesNotMatch(nav, /href: "\/personal\/(?:models|connections\/git|connections\/mcp)"/u);
   assert.match(header, /label: "个人工作台", href: "\/personal"/u);
   assert.doesNotMatch(header, /label: "我的项目", href: "\/projects"/u);
-  assert.match(header, /label: "我的团队", href: "\/team"/u);
-  const primaryLabels = ["Dashboard", "个人工作台", "我的团队"];
+  assert.match(header, /label: "团队与成员", href: "\/team"/u);
+  const primaryLabels = ["Dashboard", "个人工作台", "团队与成员"];
   const primaryPositions = primaryLabels.map((label) => header.indexOf(`label: "${label}"`));
   assert.ok(primaryPositions.every((position) => position >= 0));
   assert.deepEqual([...primaryPositions].sort((left, right) => left - right), primaryPositions);

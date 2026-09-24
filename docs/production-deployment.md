@@ -1,6 +1,6 @@
 # GitHub Actions 生产部署
 
-状态：`CONTROLLED_PRERELEASE`。当前生产运行 `v0.6.0-dev.8`；下一无迁移应用候选为 `v0.6.0-dev.10`，仍是预发布，不是稳定版或 GitHub Latest。`.7`→`.8` 的 **Deploy production** 迁移工作流只接受历史精确标签；`.8`→`.10` 使用 **Deploy application**。`.9` 在发布工具引导阶段失败，未执行应用切换。
+状态：`CONTROLLED_PRERELEASE`。截至 2026-09-24，生产已部署 `v0.6.0-dev.10`；本次 `.10`→`.11`、116→117 迁移使用 **Deploy v0.6 default-memory migration**。`.7`→`.8` 的 **Deploy production** 只保留历史精确路径，后续无迁移版本使用 **Deploy application**。这些版本仍是预发布，不是稳定版或 GitHub Latest。
 
 AI Project OS 从 GitHub Actions 的受控部署工作流手动部署已经通过标签 CI 的批准版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 
@@ -34,13 +34,19 @@ AI Project OS 从 GitHub Actions 的受控部署工作流手动部署已经通�
 
 迁移边界后失败会停止候选 writer并输出 `V06_NEXT_DEPLOY_RECOVERY_REQUIRED` 及备份证据，不会让 `.7` writer 自动连接已变更的结构。
 
+## v0.6.0-dev.11 迁移边界
+
+**Deploy v0.6 default-memory migration** 只接受已运行且健康的 `.10` 作为源和 annotated `.11` 标签作为目标；从 `main` 手动触发一次，工作流内部固定这两个版本。源、目标都必须有相同提交的成功主分支与标签完整数据库 CI，Prisma 变更只能是本次 schema 与第 117 条迁移。旧 app/worker 停止并排空会话后完成 `source_quiesced=true` 的加密异地备份，才执行迁移与权限 reconcile。迁移前核对 116 条账本，启动新 app/worker 前核对 117 条账本和新增列、表、索引、约束与触发器。
+
+迁移开始后若新 writer 尚未通过本机健康检查而失败，保持写入者停止并输出恢复所需备份证据；若新 writer 已通过本机健康检查而仅公网探测或结果落盘失败，则保留新 writer，工作流仍失败并要求人工完成公网验收。无迁移的 **Deploy application** 会拒绝本次 Prisma 差异。
+
 ## 安全模型
 
 - 工作流只能通过 `workflow_dispatch` 手动触发，并且必须从 `main` 运行。
-- 历史 **Deploy production** 输入只接受 `v0.6.0-dev.8`，目标必须是 annotated tag，且 `package.json`、应用版本与 OCI 标签必须匹配 `0.6.0-dev.8`；源输入只接受 `v0.6.0-dev.7`。后续版本使用 **Deploy application** 的源/目标标签校验。
+- 历史 **Deploy production** 输入只接受 `.7`→`.8`；本次专用工作流固定 `.10`→`.11`。两者均核对 annotated tag、源码版本、精确 SHA 与 CI；后续无迁移版本使用 **Deploy application** 的自动源/目标版本选择。
 - 部署前会通过 GitHub API 确认所选源标签和 0.6 目标标签对应精确提交的 `CI` push 运行已经 `completed/success`。
 - GitHub 使用独立 ED25519 私钥；服务器对应公钥带 `restrict` 和 forced-command，不能获取 Shell、PTY、端口转发或执行任意命令。
-- `.7`→`.8` 迁移 forced-command 只接受精确的 `deploy-v06-next v0.6.0-dev.7 v0.6.0-dev.8 <source SHA> <target SHA> CONFIRM_V06_NEXT_MIGRATION_V1`；当前 `.8`→`.10` 应用发布使用独立的受限协议。其他命令全部拒绝，sudoers 不开放 Shell、Git 或 Docker。
+- `.7`→`.8` 和 `.10`→`.11` 迁移各有固定版本、SHA 和确认词的 forced-command；本次只接受 `deploy-v06-default-memory v0.6.0-dev.10 v0.6.0-dev.11 <source SHA> <target SHA> CONFIRM_V06_DEFAULT_MEMORY_MIGRATION_V1`。无迁移应用发布使用独立的受限协议。其他命令全部拒绝，sudoers 不开放 Shell、Git 或 Docker。
 - 服务器会再次通过 GitHub 公共 API 核验标签 CI，专用私钥本身不能绕过发布门禁。
 - 生产 `.env` 位于 `/etc/ai-project-os/production.env`，权限为 `root:root 0600`，不会进入仓库、Actions 日志或部署结果。
 - 历史 `.5 -> .6` 路径会构建并复核源回滚制品和目标镜像；`.6 -> .7` 路径会在旧 app/worker 仍健康时捕获精确容器与镜像身份并构建目标镜像和只读预检。两条路径都会停止旧 app/worker，确认维护窗口中只剩本项目的 PostgreSQL 且端口只绑定 `127.0.0.1`，再以 stopped-writer cutover 模式调用 `pre-deploy` 备份。只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许继续；完整合同见[生产异地备份](production-backup.md)。
@@ -82,7 +88,9 @@ sudo deploy/production/install-production-deploy.sh \
 
 ## 后续 0.6 应用版本
 
-从已上线的 v0.6.0-dev.8 开始，后续无数据库变更的 0.6 开发版本使用 **Deploy application** 工作流。它要求目标为比源版本更新的 annotated tag、目标提交是当前 main、对应标签 CI 成功，且 prisma/migrations、prisma/schema.prisma 和 prisma.config.ts 均无差异。服务器再次核对标签、SHA、线性历史、116 条迁移账本和数据库对象；停止旧 app/worker 并验证写入会话已排空后创建加密异地备份，最后只替换 app/worker。数据库改动不能使用这条通道，必须另行评审迁移方案。
+从已上线的 v0.6.0-dev.8 开始，后续无数据库变更的 0.6 开发版本使用 **Deploy application** 工作流。它要求目标为比源版本更新的 annotated tag、目标提交是当前 main、对应标签 CI 成功，且 prisma/migrations、prisma/schema.prisma 和 prisma.config.ts 均无差异。服务器再次核对标签、SHA、线性历史和源版本对应的迁移账本（`.10` 为 116 条；`.11` 起为 117 条）及数据库对象；停止旧 app/worker 并验证写入会话已排空后创建加密异地备份，最后只替换 app/worker。数据库改动不能使用这条通道。
+
+**Deploy application** 现在只需在 `main` 上手动点击一次 **Run workflow**。工作流从 `main` 的 `package.json` 自动读取目标版本，从公网 `/api/health` 自动读取当前生产源版本；两者仍必须有 annotated tag 和成功 CI，服务器仍会独立核对实际运行源版本。若健康信息不可用、版本不匹配或包含数据库变更，流程会在切换前失败。发布前仍需先创建并推送目标标签、等待 CI 成功；此入口不自动生成标签或绕过 Environment 审批。
 
 主分支 CI 对纯 CSS/PNG/JPEG/WebP/ICO 位图及仅递增 `package.json` 版本号的改动只执行静态检查、生产构建和性能预算，不启动 PostgreSQL 服务。包含客户端代码、数据库、服务端、测试、发布文件或无法分类的变更继续执行覆盖率和完整数据库门禁；数据库作业与通用检查并行运行。标签 CI 只验证同一 SHA 已有成功的主分支 CI；若源标签到目标标签的累计差异超出轻量范围，应用发布还要求目标标签 CI 的数据库作业成功。
 
@@ -118,8 +126,8 @@ sudo deploy/production/install-production-deploy.sh \
 一般生产标准要求在点击生产入口前用当前生产备份在隔离主机完成恢复演练，并确认备份归档、manifest、数据库权限、app、worker 和登录边界均通过。保留数据切换不删除生产数据库，但回退所需的源 checkout、可 inspect 的源回滚制品和 PostgreSQL 身份证据必须可用；还必须确认生产服务器已安装本版本网关/部署器，Environment secrets/variables 完整。
 
 1. 打开 GitHub 仓库的 **Actions**。
-2. 选择 **Deploy production**。
-3. 点击 **Run workflow**，Branch 保持 `main`，确认 tag 为 `v0.6.0-dev.8`，source 为 `v0.6.0-dev.7`。
+2. 本次 `.10`→`.11` 迁移选择 **Deploy v0.6 default-memory migration**；后续无数据库变更的 0.6 版本选择 **Deploy application**。
+3. 点击 **Run workflow**，Branch 保持 `main`。迁移工作流内部固定 `.10`→`.11`；应用工作流自动读取目标标签和当前线上源标签，均无需填写版本号。
 4. 如配置了 Environment 审批，批准该部署。
 5. 工作流才会依次完成标签/CI 验证、受限 SSH、加密异地备份、部署、公网健康与 HTTP→HTTPS 跳转验证。
 

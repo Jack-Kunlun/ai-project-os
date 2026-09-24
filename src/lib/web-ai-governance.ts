@@ -21,6 +21,7 @@ import {
 } from "@/lib/ai-entitlements";
 import { reloadProviderConfiguration } from "@/lib/ai-providers/service";
 import { getDb } from "@/lib/db";
+import { requireUnchangedProjectPersonalDefaults } from "@/lib/project-personal-default-memory";
 import {
   withWebAiProjectAccessTransaction,
   type ProjectAccessAdmission,
@@ -775,6 +776,7 @@ async function revalidateProviderDispatchBeforeTransport(input: Readonly<{
   auditId: string;
   callKey: string;
   billing: RuntimeBilling;
+  personalDefaultFingerprint?: string;
 }>, db: PrismaClient): Promise<void> {
   try {
     const additionalActorIds = typeof input.route.providerConnection.ownerUserId !== "string"
@@ -789,6 +791,11 @@ async function revalidateProviderDispatchBeforeTransport(input: Readonly<{
       additionalActorIds,
       attempt: { jobId: input.jobId, ...input.attempt },
     }, async (tx, accessAdmission) => {
+      if (input.personalDefaultFingerprint !== undefined) {
+        await requireUnchangedProjectPersonalDefaults(
+          input.projectId, accessAdmission.access.actor, input.personalDefaultFingerprint, tx,
+        );
+      }
       if (accessAdmission.attempt === null) {
         throw new ProviderTransportError("AI_PROVIDER_UNAVAILABLE", 409, false);
       }
@@ -1281,6 +1288,8 @@ export async function auditedProviderCall<T>(input: Readonly<{
   maxOutputTokens?: number;
   /** Optional exact memory-generation evidence for build or index consumption. */
   personalMemoryGeneration?: PersonalMemoryDispatchEvidence;
+  /** Exact caller-owned defaults included in the outbound prompt, if any. */
+  personalDefaultFingerprint?: string;
   call: (dispatch: ProviderDispatchContext) => Promise<Readonly<T & {
     inputTokens: number;
     providerRequestId: string | null;
@@ -1372,6 +1381,11 @@ export async function auditedProviderCall<T>(input: Readonly<{
       },
       markDispatched: true,
     }, async (tx, accessAdmission) => {
+      if (input.personalDefaultFingerprint !== undefined) {
+        await requireUnchangedProjectPersonalDefaults(
+          input.route.projectId, accessAdmission.access.actor, input.personalDefaultFingerprint, tx,
+        );
+      }
       // The persisted project route and provider configuration are reloaded
       // only after the shared access and job locks. The provider lock is the
       // same namespace used by control-plane lifecycle writes.
@@ -1557,6 +1571,7 @@ export async function auditedProviderCall<T>(input: Readonly<{
       auditId: admitted.auditId,
       callKey: input.callKey,
       billing: admitted.billing,
+      personalDefaultFingerprint: input.personalDefaultFingerprint,
     }, db);
     const dispatch: ProviderDispatchContext = Object.freeze({
       ...admitted.dispatch,

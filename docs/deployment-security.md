@@ -1,6 +1,6 @@
 # 部署安全基线
 
-本文档适用于把 AI Project OS 暴露到本机之外的部署。默认 Compose 是本地运行基线，不等同于公网生产部署。当前批准目标是精确预发布标签 `v0.6.0-dev.8`，只允许从生产实际运行的 `v0.6.0-dev.7` 进入 107→116 迁移通道。其他标签均不得进入当前工作流，也不把预发布描述为稳定版。
+本文档适用于把 AI Project OS 暴露到本机之外的部署。默认 Compose 是本地运行基线，不等同于公网生产部署。当前生产源为 `v0.6.0-dev.10`；本次迁移候选只允许通过固定的 `v0.6.0-dev.10`→`v0.6.0-dev.11`、116→117 迁移工作流发布。历史 `.7`→`.8` 工作流仍保留审计用途，不能用于本次发布。预发布不等于稳定版。
 
 ## 必须满足的边界
 
@@ -40,4 +40,4 @@ curl --fail https://project-os.example.com/api/health
 
 `/api/health` 可用于存活探测，但它不证明登录、外部连接、持久化或备份可用。发布验收仍需分别覆盖数据库迁移、恢复演练、Worker、页面和真实外部服务。
 
-生产发布使用[GitHub Actions 生产部署](production-deployment.md)中的 forced-command、root-owned 部署入口和备份边界。当前工作流只接受目标 `v0.6.0-dev.8` 与源版本 `v0.6.0-dev.7`。其他标签和未批准版本必须失败关闭。
+生产发布使用[GitHub Actions 生产部署](production-deployment.md)中的 forced-command、root-owned 部署入口和备份边界。本次数据库变更使用 **Deploy v0.6 default-memory migration**，仅接受源 `v0.6.0-dev.10` 与目标 `v0.6.0-dev.11`；无数据库变更的后续版本使用独立的 **Deploy application**。其他标签和未批准路径必须失败关闭。

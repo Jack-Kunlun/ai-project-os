@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ApiError } from "../src/lib/api-errors";
+import { ApiError, mapApiError } from "../src/lib/api-errors";
+import { ProjectPersonalDefaultError } from "../src/lib/project-personal-default-memory";
 import { MAX_JSON_BODY_BYTES, readJsonBody, readRequestBody } from "../src/lib/api-response";
 
 function streamedRequest(chunks: readonly Uint8Array[], headers: HeadersInit = {}): Request {
@@ -31,6 +32,15 @@ test("JSON body reader parses normal requests without request.json", async () =>
   const payload = JSON.stringify({ title: "项目结论", enabled: true });
   const result = await readJsonBody(streamedRequest([new TextEncoder().encode(payload)], { "content-length": String(Buffer.byteLength(payload)) }));
   assert.deepEqual(result, { title: "项目结论", enabled: true });
+});
+
+test("stale personal defaults fail with a stable re-confirmation response", () => {
+  const result = mapApiError(new ProjectPersonalDefaultError("PROJECT_PERSONAL_DEFAULT_CHANGED"));
+  assert.equal(result.status, 409);
+  assert.deepEqual(result.body, { error: {
+    code: "PROJECT_PERSONAL_DEFAULT_CHANGED",
+    message: "个人通用记忆已变化，请重新确认本次项目 AI 请求",
+  } });
 });
 
 test("JSON body reader preserves malformed JSON as a stable 400", async () => {

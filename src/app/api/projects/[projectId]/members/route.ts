@@ -5,6 +5,7 @@ import { handleApiError } from "@/lib/api-response";
 import { requireApiSession } from "@/lib/auth";
 import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { getDb } from "@/lib/db";
+import { findConfirmedWorkspaceMembership } from "@/lib/membership-governance";
 
 export const dynamic = "force-dynamic";
 const idSchema = z.string().uuid();
@@ -20,6 +21,8 @@ export async function GET(request: Request, context: { params: Promise<{ project
     }, async (tx, admission) => {
       const project = await tx.project.findUniqueOrThrow({ where: { id: projectId }, select: { name: true, membershipInheritanceMode: true } });
       const canManage = admission.permission === "owner" && admission.project.archivedAt === null;
+      const actorWorkspaceMembership = await findConfirmedWorkspaceMembership(tx, admission.workspace.id, actor.id);
+      const canManageWorkspace = actorWorkspaceMembership?.role === "owner" || actorWorkspaceMembership?.role === "admin";
       const memberships = canManage
         ? await tx.workspaceMembership.findMany({
           where: { workspaceId: admission.workspace.id, accessState: "confirmed", user: { disabledAt: null, role: "user" } },
@@ -58,6 +61,7 @@ export async function GET(request: Request, context: { params: Promise<{ project
       return {
         project: { id: projectId, name: project.name, workspaceId: admission.workspace.id, membershipInheritanceMode: project.membershipInheritanceMode },
         canManage,
+        canManageWorkspace,
         members: visibleMembers,
         truncated: canManage && memberships.length > 200,
       };

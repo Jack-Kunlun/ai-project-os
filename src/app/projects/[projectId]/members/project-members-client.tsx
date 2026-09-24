@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
+import { BackButton } from "@/components/back-button";
 import { useAppConfirmDialog } from "@/components/app-confirm-dialog";
 import { safeResponseError } from "@/lib/safe-error-presentation";
 
@@ -15,7 +16,7 @@ type Member = Readonly<{
 }>;
 type Payload = Readonly<{
   project: { id: string; name: string; workspaceId: string; membershipInheritanceMode: string };
-  canManage: boolean; members: Member[]; truncated: boolean;
+  canManage: boolean; canManageWorkspace: boolean; members: Member[]; truncated: boolean;
 }>;
 
 export function ProjectMembersClient({ projectId, username, isSystemAdmin }: { projectId: string; username: string; isSystemAdmin: boolean }) {
@@ -64,13 +65,15 @@ export function ProjectMembersClient({ projectId, username, isSystemAdmin }: { p
     <AppHeader username={username} active="projects" projectId={projectId} projectSection="members" isSystemAdmin={isSystemAdmin} />
     {dialog}
     <div className="mx-auto max-w-7xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
-      <h1 className="text-3xl font-semibold">项目成员与权限</h1>
+      <div className="mb-5"><BackButton fallbackHref={`/projects/${projectId}`} /></div>
+      <h1 className="text-3xl font-semibold">成员权限</h1>
       <p className="mt-2 text-sm text-slate-600">查看当前项目的有效权限并管理显式授权；团队级账号与邀请在团队空间处理。</p>
       {error ? <p role="alert" className="mt-5 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
       {loading ? <p role="status" className="mt-7 text-sm text-slate-500">正在加载成员…</p> : payload ? <>
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5">
-          <div><h2 className="text-lg font-semibold">{payload.project.name}</h2><p className="mt-1 text-xs text-slate-500">{payload.canManage ? "选择团队成员并设置当前项目的 Editor 或 Viewer 权限。团队 Owner/Admin 继承项目 Owner 权限，需在团队空间修改团队角色。" : "你可以查看当前项目已明确授权的成员。"}</p></div>
-          <Link href={`/team/${encodeURIComponent(payload.project.workspaceId)}`} className="rounded-xl border border-indigo-200 px-4 py-2.5 text-xs font-semibold text-indigo-700">团队空间 · 邀请与账号 →</Link>
+          <div><h2 className="text-lg font-semibold">{payload.project.name}</h2><p className="mt-1 text-xs text-slate-500">{payload.canManage ? "你拥有当前项目的 Owner 权限，可为已有团队成员设置 Editor 或 Viewer 权限。" : "你可以查看当前项目已明确授权的成员。"}</p></div>
+          {payload.canManage ? <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">我的权限：Owner</span> : null}
+          {payload.canManage && payload.canManageWorkspace ? <Link href={`/team/${encodeURIComponent(payload.project.workspaceId)}?view=invitations`} className="rounded-xl border border-indigo-200 px-4 py-2.5 text-xs font-semibold text-indigo-700">邀请成员与创建账号 →</Link> : null}
         </div>
         {payload.truncated ? <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-xs text-amber-800">团队成员选择列表只展示前 200 人；当前项目已有授权仍全部列出并可撤销。</p> : null}
         {payload.members.length === 0 ? <p className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-sm text-slate-500">当前没有可显示的项目成员。</p> : <ul className="mt-5 grid gap-3 md:grid-cols-2">{payload.members.map((member) => <li key={member.userId} className="rounded-2xl border border-slate-200 bg-white p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{member.displayName || member.username}</h3><p className="mt-1 text-xs text-slate-500">@{member.username}{member.workspaceRole ? ` · 团队 ${member.workspaceRole}` : ""}</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">有效权限：{member.inheritedOwner ? "Owner · 团队继承" : member.projectRole ?? "无项目权限"}</span></div>{member.inheritedOwner && member.projectRole ? <p className="mt-2 text-xs text-slate-500">另有显式项目授权：{member.projectRole}；团队继承权限优先。</p> : null}{payload.canManage && member.projectRole !== "owner" && !member.inheritedOwner ? <MemberRoleEditor key={member.membershipId ?? member.userId} member={member} disabled={pendingUserId !== null} onSave={(role) => void save(member, role)} /> : null}</li>)}</ul>}

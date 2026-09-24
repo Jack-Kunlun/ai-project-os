@@ -6,7 +6,7 @@ import { getCurrentMembershipApplication } from "@/lib/membership-application-se
 
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const RANGE_VALUES = ["7d", "30d", "90d", "custom"] as const;
+const RANGE_VALUES = ["7d", "30d", "90d", "365d", "custom"] as const;
 const LEDGER_KINDS = ["grant", "reserve", "settle", "release", "hold", "adjustment"] as const;
 const OPERATIONS = ["embedding", "visionExtract", "autoExtract", "sourceSummary", "projectAnalysis", "generateWithContext"] as const;
 const QUERY_KEYS = new Set(["range", "from", "to", "timezone", "page", "pageSize", "kind", "operation", "modelId", "projectId", "scope"]);
@@ -210,7 +210,7 @@ export function resolveCreditReportQuery(input: CreditReportQueryInput, now: Dat
   if (Number.isNaN(now.getTime())) invalidQuery("当前时间无效");
   const current = localDateParts(now, input.timezone);
   const toParts = input.range === "custom" ? parseDateParts(input.to!, "to") : current;
-  const dayCount = input.range === "7d" ? 7 : input.range === "90d" ? 90 : 30;
+  const dayCount = input.range === "7d" ? 7 : input.range === "90d" ? 90 : input.range === "365d" ? 365 : 30;
   const fromParts = input.range === "custom" ? parseDateParts(input.from!, "from") : shiftDate(toParts, -(dayCount - 1));
   const fromDate = dateToString(fromParts);
   const toDate = dateToString(toParts);

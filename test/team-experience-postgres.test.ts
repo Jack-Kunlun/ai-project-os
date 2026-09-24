@@ -20,6 +20,43 @@ const shouldRun = process.env.TEAM_EXPERIENCE_POSTGRES_GATE === "1";
 const testDatabaseName = "ai_project_os_team_experience_test";
 const gateUser = "ai_project_os_gate";
 
+test("personal workspace team controls admit owners and admins but reject ordinary collaborators", { skip: !shouldRun ? "TEAM_EXPERIENCE_POSTGRES_GATE=1 is required" : false }, async () => {
+  assertDisposableGateDatabase();
+  const db = getDb();
+  try {
+    const { workspaceId, ownerId } = await createPostgresWorkspaceFixture(db);
+    await db.workspace.update({ where: { id: workspaceId }, data: { slug: `user-${ownerId}` } });
+    const actor: AccessUser = { id: ownerId, role: "user", accountAccessVersion: 1 };
+    const [overview, permissions, teams] = await Promise.all([
+      getTeamOverview(actor, workspaceId, db),
+      getTeamPermissions(actor, workspaceId, db),
+      listTeams(actor, db),
+    ]);
+    assert.equal(overview.role, "owner");
+    assert.equal(overview.workspace.id, workspaceId);
+    assert.equal(permissions.role, "owner");
+    assert.equal(teams.some((team) => team.workspace.id === workspaceId), false);
+    const collaboratorId = randomUUID();
+    const adminId = randomUUID();
+    await db.appUser.createMany({ data: [
+      { id: collaboratorId, username: `personal_collaborator_${collaboratorId.slice(0, 8)}`, role: "user" },
+      { id: adminId, username: `personal_admin_${adminId.slice(0, 8)}`, role: "user" },
+    ] });
+    await db.$transaction(async (tx) => {
+      await lockActorsAccess(tx, [ownerId, collaboratorId, adminId]);
+      await lockWorkspaceAccess(tx, workspaceId);
+      await grantWorkspaceMembership(tx, { workspaceId, userId: collaboratorId, role: "member", actorId: ownerId, reason: "personal_team_collaborator_test" });
+      await grantWorkspaceMembership(tx, { workspaceId, userId: adminId, role: "admin", actorId: ownerId, reason: "personal_team_admin_test" });
+    });
+    await assert.rejects(
+      () => getTeamOverview({ id: collaboratorId, role: "user", accountAccessVersion: 1 }, workspaceId, db),
+      (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+    );
+    const adminOverview = await getTeamOverview({ id: adminId, role: "user", accountAccessVersion: 1 }, workspaceId, db);
+    assert.equal(adminOverview.role, "admin");
+  } finally { await db.$disconnect(); }
+});
+
 function assertDisposableGateDatabase(): void {
   const configuredUrl = process.env.DATABASE_URL;
   if (typeof configuredUrl !== "string" || configuredUrl.length === 0) throw new Error("TEAM_EXPERIENCE_TEST_DATABASE_URL_REQUIRED");

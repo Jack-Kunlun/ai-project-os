@@ -112,28 +112,12 @@ export function AppHeader({
                 项目概览
               </Link>
               <Link
-                href={`/projects/${projectId}/configuration`}
-                aria-current={projectSection === "configuration" ? "page" : undefined}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "configuration" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+                href={`/projects/${projectId}/intelligence`}
+                aria-current={projectSection && intelligenceSections.includes(projectSection) ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && intelligenceSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
               >
-                <NavIcon name="settings" />
-                项目配置
-              </Link>
-              <Link
-                href={`/projects/${projectId}/members`}
-                aria-current={projectSection === "members" ? "page" : undefined}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "members" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
-              >
-                <NavIcon name="users" />
-                项目成员与权限
-              </Link>
-              <Link
-                href={`/projects/${projectId}/plan`}
-                aria-current={projectSection === "plan" ? "page" : undefined}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "plan" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
-              >
-                <NavIcon name="book" />
-                项目计划
+                <NavIcon name="sparkles" />
+                AI 工作台
               </Link>
               <Link
                 href={`/projects/${projectId}/materials`}
@@ -144,12 +128,20 @@ export function AppHeader({
                 项目资料
               </Link>
               <Link
-                href={`/projects/${projectId}/intelligence`}
-                aria-current={projectSection && intelligenceSections.includes(projectSection) ? "page" : undefined}
-                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection && intelligenceSections.includes(projectSection) ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+                href={`/projects/${projectId}/plan`}
+                aria-current={projectSection === "plan" ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "plan" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
               >
-                <NavIcon name="sparkles" />
-                AI 工作台
+                <NavIcon name="book" />
+                项目计划
+              </Link>
+              <Link
+                href={`/projects/${projectId}/members`}
+                aria-current={projectSection === "members" ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "members" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="users" />
+                成员权限
               </Link>
               <Link
                 href={`/projects/${projectId}/automations`}
@@ -158,6 +150,14 @@ export function AppHeader({
               >
                 <NavIcon name="repeat" />
                 项目自动化
+              </Link>
+              <Link
+                href={`/projects/${projectId}/configuration`}
+                aria-current={projectSection === "configuration" ? "page" : undefined}
+                className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 ${projectSection === "configuration" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-600 hover:bg-white hover:text-slate-950"}`}
+              >
+                <NavIcon name="settings" />
+                项目配置
               </Link>
             </nav>
           </div>

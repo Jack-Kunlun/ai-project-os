@@ -29,7 +29,7 @@ test("project overview owns governance panels while materials and configuration 
   assert.match(header, />\s*项目自动化\s*</u);
   assert.match(header, />\s*项目配置\s*</u);
   assert.doesNotMatch(header, />\s*项目管理\s*</u);
-  const orderedTabs = ["项目概览", "项目配置", "项目计划", "项目资料", "AI 工作台", "项目自动化"];
+  const orderedTabs = ["项目概览", "AI 工作台", "项目资料", "项目计划", "成员权限", "项目自动化", "项目配置"];
   const tabPositions = orderedTabs.map((label) => header.indexOf(label));
   assert.ok(tabPositions.every((position) => position >= 0));
   assert.deepEqual([...tabPositions].sort((left, right) => left - right), tabPositions);
@@ -54,7 +54,7 @@ test("project overview owns governance panels while materials and configuration 
   assert.match(dashboard, /\/projects\/\$\{entry\.project\.id\}#current-state/u);
   assert.doesNotMatch(dashboard, /href=\{`\/projects\/\$\{entry\.project\.id\}\/world`\}/u);
   assert.match(world, /Advanced state governance/u);
-  assert.match(world, /返回项目概览/u);
+  assert.match(world, /<ProjectOverviewParentLink projectId=\{projectId\}/u);
   assert.match(governance, /ProjectGovernanceSections/u);
   assert.match(governance, /id="ai-usage"/u);
   assert.match(governance, /<details id="task-runs"/u);

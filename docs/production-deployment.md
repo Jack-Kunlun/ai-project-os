@@ -1,6 +1,6 @@
 # GitHub Actions 生产部署
 
-状态：`CONTROLLED_PRERELEASE`。截至 2026-09-24，生产已部署 `v0.6.0-dev.10`；本次 `.10`→`.11`、116→117 迁移使用 **Deploy v0.6 default-memory migration**。`.7`→`.8` 的 **Deploy production** 只保留历史精确路径，后续无迁移版本使用 **Deploy application**。这些版本仍是预发布，不是稳定版或 GitHub Latest。
+状态：`CONTROLLED_PRERELEASE`。截至 2026-09-24，生产已部署 `v0.6.0-dev.11`；此次 `.10`→`.11`、116→117 迁移通过 **Deploy v0.6 default-memory migration** 完成，并验证停写异地备份、117 条迁移账本和公网 app/worker 健康。`.7`→`.8` 的 **Deploy production** 只保留历史精确路径，后续无迁移版本使用 **Deploy application**。这些版本仍是预发布，不是稳定版或 GitHub Latest。
 
 AI Project OS 从 GitHub Actions 的受控部署工作流手动部署已经通过标签 CI 的批准版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 

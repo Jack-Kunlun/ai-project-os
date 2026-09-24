@@ -1,8 +1,8 @@
 # GitHub Actions 生产部署
 
-状态：`CONTROLLED_PRERELEASE`。当前批准的生产目标是 `v0.6.0-dev.8`。该版本仍是预发布，不是稳定版或 GitHub Latest；工作流只对这一精确目标标签开放，并要求生产当前运行 `v0.6.0-dev.7`。
+状态：`CONTROLLED_PRERELEASE`。当前生产运行 `v0.6.0-dev.8`；下一无迁移应用候选为 `v0.6.0-dev.9`，仍是预发布，不是稳定版或 GitHub Latest。`.7`→`.8` 的 **Deploy production** 迁移工作流只接受历史精确标签；`.8`→`.9` 使用 **Deploy application**。
 
-AI Project OS 从 GitHub Actions 的 **Deploy production** 工作流手动部署已经通过标签 CI 的批准版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
+AI Project OS 从 GitHub Actions 的受控部署工作流手动部署已经通过标签 CI 的批准版本。该入口仅负责部署当前有效产品版本，不把部署权限开放给产品内的 Action Engine、MCP 或自动化 Worker。
 
 ## v0.5.0-dev.1 clean-reset 边界
 
@@ -37,10 +37,10 @@ AI Project OS 从 GitHub Actions 的 **Deploy production** 工作流手动部署
 ## 安全模型
 
 - 工作流只能通过 `workflow_dispatch` 手动触发，并且必须从 `main` 运行。
-- 当前目标输入只接受 `v0.6.0-dev.8`，目标必须是 annotated tag，且 `package.json`、应用版本与 OCI 标签必须匹配 `0.6.0-dev.8`；源输入只接受 `v0.6.0-dev.7`。
+- 历史 **Deploy production** 输入只接受 `v0.6.0-dev.8`，目标必须是 annotated tag，且 `package.json`、应用版本与 OCI 标签必须匹配 `0.6.0-dev.8`；源输入只接受 `v0.6.0-dev.7`。后续版本使用 **Deploy application** 的源/目标标签校验。
 - 部署前会通过 GitHub API 确认所选源标签和 0.6 目标标签对应精确提交的 `CI` push 运行已经 `completed/success`。
 - GitHub 使用独立 ED25519 私钥；服务器对应公钥带 `restrict` 和 forced-command，不能获取 Shell、PTY、端口转发或执行任意命令。
-- forced-command 当前发布只接受精确的 `deploy-v06-next v0.6.0-dev.7 v0.6.0-dev.8 <source SHA> <target SHA> CONFIRM_V06_NEXT_MIGRATION_V1`；历史协议继续保留用于审计。其他命令全部拒绝，sudoers 不开放 Shell、Git 或 Docker。
+- `.7`→`.8` 迁移 forced-command 只接受精确的 `deploy-v06-next v0.6.0-dev.7 v0.6.0-dev.8 <source SHA> <target SHA> CONFIRM_V06_NEXT_MIGRATION_V1`；`.8`→`.9` 应用发布使用独立的受限协议。其他命令全部拒绝，sudoers 不开放 Shell、Git 或 Docker。
 - 服务器会再次通过 GitHub 公共 API 核验标签 CI，专用私钥本身不能绕过发布门禁。
 - 生产 `.env` 位于 `/etc/ai-project-os/production.env`，权限为 `root:root 0600`，不会进入仓库、Actions 日志或部署结果。
 - 历史 `.5 -> .6` 路径会构建并复核源回滚制品和目标镜像；`.6 -> .7` 路径会在旧 app/worker 仍健康时捕获精确容器与镜像身份并构建目标镜像和只读预检。两条路径都会停止旧 app/worker，确认维护窗口中只剩本项目的 PostgreSQL 且端口只绑定 `127.0.0.1`，再以 stopped-writer cutover 模式调用 `pre-deploy` 备份。只有 `BACKUP_OK source_quiesced=true`、归档对象和唯一命名且经 COS metadata 验证的 manifest 均验证成功后才允许继续；完整合同见[生产异地备份](production-backup.md)。
@@ -78,13 +78,13 @@ sudo deploy/production/install-production-deploy.sh \
 
 更新器只接受 `v0.6.<patch>` 或 `v0.6.<patch>-dev.<number>` annotated tag、精确 40 位提交和固定确认词。它使用与运行中 Compose checkout 分离的 root-owned 仓库，再次核验固定 GitHub origin、标签提交、`package.json` 版本和该标签提交的成功 CI。通过后只安装代码中列出的 gateway、更新器、迁移/补丁部署器、preserve 部署器、OAuth 配置器、Compose operations override 和 sudoers；候选文件必须是普通非空文件，Shell 与 sudoers 必须先通过语法检查，目标路径不能由远端参数指定。
 
-当前 **Deploy production** 工作流先用服务器现有更新器完成一次 bootstrap，再用候选 `.8` 更新器完成第二次工具同步，随后调用 `.7`→`.8` 专用迁移协议。同一 Actions 运行完成工具同步、OAuth 配置同步、停写备份、数据库迁移和公网健康验证。
+历史 **Deploy production** 工作流先用服务器现有更新器完成一次 bootstrap，再用候选 `.8` 更新器完成第二次工具同步，随后调用 `.7`→`.8` 专用迁移协议。同一 Actions 运行完成工具同步、OAuth 配置同步、停写备份、数据库迁移和公网健康验证。
 
 ## 后续 0.6 应用版本
 
 从已上线的 v0.6.0-dev.8 开始，后续无数据库变更的 0.6 开发版本使用 **Deploy application** 工作流。它要求目标为比源版本更新的 annotated tag、目标提交是当前 main、对应标签 CI 成功，且 prisma/migrations、prisma/schema.prisma 和 prisma.config.ts 均无差异。服务器再次核对标签、SHA、线性历史、116 条迁移账本和数据库对象；停止旧 app/worker 并验证写入会话已排空后创建加密异地备份，最后只替换 app/worker。数据库改动不能使用这条通道，必须另行评审迁移方案。
 
-主分支 CI 对纯 CSS/PNG/JPEG/WebP/ICO 位图及仅递增 `package.json` 版本号的改动只执行静态检查、生产构建和性能预算，不启动 PostgreSQL 服务。包含客户端代码、数据库、服务端、测试、发布文件或无法分类的变更继续执行覆盖率和完整数据库门禁；数据库作业与通用检查并行运行。标签 CI 只验证同一 SHA 已有成功的主分支 CI；若源标签到目标标签的累计差异超出轻量范围，应用发布还要求目标标签 CI 的数据库作业成功。正式使用前仍需将本工作流随下一候选版本通过 CI 并发布；此段不代表当前 v0.6.0-dev.8 已具备该通道。
+主分支 CI 对纯 CSS/PNG/JPEG/WebP/ICO 位图及仅递增 `package.json` 版本号的改动只执行静态检查、生产构建和性能预算，不启动 PostgreSQL 服务。包含客户端代码、数据库、服务端、测试、发布文件或无法分类的变更继续执行覆盖率和完整数据库门禁；数据库作业与通用检查并行运行。标签 CI 只验证同一 SHA 已有成功的主分支 CI；若源标签到目标标签的累计差异超出轻量范围，应用发布还要求目标标签 CI 的数据库作业成功。
 
 ## GitHub Environment
 

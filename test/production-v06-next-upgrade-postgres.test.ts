@@ -16,11 +16,13 @@ async function configForCutoff(includeTarget: boolean): Promise<{ root: string; 
   const root = await mkdtemp(path.join(tmpdir(), "ai-project-os-v06-next-"));
   const migrations = path.join(root, "migrations");
   await run("cp", ["-R", path.join(process.cwd(), "prisma/migrations"), migrations]);
-  if (!includeTarget) {
-    const entries = await import("node:fs/promises").then(({ readdir }) => readdir(migrations));
-    await Promise.all(entries.filter((name) => name > "20260921010000_add_personal_knowledge_domain")
-      .map((name) => rm(path.join(migrations, name), { recursive: true, force: true })));
-  }
+  // Keep this historical replay pinned to the migrations shipped by .8.
+  const cutoff = includeTarget
+    ? "20260922050000_harden_personal_knowledge_qa_audit"
+    : "20260921010000_add_personal_knowledge_domain";
+  const entries = await import("node:fs/promises").then(({ readdir }) => readdir(migrations));
+  await Promise.all(entries.filter((name) => name > cutoff)
+    .map((name) => rm(path.join(migrations, name), { recursive: true, force: true })));
   const config = path.join(root, "prisma.config.ts");
   await writeFile(config, `import { defineConfig } from "prisma/config";
 export default defineConfig({ schema: "${path.join(process.cwd(), "prisma/schema.prisma")}", migrations: { path: "${migrations}" }, datasource: { url: process.env.DATABASE_URL } });

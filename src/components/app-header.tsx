@@ -8,7 +8,6 @@ type ProjectSection = "overview" | "configuration" | "materials" | "assets" | "e
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid", adminOnly: false },
   { key: "personalKnowledge", label: "个人工作台", href: "/personal", icon: "book", adminOnly: false },
-  { key: "projects", label: "我的项目", href: "/projects", icon: "folder", adminOnly: false },
   { key: "team", label: "我的团队", href: "/team", icon: "users", adminOnly: false },
 ] as const;
 
@@ -52,7 +51,7 @@ export function AppHeader({
 
         <nav className="order-3 flex w-full flex-wrap items-center gap-1 rounded-2xl bg-slate-100/80 p-1 xl:order-2 xl:w-auto" aria-label="全局导航">
           {primaryItems.filter((item) => !item.adminOnly || isSystemAdmin).map((item) => {
-            const isActive = item.key === active;
+            const isActive = item.key === active || (item.key === "personalKnowledge" && active === "projects");
             return (
               <Link
                 key={item.key}

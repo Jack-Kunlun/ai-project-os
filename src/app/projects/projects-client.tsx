@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useDeferredValue, useEffect, useState, type FormEvent } from "react";
 import { AppHeader } from "@/components/app-header";
+import { PersonalWorkspaceNav } from "@/components/personal-workspace-nav";
 import { ListPagination } from "@/components/list-pagination";
 import type { ListPagination as ListPaginationState } from "@/lib/list-pagination";
 import { jobStatusLabels, type JobKind, type WorkspaceProject } from "@/lib/workspace-summary";
@@ -85,6 +86,7 @@ export function ProjectsClient({ username, isSystemAdmin }: { username: string; 
   return (
     <main className="min-h-screen bg-[#f4f6fb] text-slate-950">
       <AppHeader username={username} active="projects" isSystemAdmin={isSystemAdmin} />
+      <PersonalWorkspaceNav active="projects" />
       <div className="mx-auto max-w-7xl px-5 pb-16 pt-9 sm:px-8 lg:px-10">
         <section className="flex flex-col gap-5 border-b border-slate-200 pb-8 sm:flex-row sm:items-end sm:justify-between">
           <div>

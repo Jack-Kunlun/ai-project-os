@@ -53,7 +53,11 @@ test("credit report keeps settled usage separate from balance delta and keeps pr
   assert.match(client, /后续版本/u);
   assert.match(client, /个人用量/u);
   assert.match(client, /项目用量/u);
-  assert.match(client, /请从项目页面进入额度详情/u);
+  assert.match(client, /collected\[0\]\?\.id/u);
+  assert.match(client, /<select value=\{projectId\}/u);
+  assert.match(client, /fetch\(`\/api\/credits\?\$\{params\.toString\(\)\}`,[^\n]+signal/u);
+  assert.match(client, /controller\.abort\(\)/u);
+  assert.doesNotMatch(client, /输入项目 UUID/u);
   assert.doesNotMatch(profile, /PlatformCreditPanel|平台额度|额度总量|预留中/u);
 });
 

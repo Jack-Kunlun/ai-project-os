@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 /** The pages that belong to the account-owned personal workspace. */
-export type PersonalWorkspaceNavItem = "overview" | "knowledge" | "configuration" | "models" | "git" | "mcp";
+export type PersonalWorkspaceNavItem = "overview" | "projects" | "knowledge" | "configuration" | "models" | "git" | "mcp";
 
 type PersonalWorkspaceNavProps = Readonly<{
   /** Marks the current workspace page so keyboard and visual state stay aligned. */
@@ -10,6 +10,7 @@ type PersonalWorkspaceNavProps = Readonly<{
 
 const items: readonly Readonly<{ key: PersonalWorkspaceNavItem; label: string; href: string }>[] = [
   { key: "overview", label: "总览", href: "/personal" },
+  { key: "projects", label: "全部项目", href: "/projects" },
   { key: "knowledge", label: "知识库", href: "/personal/knowledge" },
   { key: "configuration", label: "配置", href: "/personal/configuration" },
 ];

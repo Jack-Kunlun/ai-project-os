@@ -303,7 +303,7 @@ export function AdminAuditClient() {
           <tbody className="divide-y divide-slate-100">
             {data?.events.map((auditEvent) => {
               const occurred = dateParts(auditEvent.occurredAt);
-              return <tr key={`${auditEvent.source}:${auditEvent.id}`} data-audit-source={auditEvent.source} data-audit-id={auditEvent.id} className="align-top">
+              return <tr key={`${auditEvent.source}:${auditEvent.id}`} data-audit-source={auditEvent.source} data-audit-id={auditEvent.id} >
                 <td className="whitespace-nowrap px-4 py-4 text-xs text-slate-500"><span className="block">{occurred.date}</span><span className="block text-slate-400">{occurred.time}</span></td>
                 <td className="px-4 py-4">
                   <p className="whitespace-nowrap text-sm font-semibold text-slate-900">{auditSourceLabel(auditEvent.source)}</p>

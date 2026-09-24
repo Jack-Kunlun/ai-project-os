@@ -133,7 +133,7 @@ MEMBERSHIP_GOVERNANCE_EXECUTOR_LABEL='maintenance-window-20260904' \
 http://127.0.0.1:3000/api/auth/github/callback
 ```
 
-凭据只写入未提交的部署配置或受控密钥管理，不写入源码、文档、URL 或日志。`AI_PROJECT_OS_PUBLIC_ORIGIN` 必须是浏览器实际访问的规范 origin，不能填容器内部地址。历史 **Deploy production** 迁移 job 只精确允许目标 `v0.6.0-dev.8`、源 `v0.6.0-dev.7`；当前从实际运行的 `.8` 发布 `.10` 使用 **Deploy application**。不要绕过标签 CI、备份恢复、旧库预检和停写切换门禁。
+凭据只写入未提交的部署配置或受控密钥管理，不写入源码、文档、URL 或日志。`AI_PROJECT_OS_PUBLIC_ORIGIN` 必须是浏览器实际访问的规范 origin，不能填容器内部地址。历史 **Deploy production** 迁移 job 只精确允许目标 `v0.6.0-dev.8`、源 `v0.6.0-dev.7`；后续无迁移版本使用 **Deploy application**，由工作流自动选择线上源版本与目标标签。不要绕过标签 CI、备份恢复、旧库预检和停写切换门禁。
 
 用户首次使用 GitHub 登录且系统不存在同邮箱账户时，系统会创建普通用户账号、为其创建独立的个人工作区并授予该工作区 Owner，不会自动加入其他人的工作区；同邮箱已存在时不得静默合并，用户应先登录原账号，再走明确绑定流程。临时访问令牌验证后立即撤销，不作为长期 Git 凭据保存。
 

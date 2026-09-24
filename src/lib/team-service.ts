@@ -102,13 +102,15 @@ async function personalWorkspaceId(actor: AccessUser, db: TeamDb): Promise<strin
 
 async function requireTeamMembership(actor: AccessUser, workspaceId: string, db: TeamDb): Promise<Readonly<{ role: WorkspaceMembershipRole; workspace: { id: string; name: string; slug: string } }>> {
   await assertActiveAccount(actor, db);
-  const personalId = await personalWorkspaceId(actor, db);
-  if (personalId === workspaceId) return fail("ACCESS_FORBIDDEN");
   const membership = await findConfirmedWorkspaceMembership(db, workspaceId, actor.id);
   if (membership === null) return fail("ACCESS_FORBIDDEN");
-  const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { id: true, name: true, slug: true } });
+  const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { id: true, name: true, slug: true, createdById: true } });
   if (workspace === null) return fail("ACCESS_FORBIDDEN");
-  return { role: membership.role, workspace };
+  // Project collaborators may belong to somebody else's personal workspace.
+  // Its team controls remain limited to confirmed workspace owners and admins.
+  if (workspace.createdById !== null && workspace.slug === `user-${workspace.createdById}`
+    && membership.role !== "owner" && membership.role !== "admin") return fail("ACCESS_FORBIDDEN");
+  return { role: membership.role, workspace: { id: workspace.id, name: workspace.name, slug: workspace.slug } };
 }
 
 function projectWhere(actor: AccessUser, workspaceId: string): Prisma.ProjectWhereInput {

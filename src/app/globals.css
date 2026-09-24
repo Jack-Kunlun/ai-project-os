@@ -29,6 +29,12 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Tables use a shared vertical baseline; individual columns can still opt out. */
+table th,
+table td {
+  vertical-align: middle;
+}
+
 button,
 a {
   -webkit-tap-highlight-color: transparent;

@@ -42,6 +42,36 @@ test("team list excludes only the caller-owned personal workspace and scopes pro
   assert.ok(Array.isArray((scopedWhere[0]?.OR)), "project projection must retain the shared access predicate");
 });
 
+test("personal workspace team controls require an owner or admin", async () => {
+  const makeDb = (role: "owner" | "admin" | "member", userId = actorId) => ({
+    appUser: { findUnique: async () => ({ id: userId, disabledAt: null, accountAccessVersion: 1 }) },
+    workspace: { findUnique: async () => ({ id: personalId, name: "个人工作台", slug: `user-${actorId}`, createdById: actorId }) },
+    workspaceMembership: {
+      findMany: async ({ where }: { where: { userId?: string } }) => where.userId
+        ? [{ id: "55555555-5555-4555-8555-555555555555", workspaceId: personalId, userId, role, accessState: "confirmed", createdAt: new Date(), updatedAt: new Date() }]
+        : [],
+      count: async () => 1,
+    },
+    project: { findMany: async () => [], count: async () => 0 },
+  }) as unknown as PrismaClient;
+  const actor = { id: actorId, role: "user" as const, accountAccessVersion: 1 };
+  const overview = await getTeamOverview(actor, personalId, makeDb("owner"));
+  assert.equal(overview.role, "owner");
+  assert.equal(overview.workspace.id, personalId);
+  await assert.rejects(
+    () => getTeamOverview(actor, personalId, makeDb("member")),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+  const collaboratorId = "66666666-6666-4666-8666-666666666666";
+  const collaborator = { id: collaboratorId, role: "user" as const, accountAccessVersion: 1 };
+  await assert.rejects(
+    () => getTeamOverview(collaborator, personalId, makeDb("member", collaboratorId)),
+    (error: unknown) => error instanceof AccessControlError && error.code === "ACCESS_FORBIDDEN",
+  );
+  const delegatedAdmin = await getTeamOverview(collaborator, personalId, makeDb("admin", collaboratorId));
+  assert.equal(delegatedAdmin.role, "admin");
+});
+
 test("team routes and UI expose useful member views while keeping activity on approved audit sources", async () => {
   const [service, listRoute, overviewRoute, permissionsRoute, activityRoute, page, client] = await Promise.all([
     readFile("src/lib/team-service.ts", "utf8"),

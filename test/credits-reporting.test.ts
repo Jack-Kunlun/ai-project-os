@@ -17,6 +17,13 @@ test("credit report query defaults to a strict 30 day window and a valid IANA ti
   assert.equal(query.window.to.toISOString(), "2026-09-23T16:00:00.000Z");
 });
 
+test("yearly token activity stays within the bounded report window", () => {
+  const query = resolveCreditReportQuery(parseCreditReportQuery(new URLSearchParams("range=365d&timezone=Asia%2FShanghai")), new Date("2026-09-22T16:00:00.000Z"));
+  assert.equal(query.window.days.length, 365);
+  assert.equal(query.window.toDate, "2026-09-23");
+  assert.equal(query.window.days[0], query.window.fromDate);
+});
+
 test("custom credit report windows include both local endpoints and reject malformed input", () => {
   const query = resolveCreditReportQuery(
     parseCreditReportQuery(new URLSearchParams("range=custom&from=2026-03-08&to=2026-03-10&timezone=America%2FLos_Angeles")),

@@ -46,6 +46,7 @@ export type CreditReportDailyPoint = Readonly<{
   date: string;
   settledCredits: number;
   settledRawTokens: number;
+  rawTokenCoverageComplete: boolean;
   pendingCredits: number;
 }>;
 
@@ -290,6 +291,7 @@ export async function getCreditReportInTransaction(userId: string, db: ReportDb,
 
   const dailySettled = new Map(query.window.days.map((date) => [date, 0]));
   const dailyRawTokens = new Map(query.window.days.map((date) => [date, 0]));
+  const dailyRawCoverage = new Map(query.window.days.map((date) => [date, true]));
   const dailyPending = new Map(query.window.days.map((date) => [date, 0]));
   for (const reservation of settledReservations) {
     if (reservation.settledAt === null) continue;
@@ -298,6 +300,7 @@ export async function getCreditReportInTransaction(userId: string, db: ReportDb,
     const amount = sumSafe(reservation.allocations.map((allocation) => allocation.settledTokens));
     dailySettled.set(date, dailySettled.get(date)! + amount);
     dailyRawTokens.set(date, sumSafe([dailyRawTokens.get(date)!, reservation.rawSettledTokens ?? 0]));
+    if (reservation.rawSettledTokens === null) dailyRawCoverage.set(date, false);
   }
   for (const reservation of pendingReservations) {
     const date = dateToString(localDateParts(reservation.createdAt, query.timezone));
@@ -305,7 +308,7 @@ export async function getCreditReportInTransaction(userId: string, db: ReportDb,
     if (!Number.isSafeInteger(reservation.reservedTokens) || reservation.reservedTokens < 0) throw new ApiError(500, "CREDITS_PROJECTION_INCONSISTENT", "额度报表数据暂时无法读取");
     dailyPending.set(date, dailyPending.get(date)! + reservation.reservedTokens);
   }
-  const daily = Object.freeze(query.window.days.map((date) => Object.freeze({ date, settledCredits: dailySettled.get(date)!, settledRawTokens: dailyRawTokens.get(date)!, pendingCredits: dailyPending.get(date)! })));
+  const daily = Object.freeze(query.window.days.map((date) => Object.freeze({ date, settledCredits: dailySettled.get(date)!, settledRawTokens: dailyRawTokens.get(date)!, rawTokenCoverageComplete: dailyRawCoverage.get(date)!, pendingCredits: dailyPending.get(date)! })));
 
   const projectIds = [...new Set(ledgerRows.map((row) => row.reservation?.webAiGrantProjectId).filter((id): id is string => typeof id === "string"))];
   const visibleProjects = projectIds.length === 0 ? [] : await db.project.findMany({ where: { AND: [accessibleProjectWhere({ id: userId, role: "user" } satisfies AccessUser), { id: { in: projectIds } }] }, select: { id: true, name: true } });

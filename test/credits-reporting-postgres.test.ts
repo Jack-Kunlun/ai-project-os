@@ -141,6 +141,8 @@ type ReservationSeed = Readonly<{
   status: "settled" | "held";
   createdAt: Date;
   settledAt: Date | null;
+  rawEstimatedTokens?: number;
+  rawSettledTokens?: number;
   allocations: readonly Readonly<{ grantId: string; reservedTokens: number; settledTokens: number; releasedTokens: number }>[];
   safeErrorCode?: string | null;
   runtime?: RuntimeReservationEvidence;
@@ -179,7 +181,7 @@ async function createReservation(db: Prisma.TransactionClient, input: Reservatio
       modelId: input.modelId,
       status: input.status,
       reservedTokens,
-      rawEstimatedTokens: reservedTokens,
+      rawEstimatedTokens: input.rawEstimatedTokens ?? reservedTokens,
       quotaMultiplierBps: input.runtime?.quotaMultiplierBps ?? 10_000,
       routeSource: input.runtime === undefined ? null : "platform_default",
       routeId: input.runtime?.routeId ?? null,
@@ -187,7 +189,7 @@ async function createReservation(db: Prisma.TransactionClient, input: Reservatio
       routeUpdatedAt: input.runtime?.routeUpdatedAt ?? null,
       providerConfigurationVersion: input.runtime?.providerConfigurationVersion ?? null,
       routeFenceFingerprint: input.runtime?.routeFenceFingerprint ?? null,
-      rawSettledTokens: settledTokens,
+      rawSettledTokens: input.rawSettledTokens ?? settledTokens,
       settledTokens,
       reconciliationRequired: input.status === "held",
       safeErrorCode: input.safeErrorCode ?? null,
@@ -229,7 +231,7 @@ async function createReservation(db: Prisma.TransactionClient, input: Reservatio
     await db.platformTokenLedgerEntry.create({
       data: {
         id: randomUUID(), userId: input.userId, grantId: allocation.grantId, reservationId,
-        entryKind: "settle", amount: 0, usageTokens: ordinal === 1 ? settledTokens : null,
+        entryKind: "settle", amount: 0, usageTokens: ordinal === 1 ? input.rawSettledTokens ?? settledTokens : null,
         reasonCode: "AI_PLATFORM_TOKEN_SETTLED", callKey: input.callKey,
         metadata: { allocationOrdinal: ordinal }, createdAt: input.settledAt ?? input.createdAt, idempotencyKey: settledKey,
       },
@@ -357,7 +359,7 @@ test("P04 credit reporting reads settled allocations with scope and owner isolat
           routeVersion: 1,
           routeUpdatedAt: issuedAt,
           providerConfigurationVersion: 1,
-          quotaMultiplierBps: 10_000,
+          quotaMultiplierBps: 20_000,
           routeFenceFingerprint,
           payerKind: "platformCaller",
           payerProviderConnectionId: providerConnectionId,
@@ -377,7 +379,7 @@ test("P04 credit reporting reads settled allocations with scope and owner isolat
         routeVersion: 1,
         routeUpdatedAt: issuedAt,
         providerConfigurationVersion: 1,
-        quotaMultiplierBps: 10_000,
+        quotaMultiplierBps: 20_000,
         routeFenceFingerprint,
       };
 
@@ -397,6 +399,8 @@ test("P04 credit reporting reads settled allocations with scope and owner isolat
         status: "settled",
         createdAt: new Date("2026-09-10T23:00:00.000Z"),
         settledAt: new Date("2026-09-10T23:30:00.000Z"),
+        rawEstimatedTokens: 50,
+        rawSettledTokens: 30,
         allocations: [
           { grantId: multiGrantA, reservedTokens: 40, settledTokens: 40, releasedTokens: 0 },
           { grantId: multiGrantB, reservedTokens: 60, settledTokens: 20, releasedTokens: 40 },
@@ -446,8 +450,8 @@ test("P04 credit reporting reads settled allocations with scope and owner isolat
       const query = resolveCreditReportQuery(input, reportNow);
       const report = await getCreditReportInTransaction(userId, tx, query, reportNow);
       assert.deepEqual(report.usage.daily, [
-        { date: "2026-09-10", settledCredits: 10, pendingCredits: 0 },
-        { date: "2026-09-11", settledCredits: 60, pendingCredits: 8 },
+        { date: "2026-09-10", settledCredits: 10, settledRawTokens: 10, rawTokenCoverageComplete: true, pendingCredits: 0 },
+        { date: "2026-09-11", settledCredits: 60, settledRawTokens: 30, rawTokenCoverageComplete: true, pendingCredits: 8 },
       ]);
       assert.deepEqual({ total: report.summary.totalCredits, available: report.summary.availableCredits, used: report.summary.usedCredits, held: report.summary.heldCredits }, { total: 130, available: 52, used: 70, held: 8 });
       assert.equal(report.ledger.entries.filter((entry) => entry.kind === "settle").reduce((sum, entry) => sum + entry.settledCredits, 0), 70);
@@ -459,6 +463,7 @@ test("P04 credit reporting reads settled allocations with scope and owner isolat
       const personalQuery = resolveCreditReportQuery(parseCreditReportQuery(new URLSearchParams("range=custom&from=2026-09-10&to=2026-09-11&timezone=Asia%2FShanghai&scope=personal")), reportNow);
       const personalReport = await getCreditReportInTransaction(userId, tx, personalQuery, reportNow);
       assert.equal(personalReport.usage.settledCredits, 10);
+      assert.equal(personalReport.usage.daily[0]?.settledRawTokens, 10);
       assert.equal(personalReport.usage.pendingCredits, 8);
       assert.equal(personalReport.ledger.entries.length, 2);
       assert.ok(personalReport.ledger.entries.every((entry) => entry.projectName === "未关联项目"));
@@ -466,6 +471,7 @@ test("P04 credit reporting reads settled allocations with scope and owner isolat
       const projectQuery = resolveCreditReportQuery(parseCreditReportQuery(new URLSearchParams(`range=custom&from=2026-09-10&to=2026-09-11&timezone=Asia%2FShanghai&scope=project&projectId=${hiddenProjectId}`)), reportNow);
       const projectReport = await getCreditReportInTransaction(userId, tx, projectQuery, reportNow);
       assert.equal(projectReport.usage.settledCredits, 60);
+      assert.equal(projectReport.usage.daily[1]?.settledRawTokens, 30);
       assert.equal(projectReport.usage.pendingCredits, 0);
       assert.equal(projectReport.ledger.entries.length, 3);
       assert.ok(projectReport.ledger.entries.every((entry) => entry.projectName === "项目已不可见"));

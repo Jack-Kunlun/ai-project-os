@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-type DailyPoint = Readonly<{ date: string; settledRawTokens: number }>;
+type DailyPoint = Readonly<{ date: string; settledRawTokens: number; rawTokenCoverageComplete: boolean }>;
 type Mode = "daily" | "weekly" | "cumulative";
 const modes: ReadonlyArray<readonly [Mode, string]> = [["daily", "每日"], ["weekly", "每周"], ["cumulative", "累计"]];
 
@@ -49,13 +49,13 @@ export function TokenActivity({ daily }: { daily: readonly DailyPoint[] }) {
       <div className="flex items-center gap-3" aria-label="Token 活动统计方式">{modes.map(([value, label]) => <button key={value} type="button" onClick={() => setMode(value)} aria-pressed={mode === value} className={`text-xs font-medium transition ${mode === value ? "text-white" : "text-slate-400 hover:text-white"}`}>{label}</button>)}</div>
     </div>
     <div className="mt-4 overflow-x-auto pb-1 app-scrollbar-dark">
-      <div className="flex min-w-max gap-[3px]" role="img" aria-label={`Token 活动热力图，${daily.length} 天，${modes.find(([value]) => value === mode)?.[1]}统计`}>
+      <div className="flex min-w-max gap-[3px]" role="img" aria-label={`Token 活动热力图，${daily.length} 天，${modes.find(([value]) => value === mode)?.[1]}统计${daily.some((point) => !point.rawTokenCoverageComplete) ? "，部分历史用量未核实" : ""}`}>
         {weeks.map((week, index) => <div key={week[0].date} className="flex flex-col gap-[3px]">
-          {week.map((cell) => <span key={cell.date} aria-hidden="true" title={cell.point ? `${cell.date} · ${modes.find(([value]) => value === mode)?.[1]}已结算 ${cell.value.toLocaleString("zh-CN")} Token` : undefined} className={`h-2.5 w-2.5 rounded-[2px] ${cell.point ? tone(cell.value) : "opacity-0"}`} />)}
+          {week.map((cell) => <span key={cell.date} aria-hidden="true" title={cell.point ? `${cell.date} · ${modes.find(([value]) => value === mode)?.[1]}已结算 ${cell.value.toLocaleString("zh-CN")} Token${cell.point.rawTokenCoverageComplete ? "" : " · 部分历史原始 Token 未核实"}` : undefined} className={`h-2.5 w-2.5 rounded-[2px] ${cell.point ? tone(cell.value) : "opacity-0"}`} />)}
           <span aria-hidden="true" className="h-4 w-2.5 whitespace-nowrap pt-1 text-[10px] text-slate-400">{index === 0 || week.some((cell) => cell.point?.date.endsWith("-01")) ? `${Number(week.find((cell) => cell.point?.date.endsWith("-01"))?.date.slice(5, 7) ?? week.find((cell) => cell.point)?.date.slice(5, 7) ?? "")}月` : ""}</span>
         </div>)}
       </div>
     </div>
-    <p className="mt-3 text-xs text-slate-400">按已结算且核实的模型原始 Token 数着色；悬停可查看具体数值。</p>
+    <p className="mt-3 text-xs text-slate-400">按已结算且核实的模型原始 Token 数着色；悬停可查看具体数值。{daily.some((point) => !point.rawTokenCoverageComplete) ? "部分历史记录缺少原始 Token，图中数值不含这部分用量。" : ""}</p>
   </div>;
 }

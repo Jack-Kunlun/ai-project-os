@@ -73,6 +73,7 @@ test("credit report aggregates settled allocation credits while preserving a zer
   const projectId = "00000000-0000-4000-8000-000000000072";
   const settledAt = new Date("2026-09-10T08:00:00.000Z");
   const now = new Date("2026-09-12T00:00:00.000Z");
+  let rawSettledTokens: number | null = 25;
   const fakeDb = {
     platformTokenGrant: {
       findMany: async () => [{ id: "00000000-0000-4000-8000-000000000073", amount: 100, remainingTokens: 60, expiresAt: new Date("2026-10-01T00:00:00.000Z"), allocations: [{ grantId: "00000000-0000-4000-8000-000000000073", ordinal: 1, reservedTokens: 100, settledTokens: 40, releasedTokens: 60, reservation: { userId, grantId: "00000000-0000-4000-8000-000000000073", status: "settled" } }] }],
@@ -80,7 +81,7 @@ test("credit report aggregates settled allocation credits while preserving a zer
     membershipSubscription: { findUnique: async () => null },
     platformDefaultAiRoute: { findMany: async () => [] },
     platformTokenReservation: {
-      findMany: async ({ where }: { where: { status?: string } }) => where.status === "settled" ? [{ settledAt, rawSettledTokens: 25, allocations: [{ settledTokens: 40 }] }] : [],
+      findMany: async ({ where }: { where: { status?: string } }) => where.status === "settled" ? [{ settledAt, rawSettledTokens, allocations: [{ settledTokens: 40 }] }] : [],
     },
     platformTokenLedgerEntry: {
       count: async () => 1,
@@ -93,6 +94,11 @@ test("credit report aggregates settled allocation credits while preserving a zer
   const report = await getCreditReportInTransaction(userId, fakeDb, query, now);
   assert.equal(report.usage.settledCredits, 40);
   assert.equal(report.usage.daily[0]?.settledRawTokens, 25);
+  assert.equal(report.usage.daily[0]?.rawTokenCoverageComplete, true);
+  rawSettledTokens = null;
+  const historicalReport = await getCreditReportInTransaction(userId, fakeDb, query, now);
+  assert.equal(historicalReport.usage.daily[0]?.settledRawTokens, 0);
+  assert.equal(historicalReport.usage.daily[0]?.rawTokenCoverageComplete, false);
   assert.equal(report.usage.pendingCredits, 0);
   assert.equal(report.ledger.entries[0]?.settledCredits, 40);
   assert.equal(report.ledger.entries[0]?.balanceDelta, 0);

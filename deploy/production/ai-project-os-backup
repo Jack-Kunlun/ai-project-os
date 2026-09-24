@@ -108,7 +108,7 @@ write_public_status_json() {
   [[ "$MODE" =~ ^(daily|manual|pre-deploy)$ ]] || return 1
   [[ "$PUBLIC_STARTED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]] || return 1
   [[ "$state" =~ ^(running|succeeded|failed|skipped)$ ]] || return 1
-  [[ -z "$TARGET_TAG" || "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" =~ ^v0\.6\.0-dev\.([6-9]|[1-9][0-9]+)$ ]] || return 1
+  [[ -z "$TARGET_TAG" || "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.6 || "$TARGET_TAG" =~ ^v0\.6\.0-dev\.([7-9]|[1-9][0-9]+)$ ]] || return 1
   [[ -z "$completed_at" || "$completed_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]] || return 1
   [[ -z "$duration_seconds" || "$duration_seconds" =~ ^[0-9]+$ ]] || return 1
   [[ -z "$PUBLIC_BACKUP_NAME" || "$PUBLIC_BACKUP_NAME" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.6|pre-deploy-to-v0\.6\.0-dev\.(7|8)|pre-deploy-to-v0\.6\.0-dev\.([9]|[1-9][0-9]+))\.[A-Za-z0-9]{6}$ ]] || return 1
@@ -682,7 +682,7 @@ case "$MODE" in
     reason=$MODE
     ;;
   pre-deploy)
-    [[ "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" =~ ^v0\.6\.0-dev\.([6-9]|[1-9][0-9]+)$ ]] || fail 'BACKUP_TARGET_TAG_INVALID' 64
+    [[ "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.6 || "$TARGET_TAG" =~ ^v0\.6\.0-dev\.([7-9]|[1-9][0-9]+)$ ]] || fail 'BACKUP_TARGET_TAG_INVALID' 64
     [[ "${AI_PROJECT_OS_DEPLOY_LOCK_HELD-}" == 1 ]] || fail 'BACKUP_PRE_DEPLOY_CALLER_INVALID' 75
     reason="pre-deploy-to-$TARGET_TAG"
     ;;

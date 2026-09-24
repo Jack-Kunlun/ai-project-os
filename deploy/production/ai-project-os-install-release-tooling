@@ -231,7 +231,8 @@ if pattern is None:
 sample = "20260922T000000Z-pre-deploy-to-v0.6.0-dev.7.Abc123"
 next_sample = "20260923T000000Z-pre-deploy-to-v0.6.0-dev.8.Abc123"
 app_sample = "20260923T000000Z-pre-deploy-to-v0.6.0-dev.9.Abc123"
-raise SystemExit(0 if all(pattern.fullmatch(item) is not None for item in (sample, next_sample, app_sample)) else 1)
+next_app_sample = "20260924T000000Z-pre-deploy-to-v0.6.0-dev.10.Abc123"
+raise SystemExit(0 if all(pattern.fullmatch(item) is not None for item in (sample, next_sample, app_sample, next_app_sample)) else 1)
 PY
 then
   fail RELEASE_TOOLING_BACKUP_HELPER_CONTRACT_INVALID 69

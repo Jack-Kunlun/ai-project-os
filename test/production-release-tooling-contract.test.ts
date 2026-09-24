@@ -77,6 +77,15 @@ test("root updater verifies tag identity, package version, CI, and a separate ch
   assert.doesNotMatch(updater, /install-production-deploy\.sh/u);
 });
 
+test("backup retains the historical tag literal required by the deployed updater", async () => {
+  const [{ updater }, backup] = await Promise.all([
+    readContractFiles(),
+    readFile(path.join(productionDirectory, "ai-project-os-backup"), "utf8"),
+  ]);
+  assert.ok(updater.includes("grep -Fq 'v0.6.0-dev.6' \"$BACKUP\""));
+  assert.ok(backup.includes('"$TARGET_TAG" == v0.6.0-dev.6'));
+});
+
 test("updater promotes only the fixed validated control-plane allowlist", async () => {
   const { updater } = await readContractFiles();
 

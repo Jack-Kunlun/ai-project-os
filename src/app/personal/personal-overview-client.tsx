@@ -330,7 +330,7 @@ export function PersonalOverviewClient(): React.JSX.Element {
       {state.error ? <div role="alert" className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700"><span>{state.error}</span><button type="button" onClick={() => void load()} className="font-semibold underline">重新加载</button></div> : null}
       {state.partialFailures.length > 0 ? <p role="status" className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">部分统计暂不可用：{state.partialFailures.join("、")}。项目和其他已加载内容仍可继续使用。</p> : null}
 
-      <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6" aria-label="个人工作区统计">
+      <section className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6" aria-label="我的空间统计">
         <MetricCard label="进行中项目" value={state.loading ? "…" : String(state.activeProjects)} href="/personal/projects" />
         <MetricCard label="已归档项目" value={state.loading ? "…" : String(state.archivedProjects)} href="/personal/projects" />
         <MetricCard label="知识文档" value={state.loading ? "…" : countLabel(state.knowledgeCount)} href="/personal/knowledge" />
@@ -355,7 +355,7 @@ export function PersonalOverviewClient(): React.JSX.Element {
 
       <section className="mt-7 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-6 text-sm leading-7 text-indigo-950 sm:p-7">
         <h2 className="text-lg font-semibold">生效顺序</h2>
-        <p className="mt-2">个人工作区保存资源所有权；项目配置保存该项目的委托、选择和限制。进入项目执行任务时，以项目当前有效配置为准，不会因为个人连接存在就自动启用。</p>
+        <p className="mt-2">我的空间保存个人资源所有权；项目配置保存该项目的委托、选择和限制。进入项目执行任务时，以项目当前有效配置为准，不会因为个人连接存在就自动启用。</p>
         <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold"><span className="rounded-full bg-white px-3 py-1.5 text-indigo-800">Git 已关联项目 {countLabel(state.gitProjectCount)}</span><span className="rounded-full bg-white px-3 py-1.5 text-indigo-800">MCP 已关联项目 {countLabel(state.mcpProjectCount)}</span></div>
       </section>
     </div>

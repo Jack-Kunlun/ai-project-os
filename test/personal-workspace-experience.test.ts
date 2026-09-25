@@ -37,7 +37,7 @@ test("个人工作区提供受保护的总览和资源配置汇总", async () =>
   assert.match(configuration, /href="\/personal\/connections\/git"/u);
   assert.match(configuration, /href="\/personal\/connections\/mcp"/u);
   assert.match(configuration, /不会自动成为任何项目的默认配置/u);
-  assert.match(nav, /个人工作区导航/u);
+  assert.match(nav, /我的空间导航/u);
   assert.match(nav, /href: "\/personal"/u);
   assert.match(nav, /label: "我的项目", href: "\/personal\/projects"/u);
   assert.match(nav, /href: "\/personal\/knowledge"/u);

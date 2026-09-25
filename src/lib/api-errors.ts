@@ -698,7 +698,7 @@ export function mapApiError(error: unknown): { status: number; body: ApiErrorBod
       AUTH_CURRENT_PASSWORD_INVALID: [401, "当前密码不正确"],
       AUTH_PASSWORD_UNCHANGED: [400, "新密码不能与当前密码相同"],
       AUTH_LOCAL_PASSWORD_EXISTS: [409, "该账户已经设置本地密码"],
-      AUTH_PERSONAL_WORKSPACE_NOT_READY: [409, "个人工作区尚未就绪，请联系管理员完成成员治理"],
+      AUTH_PERSONAL_WORKSPACE_NOT_READY: [409, "我的空间尚未就绪，请联系管理员完成成员治理"],
       AUTH_REQUIRED: [401, "请先登录"],
       AUTH_FORBIDDEN: [403, "你没有执行此操作所需的权限"],
       AUTH_ACCOUNT_DISABLED: [403, "账户已停用"],

@@ -21,7 +21,7 @@ const items: readonly Readonly<{ key: PersonalWorkspaceNavItem; label: string; h
  */
 export function PersonalWorkspaceNav({ active }: PersonalWorkspaceNavProps): React.JSX.Element {
   return (
-    <nav className="border-b border-slate-200/80 bg-white/90" aria-label="个人工作区导航">
+    <nav className="border-b border-slate-200/80 bg-white/90" aria-label="我的空间导航">
       <div className="mx-auto max-w-7xl px-5 sm:px-8 lg:px-10">
         <div className="flex flex-wrap items-center gap-1 py-2">
           {items.map((item) => {

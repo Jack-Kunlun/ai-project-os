@@ -577,11 +577,11 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   ]);
 
   assert.match(guide, /普通用户操作指南/u);
-  assert.match(guide, /个人 Git 与 MCP 连接可以在个人工作区配置/u);
+  assert.match(guide, /个人 Git 与 MCP 连接可以在“我的空间”配置/u);
   assert.match(userDocs, /项目概览/u);
   assert.match(userDocs, /项目六个一级入口/u);
   assert.match(userDocs, /只有当前工作区 Owner\/Admin 可以创建项目/u);
-  assert.match(userDocs, /个人 Git 与 MCP 连接都由当前用户在个人工作区管理/u);
+  assert.match(userDocs, /个人 Git 与 MCP 连接都由当前用户在“我的空间”管理/u);
   assert.match(userDocs, /项目页支持 Git 连接所有者与项目 Owner 双确认后的一次性手动只读读取/u);
   assert.match(userDocs, /一次性手动读取只读取双确认委托中明确的分支、目录和文本文件/u);
   assert.doesNotMatch(userDocs, /迁移期间不启动新的外部仓库访问|个人连接开放后/u);
@@ -622,7 +622,7 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(repositories, /project-confirmation/u);
   assert.match(repositories, /不会写入、提交或创建 Pull Request/u);
   assert.match(repositories, /自动化、写入\/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准/u);
-  assert.match(guide, /个人 Git 与 MCP 连接可以在个人工作区配置/u);
+  assert.match(guide, /个人 Git 与 MCP 连接可以在“我的空间”配置/u);
   assert.match(repositories, /href="\/personal\/connections\/git"/u);
   assert.match(repositories, /资料已发布到项目/u);
   assert.doesNotMatch(guide, /新增模型、Git 或 MCP 连接/u);

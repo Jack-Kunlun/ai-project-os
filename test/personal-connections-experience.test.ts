@@ -88,6 +88,6 @@ test("personal connection forms keep project automation boundary visible", async
   assert.doesNotMatch(mcp, /请在卡片中发现工具/u);
   assert.doesNotMatch(mcp, /当前不会发起网络请求，外部连通性仍未验证/u);
   assert.match(mcp, /api\/me\/mcp-delegations/u);
-  assert.match(guide, /个人 Git 与 MCP 连接可以在个人工作区配置/u);
+  assert.match(guide, /个人 Git 与 MCP 连接可以在“我的空间”配置/u);
   assert.doesNotMatch(guide, /普通用户不需要也不能配置平台凭据/u);
 });

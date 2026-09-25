@@ -698,7 +698,7 @@ export function KnowledgeClient({ username, isSystemAdmin = false }: { username:
           <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">个人知识</h1>
-              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里属于你的个人工作区。无需创建项目即可保存、搜索和维护知识；只有你明确标记的个人通用记忆会自动补充你发起的项目 AI 请求。</p>
+              <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里是你的个人知识库。无需创建项目即可保存、搜索和维护知识；只有你明确标记的个人通用记忆会自动补充你发起的项目 AI 请求。</p>
             </div>
             <div className="grid gap-2 text-xs text-slate-300 sm:grid-cols-3 lg:w-[34rem]">
               <div className="rounded-2xl border border-white/10 bg-white/[0.07] px-4 py-3">无需项目</div>
@@ -774,7 +774,7 @@ function EmptyDetail({ onCreate }: { onCreate: () => void }): React.JSX.Element 
 function EditorForm({ mode, draft, saving, onDraftChange, onCancel, onSubmit }: { mode: "edit" | "create"; draft: KnowledgeDraft; saving: boolean; onDraftChange: (draft: KnowledgeDraft) => void; onCancel: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }): React.JSX.Element {
   return <form onSubmit={onSubmit} className="space-y-5">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">{mode === "create" ? "New note" : "Edit note"}</p><h2 className="mt-2 text-2xl font-semibold">{mode === "create" ? "新建个人知识" : "编辑个人知识"}</h2></div><span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500">纯文本 / Markdown</span></div>
-    <p className="rounded-2xl bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-800">内容只归属于当前个人工作区，不需要先创建项目。保存后会保留版本历史。</p>
+    <p className="rounded-2xl bg-indigo-50 px-4 py-3 text-xs leading-5 text-indigo-800">内容只保存在你的个人知识库中，不需要先创建项目。保存后会保留版本历史。</p>
     <label className="block text-sm font-semibold text-slate-700">标题<input value={draft.title} onChange={(event) => onDraftChange({ ...draft, title: event.target.value })} required maxLength={240} placeholder="例如：产品想法与待验证假设" className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /></label>
     <label className="block text-sm font-semibold text-slate-700">正文<textarea value={draft.content} onChange={(event) => onDraftChange({ ...draft, content: event.target.value })} required maxLength={100000} rows={18} placeholder="记录你的知识、摘要、规则或下一步想法……" className="mt-2 min-h-[20rem] w-full resize-y rounded-xl border border-slate-200 px-4 py-3 text-sm leading-6 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100" /><span className="mt-1 block text-right text-xs font-normal text-slate-400">{draft.content.length.toLocaleString("zh-CN")} / 100,000 字符</span></label>
     <label className="flex items-start gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={draft.isDefaultMemory} onChange={(event) => onDraftChange({ ...draft, isDefaultMemory: event.target.checked })} className="mt-1 h-4 w-4 shrink-0" /><span><strong className="block">作为个人通用记忆</strong><span className="mt-1 block text-xs leading-5">仅将明确标记的约定自动带入你发起的项目 AI 问答与分析；当前项目约定优先。原始文档仍属于个人知识库，但项目成员可查看生成结果，结果可能复述其中内容。取消标记只影响后续请求，不会撤回已生成的项目结果。最多 8 条，每条不超过 2,000 字符。</span></span></label>

@@ -38,7 +38,7 @@ export default async function PersonalConfigurationPage(): Promise<React.JSX.Ele
       <div className="mx-auto max-w-6xl px-5 pb-16 pt-8 sm:px-8 lg:px-10">
         <section className="rounded-[2rem] bg-slate-950 px-7 py-9 text-white shadow-xl shadow-slate-950/10 sm:px-10 sm:py-11">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Personal configuration</p>
-          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">个人工作区配置</h1>
+          <h1 className="mt-3 text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">我的空间配置</h1>
           <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里管理你拥有的模型、Git 和 MCP 连接。项目配置会展示该项目当前的资源来源，并按项目自己的委托与选择使用；保存个人资源不会自动成为任何项目的默认配置。</p>
         </section>
 
@@ -50,7 +50,7 @@ export default async function PersonalConfigurationPage(): Promise<React.JSX.Ele
 
         <section className="mt-7 rounded-3xl border border-indigo-100 bg-indigo-50/60 p-6 text-sm leading-7 text-indigo-950 shadow-sm sm:p-7">
           <h2 className="text-lg font-semibold">个人资源与项目使用</h2>
-          <p className="mt-2">个人工作区负责资源所有权和维护，项目配置负责读取当前有效来源并完成项目范围内的委托或选择。两者职责不同，项目状态变化不会删除你的个人连接。</p>
+          <p className="mt-2">我的空间负责个人资源的所有权和维护，项目配置负责读取当前有效来源并完成项目范围内的委托或选择。两者职责不同，项目状态变化不会删除你的个人连接。</p>
           <Link href="/projects" className="mt-4 inline-flex font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-4">查看项目并进入项目配置 →</Link>
         </section>
       </div>

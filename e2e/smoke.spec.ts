@@ -631,7 +631,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   await expectNoAccessibilityViolations(page, "profile");
 
   await page.goto("/personal/configuration");
-  await expect(page.getByRole("heading", { name: "个人工作区配置", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "我的空间配置", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /我的 Git 连接/u })).toBeVisible();
   await expect(page.getByRole("link", { name: /我的 MCP 连接/u })).toBeVisible();
   await expectNoAccessibilityViolations(page, "personal configuration");

@@ -40,13 +40,13 @@ export function TokenActivity({ daily }: { daily: readonly DailyPoint[] }) {
   function tone(value: number): string {
     if (value <= 0 || maxValue <= 0) return "bg-white/15";
     const fraction = value / maxValue;
-    return fraction < 0.25 ? "bg-sky-200/65" : fraction < 0.5 ? "bg-indigo-200" : fraction < 0.75 ? "bg-violet-200" : "bg-fuchsia-100";
+    return fraction < 0.25 ? "bg-sky-200/70" : fraction < 0.5 ? "bg-indigo-200" : fraction < 0.75 ? "bg-violet-200" : "bg-fuchsia-100";
   }
 
-  return <div className="rounded-2xl px-5 py-5 text-white shadow-sm sm:px-6" style={{ backgroundImage: "radial-gradient(circle at 88% 8%, rgba(198, 165, 255, .34), transparent 42%), linear-gradient(120deg, #30477e 0%, #454085 52%, #694596 100%)" }}>
+  return <div className="rounded-2xl px-5 py-5 text-white shadow-sm sm:px-6" style={{ backgroundImage: "radial-gradient(circle at 88% 8%, rgba(198, 165, 255, .18), transparent 42%), linear-gradient(120deg, #354d86 0%, #50438d 52%, #60418a 100%)" }}>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h3 className="text-sm font-semibold">Token 活动</h3>
-      <div className="flex items-center gap-1 rounded-lg bg-white/10 p-1" aria-label="Token 活动统计方式">{modes.map(([value, label]) => <button key={value} type="button" onClick={() => setMode(value)} aria-pressed={mode === value} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${mode === value ? "bg-white/20 text-white" : "text-indigo-100 hover:bg-white/10 hover:text-white"}`}>{label}</button>)}</div>
+      <div className="flex items-center gap-1 rounded-lg bg-white/10 p-1" aria-label="Token 活动统计方式">{modes.map(([value, label]) => <button key={value} type="button" onClick={() => setMode(value)} aria-pressed={mode === value} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${mode === value ? "bg-white text-slate-900" : "text-indigo-100 hover:bg-white/10 hover:text-white"}`}>{label}</button>)}</div>
     </div>
     <div className="mt-4 overflow-x-auto pb-1 app-scrollbar-dark">
       <div className="mx-auto grid w-full gap-[3px]" style={{ gridTemplateColumns: weeks.length ? `repeat(${weeks.length}, minmax(14px, 1fr))` : undefined, minWidth: weeks.length * 17, maxWidth: weeks.length < 26 ? weeks.length * 24 : undefined }} role="img" aria-label={`Token 活动热力图，${daily.length} 天，${modes.find(([value]) => value === mode)?.[1]}统计${daily.some((point) => !point.rawTokenCoverageComplete) ? "，部分历史用量未核实" : ""}`}>

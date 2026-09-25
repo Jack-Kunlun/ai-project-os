@@ -38,24 +38,24 @@ export function TokenActivity({ daily }: { daily: readonly DailyPoint[] }) {
   }, [daily, mode]);
 
   function tone(value: number): string {
-    if (value <= 0 || maxValue <= 0) return "bg-white/10";
+    if (value <= 0 || maxValue <= 0) return "bg-white/15";
     const fraction = value / maxValue;
-    return fraction < 0.25 ? "bg-blue-950" : fraction < 0.5 ? "bg-blue-800" : fraction < 0.75 ? "bg-blue-600" : "bg-blue-400";
+    return fraction < 0.25 ? "bg-sky-200/65" : fraction < 0.5 ? "bg-indigo-200" : fraction < 0.75 ? "bg-violet-200" : "bg-fuchsia-100";
   }
 
-  return <div className="rounded-2xl bg-[#1c1d21] px-5 py-5 text-white sm:px-6">
+  return <div className="rounded-2xl px-5 py-5 text-white shadow-sm sm:px-6" style={{ backgroundImage: "radial-gradient(circle at 88% 8%, rgba(198, 165, 255, .34), transparent 42%), linear-gradient(120deg, #30477e 0%, #454085 52%, #694596 100%)" }}>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h3 className="text-sm font-semibold">Token 活动</h3>
-      <div className="flex items-center gap-3" aria-label="Token 活动统计方式">{modes.map(([value, label]) => <button key={value} type="button" onClick={() => setMode(value)} aria-pressed={mode === value} className={`text-xs font-medium transition ${mode === value ? "text-white" : "text-slate-400 hover:text-white"}`}>{label}</button>)}</div>
+      <div className="flex items-center gap-1 rounded-lg bg-white/10 p-1" aria-label="Token 活动统计方式">{modes.map(([value, label]) => <button key={value} type="button" onClick={() => setMode(value)} aria-pressed={mode === value} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${mode === value ? "bg-white/20 text-white" : "text-indigo-100 hover:bg-white/10 hover:text-white"}`}>{label}</button>)}</div>
     </div>
     <div className="mt-4 overflow-x-auto pb-1 app-scrollbar-dark">
-      <div className="flex min-w-max gap-[3px]" role="img" aria-label={`Token 活动热力图，${daily.length} 天，${modes.find(([value]) => value === mode)?.[1]}统计${daily.some((point) => !point.rawTokenCoverageComplete) ? "，部分历史用量未核实" : ""}`}>
-        {weeks.map((week, index) => <div key={week[0].date} className="flex flex-col gap-[3px]">
-          {week.map((cell) => <span key={cell.date} aria-hidden="true" title={cell.point ? `${cell.date} · ${modes.find(([value]) => value === mode)?.[1]}已结算 ${cell.value.toLocaleString("zh-CN")} Token${cell.point.rawTokenCoverageComplete ? "" : " · 部分历史原始 Token 未核实"}` : undefined} className={`h-2.5 w-2.5 rounded-[2px] ${cell.point ? tone(cell.value) : "opacity-0"}`} />)}
-          <span aria-hidden="true" className="h-4 w-2.5 whitespace-nowrap pt-1 text-[10px] text-slate-400">{index === 0 || week.some((cell) => cell.point?.date.endsWith("-01")) ? `${Number(week.find((cell) => cell.point?.date.endsWith("-01"))?.date.slice(5, 7) ?? week.find((cell) => cell.point)?.date.slice(5, 7) ?? "")}月` : ""}</span>
+      <div className="mx-auto grid w-full gap-[3px]" style={{ gridTemplateColumns: weeks.length ? `repeat(${weeks.length}, minmax(14px, 1fr))` : undefined, minWidth: weeks.length * 17, maxWidth: weeks.length < 26 ? weeks.length * 24 : undefined }} role="img" aria-label={`Token 活动热力图，${daily.length} 天，${modes.find(([value]) => value === mode)?.[1]}统计${daily.some((point) => !point.rawTokenCoverageComplete) ? "，部分历史用量未核实" : ""}`}>
+        {weeks.map((week, index) => <div key={week[0].date} className="flex min-w-0 flex-col gap-[3px]">
+          {week.map((cell) => <span key={cell.date} aria-hidden="true" title={cell.point ? `${cell.date} · ${modes.find(([value]) => value === mode)?.[1]}已结算 ${cell.value.toLocaleString("zh-CN")} Token${cell.point.rawTokenCoverageComplete ? "" : " · 部分历史原始 Token 未核实"}` : undefined} className={`aspect-square w-full rounded-[3px] ${cell.point ? tone(cell.value) : "opacity-0"}`} />)}
+          <span aria-hidden="true" className="h-4 w-full whitespace-nowrap pt-1 text-[10px] text-indigo-100">{index === 0 || week.some((cell) => cell.point?.date.endsWith("-01")) ? `${Number(week.find((cell) => cell.point?.date.endsWith("-01"))?.date.slice(5, 7) ?? week.find((cell) => cell.point)?.date.slice(5, 7) ?? "")}月` : ""}</span>
         </div>)}
       </div>
     </div>
-    <p className="mt-3 text-xs text-slate-400">按已结算且核实的模型原始 Token 数着色；悬停可查看具体数值。{daily.some((point) => !point.rawTokenCoverageComplete) ? "部分历史记录缺少原始 Token，图中数值不含这部分用量。" : ""}</p>
+    <p className="mt-3 text-xs text-indigo-100">按已结算且核实的模型原始 Token 数着色；悬停可查看具体数值。{daily.some((point) => !point.rawTokenCoverageComplete) ? "部分历史记录缺少原始 Token，图中数值不含这部分用量。" : ""}</p>
   </div>;
 }

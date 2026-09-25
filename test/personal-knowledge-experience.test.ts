@@ -11,7 +11,7 @@ test("个人知识入口由服务端会话保护并接入全局导航", async ()
   assert.match(page, /requirePageSession\(\)/u);
   assert.match(page, /isSystemAdmin=\{user\.role === "admin"\}/u);
   assert.match(header, /key: "personalKnowledge"/u);
-  assert.match(header, /label: "个人工作台"/u);
+  assert.match(header, /label: "我的空间"/u);
   assert.match(header, /href: "\/personal"/u);
   assert.match(header, /const isActive = item\.key === active/u);
   assert.match((await readFile("src/components/personal-workspace-nav.tsx", "utf8")), /知识库/u);

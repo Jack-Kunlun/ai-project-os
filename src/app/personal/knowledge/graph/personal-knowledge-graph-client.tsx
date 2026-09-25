@@ -128,7 +128,7 @@ export function PersonalKnowledgeGraphClient({ username, isSystemAdmin }: { user
               {documents.map((node) => { const point = docPositions.get(node.id)!; return <g key={node.id}><circle cx={point.x} cy={point.y} r="5" fill="#312e81" /><text x={point.x} y={point.y + 1} fill="white" textAnchor="middle" fontSize="2.5">{node.title.slice(0, 2)}</text></g>; })}
             </svg>
             <ul className="mt-4 grid gap-2 sm:grid-cols-2">{documents.map((node) => <li key={node.id}><Link href={`/personal/knowledge?document=${encodeURIComponent(node.id)}`} className="text-xs font-semibold text-indigo-700">{node.title} →</Link></li>)}</ul>
-            {graph.documents.edges.length === 0 ? <p className="mt-3 text-xs text-slate-500">暂无文档关联；可在个人工作台总览中建立。</p> : null}
+            {graph.documents.edges.length === 0 ? <p className="mt-3 text-xs text-slate-500">暂无文档关联；可在我的空间中建立。</p> : null}
           </>}
         </section>
 

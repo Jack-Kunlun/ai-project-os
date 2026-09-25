@@ -7,7 +7,7 @@ type ProjectSection = "overview" | "configuration" | "members" | "materials" | "
 
 const primaryItems = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "grid", adminOnly: false },
-  { key: "personalKnowledge", label: "个人工作台", href: "/personal", icon: "book", adminOnly: false },
+  { key: "personalKnowledge", label: "我的空间", href: "/personal", icon: "book", adminOnly: false },
   { key: "team", label: "团队与成员", href: "/team", icon: "users", adminOnly: false },
 ] as const;
 

@@ -238,7 +238,7 @@ export function DashboardClient({ username, isSystemAdmin = false }: { username:
               <h1 className="mt-4 break-words text-3xl font-semibold tracking-[-0.035em] sm:text-5xl">欢迎回来，{username}</h1>
               <p className="mt-4 max-w-2xl break-words text-sm leading-7 text-slate-300 sm:text-base">先处理个人知识、额度和连接，再查看项目动态与待办。模型能力由平台默认模型或个人双确认委托提供。</p>
               <div className="mt-7 flex flex-wrap gap-3">
-                <Link href="/personal" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">个人工作台</Link>
+                <Link href="/personal" className="rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">我的空间</Link>
                 <Link href="/projects" className="rounded-xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15">我的项目</Link>
                 <Link href="/guide#dashboard" className="rounded-xl border border-white/15 bg-white/10 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/15">查看使用指南</Link>
               </div>

@@ -319,7 +319,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
   page.on("console", (message) => {
     if (message.type() === "error") browserErrors.push(`console:${message.text()}`);
   });
-  page.on("pageerror", (error) => browserErrors.push(`page:${error.message}`));
+  page.on("pageerror", (error) => browserErrors.push(`page:${new URL(page.url()).pathname}:${error.message}`));
   const adminUsername = "browser_admin";
   const adminPassword = "BrowserGate2026Password!";
   const ownerUsername = `browser_owner_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
@@ -400,6 +400,7 @@ test("first-run administrator and personal workspace Owner stay separate across 
 
   await page.goto("/credits");
   await expect(page.getByRole("heading", { name: "每日用量", exact: true })).toBeVisible();
+  await expect(page.getByText("按 Asia/Shanghai 统计，零使用日也会保留。")).toBeVisible();
   await page.getByRole("button", { name: "近 30 天", exact: true }).click();
   const tokenGrid = page.getByRole("group", { name: /Token 活动热力图，30 天/u });
   await expect(tokenGrid).toBeVisible();

@@ -320,7 +320,7 @@ export function PersonalOverviewClient(): React.JSX.Element {
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300">Personal workspace</p>
         <div className="mt-3 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">个人工作台总览</h1>
+            <h1 className="text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">我的空间</h1>
             <p className="mt-4 max-w-3xl text-sm leading-7 text-slate-300">这里统一展示当前账号可访问的项目和个人资源。个人知识留在个人空间，项目资料与记忆留在各自项目；项目 A 的约定不会自动成为项目 B 的规则。</p>
           </div>
           <Link href="/personal/configuration" className="inline-flex min-h-11 items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-indigo-50">管理个人资源</Link>

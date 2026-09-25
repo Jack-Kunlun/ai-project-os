@@ -209,7 +209,7 @@ export function PersonalProjectSearchPanel(): React.JSX.Element {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600">Workspace search</p>
-          <h2 id="personal-project-search-title" className="mt-2 text-lg font-semibold text-slate-900">搜索个人工作台</h2>
+          <h2 id="personal-project-search-title" className="mt-2 text-lg font-semibold text-slate-900">搜索我的空间</h2>
           <p className="mt-1 text-xs leading-5 text-slate-500">默认只搜索第一个可访问项目及个人知识。跨项目检索需手动选择范围；结果保留项目归属，不会合并成一套规则。</p>
         </div>
         <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600">最多 {MAX_SELECTED_PROJECTS} 个项目</span>

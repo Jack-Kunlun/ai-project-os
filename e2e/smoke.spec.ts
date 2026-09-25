@@ -398,6 +398,57 @@ test("first-run administrator and personal workspace Owner stay separate across 
     worker: { status: "up", consecutiveFailures: 0 },
   });
 
+  await page.goto("/credits");
+  await expect(page.getByRole("heading", { name: "每日用量", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "近 30 天", exact: true }).click();
+  const tokenGrid = page.getByRole("group", { name: /Token 活动热力图，30 天/u });
+  await expect(tokenGrid).toBeVisible();
+  const latestTokenCell = tokenGrid.locator("[data-token-date]").last();
+  const latestTokenDate = await latestTokenCell.getAttribute("data-token-date");
+  expect(latestTokenDate).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
+  await latestTokenCell.hover({ position: { x: 1, y: 1 } });
+  await expect(page.getByRole("tooltip")).toContainText(`${latestTokenDate}每日已结算 0 Token`);
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await tokenGrid.focus();
+  await expect(page.getByRole("tooltip")).toContainText(latestTokenDate!);
+  await tokenGrid.press("ArrowUp");
+  await expect(page.getByRole("tooltip")).not.toContainText(latestTokenDate!);
+  await tokenGrid.press("Home");
+  const oldestTokenDate = await tokenGrid.locator("[data-token-date]").first().getAttribute("data-token-date");
+  await expect(page.getByRole("tooltip")).toContainText(oldestTokenDate!);
+  await page.getByRole("button", { name: "近 7 天", exact: true }).click();
+  const sevenDayGrid = page.getByRole("group", { name: /Token 活动热力图，7 天/u });
+  await expect(sevenDayGrid).toBeVisible();
+  await sevenDayGrid.focus();
+  const latestSevenDayDate = await sevenDayGrid.locator("[data-token-date]").last().getAttribute("data-token-date");
+  await expect(page.getByRole("tooltip")).toContainText(latestSevenDayDate!);
+  await sevenDayGrid.press("ArrowUp");
+  await expect(page.getByRole("tooltip")).not.toContainText(latestSevenDayDate!);
+  await expectNoAccessibilityViolations(page, "credits heatmap");
+
+  await page.goto("/personal/connections/git");
+  await expect(page.getByRole("heading", { name: "我的 Git 连接", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "添加服务", exact: true }).click();
+  const gitDialog = page.getByRole("dialog", { name: "添加 Git 服务" });
+  const addressHelp = gitDialog.getByRole("button", { name: "服务地址填写示例" });
+  await addressHelp.hover();
+  const helpIcon = await addressHelp.boundingBox();
+  const helpIconVisual = await addressHelp.locator("span").boundingBox();
+  expect(helpIconVisual!.width).toBeLessThan(helpIcon!.width);
+  await expect(page.getByRole("tooltip")).toContainText("HTTPS 示例");
+  const caHelp = gitDialog.getByRole("button", { name: "自定义 CA（可选）填写示例" });
+  await caHelp.hover();
+  const helpPopup = page.getByRole("tooltip");
+  await expect(helpPopup).toContainText("可信私有 CA");
+  const popupBounds = await helpPopup.boundingBox();
+  expect(popupBounds).not.toBeNull();
+  expect(popupBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(popupBounds!.y + popupBounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  await expect(gitDialog.locator('[role="tooltip"]')).toHaveCount(0);
+  await expectNoAccessibilityViolations(page, "git connection tooltip");
+  await gitDialog.getByRole("button", { name: "关闭弹窗" }).click();
+
   await page.goto("/projects");
   await expect(page.getByRole("heading", { name: "我的项目" })).toBeVisible();
   await expect(page.getByText("匹配 0 个", { exact: true })).toBeVisible();

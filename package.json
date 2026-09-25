@@ -1,6 +1,6 @@
 {
   "name": "ai-project-os",
-  "version": "0.6.0-dev.13",
+  "version": "0.6.0-dev.14",
   "private": true,
   "scripts": {
     "dev": "next dev",

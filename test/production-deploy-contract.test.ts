@@ -12,6 +12,7 @@ const v06DeploymentPath = path.join(repositoryRoot, "deploy/production/ai-projec
 const v06NextDeploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-v06-next-deploy");
 const cleanDeploymentPath = path.join(repositoryRoot, "deploy/production/ai-project-os-clean-deploy");
 const backupPath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup");
+const restorePath = path.join(repositoryRoot, "deploy/production/ai-project-os-restore");
 const backupInstallerPath = path.join(repositoryRoot, "deploy/production/install-production-backup.sh");
 const backupServicePath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup.service");
 const backupTimerPath = path.join(repositoryRoot, "deploy/production/ai-project-os-backup.timer");
@@ -534,12 +535,17 @@ test("backup quiesces writers, verifies encrypted COS objects, and deletes only 
 
   assert.match(backup, /docker pause "\$app_id"/u);
   assert.match(backup, /docker pause "\$worker_id"/u);
+  assert.match(backup, /docker pause "\$git_worker_id"/u);
+  assert.match(backup, /git_worker_id=\$\(require_single_running_container git-worker\)/u);
+  assert.match(backup, /git_worker_id=\$\(require_single_stopped_container git-worker\)/u);
   assert.match(backup, /trap cleanup_on_exit EXIT/u);
   assert.match(backup, /BACKUP_STACK_SERVICE_NOT_HEALTHY/u);
-  assert.match(backup, /wait_for_writer_health "\$app_id" "\$worker_id"/u);
+  assert.match(backup, /writer_ids=\("\$app_id" "\$worker_id"\)/u);
+  assert.match(backup, /writer_ids\+=\("\$git_worker_id"\)/u);
+  assert.match(backup, /wait_for_writer_health "\$\{writer_ids\[@\]\}"/u);
   assert.match(backup, /BACKUP_WRITER_HEALTH_TIMEOUT/u);
   assert.ok(
-    backup.indexOf('wait_for_writer_health "$app_id" "$worker_id"') <
+    backup.indexOf('wait_for_writer_health "${writer_ids[@]}"') <
       backup.indexOf('upload_object "$STAGING_ARCHIVE"'),
     "writer health must recover before offsite upload and success",
   );
@@ -599,6 +605,76 @@ test("backup quiesces writers, verifies encrypted COS objects, and deletes only 
       backup.lastIndexOf('cleanup_verified_local_backups "$backup_path"'),
     "retention must run only after the current backup has a verified marker",
   );
+});
+
+test("0.7 production backup and restore require the Git writer while 0.6 remains compatible", async () => {
+  const [backup, restore] = await Promise.all([
+    readFile(backupPath, "utf8"),
+    readFile(path.join(repositoryRoot, "deploy/production/ai-project-os-restore"), "utf8"),
+  ]);
+  const versionFunction = backup.slice(
+    backup.indexOf("requires_git_worker_for_version()"),
+    backup.indexOf("write_result()"),
+  );
+  const result = spawnSync("bash", ["-c", `${versionFunction}\nfor version in 0.6.0-dev.14 0.7.0-dev.1 0.7.0 1.0.0; do if requires_git_worker_for_version "$version"; then printf 'yes\\n'; else printf 'no\\n'; fi; done`], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "no\nyes\nyes\nyes\n");
+  const writerSelection = backup.slice(
+    backup.indexOf("git_worker_id=\ngit_worker_container_output"),
+    backup.indexOf("readonly git_worker_id") + "readonly git_worker_id".length,
+  );
+  for (const [version, count, expectedStatus, expectedId] of [
+    ["0.6.0-dev.14", "0", 0, "empty"],
+    ["0.6.0-dev.14", "1", 0, "present"],
+    ["0.6.0-dev.14", "2", 72, ""],
+    ["0.7.0-dev.1", "0", 72, ""],
+    ["0.7.0-dev.1", "1", 0, "present"],
+  ] as const) {
+    const script = `set -Eeuo pipefail\nCOMPOSE_PROJECT=ai-project-os\nMODE=manual\napp_version=${version}\nfail() { printf '%s\\n' "$1" >&2; exit "$2"; }\ndocker() { for ((i=0; i<${count}; i++)); do printf '%064d\\n' "$i"; done; }\nrequire_single_running_container() { printf '%064d' 0; }\nrequire_single_stopped_container() { printf '%064d' 0; }\n${versionFunction}\n${writerSelection}\nif [[ -n "$git_worker_id" ]]; then printf present; else printf empty; fi`;
+    const selectionResult = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+    assert.equal(selectionResult.status, expectedStatus, `${version} count=${count}: ${selectionResult.stderr}`);
+    if (expectedStatus === 0) assert.equal(selectionResult.stdout, expectedId);
+  }
+  const discoveryFailure = spawnSync("bash", ["-c", `set -Eeuo pipefail\nCOMPOSE_PROJECT=ai-project-os\nMODE=manual\napp_version=0.6.0-dev.14\nfail() { printf '%s\\n' "$1" >&2; exit "$2"; }\ndocker() { return 7; }\n${versionFunction}\n${writerSelection}`], { encoding: "utf8" });
+  assert.equal(discoveryFailure.status, 72);
+  assert.match(discoveryFailure.stderr, /BACKUP_GIT_WORKER_DISCOVERY_FAILED/u);
+  assert.match(backup, /BACKUP_GIT_WORKER_ID_CHANGED/u);
+  assert.match(backup, /pre-deploy-to-v0\\\.7\\\.0/u);
+  assert.match(restore, /running_services\+=\(git-worker\)/u);
+  assert.match(restore, /build_services\+=\(git-worker\)/u);
+  assert.match(restore, /git_worker_state" == healthy/u);
+  assert.match(restore, /RELEASE_HAS_GIT_WORKER=1/u);
+  const gitPasswordCheckStart = restore.indexOf("if (( RELEASE_HAS_GIT_WORKER == 1 )); then\n  grep -Eq '^POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD");
+  const gitPasswordCheck = restore.slice(gitPasswordCheckStart, restore.indexOf("\nfi", gitPasswordCheckStart) + 3);
+  assert.ok(gitPasswordCheckStart > 0);
+  const environmentDirectory = await mkdtemp(path.join(tmpdir(), "ai-project-os-git-restore-secret-"));
+  try {
+    const environmentFile = path.join(environmentDirectory, "production.env");
+    for (const [hasGitWorker, value, expectedStatus] of [
+      ["0", "", 0],
+      ["1", "", 71],
+      ["1", `POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD=${"a".repeat(64)}\n`, 0],
+      ["1", "POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD=short\n", 71],
+    ] as const) {
+      await writeFile(environmentFile, value);
+      const check = spawnSync("bash", ["-c", `set -Eeuo pipefail\nENV_FILE=$1\nRELEASE_HAS_GIT_WORKER=$2\nfail() { printf '%s\\n' "$1" >&2; exit "$2"; }\n${gitPasswordCheck}`, "restore-git-secret-check", environmentFile, hasGitWorker], { encoding: "utf8" });
+      assert.equal(check.status, expectedStatus, check.stderr);
+    }
+  } finally {
+    await rm(environmentDirectory, { recursive: true, force: true });
+  }
+  const helperResult = spawnSync("python3", ["-c", [
+    "import runpy, sys",
+    "pattern = runpy.run_path(sys.argv[1])['BACKUP_NAME']",
+    "names = [",
+    "    '20260930T010000Z-pre-deploy-to-v0.7.0-dev.1.Abc123',",
+    "    '20260930T010000Z-pre-deploy-to-v0.7.0.Abc123',",
+    "    '20260930T010000Z-pre-deploy-to-v0.7.0-dev.0.Abc123',",
+    "]",
+    "print(' '.join('yes' if pattern.fullmatch(name) else 'no' for name in names))",
+  ].join("\n"), path.join(repositoryRoot, "deploy/production/ai_project_os_backup_artifact.py")], { encoding: "utf8" });
+  assert.equal(helperResult.status, 0, helperResult.stderr);
+  assert.equal(helperResult.stdout, "yes yes no\n");
 });
 
 test("deploy pre-deploy backup is the quiesced artifact accepted by migration restore", async () => {
@@ -934,7 +1010,22 @@ test("installer keeps secrets root-only and installs a restricted Actions key", 
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-next-deploy",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-default-memory-deploy",
     "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-app-deploy",
+    "ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v07-deploy",
   ]);
+});
+
+test("release installer, backup, and restore open only validated root-owned locks", async () => {
+  const [updater, backup, restore] = await Promise.all([
+    readFile(releaseToolingInstallerPath, "utf8"),
+    readFile(backupPath, "utf8"),
+    readFile(restorePath, "utf8"),
+  ]);
+  for (const script of [updater, backup, restore]) {
+    assert.match(script, /"O_NOFOLLOW"/u);
+    assert.match(script, /os\.O_EXCL/u);
+    assert.match(script, /metadata\.st_uid, metadata\.st_gid/u);
+    assert.doesNotMatch(script, /exec [89]>"\$(?:LOCK_FILE|DEPLOY_LOCK_FILE|BACKUP_LOCK_FILE)"/u);
+  }
 });
 
 test("production shell entrypoints pass bash syntax validation", () => {

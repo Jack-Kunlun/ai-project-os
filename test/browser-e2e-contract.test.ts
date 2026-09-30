@@ -31,6 +31,14 @@ test("browser gate stays isolated and exercises the production server", async ()
   assert.match(config, /parsed\.hostname !== "127\.0\.0\.1"/u);
   assert.match(runner, /validatePostgresGateAdminUrl/u);
   assert.match(runner, /ai_project_os_browser_e2e_test/u);
+  assert.match(runner, /GIT_AUTOMATION_WORKER_ROLE = "ai_project_os_git_automation_worker"/u);
+  assert.match(runner, /gitAutomationWorkerPassword = `GitAutomationWorker_\$\{randomBytes\(24\)\.toString\("hex"\)\}`/u);
+  assert.match(runner, /gitAutomationUrl: withCredentials\(GIT_AUTOMATION_WORKER_ROLE, gitAutomationWorkerPassword\)/u);
+  assert.match(runner, /delete environment\.GIT_AUTOMATION_DATABASE_URL/u);
+  assert.match(runner, /const principalEnvironment = \{ \.\.\.environment, GIT_AUTOMATION_DATABASE_URL: connection\.gitAutomationUrl \}/u);
+  assert.match(runner, /reconcile-database-principals\.ts", "--bootstrap-if-needed"\], principalEnvironment/u);
+  assert.match(runner, /reconcile-database-principals\.ts"\], principalEnvironment/u);
+  assert.match(runner, /for \(const role of \[RUNTIME_ROLE, WRITER_ROLE, MIGRATOR_ROLE, INVENTORY_READER_ROLE, GIT_AUTOMATION_WORKER_ROLE, CLUSTER_ADMIN_ROLE\]\)/u);
   assert.match(runner, /createServer/u);
   assert.match(runner, /hasLoopbackListener/u);
   assert.match(runner, /port: configuredPort \?\? 0/u);

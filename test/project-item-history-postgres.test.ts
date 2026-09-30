@@ -461,6 +461,9 @@ test(
           }
         });
 
+        // Project deletion now requires an archived lifecycle state before
+        // cascading evidence cleanup can be exercised.
+        await prisma.project.update({ where: { id: projectId }, data: { archivedAt: new Date() } });
         await prisma.project.delete({ where: { id: projectId } });
         assert.equal(await prisma.sourceChunk.count({ where: { projectId } }), 0);
         assert.equal(await prisma.projectItemEvidence.count({ where: { projectId } }), 0);

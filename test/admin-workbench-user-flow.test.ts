@@ -150,7 +150,8 @@ test("Git project repository routes pass the session actor to the service author
   assert.match(client, /acknowledgeReadOnlyCredentialUse:\s*true/u);
   assert.match(client, /acknowledgeRepositoryScope:\s*true/u);
   assert.match(client, /acknowledgeDataEgress:\s*true/u);
-  assert.match(client, /自动化、写入\/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准/u);
+  assert.match(client, /手动读取与自动读取分别授权；自动读取需双确认/u);
+  assert.match(client, /写入\/提交和旧 PAT 路径保持关闭，外部读取以运行记录为准/u);
   assert.match(client, /不会写入、提交或创建 Pull Request/u);
   assert.match(client, /href="\/personal\/connections\/git"/u);
   assert.match(client, /资料已发布到项目/u);
@@ -621,7 +622,8 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(repositories, /owner-confirmation/u);
   assert.match(repositories, /project-confirmation/u);
   assert.match(repositories, /不会写入、提交或创建 Pull Request/u);
-  assert.match(repositories, /自动化、写入\/提交和旧 PAT 路径保持关闭；目标 Git 服务是否可用，以连接测试和单次读取结果为准/u);
+  assert.match(repositories, /手动读取与自动读取分别授权；自动读取需双确认/u);
+  assert.match(repositories, /写入\/提交和旧 PAT 路径保持关闭，外部读取以运行记录为准/u);
   assert.match(guide, /个人 Git 与 MCP 连接可以在“我的空间”配置/u);
   assert.match(repositories, /href="\/personal\/connections\/git"/u);
   assert.match(repositories, /资料已发布到项目/u);
@@ -630,7 +632,8 @@ test("user guide and project surfaces keep admin controls out of the ordinary fl
   assert.match(tools, /仅管理连接委托和只读工具授权/u);
   assert.match(tools, /href="\/personal\/connections\/mcp"/u);
   assert.match(tools, /mcp-connection-delegations|mcp-tool-grants/u);
-  assert.doesNotMatch(tools, /MCP 连接由管理员维护|mcp-actions|dispatch|result-import|授权并调用|创建并请求审批/u);
+  assert.doesNotMatch(tools, /MCP 连接由管理员维护|授权并调用|创建并请求审批/u);
+  assert.match(tools, /mcpActionsEnabled && <Link href=\{`\/projects\/\$\{projectId\}\/mcp-actions`\}/u);
   assert.match(repositoriesPage, /isSystemAdmin=\{user\.role === "admin"\}/u);
   assert.doesNotMatch(tools, /href="\/connections\/mcp"/u);
   assert.match(projects, /payload\.pagination\.totalPages > 1 \?/u);

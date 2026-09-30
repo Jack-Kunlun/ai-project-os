@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
+import { createServer as createHttpsServer, globalAgent as httpsGlobalAgent, request as nativeHttpsRequest } from "node:https";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import type { LookupFunction } from "node:net";
 import type { PrismaClient } from "@prisma/client";
 import { mapApiError } from "../src/lib/api-errors";
 import { AccessControlError, accessibleProjectWhere, assertProjectAccess, authorizeApiRequest, getProjectPermission, resolveProjectCreationWorkspace } from "../src/lib/access-control";
 import { memoryTextSimilarity, normalizeMemoryText } from "../src/lib/memory-quality";
 import { canonicalIssuerUrl, OidcError } from "../src/lib/oidc";
-import { canonicalWebSourceUrl, extractWebDocument, WebSourceError } from "../src/lib/web-sources";
+import { canonicalWebSourceUrl, extractWebDocument, fetchAuthenticatedStaticWebDocument, resolveSecureEndpointFingerprint, securePinnedHttpRequest, WebSourceError } from "../src/lib/web-sources";
 import { getWorkspaceOverview, resolveUserWorkspace, WorkspaceError } from "../src/lib/workspaces";
 
 function errorCode(operation: () => unknown): string | null {
@@ -30,6 +32,120 @@ test("网页与 OIDC 地址默认要求公网 HTTPS，内网 HTTP 需要明确�
   assert.equal(canonicalWebSourceUrl("http://127.0.0.1:9000/guide", true), "http://127.0.0.1:9000/guide");
   assert.equal(canonicalIssuerUrl("https://login.example.com/tenant/", false), "https://login.example.com/tenant");
   assert.equal(errorCode(() => canonicalIssuerUrl("http://login.example.com", false)), "OIDC_INVALID_INPUT");
+});
+
+test("认证网页只向配置的公网 HTTPS 地址发送延迟提供的 Bearer，并拒绝重定向", async () => {
+  let requests = 0;
+  let authorization: string | undefined;
+  const request = async (input: Parameters<typeof securePinnedHttpRequest>[0]) => {
+    requests += 1;
+    assert.equal(input.url, "https://docs.example.com/private/guide");
+    assert.equal(input.allowPrivateNetwork, false);
+    const dispatch = await input.onRequestBodyWriteStart?.();
+    authorization = typeof dispatch === "object" && dispatch !== null ? dispatch.headers?.authorization : undefined;
+    return {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+      body: Buffer.from("<html><head><title>受保护文档</title></head><body>只读正文</body></html>"),
+      finalUrl: input.url,
+      fingerprint: "a".repeat(64),
+    };
+  };
+  const result = await fetchAuthenticatedStaticWebDocument({
+    url: "https://docs.example.com/private/guide#section",
+    expectedFingerprint: "a".repeat(64),
+    onRequestBodyWriteStart: () => ({ headers: { authorization: "Bearer test-bearer-secret-token" } }),
+  }, request);
+  assert.equal(requests, 1);
+  assert.equal(authorization, "Bearer test-bearer-secret-token");
+  assert.equal(result.finalUrl, "https://docs.example.com/private/guide");
+  assert.match(result.text, /只读正文/u);
+  assert.doesNotMatch(JSON.stringify(result), /test-bearer-secret-token|authorization/u);
+
+  await assert.rejects(
+    () => fetchAuthenticatedStaticWebDocument({
+      url: "https://docs.example.com/private/guide",
+      expectedFingerprint: "a".repeat(64),
+      onRequestBodyWriteStart: () => ({ headers: { authorization: "Bearer test-bearer-secret-token" } }),
+    }, async (input) => ({ status: 302, headers: { location: "https://attacker.example/collect" }, body: Buffer.alloc(0), finalUrl: input.url, fingerprint: "a".repeat(64) })),
+    (error: unknown) => error instanceof WebSourceError && error.code === "WEB_SOURCE_REDIRECT_REJECTED",
+  );
+
+  await assert.rejects(
+    () => fetchAuthenticatedStaticWebDocument({
+      url: "http://docs.example.com/private/guide",
+      expectedFingerprint: "a".repeat(64),
+      onRequestBodyWriteStart: () => ({ headers: { authorization: "Bearer test-bearer-secret-token" } }),
+    }, async (input) => ({ status: 200, headers: { "content-type": "text/plain" }, body: Buffer.from("unexpected"), finalUrl: input.url, fingerprint: "a".repeat(64) })),
+    (error: unknown) => error instanceof WebSourceError && error.code === "WEB_SOURCE_AUTHENTICATED_URL_REJECTED",
+  );
+});
+
+test("认证网页 pinned HTTPS 请求不会复用同 host 的旧 keep-alive socket", async () => {
+  const key = await readFile(join(process.cwd(), "test/fixtures/web-source-pinned-test-key.pem.fixture"));
+  const cert = await readFile(join(process.cwd(), "test/fixtures/web-source-pinned-test-cert.pem.fixture"));
+  const connectionAddresses: string[] = [];
+  const requestAddresses: string[] = [];
+  const authorizationHeaders: Array<string | undefined> = [];
+  const server = createHttpsServer({ key, cert }, (request, response) => {
+    requestAddresses.push(request.socket.remoteAddress ?? "");
+    authorizationHeaders.push(request.headers.authorization);
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.end("safe local response");
+  });
+  server.on("secureConnection", (socket) => connectionAddresses.push(socket.remoteAddress ?? ""));
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = `https://127.0.0.1:${address.port}/private`;
+  const previousTlsVerificationSetting = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  const lookupStaleAddress: LookupFunction = (_hostname, options, callback) => {
+    callback(null, options.all ? [{ address: "127.0.0.1", family: 4 }] : "127.0.0.1", 4);
+  };
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const request = nativeHttpsRequest(url, {
+        lookup: lookupStaleAddress,
+        headers: { connection: "keep-alive" },
+      }, (response) => {
+        response.resume();
+        response.on("end", resolve);
+      });
+      request.on("error", reject);
+      request.end();
+    });
+    assert.equal(connectionAddresses.length, 1);
+    assert.equal(requestAddresses.length, 1);
+    assert.equal(requestAddresses[0]?.replace(/^::ffff:/u, ""), "127.0.0.1");
+    assert.ok(Object.values(httpsGlobalAgent.freeSockets).some((sockets) => (sockets?.length ?? 0) > 0), "the stale same-origin TLS socket must be pooled before the authenticated fetch");
+
+    const endpoint = await resolveSecureEndpointFingerprint({ url, allowPrivateNetwork: true });
+    // This adapter permits loopback only for the local TLS fixture. Production
+    // authenticated fetches use securePinnedHttpRequest's default public-DNS gate.
+    const localPinnedRequest: typeof securePinnedHttpRequest = (input) => securePinnedHttpRequest({ ...input, allowPrivateNetwork: true });
+    const result = await fetchAuthenticatedStaticWebDocument({
+      url,
+      expectedFingerprint: endpoint.fingerprint,
+      onRequestBodyWriteStart: () => ({ headers: { authorization: "Bearer keep-alive-canary-secret" } }),
+    }, localPinnedRequest);
+
+    assert.match(result.text, /safe local response/u);
+    assert.equal(requestAddresses.length, 2);
+    assert.equal(connectionAddresses.length, 2, "pinned fetch must open a fresh TLS connection instead of reusing the pooled socket");
+    assert.equal(requestAddresses[1]?.replace(/^::ffff:/u, ""), "127.0.0.1");
+    assert.equal(authorizationHeaders[1], "Bearer keep-alive-canary-secret");
+  } finally {
+    httpsGlobalAgent.destroy();
+    if (previousTlsVerificationSetting === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previousTlsVerificationSetting;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test("网页提取会移除可执行内容并保留标题、来源与正文", () => {

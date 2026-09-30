@@ -3,7 +3,7 @@ import { Prisma, type OidcTokenAuthMethod, type PrismaClient } from "@prisma/cli
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
 import { z } from "zod";
 import { assertWorkspaceAdmin, type AccessUser } from "@/lib/access-control";
-import { appendEmailVerificationAudit, createSessionInTransaction, setVerifiedAccountEmail, type CreatedSession } from "@/lib/auth";
+import { appendEmailVerificationAudit, createSessionInTransaction, setVerifiedAccountEmail, type CreatedSession, type SafeSessionContext } from "@/lib/auth";
 import { createCredential, readCredentialSecret, rotateCredential } from "@/lib/credential-vault";
 import { assertEntitlementWriterSession, getDb, getEntitlementDb, isEntitlementDatabase } from "@/lib/db";
 import { canonicalInternalReturnPath } from "@/lib/redirects";
@@ -20,8 +20,10 @@ import { resolveSecureEndpointFingerprint, securePinnedJsonRequest, WebSourceErr
 import { activateAccountEntitlements } from "@/lib/account-entitlement-activation-service";
 
 export const OIDC_STATE_COOKIE_NAME = "ai_project_os_oidc_state" as const;
+export const OIDC_LINK_STATE_COOKIE_NAME = "ai_project_os_oidc_link_state" as const;
 const OIDC_ATTEMPT_LIFETIME_MS = 10 * 60 * 1_000;
 const OIDC_MAX_ACTIVE_ATTEMPTS = 200;
+const OIDC_LINK_MAX_ACTIVE_ATTEMPTS = 40;
 const OIDC_ATTEMPT_LOCK_NAMESPACE = 20260830;
 const PLATFORM_BOOTSTRAP_LOCK_ID = 781452903;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -46,7 +48,12 @@ export type OidcErrorCode =
   | "OIDC_TOKEN_EXCHANGE_FAILED"
   | "OIDC_ID_TOKEN_INVALID"
   | "OIDC_ACCOUNT_NOT_ALLOWED"
-  | "OIDC_ACCOUNT_DISABLED";
+  | "OIDC_ACCOUNT_DISABLED"
+  | "OIDC_LINK_ACCOUNT_NOT_ALLOWED"
+  | "OIDC_LINK_SESSION_INVALID"
+  | "OIDC_IDENTITY_CONFLICT"
+  | "OIDC_LINK_CONCURRENT_CHANGE"
+  | "OIDC_LINK_ATTEMPT_LIMIT";
 
 export class OidcError extends Error {
   constructor(readonly code: OidcErrorCode) {
@@ -355,6 +362,7 @@ export async function deleteOidcProvider(workspaceIdInput: unknown, providerIdIn
           updatedAt: true,
           _count: { select: { identities: true } },
           loginAttempts: { select: { credentialId: true } },
+          linkAttempts: { select: { credentialId: true } },
         },
       });
       if (provider === null) return fail("OIDC_PROVIDER_NOT_FOUND");
@@ -362,14 +370,16 @@ export async function deleteOidcProvider(workspaceIdInput: unknown, providerIdIn
       if (provider.status !== "disabled") return fail("OIDC_PROVIDER_DELETE_REQUIRES_DISABLED");
       if (provider.name !== parsed.confirmationName) return fail("OIDC_PROVIDER_CONFIRMATION_MISMATCH");
       if (provider._count.identities > 0) return fail("OIDC_PROVIDER_IN_USE");
-      const flowCredentialIds = provider.loginAttempts.map((attempt) => attempt.credentialId);
+      const flowCredentialIds = [...provider.loginAttempts, ...provider.linkAttempts].map((attempt) => attempt.credentialId);
       await tx.oidcLoginAttempt.deleteMany({ where: { providerId: provider.id } });
+      await tx.oidcIdentityLinkAttempt.deleteMany({ where: { providerId: provider.id } });
       await tx.oidcProvider.delete({ where: { id: provider.id } });
       await tx.externalCredential.deleteMany({
         where: {
           id: { in: [provider.credentialId, ...flowCredentialIds] },
           oidcProviders: { none: {} },
           oidcLoginAttempts: { none: {} },
+          oidcIdentityLinkAttempts: { none: {} },
         },
       });
       return Object.freeze({ id: provider.id });
@@ -456,6 +466,209 @@ export async function beginOidcLogin(input: Readonly<{ providerId: unknown; redi
   authorization.searchParams.set("code_challenge", base64urlSha256(verifier));
   authorization.searchParams.set("code_challenge_method", "S256");
   return Object.freeze({ authorizationUrl: authorization.toString(), state, expiresAt });
+}
+
+export async function listLinkableOidcProviders(actor: SafeSessionContext["user"], db: PrismaClient | Prisma.TransactionClient = getDb()) {
+  if (actor.role !== "user") return [];
+  const providers = await db.oidcProvider.findMany({
+    where: {
+      status: "verified",
+      disabledAt: null,
+      workspace: { memberships: { some: { userId: actor.id, accessState: "confirmed" } } },
+      identities: { none: { userId: actor.id } },
+    },
+    orderBy: [{ workspaceId: "asc" }, { name: "asc" }, { id: "asc" }],
+    select: { id: true, name: true, workspace: { select: { id: true, name: true } } },
+  });
+  return providers.map((provider) => ({ id: provider.id, name: provider.name, workspace: provider.workspace }));
+}
+
+export async function beginOidcIdentityLink(input: Readonly<{
+  providerId: unknown;
+  redirectUri: string;
+  session: SafeSessionContext;
+}>, db: PrismaClient = getDb()) {
+  const providerId = uuid(input.providerId);
+  if (input.session.user.role !== "user") return fail("OIDC_LINK_ACCOUNT_NOT_ALLOWED");
+  let redirectUri: URL;
+  try { redirectUri = new URL(input.redirectUri); } catch { return fail("OIDC_INVALID_INPUT"); }
+  if (!redirectUri.pathname.endsWith("/api/auth/oidc/link/callback") || redirectUri.username || redirectUri.password || redirectUri.search || redirectUri.hash) return fail("OIDC_INVALID_INPUT");
+  if (redirectUri.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(redirectUri.hostname)) return fail("OIDC_INVALID_INPUT");
+  const state = randomBytes(32).toString("base64url");
+  const nonce = randomBytes(32).toString("base64url");
+  const verifier = randomBytes(48).toString("base64url");
+  const expiresAt = new Date(Date.now() + OIDC_ATTEMPT_LIFETIME_MS);
+  const providerHead = await db.oidcProvider.findUnique({ where: { id: providerId }, select: { workspaceId: true } });
+  if (providerHead === null) return fail("OIDC_PROVIDER_NOT_FOUND");
+  const provider = await db.$transaction(async (tx) => {
+    await lockActorsAccess(tx, [input.session.user.id]);
+    const now = new Date();
+    const actor = await tx.appUser.findUnique({
+      where: { id: input.session.user.id },
+      select: { id: true, role: true, disabledAt: true, accountAccessVersion: true },
+    });
+    const sessionRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT "id" FROM "AppSession"
+      WHERE "id" = ${input.session.sessionId}::uuid AND "userId" = ${input.session.user.id}::uuid
+      FOR UPDATE
+    `);
+    const session = sessionRows.length === 1 ? await tx.appSession.findUnique({ where: { id: input.session.sessionId } }) : null;
+    if (
+      actor === null || actor.role !== "user" || actor.disabledAt !== null
+      || actor.accountAccessVersion !== input.session.user.accountAccessVersion
+      || session === null || session.revokedAt !== null || session.expiresAt <= now
+      || session.accountAccessVersion !== actor.accountAccessVersion
+    ) return fail("OIDC_LINK_SESSION_INVALID");
+
+    await lockWorkspaceAccess(tx, providerHead.workspaceId);
+    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${providerId}::text, ${OIDC_ATTEMPT_LOCK_NAMESPACE}))`);
+    const lockedProvider = await tx.oidcProvider.findUnique({ where: { id: providerId } });
+    if (lockedProvider === null) return fail("OIDC_PROVIDER_NOT_FOUND");
+    if (lockedProvider.workspaceId !== providerHead.workspaceId || lockedProvider.status !== "verified" || lockedProvider.disabledAt !== null || lockedProvider.authorizationEndpoint === null) {
+      return fail("OIDC_PROVIDER_NOT_VERIFIED");
+    }
+    const membership = await findCurrentWorkspaceMembership(tx, lockedProvider.workspaceId, actor.id);
+    if (membership === null || membership.accessState !== "confirmed") return fail("OIDC_LINK_ACCOUNT_NOT_ALLOWED");
+    if (await tx.oidcIdentity.findUnique({ where: { providerId_userId: { providerId, userId: actor.id } }, select: { id: true } })) {
+      return fail("OIDC_IDENTITY_CONFLICT");
+    }
+
+    const expired = await tx.oidcIdentityLinkAttempt.findMany({
+      where: { providerId, userId: actor.id, expiresAt: { lte: now } },
+      take: 500,
+      select: { id: true, credentialId: true },
+    });
+    if (expired.length > 0) {
+      await tx.oidcIdentityLinkAttempt.deleteMany({ where: { id: { in: expired.map((attempt) => attempt.id) }, expiresAt: { lte: now } } });
+      await tx.externalCredential.deleteMany({
+        where: {
+          id: { in: expired.map((attempt) => attempt.credentialId) },
+          oidcIdentityLinkAttempts: { none: {} },
+          oidcLoginAttempts: { none: {} },
+          oidcProviders: { none: {} },
+        },
+      });
+    }
+    const activeCount = await tx.oidcIdentityLinkAttempt.count({ where: { providerId, userId: actor.id, expiresAt: { gt: now } } });
+    if (activeCount >= OIDC_LINK_MAX_ACTIVE_ATTEMPTS) return fail("OIDC_LINK_ATTEMPT_LIMIT");
+
+    const flowCredential = await createCredential("oidcFlow", encodeFlow({ verifier, nonce }), tx);
+    await tx.oidcIdentityLinkAttempt.create({
+      data: {
+        providerId,
+        userId: actor.id,
+        sessionId: session.id,
+        accountAccessVersion: actor.accountAccessVersion,
+        credentialId: flowCredential.id,
+        stateHash: sha256(state),
+        nonceHash: sha256(nonce),
+        redirectUri: redirectUri.toString(),
+        expiresAt,
+      },
+    });
+    return lockedProvider;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+  if (provider.authorizationEndpoint === null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
+  const authorization = new URL(provider.authorizationEndpoint);
+  authorization.searchParams.set("client_id", provider.clientId);
+  authorization.searchParams.set("response_type", "code");
+  authorization.searchParams.set("scope", (provider.scopes as string[]).join(" "));
+  authorization.searchParams.set("redirect_uri", redirectUri.toString());
+  authorization.searchParams.set("state", state);
+  authorization.searchParams.set("nonce", nonce);
+  authorization.searchParams.set("code_challenge", base64urlSha256(verifier));
+  authorization.searchParams.set("code_challenge_method", "S256");
+  return Object.freeze({ authorizationUrl: authorization.toString(), state, expiresAt });
+}
+
+export async function completeOidcIdentityLink(input: Readonly<{
+  code: unknown;
+  state: unknown;
+  cookieState: unknown;
+  session: SafeSessionContext | null;
+}>, db: PrismaClient = getDb()): Promise<Readonly<{ providerId: string }>> {
+  if (typeof input.code !== "string" || input.code.length < 4 || input.code.length > 4096 || typeof input.state !== "string" || !/^[A-Za-z0-9_-]{40,128}$/u.test(input.state) || input.cookieState !== input.state) return fail("OIDC_FLOW_INVALID");
+  const session = input.session;
+  if (session === null || session.user.role !== "user") return fail("OIDC_LINK_SESSION_INVALID");
+  const attempt = await db.oidcIdentityLinkAttempt.findUnique({ where: { stateHash: sha256(input.state) }, include: { provider: true } });
+  if (attempt === null || attempt.consumedAt !== null) return fail("OIDC_FLOW_INVALID");
+  if (attempt.expiresAt <= new Date()) return fail("OIDC_FLOW_EXPIRED");
+  if (attempt.userId !== session.user.id || attempt.sessionId !== session.sessionId || attempt.accountAccessVersion !== session.user.accountAccessVersion) {
+    return fail("OIDC_LINK_SESSION_INVALID");
+  }
+  if (attempt.provider.status !== "verified" || attempt.provider.disabledAt !== null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
+  // PostgreSQL stores both timestamps at millisecond precision. A callback in
+  // the creation millisecond must still satisfy the ledger's strict ordering.
+  const claimedAt = new Date(Math.max(Date.now(), attempt.createdAt.getTime() + 1));
+  const claimed = await db.oidcIdentityLinkAttempt.updateMany({ where: { id: attempt.id, consumedAt: null, expiresAt: { gt: claimedAt } }, data: { consumedAt: claimedAt } });
+  if (claimed.count !== 1) return fail("OIDC_FLOW_INVALID");
+  const flow = decodeFlow(await readCredentialSecret(attempt.credentialId, "oidcFlow", db));
+  if (!secureEqual(sha256(flow.nonce), attempt.nonceHash)) return fail("OIDC_FLOW_INVALID");
+  const payload = await fetchVerifiedIdToken({ provider: attempt.provider, code: input.code, flow, redirectUri: attempt.redirectUri });
+  const subject = safeClaim(payload.sub, 512);
+  if (subject === null) return fail("OIDC_ID_TOKEN_INVALID");
+  const email = payload.email_verified === true ? safeClaim(payload.email, 320)?.toLowerCase() ?? null : null;
+  const displayName = safeClaim(payload.name, 160);
+  const subjectFingerprint = sha256(`${attempt.providerId}\u0000${subject}`);
+
+  try {
+    return await db.$transaction(async (tx) => {
+      await lockActorsAccess(tx, [attempt.userId]);
+      await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "AppUser" WHERE "id" = ${attempt.userId}::uuid FOR UPDATE
+      `);
+      const actor = await tx.appUser.findUnique({
+        where: { id: attempt.userId },
+        select: { id: true, role: true, disabledAt: true, accountAccessVersion: true },
+      });
+      const sessionRows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "AppSession"
+        WHERE "id" = ${attempt.sessionId}::uuid AND "userId" = ${attempt.userId}::uuid
+        FOR UPDATE
+      `);
+      const liveSession = sessionRows.length === 1 ? await tx.appSession.findUnique({ where: { id: attempt.sessionId } }) : null;
+      const now = new Date();
+      if (
+        actor === null || actor.role !== "user" || actor.disabledAt !== null
+        || actor.accountAccessVersion !== attempt.accountAccessVersion
+        || actor.accountAccessVersion !== session.user.accountAccessVersion
+        || liveSession === null || liveSession.revokedAt !== null || liveSession.expiresAt <= now
+        || liveSession.userId !== actor.id || liveSession.accountAccessVersion !== actor.accountAccessVersion
+      ) return fail("OIDC_LINK_SESSION_INVALID");
+
+      const emailOwner = email === null
+        ? null
+        : await tx.appUser.findUnique({ where: { email }, select: { id: true } });
+      if (emailOwner !== null && emailOwner.id !== actor.id) return fail("OIDC_ACCOUNT_NOT_ALLOWED");
+
+      const providerHead = await tx.oidcProvider.findUnique({ where: { id: attempt.providerId }, select: { workspaceId: true } });
+      if (providerHead === null) return fail("OIDC_PROVIDER_NOT_VERIFIED");
+      await lockWorkspaceAccess(tx, providerHead.workspaceId);
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${attempt.providerId}::text, ${OIDC_ATTEMPT_LOCK_NAMESPACE}))`);
+      const provider = await tx.oidcProvider.findUnique({ where: { id: attempt.providerId } });
+      if (
+        provider === null || provider.workspaceId !== providerHead.workspaceId
+        || provider.status !== "verified" || provider.disabledAt !== null
+      ) return fail("OIDC_PROVIDER_NOT_VERIFIED");
+      const membership = await findCurrentWorkspaceMembership(tx, provider.workspaceId, actor.id);
+      if (membership === null || membership.accessState !== "confirmed") return fail("OIDC_LINK_ACCOUNT_NOT_ALLOWED");
+
+      const existingSubject = await tx.oidcIdentity.findUnique({ where: { providerId_subject: { providerId: provider.id, subject } }, select: { id: true } });
+      const existingUserIdentity = await tx.oidcIdentity.findUnique({ where: { providerId_userId: { providerId: provider.id, userId: actor.id } }, select: { id: true } });
+      if (existingSubject !== null || existingUserIdentity !== null) return fail("OIDC_IDENTITY_CONFLICT");
+
+      await tx.oidcIdentity.create({ data: { providerId: provider.id, userId: actor.id, subject, email, displayName } });
+      await tx.oidcIdentityLinkAudit.create({ data: { providerId: provider.id, userId: actor.id, subjectFingerprint } });
+      await tx.oidcIdentityLinkAttempt.delete({ where: { id: attempt.id } });
+      await tx.externalCredential.delete({ where: { id: attempt.credentialId } });
+      return Object.freeze({ providerId: provider.id });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  } catch (error) {
+    if (isPrismaCode(error, "P2002")) return fail("OIDC_IDENTITY_CONFLICT");
+    if (isPrismaCode(error, "P2034")) return fail("OIDC_LINK_CONCURRENT_CHANGE");
+    throw error;
+  }
 }
 
 function safeClaim(value: unknown, maximum: number): string | null {
@@ -715,4 +928,14 @@ export function oidcStateCookie(state: string, expiresAt: Date): string {
 export function expiredOidcStateCookie(): string {
   const secure = process.env.AI_PROJECT_OS_SECURE_COOKIES === "true" ? "; Secure" : "";
   return `${OIDC_STATE_COOKIE_NAME}=; Path=/api/auth/oidc/callback; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
+}
+
+export function oidcIdentityLinkStateCookie(state: string, expiresAt: Date): string {
+  const secure = process.env.AI_PROJECT_OS_SECURE_COOKIES === "true" ? "; Secure" : "";
+  return `${OIDC_LINK_STATE_COOKIE_NAME}=${state}; Path=/api/auth/oidc/link/callback; HttpOnly; SameSite=Lax; Expires=${expiresAt.toUTCString()}${secure}`;
+}
+
+export function expiredOidcIdentityLinkStateCookie(): string {
+  const secure = process.env.AI_PROJECT_OS_SECURE_COOKIES === "true" ? "; Secure" : "";
+  return `${OIDC_LINK_STATE_COOKIE_NAME}=; Path=/api/auth/oidc/link/callback; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }

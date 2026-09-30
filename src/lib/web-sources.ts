@@ -13,6 +13,7 @@ import { hashSourceContent, MAX_SOURCE_CONTENT_LENGTH } from "@/lib/source";
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const REQUEST_TIMEOUT_MS = 20_000;
+const MAX_SECRET_DECODE_LAYERS = 16;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SUPPORTED_CONTENT_TYPE = /^(?:text\/(?:plain|html|markdown|xml)|application\/(?:json|xml|xhtml\+xml))(?:\s*;|$)/iu;
 
@@ -28,6 +29,16 @@ export type WebSourceErrorCode =
   | "WEB_SOURCE_REDIRECT_REJECTED"
   | "WEB_SOURCE_FETCH_FAILED"
   | "WEB_SOURCE_REQUEST_BOUNDARY_REJECTED"
+  | "WEB_SOURCE_AUTHENTICATED_URL_REJECTED"
+  | "WEB_SOURCE_AUTHENTICATED_DISABLED"
+  | "WEB_SOURCE_CREDENTIAL_UNAVAILABLE"
+  | "WEB_SOURCE_CREDENTIAL_REFLECTION"
+  | "WEB_SOURCE_AUTHENTICATED_RENAME_REJECTED"
+  | "WEB_SOURCE_AUTHENTICATION_REVOKED"
+  | "WEB_SOURCE_AUTHENTICATED_REVIEW_REQUIRED"
+  | "WEB_SOURCE_REVIEW_NOT_FOUND"
+  | "WEB_SOURCE_REVIEW_STALE"
+  | "WEB_SOURCE_REVIEW_CONFLICT"
   | "WEB_SOURCE_HTTP_STATUS"
   | "WEB_SOURCE_TOO_LARGE"
   | "WEB_SOURCE_TYPE_UNSUPPORTED"
@@ -63,6 +74,14 @@ const webSourceSelect = {
   lastErrorCode: true,
   createdAt: true,
   updatedAt: true,
+  authCredentialId: true,
+  authenticationMode: true,
+  revisions: {
+    where: { status: "staging", reviewStatus: "pending" },
+    orderBy: [{ fetchedAt: "desc" }, { id: "desc" }],
+    take: 1,
+    select: { id: true, title: true, contentHash: true, contentBytes: true, fetchedAt: true, finalUrl: true },
+  },
   pointer: {
     select: {
       publishedAt: true,
@@ -72,6 +91,19 @@ const webSourceSelect = {
     },
   },
 } satisfies Prisma.WebSourceSelect;
+
+type ProjectWebSourceRow = Prisma.WebSourceGetPayload<{ select: typeof webSourceSelect }>;
+
+function projectWebSourceDto(source: ProjectWebSourceRow) {
+  const { authCredentialId, authenticationMode, revisions, ...safeSource } = source;
+  const pending = revisions[0] ?? null;
+  return Object.freeze({
+    ...safeSource,
+    authenticationMode,
+    bearerConfigured: authCredentialId !== null,
+    pendingReview: pending === null ? null : Object.freeze(pending),
+  });
+}
 
 type ResolvedEndpoint = Readonly<{ address: string; family: 4 | 6; fingerprint: string }>;
 type RawResponse = Readonly<{ status: number; headers: Readonly<Record<string, string>>; body: Buffer }>;
@@ -88,6 +120,39 @@ type SecurePinnedRequestDispatch =
 
 function fail(code: WebSourceErrorCode): never {
   throw new WebSourceError(code);
+}
+
+function decodePercentEscapes(value: string): string {
+  return value.replace(/(?:%[0-9a-f]{2})+/giu, (encodedRun) => {
+    const bytes = Buffer.allocUnsafe(encodedRun.length / 3);
+    for (let index = 0; index < bytes.length; index += 1) {
+      const offset = index * 3 + 1;
+      bytes[index] = Number.parseInt(encodedRun.slice(offset, offset + 2), 16);
+    }
+    return bytes.toString("utf8");
+  });
+}
+
+function containsDecodedCredential(value: string, secret: string): boolean {
+  let candidate = value;
+  for (let depth = 0; depth < MAX_SECRET_DECODE_LAYERS; depth += 1) {
+    if (candidate.includes(secret)) return true;
+    const decoded = decodeEntities(decodePercentEscapes(candidate));
+    if (decoded === candidate) return false;
+    candidate = decoded;
+  }
+  if (candidate.includes(secret)) return true;
+  // Fail closed when repeated encoding still hides data beyond the bounded
+  // decode depth. This keeps scanning bounded for attacker-controlled bodies.
+  return /%[0-9a-f]{2}|&(?:#(?:\d+|x[0-9a-f]+)|amp|lt|gt|quot|apos|nbsp);/iu.test(candidate);
+}
+
+function assertNoCredentialReflection(response: RawResponse, finalUrl: string, secret: string): void {
+  const rawBody = response.body.toString("utf8");
+  const scannedValues = [...Object.values(response.headers), finalUrl, rawBody];
+  if (scannedValues.some((value) => containsDecodedCredential(value, secret))) {
+    return fail("WEB_SOURCE_CREDENTIAL_REFLECTION");
+  }
 }
 
 function uuid(value: unknown): string {
@@ -200,6 +265,9 @@ async function requestPinned(url: URL, endpoint: ResolvedEndpoint, options: Read
       method: options.method ?? "GET",
       headers: { accept: "text/html,text/plain,application/json,application/xml;q=0.9", "accept-encoding": "identity", "user-agent": "AI-Project-OS-Web-Source/1.0", ...headers },
       lookup: lookupPinned,
+      // A pooled socket may have been opened under a stale DNS answer. Every
+      // pinned hop must establish a fresh connection to its checked endpoint.
+      agent: false,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     }, (response) => {
       const chunks: Buffer[] = [];
@@ -320,6 +388,56 @@ async function fetchWebSource(input: Readonly<{
   return fail("WEB_SOURCE_REDIRECT_REJECTED");
 }
 
+/**
+ * Fetch a manually authorized static page with a late-bound Bearer header.
+ * The credential callback runs only after the URL has passed DNS and pinned
+ * endpoint checks. Redirects are rejected so an authorization header is
+ * never forwarded to a URL other than the configured HTTPS URL.
+ */
+export async function fetchAuthenticatedStaticWebDocument(
+  input: Readonly<{
+    url: string;
+    expectedFingerprint: string;
+    onRequestBodyWriteStart: () => SecurePinnedRequestDispatch | Promise<SecurePinnedRequestDispatch>;
+  }>,
+  request: typeof securePinnedHttpRequest = securePinnedHttpRequest,
+) {
+  const canonicalUrl = canonicalWebSourceUrl(input.url, true);
+  const url = new URL(canonicalUrl);
+  if (url.protocol !== "https:") return fail("WEB_SOURCE_AUTHENTICATED_URL_REJECTED");
+  let bearerSecret: string | null = null;
+  const response = await request({
+    url: canonicalUrl,
+    allowPrivateNetwork: false,
+    expectedFingerprint: input.expectedFingerprint,
+    onRequestBodyWriteStart: async () => {
+      const dispatch = await input.onRequestBodyWriteStart();
+      const authorization = typeof dispatch === "object" && dispatch !== null
+        ? dispatch.headers?.authorization
+        : undefined;
+      if (typeof authorization !== "string" || !/^Bearer [^\s\u0000-\u0020\u007f]+$/u.test(authorization)) {
+        return fail("WEB_SOURCE_AUTHENTICATION_REVOKED");
+      }
+      bearerSecret = authorization.slice("Bearer ".length);
+      return { headers: { authorization } };
+    },
+  });
+  if (bearerSecret !== null) assertNoCredentialReflection(response, response.finalUrl, bearerSecret);
+  if ([301, 302, 303, 307, 308].includes(response.status)) return fail("WEB_SOURCE_REDIRECT_REJECTED");
+  if (response.status < 200 || response.status >= 300) return fail("WEB_SOURCE_HTTP_STATUS");
+  const contentType = response.headers["content-type"]?.slice(0, 255) ?? "";
+  if (!SUPPORTED_CONTENT_TYPE.test(contentType)) return fail("WEB_SOURCE_TYPE_UNSUPPORTED");
+  const document = extractWebDocument(response.body, contentType, canonicalUrl);
+  return Object.freeze({
+    ...document,
+    contentType,
+    finalUrl: response.finalUrl,
+    httpStatus: response.status,
+    responseBytes: response.body.length,
+    originFingerprint: response.fingerprint,
+  });
+}
+
 function decodeEntities(value: string): string {
   const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
   return value.replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/giu, (match, decimal: string | undefined, hex: string | undefined, name: string | undefined) => {
@@ -355,7 +473,7 @@ export async function listProjectWebSources(
   db: PrismaClient = getDb(),
 ) {
   const projectId = uuid(projectIdInput);
-  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "view", allowArchived: true }, async (tx) => {
+  return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "view", allowArchived: true }, async (tx, admission) => {
     const search = input.search?.trim();
     const where: Prisma.WebSourceWhereInput = {
       projectId,
@@ -376,7 +494,12 @@ export async function listProjectWebSources(
       }),
       tx.webSource.count({ where }),
     ]);
-    return { sources, pagination: listPagination(input.page, input.pageSize, total) };
+    return {
+      sources: sources.map(projectWebSourceDto),
+      pagination: listPagination(input.page, input.pageSize, total),
+      canReview: admission.permission !== "view",
+      canManageCredentials: admission.permission === "owner",
+    };
   });
 }
 
@@ -414,36 +537,55 @@ export async function updateProjectWebSource(
   input: unknown,
   actor: WebAiActor,
   db: PrismaClient = getDb(),
+  resolveNetwork: typeof resolveSecureEndpointFingerprint = resolveSecureEndpointFingerprint,
 ) {
   const projectId = uuid(projectIdInput);
   const webSourceId = uuid(webSourceIdInput);
   const parsed = updateSchema.parse(input);
   const current = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => tx.webSource.findFirst({
     where: { id: webSourceId, projectId },
-    select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true },
+    select: { id: true, name: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, authenticationMode: true, configurationVersion: true },
   }));
   if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
-  const fingerprint = parsed.trustCurrentNetwork === true ? (await resolveEndpoint(new URL(current.url), current.allowPrivateNetwork)).fingerprint : undefined;
+  const fingerprint = parsed.trustCurrentNetwork === true
+    ? (await resolveNetwork({ url: current.url, allowPrivateNetwork: current.allowPrivateNetwork })).fingerprint
+    : undefined;
   return withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:${webSourceId}`}, 29082026))`;
     const lockedCurrent = await tx.webSource.findFirst({
       where: { id: webSourceId, projectId },
-      select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true },
+      select: { id: true, name: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, authenticationMode: true, configurationVersion: true },
     });
     if (lockedCurrent === null) return fail("WEB_SOURCE_NOT_FOUND");
+    if (lockedCurrent.authenticationMode === "bearer" && parsed.name !== undefined && parsed.name !== lockedCurrent.name) {
+      return fail("WEB_SOURCE_AUTHENTICATED_RENAME_REJECTED");
+    }
     // A trust-current-network update must not overwrite a newer network
     // decision made while DNS resolution was in flight.
     if (parsed.trustCurrentNetwork === true && lockedCurrent.resolvedAddressFingerprint !== current.resolvedAddressFingerprint) {
       return fail("WEB_SOURCE_NETWORK_CHANGED");
     }
+    const authenticatedConfigurationChanged = lockedCurrent.authenticationMode === "bearer"
+      && (parsed.enabled !== undefined || parsed.trustCurrentNetwork === true);
+    const changedAt = new Date();
+    if (authenticatedConfigurationChanged) {
+      await tx.webSourceRevision.updateMany({
+        where: { projectId, webSourceId, status: "staging", configurationVersion: { not: null } },
+        data: { status: "failed", reviewStatus: "notRequired", failureCode: "WEB_SOURCE_CONFIGURATION_CHANGED", completedAt: changedAt, contentText: null },
+      });
+      const pointer = await tx.webSourcePointer.findUnique({ where: { projectId_webSourceId: { projectId, webSourceId } }, select: { revision: { select: { projectSourceId: true } } } });
+      if (pointer?.revision.projectSourceId) await tx.projectSource.updateMany({ where: { projectId, id: pointer.revision.projectSourceId, retiredAt: null }, data: { retiredAt: changedAt } });
+      await tx.webSourcePointer.deleteMany({ where: { projectId, webSourceId } });
+    }
     if (parsed.enabled === false) {
       const pointer = await tx.webSourcePointer.findUnique({ where: { projectId_webSourceId: { projectId, webSourceId } }, select: { revision: { select: { projectSourceId: true } } } });
-      await tx.webSource.update({ where: { id: webSourceId }, data: { status: "disabled", disabledAt: new Date(), ...(parsed.name === undefined ? {} : { name: parsed.name }), ...(fingerprint === undefined ? {} : { resolvedAddressFingerprint: fingerprint }) } });
-      if (pointer?.revision.projectSourceId) await tx.projectSource.updateMany({ where: { projectId, id: pointer.revision.projectSourceId }, data: { retiredAt: new Date() } });
+      await tx.webSource.update({ where: { id: webSourceId }, data: { status: "disabled", disabledAt: changedAt, ...(authenticatedConfigurationChanged ? { configurationVersion: { increment: 1 } } : {}), ...(parsed.name === undefined ? {} : { name: parsed.name }), ...(fingerprint === undefined ? {} : { resolvedAddressFingerprint: fingerprint }) } });
+      if (pointer?.revision.projectSourceId) await tx.projectSource.updateMany({ where: { projectId, id: pointer.revision.projectSourceId, retiredAt: null }, data: { retiredAt: changedAt } });
       await tx.webSourcePointer.deleteMany({ where: { projectId, webSourceId } });
     } else {
-      await tx.webSource.update({ where: { id: webSourceId }, data: { ...(parsed.name === undefined ? {} : { name: parsed.name }), ...(parsed.enabled === true ? { status: "active", disabledAt: null, lastErrorCode: null } : {}), ...(fingerprint === undefined ? {} : { resolvedAddressFingerprint: fingerprint, status: "active", lastErrorCode: null, disabledAt: null }) } });
+      await tx.webSource.update({ where: { id: webSourceId }, data: { ...(authenticatedConfigurationChanged ? { configurationVersion: { increment: 1 } } : {}), ...(parsed.name === undefined ? {} : { name: parsed.name }), ...(parsed.enabled === true ? { status: "active", disabledAt: null, lastErrorCode: null } : {}), ...(fingerprint === undefined ? {} : { resolvedAddressFingerprint: fingerprint, status: "active", lastErrorCode: null, disabledAt: null }) } });
     }
-    return tx.webSource.findUniqueOrThrow({ where: { id: webSourceId }, select: webSourceSelect });
+    return projectWebSourceDto(await tx.webSource.findUniqueOrThrow({ where: { id: webSourceId }, select: webSourceSelect }));
   });
 }
 
@@ -460,10 +602,11 @@ export async function syncProjectWebSource(
   const webSource = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
     const current = await tx.webSource.findFirst({
       where: { id: webSourceId, projectId },
-      select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, status: true },
+    select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, status: true, authenticationMode: true, configurationVersion: true },
     });
     if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
     if (current.status === "disabled") return fail("WEB_SOURCE_DISABLED");
+    if (current.authenticationMode === "bearer") return fail("WEB_SOURCE_AUTHENTICATED_REVIEW_REQUIRED");
     const revision = await tx.webSourceRevision.create({ data: { projectId, webSourceId }, select: { id: true } });
     return Object.freeze({ ...current, revisionId: revision.id });
   });
@@ -483,6 +626,8 @@ export async function syncProjectWebSource(
             resolvedAddressFingerprint: true,
             status: true,
             disabledAt: true,
+            authenticationMode: true,
+            configurationVersion: true,
           },
         });
         if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
@@ -491,6 +636,8 @@ export async function syncProjectWebSource(
           current.url !== webSource.url
           || current.allowPrivateNetwork !== webSource.allowPrivateNetwork
           || current.resolvedAddressFingerprint !== webSource.resolvedAddressFingerprint
+          || current.authenticationMode !== webSource.authenticationMode
+          || current.configurationVersion !== webSource.configurationVersion
         ) return fail("WEB_SOURCE_NETWORK_CHANGED");
         const revision = await tx.webSourceRevision.findFirst({
           where: { id: webSource.revisionId, projectId, webSourceId },
@@ -512,11 +659,11 @@ export async function syncProjectWebSource(
     const completed = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => {
       const current = await tx.webSource.findFirst({
         where: { id: webSourceId, projectId },
-        select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, status: true },
+        select: { id: true, url: true, allowPrivateNetwork: true, resolvedAddressFingerprint: true, status: true, authenticationMode: true, configurationVersion: true },
       });
       if (current === null) return fail("WEB_SOURCE_NOT_FOUND");
       if (current.status === "disabled") return fail("WEB_SOURCE_DISABLED");
-      if (current.url !== webSource.url || current.allowPrivateNetwork !== webSource.allowPrivateNetwork || current.resolvedAddressFingerprint !== webSource.resolvedAddressFingerprint) return fail("WEB_SOURCE_NETWORK_CHANGED");
+      if (current.url !== webSource.url || current.allowPrivateNetwork !== webSource.allowPrivateNetwork || current.resolvedAddressFingerprint !== webSource.resolvedAddressFingerprint || current.authenticationMode !== webSource.authenticationMode || current.configurationVersion !== webSource.configurationVersion) return fail("WEB_SOURCE_NETWORK_CHANGED");
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:${webSourceId}`}, 29082026))`;
       const currentPointer = await tx.webSourcePointer.findUnique({
         where: { projectId_webSourceId: { projectId, webSourceId } },
@@ -543,7 +690,7 @@ export async function syncProjectWebSource(
       });
       await tx.webSource.update({ where: { id: webSourceId }, data: { status: "active", lastFetchedAt: completedAt, lastErrorCode: null, resolvedAddressFingerprint: fetched.originFingerprint, disabledAt: null } });
       await tx.project.update({ where: { id: projectId }, data: { updatedAt: completedAt } });
-      return tx.webSource.findUniqueOrThrow({ where: { id: webSourceId }, select: webSourceSelect });
+      return projectWebSourceDto(await tx.webSource.findUniqueOrThrow({ where: { id: webSourceId }, select: webSourceSelect }));
     });
     return completed;
   } catch (error) {
@@ -552,14 +699,14 @@ export async function syncProjectWebSource(
     await db.$transaction(async (tx) => {
       await lockProjectAccess(tx, projectId);
       await tx.webSourceRevision.updateMany({ where: { id: webSource.revisionId, projectId, webSourceId, status: "staging" }, data: { status: "failed", failureCode: code, completedAt } });
-      const current = await tx.webSource.findFirst({ where: { id: webSourceId, projectId }, select: { status: true, disabledAt: true, resolvedAddressFingerprint: true } });
+      const current = await tx.webSource.findFirst({ where: { id: webSourceId, projectId }, select: { status: true, disabledAt: true, resolvedAddressFingerprint: true, authenticationMode: true, configurationVersion: true } });
       // A concurrent disable must remain authoritative. Likewise, a newer
       // network decision must not be overwritten by this stale fetch failure.
       // Access denial only closes the reserved revision and never changes the
       // source state after the actor has lost project access.
       if (error instanceof WebAiAccessError) return;
-      if (current?.status === "disabled" || current?.disabledAt !== null || current?.resolvedAddressFingerprint !== webSource.resolvedAddressFingerprint) return;
-      await tx.webSource.updateMany({ where: { id: webSourceId, projectId, status: { not: "disabled" }, disabledAt: null, resolvedAddressFingerprint: webSource.resolvedAddressFingerprint }, data: { status: "error", lastErrorCode: code, lastFetchedAt: completedAt } });
+      if (current?.status === "disabled" || current?.disabledAt !== null || current?.resolvedAddressFingerprint !== webSource.resolvedAddressFingerprint || current?.authenticationMode !== webSource.authenticationMode || current?.configurationVersion !== webSource.configurationVersion) return;
+      await tx.webSource.updateMany({ where: { id: webSourceId, projectId, status: { not: "disabled" }, disabledAt: null, resolvedAddressFingerprint: webSource.resolvedAddressFingerprint, authenticationMode: "none", configurationVersion: webSource.configurationVersion }, data: { status: "error", lastErrorCode: code, lastFetchedAt: completedAt } });
     }).catch(() => undefined);
     if (error instanceof WebAiAccessError) throw error;
     throw error instanceof WebSourceError ? error : new WebSourceError("WEB_SOURCE_FETCH_FAILED");
@@ -568,7 +715,7 @@ export async function syncProjectWebSource(
 
 export async function syncAllProjectWebSources(projectIdInput: unknown, actor: WebAiActor, db: PrismaClient = getDb()) {
   const projectId = uuid(projectIdInput);
-  const sources = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => tx.webSource.findMany({ where: { projectId, status: { not: "disabled" } }, orderBy: { id: "asc" }, select: { id: true } }));
+  const sources = await withWebAiProjectAccessTransaction(db, { actor, projectId, required: "owner" }, async (tx) => tx.webSource.findMany({ where: { projectId, status: { not: "disabled" }, authenticationMode: "none" }, orderBy: { id: "asc" }, select: { id: true } }));
   const results: Array<{ id: string; status: "succeeded" | "failed"; failureCode?: string }> = [];
   for (const source of sources) {
     try {

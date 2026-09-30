@@ -671,6 +671,7 @@ test("MCP Package A PostgreSQL control plane enforces ownership, epochs, fingerp
     Object.assign(rejected, { statusBefore: "draft" });
     await insertDelegationAudit(client, rejected, "rejected", "rejected by owner", ownerId, ownerMembershipId, ownerMembership.rows[0]!.createdAt);
     await client.query("COMMIT");
+    await client.query(`UPDATE "Project" SET "archivedAt" = CURRENT_TIMESTAMP WHERE "id" = $1::uuid`, [projectId]);
     await client.query(`DELETE FROM "Project" WHERE "id" = $1::uuid`, [projectId]);
     const ownerGovernanceActor = { id: ownerId, accountAccessVersion: 1 };
     const beforeDisable = await db.mcpConnection.findUniqueOrThrow({ where: { id: connectionId }, select: { name: true, updatedAt: true } });

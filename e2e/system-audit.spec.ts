@@ -181,8 +181,8 @@ async function expectNoAccessibilityViolations(page: Page, label: string): Promi
 }
 
 /**
- * Measures the four short strings called out by UX-301 on the seeded
- * activation record, plus the action button, and records a screenshot.
+ * Measures short labels on the seeded activation record after the disposable
+ * first-run administrator configures the browser test environment.
  */
 async function measureShortLabels(page: Page, fixture: AuditFixture, label: string): Promise<void> {
   const table = page.getByRole("table");

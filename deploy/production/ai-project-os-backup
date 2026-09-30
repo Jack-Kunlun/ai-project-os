@@ -56,6 +56,7 @@ KEEP_WRITERS_QUIESCED=0
 CUTOVER_MODE=0
 EXPECTED_APP_ID=${AI_PROJECT_OS_EXPECTED_APP_ID-}
 EXPECTED_WORKER_ID=${AI_PROJECT_OS_EXPECTED_WORKER_ID-}
+EXPECTED_GIT_WORKER_ID=${AI_PROJECT_OS_EXPECTED_GIT_WORKER_ID-}
 
 fail() {
   local marker=$1
@@ -108,10 +109,10 @@ write_public_status_json() {
   [[ "$MODE" =~ ^(daily|manual|pre-deploy)$ ]] || return 1
   [[ "$PUBLIC_STARTED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]] || return 1
   [[ "$state" =~ ^(running|succeeded|failed|skipped)$ ]] || return 1
-  [[ -z "$TARGET_TAG" || "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.6 || "$TARGET_TAG" =~ ^v0\.6\.0-dev\.([7-9]|[1-9][0-9]+)$ ]] || return 1
+  [[ -z "$TARGET_TAG" || "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.6 || "$TARGET_TAG" =~ ^v0\.6\.0-dev\.([7-9]|[1-9][0-9]+)$ || "$TARGET_TAG" =~ ^v0\.7\.0(-dev\.[1-9][0-9]*)?$ ]] || return 1
   [[ -z "$completed_at" || "$completed_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}([+-][0-9]{2}:[0-9]{2}|Z)$ ]] || return 1
   [[ -z "$duration_seconds" || "$duration_seconds" =~ ^[0-9]+$ ]] || return 1
-  [[ -z "$PUBLIC_BACKUP_NAME" || "$PUBLIC_BACKUP_NAME" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.6|pre-deploy-to-v0\.6\.0-dev\.(7|8)|pre-deploy-to-v0\.6\.0-dev\.([9]|[1-9][0-9]+))\.[A-Za-z0-9]{6}$ ]] || return 1
+  [[ -z "$PUBLIC_BACKUP_NAME" || "$PUBLIC_BACKUP_NAME" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.6|pre-deploy-to-v0\.6\.0-dev\.(7|8)|pre-deploy-to-v0\.6\.0-dev\.([9]|[1-9][0-9]+)|pre-deploy-to-v0\.7\.0(-dev\.[1-9][0-9]*)?)\.[A-Za-z0-9]{6}$ ]] || return 1
   [[ -z "$PUBLIC_ARCHIVE_OBJECT" || "$PUBLIC_ARCHIVE_OBJECT" =~ ^cos://ai-project-os-backup-[0-9]+/[A-Za-z0-9][A-Za-z0-9._/-]+$ ]] || return 1
   [[ -z "$PUBLIC_ARCHIVE_SHA256" || "$PUBLIC_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || return 1
   [[ -z "$PUBLIC_ARCHIVE_BYTES" || "$PUBLIC_ARCHIVE_BYTES" =~ ^[0-9]+$ ]] || return 1
@@ -509,6 +510,12 @@ wait_for_writer_health() {
   return 1
 }
 
+requires_git_worker_for_version() {
+  local version=$1
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || return 2
+  [[ ! "$version" =~ ^0\.[0-6]\. ]]
+}
+
 write_result() {
   local status=$1
   local result_reason=$2
@@ -631,7 +638,7 @@ cleanup_verified_local_backups() {
     [[ ! -L "$path" ]] || continue
     [[ "$(dirname -- "$path")" == "$BACKUP_ROOT" ]] || continue
     name=$(basename -- "$path")
-    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.6|pre-deploy-to-v0\.6\.0-dev\.(7|8)|pre-deploy-to-v0\.6\.0-dev\.([9]|[1-9][0-9]+))\.[A-Za-z0-9]{6}$ ]] || continue
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.6|pre-deploy-to-v0\.6\.0-dev\.(7|8)|pre-deploy-to-v0\.6\.0-dev\.([9]|[1-9][0-9]+)|pre-deploy-to-v0\.7\.0(-dev\.[1-9][0-9]*)?)\.[A-Za-z0-9]{6}$ ]] || continue
 
     marker=$path/.cos-upload-verified
     [[ -f "$marker" && ! -L "$marker" ]] || continue
@@ -659,7 +666,7 @@ cleanup_verified_local_backups() {
 
     name=$(basename -- "$path")
     [[ "$(dirname -- "$path")" == "$BACKUP_ROOT" ]] || fail "BACKUP_RETENTION_PATH_INVALID" 75
-    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.6|pre-deploy-to-v0\.6\.0-dev\.(7|8)|pre-deploy-to-v0\.6\.0-dev\.([9]|[1-9][0-9]+))\.[A-Za-z0-9]{6}$ ]] ||
+    [[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-(daily|manual|pre-deploy-to-v0\.4\.0-dev\.1|pre-deploy-to-v0\.5\.0-dev\.(1|2|3|4)|pre-deploy-to-v0\.6\.0-dev\.6|pre-deploy-to-v0\.6\.0-dev\.(7|8)|pre-deploy-to-v0\.6\.0-dev\.([9]|[1-9][0-9]+)|pre-deploy-to-v0\.7\.0(-dev\.[1-9][0-9]*)?)\.[A-Za-z0-9]{6}$ ]] ||
       fail "BACKUP_RETENTION_NAME_INVALID name=$name" 75
     [[ -f "$path/.cos-upload-verified" ]] || fail "BACKUP_RETENTION_MARKER_MISSING name=$name" 75
     grep -qx 'status=COS_UPLOAD_VERIFIED' "$path/.cos-upload-verified" ||
@@ -682,7 +689,7 @@ case "$MODE" in
     reason=$MODE
     ;;
   pre-deploy)
-    [[ "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.6 || "$TARGET_TAG" =~ ^v0\.6\.0-dev\.([7-9]|[1-9][0-9]+)$ ]] || fail 'BACKUP_TARGET_TAG_INVALID' 64
+    [[ "$TARGET_TAG" =~ ^v0\.5\.0-dev\.(1|2|3|4)$ || "$TARGET_TAG" == v0.6.0-dev.6 || "$TARGET_TAG" =~ ^v0\.6\.0-dev\.([7-9]|[1-9][0-9]+)$ || "$TARGET_TAG" =~ ^v0\.7\.0(-dev\.[1-9][0-9]*)?$ ]] || fail 'BACKUP_TARGET_TAG_INVALID' 64
     [[ "${AI_PROJECT_OS_DEPLOY_LOCK_HELD-}" == 1 ]] || fail 'BACKUP_PRE_DEPLOY_CALLER_INVALID' 75
     reason="pre-deploy-to-$TARGET_TAG"
     ;;
@@ -704,19 +711,50 @@ case "${AI_PROJECT_OS_CUTOVER-0}" in
   *) fail 'BACKUP_CUTOVER_MODE_INVALID' 64 ;;
 esac
 
+secure_lock_file() {
+  command -v python3 >/dev/null || fail 'BACKUP_PYTHON_REQUIRED' 70
+  python3 - "$1" <<'PY' || fail 'BACKUP_LOCK_INVALID' 70
+import os
+import stat
+import sys
+
+lock_path = sys.argv[1]
+directory = os.lstat(os.path.dirname(lock_path))
+if not stat.S_ISDIR(directory.st_mode) or (directory.st_uid, directory.st_gid) != (0, 0):
+    raise SystemExit(1)
+if stat.S_IMODE(directory.st_mode) != 0o1777:
+    raise SystemExit(1)
+flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+try:
+    descriptor = os.open(lock_path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+except FileExistsError:
+    descriptor = os.open(lock_path, flags)
+try:
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode) or (metadata.st_uid, metadata.st_gid) != (0, 0):
+        raise SystemExit(1)
+    if stat.S_IMODE(metadata.st_mode) != 0o600:
+        raise SystemExit(1)
+finally:
+    os.close(descriptor)
+PY
+}
+
 if [[ "$MODE" != pre-deploy && "$CUTOVER_MODE" != 1 ]]; then
-  exec 8>"$DEPLOY_LOCK_FILE"
+  secure_lock_file "$DEPLOY_LOCK_FILE"
+  exec 8>>"$DEPLOY_LOCK_FILE"
   if ! flock -w "$LOCK_WAIT_SECONDS" 8; then
     fail 'BACKUP_DEPLOYMENT_IN_PROGRESS' 75
   fi
 fi
 
-exec 9>"$LOCK_FILE"
+secure_lock_file "$LOCK_FILE"
+exec 9>>"$LOCK_FILE"
 if ! flock -w "$LOCK_WAIT_SECONDS" 9; then
   fail 'BACKUP_ALREADY_RUNNING' 75
 fi
 
-for required_command in age awk basename chmod chown cp cut date df dirname docker find flock getent gzip grep install ln mktemp mv openssl rm sed sha256sum sort stat tail tar timeout tr; do
+for required_command in age awk basename chmod chown cp cut date df dirname docker find flock getent gzip grep install ln mktemp mv openssl python3 rm sed sha256sum sort stat tail tar timeout tr; do
   command -v "$required_command" >/dev/null || fail "BACKUP_COMMAND_MISSING command=$required_command" 70
 done
 
@@ -777,16 +815,44 @@ else
   worker_id=$(require_single_running_container worker)
 fi
 readonly postgres_id app_id worker_id
+app_version=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$app_id")
+[[ "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
+  fail 'BACKUP_APP_VERSION_INVALID' 72
+readonly app_version
+git_worker_id=
+git_worker_container_output=$(docker ps -aq --no-trunc \
+  --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
+  --filter 'label=com.docker.compose.service=git-worker') ||
+  fail 'BACKUP_GIT_WORKER_DISCOVERY_FAILED' 72
+git_worker_container_ids=()
+if [[ -n "$git_worker_container_output" ]]; then
+  while IFS= read -r container_id; do
+    git_worker_container_ids+=("$container_id")
+  done <<< "$git_worker_container_output"
+fi
+(( ${#git_worker_container_ids[@]} <= 1 )) ||
+  fail "BACKUP_STACK_SERVICE_INVALID service=git-worker count=${#git_worker_container_ids[@]}" 72
+if (( ${#git_worker_container_ids[@]} == 0 )) && requires_git_worker_for_version "$app_version"; then
+  fail 'BACKUP_GIT_WORKER_MISSING' 72
+fi
+if (( ${#git_worker_container_ids[@]} == 1 )); then
+  if [[ "$MODE" == pre-deploy ]]; then
+    git_worker_id=$(require_single_stopped_container git-worker)
+  else
+    git_worker_id=$(require_single_running_container git-worker)
+  fi
+fi
+readonly git_worker_id
 if [[ -n "$EXPECTED_APP_ID" || -n "$EXPECTED_WORKER_ID" ]]; then
   [[ "$EXPECTED_APP_ID" =~ ^[0-9a-f]{64}$ && "$EXPECTED_WORKER_ID" =~ ^[0-9a-f]{64}$ ]] ||
     fail 'BACKUP_EXPECTED_WRITER_IDS_INVALID' 71
   [[ "$app_id" == "$EXPECTED_APP_ID" && "$worker_id" == "$EXPECTED_WORKER_ID" ]] ||
     fail 'BACKUP_WRITER_IDS_CHANGED' 75
 fi
-app_version=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$app_id")
-[[ "$app_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
-  fail 'BACKUP_APP_VERSION_INVALID' 72
-readonly app_version
+if [[ -n "$EXPECTED_GIT_WORKER_ID" ]]; then
+  [[ "$EXPECTED_GIT_WORKER_ID" =~ ^[0-9a-f]{64}$ && "$git_worker_id" == "$EXPECTED_GIT_WORKER_ID" ]] ||
+    fail 'BACKUP_GIT_WORKER_ID_CHANGED' 75
+fi
 
 backup_timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 INCOMPLETE_DIR=$(mktemp -d "$BACKUP_ROOT/.incomplete-${backup_timestamp}-${reason}.XXXXXX")
@@ -804,6 +870,10 @@ if [[ "$MODE" != pre-deploy ]]; then
   PAUSED_WRITERS+=("$app_id")
   docker pause "$worker_id" >/dev/null
   PAUSED_WRITERS+=("$worker_id")
+  if [[ -n "$git_worker_id" ]]; then
+    docker pause "$git_worker_id" >/dev/null
+    PAUSED_WRITERS+=("$git_worker_id")
+  fi
 fi
 
 timeout 1800 docker exec "$postgres_id" sh -ec \
@@ -819,7 +889,11 @@ timeout 1800 docker cp "$app_id:/var/lib/ai-project-os/uploads/." - | gzip -n -9
   > "$INCOMPLETE_DIR/uploads.tar.gz"
 if [[ "$MODE" != pre-deploy ]]; then
   resume_writers || fail 'BACKUP_WRITER_RESUME_FAILED' 73
-  wait_for_writer_health "$app_id" "$worker_id" || fail 'BACKUP_WRITER_HEALTH_TIMEOUT' 73
+  writer_ids=("$app_id" "$worker_id")
+  if [[ -n "$git_worker_id" ]]; then
+    writer_ids+=("$git_worker_id")
+  fi
+  wait_for_writer_health "${writer_ids[@]}" || fail 'BACKUP_WRITER_HEALTH_TIMEOUT' 73
 fi
 
 tar -tzf "$INCOMPLETE_DIR/secrets.tar.gz" >/dev/null

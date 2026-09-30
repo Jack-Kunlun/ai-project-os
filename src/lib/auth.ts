@@ -50,6 +50,11 @@ export type SafeSessionUser = Readonly<{
   accountAccessVersion: number;
 }>;
 
+export type SafeSessionContext = Readonly<{
+  user: SafeSessionUser;
+  sessionId: string;
+}>;
+
 type SessionDb = PrismaClient | Prisma.TransactionClient;
 
 export type CreatedSession = Readonly<{
@@ -83,6 +88,11 @@ function canonicalPassword(value: unknown): string {
     return fail("AUTH_INVALID_INPUT");
   }
   return value;
+}
+
+/** Validate the existing password policy without running the password KDF. */
+export function validateAccountPassword(value: unknown): void {
+  canonicalPassword(value);
 }
 
 function canonicalOptionalProfileText(value: unknown, maximum: number): string | null {
@@ -597,12 +607,12 @@ function cookieToken(cookieHeader: string | null): string | null {
   return null;
 }
 
-async function readSessionTokenInternal(
+async function readSessionContextInternal(
   token: string | null,
   db: SessionDb,
   now: Date,
   touchLastSeen: boolean,
-): Promise<SafeSessionUser | null> {
+): Promise<SafeSessionContext | null> {
   if (token === null) return null;
   const session = await db.appSession.findUnique({
     where: { tokenHash: tokenHash(token) },
@@ -632,7 +642,16 @@ async function readSessionTokenInternal(
       data: { lastSeenAt: now },
     });
   }
-  return safeUser(session.user);
+  return Object.freeze({ user: safeUser(session.user), sessionId: session.id });
+}
+
+async function readSessionTokenInternal(
+  token: string | null,
+  db: SessionDb,
+  now: Date,
+  touchLastSeen: boolean,
+): Promise<SafeSessionUser | null> {
+  return (await readSessionContextInternal(token, db, now, touchLastSeen))?.user ?? null;
 }
 
 export async function readSessionToken(
@@ -664,6 +683,29 @@ export async function requireApiSession(
   if (user === null) return fail("AUTH_REQUIRED");
   await authorizeApiRequest(user, request, db);
   return user;
+}
+
+/** Authenticate an API request and return the exact backing session ID. */
+export async function requireApiSessionContext(
+  request: Request,
+  db: PrismaClient = getDb(),
+): Promise<SafeSessionContext> {
+  const context = await readSessionContextInternal(cookieToken(request.headers.get("cookie")), db, new Date(), true);
+  if (context === null) return fail("AUTH_REQUIRED");
+  await authorizeApiRequest(context.user, request, db);
+  return context;
+}
+
+/** Read an authenticated API session without touching last-seen state. */
+export async function readApiSessionContextReadOnly(
+  request: Request,
+  db: SessionDb = getDb(),
+  now = new Date(),
+): Promise<SafeSessionContext | null> {
+  const context = await readSessionContextInternal(cookieToken(request.headers.get("cookie")), db, now, false);
+  if (context === null) return null;
+  await authorizeApiRequest(context.user, request, db);
+  return context;
 }
 
 export async function requireApiSessionReadOnly(

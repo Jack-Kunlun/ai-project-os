@@ -53,7 +53,7 @@ const SOURCE_COMPOSE_ENV_KEYS = Object.freeze([
   ...DOCKER_CLIENT_ENV_KEYS,
   "POSTGRES_USER", "POSTGRES_CLUSTER_ADMIN_PASSWORD", "POSTGRES_MIGRATOR_PASSWORD", "POSTGRES_DB",
   "DATABASE_URL", "POSTGRES_RUNTIME_USER", "POSTGRES_RUNTIME_PASSWORD", "POSTGRES_ENTITLEMENT_WRITER_USER",
-  "POSTGRES_ENTITLEMENT_WRITER_PASSWORD", "POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD", "ENTITLEMENT_DATABASE_URL",
+  "POSTGRES_ENTITLEMENT_WRITER_PASSWORD", "POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD", "POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD", "ENTITLEMENT_DATABASE_URL",
   "MIGRATOR_DATABASE_URL", "DATABASE_PRINCIPAL_ADMIN_URL", "DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL",
   "ACCOUNT_ENTITLEMENT_INVENTORY_DATABASE_URL", "APP_PORT", "POSTGRES_PORT", "AI_PROJECT_OS_PGDATA_VOLUME",
   "AI_PROJECT_OS_SECRETS_VOLUME", "AI_PROJECT_OS_UPLOADS_VOLUME", "AI_PROJECT_OS_SECURE_COOKIES", "AI_PROJECT_OS_PUBLIC_ORIGIN",
@@ -67,11 +67,11 @@ const SOURCE_COMPOSE_ENV_KEYS = Object.freeze([
 ] as const);
 
 type ProcessResult = Readonly<{ code: number; stdout: string; stderr: string }>;
-type SourceService = "principal-bootstrap" | "migrate" | "reconcile" | "app" | "worker";
+type SourceService = "principal-bootstrap" | "migrate" | "reconcile" | "app" | "worker" | "git-worker";
 type ComposeService = SourceService | "postgres";
 type OneShotService = "principal-bootstrap" | "migrate" | "reconcile";
 type SourceServiceContainer = Readonly<{ container: string; image: string }>;
-type SourceWriter = Readonly<{ id: string; service: "app" | "worker" }>;
+type SourceWriter = Readonly<{ id: string; service: "app" | "worker" | "git-worker" }>;
 type TrackedContainer = Readonly<{ id: string; service: ComposeService; projectName: string; drillId: string }>;
 type TrackedHelper = Readonly<{ id: string | null; name: string; purpose: string; projectName: string; drillId: string }>;
 type DockerLabels = Readonly<Record<string, string | null>>;
@@ -89,7 +89,7 @@ type VolumeManifest = Readonly<{
 }>;
 
 const composeServices: readonly ComposeService[] = Object.freeze([
-  "postgres", "principal-bootstrap", "migrate", "reconcile", "app", "worker",
+  "postgres", "principal-bootstrap", "migrate", "reconcile", "app", "worker", "git-worker",
 ]);
 
 class RecoveryDrillError extends Error {
@@ -730,6 +730,7 @@ function sourceVolumeMountName(resource: DockerResource, destination: string): s
 async function sourceDataVolumes(
   appContainer: string,
   workerContainer: string,
+  gitWorkerContainer: string | null,
   environment: NodeJS.ProcessEnv,
 ): Promise<SourceDataVolumes> {
   const readServiceVolumes = async (container: string): Promise<SourceDataVolumes> => {
@@ -749,6 +750,17 @@ async function sourceDataVolumes(
   if (appVolumes.secrets !== workerVolumes.secrets || appVolumes.uploads !== workerVolumes.uploads) {
     fail("RECOVERY_DRILL_SOURCE_VOLUME_MISMATCH");
   }
+  if (gitWorkerContainer !== null) {
+    const resource = await inspectDockerResource("container", gitWorkerContainer, environment, "RECOVERY_DRILL_SOURCE_MOUNTS_INSPECT_FAILED");
+    if (resource === null) fail("RECOVERY_DRILL_SOURCE_MOUNTS_INVALID");
+    const state = resource.State;
+    if (typeof state !== "object" || state === null || Array.isArray(state) || (state as { Status?: unknown }).Status !== "running") {
+      fail("RECOVERY_DRILL_SOURCE_SERVICE_NOT_RUNNING");
+    }
+    if (sourceVolumeMountName(resource, SOURCE_SECRETS_DESTINATION) !== appVolumes.secrets) {
+      fail("RECOVERY_DRILL_SOURCE_VOLUME_MISMATCH");
+    }
+  }
   return appVolumes;
 }
 
@@ -756,9 +768,10 @@ async function sourceWriterPreflight(
   sourceProject: string,
   appContainer: string,
   workerContainer: string,
+  gitWorkerContainer: string | null,
   environment: NodeJS.ProcessEnv,
 ): Promise<readonly SourceWriter[]> {
-  const readWriter = async (id: string, service: SourceWriter["service"]): Promise<SourceWriter> => {
+  const readWriter = async (id: string, service: SourceWriter["service"], requireHealthy = false): Promise<SourceWriter> => {
     const resource = await inspectDockerResource("container", id, environment, "RECOVERY_DRILL_SOURCE_WRITER_INSPECT_FAILED");
     if (resource === null || resource.Id !== id) fail("RECOVERY_DRILL_SOURCE_WRITER_OWNERSHIP_INVALID");
     const labels = containerLabels(resource);
@@ -771,12 +784,21 @@ async function sourceWriterPreflight(
       || (state as { Paused?: unknown }).Paused !== false) {
       fail("RECOVERY_DRILL_SOURCE_WRITER_STATE_INVALID");
     }
+    if (requireHealthy) {
+      const health = (state as { Health?: unknown }).Health;
+      if (typeof health !== "object" || health === null || Array.isArray(health)
+        || (health as { Status?: unknown }).Status !== "healthy") {
+        fail("RECOVERY_DRILL_SOURCE_GIT_WORKER_UNHEALTHY");
+      }
+    }
     return Object.freeze({ id, service });
   };
-  return Object.freeze([
+  const writers: SourceWriter[] = [
     await readWriter(appContainer, "app"),
     await readWriter(workerContainer, "worker"),
-  ]);
+  ];
+  if (gitWorkerContainer !== null) writers.push(await readWriter(gitWorkerContainer, "git-worker", true));
+  return Object.freeze(writers);
 }
 
 const sourceServiceQueryCodes: Readonly<Record<SourceService, string>> = Object.freeze({
@@ -785,7 +807,44 @@ const sourceServiceQueryCodes: Readonly<Record<SourceService, string>> = Object.
   reconcile: "RECOVERY_DRILL_SOURCE_RECONCILE_QUERY_FAILED",
   app: "RECOVERY_DRILL_SOURCE_APP_QUERY_FAILED",
   worker: "RECOVERY_DRILL_SOURCE_WORKER_QUERY_FAILED",
+  "git-worker": "RECOVERY_DRILL_SOURCE_GIT_WORKER_QUERY_FAILED",
 });
+
+async function sourceComposeServices(composeFile: string, sourceProject: string, environment: NodeJS.ProcessEnv): Promise<ReadonlySet<string>> {
+  const result = await requireProcess("docker", [...sourceComposeArgs(sourceProject, composeFile), "config", "--services"], environment, "RECOVERY_DRILL_SOURCE_COMPOSE_CONFIG_FAILED");
+  const services = result.stdout.split(/\r?\n/u).map((service) => service.trim()).filter((service) => service.length > 0);
+  if (services.length === 0 || services.some((service) => !/^[a-z0-9][a-z0-9_-]{0,62}$/u.test(service))
+    || new Set(services).size !== services.length) {
+    fail("RECOVERY_DRILL_SOURCE_COMPOSE_CONFIG_INVALID");
+  }
+  return new Set(services);
+}
+
+async function sourceGitWorkerContainer(
+  composeFile: string,
+  sourceProject: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<SourceServiceContainer | null> {
+  const services = await sourceComposeServices(composeFile, sourceProject, environment);
+  const result = await requireProcess("docker", [
+    "ps", "--all", "--quiet",
+    "--filter", `label=com.docker.compose.project=${sourceProject}`,
+    "--filter", "label=com.docker.compose.service=git-worker",
+  ], environment, "RECOVERY_DRILL_SOURCE_GIT_WORKER_QUERY_FAILED");
+  const containers = result.stdout.trim().split(/\s+/u).filter((value) => value.length > 0);
+  if (containers.some((value) => !/^[a-f0-9]{12,64}$/u.test(value))) fail("RECOVERY_DRILL_SOURCE_SERVICE_CONTAINER_INVALID");
+  if (!services.has("git-worker")) {
+    if (containers.length > 0) fail("RECOVERY_DRILL_SOURCE_GIT_WORKER_UNEXPECTED");
+    return null;
+  }
+  if (containers.length !== 1) fail("RECOVERY_DRILL_SOURCE_GIT_WORKER_CONTAINER_INVALID");
+  const source = await sourceServiceContainer(composeFile, sourceProject, environment, "git-worker");
+  const labeledContainer = (await requireProcess("docker", ["inspect", "--format", "{{.Id}}", containers[0]!], environment, "RECOVERY_DRILL_SOURCE_GIT_WORKER_ID_QUERY_FAILED")).stdout.trim();
+  if (!/^[a-f0-9]{64}$/u.test(labeledContainer) || labeledContainer !== source.container) {
+    fail("RECOVERY_DRILL_SOURCE_GIT_WORKER_OWNERSHIP_INVALID");
+  }
+  return source;
+}
 
 async function sourceServiceContainer(composeFile: string, sourceProject: string, environment: NodeJS.ProcessEnv, service: SourceService): Promise<SourceServiceContainer> {
   const result = await requireProcess("docker", [...sourceComposeArgs(sourceProject, composeFile), "ps", "--all", "--quiet", service], environment, sourceServiceQueryCodes[service]);
@@ -1078,13 +1137,18 @@ async function copyVolume(
   if (result.code !== 0) fail("RECOVERY_DRILL_VOLUME_COPY_FAILED");
 }
 
-async function waitForHealthy(compose: readonly string[], environment: NodeJS.ProcessEnv, port: number): Promise<void> {
+async function waitForHealthy(compose: readonly string[], environment: NodeJS.ProcessEnv, port: number, gitWorkerContainerId: string | null = null): Promise<void> {
   let last = "not_checked";
   for (let attempt = 0; attempt < 120; attempt += 1) {
     if (interruptRequested && !cleanupInProgress) throw interruptedError();
     const app = await runProcess("docker", [...compose, "ps", "--quiet", "app"], environment);
     const worker = await runProcess("docker", [...compose, "ps", "--quiet", "worker"], environment);
-    if (app.code === 0 && worker.code === 0 && app.stdout.trim() && worker.stdout.trim()) {
+    let gitWorkerHealthy = gitWorkerContainerId === null;
+    if (gitWorkerContainerId !== null) {
+      const health = await runProcess("docker", ["inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}", gitWorkerContainerId], environment);
+      gitWorkerHealthy = health.code === 0 && health.stdout.trim() === "healthy";
+    }
+    if (app.code === 0 && worker.code === 0 && app.stdout.trim() && worker.stdout.trim() && gitWorkerHealthy) {
       try {
         const response = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2_000) });
         const body = await response.json() as { status?: unknown; database?: unknown; worker?: { status?: unknown } };
@@ -1096,7 +1160,30 @@ async function waitForHealthy(compose: readonly string[], environment: NodeJS.Pr
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
-  fail(`RECOVERY_DRILL_HEALTH_TIMEOUT_${last.replaceAll(/[^A-Za-z0-9_:-]/gu, "_").slice(0, 32)}`);
+  fail(`RECOVERY_DRILL_HEALTH_TIMEOUT_${last.toUpperCase().replaceAll(/[^A-Z0-9_]/gu, "_").slice(0, 32)}`);
+}
+
+async function waitForSourceGitWorkerHealthy(writer: SourceWriter, sourceProject: string, environment: NodeJS.ProcessEnv): Promise<void> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    if (interruptRequested && !cleanupInProgress) throw interruptedError();
+    const resource = await inspectDockerResource("container", writer.id, environment, "RECOVERY_DRILL_SOURCE_RESUME_INSPECT_FAILED");
+    if (resource === null || resource.Id !== writer.id) fail("RECOVERY_DRILL_SOURCE_WRITER_OWNERSHIP_INVALID");
+    const labels = containerLabels(resource);
+    const state = resource.State;
+    if (labels["com.docker.compose.project"] !== sourceProject || labels["com.docker.compose.service"] !== "git-worker") {
+      fail("RECOVERY_DRILL_SOURCE_WRITER_OWNERSHIP_INVALID");
+    }
+    if (typeof state !== "object" || state === null || Array.isArray(state)
+      || (state as { Running?: unknown }).Running !== true
+      || (state as { Paused?: unknown }).Paused !== false) {
+      fail("RECOVERY_DRILL_SOURCE_WRITER_STATE_INVALID");
+    }
+    const health = (state as { Health?: unknown }).Health;
+    if (typeof health === "object" && health !== null && !Array.isArray(health)
+      && (health as { Status?: unknown }).Status === "healthy") return;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  fail("RECOVERY_DRILL_SOURCE_GIT_WORKER_HEALTH_TIMEOUT");
 }
 
 async function sourceAppPort(compose: readonly string[], environment: NodeJS.ProcessEnv): Promise<number> {
@@ -1410,9 +1497,21 @@ async function main(): Promise<void> {
       reconcile: await sourceServiceContainer(options.composeFile, options.sourceProject, sourceEnvironment, "reconcile"),
       app: await sourceServiceContainer(options.composeFile, options.sourceProject, sourceEnvironment, "app"),
       worker: await sourceServiceContainer(options.composeFile, options.sourceProject, sourceEnvironment, "worker"),
+      gitWorker: await sourceGitWorkerContainer(options.composeFile, options.sourceProject, sourceEnvironment),
     });
-    const sourceVolumes = await sourceDataVolumes(sourceServices.app.container, sourceServices.worker.container, sourceEnvironment);
-    sourceWriters = await sourceWriterPreflight(options.sourceProject, sourceServices.app.container, sourceServices.worker.container, sourceEnvironment);
+    const sourceVolumes = await sourceDataVolumes(
+      sourceServices.app.container,
+      sourceServices.worker.container,
+      sourceServices.gitWorker?.container ?? null,
+      sourceEnvironment,
+    );
+    sourceWriters = await sourceWriterPreflight(
+      options.sourceProject,
+      sourceServices.app.container,
+      sourceServices.worker.container,
+      sourceServices.gitWorker?.container ?? null,
+      sourceEnvironment,
+    );
     const source = sourceServices.app;
     sourceAppPortValue = await sourceAppPort(sourceCompose, sourceEnvironment);
     const appPort = await reserveLoopbackPort();
@@ -1435,6 +1534,7 @@ async function main(): Promise<void> {
       POSTGRES_RUNTIME_PASSWORD: `drill_runtime_${randomBytes(24).toString("hex")}`,
       POSTGRES_ENTITLEMENT_WRITER_PASSWORD: `drill_writer_${randomBytes(24).toString("hex")}`,
       POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: `drill_inventory_${randomBytes(24).toString("hex")}`,
+      POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD: `drill_git_automation_${randomBytes(24).toString("hex")}`,
       POSTGRES_DB: DATABASE_NAME,
       POSTGRES_PORT: String(await reserveLoopbackPort()),
       APP_PORT: String(appPort),
@@ -1444,7 +1544,7 @@ async function main(): Promise<void> {
       DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL: "",
       AI_PROJECT_OS_PUBLIC_ORIGIN: `http://127.0.0.1:${appPort}`,
     };
-    await writeFile(envFile, Object.entries(isolatedEnvironment).filter(([key, value]) => ["POSTGRES_USER", "POSTGRES_CLUSTER_ADMIN_PASSWORD", "POSTGRES_MIGRATOR_PASSWORD", "POSTGRES_RUNTIME_PASSWORD", "POSTGRES_ENTITLEMENT_WRITER_PASSWORD", "POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD", "POSTGRES_DB", "POSTGRES_PORT", "APP_PORT", "AI_PROJECT_OS_PGDATA_VOLUME", "AI_PROJECT_OS_SECRETS_VOLUME", "AI_PROJECT_OS_UPLOADS_VOLUME", "DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL", "AI_PROJECT_OS_PUBLIC_ORIGIN"].includes(key) && value !== undefined).map(([key, value]) => `${key}=${value}`).join("\n") + "\n", { mode: 0o600 });
+    await writeFile(envFile, Object.entries(isolatedEnvironment).filter(([key, value]) => ["POSTGRES_USER", "POSTGRES_CLUSTER_ADMIN_PASSWORD", "POSTGRES_MIGRATOR_PASSWORD", "POSTGRES_RUNTIME_PASSWORD", "POSTGRES_ENTITLEMENT_WRITER_PASSWORD", "POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD", "POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD", "POSTGRES_DB", "POSTGRES_PORT", "APP_PORT", "AI_PROJECT_OS_PGDATA_VOLUME", "AI_PROJECT_OS_SECRETS_VOLUME", "AI_PROJECT_OS_UPLOADS_VOLUME", "DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL", "AI_PROJECT_OS_PUBLIC_ORIGIN"].includes(key) && value !== undefined).map(([key, value]) => `${key}=${value}`).join("\n") + "\n", { mode: 0o600 });
     const ownershipLabels = (indent: string, purpose: string): string[] => [
       `${indent}labels:`,
       `${indent}  "${RECOVERY_DRILL_ID_LABEL}": "${drillId}"`,
@@ -1475,6 +1575,22 @@ async function main(): Promise<void> {
       `    image: "${sourceServices.worker.image}"`,
       "    command: [\"node\", \"node_modules/tsx/dist/cli.mjs\", \"scripts/recovery-drill-worker.ts\"]",
       ...ownershipLabels("    ", "worker"),
+      ...(sourceServices.gitWorker === null ? [] : [
+        "  git-worker:",
+        `    image: "${sourceServices.gitWorker.image}"`,
+        "    command: [\"node\", \"node_modules/tsx/dist/cli.mjs\", \"scripts/recovery-drill-worker.ts\"]",
+        "    environment:",
+        "      DATABASE_URL: \"postgresql://${POSTGRES_RUNTIME_USER:-ai_project_os_runtime}:${POSTGRES_RUNTIME_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}\"",
+        "      GIT_AUTOMATION_DATABASE_URL: \"\"",
+        "      AI_PROJECT_OS_WORKER_NAME: \"recovery-drill-git-worker\"",
+        "    healthcheck:",
+        '      test: ["CMD-SHELL", "test -z \\"$$GIT_AUTOMATION_DATABASE_URL\\" && unset GIT_AUTOMATION_DATABASE_URL && node node_modules/tsx/dist/cli.mjs scripts/worker-healthcheck.ts"]',
+        "      interval: 15s",
+        "      timeout: 5s",
+        "      retries: 4",
+        "      start_period: 20s",
+        ...ownershipLabels("    ", "git-worker"),
+      ]),
       "volumes:",
       "  ai_project_os_pgdata:",
       `    name: "${targetVolumeNames.pgdata}"`,
@@ -1530,6 +1646,8 @@ async function main(): Promise<void> {
     if (targetUploads.digest !== sourceUploads.digest) fail("RECOVERY_DRILL_UPLOADS_MANIFEST_MISMATCH");
     await resumeSource(sourceWriters, options.sourceProject, sourceEnvironment);
     sourcePaused = false;
+    const sourceGitWriter = sourceWriters.find((writer) => writer.service === "git-worker");
+    if (sourceGitWriter !== undefined) await waitForSourceGitWorkerHealthy(sourceGitWriter, options.sourceProject, sourceEnvironment);
     if (sourceAppPortValue === null) fail("RECOVERY_DRILL_SOURCE_APP_PORT_INVALID");
     await waitForHealthy(sourceCompose, sourceEnvironment, sourceAppPortValue);
     await requireProcess("docker", ["cp", dumpPath, `${isolatedPostgresContainerId}:${DUMP_CONTAINER_PATH}`], isolatedEnvironment, "RECOVERY_DRILL_DUMP_COPY_FAILED");
@@ -1546,8 +1664,9 @@ async function main(): Promise<void> {
     await waitForOneShotSuccess(isolatedCompose, isolatedEnvironment, "migrate");
     await composeUpAndTrack(isolatedCompose, isolatedEnvironment, projectName, drillId, ["reconcile"], trackedContainers, "RECOVERY_DRILL_RECONCILE_FAILED", true);
     await waitForOneShotSuccess(isolatedCompose, isolatedEnvironment, "reconcile");
-    await composeUpAndTrack(isolatedCompose, isolatedEnvironment, projectName, drillId, ["app", "worker"], trackedContainers, "RECOVERY_DRILL_APP_WORKER_START_FAILED", true);
-    await waitForHealthy(isolatedCompose, isolatedEnvironment, appPort);
+    const targetServices: ComposeService[] = ["app", "worker", ...(sourceServices.gitWorker === null ? [] : ["git-worker" as const])];
+    const targetServiceContainers = await composeUpAndTrack(isolatedCompose, isolatedEnvironment, projectName, drillId, targetServices, trackedContainers, "RECOVERY_DRILL_APP_WORKER_START_FAILED", true);
+    await waitForHealthy(isolatedCompose, isolatedEnvironment, appPort, targetServiceContainers.get("git-worker") ?? null);
     await verifyCredentialRecovery(isolatedCompose, isolatedEnvironment, sourceCounts.credentials, targetSecrets.masterKey.present);
     const completedAt = new Date().toISOString();
     const checks: RecoveryDrillCheckResults = { pgRestore: "passed", migrationLedger: "passed", securityCounts: "passed", masterKeyVolume: "passed", uploadsManifest: "passed", serviceHealth: "passed" };
@@ -1578,6 +1697,8 @@ async function main(): Promise<void> {
       try {
         await resumeSource(sourceWriters, options.sourceProject, sourceEnvironment);
         sourcePaused = false;
+        const sourceGitWriter = sourceWriters.find((writer) => writer.service === "git-worker");
+        if (sourceGitWriter !== undefined) await waitForSourceGitWorkerHealthy(sourceGitWriter, options.sourceProject, sourceEnvironment);
         if (sourceAppPortValue !== null) await waitForHealthy(sourceCompose, sourceEnvironment, sourceAppPortValue);
       } catch {
         cleanupFailureCode ??= "RECOVERY_DRILL_SOURCE_RESUME_FAILED";

@@ -1,14 +1,19 @@
 import { createHash } from "node:crypto";
+import path from "node:path";
 import type {
   ProjectAssetExtractionMethod,
   ProjectAssetSegmentLocatorKind,
 } from "@prisma/client";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { readSelectedZipEntries, type ArchiveReadLimits } from "@/lib/project-assets/archive";
+import { detectAssetFile, ProjectAssetStorageError } from "@/lib/project-assets/storage";
 
-export const PROJECT_ASSET_PARSER_VERSION = "project-asset-parser:v1" as const;
+export const PROJECT_ASSET_PARSER_VERSION = "project-asset-parser:v2" as const;
 export const MAX_DOCUMENT_PAGES = 300;
 export const MAX_VISION_SEGMENTS_PER_ASSET = 20;
+const MAX_OFFICE_IMAGE_BYTES = 10 * 1024 * 1024;
+const OFFICE_IMAGE_LABEL_PREFIX = "Office 图片 · ";
+const OFFICE_MEDIA_PATH = /^(?:word|ppt|xl)\/media\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp)$/iu;
 export const MAX_PDF_RENDER_EDGE = 8_192;
 export const MAX_PDF_RENDER_PIXELS = 20_000_000;
 const PDF_VISION_SCALE = 1.5;
@@ -115,6 +120,118 @@ function splitTextSegments(content: string, locator: string): readonly ParsedAss
   return Object.freeze(results);
 }
 
+function officeImageMime(name: string, contents: Buffer): "image/png" | "image/jpeg" | "image/webp" {
+  if (contents.length === 0 || contents.length > MAX_OFFICE_IMAGE_BYTES) return fail("ASSET_DOCUMENT_TOO_LARGE");
+  try {
+    const detected = detectAssetFile(name, contents);
+    if (detected.kind === "image" && (detected.mimeType === "image/png"
+      || detected.mimeType === "image/jpeg" || detected.mimeType === "image/webp")) return detected.mimeType;
+  } catch (error) {
+    if (error instanceof ProjectAssetStorageError && (error.code === "ASSET_IMAGE_TOO_LARGE" || error.code === "ASSET_FILE_TOO_LARGE")) {
+      return fail("ASSET_DOCUMENT_TOO_LARGE");
+    }
+  }
+  return fail("ASSET_DOCUMENT_INVALID");
+}
+
+function officeReferencedImages(entries: ReadonlyMap<string, Buffer>, owners: readonly string[], root: "word" | "ppt" | "xl"): ReadonlySet<string> {
+  const images = new Set<string>();
+  const visited = new Set<string>();
+  const pending = [...owners];
+  while (pending.length > 0) {
+    const owner = pending.pop()!;
+    if (visited.has(owner)) continue;
+    visited.add(owner);
+    const xml = entries.get(owner)?.toString("utf8");
+    if (xml === undefined) continue;
+    const relationPath = path.posix.join(path.posix.dirname(owner), "_rels", `${path.posix.basename(owner)}.rels`);
+    const relations = entries.get(relationPath)?.toString("utf8");
+    if (relations === undefined) continue;
+    const visualElement = root === "xl" && /^xl\/worksheets\//u.test(owner)
+      ? /<drawing\b[^>]*\br:id\s*=\s*["']([^"']+)["'][^>]*\/?>/giu
+      : /<(?:a:blip|v:imagedata)\b[^>]*\br:(?:embed|id)\s*=\s*["']([^"']+)["'][^>]*\/?>/giu;
+    const ids = new Set([...xml.matchAll(visualElement)].map((match) => match[1]));
+    for (const match of relations.matchAll(/<Relationship\s+([^>]*?)\s*\/?>/giu)) {
+      const attributes = new Map([...match[1]!.matchAll(/([A-Za-z]+)\s*=\s*["']([^"']*)["']/gu)]
+        .map((attribute) => [attribute[1]!, attribute[2]!]));
+      const id = attributes.get("Id");
+      if (id === undefined || !ids.has(id) || attributes.get("TargetMode") === "External") continue;
+      const target = attributes.get("Target");
+      if (!target || target.startsWith("/") || target.includes("\\")) continue;
+      const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(owner), target));
+      if (!resolved.startsWith(`${root}/`)) continue;
+      if (attributes.get("Type")?.endsWith("/image") && OFFICE_MEDIA_PATH.test(resolved)) images.add(resolved);
+      if (attributes.get("Type")?.endsWith("/drawing") && /^xl\/drawings\/drawing\d+\.xml$/u.test(resolved)) pending.push(resolved);
+    }
+  }
+  return images;
+}
+
+async function readOfficeReferencedMedia(
+  buffer: Buffer,
+  structure: ReadonlyMap<string, Buffer>,
+  owners: readonly string[],
+  root: "word" | "ppt" | "xl",
+  archiveLimits?: ArchiveReadLimits,
+): Promise<ReadonlyMap<string, Buffer>> {
+  const names = officeReferencedImages(structure, owners, root);
+  if (names.size > MAX_VISION_SEGMENTS_PER_ASSET) return fail("ASSET_DOCUMENT_TOO_LARGE");
+  if (names.size === 0) return structure;
+  const media = await readSelectedZipEntries(buffer, (name) => names.has(name), {
+    maxEntries: archiveLimits?.maxEntries ?? 5_000,
+    maxExpandedBytes: archiveLimits?.maxExpandedBytes ?? 100 * 1024 * 1024,
+    maxSelectedEntryBytes: Math.min(archiveLimits?.maxSelectedEntryBytes ?? MAX_OFFICE_IMAGE_BYTES, MAX_OFFICE_IMAGE_BYTES),
+  });
+  return new Map([...structure, ...media]);
+}
+
+function officeImageSegments(entries: ReadonlyMap<string, Buffer>, root: "word" | "ppt" | "xl", owners: readonly string[], startOrdinal: number): readonly ParsedAssetSegment[] {
+  const referenced = officeReferencedImages(entries, owners, root);
+  const media = [...entries.entries()]
+    .filter(([name]) => referenced.has(name))
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (media.length > MAX_VISION_SEGMENTS_PER_ASSET) return fail("ASSET_DOCUMENT_TOO_LARGE");
+  return Object.freeze(media.map(([name, contents], index) => {
+    officeImageMime(name, contents);
+    return segment({
+      ordinal: startOrdinal + index,
+      locatorKind: "image",
+      locatorLabel: `${OFFICE_IMAGE_LABEL_PREFIX}${name}`,
+      pageNumber: null,
+      slideNumber: null,
+      sheetName: null,
+      cellRange: null,
+      requiresVision: true,
+      extractionMethod: "vision",
+      contentText: "",
+    });
+  }));
+}
+
+/** Reopen only the previously parsed Office media entry after explicit vision consent. */
+export async function readOfficeImageForVision(input: Readonly<{
+  buffer: Buffer;
+  mimeType: string;
+  locatorLabel: string;
+}>): Promise<Readonly<{ image: Buffer; mimeType: "image/png" | "image/jpeg" | "image/webp" }>> {
+  const root = input.mimeType.endsWith("wordprocessingml.document") ? "word"
+    : input.mimeType.endsWith("presentationml.presentation") ? "ppt"
+      : input.mimeType.endsWith("spreadsheetml.sheet") ? "xl" : null;
+  const name = input.locatorLabel.startsWith(OFFICE_IMAGE_LABEL_PREFIX)
+    ? input.locatorLabel.slice(OFFICE_IMAGE_LABEL_PREFIX.length) : "";
+  if (root === null || !OFFICE_MEDIA_PATH.test(name) || !name.startsWith(`${root}/media/`)) {
+    return fail("ASSET_DOCUMENT_INVALID");
+  }
+  const entries = await readSelectedZipEntries(input.buffer, (entryName) => entryName === name, {
+    maxEntries: 5_000,
+    maxExpandedBytes: 100 * 1024 * 1024,
+    maxSelectedEntryBytes: MAX_OFFICE_IMAGE_BYTES,
+  });
+  const image = entries.get(name);
+  if (image === undefined) return fail("ASSET_DOCUMENT_INVALID");
+  return Object.freeze({ image, mimeType: officeImageMime(name, image) });
+}
+
 async function parsePdf(buffer: Buffer, maxPages = MAX_DOCUMENT_PAGES): Promise<readonly ParsedAssetSegment[]> {
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -170,13 +287,16 @@ async function parsePdf(buffer: Buffer, maxPages = MAX_DOCUMENT_PAGES): Promise<
   }
 }
 
-async function parseDocx(buffer: Buffer, archiveLimits?: ArchiveReadLimits): Promise<readonly ParsedAssetSegment[]> {
-  const entries = await readSelectedZipEntries(buffer, (name) =>
-    /^word\/(?:document|header\d+|footer\d+|footnotes|endnotes)\.xml$/u.test(name),
+async function parseDocx(buffer: Buffer, archiveLimits?: ArchiveReadLimits, includeOfficeImages = true): Promise<readonly ParsedAssetSegment[]> {
+  const structure = await readSelectedZipEntries(buffer, (name) =>
+    /^word\/(?:document|header\d+|footer\d+|footnotes|endnotes)\.xml$/u.test(name)
+      || (includeOfficeImages && /^word\/_rels\/(?:document|header\d+|footer\d+|footnotes|endnotes)\.xml\.rels$/u.test(name)),
     archiveLimits);
-  const documentXml = entries.get("word/document.xml");
+  const documentXml = structure.get("word/document.xml");
   if (documentXml === undefined) return fail("ASSET_DOCUMENT_INVALID");
-  const ordered = [...entries.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const ordered = [...structure.entries()]
+    .filter(([name]) => name.endsWith(".xml"))
+    .sort(([left], [right]) => left.localeCompare(right));
   const paragraphs: string[] = [];
   for (const [, contents] of ordered) {
     const xml = contents.toString("utf8");
@@ -185,7 +305,11 @@ async function parseDocx(buffer: Buffer, archiveLimits?: ArchiveReadLimits): Pro
       if (normalizeText(value).length > 0) paragraphs.push(value);
     }
   }
-  return splitTextSegments(paragraphs.join("\n"), "Word 文档");
+  const textSegments = paragraphs.length > 0 ? splitTextSegments(paragraphs.join("\n"), "Word 文档") : [];
+  const entries = includeOfficeImages ? await readOfficeReferencedMedia(buffer, structure, ordered.map(([name]) => name), "word", archiveLimits) : structure;
+  const images = includeOfficeImages ? officeImageSegments(entries, "word", ordered.map(([name]) => name), textSegments.length) : [];
+  if (textSegments.length === 0 && images.length === 0) return fail("ASSET_DOCUMENT_EMPTY");
+  return Object.freeze([...textSegments, ...images]);
 }
 
 function numericSuffix(value: string): number {
@@ -193,9 +317,12 @@ function numericSuffix(value: string): number {
   return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
 }
 
-async function parsePptx(buffer: Buffer): Promise<readonly ParsedAssetSegment[]> {
-  const entries = await readSelectedZipEntries(buffer, (name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name));
-  const slides = [...entries.entries()].sort(([left], [right]) => numericSuffix(left) - numericSuffix(right));
+async function parsePptx(buffer: Buffer, includeOfficeImages = true): Promise<readonly ParsedAssetSegment[]> {
+  const structure = await readSelectedZipEntries(buffer, (name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name)
+    || (includeOfficeImages && /^ppt\/slides\/_rels\/slide\d+\.xml\.rels$/u.test(name)));
+  const slides = [...structure.entries()]
+    .filter(([name]) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))
+    .sort(([left], [right]) => numericSuffix(left) - numericSuffix(right));
   if (slides.length === 0) return fail("ASSET_DOCUMENT_INVALID");
   if (slides.length > MAX_DOCUMENT_PAGES) return fail("ASSET_DOCUMENT_TOO_LARGE");
   let totalChars = 0;
@@ -216,8 +343,10 @@ async function parsePptx(buffer: Buffer): Promise<readonly ParsedAssetSegment[]>
       contentText,
     });
   }).filter((entry) => entry.contentText.length > 0);
-  if (segments.length === 0) return fail("ASSET_DOCUMENT_EMPTY");
-  return Object.freeze(segments);
+  const entries = includeOfficeImages ? await readOfficeReferencedMedia(buffer, structure, slides.map(([name]) => name), "ppt") : structure;
+  const images = includeOfficeImages ? officeImageSegments(entries, "ppt", slides.map(([name]) => name), segments.length) : [];
+  if (segments.length === 0 && images.length === 0) return fail("ASSET_DOCUMENT_EMPTY");
+  return Object.freeze([...segments, ...images]);
 }
 
 function sharedStrings(xml: string | undefined): readonly string[] {
@@ -247,16 +376,18 @@ function cellValue(xml: string, strings: readonly string[]): string {
   return formula ? `=${decodeXml(formula)}${value.length > 0 ? ` → ${decodeXml(value)}` : ""}` : decodeXml(value);
 }
 
-async function parseXlsx(buffer: Buffer): Promise<readonly ParsedAssetSegment[]> {
-  const entries = await readSelectedZipEntries(buffer, (name) =>
-    name === "xl/sharedStrings.xml" || name === "xl/workbook.xml" || /^xl\/worksheets\/sheet\d+\.xml$/u.test(name),
+async function parseXlsx(buffer: Buffer, includeOfficeImages = true): Promise<readonly ParsedAssetSegment[]> {
+  const structure = await readSelectedZipEntries(buffer, (name) =>
+    name === "xl/sharedStrings.xml" || name === "xl/workbook.xml" || /^xl\/worksheets\/sheet\d+\.xml$/u.test(name)
+      || (includeOfficeImages && (/^xl\/worksheets\/_rels\/sheet\d+\.xml\.rels$/u.test(name)
+        || /^xl\/drawings\/(?:drawing\d+\.xml|_rels\/drawing\d+\.xml\.rels)$/u.test(name))),
   );
-  const worksheets = [...entries.entries()]
+  const worksheets = [...structure.entries()]
     .filter(([name]) => /^xl\/worksheets\/sheet\d+\.xml$/u.test(name))
     .sort(([left], [right]) => numericSuffix(left) - numericSuffix(right));
   if (worksheets.length === 0) return fail("ASSET_DOCUMENT_INVALID");
-  const strings = sharedStrings(entries.get("xl/sharedStrings.xml")?.toString("utf8"));
-  const names = sheetNames(entries.get("xl/workbook.xml")?.toString("utf8"));
+  const strings = sharedStrings(structure.get("xl/sharedStrings.xml")?.toString("utf8"));
+  const names = sheetNames(structure.get("xl/workbook.xml")?.toString("utf8"));
   let totalCells = 0;
   let totalChars = 0;
   const segments: ParsedAssetSegment[] = [];
@@ -293,8 +424,10 @@ async function parseXlsx(buffer: Buffer): Promise<readonly ParsedAssetSegment[]>
       contentText,
     }));
   });
-  if (segments.length === 0) return fail("ASSET_DOCUMENT_EMPTY");
-  return Object.freeze(segments);
+  const entries = includeOfficeImages ? await readOfficeReferencedMedia(buffer, structure, worksheets.map(([name]) => name), "xl") : structure;
+  const images = includeOfficeImages ? officeImageSegments(entries, "xl", worksheets.map(([name]) => name), segments.length) : [];
+  if (segments.length === 0 && images.length === 0) return fail("ASSET_DOCUMENT_EMPTY");
+  return Object.freeze([...segments, ...images]);
 }
 
 export async function parseAssetBuffer(input: Readonly<{
@@ -303,14 +436,15 @@ export async function parseAssetBuffer(input: Readonly<{
   fileName: string;
   archiveLimits?: ArchiveReadLimits;
   maxPdfPages?: number;
+  includeOfficeImages?: boolean;
 }>): Promise<readonly ParsedAssetSegment[]> {
   if (input.mimeType.startsWith("text/") || input.mimeType === "application/json") {
     return splitTextSegments(new TextDecoder().decode(input.buffer), input.fileName);
   }
   if (input.mimeType === "application/pdf") return parsePdf(input.buffer, input.maxPdfPages);
-  if (input.mimeType.endsWith("wordprocessingml.document")) return parseDocx(input.buffer, input.archiveLimits);
-  if (input.mimeType.endsWith("presentationml.presentation")) return parsePptx(input.buffer);
-  if (input.mimeType.endsWith("spreadsheetml.sheet")) return parseXlsx(input.buffer);
+  if (input.mimeType.endsWith("wordprocessingml.document")) return parseDocx(input.buffer, input.archiveLimits, input.includeOfficeImages);
+  if (input.mimeType.endsWith("presentationml.presentation")) return parsePptx(input.buffer, input.includeOfficeImages);
+  if (input.mimeType.endsWith("spreadsheetml.sheet")) return parseXlsx(input.buffer, input.includeOfficeImages);
   if (input.mimeType.startsWith("image/")) {
     return Object.freeze([segment({
       ordinal: 0,

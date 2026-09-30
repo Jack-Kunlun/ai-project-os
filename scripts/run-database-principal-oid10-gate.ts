@@ -13,8 +13,9 @@ const LEGACY_ROLE = "ai_project_os_legacy_bootstrap";
 const MIGRATOR_ROLE = "ai_project_os_migrator";
 const RUNTIME_ROLE = "ai_project_os_runtime";
 const WRITER_ROLE = "ai_project_os_entitlement_writer";
+const GIT_AUTOMATION_WORKER_ROLE = "ai_project_os_git_automation_worker";
 const REQUIRED_EXTENSIONS = Object.freeze(["vector", "pg_trgm", "pgcrypto", "plpgsql"] as const);
-const EXPECTED_MIGRATION_COUNT = 117;
+const EXPECTED_MIGRATION_COUNT = 133;
 const COMMAND_TIMEOUT_MS = 5 * 60 * 1_000;
 const READY_TIMEOUT_MS = 2 * 60 * 1_000;
 
@@ -25,6 +26,7 @@ type GateSecrets = Readonly<{
   migrator: string;
   runtime: string;
   writer: string;
+  gitAutomationWorker: string;
   inventory: string;
   legacy: string;
 }>;
@@ -251,7 +253,7 @@ async function publishedPort(container: string): Promise<number> {
 }
 
 function principalEnvironment(
-  urls: Readonly<{ admin: string; runtime: string; writer: string; migrator: string }>,
+  urls: Readonly<{ admin: string; runtime: string; writer: string; gitAutomationWorker: string; migrator: string }>,
   inventoryPassword: string,
   legacyUrl?: string,
 ): NodeJS.ProcessEnv {
@@ -261,6 +263,7 @@ function principalEnvironment(
     DATABASE_PRINCIPAL_ADMIN_URL: urls.admin,
     DATABASE_URL: urls.runtime,
     ENTITLEMENT_DATABASE_URL: urls.writer,
+    GIT_AUTOMATION_DATABASE_URL: urls.gitAutomationWorker,
     MIGRATOR_DATABASE_URL: urls.migrator,
     POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: inventoryPassword,
   };
@@ -458,6 +461,7 @@ async function main(): Promise<void> {
     migrator: secret("oid10_migrator"),
     runtime: secret("oid10_runtime"),
     writer: secret("oid10_writer"),
+    gitAutomationWorker: secret("oid10_git_automation_worker"),
     inventory: secret("oid10_inventory"),
     legacy: secret("oid10_legacy"),
   });
@@ -490,7 +494,8 @@ async function main(): Promise<void> {
     let migratorUrl = connectionUrl(MIGRATOR_ROLE, secrets.migrator, port);
     let runtimeUrl = connectionUrl(RUNTIME_ROLE, secrets.runtime, port);
     let writerUrl = connectionUrl(WRITER_ROLE, secrets.writer, port);
-    let urls = Object.freeze({ admin: adminUrl, runtime: runtimeUrl, writer: writerUrl, migrator: migratorUrl });
+    let gitAutomationWorkerUrl = connectionUrl(GIT_AUTOMATION_WORKER_ROLE, secrets.gitAutomationWorker, port);
+    let urls = Object.freeze({ admin: adminUrl, runtime: runtimeUrl, writer: writerUrl, gitAutomationWorker: gitAutomationWorkerUrl, migrator: migratorUrl });
 
     await assertInitialOid10(legacyUrl);
     await createAndAssertInitialOid10Extensions(legacyUrl);
@@ -524,7 +529,8 @@ async function main(): Promise<void> {
     migratorUrl = connectionUrl(MIGRATOR_ROLE, secrets.migrator, port);
     runtimeUrl = connectionUrl(RUNTIME_ROLE, secrets.runtime, port);
     writerUrl = connectionUrl(WRITER_ROLE, secrets.writer, port);
-    urls = Object.freeze({ admin: adminUrl, runtime: runtimeUrl, writer: writerUrl, migrator: migratorUrl });
+    gitAutomationWorkerUrl = connectionUrl(GIT_AUTOMATION_WORKER_ROLE, secrets.gitAutomationWorker, port);
+    urls = Object.freeze({ admin: adminUrl, runtime: runtimeUrl, writer: writerUrl, gitAutomationWorker: gitAutomationWorkerUrl, migrator: migratorUrl });
     await assertClusterAdminReachable(adminUrl, "post-restart-admin");
     await runRepositoryCommand(["node_modules/tsx/dist/cli.mjs", "scripts/reconcile-database-principals.ts", "--bootstrap-if-needed"], "principal-bootstrap-post-restart", principalEnvironment(urls, secrets.inventory));
     await runRepositoryCommand(["node_modules/tsx/dist/cli.mjs", "scripts/reconcile-database-principals.ts"], "reconcile-post-restart", principalEnvironment(urls, secrets.inventory));

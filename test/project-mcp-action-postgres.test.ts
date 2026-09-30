@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Prisma } from "@prisma/client";
 import test from "node:test";
+import { createSession, SESSION_COOKIE_NAME } from "../src/lib/auth";
+import { GET as getMcpActions, POST as postMcpAction } from "../src/app/api/projects/[projectId]/mcp-actions/route";
 import { createCredential } from "../src/lib/credential-vault";
 import { getDb } from "../src/lib/db";
 import { executeMcpConnectionMutation, previewMcpConnectionMutation } from "../src/lib/mcp/connection-governance";
@@ -43,6 +45,8 @@ test(
   "project MCP action approval control plane enforces Owner admission, CAS, TTL, drift, and retained evidence",
   { skip: !shouldRun ? "PROJECT_MCP_ACTION_POSTGRES_GATE=1 is required" : false },
   async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    Reflect.set(process.env, "NODE_ENV", "test");
     const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-mcp-action-key-"));
     const previousMasterKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
@@ -135,6 +139,27 @@ test(
         await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: ownerId, reason: "mcp_action_gate_project_viewer" });
         return createdProject;
       });
+      const previousActionFlag = process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED;
+      process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED = "true";
+      try {
+        const session = await createSession(db, await db.appUser.findUniqueOrThrow({ where: { id: secondOwnerId } }));
+        const endpoint = `http://localhost/api/projects/${projectId}/mcp-actions`;
+        const context = { params: Promise.resolve({ projectId }) };
+        const listed = await getMcpActions(new Request(endpoint, { headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}`, host: "localhost" } }), context);
+        assert.equal(listed.status, 200);
+        assert.equal(listed.headers.get("cache-control"), "no-store");
+        assert.deepEqual((await listed.json() as { actions: unknown[] }).actions, []);
+        const denied = await getMcpActions(new Request(endpoint), context);
+        assert.equal(denied.status, 401);
+        const crossOrigin = await postMcpAction(new Request(endpoint, {
+          method: "POST", headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}`, host: "localhost",
+            origin: "https://attacker.example", "content-type": "application/json" }, body: "{}",
+        }), context);
+        assert.equal(crossOrigin.status, 403);
+      } finally {
+        if (previousActionFlag === undefined) delete process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED;
+        else process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED = previousActionFlag;
+      }
       await createMcpConnectionFixture({
         id: connectionId, name: `MCP action connection ${suffix}`, endpointUrl: "https://mcp.example.invalid/mcp", authKind: "none", credentialId: null,
         allowPrivateNetwork: false, resolvedAddressFingerprint: networkFingerprint, protocolVersion: "2026-07-28", catalogFingerprint: "c".repeat(64),
@@ -591,6 +616,8 @@ test(
       assert.equal(await db.projectMcpAction.count({ where: { projectId } }), 0);
       assert.equal(await db.projectMcpActionDecision.count({ where: { projectId } }), decisionsBeforeDelete);
     } finally {
+      if (previousNodeEnv === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+      else Reflect.set(process.env, "NODE_ENV", previousNodeEnv);
       await db.$disconnect();
       if (previousMasterKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
       else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousMasterKeyPath;

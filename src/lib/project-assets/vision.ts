@@ -8,7 +8,7 @@ import { withWebAiProjectAccessTransaction } from "@/lib/access-linearization";
 import { assertWebAiProjectAccess, type WebAiActor } from "@/lib/web-ai-access";
 import { resolveEffectiveAiRoute } from "@/lib/effective-ai-route";
 import { loadProjectAiPublicVisibility } from "@/lib/project-ai-public-projection";
-import { renderPdfPageForVision } from "@/lib/project-assets/parser";
+import { readOfficeImageForVision, renderPdfPageForVision } from "@/lib/project-assets/parser";
 import { ProjectAssetError } from "@/lib/project-assets/service";
 import { readAssetBlob } from "@/lib/project-assets/storage";
 import { getProjectJobInternal, isUncertainProviderDispatch } from "@/lib/project-workflow";
@@ -129,7 +129,10 @@ async function loadVisionMaterial(
   }
   const segments = version.segments.filter((segment) => segment.requiresVision);
   if (segments.length === 0) throw new ProjectAssetError("PROJECT_ASSET_INVALID_STATE");
-  if (!(version.mimeType.startsWith("image/") || version.mimeType === "application/pdf")) {
+  if (!(version.mimeType.startsWith("image/") || version.mimeType === "application/pdf"
+    || version.mimeType.endsWith("wordprocessingml.document")
+    || version.mimeType.endsWith("presentationml.presentation")
+    || version.mimeType.endsWith("spreadsheetml.sheet"))) {
     throw new ProviderTransportError("AI_PROVIDER_VISION_UNSUPPORTED", 422, false);
   }
   const manifest = manifestFingerprint({
@@ -311,6 +314,12 @@ export async function runProjectAssetVisionExtraction(input: Readonly<{
         if (segment.pageNumber === null) throw new ProviderTransportError("AI_PROVIDER_REJECTED", 422, false);
         image = await renderPdfPageForVision(buffer, segment.pageNumber);
         mimeType = "image/png";
+      } else if (version.mimeType.endsWith("wordprocessingml.document")
+        || version.mimeType.endsWith("presentationml.presentation")
+        || version.mimeType.endsWith("spreadsheetml.sheet")) {
+        const embedded = await readOfficeImageForVision({ buffer, mimeType: version.mimeType, locatorLabel: segment.locatorLabel });
+        image = embedded.image;
+        mimeType = embedded.mimeType;
       } else {
         image = buffer;
         if (version.mimeType === "image/png" || version.mimeType === "image/jpeg" || version.mimeType === "image/webp") {

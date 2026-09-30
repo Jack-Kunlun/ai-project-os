@@ -33,6 +33,52 @@ import { createVerifiedProviderFixture } from "./platform-provider-fixture";
 
 const shouldRun = process.env.PROJECT_ASSET_POSTGRES_GATE === "1";
 
+function officeZip(entries: ReadonlyArray<readonly [string, string | Buffer]>): Buffer {
+  const crc32 = (input: Buffer) => {
+    let crc = 0xffffffff;
+    for (const byte of input) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  };
+  const parts: Buffer[] = [];
+  const directory: Buffer[] = [];
+  let offset = 0;
+  for (const [entryName, value] of entries) {
+    const name = Buffer.from(entryName, "utf8");
+    const data = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
+    const checksum = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(checksum, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    parts.push(local, name, data);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt32LE(checksum, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt32LE(offset, 42);
+    directory.push(central, name);
+    offset += local.length + name.length + data.length;
+  }
+  const centralDirectory = Buffer.concat(directory);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralDirectory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, centralDirectory, end]);
+}
+
 async function activateDefaultVisionRoute(
   db: ReturnType<typeof getDb>,
   actor: Readonly<{ id: string; role: string; accountAccessVersion: number }>,
@@ -238,6 +284,46 @@ test(
       assert.equal(exportDocument.assets[0]!.versions[0]!.sizeBytes.length > 0, true);
       assert.equal(exported.json.includes('"storageKey"'), false);
       assert.equal(exportDocument.exclusions.some((entry) => entry.includes("ai-project-os-uploads")), true);
+
+      const sourceCountBeforeOffice = await db.projectSource.count({ where: { projectId, retiredAt: null } });
+      const officeImage = Buffer.from(await canvas.encode("png"));
+      const office = await uploadProjectAsset({
+        projectId,
+        requestedBy: user,
+        fileName: "illustrated.docx",
+        buffer: officeZip([
+          ["word/document.xml", '<w:document><w:body><w:p><w:t>Office 图片审核</w:t></w:p><a:blip r:embed="rId1"/></w:body></w:document>'],
+          ["word/_rels/document.xml.rels", '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/></Relationships>'],
+          ["word/media/image1.png", officeImage],
+          ["word/media/orphan.png", officeImage],
+        ]),
+      }, db);
+      assert.equal(office?.status, "waitingVision");
+      assert.equal(office?.segments.length, 2);
+      assert.deepEqual(office?.segments.filter((segment) => segment.requiresVision).map((segment) => segment.locatorLabel), ["Office 图片 · word/media/image1.png"]);
+      assert.equal(await db.projectSource.count({ where: { projectId, retiredAt: null } }), sourceCountBeforeOffice);
+      const officeClientKey = `office-${suffix}`;
+      const officeConfirmation = await prepareProjectAssetVisionConfirmation({
+        projectId, assetId: office!.id, requestedBy: user, clientKey: officeClientKey, db,
+      });
+      const officeJob = await runProjectAssetVisionExtraction({
+        projectId, assetId: office!.id, requestedBy: user,
+        clientKey: officeClientKey, challengeId: officeConfirmation.challengeId,
+      }, db);
+      assert.equal(officeJob.status, "succeeded");
+      let reviewedOffice = await getProjectAsset(projectId, office!.id, db);
+      assert.equal(reviewedOffice?.status, "awaitingReview");
+      assert.match(reviewedOffice?.segments.find((segment) => segment.locatorKind === "image")?.contentText ?? "", /完成文件识别/u);
+      assert.equal(await db.projectSource.count({ where: { projectId, retiredAt: null } }), sourceCountBeforeOffice);
+      for (const officeSegment of reviewedOffice!.segments) {
+        reviewedOffice = await reviewProjectAssetSegment({
+          projectId, assetId: office!.id, segmentId: officeSegment.id, requestedBy: user,
+          review: { action: "accept", reviewedText: officeSegment.contentText },
+        }, db);
+      }
+      assert.equal(reviewedOffice?.status, "ready");
+      assert.equal(await db.projectSource.count({ where: { projectId, retiredAt: null } }), sourceCountBeforeOffice + 2);
+      assert.equal(await db.providerCallAudit.count({ where: { job: { projectId }, operation: "visionExtract", status: "succeeded" } }), 2);
 
       for (const adapter of [
         { kind: "qwen" as const, key: "sk-project-assets-qwen", model: "qwen3-vl-plus" },

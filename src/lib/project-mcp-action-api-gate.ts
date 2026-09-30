@@ -1,5 +1,9 @@
 export const PROJECT_MCP_ACTION_API_UNAVAILABLE = "PROJECT_MCP_ACTION_API_UNAVAILABLE";
 
+export function isProjectMcpActionApiEnabled(): boolean {
+  return process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED === "true";
+}
+
 export function projectMcpActionApiUnavailable(): Response {
   return Response.json(
     {

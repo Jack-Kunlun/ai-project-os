@@ -6,3 +6,4 @@ ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-pat
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-next-deploy
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v06-default-memory-deploy
 ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-app-deploy
+ai-project-os-actions ALL=(root) NOPASSWD: /usr/local/sbin/ai-project-os-v07-deploy

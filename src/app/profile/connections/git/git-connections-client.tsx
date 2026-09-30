@@ -115,7 +115,7 @@ export function GitConnectionsClient() {
           </div>
           <div className="rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-900 lg:max-w-xs">
             <p className="font-semibold">当前使用边界</p>
-            <p className="mt-1 text-xs leading-5">项目页已支持一次性手动只读委托；自动化、写入/提交和旧 PAT 路径保持关闭。新建连接会先测试指定仓库和 ref；后续变更仍必须通过安全影响预览。</p>
+            <p className="mt-1 text-xs leading-5">项目页支持一次性手动只读委托和单独的自动读取双确认授权；授权生效后才会按计划只读。写入/提交和旧 PAT 路径保持关闭。新建连接会先测试指定仓库和 ref；后续变更仍必须通过安全影响预览。</p>
           </div>
         </div>
       </section>

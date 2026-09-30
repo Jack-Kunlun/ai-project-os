@@ -49,11 +49,13 @@ test("host migration keeps the restored target passive until an explicit guarded
   assert.match(sourceState, /SOURCE_RESUMED_OK/u);
 
   assert.match(restore, /RESTORE_MIGRATION_BACKUP_NOT_QUIESCED/u);
-  assert.match(restore, /compose build principal-bootstrap migrate reconcile app worker/u);
+  assert.match(restore, /build_services=\(principal-bootstrap migrate reconcile app worker\)/u);
+  assert.match(restore, /compose build "\$\{build_services\[@\]\}"/u);
   assert.match(restore, /compose up -d --no-build --force-recreate principal-bootstrap/u);
   assert.match(restore, /compose up -d --no-build --force-recreate migrate/u);
   assert.match(restore, /compose up -d --no-build --force-recreate reconcile/u);
-  assert.match(restore, /compose up -d --no-build --force-recreate app worker/u);
+  assert.match(restore, /running_services=\(app worker\)/u);
+  assert.match(restore, /compose up -d --no-build --force-recreate "\$\{running_services\[@\]\}"/u);
   assert.match(restore, /POSTGRES_CLUSTER_ADMIN_PASSWORD/u);
   assert.match(restore, /POSTGRES_MIGRATOR_PASSWORD/u);
   assert.match(restore, /standby=true/u);

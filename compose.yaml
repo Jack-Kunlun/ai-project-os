@@ -30,6 +30,7 @@ services:
       DATABASE_PRINCIPAL_ADMIN_URL: "postgresql://${POSTGRES_USER:-ai_project_os_cluster_admin}:${POSTGRES_CLUSTER_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       DATABASE_URL: "postgresql://${POSTGRES_RUNTIME_USER:-ai_project_os_runtime}:${POSTGRES_RUNTIME_PASSWORD:?POSTGRES_RUNTIME_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       ENTITLEMENT_DATABASE_URL: "postgresql://${POSTGRES_ENTITLEMENT_WRITER_USER:-ai_project_os_entitlement_writer}:${POSTGRES_ENTITLEMENT_WRITER_PASSWORD:?POSTGRES_ENTITLEMENT_WRITER_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      GIT_AUTOMATION_DATABASE_URL: "postgresql://${POSTGRES_GIT_AUTOMATION_WORKER_USER:-ai_project_os_git_automation_worker}:${POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD:?POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       MIGRATOR_DATABASE_URL: "postgresql://ai_project_os_migrator:${POSTGRES_MIGRATOR_PASSWORD:?POSTGRES_MIGRATOR_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: "${POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD:?POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD must be set}"
       DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL: "${DATABASE_PRINCIPAL_LEGACY_BOOTSTRAP_URL:-}"
@@ -74,6 +75,7 @@ services:
       DATABASE_PRINCIPAL_ADMIN_URL: "postgresql://${POSTGRES_USER:-ai_project_os_cluster_admin}:${POSTGRES_CLUSTER_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       DATABASE_URL: "postgresql://${POSTGRES_RUNTIME_USER:-ai_project_os_runtime}:${POSTGRES_RUNTIME_PASSWORD:?POSTGRES_RUNTIME_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       ENTITLEMENT_DATABASE_URL: "postgresql://${POSTGRES_ENTITLEMENT_WRITER_USER:-ai_project_os_entitlement_writer}:${POSTGRES_ENTITLEMENT_WRITER_PASSWORD:?POSTGRES_ENTITLEMENT_WRITER_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      GIT_AUTOMATION_DATABASE_URL: "postgresql://${POSTGRES_GIT_AUTOMATION_WORKER_USER:-ai_project_os_git_automation_worker}:${POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD:?POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       MIGRATOR_DATABASE_URL: "postgresql://ai_project_os_migrator:${POSTGRES_MIGRATOR_PASSWORD:?POSTGRES_MIGRATOR_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
       POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: "${POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD:?POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD must be set}"
     command: ["node", "node_modules/tsx/dist/cli.mjs", "scripts/reconcile-database-principals.ts"]
@@ -93,6 +95,11 @@ services:
       AI_PROJECT_OS_MASTER_KEY_FILE: /var/lib/ai-project-os-secrets/master.key
       AI_PROJECT_OS_SECURE_COOKIES: "${AI_PROJECT_OS_SECURE_COOKIES:-false}"
       AI_PROJECT_OS_PUBLIC_ORIGIN: "${AI_PROJECT_OS_PUBLIC_ORIGIN:-http://127.0.0.1:3000}"
+      LOCAL_REGISTRATION_ENABLED: "${LOCAL_REGISTRATION_ENABLED:-false}"
+      AI_PROJECT_OS_MCP_ACTIONS_ENABLED: "${AI_PROJECT_OS_MCP_ACTIONS_ENABLED:-false}"
+      AI_PROJECT_OS_MCP_EXPORT_ENABLED: "${AI_PROJECT_OS_MCP_EXPORT_ENABLED:-false}"
+      AI_PROJECT_OS_MCP_EXPORT_OAUTH_ENABLED: "${AI_PROJECT_OS_MCP_EXPORT_OAUTH_ENABLED:-false}"
+      AI_PROJECT_OS_MCP_EXPORT_PUBLIC_ORIGIN: "${AI_PROJECT_OS_MCP_EXPORT_PUBLIC_ORIGIN:-}"
       AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID: "${AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_ID:-}"
       AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET: "${AI_PROJECT_OS_GITHUB_OAUTH_CLIENT_SECRET:-}"
       AI_PROJECT_OS_WORKER_NAME: ${AI_PROJECT_OS_WORKER_NAME:-automation-primary}
@@ -171,6 +178,33 @@ services:
     init: true
     healthcheck:
       test: ["CMD", "node", "node_modules/tsx/dist/cli.mjs", "scripts/worker-healthcheck.ts"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+
+  git-worker:
+    build:
+      context: .
+      target: worker
+    command: ["node", "node_modules/tsx/dist/cli.mjs", "scripts/git-automation-worker.ts"]
+    depends_on:
+      reconcile:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${POSTGRES_GIT_AUTOMATION_WORKER_USER:-ai_project_os_git_automation_worker}:${POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD:?POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      GIT_AUTOMATION_DATABASE_URL: "postgresql://${POSTGRES_GIT_AUTOMATION_WORKER_USER:-ai_project_os_git_automation_worker}:${POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD:?POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-ai_project_os}"
+      AI_PROJECT_OS_MASTER_KEY_FILE: /var/lib/ai-project-os-secrets/master.key
+    volumes:
+      - ai_project_os_secrets:/var/lib/ai-project-os-secrets:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=536870912,mode=1777
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test: ["CMD", "node", "node_modules/tsx/dist/cli.mjs", "scripts/git-automation-worker-healthcheck.ts"]
       interval: 15s
       timeout: 5s
       retries: 4

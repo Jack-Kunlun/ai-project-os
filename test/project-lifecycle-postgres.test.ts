@@ -249,6 +249,7 @@ test(
       await db.appUser.delete({ where: { id: backupOwner.id } });
       createdBackupOwnerId = null;
     } finally {
+      await db.project.updateMany({ where: { id: projectId }, data: { archivedAt: new Date() } });
       await db.project.deleteMany({ where: { id: projectId } });
       await db.workspace.deleteMany({ where: { id: workspaceId } });
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });

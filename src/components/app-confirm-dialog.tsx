@@ -103,7 +103,7 @@ export function useAppConfirmDialog() {
           <h2 id={titleId} className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{options.title}</h2>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-7 py-5 sm:px-8">
-          <p id={descriptionId} className={`text-sm leading-6 ${descriptionClass}`}>{options.description}</p>
+          <p id={descriptionId} className={`whitespace-pre-wrap break-words text-sm leading-6 ${descriptionClass}`}>{options.description}</p>
           {hasInput ? (
             <label className="mt-5 block text-sm font-semibold text-slate-700">
               {options.inputLabel}

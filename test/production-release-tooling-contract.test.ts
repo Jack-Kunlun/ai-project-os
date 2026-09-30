@@ -11,31 +11,36 @@ const gatewayPath = path.join(productionDirectory, "ai-project-os-actions-gatewa
 const installerPath = path.join(productionDirectory, "install-production-deploy.sh");
 const backupArtifactHelperPath = path.join(productionDirectory, "ai_project_os_backup_artifact.py");
 const sudoersPath = path.join(productionDirectory, "ai-project-os-deploy.sudoers");
+const nginxConfigPath = path.join(productionDirectory, "nginx/ai-project-os.conf");
+const bootstrapPath = path.join(productionDirectory, "bootstrap-production-host");
 const deploymentDocsPath = path.join(repositoryRoot, "docs/production-deployment.md");
 
 /** Read every release-tooling contract file once so assertions share one snapshot. */
 async function readContractFiles() {
-  const [updater, gateway, installer, sudoers, deploymentDocs] = await Promise.all([
+  const [updater, gateway, installer, sudoers, nginxConfig, bootstrap, deploymentDocs] = await Promise.all([
     readFile(updaterPath, "utf8"),
     readFile(gatewayPath, "utf8"),
     readFile(installerPath, "utf8"),
     readFile(sudoersPath, "utf8"),
+    readFile(nginxConfigPath, "utf8"),
+    readFile(bootstrapPath, "utf8"),
     readFile(deploymentDocsPath, "utf8"),
   ]);
-  return { updater, gateway, installer, sudoers, deploymentDocs };
+  return { updater, gateway, installer, sudoers, nginxConfig, bootstrap, deploymentDocs };
 }
 
 test("forced-command gateway exposes only the exact release-tooling grammar", async () => {
   const { gateway } = await readContractFiles();
 
-  assert.ok(gateway.includes("^install-release-tooling\\ (v0\\.6\\.[0-9]+(-dev\\.[1-9][0-9]*)?)\\ ([0-9a-f]{40})\\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$"));
+  assert.ok(gateway.includes("^install-release-tooling\\ (v0\\.7\\.0)\\ ([0-9a-f]{40})\\ (CONFIRM_INSTALL_RELEASE_TOOLING_V1)$"));
+  assert.match(gateway, /tooling-v07-status/u);
   assert.match(gateway, /CONFIRM_INSTALL_RELEASE_TOOLING_V1/u);
   assert.match(gateway, /exec sudo -n \/usr\/local\/sbin\/ai-project-os-install-release-tooling/u);
   assert.doesNotMatch(gateway, /\beval\s|bash -c|sh -c/u);
 
   for (const deniedCommand of [
     "install-release-tooling main " + "a".repeat(40) + " CONFIRM_INSTALL_RELEASE_TOOLING_V1",
-    "install-release-tooling v0.7.0 " + "a".repeat(40) + " CONFIRM_INSTALL_RELEASE_TOOLING_V1",
+    "install-release-tooling v0.6.0-dev.15 " + "a".repeat(40) + " CONFIRM_INSTALL_RELEASE_TOOLING_V1",
     "install-release-tooling v0.6.0 " + "a".repeat(39) + " CONFIRM_INSTALL_RELEASE_TOOLING_V1",
     "install-release-tooling v0.6.0 " + "a".repeat(40) + " CONFIRM_INSTALL_RELEASE_TOOLING_V1; id",
     "install-release-tooling v0.6.0-dev.0 " + "a".repeat(40) + " CONFIRM_INSTALL_RELEASE_TOOLING_V1",
@@ -53,7 +58,7 @@ test("root updater verifies tag identity, package version, CI, and a separate ch
   const { updater } = await readContractFiles();
 
   assert.match(updater, /\[\[ \$EUID -eq 0 \]\]/u);
-  assert.ok(updater.includes("readonly RELEASE_TAG_PATTERN='^v0\\.6\\.[0-9]+(-dev\\.[1-9][0-9]*)?$'"));
+  assert.ok(updater.includes("readonly RELEASE_TAG_PATTERN='^v0\\.7\\.0$'"));
   assert.ok(updater.includes('[[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]]'));
   assert.match(updater, /CONFIRM_INSTALL_RELEASE_TOOLING_V1/u);
   assert.match(updater, /REPOSITORY_URL=https:\/\/github\.com\/Jack-Kunlun\/ai-project-os\.git/u);
@@ -101,6 +106,7 @@ test("updater promotes only the fixed validated control-plane allowlist", async 
     "ai_project_os_backup_artifact.py",
     "ai-project-os-restore",
     "ai-project-os-configure-github-oauth",
+    "deploy/production/nginx/ai-project-os.conf",
     "compose.operations.yaml",
     "ai-project-os-deploy.sudoers",
   ]) {
@@ -135,6 +141,51 @@ test("updater promotes only the fixed validated control-plane allowlist", async 
   assert.match(updater, /pre-deploy-to-v0\\\.6\\\.0-dev\\\.7/u);
   assert.doesNotMatch(updater, /\$\{4-\}|readonly [A-Z_]+=\$\{4|read -r[^\n]*destination|\beval\s/u);
   assert.doesNotMatch(updater, /source "\$/u);
+});
+
+test("OAuth uses an isolated source budget installed through the verified host and tooling paths", async () => {
+  const { updater, nginxConfig, bootstrap } = await readContractFiles();
+  assert.match(nginxConfig, /^limit_req_zone \$binary_remote_addr zone=ai_project_os_oauth_authorize:10m rate=3r\/m;$/mu);
+  const oauthLocation = nginxConfig.match(/^    location = \/oauth\/authorize \{\n([\s\S]*?)^    \}/mu)?.[1] ?? "";
+  assert.match(oauthLocation, /limit_req zone=ai_project_os_oauth_authorize burst=3 nodelay;/u);
+  assert.match(oauthLocation, /limit_req_status 429;/u);
+  assert.doesNotMatch(oauthLocation, /zone=ai_project_os_auth/u);
+  assert.match(nginxConfig, /Nginx terminates public TLS directly[\s\S]*?never trusts a client-supplied forwarded-address header/u);
+
+  assert.match(updater, /deploy\/production\/nginx\/ai-project-os\.conf/u);
+  assert.match(updater, /stage_install "\$NGINX_CONFIG" "\$NGINX_CONFIG_DEST" 0644/u);
+  assert.match(updater, /NGINX_CONFIG_DEST=\/etc\/nginx\/sites-available\/ai-project-os\.conf/u);
+  assert.match(updater, /NGINX_ENABLED_PATH=\/etc\/nginx\/sites-enabled\/ai-project-os\.conf/u);
+  assert.match(updater, /rollback_nginx_configuration\(\)/u);
+  assert.match(updater, /mv -f -- "\$NGINX_BACKUP_PATH" "\$NGINX_CONFIG_DEST"/u);
+  assert.match(updater, /NGINX_CONFIG_COMMITTED=true/u);
+  assert.match(updater, /NGINX_WAS_ACTIVE=true/u);
+  assert.match(updater, /systemctl start nginx >\/dev\/null 2>&1 \|\| rollback_failed=true/u);
+  assert.match(updater, /systemctl is-active --quiet nginx \|\| rollback_failed=true/u);
+  const promoteNginx = updater.indexOf('mv -f -- "$staged_nginx_config" "$NGINX_CONFIG_DEST"');
+  const validateNginx = updater.indexOf("nginx -t || fail RELEASE_TOOLING_NGINX_CONFIG_INVALID");
+  const reloadNginx = updater.indexOf("systemctl reload nginx || fail RELEASE_TOOLING_NGINX_RELOAD_FAILED");
+  assert.ok(promoteNginx >= 0 && promoteNginx < validateNginx && validateNginx < reloadNginx);
+
+  const bootstrapDisable = bootstrap.indexOf("systemctl disable --now nginx");
+  const initialInstall = bootstrap.indexOf('install -o root -g root -m 0644 "$SOURCE_DIR/nginx/ai-project-os.conf"');
+  const initialValidation = bootstrap.indexOf("nginx -t", initialInstall);
+  assert.ok(bootstrapDisable >= 0 && bootstrapDisable < initialInstall && initialInstall < initialValidation);
+  assert.match(bootstrap, /nginx\/ai-project-os\.conf/u);
+  assert.match(bootstrap, /require_source_file "\$script"/u);
+  assert.match(bootstrap, /ln -sfn \/etc\/nginx\/sites-available\/ai-project-os\.conf \/etc\/nginx\/sites-enabled\/ai-project-os\.conf/u);
+});
+
+test("public registration has a dedicated source limit in production and example Nginx", async () => {
+  const { nginxConfig } = await readContractFiles();
+  const example = await readFile(path.join(repositoryRoot, "deploy/nginx/ai-project-os.conf.example"), "utf8");
+  for (const config of [nginxConfig, example]) {
+    assert.match(config, /^limit_req_zone \$binary_remote_addr zone=ai_project_os_registration:10m rate=1r\/m;$/mu);
+    const registrationLocation = config.match(/^    location = \/api\/auth\/register \{\n([\s\S]*?)^    \}/mu)?.[1] ?? "";
+    assert.match(registrationLocation, /limit_req zone=ai_project_os_registration burst=1 nodelay;/u);
+    assert.match(registrationLocation, /limit_req_status 429;/u);
+    assert.match(registrationLocation, /include \/etc\/nginx\/snippets\/ai-project-os-proxy\.conf;/u);
+  }
 });
 
 test("updater backup helper contract accepts existing and future 0.6 app artifacts", async () => {

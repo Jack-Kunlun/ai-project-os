@@ -7,10 +7,11 @@ import test from "node:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { ProjectItemRevisionAction, type AutomationRuleKind, type PrismaClient } from "@prisma/client";
 import { AccessControlError, accessibleProjectWhere, authorizeApiRequest } from "../src/lib/access-control";
+import { createSession } from "../src/lib/auth";
 import { AutomationError, createProjectAutomationRule, listUserNotifications, openNotification, previewProjectAutomationRule, runAutomationWorkerCycle } from "../src/lib/automation";
 import { getDb } from "../src/lib/db";
 import { analyzeProjectMemoryQuality, resolveMemoryQualityIssue, updateProjectItemMemoryMetadata } from "../src/lib/memory-quality";
-import { beginOidcLogin, completeOidcLogin, createOidcProvider, deleteOidcProvider, OidcError, updateOidcProvider } from "../src/lib/oidc";
+import { beginOidcIdentityLink, beginOidcLogin, completeOidcIdentityLink, completeOidcLogin, createOidcProvider, deleteOidcProvider, OidcError, updateOidcProvider } from "../src/lib/oidc";
 import { appendProjectItemRevision, createPrimaryProjectItemEvidence } from "../src/lib/project-item-history";
 import { updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { createProjectWebSource, syncProjectWebSource } from "../src/lib/web-sources";
@@ -47,6 +48,8 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   const projectB = randomUUID();
   const memberId = randomUUID();
   const outsiderUserId = randomUUID();
+  const revokedLinkUserId = randomUUID();
+  const unmemberedLinkUserId = randomUUID();
   const roleWorkspaceId = randomUUID();
   const masterKeyPath = `/tmp/ai-project-os-v3-${process.pid}-${suffix}.key`;
   const previousKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
@@ -59,10 +62,18 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
   let disposableOidcProviderId: string | null = null;
   let disposableOidcCredentialId: string | null = null;
   let documentText = "<html><head><title>V3 文档</title></head><body><h1>首次版本</h1><p>连接器已启用。</p></body></html>";
-  let expectedNonce = "";
-  let expectedChallenge = "";
+  const expectedProofs = new Map<string, Readonly<{ nonce: string; challenge: string; email: string; subject: string }>>();
   let tokenEmail = `oidc-${suffix}@example.com`;
   let tokenSubject = `subject-${suffix}`;
+  function expectOidcProof(flow: Readonly<{ authorizationUrl: string }>, code: string, email = tokenEmail, subject = tokenSubject) {
+    const authorization = new URL(flow.authorizationUrl);
+    expectedProofs.set(code, {
+      nonce: authorization.searchParams.get("nonce")!,
+      challenge: authorization.searchParams.get("code_challenge")!,
+      email,
+      subject,
+    });
+  }
   const { publicKey, privateKey } = await generateKeyPair("RS256");
   const publicJwk = { ...(await exportJWK(publicKey)), kid: `v3-${suffix}`, use: "sig", alg: "RS256" };
   let issuer = "";
@@ -80,13 +91,15 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const form = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
-      assert.equal(form.get("code"), "valid-code");
+      const code = form.get("code") ?? "";
+      const proof = expectedProofs.get(code);
+      assert.ok(proof, `unexpected OIDC code ${code}`);
       assert.equal(form.get("client_id"), null);
       assert.equal(form.get("client_secret"), null);
       assert.equal(Buffer.from((request.headers.authorization ?? "").replace(/^Basic\s+/u, ""), "base64").toString("utf8"), `client-${suffix}:secret-${suffix}-123456`);
-      assert.equal(createHash("sha256").update(form.get("code_verifier") ?? "", "utf8").digest("base64url"), expectedChallenge);
-      const idToken = await new SignJWT({ nonce: expectedNonce, email: tokenEmail, email_verified: true, name: "OIDC Member", preferred_username: `oidc_${suffix}` })
-        .setProtectedHeader({ alg: "RS256", kid: publicJwk.kid }).setIssuer(issuer).setAudience(`client-${suffix}`).setSubject(tokenSubject).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+      assert.equal(createHash("sha256").update(form.get("code_verifier") ?? "", "utf8").digest("base64url"), proof.challenge);
+      const idToken = await new SignJWT({ nonce: proof.nonce, email: proof.email, email_verified: true, name: "OIDC Member", preferred_username: `oidc_${suffix}` })
+        .setProtectedHeader({ alg: "RS256", kid: publicJwk.kid }).setIssuer(issuer).setAudience(`client-${suffix}`).setSubject(proof.subject).setIssuedAt().setExpirationTime("5m").sign(privateKey);
       response.writeHead(200, { "content-type": "application/json" }); response.end(JSON.stringify({ id_token: idToken, token_type: "Bearer" })); return;
     }
     if (request.url === "/doc") {
@@ -247,9 +260,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     assert.match(persistedProvider.tokenAddressFingerprint ?? "", /^[0-9a-f]{64}$/u);
     assert.match(persistedProvider.jwksAddressFingerprint ?? "", /^[0-9a-f]{64}$/u);
     const flow = await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/dashboard" }, db);
-    const authorization = new URL(flow.authorizationUrl);
-    expectedNonce = authorization.searchParams.get("nonce")!;
-    expectedChallenge = authorization.searchParams.get("code_challenge")!;
+    expectOidcProof(flow, "valid-code");
     const completed = await completeOidcLogin({ code: "valid-code", state: flow.state, cookieState: flow.state }, db);
     assert.equal(completed.returnTo, "/dashboard");
     const oidcUser = await db.appUser.findUniqueOrThrow({ where: { email: `oidc-${suffix}@example.com` } });
@@ -269,6 +280,90 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     assert.equal((await findConfirmedWorkspaceMembership(db, SEEDED_WORKSPACE_ID, oidcUser.id))?.role, "viewer");
     assert.equal(await db.appSession.count({ where: { userId: oidcUser.id, revokedAt: null } }), 1);
 
+    await db.appUser.create({ data: { id: unmemberedLinkUserId, username: `oidc_unmembered_link_${suffix}`, role: "user", passwordHash: null, passwordSalt: null } });
+    const unmembered = await db.appUser.findUniqueOrThrow({ where: { id: unmemberedLinkUserId } });
+    const unmemberedSession = await createSession(db, { id: unmembered.id, username: unmembered.username, role: "user", accountAccessVersion: unmembered.accountAccessVersion });
+    const unmemberedSessionRow = await db.appSession.findUniqueOrThrow({ where: { tokenHash: digest(unmemberedSession.token) }, select: { id: true } });
+    await assert.rejects(
+      () => beginOidcIdentityLink({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/link/callback", session: { user: unmemberedSession.user, sessionId: unmemberedSessionRow.id } }, db),
+      (error: unknown) => error instanceof OidcError && error.code === "OIDC_LINK_ACCOUNT_NOT_ALLOWED",
+    );
+
+    const linkAccount = await db.appUser.findUniqueOrThrow({ where: { id: memberId } });
+    const linkSession = await createSession(db, { id: linkAccount.id, username: linkAccount.username, role: "user", accountAccessVersion: linkAccount.accountAccessVersion });
+    const linkSessionRow = await db.appSession.findUniqueOrThrow({ where: { tokenHash: digest(linkSession.token) }, select: { id: true } });
+    const linkContext = { user: linkSession.user, sessionId: linkSessionRow.id };
+    const accountBeforeLink = await db.appUser.findUniqueOrThrow({ where: { id: memberId }, select: { email: true, emailVerifiedAt: true, accountAccessVersion: true, updatedAt: true } });
+    const membershipsBeforeLink = await db.workspaceMembership.count({ where: { userId: memberId } });
+    const sessionsBeforeLink = await db.appSession.count({ where: { userId: memberId } });
+    const linkFlow = await beginOidcIdentityLink({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/link/callback", session: linkContext });
+    const linkedSubject = `explicit-link-${suffix}`;
+    expectOidcProof(linkFlow, "oidc-link-code", memberEmail, linkedSubject);
+    const linked = await completeOidcIdentityLink({ code: "oidc-link-code", state: linkFlow.state, cookieState: linkFlow.state, session: linkContext });
+    assert.equal(linked.providerId, provider.id);
+    assert.equal((await db.oidcIdentity.findUniqueOrThrow({ where: { providerId_subject: { providerId: provider.id, subject: linkedSubject } }, select: { userId: true, email: true } })).userId, memberId);
+    assert.equal((await db.oidcIdentity.findUniqueOrThrow({ where: { providerId_subject: { providerId: provider.id, subject: linkedSubject } }, select: { email: true } })).email, memberEmail);
+    assert.deepEqual(await db.appUser.findUniqueOrThrow({ where: { id: memberId }, select: { email: true, emailVerifiedAt: true, accountAccessVersion: true, updatedAt: true } }), accountBeforeLink);
+    assert.equal(await db.workspaceMembership.count({ where: { userId: memberId } }), membershipsBeforeLink);
+    assert.equal(await db.appSession.count({ where: { userId: memberId } }), sessionsBeforeLink);
+    const linkAudit = await db.oidcIdentityLinkAudit.findMany({ where: { providerId: provider.id }, select: { userId: true, subjectFingerprint: true } });
+    assert.deepEqual(linkAudit, [{ userId: memberId, subjectFingerprint: digest(`${provider.id}\u0000${linkedSubject}`) }]);
+    assert.doesNotMatch(JSON.stringify(linkAudit), new RegExp(linkedSubject));
+    await assert.rejects(
+      () => completeOidcIdentityLink({ code: "oidc-link-code", state: linkFlow.state, cookieState: linkFlow.state, session: linkContext }, db),
+      (error: unknown) => error instanceof OidcError && error.code === "OIDC_FLOW_INVALID",
+    );
+    await assert.rejects(
+      () => beginOidcIdentityLink({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/link/callback", session: linkContext }, db),
+      (error: unknown) => error instanceof OidcError && error.code === "OIDC_IDENTITY_CONFLICT",
+    );
+
+    const linkedLoginFlow = await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/profile" }, db);
+    expectOidcProof(linkedLoginFlow, "oidc-linked-login-code", memberEmail, linkedSubject);
+    const linkedLogin = await completeOidcLogin({ code: "oidc-linked-login-code", state: linkedLoginFlow.state, cookieState: linkedLoginFlow.state }, db);
+    assert.equal(linkedLogin.session.user.id, memberId);
+
+    await db.appUser.create({ data: { id: revokedLinkUserId, username: `oidc_revoked_link_${suffix}`, role: "user", passwordHash: null, passwordSalt: null } });
+    await db.$transaction((tx) => grantWorkspaceMembership(tx, { workspaceId: SEEDED_WORKSPACE_ID, userId: revokedLinkUserId, role: "viewer", actorId: owner.id, reason: "v3_gate_oidc_link_revocation" }));
+    const revokedLinkAccount = await db.appUser.findUniqueOrThrow({ where: { id: revokedLinkUserId } });
+    const revokedLinkSession = await createSession(db, { id: revokedLinkAccount.id, username: revokedLinkAccount.username, role: "user", accountAccessVersion: revokedLinkAccount.accountAccessVersion });
+    const revokedLinkSessionRow = await db.appSession.findUniqueOrThrow({ where: { tokenHash: digest(revokedLinkSession.token) }, select: { id: true } });
+    const revokedLinkContext = { user: revokedLinkSession.user, sessionId: revokedLinkSessionRow.id };
+
+    const emailCollisionFlow = await beginOidcIdentityLink({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/link/callback", session: revokedLinkContext }, db);
+    const emailCollisionSubject = `email-owner-link-${suffix}`;
+    expectOidcProof(emailCollisionFlow, "oidc-link-email-owner-code", memberEmail, emailCollisionSubject);
+    await assert.rejects(
+      () => completeOidcIdentityLink({ code: "oidc-link-email-owner-code", state: emailCollisionFlow.state, cookieState: emailCollisionFlow.state, session: revokedLinkContext }, db),
+      (error: unknown) => error instanceof OidcError && error.code === "OIDC_ACCOUNT_NOT_ALLOWED",
+    );
+    assert.equal(await db.oidcIdentity.count({ where: { providerId: provider.id, subject: emailCollisionSubject } }), 0);
+
+    const revokedLinkFlow = await beginOidcIdentityLink({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/link/callback", session: revokedLinkContext }, db);
+    const revokedLinkSubject = `revoked-link-${suffix}`;
+    expectOidcProof(revokedLinkFlow, "oidc-revoked-link-code", `revoked-link-${suffix}@example.com`, revokedLinkSubject);
+    await db.appSession.update({ where: { id: revokedLinkSessionRow.id }, data: { revokedAt: new Date() } });
+    await assert.rejects(
+      () => completeOidcIdentityLink({ code: "oidc-revoked-link-code", state: revokedLinkFlow.state, cookieState: revokedLinkFlow.state, session: revokedLinkContext }, db),
+      (error: unknown) => error instanceof OidcError && error.code === "OIDC_LINK_SESSION_INVALID",
+    );
+    assert.equal(await db.oidcIdentity.count({ where: { providerId: provider.id, subject: revokedLinkSubject } }), 0);
+
+    const attemptBudgetSession = await createSession(db, { id: revokedLinkAccount.id, username: revokedLinkAccount.username, role: "user", accountAccessVersion: revokedLinkAccount.accountAccessVersion });
+    const attemptBudgetSessionRow = await db.appSession.findUniqueOrThrow({ where: { tokenHash: digest(attemptBudgetSession.token) }, select: { id: true } });
+    const attemptBudgetContext = { user: attemptBudgetSession.user, sessionId: attemptBudgetSessionRow.id };
+    const existingLinkAttempts = await db.oidcIdentityLinkAttempt.count({ where: { providerId: provider.id, userId: revokedLinkUserId, expiresAt: { gt: new Date() } } });
+    assert.equal(existingLinkAttempts, 2);
+    for (let index = existingLinkAttempts; index < 40; index += 1) {
+      const failedAttempt = await beginOidcIdentityLink({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/link/callback", session: attemptBudgetContext }, db);
+      const attemptRow = await db.oidcIdentityLinkAttempt.findUniqueOrThrow({ where: { stateHash: digest(failedAttempt.state) }, select: { id: true, createdAt: true } });
+      await db.oidcIdentityLinkAttempt.update({ where: { id: attemptRow.id }, data: { consumedAt: new Date(attemptRow.createdAt.getTime() + 1) } });
+    }
+    await assert.rejects(
+      () => beginOidcIdentityLink({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/link/callback", session: attemptBudgetContext }, db),
+      (error: unknown) => error instanceof OidcError && error.code === "OIDC_LINK_ATTEMPT_LIMIT",
+    );
+
     // A legacy OIDC identity may already be admitted to the provider
     // workspace without the canonical personal workspace. The callback may
     // lazily create only that missing personal space; it must not regrant a
@@ -281,9 +376,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       await tx.oidcIdentity.create({ data: { providerId: provider.id, userId: legacyUser.id, subject: tokenSubject, email: tokenEmail, displayName: "Legacy OIDC", lastLoginAt: new Date() } });
     });
     const legacyFlow = await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/dashboard" }, db);
-    const legacyAuthorization = new URL(legacyFlow.authorizationUrl);
-    expectedNonce = legacyAuthorization.searchParams.get("nonce")!;
-    expectedChallenge = legacyAuthorization.searchParams.get("code_challenge")!;
+    expectOidcProof(legacyFlow, "valid-code");
     await completeOidcLogin({ code: "valid-code", state: legacyFlow.state, cookieState: legacyFlow.state }, db);
     const lazyPersonalWorkspace = await db.workspace.findUniqueOrThrow({ where: { slug: `user-${legacyUser.id}` }, select: { id: true, createdById: true } });
     assert.equal(lazyPersonalWorkspace.createdById, legacyUser.id);
@@ -293,9 +386,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       await revokeWorkspaceMembership(tx, lazyPersonalWorkspace.id, legacyUser.id, { actorId: owner.id, reason: "v3_gate_revoke_legacy_personal_owner" });
     });
     const revokedLegacyFlow = await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/dashboard" }, db);
-    const revokedLegacyAuthorization = new URL(revokedLegacyFlow.authorizationUrl);
-    expectedNonce = revokedLegacyAuthorization.searchParams.get("nonce")!;
-    expectedChallenge = revokedLegacyAuthorization.searchParams.get("code_challenge")!;
+    expectOidcProof(revokedLegacyFlow, "valid-code");
     await assert.rejects(
       () => completeOidcLogin({ code: "valid-code", state: revokedLegacyFlow.state, cookieState: revokedLegacyFlow.state }, db),
       (error: unknown) => error instanceof OidcError && error.code === "OIDC_ACCOUNT_NOT_ALLOWED",
@@ -317,9 +408,7 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
     const collisionUser = await db.appUser.create({ data: { username: `collision_${suffix}`, email: tokenEmail, role: "user", passwordHash: null, passwordSalt: null } });
     collisionUserId = collisionUser.id;
     const collisionFlow = await beginOidcLogin({ providerId: provider.id, redirectUri: "http://127.0.0.1:3000/api/auth/oidc/callback", returnTo: "/dashboard" }, db);
-    const collisionAuthorization = new URL(collisionFlow.authorizationUrl);
-    expectedNonce = collisionAuthorization.searchParams.get("nonce")!;
-    expectedChallenge = collisionAuthorization.searchParams.get("code_challenge")!;
+    expectOidcProof(collisionFlow, "valid-code");
     await updateOidcProvider(SEEDED_WORKSPACE_ID, provider.id, { enabled: false }, owner, db);
     await assert.rejects(() => completeOidcLogin({ code: "valid-code", state: collisionFlow.state, cookieState: collisionFlow.state }, db), (error: unknown) => error instanceof OidcError && error.code === "OIDC_PROVIDER_NOT_VERIFIED");
     await updateOidcProvider(SEEDED_WORKSPACE_ID, provider.id, { enabled: true }, owner, db);
@@ -376,19 +465,23 @@ test("V3 persists RBAC, memory governance, automation, web sources and OIDC code
       const pendingOidcCredentials = oidcProviderId === null
         ? []
         : (await db.oidcLoginAttempt.findMany({ where: { providerId: oidcProviderId }, select: { credentialId: true } })).map((attempt) => attempt.credentialId);
+      const pendingOidcLinkCredentials = oidcProviderId === null
+        ? []
+        : (await db.oidcIdentityLinkAttempt.findMany({ where: { providerId: oidcProviderId }, select: { credentialId: true } })).map((attempt) => attempt.credentialId);
       if (oidcProviderId !== null) await db.oidcProvider.deleteMany({ where: { id: oidcProviderId } });
       if (oidcProviderCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: oidcProviderCredentialId } });
       if (failedFlowCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: failedFlowCredentialId } });
       if (disposableOidcProviderId !== null) await db.oidcProvider.deleteMany({ where: { id: disposableOidcProviderId } });
       if (disposableOidcCredentialId !== null) await db.externalCredential.deleteMany({ where: { id: disposableOidcCredentialId } });
       if (pendingOidcCredentials.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: pendingOidcCredentials } } });
+      if (pendingOidcLinkCredentials.length > 0) await db.externalCredential.deleteMany({ where: { id: { in: pendingOidcLinkCredentials } } });
+      await db.project.updateMany({ where: { id: { in: [projectA, projectB] } }, data: { archivedAt: new Date() } });
       await db.project.deleteMany({ where: { id: { in: [projectA, projectB] } } });
-      // The successful OIDC flow intentionally creates an AppSession and
-      // immutable user evidence.  Keep that user/ledger/grant chain intact;
-      // the disposable database teardown owns its final cleanup.
+      // These OIDC fixtures create append-only AppSessions and identity-link
+      // audit evidence. Keep their user/session chains intact; the disposable
+      // database teardown owns their final cleanup.
       if (collisionUserId !== null) await db.appUser.deleteMany({ where: { id: collisionUserId } });
       await db.workspace.deleteMany({ where: { id: roleWorkspaceId } });
-      await db.appUser.deleteMany({ where: { id: memberId } });
       await db.appUser.deleteMany({ where: { id: outsiderUserId } });
     } finally {
       await new Promise<void>((resolve) => {

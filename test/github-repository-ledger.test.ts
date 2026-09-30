@@ -129,7 +129,13 @@ test("schema scopes repository content and derived rows to their project link", 
   assert.match(schema, /RepositoryCodeGenerationEntry_revision_fkey/);
   assert.match(schema, /ProjectCodeSnapshotEntry_generation_fkey/);
   assert.match(schema, /ProjectSource\[\]\s+@relation\("RepositoryLinkSources"\)/);
-  assert.doesNotMatch(schema, /githubToken|accessToken|personalAccessToken/i);
+  // OAuth access-token models are separate; GitHub repository rows must not
+  // acquire a plaintext credential field.
+  for (const model of ["GitHubConnection", "GitHubRepository", "ProjectRepositoryLink"]) {
+    const body = schema.match(new RegExp(`model ${model} \\{([^}]*)\\}`, "u"))?.[1];
+    assert.ok(body, `${model} must exist`);
+    assert.doesNotMatch(body, /^\s*(?:githubToken|accessToken|personalAccessToken)\s/mu);
+  }
 });
 
 test("migration enforces admission, immutability and atomic pointer publication", () => {

@@ -84,6 +84,9 @@ export async function readSelectedZipEntries(
           throw new ProjectAssetArchiveError("ASSET_ARCHIVE_UNSAFE_PATH");
         }
         if (!entry.fileName.endsWith("/") && select(entry.fileName)) {
+          if (entry.uncompressedSize > limits.maxSelectedEntryBytes) {
+            throw new ProjectAssetArchiveError("ASSET_ARCHIVE_TOO_LARGE");
+          }
           selected.set(entry.fileName, await readEntry(zip, entry, limits.maxSelectedEntryBytes));
         }
         zip.readEntry();

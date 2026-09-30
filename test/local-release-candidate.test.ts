@@ -28,6 +28,7 @@ test("candidate readiness requires healthy runtime services and a successful mig
     { Service: "reconcile", State: "exited", Health: "", ExitCode: 0 },
     { Service: "app", State: "running", Health: "healthy", ExitCode: 0 },
     { Service: "worker", State: "running", Health: "healthy", ExitCode: 0 },
+    { Service: "git-worker", State: "running", Health: "healthy", ExitCode: 0 },
   ]));
   assert.equal(evaluateCandidateReadiness(entries).ready, true);
 
@@ -39,6 +40,8 @@ test("candidate readiness requires healthy runtime services and a successful mig
   assert.match(evaluateCandidateReadiness(failedReconcile).fatal ?? "", /reconcile exited 1/u);
   const missingWorker = entries.filter((entry) => entry.service !== "worker");
   assert.equal(evaluateCandidateReadiness(missingWorker).ready, false);
+  const missingGitWorker = entries.filter((entry) => entry.service !== "git-worker");
+  assert.equal(evaluateCandidateReadiness(missingGitWorker).ready, false);
 });
 
 test("release version must agree across package, application, and OCI metadata", async () => {
@@ -47,7 +50,7 @@ test("release version must agree across package, application, and OCI metadata",
     readFile("src/lib/version.ts", "utf8"),
     readFile("Dockerfile", "utf8"),
   ]);
-  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "0.6.0-dev.14");
+  assert.equal(readCoherentVersion(packageJson, appVersion, dockerfile), "0.7.0-dev.1");
   assert.throws(
     () => readCoherentVersion(packageJson, 'export const APP_VERSION = "9.9.9";', dockerfile),
     /LOCAL_RELEASE_VERSION_MISMATCH/u,
@@ -65,7 +68,7 @@ test("local release command is wired to CI without tag, push, or broad cleanup",
   assert.equal(packageJson.scripts["release:local"], "node --import tsx scripts/run-local-release.ts");
   assert.match(workflow, /pnpm release:local/u);
   assert.match(runner, /LOCAL_RELEASE_WORKTREE_DIRTY/u);
-  assert.match(runner, /restart", "postgres", "app", "worker/u);
+  assert.match(runner, /restart", "postgres", "app", "worker", "git-worker/u);
   assert.match(runner, /LOCAL_RELEASE_IMAGE_PREFIX\}-reconcile/u);
   assert.match(runner, /verifyMigrations/u);
   assert.match(runner, /verifyImageLabels/u);
@@ -87,6 +90,9 @@ test("local release command is wired to CI without tag, push, or broad cleanup",
   assert.doesNotMatch(runner, /automationRules?\.create|backgroundJobs?\.create/u);
   assert.match(runner, /cleanupCandidate/u);
   assert.match(runner, /ai_project_os_entitlement_writer/u);
+  assert.match(runner, /const gitAutomationWorkerPassword = `git_automation_\$\{randomBytes\(24\)\.toString\("hex"\)\}`/u);
+  assert.match(runner, /POSTGRES_GIT_AUTOMATION_WORKER_PASSWORD=\$\{gitAutomationWorkerPassword\}/u);
+  assert.match(runner, /finally \{[\s\S]*await rm\(temporaryDirectory, \{ recursive: true, force: true \}\)/u);
   assert.match(runner, /"-q",\s*"-At"/u);
   assert.match(runner, /createPasswordRecord/u);
   assert.match(runner, /个人工作区/u);

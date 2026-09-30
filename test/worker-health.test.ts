@@ -47,6 +47,8 @@ test("migration, worker entrypoint and Compose preserve the health boundary", as
   assert.match(migration, /WorkerRuntime_failures_check/u);
   assert.match(worker, /recordWorkerHeartbeat/u);
   assert.match(worker, /JSON\.stringify/u);
+  assert.match(worker, /cleanupExpiredMcpExportOAuthState\(db\)/u);
+  assert.match(worker, /MCP_EXPORT_OAUTH_STATE_CLEANUP_INTERVAL_MS/u);
   assert.match(compose, /AI_PROJECT_OS_WORKER_NAME/u);
   assert.match(compose, /scripts\/worker-healthcheck\.ts/u);
 });

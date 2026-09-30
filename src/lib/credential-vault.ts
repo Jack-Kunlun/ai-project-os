@@ -133,7 +133,7 @@ export async function readExistingMasterKey(): Promise<Buffer> {
 }
 
 function canonicalSecret(kind: ExternalCredentialKind, value: unknown): string {
-  const maximumLength = kind === "git" ? 32_768 : kind === "mcp" || kind === "oidcClient" || kind === "oidcFlow" || kind === "githubOauthFlow" ? 4_096 : 512;
+  const maximumLength = kind === "git" ? 32_768 : kind === "mcp" || kind === "webSource" || kind === "oidcClient" || kind === "oidcFlow" || kind === "githubOauthFlow" ? 4_096 : 512;
   if (
     typeof value !== "string" ||
     value.length < 8 ||

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { runProjectActionWorkerCycle } from "@/lib/action-engine";
 import { runAutomationWorkerCycle } from "@/lib/automation";
 import { getDb } from "@/lib/db";
+import { cleanupExpiredMcpExportOAuthState } from "@/lib/mcp-export-oauth";
 import { reconcileProjectDeletionStorage } from "@/lib/project-lifecycle";
 import { reconcileStaleProjectMcpActionDispatchReservations } from "@/lib/project-mcp-action-dispatch-service";
 import { reconcilePlatformProviderProbeAttempts } from "@/lib/platform-provider-probe-service";
@@ -13,6 +15,7 @@ import {
   WORKER_HEARTBEAT_INTERVAL_MS,
 } from "@/lib/worker-health";
 
+const MCP_EXPORT_OAUTH_STATE_CLEANUP_INTERVAL_MS = 15 * 60 * 1_000;
 let stopping = false;
 let finishWait: (() => void) | null = null;
 
@@ -48,6 +51,7 @@ async function main() {
   let lastActionCycleAt: Date | null = null;
   let lastAutomationCycleAt: Date | null = null;
   let heartbeatPending = false;
+  let nextMcpExportOAuthCleanupAt = 0;
 
   const writeLog = (level: "info" | "warn" | "error", event: string, details: Record<string, number | string> = {}) => {
     const line = JSON.stringify({ timestamp: new Date().toISOString(), level, component: "automation-worker", event, worker: workerName, ...details });
@@ -83,6 +87,28 @@ async function main() {
     while (!stopping) {
       let claimed = 0;
       let cycleFailures = 0;
+      if (performance.now() >= nextMcpExportOAuthCleanupAt) {
+        nextMcpExportOAuthCleanupAt = performance.now() + MCP_EXPORT_OAUTH_STATE_CLEANUP_INTERVAL_MS;
+        try {
+          const result = await cleanupExpiredMcpExportOAuthState(db);
+          const deleted = result.authorizationRequestsDeleted + result.codesDeleted
+            + result.accessTokensDeleted + result.admissionBudgetsDeleted;
+          if (deleted > 0) {
+            writeLog("info", "worker.mcp_export_oauth_state_cleanup_completed", {
+              authorizationRequestsDeleted: result.authorizationRequestsDeleted,
+              codesDeleted: result.codesDeleted,
+              accessTokensDeleted: result.accessTokensDeleted,
+              admissionBudgetsDeleted: result.admissionBudgetsDeleted,
+            });
+          }
+        } catch {
+          cycleFailures += 1;
+          writeLog("error", "worker.mcp_export_oauth_state_cleanup_failed", {
+            errorCode: "MCP_EXPORT_OAUTH_CLEANUP_FAILED",
+          });
+        }
+      }
+
       try {
         const reconciled = await reconcileStaleProjectAssetUploadReservations(db);
         if (reconciled > 0) {

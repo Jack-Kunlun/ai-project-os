@@ -276,11 +276,11 @@ test(
       const tuple = await client.query<{ valid: boolean }>(`SELECT "project_mcp_tool_grant_v2_tuple_valid"("ProjectMcpToolGrant") AS valid FROM "ProjectMcpToolGrant" WHERE "id" = $1::uuid`, [grantId]);
       assert.equal(tuple.rows[0]?.valid, true);
 
+      const archived = await updateProjectLifecycle({ projectId, actor, action: "archive", expectedUpdatedAt: project.updatedAt }, db);
       await client.query("BEGIN");
       await assert.rejects(() => client.query(`DELETE FROM "Project" WHERE "id" = $1::uuid`, [projectId]), retentionError);
       await client.query("ROLLBACK").catch(() => undefined);
 
-      const archived = await updateProjectLifecycle({ projectId, actor, action: "archive", expectedUpdatedAt: project.updatedAt }, db);
       await assert.rejects(
         () => deleteArchivedProject({ projectId, actor, confirmationName: archived.project.name, expectedUpdatedAt: archived.project.updatedAt }, db),
         (error: unknown) => error instanceof ProjectLifecycleError && error.code === "PROJECT_MCP_GRANT_RETENTION_REQUIRED",

@@ -78,7 +78,7 @@ export async function buildAutomationScopePreview(
   const modelExternalTransfer = false;
   if (kind === "webSourceSync") {
     const sources = await tx.webSource.findMany({
-      where: { projectId, status: { not: "disabled" } },
+      where: { projectId, status: { not: "disabled" }, authenticationMode: "none" },
       orderBy: { id: "asc" },
       select: { url: true },
     });

@@ -22,8 +22,10 @@ test("login page exposes the reference layout and real configured auth choices",
   assert.match(await readFile("src/components/brand-mark.tsx", "utf8"), /ai-project-os-admin-crisp\.png/u);
   assert.doesNotMatch(form, />OS<\/span>/u);
   assert.match(form, /记住我/u);
+  assert.match(form, /href="\/register"[\s\S]*创建账号/u);
   assert.match(form, /忘记密码/u);
   assert.match(form, /使用 GitHub 登录/u);
+  assert.match(form, /首次使用 GitHub 登录会自动创建普通用户账号/u);
   assert.match(form, /隐私政策/u);
   assert.match(form, /服务条款/u);
   assert.match(form, /帮助文档/u);
@@ -53,4 +55,37 @@ test("login page exposes the reference layout and real configured auth choices",
     assert.doesNotMatch(publicRoute, /requirePageSession/u);
   }
   assert.match(publicPage, /返回登录/u);
+
+  const [registerPage, registerForm, registrationRoute, registrationService, registrationBudget, registrationConfig] = await Promise.all([
+    readFile("src/app/register/page.tsx", "utf8"),
+    readFile("src/app/register/register-form.tsx", "utf8"),
+    readFile("src/app/api/auth/register/route.ts", "utf8"),
+    readFile("src/lib/local-registration-service.ts", "utf8"),
+    readFile("src/lib/local-registration-abuse-budget.ts", "utf8"),
+    readFile("src/lib/local-registration-config.ts", "utf8"),
+  ]);
+  assert.match(registerPage, /RegisterForm/u);
+  assert.match(registerPage, /isLocalRegistrationEnabled/u);
+  assert.match(registerForm, /localRegistrationEnabled \?/u);
+  assert.match(registerForm, /本地用户名和密码注册暂未开放/u);
+  assert.match(registerForm, /使用 GitHub 注册或登录/u);
+  assert.match(registerForm, /首次 GitHub 登录会创建普通用户账号/u);
+  assert.match(registerForm, /不收集邮箱/u);
+  assert.match(registerForm, /邮件找回密码/u);
+  assert.doesNotMatch(registerForm, /id="register-email"/u);
+  assert.match(registrationRoute, /assertSameOrigin/u);
+  assert.match(registrationRoute, /\.strict\(\)/u);
+  assert.match(registrationRoute, /reserveLocalRegistrationAttempt/u);
+  assert.match(registrationService, /isolationLevel: Prisma\.TransactionIsolationLevel\.Serializable/u);
+  assert.match(registrationService, /role: "owner"/u);
+  assert.match(registrationService, /email: null/u);
+  assert.doesNotMatch(registrationService, /activateAccountEntitlements/u);
+  assert.match(registrationBudget, /pg_advisory_xact_lock/u);
+  assert.match(registrationBudget, /GLOBAL_HOURLY_LIMIT = 50/u);
+  assert.match(registrationBudget, /GLOBAL_DAILY_LIMIT = 200/u);
+  assert.match(registrationBudget, /USERNAME_HOURLY_LIMIT = 5/u);
+  assert.match(registrationBudget, /deleteMany/u);
+  assert.match(registrationBudget, /LOCAL_REGISTRATION_BUDGET_UNAVAILABLE/u);
+  assert.doesNotMatch(registrationBudget, /X-Forwarded-For/u);
+  assert.match(registrationConfig, /process\.env\.LOCAL_REGISTRATION_ENABLED === "true"/u);
 });

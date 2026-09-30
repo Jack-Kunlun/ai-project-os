@@ -455,6 +455,7 @@ export type ActionProjectionRow = {
     resultDepth: number;
     omittedContentCount: number;
   } | null;
+  resultImport?: { projectSourceId: string } | null;
 };
 
 const actionProjectionSelect = {
@@ -490,6 +491,7 @@ const actionDetailSelect = {
       omittedContentCount: true,
     },
   },
+  resultImport: { select: { projectSourceId: true } },
 } satisfies Prisma.ProjectMcpActionSelect;
 
 const actionControlSelect = {
@@ -548,6 +550,9 @@ export function projectAction(row: ActionProjectionRow, detail: boolean): Readon
       resultDepth: row.dispatchResult.resultDepth,
       omittedContentCount: row.dispatchResult.omittedContentCount,
     });
+  }
+  if (detail && row.resultImport?.projectSourceId) {
+    projection.importedSourceId = row.resultImport.projectSourceId;
   }
   return Object.freeze(projection);
 }
@@ -629,7 +634,7 @@ export async function listProjectMcpActions(projectIdInput: unknown, actor: Acto
   return withSerializableRetry(db, async (tx) => {
     await lockAdmission(tx, projectId, [actorId]);
     const { project } = await ownerAdmission(tx, projectId, actorId, true, actor.accountAccessVersion);
-    const rows = await tx.projectMcpAction.findMany({ where: { projectId }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: actionProjectionSelect });
+    const rows = await tx.projectMcpAction.findMany({ where: { projectId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 50, select: actionProjectionSelect });
     return Object.freeze({ projectId, archived: project.archivedAt !== null, actions: rows.map((row) => projectAction({ ...row, canonicalArguments: null } as unknown as ActionProjectionRow, false)) });
   });
 }

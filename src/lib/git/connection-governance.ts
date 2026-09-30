@@ -57,6 +57,7 @@ type Db = PrismaClient | Tx;
 type Impact = Readonly<{
   legacyLinks: ReadonlyArray<Readonly<{ projectId: string; projectName: string | null; status: string }>>;
   liveDelegations: ReadonlyArray<Readonly<{ projectId: string; projectName: string | null; status: string; expiresAt: string }>>;
+  liveAutomationGrants: ReadonlyArray<Readonly<{ id: string; projectId: string; projectName: string | null; status: string; expiresAt: string }>>;
   manualRuns: ReadonlyArray<Readonly<{ projectId: string; projectName: string | null; status: string; expiresAt: string | null }>>;
   historicalReferences: number;
 }>;
@@ -98,6 +99,7 @@ function editBlockers(impact: Impact): string[] {
   const blockers: string[] = [];
   if (impact.legacyLinks.length > 0) blockers.push("legacy_project_link");
   if (impact.liveDelegations.length > 0) blockers.push("live_delegation");
+  if (impact.liveAutomationGrants.length > 0) blockers.push("live_automation_grant");
   if (impact.manualRuns.length > 0) blockers.push("active_manual_run");
   return blockers;
 }
@@ -178,6 +180,7 @@ async function setConfig(tx: Tx, key: string, value: string): Promise<void> {
 }
 
 async function lockConnection(tx: Tx, connectionId: string): Promise<void> {
+  await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))`);
   await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${connectionId}::text, 32010000))`);
   await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
 }
@@ -221,7 +224,7 @@ async function loadImpact(db: Db, connectionId: string, actorId: string): Promis
     select: { id: true, projectId: true, status: true, expiresAt: true },
     orderBy: [{ projectId: "asc" }, { id: "asc" }],
   });
-  const [legacyRows, runRows] = await Promise.all([
+  const [legacyRows, runRows, automationGrantRows] = await Promise.all([
     db.projectGitRepositoryLink.findMany({
       where: { repository: { gitConnectionId: connectionId } },
       select: { projectId: true, status: true },
@@ -232,6 +235,11 @@ async function loadImpact(db: Db, connectionId: string, actorId: string): Promis
       select: { projectId: true, status: true, createdAt: true },
       orderBy: [{ projectId: "asc" }, { id: "asc" }],
     }),
+    db.projectGitRepositoryAutomationGrant.findMany({
+      where: { gitConnectionId: connectionId, status: { in: ["draft", "ownerConfirmed", "active"] } },
+      select: { id: true, projectId: true, status: true, expiresAt: true },
+      orderBy: [{ projectId: "asc" }, { id: "asc" }],
+    }),
   ]);
   const historicalReferences = delegationRefs.length === 0
     ? 0
@@ -240,16 +248,18 @@ async function loadImpact(db: Db, connectionId: string, actorId: string): Promis
     ...legacyRows.map((row) => row.projectId),
     ...delegationRows.map((row) => row.projectId),
     ...runRows.map((row) => row.projectId),
+    ...automationGrantRows.map((row) => row.projectId),
   ];
   const names = await visibleProjectNames(db, actorId, projectIds);
   const legacyLinks = legacyRows.map((row) => Object.freeze({ projectId: row.projectId, projectName: names.get(row.projectId) ?? null, status: row.status }));
   const liveDelegations = delegationRows.map((row) => Object.freeze({ projectId: row.projectId, projectName: names.get(row.projectId) ?? null, status: row.status, expiresAt: row.expiresAt.toISOString() }));
+  const liveAutomationGrants = automationGrantRows.map((row) => Object.freeze({ id: row.id, projectId: row.projectId, projectName: names.get(row.projectId) ?? null, status: row.status, expiresAt: row.expiresAt.toISOString() }));
   const manualRuns = runRows.map((row) => Object.freeze({ projectId: row.projectId, projectName: names.get(row.projectId) ?? null, status: row.status, expiresAt: null }));
-  return Object.freeze({ legacyLinks, liveDelegations, manualRuns, historicalReferences });
+  return Object.freeze({ legacyLinks, liveDelegations, liveAutomationGrants, manualRuns, historicalReferences });
 }
 
 function impactCount(impact: Impact): number {
-  return impact.legacyLinks.length + impact.liveDelegations.length + impact.manualRuns.length + impact.historicalReferences;
+  return impact.legacyLinks.length + impact.liveDelegations.length + impact.liveAutomationGrants.length + impact.manualRuns.length + impact.historicalReferences;
 }
 
 function blockersFor(
@@ -263,6 +273,7 @@ function blockersFor(
   testedProbe: boolean,
 ): string[] {
   const blockers: string[] = [];
+  if (impact.liveAutomationGrants.length > 0) blockers.push("live_automation_grant");
   if ((action === "rotateCredential" || action === "retrust" || action === "retest") && status === "disabled") blockers.push("connection_disabled");
   if (action === "rotateCredential" && !candidateSecretPresent) blockers.push("secret_required_at_preview");
   if (action === "rotateCredential" && !credentialAvailable) blockers.push("credential_unavailable");
@@ -391,6 +402,7 @@ export async function previewGitConnectionMutation(
     const impactSnapshot = {
       legacyLinks: impact.legacyLinks,
       liveDelegations: impact.liveDelegations,
+      liveAutomationGrants: impact.liveAutomationGrants,
       manualRuns: impact.manualRuns,
       historicalReferences: impact.historicalReferences,
       ...(testedProbe === null ? {} : { testedProbe }),
@@ -470,7 +482,7 @@ export async function executeGitConnectionMutation(
       || (previewImpact.candidateFingerprint ?? null) !== candidateFingerprint) return fail("GIT_CONNECTION_PREVIEW_MISMATCH");
     if (testedProbe !== null) await validateTestedProbe(tx, testedProbe, actor.id, connectionId);
     const impact = await loadImpact(tx, connectionId, actor.id);
-    const currentImpactSnapshot = { legacyLinks: impact.legacyLinks, liveDelegations: impact.liveDelegations, manualRuns: impact.manualRuns, historicalReferences: impact.historicalReferences, ...(testedProbe === null ? {} : { testedProbe }) } satisfies Prisma.InputJsonValue;
+    const currentImpactSnapshot = { legacyLinks: impact.legacyLinks, liveDelegations: impact.liveDelegations, liveAutomationGrants: impact.liveAutomationGrants, manualRuns: impact.manualRuns, historicalReferences: impact.historicalReferences, ...(testedProbe === null ? {} : { testedProbe }) } satisfies Prisma.InputJsonValue;
     const currentImpactFingerprint = hash({ ...currentImpactSnapshot, ...(candidateFingerprint === null ? {} : { candidateFingerprint }) });
     if (currentImpactFingerprint !== preview.impactFingerprint) return fail("GIT_CONNECTION_IMPACT_CHANGED");
     const blockers = [

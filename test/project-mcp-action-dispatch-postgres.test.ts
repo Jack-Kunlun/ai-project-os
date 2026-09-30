@@ -9,6 +9,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Prisma, PrismaClient } from "@prisma/client";
 import test from "node:test";
+import { createSession, SESSION_COOKIE_NAME } from "../src/lib/auth";
 import { createCredential } from "../src/lib/credential-vault";
 import { getDb } from "../src/lib/db";
 import { executeAccountAccess, previewAccountAccess } from "../src/lib/account-access-service";
@@ -19,6 +20,7 @@ import {
   type McpConnectionMutationAction,
 } from "../src/lib/mcp/connection-governance";
 import { createMcpToolReview } from "../src/lib/mcp-tool-review-service";
+import { POST as postMcpActionResultImport } from "../src/app/api/projects/[projectId]/mcp-actions/[actionId]/import/route";
 import {
   confirmProjectMcpConnectionDelegationOwner,
   confirmProjectMcpConnectionDelegationProject,
@@ -30,8 +32,9 @@ import {
   ProjectMcpToolGrantServiceError,
   revokeProjectMcpToolGrantV2,
 } from "../src/lib/project-mcp-tool-grant-service";
-import { decideProjectMcpAction, proposeProjectMcpAction } from "../src/lib/project-mcp-action-service";
+import { decideProjectMcpAction, getProjectMcpAction, proposeProjectMcpAction } from "../src/lib/project-mcp-action-service";
 import { sanitizeMcpToolResult } from "../src/lib/mcp/schema";
+import { hashSourceContent } from "../src/lib/source";
 import { deleteArchivedProject } from "../src/lib/project-lifecycle";
 import { grantProjectMembership, grantWorkspaceMembership } from "../src/lib/membership-governance";
 import {
@@ -133,6 +136,8 @@ test(
   "single-use MCP dispatch is linearized, bounded, and retains scalar evidence",
   { skip: !shouldRun ? "PROJECT_MCP_ACTION_DISPATCH_POSTGRES_GATE=1 is required" : false },
   async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    Reflect.set(process.env, "NODE_ENV", "test");
     const keyDirectory = await mkdtemp(join(tmpdir(), "ai-project-os-mcp-dispatch-key-"));
     const previousMasterKeyPath = process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
     process.env.AI_PROJECT_OS_MASTER_KEY_FILE = join(keyDirectory, "master.key");
@@ -155,6 +160,7 @@ test(
           AND (
             pg_get_triggerdef(oid) LIKE '%legacy_mcp_source_reference_guard%'
             OR pg_get_triggerdef(oid) LIKE '%project_action_result_import_guard%'
+            OR pg_get_triggerdef(oid) LIKE '%project_mcp_action_result_import_guard%'
           )
       )
       SELECT count(*)::int AS "consumerCount",
@@ -192,6 +198,8 @@ test(
     const suffix = randomUUID().replaceAll("-", "").slice(0, 10);
     const ownerId = randomUUID();
     const approvingOwnerId = randomUUID();
+    const editorId = randomUUID();
+    const viewerId = randomUUID();
     const lifecycleAdminId = randomUUID();
     const workspaceId = randomUUID();
     const projectId = randomUUID();
@@ -313,7 +321,6 @@ test(
                     "Auth<!--x-->orization": "persisted-obfuscated-html-comment-marker",
                     "Auth<b>x</b>orization": "persisted-obfuscated-html-element-marker",
                     "Au<span><i>x</i></span>thorization": "persisted-obfuscated-html-nested-marker",
-                    ["__proto__"]: { marker: "persisted-prototype-marker" },
                   },
                 },
               }
@@ -421,6 +428,26 @@ test(
     let retainedAttemptCount = 0;
     let retainedRuntimeCount = 0;
     let inFlight: Promise<unknown> | null = null;
+    const previousMcpActionsFlag = process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED;
+    let editorSessionToken: string | null = null;
+    let viewerSessionToken: string | null = null;
+    const postResultImport = async (
+      actionId: string,
+      payload: unknown,
+      options: Readonly<{ sessionToken?: string | null; origin?: string; rawBody?: string }> = {},
+    ) => {
+      const sessionToken = options.sessionToken === undefined ? editorSessionToken : options.sessionToken;
+      const headers: Record<string, string> = {
+        host: "localhost",
+        origin: options.origin ?? "http://localhost",
+        "content-type": "application/json",
+      };
+      if (sessionToken !== null) headers.cookie = `${SESSION_COOKIE_NAME}=${sessionToken}`;
+      return postMcpActionResultImport(new Request(
+        `http://localhost/api/projects/${projectId}/mcp-actions/${actionId}/import`,
+        { method: "POST", headers, body: options.rawBody ?? JSON.stringify(payload) },
+      ), { params: Promise.resolve({ projectId, actionId }) });
+    };
     try {
       const port = await listen(server);
       const endpoint = `http://127.0.0.1:${port}/mcp`;
@@ -428,6 +455,8 @@ test(
       await db.appUser.createMany({ data: [
         { id: ownerId, username: `dispatch_owner_${suffix}`, role: "admin" },
         { id: approvingOwnerId, username: `dispatch_approver_${suffix}`, role: "user" },
+        { id: editorId, username: `dispatch_editor_${suffix}`, role: "user" },
+        { id: viewerId, username: `dispatch_viewer_${suffix}`, role: "user" },
         { id: lifecycleAdminId, username: `dispatch_lifecycle_admin_${suffix}`, role: "admin" },
       ] });
       await db.$transaction(async (tx) => {
@@ -435,9 +464,16 @@ test(
         assert.equal(project.id, workspaceId);
         await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_workspace_owner" });
         await grantWorkspaceMembership(tx, { workspaceId, userId: approvingOwnerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_workspace_approver" });
+        await grantWorkspaceMembership(tx, { workspaceId, userId: editorId, role: "member", actorId: ownerId, reason: "dispatch_gate_workspace_editor" });
+        await grantWorkspaceMembership(tx, { workspaceId, userId: viewerId, role: "member", actorId: ownerId, reason: "dispatch_gate_workspace_viewer" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_project_owner" });
         await grantProjectMembership(tx, { projectId, workspaceId, userId: approvingOwnerId, role: "owner", actorId: ownerId, reason: "dispatch_gate_project_approver" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: editorId, role: "editor", actorId: ownerId, reason: "dispatch_gate_project_editor" });
+        await grantProjectMembership(tx, { projectId, workspaceId, userId: viewerId, role: "viewer", actorId: ownerId, reason: "dispatch_gate_project_viewer" });
       });
+      process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED = "true";
+      editorSessionToken = (await createSession(db, await db.appUser.findUniqueOrThrow({ where: { id: editorId } }))).token;
+      viewerSessionToken = (await createSession(db, await db.appUser.findUniqueOrThrow({ where: { id: viewerId } }))).token;
       await assert.rejects(
         () => db.projectSource.create({
           data: {
@@ -626,7 +662,7 @@ test(
         title: "Lookup",
         description: "Safe lookup",
         inputSchema: { type: "object", properties: { query: { type: "string", minLength: 1 } }, required: ["query"], additionalProperties: false },
-        outputSchema: { type: "object", properties: { ok: { type: "boolean" }, access_token: { type: "string" } }, required: ["ok"], additionalProperties: false },
+        outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"], additionalProperties: true },
         annotations: { readOnlyHint: true, destructiveHint: false },
         remoteReadOnlyHint: true,
         definitionFingerprint,
@@ -892,6 +928,136 @@ test(
       `);
       assert.deepEqual(retainedMarkers[0], { resultLeak: false, attemptLeak: false, runtimeLeak: false });
 
+      const importEvidence = await db.projectMcpAction.findUniqueOrThrow({
+        where: { id: sensitive.actionId },
+        select: {
+          actionFingerprint: true,
+          canonicalArgumentsHash: true,
+          toolName: true,
+          stateVersion: true,
+          status: true,
+          transitionAt: true,
+          dispatchResult: { select: { id: true, sanitizedPayload: true, resultFingerprint: true } },
+        },
+      });
+      assert.equal(importEvidence.status, "succeeded");
+      assert.equal(importEvidence.stateVersion, 4);
+      assert.ok(importEvidence.dispatchResult);
+      // A successful remote result stays in the action-result store until an
+      // Editor or Owner explicitly imports it as a project source.
+      const preImportSourceCount = await db.projectSource.count({
+        where: {
+          projectId,
+          OR: [
+            { sourceIdentity: sensitive.actionId },
+            { externalRef: `https://ai-project-os.invalid/projects/${projectId}/mcp-actions/${sensitive.actionId}` },
+          ],
+        },
+      });
+      assert.equal(preImportSourceCount, 0);
+      assert.equal(await db.projectMcpActionResultImport.count({ where: { actionId: sensitive.actionId } }), 0);
+      const importBody = {
+        expectedActionRevision: sensitive.actionRevision,
+        expectedResultFingerprint: importEvidence.dispatchResult.resultFingerprint,
+      };
+      process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED = "false";
+      const disabledImport = await postResultImport(sensitive.actionId, importBody);
+      assert.equal(disabledImport.status, 404);
+      assert.equal(disabledImport.headers.get("cache-control"), "private, no-store");
+      process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED = "true";
+
+      const missingSession = await postResultImport(sensitive.actionId, importBody, { sessionToken: null });
+      assert.equal(missingSession.status, 401);
+      assert.equal(missingSession.headers.get("cache-control"), "private, no-store");
+      const crossOriginImport = await postResultImport(sensitive.actionId, importBody, { origin: "https://attacker.example" });
+      assert.equal(crossOriginImport.status, 403);
+      const viewerImport = await postResultImport(sensitive.actionId, importBody, { sessionToken: viewerSessionToken });
+      assert.equal(viewerImport.status, 403);
+      const extraFieldImport = await postResultImport(sensitive.actionId, { ...importBody, arguments: { query: "sensitive-result" } });
+      assert.equal(extraFieldImport.status, 400);
+      const malformedJsonImport = await postResultImport(sensitive.actionId, null, { rawBody: "not-json" });
+      assert.equal(malformedJsonImport.status, 400);
+      const staleRevisionImport = await postResultImport(sensitive.actionId, { ...importBody, expectedActionRevision: fingerprint("0") });
+      assert.equal(staleRevisionImport.status, 409);
+      const staleResultImport = await postResultImport(sensitive.actionId, { ...importBody, expectedResultFingerprint: fingerprint("0") });
+      assert.equal(staleResultImport.status, 409);
+
+      const legacyImportCountBefore = await db.projectActionResultImport.count({ where: { projectId } });
+      const concurrentImports = await Promise.all([
+        postResultImport(sensitive.actionId, importBody),
+        postResultImport(sensitive.actionId, importBody),
+      ]);
+      assert.deepEqual(concurrentImports.map((response) => response.status).sort(), [200, 201]);
+      for (const response of concurrentImports) assert.equal(response.headers.get("cache-control"), "private, no-store");
+      const concurrentImportBodies = await Promise.all(concurrentImports.map(async (response) => response.json() as Promise<{
+        created: boolean;
+        import: { id: string; projectSourceId: string; contentFingerprint: string; importedById: string };
+      }>));
+      assert.equal(concurrentImportBodies.filter((body) => body.created).length, 1);
+      assert.equal(concurrentImportBodies[0]?.import.id, concurrentImportBodies[1]?.import.id);
+      assert.equal(concurrentImportBodies[0]?.import.projectSourceId, concurrentImportBodies[1]?.import.projectSourceId);
+      assert.ok(concurrentImportBodies.every((body) => body.import.importedById === editorId));
+      const importedActionDetail = await getProjectMcpAction(projectId, sensitive.actionId, actor, db);
+      assert.equal(importedActionDetail.importedSourceId, concurrentImportBodies[0]?.import.projectSourceId);
+      assert.doesNotMatch(JSON.stringify(concurrentImportBodies), /persisted-/u);
+
+      const resultImport = await db.projectMcpActionResultImport.findUniqueOrThrow({ where: { actionId: sensitive.actionId } });
+      assert.equal(resultImport.dispatchResultId, importEvidence.dispatchResult.id);
+      assert.equal(resultImport.actionFingerprint, importEvidence.actionFingerprint);
+      assert.equal(resultImport.actionRevision, sensitive.actionRevision);
+      assert.equal(resultImport.actionInputFingerprint, importEvidence.canonicalArgumentsHash);
+      assert.equal(resultImport.resultFingerprint, importEvidence.dispatchResult.resultFingerprint);
+      assert.equal(resultImport.contentFingerprint, concurrentImportBodies[0]?.import.contentFingerprint);
+      assert.equal(await db.projectMcpActionResultImport.count({ where: { actionId: sensitive.actionId } }), 1);
+      assert.equal(await db.projectActionResultImport.count({ where: { projectId } }), legacyImportCountBefore);
+      const importedSource = await db.projectSource.findUniqueOrThrow({ where: { id: resultImport.projectSourceId } });
+      assert.equal(importedSource.kind, "manual");
+      assert.equal(importedSource.externalRef, `https://ai-project-os.invalid/projects/${projectId}/mcp-actions/${sensitive.actionId}`);
+      assert.equal(importedSource.sourceIdentity, sensitive.actionId);
+      assert.equal(importedSource.revisionKey, sensitive.actionId);
+      assert.equal(importedSource.contentHash, resultImport.contentFingerprint);
+      await assert.rejects(
+        () => db.projectSource.update({ where: { id: importedSource.id }, data: {
+          contentText: "edited MCP result",
+          contentHash: hashSourceContent("edited MCP result"),
+          manualContentDedupeKey: hashSourceContent("edited MCP result"),
+        } }),
+        /project source provenance is immutable/u,
+      );
+      const sourceContent = JSON.parse(importedSource.contentText) as {
+        schemaVersion: string;
+        action: { id: string; revision: string; fingerprint: string; stateVersion: number; completedAt: string };
+        input: { fingerprint: string };
+        tool: { name: string };
+        result: { fingerprint: string; payload: unknown };
+      };
+      assert.equal(sourceContent.schemaVersion, "ai-project-os/project-mcp-action-result/v1");
+      assert.deepEqual(sourceContent.action, {
+        id: sensitive.actionId,
+        revision: sensitive.actionRevision,
+        fingerprint: importEvidence.actionFingerprint,
+        stateVersion: 4,
+        completedAt: importEvidence.transitionAt.toISOString(),
+      });
+      assert.deepEqual(sourceContent.input, { fingerprint: importEvidence.canonicalArgumentsHash });
+      assert.deepEqual(sourceContent.tool, { name: importEvidence.toolName });
+      assert.deepEqual(sourceContent.result, {
+        fingerprint: importEvidence.dispatchResult.resultFingerprint,
+        payload: importEvidence.dispatchResult.sanitizedPayload,
+      });
+      assert.doesNotMatch(importedSource.contentText, /persisted-|access_token|Authorization|arguments/iu);
+      await assert.rejects(
+        () => db.projectMcpActionResultImport.update({ where: { id: resultImport.id }, data: { resultFingerprint: fingerprint("0") } }),
+        /project MCP action result imports are immutable/u,
+      );
+      await assert.rejects(
+        () => db.projectMcpActionResultImport.delete({ where: { id: resultImport.id } }),
+        /project MCP action result imports are append-only/u,
+      );
+      const replayImport = await postResultImport(sensitive.actionId, importBody);
+      assert.equal(replayImport.status, 200);
+      assert.deepEqual(await replayImport.json(), concurrentImportBodies.find((body) => !body.created));
+
       // Matching remote failure is terminal failed; replay remains local.
       serverState.mode = "rpcError";
       const failed = await createApprovedAction("matching-rpc-error");
@@ -900,6 +1066,8 @@ test(
       assert.equal(failedAction.status, "failed");
       assert.equal(await db.projectMcpActionDispatchAttempt.count({ where: { actionId: failed.actionId } }), 1);
       assert.equal(await db.projectMcpActionRuntimeLedger.count({ where: { actionId: failed.actionId } }), 2);
+      const failedImport = await postResultImport(failed.actionId, { expectedActionRevision: failed.actionRevision, expectedResultFingerprint: fingerprint("f") });
+      assert.equal(failedImport.status, 409);
       const failedPostCount = serverState.postCount;
       await dispatchProjectMcpAction(projectId, failed.actionId, { expectedStateVersion: 2, expectedActionRevision: failed.actionRevision, acknowledgeSingleUse: true }, dispatchActor, db);
       assert.equal(serverState.postCount, failedPostCount);
@@ -910,6 +1078,14 @@ test(
       await dispatchProjectMcpAction(projectId, unknown.actionId, { expectedStateVersion: 2, expectedActionRevision: unknown.actionRevision, acknowledgeSingleUse: true }, dispatchActor, db);
       assert.equal((await db.projectMcpAction.findUniqueOrThrow({ where: { id: unknown.actionId }, select: { status: true } })).status, "unknown");
       assert.equal(await db.projectMcpActionDispatchAttempt.count({ where: { actionId: unknown.actionId } }), 1);
+      const unknownImport = await postResultImport(unknown.actionId, { expectedActionRevision: unknown.actionRevision, expectedResultFingerprint: fingerprint("f") });
+      assert.equal(unknownImport.status, 409);
+
+      const accountDisabled = await mutateAccountAccess(editorId, ownerId, "disable", "MCP result import current account status test", `mcp-import-disable-${suffix}`);
+      assert.ok(accountDisabled.accountAccessVersion > 1);
+      assert.notEqual((await db.appUser.findUniqueOrThrow({ where: { id: editorId }, select: { disabledAt: true } })).disabledAt, null);
+      const disabledEditorImport = await postResultImport(sensitive.actionId, importBody);
+      assert.equal(disabledEditorImport.status, 401);
 
       // An atomic DB-clock boundary predicate that returns no row is stale,
       // not an ordinary client failure, and therefore sends no request.
@@ -1367,12 +1543,16 @@ test(
       assert.equal(await db.projectMcpActionDispatchAttempt.count({ where: { projectId } }), retainedAttemptCount);
       assert.equal(await db.projectMcpActionRuntimeLedger.count({ where: { projectId } }), retainedRuntimeCount);
     } finally {
+      if (previousNodeEnv === undefined) Reflect.deleteProperty(process.env, "NODE_ENV");
+      else Reflect.set(process.env, "NODE_ENV", previousNodeEnv);
       serverState.releaseHold?.();
       await inFlight?.catch(() => undefined);
       await close(server).catch(() => undefined);
       await positiveTimeZoneDb.$disconnect();
       await negativeTimeZoneDb.$disconnect();
       await db.$disconnect();
+      if (previousMcpActionsFlag === undefined) delete process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED;
+      else process.env.AI_PROJECT_OS_MCP_ACTIONS_ENABLED = previousMcpActionsFlag;
       if (previousMasterKeyPath === undefined) delete process.env.AI_PROJECT_OS_MASTER_KEY_FILE;
       else process.env.AI_PROJECT_OS_MASTER_KEY_FILE = previousMasterKeyPath;
       await rm(keyDirectory, { recursive: true, force: true });

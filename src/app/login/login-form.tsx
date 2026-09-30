@@ -127,10 +127,15 @@ export function LoginForm({
 
             <button type="submit" disabled={pending} className="mt-6 h-[52px] w-full rounded-xl bg-[linear-gradient(90deg,#4f35ff,#4a2df3)] px-4 text-[16px] font-semibold tracking-[0.22em] text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:opacity-50">{pending ? "登录中…" : "登 录"}</button>
 
+            <p className="mt-4 text-center text-sm text-slate-500">还没有账号？ <Link href="/register" className="font-semibold text-indigo-600 hover:text-indigo-500">创建账号</Link></p>
+
             <div className="my-5 flex items-center gap-5 text-sm text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>其他登录方式</span><span className="h-px flex-1 bg-slate-200" /></div>
 
             {githubLoginAvailable ? (
-              <a href={githubHref} className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-300 bg-white text-[16px] font-semibold text-slate-900 transition hover:border-indigo-300 hover:bg-indigo-50"><GitHubIcon />使用 GitHub 登录</a>
+              <div>
+                <a href={githubHref} className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-300 bg-white text-[16px] font-semibold text-slate-900 transition hover:border-indigo-300 hover:bg-indigo-50"><GitHubIcon />使用 GitHub 登录</a>
+                <p className="mt-2 text-center text-[12px] text-slate-400">首次使用 GitHub 登录会自动创建普通用户账号。</p>
+              </div>
             ) : (
               <div>
                 <button type="button" disabled className="flex h-[52px] w-full items-center justify-center gap-4 rounded-xl border border-slate-200 bg-slate-50 text-[16px] font-semibold text-slate-500"><GitHubIcon />使用 GitHub 登录</button>

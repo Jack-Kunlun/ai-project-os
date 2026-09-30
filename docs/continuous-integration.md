@@ -1,6 +1,6 @@
 # 持续集成与浏览器门禁
 
-仓库的 GitHub Actions 工作流在每次 push 和 pull request 上按改动范围运行发布门禁。只有提交全部改动均为 `src/**/*.css`、`public` 下 PNG/JPEG/WebP/ICO 位图，或只递增 `package.json` 的 `0.6.0-dev.N` 版本号时，才使用无需 PostgreSQL 的快速路径：Prisma Client 生成、Lint、类型检查、生产构建及性能预算。SVG、客户端代码、脚本、配置、测试和混合改动均使用完整路径。标签复用同 SHA 已成功的主分支 CI；若源标签到目标标签的累计差异超出轻量范围，应用发布还须证明目标标签 CI 的完整数据库作业成功；生产应用发布仍会停写、备份、预检数据库账本并检查健康。它是 GitHub 适配器，不改变产品对 Gitee、GitLab、自建 GitLab、Gitea、Forgejo 或通用 Git 的支持边界；使用其他 CI 平台时应按同样规则移植仓库命令。
+仓库的 GitHub Actions 工作流在每次 push 和 pull request 上按改动范围运行发布门禁。只有提交全部改动均为 `src/**/*.css`、`public` 下 PNG/JPEG/WebP/ICO 位图，或历史 `0.6.0-dev.N` 仅递增 `package.json` 版本号时，才使用无需 PostgreSQL 的快速路径：Prisma Client 生成、Lint、类型检查、生产构建及性能预算。`0.7.x` 版本、SVG、客户端代码、脚本、配置、测试和混合改动均使用完整路径。0.7 发布标签必须指向同 SHA 已成功的主分支完整 CI；生产部署仍会停写、备份、预检数据库账本并检查健康。它是 GitHub 适配器，不改变产品对 Gitee、GitLab、自建 GitLab、Gitea、Forgejo 或通用 Git 的支持边界；使用其他 CI 平台时应按同样规则移植仓库命令。
 
 ## 自动门禁
 
@@ -18,7 +18,7 @@
 
 可访问性扫描由锁定版本的 `@axe-core/playwright` 在本机浏览器上下文执行，不把页面内容发送给第三方服务。自动扫描不能替代键盘操作、屏幕阅读器和人工认知可用性评审，但任何已覆盖页面的 WCAG A/AA 违规都会直接使门禁失败。
 
-性能预算保存在 `config/performance-budgets.json`。当前生产基线的共享 JavaScript 上限为 145 KiB、最大单个 JavaScript 文件为 75 KiB、全局 CSS 为 14.5 KiB、全站静态资产库存为 720 KiB。setup、Dashboard、项目列表、指南、MCP 连接、账号访问、个人工作区和个人知识库路由分别使用 155、165、165、155、175、155、170 和 180 KiB 的 JavaScript 上限。全站静态资产库存会排除 Next 生成的 `static/chunks/app/api/**/route-*.js` 服务端 API 路由入口桩；页面和动态页面 chunk 不排除。库存是其余静态客户端构建文件逐文件 gzip 后的总量，不是首屏性能指标，也不等同于首屏加载体积。所有数值均按每个构建文件独立 gzip 后计算，避免机器速度与临时负载造成误报；调整预算必须和可解释的产品或依赖变化一起评审。`pnpm test:performance` 会使用不可连接的 loopback 数据库占位地址生成新的生产构建再检查预算，避免误连部署数据库；快速路径用 `pnpm test:performance` 建立无数据库连接的生产构建；完整路径的数据库作业已有浏览器门禁产物，因此直接运行 `pnpm performance:check`。
+性能预算保存在 `config/performance-budgets.json`。0.7.x 候选的共享 JavaScript 上限为 145 KiB、最大单个 JavaScript 文件为 75 KiB、全局 CSS 为 15 KiB、全站静态资产库存为 760 KiB。0.7.x 新增注册、MCP 与 Git 治理页面后，隔离生产构建实测 CSS 14.7 KiB、全站静态资产 752.2 KiB；因此 CSS 从 14.5 KiB、资产库存从 724 KiB 调整，保留约 1% 的库存余量。此调整不改变共享脚本、单文件或关键路由上限。setup、Dashboard、项目列表、指南、MCP 连接、账号访问、个人工作区和个人知识库路由分别使用 155、165、165、155、175、155、170 和 180 KiB 的 JavaScript 上限。全站静态资产库存会排除 Next 生成的 `static/chunks/app/api/**/route-*.js` 服务端 API 路由入口桩；页面和动态页面 chunk 不排除。库存是其余静态客户端构建文件逐文件 gzip 后的总量，不是首屏性能指标，也不等同于首屏加载体积。所有数值均按每个构建文件独立 gzip 后计算，避免机器速度与临时负载造成误报；调整预算必须和可解释的产品或依赖变化一起评审。`pnpm test:performance` 会使用不可连接的 loopback 数据库占位地址生成新的生产构建再检查预算，避免误连部署数据库；快速路径用 `pnpm test:performance` 建立无数据库连接的生产构建；完整路径的数据库作业已有浏览器门禁产物，因此直接运行 `pnpm performance:check`。
 
 容器交付门禁的隔离与清理规则见[本地持续交付候选门禁](local-release.md)。它只验证一次性本地候选，不发布镜像、不创建 tag、不升级正式 Compose，也不替代备份恢复和真实外部服务现场验收。
 

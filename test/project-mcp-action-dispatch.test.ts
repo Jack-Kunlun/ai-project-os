@@ -493,7 +493,7 @@ test("depth, node, and total-byte limits become unknown after the boundary", asy
   assert.equal(bytes.boundaryCount, 1);
 });
 
-test("dispatch runtime stays isolated from public routes, the legacy worker, and write paths", async () => {
+test("dispatch runtime requires explicit API opt-in and remains isolated from the legacy worker and write paths", async () => {
   const [service, worker, route, apiGate, schema, migration] = await Promise.all([
     readFile("src/lib/project-mcp-action-dispatch-service.ts", "utf8"),
     readFile("scripts/automation-worker.ts", "utf8"),
@@ -505,7 +505,9 @@ test("dispatch runtime stays isolated from public routes, the legacy worker, and
   assert.doesNotMatch(service, /ProjectAction|action-engine|child_process|stdio|writeTool|executeMcpActionSnapshot/u);
   assert.doesNotMatch(worker, /callMcpTool|securePinnedHttpRequest|readCredentialSecret/u);
   assert.match(route, /projectMcpActionApiUnavailable/u);
-  assert.doesNotMatch(route, /dispatchProjectMcpAction|requireApiSession|readJsonBody|assertSameOrigin/u);
+  assert.match(route, /isProjectMcpActionApiEnabled|dispatchProjectMcpAction|requireApiSession|readJsonBody|assertSameOrigin/u);
+  assert.match(apiGate, /process\.env\.AI_PROJECT_OS_MCP_ACTIONS_ENABLED === "true"/u);
+  assert.doesNotMatch(apiGate, /NODE_ENV !== "production"/u);
   assert.match(apiGate, /PROJECT_MCP_ACTION_API_UNAVAILABLE/u);
   assert.match(apiGate, /status: 404/u);
   assert.match(apiGate, /cache-control": "no-store/u);

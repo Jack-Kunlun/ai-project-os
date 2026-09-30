@@ -182,6 +182,7 @@ test(
           evidenceFingerprint: "a".repeat(64),
         },
       });
+      await db.project.update({ where: { id: cascadeProjectId }, data: { archivedAt: new Date() } });
       await db.project.delete({ where: { id: cascadeProjectId } });
       assert.equal(await db.backgroundJobReconciliation.count({ where: { projectId: cascadeProjectId } }), 0);
 
@@ -263,6 +264,7 @@ test(
       const serialized = JSON.stringify(detail);
       assert.doesNotMatch(serialized, /leaseTokenHash|claimToken/u);
     } finally {
+      await db.project.updateMany({ where: { id: { in: [projectId, otherProjectId] } }, data: { archivedAt: new Date() } });
       await db.project.deleteMany({ where: { id: { in: [projectId, otherProjectId] } } });
       if (createdUserId !== null) await db.appUser.deleteMany({ where: { id: createdUserId } });
     }

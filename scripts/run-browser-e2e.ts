@@ -16,6 +16,7 @@ const MIGRATOR_ROLE = "ai_project_os_migrator";
 const RUNTIME_ROLE = "ai_project_os_runtime";
 const WRITER_ROLE = "ai_project_os_entitlement_writer";
 const INVENTORY_READER_ROLE = "ai_project_os_entitlement_inventory_reader";
+const GIT_AUTOMATION_WORKER_ROLE = "ai_project_os_git_automation_worker";
 const liveChildren = new Set<ChildProcess>();
 
 function configuredBrowserPort(): number | undefined {
@@ -120,19 +121,21 @@ async function ensureRole(admin: Client, role: string, password: string, attribu
   await admin.query(`ALTER ROLE ${quoteIdentifier(role)} WITH ${loginClause} ${attributes} PASSWORD ${quoteLiteral(password)}`);
 }
 
-async function recreateDatabase(admin: Client, adminUrl: URL): Promise<Readonly<{ adminUrl: string; migratorUrl: string; runtimeUrl: string; writerUrl: string; inventoryPassword: string }>> {
+async function recreateDatabase(admin: Client, adminUrl: URL): Promise<Readonly<{ adminUrl: string; migratorUrl: string; runtimeUrl: string; writerUrl: string; gitAutomationUrl: string; inventoryPassword: string }>> {
   await admin.query(`DROP DATABASE IF EXISTS "${DATABASE_NAME}" WITH (FORCE)`);
   const suffix = randomBytes(18).toString("hex");
   const clusterAdminPassword = `ClusterAdmin_${suffix}`;
   const migratorPassword = `Migrator_${suffix}`;
   const runtimePassword = `Runtime_${suffix}`;
   const writerPassword = `Writer_${suffix}`;
+  const gitAutomationWorkerPassword = `GitAutomationWorker_${randomBytes(24).toString("hex")}`;
   const inventoryPassword = `Inventory_${suffix}`;
   await ensureRole(admin, CLUSTER_ADMIN_ROLE, clusterAdminPassword, "SUPERUSER CREATEDB CREATEROLE INHERIT NOREPLICATION NOBYPASSRLS");
   await ensureRole(admin, MIGRATOR_ROLE, migratorPassword, "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS");
   await ensureRole(admin, RUNTIME_ROLE, runtimePassword, "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS", false);
   await ensureRole(admin, WRITER_ROLE, writerPassword, "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS", false);
   await ensureRole(admin, INVENTORY_READER_ROLE, inventoryPassword, "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS");
+  await ensureRole(admin, GIT_AUTOMATION_WORKER_ROLE, gitAutomationWorkerPassword, "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS");
   await admin.query(`CREATE DATABASE "${DATABASE_NAME}" OWNER "${CLUSTER_ADMIN_ROLE}"`);
   const base = new URL(adminUrl);
   base.pathname = `/${DATABASE_NAME}`;
@@ -146,17 +149,28 @@ async function recreateDatabase(admin: Client, adminUrl: URL): Promise<Readonly<
     target.password = password;
     return target.toString();
   };
+  // The template database owns plpgsql as the initdb role. Recreate it under
+  // the disposable cluster admin so the principal ownership gate can run.
+  const clusterAdmin = new Client({ connectionString: withCredentials(CLUSTER_ADMIN_ROLE, clusterAdminPassword) });
+  await clusterAdmin.connect();
+  try {
+    await clusterAdmin.query("DROP EXTENSION plpgsql");
+    await clusterAdmin.query("CREATE EXTENSION plpgsql");
+  } finally {
+    await clusterAdmin.end();
+  }
   return {
     adminUrl: withCredentials(CLUSTER_ADMIN_ROLE, clusterAdminPassword),
     migratorUrl: withCredentials(MIGRATOR_ROLE, migratorPassword),
     runtimeUrl: withCredentials(RUNTIME_ROLE, runtimePassword),
     writerUrl: withCredentials(WRITER_ROLE, writerPassword),
+    gitAutomationUrl: withCredentials(GIT_AUTOMATION_WORKER_ROLE, gitAutomationWorkerPassword),
     inventoryPassword,
   };
 }
 
 async function dropProvisionedRoles(admin: Client): Promise<void> {
-  for (const role of [RUNTIME_ROLE, WRITER_ROLE, MIGRATOR_ROLE, INVENTORY_READER_ROLE, CLUSTER_ADMIN_ROLE]) {
+  for (const role of [RUNTIME_ROLE, WRITER_ROLE, MIGRATOR_ROLE, INVENTORY_READER_ROLE, GIT_AUTOMATION_WORKER_ROLE, CLUSTER_ADMIN_ROLE]) {
     await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = $1 AND pid <> pg_backend_pid()", [role]);
     await admin.query(`DROP OWNED BY ${quoteIdentifier(role)}`).catch(() => undefined);
     await admin.query(`DROP ROLE IF EXISTS ${quoteIdentifier(role)}`).catch(() => undefined);
@@ -235,9 +249,11 @@ async function main() {
       AI_PROJECT_OS_MASTER_KEY_FILE: join(temporaryDirectory, "master.key"),
       AI_PROJECT_OS_WORKER_NAME: "browser-e2e-worker",
     };
-    await run("pnpm", ["exec", "tsx", "scripts/reconcile-database-principals.ts", "--bootstrap-if-needed"], environment);
+    delete environment.GIT_AUTOMATION_DATABASE_URL;
+    const principalEnvironment = { ...environment, GIT_AUTOMATION_DATABASE_URL: connection.gitAutomationUrl };
+    await run("pnpm", ["exec", "tsx", "scripts/reconcile-database-principals.ts", "--bootstrap-if-needed"], principalEnvironment);
     await run("pnpm", ["exec", "prisma", "migrate", "deploy", "--config", "prisma.config.ts"], { ...environment, DATABASE_URL: connection.migratorUrl });
-    await run("pnpm", ["exec", "tsx", "scripts/reconcile-database-principals.ts"], environment);
+    await run("pnpm", ["exec", "tsx", "scripts/reconcile-database-principals.ts"], principalEnvironment);
     const appEnvironment = { ...environment };
     delete appEnvironment.DATABASE_PRINCIPAL_ADMIN_URL;
     delete appEnvironment.MIGRATOR_DATABASE_URL;
@@ -250,6 +266,10 @@ async function main() {
     const port = await selectBrowserPort();
     const baseUrl = `http://127.0.0.1:${port}`;
     appEnvironment.BROWSER_E2E_BASE_URL = baseUrl;
+    // The disposable browser database has a bootstrapped admin and real
+    // entitlement writer, so exercise the opt-in local registration path.
+    appEnvironment.LOCAL_REGISTRATION_ENABLED = "true";
+    appEnvironment.AI_PROJECT_OS_PUBLIC_ORIGIN = baseUrl;
     appEnvironment.HOSTNAME = "127.0.0.1";
     appEnvironment.PORT = String(port);
 

@@ -21,11 +21,10 @@ test("project MCP tools page exposes only the server-authorized control plane", 
   assert.match(source, /不会计入有效额度/u);
   assert.match(source, /费用承担者为连接所有者/u);
   assert.match(source, /平台不代扣，也不计入项目平台额度/u);
-  assert.match(source, /新连接保存时仅执行受限 DNS\/地址安全解析/u);
-  assert.match(source, /当前不能成为项目可委托连接/u);
-  assert.match(source, /现场 MCP 验证入口尚未开放/u);
+  assert.match(source, /mcpActionsEnabled && <Link href=\{`\/projects\/\$\{projectId\}\/mcp-actions`\}/u);
+  assert.match(source, /只读动作可逐次提案、Owner 审批和单次派发/u);
   assert.doesNotMatch(source, /个人 MCP 设置<\/Link>中完成验证/u);
-  assert.doesNotMatch(source, /\/mcp-actions|tools\/call|\/dispatch|result-import/u);
+  assert.doesNotMatch(source, /tools\/call|\/dispatch|result-import/u);
   assert.doesNotMatch(source, /endpointUrl|bearerToken|ciphertext|nonce|authTag|rawHeaders/u);
 });
 

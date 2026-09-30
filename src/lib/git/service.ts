@@ -109,19 +109,25 @@ type GitConnectionActor = Readonly<{ id: string; accountAccessVersion?: number }
 // that distinction out of the public error shape while allowing the caller to
 // undo the optimistic dispatch marker for deterministic pre-fetch failures.
 const preDispatchGitErrors = new WeakSet<object>();
+const postDispatchGitErrors = new WeakSet<object>();
 
 function markPreDispatchGitError(error: unknown): unknown {
   if (typeof error === "object" && error !== null) preDispatchGitErrors.add(error);
   return error;
 }
 
+function markPostDispatchGitError(error: unknown): unknown {
+  if (typeof error === "object" && error !== null) postDispatchGitErrors.add(error);
+  return error;
+}
+
 export function isDefinitelyPreDispatchGitSyncFailure(error: unknown): boolean {
+  if (typeof error === "object" && error !== null && postDispatchGitErrors.has(error)) return false;
   if (error instanceof CredentialVaultError) return true;
   if (typeof error === "object" && error !== null && preDispatchGitErrors.has(error)) return true;
   if (error instanceof GitSafetyError) return error.code !== "GIT_NETWORK_CHANGED";
   return error instanceof GitServiceError && [
     "GIT_CONNECTION_INVALID_INPUT",
-    "GIT_CONNECTION_NOT_VERIFIED",
     "GIT_REPOSITORY_LINK_NOT_FOUND",
     "GIT_REPOSITORY_LINK_DISABLED",
   ].includes(error.code);
@@ -319,6 +325,23 @@ export type GitConnectionWithSecret = Prisma.GitConnectionGetPayload<{
   include: { credential: true };
 }>;
 
+type GitCredentialReadConnection = Pick<GitConnectionWithSecret, "authKind"> & {
+  credentialId?: string | null;
+  credential?: Pick<NonNullable<GitConnectionWithSecret["credential"]>, "secretFingerprint"> | null;
+};
+
+type GitRepositoryReadConnection = Pick<GitConnectionWithSecret,
+  | "baseUrl"
+  | "allowPrivateNetwork"
+  | "resolvedAddressFingerprint"
+  | "transport"
+  | "authKind"
+  | "username"
+  | "providerKind"
+  | "tlsCaCertificate"
+  | "sshKnownHost"
+> & Partial<Pick<GitCredentialReadConnection, "credentialId" | "credential">>;
+
 export type GitScannedFile = Readonly<{
   path: string;
   blobOid: string;
@@ -327,6 +350,24 @@ export type GitScannedFile = Readonly<{
   contentBytes: number;
   lineCount: number;
   externalRef: string | null;
+}>;
+
+export type GitDelegationBaselineFile = Readonly<{
+  path: string;
+  blobOid: string;
+  contentText: string;
+  contentHash: string;
+  contentBytes: number;
+  lineCount: number;
+}>;
+
+export type GitDelegationBaseline = Readonly<{
+  runId: string;
+  frozenCommitSha: string;
+  manifestFingerprint: string;
+  publishedAt: Date;
+  repositoryPath: string;
+  files: readonly GitDelegationBaselineFile[];
 }>;
 
 function fail(code: GitServiceErrorCode): never {
@@ -362,12 +403,12 @@ function credentialAuthKind(value: GitAuthKind): Exclude<GitAuthKind, "none"> {
 }
 
 async function loadCredential(
-  connection: GitConnectionWithSecret,
+  connection: GitCredentialReadConnection,
   db: PrismaClient | Prisma.TransactionClient,
   expectedSecretFingerprint?: string,
 ): Promise<GitCredentialPayload | null> {
   if (connection.authKind === "none") return null;
-  if (connection.credentialId === null) return fail("GIT_CONNECTION_INVALID_INPUT");
+  if (connection.credentialId == null) return fail("GIT_CONNECTION_INVALID_INPUT");
   return decodeGitCredential(
     await readCredentialSecret(connection.credentialId, "git", db, { expectedSecretFingerprint }),
     credentialAuthKind(connection.authKind),
@@ -609,8 +650,35 @@ function parseTree(output: string): readonly { path: string; blobOid: string; by
   return Object.freeze(rows);
 }
 
-async function readRepositoryFiles(input: Readonly<{
-  connection: GitConnectionWithSecret;
+export function parseAdvertisedGitRef(output: string, expectedRef: string): string {
+  const record = output.endsWith("\r\n")
+    ? output.slice(0, -2)
+    : output.endsWith("\n")
+      ? output.slice(0, -1)
+      : output;
+  if (record.includes("\n") || record.includes("\r")) return fail("GIT_REPOSITORY_NOT_FOUND");
+  const match = record.match(/^([0-9a-f]{40}|[0-9a-f]{64})\t([^\t]+)$/u);
+  if (match === null || match[2] !== expectedRef) return fail("GIT_REPOSITORY_NOT_FOUND");
+  return match[1]!;
+}
+
+type GitRepositoryReadChanged = Readonly<{
+  outcome: "changed";
+  commitSha: string;
+  addressFingerprint: string;
+  files: readonly GitScannedFile[];
+}>;
+
+type GitRepositoryReadUnchanged = Readonly<{
+  outcome: "unchanged";
+  commitSha: string;
+  addressFingerprint: string;
+}>;
+
+type GitRepositoryReadResult = GitRepositoryReadChanged | GitRepositoryReadUnchanged;
+
+type GitRepositoryReadInput = Readonly<{
+  connection: GitRepositoryReadConnection;
   repositoryPath: string;
   trackedRef: string;
   webUrl?: string;
@@ -619,37 +687,136 @@ async function readRepositoryFiles(input: Readonly<{
   db: PrismaClient;
   pinnedResolution?: GitEndpointResolution;
   onDispatchBoundary?: () => Promise<boolean>;
-}>): Promise<Readonly<{ commitSha: string; addressFingerprint: string; files: readonly GitScannedFile[] }>> {
+  onBeforeCredentialRead?: () => Promise<boolean>;
+  onBeforeExternalRequest?: () => Promise<boolean>;
+  loadCredentialSecret?: () => Promise<string>;
+  signal?: AbortSignal;
+  unchangedIfCommitSha?: string;
+  incrementalBaseline?: GitDelegationBaseline | null;
+}>;
+
+function throwIfGitReadAborted(signal?: AbortSignal, beforeDispatch = false): void {
+  if (signal?.aborted) {
+    const error = new GitRunnerError("GIT_OPERATION_ABORTED");
+    throw beforeDispatch ? markPreDispatchGitError(error) : error;
+  }
+}
+
+function trustedBaselineBody(
+  input: GitRepositoryReadInput,
+  baseline: GitDelegationBaseline,
+  file: GitDelegationBaselineFile | null | undefined,
+  path: string,
+  blobOid: string,
+  currentPrefix: string,
+): string | null {
+  if (file === null || file === undefined
+    || baseline.repositoryPath !== input.repositoryPath
+    || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(baseline.frozenCommitSha)
+    || !/^[0-9a-f]{64}$/u.test(baseline.manifestFingerprint)
+    || file.path !== path
+    || file.blobOid !== blobOid
+    || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(file.blobOid)
+    || file.contentText.length > MAX_SOURCE_CONTENT_LENGTH
+    || !/^[0-9a-f]{64}$/u.test(file.contentHash)
+    || hashSourceContent(file.contentText) !== file.contentHash
+    || Buffer.byteLength(file.contentText, "utf8") !== file.contentBytes
+    || (file.contentText.length === 0 ? 0 : file.contentText.split("\n").length) !== file.lineCount) return null;
+  const baselinePrefix = `Repository: ${input.repositoryPath}\nRevision: ${baseline.frozenCommitSha}\nPath: ${path}\n\n`;
+  if (baselinePrefix.length !== currentPrefix.length || !file.contentText.startsWith(baselinePrefix)) return null;
+  return file.contentText.slice(baselinePrefix.length);
+}
+
+async function readRepositoryFiles(input: GitRepositoryReadInput & Readonly<{ unchangedIfCommitSha: string }>): Promise<GitRepositoryReadResult>;
+async function readRepositoryFiles(input: GitRepositoryReadInput & Readonly<{ unchangedIfCommitSha?: undefined }>): Promise<GitRepositoryReadChanged>;
+async function readRepositoryFiles(input: GitRepositoryReadInput): Promise<GitRepositoryReadResult> {
+  throwIfGitReadAborted(input.signal, true);
   const resolution = input.pinnedResolution ?? await assertPinnedGitEndpoint({
     baseUrl: input.connection.baseUrl,
     allowPrivateNetwork: input.connection.allowPrivateNetwork,
     expectedFingerprint: input.connection.resolvedAddressFingerprint,
+    signal: input.signal,
   });
+  throwIfGitReadAborted(input.signal, true);
   const remote = gitRemoteUrl(input.connection.baseUrl, input.repositoryPath);
   const endpointUrl = new URL(input.connection.baseUrl);
-  let fetchStarted = false;
+  let externalReadStarted = false;
   try {
     // Commit the final database-owned dispatch marker before any credential
     // decryption or runner creation.  This is the last no-network boundary.
+    throwIfGitReadAborted(input.signal);
     const accepted = await input.onDispatchBoundary?.() ?? true;
+    throwIfGitReadAborted(input.signal);
     if (!accepted) return fail("GIT_CONNECTION_NOT_VERIFIED");
-    const credential = await loadCredential(input.connection, input.db, input.connection.credential?.secretFingerprint ?? undefined);
+    throwIfGitReadAborted(input.signal);
+    const credentialReadAccepted = await input.onBeforeCredentialRead?.() ?? true;
+    throwIfGitReadAborted(input.signal);
+    if (!credentialReadAccepted) throw new GitRunnerError("GIT_REQUEST_BOUNDARY_REJECTED");
+    let credential: GitCredentialPayload | null;
+    if (input.loadCredentialSecret === undefined) {
+      credential = await loadCredential(input.connection, input.db, input.connection.credential?.secretFingerprint ?? undefined);
+    } else if (input.connection.authKind === "none") {
+      credential = null;
+    } else {
+      throwIfGitReadAborted(input.signal);
+      const secret: unknown = await input.loadCredentialSecret();
+      throwIfGitReadAborted(input.signal);
+      if (typeof secret !== "string") throw new Error("GIT_CREDENTIAL_INVALID");
+      credential = decodeGitCredential(secret, credentialAuthKind(input.connection.authKind));
+    }
+    throwIfGitReadAborted(input.signal);
     return await withGitRunner({
     transport: input.connection.transport,
     authKind: input.connection.authKind,
     username: defaultUsername(input.connection),
-    credential,
-    tlsCaCertificate: input.connection.tlsCaCertificate,
+      credential,
+      signal: input.signal,
+      tlsCaCertificate: input.connection.tlsCaCertificate,
     sshKnownHost: input.connection.sshKnownHost,
     pinnedEndpoint: { hostname: endpointUrl.hostname, port: endpointUrl.port || (input.connection.transport === "ssh" ? "22" : "443"), addresses: resolution.addresses },
   }, async (runner) => {
     const repositoryDir = join(runner.root, "repository.git");
     await mkdir(repositoryDir, { mode: 0o700 });
+    throwIfGitReadAborted(input.signal);
     await runner.runText(["init", "--bare", repositoryDir], { maxOutputBytes: 64 * 1024 });
     await runner.runText(["-C", repositoryDir, "remote", "add", "origin", remote], { maxOutputBytes: 64 * 1024 });
-    // From this point Git may contact the configured remote. Any later
-    // runner error therefore keeps the dispatch marker for reconciliation.
-    fetchStarted = true;
+    const recheckExternalRequestBoundary = async () => {
+      throwIfGitReadAborted(input.signal);
+      const beforeDnsAccepted = await input.onBeforeExternalRequest?.() ?? true;
+      throwIfGitReadAborted(input.signal);
+      if (!beforeDnsAccepted) throw new GitRunnerError("GIT_REQUEST_BOUNDARY_REJECTED");
+      await assertPinnedGitEndpoint({
+        baseUrl: input.connection.baseUrl,
+        allowPrivateNetwork: input.connection.allowPrivateNetwork,
+        expectedFingerprint: resolution.fingerprint,
+        signal: input.signal,
+      });
+      throwIfGitReadAborted(input.signal);
+      // A credential or delegation can change while DNS lookup is pending.
+      // Keep the control-plane check adjacent to the external Git command.
+      const boundaryAccepted = await input.onBeforeExternalRequest?.() ?? true;
+      throwIfGitReadAborted(input.signal);
+      if (!boundaryAccepted) throw new GitRunnerError("GIT_REQUEST_BOUNDARY_REJECTED");
+    };
+    // A valid published baseline permits a metadata-only ref check first. It
+    // avoids fetching repository objects when the advertised branch is
+    // already at the frozen commit. This is still external I/O, so any later
+    // failure keeps the dispatch marker for reconciliation.
+    if (input.unchangedIfCommitSha !== undefined) {
+      await recheckExternalRequestBoundary();
+      externalReadStarted = true;
+      const advertised = await runner.runText([
+        "-C", repositoryDir, "ls-remote", "--exit-code", "--refs", "origin", `refs/heads/${input.trackedRef}`,
+      ], { maxOutputBytes: 64 * 1024 });
+      const remoteCommitSha = parseAdvertisedGitRef(advertised, `refs/heads/${input.trackedRef}`);
+      if (remoteCommitSha === input.unchangedIfCommitSha) {
+        return Object.freeze({ outcome: "unchanged", commitSha: remoteCommitSha, addressFingerprint: resolution.fingerprint });
+      }
+    }
+    // From this point Git may fetch the configured remote. Any later runner
+    // error therefore keeps the dispatch marker for reconciliation.
+    await recheckExternalRequestBoundary();
+    externalReadStarted = true;
     await runner.runText(["-C", repositoryDir, "fetch", "--depth=1", "--no-tags", "origin", `refs/heads/${input.trackedRef}`], { timeoutMs: 180_000, maxOutputBytes: 256 * 1024 });
     const commitSha = (await runner.runText(["-C", repositoryDir, "rev-parse", "FETCH_HEAD"], { maxOutputBytes: 64 * 1024 })).trim();
     if (!/^[0-9a-f]{40,64}$/u.test(commitSha)) return fail("GIT_REPOSITORY_EMPTY");
@@ -662,14 +829,26 @@ async function readRepositoryFiles(input: Readonly<{
     if (candidates.length > MAX_SCANNED_FILES) return fail("GIT_REPOSITORY_TOO_LARGE");
     if (candidates.reduce((sum, entry) => sum + entry.bytes, 0) > MAX_TOTAL_BYTES) return fail("GIT_REPOSITORY_TOO_LARGE");
 
+    const baselineFilesByPath = new Map<string, GitDelegationBaselineFile | null>();
+    const baseline = input.incrementalBaseline;
+    if (baseline !== null && baseline !== undefined && baseline.repositoryPath === input.repositoryPath) {
+      for (const file of baseline.files) {
+        if (baselineFilesByPath.has(file.path)) baselineFilesByPath.set(file.path, null);
+        else baselineFilesByPath.set(file.path, file);
+      }
+    }
+
     const files: GitScannedFile[] = [];
     for (const entry of candidates) {
-      const body = normalizeText(await runner.runBytes(["-C", repositoryDir, "cat-file", "blob", entry.blobOid], { maxOutputBytes: MAX_FILE_BYTES + 1024 }));
+      const prefix = `Repository: ${input.repositoryPath}\nRevision: ${commitSha}\nPath: ${entry.path}\n\n`;
+      const reusedBody = baseline === null || baseline === undefined
+        ? null
+        : trustedBaselineBody(input, baseline, baselineFilesByPath.get(entry.path), entry.path, entry.blobOid, prefix);
+      const body = reusedBody ?? normalizeText(await runner.runBytes(["-C", repositoryDir, "cat-file", "blob", entry.blobOid], { maxOutputBytes: MAX_FILE_BYTES + 1024 }));
       if (body === null) continue;
       const externalRef = input.webUrl === undefined
         ? null
         : sourceReference(input.webUrl, input.connection.providerKind, commitSha, entry.path);
-      const prefix = `Repository: ${input.repositoryPath}\nRevision: ${commitSha}\nPath: ${entry.path}\n\n`;
       const contentText = `${prefix}${body}`.slice(0, MAX_SOURCE_CONTENT_LENGTH);
       const contentBytes = Buffer.byteLength(contentText, "utf8");
       files.push(Object.freeze({
@@ -683,11 +862,11 @@ async function readRepositoryFiles(input: Readonly<{
       }));
     }
     if (files.length === 0) return fail("GIT_REPOSITORY_BINARY_ONLY");
-    return Object.freeze({ commitSha, addressFingerprint: resolution.fingerprint, files: Object.freeze(files) });
+    return Object.freeze({ outcome: "changed", commitSha, addressFingerprint: resolution.fingerprint, files: Object.freeze(files) });
     });
   } catch (error) {
-    if (!fetchStarted) throw markPreDispatchGitError(error);
-    throw error;
+    if (!externalReadStarted) throw markPreDispatchGitError(error);
+    throw markPostDispatchGitError(error);
   }
 }
 
@@ -697,7 +876,7 @@ async function readRepositoryFiles(input: Readonly<{
  * accidentally reaching the legacy project snapshot path.
  */
 export async function readGitRepositoryFilesForDelegation(input: Readonly<{
-  connection: GitConnectionWithSecret;
+  connection: GitRepositoryReadConnection;
   repositoryPath: string;
   trackedRef: string;
   includeRoots: readonly string[];
@@ -705,8 +884,18 @@ export async function readGitRepositoryFilesForDelegation(input: Readonly<{
   db: PrismaClient;
   pinnedResolution: GitEndpointResolution;
   onDispatchBoundary?: () => Promise<boolean>;
-}>): Promise<Readonly<{ commitSha: string; addressFingerprint: string; files: readonly GitScannedFile[] }>> {
-  return readRepositoryFiles(input);
+  onBeforeCredentialRead?: () => Promise<boolean>;
+  onBeforeExternalRequest?: () => Promise<boolean>;
+  loadCredentialSecret?: () => Promise<string>;
+  signal?: AbortSignal;
+  unchangedIfCommitSha?: string | null;
+  incrementalBaseline?: GitDelegationBaseline | null;
+}>): Promise<GitRepositoryReadResult> {
+  const { unchangedIfCommitSha, ...readInput } = input;
+  if (unchangedIfCommitSha !== null && unchangedIfCommitSha !== undefined) {
+    return readRepositoryFiles({ ...readInput, unchangedIfCommitSha });
+  }
+  return readRepositoryFiles(readInput);
 }
 
 export function gitConnectionCatalog() {
@@ -1222,11 +1411,17 @@ export async function disableGitConnection(connectionIdInput: unknown, actor: Gi
   return db.$transaction(async (tx) => {
     await lockActorAccess(tx, actor.id);
     const currentActorVersion = await assertGitActor(tx, actor);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('ai-project-git-repository-delegation-global', 0))`;
     await tx.$queryRaw`SELECT "id" FROM "GitConnection" WHERE "id" = ${connectionId}::uuid FOR UPDATE`;
     const current = await tx.gitConnection.findFirst({
       where: { id: connectionId, ownerUserId: actor.id, ownershipState: "confirmed" },
     });
     if (current === null) return fail("GIT_CONNECTION_NOT_FOUND");
+    const liveAutomationGrant = await tx.projectGitRepositoryAutomationGrant.findFirst({
+      where: { gitConnectionId: connectionId, status: { in: ["draft", "ownerConfirmed", "active"] } },
+      select: { id: true },
+    });
+    if (liveAutomationGrant !== null) return fail("GIT_CONNECTION_IN_USE");
     if (current.status === "disabled") return projectPersonalGitConnection(await tx.gitConnection.findUniqueOrThrow({ where: { id: connectionId }, select: connectionSelect }), currentActorVersion);
     return projectPersonalGitConnection(await tx.gitConnection.update({
       where: { id: connectionId },
@@ -1291,6 +1486,14 @@ export async function deleteGitConnection(
           select: { id: true },
         });
         if (liveDelegation !== null) return fail("GIT_CONNECTION_IN_USE");
+        const liveAutomationGrant = await tx.projectGitRepositoryAutomationGrant.findFirst({
+          where: {
+            gitConnectionId: connection.id,
+            status: { in: ["draft", "ownerConfirmed", "active"] },
+          },
+          select: { id: true },
+        });
+        if (liveAutomationGrant !== null) return fail("GIT_CONNECTION_IN_USE");
         await tx.gitRepository.deleteMany({ where: { gitConnectionId: connection.id } });
         await tx.gitConnection.delete({ where: { id: connection.id } });
         if (connection.credentialId !== null) {

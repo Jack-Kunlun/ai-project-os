@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -39,6 +40,10 @@ import {
   createReadOnlyProjectAgent,
 } from "@/lib/ai-memory";
 import { hashSourceContent } from "@/lib/source";
+import { GET as getSource } from "../src/app/api/projects/[projectId]/sources/[sourceId]/route";
+import { createSession, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { createPersonalProjectSearchService } from "@/lib/personal-project-search-service";
+import { grantProjectMembership } from "@/lib/membership-governance";
 import { createPostgresWorkspaceFixture } from "./postgres-workspace-fixture";
 
 const execFile = promisify(execFileCallback);
@@ -141,6 +146,24 @@ test(
             { id: projectId, workspaceId: workspace.workspaceId, name: "Corpus project", slug: "corpus-project" },
             { id: otherProjectId, workspaceId: workspace.workspaceId, name: "Other project", slug: "other-corpus-project" },
           ],
+        });
+        await prisma.$transaction(async (tx) => {
+          await grantProjectMembership(tx, {
+            projectId,
+            workspaceId: workspace.workspaceId,
+            userId: workspace.ownerId,
+            role: "owner",
+            actorId: workspace.ownerId,
+            reason: "corpus_search_gate",
+          });
+          await grantProjectMembership(tx, {
+            projectId: otherProjectId,
+            workspaceId: workspace.workspaceId,
+            userId: workspace.ownerId,
+            role: "owner",
+            actorId: workspace.ownerId,
+            reason: "corpus_search_gate",
+          });
         });
         await prisma.projectSource.createMany({
           data: [
@@ -602,7 +625,14 @@ test(
         assert.equal(lexicalSearch.mode, "lexical");
         assert.equal(lexicalSearch.results[0]?.citation.sourceId, sourceAId);
         assert.equal(lexicalSearch.results[0]?.citation.excerpt, sourceAContent);
+        assert.equal(lexicalSearch.results[0]?.citation.sourceContentHash, hashSourceContent(sourceAContent));
         assert.equal(lexicalSearch.snapshot.manualIndexGenerationId, indexResults[0]!.id);
+        const personalSearch = await createPersonalProjectSearchService({ db: prisma }).search(
+          { id: workspace.ownerId, role: "user", accountAccessVersion: 1 },
+          { projectIds: [projectId], query: "可追溯的长期记忆", take: 2 },
+        );
+        assert.equal(personalSearch.results[0]?.citation.sourceId, sourceAId);
+        assert.equal(personalSearch.results[0]?.citation.sourceContentHash, hashSourceContent(sourceAContent));
 
         const summaryPlan = buildGroundedRagPlanFromSearch({
           projectId,
@@ -984,6 +1014,183 @@ test(
             error instanceof CorpusIndexError &&
             error.code === "CORPUS_INDEX_GRANT_INELIGIBLE",
         );
+
+        // Exercise a real multi-chunk citation through the search SQL and
+        // source detail route. A one-chunk source has identical chunk/source
+        // hashes and cannot catch accidental hash substitution.
+        const longText = `${"A".repeat(2600)} CITATION_MARKER_Z9`;
+        const longHash = hashSourceContent(longText);
+        const longSource = await prisma.projectSource.create({ data: {
+          projectId, kind: "manual", contentText: longText,
+          contentHash: longHash, manualContentDedupeKey: longHash,
+        } });
+        const longGrant = await prisma.modelProcessingGrant.create({ data: {
+          projectId,
+          sourceKind: "manual_text",
+          policyRevisionId,
+          profileFingerprint: OPENAI_EMBEDDING_PROFILE_FINGERPRINT,
+          providerFingerprint: OPENAI_EMBEDDINGS_PROVIDER_FINGERPRINT,
+          modelFingerprint: OPENAI_EMBEDDING_MODEL_FINGERPRINT,
+          modelId: OPENAI_EMBEDDING_MODEL_ID,
+          processorFingerprint,
+          regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
+          retentionFingerprint: OPENAI_EMBEDDINGS_RETENTION_FINGERPRINT,
+          endpointFingerprint: OPENAI_EMBEDDINGS_ENDPOINT_FINGERPRINT,
+          grantFingerprint: "e".repeat(64),
+          effectivePolicyVersion: 1,
+          budgetFingerprint,
+          scannerFingerprint,
+          scannerVersion: "scanner-v1",
+          budgetProfile: "standard",
+          issuedBy: "test-owner",
+          purposeCode: "multi-chunk-citation",
+        } });
+        await prisma.modelProcessingGrantSource.create({ data: {
+          projectId, grantId: longGrant.id, sourceId: longSource.id,
+          contentFingerprint: longHash,
+          contentBytes: Buffer.byteLength(longText, "utf8"),
+        } });
+        await prisma.modelProcessingGrantOperation.create({ data: {
+          projectId, grantId: longGrant.id, operation: "embedding",
+        } });
+        await prisma.modelProcessingGrant.update({ where: { id: longGrant.id }, data: {
+          status: "issued", issuedAt: new Date(Date.now() - 60_000),
+          expiresAt: new Date(Date.now() + 3_600_000),
+        } });
+        const longCorpus = await service.ensureProjectCorpusGeneration({ projectId, grantId: longGrant.id });
+        assert.ok(longCorpus.expectedChunkCount > 1);
+        const longIndex = await service.prepareProjectCorpusIndex({ projectId, corpusGenerationId: longCorpus.id });
+        const longPublished = await service.executeProjectCorpusIndex(
+          { projectId, indexGenerationId: longIndex.id }, credential!, {
+            fetchImplementation: async (_request, init) => {
+              const body = JSON.parse(String(init?.body)) as { input: string[] };
+              assert.ok(body.input.length > 1);
+              return new Response(JSON.stringify({
+                object: "list", model: OPENAI_EMBEDDING_MODEL_ID,
+                data: body.input.map((_, index) => ({
+                  object: "embedding", index,
+                  embedding: Array.from({ length: 1_536 }, (__, component) => component === 0 ? 1 : 0),
+                })),
+                usage: { prompt_tokens: 12, total_tokens: 12 },
+              }), { status: 200, headers: { "content-type": "application/json", "x-request-id": "req_multi_chunk" } });
+            },
+          },
+        );
+        assert.equal(longPublished.kind, "published");
+        const longSearch = await createPersonalProjectSearchService({ db: prisma }).search(
+          { id: workspace.ownerId, role: "user", accountAccessVersion: 1 },
+          { projectIds: [projectId], query: "CITATION_MARKER_Z9", take: 2 },
+        );
+        const longCitation = longSearch.results.find((item) => item.citation.sourceId === longSource.id)?.citation;
+        assert.ok(longCitation);
+        assert.notEqual(longCitation.contentHash, longCitation.sourceContentHash);
+        assert.equal(longCitation.sourceContentHash, longHash);
+        const otherText = "Second project also has CITATION_MARKER_Z9 evidence.";
+        const otherHash = hashSourceContent(otherText);
+        const otherSource = await prisma.projectSource.create({ data: {
+          projectId: otherProjectId, kind: "manual", contentText: otherText,
+          contentHash: otherHash, manualContentDedupeKey: otherHash,
+        } });
+        const otherPolicyRevisionId = randomUUID();
+        await prisma.projectAiPolicyRevision.create({ data: {
+          id: otherPolicyRevisionId,
+          projectId: otherProjectId,
+          revision: 1,
+          policyFingerprint: "f".repeat(64),
+          outboundEnabled: true,
+          embeddingEnabled: true,
+          sourceSummaryEnabled: false,
+          projectAnalysisEnabled: false,
+          profileFingerprint: OPENAI_EMBEDDING_PROFILE_FINGERPRINT,
+          processorFingerprint,
+          regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
+          retentionFingerprint: OPENAI_EMBEDDINGS_RETENTION_FINGERPRINT,
+          endpointFingerprint: OPENAI_EMBEDDINGS_ENDPOINT_FINGERPRINT,
+          budgetFingerprint,
+          scannerFingerprint,
+        } });
+        await prisma.projectAiPolicyOperationProfile.create({ data: {
+          projectId: otherProjectId,
+          policyRevisionId: otherPolicyRevisionId,
+          operation: "embedding",
+          profileFingerprint: OPENAI_EMBEDDING_PROFILE_FINGERPRINT,
+          providerFingerprint: OPENAI_EMBEDDINGS_PROVIDER_FINGERPRINT,
+          modelFingerprint: OPENAI_EMBEDDING_MODEL_FINGERPRINT,
+          modelId: OPENAI_EMBEDDING_MODEL_ID,
+          processorFingerprint,
+          regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
+          retentionFingerprint: OPENAI_EMBEDDINGS_RETENTION_FINGERPRINT,
+          endpointFingerprint: OPENAI_EMBEDDINGS_ENDPOINT_FINGERPRINT,
+        } });
+        await prisma.projectAiPolicy.create({ data: {
+          projectId: otherProjectId, currentRevisionId: otherPolicyRevisionId,
+        } });
+        const otherGrant = await prisma.modelProcessingGrant.create({ data: {
+          projectId: otherProjectId,
+          sourceKind: "manual_text",
+          policyRevisionId: otherPolicyRevisionId,
+          profileFingerprint: OPENAI_EMBEDDING_PROFILE_FINGERPRINT,
+          providerFingerprint: OPENAI_EMBEDDINGS_PROVIDER_FINGERPRINT,
+          modelFingerprint: OPENAI_EMBEDDING_MODEL_FINGERPRINT,
+          modelId: OPENAI_EMBEDDING_MODEL_ID,
+          processorFingerprint,
+          regionFingerprint: OPENAI_PROCESSOR_REGION_FINGERPRINT,
+          retentionFingerprint: OPENAI_EMBEDDINGS_RETENTION_FINGERPRINT,
+          endpointFingerprint: OPENAI_EMBEDDINGS_ENDPOINT_FINGERPRINT,
+          grantFingerprint: "9".repeat(64),
+          effectivePolicyVersion: 1,
+          budgetFingerprint,
+          scannerFingerprint,
+          scannerVersion: "scanner-v1",
+          budgetProfile: "standard",
+          issuedBy: "test-owner",
+          purposeCode: "two-project-search",
+        } });
+        await prisma.modelProcessingGrantSource.create({ data: {
+          projectId: otherProjectId, grantId: otherGrant.id, sourceId: otherSource.id,
+          contentFingerprint: otherHash, contentBytes: Buffer.byteLength(otherText, "utf8"),
+        } });
+        await prisma.modelProcessingGrantOperation.create({ data: {
+          projectId: otherProjectId, grantId: otherGrant.id, operation: "embedding",
+        } });
+        await prisma.modelProcessingGrant.update({ where: { id: otherGrant.id }, data: {
+          status: "issued", issuedAt: new Date(Date.now() - 60_000),
+          expiresAt: new Date(Date.now() + 3_600_000),
+        } });
+        const otherCorpus = await service.ensureProjectCorpusGeneration({ projectId: otherProjectId, grantId: otherGrant.id });
+        const otherIndex = await service.prepareProjectCorpusIndex({ projectId: otherProjectId, corpusGenerationId: otherCorpus.id });
+        const otherPublished = await service.executeProjectCorpusIndex(
+          { projectId: otherProjectId, indexGenerationId: otherIndex.id }, credential!, {
+            fetchImplementation: async (_request, init) => {
+              const body = JSON.parse(String(init?.body)) as { input: string[] };
+              assert.deepEqual(body.input, [otherText]);
+              return new Response(JSON.stringify({
+                object: "list", model: OPENAI_EMBEDDING_MODEL_ID,
+                data: [{ object: "embedding", index: 0,
+                  embedding: Array.from({ length: 1_536 }, (__, component) => component === 0 ? 1 : 0) }],
+                usage: { prompt_tokens: 12, total_tokens: 12 },
+              }), { status: 200, headers: { "content-type": "application/json", "x-request-id": "req_two_projects" } });
+            },
+          },
+        );
+        assert.equal(otherPublished.kind, "published");
+        const twoProjectSearch = await createPersonalProjectSearchService({ db: prisma }).search(
+          { id: workspace.ownerId, role: "user", accountAccessVersion: 1 },
+          { projectIds: [projectId, otherProjectId], query: "CITATION_MARKER_Z9", take: 2 },
+        );
+        assert.deepEqual(new Set(twoProjectSearch.results.map((item) => item.projectId)), new Set([projectId, otherProjectId]));
+        const sessionUser = await prisma.appUser.findUniqueOrThrow({ where: { id: workspace.ownerId } });
+        const session = await createSession(prisma, sessionUser);
+        const sourceUrl = `http://localhost/api/projects/${projectId}/sources/${longSource.id}?contentHash=${longCitation.sourceContentHash}`;
+        const sourceContext = { params: Promise.resolve({ projectId, sourceId: longSource.id }) };
+        const sourceRequest = () => new Request(sourceUrl, { headers: { cookie: `${SESSION_COOKIE_NAME}=${session.token}`, host: "localhost" } });
+        const current = await getSource(sourceRequest(), sourceContext);
+        assert.equal(current.status, 200);
+        assert.match(await current.text(), /CITATION_MARKER_Z9/u);
+        await prisma.projectSource.update({ where: { projectId_id: { projectId, id: longSource.id } }, data: { retiredAt: new Date() } });
+        const stale = await getSource(sourceRequest(), sourceContext);
+        assert.equal(stale.status, 409);
+        assert.doesNotMatch(await stale.text(), /CITATION_MARKER_Z9/u);
       } finally {
         await prisma.$disconnect();
       }

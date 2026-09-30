@@ -135,7 +135,7 @@ export function McpConnectionsClient() {
           </div>
           <div className="rounded-2xl bg-violet-50 px-4 py-3 text-sm text-violet-950 lg:max-w-xs">
             <p className="font-semibold">当前使用边界</p>
-            <p className="mt-1 text-xs leading-5">项目委托控制面已开放；远端动作、自动化和调用审批仍未开放。新建连接会先执行受限 DNS/地址安全解析，再完成 initialize 和 tools/list 只读测试。</p>
+            <p className="mt-1 text-xs leading-5">项目委托控制面已开放；只读动作在受控环境逐次审批，生产开放仍需验收；自动化保持关闭。新建连接会先执行受限 DNS/地址安全解析，再完成 initialize 和 tools/list 只读测试。</p>
           </div>
         </div>
       </section>

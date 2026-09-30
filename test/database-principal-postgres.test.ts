@@ -7,6 +7,7 @@ import test from "node:test";
 import { PrismaClient } from "@prisma/client";
 import { Client } from "pg";
 import { initializeAdmin } from "../src/lib/auth";
+import { POST as registerPost } from "../src/app/api/auth/register/route";
 import { activateAccountEntitlements } from "../src/lib/account-entitlement-activation-service";
 import { getDb, getEntitlementDb } from "../src/lib/db";
 import {
@@ -26,8 +27,13 @@ import {
 } from "../src/lib/workspace-role-governance-service";
 import {
   DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX,
+  DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX,
+  DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX,
   DATABASE_PRINCIPAL_TRIGGER_FUNCTION_MATRIX,
   DATABASE_PRINCIPAL_RELATIONS,
+  GIT_AUTOMATION_WORKER_LEDGER_RELATIONS,
+  GIT_AUTOMATION_WORKER_CONTEXT_RELATIONS,
+  GIT_AUTOMATION_WORKER_POLL_COLUMNS,
 } from "../src/lib/database-principal-catalog";
 
 const execFile = promisify(execFileCallback);
@@ -38,6 +44,7 @@ const clusterAdminRole = "ai_project_os_cluster_admin";
 const runtimeRole = "ai_project_os_runtime";
 const migratorRole = "ai_project_os_migrator";
 const writerRole = "ai_project_os_entitlement_writer";
+const gitAutomationWorkerRole = "ai_project_os_git_automation_worker";
 const repositoryRoot = process.cwd();
 
 function targetAdminUrl(): string {
@@ -184,7 +191,7 @@ async function assertInvokerHelperAcls(admin: Client): Promise<void> {
     assert.equal(row.writer_direct, helper.entitlementWriter, signature);
   }
   assert.ok(rows.rows.every((row) => expectedOids.has(row.oid)));
-  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 43);
+  assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.runtime).length, 45);
   assert.equal(DATABASE_PRINCIPAL_INVOKER_FUNCTION_MATRIX.filter((helper) => helper.entitlementWriter).length, 8);
 }
 
@@ -212,6 +219,7 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
       public_execute: boolean;
       owner: string | null;
       prosecdef: boolean;
+      proconfig: string[] | null;
     }>(`
       SELECT p.oid::text AS oid,
              pg_get_function_identity_arguments(p.oid) AS identity_arguments,
@@ -242,7 +250,8 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
                   AND privilege.privilege_type = 'EXECUTE'
              ) AS public_execute,
              pg_get_userbyid(p.proowner) AS owner,
-             p.prosecdef
+             p.prosecdef,
+             p.proconfig
         FROM pg_proc p
        WHERE p.oid = pg_catalog.to_regprocedure($3)
     `, [runtimeRole, writerRole, signature]);
@@ -251,7 +260,8 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
     expectedOids.add(row.oid);
     assert.equal(row.identity_arguments, trigger.identityArguments, signature);
     assert.equal(row.owner, migratorRole, signature);
-    assert.equal(row.prosecdef, false, signature);
+    assert.equal(row.prosecdef, trigger.securityDefiner, signature);
+    if (trigger.securityDefiner) assert.ok(row.proconfig?.includes("search_path=pg_catalog"), signature);
     assert.equal(row.public_execute, false, signature);
     assert.equal(row.runtime_execute, false, signature);
     assert.equal(row.runtime_direct, false, signature);
@@ -261,6 +271,134 @@ async function assertGuardedTriggerFunctionAcls(admin: Client): Promise<void> {
   assert.ok(rows.rows.every((row) => expectedOids.has(row.oid)));
 }
 
+async function assertGitAutomationLedgerAcls(admin: Client): Promise<void> {
+  const pollColumns = GIT_AUTOMATION_WORKER_POLL_COLUMNS as Readonly<Record<string, readonly string[]>>;
+  const ledgerRelations = new Set<string>(GIT_AUTOMATION_WORKER_LEDGER_RELATIONS);
+  const checkedRelations = new Set<string>([
+    ...GIT_AUTOMATION_WORKER_LEDGER_RELATIONS,
+    ...GIT_AUTOMATION_WORKER_CONTEXT_RELATIONS,
+    ...Object.keys(pollColumns),
+  ]);
+  for (const relation of checkedRelations) {
+    const result = await admin.query<{
+      owner: string | null;
+      runtime_select: boolean; runtime_insert: boolean; runtime_update: boolean; runtime_delete: boolean; runtime_truncate: boolean;
+      writer_select: boolean; writer_insert: boolean; writer_update: boolean; writer_delete: boolean; writer_truncate: boolean;
+      worker_select: boolean; worker_insert: boolean; worker_update: boolean; worker_delete: boolean; worker_truncate: boolean;
+      public_select: boolean;
+    }>(`
+      SELECT pg_get_userbyid(c.relowner) AS owner,
+             has_table_privilege($1, c.oid, 'SELECT') AS runtime_select,
+             has_table_privilege($1, c.oid, 'INSERT') AS runtime_insert,
+             has_table_privilege($1, c.oid, 'UPDATE') AS runtime_update,
+             has_table_privilege($1, c.oid, 'DELETE') AS runtime_delete,
+             has_table_privilege($1, c.oid, 'TRUNCATE') AS runtime_truncate,
+             has_table_privilege($2, c.oid, 'SELECT') AS writer_select,
+             has_table_privilege($2, c.oid, 'INSERT') AS writer_insert,
+             has_table_privilege($2, c.oid, 'UPDATE') AS writer_update,
+             has_table_privilege($2, c.oid, 'DELETE') AS writer_delete,
+             has_table_privilege($2, c.oid, 'TRUNCATE') AS writer_truncate,
+             has_table_privilege($3, c.oid, 'SELECT') AS worker_select,
+             has_table_privilege($3, c.oid, 'INSERT') AS worker_insert,
+             has_table_privilege($3, c.oid, 'UPDATE') AS worker_update,
+             has_table_privilege($3, c.oid, 'DELETE') AS worker_delete,
+             has_table_privilege($3, c.oid, 'TRUNCATE') AS worker_truncate,
+             EXISTS (SELECT 1 FROM aclexplode(COALESCE(c.relacl, acldefault('r', c.relowner))) a WHERE a.grantee=0::oid AND a.privilege_type='SELECT') AS public_select
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname=$4
+    `, [runtimeRole, writerRole, gitAutomationWorkerRole, relation]);
+    const row = result.rows[0];
+    assert.ok(row, `missing ledger relation ${relation}`);
+    assert.equal(row.owner, migratorRole, relation);
+    for (const privilege of [
+      "worker_select", "worker_insert", "worker_update", "worker_delete", "worker_truncate", "public_select",
+    ] as const) {
+      assert.equal(row[privilege], false, `${relation} ${privilege}`);
+    }
+    if (ledgerRelations.has(relation)) {
+      for (const privilege of ["runtime_select", "runtime_insert", "runtime_update", "runtime_delete", "runtime_truncate",
+        "writer_select", "writer_insert", "writer_update", "writer_delete", "writer_truncate"] as const) {
+        assert.equal(row[privilege], false, `${relation} ${privilege}`);
+      }
+    }
+    const columns = await admin.query<{
+      attname: string; runtime_select: boolean; writer_select: boolean; worker_select: boolean; worker_direct: boolean; public_select: boolean;
+    }>(`
+      SELECT a.attname,
+             has_column_privilege($1, c.oid, a.attname, 'SELECT') AS runtime_select,
+             has_column_privilege($2, c.oid, a.attname, 'SELECT') AS writer_select,
+             has_column_privilege($3, c.oid, a.attname, 'SELECT') AS worker_select,
+             CASE WHEN a.attacl IS NULL THEN FALSE ELSE EXISTS (
+               SELECT 1 FROM aclexplode(a.attacl) acl
+                WHERE acl.grantee = (SELECT oid FROM pg_roles WHERE rolname=$3) AND acl.privilege_type='SELECT'
+             ) END AS worker_direct,
+             CASE WHEN a.attacl IS NULL THEN FALSE ELSE EXISTS (
+               SELECT 1 FROM aclexplode(a.attacl) acl
+                WHERE acl.grantee=0::oid AND acl.privilege_type='SELECT'
+             ) END AS public_select
+        FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname=$4 AND a.attnum > 0 AND NOT a.attisdropped
+    `, [runtimeRole, writerRole, gitAutomationWorkerRole, relation]);
+    const allowed = new Set(pollColumns[relation] ?? []);
+    assert.ok(columns.rows.length > 0, `missing columns for ${relation}`);
+    for (const column of columns.rows) {
+      const expected = allowed.has(column.attname);
+      if (ledgerRelations.has(relation)) {
+        assert.equal(column.runtime_select, false, `${relation}.${column.attname} runtime`);
+        assert.equal(column.writer_select, false, `${relation}.${column.attname} writer`);
+      }
+      assert.equal(column.worker_select, expected, `${relation}.${column.attname} worker`);
+      assert.equal(column.worker_direct, expected, `${relation}.${column.attname} direct worker ACL`);
+      assert.equal(column.public_select, false, `${relation}.${column.attname} public`);
+    }
+  }
+
+  const verifyFunction = async (helper: { name: string; identityArguments: string }, workerExpected: boolean, securityDefiner: boolean) => {
+    const signature = `public.${quoteIdentifier(helper.name)}(${helper.identityArguments})`;
+    const result = await admin.query<{
+      owner: string | null; prosecdef: boolean; proconfig: string[] | null;
+      runtime_execute: boolean; writer_execute: boolean; worker_execute: boolean; worker_direct: boolean; public_execute: boolean;
+    }>(`
+      SELECT pg_get_userbyid(p.proowner) AS owner, p.prosecdef, p.proconfig,
+             has_function_privilege($1, p.oid, 'EXECUTE') AS runtime_execute,
+             has_function_privilege($2, p.oid, 'EXECUTE') AS writer_execute,
+             has_function_privilege($3, p.oid, 'EXECUTE') AS worker_execute,
+             EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee=(SELECT oid FROM pg_roles WHERE rolname=$3) AND a.privilege_type='EXECUTE') AS worker_direct,
+             EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee=0::oid AND a.privilege_type='EXECUTE') AS public_execute
+        FROM pg_proc p WHERE p.oid=pg_catalog.to_regprocedure($4)
+    `, [runtimeRole, writerRole, gitAutomationWorkerRole, signature]);
+    const row = result.rows[0];
+    assert.ok(row, `missing ledger function ${signature}`);
+    assert.equal(row.owner, migratorRole, signature);
+    assert.equal(row.prosecdef, securityDefiner, signature);
+    if (securityDefiner) assert.ok(row.proconfig?.includes("search_path=pg_catalog"), signature);
+    assert.equal(row.runtime_execute, false, signature);
+    assert.equal(row.writer_execute, false, signature);
+    assert.equal(row.worker_execute, workerExpected, signature);
+    assert.equal(row.worker_direct, workerExpected, signature);
+    assert.equal(row.public_execute, false, signature);
+  };
+  for (const helper of DATABASE_PRINCIPAL_GIT_AUTOMATION_WORKER_DEFINER_FUNCTION_MATRIX) await verifyFunction(helper, true, true);
+  for (const helper of DATABASE_PRINCIPAL_PRIVATE_FUNCTION_MATRIX) await verifyFunction(helper, false, false);
+}
+
+async function gitAutomationWorkerFunctionPrivileges(admin: Client, signature: string): Promise<{ worker_execute: boolean; worker_direct: boolean }> {
+  const result = await admin.query<{ worker_execute: boolean; worker_direct: boolean }>(`
+    SELECT has_function_privilege($1, function_row.oid, 'EXECUTE') AS worker_execute,
+           EXISTS (
+             SELECT 1
+               FROM aclexplode(COALESCE(function_row.proacl, acldefault('f', function_row.proowner))) privilege
+              WHERE privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                AND privilege.privilege_type = 'EXECUTE'
+           ) AS worker_direct
+      FROM pg_proc function_row
+     WHERE function_row.oid = pg_catalog.to_regprocedure($2)
+  `, [gitAutomationWorkerRole, signature]);
+  const row = result.rows[0];
+  assert.ok(row, `missing function ${signature}`);
+  return row;
+}
+
 async function runPrincipalBootstrap(
   runtimePassword: string,
   migratorPassword: string,
@@ -268,11 +406,13 @@ async function runPrincipalBootstrap(
   bootstrapConnectionString?: string,
 ): Promise<void> {
   await ensureClusterAdminForGate();
+  const gitAutomationWorkerPassword = `GitAutomation_${randomUUID().replaceAll("-", "")}`;
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     DATABASE_PRINCIPAL_ADMIN_URL: targetAdminUrl(),
     DATABASE_URL: roleUrl(runtimeRole, runtimePassword),
     ENTITLEMENT_DATABASE_URL: roleUrl(writerRole, writerPassword),
+    GIT_AUTOMATION_DATABASE_URL: roleUrl(gitAutomationWorkerRole, gitAutomationWorkerPassword),
     MIGRATOR_DATABASE_URL: roleUrl(migratorRole, migratorPassword),
     POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: `Inventory_${randomUUID().replaceAll("-", "")}`,
   };
@@ -310,11 +450,13 @@ async function runProductionReconcile(
   migratorPassword: string,
   writerPassword: string,
 ): Promise<void> {
+  const gitAutomationWorkerPassword = `GitAutomation_${randomUUID().replaceAll("-", "")}`;
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     DATABASE_PRINCIPAL_ADMIN_URL: targetAdminUrl(),
     DATABASE_URL: roleUrl(runtimeRole, runtimePassword),
     ENTITLEMENT_DATABASE_URL: roleUrl(writerRole, writerPassword),
+    GIT_AUTOMATION_DATABASE_URL: roleUrl(gitAutomationWorkerRole, gitAutomationWorkerPassword),
     MIGRATOR_DATABASE_URL: roleUrl(migratorRole, migratorPassword),
     POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: `Inventory_${randomUUID().replaceAll("-", "")}`,
   };
@@ -514,6 +656,7 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
     await runProductionReconcile(runtimePassword, migratorPassword, writerPassword);
     await assertInvokerHelperAcls(admin);
     await assertGuardedTriggerFunctionAcls(admin);
+    await assertGitAutomationLedgerAcls(admin);
     // A rerun with the retained legacy URL must self-heal/verify through the
     // cluster-admin path after the sealed role has replaced the source OID.
     await runPrincipalBootstrap(runtimePassword, migratorPassword, writerPassword, roleUrl(legacyRole, legacyPassword));
@@ -618,8 +761,8 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
         FROM pg_roles
        WHERE rolname = ANY($1::text[])
        ORDER BY rolname
-    `, [[runtimeRole, writerRole, migratorRole]]);
-    assert.equal(roles.rows.length, 3);
+    `, [[runtimeRole, writerRole, migratorRole, gitAutomationWorkerRole]]);
+    assert.equal(roles.rows.length, 4);
     assert.ok(roles.rows.every((row) => !row.rolsuper && !row.rolcreatedb && !row.rolcreaterole && !row.rolinherit && !row.rolreplication && !row.rolbypassrls));
     const memberships = await admin.query(`
       SELECT 1
@@ -627,15 +770,18 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
         JOIN pg_roles member ON member.oid = membership.member
         JOIN pg_roles parent ON parent.oid = membership.roleid
        WHERE member.rolname = ANY($1::text[]) OR parent.rolname = ANY($1::text[])
-    `, [[runtimeRole, writerRole, migratorRole]]);
+    `, [[runtimeRole, writerRole, migratorRole, gitAutomationWorkerRole]]);
     assert.equal(memberships.rowCount, 0);
     const directAcl = await admin.query<{
       runtime_database_create: boolean;
       runtime_database_temp: boolean;
       writer_database_create: boolean;
       writer_database_temp: boolean;
+      git_worker_database_create: boolean;
+      git_worker_database_temp: boolean;
       runtime_schema_create: boolean;
       writer_schema_create: boolean;
+      git_worker_schema_create: boolean;
       runtime_policy_insert: boolean;
       runtime_policy_update: boolean;
       runtime_policy_delete: boolean;
@@ -646,21 +792,27 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
              has_database_privilege($1, current_database(), 'TEMPORARY') AS runtime_database_temp,
              has_database_privilege($2, current_database(), 'CREATE') AS writer_database_create,
              has_database_privilege($2, current_database(), 'TEMPORARY') AS writer_database_temp,
+             has_database_privilege($3, current_database(), 'CREATE') AS git_worker_database_create,
+             has_database_privilege($3, current_database(), 'TEMPORARY') AS git_worker_database_temp,
              has_schema_privilege($1, 'public', 'CREATE') AS runtime_schema_create,
              has_schema_privilege($2, 'public', 'CREATE') AS writer_schema_create,
+             has_schema_privilege($3, 'public', 'CREATE') AS git_worker_schema_create,
              has_table_privilege($1, 'public."PlatformGrantOfferPolicy"', 'INSERT') AS runtime_policy_insert,
              has_table_privilege($1, 'public."PlatformGrantOfferPolicy"', 'UPDATE') AS runtime_policy_update,
              has_table_privilege($1, 'public."PlatformGrantOfferPolicy"', 'DELETE') AS runtime_policy_delete,
-             has_sequence_privilege($1, $3, 'UPDATE') AS runtime_sequence_update,
-             has_sequence_privilege($2, $3, 'UPDATE') AS writer_sequence_update
-    `, [runtimeRole, writerRole, `public.${quoteIdentifier(driftSequenceName)}`]);
+             has_sequence_privilege($1, $4, 'UPDATE') AS runtime_sequence_update,
+             has_sequence_privilege($2, $4, 'UPDATE') AS writer_sequence_update
+    `, [runtimeRole, writerRole, gitAutomationWorkerRole, `public.${quoteIdentifier(driftSequenceName)}`]);
     assert.deepEqual(directAcl.rows[0], {
       runtime_database_create: false,
       runtime_database_temp: false,
       writer_database_create: false,
       writer_database_temp: false,
+      git_worker_database_create: false,
+      git_worker_database_temp: false,
       runtime_schema_create: false,
       writer_schema_create: false,
+      git_worker_schema_create: false,
       runtime_policy_insert: false,
       runtime_policy_update: false,
       runtime_policy_delete: false,
@@ -695,7 +847,7 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
         LEFT JOIN pg_roles grantee ON grantee.oid = privilege.grantee
        WHERE owner_role.rolname = ANY($1::text[])
        ORDER BY owner, namespace_oid, object_type, grantee NULLS LAST, privilege_type NULLS LAST
-    `, [[runtimeRole, writerRole, migratorRole]]);
+    `, [[runtimeRole, writerRole, migratorRole, gitAutomationWorkerRole]]);
     assert.equal(normalizedDefaults.rows.filter((row) => row.owner === runtimeRole || row.owner === writerRole).length, 0);
     const migratorDefaults = normalizedDefaults.rows.filter((row) => row.owner === migratorRole);
     assert.deepEqual(migratorDefaults, [{
@@ -718,10 +870,10 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
         JOIN pg_roles role_row ON role_row.oid = setting.setrole
        WHERE role_row.rolname = ANY($1::text[])
          AND setting.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))
-    `, [[runtimeRole, writerRole, migratorRole]]);
+    `, [[runtimeRole, writerRole, migratorRole, gitAutomationWorkerRole]]);
     assert.deepEqual(
       roleSettings.rows.sort((left, right) => left.rolname.localeCompare(right.rolname)),
-      [runtimeRole, writerRole, migratorRole].sort().map((rolname) => ({ rolname, config: ["default_transaction_read_only=off"] })),
+      [runtimeRole, writerRole, migratorRole, gitAutomationWorkerRole].sort().map((rolname) => ({ rolname, config: ["default_transaction_read_only=off"] })),
     );
 
     await admin.query(`DROP DATABASE ${quoteIdentifier(externalDatabaseName)}`);
@@ -779,7 +931,7 @@ test("legacy owner bootstrap preserves representative grant and ledger data", {
       await dropRole(admin, legacyRole).catch(reportCleanupFailure);
       await dropRole(admin, "ai_project_os_legacy_bootstrap").catch(reportCleanupFailure);
       await dropRole(admin, bypassRole).catch(reportCleanupFailure);
-      for (const role of [runtimeRole, writerRole, migratorRole]) await dropRole(admin, role).catch(reportCleanupFailure);
+      for (const role of [runtimeRole, writerRole, migratorRole, gitAutomationWorkerRole]) await dropRole(admin, role).catch(reportCleanupFailure);
       for (const role of [legacyRole, legacyMemberRole, legacyParentRole, bypassRole, "ai_project_os_legacy_bootstrap"]) {
         try {
           assert.equal(await roleExists(admin, role), false, `database-principal cleanup left role ${role}`);
@@ -818,7 +970,7 @@ test("production reconcile separates non-owner runtime from writer and preserves
   try {
     await ensureClusterAdminForGate();
     await admin.connect();
-    for (const role of [runtimeRole, migratorRole, writerRole]) existingRoles.set(role, await roleExists(admin, role));
+    for (const role of [runtimeRole, migratorRole, writerRole, gitAutomationWorkerRole]) existingRoles.set(role, await roleExists(admin, role));
     const databaseOwner = await admin.query<{ owner: string }>(`
       SELECT pg_get_userbyid(d.datdba) AS owner
         FROM pg_database d
@@ -834,13 +986,24 @@ test("production reconcile separates non-owner runtime from writer and preserves
     // Run the production owner/ACL reconcile command; this gate intentionally
     // does not replace it with a hand-written set of GRANT statements.
     await runPrincipalBootstrap(runtimePassword, migratorPassword, writerPassword, roleUrl(bootstrapRole, bootstrapPassword));
+    const previouslyGrantedFunction = 'public."project_git_automation_guard_project_delete"()';
+    await admin.query(`GRANT EXECUTE ON FUNCTION ${previouslyGrantedFunction} TO ${quoteIdentifier(gitAutomationWorkerRole)}`);
+    assert.deepEqual(await gitAutomationWorkerFunctionPrivileges(admin, previouslyGrantedFunction), {
+      worker_execute: true,
+      worker_direct: true,
+    });
     await runProductionReconcile(runtimePassword, migratorPassword, writerPassword);
+    assert.deepEqual(await gitAutomationWorkerFunctionPrivileges(admin, previouslyGrantedFunction), {
+      worker_execute: false,
+      worker_direct: false,
+    });
     // The second reconcile deliberately omits the bootstrap URL.  It proves that
     // the final migrator role is sufficient for owner/ACL reconciliation and
     // no longer depends on CREATEROLE.
     await runProductionReconcile(runtimePassword, migratorPassword, writerPassword);
     await assertInvokerHelperAcls(admin);
     await assertGuardedTriggerFunctionAcls(admin);
+    await assertGitAutomationLedgerAcls(admin);
 
     const relationRows = await admin.query<{ relname: string; owner: string; relkind: string }>(`
       SELECT c.relname, pg_get_userbyid(c.relowner) AS owner, c.relkind
@@ -869,13 +1032,14 @@ test("production reconcile separates non-owner runtime from writer and preserves
         FROM pg_roles
        WHERE rolname = ANY($1::text[])
        ORDER BY rolname
-    `, [[runtimeRole, writerRole, migratorRole]]);
-    assert.equal(acl.rows.length, 3);
-    assert.deepEqual(acl.rows.map((row) => row.rolname), [writerRole, migratorRole, runtimeRole]);
+    `, [[runtimeRole, writerRole, migratorRole, gitAutomationWorkerRole]]);
+    assert.equal(acl.rows.length, 4);
+    assert.deepEqual(acl.rows.map((row) => row.rolname), [writerRole, gitAutomationWorkerRole, migratorRole, runtimeRole]);
     assert.ok(acl.rows.every((row) => !row.rolsuper && !row.rolcreatedb && !row.rolinherit && !row.rolreplication && !row.rolbypassrls));
     assert.equal(acl.rows.find((row) => row.rolname === migratorRole)?.rolcreaterole, false);
     assert.equal(acl.rows.find((row) => row.rolname === runtimeRole)?.rolcreaterole, false);
     assert.equal(acl.rows.find((row) => row.rolname === writerRole)?.rolcreaterole, false);
+    assert.equal(acl.rows.find((row) => row.rolname === gitAutomationWorkerRole)?.rolcreaterole, false);
     const publicAcl = await admin.query<{ database_public: boolean; schema_public: boolean }>(`
       SELECT EXISTS (
                SELECT 1
@@ -909,6 +1073,36 @@ test("production reconcile separates non-owner runtime from writer and preserves
       assert.equal(await writer.accountEntitlementActivation.count({ where: { userId: actor.id, lifecycleKey: "initial_account_v1" } }), 0);
       assert.equal(await writer.platformTokenGrant.count({ where: { userId: actor.id, kind: "signup" } }), 0);
       assert.equal(await writer.platformTokenLedgerEntry.count({ where: { userId: actor.id, reasonCode: "AI_SIGNUP_GRANT" } }), 0);
+
+      // Exercise the public registration route through the real entitlement
+      // writer, including the HTTP cookie and its protected mutations.
+      const previousRegistrationFlag = process.env.LOCAL_REGISTRATION_ENABLED;
+      const previousPublicOrigin = process.env.AI_PROJECT_OS_PUBLIC_ORIGIN;
+      process.env.LOCAL_REGISTRATION_ENABLED = "true";
+      process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = "https://app.example";
+      try {
+        const registrationUsername = `registered_${suffix}`;
+        const response = await registerPost(new Request("https://app.example/api/auth/register", {
+          method: "POST",
+          headers: { host: "app.example", origin: "https://app.example", "content-type": "application/json" },
+          body: JSON.stringify({ username: registrationUsername, password: "RegistrationPassword_2026", remember: true }),
+        }));
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get("set-cookie") ?? "", /HttpOnly/iu);
+        const body = await response.json() as { user: { id: string; username: string; role: string } };
+        assert.equal(body.user.username, registrationUsername);
+        assert.equal(body.user.role, "user");
+        const registered = await writer.appUser.findUniqueOrThrow({ where: { id: body.user.id } });
+        assert.equal(registered.email, null);
+        assert.equal(registered.emailVerifiedAt, null);
+        assert.equal(await writer.workspaceMembership.count({ where: { userId: registered.id, role: "owner", accessState: "confirmed" } }), 1);
+        assert.equal(await writer.accountEntitlementActivation.count({ where: { userId: registered.id } }), 0);
+      } finally {
+        if (previousRegistrationFlag === undefined) delete process.env.LOCAL_REGISTRATION_ENABLED;
+        else process.env.LOCAL_REGISTRATION_ENABLED = previousRegistrationFlag;
+        if (previousPublicOrigin === undefined) delete process.env.AI_PROJECT_OS_PUBLIC_ORIGIN;
+        else process.env.AI_PROJECT_OS_PUBLIC_ORIGIN = previousPublicOrigin;
+      }
 
       // The platform admin does not bootstrap a shared/default workspace
       // owner.  Build the same kind of personal workspace that a newly
@@ -1098,6 +1292,68 @@ test("production reconcile separates non-owner runtime from writer and preserves
       writer_update: true,
       writer_delete: true,
     });
+    const webReviewAuditAcl = await admin.query<{
+      runtime_select: boolean;
+      runtime_insert: boolean;
+      runtime_update: boolean;
+      runtime_delete: boolean;
+      writer_select: boolean;
+      writer_insert: boolean;
+      writer_update: boolean;
+      writer_delete: boolean;
+      runtime_direct_other: boolean;
+      writer_direct_other: boolean;
+      public_direct: boolean;
+    }>(`
+      SELECT has_table_privilege($1, 'public."WebSourceReviewAudit"', 'SELECT') AS runtime_select,
+             has_table_privilege($1, 'public."WebSourceReviewAudit"', 'INSERT') AS runtime_insert,
+             has_table_privilege($1, 'public."WebSourceReviewAudit"', 'UPDATE') AS runtime_update,
+             has_table_privilege($1, 'public."WebSourceReviewAudit"', 'DELETE') AS runtime_delete,
+             has_table_privilege($2, 'public."WebSourceReviewAudit"', 'SELECT') AS writer_select,
+             has_table_privilege($2, 'public."WebSourceReviewAudit"', 'INSERT') AS writer_insert,
+             has_table_privilege($2, 'public."WebSourceReviewAudit"', 'UPDATE') AS writer_update,
+             has_table_privilege($2, 'public."WebSourceReviewAudit"', 'DELETE') AS writer_delete,
+             EXISTS (
+               SELECT 1 FROM pg_class relation_row
+               JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+               CROSS JOIN LATERAL aclexplode(COALESCE(relation_row.relacl, acldefault('r', relation_row.relowner))) privilege
+               WHERE namespace_row.nspname = 'public' AND relation_row.relname = 'WebSourceReviewAudit'
+                 AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+                 AND privilege.privilege_type <> 'SELECT'
+             ) AS runtime_direct_other,
+             EXISTS (
+               SELECT 1 FROM pg_class relation_row
+               JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+               CROSS JOIN LATERAL aclexplode(COALESCE(relation_row.relacl, acldefault('r', relation_row.relowner))) privilege
+               WHERE namespace_row.nspname = 'public' AND relation_row.relname = 'WebSourceReviewAudit'
+                 AND privilege.grantee = (SELECT oid FROM pg_roles WHERE rolname = $2)
+                 AND privilege.privilege_type NOT IN ('SELECT', 'INSERT')
+             ) AS writer_direct_other,
+             EXISTS (
+               SELECT 1 FROM pg_class relation_row
+               JOIN pg_namespace namespace_row ON namespace_row.oid = relation_row.relnamespace
+               CROSS JOIN LATERAL aclexplode(COALESCE(relation_row.relacl, acldefault('r', relation_row.relowner))) privilege
+               WHERE namespace_row.nspname = 'public' AND relation_row.relname = 'WebSourceReviewAudit'
+                 AND privilege.grantee = 0::oid
+             ) AS public_direct
+    `, [runtimeRole, writerRole]);
+    assert.deepEqual(webReviewAuditAcl.rows[0], {
+      runtime_select: true,
+      runtime_insert: false,
+      runtime_update: false,
+      runtime_delete: false,
+      writer_select: true,
+      writer_insert: true,
+      writer_update: false,
+      writer_delete: false,
+      runtime_direct_other: false,
+      writer_direct_other: false,
+      public_direct: false,
+    });
+    await expectPermissionDenied(() => runtimeClient.query(
+      `INSERT INTO "WebSourceReviewAudit" ("id") VALUES ($1)`,
+      [randomUUID()],
+    ));
     const runtimePrivileges = await runtimeClient.query<{
       policySelect: boolean;
       policyInsert: boolean;
@@ -1255,7 +1511,7 @@ test("production reconcile separates non-owner runtime from writer and preserves
     }
     await dropRole(admin, "ai_project_os_legacy_bootstrap").catch(reportCleanupFailure);
     await dropRole(admin, bootstrapRole).catch(reportCleanupFailure);
-    for (const role of [runtimeRole, writerRole, migratorRole]) {
+    for (const role of [runtimeRole, writerRole, migratorRole, gitAutomationWorkerRole]) {
       if (existingRoles.get(role) !== true) await dropRole(admin, role).catch(reportCleanupFailure);
     }
     for (const role of [bootstrapRole, "ai_project_os_legacy_bootstrap"]) {

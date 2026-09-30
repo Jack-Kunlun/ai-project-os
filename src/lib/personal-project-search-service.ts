@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import {
   createProjectSearchService,
@@ -6,6 +6,8 @@ import {
   type ProjectSearchResponse,
 } from "@/lib/ai-memory/project-search";
 import { accessibleProjectWhere } from "@/lib/access-control";
+import { admitWebAiProjectAccess, lockActorsAccess, lockProjectAccess, lockWorkspaceAccess } from "@/lib/access-linearization";
+import { isSerializableTransactionConflict, SERIALIZABLE_RETRY_LIMIT } from "@/lib/prisma-transaction";
 import { assertWebAiProjectAccess, loadCurrentWebAiActor, type WebAiActor } from "@/lib/web-ai-access";
 
 /** Keep a personal search explicitly bounded to a small, user-selected scope. */
@@ -85,6 +87,7 @@ export type PersonalProjectSearchCitation = Readonly<{
   rangeStart: number;
   rangeEnd: number;
   contentHash: string;
+  sourceContentHash: string;
   excerpt: string;
 }>;
 
@@ -141,19 +144,13 @@ async function assertSelectedProjectViews(
   if (failure !== undefined) throw failure.reason;
 }
 
-/**
- * Search only explicitly selected projects. Every selected ID is admitted
- * before the project search and rechecked after it, so membership revocation
- * prevents any project result from reaching the response boundary.
- */
+/** Search a bounded set under one access and index consistency boundary. */
 export function createPersonalProjectSearchService(options: Readonly<{
   db: PrismaClient;
   searchService?: ProjectSearchService;
 }>): Readonly<{
   search(actor: WebAiActor, input: unknown): Promise<PersonalProjectSearchResponse>;
 }> {
-  const searchService = options.searchService ?? createProjectSearchService({ db: options.db });
-
   return Object.freeze({
     async search(actor: WebAiActor, rawInput: unknown): Promise<PersonalProjectSearchResponse> {
       const input = parsePersonalProjectSearchInput(rawInput);
@@ -162,7 +159,7 @@ export function createPersonalProjectSearchService(options: Readonly<{
       const projectIds = input.scope === "selected"
         ? input.projectIds
         : (await options.db.project.findMany({
-          where: accessibleProjectWhere(currentActor),
+          where: { AND: [accessibleProjectWhere(currentActor), { archivedAt: null }] },
           orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
           take: PERSONAL_PROJECT_SEARCH_MAX_ALL_PROJECTS + 1,
           select: { id: true },
@@ -174,34 +171,61 @@ export function createPersonalProjectSearchService(options: Readonly<{
       // the same service-layer view admission used by project AI features.
       await assertSelectedProjectViews(actor, projectIds, options.db);
 
-      const projects = await options.db.project.findMany({
-        where: { id: { in: [...projectIds] } },
-        select: { id: true, name: true, archivedAt: true },
-      });
-      if (projects.length !== projectIds.length) return fail("PERSONAL_PROJECT_SEARCH_PROJECT_UNAVAILABLE");
-      const projectById = new Map(projects.map((project) => [project.id.toLowerCase(), project]));
-      if (projectIds.some((projectId) => !projectById.has(projectId))) {
-        return fail("PERSONAL_PROJECT_SEARCH_PROJECT_UNAVAILABLE");
-      }
+      // Hold the same actor -> workspace -> project fence used by membership
+      // revocation through the index read and response assembly. Project search
+      // uses this transaction too, keeping source retirement and index pointer
+      // changes behind its row-share locks until the response linearizes.
+      for (let attempt = 0; attempt < SERIALIZABLE_RETRY_LIMIT; attempt += 1) {
+        try {
+          return await options.db.$transaction(async (tx) => {
+        const routes = await tx.project.findMany({
+          where: { id: { in: [...projectIds] } },
+          select: { id: true, workspaceId: true },
+        });
+        if (routes.length !== projectIds.length) return fail("PERSONAL_PROJECT_SEARCH_PROJECT_UNAVAILABLE");
+        await lockActorsAccess(tx, [actor.id]);
+        for (const workspaceId of [...new Set(routes.map((route) => route.workspaceId))].sort()) {
+          await lockWorkspaceAccess(tx, workspaceId);
+        }
+        for (const projectId of [...projectIds].sort()) await lockProjectAccess(tx, projectId);
+        for (const projectId of projectIds) {
+          await admitWebAiProjectAccess(tx, {
+            actor,
+            projectId,
+            required: "view",
+            allowArchived: input.scope === "selected",
+          });
+        }
+        const searchService = options.searchService ?? createProjectSearchService({ db: tx, transactionClient: true });
+        const projectSearches: ProjectSearchResponse[] = [];
+        try {
+          for (const projectId of projectIds) {
+            projectSearches.push(await searchService.search({ projectId, query: input.query, take: input.take }));
+          }
+        } catch (error) {
+          return mapProjectSearchError(error);
+        }
+        for (const projectId of projectIds) {
+          await admitWebAiProjectAccess(tx, {
+            actor,
+            projectId,
+            required: "view",
+            allowArchived: input.scope === "selected",
+          });
+        }
+        const currentProjects = await tx.project.findMany({
+          where: { id: { in: [...projectIds] }, ...(input.scope === "allAccessible" ? { archivedAt: null } : {}) },
+          select: { id: true, name: true, archivedAt: true },
+        });
+        if (currentProjects.length !== projectIds.length) return fail("PERSONAL_PROJECT_SEARCH_PROJECT_UNAVAILABLE");
+        const currentProjectById = new Map(currentProjects.map((project) => [project.id.toLowerCase(), project]));
+        if (projectIds.some((projectId) => !currentProjectById.has(projectId))) {
+          return fail("PERSONAL_PROJECT_SEARCH_PROJECT_UNAVAILABLE");
+        }
 
-      let projectSearches: readonly ProjectSearchResponse[];
-      try {
-        projectSearches = await Promise.all(projectIds.map((projectId) => searchService.search({
-          projectId,
-          query: input.query,
-          take: input.take,
-        })));
-      } catch (error) {
-        return mapProjectSearchError(error);
-      }
-
-      // Membership can change while a snapshot query is running. Re-admit all
-      // projects before sorting or serializing even one citation.
-      await assertSelectedProjectViews(actor, projectIds, options.db);
-
-      const results = projectSearches.flatMap((search, index) => {
+        const results = projectSearches.flatMap((search, index) => {
         const projectId = projectIds[index]!;
-        const project = projectById.get(projectId);
+        const project = currentProjectById.get(projectId);
         if (project === undefined) return [];
         return search.results.map((result) => Object.freeze({
           rank: 0,
@@ -211,21 +235,28 @@ export function createPersonalProjectSearchService(options: Readonly<{
           snapshotId: search.snapshot.id,
           citation: Object.freeze({ ...result.citation }),
         }));
-      }).sort(stableResultOrder).slice(0, input.take).map((result, index) => Object.freeze({
+        }).sort(stableResultOrder).slice(0, input.take).map((result, index) => Object.freeze({
         ...result,
         rank: index + 1,
       }));
 
-      return Object.freeze({
+        return Object.freeze({
         mode: "lexical" as const,
         scope: input.scope,
         query: input.query,
         selectedProjects: Object.freeze(projectIds.map((projectId) => {
-          const project = projectById.get(projectId)!;
+          const project = currentProjectById.get(projectId)!;
           return Object.freeze({ id: project.id, name: project.name, archived: project.archivedAt !== null });
         })),
         results: Object.freeze(results),
-      });
+        });
+          }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 });
+        } catch (error) {
+          if (!isSerializableTransactionConflict(error)) throw error;
+          if (attempt + 1 >= SERIALIZABLE_RETRY_LIMIT) return fail("PERSONAL_PROJECT_SEARCH_CONFLICT");
+        }
+      }
+      return fail("PERSONAL_PROJECT_SEARCH_CONFLICT");
     },
   });
 }

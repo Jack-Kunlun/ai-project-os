@@ -348,6 +348,7 @@ test(
       assert.equal(providerFetches, 0);
     } finally {
       globalThis.fetch = previousFetch;
+      await db.project.updateMany({ where: { id: { in: [projectId, archivedProjectId, otherProjectId, githubProjectId] } }, data: { archivedAt: new Date() } });
       await db.project.deleteMany({ where: { id: { in: [projectId, archivedProjectId, otherProjectId, githubProjectId] } } });
       await db.externalCredential.deleteMany({ where: { id: githubCredentialId } });
       await db.workspace.deleteMany({ where: { id: { in: [workspaceId, otherWorkspaceId] } } });

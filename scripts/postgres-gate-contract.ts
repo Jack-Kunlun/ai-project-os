@@ -6,7 +6,7 @@ export interface PostgresGateDefinition {
   databaseUrlEnv?: string;
   seedAdmin?: boolean;
   schema?: "public";
-  setup: "migrate" | "self";
+  setup: "migrate" | "self" | "principals";
 }
 
 export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
@@ -43,6 +43,10 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "platform-credit-governance", file: "test/platform-credit-governance-postgres.test.ts", database: "ai_project_os_platform_credit_governance_test", gateEnv: "PLATFORM_CREDIT_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
   { id: "project-ai-provider-delegation", file: "test/project-ai-provider-delegation-postgres.test.ts", database: "ai_project_os_project_ai_provider_delegation_test", gateEnv: "PROJECT_AI_PROVIDER_DELEGATION_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
   { id: "project-git-repository-delegation", file: "test/project-git-repository-delegation-postgres.test.ts", database: "ai_project_os_project_git_repository_delegation_test", gateEnv: "PROJECT_GIT_REPOSITORY_DELEGATION_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
+  { id: "project-git-automation-run-ledger", file: "test/project-git-automation-run-ledger-postgres.test.ts", database: "ai_project_os_project_git_automation_run_ledger_test", gateEnv: "PROJECT_GIT_AUTOMATION_RUN_LEDGER_POSTGRES_GATE", seedAdmin: true, setup: "principals" },
+  { id: "project-git-automation-read-context", file: "test/project-git-automation-read-context-postgres.test.ts", database: "ai_project_os_project_git_automation_read_context_test", gateEnv: "PROJECT_GIT_AUTOMATION_READ_CONTEXT_POSTGRES_GATE", seedAdmin: true, setup: "principals" },
+  { id: "project-git-automation-material", file: "test/project-git-automation-material-postgres.test.ts", database: "ai_project_os_project_git_automation_material_test", gateEnv: "PROJECT_GIT_AUTOMATION_MATERIAL_POSTGRES_GATE", seedAdmin: true, setup: "principals" },
+  { id: "project-git-automation-execution", file: "test/project-git-automation-execution-postgres.test.ts", database: "ai_project_os_project_git_automation_execution_test", gateEnv: "PROJECT_GIT_AUTOMATION_EXECUTION_POSTGRES_GATE", setup: "principals" },
   { id: "project-delegated-git-runtime", file: "test/project-delegated-git-runtime-postgres.test.ts", database: "ai_project_os_project_delegated_git_runtime_test", gateEnv: "PROJECT_DELEGATED_GIT_RUNTIME_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
   { id: "personal-runtime-evidence", file: "test/personal-runtime-evidence-postgres.test.ts", database: "ai_project_os_personal_runtime_evidence_test", gateEnv: "PERSONAL_RUNTIME_EVIDENCE_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
   { id: "personal-web-ai-runtime", file: "test/personal-web-ai-runtime-postgres.test.ts", database: "ai_project_os_personal_web_ai_runtime_test", gateEnv: "PERSONAL_WEB_AI_RUNTIME_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
@@ -51,6 +55,8 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "configuration-deletion", file: "test/configuration-deletion-postgres.test.ts", database: "ai_project_os_configuration_deletion_test", gateEnv: "CONFIGURATION_DELETION_POSTGRES_GATE", setup: "migrate" },
   { id: "action-engine", file: "test/action-engine-postgres.test.ts", database: "ai_project_os_action_engine_test", gateEnv: "ACTION_ENGINE_POSTGRES_GATE", setup: "migrate" },
   { id: "mcp-capabilities", file: "test/mcp-capabilities-postgres.test.ts", database: "ai_project_os_mcp_capabilities_test", gateEnv: "MCP_CAPABILITIES_POSTGRES_GATE", setup: "migrate" },
+  { id: "mcp-export-grants", file: "test/mcp-export-grants-postgres.test.ts", database: "ai_project_os_mcp_export_grants_test", gateEnv: "MCP_EXPORT_POSTGRES_GATE", setup: "migrate" },
+  { id: "mcp-export-oauth-upgrade", file: "test/mcp-export-oauth-upgrade-postgres.test.ts", database: "ai_project_os_mcp_export_oauth_upgrade_test", gateEnv: "MCP_EXPORT_OAUTH_UPGRADE_POSTGRES_GATE", setup: "self" },
   { id: "connection-governance", file: "test/connection-governance-postgres.test.ts", database: "ai_project_os_connection_governance_test", gateEnv: "CONNECTION_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
   { id: "connection-configuration-edit", file: "test/connection-configuration-edit-postgres.test.ts", database: "ai_project_os_connection_configuration_edit_test", gateEnv: "CONNECTION_CONFIGURATION_EDIT_POSTGRES_GATE", setup: "migrate" },
   { id: "credits-reporting", file: "test/credits-reporting-postgres.test.ts", database: "ai_project_os_credits_reporting_test", gateEnv: "CREDITS_REPORTING_POSTGRES_GATE", setup: "migrate" },
@@ -70,8 +76,10 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "workspace-role-governance", file: "test/workspace-role-governance-postgres.test.ts", database: "ai_project_os_workspace_role_governance_test", gateEnv: "WORKSPACE_ROLE_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
   { id: "local-workspace-member", file: "test/local-workspace-member-postgres.test.ts", database: "ai_project_os_local_workspace_member_test", gateEnv: "LOCAL_WORKSPACE_MEMBER_POSTGRES_GATE", setup: "migrate" },
   { id: "local-login", file: "test/local-login-postgres.test.ts", database: "ai_project_os_local_login_test", gateEnv: "LOCAL_LOGIN_POSTGRES_GATE", databaseUrlEnv: "LOCAL_LOGIN_TEST_DATABASE_URL", setup: "migrate" },
+  { id: "local-registration", file: "test/local-registration-postgres.test.ts", database: "ai_project_os_local_registration_test", gateEnv: "LOCAL_REGISTRATION_POSTGRES_GATE", databaseUrlEnv: "LOCAL_REGISTRATION_TEST_DATABASE_URL", setup: "migrate" },
   { id: "github-oauth", file: "test/github-oauth-postgres.test.ts", database: "ai_project_os_github_oauth_test", gateEnv: "GITHUB_OAUTH_POSTGRES_GATE", databaseUrlEnv: "GITHUB_OAUTH_TEST_DATABASE_URL", setup: "migrate" },
   { id: "database-principals", file: "test/database-principal-postgres.test.ts", database: "ai_project_os_database_principals_test", gateEnv: "DATABASE_PRINCIPAL_POSTGRES_GATE", setup: "migrate" },
+  { id: "project-git-automation-upgrade", file: "test/project-git-automation-upgrade-postgres.test.ts", database: "ai_project_os_project_git_automation_upgrade_test", gateEnv: "PROJECT_GIT_AUTOMATION_UPGRADE_POSTGRES_GATE", setup: "self" },
   { id: "platform-provider-probe", file: "test/platform-provider-probe-postgres.test.ts", database: "ai_project_os_platform_provider_probe_test", gateEnv: "PLATFORM_PROVIDER_PROBE_POSTGRES_GATE", seedAdmin: true, setup: "migrate" },
   { id: "platform-grant-offer-policy", file: "test/platform-grant-offer-policy-postgres.test.ts", database: "ai_project_os_platform_grant_offer_policy_test", gateEnv: "PLATFORM_GRANT_OFFER_POLICY_POSTGRES_GATE", setup: "migrate" },
   { id: "account-entitlement-activation", file: "test/account-entitlement-activation-postgres.test.ts", database: "ai_project_os_account_entitlement_activation_test", gateEnv: "ACCOUNT_ENTITLEMENT_ACTIVATION_POSTGRES_GATE", setup: "migrate" },
@@ -81,6 +89,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "project-mcp-action-dispatch", file: "test/project-mcp-action-dispatch-postgres.test.ts", database: "ai_project_os_project_mcp_action_dispatch_test", gateEnv: "PROJECT_MCP_ACTION_DISPATCH_POSTGRES_GATE", setup: "migrate" },
   { id: "project-plan", file: "test/project-plan-postgres.test.ts", database: "ai_project_os_project_plan_test", gateEnv: "PROJECT_PLAN_POSTGRES_GATE", setup: "migrate" },
   { id: "automation-governance", file: "test/automation-governance-postgres.test.ts", database: "ai_project_os_automation_governance_test", gateEnv: "AUTOMATION_GOVERNANCE_POSTGRES_GATE", setup: "migrate" },
+  { id: "authenticated-web-source", file: "test/authenticated-web-source-postgres.test.ts", database: "ai_project_os_authenticated_web_source_test", gateEnv: "AUTHENTICATED_WEB_SOURCE_POSTGRES_GATE", setup: "principals" },
   { id: "project-world", file: "test/project-world-postgres.test.ts", database: "ai_project_os_v5_gate_world", gateEnv: "PROJECT_WORLD_POSTGRES_GATE", setup: "migrate" },
   { id: "worker-health", file: "test/worker-health-postgres.test.ts", database: "ai_project_os_worker_health_test", gateEnv: "WORKER_HEALTH_POSTGRES_GATE", setup: "migrate" },
   { id: "notification-subjects", file: "test/notification-subjects-postgres.test.ts", database: "ai_project_os_notification_subjects_test", gateEnv: "NOTIFICATION_SUBJECTS_POSTGRES_GATE", setup: "migrate", seedAdmin: true },
@@ -88,6 +97,7 @@ export const POSTGRES_GATES: readonly PostgresGateDefinition[] = Object.freeze([
   { id: "v06-patch-upgrade", file: "test/production-v06-patch-upgrade-postgres.test.ts", database: "ai_project_os_v06_patch_upgrade_test", gateEnv: "PRODUCTION_V06_PATCH_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V06_PATCH_UPGRADE_TEST_DATABASE_URL", setup: "self" },
   { id: "v06-next-upgrade", file: "test/production-v06-next-upgrade-postgres.test.ts", database: "ai_project_os_v06_next_upgrade_test", gateEnv: "PRODUCTION_V06_NEXT_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V06_NEXT_UPGRADE_TEST_DATABASE_URL", setup: "self" },
   { id: "v06-default-memory-upgrade", file: "test/production-v06-default-memory-upgrade-postgres.test.ts", database: "ai_project_os_v06_default_memory_upgrade_test", gateEnv: "PRODUCTION_V06_DEFAULT_MEMORY_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V06_DEFAULT_MEMORY_UPGRADE_TEST_DATABASE_URL", setup: "self" },
+  { id: "v07-upgrade", file: "test/production-v07-upgrade-postgres.test.ts", database: "ai_project_os_production_v07_upgrade_test", gateEnv: "PRODUCTION_V07_UPGRADE_POSTGRES_GATE", databaseUrlEnv: "PRODUCTION_V07_UPGRADE_TEST_DATABASE_URL", setup: "self" },
 ]);
 
 export const POSTGRES_GATE_TEST_USER = "ai_project_os_gate";

@@ -46,8 +46,8 @@ test("personal Git and MCP clients use only owner APIs and preserve lifecycle sa
   assert.match(git, /项目委托安全管理/u);
   assert.doesNotMatch(git, /api\/settings\/git-connections|admin\/connectors|attestation|projectMcpToolGrant/u);
   assert.doesNotMatch(git, /definitionFingerprint|networkFingerprint|credentialFingerprint/u);
-  assert.match(git, /项目页已支持一次性手动只读委托/u);
-  assert.match(git, /项目页已支持一次性手动只读委托；自动化、写入\/提交和旧 PAT 路径保持关闭/u);
+  assert.match(git, /项目页支持一次性手动只读委托和单独的自动读取双确认授权/u);
+  assert.match(git, /写入\/提交和旧 PAT 路径保持关闭/u);
   assert.match(git, /费用承担者为连接所有者/u);
   assert.match(git, /manualSyncAllowed/u);
   assert.match(git, /canReject|canRevoke/u);
@@ -77,12 +77,12 @@ test("personal connection forms keep project automation boundary visible", async
     readFile("src/app/profile/connections/mcp/mcp-connections-client.tsx", "utf8"),
     readFile("src/app/guide/page.tsx", "utf8"),
   ]);
-  assert.match(git, /项目页已支持一次性手动只读委托/u);
-  assert.match(git, /项目页已支持一次性手动只读委托；自动化、写入\/提交和旧 PAT 路径保持关闭/u);
+  assert.match(git, /项目页支持一次性手动只读委托和单独的自动读取双确认授权/u);
+  assert.match(git, /写入\/提交和旧 PAT 路径保持关闭/u);
   assert.match(git, /已完成 Git 仓库只读测试并加密保存。密钥输入框已清空；后续变更请在连接卡片中通过安全治理预览管理/u);
   assert.doesNotMatch(git, /请在卡片中测试连接/u);
   assert.match(mcp, /项目委托控制面已开放/u);
-  assert.match(mcp, /远端动作、自动化和调用审批仍未开放/u);
+  assert.match(mcp, /只读动作在受控环境逐次审批，生产开放仍需验收；自动化保持关闭/u);
   assert.match(mcp, /新建连接会先执行受限 DNS\/地址安全解析，再完成 initialize 和 tools\/list 只读测试/u);
   assert.match(mcp, /已完成 MCP initialize 和 tools\/list 只读测试并加密保存。Token 输入框已清空；后续变更请在连接卡片中通过安全治理预览管理/u);
   assert.doesNotMatch(mcp, /请在卡片中发现工具/u);

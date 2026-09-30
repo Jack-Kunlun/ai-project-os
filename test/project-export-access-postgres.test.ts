@@ -48,6 +48,7 @@ test("project export service admits only a current active Owner before reading o
     assert.equal(exported.audit.byteCount, Buffer.byteLength(exported.json, "utf8"));
     assert.equal(await db.projectDataExportAudit.count({ where: { projectId } }), 1);
   } finally {
+    await db.project.updateMany({ where: { id: projectId }, data: { archivedAt: new Date() } });
     await db.project.deleteMany({ where: { id: projectId } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });
     await db.appUser.deleteMany({ where: { id: { in: userIds } } });

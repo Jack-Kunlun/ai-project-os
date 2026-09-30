@@ -22,6 +22,8 @@ import {
 } from "../src/lib/access-linearization";
 import { updateProjectLifecycle } from "../src/lib/project-lifecycle";
 import { grantProjectMembership, grantWorkspaceMembership, revokeProjectMembership } from "../src/lib/membership-governance";
+import { createPersonalProjectSearchService, type PersonalProjectSearchResponse } from "../src/lib/personal-project-search-service";
+import type { ProjectSearchResponse } from "../src/lib/ai-memory/project-search";
 
 const shouldRun = process.env.ACCESS_LINEARIZATION_POSTGRES_GATE === "1";
 
@@ -307,11 +309,100 @@ test(
       const archived = await archiveAfterAdmission;
       assert.notEqual(archived.project.archivedAt, null);
     } finally {
+      await db.project.updateMany({ where: { id: { in: [membershipProjectId, archiveProjectId, legacyProjectOnlyId] } }, data: { archivedAt: new Date() } });
       await db.project.deleteMany({ where: { id: { in: [membershipProjectId, archiveProjectId, legacyProjectOnlyId] } } });
       await db.workspace.deleteMany({ where: { id: workspaceId } });
       // Account lifecycle previews and audits are intentionally append-only;
       // the disposable gate runner drops this database after the test, so the
       // fixture users remain until that boundary instead of bypassing guards.
+    }
+  },
+);
+
+test(
+  "personal project search linearizes its result against concurrent membership revocation",
+  { skip: !shouldRun ? "ACCESS_LINEARIZATION_POSTGRES_GATE=1 is required" : false },
+  async () => {
+    const db = getDb();
+    const suffix = randomUUID().slice(0, 8);
+    const ownerId = randomUUID();
+    const memberId = randomUUID();
+    const workspaceId = randomUUID();
+    const projectId = randomUUID();
+    const otherProjectId = randomUUID();
+    const member: WebAiActor = { id: memberId, role: "user", accountAccessVersion: 1 };
+    const searchEntered = deferred();
+    const releaseSearch = deferred();
+    const searchResponse: ProjectSearchResponse = {
+      searchVersion: "project-search:v1",
+      mode: "lexical",
+      snapshot: {
+        id: randomUUID(),
+        manifestFingerprint: "a".repeat(64),
+        manualIndexGenerationId: randomUUID(),
+        manualCorpusGenerationId: randomUUID(),
+        effectivePolicyVersion: 1,
+        publishedAt: new Date(),
+      },
+      results: [],
+    };
+
+    await db.appUser.createMany({ data: [
+      { id: ownerId, username: `search_owner_${suffix}`, role: "user" },
+      { id: memberId, username: `search_member_${suffix}`, role: "user" },
+    ] });
+    await db.$transaction(async (tx) => {
+      await tx.workspace.create({ data: { id: workspaceId, name: `Search ${suffix}`, slug: `search-${suffix}`, createdById: ownerId } });
+      await tx.project.createMany({ data: [
+        { id: projectId, workspaceId, name: `Search project ${suffix}`, slug: `search-project-${suffix}` },
+        { id: otherProjectId, workspaceId, name: `Other search project ${suffix}`, slug: `other-search-project-${suffix}` },
+      ] });
+      await grantWorkspaceMembership(tx, { workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "search_linearization_fixture" });
+      await grantProjectMembership(tx, { projectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "search_linearization_fixture" });
+      await grantProjectMembership(tx, { projectId, workspaceId, userId: memberId, role: "viewer", actorId: ownerId, reason: "search_linearization_fixture" });
+      await grantProjectMembership(tx, { projectId: otherProjectId, workspaceId, userId: ownerId, role: "owner", actorId: ownerId, reason: "search_linearization_fixture" });
+      await grantProjectMembership(tx, { projectId: otherProjectId, workspaceId, userId: memberId, role: "viewer", actorId: ownerId, reason: "search_linearization_fixture" });
+    });
+
+    let search: Promise<PersonalProjectSearchResponse> | undefined;
+    let revoke: Promise<void> | undefined;
+    try {
+      const service = createPersonalProjectSearchService({
+        db,
+        searchService: { search: async () => {
+          searchEntered.resolve();
+          await releaseSearch.promise;
+          return searchResponse;
+        } },
+      });
+      search = service.search(member, { projectIds: [projectId, otherProjectId], query: "evidence" });
+      await searchEntered.promise;
+      revoke = db.$transaction(async (tx) => {
+        await lockActorsAccess(tx, [memberId, ownerId]);
+        await lockWorkspaceAccess(tx, workspaceId);
+        await lockProjectAccess(tx, otherProjectId);
+        await revokeProjectMembership(tx, otherProjectId, memberId, workspaceId, {
+          actorId: ownerId,
+          reason: "search_linearization_revoke_after_admission",
+        });
+      });
+      await waitForAdvisoryLockWait(db);
+      releaseSearch.resolve();
+      const result = await search;
+      assert.deepEqual(result.selectedProjects.map((project) => project.id), [projectId, otherProjectId]);
+      await revoke;
+      await assert.rejects(
+        () => service.search(member, { projectIds: [projectId, otherProjectId], query: "evidence" }),
+        accessCode("ACCESS_FORBIDDEN"),
+      );
+    } finally {
+      releaseSearch.resolve();
+      await Promise.allSettled([
+        ...(search === undefined ? [] : [search]),
+        ...(revoke === undefined ? [] : [revoke]),
+      ]);
+      // The isolated gate runner drops this database after the test. Deleting
+      // fixture rows here can mask the actual concurrency assertion on failure.
     }
   },
 );

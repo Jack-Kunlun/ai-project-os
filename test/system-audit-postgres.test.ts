@@ -50,7 +50,7 @@ const expectedEnums: Readonly<Record<string, readonly string[]>> = {
   McpToolReviewRiskReasonCode: ["read_only_eligible", "write_capability", "destructive_capability", "untrusted_remote_text", "schema_invalid", "network_unverified", "credential_scope_unknown", "insufficient_evidence"],
   ProjectAiProviderDelegationAuditAction: ["proposed", "owner_confirmed", "activated", "rejected", "revoked", "expired", "platform_selected", "personal_selected", "selection_updated"],
   ProjectGitRepositoryDelegationAuditAction: ["proposed", "owner_confirmed", "activated", "rejected", "revoked", "expired"],
-  ProjectGitRepositoryManualRunAuditAction: ["requested", "admitted", "dispatched", "succeeded", "failed", "unknown", "conflict"],
+  ProjectGitRepositoryManualRunAuditAction: ["requested", "admitted", "dispatched", "succeeded", "failed", "unknown", "conflict", "unchanged"],
   ProjectMcpConnectionDelegationAuditAction: ["proposed", "owner_confirmed", "activated", "rejected", "revoked", "expired"],
   ProjectMcpToolGrantLedgerEvent: ["granted", "revoked"],
   ProjectMcpActionLedgerEvent: ["proposed", "approved", "rejected", "cancelled"],

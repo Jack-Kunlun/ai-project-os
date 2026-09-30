@@ -23,9 +23,13 @@ function formatDate(value: string | null): string {
   return Number.isNaN(date.getTime()) ? "时间无效" : new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-async function getSource(projectId: string, sourceId: string): Promise<ProjectSource> {
-  const response = await fetch(`/api/projects/${projectId}/sources/${sourceId}`, { cache: "no-store" });
-  const payload = await response.json().catch(() => null) as { source?: ProjectSource; error?: { message?: string } } | null;
+async function getSource(projectId: string, sourceId: string, contentHash: string | null, signal?: AbortSignal): Promise<ProjectSource> {
+  const query = contentHash === null ? "" : `?contentHash=${encodeURIComponent(contentHash)}`;
+  const response = await fetch(`/api/projects/${projectId}/sources/${sourceId}${query}`, { cache: "no-store", signal });
+  const payload = await response.json().catch(() => null) as { source?: ProjectSource; error?: { code?: string; message?: string } } | null;
+  if (payload?.error?.code === "SOURCE_CITATION_STALE") {
+    throw new Error("搜索引用对应的资料已更新、退役或删除，请返回重新搜索。");
+  }
   if (!response.ok || payload?.source === undefined) throw new Error(payload?.error?.message ?? "资料原文加载失败");
   return payload.source;
 }
@@ -33,27 +37,35 @@ async function getSource(projectId: string, sourceId: string): Promise<ProjectSo
 export function ProjectSourceDetailClient({ username, isSystemAdmin }: { username: string; isSystemAdmin: boolean }) {
   const { projectId, sourceId } = useParams<{ projectId: string; sourceId: string }>();
   const searchParams = useSearchParams();
+  const citationContentHash = searchParams.get("contentHash");
   const fromNotifications = searchParams.get("from") === "notifications";
   const safeReturnTo = safeMaterialsReturnTo(projectId, searchParams.get("returnTo"));
   const [source, setSource] = useState<ProjectSource | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
+    setSource(null);
+    setError(null);
     try {
-      setSource(await getSource(projectId, sourceId));
-      setError(null);
+      const loaded = await getSource(projectId, sourceId, citationContentHash, signal);
+      if (!signal?.aborted) setSource(loaded);
     } catch (cause) {
+      if (signal?.aborted) return;
       setError(cause instanceof Error ? cause.message : "资料原文加载失败");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [projectId, sourceId]);
+  }, [citationContentHash, projectId, sourceId]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timer);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void load(controller.signal), 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [load]);
 
   return (

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { Prisma, PrismaClient, ProjectItemType } from "@prisma/client";
+import { PrismaClient, ProjectItemType } from "@prisma/client";
 import { Client, type QueryResult, type QueryResultRow } from "pg";
 import {
   buildOperationKey,

@@ -130,6 +130,7 @@ test("Action Engine persists policy, approval, execution, recovery and archive b
     const audit = await db.projectActionAudit.findFirstOrThrow({ where: { actionId: automatic.id } });
     await assert.rejects(() => db.projectActionAudit.update({ where: { id: audit.id }, data: { details: { changed: true } } }));
   } finally {
+    await db.project.updateMany({ where: { id: projectId }, data: { archivedAt: new Date() } });
     await db.project.deleteMany({ where: { id: projectId } });
     await db.workspace.deleteMany({ where: { id: workspaceId } });
     await db.appUser.deleteMany({ where: { id: { in: [adminId, outsiderAdminId, editorId, viewerId] } } });

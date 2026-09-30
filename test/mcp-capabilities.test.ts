@@ -266,9 +266,9 @@ test("MCP 页面指南表达当前个人发现、管理员审核与项目只读�
     readFile("src/app/guide/page.tsx", "utf8"),
     readFile("src/app/connections/mcp/mcp-connections-client.tsx", "utf8"),
   ]);
-  assert.match(guide, /个人连接与工具发现、管理员净化快照审核、项目连接委托和只读工具授权控制面已开放/u);
-  assert.match(guide, /MCP 工具必须由管理员审核精确工具后才能由项目 Owner 管理连接委托和只读工具授权/u);
-  assert.match(guide, /远端动作调用、调用审批、派发和结果查看\/导入尚未开放，不能通过内部 API 绕过/u);
+  assert.match(guide, /MCP 个人连接与工具发现、管理员净化快照审核、项目连接委托已可用/u);
+  assert.match(guide, /MCP 工具须先由管理员审核精确定义，项目 Owner 再管理连接委托和只读工具授权/u);
+  assert.match(guide, /受控环境中只读动作逐次审批，结果经人工确认后才可导入/u);
   assert.match(connections, /管理员认证精确定义、网络和凭据指纹/u);
   assert.match(connections, /完成工具发现与管理员认证/u);
 });

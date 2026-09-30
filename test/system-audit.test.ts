@@ -542,6 +542,7 @@ test("Git manual unknown recovery with no actor is a system principal only for t
   rows.projectGitRepositoryManualRunAudit.push(
     { ...rows.projectGitRepositoryManualRunAudit[0], id: "5c111111-1111-4111-8111-111111111112", action: "unknown", actorId: null },
     { ...rows.projectGitRepositoryManualRunAudit[0], id: "5c111111-1111-4111-8111-111111111113", action: "failed", actorId: null },
+    { ...rows.projectGitRepositoryManualRunAudit[0], id: "5c111111-1111-4111-8111-111111111114", action: "unchanged" },
   );
   const db = fakeDb(rows);
   const now = new Date("2026-09-09T02:00:00.000Z");
@@ -554,6 +555,10 @@ test("Git manual unknown recovery with no actor is a system principal only for t
   assert.ok(failed);
   assert.equal(failed.actor.kind, "unrecorded");
   assert.equal(failed.actor.id, null);
+  const unchanged = events.find((event) => event.action === "unchanged");
+  assert.ok(unchanged);
+  assert.equal(unchanged.result, "applied");
+  assert.deepEqual((await listSystemAudit({ source: "projectGitManualRun", action: "unchanged", pageSize: 50 }, db, now)).events.map((event) => event.id), [unchanged.id]);
   assert.equal((await listSystemAudit({ source: "projectGitManualRun", actor: ADMIN_ID, pageSize: 50 }, db, now)).events.some((event) => event.id === recovery.id), false);
 });
 

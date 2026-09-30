@@ -236,7 +236,7 @@ export const SYSTEM_AUDIT_REGISTRY: Readonly<Record<SystemAuditSource, SystemAud
     actionMap: actionMapping(SYSTEM_AUDIT_ALLOWED_ACTIONS_BY_SOURCE.projectGitManualRun),
     resultField: "action",
     allowedResults: SYSTEM_AUDIT_ALLOWED_RESULTS_BY_SOURCE.projectGitManualRun,
-    resultMap: resultMapping({ applied: ["succeeded"], pending: ["requested", "admitted", "dispatched"], rejected: ["conflict"], failed: ["failed"], unknown: ["unknown"] }),
+    resultMap: resultMapping({ applied: ["succeeded", "unchanged"], pending: ["requested", "admitted", "dispatched"], rejected: ["conflict"], failed: ["failed"], unknown: ["unknown"] }),
   },
   projectMcpActionApproval: {
     source: "projectMcpActionApproval",

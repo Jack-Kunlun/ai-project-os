@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { Client } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
@@ -16,6 +17,18 @@ const SEEDED_ADMIN_ID = "00000000-0000-4000-8000-000000000010";
 const SEEDED_OWNER_ID = "00000000-0000-4000-8000-000000000012";
 const SEEDED_OWNER_MEMBERSHIP_ID = "00000000-0000-4000-8000-000000000011";
 const SEEDED_WORKSPACE_ID = "00000000-0000-4000-8000-000000000099";
+const PRINCIPAL_GATE_ROLES = Object.freeze([
+  { name: "ai_project_os_cluster_admin", attributes: "SUPERUSER CREATEDB CREATEROLE INHERIT NOREPLICATION NOBYPASSRLS", login: true },
+  { name: "ai_project_os_migrator", attributes: "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS", login: true },
+  { name: "ai_project_os_runtime", attributes: "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS", login: false },
+  { name: "ai_project_os_entitlement_writer", attributes: "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS", login: false },
+  { name: "ai_project_os_git_automation_worker", attributes: "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS", login: false },
+  { name: "ai_project_os_entitlement_inventory_reader", attributes: "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS", login: false },
+] as const);
+const DATABASE_PRINCIPAL_GATE_TEMPORARY_ROLES = Object.freeze([
+  "ai_project_os_cluster_admin",
+  "ai_project_os_entitlement_inventory_reader",
+] as const);
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -42,17 +55,123 @@ function quoteDatabaseName(database: string): string {
   return `"${database}"`;
 }
 
+function quoteIdentifier(value: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)) throw new Error("POSTGRES_GATE_IDENTIFIER_INVALID");
+  return `"${value}"`;
+}
+
 async function recreateDatabase(admin: Client, database: string): Promise<void> {
   const quoted = quoteDatabaseName(database);
   await admin.query(`DROP DATABASE IF EXISTS ${quoted} WITH (FORCE)`);
   await admin.query(`CREATE DATABASE ${quoted} OWNER "${POSTGRES_GATE_TEST_USER}"`);
 }
 
+async function prepareLegacyPrincipalGateExtensions(adminUrl: URL, database: string, testPassword: string): Promise<void> {
+  const gateUrl = buildPostgresGateDatabaseUrl(adminUrl, database, testPassword);
+  const gate = new Client({ connectionString: gateUrl, connectionTimeoutMillis: 5_000 });
+  await gate.connect();
+  try {
+    // The legacy-owner recovery test transfers all objects owned by the
+    // disposable gate role. Recreate template plpgsql under that role before
+    // migrations, as the production bootstrap does for its cluster admin.
+    await gate.query("DROP EXTENSION plpgsql");
+    await gate.query("CREATE EXTENSION plpgsql");
+  } finally {
+    await gate.end();
+  }
+}
+
 async function dropDatabase(admin: Client, database: string): Promise<void> {
   await admin.query(`DROP DATABASE IF EXISTS ${quoteDatabaseName(database)} WITH (FORCE)`);
 }
 
-async function seedInitialAdmin(databaseUrl: string): Promise<void> {
+async function dropDatabasePrincipalGateTemporaryRoles(admin: Client): Promise<void> {
+  for (const role of DATABASE_PRINCIPAL_GATE_TEMPORARY_ROLES) {
+    const exists = await admin.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists",
+      [role],
+    );
+    if (exists.rows[0]?.exists !== true) continue;
+    await admin.query(
+      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = $1 AND pid <> pg_backend_pid()",
+      [role],
+    );
+    await admin.query(`DROP OWNED BY ${quoteIdentifier(role)}`);
+    await admin.query(`DROP ROLE ${quoteIdentifier(role)}`);
+  }
+}
+
+function roleDatabaseUrl(adminUrl: URL, database: string, role: string, password: string): string {
+  const target = new URL(adminUrl);
+  target.pathname = `/${database}`;
+  target.username = role;
+  target.password = password;
+  target.search = "";
+  target.hash = "";
+  return target.toString();
+}
+
+async function assertPrincipalGateRolesAvailable(admin: Client): Promise<void> {
+  const existing = await admin.query<{ rolname: string }>(
+    "SELECT rolname FROM pg_roles WHERE rolname = ANY($1::text[]) ORDER BY rolname",
+    [PRINCIPAL_GATE_ROLES.map(({ name }) => name)],
+  );
+  if (existing.rows.length > 0) throw new Error("POSTGRES_GATE_PRINCIPAL_ROLE_COLLISION");
+}
+
+async function createPrincipalGateEnvironment(admin: Client, adminUrl: URL, database: string): Promise<NodeJS.ProcessEnv> {
+  const suffix = randomBytes(18).toString("hex");
+  const passwords = new Map(PRINCIPAL_GATE_ROLES.map(({ name }) => [name, `${name.split("_").at(-1)}_${suffix}`]));
+  for (const role of PRINCIPAL_GATE_ROLES) {
+    const password = passwords.get(role.name);
+    if (password === undefined) throw new Error("POSTGRES_GATE_PRINCIPAL_PASSWORD_INVALID");
+    await admin.query(`CREATE ROLE ${quoteIdentifier(role.name)} ${role.login ? "LOGIN" : "NOLOGIN"} ${role.attributes} PASSWORD '${password}'`);
+  }
+  await admin.query(`DROP DATABASE IF EXISTS ${quoteDatabaseName(database)} WITH (FORCE)`);
+  await admin.query(`CREATE DATABASE ${quoteDatabaseName(database)} OWNER ${quoteIdentifier("ai_project_os_cluster_admin")}`);
+
+  const adminRoleUrl = roleDatabaseUrl(adminUrl, database, "ai_project_os_cluster_admin", passwords.get("ai_project_os_cluster_admin")!);
+  const clusterAdmin = new Client({ connectionString: adminRoleUrl, connectionTimeoutMillis: 5_000 });
+  await clusterAdmin.connect();
+  try {
+    // The template database's plpgsql extension belongs to its initdb role;
+    // recreate it under the disposable cluster admin before principal bootstrap.
+    await clusterAdmin.query("DROP EXTENSION plpgsql");
+    await clusterAdmin.query("CREATE EXTENSION plpgsql");
+  } finally {
+    await clusterAdmin.end();
+  }
+
+  const runtimeUrl = roleDatabaseUrl(adminUrl, database, "ai_project_os_runtime", passwords.get("ai_project_os_runtime")!);
+  const writerUrl = roleDatabaseUrl(adminUrl, database, "ai_project_os_entitlement_writer", passwords.get("ai_project_os_entitlement_writer")!);
+  const gitAutomationUrl = roleDatabaseUrl(adminUrl, database, "ai_project_os_git_automation_worker", passwords.get("ai_project_os_git_automation_worker")!);
+  const migratorUrl = roleDatabaseUrl(adminUrl, database, "ai_project_os_migrator", passwords.get("ai_project_os_migrator")!);
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    DATABASE_PRINCIPAL_ADMIN_URL: adminRoleUrl,
+    DATABASE_URL: runtimeUrl,
+    ENTITLEMENT_DATABASE_URL: writerUrl,
+    GIT_AUTOMATION_DATABASE_URL: gitAutomationUrl,
+    MIGRATOR_DATABASE_URL: migratorUrl,
+    POSTGRES_ENTITLEMENT_INVENTORY_READER_PASSWORD: passwords.get("ai_project_os_entitlement_inventory_reader"),
+  };
+  await run("pnpm", ["exec", "tsx", "scripts/reconcile-database-principals.ts", "--bootstrap-if-needed"], environment);
+  await run("pnpm", ["exec", "prisma", "migrate", "deploy", "--config", "prisma.config.ts"], { ...environment, DATABASE_URL: migratorUrl });
+  await run("pnpm", ["exec", "tsx", "scripts/reconcile-database-principals.ts"], environment);
+  // Reconciliation verifies the bootstrap NOLOGIN shape, then enables LOGIN
+  // for the runtime and writer sessions it checks. The disposable gate uses
+  // those same principals and their exact production ACLs.
+  return environment;
+}
+
+async function dropPrincipalGateRoles(admin: Client): Promise<void> {
+  for (const { name } of [...PRINCIPAL_GATE_ROLES].reverse()) {
+    await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = $1 AND pid <> pg_backend_pid()", [name]);
+    await admin.query(`DROP ROLE IF EXISTS ${quoteIdentifier(name)}`);
+  }
+}
+
+async function seedInitialAdmin(databaseUrl: string, entitlementDatabaseUrl = databaseUrl): Promise<void> {
   const client = new Client({ connectionString: databaseUrl, connectionTimeoutMillis: 5_000 });
   await client.connect();
   try {
@@ -115,7 +234,7 @@ async function seedInitialAdmin(databaseUrl: string): Promise<void> {
     await client.end();
   }
 
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: entitlementDatabaseUrl }) });
   try {
     const now = new Date();
     await prisma.$transaction((tx) => createBootstrapSignupOfferPolicy(tx, SEEDED_ADMIN_ID, now));
@@ -143,7 +262,32 @@ async function runGate(
   total: number,
 ): Promise<void> {
   console.log(`[${position}/${total}] ${gate.id}`);
+  if (gate.setup === "principals") {
+    let cleanupPrincipalRoles = false;
+    try {
+      await assertPrincipalGateRolesAvailable(admin);
+      cleanupPrincipalRoles = true;
+      const environment = await createPrincipalGateEnvironment(admin, adminUrl, gate.database);
+      if (gate.seedAdmin === true) {
+        const principalAdminUrl = environment.DATABASE_PRINCIPAL_ADMIN_URL;
+        const entitlementWriterUrl = environment.ENTITLEMENT_DATABASE_URL;
+        if (typeof principalAdminUrl !== "string" || typeof entitlementWriterUrl !== "string") {
+          throw new Error("POSTGRES_GATE_PRINCIPAL_SEED_URL_REQUIRED");
+        }
+        await seedInitialAdmin(principalAdminUrl, entitlementWriterUrl);
+      }
+      environment[gate.gateEnv] = "1";
+      await run("pnpm", ["exec", "tsx", "--test", gate.file], environment);
+    } finally {
+      await dropDatabase(admin, gate.database);
+      if (cleanupPrincipalRoles) await dropPrincipalGateRoles(admin);
+    }
+    return;
+  }
   await recreateDatabase(admin, gate.database);
+  if (gate.id === "database-principals") {
+    await prepareLegacyPrincipalGateExtensions(adminUrl, gate.database, testPassword);
+  }
   const databaseUrl = buildPostgresGateDatabaseUrl(adminUrl, gate.database, testPassword, gate.schema);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -160,7 +304,13 @@ async function runGate(
     if (gate.seedAdmin === true) await seedInitialAdmin(databaseUrl);
     await run("pnpm", ["exec", "tsx", "--test", gate.file], env);
   } finally {
-    await dropDatabase(admin, gate.database);
+    try {
+      await dropDatabase(admin, gate.database);
+    } finally {
+      if (gate.id === "database-principals") {
+        await dropDatabasePrincipalGateTemporaryRoles(admin);
+      }
+    }
   }
 }
 

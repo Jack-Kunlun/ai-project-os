@@ -1,0 +1,206 @@
+name: Deploy v0.7 with database migration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ai-project-os-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy verified v0.7 release
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    environment:
+      name: production
+      url: https://ai-project-os.com
+    env:
+      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve running source and v0.7 target release
+        env:
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          target_tag="v$(node -p 'require("./package.json").version')"
+          [[ "$target_tag" == v0.7.0 ]] || {
+            echo "V07_TARGET_TAG_INVALID" >&2; exit 64;
+          }
+
+          production_health=$(curl --fail --silent --show-error \
+            --connect-timeout 10 --max-time 20 https://ai-project-os.com/api/health)
+          jq --exit-status '.status == "ok" and .database == "up" and .worker.status == "up"' \
+            <<<"$production_health" >/dev/null || { echo "V07_SOURCE_HEALTH_INVALID" >&2; exit 64; }
+          source_tag="v$(jq --exit-status --raw-output '.version | strings' <<<"$production_health")"
+          [[ "$source_tag" =~ ^v0\.6\.0-dev\.[1-9][0-9]+$ ]] || {
+            echo "V07_SOURCE_TAG_INVALID" >&2; exit 64;
+          }
+
+          git fetch --force --no-tags origin \
+            "refs/tags/$source_tag:refs/tags/$source_tag" \
+            "refs/tags/$target_tag:refs/tags/$target_tag"
+          for release_tag in "$source_tag" "$target_tag"; do
+            [[ "$(git cat-file -t "refs/tags/$release_tag")" == tag ]] || {
+              echo "V07_TAG_NOT_ANNOTATED" >&2; exit 65;
+            }
+          done
+          source_sha=$(git rev-parse "refs/tags/$source_tag^{}")
+          target_sha=$(git rev-parse "refs/tags/$target_tag^{}")
+          [[ "$(git rev-parse HEAD)" == "$target_sha" ]] || {
+            echo "V07_MAIN_HEAD_MISMATCH" >&2; exit 66;
+          }
+          git merge-base --is-ancestor "$source_sha" "$target_sha" || {
+            echo "V07_SOURCE_TARGET_NOT_LINEAR" >&2; exit 66;
+          }
+          [[ "$source_sha" != "$target_sha" && -z "$(git rev-list --merges "$source_sha..$target_sha")" ]] || {
+            echo "V07_SOURCE_TARGET_HAS_MERGE_OR_NO_CHANGE" >&2; exit 66;
+          }
+          [[ "v$(git show "$target_sha:package.json" | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).version))')" == "$target_tag" ]] || {
+            echo "V07_TARGET_VERSION_MISMATCH" >&2; exit 66;
+          }
+          [[ "$(git ls-tree -d --name-only "$source_sha:prisma/migrations" | grep -Ec '^[0-9]{14}_')" == 117 ]] || {
+            echo "V07_SOURCE_MIGRATION_COUNT_INVALID" >&2; exit 66;
+          }
+          [[ "$(git ls-tree -d --name-only "$target_sha:prisma/migrations" | grep -Ec '^[0-9]{14}_')" == 133 ]] || {
+            echo "V07_TARGET_MIGRATION_COUNT_INVALID" >&2; exit 66;
+          }
+
+          for release_pair in "$source_tag:$source_sha" "$target_tag:$target_sha"; do
+            release_tag=${release_pair%%:*}
+            release_sha=${release_pair#*:}
+            runs_json=$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header 'Accept: application/vnd.github+json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$release_sha&per_page=100")
+            jq --exit-status --arg sha "$release_sha" --arg tag "$release_tag" \
+              '.workflow_runs | any(.head_sha == $sha and .head_branch == $tag and .event == "push" and .status == "completed" and .conclusion == "success")' \
+              <<<"$runs_json" >/dev/null || { echo "V07_TAG_CI_REQUIRED tag=$release_tag" >&2; exit 67; }
+          done
+
+          main_runs_json=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GH_REPOSITORY/actions/workflows/ci.yml/runs?event=push&status=success&head_sha=$target_sha&per_page=100")
+          main_run_id=$(jq --raw-output --arg sha "$target_sha" \
+            '[.workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and .status == "completed" and .conclusion == "success") | .id] | first // empty' \
+            <<<"$main_runs_json")
+          [[ "$main_run_id" =~ ^[1-9][0-9]*$ ]] || { echo "V07_MAIN_CI_REQUIRED" >&2; exit 68; }
+          jobs_json=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GH_REPOSITORY/actions/runs/$main_run_id/jobs?per_page=100")
+          jq --exit-status \
+            '.jobs | any(.name == "Verify database and release candidate" and .conclusion == "success")' \
+            <<<"$jobs_json" >/dev/null || { echo "V07_FULL_DATABASE_CI_REQUIRED" >&2; exit 68; }
+
+          printf 'V07_SOURCE_TAG=%s\nV07_SOURCE_SHA=%s\nV07_TARGET_TAG=%s\nV07_TARGET_SHA=%s\n' \
+            "$source_tag" "$source_sha" "$target_tag" "$target_sha" >> "$GITHUB_ENV"
+
+      - name: Prepare restricted production SSH identity
+        env:
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$PRODUCTION_SSH_PRIVATE_KEY"
+          test -n "$PRODUCTION_SSH_KNOWN_HOSTS"
+          [[ "$PRODUCTION_SSH_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || {
+            echo "PRODUCTION_SSH_HOST_INVALID" >&2; exit 64;
+          }
+          install -d -m 700 "$RUNNER_TEMP/ai-project-os-ssh"
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" "$RUNNER_TEMP/ai-project-os-ssh/known_hosts"
+          ssh-keygen -y -f "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" >/dev/null
+          ssh-keygen -F "$PRODUCTION_SSH_HOST" -f "$RUNNER_TEMP/ai-project-os-ssh/known_hosts" >/dev/null
+
+      - name: Require the preinstalled v0.7 gateway
+        run: |
+          set -euo pipefail
+          output=$(ssh \
+            -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "tooling-v07-status")
+          [[ "$output" == "TOOLING_V07_READY" ]] || {
+            echo "V07_TOOLING_NOT_BOOTSTRAPPED" >&2
+            exit 68
+          }
+
+      - name: Refresh v0.7 tooling from the verified target tag
+        run: |
+          set -euo pipefail
+          output=$(ssh \
+            -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "install-release-tooling $V07_TARGET_TAG $V07_TARGET_SHA CONFIRM_INSTALL_RELEASE_TOOLING_V1")
+          grep -Fqx "RELEASE_TOOLING_INSTALL_OK tag=$V07_TARGET_TAG revision=$V07_TARGET_SHA" <<<"$output"
+
+      - name: Deploy with stopped-writer backup and database migration
+        run: |
+          set -euo pipefail
+          umask 077
+          deployment_output_file="$RUNNER_TEMP/ai-project-os-ssh/v07-deployment-output.log"
+          set +e
+          ssh \
+            -i "$RUNNER_TEMP/ai-project-os-ssh/id_ed25519" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ai-project-os-ssh/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 \
+            "ai-project-os-actions@$PRODUCTION_SSH_HOST" \
+            "deploy-v07 $V07_SOURCE_TAG $V07_TARGET_TAG $V07_SOURCE_SHA $V07_TARGET_SHA CONFIRM_V07_MIGRATION_V1" 2>&1 | tee "$deployment_output_file"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          (( pipeline_status[0] == 0 )) || exit "${pipeline_status[0]}"
+          (( pipeline_status[1] == 0 )) || { echo "V07_DEPLOY_OUTPUT_CAPTURE_FAILED" >&2; exit 74; }
+          grep -Fq "DEPLOY_OK tag=$V07_TARGET_TAG revision=$V07_TARGET_SHA " "$deployment_output_file"
+          grep -Eq '^BACKUP_OK .* source_quiesced=true$' "$deployment_output_file"
+          backup_object=$(sed -n 's/^DEPLOY_OK .* backup_object=\([^ ]*\).*/\1/p' "$deployment_output_file" | tail -n 1)
+          [[ "$backup_object" =~ ^cos://ai-project-os-backup-[0-9]+/production/backups/ ]] || {
+            echo "V07_BACKUP_RESULT_INVALID" >&2; exit 68;
+          }
+          printf 'V07_BACKUP_OBJECT=%s\n' "$backup_object" >> "$GITHUB_ENV"
+
+      - name: Verify public production health
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if health_json=$(curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://ai-project-os.com/api/health) && \
+              jq --exit-status --arg version "${V07_TARGET_TAG#v}" \
+                '.status == "ok" and .version == $version and .database == "up" and .worker.status == "up" and .worker.consecutiveFailures == 0' \
+                <<<"$health_json" >/dev/null; then
+              break
+            fi
+            [[ "$attempt" != 30 ]] || { echo "V07_PUBLIC_HEALTH_TIMEOUT" >&2; exit 68; }
+            sleep 10
+          done
+          printf '### v0.7 production deployment\n\n- Tag: `%s`\n- Source: `%s`\n- Revision: `%s`\n- Verified backup: `%s`\n' \
+            "$V07_TARGET_TAG" "$V07_SOURCE_TAG" "$V07_TARGET_SHA" "$V07_BACKUP_OBJECT" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove production SSH identity
+        if: ${{ always() }}
+        run: rm -rf -- "$RUNNER_TEMP/ai-project-os-ssh"

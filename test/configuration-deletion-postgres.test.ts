@@ -668,6 +668,7 @@ test("unused model and Git connections can be permanently deleted while historic
       (error: unknown) => error instanceof McpCapabilityError && error.code === "MCP_CONNECTION_NOT_FOUND",
     );
   } finally {
+    await db.project.updateMany({ where: { id: projectId }, data: { archivedAt: new Date() } });
     await db.project.deleteMany({ where: { id: projectId } });
     if (providerId !== null) await db.aiProviderConnection.deleteMany({ where: { id: providerId } });
     if (historicalConnectionId !== null) {

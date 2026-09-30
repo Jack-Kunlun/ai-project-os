@@ -16,6 +16,7 @@ export type CandidateIdentity = {
     reconcile: string;
     app: string;
     worker: string;
+    gitWorker: string;
   };
 };
 
@@ -34,7 +35,7 @@ export type CandidateReadiness = {
 
 const TOKEN_PATTERN = /^[a-z0-9]{12,24}$/u;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
-const RUNNING_SERVICES = ["postgres", "app", "worker"] as const;
+const RUNNING_SERVICES = ["postgres", "app", "worker", "git-worker"] as const;
 const ONE_SHOT_SERVICES = ["principal-bootstrap", "migrate", "reconcile"] as const;
 
 export function createCandidateIdentity(token: string, version: string): CandidateIdentity {
@@ -57,6 +58,7 @@ export function createCandidateIdentity(token: string, version: string): Candida
       reconcile: `${projectName}-reconcile:${version}`,
       app: `${projectName}-app:${version}`,
       worker: `${projectName}-worker:${version}`,
+      gitWorker: `${projectName}-git-worker:${version}`,
     },
   };
   assertSafeCandidateIdentity(identity);
@@ -80,6 +82,7 @@ export function assertSafeCandidateIdentity(identity: CandidateIdentity): void {
     `${expected}-reconcile:${identity.version}`,
     `${expected}-app:${identity.version}`,
     `${expected}-worker:${identity.version}`,
+    `${expected}-git-worker:${identity.version}`,
   ];
   const actualValues = [
     identity.volumes.postgres,
@@ -90,6 +93,7 @@ export function assertSafeCandidateIdentity(identity: CandidateIdentity): void {
     identity.images.reconcile,
     identity.images.app,
     identity.images.worker,
+    identity.images.gitWorker,
   ];
   if (!actualValues.every((value, index) => value === expectedValues[index])) {
     throw new Error("LOCAL_RELEASE_IDENTITY_UNSAFE");

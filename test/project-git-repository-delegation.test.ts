@@ -11,6 +11,7 @@ import {
   GitRunnerError,
   GitServiceError,
   isDefinitelyPreDispatchGitSyncFailure,
+  parseAdvertisedGitRef,
   readGitRepositoryFilesForDelegation,
   type GitConnectionWithSecret,
 } from "../src/lib/git";
@@ -228,6 +229,81 @@ test("Git connection probes re-admit immediately before ls-remote", () => {
   assert.match(admission, /updatedAt\.getTime/u);
   assert.match(admission, /secretFingerprint/u);
   assert.match(gitService, /onDispatchBoundary: \(\) => acceptGitProbeDispatchBoundary/u);
+});
+
+test("unchanged Git head matching accepts one exact advertised ref before any fetch or blob read", () => {
+  const sha1 = "a".repeat(40);
+  const sha256 = "b".repeat(64);
+  assert.equal(parseAdvertisedGitRef(`${sha1}\trefs/heads/main\n`, "refs/heads/main"), sha1);
+  assert.equal(parseAdvertisedGitRef(`${sha256}\trefs/heads/release\r\n`, "refs/heads/release"), sha256);
+
+  for (const output of [
+    "",
+    `${sha1}\trefs/heads/other\n`,
+    `${sha1}\trefs/heads/main\n${"c".repeat(40)}\trefs/heads/main-copy\n`,
+    `${sha1}\trefs/heads/main\n\n`,
+    `${"A".repeat(40)}\trefs/heads/main\n`,
+    `${"d".repeat(39)}\trefs/heads/main\n`,
+    `fatal: protocol failure\n${sha1}\trefs/heads/main\n`,
+  ]) {
+    assert.throws(
+      () => parseAdvertisedGitRef(output, "refs/heads/main"),
+      (error: unknown) => error instanceof GitServiceError && error.code === "GIT_REPOSITORY_NOT_FOUND",
+    );
+  }
+
+  const readStart = gitService.indexOf("async function readRepositoryFiles");
+  const readEnd = gitService.indexOf("\n/**", readStart);
+  const read = gitService.slice(readStart, readEnd);
+  const dispatch = read.indexOf("const accepted = await input.onDispatchBoundary");
+  const lsRemote = read.indexOf('"ls-remote"');
+  const unchangedReturn = read.indexOf('return Object.freeze({ outcome: "unchanged"');
+  const fetch = read.indexOf('"fetch"');
+  const treeRead = read.indexOf('"ls-tree"');
+  const blobRead = read.indexOf('"cat-file", "blob"');
+  assert.ok(dispatch >= 0 && lsRemote > dispatch);
+  assert.ok(unchangedReturn > lsRemote && fetch > unchangedReturn && treeRead > fetch && blobRead > treeRead);
+});
+
+test("incremental Git reuse is bound to verified frozen sources and rechecked before publish", () => {
+  const baselineStart = runtimeService.indexOf("async function loadPublicationState");
+  const baselineEnd = runtimeService.indexOf("\nfunction publicRun", baselineStart);
+  const baseline = runtimeService.slice(baselineStart, baselineEnd);
+  assert.match(baseline, /normalizedPath: true, blobOid: true/u);
+  assert.match(baseline, /sourceIdentity: true, revisionKey: true/u);
+  assert.match(baseline, /expectedSourceIdentity = deterministicUuid\(`git-delegated-source:/u);
+  assert.match(baseline, /expectedRevisionKey = deterministicUuid\(`git-delegated-revision:/u);
+  assert.match(baseline, /Repository: \$\{publicationVersion\.repositoryPath\}\\nRevision: \$\{frozenCommitSha\}\\nPath: \$\{entry\.normalizedPath\}/u);
+  assert.match(baseline, /project_git_repository_publication_manifest/u);
+
+  const changedPublishStart = runtimeService.indexOf("const files = result.files");
+  const changedPublishEnd = runtimeService.indexOf("for (let ordinal = 0; ordinal < files.length", changedPublishStart);
+  const changedPublish = runtimeService.slice(changedPublishStart, changedPublishEnd);
+  assert.match(changedPublish, /samePersistedBaselineIdentity\(baseline, persistedBaseline\)/u);
+  assert.match(runtimeService, /samePublicationCursor\(snapshot\.publicationCursor, publicationState\.cursor\)/u);
+  assert.match(runtimeService, /sameManualPointerBaseline\(snapshot\.baselinePointer, publicationState\.baseline\)/u);
+  assert.match(runtimeService, /incrementalBaseline: snapshot\.baselinePointer/u);
+
+  const trustedReuse = gitService.slice(gitService.indexOf("function trustedBaselineBody"), gitService.indexOf("async function readRepositoryFiles"));
+  assert.match(trustedReuse, /file\.blobOid !== blobOid/u);
+  assert.match(trustedReuse, /baselinePrefix\.length !== currentPrefix\.length/u);
+  assert.match(trustedReuse, /file\.contentText\.startsWith\(baselinePrefix\)/u);
+  assert.match(trustedReuse, /return file\.contentText\.slice\(baselinePrefix\.length\)/u);
+  const realRunnerTest = readFileSync("test/git-delegation-incremental.test.ts", "utf8");
+  assert.match(realRunnerTest, /delegated Git incremental sync reuses only verified path\/blob text and traces actual runner commands/u);
+  assert.match(realRunnerTest, /catFileBlobs\(await readTrace\(\)\), \[changedOid, newOid\]/u);
+});
+
+test("delegated Git rechecks admission before credential reads and remote requests", () => {
+  assert.match(runtimeService, /async function isGitDispatchAdmissionCurrent/u);
+  assert.match(runtimeService, /onBeforeCredentialRead: \(\) => isGitDispatchAdmissionCurrent/u);
+  assert.match(runtimeService, /onBeforeExternalRequest: \(\) => isGitDispatchAdmissionCurrent/u);
+  const dispatchReader = gitService.slice(gitService.indexOf("async function readRepositoryFiles"), gitService.indexOf("export async function readGitRepositoryFilesForDelegation"));
+  assert.match(dispatchReader, /onBeforeCredentialRead\?\.\(\)/u);
+  assert.match(dispatchReader, /recheckExternalRequestBoundary\(\)[\s\S]*?"ls-remote"/u);
+  assert.match(dispatchReader, /recheckExternalRequestBoundary\(\)[\s\S]*?"fetch"/u);
+  assert.match(dispatchReader, /expectedFingerprint: resolution\.fingerprint/u);
+  assert.equal(isDefinitelyPreDispatchGitSyncFailure(new GitServiceError("GIT_CONNECTION_NOT_VERIFIED")), false);
 });
 
 test("delegated Git reader performs no credential read after the final fence rejects", async () => {

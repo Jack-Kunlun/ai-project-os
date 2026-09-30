@@ -114,3 +114,19 @@ test("PostgreSQL gate runner binds every database client to the disposable gate 
   assert.match(runner, /if \(gate\.id === "database-principals"\)\s*\{\s*await dropDatabasePrincipalGateTemporaryRoles\(admin\)/u);
   assert.match(runner, /async function dropDatabasePrincipalGateTemporaryRoles\(admin: Client\)[\s\S]*?DROP OWNED BY \$\{quoteIdentifier\(role\)\}[\s\S]*?DROP ROLE \$\{quoteIdentifier\(role\)\}/u);
 });
+
+test("CI PostgreSQL administrator is separate from disposable principal gate roles", async () => {
+  const [workflow, runner] = await Promise.all([
+    readFile(".github/workflows/ci.yml", "utf8"),
+    readFile("scripts/run-postgres-gates.ts", "utf8"),
+  ]);
+  const serviceUser = workflow.match(/POSTGRES_USER: (ai_project_os_[a-z_]+)/u)?.[1];
+  const adminUrlUser = workflow.match(/POSTGRES_GATE_ADMIN_URL: postgresql:\/\/(ai_project_os_[a-z_]+):/u)?.[1];
+  const healthUser = workflow.match(/--health-cmd "pg_isready -U (ai_project_os_[a-z_]+) -d postgres"/u)?.[1];
+  assert.ok(serviceUser);
+  assert.equal(adminUrlUser, serviceUser);
+  assert.equal(healthUser, serviceUser);
+  const principalRoleManifest = runner.split("const PRINCIPAL_GATE_ROLES = Object.freeze([", 2)[1]?.split("const DATABASE_PRINCIPAL_GATE_TEMPORARY_ROLES", 1)[0];
+  assert.ok(principalRoleManifest);
+  assert.doesNotMatch(principalRoleManifest, new RegExp(`name: "${serviceUser}"`, "u"));
+});
